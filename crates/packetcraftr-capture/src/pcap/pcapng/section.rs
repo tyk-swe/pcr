@@ -61,7 +61,7 @@ pub(in crate::pcap) fn read_section_header_with_length<R: Read>(
             });
         }
     };
-    let block_length = decode_u32(endianness, &raw_length);
+    let block_length = decode_u32(endianness, &raw_length)?;
     validate_pcapng_block_length(block_length, max_size)?;
     let block_length_usize =
         usize::try_from(block_length).map_err(|_| Error::InvalidBlockLength {
@@ -83,7 +83,7 @@ pub(in crate::pcap) fn read_section_header_with_length<R: Read>(
     let remaining_length = block_length_usize - 12;
     read_exact_vec(reader, scratch, remaining_length, "pcapng section header")?;
     let footer_offset = scratch.len() - 4;
-    let trailing_length = decode_u32(endianness, &scratch[footer_offset..]);
+    let trailing_length = decode_u32(endianness, &scratch[footer_offset..])?;
     if trailing_length != block_length {
         return Err(Error::BlockLengthMismatch {
             leading: block_length,
@@ -91,8 +91,8 @@ pub(in crate::pcap) fn read_section_header_with_length<R: Read>(
         });
     }
 
-    let major = decode_u16(endianness, &scratch[0..2]);
-    let minor = decode_u16(endianness, &scratch[2..4]);
+    let major = decode_u16(endianness, &scratch[0..2])?;
+    let minor = decode_u16(endianness, &scratch[2..4])?;
     if major != 1 || (minor != 0 && minor != 2) {
         return Err(Error::UnsupportedVersion {
             format: Format::PcapNg,
@@ -100,7 +100,7 @@ pub(in crate::pcap) fn read_section_header_with_length<R: Read>(
             minor,
         });
     }
-    let section_length = decode_i64(endianness, &scratch[4..12]);
+    let section_length = decode_i64(endianness, &scratch[4..12])?;
     if section_length < -1 {
         return Err(Error::InvalidData {
             format: Format::PcapNg,

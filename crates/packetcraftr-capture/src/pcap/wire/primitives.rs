@@ -167,28 +167,52 @@ pub(in crate::pcap) fn write_padding<W: Write>(
     Ok(())
 }
 
-pub(in crate::pcap) fn decode_u16(endianness: Endianness, bytes: &[u8]) -> u16 {
-    let word: [u8; 2] = bytes[..2].try_into().expect("two-byte slice");
-    match endianness {
+pub(in crate::pcap) fn decode_u16(endianness: Endianness, bytes: &[u8]) -> Result<u16, Error> {
+    let word: [u8; 2] = bytes
+        .get(..2)
+        .ok_or(Error::Truncated {
+            context: "two-byte field",
+            expected: 2,
+            actual: bytes.len(),
+        })?
+        .try_into()
+        .expect("two-byte slice");
+    Ok(match endianness {
         Endianness::Little => u16::from_le_bytes(word),
         Endianness::Big => u16::from_be_bytes(word),
-    }
+    })
 }
 
-pub(in crate::pcap) fn decode_u32(endianness: Endianness, bytes: &[u8]) -> u32 {
-    let word: [u8; 4] = bytes[..4].try_into().expect("four-byte slice");
-    match endianness {
+pub(in crate::pcap) fn decode_u32(endianness: Endianness, bytes: &[u8]) -> Result<u32, Error> {
+    let word: [u8; 4] = bytes
+        .get(..4)
+        .ok_or(Error::Truncated {
+            context: "four-byte field",
+            expected: 4,
+            actual: bytes.len(),
+        })?
+        .try_into()
+        .expect("four-byte slice");
+    Ok(match endianness {
         Endianness::Little => u32::from_le_bytes(word),
         Endianness::Big => u32::from_be_bytes(word),
-    }
+    })
 }
 
-pub(in crate::pcap) fn decode_i64(endianness: Endianness, bytes: &[u8]) -> i64 {
-    let word: [u8; 8] = bytes[..8].try_into().expect("eight-byte slice");
-    match endianness {
+pub(in crate::pcap) fn decode_i64(endianness: Endianness, bytes: &[u8]) -> Result<i64, Error> {
+    let word: [u8; 8] = bytes
+        .get(..8)
+        .ok_or(Error::Truncated {
+            context: "eight-byte field",
+            expected: 8,
+            actual: bytes.len(),
+        })?
+        .try_into()
+        .expect("eight-byte slice");
+    Ok(match endianness {
         Endianness::Little => i64::from_le_bytes(word),
         Endianness::Big => i64::from_be_bytes(word),
-    }
+    })
 }
 
 pub(in crate::pcap) fn write_u16<W: Write>(
@@ -228,4 +252,37 @@ pub(in crate::pcap) fn write_i64<W: Write>(
     };
     writer.write_all(&bytes)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn integer_decoders_reject_short_slices_without_panicking() {
+        for error in [
+            decode_u16(Endianness::Little, &[0]).unwrap_err(),
+            decode_u32(Endianness::Little, &[0; 3]).unwrap_err(),
+            decode_i64(Endianness::Little, &[0; 7]).unwrap_err(),
+        ] {
+            assert!(matches!(error, Error::Truncated { .. }));
+        }
+    }
+
+    #[test]
+    fn integer_decoders_preserve_endianness() {
+        assert_eq!(decode_u16(Endianness::Big, &[0x12, 0x34]).unwrap(), 0x1234);
+        assert_eq!(
+            decode_u32(Endianness::Little, &[0x78, 0x56, 0x34, 0x12]).unwrap(),
+            0x1234_5678
+        );
+        assert_eq!(
+            decode_i64(
+                Endianness::Big,
+                &[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfe]
+            )
+            .unwrap(),
+            -2
+        );
+    }
 }

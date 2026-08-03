@@ -25,8 +25,8 @@ pub(in crate::pcap) fn parse_interface_description(
             reason: "interface description block is shorter than 8 bytes",
         });
     }
-    let link_type = LinkType(u32::from(decode_u16(endianness, &body[0..2])));
-    let snap_len = decode_u32(endianness, &body[4..8]);
+    let link_type = LinkType(u32::from(decode_u16(endianness, &body[0..2])?));
+    let snap_len = decode_u32(endianness, &body[4..8])?;
     let mut timestamp_resolution = DEFAULT_TIMESTAMP_RESOLUTION;
     let mut timestamp_offset = 0_i64;
     let mut saw_timestamp_resolution = false;
@@ -72,7 +72,7 @@ pub(in crate::pcap) fn parse_interface_description(
                             reason: "if_tsoffset option must contain eight bytes",
                         });
                     }
-                    timestamp_offset = decode_i64(endianness, value);
+                    timestamp_offset = decode_i64(endianness, value)?;
                 }
                 _ => {}
             }

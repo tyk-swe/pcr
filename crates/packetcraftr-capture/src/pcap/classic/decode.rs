@@ -23,8 +23,8 @@ pub(in crate::pcap) fn read_pcap_header<R: Read>(
 ) -> Result<ReaderState, Error> {
     let mut remaining = [0_u8; PCAP_GLOBAL_HEADER_LEN - 4];
     read_exact_counted(reader, &mut remaining, "pcap global header")?;
-    let major = decode_u16(endianness, &remaining[0..2]);
-    let minor = decode_u16(endianness, &remaining[2..4]);
+    let major = decode_u16(endianness, &remaining[0..2])?;
+    let minor = decode_u16(endianness, &remaining[2..4])?;
     if (major, minor) != (2, 4) {
         return Err(Error::UnsupportedVersion {
             format: Format::Pcap,
@@ -32,7 +32,7 @@ pub(in crate::pcap) fn read_pcap_header<R: Read>(
             minor,
         });
     }
-    let snap_len = decode_u32(endianness, &remaining[12..16]);
+    let snap_len = decode_u32(endianness, &remaining[12..16])?;
     if snap_len == 0 {
         return Err(Error::InvalidData {
             format: Format::Pcap,
@@ -42,7 +42,7 @@ pub(in crate::pcap) fn read_pcap_header<R: Read>(
     // The classic-PCAP network word uses its low 16 bits for LINKTYPE and may
     // carry standardized FCS metadata in the high bits. Do not misclassify a
     // flagged Ethernet capture as an unknown 32-bit DLT.
-    let network_word = decode_u32(endianness, &remaining[16..20]);
+    let network_word = decode_u32(endianness, &remaining[16..20])?;
     let link_type = LinkType(network_word & 0xffff);
     Ok(ReaderState::Pcap {
         endianness,
@@ -65,10 +65,10 @@ pub(in crate::pcap) fn read_next_pcap_frame<R: Read>(
         return Ok(None);
     }
 
-    let seconds = decode_u32(endianness, &header[0..4]);
-    let fraction = decode_u32(endianness, &header[4..8]);
-    let captured_length = decode_u32(endianness, &header[8..12]);
-    let original_length = decode_u32(endianness, &header[12..16]);
+    let seconds = decode_u32(endianness, &header[0..4])?;
+    let fraction = decode_u32(endianness, &header[4..8])?;
+    let captured_length = decode_u32(endianness, &header[8..12])?;
+    let original_length = decode_u32(endianness, &header[12..16])?;
     let denominator = match precision {
         TimestampPrecision::Microseconds => 1_000_000,
         TimestampPrecision::Nanoseconds => 1_000_000_000,

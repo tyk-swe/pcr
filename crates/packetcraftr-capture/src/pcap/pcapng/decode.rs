@@ -164,8 +164,8 @@ pub(in crate::pcap) fn read_next_pcapng_frame<R: Read>(
             continue;
         }
 
-        let block_type = decode_u32(section_endianness, &raw_header[..4]);
-        let block_length = decode_u32(section_endianness, &raw_header[4..8]);
+        let block_type = decode_u32(section_endianness, &raw_header[..4])?;
+        let block_length = decode_u32(section_endianness, &raw_header[4..8])?;
         validate_pcapng_block_length(block_length, max_size)?;
         if let Some(remaining) = remaining_in_section
             && u64::from(block_length) > remaining
@@ -201,7 +201,7 @@ pub(in crate::pcap) fn read_next_pcapng_frame<R: Read>(
         read_exact_vec(reader, scratch, remaining, "pcapng block")?;
 
         let body_length = scratch.len() - 4;
-        let trailing_length = decode_u32(section_endianness, &scratch[body_length..]);
+        let trailing_length = decode_u32(section_endianness, &scratch[body_length..])?;
         if trailing_length != block_length {
             return Err(Error::BlockLengthMismatch {
                 leading: block_length,

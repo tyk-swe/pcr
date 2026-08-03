@@ -27,8 +27,8 @@ where
                 actual: options.len(),
             });
         }
-        let code = decode_u16(endianness, &options[offset..offset + 2]);
-        let length = usize::from(decode_u16(endianness, &options[offset + 2..offset + 4]));
+        let code = decode_u16(endianness, &options[offset..offset + 2])?;
+        let length = usize::from(decode_u16(endianness, &options[offset + 2..offset + 4])?);
         offset += 4;
         if code == PCAPNG_OPTION_END {
             if length != 0 {

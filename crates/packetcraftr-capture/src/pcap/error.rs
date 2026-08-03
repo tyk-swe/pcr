@@ -109,6 +109,11 @@ impl Classified for Error {
                 Kind::Cli,
                 Some("use a supported finite capture timestamp or replay timing option"),
             ),
+            Self::WrongWriterFormat { .. } => Classification::new(
+                "cli.capture_option",
+                Kind::Cli,
+                Some("call the writer method that matches the writer's configured format"),
+            ),
             Self::SizeLimitExceeded { .. }
             | Self::InterfaceLimit { .. }
             | Self::TotalInterfaceLimit { .. }
@@ -135,5 +140,26 @@ impl Classified for Error {
             Self::Io(source) => vec![source.to_string()],
             _ => Vec::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wrong_writer_format_is_classified_as_caller_usage() {
+        let classification = Error::WrongWriterFormat {
+            expected: Format::Pcap,
+            actual: Format::PcapNg,
+        }
+        .classification();
+
+        assert_eq!(classification.code, "cli.capture_option");
+        assert_eq!(classification.kind, Kind::Cli);
+        assert_eq!(
+            classification.remediation,
+            Some("call the writer method that matches the writer's configured format")
+        );
     }
 }

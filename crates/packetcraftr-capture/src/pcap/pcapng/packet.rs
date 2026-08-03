@@ -31,11 +31,11 @@ pub(in crate::pcap) fn parse_enhanced_packet(
         });
     }
     let header = PacketHeader {
-        interface_id: decode_u32(endianness, &body[0..4]),
-        timestamp_ticks: (u64::from(decode_u32(endianness, &body[4..8])) << 32)
-            | u64::from(decode_u32(endianness, &body[8..12])),
-        captured_length: decode_u32(endianness, &body[12..16]),
-        original_length: decode_u32(endianness, &body[16..20]),
+        interface_id: decode_u32(endianness, &body[0..4])?,
+        timestamp_ticks: (u64::from(decode_u32(endianness, &body[4..8])?) << 32)
+            | u64::from(decode_u32(endianness, &body[8..12])?),
+        captured_length: decode_u32(endianness, &body[12..16])?,
+        original_length: decode_u32(endianness, &body[16..20])?,
     };
     parse_pcapng_packet_body(
         body,
@@ -62,11 +62,11 @@ pub(in crate::pcap) fn parse_obsolete_packet(
         });
     }
     let header = PacketHeader {
-        interface_id: u32::from(decode_u16(endianness, &body[0..2])),
-        timestamp_ticks: (u64::from(decode_u32(endianness, &body[4..8])) << 32)
-            | u64::from(decode_u32(endianness, &body[8..12])),
-        captured_length: decode_u32(endianness, &body[12..16]),
-        original_length: decode_u32(endianness, &body[16..20]),
+        interface_id: u32::from(decode_u16(endianness, &body[0..2])?),
+        timestamp_ticks: (u64::from(decode_u32(endianness, &body[4..8])?) << 32)
+            | u64::from(decode_u32(endianness, &body[8..12])?),
+        captured_length: decode_u32(endianness, &body[12..16])?,
+        original_length: decode_u32(endianness, &body[16..20])?,
     };
     parse_pcapng_packet_body(
         body,
@@ -167,7 +167,7 @@ pub(in crate::pcap) fn parse_simple_packet(
         interface: 0,
         available: 0,
     })?;
-    let original_length = decode_u32(endianness, &body[0..4]);
+    let original_length = decode_u32(endianness, &body[0..4])?;
     let captured_length = if interface.snap_len == 0 {
         original_length
     } else {
@@ -230,7 +230,7 @@ pub(in crate::pcap) fn parse_packet_direction(
                         reason: "epb_flags option must contain four bytes",
                     });
                 }
-                direction = Some(match decode_u32(endianness, value) & 0b11 {
+                direction = Some(match decode_u32(endianness, value)? & 0b11 {
                     1 => Direction::Inbound,
                     2 => Direction::Outbound,
                     _ => Direction::Unknown,

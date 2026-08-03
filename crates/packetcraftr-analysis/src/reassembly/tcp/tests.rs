@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use bytes::Bytes;
 use std::net::{IpAddr, Ipv4Addr};
 use std::time::{Duration, Instant};
 

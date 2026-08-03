@@ -6,9 +6,11 @@
 use std::collections::{BTreeMap, HashMap};
 
 use packetcraftr_packet::diagnostic::DiagnosticSeverity;
+use packetcraftr_protocol::transport::Tcp;
 
-use super::conversation_index::{transport_payload, transports};
-use super::{FlowKey, FrameRecord, Tcp, TcpEvent};
+use crate::adapter::{transport_payload, transports};
+use crate::pipeline::FrameRecord;
+use crate::reassembly::tcp::{Event as TcpEvent, FlowKey};
 
 use finding::new as new_finding;
 use tcp::DirectionState;
@@ -335,7 +337,7 @@ impl ExpertCollector {
     /// findings are attributed to `end_number`, the last frame read.
     pub fn finish(
         mut self,
-        trailing: &[super::TcpEvent],
+        trailing: &[TcpEvent],
         end_number: u64,
     ) -> (Vec<Finding>, ExpertSummary) {
         let mut findings = Vec::new();

@@ -3,19 +3,25 @@
 
 use std::io::Cursor;
 use std::net::Ipv4Addr;
+use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 
 use bytes::Bytes;
 
-use super::pipeline::{AnalysisLimits, AnalysisOptions};
 use super::*;
+use crate::adapter::{tcp_segment, udp_flow};
+use crate::pipeline::{AnalysisLimits, AnalysisOptions};
 use crate::reassembly::tcp::Event as SessionTcpEvent;
-use packetcraftr_capture::{Frame, LinkType, Writer};
+use packetcraftr_capture::{Frame, LinkType, Reader, Writer};
+use packetcraftr_core::error::{Classification, Classified, Kind};
+use packetcraftr_packet::Packet;
 use packetcraftr_packet::build::{Builder, Context as BuildContext, Options as BuildOptions};
-use packetcraftr_packet::filter::Options as FilterOptions;
-use packetcraftr_packet::layer::Raw;
-
-use super::conversation_index::{tcp_segment, udp_flow};
+use packetcraftr_packet::decode::{DecodeOptions, Decoder};
+use packetcraftr_packet::filter::{Filter, Options as FilterOptions};
+use packetcraftr_packet::layer::{Padding, Raw};
+use packetcraftr_packet::registry::ProtocolRegistry;
+use packetcraftr_protocol::network::Ipv4;
+use packetcraftr_protocol::transport::{Tcp, Udp};
 
 fn registry() -> Arc<ProtocolRegistry> {
     Arc::new(packetcraftr_protocol::builtin::registry().unwrap())

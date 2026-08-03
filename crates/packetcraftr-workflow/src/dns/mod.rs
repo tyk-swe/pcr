@@ -13,7 +13,7 @@ use serde::Serialize;
 use thiserror::Error;
 
 use packetcraftr_capture::Frame;
-use packetcraftr_error::{Classification, Classified, Kind};
+use packetcraftr_core::error::{Classification, Classified, Kind};
 use packetcraftr_net::{
     capture::{DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES},
     route::{NeighborResolver, RouteProvider},
@@ -46,7 +46,7 @@ use super::probe::{self, Transport as ProbeTransport};
 use super::scan::MAX_SCAN_RATE;
 use super::target::{Authorizer, Target};
 use super::{AddressFamily, BoundaryError, Stats};
-use packetcraftr_budget::{Deadline, DeadlineExceeded};
+use packetcraftr_core::budget::{Deadline, DeadlineExceeded};
 
 pub const DNS_HEADER_BYTES: usize = 12;
 pub const DEFAULT_DNS_SERVER_PORT: u16 = 53;

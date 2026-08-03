@@ -13,7 +13,7 @@ use std::{
 };
 
 use bytes::Bytes;
-use packetcraftr_capture::LinkType;
+use packetcraftr_core::frame::LinkType;
 
 use super::{
     abi::{BpfProgram, PCAP_ERROR, PCAP_ERROR_BREAK, PCAP_NETMASK_UNKNOWN, PcapStatistics},

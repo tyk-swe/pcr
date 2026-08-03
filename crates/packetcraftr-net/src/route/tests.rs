@@ -17,7 +17,7 @@ use super::{
 #[cfg(not(feature = "native-route"))]
 use super::{NativeRouteError, SystemRouteProvider};
 use crate::capture::CaptureStatistics;
-use packetcraftr_capture::{Frame, LinkType};
+use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_packet::{Packet, field::WireValue, layer::Raw};
 use packetcraftr_protocol::{
     ipv6::SegmentRoutingHeader,

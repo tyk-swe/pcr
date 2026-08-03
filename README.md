@@ -125,13 +125,31 @@ or `target\release\packetcraftr.exe` on Windows.
 
 ## Workspace layout
 
-PacketcraftR is a Cargo workspace. Each library domain is its own crate under
-`crates/`, the `packetcraftr` crate re-exports all of them under their domain
-names so `packetcraftr::packet::…` continues to work, and `packetcraftr-cli`
-builds the `packetcraftr` binary. Depend on `packetcraftr` for the whole
-library, or on individual crates such as `packetcraftr-capture` and
-`packetcraftr-reassembly` to compile only what you use. `AGENTS.md` describes
-the crate layering and the offline/live boundary.
+PacketcraftR has ten Cargo packages under `crates/`. The `packetcraftr` facade
+re-exports the compiled domains, owns render-neutral output models, and exposes
+analysis reassembly as `packetcraftr::reassembly`; `packetcraftr-cli` builds the
+`packetcraftr` binary. Depend on the facade for the whole library, on domain
+crates such as `packetcraftr-core` or `packetcraftr-capture` for a lower layer,
+or on `packetcraftr-analysis` for offline analysis and independent reassembly.
+
+The normal internal dependency graph is exact:
+
+| Package | Direct internal dependencies |
+| --- | --- |
+| `packetcraftr-core` | none |
+| `packetcraftr-capture` | core |
+| `packetcraftr-packet` | core |
+| `packetcraftr-protocol` | core, packet |
+| `packetcraftr-net` | core, packet |
+| `packetcraftr-client` | core, net, packet, protocol |
+| `packetcraftr-analysis` | core, capture, packet, protocol |
+| `packetcraftr-workflow` | core, capture, client, net, packet, protocol |
+| `packetcraftr` | core, capture, packet, protocol, net, client, analysis, workflow |
+| `packetcraftr-cli` | packetcraftr |
+
+`scripts/check-workspace-architecture` enforces this graph, including the
+absence of any analysis path to the live client or network crates. `AGENTS.md`
+describes the layering and offline/live boundary.
 
 ## Cargo features and tested profiles
 

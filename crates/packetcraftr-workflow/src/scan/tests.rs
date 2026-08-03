@@ -20,7 +20,7 @@ use packetcraftr_client::Client;
 use packetcraftr_client::exchange::Options as ExchangeOptions;
 use packetcraftr_client::policy::Policy as TrafficPolicy;
 use packetcraftr_client::target::{Error as TargetResolutionError, Resolver as HostnameResolver};
-use packetcraftr_error::Classification as ErrorClassification;
+use packetcraftr_core::error::Classification as ErrorClassification;
 use packetcraftr_net::{
     Error as LiveIoError,
     capture::{

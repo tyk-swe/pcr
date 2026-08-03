@@ -4,7 +4,7 @@
 use std::io::{self, Read, Write};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use crate::Frame;
+use crate::{Frame, FrameError};
 
 use super::models::{Endianness, Error, Format, TimestampResolution};
 
@@ -56,10 +56,11 @@ pub(super) fn validate_declared_lengths(
     kind: &'static str,
 ) -> Result<(), Error> {
     if original_length < captured_length {
-        return Err(Error::OriginalLengthTooSmall {
+        return Err(FrameError::OriginalLengthTooSmall {
             captured: captured_length,
             original: original_length,
-        });
+        }
+        .into());
     }
     if captured_length as usize > max_size {
         return Err(Error::SizeLimitExceeded {

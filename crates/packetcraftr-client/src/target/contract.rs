@@ -7,7 +7,7 @@ use std::str::FromStr;
 use serde::Serialize;
 use thiserror::Error;
 
-use packetcraftr_error::{Classification, Classified, Kind};
+use packetcraftr_core::error::{Classification, Classified, Kind};
 
 use super::super::policy::TrafficPolicyError;
 
@@ -254,7 +254,7 @@ impl HostnameResolver for SystemHostnameResolver {
 mod tests {
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
-    use packetcraftr_error::{Classified, Kind};
+    use packetcraftr_core::error::{Classified, Kind};
 
     use super::{Hostname, IpVersion, LiveTarget, ResolvedTarget, TargetResolutionError};
     use crate::policy::TrafficPolicyError;

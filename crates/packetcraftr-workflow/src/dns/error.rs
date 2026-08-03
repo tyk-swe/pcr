@@ -192,7 +192,7 @@ impl Classified for DnsError {
 
 #[cfg(test)]
 mod tests {
-    use packetcraftr_error::{BoundaryError, Classification, Classified, Kind};
+    use packetcraftr_core::error::{BoundaryError, Classification, Classified, Kind};
 
     use super::{DnsError, DnsWireError};
     use std::time::Duration;

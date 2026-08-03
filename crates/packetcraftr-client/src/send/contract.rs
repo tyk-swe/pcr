@@ -6,7 +6,7 @@ use std::net::IpAddr;
 use bytes::Bytes;
 use thiserror::Error;
 
-use packetcraftr_error::{Classification, Classified, Kind};
+use packetcraftr_core::error::{Classification, Classified, Kind};
 use packetcraftr_net::{
     Error as LiveIoError,
     neighbor::Error as NeighborError,
@@ -151,7 +151,7 @@ impl Classified for ClientError {
 
 #[cfg(test)]
 mod tests {
-    use packetcraftr_error::{Classified, Kind};
+    use packetcraftr_core::error::{Classified, Kind};
 
     use super::{ClientError, SendOptions};
     use packetcraftr_net::Error as LiveIoError;

@@ -5,7 +5,7 @@
 
 use std::time::Instant;
 
-use packetcraftr_capture::Frame;
+use packetcraftr_core::frame::Frame;
 use packetcraftr_net::capture::CapturedFrame;
 use packetcraftr_packet::{
     Packet,

@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use super::Error;
 use super::route::PlannedRoute;
-use packetcraftr_capture::{DEFAULT_SIZE_LIMIT, Frame as CaptureFrame};
+use packetcraftr_core::frame::{DEFAULT_SIZE_LIMIT, Frame as CaptureFrame};
 
 #[doc(hidden)]
 pub use self::{
@@ -283,7 +283,7 @@ mod tests {
     use crate::route::{
         DestinationScope, InterfaceId, PlannedRoute, RouteDecision, RouteSelectionReason,
     };
-    use packetcraftr_capture::LinkType;
+    use packetcraftr_core::frame::LinkType;
 
     #[derive(Debug)]
     struct TestCapture;

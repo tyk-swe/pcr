@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use packetcraftr_capture::Frame;
-use packetcraftr_error::{Classified, Kind};
+use packetcraftr_core::error::{Classified, Kind};
 use packetcraftr_net::{
     capture::{DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES},
     route::{NeighborResolver, RouteProvider},
@@ -49,7 +49,7 @@ use super::nonzero_ipv4_identification;
 use super::probe::Correlation;
 use super::target::{Authorizer, Target};
 use super::{AddressFamily, BoundaryError, Stats};
-use packetcraftr_budget::{Deadline, DeadlineExceeded};
+use packetcraftr_core::budget::{Deadline, DeadlineExceeded};
 
 pub const DEFAULT_SCAN_BATCH_SIZE: usize = 64;
 pub const DEFAULT_MAX_SCAN_PORTS: usize = 1_024;

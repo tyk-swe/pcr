@@ -6,7 +6,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use thiserror::Error;
 
-use packetcraftr_capture::{Error as CaptureError, Frame, LinkType};
+use packetcraftr_core::frame::{Frame, FrameError as CaptureError, LinkType};
 
 use super::super::Packet;
 use super::super::build::{DEFAULT_MAX_LAYERS, DEFAULT_MAX_PACKET_SIZE};
@@ -456,7 +456,7 @@ mod tests {
         layout::FieldLayout,
         registry::RegistryBuilder,
     };
-    use packetcraftr_capture::LinkType;
+    use packetcraftr_core::frame::LinkType;
 
     #[derive(Clone, Debug)]
     struct Probe;

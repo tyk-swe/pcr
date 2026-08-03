@@ -6,7 +6,7 @@ use std::time::Duration;
 use thiserror::Error as ThisError;
 
 use super::link::LinkMode;
-use packetcraftr_error::{Classification, Classified, Kind};
+use packetcraftr_core::error::{Classification, Classified, Kind};
 
 /// Errors shared by live interface, transmission, and capture providers.
 #[derive(Debug, ThisError, Clone, PartialEq, Eq)]
@@ -236,7 +236,7 @@ impl Classified for Error {
 mod tests {
     use std::time::Duration;
 
-    use packetcraftr_error::{Classified, Kind};
+    use packetcraftr_core::error::{Classified, Kind};
 
     use super::Error;
     use crate::link::LinkMode;

@@ -30,7 +30,7 @@ use crate::{
     },
     transmit::{IoSendReport, Layer2Frame, Layer2Io},
 };
-use packetcraftr_capture::{Direction, Frame, LinkType};
+use packetcraftr_core::frame::{Direction, Frame, LinkType};
 
 type FrameResponseScript = dyn Fn(&Bytes) -> Vec<Frame> + Send + Sync;
 

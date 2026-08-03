@@ -978,13 +978,12 @@ dependencies = [
  "packetcraftr-analysis",
  "packetcraftr-capture",
  "packetcraftr-client",
- "packetcraftr-error",
+ "packetcraftr-core",
  "packetcraftr-net",
- "packetcraftr-output",
  "packetcraftr-packet",
  "packetcraftr-protocol",
- "packetcraftr-reassembly",
  "packetcraftr-workflow",
+ "serde",
  "serde_json",
 ]
 
@@ -993,27 +992,21 @@ name = "packetcraftr-analysis"
 version = "0.4.0"
 dependencies = [
  "bytes",
- "packetcraftr-budget",
  "packetcraftr-capture",
- "packetcraftr-error",
+ "packetcraftr-core",
  "packetcraftr-packet",
  "packetcraftr-protocol",
- "packetcraftr-reassembly",
+ "serde",
  "thiserror 2.0.19",
 ]
-
-[[package]]
-name = "packetcraftr-budget"
-version = "0.4.0"
 
 [[package]]
 name = "packetcraftr-capture"
 version = "0.4.0"
 dependencies = [
  "bytes",
- "packetcraftr-error",
+ "packetcraftr-core",
  "serde",
- "serde_json",
  "thiserror 2.0.19",
 ]
 
@@ -1034,8 +1027,7 @@ name = "packetcraftr-client"
 version = "0.4.0"
 dependencies = [
  "bytes",
- "packetcraftr-capture",
- "packetcraftr-error",
+ "packetcraftr-core",
  "packetcraftr-net",
  "packetcraftr-packet",
  "packetcraftr-protocol",
@@ -1044,10 +1036,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "packetcraftr-error"
+name = "packetcraftr-core"
 version = "0.4.0"
 dependencies = [
+ "bytes",
  "serde",
+ "serde_json",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -1058,8 +1053,7 @@ dependencies = [
  "futures-util",
  "libc",
  "libloading 0.9.0",
- "packetcraftr-capture",
- "packetcraftr-error",
+ "packetcraftr-core",
  "packetcraftr-packet",
  "packetcraftr-protocol",
  "pcap",
@@ -1073,29 +1067,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "packetcraftr-output"
-version = "0.4.0"
-dependencies = [
- "bytes",
- "packetcraftr-analysis",
- "packetcraftr-capture",
- "packetcraftr-client",
- "packetcraftr-error",
- "packetcraftr-net",
- "packetcraftr-packet",
- "packetcraftr-protocol",
- "packetcraftr-workflow",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "packetcraftr-packet"
 version = "0.4.0"
 dependencies = [
  "bytes",
  "noyalib",
- "packetcraftr-capture",
+ "packetcraftr-core",
  "serde",
  "serde_json",
  "thiserror 2.0.19",
@@ -1106,20 +1083,9 @@ name = "packetcraftr-protocol"
 version = "0.4.0"
 dependencies = [
  "bytes",
- "packetcraftr-capture",
+ "packetcraftr-core",
  "packetcraftr-packet",
  "serde",
-]
-
-[[package]]
-name = "packetcraftr-reassembly"
-version = "0.4.0"
-dependencies = [
- "bytes",
- "packetcraftr-packet",
- "packetcraftr-protocol",
- "serde",
- "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -1127,10 +1093,9 @@ name = "packetcraftr-workflow"
 version = "0.4.0"
 dependencies = [
  "bytes",
- "packetcraftr-budget",
  "packetcraftr-capture",
  "packetcraftr-client",
- "packetcraftr-error",
+ "packetcraftr-core",
  "packetcraftr-net",
  "packetcraftr-packet",
  "packetcraftr-protocol",

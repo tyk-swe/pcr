@@ -349,7 +349,7 @@ fn win32_error(operation: &'static str, error: WIN32_ERROR) -> NativeRouteError 
 #[cfg(all(test, feature = "native-route"))]
 mod tests {
     use crate::{interface::InterfaceFlags, link::LinkCapability};
-    use packetcraftr_capture::LinkType;
+    use packetcraftr_core::frame::LinkType;
 
     use super::*;
     use crate::route::Provider as RouteProvider;

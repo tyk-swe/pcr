@@ -13,10 +13,9 @@ workspace = true
 
 [dependencies]
 bytes.workspace = true
-packetcraftr-budget.workspace = true
 packetcraftr-capture.workspace = true
 packetcraftr-client.workspace = true
-packetcraftr-error.workspace = true
+packetcraftr-core.workspace = true
 packetcraftr-net.workspace = true
 packetcraftr-packet.workspace = true
 packetcraftr-protocol.workspace = true

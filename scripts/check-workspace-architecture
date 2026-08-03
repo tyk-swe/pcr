@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+# Copyright (C) 2026 tyk-swe
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# Enforces the complete set of normal direct dependencies between workspace packages.
+
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+metadata_file="$(mktemp)"
+trap 'rm -f "$metadata_file"' EXIT
+cargo metadata --locked --format-version 1 > "$metadata_file"
+
+python3 - "$metadata_file" <<'PY'
+import json
+import pathlib
+import sys
+
+expected = {
+    "packetcraftr-core": set(),
+    "packetcraftr-capture": {"packetcraftr-core"},
+    "packetcraftr-packet": {"packetcraftr-core"},
+    "packetcraftr-protocol": {"packetcraftr-core", "packetcraftr-packet"},
+    "packetcraftr-net": {"packetcraftr-core", "packetcraftr-packet"},
+    "packetcraftr-client": {
+        "packetcraftr-core",
+        "packetcraftr-net",
+        "packetcraftr-packet",
+        "packetcraftr-protocol",
+    },
+    "packetcraftr-analysis": {
+        "packetcraftr-core",
+        "packetcraftr-capture",
+        "packetcraftr-packet",
+        "packetcraftr-protocol",
+    },
+    "packetcraftr-workflow": {
+        "packetcraftr-core",
+        "packetcraftr-capture",
+        "packetcraftr-client",
+        "packetcraftr-net",
+        "packetcraftr-packet",
+        "packetcraftr-protocol",
+    },
+    "packetcraftr": {
+        "packetcraftr-core",
+        "packetcraftr-capture",
+        "packetcraftr-packet",
+        "packetcraftr-protocol",
+        "packetcraftr-net",
+        "packetcraftr-client",
+        "packetcraftr-analysis",
+        "packetcraftr-workflow",
+    },
+    "packetcraftr-cli": {"packetcraftr"},
+}
+removed = {
+    "packetcraftr-budget",
+    "packetcraftr-error",
+    "packetcraftr-output",
+    "packetcraftr-reassembly",
+}
+
+metadata = json.loads(pathlib.Path(sys.argv[1]).read_text())
+workspace_ids = set(metadata["workspace_members"])
+workspace_packages = {
+    package["id"]: package for package in metadata["packages"] if package["id"] in workspace_ids
+}
+names = {package["name"] for package in workspace_packages.values()}
+errors = []
+
+if names != set(expected):
+    errors.append(
+        "workspace package set differs: "
+        f"missing={sorted(set(expected) - names)}, unexpected={sorted(names - set(expected))}"
+    )
+
+for package in workspace_packages.values():
+    referenced_removed = removed.intersection(dependency["name"] for dependency in package["dependencies"])
+    if referenced_removed:
+        errors.append(f"{package['name']} references removed packages {sorted(referenced_removed)}")
+
+    actual = {
+        dependency["name"]
+        for dependency in package["dependencies"]
+        if dependency["kind"] is None
+        and dependency["source"] is None
+        and dependency["name"] in names
+    }
+    wanted = expected.get(package["name"])
+    if wanted is not None and actual != wanted:
+        errors.append(
+            f"{package['name']} normal internal edges differ: "
+            f"missing={sorted(wanted - actual)}, undeclared={sorted(actual - wanted)}"
+        )
+
+analysis_edges = expected["packetcraftr-analysis"]
+if {"packetcraftr-client", "packetcraftr-net"}.intersection(analysis_edges):
+    errors.append("encoded analysis graph reaches packetcraftr-client or packetcraftr-net")
+
+reachable = set()
+pending = ["packetcraftr-analysis"]
+while pending:
+    current = pending.pop()
+    for dependency in expected[current]:
+        if dependency not in reachable:
+            reachable.add(dependency)
+            pending.append(dependency)
+if {"packetcraftr-client", "packetcraftr-net"}.intersection(reachable):
+    errors.append("packetcraftr-analysis has a dependency path to a live package")
+
+if errors:
+    for error in errors:
+        print(f"workspace architecture: {error}", file=sys.stderr)
+    raise SystemExit(1)
+
+print("workspace architecture: 10 packages and all normal internal edges match")
+PY

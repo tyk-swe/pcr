@@ -19,19 +19,18 @@ native-layer2 = ["packetcraftr-net/native-layer2"]
 native-layer3 = ["packetcraftr-net/native-layer3"]
 
 [dependencies]
+bytes.workspace = true
 packetcraftr-analysis.workspace = true
 packetcraftr-capture.workspace = true
 packetcraftr-client.workspace = true
-packetcraftr-error.workspace = true
+packetcraftr-core.workspace = true
 packetcraftr-net.workspace = true
-packetcraftr-output.workspace = true
 packetcraftr-packet.workspace = true
 packetcraftr-protocol.workspace = true
-packetcraftr-reassembly.workspace = true
 packetcraftr-workflow.workspace = true
+serde.workspace = true
 
 [dev-dependencies]
-bytes.workspace = true
 criterion.workspace = true
 serde_json.workspace = true
 

@@ -2,9 +2,9 @@
 
 ## Project Structure & Module Organization
 
-PacketcraftR is a Rust 2024 Cargo workspace for packet construction, dissection, capture I/O, and bounded diagnostics. Domain crates live under `crates/`; dependencies flow upward from shared errors, budgets, and capture/reassembly types through packet, protocol, network, client, analysis, workflow, and output layers to the `packetcraftr` facade and `packetcraftr-cli`. Keep this graph acyclic.
+PacketcraftR is a Rust 2024 Cargo workspace for packet construction, dissection, capture I/O, and bounded diagnostics. Its ten packages live under `crates/`. Dependencies flow upward from `packetcraftr-core` through capture, packet, protocol, network, client, analysis, and workflow to the `packetcraftr` facade and `packetcraftr-cli`. Reassembly is owned by analysis, while render-neutral output models are owned by the facade. Keep this graph acyclic and run `scripts/check-workspace-architecture` after dependency changes.
 
-The offline/live split is a dependency edge, not a convention. `packetcraftr-analysis` holds the offline capture pipeline and must never depend on `packetcraftr-client` or `packetcraftr-net`; that absence is what guarantees it has no resolver, route, capture, or transmission seam to gate. Live probing lives in `packetcraftr-workflow`. Both bound themselves with `packetcraftr-budget`, which sits at the bottom of the graph beside `packetcraftr-error`.
+The offline/live split is a dependency edge, not a convention. `packetcraftr-analysis` holds the offline capture pipeline and reassembly algorithms and must never depend on `packetcraftr-client` or `packetcraftr-net`; that absence is what guarantees it has no resolver, route, capture, or transmission seam to gate. Live probing lives in `packetcraftr-workflow`. Both use the bottom-layer budgets and errors in `packetcraftr-core`.
 
 Place unit tests beside their modules. Integration tests live in `crates/packetcraftr/tests/`, CLI tests and goldens in `crates/packetcraftr-cli/tests/`, fixtures in `tests/fixtures/`, schemas in `schemas/`, published examples in `examples/documents/`, benchmarks in `crates/packetcraftr/benches/`, and fuzz targets in `fuzz/`.
 
@@ -14,6 +14,7 @@ Place unit tests beside their modules. Integration tests live in `crates/packetc
 - `cargo run -p packetcraftr-cli -- --help`: run the CLI locally.
 - `cargo nextest run --locked`: run the default unit/integration test profile; also test `--no-default-features` and `--all-features` before release. Run matching `cargo test --doc` commands because nextest does not execute doctests.
 - `cargo fmt --all -- --check`: verify formatting.
+- `scripts/check-workspace-architecture`: enforce the exact normal internal dependency graph.
 - `scripts/check-source-conventions`: enforce repository source layout.
 - `cargo clippy --locked --all-targets --all-features -- -D warnings`: apply the CI lint gate.
 - `cargo fmt --manifest-path fuzz/Cargo.toml -- --check` and `cargo clippy --manifest-path fuzz/Cargo.toml --locked --all-targets -- -D warnings`: apply the same gates to the fuzz workspace, which the root `--all` flags do not reach.

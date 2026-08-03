@@ -9,11 +9,11 @@ use bytes::Bytes;
 
 use super::pipeline::{AnalysisLimits, AnalysisOptions};
 use super::*;
+use crate::reassembly::tcp::Event as SessionTcpEvent;
 use packetcraftr_capture::{Frame, LinkType, Writer};
 use packetcraftr_packet::build::{Builder, Context as BuildContext, Options as BuildOptions};
 use packetcraftr_packet::filter::Options as FilterOptions;
 use packetcraftr_packet::layer::Raw;
-use packetcraftr_reassembly::tcp::Event as SessionTcpEvent;
 
 use super::conversation_index::{tcp_segment, udp_flow};
 

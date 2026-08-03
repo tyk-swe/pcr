@@ -66,7 +66,7 @@ mod tests {
         },
     };
     use bytes::Bytes;
-    use packetcraftr_capture::LinkType;
+    use packetcraftr_core::frame::LinkType;
 
     struct RecordingBackend {
         packet: Mutex<Option<PreparedRawIp>>,

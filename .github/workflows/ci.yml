@@ -140,6 +140,8 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Source conventions
         run: scripts/check-source-conventions
+      - name: Workspace architecture
+        run: scripts/check-workspace-architecture
       # `packetcraftr-analysis` runs without authorization gates because it has
       # no resolver, route, capture, or transmission seam. That is only true
       # while it cannot reach one, so assert the dependency edge itself.

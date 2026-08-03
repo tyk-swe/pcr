@@ -9,7 +9,7 @@ use packetcraftr::reassembly::{Limits, fragment, tcp};
 
 #[test]
 fn direct_and_facade_reassembly_paths_are_public() {
-    let direct = packetcraftr_reassembly::Limits::default();
+    let direct = packetcraftr_analysis::reassembly::Limits::default();
     let facade = packetcraftr::reassembly::Limits::default();
     assert_eq!(direct, facade);
 }

@@ -7,10 +7,11 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::LinkType;
-use packetcraftr_error::{Classification, Classified, Kind};
+use packetcraftr_core::error::{Classification, Classified, Kind};
+use packetcraftr_core::frame::FrameError;
 
 /// Default maximum size of an offline packet or a PCAPNG block (16 MiB).
-pub const DEFAULT_SIZE_LIMIT: usize = 16 * 1024 * 1024;
+pub use packetcraftr_core::frame::DEFAULT_SIZE_LIMIT;
 /// Default maximum number of interface descriptions retained per PCAPNG section.
 pub const DEFAULT_INTERFACE_LIMIT: usize = 4_096;
 /// Default maximum interface descriptions retained across all PCAPNG sections.
@@ -224,6 +225,8 @@ pub struct TranscodeReport {
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum Error {
+    #[error(transparent)]
+    Frame(#[from] FrameError),
     #[error("capture I/O failed: {0}")]
     Io(#[from] io::Error),
     #[error("capture input is empty")]
@@ -267,12 +270,6 @@ pub enum Error {
     SectionHeaderBeforeBoundary { remaining: u64 },
     #[error("pcapng section has {remaining} bytes remaining, fewer than a complete block header")]
     SectionRemainderTooSmall { remaining: u64 },
-    #[error("captured frame contains {actual} bytes, exceeding the u32 capture-record limit")]
-    CapturedLengthTooLarge { actual: usize },
-    #[error("frame captured length says {declared} bytes but contains {actual}")]
-    CapturedLengthMismatch { declared: u32, actual: usize },
-    #[error("frame original length {original} is smaller than captured length {captured}")]
-    OriginalLengthTooSmall { captured: u32, original: u32 },
     #[error("timestamp cannot be represented in {format}")]
     TimestampOutOfRange { format: Format },
     #[error("timestamp fraction {fraction} is invalid for a denominator of {denominator}")]

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::{Error as LiveIoError, capture::CaptureStatistics};
-use packetcraftr_capture::Frame;
+use packetcraftr_core::frame::Frame;
 
 fn materialize<N: NeighborResolver>(
     mut plan: PlannedRoute,

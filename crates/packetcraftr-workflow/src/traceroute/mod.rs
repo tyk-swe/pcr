@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use packetcraftr_capture::Frame;
-use packetcraftr_error::{Classification, Classified, Kind};
+use packetcraftr_core::error::{Classification, Classified, Kind};
 use packetcraftr_net::{
     capture::{DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES},
     route::{NeighborResolver, RouteProvider},
@@ -47,7 +47,7 @@ use super::probe::{self, Correlation, Transport as ProbeTransport};
 use super::scan::{MAX_SCAN_PROBES, MAX_SCAN_RATE};
 use super::target::{Authorizer, Target};
 use super::{AddressFamily, BoundaryError, Stats};
-use packetcraftr_budget::{Deadline, DeadlineExceeded};
+use packetcraftr_core::budget::{Deadline, DeadlineExceeded};
 
 pub const DEFAULT_TRACEROUTE_FIRST_HOP: u8 = 1;
 pub const DEFAULT_TRACEROUTE_MAX_HOPS: u8 = 30;

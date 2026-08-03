@@ -108,47 +108,47 @@ const fn capture_root(
 /// typed so a protocol rename cannot silently leave a string binding behind.
 pub const BUILTIN_CAPTURE_ROOTS: &[CaptureRootSupport] = &[
     capture_root(
-        packetcraftr_capture::LinkType::NULL.0,
+        packetcraftr_core::frame::LinkType::NULL.0,
         BuiltinProtocol::BsdNull,
         CaptureRootByteOrder::CapturedHost,
     ),
     capture_root(
-        packetcraftr_capture::LinkType::ETHERNET.0,
+        packetcraftr_core::frame::LinkType::ETHERNET.0,
         BuiltinProtocol::Ethernet,
         CaptureRootByteOrder::ProtocolDefined,
     ),
     capture_root(
-        packetcraftr_capture::LinkType::BSD_RAW.0,
+        packetcraftr_core::frame::LinkType::BSD_RAW.0,
         BuiltinProtocol::RawIp,
         CaptureRootByteOrder::ProtocolDefined,
     ),
     capture_root(
-        packetcraftr_capture::LinkType::RAW.0,
+        packetcraftr_core::frame::LinkType::RAW.0,
         BuiltinProtocol::RawIp,
         CaptureRootByteOrder::ProtocolDefined,
     ),
     capture_root(
-        packetcraftr_capture::LinkType::LOOP.0,
+        packetcraftr_core::frame::LinkType::LOOP.0,
         BuiltinProtocol::BsdLoop,
         CaptureRootByteOrder::Network,
     ),
     capture_root(
-        packetcraftr_capture::LinkType::LINUX_SLL.0,
+        packetcraftr_core::frame::LinkType::LINUX_SLL.0,
         BuiltinProtocol::LinuxSll,
         CaptureRootByteOrder::Network,
     ),
     capture_root(
-        packetcraftr_capture::LinkType::IPV4.0,
+        packetcraftr_core::frame::LinkType::IPV4.0,
         BuiltinProtocol::Ipv4,
         CaptureRootByteOrder::ProtocolDefined,
     ),
     capture_root(
-        packetcraftr_capture::LinkType::IPV6.0,
+        packetcraftr_core::frame::LinkType::IPV6.0,
         BuiltinProtocol::Ipv6,
         CaptureRootByteOrder::ProtocolDefined,
     ),
     capture_root(
-        packetcraftr_capture::LinkType::LINUX_SLL2.0,
+        packetcraftr_core::frame::LinkType::LINUX_SLL2.0,
         BuiltinProtocol::LinuxSll2,
         CaptureRootByteOrder::Network,
     ),

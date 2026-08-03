@@ -24,7 +24,7 @@ use super::evidence::{
 };
 use super::target::{Authorizer, Target};
 use super::{BoundaryError, Stats};
-use packetcraftr_budget::Deadline;
+use packetcraftr_core::budget::Deadline;
 
 pub(super) struct SelectedTargets {
     pub(super) declared: String,

@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::time::{Duration, UNIX_EPOCH};
 
 use bytes::Bytes;
-use packetcraftr_capture::{Frame, LinkType};
+use packetcraftr_core::frame::{Frame, LinkType};
 
 use super::super::Packet;
 use super::super::codec::{

@@ -22,8 +22,8 @@ use super::materialize::patch_builtin_ethernet;
 use super::policy::{TrafficPolicy, TrafficPolicyError};
 use super::send::{ClientError, SendOptions};
 use super::target::{Hostname, HostnameResolver, LiveTarget, TargetResolutionError};
-use packetcraftr_capture::{Frame, LinkType};
-use packetcraftr_error::{Classified, Kind};
+use packetcraftr_core::error::{Classified, Kind};
+use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_net::{
     Error as LiveIoError,
     capture::{

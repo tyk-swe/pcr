@@ -12,7 +12,7 @@ use std::{
 };
 
 use crate::{Error as LiveIoError, capture::CapturedFrame};
-use packetcraftr_capture::{Frame, LinkType};
+use packetcraftr_core::frame::{Frame, LinkType};
 
 use super::{NativeCaptureEvent, NativeCaptureSource, queue::SharedCapture};
 

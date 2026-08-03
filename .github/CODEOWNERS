@@ -14,7 +14,7 @@
 /crates/packetcraftr-protocol/src/matcher/** @tyk-swe
 /crates/packetcraftr-workflow/src/probe.rs @tyk-swe
 
-/crates/packetcraftr-output/src/** @tyk-swe @rkdxodud-tyk
+/crates/packetcraftr/src/output/** @tyk-swe @rkdxodud-tyk
 /schemas/** @tyk-swe @rkdxodud-tyk
 /examples/documents/** @tyk-swe @rkdxodud-tyk
 /crates/packetcraftr-packet/src/document/model.rs @tyk-swe @rkdxodud-tyk
@@ -33,5 +33,7 @@
 
 # Workspace-wide dependency, feature, lint, and profile policy.
 /Cargo.toml @tyk-swe
+/scripts/check-workspace-architecture @tyk-swe
 
+/.github/workflows/ci.yml @tyk-swe
 /.github/workflows/release.yml @tyk-swe

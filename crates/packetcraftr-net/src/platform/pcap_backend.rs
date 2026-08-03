@@ -25,7 +25,7 @@ use crate::{
     route::InterfaceId,
     transmit::{IoSendReport, Layer2Frame},
 };
-use packetcraftr_capture::LinkType;
+use packetcraftr_core::frame::LinkType;
 
 const READ_TIMEOUT_MILLIS: i32 = 50;
 const PCAP_NETMASK_UNKNOWN: u32 = u32::MAX;

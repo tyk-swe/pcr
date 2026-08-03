@@ -19,11 +19,11 @@ impl ScanTransport {
         }
     }
 
-    pub(in crate::scan) const fn probe_transport(self) -> crate::probe::Transport {
+    pub(in crate::scan) const fn probe_transport(self) -> crate::kernel::probe::Transport {
         match self {
-            Self::Tcp => crate::probe::Transport::Tcp,
-            Self::Udp => crate::probe::Transport::Udp,
-            Self::Icmp => crate::probe::Transport::Icmp,
+            Self::Tcp => crate::kernel::probe::Transport::Tcp,
+            Self::Udp => crate::kernel::probe::Transport::Udp,
+            Self::Icmp => crate::kernel::probe::Transport::Icmp,
         }
     }
 }

@@ -16,15 +16,25 @@ use packetcraftr_protocol::{
     QuotedIcmpError, QuotedProbeTransport, quoted_icmp_error_kind, transport::Tcp,
 };
 
+/// Maps an operation-local sequence to an IPv4 identification that native
+/// raw-socket adapters can preserve exactly. Zero is deliberately excluded.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "the remainder is strictly below u16::MAX, so the increment still fits u16"
+)]
+pub(crate) const fn nonzero_ipv4_identification(sequence: u64) -> u16 {
+    ((sequence % u16::MAX as u64) + 1) as u16
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Transport {
+pub(crate) enum Transport {
     Tcp,
     Udp,
     Icmp,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Correlation {
+pub(crate) enum Correlation {
     TcpReset,
     TcpSynAck,
     TcpOther,
@@ -37,23 +47,23 @@ pub(super) enum Correlation {
 }
 
 impl Correlation {
-    pub(super) const fn is_direct_reply(self) -> bool {
+    pub(crate) const fn is_direct_reply(self) -> bool {
         matches!(
             self,
             Self::TcpReset | Self::TcpSynAck | Self::TcpOther | Self::UdpReply | Self::IcmpReply
         )
     }
 
-    pub(super) const fn is_network_failure(self) -> bool {
+    pub(crate) const fn is_network_failure(self) -> bool {
         !self.is_direct_reply()
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct Observation {
-    pub(super) responder: IpAddr,
-    pub(super) reason: &'static str,
-    pub(super) correlation: Correlation,
+pub(crate) struct Observation {
+    pub(crate) responder: IpAddr,
+    pub(crate) reason: &'static str,
+    pub(crate) correlation: Correlation,
 }
 
 impl Observation {
@@ -66,7 +76,7 @@ impl Observation {
     }
 }
 
-pub(super) fn packet_shape_matches(packet: &Packet, expected: &[BuiltinProtocol]) -> bool {
+pub(crate) fn packet_shape_matches(packet: &Packet, expected: &[BuiltinProtocol]) -> bool {
     let mut layers = packet.iter().peekable();
     if layers
         .peek()
@@ -83,7 +93,7 @@ pub(super) fn packet_shape_matches(packet: &Packet, expected: &[BuiltinProtocol]
 
 /// Correlates one decoded response with a request without assigning an
 /// operation-specific status. Corrupt and unrelated traffic returns `None`.
-pub(super) fn observe(
+pub(crate) fn observe(
     registry: &ProtocolRegistry,
     transport: Transport,
     request: &Packet,

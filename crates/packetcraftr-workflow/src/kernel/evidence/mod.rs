@@ -3,13 +3,14 @@
 
 //! Private response-evidence accounting and ordering shared by workflows.
 
-pub(super) use budget::{
+pub(crate) use budget::{
     EvidenceBudget, EvidenceDiagnosticDescriptor, push_undecoded_limit_diagnostic, retain_evidence,
+    retain_undecoded_frames,
 };
-pub(super) use candidate_selection::{
-    ResponseCandidate, response_within_deadline, select_response_candidate,
+pub(crate) use candidate_selection::{
+    ResponseCandidate, ResponseSelector, response_within_deadline, select_response_candidate,
 };
-pub(super) use exact_validation::{
+pub(crate) use exact_validation::{
     ExchangeEvidence, ExchangeEvidenceError, MatchedResponseEvidence, ResponseEvidence,
     format_exchange_evidence_error, validate_aggregate_evidence_limits,
     validate_capture_statistics_evidence, validate_exchange_evidence,
@@ -22,6 +23,7 @@ mod exact_validation;
 
 #[cfg(test)]
 mod tests {
+    use std::convert::Infallible;
     use std::time::{Duration, SystemTime};
 
     use bytes::Bytes;
@@ -29,8 +31,8 @@ mod tests {
     use super::budget::{checked_frame_bytes, checked_frame_count, checked_sent_frame_bytes};
     use super::exact_validation::validate_decoded_frame;
     use super::*;
-    use crate::Stats;
     use packetcraftr_capture::{Frame, LinkType};
+    use packetcraftr_client::Stats;
     use packetcraftr_packet::{Packet, decode::Result as DecodedPacket, layout};
 
     struct NoMatchedResponses;
@@ -103,6 +105,50 @@ mod tests {
             |observation| observation.rank,
             |observation| observation.key,
         );
+    }
+
+    #[test]
+    fn one_unsolicited_frame_can_satisfy_only_one_probe() {
+        let frame = Frame::new(
+            SystemTime::UNIX_EPOCH + Duration::from_millis(1),
+            LinkType::RAW,
+            &[1_u8][..],
+        )
+        .unwrap();
+        let response = DecodedPacket {
+            packet: Packet::new(),
+            original: frame.bytes().clone(),
+            frame,
+            layout: layout::Packet::default(),
+            diagnostics: Vec::new(),
+        };
+        let mut matched = Vec::<NoMatchedResponses>::new();
+        let mut selector = ResponseSelector::new(&mut matched, std::slice::from_ref(&response));
+
+        let first = selector
+            .select(
+                0,
+                SystemTime::UNIX_EPOCH,
+                Duration::from_millis(10),
+                |_| Some(()),
+                |_| 0,
+                |_| (),
+                || Ok::<(), Infallible>(()),
+            )
+            .unwrap();
+        assert!(first.is_some());
+        let second = selector
+            .select(
+                1,
+                SystemTime::UNIX_EPOCH,
+                Duration::from_millis(10),
+                |_| Some(()),
+                |_| 0,
+                |_| (),
+                || Ok::<(), Infallible>(()),
+            )
+            .unwrap();
+        assert!(second.is_none());
     }
 
     #[test]

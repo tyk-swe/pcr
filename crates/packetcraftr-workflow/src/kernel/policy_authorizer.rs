@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use packetcraftr_client::target::{Hostname, Target as ClientTarget};
+use packetcraftr_core::error::BoundaryError;
 
-use super::BoundaryError;
 use super::target::{Authorized, Authorizer, Target};
 
 /// Applies a client traffic policy and hostname resolver to the shared target

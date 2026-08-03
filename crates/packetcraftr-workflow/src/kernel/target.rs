@@ -1,0 +1,105 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
+use std::collections::HashSet;
+use std::fmt;
+use std::net::IpAddr;
+use std::time::Duration;
+
+use serde::{Deserialize, Serialize};
+
+use super::address_family::AddressFamily;
+use super::clock::check_deadline;
+use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::error::BoundaryError;
+
+/// Declared target before hostname resolution or traffic-policy effects.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+pub enum Target {
+    Address(IpAddr),
+    Hostname(String),
+}
+
+impl fmt::Display for Target {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Address(address) => address.fmt(formatter),
+            Self::Hostname(hostname) => formatter.write_str(hostname),
+        }
+    }
+}
+
+/// Target whose declared name and selected addresses have been authorized.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Authorized {
+    pub declared: String,
+    pub addresses: Vec<IpAddr>,
+}
+
+/// Policy and resolution seam shared by scan, DNS, and traceroute.
+pub trait Authorizer {
+    fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError>;
+
+    fn authorize_operation(
+        &mut self,
+        packets: u64,
+        maximum_wire_bytes: u64,
+    ) -> Result<(), BoundaryError>;
+}
+
+pub(crate) struct SelectedTargets {
+    pub(crate) declared: String,
+    pub(crate) addresses: Vec<IpAddr>,
+}
+
+/// Resolves, authorizes, filters, and de-duplicates a target while checking
+/// the same absolute deadline on both sides of every policy boundary.
+pub(crate) fn resolve_selected<A, E>(
+    authorizer: &mut A,
+    target: &Target,
+    family: AddressFamily,
+    deadline: &Deadline,
+    mut duration_error: impl FnMut(Duration, Duration) -> E,
+) -> Result<SelectedTargets, E>
+where
+    A: Authorizer,
+    E: From<BoundaryError>,
+{
+    check_deadline(deadline, &mut duration_error)?;
+    let resolved = authorizer.resolve_and_authorize(target);
+    check_deadline(deadline, &mut duration_error)?;
+    let resolved = resolved.map_err(E::from)?;
+
+    let mut addresses = Vec::with_capacity(resolved.addresses.len());
+    let mut seen = HashSet::with_capacity(resolved.addresses.len());
+    for address in resolved.addresses {
+        check_deadline(deadline, &mut duration_error)?;
+        if family.accepts(address) && seen.insert(address) {
+            addresses.push(address);
+        }
+    }
+    Ok(SelectedTargets {
+        declared: resolved.declared,
+        addresses,
+    })
+}
+
+/// Obtains complete packet and byte approval before batch construction or
+/// execution can produce live side effects.
+pub(crate) fn approve_operation<A, E>(
+    authorizer: &mut A,
+    packets: u64,
+    maximum_wire_bytes: u64,
+    deadline: &Deadline,
+    mut duration_error: impl FnMut(Duration, Duration) -> E,
+) -> Result<(), E>
+where
+    A: Authorizer,
+    E: From<BoundaryError>,
+{
+    check_deadline(deadline, &mut duration_error)?;
+    let approval = authorizer.authorize_operation(packets, maximum_wire_bytes);
+    check_deadline(deadline, &mut duration_error)?;
+    approval.map_err(E::from)
+}

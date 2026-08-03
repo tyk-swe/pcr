@@ -39,16 +39,15 @@ use packetcraftr_protocol::{
     transport::{Tcp, Udp},
 };
 
-use super::clock::Clock;
-use super::evidence::{
+use super::{AddressFamily, BoundaryError, Stats};
+use crate::kernel::clock::Clock;
+use crate::kernel::evidence::{
     EvidenceBudget, EvidenceDiagnosticDescriptor, ExchangeEvidence, ExchangeEvidenceError,
     MatchedResponseEvidence, ResponseEvidence, format_exchange_evidence_error, retain_evidence,
     validate_exchange_evidence as validate_shared_exchange_evidence,
 };
-use super::nonzero_ipv4_identification;
-use super::probe::Correlation;
-use super::target::{Authorizer, Target};
-use super::{AddressFamily, BoundaryError, Stats};
+use crate::kernel::probe::Correlation;
+use crate::kernel::target::{Authorizer, Target};
 use packetcraftr_core::budget::{Deadline, DeadlineExceeded};
 
 pub const DEFAULT_SCAN_BATCH_SIZE: usize = 64;
@@ -77,9 +76,14 @@ mod model;
 mod tests;
 
 /// Executes scan batches through a client's capture-ready exchange lifecycle.
-pub type ClientExecutor<'a, R, N, I> =
-    super::client_executor::ClientExecutor<'a, R, N, I, super::client_executor::Scan>;
-pub use super::policy_authorizer::PolicyAuthorizer;
+pub type ClientExecutor<'a, R, N, I> = crate::kernel::client_executor::ClientExecutor<
+    'a,
+    R,
+    N,
+    I,
+    crate::kernel::client_executor::Scan,
+>;
+pub use crate::kernel::policy_authorizer::PolicyAuthorizer;
 pub use classification::{
     ScanResponseClassification as ResponseClassification,
     classify_scan_response as classify_response,

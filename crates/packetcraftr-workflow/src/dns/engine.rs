@@ -581,7 +581,7 @@ pub(super) fn dns_source_port(base: u16, attempt: u32) -> u16 {
 }
 
 fn dns_rate_delay(rate: Option<u32>) -> Result<Duration, DnsError> {
-    crate::clock::rate_delay(1, rate).ok_or(DnsError::InvalidLimit {
+    crate::kernel::clock::rate_delay(1, rate).ok_or(DnsError::InvalidLimit {
         field: "queries_per_second",
         value: u64::from(rate.unwrap_or_default()),
         reason: "rate-delay arithmetic overflowed".to_owned(),

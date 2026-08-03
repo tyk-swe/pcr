@@ -1,0 +1,175 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
+//! Deterministic, deadline-bounded response candidate selection.
+
+use std::collections::HashSet;
+use std::iter::Peekable;
+use std::slice::Iter;
+use std::time::{Duration, SystemTime};
+
+use packetcraftr_packet::decode::Result as DecodedPacket;
+
+use super::exact_validation::MatchedResponseEvidence;
+
+pub(crate) fn response_within_deadline(
+    latency: Option<Duration>,
+    captured_at: SystemTime,
+    sent_at: SystemTime,
+    timeout: Duration,
+) -> bool {
+    match latency {
+        Some(latency) => latency <= timeout,
+        None => captured_at
+            .duration_since(sent_at)
+            .is_ok_and(|captured_latency| captured_latency <= timeout),
+    }
+}
+
+pub(crate) fn preferred_latency(candidate: Option<Duration>, current: Option<Duration>) -> bool {
+    match (candidate, current) {
+        (Some(candidate), Some(current)) => candidate < current,
+        (Some(_), None) => true,
+        (None, _) => false,
+    }
+}
+
+pub(crate) struct ResponseCandidate<'a, O> {
+    pub(crate) observation: O,
+    pub(crate) decoded: &'a DecodedPacket,
+    pub(crate) latency: Option<Duration>,
+}
+
+pub(crate) fn select_response_candidate<'a, O, K: Ord>(
+    best: &mut Option<ResponseCandidate<'a, O>>,
+    candidate: ResponseCandidate<'a, O>,
+    sent_at: SystemTime,
+    timeout: Duration,
+    rank: impl Fn(&O) -> u8,
+    tie_break_key: impl Fn(&O) -> K,
+) -> bool {
+    if !response_within_deadline(
+        candidate.latency,
+        candidate.decoded.frame.timestamp,
+        sent_at,
+        timeout,
+    ) {
+        return false;
+    }
+    let candidate_precedes = best.as_ref().is_none_or(|current| {
+        let candidate_rank = rank(&candidate.observation);
+        let current_rank = rank(&current.observation);
+        if candidate_rank != current_rank {
+            return candidate_rank > current_rank;
+        }
+        if candidate.decoded.frame.timestamp != current.decoded.frame.timestamp {
+            return candidate.decoded.frame.timestamp < current.decoded.frame.timestamp;
+        }
+        let candidate_key = tie_break_key(&candidate.observation);
+        let current_key = tie_break_key(&current.observation);
+        if candidate_key != current_key {
+            return candidate_key < current_key;
+        }
+        if candidate.decoded.frame.bytes() != current.decoded.frame.bytes() {
+            return candidate.decoded.frame.bytes() < current.decoded.frame.bytes();
+        }
+        preferred_latency(candidate.latency, current.latency)
+    });
+    if candidate_precedes {
+        *best = Some(candidate);
+    }
+    candidate_precedes
+}
+
+/// Stable, linear-time response grouping shared by every bounded probe batch.
+/// Sorting is stable so equal request indices preserve executor evidence order.
+pub(crate) struct ResponseSelector<'a, M> {
+    matched: Peekable<Iter<'a, M>>,
+    unsolicited: &'a [DecodedPacket],
+    consumed_unsolicited: HashSet<usize>,
+}
+
+impl<'a, M: MatchedResponseEvidence> ResponseSelector<'a, M> {
+    pub(crate) fn new(matched: &'a mut [M], unsolicited: &'a [DecodedPacket]) -> Self {
+        matched.sort_by_key(MatchedResponseEvidence::request_index);
+        Self {
+            matched: matched.iter().peekable(),
+            unsolicited,
+            consumed_unsolicited: HashSet::new(),
+        }
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the selection seam threads request identity, timing, and the caller's fallible \
+                  callbacks; a parameter struct would only rename the same fields"
+    )]
+    pub(crate) fn select<O, K: Ord, E>(
+        &mut self,
+        request_index: usize,
+        sent_at: SystemTime,
+        timeout: Duration,
+        mut classify: impl FnMut(&DecodedPacket) -> Option<O>,
+        rank: impl Fn(&O) -> u8,
+        tie_break_key: impl Fn(&O) -> K,
+        mut check_deadline: impl FnMut() -> Result<(), E>,
+    ) -> Result<Option<ResponseCandidate<'a, O>>, E> {
+        let mut best = None;
+        let mut best_unsolicited = None;
+        while self
+            .matched
+            .peek()
+            .is_some_and(|response| response.request_index() == request_index)
+        {
+            check_deadline()?;
+            let response = self
+                .matched
+                .next()
+                .expect("peeked matched response must remain available");
+            if let Some(observation) = classify(response.response())
+                && select_response_candidate(
+                    &mut best,
+                    ResponseCandidate {
+                        observation,
+                        decoded: response.response(),
+                        latency: Some(response.latency()),
+                    },
+                    sent_at,
+                    timeout,
+                    &rank,
+                    &tie_break_key,
+                )
+            {
+                best_unsolicited = None;
+            }
+            check_deadline()?;
+        }
+        for (index, response) in self.unsolicited.iter().enumerate() {
+            if self.consumed_unsolicited.contains(&index) {
+                continue;
+            }
+            check_deadline()?;
+            if let Some(observation) = classify(response)
+                && select_response_candidate(
+                    &mut best,
+                    ResponseCandidate {
+                        observation,
+                        decoded: response,
+                        latency: None,
+                    },
+                    sent_at,
+                    timeout,
+                    &rank,
+                    &tie_break_key,
+                )
+            {
+                best_unsolicited = Some(index);
+            }
+            check_deadline()?;
+        }
+        if let Some(index) = best_unsolicited {
+            self.consumed_unsolicited.insert(index);
+        }
+        Ok(best)
+    }
+}

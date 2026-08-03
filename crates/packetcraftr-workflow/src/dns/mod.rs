@@ -33,19 +33,18 @@ use packetcraftr_protocol::{
     transport::Udp,
 };
 
-use super::clock::Clock;
-use super::evidence::{
+use super::scan::MAX_SCAN_RATE;
+use super::{AddressFamily, BoundaryError, Stats};
+use crate::kernel::clock::Clock;
+use crate::kernel::evidence::{
     EvidenceBudget, EvidenceDiagnosticDescriptor, ExchangeEvidenceError, ResponseCandidate,
     ResponseEvidence, push_undecoded_limit_diagnostic, response_within_deadline, retain_evidence,
     select_response_candidate, validate_aggregate_evidence_limits,
     validate_capture_statistics_evidence, validate_response_frames_and_deadlines,
     validate_sent_byte_accounting,
 };
-use super::nonzero_ipv4_identification;
-use super::probe::{self, Transport as ProbeTransport};
-use super::scan::MAX_SCAN_RATE;
-use super::target::{Authorizer, Target};
-use super::{AddressFamily, BoundaryError, Stats};
+use crate::kernel::probe::{self, Transport as ProbeTransport, nonzero_ipv4_identification};
+use crate::kernel::target::{Authorizer, Target};
 use packetcraftr_core::budget::{Deadline, DeadlineExceeded};
 
 pub const DNS_HEADER_BYTES: usize = 12;
@@ -92,9 +91,14 @@ mod tests;
 mod wire;
 
 /// Executes DNS queries through a client's capture-ready exchange lifecycle.
-pub type ClientExecutor<'a, R, N, I> =
-    super::client_executor::ClientExecutor<'a, R, N, I, super::client_executor::Dns>;
-pub use super::policy_authorizer::PolicyAuthorizer;
+pub type ClientExecutor<'a, R, N, I> = crate::kernel::client_executor::ClientExecutor<
+    'a,
+    R,
+    N,
+    I,
+    crate::kernel::client_executor::Dns,
+>;
+pub use crate::kernel::policy_authorizer::PolicyAuthorizer;
 pub use engine::dns as run;
 pub use error::{DnsError as Error, DnsWireError as WireError};
 pub use model::{

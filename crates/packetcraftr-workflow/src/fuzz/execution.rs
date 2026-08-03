@@ -31,7 +31,7 @@ pub(super) fn worst_case_duration(
 }
 
 pub(super) fn rate_delay(rate: Option<u32>) -> Result<Duration, FuzzError> {
-    crate::clock::rate_delay(1, rate).ok_or(FuzzError::InvalidLimit {
+    crate::kernel::clock::rate_delay(1, rate).ok_or(FuzzError::InvalidLimit {
         field: "cases_per_second",
         value: u64::from(rate.unwrap_or_default()),
         reason: "rate-delay arithmetic overflowed".to_owned(),

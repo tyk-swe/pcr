@@ -3,7 +3,8 @@
 
 //! All-or-nothing transport tuple interpretation.
 
-use super::{BuiltinProtocol, DESTINATION_PORT, Layer, SOURCE_PORT};
+use super::super::{BuiltinProtocol, Layer};
+use super::path::{DESTINATION_PORT, SOURCE_PORT};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TransportKey {

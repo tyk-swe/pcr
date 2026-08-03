@@ -1,0 +1,107 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
+use std::net::IpAddr;
+
+use super::super::{BuiltinProtocol, FieldValue, Packet};
+use super::error::SemanticError;
+use super::path::{DESTINATION, SEGMENTS, TARGET_PROTOCOL, ip_path_at};
+use crate::layer::MalformedLayer;
+
+pub(super) const ROUTE_FIELDS: [&str; 3] = [DESTINATION, SEGMENTS, TARGET_PROTOCOL];
+
+/// Enumerates every address that can affect a live destination. Unknown
+/// protocols cannot opt into route semantics by imitating reflective names.
+pub fn live_destinations(packet: &Packet) -> Result<Vec<IpAddr>, SemanticError> {
+    let mut destinations = Vec::new();
+    for (index, layer) in packet.iter().enumerate() {
+        if let Some(malformed) = layer.as_any().downcast_ref::<MalformedLayer>()
+            && let Some(intended) = malformed.intended_protocol.as_ref()
+            && BuiltinProtocol::from_id(intended)
+                .is_some_and(malformed_protocol_may_hide_destination)
+        {
+            return Err(SemanticError::new(format!(
+                "malformed {} layer may hide a live destination: {}",
+                intended, malformed.reason
+            )));
+        }
+        match BuiltinProtocol::of(layer) {
+            Some(BuiltinProtocol::Ipv4 | BuiltinProtocol::Ipv6) => {
+                let protocol = BuiltinProtocol::of(layer).expect("matched built-in IP protocol");
+                let path = ip_path_at(packet, index, packet.len(), protocol)?;
+                push_if_specified(&mut destinations, path.header_destination);
+                for destination in path.declared_route_destinations {
+                    push_if_specified(&mut destinations, destination);
+                }
+            }
+            Some(BuiltinProtocol::Ipv6Srh) => {
+                validate_attached_srh(packet, index)?;
+            }
+            Some(BuiltinProtocol::Arp) => match layer.field(TARGET_PROTOCOL) {
+                Some(FieldValue::Ipv4(value)) => {
+                    push_if_specified(&mut destinations, IpAddr::V4(value));
+                }
+                Some(_) => {
+                    return Err(SemanticError::field(
+                        layer.protocol_id(),
+                        TARGET_PROTOCOL,
+                        "is not IPv4",
+                    ));
+                }
+                None => {
+                    return Err(SemanticError::field(
+                        layer.protocol_id(),
+                        TARGET_PROTOCOL,
+                        "is missing",
+                    ));
+                }
+            },
+            Some(_) => {}
+            None => {
+                if let Some(field) = ROUTE_FIELDS.iter().find(|field| {
+                    layer
+                        .schema()
+                        .fields
+                        .iter()
+                        .any(|schema| schema.name == **field)
+                        || layer.field(field).is_some()
+                }) {
+                    return Err(SemanticError::new(format!(
+                        "unknown protocol {} exposes route-bearing field {field}",
+                        layer.protocol_id()
+                    )));
+                }
+            }
+        }
+    }
+    Ok(destinations)
+}
+
+fn malformed_protocol_may_hide_destination(protocol: BuiltinProtocol) -> bool {
+    protocol == BuiltinProtocol::RawIp
+        || protocol == BuiltinProtocol::Arp
+        || protocol.is_ip()
+        || protocol.is_ipv6_extension()
+}
+
+fn validate_attached_srh(packet: &Packet, srh_index: usize) -> Result<(), SemanticError> {
+    for (network_index, candidate) in packet.iter().enumerate().take(srh_index).rev() {
+        match BuiltinProtocol::of(candidate) {
+            Some(BuiltinProtocol::Ipv6) => {
+                ip_path_at(packet, network_index, srh_index + 1, BuiltinProtocol::Ipv6)?;
+                return Ok(());
+            }
+            Some(protocol) if protocol.is_ipv6_extension() => {}
+            _ => break,
+        }
+    }
+    Err(SemanticError::new(
+        "IPv6 SRH is not in a contiguous typed extension chain",
+    ))
+}
+
+fn push_if_specified(destinations: &mut Vec<IpAddr>, destination: IpAddr) {
+    if !destination.is_unspecified() && !destinations.contains(&destination) {
+        destinations.push(destination);
+    }
+}

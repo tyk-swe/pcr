@@ -3,9 +3,9 @@
 
 //! Directly transmitted VLAN metadata interpretation.
 
-use super::{
-    BuiltinProtocol, FieldValue, Packet, SemanticError, outer_scope_len, required_u8_field,
-};
+use super::super::{BuiltinProtocol, FieldValue, Packet};
+use super::error::SemanticError;
+use super::path::{outer_scope_len, required_u8_field};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VlanKind {

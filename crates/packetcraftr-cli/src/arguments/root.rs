@@ -7,6 +7,8 @@ use packetcraftr::output;
 use super::{
     BuildArgs, CaptureArgs, DissectArgs, DnsArgs, ExchangeArgs, ExpertArgs, FollowArgs, FuzzArgs,
     PlanArgs, ProtocolsArgs, ReadArgs, ReplayArgs, ScanArgs, SendArgs, StatsArgs, TracerouteArgs,
+    build, capture, dissect, dns, exchange, expert, follow, fuzz, passive, plan, protocols, read,
+    replay, scan, send, stats, traceroute,
 };
 
 const ROOT_AFTER_HELP: &str = r#"Output formats:
@@ -26,104 +28,6 @@ Examples:
   packetcraftr --output ndjson read capture.pcapng --max-frames 100
 
 Run `packetcraftr <COMMAND> --help` for command-specific options and examples."#;
-const BUILD_AFTER_HELP: &str = r#"Examples:
-  packetcraftr build --packet 'raw(text=hello)'
-  packetcraftr --output raw build --packet-file packet.json"#;
-const DISSECT_AFTER_HELP: &str = r#"When neither --hex nor --file is supplied, raw frame bytes are read from standard input.
-
-With --filter, the dissection is emitted only when the frame matches; a frame that does not match emits nothing and the command still succeeds.
-
-Examples:
-  packetcraftr dissect --hex '45000014000000004001f6e7c0000201c6336402'
-  packetcraftr --output json dissect --file frame.bin --link-type 1
-  packetcraftr dissect --file frame.bin --filter 'icmpv4 && ip.dst == 198.51.100.2'"#;
-const PROTOCOLS_AFTER_HELP: &str = r#"Examples:
-  packetcraftr protocols
-  packetcraftr protocols ipv4
-  packetcraftr --output json protocols IP4"#;
-const READ_AFTER_HELP: &str = r#"Examples:
-  packetcraftr read capture.pcapng --max-frames 100
-  packetcraftr --output ndjson read capture.pcap
-  packetcraftr read capture.pcapng --filter 'tcp.flags.syn == 1 && !tcp.flags.ack' --dissect
-  packetcraftr --output pcapng read capture.pcapng --filter 'ip.src in 10.0.0.0/8' > subset.pcapng"#;
-const INTERFACES_AFTER_HELP: &str = r#"Examples:
-  packetcraftr interfaces
-  packetcraftr --output json interfaces"#;
-const PLAN_AFTER_HELP: &str = r#"Route planning is passive: it performs no packet transmission.
-
-Example:
-  packetcraftr plan --packet 'ipv4(dst=192.0.2.53)/udp(dport=53)'"#;
-const SEND_AFTER_HELP: &str = r#"Live transmission is policy-gated and may require native features, dependencies, and privileges.
-
-Example:
-  packetcraftr send --packet 'ipv4(dst=192.0.2.1)/icmpv4(type=8,code=0)'"#;
-const EXCHANGE_AFTER_HELP: &str = r#"Live exchange is policy-gated and may require native features, dependencies, and privileges.
-
-Example:
-  packetcraftr exchange --packet 'ipv4(dst=192.0.2.1)/icmpv4(type=8,code=0)' --timeout-ms 1000"#;
-const CAPTURE_AFTER_HELP: &str = r#"Live capture may require native features, dependencies, and privileges.
-
---capture-filter <BPF> uses the stable resolver-free core of libpcap/Npcap BPF syntax and narrows what reaches PacketcraftR. Frames it rejects never enter PacketcraftR's capture queue and do not consume queue capacity or operation frame and byte budgets.
-
-Use core BPF keywords and numeric address, network, port, and protocol operands. Other symbolic tokens are rejected before native compilation so capture filters cannot perform hidden hostname or name-database resolution; --allow-hostname-resolution does not change this rule.
-
---filter <EXPR> uses PacketcraftR's display-filter language after capture. Frames it rejects have already occupied PacketcraftR's capture queue and passed the native BPF filter, so they still consume operation frame and byte budgets.
-
-The two filters use different languages and may be combined.
-
-Examples:
-  packetcraftr capture --packet 'ipv4(dst=192.0.2.53)/udp(dport=53)' --timeout-ms 1000
-  packetcraftr capture \
-    --packet 'ipv4(dst=192.0.2.53)/udp(dport=53)' \
-    --capture-filter 'udp port 53' \
-    --filter 'udp.source_port == 53'"#;
-const REPLAY_AFTER_HELP: &str = r#"Replay is policy-gated and may require native features, dependencies, and privileges.
-
-Frames a --filter rejects are skipped before authorization, so they are never policy-checked or transmitted, but they still count against the operation's frame budget. Transmitted frames keep their original spacing: the delay before a kept frame spans any skipped frames in between.
-
-Examples:
-  packetcraftr replay capture.pcapng --interface eth0 --timing immediate
-  packetcraftr replay capture.pcap --interface 2 --rate 100
-  packetcraftr replay capture.pcap --interface eth0 --filter 'udp && ip.dst == 10.0.0.2'"#;
-const SCAN_AFTER_HELP: &str = r#"Examples:
-  packetcraftr scan 192.0.2.10 --transport tcp --ports 22,80,443
-  packetcraftr --output ndjson scan 198.51.100.10 --transport icmp"#;
-const FOLLOW_AFTER_HELP: &str = r#"Following is computed offline over dissected frames; no live capture or transmission is involved.
-
-The conversation index comes from the same first-seen numbering stats reports and stream filters match, so 'follow --stream tcp:7' extracts the conversation 'tcp.stream == 7' selects. The client is the endpoint that sent the conversation's first captured frame. TCP payload is reassembled in stream order per direction; UDP emits one chunk per datagram. IP-fragmented datagrams carry no conversation index and are not followed. Raw output needs a single direction, since interleaved raw bytes would be indistinguishable.
-
-Examples:
-  packetcraftr follow capture.pcapng --stream tcp:0
-  packetcraftr follow capture.pcapng --stream tcp:0 --direction client --output raw > client.bin
-  packetcraftr --output json follow capture.pcapng --stream udp:2"#;
-const EXPERT_AFTER_HELP: &str = r#"Expert analysis is computed offline over dissected frames; no live capture or transmission is involved.
-
-Retransmissions (including retransmissions whose content changed) come from bounded TCP reassembly, and duplicate acknowledgments, zero windows and their probes, window-full and window-exceeded conditions, keep-alives, resets, and uncaptured earlier segments come from cross-frame header tracking. Dissection diagnostics such as checksum mismatches surface as findings under their own codes. Stream-aware filters such as 'tcp.stream == 7' are supported.
-
-Examples:
-  packetcraftr expert capture.pcapng
-  packetcraftr expert capture.pcapng --filter 'tcp.stream == 3'
-  packetcraftr --output ndjson expert capture.pcapng"#;
-const STATS_AFTER_HELP: &str = r#"Statistics are computed offline over dissected frames; no live capture or transmission is involved.
-
-Conversation (stream) indices are assigned in first-seen order over the whole capture before any --filter runs, so the index one invocation reports names the same conversation in every other invocation, and stream-aware filters such as 'tcp.stream == 7' are supported.
-
-Examples:
-  packetcraftr stats capture.pcapng --table conversations
-  packetcraftr stats capture.pcapng --table protocols --filter 'ip.src in 10.0.0.0/8'
-  packetcraftr --output json stats capture.pcapng --table io --interval-ms 100"#;
-const TRACEROUTE_AFTER_HELP: &str = r#"Examples:
-  packetcraftr traceroute 192.0.2.1 --strategy icmp
-  packetcraftr --output ndjson traceroute example.test --allow-hostname-resolution"#;
-const DNS_AFTER_HELP: &str = r#"Examples:
-  packetcraftr dns 192.0.2.53 example.test --type a
-  packetcraftr --output json dns 192.0.2.53 _service._tcp.example.test --type srv"#;
-const FUZZ_AFTER_HELP: &str = r#"Examples:
-  packetcraftr fuzz --packet 'ipv4(dst=192.0.2.1)/udp(dport=9)/raw(text=hi)' --cases 16
-  packetcraftr fuzz --packet-file packet.json --seed 7 --first-case 42 --cases 1"#;
-const ROUTES_AFTER_HELP: &str = r#"Examples:
-  packetcraftr routes
-  packetcraftr --output json routes"#;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -224,82 +128,72 @@ impl CliColorChoice {
     }
 }
 
+#[derive(Debug, Subcommand)]
+pub(crate) enum Command {
+    /// Build exact packet bytes from an expression or document.
+    #[command(after_long_help = build::AFTER_LONG_HELP)]
+    Build(BuildArgs),
+    /// Decode a frame with bounded, registry-driven dissection.
+    #[command(after_long_help = dissect::AFTER_LONG_HELP)]
+    Dissect(DissectArgs),
+    /// List built-in protocols or describe one protocol.
+    #[command(after_long_help = protocols::AFTER_LONG_HELP)]
+    Protocols(ProtocolsArgs),
+    /// Stream frames from a classic PCAP or PCAPNG file.
+    #[command(after_long_help = read::AFTER_LONG_HELP)]
+    Read(ReadArgs),
+    /// Enumerate local interfaces.
+    #[command(after_long_help = passive::INTERFACES_AFTER_HELP)]
+    Interfaces,
+    /// Passively select route, source, MTU, and link mode.
+    #[command(after_long_help = plan::AFTER_LONG_HELP)]
+    Plan(PlanArgs),
+    /// Transmit a packet under traffic policy.
+    #[command(after_long_help = send::AFTER_LONG_HELP)]
+    Send(SendArgs),
+    /// Capture-ready request/response exchange.
+    #[command(after_long_help = exchange::AFTER_LONG_HELP)]
+    Exchange(ExchangeArgs),
+    /// Stream live captured frames.
+    #[command(after_long_help = capture::AFTER_LONG_HELP)]
+    Capture(CaptureArgs),
+    /// Report protocol health findings over a capture file.
+    #[command(after_long_help = expert::AFTER_LONG_HELP)]
+    Expert(ExpertArgs),
+    /// Extract one conversation's payload from a capture file.
+    #[command(after_long_help = follow::AFTER_LONG_HELP)]
+    Follow(FollowArgs),
+    /// Replay a PCAP/PCAPNG stream.
+    #[command(after_long_help = replay::AFTER_LONG_HELP)]
+    Replay(ReplayArgs),
+    /// Run a structured network scan.
+    #[command(after_long_help = scan::AFTER_LONG_HELP)]
+    Scan(ScanArgs),
+    /// Compute aggregate statistics over a capture file.
+    #[command(after_long_help = stats::AFTER_LONG_HELP)]
+    Stats(StatsArgs),
+    /// Run bounded, policy-gated traceroute probes.
+    #[command(
+        long_about = traceroute::LONG_ABOUT,
+        after_long_help = traceroute::AFTER_LONG_HELP
+    )]
+    Traceroute(TracerouteArgs),
+    /// Run a structured DNS operation.
+    #[command(after_long_help = dns::AFTER_LONG_HELP)]
+    Dns(DnsArgs),
+    /// Run bounded field-aware packet fuzzing.
+    #[command(after_long_help = fuzz::AFTER_LONG_HELP)]
+    Fuzz(FuzzArgs),
+    /// Enumerate passive interface-bound route decisions.
+    #[command(after_long_help = passive::ROUTES_AFTER_HELP)]
+    Routes,
+}
+
 #[cfg(test)]
 mod tests {
-    use clap::{CommandFactory, Parser, error::ErrorKind};
-    use packetcraftr::{capture, client, net};
+    use clap::Parser;
 
-    use super::{Cli, CliColorChoice, Command};
-
-    const POLICY_OPTIONS: [&str; 6] = [
-        "allow-public-destinations",
-        "allow-hostname-resolution",
-        "allow-permissive-packets",
-        "max-packets",
-        "max-bytes",
-        "max-resolved-addresses",
-    ];
-
-    fn policy_for(arguments: &[&str]) -> client::policy::Policy {
-        match Cli::try_parse_from(arguments).unwrap().command {
-            Command::Plan(arguments) => arguments.policy.into_policy(),
-            Command::Send(arguments) => arguments.policy.into_policy(),
-            Command::Exchange(arguments) => arguments.send.policy.into_policy(),
-            Command::Capture(arguments) => arguments.policy.into_policy(),
-            Command::Replay(arguments) => arguments.policy.into_policy(),
-            Command::Scan(arguments) => arguments.policy.into_policy(),
-            Command::Traceroute(arguments) => arguments.policy.into_policy(),
-            Command::Dns(arguments) => arguments.policy.into_policy(),
-            Command::Fuzz(arguments) => arguments.policy.into_policy(),
-            command => panic!("{} has no traffic policy", command.name().as_str()),
-        }
-    }
-
-    fn command_arguments(command_name: &str) -> Vec<&str> {
-        match command_name {
-            "plan" | "send" | "exchange" | "capture" => {
-                vec!["packetcraftr", command_name, "--packet", "raw()"]
-            }
-            "replay" => vec![
-                "packetcraftr",
-                "replay",
-                "capture.pcap",
-                "--interface",
-                "test0",
-            ],
-            "scan" => vec!["packetcraftr", "scan", "192.0.2.1", "--ports", "80"],
-            "traceroute" => vec!["packetcraftr", "traceroute", "192.0.2.1"],
-            "dns" => vec!["packetcraftr", "dns", "192.0.2.53", "example.test"],
-            "fuzz" => vec!["packetcraftr", "fuzz", "--packet", "raw()"],
-            _ => panic!("missing test arguments for {command_name}"),
-        }
-    }
-
-    fn assert_authorization_closed(policy: &client::policy::Policy) {
-        assert!(!policy.allow_public_destinations);
-        assert!(!policy.allow_hostname_resolution);
-        assert!(!policy.allow_permissive_packets);
-    }
-
-    #[test]
-    fn capture_parses_native_and_display_filters_independently() {
-        let cli = Cli::try_parse_from([
-            "packetcraftr",
-            "capture",
-            "--packet",
-            "ipv4(dst=192.0.2.53)/udp(dport=53)",
-            "--capture-filter",
-            "udp port 53",
-            "--filter",
-            "udp.source_port == 53",
-        ])
-        .unwrap();
-        let Command::Capture(arguments) = cli.command else {
-            panic!("expected capture command");
-        };
-        assert_eq!(arguments.capture_filter.as_deref(), Some("udp port 53"));
-        assert_eq!(arguments.filter.as_deref(), Some("udp.source_port == 53"));
-    }
+    use super::{Cli, CliColorChoice};
 
     #[test]
     fn global_colour_choice_parses_before_or_after_the_subcommand() {
@@ -334,477 +228,4 @@ mod tests {
         assert!(help.contains("Usage: packetcraftr build [OPTIONS]"));
         assert!(!help.contains("packetcraftr.exe"));
     }
-
-    #[test]
-    fn traffic_policy_options_have_the_exact_command_matrix() {
-        let expected = [
-            (
-                "plan",
-                vec![
-                    "allow-public-destinations",
-                    "allow-hostname-resolution",
-                    "max-resolved-addresses",
-                ],
-            ),
-            ("send", POLICY_OPTIONS.to_vec()),
-            ("exchange", POLICY_OPTIONS.to_vec()),
-            (
-                "capture",
-                vec![
-                    "allow-public-destinations",
-                    "allow-hostname-resolution",
-                    "max-packets",
-                    "max-bytes",
-                    "max-resolved-addresses",
-                ],
-            ),
-            (
-                "replay",
-                vec![
-                    "allow-public-destinations",
-                    "allow-permissive-packets",
-                    "max-packets",
-                    "max-bytes",
-                ],
-            ),
-            (
-                "scan",
-                vec![
-                    "allow-public-destinations",
-                    "allow-hostname-resolution",
-                    "max-packets",
-                    "max-bytes",
-                    "max-resolved-addresses",
-                ],
-            ),
-            (
-                "traceroute",
-                vec![
-                    "allow-public-destinations",
-                    "allow-hostname-resolution",
-                    "max-packets",
-                    "max-bytes",
-                    "max-resolved-addresses",
-                ],
-            ),
-            (
-                "dns",
-                vec![
-                    "allow-public-destinations",
-                    "allow-hostname-resolution",
-                    "max-packets",
-                    "max-bytes",
-                    "max-resolved-addresses",
-                ],
-            ),
-            (
-                "fuzz",
-                vec![
-                    "allow-public-destinations",
-                    "allow-permissive-packets",
-                    "max-packets",
-                    "max-bytes",
-                ],
-            ),
-        ];
-        let command = Cli::command();
-        for (name, expected_options) in expected {
-            let subcommand = command
-                .find_subcommand(name)
-                .unwrap_or_else(|| panic!("missing {name} command"));
-            for option in POLICY_OPTIONS {
-                let count = subcommand
-                    .get_arguments()
-                    .filter(|argument| argument.get_long() == Some(option))
-                    .count();
-                assert_eq!(
-                    count,
-                    usize::from(expected_options.contains(&option)),
-                    "unexpected --{option} count on {name}"
-                );
-            }
-        }
-
-        for name in ["build", "dissect", "read", "expert", "follow", "stats"] {
-            let subcommand = command
-                .find_subcommand(name)
-                .unwrap_or_else(|| panic!("missing {name} command"));
-            for option in POLICY_OPTIONS {
-                let expected_count = usize::from(
-                    option == "max-bytes" && matches!(name, "read" | "expert" | "follow" | "stats"),
-                );
-                assert_eq!(
-                    subcommand
-                        .get_arguments()
-                        .filter(|argument| argument.get_long() == Some(option))
-                        .count(),
-                    expected_count,
-                    "offline {name} unexpectedly exposes --{option}"
-                );
-            }
-            if matches!(name, "read" | "expert" | "follow" | "stats") {
-                let max_bytes = subcommand
-                    .get_arguments()
-                    .find(|argument| argument.get_long() == Some("max-bytes"))
-                    .unwrap();
-                assert!(
-                    max_bytes
-                        .get_help()
-                        .is_some_and(|help| help.to_string().contains("captured payload bytes")),
-                    "offline {name} --max-bytes changed into a traffic-policy option"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn every_applicable_traffic_policy_option_parses() {
-        let cases = [
-            (
-                "plan",
-                vec![
-                    "--allow-public-destinations",
-                    "--allow-hostname-resolution",
-                    "--max-resolved-addresses",
-                    "7",
-                ],
-            ),
-            (
-                "send",
-                vec![
-                    "--allow-public-destinations",
-                    "--allow-hostname-resolution",
-                    "--allow-permissive-packets",
-                    "--max-packets",
-                    "11",
-                    "--max-bytes",
-                    "12",
-                    "--max-resolved-addresses",
-                    "7",
-                ],
-            ),
-            (
-                "exchange",
-                vec![
-                    "--allow-public-destinations",
-                    "--allow-hostname-resolution",
-                    "--allow-permissive-packets",
-                    "--max-packets",
-                    "11",
-                    "--max-bytes",
-                    "12",
-                    "--max-resolved-addresses",
-                    "7",
-                ],
-            ),
-            (
-                "capture",
-                vec![
-                    "--allow-public-destinations",
-                    "--allow-hostname-resolution",
-                    "--max-packets",
-                    "11",
-                    "--max-bytes",
-                    "12",
-                    "--max-resolved-addresses",
-                    "7",
-                ],
-            ),
-            (
-                "replay",
-                vec![
-                    "--allow-public-destinations",
-                    "--allow-permissive-packets",
-                    "--max-packets",
-                    "11",
-                    "--max-bytes",
-                    "12",
-                ],
-            ),
-            (
-                "scan",
-                vec![
-                    "--allow-public-destinations",
-                    "--allow-hostname-resolution",
-                    "--max-packets",
-                    "11",
-                    "--max-bytes",
-                    "12",
-                    "--max-resolved-addresses",
-                    "7",
-                ],
-            ),
-            (
-                "traceroute",
-                vec![
-                    "--allow-public-destinations",
-                    "--allow-hostname-resolution",
-                    "--max-packets",
-                    "11",
-                    "--max-bytes",
-                    "12",
-                    "--max-resolved-addresses",
-                    "7",
-                ],
-            ),
-            (
-                "dns",
-                vec![
-                    "--allow-public-destinations",
-                    "--allow-hostname-resolution",
-                    "--max-packets",
-                    "11",
-                    "--max-bytes",
-                    "12",
-                    "--max-resolved-addresses",
-                    "7",
-                ],
-            ),
-            (
-                "fuzz",
-                vec![
-                    "--allow-public-destinations",
-                    "--allow-permissive-packets",
-                    "--max-packets",
-                    "11",
-                    "--max-bytes",
-                    "12",
-                ],
-            ),
-        ];
-
-        for (command, options) in cases {
-            let mut arguments = command_arguments(command);
-            arguments.extend(options);
-            Cli::try_parse_from(arguments)
-                .unwrap_or_else(|error| panic!("{command} policy options failed: {error}"));
-        }
-    }
-
-    #[test]
-    fn removed_no_op_policy_options_are_unknown_arguments() {
-        for (command, option) in [
-            ("plan", "--allow-permissive-packets"),
-            ("plan", "--max-packets"),
-            ("capture", "--allow-permissive-packets"),
-            ("scan", "--allow-permissive-packets"),
-            ("traceroute", "--allow-permissive-packets"),
-            ("dns", "--allow-permissive-packets"),
-            ("fuzz", "--allow-hostname-resolution"),
-            ("fuzz", "--max-resolved-addresses"),
-            ("replay", "--allow-hostname-resolution"),
-        ] {
-            let mut arguments = command_arguments(command);
-            arguments.push(option);
-            if option == "--max-packets" || option == "--max-resolved-addresses" {
-                arguments.push("1");
-            }
-            let error = Cli::try_parse_from(arguments).unwrap_err();
-            assert_eq!(
-                error.kind(),
-                ErrorKind::UnknownArgument,
-                "{command} {option}"
-            );
-        }
-    }
-
-    #[test]
-    fn default_policy_parsing_keeps_every_authorization_gate_closed() {
-        for command in [
-            "plan",
-            "send",
-            "exchange",
-            "capture",
-            "replay",
-            "scan",
-            "traceroute",
-            "dns",
-            "fuzz",
-        ] {
-            let policy = policy_for(&command_arguments(command));
-            assert_authorization_closed(&policy);
-        }
-    }
-
-    #[test]
-    fn operation_policy_conversions_map_only_their_applicable_groups() {
-        let defaults = client::policy::Policy::default();
-        let normal_bytes = u64::try_from(net::capture::Limits::default().max_bytes).unwrap();
-
-        let plan = policy_for(&[
-            "packetcraftr",
-            "plan",
-            "--packet",
-            "raw()",
-            "--allow-public-destinations",
-            "--allow-hostname-resolution",
-            "--max-resolved-addresses",
-            "7",
-        ]);
-        assert!(plan.allow_public_destinations);
-        assert!(plan.allow_hostname_resolution);
-        assert!(!plan.allow_permissive_packets);
-        assert_eq!(plan.max_resolved_addresses, 7);
-        assert_eq!(
-            plan.max_packets_per_operation,
-            defaults.max_packets_per_operation
-        );
-        assert_eq!(
-            plan.max_bytes_per_operation,
-            defaults.max_bytes_per_operation
-        );
-
-        for command in ["send", "exchange"] {
-            let mut arguments = command_arguments(command);
-            arguments.extend([
-                "--allow-public-destinations",
-                "--allow-hostname-resolution",
-                "--allow-permissive-packets",
-                "--max-packets",
-                "11",
-                "--max-bytes",
-                "12",
-                "--max-resolved-addresses",
-                "7",
-            ]);
-            let policy = policy_for(&arguments);
-            assert!(policy.allow_public_destinations);
-            assert!(policy.allow_hostname_resolution);
-            assert!(policy.allow_permissive_packets);
-            assert_eq!(policy.max_packets_per_operation, 11);
-            assert_eq!(policy.max_bytes_per_operation, 12);
-            assert_eq!(policy.max_resolved_addresses, 7);
-        }
-
-        for command in ["capture", "scan", "traceroute", "dns"] {
-            let mut arguments = command_arguments(command);
-            arguments.extend([
-                "--allow-public-destinations",
-                "--allow-hostname-resolution",
-                "--max-packets",
-                "11",
-                "--max-bytes",
-                "12",
-                "--max-resolved-addresses",
-                "7",
-            ]);
-            let policy = policy_for(&arguments);
-            assert!(policy.allow_public_destinations);
-            assert!(policy.allow_hostname_resolution);
-            assert!(!policy.allow_permissive_packets);
-            assert_eq!(policy.max_packets_per_operation, 11);
-            assert_eq!(policy.max_bytes_per_operation, 12);
-            assert_eq!(policy.max_resolved_addresses, 7);
-        }
-
-        for command in ["replay", "fuzz"] {
-            let mut arguments = command_arguments(command);
-            arguments.extend([
-                "--allow-public-destinations",
-                "--allow-permissive-packets",
-                "--max-packets",
-                "11",
-                "--max-bytes",
-                "12",
-            ]);
-            let policy = policy_for(&arguments);
-            assert!(policy.allow_public_destinations);
-            assert!(!policy.allow_hostname_resolution);
-            assert!(policy.allow_permissive_packets);
-            assert_eq!(policy.max_packets_per_operation, 11);
-            assert_eq!(policy.max_bytes_per_operation, 12);
-            assert_eq!(
-                policy.max_resolved_addresses,
-                defaults.max_resolved_addresses
-            );
-        }
-
-        for command in [
-            "send",
-            "exchange",
-            "capture",
-            "scan",
-            "traceroute",
-            "dns",
-            "fuzz",
-        ] {
-            let policy = policy_for(&command_arguments(command));
-            assert_eq!(policy.max_packets_per_operation, 10_000, "{command}");
-            assert_eq!(policy.max_bytes_per_operation, normal_bytes, "{command}");
-        }
-        let replay = policy_for(&command_arguments("replay"));
-        assert_eq!(
-            replay.max_packets_per_operation,
-            capture::DEFAULT_STREAM_FRAMES
-        );
-        assert_eq!(
-            replay.max_bytes_per_operation,
-            capture::DEFAULT_STREAM_BYTES
-        );
-        assert_eq!(
-            replay.max_resolved_addresses,
-            client::policy::DEFAULT_MAX_RESOLVED_ADDRESSES
-        );
-    }
-}
-
-#[derive(Debug, Subcommand)]
-pub(crate) enum Command {
-    /// Build exact packet bytes from an expression or document.
-    #[command(after_long_help = BUILD_AFTER_HELP)]
-    Build(BuildArgs),
-    /// Decode a frame with bounded, registry-driven dissection.
-    #[command(after_long_help = DISSECT_AFTER_HELP)]
-    Dissect(DissectArgs),
-    /// List built-in protocols or describe one protocol.
-    #[command(after_long_help = PROTOCOLS_AFTER_HELP)]
-    Protocols(ProtocolsArgs),
-    /// Stream frames from a classic PCAP or PCAPNG file.
-    #[command(after_long_help = READ_AFTER_HELP)]
-    Read(ReadArgs),
-    /// Enumerate local interfaces.
-    #[command(after_long_help = INTERFACES_AFTER_HELP)]
-    Interfaces,
-    /// Passively select route, source, MTU, and link mode.
-    #[command(after_long_help = PLAN_AFTER_HELP)]
-    Plan(PlanArgs),
-    /// Transmit a packet under traffic policy.
-    #[command(after_long_help = SEND_AFTER_HELP)]
-    Send(SendArgs),
-    /// Capture-ready request/response exchange.
-    #[command(after_long_help = EXCHANGE_AFTER_HELP)]
-    Exchange(ExchangeArgs),
-    /// Stream live captured frames.
-    #[command(after_long_help = CAPTURE_AFTER_HELP)]
-    Capture(CaptureArgs),
-    /// Report protocol health findings over a capture file.
-    #[command(after_long_help = EXPERT_AFTER_HELP)]
-    Expert(ExpertArgs),
-    /// Extract one conversation's payload from a capture file.
-    #[command(after_long_help = FOLLOW_AFTER_HELP)]
-    Follow(FollowArgs),
-    /// Replay a PCAP/PCAPNG stream.
-    #[command(after_long_help = REPLAY_AFTER_HELP)]
-    Replay(ReplayArgs),
-    /// Run a structured network scan.
-    #[command(after_long_help = SCAN_AFTER_HELP)]
-    Scan(ScanArgs),
-    /// Compute aggregate statistics over a capture file.
-    #[command(after_long_help = STATS_AFTER_HELP)]
-    Stats(StatsArgs),
-    /// Run bounded, policy-gated traceroute probes.
-    #[command(
-        long_about = "Run bounded, policy-gated traceroute probes. UDP starts at --port and increments the destination port for every probe; TCP keeps --port fixed. Each hop sends its attempts as one burst and shares one --timeout-ms response window. Traceroute supports text, JSON, and NDJSON output. Public destinations and hostname resolution require their respective explicit policy options.",
-        after_long_help = TRACEROUTE_AFTER_HELP
-    )]
-    Traceroute(TracerouteArgs),
-    /// Run a structured DNS operation.
-    #[command(after_long_help = DNS_AFTER_HELP)]
-    Dns(DnsArgs),
-    /// Run bounded field-aware packet fuzzing.
-    #[command(after_long_help = FUZZ_AFTER_HELP)]
-    Fuzz(FuzzArgs),
-    /// Enumerate passive interface-bound route decisions.
-    #[command(after_long_help = ROUTES_AFTER_HELP)]
-    Routes,
 }

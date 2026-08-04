@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Bounded parsing and postfix-program compilation for display filters.
+
 use super::super::field::FieldKind;
 use super::super::registry::ProtocolRegistry;
 use super::ast::{Op, Predicate};

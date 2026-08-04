@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Field-path models, registry resolution, and byte-slice validation.
+
 use super::super::field::FieldKind;
 use super::super::layer::ProtocolId;
 use super::super::registry::{FilterFieldBinding, ProtocolRegistry};

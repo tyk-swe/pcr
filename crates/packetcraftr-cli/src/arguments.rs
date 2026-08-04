@@ -2,6 +2,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 //! Clap argument and command models.
+//!
+//! Each command module owns its arguments, command-specific value enums,
+//! conversions, help text, and parser tests. This root exposes those models to
+//! command execution while the shared modules hold only genuinely reused
+//! policy, capture, recipe, route, and offline-limit groups.
 
 pub(super) use build::BuildArgs;
 pub(super) use capture::CaptureArgs;

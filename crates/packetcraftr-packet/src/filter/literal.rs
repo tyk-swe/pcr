@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Filter-literal parsing and compile-time field compatibility.
+
 use std::fmt;
 use std::net::{Ipv4Addr, Ipv6Addr};
 

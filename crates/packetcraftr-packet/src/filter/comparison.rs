@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Runtime comparison, prefix-membership, and byte-containment semantics.
+
 use std::cmp::Ordering;
 
 use super::super::field::FieldValue;

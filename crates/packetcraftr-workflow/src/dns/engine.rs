@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! DNS retry orchestration across authorization, execution, and outcomes.
+
 use std::time::{Duration, SystemTime};
 
 use packetcraftr_core::budget::{Deadline, DeadlineExceeded};

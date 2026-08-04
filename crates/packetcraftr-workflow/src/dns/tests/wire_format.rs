@@ -1,13 +1,20 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::{
-    Bytes, DNS_CLASS_IN, DNS_EPHEMERAL_SOURCE_PORT_BASE, DNS_FLAG_AUTHENTICATED_DATA,
-    DNS_FLAG_CHECKING_DISABLED, DNS_FLAG_RECURSION_AVAILABLE, DNS_FLAG_RECURSION_DESIRED,
-    DNS_TYPE_OPT, DnsLimits, DnsName, DnsQueryType, DnsRecordValue, DnsSection, DnsWireError,
-    FixtureRecord, canonical_query_name, decode_dns_response, decode_dns_tcp_frame,
-    dns_source_port, encode_dns_query, fixture_response, wire_name,
+use bytes::Bytes;
+
+use super::super::engine::dns_source_port;
+use super::super::error::DnsWireError;
+use super::super::model::{DnsLimits, DnsName, DnsQueryType, DnsRecordValue, DnsSection};
+use super::super::wire::{
+    canonical_query_name, decode_dns_response, decode_dns_tcp_frame, encode_dns_query,
 };
+use super::super::{
+    DNS_CLASS_IN, DNS_EPHEMERAL_SOURCE_PORT_BASE, DNS_FLAG_AUTHENTICATED_DATA,
+    DNS_FLAG_CHECKING_DISABLED, DNS_FLAG_RECURSION_AVAILABLE, DNS_FLAG_RECURSION_DESIRED,
+    DNS_TYPE_OPT,
+};
+use super::support::{FixtureRecord, fixture_response, wire_name};
 
 #[test]
 fn query_construction_is_canonical_and_bounded() {

@@ -1,12 +1,22 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::{
-    Bytes, DecodedPacket, Diagnostic, DnsLimits, DnsProbe, DnsQueryType, DnsResponseClassification,
-    FixtureRecord, Frame, Icmpv4, Icmpv6, IpAddr, Ipv4, Ipv4Addr, Ipv6, Ipv6Addr, LinkType, Packet,
-    Raw, UNIX_EPOCH, Udp, classify_dns_response, default_registry, encode_dns_query,
-    fixture_response,
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::time::UNIX_EPOCH;
+
+use bytes::Bytes;
+use packetcraftr_capture::{Frame, LinkType};
+use packetcraftr_packet::{Packet, decode::DecodedPacket, diagnostic::Diagnostic, layer::Raw};
+use packetcraftr_protocol::{
+    builtin::registry as default_registry,
+    icmp::{Icmpv4, Icmpv6},
+    network::{Ipv4, Ipv6},
+    transport::Udp,
 };
+
+use super::super::model::{DnsLimits, DnsProbe, DnsQueryType};
+use super::super::wire::{DnsResponseClassification, classify_dns_response, encode_dns_query};
+use super::support::{FixtureRecord, fixture_response};
 
 #[test]
 fn correlation_requires_exact_reverse_tuple_checksum_and_dns_identity() {

@@ -35,7 +35,10 @@ mod classification;
 mod client_executor;
 mod engine;
 mod error;
+mod evidence;
 mod model;
+mod plan;
+mod probe;
 #[cfg(test)]
 mod tests;
 

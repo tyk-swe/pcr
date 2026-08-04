@@ -1,14 +1,32 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::{
-    AddressFamily, AtomicUsize, Authorized, Authorizer, BoundaryError, Bytes, Classified,
-    DEFAULT_CAPTURE_QUEUE_FRAMES, DnsError, DnsExchange, DnsExchangeExecution, DnsExecutor,
-    DnsLimits, DnsQueryType, DnsRequest, Duration, Hostname, HostnameResolver, IpAddr, Ipv4Addr,
-    Ipv6Addr, NoopClock, Ordering, PayloadExecutor, PolicyAuthorizer, Result, ScriptedResolver,
-    Target, TargetResolutionError, TimeoutExecutor, TrafficPolicy, default_registry, dns,
-    single_attempt_request,
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::result::Result;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
+
+use bytes::Bytes;
+use packetcraftr_client::policy::Policy as TrafficPolicy;
+use packetcraftr_client::target::{
+    Error as TargetResolutionError, Hostname, Resolver as HostnameResolver,
 };
+use packetcraftr_core::error::Classified;
+use packetcraftr_net::capture::DEFAULT_CAPTURE_QUEUE_FRAMES;
+use packetcraftr_protocol::builtin::registry as default_registry;
+
+use crate::kernel::policy_authorizer::PolicyAuthorizer;
+use crate::kernel::target::{Authorizer, Target};
+use crate::target::Authorized;
+use crate::{AddressFamily, BoundaryError};
+
+use super::super::engine::dns;
+use super::super::error::DnsError;
+use super::super::model::{
+    DnsExchange, DnsExchangeExecution, DnsExecutor, DnsLimits, DnsQueryType, DnsRequest,
+};
+use super::evidence_validation::{NoopClock, ScriptedResolver, TimeoutExecutor};
+use super::outcome::{PayloadExecutor, single_attempt_request};
 
 fn private_policy() -> TrafficPolicy {
     TrafficPolicy {

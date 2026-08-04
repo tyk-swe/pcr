@@ -1,69 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::VecDeque;
-use std::convert::Infallible;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::result::Result;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::net::{IpAddr, Ipv4Addr};
 
-use super::engine::{dns, dns_source_port, validate_dns_execution};
-use super::error::{DnsError, DnsWireError};
-use super::model::{
-    DnsAttemptStatus, DnsExchange, DnsExchangeExecution, DnsExecutor, DnsLimits,
-    DnsMatchedResponse, DnsName, DnsOutcome, DnsProbe, DnsQueryType, DnsRecordValue, DnsRequest,
-    DnsSection,
-};
-use super::wire::{
-    DnsResponseClassification, canonical_query_name, classify_dns_response, decode_dns_response,
-    decode_dns_tcp_frame, encode_dns_query,
-};
-use super::{
-    DNS_CLASS_IN, DNS_EPHEMERAL_SOURCE_PORT_BASE, DNS_FLAG_AUTHENTICATED_DATA,
-    DNS_FLAG_CHECKING_DISABLED, DNS_FLAG_RECURSION_AVAILABLE, DNS_FLAG_RECURSION_DESIRED,
-    DNS_FLAG_RESPONSE, DNS_FLAG_TRUNCATED, DNS_TYPE_OPT,
-};
-use crate::kernel::clock::Clock;
-use crate::kernel::policy_authorizer::PolicyAuthorizer;
-use crate::kernel::target::{Authorizer, Target};
-use crate::target::Authorized;
-use crate::{AddressFamily, BoundaryError, Stats};
-use bytes::Bytes;
-use evidence_validation::{NoopClock, ScriptedResolver, TimeoutExecutor};
-use outcome::{PayloadExecutor, single_attempt_request};
-use packetcraftr_capture::{Frame, LinkType};
-use packetcraftr_client::policy::Policy as TrafficPolicy;
-use packetcraftr_client::target::{
-    Error as TargetResolutionError, Hostname, Resolver as HostnameResolver,
-};
-use packetcraftr_core::error::Classified;
-use packetcraftr_net::capture::DEFAULT_CAPTURE_QUEUE_FRAMES;
-use packetcraftr_packet::{
-    Packet, decode::DecodedPacket, diagnostic::Diagnostic, layer::Raw, semantics::BuiltinProtocol,
-};
-use packetcraftr_protocol::builtin::registry as default_registry;
-use packetcraftr_protocol::icmp::{Icmpv4, Icmpv6};
-use packetcraftr_protocol::{
-    network::{Ipv4, Ipv6},
-    transport::Udp,
-};
+use packetcraftr_packet::semantics::BuiltinProtocol;
 
-fn wire_name(name: &str) -> Vec<u8> {
-    let mut bytes = Vec::new();
-    if name == "." {
-        bytes.push(0);
-        return bytes;
-    }
-    for label in name.strip_suffix('.').unwrap_or(name).split('.') {
-        assert!(!label.is_empty());
-        bytes.push(u8::try_from(label.len()).expect("fixture label length fits in one byte"));
-        bytes.extend_from_slice(label.as_bytes());
-    }
-    bytes.push(0);
-    bytes
-}
+use super::model::{DnsProbe, DnsQueryType};
+use super::wire::encode_dns_query;
 
 #[test]
 fn dns_probe_uses_typed_port_53_and_raw_custom_payloads() {
@@ -96,64 +39,10 @@ fn dns_probe_uses_typed_port_53_and_raw_custom_payloads() {
     );
 }
 
-#[derive(Clone)]
-struct FixtureRecord {
-    owner: Vec<u8>,
-    type_code: u16,
-    class: u16,
-    ttl: u32,
-    rdata: Vec<u8>,
-}
-
-impl FixtureRecord {
-    fn in_class(owner: &str, type_code: u16, rdata: Vec<u8>) -> Self {
-        Self {
-            owner: wire_name(owner),
-            type_code,
-            class: DNS_CLASS_IN,
-            ttl: 60,
-            rdata,
-        }
-    }
-
-    fn encode(&self, output: &mut Vec<u8>) {
-        output.extend_from_slice(&self.owner);
-        output.extend_from_slice(&self.type_code.to_be_bytes());
-        output.extend_from_slice(&self.class.to_be_bytes());
-        output.extend_from_slice(&self.ttl.to_be_bytes());
-        output.extend_from_slice(&u16::try_from(self.rdata.len()).unwrap().to_be_bytes());
-        output.extend_from_slice(&self.rdata);
-    }
-}
-
-fn fixture_response(
-    transaction_id: u16,
-    flags: u16,
-    query_name: &str,
-    query_type: DnsQueryType,
-    answers: &[FixtureRecord],
-    authorities: &[FixtureRecord],
-    additionals: &[FixtureRecord],
-) -> Vec<u8> {
-    let mut output = Vec::new();
-    output.extend_from_slice(&transaction_id.to_be_bytes());
-    output.extend_from_slice(&(DNS_FLAG_RESPONSE | flags).to_be_bytes());
-    output.extend_from_slice(&1u16.to_be_bytes());
-    output.extend_from_slice(&u16::try_from(answers.len()).unwrap().to_be_bytes());
-    output.extend_from_slice(&u16::try_from(authorities.len()).unwrap().to_be_bytes());
-    output.extend_from_slice(&u16::try_from(additionals.len()).unwrap().to_be_bytes());
-    output.extend_from_slice(&wire_name(query_name));
-    output.extend_from_slice(&query_type.code().to_be_bytes());
-    output.extend_from_slice(&DNS_CLASS_IN.to_be_bytes());
-    for record in answers.iter().chain(authorities).chain(additionals) {
-        record.encode(&mut output);
-    }
-    output
-}
-
 mod correlation;
 mod evidence_validation;
 mod outcome;
 mod policy_retry;
+mod support;
 mod wire_format;
 mod wire_record;

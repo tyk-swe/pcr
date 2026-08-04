@@ -6,9 +6,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::super::engine::traceroute;
-use super::super::engine::{build_batches, sent_traceroute_probe_matches};
 use super::super::error::TracerouteError;
 use super::super::model::TracerouteStrategy;
+use super::super::plan::build_batches;
+use super::super::probe::sent_traceroute_probe_matches;
 use super::support::{CountingRejectExecutor, FixedAuthorizer, NoopClock, udp_traceroute_request};
 use crate::kernel::target::Target;
 use packetcraftr_protocol::builtin::registry as default_registry;

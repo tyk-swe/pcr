@@ -1,11 +1,20 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::{
-    Bytes, DecodedPacket, Diagnostic, Icmpv4, Icmpv6, IpAddr, Ipv4, Ipv4Addr, Ipv6, Ipv6Addr,
-    Packet, ScanClassification, ScanTransport, Tcp, Udp, classify_scan_response, decoded,
-    default_registry, tcp_packet, udp_packet,
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+use bytes::Bytes;
+use packetcraftr_packet::{Packet, decode::DecodedPacket, diagnostic::Diagnostic};
+use packetcraftr_protocol::{
+    builtin::registry as default_registry,
+    icmp::{Icmpv4, Icmpv6},
+    network::{Ipv4, Ipv6},
+    transport::{Tcp, Udp},
 };
+
+use super::super::classification::classify_scan_response;
+use super::super::model::{ScanClassification, ScanTransport};
+use super::support::{decoded, tcp_packet, udp_packet};
 
 #[test]
 fn tcp_direct_matcher_classifies_replies_and_rejects_bad_integrity() {

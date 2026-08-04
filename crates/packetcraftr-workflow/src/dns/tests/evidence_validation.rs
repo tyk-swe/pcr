@@ -1,14 +1,37 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::{
-    Arc, AtomicUsize, Authorized, Authorizer, BoundaryError, Bytes, Classified, Clock,
-    DecodedPacket, DnsError, DnsExchange, DnsExchangeExecution, DnsExecutor, DnsLimits,
-    DnsMatchedResponse, DnsProbe, DnsQueryType, Duration, Frame, Hostname, HostnameResolver,
-    Infallible, IpAddr, Ipv4Addr, LinkType, Mutex, Ordering, Packet, PayloadExecutor, Result,
-    Stats, Target, TargetResolutionError, UNIX_EPOCH, VecDeque, default_registry, dns,
-    encode_dns_query, single_attempt_request, validate_dns_execution,
+use std::collections::VecDeque;
+use std::convert::Infallible;
+use std::net::{IpAddr, Ipv4Addr};
+use std::result::Result;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, UNIX_EPOCH};
+
+use bytes::Bytes;
+use packetcraftr_capture::{Frame, LinkType};
+use packetcraftr_client::target::{
+    Error as TargetResolutionError, Hostname, Resolver as HostnameResolver,
 };
+use packetcraftr_core::error::Classified;
+use packetcraftr_packet::{Packet, decode::DecodedPacket};
+use packetcraftr_protocol::builtin::registry as default_registry;
+
+use crate::kernel::clock::Clock;
+use crate::kernel::target::{Authorizer, Target};
+use crate::target::Authorized;
+use crate::{BoundaryError, Stats};
+
+use super::super::engine::dns;
+use super::super::error::DnsError;
+use super::super::evidence::validate_dns_execution;
+use super::super::model::{
+    DnsExchange, DnsExchangeExecution, DnsExecutor, DnsLimits, DnsMatchedResponse, DnsProbe,
+    DnsQueryType,
+};
+use super::super::wire::encode_dns_query;
+use super::outcome::{PayloadExecutor, single_attempt_request};
 
 pub(super) struct NoopClock;
 

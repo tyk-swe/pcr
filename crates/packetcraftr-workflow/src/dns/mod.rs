@@ -46,6 +46,7 @@ const MAX_DNS_PROBE_OVERHEAD: u64 = 14 + 40 + 8;
 mod client_executor;
 mod engine;
 mod error;
+mod evidence;
 mod model;
 #[cfg(test)]
 mod tests;

@@ -5,14 +5,15 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::result::Result;
 use std::time::{Duration, UNIX_EPOCH};
 
-use super::super::engine::{
-    build_batches, sent_traceroute_probe_matches, traceroute, validate_execution,
-};
+use super::super::engine::traceroute;
 use super::super::error::TracerouteError;
+use super::super::evidence::validate_execution;
 use super::super::model::{
     TracerouteBatch, TracerouteBatchExecution, TracerouteCompletion, TracerouteExecutor,
     TracerouteLimits, TracerouteMatchedResponse, TracerouteProbeStatus, TracerouteResponseKind,
 };
+use super::super::plan::build_batches;
+use super::super::probe::sent_traceroute_probe_matches;
 use super::support::{
     FixedAuthorizer, MixedHopExecutor, NoopClock, UndecodedExecutor, frame_at, icmpv4_error,
     ipv4_udp_quote, udp_traceroute_request,

@@ -4,8 +4,8 @@
 use std::net::{IpAddr, Ipv6Addr};
 
 use super::super::classification::classify_traceroute_response;
-use super::super::engine::traceroute_identity;
 use super::super::model::{TracerouteProbe, TracerouteResponseKind, TracerouteStrategy};
+use super::super::probe::traceroute_identity;
 use super::super::{DEFAULT_TRACEROUTE_UDP_PORT, TRACEROUTE_SOURCE_PORT};
 use super::support::decoded_at;
 use bytes::Bytes;

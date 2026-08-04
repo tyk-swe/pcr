@@ -1,15 +1,36 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::{
-    Arc, AtomicUsize, CaptureProvider, CaptureQueueLimits, CaptureSession, CaptureStatistics,
-    CapturedFrame, Classified, Client, ClientExecutor, DestinationScope, DnsClientExecutor,
-    Duration, ExchangeOptions, Infallible, InterfaceId, IoSendReport, IpAddr, Ipv4, Ipv4Addr, Kind,
-    LinkCapability, LinkMode, LinkType, LiveIoError, Mutex, NoNeighbors, Ordering, PacketIo,
-    PlanOptions, PlannedRoute, Result, RouteDecision, RouteProvider, RouteSelectionReason,
-    ScanBatch, ScanExecutor, ScanProbe, ScanTransport, TracerouteClientExecutor, TransmissionFrame,
-    default_registry, private_scan_policy,
+use std::convert::Infallible;
+use std::net::{IpAddr, Ipv4Addr};
+use std::result::Result;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use packetcraftr_capture::LinkType;
+use packetcraftr_client::{Client, exchange::Options as ExchangeOptions};
+use packetcraftr_core::error::{Classified, Kind};
+use packetcraftr_net::{
+    Error as LiveIoError,
+    capture::{
+        CaptureProvider, CaptureQueueLimits, CaptureSession, CaptureStatistics, CapturedFrame,
+    },
+    link::{LinkCapability, LinkMode},
+    route::{
+        DestinationScope, InterfaceId, PlanOptions, PlannedRoute, RouteDecision, RouteProvider,
+        RouteSelectionReason,
+    },
+    transmit::{IoSendReport, PacketIo, TransmissionFrame},
 };
+use packetcraftr_protocol::{builtin::registry as default_registry, network::Ipv4};
+
+use crate::dns::ClientExecutor as DnsClientExecutor;
+use crate::traceroute::ClientExecutor as TracerouteClientExecutor;
+
+use super::super::ClientExecutor;
+use super::super::model::{ScanBatch, ScanExecutor, ScanProbe, ScanTransport};
+use super::support::{NoNeighbors, private_scan_policy};
 
 #[derive(Clone)]
 struct FixedRoute(RouteDecision);

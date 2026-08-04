@@ -22,7 +22,7 @@ pub struct TracerouteProbe {
 
 impl TracerouteProbe {
     pub fn packet(&self) -> Packet {
-        super::super::engine::probe_packet(self)
+        super::super::probe::probe_packet(self)
     }
 }
 

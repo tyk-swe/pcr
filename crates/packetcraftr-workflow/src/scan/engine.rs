@@ -5,49 +5,36 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use std::time::Duration;
 
-use bytes::Bytes;
 use packetcraftr_capture::Frame;
 use packetcraftr_core::budget::{Deadline, DeadlineExceeded};
 use packetcraftr_packet::{
-    Packet,
-    decode::DecodedPacket,
     diagnostic::{Diagnostic, push_diagnostic_once},
     registry::ProtocolRegistry,
 };
-use packetcraftr_protocol::{
-    icmp::{Icmpv4, Icmpv6},
-    network::{Ipv4, Ipv6},
-    transport::{Tcp, Udp},
-};
 
+use crate::kernel::bounded_probe::{
+    ProbeBatch, ProbeExecution, ProbeLifecycle, ProbeRunConfig, run_batches,
+};
 use crate::kernel::clock::Clock;
 use crate::kernel::evidence::{
-    EvidenceBudget, ExchangeEvidence, ExchangeEvidenceError, MatchedResponseEvidence,
-    ResponseEvidence, format_exchange_evidence_error, retain_evidence,
-    validate_exchange_evidence as validate_shared_exchange_evidence,
+    EvidenceBudget, ResponseSelector, retain_evidence, retain_undecoded_frames,
 };
-use crate::kernel::target::Authorizer;
+use crate::kernel::target::{Authorizer, approve_operation, resolve_selected};
 use crate::{BoundaryError, Stats};
 
 use super::classification::classify_scan_response;
 use super::error::ScanError;
+use super::evidence::validate_exchange_evidence;
 use super::model::{
     ScanBatch, ScanBatchExecution, ScanClassification, ScanEndpointResult, ScanExecutor,
-    ScanLimits, ScanMatchedResponse, ScanProbe, ScanProbeEvidence, ScanProbeStatus, ScanRequest,
-    ScanResult, ScanTransport,
+    ScanLimits, ScanProbeEvidence, ScanProbeStatus, ScanRequest, ScanResult, ScanTransport,
 };
+use super::plan::{build_batches, worst_case_duration};
 use super::{IPV4_PROBE_BYTES, IPV6_PROBE_BYTES, SCAN_EVIDENCE_DIAGNOSTICS};
+
 /// Resolves and authorizes the complete target set before constructing any
 /// probe, applies operation-wide packet/byte/duration limits, schedules
 /// homogeneous batches, and classifies only checksum-valid correlated facts.
-use crate::kernel::bounded_probe::{
-    ProbeBatch, ProbeExecution, ProbeLifecycle, ProbeRunConfig, run_batches,
-};
-use crate::kernel::evidence::{ResponseSelector, retain_undecoded_frames};
-use crate::kernel::probe::{nonzero_ipv4_identification, packet_shape_matches};
-use crate::kernel::target::{approve_operation, resolve_selected};
-use packetcraftr_packet::semantics::BuiltinProtocol;
-
 pub fn scan<A, E, C>(
     request: &ScanRequest,
     authorizer: &mut A,
@@ -196,298 +183,6 @@ where
         diagnostics: output.diagnostics,
         stats: run.stats,
     })
-}
-
-pub(super) fn build_batches(
-    request: &ScanRequest,
-    addresses: &[IpAddr],
-    endpoint_ports: &[Option<u16>],
-) -> Result<Vec<ScanBatch>, ScanError> {
-    let mut batches = Vec::new();
-    let mut sequence = 0_u64;
-    for address in addresses {
-        for attempt in 1..=request.attempts {
-            for chunk in endpoint_ports.chunks(request.limits.batch_size) {
-                let probes = chunk
-                    .iter()
-                    .map(|port| {
-                        let probe = ScanProbe {
-                            sequence,
-                            address: *address,
-                            transport: request.transport,
-                            port: *port,
-                            attempt,
-                        };
-                        sequence = sequence.checked_add(1).ok_or(ScanError::InvalidLimit {
-                            field: "probes",
-                            value: u64::MAX,
-                            reason: "probe sequence overflowed".to_owned(),
-                        })?;
-                        Ok(probe)
-                    })
-                    .collect::<Result<Vec<_>, ScanError>>()?;
-                batches.push(ScanBatch {
-                    probes,
-                    timeout: request.timeout,
-                });
-            }
-        }
-    }
-    Ok(batches)
-}
-
-fn worst_case_duration(
-    request: &ScanRequest,
-    address_count: usize,
-    endpoints_per_address: usize,
-) -> Result<Duration, ScanError> {
-    let batches_per_attempt = endpoints_per_address.div_ceil(request.limits.batch_size);
-    let batch_count = address_count
-        .checked_mul(request.attempts as usize)
-        .and_then(|count| count.checked_mul(batches_per_attempt))
-        .ok_or(ScanError::DurationLimit {
-            actual: Duration::MAX,
-            limit: request.limits.max_duration,
-        })?;
-    let batch_count_u32 = u32::try_from(batch_count).map_err(|_| ScanError::DurationLimit {
-        actual: Duration::MAX,
-        limit: request.limits.max_duration,
-    })?;
-    let exchange_time =
-        request
-            .timeout
-            .checked_mul(batch_count_u32)
-            .ok_or(ScanError::DurationLimit {
-                actual: Duration::MAX,
-                limit: request.limits.max_duration,
-            })?;
-    let final_batch_size = endpoints_per_address % request.limits.batch_size;
-    let delay =
-        (0..batch_count.saturating_sub(1)).try_fold(Duration::ZERO, |total, batch_index| {
-            let position = batch_index % batches_per_attempt;
-            let probes = if position + 1 == batches_per_attempt && final_batch_size != 0 {
-                final_batch_size
-            } else {
-                request.limits.batch_size
-            };
-            total
-                .checked_add(rate_delay(probes, request.probes_per_second)?)
-                .ok_or(ScanError::DurationLimit {
-                    actual: Duration::MAX,
-                    limit: request.limits.max_duration,
-                })
-        })?;
-    exchange_time
-        .checked_add(delay)
-        .ok_or(ScanError::DurationLimit {
-            actual: Duration::MAX,
-            limit: request.limits.max_duration,
-        })
-}
-
-fn rate_delay(probes: usize, rate: Option<u32>) -> Result<Duration, ScanError> {
-    crate::kernel::clock::rate_delay(probes, rate).ok_or(ScanError::InvalidLimit {
-        field: "probes_per_second",
-        value: u64::from(rate.unwrap_or_default()),
-        reason: "rate-delay arithmetic overflowed".to_owned(),
-    })
-}
-
-const SCAN_UDP_SOURCE_PORT_BASE: u16 = 49_152;
-
-fn scan_udp_source_port(attempt: u32) -> u16 {
-    let width = u32::from(u16::MAX) - u32::from(SCAN_UDP_SOURCE_PORT_BASE) + 1;
-    let offset = attempt.saturating_sub(1) % width;
-    u16::try_from(u32::from(SCAN_UDP_SOURCE_PORT_BASE) + offset)
-        .expect("ephemeral source-port arithmetic must remain within u16")
-}
-
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "the operation-local sequence is reduced to the 32-bit and 20-bit wire fields the \
-              probe carries; sent_scan_probe_matches applies the same reduction when comparing, \
-              so even a wrapped counter still matches"
-)]
-pub(super) fn probe_packet(probe: &ScanProbe) -> Packet {
-    let mut packet = Packet::new();
-    match probe.address {
-        IpAddr::V4(destination) => {
-            packet.push(Ipv4 {
-                destination,
-                identification: nonzero_ipv4_identification(probe.sequence),
-                ..Ipv4::default()
-            });
-            match probe.transport {
-                ScanTransport::Tcp => packet.push(Tcp {
-                    destination_port: probe.port.expect("validated TCP scan port"),
-                    sequence: probe.sequence as u32,
-                    ..Tcp::default()
-                }),
-                ScanTransport::Udp => packet.push(Udp {
-                    source_port: scan_udp_source_port(probe.attempt),
-                    destination_port: probe.port.expect("validated UDP scan port"),
-                    ..Udp::default()
-                }),
-                ScanTransport::Icmp => packet.push(Icmpv4 {
-                    body: icmp_identity(probe.sequence),
-                    ..Icmpv4::default()
-                }),
-            };
-        }
-        IpAddr::V6(destination) => {
-            packet.push(Ipv6 {
-                destination,
-                flow_label: (probe.sequence as u32) & 0x000f_ffff,
-                ..Ipv6::default()
-            });
-            match probe.transport {
-                ScanTransport::Tcp => packet.push(Tcp {
-                    destination_port: probe.port.expect("validated TCP scan port"),
-                    sequence: probe.sequence as u32,
-                    ..Tcp::default()
-                }),
-                ScanTransport::Udp => packet.push(Udp {
-                    source_port: scan_udp_source_port(probe.attempt),
-                    destination_port: probe.port.expect("validated UDP scan port"),
-                    ..Udp::default()
-                }),
-                ScanTransport::Icmp => packet.push(Icmpv6 {
-                    body: icmp_identity(probe.sequence),
-                    ..Icmpv6::default()
-                }),
-            };
-        }
-    }
-    packet
-}
-
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "the identity tag is a deliberate 16-bit reduction of the sequence, split across \
-              the two payload bytes below"
-)]
-fn icmp_identity(sequence: u64) -> Bytes {
-    let sequence = sequence as u16;
-    Bytes::copy_from_slice(&[0x50, 0x43, (sequence >> 8) as u8, sequence as u8])
-}
-
-pub(super) fn validate_exchange_evidence(
-    batch: &ScanBatch,
-    exchange: &ScanBatchExecution,
-    limits: ScanLimits,
-) -> Result<(), ScanError> {
-    validate_shared_exchange_evidence(
-        ExchangeEvidence {
-            request_count: batch.probes.len(),
-            sent_packets: &exchange.sent,
-            sent_frames: &exchange.sent_evidence,
-            matched_responses: &exchange.responses,
-            unsolicited: &exchange.unsolicited,
-            undecoded: &exchange.undecoded,
-            timeout: batch.timeout,
-            stats: &exchange.stats,
-        },
-        limits.max_evidence_frames,
-        limits.max_evidence_bytes,
-        |request_index, sent| sent_scan_probe_matches(&batch.probes[request_index], sent),
-    )
-    .map_err(|error| map_scan_evidence_error(batch, error))
-}
-
-impl ResponseEvidence for ScanMatchedResponse {
-    fn response(&self) -> &DecodedPacket {
-        &self.response
-    }
-
-    fn latency(&self) -> Duration {
-        self.latency
-    }
-}
-
-impl MatchedResponseEvidence for ScanMatchedResponse {
-    fn request_index(&self) -> usize {
-        self.request_index
-    }
-}
-
-fn map_scan_evidence_error(batch: &ScanBatch, error: ExchangeEvidenceError) -> ScanError {
-    let batch_sequence = batch.probes[0].sequence;
-    let sequence = match &error {
-        ExchangeEvidenceError::SentPacketMismatch { request_index } => {
-            batch.probes[*request_index].sequence
-        }
-        _ => batch_sequence,
-    };
-    let message = format_exchange_evidence_error(error, "batch", "scan");
-    ScanError::InvalidEvidence { sequence, message }
-}
-
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "the observed packet is compared against the same reduction probe_packet applied, \
-              so the narrowing is symmetric on both sides of the comparison"
-)]
-pub(super) fn sent_scan_probe_matches(probe: &ScanProbe, sent: &Packet) -> bool {
-    let network_protocol = if probe.address.is_ipv4() {
-        BuiltinProtocol::Ipv4
-    } else {
-        BuiltinProtocol::Ipv6
-    };
-    let transport_protocol = match probe.transport {
-        ScanTransport::Tcp => BuiltinProtocol::Tcp,
-        ScanTransport::Udp => BuiltinProtocol::Udp,
-        ScanTransport::Icmp if probe.address.is_ipv4() => BuiltinProtocol::Icmpv4,
-        ScanTransport::Icmp => BuiltinProtocol::Icmpv6,
-    };
-    if !packet_shape_matches(sent, &[network_protocol, transport_protocol]) {
-        return false;
-    }
-    let network_matches = match probe.address {
-        IpAddr::V4(destination) => {
-            sent.iter()
-                .filter(|layer| BuiltinProtocol::of(*layer) == Some(BuiltinProtocol::Ipv4))
-                .count()
-                == 1
-                && sent.get::<Ipv4>().is_some_and(|ipv4| {
-                    ipv4.destination == destination
-                        && ipv4.identification == nonzero_ipv4_identification(probe.sequence)
-                })
-        }
-        IpAddr::V6(destination) => {
-            sent.iter()
-                .filter(|layer| BuiltinProtocol::of(*layer) == Some(BuiltinProtocol::Ipv6))
-                .count()
-                == 1
-                && sent.get::<Ipv6>().is_some_and(|ipv6| {
-                    ipv6.destination == destination
-                        && ipv6.flow_label == (probe.sequence as u32) & 0x000f_ffff
-                })
-        }
-    };
-    if !network_matches {
-        return false;
-    }
-    match probe.transport {
-        ScanTransport::Tcp => sent.get::<Tcp>().is_some_and(|tcp| {
-            tcp.destination_port == probe.port.expect("validated TCP scan port")
-                && tcp.sequence == probe.sequence as u32
-                && tcp.flags == Tcp::SYN
-        }),
-        ScanTransport::Udp => sent.get::<Udp>().is_some_and(|udp| {
-            udp.source_port == scan_udp_source_port(probe.attempt)
-                && udp.destination_port == probe.port.expect("validated UDP scan port")
-        }),
-        ScanTransport::Icmp => match probe.address {
-            IpAddr::V4(_) => sent.get::<Icmpv4>().is_some_and(|icmp| {
-                icmp.icmp_type == 8 && icmp.code == 0 && icmp.body == icmp_identity(probe.sequence)
-            }),
-            IpAddr::V6(_) => sent.get::<Icmpv6>().is_some_and(|icmp| {
-                icmp.icmp_type == 128
-                    && icmp.code == 0
-                    && icmp.body == icmp_identity(probe.sequence)
-            }),
-        },
-    }
 }
 
 struct ScanOutput {

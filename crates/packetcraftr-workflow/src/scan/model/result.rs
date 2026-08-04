@@ -74,3 +74,18 @@ pub struct ScanResult {
     pub diagnostics: Vec<Diagnostic>,
     pub stats: Stats,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::ScanClassification;
+
+    #[test]
+    fn scan_classification_ranks_are_strictly_ordered() {
+        assert_eq!(ScanClassification::Open.rank(), 6);
+        assert_eq!(ScanClassification::Closed.rank(), 5);
+        assert_eq!(ScanClassification::Filtered.rank(), 4);
+        assert_eq!(ScanClassification::Unreachable.rank(), 3);
+        assert_eq!(ScanClassification::Unknown.rank(), 2);
+        assert_eq!(ScanClassification::Timeout.rank(), 1);
+    }
+}

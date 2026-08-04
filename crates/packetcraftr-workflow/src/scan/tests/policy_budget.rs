@@ -1,12 +1,25 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::{
-    AddressFamily, AddressListAuthorizer, Arc, AtomicUsize, Authorizer, BoundaryError, Classified,
-    CountingRejectExecutor, Duration, ErrorClassification, IpAddr, Ipv4Addr, Kind, NoopClock,
-    OpenTcpExecutor, Ordering, PolicyAuthorizer, Result, ScanBatch, ScanBatchExecution, ScanError,
-    ScanExecutor, ScriptedResolver, Target, TimeoutExecutor, default_registry, private_scan_policy,
-    scan, tcp_scan_request,
+use std::net::{IpAddr, Ipv4Addr};
+use std::result::Result;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
+
+use packetcraftr_core::error::{Classification as ErrorClassification, Classified, Kind};
+use packetcraftr_protocol::builtin::registry as default_registry;
+
+use crate::kernel::policy_authorizer::PolicyAuthorizer;
+use crate::kernel::target::{Authorizer, Target};
+use crate::{AddressFamily, BoundaryError};
+
+use super::super::engine::scan;
+use super::super::error::ScanError;
+use super::super::model::{ScanBatch, ScanBatchExecution, ScanExecutor};
+use super::support::{
+    AddressListAuthorizer, CountingRejectExecutor, NoopClock, OpenTcpExecutor, ScriptedResolver,
+    TimeoutExecutor, private_scan_policy, tcp_scan_request,
 };
 
 #[test]

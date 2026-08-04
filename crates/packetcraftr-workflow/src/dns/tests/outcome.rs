@@ -1,13 +1,27 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::{
-    AddressFamily, Authorized, Authorizer, BoundaryError, Bytes, DNS_FLAG_TRUNCATED, DecodedPacket,
+use std::net::{IpAddr, Ipv4Addr};
+use std::result::Result;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use bytes::Bytes;
+use packetcraftr_capture::{Frame, LinkType};
+use packetcraftr_packet::{Packet, decode::DecodedPacket, layer::Raw};
+use packetcraftr_protocol::{builtin::registry as default_registry, network::Ipv4, transport::Udp};
+
+use crate::kernel::target::{Authorizer, Target};
+use crate::target::Authorized;
+use crate::{AddressFamily, BoundaryError, Stats};
+
+use super::super::DNS_FLAG_TRUNCATED;
+use super::super::engine::dns;
+use super::super::model::{
     DnsAttemptStatus, DnsExchange, DnsExchangeExecution, DnsExecutor, DnsLimits,
-    DnsMatchedResponse, DnsOutcome, DnsQueryType, DnsRequest, Duration, FixtureRecord, Frame,
-    IpAddr, Ipv4, Ipv4Addr, LinkType, NoopClock, Packet, Raw, Result, Stats, SystemTime, Target,
-    UNIX_EPOCH, Udp, default_registry, dns, fixture_response,
+    DnsMatchedResponse, DnsOutcome, DnsQueryType, DnsRequest,
 };
+use super::evidence_validation::NoopClock;
+use super::support::{FixtureRecord, fixture_response};
 
 struct LocalAuthorizer;
 

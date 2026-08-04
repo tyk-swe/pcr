@@ -1,13 +1,29 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::{
-    AddressFamily, AddressListAuthorizer, BoundaryError, Duration, Frame, IpAddr, Ipv4, Ipv4Addr,
-    Ipv6Addr, LinkType, NoopClock, OpenTcpExecutor, PolicyAuthorizer, RecordingClock, Result,
-    ScanBatch, ScanBatchExecution, ScanClassification, ScanError, ScanExecutor, ScanLimits,
-    ScanMatchedResponse, ScanProbeStatus, ScriptedResolver, Target, Tcp, TimeoutExecutor,
-    UNIX_EPOCH, UndecodedExecutor, build_batches, decoded, default_registry, private_scan_policy,
-    scan, sent_scan_probe_matches, tcp_packet, tcp_scan_request, validate_exchange_evidence,
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::result::Result;
+use std::time::{Duration, UNIX_EPOCH};
+
+use packetcraftr_capture::{Frame, LinkType};
+use packetcraftr_protocol::{builtin::registry as default_registry, network::Ipv4, transport::Tcp};
+
+use crate::kernel::policy_authorizer::PolicyAuthorizer;
+use crate::kernel::target::Target;
+use crate::{AddressFamily, BoundaryError};
+
+use super::super::engine::scan;
+use super::super::error::ScanError;
+use super::super::evidence::validate_exchange_evidence;
+use super::super::model::{
+    ScanBatch, ScanBatchExecution, ScanClassification, ScanExecutor, ScanLimits,
+    ScanMatchedResponse, ScanProbeStatus,
+};
+use super::super::plan::build_batches;
+use super::super::probe::sent_scan_probe_matches;
+use super::support::{
+    AddressListAuthorizer, NoopClock, OpenTcpExecutor, RecordingClock, ScriptedResolver,
+    TimeoutExecutor, UndecodedExecutor, decoded, private_scan_policy, tcp_packet, tcp_scan_request,
 };
 
 #[test]

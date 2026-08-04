@@ -61,12 +61,8 @@ pub use model::{
 };
 pub use system_boundary::{SystemAuthorizer, SystemTransmitter};
 
-#[cfg(test)]
-use engine::{replay_capture, replay_capture_with_selector};
 use error::ReplayError;
 use model::{
     ReplayAuthorizationContext, ReplayAuthorizer, ReplayFrameEvidence, ReplayOptions,
     ReplaySelector, ReplaySummary, ReplayTransmission, ReplayTransmitter,
 };
-#[cfg(test)]
-use model::{ReplayLimits, ReplayTiming};

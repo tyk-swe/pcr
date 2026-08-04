@@ -12,7 +12,7 @@ mod finalization;
 mod options;
 mod preparation;
 mod retention;
-pub(crate) mod route_cache;
+mod route_cache;
 mod send_sequence;
 mod shutdown;
 mod transaction;

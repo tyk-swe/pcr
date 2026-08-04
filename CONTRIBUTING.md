@@ -87,13 +87,40 @@ Every pull request must have one primary responsibility.
 - Update fixtures, goldens, examples, and schemas together when an approved
   serialized or CLI contract changes.
 
-The canonical library domains are `analysis`, `budget`, `capture`, `client`,
-`error`, `net`, `output`, `packet`, `protocol`, `session`, and `workflow`, each
-a crate under `crates/` named `packetcraftr-<domain>`. Prefer specific module
-names that describe their responsibility, and keep the inter-crate dependency
+The workspace has ten packages. Shared budgets, errors, and frames live in
+`packetcraftr-core`; offline capture-file I/O in `packetcraftr-capture`;
+runtime-neutral packet behavior in `packetcraftr-packet`; built-in protocols in
+`packetcraftr-protocol`; and native interfaces, routes, capture, and transmission
+in `packetcraftr-net`. Policy-gated send and exchange behavior belongs to
+`packetcraftr-client`, offline analysis and reassembly to
+`packetcraftr-analysis`, and live workflows to `packetcraftr-workflow`.
+`packetcraftr` is the facade and owns render-neutral output contracts, while
+`packetcraftr-cli` owns command parsing, composition, rendering, and process
+behavior.
+
+The exact normal internal dependency graph is:
+
+| Package | Direct internal dependencies |
+| --- | --- |
+| `packetcraftr-core` | none |
+| `packetcraftr-capture` | core |
+| `packetcraftr-packet` | core |
+| `packetcraftr-protocol` | core, packet |
+| `packetcraftr-net` | core, packet |
+| `packetcraftr-client` | core, net, packet, protocol |
+| `packetcraftr-analysis` | core, capture, packet, protocol |
+| `packetcraftr-workflow` | core, capture, client, net, packet, protocol |
+| `packetcraftr` | core, capture, packet, protocol, net, client, analysis, workflow |
+| `packetcraftr-cli` | packetcraftr |
+
+`scripts/check-arch` enforces that graph. In particular,
+`packetcraftr-analysis` must have no direct or transitive path to
+`packetcraftr-client` or `packetcraftr-net`; the dependency boundary guarantees
+that offline analysis cannot resolve, route, capture, or transmit live traffic.
+Prefer specific module names that describe their responsibility, and keep the
 graph acyclic. Unsafe code is confined to
-`crates/packetcraftr-net/src/platform/`, and every unsafe block needs a
-specific `SAFETY` explanation.
+`crates/packetcraftr-net/src/platform/`, and every unsafe block needs a specific
+`SAFETY` explanation.
 
 ## Code review
 

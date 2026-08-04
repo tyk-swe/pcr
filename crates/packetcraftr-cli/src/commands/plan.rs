@@ -5,17 +5,18 @@ use std::sync::Arc;
 
 use packetcraftr::output;
 
-use super::super::arguments::RouteArgs;
+use super::super::arguments::PlanArgs;
 use super::super::errors::CliError;
 use super::super::rendering::{emit_json, write_stdout_line};
 use super::super::runtime::{default_registry_arc, prepare_route_request, system_client};
 
 pub(crate) fn run_plan(
-    arguments: RouteArgs,
+    arguments: PlanArgs,
     output: output::contract::Format,
 ) -> Result<(), CliError> {
+    let PlanArgs { route, policy } = arguments;
     let registry = default_registry_arc()?;
-    let request = prepare_route_request(arguments, &registry)?;
+    let request = prepare_route_request(route, policy.into_policy(), &registry)?;
     let client = system_client(Arc::clone(&registry), request.policy);
     let route = client
         .plan(&request.packet, request.destination, &request.options)

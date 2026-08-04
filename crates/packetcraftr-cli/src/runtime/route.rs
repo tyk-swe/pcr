@@ -43,6 +43,7 @@ pub(crate) fn workflow_exchange_options(
 
 pub(crate) fn prepare_route_request(
     arguments: RouteArgs,
+    policy: client::policy::Policy,
     registry: &packet::registry::Registry,
 ) -> Result<PreparedRouteRequest, CliError> {
     let RouteArgs {
@@ -51,10 +52,8 @@ pub(crate) fn prepare_route_request(
         interface,
         source,
         link_mode,
-        policy,
     } = arguments;
     let packet = read_recipe(recipe, registry)?;
-    let policy = policy.into_policy();
     policy.validate().map_err(CliError::classified)?;
     // This check intentionally precedes interface discovery and route lookup.
     policy

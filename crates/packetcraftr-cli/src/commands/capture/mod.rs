@@ -42,6 +42,7 @@ pub(crate) fn run_capture(
         capture_filter,
         filter,
         limits,
+        policy,
     } = arguments;
     let timeout = Duration::from_millis(timeout_ms);
     validate_capture_window(timeout)?;
@@ -66,7 +67,7 @@ pub(crate) fn run_capture(
         }
         None => None,
     };
-    let request = prepare_route_request(route, &registry)?;
+    let request = prepare_route_request(route, policy.into_policy(), &registry)?;
     let budget = CaptureBudget::from(&request.policy);
     let client = system_client(Arc::clone(&registry), request.policy);
     let route = client

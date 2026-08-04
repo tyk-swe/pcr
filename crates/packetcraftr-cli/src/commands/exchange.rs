@@ -29,6 +29,7 @@ pub(crate) fn run_exchange(
         route,
         mode,
         allow_permissive_live,
+        policy,
     } = send;
     let limits = limits.into_limits();
     let mut options = client::exchange::Options {
@@ -46,7 +47,7 @@ pub(crate) fn run_exchange(
     options.validate().map_err(CliError::classified)?;
 
     let registry = default_registry_arc()?;
-    let request = prepare_route_request(route, &registry)?;
+    let request = prepare_route_request(route, policy.into_policy(), &registry)?;
     options.send = client::send::Options {
         destination: request.destination,
         plan: request.options,

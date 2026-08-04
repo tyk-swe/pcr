@@ -24,9 +24,10 @@ pub(crate) fn run_send(
         route,
         mode,
         allow_permissive_live,
+        policy,
     } = arguments;
     let registry = default_registry_arc()?;
-    let request = prepare_route_request(route, &registry)?;
+    let request = prepare_route_request(route, policy.into_policy(), &registry)?;
     let client = system_client(Arc::clone(&registry), request.policy);
     let report = client
         .send(

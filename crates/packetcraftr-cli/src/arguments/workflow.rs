@@ -9,7 +9,7 @@ use packetcraftr::{net, packet, workflow};
 use super::capture_limits::CaptureLimitArgs;
 use super::network::CliLinkMode;
 use super::offline::{CliBuildMode, RecipeArgs};
-use super::policy::TrafficPolicyArgs;
+use super::policy::{FuzzPolicyArgs, HostnameTrafficPolicyArgs};
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
 pub(crate) enum CliFuzzStrategy {
@@ -103,7 +103,7 @@ pub(crate) struct FuzzArgs {
     #[command(flatten)]
     pub(crate) limits: CaptureLimitArgs,
     #[command(flatten)]
-    pub(crate) policy: TrafficPolicyArgs,
+    pub(crate) policy: FuzzPolicyArgs,
 }
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
@@ -192,7 +192,7 @@ pub(crate) struct ScanArgs {
     #[command(flatten)]
     pub(crate) limits: CaptureLimitArgs,
     #[command(flatten)]
-    pub(crate) policy: TrafficPolicyArgs,
+    pub(crate) policy: HostnameTrafficPolicyArgs,
 }
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
@@ -298,7 +298,7 @@ pub(crate) struct DnsArgs {
     #[command(flatten)]
     pub(crate) limits: CaptureLimitArgs,
     #[command(flatten)]
-    pub(crate) policy: TrafficPolicyArgs,
+    pub(crate) policy: HostnameTrafficPolicyArgs,
 }
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
@@ -486,5 +486,5 @@ pub(crate) struct TracerouteArgs {
     #[command(flatten)]
     pub(crate) limits: CaptureLimitArgs,
     #[command(flatten)]
-    pub(crate) policy: TrafficPolicyArgs,
+    pub(crate) policy: HostnameTrafficPolicyArgs,
 }

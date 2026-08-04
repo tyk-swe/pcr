@@ -11,7 +11,7 @@ pub(super) use exchange::ExchangeArgs;
 pub(super) use expert::ExpertArgs;
 pub(super) use follow::{CliFollowDirection, FollowArgs};
 pub(super) use fuzz::FuzzArgs;
-pub(super) use plan::RouteArgs;
+pub(super) use plan::{PlanArgs, RouteArgs};
 pub(super) use protocols::ProtocolsArgs;
 pub(super) use read::ReadArgs;
 pub(super) use replay::{CliReplayTiming, ReplayArgs};

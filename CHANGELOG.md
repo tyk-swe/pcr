@@ -18,6 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** Canonicalized traffic-policy CLI arguments and removed accepted
+  no-op options: `plan` no longer exposes `--allow-permissive-packets`,
+  `--max-packets`, or `--max-bytes`; `capture`, `scan`, `traceroute`, and `dns`
+  no longer expose `--allow-permissive-packets`; and `fuzz` no longer exposes
+  `--allow-hostname-resolution` or `--max-resolved-addresses`. Applicable flag
+  names, defaults, authorization semantics, and stable error codes are
+  unchanged.
 - Renamed the repository entry-point scripts to shorter names:
   `scripts/check-source-conventions` is now `scripts/check-conventions`,
   `scripts/check-workspace-architecture` is now `scripts/check-arch`, and

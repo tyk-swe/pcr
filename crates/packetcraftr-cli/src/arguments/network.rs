@@ -9,7 +9,7 @@ use packetcraftr::{capture, client, net};
 
 use super::capture_limits::CaptureLimitArgs;
 use super::offline::{CliBuildMode, RecipeArgs};
-use super::policy::{ReplayPolicyArgs, TrafficPolicyArgs};
+use super::policy::{HostnameTrafficPolicyArgs, PlanPolicyArgs, ReplayPolicyArgs, SendPolicyArgs};
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
 pub(crate) enum CliReplayTiming {
@@ -73,8 +73,14 @@ pub(crate) struct RouteArgs {
     /// Automatic, Layer 2, or raw Layer 3 transmission intent.
     #[arg(long, value_enum, default_value_t = CliLinkMode::Auto)]
     pub(crate) link_mode: CliLinkMode,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PlanArgs {
     #[command(flatten)]
-    pub(crate) policy: TrafficPolicyArgs,
+    pub(crate) route: RouteArgs,
+    #[command(flatten)]
+    pub(crate) policy: PlanPolicyArgs,
 }
 
 #[derive(Debug, Args)]
@@ -87,6 +93,8 @@ pub(crate) struct SendArgs {
     /// Per-operation opt-in required for a permissively built live frame.
     #[arg(long)]
     pub(crate) allow_permissive_live: bool,
+    #[command(flatten)]
+    pub(crate) policy: SendPolicyArgs,
 }
 
 #[derive(Debug, Args)]
@@ -104,6 +112,8 @@ pub(crate) struct CaptureArgs {
     pub(crate) filter: Option<String>,
     #[command(flatten)]
     pub(crate) limits: CaptureLimitArgs,
+    #[command(flatten)]
+    pub(crate) policy: HostnameTrafficPolicyArgs,
 }
 
 #[derive(Debug, Args)]

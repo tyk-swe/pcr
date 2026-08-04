@@ -260,13 +260,13 @@ Read and satisfy these gates before running the live examples below.
 
 ### Destination authorization
 
-By default, live policy denies globally routable addresses and multicast
-addresses. Private, loopback, link-local, unspecified, and documentation
-addresses are not classified as public by the current policy. When a public
-destination is genuinely required and authorized, pass
-`--allow-public-destinations` to that live command. This opt-in does not grant
-legal authorization, operating-system privileges, or additional packet/byte
-budget.
+By default, traffic policy denies destinations it classifies as public: globally
+routable and multicast addresses. Private, loopback, link-local, unspecified,
+and documentation addresses are not classified as public by the current policy.
+When a public destination is genuinely required and authorized, pass
+`--allow-public-destinations` to that command. This opt-in does not grant
+legal authorization, operating-system privileges, hostname resolution,
+permissive or malformed-packet authorization, or additional packet/byte budget.
 
 PacketcraftR checks every route-bearing destination declared by a packet.
 Replay checks each decoded frame. A policy rejection is reported as
@@ -280,6 +280,21 @@ Live hostnames are not resolved unless the command includes
 `--max-resolved-addresses`, and every returned address must independently pass
 the public-destination policy. If a hostname can resolve publicly, both
 `--allow-hostname-resolution` and `--allow-public-destinations` are required.
+
+The public traffic-policy options are exposed only where their gates or budgets
+can affect the operation:
+
+| Option | Commands |
+| --- | --- |
+| `--allow-public-destinations` | `plan`, `send`, `exchange`, `capture`, `replay`, `scan`, `traceroute`, `dns`, `fuzz` |
+| `--allow-hostname-resolution`, `--max-resolved-addresses` | `plan`, `send`, `exchange`, `capture`, `scan`, `traceroute`, `dns` |
+| `--allow-permissive-packets` | `send`, `exchange`, `replay`, `fuzz` |
+| `--max-packets`, `--max-bytes` | `send`, `exchange`, `capture`, `replay`, `scan`, `traceroute`, `dns`, `fuzz` |
+
+`plan` is passive and therefore has no operation packet or byte policy budget.
+Replay destinations come from capture frames, and `fuzz --destination` accepts
+an IP address rather than a hostname, so neither command exposes hostname
+resolution policy options.
 
 ### Permissive and malformed live traffic
 

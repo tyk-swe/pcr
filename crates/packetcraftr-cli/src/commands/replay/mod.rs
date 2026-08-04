@@ -38,9 +38,10 @@ pub(crate) fn run_replay(
     arguments: ReplayArgs,
     output: output::contract::Format,
 ) -> Result<(), CliError> {
+    let policy = arguments.policy.clone().into_policy();
     validate_capture_stream_limits(
-        arguments.policy.max_packets,
-        arguments.policy.max_bytes,
+        policy.max_packets_per_operation,
+        policy.max_bytes_per_operation,
         arguments.max_frame_bytes,
         arguments.max_interfaces,
     )?;
@@ -60,7 +61,6 @@ pub(crate) fn run_replay(
         None => None,
     };
     let requested_interface = requested_replay_interface(&arguments.interface)?;
-    let policy = arguments.policy.clone().into_policy();
     policy.validate().map_err(CliError::classified)?;
     let limits = workflow::replay::Limits {
         max_frames: policy.max_packets_per_operation,

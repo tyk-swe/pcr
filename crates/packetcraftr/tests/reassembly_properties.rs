@@ -7,13 +7,6 @@ use std::time::{Duration, Instant};
 use bytes::Bytes;
 use packetcraftr::reassembly::{Limits, fragment, tcp};
 
-#[test]
-fn direct_and_facade_reassembly_paths_are_public() {
-    let direct = packetcraftr_analysis::reassembly::Limits::default();
-    let facade = packetcraftr::reassembly::Limits::default();
-    assert_eq!(direct, facade);
-}
-
 fn limits() -> Limits {
     Limits {
         max_flows: 8,

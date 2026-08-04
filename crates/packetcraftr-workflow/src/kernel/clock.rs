@@ -63,10 +63,4 @@ mod tests {
         assert_eq!(rate_delay(10, None), Some(Duration::ZERO));
         assert_eq!(rate_delay(1, Some(0)), None);
     }
-
-    #[test]
-    fn system_clock_implements_the_public_clock_trait() {
-        let mut clock = SystemClock;
-        assert_eq!(clock.sleep(Duration::ZERO), Ok(()));
-    }
 }

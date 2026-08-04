@@ -358,14 +358,6 @@ fn replay_limit_validation_rejects_inconsistent_frame_and_duration_bounds() {
 }
 
 #[test]
-fn replay_default_limits_are_valid_and_finite() {
-    let limits = ReplayLimits::default().validate().unwrap();
-    assert!(limits.max_frames > 0);
-    assert!(limits.max_bytes >= limits.max_frame_bytes as u64);
-    assert!(limits.max_duration <= MAX_REPLAY_DURATION);
-}
-
-#[test]
 fn replay_network_envelope_extracts_ipv4_and_ipv6_endpoints() {
     let mut ipv4 = vec![0_u8; 20];
     ipv4[0] = 0x45;

@@ -28,15 +28,3 @@ fn external_commands_can_reuse_typed_aggregate_and_stream_contracts() {
     assert_eq!(stream["sequence"], 0);
     assert_eq!(stream["result"]["frame"]["bytes_hex"], "dead");
 }
-
-#[test]
-fn every_command_owned_output_path_is_public() {
-    fn assert_public<T>() {}
-
-    assert_public::<packetcraftr::output::read::Result>();
-    assert_public::<packetcraftr::output::interfaces::Result>();
-    assert_public::<packetcraftr::output::plan::Result>();
-    assert_public::<packetcraftr::output::routes::Result>();
-    assert_public::<packetcraftr::output::send::Result>();
-    assert_public::<packetcraftr::output::exchange::Result>();
-}

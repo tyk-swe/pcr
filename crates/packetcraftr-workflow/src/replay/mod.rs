@@ -10,39 +10,6 @@
 //! malformed bytes additionally requires the explicit malformed-traffic
 //! opt-ins.
 
-use std::io::Read;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::sync::Arc;
-use std::time::{Duration, SystemTime};
-
-use serde::Serialize;
-use thiserror::Error;
-
-use crate::kernel::clock::Clock as WorkflowClock;
-use packetcraftr_capture::{
-    DEFAULT_SIZE_LIMIT, DEFAULT_STREAM_BYTES, DEFAULT_STREAM_FRAMES, Error as CaptureError, Format,
-    Frame, Interface, LinkType, Reader,
-};
-use packetcraftr_core::budget::{Deadline, DeadlineExceeded};
-use packetcraftr_core::error::{Classification, Classified, Kind};
-use packetcraftr_net::{
-    Error as LiveIoError,
-    interface::{InterfaceInfo, InterfaceProvider, SystemInterfaceProvider},
-    link::{LinkCapability, LinkMode},
-    route::{
-        DestinationScope, InterfaceId, MaterializedRoute, PlannedRoute, RouteDecision,
-        RouteProvider, RouteSelectionReason, SystemRouteProvider,
-    },
-    transmit::{
-        DispatchPacketIo, IoSendReport, PacketIo, SystemLayer2Io, SystemLayer3Io, TransmissionFrame,
-    },
-};
-use packetcraftr_packet::build::{
-    Builder, Context as BuildContext, Mode as BuildMode, Options as BuildOptions,
-};
-use packetcraftr_packet::decode::{Decoder, Options as DecodeOptions};
-use packetcraftr_packet::{codec::NetworkEnvelope, registry::ProtocolRegistry};
-
 mod engine;
 mod error;
 mod model;
@@ -60,9 +27,3 @@ pub use model::{
     ReplayTiming as Timing, ReplayTransmission as Transmission, ReplayTransmitter as Transmitter,
 };
 pub use system_boundary::{SystemAuthorizer, SystemTransmitter};
-
-use error::ReplayError;
-use model::{
-    ReplayAuthorizationContext, ReplayAuthorizer, ReplayFrameEvidence, ReplayOptions,
-    ReplaySelector, ReplaySummary, ReplayTransmission, ReplayTransmitter,
-};

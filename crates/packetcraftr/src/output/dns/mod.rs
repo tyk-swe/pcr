@@ -3,12 +3,15 @@
 
 //! Structured DNS output.
 
-mod model;
+mod record;
+mod result;
 pub use crate::output::frame::{Captured as Frame, Timestamp};
-pub use model::{
-    DnsAttemptOutput as Attempt, DnsCommandResult as Result, DnsEdnsOptionOutput as EdnsOption,
-    DnsEdnsOutput as Edns, DnsOutcome as Outcome, DnsOutcome as AttemptStatus,
-    DnsRecordData as RecordData, DnsRecordOutput as Record,
+pub use record::{
+    DnsEdnsOptionOutput as EdnsOption, DnsEdnsOutput as Edns, DnsRecordData as RecordData,
+    DnsRecordOutput as Record,
     DnsRejectedRecordOutput as RejectedRecord, DnsSection as Section,
-    DnsStreamCommandResult as Event, DnsUndecodedOutput as Undecoded,
+};
+pub use result::{
+    DnsAttemptOutput as Attempt, DnsCommandResult as Result, DnsOutcome as AttemptStatus,
+    DnsOutcome as Outcome, DnsStreamCommandResult as Event, DnsUndecodedOutput as Undecoded,
 };

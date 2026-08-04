@@ -2,9 +2,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 /// Failure from a bounded replay operation.
-use super::{
-    CaptureError, Classification, Classified, Duration, Error, Kind, LinkMode, LiveIoError,
-};
+use std::time::Duration;
+
+use packetcraftr_capture::Error as CaptureError;
+use packetcraftr_core::error::{Classification, Classified, Kind};
+use packetcraftr_net::{Error as LiveIoError, link::LinkMode};
+use thiserror::Error;
 
 #[derive(Debug, Error)]
 #[non_exhaustive]

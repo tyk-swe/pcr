@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use packetcraftr_net::{
+    Error as LiveIoError,
     capture::{CaptureQueueLimits, CaptureSession},
     transmit::PacketIo,
 };
@@ -87,5 +88,14 @@ impl<C: CaptureSession> ExchangeTransaction<C> {
         self.await_capture_readiness()?;
         self.send_requests(io, workflow_matcher)?;
         self.collect_remaining(workflow_matcher)
+    }
+
+    fn await_capture_readiness(&mut self) -> Result<(), LiveIoError> {
+        let readiness_timeout = self.deadline.checked_duration_since(Instant::now()).ok_or(
+            LiveIoError::DeadlineExceeded {
+                operation: "waiting for capture readiness",
+            },
+        )?;
+        self.capture.inner.wait_ready(readiness_timeout)
     }
 }

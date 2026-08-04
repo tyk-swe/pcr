@@ -3,6 +3,8 @@
 
 //! Public exchange entry points and the prepare/arm/execute handoff.
 
+use std::sync::Arc;
+
 use packetcraftr_net::{
     capture::CaptureProvider,
     route::{NeighborResolver, RouteProvider},
@@ -11,7 +13,10 @@ use packetcraftr_net::{
 use packetcraftr_packet::{Packet, template::PacketTemplate};
 
 use crate::Client;
-use crate::exchange::{ExchangeOptions, ExchangeResult, WorkflowResponseMatcher};
+use crate::exchange::{
+    ExchangeOptions, ExchangeResult, ExchangeTransaction, PreparedExchange, WorkflowResponseMatcher,
+};
+use crate::planning::ensure_preparation_deadline;
 use crate::send::ClientError;
 
 impl<R, N, I> Client<R, N, I>
@@ -53,5 +58,24 @@ where
         let prepared = self.prepare_exchange(template, options)?;
         let transaction = self.arm_capture(prepared)?;
         transaction.execute(&self.io, workflow_matcher)
+    }
+
+    fn arm_capture(
+        &self,
+        prepared: PreparedExchange,
+    ) -> Result<ExchangeTransaction<<I as CaptureProvider>::Capture>, ClientError> {
+        let first_route = &prepared
+            .packets
+            .first()
+            .expect("non-empty prepared exchange")
+            .route
+            .plan;
+        ensure_preparation_deadline(prepared.deadline)?;
+        let capture = self.io.arm_capture(first_route, prepared.capture_limits)?;
+        Ok(ExchangeTransaction::new(
+            Arc::clone(&self.registry),
+            capture,
+            prepared,
+        ))
     }
 }

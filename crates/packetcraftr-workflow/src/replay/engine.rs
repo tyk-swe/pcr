@@ -3,12 +3,20 @@
 
 /// Streams, authorizes, schedules, and transmits a capture without retaining
 /// more than the current frame.
-use super::wire::{replay_link_mode, validate_transmission_evidence};
-use super::{
-    Deadline, DeadlineExceeded, Duration, Format, Read, Reader, ReplayAuthorizationContext,
-    ReplayAuthorizer, ReplayError, ReplayFrameEvidence, ReplayOptions, ReplaySelector,
-    ReplaySummary, ReplayTransmitter, WorkflowClock,
+use std::io::Read;
+use std::time::Duration;
+
+use packetcraftr_capture::{Format, Reader};
+use packetcraftr_core::budget::{Deadline, DeadlineExceeded};
+
+use crate::kernel::clock::Clock as WorkflowClock;
+
+use super::error::ReplayError;
+use super::model::{
+    ReplayAuthorizationContext, ReplayAuthorizer, ReplayFrameEvidence, ReplayOptions,
+    ReplaySelector, ReplaySummary, ReplayTransmitter,
 };
+use super::wire::{replay_link_mode, validate_transmission_evidence};
 
 pub fn replay_capture<R, A, T, C, F>(
     reader: &mut Reader<R>,

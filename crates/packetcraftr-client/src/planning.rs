@@ -5,17 +5,27 @@ use std::net::IpAddr;
 use std::time::Instant;
 
 use packetcraftr_net::{
+    Error as LiveIoError,
     route::{NeighborResolver, PlanOptions, PlannedRoute, RouteProvider},
     transmit::PacketIo,
 };
 use packetcraftr_packet::{Packet, semantics::BuiltinProtocol};
 
 use crate::Client;
-use crate::exchange::deadline::ensure_preparation_deadline;
 use crate::send::ClientError;
 use crate::target::{
     HostnameResolver, IpVersion, LiveTarget, ResolvedTarget, TargetResolutionError,
 };
+
+pub(crate) fn ensure_preparation_deadline(deadline: Instant) -> Result<(), ClientError> {
+    if deadline.checked_duration_since(Instant::now()).is_none() {
+        return Err(LiveIoError::DeadlineExceeded {
+            operation: "preparing the exchange",
+        }
+        .into());
+    }
+    Ok(())
+}
 
 impl<R, N, I> Client<R, N, I>
 where

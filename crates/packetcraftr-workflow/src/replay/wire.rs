@@ -1,10 +1,19 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::{
-    Frame, IoSendReport, IpAddr, Ipv4Addr, Ipv6Addr, Kind, LinkMode, LinkType, LiveIoError,
-    NetworkEnvelope, ReplayError, RouteProvider, SystemRouteProvider,
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+use packetcraftr_capture::{Frame, LinkType};
+use packetcraftr_core::error::Kind;
+use packetcraftr_net::{
+    Error as LiveIoError,
+    link::LinkMode,
+    route::{RouteProvider, SystemRouteProvider},
+    transmit::IoSendReport,
 };
+use packetcraftr_packet::codec::NetworkEnvelope;
+
+use super::error::ReplayError;
 
 pub(super) fn map_replay_route_error(
     source: packetcraftr_net::route::NativeRouteError,

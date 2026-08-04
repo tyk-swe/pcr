@@ -4,16 +4,13 @@
 //! Multi-packet capture-ready exchange contracts.
 
 mod accumulator;
-mod arming;
 mod capture;
 mod contract;
 mod correlation;
-pub(crate) mod deadline;
 mod execution;
 mod finalization;
 mod options;
 mod preparation;
-mod readiness;
 mod retention;
 pub(crate) mod route_cache;
 mod send_sequence;

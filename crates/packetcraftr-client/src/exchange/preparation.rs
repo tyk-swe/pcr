@@ -18,12 +18,12 @@ use packetcraftr_packet::{
 
 use crate::Client;
 use crate::exchange::ExchangeOptions;
-use crate::exchange::deadline::ensure_preparation_deadline;
 use crate::exchange::route_cache::ExchangeRouteProvider;
 use crate::materialize::{
     build_context, materialize_link_fields, materialize_link_structure, materialize_network_fields,
     patch_builtin_ethernet, require_fixed_width_link_materialization,
 };
+use crate::planning::ensure_preparation_deadline;
 use crate::policy::TrafficPolicyError;
 use crate::send::ClientError;
 use crate::validation::validate_mtu;

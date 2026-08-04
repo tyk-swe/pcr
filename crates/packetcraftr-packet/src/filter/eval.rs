@@ -9,8 +9,8 @@ use super::super::decode::DecodedPacket;
 use super::super::field::{FieldKind, FieldValue};
 use super::super::layer::Layer;
 use super::ast::{Op, Predicate};
+use super::comparison;
 use super::lexer::CompareOperator;
-use super::literal;
 use super::path::{ByteSlice, FieldAccess, FieldRef, FieldSource, FrameField, StreamTransport};
 
 /// Everything a compiled filter may read about one packet.
@@ -81,15 +81,15 @@ fn test(predicate: &Predicate, context: &Context<'_>) -> bool {
             operator,
             value,
         } => any_value(context, field, |candidate| {
-            literal::matches(candidate, *operator, value)
+            comparison::matches(candidate, *operator, value)
         }),
         Predicate::Membership { field, values } => any_value(context, field, |candidate| {
             values
                 .iter()
-                .any(|value| literal::matches(candidate, CompareOperator::Equal, value))
+                .any(|value| comparison::matches(candidate, CompareOperator::Equal, value))
         }),
         Predicate::Contains { field, needle } => any_value(context, field, |candidate| {
-            literal::contains(candidate, needle)
+            comparison::contains(candidate, needle)
         }),
     }
 }

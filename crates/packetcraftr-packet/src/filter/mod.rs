@@ -57,6 +57,7 @@
 //! than recursion, so filter text cannot drive stack depth.
 
 mod ast;
+mod comparison;
 mod error;
 mod eval;
 mod lexer;

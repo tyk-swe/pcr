@@ -7,34 +7,9 @@
 //! native-I/O seam. [`run_live`] is a separate, explicit entry point that
 //! requires operation authorization and a capture-ready executor.
 
-use std::fmt;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::sync::Arc;
 use std::time::Duration;
 
-use bytes::Bytes;
-use serde::Serialize;
-use thiserror::Error;
-
-use crate::kernel::clock::Clock;
-use crate::kernel::evidence::EvidenceBudget;
-use packetcraftr_capture::{Frame, LinkType};
-use packetcraftr_core::budget::{Deadline, DeadlineExceeded};
-use packetcraftr_core::error::{Classification, Classified, Kind};
-use packetcraftr_net::{
-    capture::{CaptureStatistics, DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES},
-    route::{NeighborResolver, RouteProvider},
-};
-use packetcraftr_packet::{
-    Packet,
-    build::{BuildContext, BuildOptions, Builder, BuiltPacket, DEFAULT_MAX_PACKET_SIZE},
-    decode::{DecodeOptions, DecodedPacket, Dissector},
-    diagnostic::{Diagnostic, push_diagnostic_once},
-    field::{FieldKind, FieldValue},
-    registry::ProtocolRegistry,
-    semantics::BuiltinProtocol,
-    template::{DEFAULT_MAX_TEMPLATE_PACKETS, PacketTemplate},
-};
+use packetcraftr_packet::template::DEFAULT_MAX_TEMPLATE_PACKETS;
 
 pub const DEFAULT_FUZZ_CASES: usize = 64;
 pub const DEFAULT_MAX_FUZZ_CASES: usize = DEFAULT_MAX_TEMPLATE_PACKETS;
@@ -83,19 +58,3 @@ pub type ClientExecutor<'a, R, N, I> = crate::kernel::client_executor::ClientExe
     I,
     crate::kernel::client_executor::Fuzz,
 >;
-
-#[cfg(test)]
-use engine::{fuzz, fuzz_live};
-use error::FuzzError;
-use model::{
-    FuzzAuthorizer, FuzzCase, FuzzCaseExecution, FuzzCaseFailure, FuzzCaseOutcome,
-    FuzzExecutionCase, FuzzExecutor, FuzzLimits, FuzzLiveOptions, FuzzMode, FuzzMutation,
-    FuzzReproduction, FuzzRequest, FuzzResult, FuzzStats, FuzzStrategy, FuzzTarget,
-};
-
-fn duration_limit(error: DeadlineExceeded) -> FuzzError {
-    FuzzError::DurationLimit {
-        actual: error.actual,
-        limit: error.limit,
-    }
-}

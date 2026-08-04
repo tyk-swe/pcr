@@ -1,7 +1,14 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-use super::super::*;
-use super::request::*;
+use std::net::IpAddr;
+use std::time::Duration;
+
+use packetcraftr_capture::Frame;
+use packetcraftr_packet::{Packet, decode::DecodedPacket, diagnostic::Diagnostic};
+
+use crate::Stats;
+
+use super::request::TracerouteStrategy;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TracerouteProbe {

@@ -1,7 +1,16 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-use super::super::*;
-use super::request::*;
+use std::net::IpAddr;
+use std::time::{Duration, SystemTime};
+
+use serde::Serialize;
+
+use packetcraftr_capture::Frame;
+use packetcraftr_packet::diagnostic::Diagnostic;
+
+use crate::Stats;
+
+use super::request::ScanTransport;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]

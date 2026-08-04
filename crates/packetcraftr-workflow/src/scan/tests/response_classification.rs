@@ -1,7 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::*;
+use super::{
+    Bytes, DecodedPacket, Diagnostic, Icmpv4, Icmpv6, IpAddr, Ipv4, Ipv4Addr, Ipv6, Ipv6Addr,
+    Packet, ScanClassification, ScanTransport, Tcp, Udp, classify_scan_response, decoded,
+    default_registry, tcp_packet, udp_packet,
+};
 
 #[test]
 fn tcp_direct_matcher_classifies_replies_and_rejects_bad_integrity() {

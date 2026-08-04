@@ -1,18 +1,41 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::{
-    Authorizer, Bytes, Clock, Deadline, DeadlineExceeded, DecodedPacket, Diagnostic, Duration,
-    EvidenceBudget, ExchangeEvidence, ExchangeEvidenceError, Icmpv4, Icmpv6, IpAddr, Ipv4, Ipv6,
-    MAX_TRACEROUTE_PROBE_BYTES, MatchedResponseEvidence, Packet, ProtocolRegistry,
-    ResponseEvidence, Stats, TRACEROUTE_EVIDENCE_DIAGNOSTICS, TRACEROUTE_SOURCE_PORT, Tcp,
-    TracerouteBatch, TracerouteBatchExecution, TracerouteCompletion, TracerouteError,
-    TracerouteExecutor, TracerouteHopResult, TracerouteLimits, TracerouteMatchedResponse,
-    TracerouteProbe, TracerouteProbeEvidence, TracerouteProbeStatus, TracerouteRequest,
-    TracerouteResponseKind, TracerouteResult, TracerouteStrategy, TracerouteUndecodedEvidence, Udp,
-    classify_traceroute_response, format_exchange_evidence_error, push_diagnostic_once,
-    retain_evidence, validate_shared_exchange_evidence,
+use std::net::IpAddr;
+use std::time::Duration;
+
+use bytes::Bytes;
+use packetcraftr_core::budget::{Deadline, DeadlineExceeded};
+use packetcraftr_packet::{
+    Packet,
+    decode::DecodedPacket,
+    diagnostic::{Diagnostic, push_diagnostic_once},
+    registry::ProtocolRegistry,
 };
+use packetcraftr_protocol::{
+    icmp::{Icmpv4, Icmpv6},
+    network::{Ipv4, Ipv6},
+    transport::{Tcp, Udp},
+};
+
+use crate::kernel::clock::Clock;
+use crate::kernel::evidence::{
+    EvidenceBudget, ExchangeEvidence, ExchangeEvidenceError, MatchedResponseEvidence,
+    ResponseEvidence, format_exchange_evidence_error, retain_evidence,
+    validate_exchange_evidence as validate_shared_exchange_evidence,
+};
+use crate::kernel::target::Authorizer;
+use crate::{BoundaryError, Stats};
+
+use super::classification::classify_traceroute_response;
+use super::error::TracerouteError;
+use super::model::{
+    TracerouteBatch, TracerouteBatchExecution, TracerouteCompletion, TracerouteExecutor,
+    TracerouteHopResult, TracerouteLimits, TracerouteMatchedResponse, TracerouteProbe,
+    TracerouteProbeEvidence, TracerouteProbeStatus, TracerouteRequest, TracerouteResponseKind,
+    TracerouteResult, TracerouteStrategy, TracerouteUndecodedEvidence,
+};
+use super::{MAX_TRACEROUTE_PROBE_BYTES, TRACEROUTE_EVIDENCE_DIAGNOSTICS, TRACEROUTE_SOURCE_PORT};
 /// Resolves and authorizes the complete target set before constructing a
 /// probe, approves the complete packet/byte/time budget, and preserves every
 /// attempt until checksum-valid evidence reaches a terminal outcome.
@@ -473,10 +496,7 @@ impl<E: TracerouteExecutor> ProbeLifecycle<TracerouteBatch> for TracerouteProbeL
     type Output = TracerouteHopResult;
     type Error = TracerouteError;
 
-    fn execute(
-        &mut self,
-        batch: &TracerouteBatch,
-    ) -> Result<Self::Execution, super::BoundaryError> {
+    fn execute(&mut self, batch: &TracerouteBatch) -> Result<Self::Execution, BoundaryError> {
         self.executor.execute(batch)
     }
 
@@ -529,7 +549,7 @@ impl<E: TracerouteExecutor> ProbeLifecycle<TracerouteBatch> for TracerouteProbeL
         TracerouteError::Clock { sequence, message }
     }
 
-    fn execution_error(sequence: u64, source: super::BoundaryError) -> Self::Error {
+    fn execution_error(sequence: u64, source: BoundaryError) -> Self::Error {
         TracerouteError::Execution { sequence, source }
     }
 

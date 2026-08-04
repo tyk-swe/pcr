@@ -1,7 +1,21 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-use super::super::*;
-use super::request::*;
+use std::fmt;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::time::{Duration, SystemTime};
+
+use bytes::Bytes;
+use serde::Serialize;
+
+use packetcraftr_capture::Frame;
+use packetcraftr_packet::diagnostic::Diagnostic;
+
+use crate::Stats;
+
+use super::super::DNS_TYPE_OPT;
+use super::super::error::DnsWireError;
+use super::super::wire::response_code_name;
+use super::request::DnsQueryType;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]

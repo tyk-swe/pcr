@@ -3,24 +3,35 @@
 
 use std::collections::VecDeque;
 use std::convert::Infallible;
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::result::Result;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::UNIX_EPOCH;
+use std::time::{Duration, UNIX_EPOCH};
 
+use super::ClientExecutor;
+use super::classification::classify_scan_response;
 use super::engine::{
-    build_batches, probe_packet, sent_scan_probe_matches, validate_exchange_evidence,
+    build_batches, probe_packet, scan, sent_scan_probe_matches, validate_exchange_evidence,
 };
-use super::*;
+use super::error::ScanError;
+use super::model::{
+    ScanBatch, ScanBatchExecution, ScanClassification, ScanExecutor, ScanLimits,
+    ScanMatchedResponse, ScanProbe, ScanProbeStatus, ScanRequest, ScanTransport,
+};
 use crate::dns::ClientExecutor as DnsClientExecutor;
+use crate::kernel::clock::Clock;
 use crate::kernel::policy_authorizer::PolicyAuthorizer;
+use crate::kernel::target::{Authorizer, Target};
 use crate::traceroute::ClientExecutor as TracerouteClientExecutor;
-use packetcraftr_capture::LinkType;
+use crate::{AddressFamily, BoundaryError, Stats};
+use bytes::Bytes;
+use packetcraftr_capture::{Frame, LinkType};
 use packetcraftr_client::Client;
 use packetcraftr_client::exchange::Options as ExchangeOptions;
 use packetcraftr_client::policy::Policy as TrafficPolicy;
 use packetcraftr_client::target::{Error as TargetResolutionError, Resolver as HostnameResolver};
-use packetcraftr_core::error::Classification as ErrorClassification;
+use packetcraftr_core::error::{Classification as ErrorClassification, Classified, Kind};
 use packetcraftr_net::{
     Error as LiveIoError,
     capture::{
@@ -34,9 +45,15 @@ use packetcraftr_net::{
     },
     transmit::{IoSendReport, PacketIo, TransmissionFrame},
 };
-use packetcraftr_packet::layout::PacketLayout;
+use packetcraftr_packet::{
+    Packet, decode::DecodedPacket, diagnostic::Diagnostic, layout::PacketLayout,
+};
 use packetcraftr_protocol::builtin::registry as default_registry;
-use std::result::Result;
+use packetcraftr_protocol::{
+    icmp::{Icmpv4, Icmpv6},
+    network::{Ipv4, Ipv6},
+    transport::{Tcp, Udp},
+};
 
 #[derive(Clone, Copy, Debug, Default)]
 struct NoNeighbors;

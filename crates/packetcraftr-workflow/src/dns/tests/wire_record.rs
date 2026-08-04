@@ -1,7 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::*;
+use super::{
+    DNS_FLAG_RESPONSE, DNS_FLAG_TRUNCATED, DnsLimits, DnsQueryType, DnsRecordValue, DnsWireError,
+    FixtureRecord, Ipv6Addr, decode_dns_response, decode_dns_tcp_frame, fixture_response,
+    wire_name,
+};
 
 #[test]
 fn every_published_record_shape_decodes_to_typed_bounded_data() {

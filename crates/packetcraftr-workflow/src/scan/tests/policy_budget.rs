@@ -1,7 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::*;
+use super::{
+    AddressFamily, AddressListAuthorizer, Arc, AtomicUsize, Authorizer, BoundaryError, Classified,
+    CountingRejectExecutor, Duration, ErrorClassification, IpAddr, Ipv4Addr, Kind, NoopClock,
+    OpenTcpExecutor, Ordering, PolicyAuthorizer, Result, ScanBatch, ScanBatchExecution, ScanError,
+    ScanExecutor, ScriptedResolver, Target, TimeoutExecutor, default_registry, private_scan_policy,
+    scan, tcp_scan_request,
+};
 
 #[test]
 fn hostname_policy_denial_precedes_resolution_and_probe_construction() {

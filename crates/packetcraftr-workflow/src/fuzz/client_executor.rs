@@ -3,13 +3,19 @@
 
 /// Applies the client's traffic policy to a complete live fuzz campaign before
 /// route, capture, neighbor, or transmission providers are invoked.
-use super::{
-    Duration, FuzzAuthorizer, FuzzCaseExecution, FuzzExecutionCase, FuzzExecutor, IpAddr,
-    NeighborResolver, Packet, PacketTemplate, RouteProvider,
-};
+use std::net::IpAddr;
+use std::time::Duration;
+
 use crate::BoundaryError;
 use crate::kernel::client_executor::{ClientExecutor, Fuzz};
-use packetcraftr_net::{capture::CaptureProvider, transmit::PacketIo};
+use packetcraftr_net::{
+    capture::CaptureProvider,
+    route::{NeighborResolver, RouteProvider},
+    transmit::PacketIo,
+};
+use packetcraftr_packet::{Packet, template::PacketTemplate};
+
+use super::model::{FuzzAuthorizer, FuzzCaseExecution, FuzzExecutionCase, FuzzExecutor};
 
 pub struct PolicyAuthorizer<'a> {
     policy: &'a packetcraftr_client::policy::Policy,

@@ -3,15 +3,26 @@
 
 //! Mutation preparation, accounting, and reflected-field resolution.
 
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::error::{Classification, Kind};
+use packetcraftr_packet::{
+    Packet,
+    build::{BuildContext, Builder},
+    decode::Dissector,
+    field::{FieldKind, FieldValue},
+    registry::ProtocolRegistry,
+};
+
+use super::super::MAX_FUZZ_TARGET_FIELDS;
 use super::super::engine::{PreparedFuzz, ResolvedField};
+use super::super::error::{FuzzError, duration_limit};
 use super::super::execution::case_seed;
-use super::super::{
-    Arc, BuildContext, Builder, Classification, Deadline, Dissector, FieldKind, FieldValue,
-    FuzzCase, FuzzCaseFailure, FuzzCaseOutcome, FuzzError, FuzzLimits, FuzzMutation,
-    FuzzReproduction, FuzzRequest, FuzzStrategy, FuzzTarget, Kind, MAX_FUZZ_TARGET_FIELDS, Packet,
-    ProtocolRegistry, duration_limit,
+use super::super::model::{
+    FuzzCase, FuzzCaseFailure, FuzzCaseOutcome, FuzzLimits, FuzzMutation, FuzzReproduction,
+    FuzzRequest, FuzzStrategy, FuzzTarget,
 };
 use super::decode::dissect_built;
 use super::value::{bounded_value_size, index_from, mutation_value, shrink_values};

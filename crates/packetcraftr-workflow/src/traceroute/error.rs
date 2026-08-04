@@ -1,7 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::{BoundaryError, Classification, Classified, Duration, Error, Kind};
+use std::time::Duration;
+
+use thiserror::Error;
+
+use crate::BoundaryError;
+use packetcraftr_core::error::{Classification, Classified, Kind};
 
 #[derive(Debug, Error)]
 #[non_exhaustive]

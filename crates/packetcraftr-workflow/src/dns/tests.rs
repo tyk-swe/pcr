@@ -3,26 +3,52 @@
 
 use std::collections::VecDeque;
 use std::convert::Infallible;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::result::Result;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::UNIX_EPOCH;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use super::engine::{dns_source_port, validate_dns_execution};
-use super::*;
+use super::engine::{dns, dns_source_port, validate_dns_execution};
+use super::error::{DnsError, DnsWireError};
+use super::model::{
+    DnsAttemptStatus, DnsExchange, DnsExchangeExecution, DnsExecutor, DnsLimits,
+    DnsMatchedResponse, DnsName, DnsOutcome, DnsProbe, DnsQueryType, DnsRecordValue, DnsRequest,
+    DnsSection,
+};
+use super::wire::{
+    DnsResponseClassification, canonical_query_name, classify_dns_response, decode_dns_response,
+    decode_dns_tcp_frame, encode_dns_query,
+};
+use super::{
+    DNS_CLASS_IN, DNS_EPHEMERAL_SOURCE_PORT_BASE, DNS_FLAG_AUTHENTICATED_DATA,
+    DNS_FLAG_CHECKING_DISABLED, DNS_FLAG_RECURSION_AVAILABLE, DNS_FLAG_RECURSION_DESIRED,
+    DNS_FLAG_RESPONSE, DNS_FLAG_TRUNCATED, DNS_TYPE_OPT,
+};
+use crate::kernel::clock::Clock;
 use crate::kernel::policy_authorizer::PolicyAuthorizer;
+use crate::kernel::target::{Authorizer, Target};
 use crate::target::Authorized;
+use crate::{AddressFamily, BoundaryError, Stats};
+use bytes::Bytes;
 use evidence_validation::{NoopClock, ScriptedResolver, TimeoutExecutor};
 use outcome::{PayloadExecutor, single_attempt_request};
-use packetcraftr_capture::LinkType;
+use packetcraftr_capture::{Frame, LinkType};
 use packetcraftr_client::policy::Policy as TrafficPolicy;
 use packetcraftr_client::target::{
     Error as TargetResolutionError, Hostname, Resolver as HostnameResolver,
 };
 use packetcraftr_core::error::Classified;
-use packetcraftr_packet::semantics::BuiltinProtocol;
+use packetcraftr_net::capture::DEFAULT_CAPTURE_QUEUE_FRAMES;
+use packetcraftr_packet::{
+    Packet, decode::DecodedPacket, diagnostic::Diagnostic, layer::Raw, semantics::BuiltinProtocol,
+};
 use packetcraftr_protocol::builtin::registry as default_registry;
 use packetcraftr_protocol::icmp::{Icmpv4, Icmpv6};
-use std::result::Result;
+use packetcraftr_protocol::{
+    network::{Ipv4, Ipv6},
+    transport::Udp,
+};
 
 fn wire_name(name: &str) -> Vec<u8> {
     let mut bytes = Vec::new();

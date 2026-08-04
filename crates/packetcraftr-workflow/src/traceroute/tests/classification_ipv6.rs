@@ -1,13 +1,18 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::net::Ipv6Addr;
+use std::net::{IpAddr, Ipv6Addr};
 
+use super::super::classification::classify_traceroute_response;
 use super::super::engine::traceroute_identity;
-use super::super::*;
+use super::super::model::{TracerouteProbe, TracerouteResponseKind, TracerouteStrategy};
+use super::super::{DEFAULT_TRACEROUTE_UDP_PORT, TRACEROUTE_SOURCE_PORT};
 use super::support::decoded_at;
+use bytes::Bytes;
+use packetcraftr_packet::{Packet, decode::DecodedPacket};
 use packetcraftr_protocol::builtin::registry as default_registry;
 use packetcraftr_protocol::ipv6::SegmentRoutingHeader;
+use packetcraftr_protocol::{icmp::Icmpv6, network::Ipv6, transport::Udp};
 
 #[test]
 fn ipv6_classifier_accepts_intermediate_response() {

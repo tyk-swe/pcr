@@ -1,8 +1,18 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-use super::super::*;
-use super::request::*;
-use serde::Deserialize;
+use std::fmt;
+use std::time::Duration;
+
+use serde::{Deserialize, Serialize};
+
+use packetcraftr_capture::Frame;
+use packetcraftr_core::error::{Classification, Classified};
+use packetcraftr_net::capture::CaptureStatistics;
+use packetcraftr_packet::{
+    Packet, build::BuiltPacket, decode::DecodedPacket, diagnostic::Diagnostic, field::FieldValue,
+};
+
+use super::request::FuzzStrategy;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]

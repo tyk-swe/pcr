@@ -3,10 +3,19 @@
 
 //! Protocol-aware DNS response classification.
 
-use super::super::{
-    Bytes, DecodedPacket, DiagnosticSeverity, Dns, DnsLimits, DnsProbe, MalformedLayer, Packet,
-    ProbeTransport, ProtocolRegistry, Raw, ValidatedDnsResponse, probe,
+use bytes::Bytes;
+use packetcraftr_packet::{
+    Packet,
+    decode::DecodedPacket,
+    diagnostic::DiagnosticSeverity,
+    layer::{MalformedLayer, Raw},
+    registry::ProtocolRegistry,
 };
+use packetcraftr_protocol::application::Dns;
+
+use crate::kernel::probe::{self, Transport as ProbeTransport};
+
+use super::super::model::{DnsLimits, DnsProbe, ValidatedDnsResponse};
 use super::decode::decode_dns_response;
 use packetcraftr_packet::semantics::BuiltinProtocol;
 

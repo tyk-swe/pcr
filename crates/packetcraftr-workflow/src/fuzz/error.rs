@@ -1,7 +1,14 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::{Classification, Classified, Duration, Error, FuzzTarget, Kind};
+use std::time::Duration;
+
+use thiserror::Error;
+
+use packetcraftr_core::budget::DeadlineExceeded;
+use packetcraftr_core::error::{Classification, Classified, Kind};
+
+use super::model::FuzzTarget;
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -124,5 +131,12 @@ impl Classified for FuzzError {
             Self::Execution { source, .. } => source.causes(),
             _ => Vec::new(),
         }
+    }
+}
+
+pub(super) fn duration_limit(error: DeadlineExceeded) -> FuzzError {
+    FuzzError::DurationLimit {
+        actual: error.actual,
+        limit: error.limit,
     }
 }

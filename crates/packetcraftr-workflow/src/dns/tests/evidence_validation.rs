@@ -1,7 +1,14 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::*;
+use super::{
+    Arc, AtomicUsize, Authorized, Authorizer, BoundaryError, Bytes, Classified, Clock,
+    DecodedPacket, DnsError, DnsExchange, DnsExchangeExecution, DnsExecutor, DnsLimits,
+    DnsMatchedResponse, DnsProbe, DnsQueryType, Duration, Frame, Hostname, HostnameResolver,
+    Infallible, IpAddr, Ipv4Addr, LinkType, Mutex, Ordering, Packet, PayloadExecutor, Result,
+    Stats, Target, TargetResolutionError, UNIX_EPOCH, VecDeque, default_registry, dns,
+    encode_dns_query, single_attempt_request, validate_dns_execution,
+};
 
 pub(super) struct NoopClock;
 

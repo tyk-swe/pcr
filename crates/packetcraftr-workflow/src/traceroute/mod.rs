@@ -9,44 +9,9 @@
 //! routing and reachability problems. Destination authorization is required
 //! before the first probe, and hop count, attempts, and timeouts are finite.
 
-use std::fmt;
-use std::net::IpAddr;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
-use bytes::Bytes;
-use serde::{Deserialize, Serialize};
-use thiserror::Error;
-
-use packetcraftr_capture::Frame;
-use packetcraftr_core::error::{Classification, Classified, Kind};
-use packetcraftr_net::{
-    capture::{DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES},
-    route::{NeighborResolver, RouteProvider},
-};
-use packetcraftr_packet::{
-    Packet,
-    decode::DecodedPacket,
-    diagnostic::{Diagnostic, push_diagnostic_once},
-    registry::ProtocolRegistry,
-    template::{PacketTemplate, TemplateValues},
-};
-use packetcraftr_protocol::{
-    icmp::{Icmpv4, Icmpv6},
-    network::{Ipv4, Ipv6},
-    transport::{Tcp, Udp},
-};
-
-use super::scan::{MAX_SCAN_PROBES, MAX_SCAN_RATE};
-use super::{AddressFamily, BoundaryError, Stats};
-use crate::kernel::clock::Clock;
-use crate::kernel::evidence::{
-    EvidenceBudget, EvidenceDiagnosticDescriptor, ExchangeEvidence, ExchangeEvidenceError,
-    MatchedResponseEvidence, ResponseEvidence, format_exchange_evidence_error, retain_evidence,
-    validate_exchange_evidence as validate_shared_exchange_evidence,
-};
-use crate::kernel::probe::{self, Correlation, Transport as ProbeTransport};
-use crate::kernel::target::{Authorizer, Target};
-use packetcraftr_core::budget::{Deadline, DeadlineExceeded};
+use crate::kernel::evidence::EvidenceDiagnosticDescriptor;
 
 pub const DEFAULT_TRACEROUTE_FIRST_HOP: u8 = 1;
 pub const DEFAULT_TRACEROUTE_MAX_HOPS: u8 = 30;
@@ -96,15 +61,4 @@ pub use model::{
     TracerouteProbeStatus as ProbeStatus, TracerouteRequest as Request,
     TracerouteResponseKind as ResponseKind, TracerouteResult as Result,
     TracerouteStrategy as Strategy, TracerouteUndecodedEvidence as UndecodedEvidence,
-};
-
-use classification::classify_traceroute_response;
-#[cfg(test)]
-use engine::traceroute;
-use error::TracerouteError;
-use model::{
-    TracerouteBatch, TracerouteBatchExecution, TracerouteCompletion, TracerouteExecutor,
-    TracerouteHopResult, TracerouteLimits, TracerouteMatchedResponse, TracerouteProbe,
-    TracerouteProbeEvidence, TracerouteProbeStatus, TracerouteRequest, TracerouteResponseKind,
-    TracerouteResult, TracerouteStrategy, TracerouteUndecodedEvidence,
 };

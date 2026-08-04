@@ -1,11 +1,15 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::net::Ipv4Addr;
+use std::net::{IpAddr, Ipv4Addr};
 
-use super::super::*;
+use super::super::classification::classify_traceroute_response;
+use super::super::model::{TracerouteProbe, TracerouteResponseKind, TracerouteStrategy};
+use super::super::{DEFAULT_TRACEROUTE_UDP_PORT, TRACEROUTE_SOURCE_PORT};
 use super::support::{decoded_at, icmpv4_error, ipv4_udp_quote};
+use packetcraftr_packet::{Packet, diagnostic::Diagnostic};
 use packetcraftr_protocol::builtin::registry as default_registry;
+use packetcraftr_protocol::{network::Ipv4, transport::Tcp};
 
 #[test]
 fn ipv4_classifier_accepts_intermediate_destination_and_unreachable_responses() {

@@ -1,13 +1,22 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::{
-    BoundaryError, FieldValue, NeighborResolver, PacketTemplate, RouteProvider, ScanBatch,
-    ScanBatchExecution, ScanExecutor, ScanMatchedResponse, ScanTransport, TemplateValues,
-    classify_scan_response,
-};
+use crate::BoundaryError;
 use crate::kernel::client_executor::{ClientExecutor, Scan};
-use packetcraftr_net::{capture::CaptureProvider, transmit::PacketIo};
+use packetcraftr_net::{
+    capture::CaptureProvider,
+    route::{NeighborResolver, RouteProvider},
+    transmit::PacketIo,
+};
+use packetcraftr_packet::{
+    field::FieldValue,
+    template::{PacketTemplate, TemplateValues},
+};
+
+use super::classification::classify_scan_response;
+use super::model::{
+    ScanBatch, ScanBatchExecution, ScanExecutor, ScanMatchedResponse, ScanTransport,
+};
 
 /// Executes homogeneous scan batches through the client's capture-ready
 /// exchange lifecycle.

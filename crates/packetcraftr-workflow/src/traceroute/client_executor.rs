@@ -1,13 +1,20 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::{
-    BoundaryError, NeighborResolver, PacketTemplate, RouteProvider, TemplateValues,
-    TracerouteBatch, TracerouteBatchExecution, TracerouteExecutor, TracerouteMatchedResponse,
-    TracerouteStrategy, classify_traceroute_response,
-};
+use crate::BoundaryError;
 use crate::kernel::client_executor::{ClientExecutor, Traceroute};
-use packetcraftr_net::{capture::CaptureProvider, transmit::PacketIo};
+use packetcraftr_net::{
+    capture::CaptureProvider,
+    route::{NeighborResolver, RouteProvider},
+    transmit::PacketIo,
+};
+use packetcraftr_packet::template::{PacketTemplate, TemplateValues};
+
+use super::classification::classify_traceroute_response;
+use super::model::{
+    TracerouteBatch, TracerouteBatchExecution, TracerouteExecutor, TracerouteMatchedResponse,
+    TracerouteStrategy,
+};
 
 /// Executes homogeneous traceroute hop batches through the client's
 /// capture-ready exchange lifecycle.

@@ -2,17 +2,28 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 /// Generate, build, and dissect deterministic cases without any live seam.
+use std::sync::Arc;
+use std::time::Duration;
+
+use packetcraftr_core::budget::Deadline;
+use packetcraftr_packet::{
+    Packet, decode::Dissector, field::FieldKind, registry::ProtocolRegistry,
+};
+
+use crate::kernel::clock::Clock;
+use crate::kernel::evidence::EvidenceBudget;
+
+use super::SYNTHESIZED_ETHERNET_BYTES;
+use super::error::{FuzzError, duration_limit};
 use super::execution::{
     ExecutionEvidence, add_execution_stats, rate_delay, retain_evidence, validate_execution,
     worst_case_duration,
 };
-use super::mutation::{dissect_built, has_link_root, prepare};
-use super::{
-    Arc, Clock, Deadline, Dissector, Duration, EvidenceBudget, FieldKind, FuzzAuthorizer, FuzzCase,
-    FuzzCaseOutcome, FuzzError, FuzzExecutionCase, FuzzExecutor, FuzzLiveOptions, FuzzMode,
-    FuzzRequest, FuzzResult, FuzzStats, FuzzTarget, Packet, ProtocolRegistry,
-    SYNTHESIZED_ETHERNET_BYTES, duration_limit,
+use super::model::{
+    FuzzAuthorizer, FuzzCase, FuzzCaseOutcome, FuzzExecutionCase, FuzzExecutor, FuzzLiveOptions,
+    FuzzMode, FuzzRequest, FuzzResult, FuzzStats, FuzzTarget,
 };
+use super::mutation::{dissect_built, has_link_root, prepare};
 
 pub fn fuzz(
     request: &FuzzRequest,

@@ -1,7 +1,16 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-use super::super::*;
-use super::request::*;
+use std::net::IpAddr;
+use std::time::{Duration, SystemTime};
+
+use serde::Serialize;
+
+use packetcraftr_capture::Frame;
+use packetcraftr_packet::diagnostic::Diagnostic;
+
+use crate::Stats;
+
+use super::request::TracerouteStrategy;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -70,8 +79,18 @@ pub struct TracerouteUndecodedEvidence {
 #[cfg(test)]
 mod tests {
     use std::net::{IpAddr, Ipv4Addr};
+    use std::time::Duration;
 
-    use super::*;
+    use crate::AddressFamily;
+    use crate::kernel::probe::Transport as ProbeTransport;
+    use crate::kernel::target::Target;
+
+    use super::super::super::error::TracerouteError;
+    use super::super::super::{MAX_TRACEROUTE_DURATION, MAX_TRACEROUTE_PROBES_PER_HOP};
+    use super::super::request::{TracerouteLimits, TracerouteRequest, TracerouteStrategy};
+    use super::TracerouteResponseKind;
+    use crate::scan::{MAX_SCAN_PROBES, MAX_SCAN_RATE};
+    use packetcraftr_net::capture::{DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES};
 
     fn request(strategy: TracerouteStrategy, destination_port: Option<u16>) -> TracerouteRequest {
         TracerouteRequest {

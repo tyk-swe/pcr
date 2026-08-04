@@ -1,7 +1,14 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::*;
+use super::{
+    AddressFamily, AtomicUsize, Authorized, Authorizer, BoundaryError, Bytes, Classified,
+    DEFAULT_CAPTURE_QUEUE_FRAMES, DnsError, DnsExchange, DnsExchangeExecution, DnsExecutor,
+    DnsLimits, DnsQueryType, DnsRequest, Duration, Hostname, HostnameResolver, IpAddr, Ipv4Addr,
+    Ipv6Addr, NoopClock, Ordering, PayloadExecutor, PolicyAuthorizer, Result, ScriptedResolver,
+    Target, TargetResolutionError, TimeoutExecutor, TrafficPolicy, default_registry, dns,
+    single_attempt_request,
+};
 
 fn private_policy() -> TrafficPolicy {
     TrafficPolicy {

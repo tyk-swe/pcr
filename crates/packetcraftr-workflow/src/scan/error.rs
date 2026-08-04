@@ -1,7 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::{BoundaryError, Classified, Duration, Error, Kind};
+use std::time::Duration;
+
+use thiserror::Error;
+
+use crate::BoundaryError;
+use packetcraftr_core::error::{Classified, Kind};
 // `scan` re-exports `ScanClassification as Classification`, so the shared
 // error taxonomy is aliased here to keep the two names unambiguous.
 use packetcraftr_core::error::Classification as ErrorClassification;

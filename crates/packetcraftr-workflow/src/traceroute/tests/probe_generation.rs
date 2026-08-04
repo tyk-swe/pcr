@@ -1,14 +1,18 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::net::Ipv4Addr;
+use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use super::super::engine::traceroute;
 use super::super::engine::{build_batches, sent_traceroute_probe_matches};
-use super::super::*;
+use super::super::error::TracerouteError;
+use super::super::model::TracerouteStrategy;
 use super::support::{CountingRejectExecutor, FixedAuthorizer, NoopClock, udp_traceroute_request};
+use crate::kernel::target::Target;
 use packetcraftr_protocol::builtin::registry as default_registry;
+use packetcraftr_protocol::network::{Ipv4, Ipv6};
 
 #[test]
 fn udp_destination_port_overflow_is_rejected_before_authorized_probe_construction() {

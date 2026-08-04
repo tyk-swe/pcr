@@ -1,10 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-mod execution_boundary;
+mod execution;
 mod request;
 mod result;
 
-pub use execution_boundary::*;
-pub use request::*;
-pub use result::*;
+pub use execution::{ScanBatch, ScanBatchExecution, ScanExecutor, ScanMatchedResponse, ScanProbe};
+pub use request::{ScanLimits, ScanRequest, ScanTransport};
+pub use result::{
+    ScanClassification, ScanEndpointResult, ScanProbeEvidence, ScanProbeStatus, ScanResult,
+};

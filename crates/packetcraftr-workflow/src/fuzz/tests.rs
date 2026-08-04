@@ -2,16 +2,38 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::convert::Infallible;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::result::Result;
+use std::sync::Arc;
+use std::time::Duration;
 
+use super::engine::{fuzz, fuzz_live};
+use super::error::FuzzError;
 use super::execution::SplitMix64;
+use super::model::{
+    FuzzAuthorizer, FuzzCaseExecution, FuzzCaseOutcome, FuzzExecutionCase, FuzzExecutor,
+    FuzzLimits, FuzzLiveOptions, FuzzMode, FuzzRequest, FuzzStrategy, FuzzTarget,
+};
 use super::mutation::{bounded_value_size, random_value};
-use super::*;
+use super::{
+    MAX_FUZZ_CASES, MAX_FUZZ_DURATION, MAX_FUZZ_FIELD_BYTES, MAX_FUZZ_LIST_ITEMS, MAX_FUZZ_RATE,
+    MAX_FUZZ_SHRINK_STEPS, MAX_FUZZ_STRATEGIES,
+};
+use crate::kernel::clock::Clock;
 use crate::{BoundaryError, Stats};
+use bytes::Bytes;
+use packetcraftr_capture::{Frame, LinkType};
+use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::error::{Classification, Classified, Kind};
 use packetcraftr_packet::{
-    build::BuildMode, document::PacketDocument, field::WireValue, layer::Raw,
+    Packet,
+    build::{BuildContext, BuildMode, BuildOptions, Builder},
+    document::PacketDocument,
+    field::{FieldKind, FieldValue, WireValue},
+    layer::Raw,
+    registry::ProtocolRegistry,
 };
 use packetcraftr_protocol::{builtin::registry as default_registry, network::Ipv4, transport::Udp};
-use std::result::Result;
 
 fn fuzz_protocol_registry() -> Arc<ProtocolRegistry> {
     Arc::new(default_registry().unwrap())

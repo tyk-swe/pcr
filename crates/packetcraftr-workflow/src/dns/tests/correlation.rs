@@ -1,7 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::*;
+use super::{
+    Bytes, DecodedPacket, Diagnostic, DnsLimits, DnsProbe, DnsQueryType, DnsResponseClassification,
+    FixtureRecord, Frame, Icmpv4, Icmpv6, IpAddr, Ipv4, Ipv4Addr, Ipv6, Ipv6Addr, LinkType, Packet,
+    Raw, UNIX_EPOCH, Udp, classify_dns_response, default_registry, encode_dns_query,
+    fixture_response,
+};
 
 #[test]
 fn correlation_requires_exact_reverse_tuple_checksum_and_dns_identity() {

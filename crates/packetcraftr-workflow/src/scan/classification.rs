@@ -1,9 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::{
-    Correlation, DecodedPacket, IpAddr, Packet, ProtocolRegistry, ScanClassification, ScanTransport,
-};
+use std::net::IpAddr;
+
+use packetcraftr_packet::{Packet, decode::DecodedPacket, registry::ProtocolRegistry};
+
+use crate::kernel::probe::Correlation;
+
+use super::model::{ScanClassification, ScanTransport};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ScanResponseClassification {

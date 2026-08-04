@@ -10,45 +10,9 @@
 //! destination authorization and terminates on finite packet, byte, duration,
 //! and evidence budgets.
 
-use std::collections::{HashMap, HashSet};
-use std::fmt;
-use std::net::IpAddr;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
-use bytes::Bytes;
-use serde::{Deserialize, Serialize};
-use thiserror::Error;
-
-use packetcraftr_capture::Frame;
-use packetcraftr_core::error::{Classified, Kind};
-use packetcraftr_net::{
-    capture::{DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES},
-    route::{NeighborResolver, RouteProvider},
-};
-use packetcraftr_packet::{
-    Packet,
-    decode::DecodedPacket,
-    diagnostic::{Diagnostic, push_diagnostic_once},
-    field::FieldValue,
-    registry::ProtocolRegistry,
-    template::{DEFAULT_MAX_TEMPLATE_PACKETS, PacketTemplate, TemplateValues},
-};
-use packetcraftr_protocol::{
-    icmp::{Icmpv4, Icmpv6},
-    network::{Ipv4, Ipv6},
-    transport::{Tcp, Udp},
-};
-
-use super::{AddressFamily, BoundaryError, Stats};
-use crate::kernel::clock::Clock;
-use crate::kernel::evidence::{
-    EvidenceBudget, EvidenceDiagnosticDescriptor, ExchangeEvidence, ExchangeEvidenceError,
-    MatchedResponseEvidence, ResponseEvidence, format_exchange_evidence_error, retain_evidence,
-    validate_exchange_evidence as validate_shared_exchange_evidence,
-};
-use crate::kernel::probe::Correlation;
-use crate::kernel::target::{Authorizer, Target};
-use packetcraftr_core::budget::{Deadline, DeadlineExceeded};
+use crate::kernel::evidence::EvidenceDiagnosticDescriptor;
 
 pub const DEFAULT_SCAN_BATCH_SIZE: usize = 64;
 pub const DEFAULT_MAX_SCAN_PORTS: usize = 1_024;
@@ -96,14 +60,4 @@ pub use model::{
     ScanMatchedResponse as MatchedResponse, ScanProbe as Probe, ScanProbeEvidence as ProbeEvidence,
     ScanProbeStatus as ProbeStatus, ScanRequest as Request, ScanResult as Result,
     ScanTransport as Transport,
-};
-
-use classification::classify_scan_response;
-#[cfg(test)]
-use engine::scan;
-use error::ScanError;
-use model::{
-    ScanBatch, ScanBatchExecution, ScanClassification, ScanEndpointResult, ScanExecutor,
-    ScanLimits, ScanMatchedResponse, ScanProbe, ScanProbeEvidence, ScanProbeStatus, ScanRequest,
-    ScanResult, ScanTransport,
 };

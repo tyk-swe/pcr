@@ -1,11 +1,19 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::net::Ipv4Addr;
+use std::net::{IpAddr, Ipv4Addr};
 use std::result::Result;
+use std::time::Duration;
 
-use super::super::*;
+use super::super::engine::traceroute;
+use super::super::error::TracerouteError;
+use super::super::model::{
+    TracerouteBatch, TracerouteBatchExecution, TracerouteCompletion, TracerouteExecutor,
+    TracerouteMatchedResponse, TracerouteProbeStatus,
+};
 use super::support::{FixedAuthorizer, MixedHopExecutor, NoopClock, udp_traceroute_request};
+use crate::BoundaryError;
+use crate::kernel::target::Target;
 use packetcraftr_protocol::builtin::registry as default_registry;
 
 #[test]

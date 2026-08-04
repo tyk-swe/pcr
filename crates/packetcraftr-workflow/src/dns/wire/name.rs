@@ -3,7 +3,10 @@
 
 //! Canonical and compressed DNS name handling.
 
-use super::super::{Bytes, DnsLimits, DnsName, DnsWireError};
+use bytes::Bytes;
+
+use super::super::error::DnsWireError;
+use super::super::model::{DnsLimits, DnsName};
 
 /// Canonicalizes a bounded ASCII DNS name for wire construction and
 /// case-insensitive correlation. The returned form always has a trailing dot.

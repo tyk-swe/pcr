@@ -1,7 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::*;
+use super::{
+    AddressFamily, Authorized, Authorizer, BoundaryError, Bytes, DNS_FLAG_TRUNCATED, DecodedPacket,
+    DnsAttemptStatus, DnsExchange, DnsExchangeExecution, DnsExecutor, DnsLimits,
+    DnsMatchedResponse, DnsOutcome, DnsQueryType, DnsRequest, Duration, FixtureRecord, Frame,
+    IpAddr, Ipv4, Ipv4Addr, LinkType, NoopClock, Packet, Raw, Result, Stats, SystemTime, Target,
+    UNIX_EPOCH, Udp, default_registry, dns, fixture_response,
+};
 
 struct LocalAuthorizer;
 

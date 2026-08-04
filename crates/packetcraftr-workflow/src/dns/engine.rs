@@ -5,21 +5,36 @@
 /// protocol registry, and exchange seams. Every retry repeats declared-name
 /// authorization, resolution, and authorization of every answer before a new
 /// probe is constructed.
-use super::Clock;
-use super::wire::dns_payload;
-use super::{
-    Authorizer, DNS_EPHEMERAL_SOURCE_PORT_BASE, DNS_EVIDENCE_DIAGNOSTICS, Deadline,
-    DeadlineExceeded, DecodedPacket, DnsAttemptEvidence, DnsAttemptStatus, DnsError, DnsExchange,
-    DnsExchangeExecution, DnsExecutor, DnsLimits, DnsMatchedResponse, DnsOutcome, DnsProbe,
-    DnsRequest, DnsResponseClassification, DnsResult, DnsUndecodedEvidence, Duration,
-    EvidenceBudget, ExchangeEvidenceError, MAX_DNS_PROBE_OVERHEAD, NetworkEnvelope, Packet,
-    ProtocolRegistry, ResponseCandidate, ResponseEvidence, Stats, SystemTime,
-    classify_dns_response, encode_dns_query, push_diagnostic_once, push_undecoded_limit_diagnostic,
-    response_within_deadline, retain_evidence, select_response_candidate,
-    validate_aggregate_evidence_limits, validate_capture_statistics_evidence,
-    validate_response_frames_and_deadlines, validate_sent_byte_accounting,
-};
+use std::time::{Duration, SystemTime};
+
+use packetcraftr_core::budget::{Deadline, DeadlineExceeded};
 use packetcraftr_packet::semantics::BuiltinProtocol;
+use packetcraftr_packet::{
+    Packet, codec::NetworkEnvelope, decode::DecodedPacket, diagnostic::push_diagnostic_once,
+    registry::ProtocolRegistry,
+};
+
+use crate::Stats;
+use crate::kernel::clock::Clock;
+use crate::kernel::evidence::{
+    EvidenceBudget, ExchangeEvidenceError, ResponseCandidate, ResponseEvidence,
+    push_undecoded_limit_diagnostic, response_within_deadline, retain_evidence,
+    select_response_candidate, validate_aggregate_evidence_limits,
+    validate_capture_statistics_evidence, validate_response_frames_and_deadlines,
+    validate_sent_byte_accounting,
+};
+use crate::kernel::target::Authorizer;
+
+use super::error::DnsError;
+use super::model::{
+    DnsAttemptEvidence, DnsAttemptStatus, DnsExchange, DnsExchangeExecution, DnsExecutor,
+    DnsLimits, DnsMatchedResponse, DnsOutcome, DnsProbe, DnsRequest, DnsResult,
+    DnsUndecodedEvidence,
+};
+use super::wire::{
+    DnsResponseClassification, classify_dns_response, dns_payload, encode_dns_query,
+};
+use super::{DNS_EPHEMERAL_SOURCE_PORT_BASE, DNS_EVIDENCE_DIAGNOSTICS, MAX_DNS_PROBE_OVERHEAD};
 
 pub fn dns<A, E, C>(
     request: &DnsRequest,

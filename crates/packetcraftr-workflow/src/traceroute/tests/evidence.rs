@@ -1,18 +1,28 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::net::Ipv4Addr;
+use std::net::{IpAddr, Ipv4Addr};
 use std::result::Result;
-use std::time::UNIX_EPOCH;
+use std::time::{Duration, UNIX_EPOCH};
 
-use super::super::engine::{build_batches, sent_traceroute_probe_matches, validate_execution};
-use super::super::*;
+use super::super::engine::{
+    build_batches, sent_traceroute_probe_matches, traceroute, validate_execution,
+};
+use super::super::error::TracerouteError;
+use super::super::model::{
+    TracerouteBatch, TracerouteBatchExecution, TracerouteCompletion, TracerouteExecutor,
+    TracerouteLimits, TracerouteMatchedResponse, TracerouteProbeStatus, TracerouteResponseKind,
+};
 use super::support::{
     FixedAuthorizer, MixedHopExecutor, NoopClock, UndecodedExecutor, frame_at, icmpv4_error,
     ipv4_udp_quote, udp_traceroute_request,
 };
+use crate::kernel::target::Target;
+use crate::{BoundaryError, Stats};
+use packetcraftr_capture::Frame;
 use packetcraftr_net::capture::CaptureStatistics;
 use packetcraftr_protocol::builtin::registry as default_registry;
+use packetcraftr_protocol::network::Ipv4;
 
 #[test]
 fn workflow_preserves_mixed_attempts_and_stops_after_destination_evidence() {

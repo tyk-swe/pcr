@@ -2,19 +2,23 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::collections::VecDeque;
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::result::Result;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use super::super::*;
+use super::super::engine::traceroute;
+use super::super::error::TracerouteError;
 use super::support::{
     CountingRejectExecutor, NoopClock, UndecodedExecutor, udp_traceroute_request,
 };
 use crate::kernel::policy_authorizer::PolicyAuthorizer;
+use crate::kernel::target::{Authorizer, Target};
 use crate::target::Authorized;
+use crate::{AddressFamily, BoundaryError};
 use packetcraftr_client::policy::Policy as TrafficPolicy;
 use packetcraftr_client::target::{Error as TargetResolutionError, Resolver as HostnameResolver};
+use packetcraftr_core::error::Classified;
 use packetcraftr_protocol::builtin::registry as default_registry;
 
 fn private_traceroute_policy() -> TrafficPolicy {

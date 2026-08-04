@@ -1,11 +1,14 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::{
-    Correlation, DecodedPacket, IpAddr, Packet, ProtocolRegistry, TracerouteResponseKind,
-    TracerouteStrategy, probe,
-};
+use std::net::IpAddr;
+
 use packetcraftr_packet::semantics::{self, BuiltinProtocol};
+use packetcraftr_packet::{Packet, decode::DecodedPacket, registry::ProtocolRegistry};
+
+use crate::kernel::probe::{self, Correlation};
+
+use super::model::{TracerouteResponseKind, TracerouteStrategy};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TracerouteResponseClassification {

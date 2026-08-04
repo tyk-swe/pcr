@@ -3,10 +3,10 @@
 
 //! Question-relevance filtering and bounded rejected-record auditing.
 
-use super::super::{
-    DNS_CLASS_IN, DNS_TYPE_OPT, DnsName, DnsQueryType, DnsRecord, DnsRecordValue,
-    DnsRejectedRecord, DnsSection,
+use super::super::model::{
+    DnsName, DnsQueryType, DnsRecord, DnsRecordValue, DnsRejectedRecord, DnsSection,
 };
+use super::super::{DNS_CLASS_IN, DNS_TYPE_OPT};
 
 pub(super) struct RelevantRecords {
     pub(super) answers: Vec<DnsRecord>,

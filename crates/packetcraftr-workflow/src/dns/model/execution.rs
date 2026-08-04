@@ -1,7 +1,22 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-use super::super::*;
-use super::request::*;
+use std::net::IpAddr;
+use std::time::Duration;
+
+use bytes::Bytes;
+use packetcraftr_capture::Frame;
+use packetcraftr_packet::{Packet, decode::DecodedPacket, diagnostic::Diagnostic, layer::Raw};
+use packetcraftr_protocol::{
+    application::Dns,
+    network::{Ipv4, Ipv6},
+    transport::Udp,
+};
+
+use crate::Stats;
+use crate::kernel::probe::nonzero_ipv4_identification;
+
+use super::super::DEFAULT_DNS_SERVER_PORT;
+use super::request::DnsQueryType;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DnsProbe {

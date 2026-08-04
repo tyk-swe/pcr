@@ -1,12 +1,17 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::{
-    BoundaryError, DnsExchange, DnsExchangeExecution, DnsExecutor, DnsMatchedResponse,
-    NeighborResolver, PacketTemplate, ProbeTransport, RouteProvider, probe,
-};
+use crate::BoundaryError;
 use crate::kernel::client_executor::{ClientExecutor, Dns};
-use packetcraftr_net::{capture::CaptureProvider, transmit::PacketIo};
+use crate::kernel::probe::{self, Transport as ProbeTransport};
+use packetcraftr_net::{
+    capture::CaptureProvider,
+    route::{NeighborResolver, RouteProvider},
+    transmit::PacketIo,
+};
+use packetcraftr_packet::template::PacketTemplate;
+
+use super::model::{DnsExchange, DnsExchangeExecution, DnsExecutor, DnsMatchedResponse};
 
 /// Executes one DNS query through the client's capture-ready exchange
 /// lifecycle.

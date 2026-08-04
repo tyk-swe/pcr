@@ -1,11 +1,17 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::{
-    CASE_DOMAIN, Deadline, Diagnostic, Duration, EvidenceBudget, Frame, FuzzCase,
-    FuzzCaseExecution, FuzzError, FuzzLimits, FuzzLiveOptions, FuzzStats, MAX_FUZZ_DURATION,
-    SPLITMIX_INCREMENT, duration_limit, push_diagnostic_once,
-};
+use std::time::Duration;
+
+use packetcraftr_capture::Frame;
+use packetcraftr_core::budget::Deadline;
+use packetcraftr_packet::diagnostic::{Diagnostic, push_diagnostic_once};
+
+use crate::kernel::evidence::EvidenceBudget;
+
+use super::error::{FuzzError, duration_limit};
+use super::model::{FuzzCase, FuzzCaseExecution, FuzzLimits, FuzzLiveOptions, FuzzStats};
+use super::{CASE_DOMAIN, MAX_FUZZ_DURATION, SPLITMIX_INCREMENT};
 
 pub(super) fn worst_case_duration(
     live: FuzzLiveOptions,

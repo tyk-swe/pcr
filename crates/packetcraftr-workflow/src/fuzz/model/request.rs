@@ -1,8 +1,23 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-use super::super::*;
-use serde::Deserialize;
+use std::fmt;
+use std::net::IpAddr;
 use std::str::FromStr;
+use std::time::Duration;
+
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+use packetcraftr_net::capture::{DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES};
+use packetcraftr_packet::build::{BuildOptions, DEFAULT_MAX_PACKET_SIZE};
+
+use super::super::error::FuzzError;
+use super::super::{
+    DEFAULT_FUZZ_CASES, DEFAULT_MAX_FUZZ_CASES, DEFAULT_MAX_FUZZ_FIELD_BYTES,
+    DEFAULT_MAX_FUZZ_LIST_ITEMS, DEFAULT_MAX_FUZZ_SHRINK_STEPS, MAX_FUZZ_CASES, MAX_FUZZ_DURATION,
+    MAX_FUZZ_FIELD_BYTES, MAX_FUZZ_LIST_ITEMS, MAX_FUZZ_RATE, MAX_FUZZ_SHRINK_STEPS,
+    MAX_FUZZ_STRATEGIES,
+};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

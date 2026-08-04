@@ -1,12 +1,20 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::net::{Ipv4Addr, Ipv6Addr};
+
+use bytes::Bytes;
+
+use super::super::error::DnsWireError;
+use super::super::model::{
+    DnsEdns, DnsEdnsOption, DnsLimits, DnsName, DnsQueryType, DnsRecord, DnsRecordValue,
+    ValidatedDnsResponse,
+};
 use super::super::{
-    Bytes, DNS_CLASS_IN, DNS_FLAG_AUTHENTICATED_DATA, DNS_FLAG_AUTHORITATIVE,
-    DNS_FLAG_CHECKING_DISABLED, DNS_FLAG_RECURSION_AVAILABLE, DNS_FLAG_RECURSION_DESIRED,
-    DNS_FLAG_RESPONSE, DNS_FLAG_TRUNCATED, DNS_HEADER_BYTES, DNS_OPCODE_MASK, DNS_RCODE_MASK,
-    DNS_RESERVED_MASK, DNS_TYPE_OPT, DnsEdns, DnsEdnsOption, DnsLimits, DnsName, DnsQueryType,
-    DnsRecord, DnsRecordValue, DnsWireError, Ipv4Addr, Ipv6Addr, ValidatedDnsResponse,
+    DNS_CLASS_IN, DNS_FLAG_AUTHENTICATED_DATA, DNS_FLAG_AUTHORITATIVE, DNS_FLAG_CHECKING_DISABLED,
+    DNS_FLAG_RECURSION_AVAILABLE, DNS_FLAG_RECURSION_DESIRED, DNS_FLAG_RESPONSE,
+    DNS_FLAG_TRUNCATED, DNS_HEADER_BYTES, DNS_OPCODE_MASK, DNS_RCODE_MASK, DNS_RESERVED_MASK,
+    DNS_TYPE_OPT,
 };
 use super::name::{canonical_query_name, decode_name};
 use super::relevance::{RelevantRecords, filter_relevant_records};

@@ -3,9 +3,14 @@
 
 //! Deterministic field-value mutation strategies and shrinking.
 
+use std::net::{Ipv4Addr, Ipv6Addr};
+
+use bytes::Bytes;
+use packetcraftr_packet::field::{FieldKind, FieldValue};
+
 use super::super::engine::ResolvedField;
 use super::super::execution::SplitMix64;
-use super::super::{Bytes, FieldKind, FieldValue, FuzzLimits, FuzzStrategy, Ipv4Addr, Ipv6Addr};
+use super::super::model::{FuzzLimits, FuzzStrategy};
 
 pub(super) fn mutation_value(
     strategy: FuzzStrategy,

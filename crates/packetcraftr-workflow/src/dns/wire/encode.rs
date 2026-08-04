@@ -3,9 +3,11 @@
 
 //! Canonical DNS query encoding.
 
-use super::super::{
-    Bytes, DNS_CLASS_IN, DNS_FLAG_RECURSION_DESIRED, DNS_HEADER_BYTES, DnsQueryType, DnsWireError,
-};
+use bytes::Bytes;
+
+use super::super::error::DnsWireError;
+use super::super::model::DnsQueryType;
+use super::super::{DNS_CLASS_IN, DNS_FLAG_RECURSION_DESIRED, DNS_HEADER_BYTES};
 use super::name::{canonical_query_name, encode_name};
 
 /// Constructs one standard IN-class DNS query without resolver or I/O side

@@ -1,6 +1,22 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-use super::super::*;
+use std::collections::HashSet;
+use std::fmt;
+use std::time::Duration;
+
+use serde::{Deserialize, Serialize};
+
+use packetcraftr_net::capture::{DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES};
+use packetcraftr_packet::template::DEFAULT_MAX_TEMPLATE_PACKETS;
+
+use crate::AddressFamily;
+use crate::kernel::target::Target;
+
+use super::super::error::ScanError;
+use super::super::{
+    DEFAULT_MAX_SCAN_PORTS, DEFAULT_MAX_UNDECODED_SCAN_FRAMES, DEFAULT_SCAN_BATCH_SIZE,
+    MAX_SCAN_ATTEMPTS, MAX_SCAN_DURATION, MAX_SCAN_PROBES, MAX_SCAN_RATE,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

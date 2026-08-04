@@ -1,7 +1,14 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-use super::super::*;
-use super::request::*;
+use std::net::IpAddr;
+use std::time::Duration;
+
+use packetcraftr_capture::Frame;
+use packetcraftr_packet::{Packet, decode::DecodedPacket, diagnostic::Diagnostic};
+
+use crate::Stats;
+
+use super::request::ScanTransport;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ScanProbe {
@@ -15,8 +22,19 @@ pub struct ScanProbe {
 #[cfg(test)]
 mod tests {
     use std::net::{IpAddr, Ipv4Addr};
+    use std::time::Duration;
 
-    use super::*;
+    use crate::AddressFamily;
+    use crate::kernel::target::Target;
+
+    use super::super::super::error::ScanError;
+    use super::super::super::{
+        MAX_SCAN_ATTEMPTS, MAX_SCAN_DURATION, MAX_SCAN_PROBES, MAX_SCAN_RATE,
+    };
+    use super::super::request::{ScanLimits, ScanRequest, ScanTransport};
+    use super::super::result::ScanClassification;
+    use super::ScanProbe;
+    use packetcraftr_net::capture::{DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES};
 
     fn request(transport: ScanTransport, ports: Vec<u16>) -> ScanRequest {
         ScanRequest {

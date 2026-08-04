@@ -3,10 +3,16 @@
 
 //! Bounded decode evidence and capture-link helpers.
 
-use super::super::{
-    BuiltPacket, BuiltinProtocol, DecodeOptions, DecodedPacket, Diagnostic, Dissector, Frame,
-    FuzzLimits, LinkType, Packet,
+use packetcraftr_capture::{Frame, LinkType};
+use packetcraftr_packet::{
+    Packet,
+    build::BuiltPacket,
+    decode::{DecodeOptions, DecodedPacket, Dissector},
+    diagnostic::Diagnostic,
+    semantics::BuiltinProtocol,
 };
+
+use super::super::model::FuzzLimits;
 
 pub(in crate::fuzz) fn dissect_built(
     dissector: &Dissector,

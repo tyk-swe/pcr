@@ -1,6 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-use super::super::*;
+use std::net::IpAddr;
+use std::time::Duration;
+
+use packetcraftr_capture::Frame;
+use packetcraftr_packet::{Packet, build::BuiltPacket, diagnostic::Diagnostic};
 
 #[derive(Clone, Debug)]
 pub struct FuzzExecutionCase {

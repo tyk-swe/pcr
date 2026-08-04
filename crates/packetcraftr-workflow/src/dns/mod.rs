@@ -4,48 +4,9 @@
 //! Bounded DNS query construction, response validation, relevance filtering,
 //! and retry execution over the shared target-policy and exchange seams.
 
-use std::fmt;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
-use bytes::Bytes;
-use serde::Serialize;
-use thiserror::Error;
-
-use packetcraftr_capture::Frame;
-use packetcraftr_core::error::{Classification, Classified, Kind};
-use packetcraftr_net::{
-    capture::{DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES},
-    route::{NeighborResolver, RouteProvider},
-};
-use packetcraftr_packet::{
-    Packet,
-    codec::NetworkEnvelope,
-    decode::DecodedPacket,
-    diagnostic::{Diagnostic, DiagnosticSeverity, push_diagnostic_once},
-    layer::{MalformedLayer, Raw},
-    registry::ProtocolRegistry,
-    template::PacketTemplate,
-};
-use packetcraftr_protocol::{
-    application::Dns,
-    network::{Ipv4, Ipv6},
-    transport::Udp,
-};
-
-use super::scan::MAX_SCAN_RATE;
-use super::{AddressFamily, BoundaryError, Stats};
-use crate::kernel::clock::Clock;
-use crate::kernel::evidence::{
-    EvidenceBudget, EvidenceDiagnosticDescriptor, ExchangeEvidenceError, ResponseCandidate,
-    ResponseEvidence, push_undecoded_limit_diagnostic, response_within_deadline, retain_evidence,
-    select_response_candidate, validate_aggregate_evidence_limits,
-    validate_capture_statistics_evidence, validate_response_frames_and_deadlines,
-    validate_sent_byte_accounting,
-};
-use crate::kernel::probe::{self, Transport as ProbeTransport, nonzero_ipv4_identification};
-use crate::kernel::target::{Authorizer, Target};
-use packetcraftr_core::budget::{Deadline, DeadlineExceeded};
+use crate::kernel::evidence::EvidenceDiagnosticDescriptor;
 
 pub const DNS_HEADER_BYTES: usize = 12;
 pub const DEFAULT_DNS_SERVER_PORT: u16 = 53;
@@ -115,16 +76,3 @@ pub use wire::{
     classify_dns_response as classify_response, decode_dns_response as decode_response,
     decode_dns_tcp_frame as decode_tcp_frame, encode_dns_query as encode_query, response_code_name,
 };
-
-#[cfg(test)]
-use engine::dns;
-use error::{DnsError, DnsWireError};
-use model::{
-    DnsAttemptEvidence, DnsAttemptStatus, DnsEdns, DnsEdnsOption, DnsExchange,
-    DnsExchangeExecution, DnsExecutor, DnsLimits, DnsMatchedResponse, DnsName, DnsOutcome,
-    DnsProbe, DnsQueryType, DnsRecord, DnsRecordValue, DnsRejectedRecord, DnsRequest, DnsResult,
-    DnsSection, DnsUndecodedEvidence, ValidatedDnsResponse,
-};
-use wire::{DnsResponseClassification, classify_dns_response, encode_dns_query};
-#[cfg(test)]
-use wire::{decode_dns_response, decode_dns_tcp_frame};

@@ -7,8 +7,10 @@ use bytes::Bytes;
 
 use crate::{
     ipv6::SegmentRoutingHeader,
-    network::Ipv6,
+    link::Ethernet,
+    network::{Ipv4, Ipv6},
     transport::{Tcp, Udp},
+    tunnel::Vxlan,
 };
 use packetcraftr_packet::{
     Packet, field::FieldValue, layer::Raw, matcher::ResponseMatcher, semantics::BuiltinProtocol,
@@ -185,6 +187,178 @@ fn reverse_tuple_accepts_a_fully_reversed_tunneled_reply() {
         matcher.responder(&request, &response),
         Some(IpAddr::V6(inner_destination))
     );
+}
+
+#[test]
+fn udp_tunnel_matching_requires_every_udp_tuple_to_reverse() {
+    let outer_source = Ipv4Addr::new(10, 0, 0, 1);
+    let outer_destination = Ipv4Addr::new(10, 0, 0, 2);
+    let inner_source = Ipv4Addr::new(192, 168, 1, 1);
+    let inner_destination = Ipv4Addr::new(192, 168, 1, 2);
+    let mut request = Packet::new();
+    request
+        .push(Ipv4 {
+            source: outer_source,
+            destination: outer_destination,
+            ..Ipv4::default()
+        })
+        .push(Udp {
+            source_port: 40_000,
+            destination_port: 4789,
+            ..Udp::default()
+        })
+        .push(Vxlan::default())
+        .push(Ethernet::default())
+        .push(Ipv4 {
+            source: inner_source,
+            destination: inner_destination,
+            ..Ipv4::default()
+        })
+        .push(Udp {
+            source_port: 50_000,
+            destination_port: 53,
+            ..Udp::default()
+        });
+    let mut response = Packet::new();
+    response
+        .push(Ipv4 {
+            source: outer_destination,
+            destination: outer_source,
+            ..Ipv4::default()
+        })
+        .push(Udp {
+            source_port: 4789,
+            destination_port: 40_000,
+            ..Udp::default()
+        })
+        .push(Vxlan::default())
+        .push(Ethernet::default())
+        .push(Ipv4 {
+            source: inner_destination,
+            destination: inner_source,
+            ..Ipv4::default()
+        })
+        .push(Udp {
+            source_port: 53,
+            destination_port: 50_000,
+            ..Udp::default()
+        });
+    let matcher = ReverseFlowMatcher::new(BuiltinProtocol::Udp);
+
+    assert!(matcher.matches(&request, &response).matched);
+    assert_eq!(
+        matcher.responder(&request, &response),
+        Some(IpAddr::V4(inner_destination))
+    );
+
+    let mut wrong_inner_endpoint = response.clone();
+    wrong_inner_endpoint
+        .layer_mut(4)
+        .unwrap()
+        .as_any_mut()
+        .downcast_mut::<Ipv4>()
+        .unwrap()
+        .source = Ipv4Addr::new(192, 168, 1, 3);
+    assert!(!matcher.matches(&request, &wrong_inner_endpoint).matched);
+
+    let mut wrong_inner_tuple = response.clone();
+    wrong_inner_tuple
+        .layer_mut(5)
+        .unwrap()
+        .as_any_mut()
+        .downcast_mut::<Udp>()
+        .unwrap()
+        .destination_port = 50_001;
+    assert!(!matcher.matches(&request, &wrong_inner_tuple).matched);
+
+    let mut missing_inner_udp = response;
+    missing_inner_udp.remove(5).unwrap();
+    assert!(!matcher.matches(&request, &missing_inner_udp).matched);
+}
+
+#[test]
+fn the_innermost_matcher_validates_enclosing_tunnel_transports() {
+    let outer_source = Ipv4Addr::new(10, 0, 0, 1);
+    let outer_destination = Ipv4Addr::new(10, 0, 0, 2);
+    let inner_source = Ipv4Addr::new(192, 168, 1, 1);
+    let inner_destination = Ipv4Addr::new(192, 168, 1, 2);
+    let mut request = Packet::new();
+    request
+        .push(Ipv4 {
+            source: outer_source,
+            destination: outer_destination,
+            ..Ipv4::default()
+        })
+        .push(Udp {
+            source_port: 40_000,
+            destination_port: 4789,
+            ..Udp::default()
+        })
+        .push(Vxlan::default())
+        .push(Ethernet::default())
+        .push(Ipv4 {
+            source: inner_source,
+            destination: inner_destination,
+            ..Ipv4::default()
+        })
+        .push(Tcp {
+            source_port: 50_000,
+            destination_port: 443,
+            sequence: 17,
+            flags: Tcp::SYN,
+            ..Tcp::default()
+        });
+    let mut response = Packet::new();
+    response
+        .push(Ipv4 {
+            source: outer_destination,
+            destination: outer_source,
+            ..Ipv4::default()
+        })
+        .push(Udp {
+            source_port: 4789,
+            destination_port: 40_000,
+            ..Udp::default()
+        })
+        .push(Vxlan::default())
+        .push(Ethernet::default())
+        .push(Ipv4 {
+            source: inner_destination,
+            destination: inner_source,
+            ..Ipv4::default()
+        })
+        .push(Tcp {
+            source_port: 443,
+            destination_port: 50_000,
+            sequence: 91,
+            acknowledgment: 18,
+            flags: Tcp::SYN | Tcp::ACK,
+            ..Tcp::default()
+        });
+
+    let tcp = ReverseFlowMatcher::new(BuiltinProtocol::Tcp);
+    let udp = ReverseFlowMatcher::new(BuiltinProtocol::Udp);
+    assert!(tcp.matches(&request, &response).matched);
+    assert!(!udp.matches(&request, &response).matched);
+    assert_eq!(
+        tcp.responder(&request, &response),
+        Some(IpAddr::V4(inner_destination))
+    );
+
+    let mut wrong_outer_tuple = response.clone();
+    wrong_outer_tuple
+        .layer_mut(1)
+        .unwrap()
+        .as_any_mut()
+        .downcast_mut::<Udp>()
+        .unwrap()
+        .destination_port = 40_001;
+    assert!(!tcp.matches(&request, &wrong_outer_tuple).matched);
+
+    let mut missing_inner_response = response;
+    missing_inner_response.remove(5).unwrap();
+    assert!(!tcp.matches(&request, &missing_inner_response).matched);
+    assert!(!udp.matches(&request, &missing_inner_response).matched);
 }
 
 #[test]

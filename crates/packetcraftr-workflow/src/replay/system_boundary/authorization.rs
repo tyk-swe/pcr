@@ -65,6 +65,16 @@ impl SystemAuthorizer {
                 Vec::new(),
             ));
         }
+        if self.registry.root_for_link_type(frame.link_type.0).is_none() {
+            return Err(BoundaryError::from_error(
+                packetcraftr_client::policy::Error::InvalidPacketSemantics {
+                    reason: format!(
+                        "replay authorization does not support link type {}",
+                        frame.link_type.0
+                    ),
+                },
+            ));
+        }
         if mode == LinkMode::Layer3 {
             replay_network_envelope(frame).map_err(|source| {
                 BoundaryError::with_source(

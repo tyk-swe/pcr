@@ -150,7 +150,7 @@ macro_rules! define_builtin_protocol {
             /// end the enclosing network envelope and carry no link-layer or
             /// routing intent for the packet that is transmitted directly.
             pub const fn is_encapsulation_boundary(self) -> bool {
-                matches!(self, Self::Erspan | Self::Geneve | Self::Vxlan)
+                matches!(self, Self::Erspan | Self::Geneve | Self::Gre | Self::Vxlan)
             }
         }
     };

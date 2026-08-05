@@ -7,9 +7,13 @@ use std::sync::Arc;
 use bytes::Bytes;
 
 use crate::{
+    gre::Gre,
     icmp::{Icmpv4, Icmpv6},
+    ipv6::{DestinationOptions, HopByHop},
+    link::Ethernet,
     network::{Ipv4, Ipv6},
     transport::{Sctp, Tcp, Udp},
+    tunnel::Vxlan,
 };
 use packetcraftr_packet::{
     Packet,
@@ -223,4 +227,173 @@ fn malformed_first_ip_does_not_fall_through_to_an_inner_ip_for_quoted_matching()
             .matches(&request, &response)
             .matched
     );
+}
+
+#[test]
+fn tunneled_or_ip_in_ip_icmp_errors_are_not_direct_responses() {
+    let source = Ipv4Addr::new(10, 0, 0, 1);
+    let destination = Ipv4Addr::new(10, 0, 0, 2);
+    let router = Ipv4Addr::new(10, 0, 0, 254);
+    let mut request = Packet::new();
+    request
+        .push(Ipv4 {
+            source,
+            destination,
+            ..Ipv4::default()
+        })
+        .push(Udp {
+            source_port: 12_345,
+            destination_port: 33_434,
+            ..Udp::default()
+        });
+    let direct = quoted_icmpv4_time_exceeded(router, source, 17, &request);
+    let quoted_error = direct.get::<Icmpv4>().unwrap().clone();
+
+    let mut tunneled = Packet::new();
+    tunneled
+        .push(Ipv4 {
+            source: Ipv4Addr::new(10, 0, 0, 200),
+            destination: source,
+            ..Ipv4::default()
+        })
+        .push(Udp {
+            source_port: 4789,
+            destination_port: 40_000,
+            ..Udp::default()
+        })
+        .push(Vxlan::default())
+        .push(Ethernet::default())
+        .push(Ipv4 {
+            source: router,
+            destination: source,
+            ..Ipv4::default()
+        })
+        .push(quoted_error.clone());
+    assert!(
+        quoted_icmp_error_kind(&request, &tunneled, QuotedProbeTransport::Udp).is_none()
+    );
+    assert!(
+        !ReverseFlowMatcher::new(BuiltinProtocol::Udp)
+            .matches(&request, &tunneled)
+            .matched
+    );
+
+    let mut gre = Packet::new();
+    gre
+        .push(Ipv4 {
+            source: Ipv4Addr::new(10, 0, 0, 200),
+            destination: source,
+            ..Ipv4::default()
+        })
+        .push(Gre::default())
+        .push(Ipv4 {
+            source: router,
+            destination: source,
+            ..Ipv4::default()
+        })
+        .push(quoted_error.clone());
+    assert!(quoted_icmp_error_kind(&request, &gre, QuotedProbeTransport::Udp).is_none());
+
+    let mut transport_wrapped = Packet::new();
+    transport_wrapped
+        .push(Ipv4 {
+            source: Ipv4Addr::new(10, 0, 0, 200),
+            destination: source,
+            ..Ipv4::default()
+        })
+        .push(Udp {
+            source_port: 40_000,
+            destination_port: 40_001,
+            ..Udp::default()
+        })
+        .push(quoted_error.clone());
+    assert!(
+        quoted_icmp_error_kind(&request, &transport_wrapped, QuotedProbeTransport::Udp).is_none()
+    );
+
+    let mut ip_in_ip = Packet::new();
+    ip_in_ip
+        .push(Ipv4 {
+            source: Ipv4Addr::new(10, 0, 0, 200),
+            destination: source,
+            ..Ipv4::default()
+        })
+        .push(Ipv4 {
+            source: router,
+            destination: source,
+            ..Ipv4::default()
+        })
+        .push(quoted_error);
+    assert!(quoted_icmp_error_kind(&request, &ip_in_ip, QuotedProbeTransport::Udp).is_none());
+}
+
+#[test]
+fn quoted_icmpv6_walks_extension_headers_and_rejects_nonfirst_fragments() {
+    let source: Ipv6Addr = "fd00::1".parse().unwrap();
+    let destination: Ipv6Addr = "fd00::2".parse().unwrap();
+    let router: Ipv6Addr = "fd00::fe".parse().unwrap();
+    let mut request = Packet::new();
+    request
+        .push(Ipv6 {
+            source,
+            destination,
+            ..Ipv6::default()
+        })
+        .push(HopByHop::default())
+        .push(DestinationOptions::default())
+        .push(Udp {
+            source_port: 12_345,
+            destination_port: 33_434,
+            ..Udp::default()
+        });
+
+    let mut quote = vec![0_u8; 64];
+    quote[0] = 0x60;
+    quote[4..6].copy_from_slice(&24_u16.to_be_bytes());
+    quote[6] = 0;
+    quote[8..24].copy_from_slice(&source.octets());
+    quote[24..40].copy_from_slice(&destination.octets());
+    quote[40] = 60;
+    quote[41] = 0;
+    quote[48] = 17;
+    quote[49] = 0;
+    quote[56..58].copy_from_slice(&12_345_u16.to_be_bytes());
+    quote[58..60].copy_from_slice(&33_434_u16.to_be_bytes());
+    let mut body = vec![0_u8; 4];
+    body.extend_from_slice(&quote);
+    let mut response = Packet::new();
+    response
+        .push(Ipv6 {
+            source: router,
+            destination: source,
+            ..Ipv6::default()
+        })
+        .push(Icmpv6 {
+            icmp_type: 3,
+            body: Bytes::from(body),
+            ..Icmpv6::default()
+        });
+    assert!(
+        quoted_icmp_error_kind(&request, &response, QuotedProbeTransport::Udp).is_some()
+    );
+    assert!(
+        ReverseFlowMatcher::new(BuiltinProtocol::Udp)
+            .matches(&request, &response)
+            .matched
+    );
+
+    let mut nonfirst_quote = vec![0_u8; 56];
+    nonfirst_quote[0] = 0x60;
+    nonfirst_quote[4..6].copy_from_slice(&16_u16.to_be_bytes());
+    nonfirst_quote[6] = 44;
+    nonfirst_quote[8..24].copy_from_slice(&source.octets());
+    nonfirst_quote[24..40].copy_from_slice(&destination.octets());
+    nonfirst_quote[40] = 17;
+    nonfirst_quote[42..44].copy_from_slice(&8_u16.to_be_bytes());
+    nonfirst_quote[48..50].copy_from_slice(&12_345_u16.to_be_bytes());
+    nonfirst_quote[50..52].copy_from_slice(&33_434_u16.to_be_bytes());
+    let mut body = vec![0_u8; 4];
+    body.extend_from_slice(&nonfirst_quote);
+    response.get_mut::<Icmpv6>().unwrap().body = Bytes::from(body);
+    assert!(quoted_icmp_error_kind(&request, &response, QuotedProbeTransport::Udp).is_none());
 }

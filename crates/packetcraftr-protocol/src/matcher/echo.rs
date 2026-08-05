@@ -48,43 +48,46 @@ impl ResponseMatcher for EchoMatcher {
         let Some(layers) = reversed_protocol_layers(self.protocol, request, response) else {
             return MatchResult::no_match();
         };
-        let request_layer = layers.request;
-        let response_layer = layers.response;
-        if request_layer.field("type").and_then(|value| value.as_u64()) != Some(self.request_type)
-            || response_layer
-                .field("type")
-                .and_then(|value| value.as_u64())
-                != Some(self.reply_type)
-        {
-            return MatchResult::no_match();
+        for layers in &layers {
+            let request_layer = layers.request;
+            let response_layer = layers.response;
+            if request_layer.field("type").and_then(|value| value.as_u64())
+                != Some(self.request_type)
+                || response_layer
+                    .field("type")
+                    .and_then(|value| value.as_u64())
+                    != Some(self.reply_type)
+            {
+                return MatchResult::no_match();
+            }
+            if request_layer.field("code").and_then(|value| value.as_u64()) != Some(0)
+                || response_layer
+                    .field("code")
+                    .and_then(|value| value.as_u64())
+                    != Some(0)
+            {
+                return MatchResult::no_match();
+            }
+            let Some(FieldValue::Bytes(request_body)) = request_layer.field("body") else {
+                return MatchResult::no_match();
+            };
+            let Some(FieldValue::Bytes(response_body)) = response_layer.field("body") else {
+                return MatchResult::no_match();
+            };
+            if request_body.len() < 4
+                || response_body.len() < 4
+                || request_body[..4] != response_body[..4]
+            {
+                return MatchResult::no_match();
+            }
         }
-        if request_layer.field("code").and_then(|value| value.as_u64()) != Some(0)
-            || response_layer
-                .field("code")
-                .and_then(|value| value.as_u64())
-                != Some(0)
-        {
-            return MatchResult::no_match();
-        }
-        let Some(FieldValue::Bytes(request_body)) = request_layer.field("body") else {
-            return MatchResult::no_match();
-        };
-        let Some(FieldValue::Bytes(response_body)) = response_layer.field("body") else {
-            return MatchResult::no_match();
-        };
-        if request_body.len() < 4
-            || response_body.len() < 4
-            || request_body[..4] != response_body[..4]
-        {
-            return MatchResult::no_match();
-        }
-        MatchResult::matched(100, "matching ICMP echo identifier and sequence")
+        MatchResult::matched(100, "matching ICMP echo identifiers and sequences")
     }
 
     fn responder(&self, _request: &Packet, response: &Packet) -> Option<IpAddr> {
         let response_layer_index = response
             .iter()
-            .position(|layer| BuiltinProtocol::of(layer) == Some(self.protocol))?;
+            .rposition(|layer| BuiltinProtocol::of(layer) == Some(self.protocol))?;
         network_endpoints_before(response, response_layer_index).map(|endpoints| endpoints.source)
     }
 }

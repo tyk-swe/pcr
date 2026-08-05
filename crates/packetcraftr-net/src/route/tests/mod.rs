@@ -20,6 +20,7 @@ use crate::capture::CaptureStatistics;
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_packet::{Packet, field::WireValue, layer::Raw};
 use packetcraftr_protocol::{
+    gre::Gre,
     ipv6::SegmentRoutingHeader,
     link::{Arp, Ethernet, Vlan, Vlan8021ad},
     network::{Ipv4, Ipv6},

@@ -65,6 +65,21 @@ fn raw_frame(destination: Ipv4Addr) -> Frame {
 }
 
 #[test]
+fn system_authorizer_rejects_unsupported_link_types() {
+    let link_type = LinkType(u32::MAX);
+    let bytes = raw_frame(Ipv4Addr::new(8, 8, 8, 8)).bytes().clone();
+    let frame = Frame::new(UNIX_EPOCH, link_type, bytes).unwrap();
+    let authorizer = SystemAuthorizer::new(packetcraftr_client::policy::Policy::default(), true);
+    let error = authorizer
+        .authorize_frame(&frame, LinkMode::Layer2)
+        .unwrap_err();
+    assert_eq!(
+        error.classification().code,
+        "policy.invalid_packet_semantics"
+    );
+}
+
+#[test]
 fn system_authorizer_enforces_cumulative_policy_packet_and_byte_budgets() {
     let frame = authorized_raw_frame();
     let mut packet_policy = packetcraftr_client::policy::Policy {

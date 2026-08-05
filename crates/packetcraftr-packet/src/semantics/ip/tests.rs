@@ -203,6 +203,24 @@ fn the_outer_scope_ends_at_the_first_encapsulation_boundary() {
         outer_destination,
     ));
     assert_eq!(outer_scope_len(&plain), plain.len());
+
+    let mut gre = Packet::new();
+    gre.push(stack_layer("ethernet"))
+        .push(stack_ip_layer(
+            Ipv4Addr::new(10, 0, 0, 1),
+            outer_destination,
+        ))
+        .push(stack_layer("gre"))
+        .push(stack_layer("ethernet"))
+        .push(stack_ip_layer(
+            Ipv4Addr::new(192, 168, 1, 1),
+            Ipv4Addr::new(192, 168, 1, 5),
+        ));
+    assert_eq!(outer_scope_len(&gre), 3);
+    assert_eq!(
+        outer_ip_path(&gre).unwrap().unwrap().header_destination,
+        IpAddr::V4(outer_destination)
+    );
 }
 
 #[test]
@@ -238,7 +256,18 @@ fn unknown_runtime_route_fields_fail_closed_but_destination_port_does_not() {
 
 #[test]
 fn malformed_route_layers_fail_closed() {
-    for protocol in ["raw_ip", "ipv4", "ipv6_srh"] {
+    for protocol in [
+        "ethernet",
+        "raw_ip",
+        "ipv4",
+        "ipv6_srh",
+        "udp",
+        "gre",
+        "vxlan",
+        "geneve",
+        "mpls",
+        "ppp",
+    ] {
         let mut packet = Packet::new();
         packet.push(crate::layer::MalformedLayer::new(
             Some(ProtocolId::new(protocol)),
@@ -246,6 +275,24 @@ fn malformed_route_layers_fail_closed() {
             "truncated",
         ));
         assert!(live_destinations(&packet).is_err(), "{protocol}");
+    }
+
+    let mut alias = Packet::new();
+    alias.push(crate::layer::MalformedLayer::new(
+        Some(ProtocolId::new("ip")),
+        Vec::<u8>::new(),
+        "truncated",
+    ));
+    assert!(live_destinations(&alias).is_err());
+
+    for protocol in ["raw", "tcp", "icmpv4", "dns"] {
+        let mut packet = Packet::new();
+        packet.push(crate::layer::MalformedLayer::new(
+            Some(ProtocolId::new(protocol)),
+            Vec::<u8>::new(),
+            "truncated",
+        ));
+        assert!(live_destinations(&packet).is_ok(), "{protocol}");
     }
 }
 

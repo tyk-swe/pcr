@@ -46,7 +46,7 @@ fn permissive_layer2_options() -> SendOptions {
 }
 
 #[test]
-fn temporary_malformed_gre_can_hide_public_destination() {
+fn malformed_gre_cannot_hide_a_public_destination() {
     let neighbors = CountingNeighbors::default();
     let io = RecordingIo::default();
     let client = Client::new(
@@ -56,7 +56,7 @@ fn temporary_malformed_gre_can_hide_public_destination() {
             link_type: LinkType::ETHERNET,
             ..route(LinkCapability::Layer2And3)
         }),
-        neighbors,
+        neighbors.clone(),
         io.clone(),
         TrafficPolicy {
             allow_permissive_packets: true,
@@ -70,15 +70,18 @@ fn temporary_malformed_gre_can_hide_public_destination() {
     outer.extend_from_slice(&[0, 1, 0x08, 0]); // unsupported GRE version, IPv4 payload
     outer.extend_from_slice(&raw_ipv4(Ipv4Addr::new(8, 8, 8, 8)));
 
-    assert!(
+    assert!(matches!(
         client
             .send(
                 raw_ethernet_request(outer, 0x0800, false),
                 permissive_layer2_options(),
-            )
-            .is_ok()
-    );
-    assert!(!io.0.lock().unwrap().is_empty());
+            ),
+        Err(ClientError::Policy(
+            TrafficPolicyError::InvalidPacketSemantics { .. }
+        ))
+    ));
+    assert_eq!(neighbors.0.load(Ordering::SeqCst), 0);
+    assert!(io.0.lock().unwrap().is_empty());
 }
 
 #[test]
@@ -261,6 +264,54 @@ fn custom_registry_cannot_hide_a_wire_destination() {
         ),
         Err(ClientError::Policy(
             TrafficPolicyError::PublicDestination { .. }
+        ))
+    ));
+    assert_eq!(neighbors.0.load(Ordering::SeqCst), 0);
+    assert!(io.0.lock().unwrap().is_empty());
+}
+
+#[test]
+fn unsupported_layer2_link_type_is_rejected_before_io() {
+    let neighbors = CountingNeighbors::default();
+    let io = RecordingIo::default();
+    let unsupported = LinkType(u32::MAX);
+    let client = Client::new(
+        Arc::new(default_registry().unwrap()),
+        FixedRoutes(RouteDecision {
+            capability: LinkCapability::Layer2And3,
+            link_type: unsupported,
+            ..route(LinkCapability::Layer2And3)
+        }),
+        neighbors.clone(),
+        io.clone(),
+        TrafficPolicy::default(),
+    );
+    let mut request = Packet::new();
+    request
+        .push(Ethernet {
+            destination: [1; 6],
+            source: [2; 6],
+            ether_type: WireValue::Auto,
+        })
+        .push(Ipv4 {
+            destination: Ipv4Addr::new(10, 0, 0, 2),
+            ..Ipv4::default()
+        })
+        .push(Udp::default());
+
+    assert!(matches!(
+        client.send(
+            request,
+            SendOptions {
+                plan: PlanOptions {
+                    link_mode: LinkMode::Layer2,
+                    ..PlanOptions::default()
+                },
+                ..SendOptions::default()
+            },
+        ),
+        Err(ClientError::Policy(
+            TrafficPolicyError::InvalidPacketSemantics { .. }
         ))
     ));
     assert_eq!(neighbors.0.load(Ordering::SeqCst), 0);

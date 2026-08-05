@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use super::{
-    Arp, Ethernet, FixedRoute, InterfaceOnlyRoute, IpAddr, Ipv4, Ipv4Addr, Ipv6Addr,
+    Arp, Ethernet, FixedRoute, Gre, InterfaceOnlyRoute, IpAddr, Ipv4, Ipv4Addr, Ipv6Addr,
     LinkCapability, LinkMode, LinkType, MacAddress, Ordering, Packet, PlanError, PlanOptions,
     PreferenceAwareRoute, RouteDecision, RoutePlanner, Udp, Vlan, Vxlan, WireValue,
     canonical_link_intent_packets, route,
@@ -68,55 +68,94 @@ fn vxlan_tunneled_frame_packet() -> Packet {
     packet
 }
 
+fn gre_teb_tunneled_frame_packet() -> Packet {
+    let mut packet = Packet::new();
+    packet
+        .push(Ipv4 {
+            source: Ipv4Addr::new(192, 0, 2, 10),
+            destination: Ipv4Addr::new(198, 51, 100, 1),
+            ..Ipv4::default()
+        })
+        .push(Gre::default())
+        .push(Ethernet {
+            destination: [9; 6],
+            source: [8; 6],
+            ether_type: WireValue::Auto,
+        })
+        .push(Vlan {
+            vlan_id: 300,
+            ..Vlan::default()
+        })
+        .push(Ipv4 {
+            source: Ipv4Addr::new(192, 168, 1, 1),
+            destination: Ipv4Addr::new(192, 168, 1, 5),
+            ..Ipv4::default()
+        });
+    packet
+}
+
+fn tunneled_frame_packets() -> [(&'static str, Packet); 2] {
+    [
+        ("vxlan", vxlan_tunneled_frame_packet()),
+        ("gre-teb", gre_teb_tunneled_frame_packet()),
+    ]
+}
+
 #[test]
 fn a_tunneled_ethernet_frame_carries_no_outer_link_intent() {
-    let packet = vxlan_tunneled_frame_packet();
-    let provider = FixedRoute(route(None));
+    for (case, packet) in tunneled_frame_packets() {
+        let provider = FixedRoute(route(None));
 
-    let explicit = RoutePlanner
-        .plan(
-            &packet,
-            None,
-            &PlanOptions {
-                link_mode: LinkMode::Layer3,
-                interface: None,
-                preferred_source: None,
-            },
-            &provider,
-        )
-        .unwrap();
-    assert_eq!(explicit.mode, LinkMode::Layer3);
+        let explicit = RoutePlanner
+            .plan(
+                &packet,
+                None,
+                &PlanOptions {
+                    link_mode: LinkMode::Layer3,
+                    interface: None,
+                    preferred_source: None,
+                },
+                &provider,
+            )
+            .unwrap();
+        assert_eq!(explicit.mode, LinkMode::Layer3, "{case}");
 
-    let auto = RoutePlanner
-        .plan(&packet, None, &PlanOptions::default(), &provider)
-        .unwrap();
-    assert_eq!(auto.mode, LinkMode::Layer3);
+        let auto = RoutePlanner
+            .plan(&packet, None, &PlanOptions::default(), &provider)
+            .unwrap();
+        assert_eq!(auto.mode, LinkMode::Layer3, "{case}");
+    }
 }
 
 #[test]
 fn layer2_planning_ignores_addresses_inside_the_tunneled_frame() {
-    let packet = vxlan_tunneled_frame_packet();
-    let plan = RoutePlanner
-        .plan(
-            &packet,
-            None,
-            &PlanOptions {
-                link_mode: LinkMode::Layer2,
-                interface: None,
-                preferred_source: None,
-            },
-            &FixedRoute(route(None)),
-        )
-        .unwrap();
+    for (case, packet) in tunneled_frame_packets() {
+        let plan = RoutePlanner
+            .plan(
+                &packet,
+                None,
+                &PlanOptions {
+                    link_mode: LinkMode::Layer2,
+                    interface: None,
+                    preferred_source: None,
+                },
+                &FixedRoute(route(None)),
+            )
+            .unwrap();
 
-    // The tunneled frame's MACs and VLAN tag describe the encapsulated
-    // network: the outer link still needs synthesis, neighbor resolution,
-    // and an untagged neighbor probe.
-    assert!(plan.synthesized_ethernet);
-    assert!(plan.destination_mac.is_none());
-    assert_eq!(plan.source_mac, Some(MacAddress([2, 0, 0, 0, 0, 1])));
-    assert!(plan.neighbor_vlan_tags.is_empty());
-    assert!(plan.neighbor_target.is_some());
+        // The tunneled frame's MACs and VLAN tag describe the encapsulated
+        // network: the outer link still needs synthesis, neighbor resolution,
+        // and an untagged neighbor probe.
+        assert!(plan.synthesized_ethernet, "{case}");
+        assert!(plan.destination_mac.is_none(), "{case}");
+        assert_eq!(
+            plan.source_mac,
+            Some(MacAddress([2, 0, 0, 0, 0, 1])),
+            "{case}"
+        );
+        assert!(plan.neighbor_vlan_tags.is_empty(), "{case}");
+        assert!(plan.neighbor_target.is_some(), "{case}");
+    }
 }
 
 #[test]

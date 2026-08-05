@@ -17,7 +17,7 @@ pub fn live_destinations(packet: &Packet) -> Result<Vec<IpAddr>, SemanticError> 
     for (index, layer) in packet.iter().enumerate() {
         if let Some(malformed) = layer.as_any().downcast_ref::<MalformedLayer>()
             && let Some(intended) = malformed.intended_protocol.as_ref()
-            && BuiltinProtocol::from_id(intended)
+            && BuiltinProtocol::from_name_or_alias(intended.as_str())
                 .is_some_and(malformed_protocol_may_hide_destination)
         {
             return Err(SemanticError::new(format!(
@@ -77,11 +77,49 @@ pub fn live_destinations(packet: &Packet) -> Result<Vec<IpAddr>, SemanticError> 
     Ok(destinations)
 }
 
+// Keep this match exhaustive so every newly added built-in protocol must make
+// an explicit live-authorization decision.
+#[allow(clippy::match_like_matches_macro)]
 fn malformed_protocol_may_hide_destination(protocol: BuiltinProtocol) -> bool {
-    protocol == BuiltinProtocol::RawIp
-        || protocol == BuiltinProtocol::Arp
-        || protocol.is_ip()
-        || protocol.is_ipv6_extension()
+    match protocol {
+        BuiltinProtocol::Ah
+        | BuiltinProtocol::Arp
+        | BuiltinProtocol::BsdLoop
+        | BuiltinProtocol::BsdNull
+        | BuiltinProtocol::Erspan
+        | BuiltinProtocol::Ethernet
+        | BuiltinProtocol::Geneve
+        | BuiltinProtocol::Gre
+        | BuiltinProtocol::Ipv4
+        | BuiltinProtocol::Ipv6
+        | BuiltinProtocol::Ipv6DestinationOptions
+        | BuiltinProtocol::Ipv6Fragment
+        | BuiltinProtocol::Ipv6HopByHop
+        | BuiltinProtocol::Ipv6Srh
+        | BuiltinProtocol::L2tpv3
+        | BuiltinProtocol::LinuxSll
+        | BuiltinProtocol::LinuxSll2
+        | BuiltinProtocol::Llc
+        | BuiltinProtocol::Mpls
+        | BuiltinProtocol::Ppp
+        | BuiltinProtocol::Pppoe
+        | BuiltinProtocol::RawIp
+        | BuiltinProtocol::Snap
+        | BuiltinProtocol::Udp
+        | BuiltinProtocol::Vlan
+        | BuiltinProtocol::Vlan8021ad
+        | BuiltinProtocol::Vxlan => true,
+        BuiltinProtocol::Dns
+        | BuiltinProtocol::Esp
+        | BuiltinProtocol::Icmpv4
+        | BuiltinProtocol::Icmpv6
+        | BuiltinProtocol::Igmp
+        | BuiltinProtocol::Malformed
+        | BuiltinProtocol::Padding
+        | BuiltinProtocol::Raw
+        | BuiltinProtocol::Sctp
+        | BuiltinProtocol::Tcp => false,
+    }
 }
 
 fn validate_attached_srh(packet: &Packet, srh_index: usize) -> Result<(), SemanticError> {

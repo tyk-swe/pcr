@@ -45,14 +45,6 @@ impl<R, N, I> Client<R, N, I> {
             LinkMode::Layer3 => LinkType::RAW,
             LinkMode::Auto => return Err(LiveIoError::UnresolvedLinkMode.into()),
         };
-        let frame = Frame::new(
-            std::time::SystemTime::UNIX_EPOCH,
-            link_type,
-            built.bytes.clone(),
-        )
-        .map_err(|error| TrafficPolicyError::InvalidPacketSemantics {
-            reason: error.to_string(),
-        })?;
         static REGISTRY: OnceLock<Result<Arc<ProtocolRegistry>, String>> = OnceLock::new();
         let registry = REGISTRY
             .get_or_init(|| {
@@ -64,6 +56,23 @@ impl<R, N, I> Client<R, N, I> {
             .map_err(|reason| TrafficPolicyError::InvalidPacketSemantics {
                 reason: reason.clone(),
             })?;
+        if registry.root_for_link_type(link_type.0).is_none() {
+            return Err(TrafficPolicyError::InvalidPacketSemantics {
+                reason: format!(
+                    "final-wire authorization does not support link type {}",
+                    link_type.0
+                ),
+            }
+            .into());
+        }
+        let frame = Frame::new(
+            std::time::SystemTime::UNIX_EPOCH,
+            link_type,
+            built.bytes.clone(),
+        )
+        .map_err(|error| TrafficPolicyError::InvalidPacketSemantics {
+            reason: error.to_string(),
+        })?;
         let decoded = Dissector::new(Arc::clone(registry))
             .decode(frame, DecodeOptions::default())
             .map_err(|error| TrafficPolicyError::InvalidPacketSemantics {

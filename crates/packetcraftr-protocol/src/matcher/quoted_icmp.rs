@@ -7,6 +7,7 @@ use packetcraftr_packet::{
     Packet,
     codec::NetworkEnvelope,
     field::FieldValue,
+    layer::Layer,
     semantics::{self, BuiltinProtocol},
 };
 
@@ -50,13 +51,7 @@ pub fn quoted_icmp_error_kind(
     if transport != expected_transport {
         return None;
     }
-    let layer = response.iter().find(|layer| {
-        matches!(
-            BuiltinProtocol::of(*layer),
-            Some(BuiltinProtocol::Icmpv4 | BuiltinProtocol::Icmpv6)
-        )
-    })?;
-    let icmp_protocol = BuiltinProtocol::of(layer)?;
+    let (icmp_protocol, layer) = directly_received_icmp(response)?;
     let icmp_type = u8::try_from(layer.field("type")?.as_u64()?).ok()?;
     let code = u8::try_from(layer.field("code")?.as_u64()?).ok()?;
     let kind = match icmp_protocol {
@@ -86,6 +81,63 @@ pub fn quoted_icmp_error_kind(
         return None;
     }
     Some(kind)
+}
+
+fn directly_received_icmp(response: &Packet) -> Option<(BuiltinProtocol, &dyn Layer)> {
+    let outer_scope = semantics::outer_scope_len(response);
+    let (outer_network_index, outer_network_protocol) = response
+        .iter()
+        .take(outer_scope)
+        .enumerate()
+        .find_map(|(index, layer)| {
+            let protocol = BuiltinProtocol::of(layer)?;
+            protocol.is_ip().then_some((index, protocol))
+        })?;
+    let (icmp_index, icmp_protocol, layer) = response
+        .iter()
+        .take(outer_scope)
+        .enumerate()
+        .find_map(|(index, layer)| {
+            let protocol = BuiltinProtocol::of(layer)?;
+            matches!(
+                protocol,
+                BuiltinProtocol::Icmpv4 | BuiltinProtocol::Icmpv6
+            )
+            .then_some((index, protocol, layer))
+        })?;
+    if icmp_index <= outer_network_index {
+        return None;
+    }
+    let directly_nested = response
+        .iter()
+        .skip(outer_network_index + 1)
+        .take(icmp_index - outer_network_index - 1)
+        .all(|layer| {
+            BuiltinProtocol::of(layer).is_some_and(BuiltinProtocol::is_ipv6_extension)
+        });
+    if !directly_nested {
+        return None;
+    }
+    let enclosing_network_index = response
+        .iter()
+        .enumerate()
+        .take(icmp_index)
+        .rev()
+        .find_map(|(index, layer)| {
+            BuiltinProtocol::of(layer)
+                .is_some_and(BuiltinProtocol::is_ip)
+                .then_some(index)
+        })?;
+    if enclosing_network_index != outer_network_index
+        || !matches!(
+            (outer_network_protocol, icmp_protocol),
+            (BuiltinProtocol::Ipv4, BuiltinProtocol::Icmpv4)
+                | (BuiltinProtocol::Ipv6, BuiltinProtocol::Icmpv6)
+        )
+    {
+        return None;
+    }
+    Some((icmp_protocol, layer))
 }
 
 fn quoted_probe_matches(
@@ -239,6 +291,10 @@ struct QuotedProbe<'a> {
     payload: &'a [u8],
 }
 
+const IPV6_HEADER_LEN: usize = 40;
+const MIN_QUOTED_TRANSPORT_LEN: usize = 8;
+const MAX_QUOTED_IPV6_EXTENSION_HEADERS: usize = 16;
+
 fn parse_quoted_probe(bytes: &[u8]) -> Option<QuotedProbe<'_>> {
     match bytes.first()? >> 4 {
         4 => {
@@ -265,23 +321,84 @@ fn parse_quoted_probe(bytes: &[u8]) -> Option<QuotedProbe<'_>> {
             })
         }
         6 => {
-            if bytes.len() < 48 {
+            if bytes.len() < IPV6_HEADER_LEN {
                 return None;
             }
             let payload_length = usize::from(u16::from_be_bytes([bytes[4], bytes[5]]));
-            if payload_length < 8 {
-                return None;
-            }
-            let end = 40_usize.checked_add(payload_length)?.min(bytes.len());
+            let end = IPV6_HEADER_LEN
+                .checked_add(payload_length)?
+                .min(bytes.len());
+            let (protocol, payload) = parse_quoted_ipv6_payload(bytes, bytes[6], end)?;
             Some(QuotedProbe {
                 source: IpAddr::V6(Ipv6Addr::from(<[u8; 16]>::try_from(&bytes[8..24]).ok()?)),
                 destination: IpAddr::V6(Ipv6Addr::from(<[u8; 16]>::try_from(&bytes[24..40]).ok()?)),
-                protocol: bytes[6],
-                payload: &bytes[40..end],
+                protocol,
+                payload,
             })
         }
         _ => None,
     }
+}
+
+fn parse_quoted_ipv6_payload(
+    bytes: &[u8],
+    mut protocol: u8,
+    end: usize,
+) -> Option<(u8, &[u8])> {
+    let mut offset = IPV6_HEADER_LEN;
+    let mut extension_count = 0_usize;
+    loop {
+        let header = bytes.get(offset..end)?;
+        let header_len = match protocol {
+            // Hop-by-Hop Options, Routing, and Destination Options.
+            0 | 43 | 60 => {
+                if extension_count >= MAX_QUOTED_IPV6_EXTENSION_HEADERS {
+                    return None;
+                }
+                let next = *header.first()?;
+                let header_len = (usize::from(*header.get(1)?) + 1).checked_mul(8)?;
+                if header_len < 8 || header.len() < header_len {
+                    return None;
+                }
+                protocol = next;
+                header_len
+            }
+            // Fragment. Only atomic and first fragments can quote a transport
+            // key at the start of this payload.
+            44 => {
+                if extension_count >= MAX_QUOTED_IPV6_EXTENSION_HEADERS || header.len() < 8 {
+                    return None;
+                }
+                let offset_and_flags = u16::from_be_bytes([header[2], header[3]]);
+                if offset_and_flags & 0xfffe != 0 {
+                    return None;
+                }
+                protocol = header[0];
+                8
+            }
+            // Authentication Header. Its length is measured in 32-bit words
+            // excluding the first two words.
+            51 => {
+                if extension_count >= MAX_QUOTED_IPV6_EXTENSION_HEADERS {
+                    return None;
+                }
+                let next = *header.first()?;
+                let header_len = (usize::from(*header.get(1)?) + 2).checked_mul(4)?;
+                if header_len < 12 || header.len() < header_len {
+                    return None;
+                }
+                protocol = next;
+                header_len
+            }
+            _ => break,
+        };
+        offset = offset.checked_add(header_len)?;
+        extension_count += 1;
+    }
+    if end.checked_sub(offset)? < MIN_QUOTED_TRANSPORT_LEN {
+        return None;
+    }
+    Some((protocol, bytes.get(offset..end)?))
 }
 
 fn outer_network_envelope(packet: &Packet) -> Option<NetworkEnvelope> {

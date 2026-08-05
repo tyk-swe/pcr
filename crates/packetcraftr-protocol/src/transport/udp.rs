@@ -26,19 +26,42 @@ use super::super::common::{
 use super::super::network::encode_network;
 
 const UDP_LEN: usize = 8;
+const DNS_HEADER_LEN: usize = 12;
+const DNS_PORT: u16 = 53;
+const DNS_RESPONSE_FLAG: u16 = 0x8000;
+const DNS_RESERVED_Z_FLAG: u16 = 0x0040;
 
-/// Child discriminators in dissection order: the destination port, then the
-/// source port, then the raw fallback. A zero port is not a service port and
-/// must never shadow the fallback slot, so it is skipped rather than offered.
-fn child_discriminators(source_port: u16, destination_port: u16) -> Vec<Discriminator> {
+/// Child discriminators in dissection order. The destination port normally
+/// wins, but a structurally plausible DNS response gives source port 53
+/// precedence so replies to a client port that is also registered for a
+/// tunnel still dissect as DNS. A zero port never shadows the raw fallback.
+fn child_discriminators(
+    source_port: u16,
+    destination_port: u16,
+    payload: &[u8],
+) -> Vec<Discriminator> {
+    let ports = if dns_response_prefers_source_port(source_port, payload) {
+        [source_port, destination_port]
+    } else {
+        [destination_port, source_port]
+    };
     let mut next = Vec::with_capacity(3);
-    for port in [destination_port, source_port] {
-        if port != 0 {
-            next.push(Discriminator(u64::from(port)));
+    for port in ports {
+        let discriminator = Discriminator(u64::from(port));
+        if port != 0 && !next.contains(&discriminator) {
+            next.push(discriminator);
         }
     }
     next.push(Discriminator(0));
     next
+}
+
+fn dns_response_prefers_source_port(source_port: u16, payload: &[u8]) -> bool {
+    if source_port != DNS_PORT || payload.len() < DNS_HEADER_LEN {
+        return false;
+    }
+    let flags = u16::from_be_bytes([payload[2], payload[3]]);
+    flags & DNS_RESPONSE_FLAG != 0 && flags & DNS_RESERVED_Z_FLAG == 0
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -137,8 +160,9 @@ impl LayerCodec for UdpCodec {
             .and_then(|value| u16::try_from(value).ok())
             .ok_or_else(|| invalid("udp", "datagram exceeds UDP length range"))?;
         let mut diagnostics = Vec::new();
-        // Dissection selects the child from the destination port, then the
-        // source port, then the raw fallback. When that selection disagrees
+        // Dissection normally selects the child from the destination port.
+        // A plausible DNS response instead gives source port 53 precedence.
+        // When that selection disagrees
         // with the declared child — an encapsulation away from its registered
         // port, or an opaque payload sitting on one — the built bytes would
         // not round-trip into the same layers. Padding and malformed children
@@ -149,9 +173,13 @@ impl LayerCodec for UdpCodec {
                 BuiltinProtocol::from_id(child.protocol_id()),
                 Some(BuiltinProtocol::Padding | BuiltinProtocol::Malformed)
             )
-            && let Some(selected) = child_discriminators(layer.source_port, layer.destination_port)
-                .into_iter()
-                .find_map(|discriminator| context.registry.child_for("udp", discriminator))
+            && let Some(selected) = child_discriminators(
+                layer.source_port,
+                layer.destination_port,
+                covered_payload,
+            )
+            .into_iter()
+            .find_map(|discriminator| context.registry.child_for("udp", discriminator))
             && *selected != *child.protocol_id()
         {
             let message = match context
@@ -277,13 +305,13 @@ impl LayerCodec for UdpCodec {
             consumed: UDP_LEN,
             payload_offset: UDP_LEN,
             payload_len,
-            // Encapsulations register on their well-known ports, so both
-            // ports are offered as discriminators before the raw fallback:
-            // either endpoint of a tunnel may own the registered port.
+            // Both endpoints are offered before the raw fallback. Destination
+            // normally wins; a plausible DNS response gives source port 53
+            // precedence so a tunnel-service-numbered client port stays DNS.
             next: if payload_len == 0 {
                 Vec::new()
             } else {
-                child_discriminators(source_port, destination_port)
+                child_discriminators(source_port, destination_port, &input[UDP_LEN..length])
             },
             fields: udp_layout(),
             diagnostics,

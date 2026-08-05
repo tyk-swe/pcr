@@ -8,7 +8,7 @@ use packetcraftr_packet::{
     Packet,
     field::FieldValue,
     matcher::{MatchResult, ResponseMatcher},
-    semantics::{self, BuiltinProtocol},
+    semantics::BuiltinProtocol,
 };
 
 use super::{
@@ -51,115 +51,123 @@ impl ResponseMatcher for ReverseFlowMatcher {
         let Some(layers) = reversed_protocol_layers(self.protocol, request, response) else {
             return MatchResult::no_match();
         };
-        let request_layer_index = layers.request_index;
-        let request_layer = layers.request;
-        let response_layer_index = layers.response_index;
-        let response_layer = layers.response;
-        if !semantics::transport_keys_are_reversed(request_layer, response_layer) {
-            return MatchResult::no_match();
-        }
         match self.protocol {
             BuiltinProtocol::Tcp => {
-                let Some(request_flags) = request_layer
-                    .field("flags")
-                    .and_then(|value| value.as_u64())
-                    .and_then(|value| u16::try_from(value).ok())
-                else {
-                    return MatchResult::no_match();
-                };
-                let Some(request_sequence) = request_layer
-                    .field("sequence")
-                    .and_then(|value| value.as_u64())
-                    .and_then(|value| u32::try_from(value).ok())
-                else {
-                    return MatchResult::no_match();
-                };
-                let Some(response_flags) = response_layer
-                    .field("flags")
-                    .and_then(|value| value.as_u64())
-                    .and_then(|value| u16::try_from(value).ok())
-                else {
-                    return MatchResult::no_match();
-                };
-                let Some(request_payload_length) = tcp_payload_length(request, request_layer_index)
-                else {
-                    return MatchResult::no_match();
-                };
-                let expected_acknowledgment = request_sequence
-                    .wrapping_add(request_payload_length)
-                    .wrapping_add(u32::from(request_flags & Tcp::SYN != 0))
-                    .wrapping_add(u32::from(request_flags & Tcp::FIN != 0));
-                let has_ack = response_flags & Tcp::ACK != 0;
-                let has_rst = response_flags & Tcp::RST != 0;
-                if has_ack {
-                    let Some(response_acknowledgment) = response_layer
-                        .field("acknowledgment")
+                for layers in &layers {
+                    let request_layer_index = layers.request_index;
+                    let request_layer = layers.request;
+                    let response_layer = layers.response;
+                    let Some(request_flags) = request_layer
+                        .field("flags")
                         .and_then(|value| value.as_u64())
-                        .and_then(|value| u32::try_from(value).ok())
+                        .and_then(|value| u16::try_from(value).ok())
                     else {
                         return MatchResult::no_match();
                     };
-                    if response_acknowledgment != expected_acknowledgment {
-                        return MatchResult::no_match();
-                    }
-                } else if has_rst && request_flags & Tcp::ACK != 0 {
-                    let Some(request_acknowledgment) = request_layer
-                        .field("acknowledgment")
-                        .and_then(|value| value.as_u64())
-                        .and_then(|value| u32::try_from(value).ok())
-                    else {
-                        return MatchResult::no_match();
-                    };
-                    let Some(response_sequence) = response_layer
+                    let Some(request_sequence) = request_layer
                         .field("sequence")
                         .and_then(|value| value.as_u64())
                         .and_then(|value| u32::try_from(value).ok())
                     else {
                         return MatchResult::no_match();
                     };
-                    if response_sequence != request_acknowledgment {
+                    let Some(response_flags) = response_layer
+                        .field("flags")
+                        .and_then(|value| value.as_u64())
+                        .and_then(|value| u16::try_from(value).ok())
+                    else {
+                        return MatchResult::no_match();
+                    };
+                    let Some(request_payload_length) =
+                        tcp_payload_length(request, request_layer_index)
+                    else {
+                        return MatchResult::no_match();
+                    };
+                    let expected_acknowledgment = request_sequence
+                        .wrapping_add(request_payload_length)
+                        .wrapping_add(u32::from(request_flags & Tcp::SYN != 0))
+                        .wrapping_add(u32::from(request_flags & Tcp::FIN != 0));
+                    let has_ack = response_flags & Tcp::ACK != 0;
+                    let has_rst = response_flags & Tcp::RST != 0;
+                    if has_ack {
+                        let Some(response_acknowledgment) = response_layer
+                            .field("acknowledgment")
+                            .and_then(|value| value.as_u64())
+                            .and_then(|value| u32::try_from(value).ok())
+                        else {
+                            return MatchResult::no_match();
+                        };
+                        if response_acknowledgment != expected_acknowledgment {
+                            return MatchResult::no_match();
+                        }
+                    } else if has_rst && request_flags & Tcp::ACK != 0 {
+                        let Some(request_acknowledgment) = request_layer
+                            .field("acknowledgment")
+                            .and_then(|value| value.as_u64())
+                            .and_then(|value| u32::try_from(value).ok())
+                        else {
+                            return MatchResult::no_match();
+                        };
+                        let Some(response_sequence) = response_layer
+                            .field("sequence")
+                            .and_then(|value| value.as_u64())
+                            .and_then(|value| u32::try_from(value).ok())
+                        else {
+                            return MatchResult::no_match();
+                        };
+                        if response_sequence != request_acknowledgment {
+                            return MatchResult::no_match();
+                        }
+                    } else {
                         return MatchResult::no_match();
                     }
-                } else {
-                    return MatchResult::no_match();
+                    if has_rst && response_flags & Tcp::SYN != 0 {
+                        return MatchResult::no_match();
+                    }
                 }
-                if has_rst && response_flags & Tcp::SYN != 0 {
-                    return MatchResult::no_match();
-                }
-                MatchResult::matched(200, "reverse TCP tuple and sequence state")
+                MatchResult::matched(200, "reverse TCP tuples and sequence state")
             }
             BuiltinProtocol::Sctp => {
-                if request_layer
-                    .field("verification_tag")
-                    .and_then(|value| value.as_u64())
-                    != Some(0)
-                {
-                    return MatchResult::no_match();
-                }
-                let Some((request_initiate_tag, _)) =
-                    sctp_initiate_tag(request, request_layer_index, 1)
-                else {
-                    return MatchResult::no_match();
-                };
-                if request_initiate_tag == 0
-                    || sctp_initiate_tag(response, response_layer_index, 2).is_none()
-                    || response_layer
+                for layers in &layers {
+                    let request_layer_index = layers.request_index;
+                    let request_layer = layers.request;
+                    let response_layer_index = layers.response_index;
+                    let response_layer = layers.response;
+                    if request_layer
                         .field("verification_tag")
                         .and_then(|value| value.as_u64())
-                        != Some(u64::from(request_initiate_tag))
-                {
-                    return MatchResult::no_match();
+                        != Some(0)
+                    {
+                        return MatchResult::no_match();
+                    }
+                    let Some((request_initiate_tag, _)) =
+                        sctp_initiate_tag(request, request_layer_index, 1)
+                    else {
+                        return MatchResult::no_match();
+                    };
+                    if request_initiate_tag == 0
+                        || sctp_initiate_tag(response, response_layer_index, 2).is_none()
+                        || response_layer
+                            .field("verification_tag")
+                            .and_then(|value| value.as_u64())
+                            != Some(u64::from(request_initiate_tag))
+                    {
+                        return MatchResult::no_match();
+                    }
                 }
-                MatchResult::matched(200, "reverse SCTP tuple and INIT verification tag")
+                MatchResult::matched(200, "reverse SCTP tuples and INIT verification tags")
             }
-            _ => MatchResult::matched(100, format!("reverse {} tuple", self.protocol.as_str())),
+            _ => MatchResult::matched(
+                100,
+                format!("all reverse {} tuples", self.protocol.as_str()),
+            ),
         }
     }
 
     fn responder(&self, _request: &Packet, response: &Packet) -> Option<IpAddr> {
         let response_layer_index = response
             .iter()
-            .position(|layer| BuiltinProtocol::of(layer) == Some(self.protocol))?;
+            .rposition(|layer| BuiltinProtocol::of(layer) == Some(self.protocol))?;
         network_endpoints_before(response, response_layer_index).map(|endpoints| endpoints.source)
     }
 }

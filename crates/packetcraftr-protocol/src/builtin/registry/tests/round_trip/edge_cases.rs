@@ -223,6 +223,176 @@ fn an_encapsulated_ethernet_frame_keeps_its_own_link_padding_scope() {
 }
 
 #[test]
+fn a_gre_teb_frame_keeps_its_own_link_padding_scope() {
+    let registry = Arc::new(default_registry().unwrap());
+    let builder = Builder::new(Arc::clone(&registry));
+    let mut outer = Packet::new();
+    outer
+        .push(Ethernet::default())
+        .push(Ipv4 {
+            source: Ipv4Addr::new(10, 0, 0, 1),
+            destination: Ipv4Addr::new(10, 0, 0, 2),
+            ..Ipv4::default()
+        })
+        .push(Gre::default())
+        .push(Ethernet::default())
+        .push(Ipv4 {
+            source: Ipv4Addr::new(192, 168, 1, 1),
+            destination: Ipv4Addr::new(192, 168, 1, 5),
+            ..Ipv4::default()
+        })
+        .push(Icmpv4 {
+            body: Bytes::from_static(b"inner"),
+            ..Icmpv4::default()
+        });
+    outer.push(Padding::after_layer(vec![0_u8; 6], 4));
+    let built = builder
+        .build(outer, BuildContext::default(), BuildOptions::default())
+        .unwrap();
+    let decoded = Dissector::new(Arc::clone(&registry))
+        .decode_with_root(
+            built.bytes.clone(),
+            "ethernet".into(),
+            DecodeOptions::default(),
+        )
+        .unwrap();
+
+    let codes = decoded
+        .diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.code.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(codes, ["decode.trailing_padding"]);
+    assert!(decoded.packet.get::<Padding>().is_some());
+
+    let rebuilt = builder
+        .build(
+            decoded.packet,
+            BuildContext::default(),
+            BuildOptions::default(),
+        )
+        .unwrap();
+    assert_eq!(rebuilt.bytes, built.bytes);
+}
+
+#[test]
+fn dns_direction_disambiguates_tunnel_service_ports() {
+    let registry = Arc::new(default_registry().unwrap());
+    let builder = Builder::new(Arc::clone(&registry));
+    for (source_port, destination_port, response) in [
+        (53, 4789, true),
+        (4789, 53, false),
+        (53, 6081, true),
+        (6081, 53, false),
+    ] {
+        let mut wire = vec![0_u8; 12];
+        wire[0..2].copy_from_slice(&0x1234_u16.to_be_bytes());
+        if response {
+            wire[2..4].copy_from_slice(&0x8000_u16.to_be_bytes());
+        }
+        let mut packet = Packet::new();
+        packet
+            .push(Ipv4 {
+                source: Ipv4Addr::new(10, 0, 0, 1),
+                destination: Ipv4Addr::new(10, 0, 0, 2),
+                ..Ipv4::default()
+            })
+            .push(Udp {
+                source_port,
+                destination_port,
+                ..Udp::default()
+            })
+            .push(Dns::from_wire(Bytes::from(wire)).unwrap());
+        let built = builder
+            .build(packet, BuildContext::default(), BuildOptions::default())
+            .unwrap();
+        assert!(built.diagnostics.is_empty());
+
+        let decoded = Dissector::new(Arc::clone(&registry))
+            .decode_with_root(built.bytes, "ipv4".into(), DecodeOptions::default())
+            .unwrap();
+        assert_eq!(decoded.packet.get::<Dns>().unwrap().response, response);
+        assert!(decoded.packet.get::<Vxlan>().is_none());
+        assert!(decoded.packet.get::<Geneve>().is_none());
+    }
+
+    for (destination_port, geneve) in [(4789, false), (6081, true)] {
+        let mut tunnel = Packet::new();
+        tunnel
+            .push(Ipv4 {
+                source: Ipv4Addr::new(10, 0, 0, 1),
+                destination: Ipv4Addr::new(10, 0, 0, 2),
+                ..Ipv4::default()
+            })
+            .push(Udp {
+                source_port: 53,
+                destination_port,
+                ..Udp::default()
+            });
+        if geneve {
+            tunnel.push(Geneve::default());
+        } else {
+            tunnel.push(Vxlan::default());
+        }
+        tunnel
+            .push(Ethernet::default())
+            .push(Ipv4 {
+                source: Ipv4Addr::new(192, 168, 1, 1),
+                destination: Ipv4Addr::new(192, 168, 1, 5),
+                ..Ipv4::default()
+            })
+            .push(Icmpv4::default());
+        let built = builder
+            .build(tunnel, BuildContext::default(), BuildOptions::default())
+            .unwrap();
+        let decoded = Dissector::new(Arc::clone(&registry))
+            .decode_with_root(built.bytes, "ipv4".into(), DecodeOptions::default())
+            .unwrap();
+        if geneve {
+            assert!(decoded.packet.get::<Geneve>().is_some());
+        } else {
+            assert!(decoded.packet.get::<Vxlan>().is_some());
+        }
+        assert!(decoded.packet.get::<Dns>().is_none());
+    }
+
+    // The IPv6 EtherType has the DNS QR bit set when viewed as bytes 2..4.
+    // Its reserved DNS Z bit is also set, so it must remain a GENEVE payload.
+    let mut geneve_ipv6 = Packet::new();
+    geneve_ipv6
+        .push(Ipv4 {
+            source: Ipv4Addr::new(10, 0, 0, 1),
+            destination: Ipv4Addr::new(10, 0, 0, 2),
+            ..Ipv4::default()
+        })
+        .push(Udp {
+            source_port: 53,
+            destination_port: 6081,
+            ..Udp::default()
+        })
+        .push(Geneve::default())
+        .push(Ipv6 {
+            source: "fd00::1".parse().unwrap(),
+            destination: "fd00::2".parse().unwrap(),
+            ..Ipv6::default()
+        })
+        .push(Icmpv6::default());
+    let built = builder
+        .build(
+            geneve_ipv6,
+            BuildContext::default(),
+            BuildOptions::default(),
+        )
+        .unwrap();
+    let decoded = Dissector::new(Arc::clone(&registry))
+        .decode_with_root(built.bytes, "ipv4".into(), DecodeOptions::default())
+        .unwrap();
+    assert!(decoded.packet.get::<Geneve>().is_some());
+    assert!(decoded.packet.get::<Ipv6>().is_some());
+    assert!(decoded.packet.get::<Dns>().is_none());
+}
+
+#[test]
 fn udp_traffic_away_from_registered_ports_still_decodes_as_raw() {
     let registry = Arc::new(default_registry().unwrap());
     let mut packet = Packet::new();

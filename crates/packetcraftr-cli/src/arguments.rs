@@ -24,6 +24,7 @@ pub(super) use recipe::RecipeArgs;
 pub(super) use replay::{CliReplayTiming, ReplayArgs};
 pub(super) use root::{Cli, CliColorChoice, Command};
 pub(super) use route::RouteArgs;
+pub(crate) use scan::CliScanPortSpec;
 pub(super) use scan::ScanArgs;
 pub(super) use send::SendArgs;
 pub(super) use stats::{CliStatsTable, StatsArgs};

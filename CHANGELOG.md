@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added finding-level `--min-severity` and repeatable `--code` selectors to
   `packetcraftr expert`, enabling output filtering by minimum severity and exact
   stable code without narrowing capture analysis history or frame selection.
+- Added `scan --ports` bounded inclusive range syntax: each comma-delimited
+  token may now be a `u16` port or an inclusive `START-END` range. Ranges
+  deduplicate stably in first-seen order alongside individual ports and
+  expansion stops as soon as another distinct port would exceed `--max-ports`,
+  preserving the existing `cli.scan_limit` classification and `Vec<u16>` workflow
+  request contract.
 - Added `packetcraftr capture --capture-filter <BPF>` to install native
   libpcap/Npcap BPF before frames enter PacketcraftR's queue or operation
   budgets, independently of the existing post-capture `--filter` display

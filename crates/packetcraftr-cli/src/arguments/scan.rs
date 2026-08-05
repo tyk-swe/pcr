@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::net::IpAddr;
+use std::str::FromStr;
 
 use clap::{Args, ValueEnum};
 use packetcraftr::{packet, workflow};
@@ -13,7 +14,55 @@ use super::route::CliLinkMode;
 
 pub(super) const AFTER_LONG_HELP: &str = r#"Examples:
   packetcraftr scan 192.0.2.10 --transport tcp --ports 22,80,443
-  packetcraftr --output ndjson scan 198.51.100.10 --transport icmp"#;
+  packetcraftr scan 192.0.2.10 --transport udp --ports 53,8000-8100
+  packetcraftr --output ndjson scan 198.51.100.10 --transport icmp
+
+Port syntax:
+  --ports accepts comma-separated u16 ports and inclusive ranges of the form
+  START-END, where START and END are both u16 ports and START <= END. Repeated
+  ports and overlapping ranges keep their first-seen order and deduplicate.
+  Expansion is bounded by --max-ports and stops as soon as another distinct
+  port would exceed that limit."#;
+
+/// One CLI `--ports` token: either a single u16 port or an inclusive
+/// `START-END` range. This is a CLI-only concern; expansion into the
+/// `Vec<u16>` carried by `workflow::scan::Request` happens in
+/// `commands::scan::conversion`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CliScanPortSpec {
+    Single(u16),
+    RangeInclusive { start: u16, end: u16 },
+}
+
+impl FromStr for CliScanPortSpec {
+    type Err = String;
+
+    fn from_str(token: &str) -> Result<Self, Self::Err> {
+        let Some((start_part, end_part)) = token.split_once('-') else {
+            return Ok(Self::Single(parse_port(token)?));
+        };
+        if start_part.is_empty() || end_part.is_empty() {
+            return Err(format!(
+                "invalid port spec `{token}`: inclusive ranges need the form START-END with both \
+                 endpoints present"
+            ));
+        }
+        let start = parse_port(start_part)?;
+        let end = parse_port(end_part)?;
+        if end < start {
+            return Err(format!(
+                "invalid port spec `{token}`: range end {end} precedes start {start}"
+            ));
+        }
+        Ok(Self::RangeInclusive { start, end })
+    }
+}
+
+fn parse_port(token: &str) -> Result<u16, String> {
+    token
+        .parse::<u16>()
+        .map_err(|_| format!("invalid port spec `{token}`: expected a u16 port or START-END range"))
+}
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
 pub(crate) enum CliScanTransport {
@@ -44,9 +93,10 @@ pub(crate) struct ScanArgs {
     /// Select all authorized addresses or only one IP family.
     #[arg(long, value_enum, default_value_t = CliAddressFamily::Any)]
     pub(crate) family: CliAddressFamily,
-    /// Comma-separated TCP/UDP destination ports; omitted for ICMP.
+    /// Comma-separated TCP/UDP destination ports or inclusive START-END ranges;
+    /// omitted for ICMP.
     #[arg(long, value_delimiter = ',', num_args = 1..)]
-    pub(crate) ports: Vec<u16>,
+    pub(crate) ports: Vec<CliScanPortSpec>,
     /// Number of bounded attempts per selected endpoint.
     #[arg(long, default_value_t = 1)]
     pub(crate) attempts: u32,
@@ -90,7 +140,7 @@ pub(crate) struct ScanArgs {
 mod tests {
     use clap::Parser;
 
-    use super::CliScanTransport;
+    use super::{CliScanPortSpec, CliScanTransport};
     use crate::arguments::{Cli, Command};
 
     #[test]
@@ -115,9 +165,99 @@ mod tests {
             panic!("expected scan command");
         };
         assert!(matches!(arguments.transport, CliScanTransport::Udp));
-        assert_eq!(arguments.ports, [53, 161]);
+        assert_eq!(
+            arguments.ports,
+            [CliScanPortSpec::Single(53), CliScanPortSpec::Single(161)]
+        );
         assert_eq!(arguments.attempts, 2);
         assert_eq!(arguments.batch_size, 2);
         assert_eq!(arguments.rate, Some(10));
+    }
+
+    #[test]
+    fn numeric_only_ports_still_parse_as_singles() {
+        let cli =
+            Cli::try_parse_from(["packetcraftr", "scan", "192.0.2.10", "--ports", "22,80,443"])
+                .unwrap();
+        let Command::Scan(arguments) = cli.command else {
+            panic!("expected scan command");
+        };
+        assert_eq!(
+            arguments.ports,
+            [
+                CliScanPortSpec::Single(22),
+                CliScanPortSpec::Single(80),
+                CliScanPortSpec::Single(443)
+            ]
+        );
+    }
+
+    #[test]
+    fn mixed_singles_and_ranges_parse_into_the_correct_spec_sequence() {
+        let cli = Cli::try_parse_from([
+            "packetcraftr",
+            "scan",
+            "192.0.2.10",
+            "--ports",
+            "22,80,443,8000-8002",
+        ])
+        .unwrap();
+        let Command::Scan(arguments) = cli.command else {
+            panic!("expected scan command");
+        };
+        assert_eq!(
+            arguments.ports,
+            [
+                CliScanPortSpec::Single(22),
+                CliScanPortSpec::Single(80),
+                CliScanPortSpec::Single(443),
+                CliScanPortSpec::RangeInclusive {
+                    start: 8000,
+                    end: 8002
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn upper_u16_boundary_range_is_accepted() {
+        let spec: CliScanPortSpec = "65534-65535".parse().unwrap();
+        assert_eq!(
+            spec,
+            CliScanPortSpec::RangeInclusive {
+                start: 65534,
+                end: 65535
+            }
+        );
+    }
+
+    #[test]
+    fn descending_ranges_are_rejected() {
+        assert!("9000-8000".parse::<CliScanPortSpec>().is_err());
+    }
+
+    #[test]
+    fn missing_range_endpoints_are_rejected() {
+        for token in ["80-", "-80"] {
+            assert!(
+                token.parse::<CliScanPortSpec>().is_err(),
+                "`{token}` should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn extra_separators_are_rejected() {
+        assert!("80-81-82".parse::<CliScanPortSpec>().is_err());
+    }
+
+    #[test]
+    fn non_numeric_and_out_of_range_endpoints_are_rejected() {
+        for token in ["abc", "80-abc", "65536", "80-65536"] {
+            assert!(
+                token.parse::<CliScanPortSpec>().is_err(),
+                "`{token}` should be rejected"
+            );
+        }
     }
 }

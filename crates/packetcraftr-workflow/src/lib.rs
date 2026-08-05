@@ -8,7 +8,7 @@
 //! [`scan`], [`traceroute`], [`dns`], and [`replay`] are live domains: their
 //! public entry points require authorization and finite operation budgets.
 //! [`fuzz::run`] is deliberately offline, while [`fuzz::run_live`] makes its
-//! resolver, authorization, and executor boundaries explicit. Private kernel
+//! registry, authorization, execution, and clock boundaries explicit. Private kernel
 //! modules own only contracts that are genuinely shared across these domains,
 //! such as clocks, target authorization, probe lifecycles, and exact evidence
 //! accounting; packet generation, validation, and classification remain with

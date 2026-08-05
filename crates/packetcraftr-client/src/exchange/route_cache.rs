@@ -21,13 +21,13 @@ enum ExchangeRouteLookupKey {
 
 /// Memoizes passive route decisions for one exchange without retaining an
 /// operating-system route snapshot beyond that operation.
-pub(crate) struct ExchangeRouteProvider<'a, R> {
+pub(super) struct ExchangeRouteProvider<'a, R> {
     inner: &'a R,
     decisions: Mutex<HashMap<ExchangeRouteLookupKey, Option<RouteDecision>>>,
 }
 
 impl<'a, R: RouteProvider> ExchangeRouteProvider<'a, R> {
-    pub(crate) fn new(inner: &'a R) -> Self {
+    pub(super) fn new(inner: &'a R) -> Self {
         Self {
             inner,
             decisions: Mutex::new(HashMap::new()),

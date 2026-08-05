@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use clap::Args;
+use clap::{ArgAction, Args, ValueEnum};
 
 use super::offline_limits::OfflineAnalysisLimits;
 
@@ -14,7 +14,28 @@ Retransmissions (including retransmissions whose content changed) come from boun
 Examples:
   packetcraftr expert capture.pcapng
   packetcraftr expert capture.pcapng --filter 'tcp.stream == 3'
+  packetcraftr expert capture.pcapng --min-severity warning
+  packetcraftr expert capture.pcapng --code tcp.reset --code tcp.retransmission
   packetcraftr --output ndjson expert capture.pcapng"#;
+
+/// Minimum finding severity selector for `expert`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+#[value(rename_all = "snake_case")]
+pub(crate) enum CliExpertSeverity {
+    Info,
+    Warning,
+    Error,
+}
+
+impl CliExpertSeverity {
+    pub(crate) const fn rank(self) -> u8 {
+        match self {
+            Self::Info => 1,
+            Self::Warning => 2,
+            Self::Error => 3,
+        }
+    }
+}
 
 #[derive(Debug, Args)]
 pub(crate) struct ExpertArgs {
@@ -24,6 +45,49 @@ pub(crate) struct ExpertArgs {
     /// capture-global.
     #[arg(long, value_name = "EXPR")]
     pub(crate) filter: Option<String>,
+    /// Minimum finding severity to include in output.
+    #[arg(long, value_enum, default_value_t = CliExpertSeverity::Info)]
+    pub(crate) min_severity: CliExpertSeverity,
+    /// Keep only findings matching an exact code; repeatable.
+    #[arg(long = "code", value_name = "CODE", action = ArgAction::Append)]
+    pub(crate) codes: Vec<String>,
     #[command(flatten)]
     pub(crate) limits: OfflineAnalysisLimits,
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::*;
+    use crate::arguments::Command;
+
+    #[derive(Debug, Parser)]
+    struct CliWrapper {
+        #[command(subcommand)]
+        command: Command,
+    }
+
+    #[test]
+    fn parses_expert_selectors() {
+        let cli = CliWrapper::try_parse_from([
+            "packetcraftr",
+            "expert",
+            "capture.pcap",
+            "--min-severity",
+            "warning",
+            "--code",
+            "tcp.reset",
+            "--code",
+            "tcp.retransmission",
+        ])
+        .unwrap();
+
+        let Command::Expert(args) = cli.command else {
+            panic!("expected Expert command");
+        };
+
+        assert_eq!(args.min_severity, CliExpertSeverity::Warning);
+        assert_eq!(args.codes, vec!["tcp.reset", "tcp.retransmission"]);
+    }
 }

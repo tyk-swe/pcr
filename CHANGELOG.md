@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added finding-level `--min-severity` and repeatable `--code` selectors to
+  `packetcraftr expert`, enabling output filtering by minimum severity and exact
+  stable code without narrowing capture analysis history or frame selection.
 - Added `packetcraftr capture --capture-filter <BPF>` to install native
   libpcap/Npcap BPF before frames enter PacketcraftR's queue or operation
   budgets, independently of the existing post-capture `--filter` display

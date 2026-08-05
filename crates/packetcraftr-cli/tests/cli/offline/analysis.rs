@@ -194,3 +194,186 @@ fn expert_rejects_unsupported_formats_and_invalid_limits_up_front() {
         String::from_utf8_lossy(&limits.stderr)
     );
 }
+
+#[test]
+fn expert_selects_findings_by_code_and_severity() {
+    let capture = anomalous_capture();
+    let expert = |arguments: &[&str]| -> String {
+        let mut command = binary();
+        command.arg("expert").arg(&capture).args(arguments);
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "{arguments:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap()
+    };
+
+    // --code tcp.reset
+    let single_code = expert(&["--code", "tcp.reset"]);
+    assert!(
+        single_code.contains("#5 Warning tcp.reset (tcp stream 0)"),
+        "{single_code}"
+    );
+    assert!(!single_code.contains("tcp.retransmission"), "{single_code}");
+    assert!(!single_code.contains("tcp.duplicate_ack"), "{single_code}");
+    assert!(
+        single_code.contains(
+            "found 1 finding(s) (0 error(s), 1 warning(s), 0 note(s)) in 5 of 5 frame(s)"
+        ),
+        "{single_code}"
+    );
+
+    // Repeated codes: --code tcp.reset --code tcp.duplicate_ack
+    let repeated_codes = expert(&["--code", "tcp.reset", "--code", "tcp.duplicate_ack"]);
+    assert!(
+        repeated_codes.contains("#4 Warning tcp.duplicate_ack"),
+        "{repeated_codes}"
+    );
+    assert!(
+        repeated_codes.contains("#5 Warning tcp.reset"),
+        "{repeated_codes}"
+    );
+    assert!(
+        !repeated_codes.contains("tcp.retransmission"),
+        "{repeated_codes}"
+    );
+    assert!(
+        repeated_codes.contains(
+            "found 2 finding(s) (0 error(s), 2 warning(s), 0 note(s)) in 5 of 5 frame(s)"
+        ),
+        "{repeated_codes}"
+    );
+
+    // Per-code counts in aggregate JSON for repeated codes
+    let repeated_json: serde_json::Value = serde_json::from_str(&expert(&[
+        "--output",
+        "json",
+        "--code",
+        "tcp.reset",
+        "--code",
+        "tcp.duplicate_ack",
+    ]))
+    .unwrap();
+    let result_json = &repeated_json["result"];
+    let codes_json = result_json["codes"].as_array().unwrap();
+    assert_eq!(codes_json.len(), 2);
+    // BTreeMap ordering guarantees tcp.duplicate_ack before tcp.reset
+    assert_eq!(codes_json[0]["code"], "tcp.duplicate_ack");
+    assert_eq!(codes_json[0]["findings"], 1);
+    assert_eq!(codes_json[1]["code"], "tcp.reset");
+    assert_eq!(codes_json[1]["findings"], 1);
+
+    // Unknown code
+    let unknown_code = expert(&["--code", "unknown.code"]);
+    assert!(!unknown_code.contains("#"), "{unknown_code}");
+    assert!(
+        unknown_code.contains(
+            "found 0 finding(s) (0 error(s), 0 warning(s), 0 note(s)) in 5 of 5 frame(s)"
+        ),
+        "{unknown_code}"
+    );
+
+    let unknown_json: serde_json::Value =
+        serde_json::from_str(&expert(&["--output", "json", "--code", "unknown.code"])).unwrap();
+    assert_eq!(
+        unknown_json["result"]["findings"].as_array().unwrap().len(),
+        0
+    );
+    assert_eq!(unknown_json["result"]["codes"].as_array().unwrap().len(), 0);
+
+    let unknown_ndjson = expert(&["--output", "ndjson", "--code", "unknown.code"]);
+    let unknown_lines: Vec<serde_json::Value> = unknown_ndjson
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(unknown_lines.len(), 1);
+    assert_eq!(unknown_lines[0]["sequence"], 0);
+
+    // --min-severity warning retains all three warnings in existing fixture
+    let min_warning = expert(&["--min-severity", "warning"]);
+    assert!(
+        min_warning.contains(
+            "found 3 finding(s) (0 error(s), 3 warning(s), 0 note(s)) in 5 of 5 frame(s)"
+        ),
+        "{min_warning}"
+    );
+
+    // --min-severity error excludes warnings and reports 0 selected findings
+    let min_error = expert(&["--min-severity", "error"]);
+    assert!(
+        min_error.contains(
+            "found 0 finding(s) (0 error(s), 0 warning(s), 0 note(s)) in 5 of 5 frame(s)"
+        ),
+        "{min_error}"
+    );
+
+    // Combining --min-severity and --code uses intersection semantics
+    let intersect_match = expert(&["--min-severity", "warning", "--code", "tcp.reset"]);
+    assert!(
+        intersect_match.contains(
+            "found 1 finding(s) (0 error(s), 1 warning(s), 0 note(s)) in 5 of 5 frame(s)"
+        ),
+        "{intersect_match}"
+    );
+
+    let intersect_miss = expert(&["--min-severity", "error", "--code", "tcp.reset"]);
+    assert!(
+        intersect_miss.contains(
+            "found 0 finding(s) (0 error(s), 0 warning(s), 0 note(s)) in 5 of 5 frame(s)"
+        ),
+        "{intersect_miss}"
+    );
+
+    // Aggregate JSON validation
+    let agg_json: serde_json::Value =
+        serde_json::from_str(&expert(&["--output", "json", "--code", "tcp.reset"])).unwrap();
+    let res = &agg_json["result"];
+    assert_eq!(res["frames_read"], 5);
+    assert_eq!(res["frames_matched"], 5);
+    assert_eq!(res["warnings"], 1);
+    assert_eq!(res["errors"], 0);
+    assert_eq!(res["notes"], 0);
+    assert_eq!(res["findings"].as_array().unwrap().len(), 1);
+    assert_eq!(res["findings"][0]["code"], "tcp.reset");
+
+    // NDJSON for --code tcp.reset
+    let ndjson_reset = expert(&["--output", "ndjson", "--code", "tcp.reset"]);
+    let ndjson_lines: Vec<serde_json::Value> = ndjson_reset
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(ndjson_lines.len(), 2);
+    assert_eq!(ndjson_lines[0]["sequence"], 0);
+    assert_eq!(ndjson_lines[0]["result"]["code"], "tcp.reset");
+    assert_eq!(ndjson_lines[1]["sequence"], 1);
+    assert_eq!(
+        ndjson_lines[1]["result"]["findings"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
+    assert_eq!(ndjson_lines[1]["result"]["warnings"], 1);
+    assert_eq!(ndjson_lines[1]["result"]["codes"][0]["code"], "tcp.reset");
+}
+
+#[test]
+fn expert_rejects_invalid_min_severity_up_front() {
+    let output = binary()
+        .args([
+            "expert",
+            "definitely-missing.pcap",
+            "--min-severity",
+            "invalid",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("invalid"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

@@ -1,14 +1,57 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::collections::BTreeMap;
+
+use packetcraftr::packet::diagnostic::DiagnosticSeverity;
 use packetcraftr::{analysis, output};
 
-use super::super::arguments::ExpertArgs;
+use super::super::arguments::{CliExpertSeverity, ExpertArgs};
 use super::super::errors::CliError;
 use super::super::rendering::{emit_json, emit_json_compact, write_stdout_line};
 use super::offline_analysis::{
     PreparedOfflineAnalysis, open_offline_reader, prepare_offline_analysis,
 };
+
+#[derive(Debug, Default)]
+struct SelectedExpertSummary {
+    findings: u64,
+    errors: u64,
+    warnings: u64,
+    notes: u64,
+    codes: BTreeMap<String, u64>,
+}
+
+impl SelectedExpertSummary {
+    fn count(&mut self, finding: &analysis::expert::Finding) {
+        self.findings += 1;
+        match finding.severity {
+            DiagnosticSeverity::Error => self.errors += 1,
+            DiagnosticSeverity::Warning => self.warnings += 1,
+            DiagnosticSeverity::Info => self.notes += 1,
+        }
+        *self.codes.entry(finding.code.clone()).or_default() += 1;
+    }
+}
+
+fn matches_selector(
+    finding: &analysis::expert::Finding,
+    min_severity: CliExpertSeverity,
+    codes: &[String],
+) -> bool {
+    let finding_rank = match finding.severity {
+        DiagnosticSeverity::Info => 1,
+        DiagnosticSeverity::Warning => 2,
+        DiagnosticSeverity::Error => 3,
+    };
+    if finding_rank < min_severity.rank() {
+        return false;
+    }
+    if !codes.is_empty() && !codes.iter().any(|c| c == &finding.code) {
+        return false;
+    }
+    true
+}
 
 pub(crate) fn run_expert(
     arguments: ExpertArgs,
@@ -31,12 +74,16 @@ pub(crate) fn run_expert(
         limits,
     };
     let mut collector = analysis::expert::ExpertCollector::new();
+    let mut selected_summary = SelectedExpertSummary::default();
     let mut sequence = 0_u64;
     let mut retained: Vec<output::expert::Finding> = Vec::new();
     let outcome = analysis::run(&mut reader, registry, &options, |record| {
         for finding in collector.observe(&record) {
-            emit_finding(output, finding.into(), &mut sequence, &mut retained)
-                .map_err(CliError::into_boundary_error)?;
+            if matches_selector(&finding, arguments.min_severity, &arguments.codes) {
+                selected_summary.count(&finding);
+                emit_finding(output, finding.into(), &mut sequence, &mut retained)
+                    .map_err(CliError::into_boundary_error)?;
+            }
         }
         Ok(())
     });
@@ -50,30 +97,40 @@ pub(crate) fn run_expert(
             error
         }
     })?;
-    let (trailing, expert_summary) =
+    let (trailing, _expert_summary) =
         collector.finish(&summary.trailing_tcp_events, summary.frames_read);
     for finding in trailing {
-        emit_finding(output, finding.into(), &mut sequence, &mut retained)?;
+        if matches_selector(&finding, arguments.min_severity, &arguments.codes) {
+            selected_summary.count(&finding);
+            emit_finding(output, finding.into(), &mut sequence, &mut retained)?;
+        }
     }
 
     match output {
         output::contract::Format::Text => write_stdout_line(format_args!(
             "found {} finding(s) ({} error(s), {} warning(s), {} note(s)) in {} of {} frame(s)",
-            expert_summary.findings,
-            expert_summary.errors,
-            expert_summary.warnings,
-            expert_summary.notes,
+            selected_summary.findings,
+            selected_summary.errors,
+            selected_summary.warnings,
+            selected_summary.notes,
             summary.frames_matched,
             summary.frames_read,
         )),
         output::contract::Format::Json => emit_json(&output::envelope::Aggregate::success(
             output::contract::Command::Expert,
-            output::expert::Result::from_summary(
-                expert_summary,
-                summary.frames_read,
-                summary.frames_matched,
-                retained,
-            ),
+            output::expert::Result {
+                frames_read: summary.frames_read,
+                frames_matched: summary.frames_matched,
+                errors: selected_summary.errors,
+                warnings: selected_summary.warnings,
+                notes: selected_summary.notes,
+                codes: selected_summary
+                    .codes
+                    .into_iter()
+                    .map(|(code, findings)| output::expert::CodeCount { code, findings })
+                    .collect(),
+                findings: retained,
+            },
             Vec::new(),
         )),
         output::contract::Format::Ndjson => {
@@ -82,12 +139,19 @@ pub(crate) fn run_expert(
             emit_json_compact(&output::envelope::Stream::success(
                 output::contract::Command::Expert,
                 sequence,
-                output::expert::Result::from_summary(
-                    expert_summary,
-                    summary.frames_read,
-                    summary.frames_matched,
-                    Vec::new(),
-                ),
+                output::expert::Result {
+                    frames_read: summary.frames_read,
+                    frames_matched: summary.frames_matched,
+                    errors: selected_summary.errors,
+                    warnings: selected_summary.warnings,
+                    notes: selected_summary.notes,
+                    codes: selected_summary
+                        .codes
+                        .into_iter()
+                        .map(|(code, findings)| output::expert::CodeCount { code, findings })
+                        .collect(),
+                    findings: Vec::new(),
+                },
                 Vec::new(),
             ))
             .map_err(|error| error.at_sequence(sequence))

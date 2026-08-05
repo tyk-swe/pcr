@@ -13,7 +13,7 @@ pub(super) use capture::CaptureArgs;
 pub(super) use dissect::DissectArgs;
 pub(super) use dns::DnsArgs;
 pub(super) use exchange::ExchangeArgs;
-pub(super) use expert::ExpertArgs;
+pub(super) use expert::{CliExpertSeverity, ExpertArgs};
 pub(super) use follow::{CliFollowDirection, FollowArgs};
 pub(super) use fuzz::FuzzArgs;
 pub(super) use offline_limits::{OfflineAnalysisLimits, OfflineCaptureLimits};

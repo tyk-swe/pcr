@@ -97,6 +97,7 @@ const EXPECTED_TOOL_FORMATS: &[OutputFormat] =
 const EXPECTED_FOLLOW_FORMATS: &[OutputFormat] = &[
     OutputFormat::Text,
     OutputFormat::Json,
+    OutputFormat::Ndjson,
     OutputFormat::Hex,
     OutputFormat::Raw,
 ];

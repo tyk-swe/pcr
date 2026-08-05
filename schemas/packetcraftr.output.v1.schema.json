@@ -224,6 +224,9 @@
               "$ref": "#/$defs/expertStreamSuccess"
             },
             {
+              "$ref": "#/$defs/followStreamSuccess"
+            },
+            {
               "$ref": "#/$defs/exchangeStreamSuccess"
             },
             {
@@ -920,6 +923,31 @@
         },
         {
           "$ref": "#/$defs/expertResult"
+        }
+      ]
+    },
+    "followStreamSuccess": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "follow"
+        },
+        "result": {
+          "$ref": "#/$defs/followStreamResult"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ]
+    },
+    "followStreamResult": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/followChunk"
+        },
+        {
+          "$ref": "#/$defs/followResult"
         }
       ]
     },

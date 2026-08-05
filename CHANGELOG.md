@@ -18,6 +18,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   expansion stops as soon as another distinct port would exceed `--max-ports`,
   preserving the existing `cli.scan_limit` classification and `Vec<u16>` workflow
   request contract.
+
+- Added incremental NDJSON output to the offline `follow` command.
+  `packetcraftr --output ndjson follow capture.pcapng --stream tcp:7` now
+  streams one record per direction-selected delivered chunk in delivery
+  order, then one terminal summary record with an empty `chunks` array.
+  Chunk sequences are contiguous starting at 0, direction-filtered chunks
+  consume no sequence, and a terminal stream error continues at the next
+  sequence. Aggregate JSON retains all chunks unchanged; text, hex, and raw
+  output are unchanged.
 - Added `packetcraftr capture --capture-filter <BPF>` to install native
   libpcap/Npcap BPF before frames enter PacketcraftR's queue or operation
   budgets, independently of the existing post-capture `--filter` display

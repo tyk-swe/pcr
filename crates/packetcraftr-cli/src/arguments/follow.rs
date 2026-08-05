@@ -14,7 +14,8 @@ The conversation index comes from the same first-seen numbering stats reports an
 Examples:
   packetcraftr follow capture.pcapng --stream tcp:0
   packetcraftr follow capture.pcapng --stream tcp:0 --direction client --output raw > client.bin
-  packetcraftr --output json follow capture.pcapng --stream udp:2"#;
+  packetcraftr --output json follow capture.pcapng --stream udp:2
+  packetcraftr --output ndjson follow capture.pcapng --stream tcp:7"#;
 
 /// How a followed conversation's chunks are narrowed by sender.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]

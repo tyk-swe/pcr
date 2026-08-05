@@ -110,6 +110,37 @@ fn published_follow_outputs_match_the_cli() {
     let actual: serde_json::Value = serde_json::from_slice(&success.stdout).unwrap();
     assert_eq!(actual, json_file("output-follow-success.json"));
 
+    // NDJSON streams one record per delivered chunk and then a terminal
+    // summary; the first chunk and the terminal summary match their goldens
+    // and every sequence number is contiguous.
+    let stream = binary()
+        .args(["--output", "ndjson", "follow"])
+        .arg(&fixture)
+        .args(["--stream", "tcp:0"])
+        .output()
+        .unwrap();
+    assert!(
+        stream.status.success(),
+        "{}",
+        String::from_utf8_lossy(&stream.stderr)
+    );
+    let records = std::str::from_utf8(&stream.stdout)
+        .unwrap()
+        .split('\n')
+        .filter(|line| !line.is_empty())
+        .map(serde_json::from_str::<serde_json::Value>)
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert!(!records.is_empty());
+    let first = records[0].clone();
+    assert_eq!(first, json_file("output-follow-event.json"));
+    let last = records.last().unwrap().clone();
+    assert_eq!(last, json_file("output-follow-complete.json"));
+    assert_eq!(last["sequence"], records.len() - 1);
+    for (index, record) in records.iter().enumerate() {
+        assert_eq!(record["sequence"], index);
+    }
+
     let error = binary()
         .args([
             "--output",

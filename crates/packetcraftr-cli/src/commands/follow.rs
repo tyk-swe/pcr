@@ -5,7 +5,9 @@ use packetcraftr::{analysis, output};
 
 use super::super::arguments::{CliFollowDirection, FollowArgs};
 use super::super::errors::CliError;
-use super::super::rendering::{emit_json, emit_stderr_message, write_raw, write_stdout_line};
+use super::super::rendering::{
+    emit_json, emit_json_compact, emit_stderr_message, write_raw, write_stdout_line,
+};
 use super::offline_analysis::{
     PreparedOfflineAnalysis, open_offline_reader, prepare_offline_analysis,
 };
@@ -55,17 +57,28 @@ pub(crate) fn run_follow(
     };
     let mut collector = FollowCollector::new(selector);
     let direction = arguments.direction;
+    let mut sequence = 0_u64;
     let mut retained: Vec<output::follow::Chunk> = Vec::new();
     let run_summary = analysis::run(&mut reader, registry, &options, |record| {
         for chunk in collector.observe(&record) {
             if !direction_matches(direction, &chunk) {
                 continue;
             }
-            emit_chunk(output, chunk, &mut retained).map_err(CliError::into_boundary_error)?;
+            emit_chunk(output, chunk, &mut sequence, &mut retained)
+                .map_err(CliError::into_boundary_error)?;
         }
         Ok(())
     })
-    .map_err(CliError::classified)?;
+    .map_err(|error| {
+        let error = CliError::classified(error);
+        // Streamed records are numbered by emission, not by capture frame,
+        // so a terminal stream error continues that numbering.
+        if matches!(output, output::contract::Format::Ndjson) {
+            error.at_sequence(sequence)
+        } else {
+            error
+        }
+    })?;
     let summary = collector.finish(&run_summary.trailing_tcp_events);
 
     match output {
@@ -101,6 +114,23 @@ pub(crate) fn run_follow(
             ),
             Vec::new(),
         )),
+        output::contract::Format::Ndjson => {
+            // Every direction-selected chunk was already streamed; the
+            // terminal record carries only the totals and an empty chunk
+            // list, so NDJSON does not retain payloads.
+            emit_json_compact(&output::envelope::Stream::success(
+                output::contract::Command::Follow,
+                sequence,
+                output::follow::Result::from_summary(
+                    selector.transport.into(),
+                    selector.index,
+                    summary,
+                    Vec::new(),
+                ),
+                Vec::new(),
+            ))
+            .map_err(|error| error.at_sequence(sequence))
+        }
         output::contract::Format::Hex | output::contract::Format::Raw => {
             // Standard output stays pure payload, so incompleteness is
             // reported out of band rather than silently swallowed.
@@ -113,7 +143,7 @@ pub(crate) fn run_follow(
             }
             Ok(())
         }
-        _ => unreachable!("the format contract admits only text, json, hex, and raw"),
+        _ => unreachable!("the format contract admits only text, json, ndjson, hex, and raw"),
     }
 }
 
@@ -121,6 +151,7 @@ pub(crate) fn run_follow(
 fn emit_chunk(
     output: output::contract::Format,
     chunk: Chunk,
+    sequence: &mut u64,
     retained: &mut Vec<output::follow::Chunk>,
 ) -> Result<(), CliError> {
     match output {
@@ -144,7 +175,21 @@ fn emit_chunk(
             retained.push(chunk.into());
             Ok(())
         }
-        _ => unreachable!("the format contract admits only text, json, hex, and raw"),
+        output::contract::Format::Ndjson => {
+            emit_json_compact(&output::envelope::Stream::success(
+                output::contract::Command::Follow,
+                *sequence,
+                output::follow::Chunk::from(chunk),
+                Vec::new(),
+            ))
+            .map_err(|error| error.at_sequence(*sequence))?;
+            *sequence = sequence.checked_add(1).ok_or_else(|| {
+                CliError::classified(output::contract::Error::SequenceOverflow)
+                    .at_sequence(*sequence)
+            })?;
+            Ok(())
+        }
+        _ => unreachable!("the format contract admits only text, json, ndjson, hex, and raw"),
     }
 }
 

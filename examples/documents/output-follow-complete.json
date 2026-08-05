@@ -1,0 +1,25 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "follow",
+  "mode": "stream",
+  "sequence": 3,
+  "status": "success",
+  "result": {
+    "transport": "tcp",
+    "stream": 0,
+    "client": {
+      "address": "10.0.0.1",
+      "port": 1000
+    },
+    "server": {
+      "address": "10.0.0.2",
+      "port": 443
+    },
+    "frames": 3,
+    "client_bytes": 10,
+    "server_bytes": 5,
+    "undelivered_bytes": 0,
+    "chunks": []
+  },
+  "diagnostics": []
+}

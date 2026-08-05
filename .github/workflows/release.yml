@@ -204,28 +204,303 @@ jobs:
         name: Smoke-test Unix archive
         shell: bash
         run: |
-          set -euo pipefail
+          set -uo pipefail
+
+          # The release archive is exercised as a real installation: the
+          # extracted binary is invoked by absolute path only, so the checks
+          # can never pass by resolving another `packetcraftr` from PATH, the
+          # build workspace, or target/.
           extraction="$RUNNER_TEMP/archive-smoke-test"
+          rm -rf "$extraction"
           mkdir -p "$extraction"
           tar -C "$extraction" -xzf "$RUNNER_TEMP/$ARCHIVE_BASENAME.tar.gz"
           executable="$extraction/$ARCHIVE_BASENAME/packetcraftr"
-          test -x "$executable"
+          if [[ ! -x "$executable" ]]; then
+            echo "packaged executable is missing or not executable: $executable" >&2
+            exit 1
+          fi
           for document in LICENSE README.md CHANGELOG.md; do
-            test -s "$extraction/$ARCHIVE_BASENAME/$document"
+            document_path="$extraction/$ARCHIVE_BASENAME/$document"
+            if [[ ! -s "$document_path" ]]; then
+              echo "packaged $document is missing or empty: $document_path" >&2
+              exit 1
+            fi
           done
-          test "$("$executable" --version)" = "packetcraftr $VERSION"
+
+          # Run a command against the extracted binary and fail with a full
+          # diagnostic (command, exit code, stdout, stderr) when the command
+          # exits non-zero. On success the captured stdout and stderr paths are
+          # left in the global CHECK_STDOUT_FILE and CHECK_STDERR_FILE so
+          # callers can read/parse them and remove them. stdout/stderr are
+          # captured separately so JSON parsing and panic/backtrace checks
+          # target the right stream. Running the command directly (not in a
+          # command substitution) lets an abort propagate to the whole script
+          # instead of only a subshell.
+          CHECK_STDOUT_FILE=""
+          CHECK_STDERR_FILE=""
+          run_check() {
+            local description="$1"; shift
+            local stdout_file stderr_file exit_code=0
+            stdout_file="$(mktemp)"
+            stderr_file="$(mktemp)"
+            "$@" >"$stdout_file" 2>"$stderr_file" || exit_code=$?
+            if (( exit_code != 0 )); then
+              echo "FAILED: $description" >&2
+              echo "  command: $*" >&2
+              echo "  exit code: $exit_code" >&2
+              echo "  stdout:" >&2
+              sed 's/^/    /' "$stdout_file" >&2
+              echo "  stderr:" >&2
+              sed 's/^/    /' "$stderr_file" >&2
+              rm -f "$stdout_file" "$stderr_file"
+              return 1
+            fi
+            CHECK_STDOUT_FILE="$stdout_file"
+            CHECK_STDERR_FILE="$stderr_file"
+          }
+
+          fail_assertion() {
+            local description="$1"; shift
+            echo "FAILED: $description" >&2
+            if (( $# > 0 )); then
+              printf '  %s\n' "$@" >&2
+            fi
+            return 1
+          }
+
+          # Read a captured stdout file, remove it, and print its contents.
+          consume_stdout() {
+            local file="$1"
+            cat "$file"
+            rm -f "$file"
+          }
+
+          # Fail if a captured stderr file contains a panic or backtrace
+          # marker, then remove it.
+          assert_clean_stderr() {
+            local file="$1"
+            local stderr_content
+            stderr_content="$(cat "$file")"
+            rm -f "$file"
+            if [[ "$stderr_content" == *"panic"* || "$stderr_content" == *"backtrace"* ]]; then
+              fail_assertion \
+                "command wrote a panic or backtrace to stderr" \
+                "stderr:" \
+                "$stderr_content" || exit 1
+            fi
+          }
+
+          # 1. --version exits successfully and reports the exact release
+          # version.
+          run_check \
+            "packetcraftr --version succeeds" \
+            "$executable" --version || exit 1
+          version_output="$(consume_stdout "$CHECK_STDOUT_FILE")"
+          rm -f "$CHECK_STDERR_FILE"
+          version_expected="packetcraftr $VERSION"
+          if [[ "$version_output" != "$version_expected" ]]; then
+            fail_assertion \
+              "packetcraftr --version reported an unexpected value" \
+              "expected: $version_expected" \
+              "actual:   $version_output" || exit 1
+          fi
+
+          # 2. --help exits successfully, names the program, and exposes
+          # representative offline and native command groups. The full help
+          # text is not snapshotted.
+          run_check \
+            "packetcraftr --help succeeds" \
+            "$executable" --help || exit 1
+          help_output="$(consume_stdout "$CHECK_STDOUT_FILE")"
+          rm -f "$CHECK_STDERR_FILE"
+          for expected in \
+            "Usage: packetcraftr" \
+            "Commands:" \
+            "build" \
+            "dissect" \
+            "protocols" \
+            "read" \
+            "interfaces" \
+            "routes" \
+            "plan" \
+            "send"
+          do
+            if [[ "$help_output" != *"$expected"* ]]; then
+              fail_assertion \
+                "packetcraftr --help is missing expected text: $expected" || exit 1
+            fi
+          done
+
+          # 3. Raw packet build emits exactly the requested hex bytes after
+          # removing only the platform trailing newline, and stderr must not
+          # contain a panic or backtrace.
+          run_check \
+            "packetcraftr --output hex build raw(hex=deadbeef) succeeds" \
+            "$executable" --output hex build --packet 'raw(hex=deadbeef)' || exit 1
+          build_output="$(consume_stdout "$CHECK_STDOUT_FILE")"
+          assert_clean_stderr "$CHECK_STDERR_FILE"
+          build_hex="${build_output%$'\n'}"
+          if [[ "$build_hex" != "deadbeef" ]]; then
+            fail_assertion \
+              "raw packet build did not emit exactly deadbeef" \
+              "expected: deadbeef" \
+              "actual:   $build_hex" || exit 1
+          fi
+
+          # 4. Structured protocol description identifies IPv4 with stable
+          # envelope fields. Presentation text is not asserted.
+          run_check \
+            "packetcraftr --output json protocols ipv4 succeeds" \
+            "$executable" --output json protocols ipv4 || exit 1
+          protocols_stdout_file="$CHECK_STDOUT_FILE"
+          rm -f "$CHECK_STDERR_FILE"
+          python3 - "$protocols_stdout_file" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          path = pathlib.Path(sys.argv[1])
+          payload = path.read_text(encoding="utf-8")
+          try:
+              document = json.loads(payload)
+          except json.JSONDecodeError as error:
+              raise SystemExit(
+                  f"protocols ipv4 output is not valid JSON: {error}\n"
+                  f"payload:\n{payload}"
+              )
+          finally:
+              path.unlink(missing_ok=True)
+
+          def fail(reason):
+              raise SystemExit(
+                  f"protocols ipv4 JSON assertion failed: {reason}\n"
+                  f"payload:\n{payload}"
+              )
+
+          if document.get("schema") != "packetcraftr.output/v1":
+              fail(f"schema is {document.get('schema')!r}, expected 'packetcraftr.output/v1'")
+          if document.get("command") != "protocols":
+              fail(f"command is {document.get('command')!r}, expected 'protocols'")
+          if document.get("mode") != "aggregate":
+              fail(f"mode is {document.get('mode')!r}, expected 'aggregate'")
+          if document.get("status") != "success":
+              fail(f"status is {document.get('status')!r}, expected 'success'")
+          protocol = document.get("result", {}).get("protocol")
+          if not isinstance(protocol, dict):
+              fail(f"result.protocol is not an object: {protocol!r}")
+          if protocol.get("protocol") != "ipv4":
+              fail(f"result.protocol.protocol is {protocol.get('protocol')!r}, expected 'ipv4'")
+          if "fields" not in protocol or not isinstance(protocol["fields"], list):
+              fail("result.protocol.fields is missing or not a list")
+          PY
+
+          # 5. Structured dissection represents the supplied packet bytes.
+          run_check \
+            "packetcraftr --output json dissect deadbeef link-type 147 succeeds" \
+            "$executable" --output json dissect --hex deadbeef --link-type 147 || exit 1
+          dissect_stdout_file="$CHECK_STDOUT_FILE"
+          rm -f "$CHECK_STDERR_FILE"
+          python3 - "$dissect_stdout_file" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          path = pathlib.Path(sys.argv[1])
+          payload = path.read_text(encoding="utf-8")
+          try:
+              document = json.loads(payload)
+          except json.JSONDecodeError as error:
+              raise SystemExit(
+                  f"dissect output is not valid JSON: {error}\n"
+                  f"payload:\n{payload}"
+              )
+          finally:
+              path.unlink(missing_ok=True)
+
+          def fail(reason):
+              raise SystemExit(
+                  f"dissect JSON assertion failed: {reason}\n"
+                  f"payload:\n{payload}"
+              )
+
+          if document.get("schema") != "packetcraftr.output/v1":
+              fail(f"schema is {document.get('schema')!r}, expected 'packetcraftr.output/v1'")
+          if document.get("command") != "dissect":
+              fail(f"command is {document.get('command')!r}, expected 'dissect'")
+          if document.get("mode") != "aggregate":
+              fail(f"mode is {document.get('mode')!r}, expected 'aggregate'")
+          if document.get("status") != "success":
+              fail(f"status is {document.get('status')!r}, expected 'success'")
+          result = document.get("result", {})
+          if not isinstance(result, dict):
+              fail(f"result is not an object: {result!r}")
+          if result.get("bytes_hex") != "deadbeef":
+              fail(f"result.bytes_hex is {result.get('bytes_hex')!r}, expected 'deadbeef'")
+          if result.get("link_type") != 147:
+              fail(f"result.link_type is {result.get('link_type')!r}, expected 147")
+          PY
+
+          # 6. Machine output stays valid JSON with no ANSI escape sequence
+          # under the strongest supported styling request.
+          run_check \
+            "packetcraftr --color always --output json protocols ipv4 succeeds" \
+            "$executable" --color always --output json protocols ipv4 || exit 1
+          styled_stdout_file="$CHECK_STDOUT_FILE"
+          rm -f "$CHECK_STDERR_FILE"
+          python3 - "$styled_stdout_file" <<'PY'
+          import json
+          import pathlib
+          import re
+          import sys
+
+          path = pathlib.Path(sys.argv[1])
+          payload = path.read_text(encoding="utf-8")
+          try:
+              document = json.loads(payload)
+          except json.JSONDecodeError as error:
+              raise SystemExit(
+                  f"styled JSON output is not valid JSON: {error}\n"
+                  f"payload:\n{payload}"
+              )
+          finally:
+              path.unlink(missing_ok=True)
+
+          if re.search(r"\x1b\[", payload):
+              raise SystemExit(
+                  "styled JSON output contains an ANSI escape sequence\n"
+                  f"payload:\n{payload}"
+              )
+          if document.get("schema") != "packetcraftr.output/v1":
+              raise SystemExit(
+                  f"styled JSON schema is {document.get('schema')!r}, "
+                  "expected 'packetcraftr.output/v1'\n"
+                  f"payload:\n{payload}"
+              )
+          if document.get("status") != "success":
+              raise SystemExit(
+                  f"styled JSON status is {document.get('status')!r}, "
+                  "expected 'success'\n"
+                  f"payload:\n{payload}"
+              )
+          PY
       - if: runner.os == 'Windows'
         name: Smoke-test Windows archive
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           $extraction = Join-Path $env:RUNNER_TEMP "archive-smoke-test"
+          if (Test-Path $extraction) {
+            Remove-Item -Recurse -Force $extraction
+          }
           $archive = Join-Path $env:RUNNER_TEMP "$($env:ARCHIVE_BASENAME).zip"
           Expand-Archive -Path $archive -DestinationPath $extraction
+          # The extracted binary is invoked by absolute path only, so the
+          # checks can never pass by resolving another `packetcraftr` from
+          # PATH, the build workspace, or target/.
           $packagedPath = "$($env:ARCHIVE_BASENAME)/packetcraftr.exe"
           $executable = Join-Path $extraction $packagedPath
           if (-not (Test-Path -PathType Leaf $executable)) {
-            throw "packaged executable is missing"
+            throw "packaged executable is missing: $executable"
           }
           foreach ($document in @("LICENSE", "README.md", "CHANGELOG.md")) {
             $documentPath = Join-Path $extraction "$($env:ARCHIVE_BASENAME)/$document"
@@ -233,15 +508,184 @@ jobs:
               -not (Test-Path -PathType Leaf $documentPath) -or
               (Get-Item $documentPath).Length -eq 0
             ) {
-              throw "packaged $document is missing or empty"
+              throw "packaged $document is missing or empty: $documentPath"
             }
           }
-          $reportedVersion = (& $executable --version | Out-String).Trim()
-          if ($LASTEXITCODE -ne 0) {
-            throw "packaged executable failed with exit code $LASTEXITCODE"
+
+          # Run a command against the extracted binary and fail with a full
+          # diagnostic (command, exit code, stdout, stderr) when an assertion
+          # breaks. On success the captured stdout and stderr are normalized
+          # as strings in the script-scoped $CheckStdout and $CheckStderr
+          # variables so callers can assert on them. stderr is redirected to a
+          # temporary file so it stays separate from stdout for JSON parsing
+          # and panic/backtrace checks. The native call runs with
+          # ErrorActionPreference temporarily set to Continue so stderr text
+          # never trips the outer Stop preference, and array splatting
+          # preserves each argument verbatim.
+          $script:CheckStdout = ""
+          $script:CheckStderr = ""
+          function Invoke-PacketcraftrCheck {
+            param(
+              [string]$Description,
+              [string[]]$Arguments
+            )
+            $stderrPath = [System.IO.Path]::GetTempFileName()
+            $outerPreference = $ErrorActionPreference
+            $ErrorActionPreference = "Continue"
+            try {
+              $stdout = & $executable @Arguments 2>$stderrPath
+              $exitCode = $LASTEXITCODE
+            } finally {
+              $ErrorActionPreference = $outerPreference
+            }
+            $stderr = Get-Content -Raw $stderrPath -ErrorAction SilentlyContinue
+            if ($null -eq $stdout) {
+              $stdout = ""
+            } else {
+              $stdout = $stdout -join [System.Environment]::NewLine
+            }
+            if ($null -eq $stderr) { $stderr = "" }
+            Remove-Item -Force $stderrPath -ErrorAction SilentlyContinue
+            if ($exitCode -ne 0) {
+              $message = @"
+          FAILED: $Description
+            command: $executable $($Arguments -join ' ')
+            exit code: $exitCode
+            stdout:
+          $stdout
+            stderr:
+          $stderr
+          "@
+              Write-Error $message
+              exit 1
+            }
+            $script:CheckStdout = $stdout
+            $script:CheckStderr = $stderr
           }
-          if ($reportedVersion -ne "packetcraftr $env:VERSION") {
-            throw "unexpected packaged version: $reportedVersion"
+
+          # 1. --version exits successfully and reports the exact release
+          # version.
+          Invoke-PacketcraftrCheck `
+            "packetcraftr --version succeeds" `
+            @("--version")
+          $version = $script:CheckStdout.Trim()
+          $versionExpected = "packetcraftr $env:VERSION"
+          if ($version -ne $versionExpected) {
+            throw @"
+          FAILED: packetcraftr --version reported an unexpected value
+            expected: $versionExpected
+            actual:   $version
+          "@
+          }
+
+          # 2. --help exits successfully, names the program, and exposes
+          # representative offline and native command groups. The full help
+          # text is not snapshotted.
+          Invoke-PacketcraftrCheck `
+            "packetcraftr --help succeeds" `
+            @("--help")
+          $help = $script:CheckStdout
+          foreach ($expected in @(
+            "Usage: packetcraftr",
+            "Commands:",
+            "build",
+            "dissect",
+            "protocols",
+            "read",
+            "interfaces",
+            "routes",
+            "plan",
+            "send"
+          )) {
+            if (-not $help.Contains($expected)) {
+              throw "FAILED: packetcraftr --help is missing expected text: $expected"
+            }
+          }
+
+          # 3. Raw packet build emits exactly the requested hex bytes after
+          # removing only the platform trailing newline, and stderr must not
+          # contain a panic or backtrace.
+          Invoke-PacketcraftrCheck `
+            "packetcraftr --output hex build raw(hex=deadbeef) succeeds" `
+            @("--output", "hex", "build", "--packet", "raw(hex=deadbeef)")
+          $buildHex = $script:CheckStdout.TrimEnd("`r", "`n")
+          $buildStderr = $script:CheckStderr
+          if ($buildHex -ne "deadbeef") {
+            throw @"
+          FAILED: raw packet build did not emit exactly deadbeef
+            expected: deadbeef
+            actual:   $buildHex
+          "@
+          }
+          if ($buildStderr -match "panic" -or $buildStderr -match "backtrace") {
+            throw @"
+          FAILED: raw packet build wrote a panic or backtrace to stderr
+            stderr:
+          $buildStderr
+          "@
+          }
+
+          # 4. Structured protocol description identifies IPv4 with stable
+          # envelope fields. Presentation text is not asserted.
+          Invoke-PacketcraftrCheck `
+            "packetcraftr --output json protocols ipv4 succeeds" `
+            @("--output", "json", "protocols", "ipv4")
+          $protocols = $script:CheckStdout | ConvertFrom-Json
+          if ($protocols.schema -ne "packetcraftr.output/v1") {
+            throw "FAILED: protocols ipv4 schema is $($protocols.schema), expected 'packetcraftr.output/v1'"
+          }
+          if ($protocols.command -ne "protocols") {
+            throw "FAILED: protocols ipv4 command is $($protocols.command), expected 'protocols'"
+          }
+          if ($protocols.mode -ne "aggregate") {
+            throw "FAILED: protocols ipv4 mode is $($protocols.mode), expected 'aggregate'"
+          }
+          if ($protocols.status -ne "success") {
+            throw "FAILED: protocols ipv4 status is $($protocols.status), expected 'success'"
+          }
+          if ($protocols.result.protocol.protocol -ne "ipv4") {
+            throw "FAILED: protocols ipv4 result.protocol.protocol is $($protocols.result.protocol.protocol), expected 'ipv4'"
+          }
+
+          # 5. Structured dissection represents the supplied packet bytes.
+          Invoke-PacketcraftrCheck `
+            "packetcraftr --output json dissect deadbeef link-type 147 succeeds" `
+            @("--output", "json", "dissect", "--hex", "deadbeef", "--link-type", "147")
+          $dissect = $script:CheckStdout | ConvertFrom-Json
+          if ($dissect.schema -ne "packetcraftr.output/v1") {
+            throw "FAILED: dissect schema is $($dissect.schema), expected 'packetcraftr.output/v1'"
+          }
+          if ($dissect.command -ne "dissect") {
+            throw "FAILED: dissect command is $($dissect.command), expected 'dissect'"
+          }
+          if ($dissect.mode -ne "aggregate") {
+            throw "FAILED: dissect mode is $($dissect.mode), expected 'aggregate'"
+          }
+          if ($dissect.status -ne "success") {
+            throw "FAILED: dissect status is $($dissect.status), expected 'success'"
+          }
+          if ($dissect.result.bytes_hex -ne "deadbeef") {
+            throw "FAILED: dissect result.bytes_hex is $($dissect.result.bytes_hex), expected 'deadbeef'"
+          }
+          if ($dissect.result.link_type -ne 147) {
+            throw "FAILED: dissect result.link_type is $($dissect.result.link_type), expected 147"
+          }
+
+          # 6. Machine output stays valid JSON with no ANSI escape sequence
+          # under the strongest supported styling request.
+          Invoke-PacketcraftrCheck `
+            "packetcraftr --color always --output json protocols ipv4 succeeds" `
+            @("--color", "always", "--output", "json", "protocols", "ipv4")
+          $styledJson = $script:CheckStdout
+          $styled = $styledJson | ConvertFrom-Json
+          if ($styled.schema -ne "packetcraftr.output/v1") {
+            throw "FAILED: styled JSON schema is $($styled.schema), expected 'packetcraftr.output/v1'"
+          }
+          if ($styled.status -ne "success") {
+            throw "FAILED: styled JSON status is $($styled.status), expected 'success'"
+          }
+          if ($styledJson -match "\x1b\[") {
+            throw "FAILED: styled JSON output contains an ANSI escape sequence"
           }
       - if: runner.os == 'Linux' && matrix.variant.name == 'all-features'
         name: Verify full Linux binary links libpcap

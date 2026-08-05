@@ -15,6 +15,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   language. Native compilation uses the selected interface's IPv4 netmask and
   accepts the stable resolver-free BPF core with numeric operands to prevent
   hidden name resolution.
+- Strengthened release archive validation so every produced archive is
+  smoke-tested as a usable PacketcraftR installation, not merely as a binary
+  that responds to `--version`. The release workflow now extracts each archive
+  and invokes the binary by absolute path only (never resolving another
+  `packetcraftr` from `PATH`, `target/`, or the build workspace) for offline
+  `--version`, `--help`, raw packet build, structured `protocols` and `dissect`
+  JSON envelope validation, and machine-output styling checks. The Linux
+  `libpcap`/`ldd` checks and SHA-256 checksum generation and verification are
+  preserved, and every release target and feature variant including pcap-free
+  archives runs the full functional smoke suite. CLI behavior, wire bytes,
+  schemas, and serialized output contracts are unchanged.
 
 ### Changed
 

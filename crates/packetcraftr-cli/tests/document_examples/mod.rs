@@ -23,7 +23,7 @@ use packetcraftr::{
         capture::{
             Event as CaptureFrameCommandResult, Frame as FrameOutput, Timestamp as OutputTimestamp,
         },
-        contract::{CONTRACTS as COMMAND_OUTPUT_CONTRACTS, Command as CommandName},
+        contract::Command as CommandName,
         dns::{
             Attempt as DnsAttemptOutput, AttemptStatus as DnsAttemptStatus,
             Event as DnsStreamCommandResult, Outcome as DnsOutcome, Record as DnsRecordOutput,

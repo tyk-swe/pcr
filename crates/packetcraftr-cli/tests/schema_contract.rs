@@ -1,11 +1,19 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use jsonschema::Validator;
 use packetcraftr::packet::document::{Format, Packet as PacketDocument};
+use packetcraftr::{
+    error::{Classification, Kind},
+    output::{
+        contract::Command as CommandName,
+        envelope::{AggregateError, Error as OutputError, StreamError},
+    },
+};
 use serde_json::{Value, json};
 
 fn root() -> PathBuf {
@@ -61,6 +69,114 @@ fn committed_schemas_and_every_document_example_validate() {
             );
         }
     }
+}
+
+#[test]
+fn output_schema_command_vocabulary_matches_the_authoritative_contract() {
+    let schema = json_file(root().join("schemas/packetcraftr.output.v1.schema.json"));
+    let command_enum = schema["$defs"]["baseEnvelope"]["properties"]["command"]["enum"]
+        .as_array()
+        .unwrap();
+    assert!(command_enum.iter().any(Value::is_null));
+
+    let schema_command_names = command_enum
+        .iter()
+        .filter_map(Value::as_str)
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    let schema_commands = schema_command_names
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let contract_commands = CommandName::ALL
+        .iter()
+        .map(|command| command.as_str().to_owned())
+        .collect::<BTreeSet<_>>();
+    let schema_only = schema_commands
+        .difference(&contract_commands)
+        .cloned()
+        .collect::<Vec<_>>();
+    let contract_only = contract_commands
+        .difference(&schema_commands)
+        .cloned()
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        schema_command_names.len(),
+        schema_commands.len(),
+        "output schema repeats a serialized command name"
+    );
+    assert!(
+        schema_only.is_empty() && contract_only.is_empty(),
+        "commands present in the output schema but absent from the authoritative contract: {schema_only:?}; commands present in the authoritative contract but absent from the output schema: {contract_only:?}"
+    );
+}
+
+#[test]
+fn every_relevant_command_golden_validates_against_the_output_schema() {
+    let output = validator("packetcraftr.output.v1.schema.json");
+    let examples = root().join("examples/documents");
+
+    for command in CommandName::ALL {
+        for suffix in ["success", "event", "complete", "error"] {
+            let name = format!("output-{}-{suffix}.json", command.as_str());
+            let path = examples.join(&name);
+            if !path.is_file() {
+                continue;
+            }
+            let value = json_file(&path);
+            assert_eq!(value["command"], command.as_str(), "{name}");
+            assert!(
+                output.is_valid(&value),
+                "{name}: {:?}",
+                output.iter_errors(&value).collect::<Vec<_>>()
+            );
+        }
+    }
+}
+
+#[test]
+fn structured_error_envelope_for_every_command_validates_against_the_output_schema() {
+    let output = validator("packetcraftr.output.v1.schema.json");
+    let classification = Classification::new("test.output_contract", Kind::Cli, None);
+
+    for command in CommandName::ALL {
+        let error = OutputError::new(classification, "contract test error", Vec::new());
+        let aggregate =
+            serde_json::to_value(AggregateError::error(Some(*command), error.clone())).unwrap();
+        let stream = serde_json::to_value(StreamError::error(Some(*command), 0, error)).unwrap();
+
+        for (mode, value) in [("aggregate", aggregate), ("stream", stream)] {
+            assert!(
+                output.is_valid(&value),
+                "{command} {mode}: {:?}",
+                output.iter_errors(&value).collect::<Vec<_>>()
+            );
+        }
+    }
+}
+
+#[test]
+fn output_schema_rejects_unknown_command_spelling() {
+    let output = validator("packetcraftr.output.v1.schema.json");
+    let unknown = json!({
+        "schema": "packetcraftr.output/v1",
+        "command": "not_a_real_command",
+        "mode": "aggregate",
+        "status": "error",
+        "error": {
+            "code": "test.unknown_command",
+            "kind": "cli",
+            "message": "unknown command",
+            "causes": []
+        },
+        "diagnostics": []
+    });
+
+    assert!(
+        !output.is_valid(&unknown),
+        "schema accepted an unknown command spelling: {unknown}"
+    );
 }
 
 #[test]

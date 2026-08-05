@@ -35,6 +35,28 @@ pub enum CommandName {
 }
 
 impl CommandName {
+    /// Complete v1 command vocabulary in canonical serialized order.
+    pub const ALL: &'static [Self] = &[
+        Self::Build,
+        Self::Dissect,
+        Self::Protocols,
+        Self::Plan,
+        Self::Send,
+        Self::Exchange,
+        Self::Capture,
+        Self::Read,
+        Self::Replay,
+        Self::Scan,
+        Self::Stats,
+        Self::Expert,
+        Self::Follow,
+        Self::Traceroute,
+        Self::Dns,
+        Self::Fuzz,
+        Self::Interfaces,
+        Self::Routes,
+    ];
+
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Build => "build",
@@ -196,7 +218,8 @@ const FOLLOW_FORMATS: &[OutputFormat] = &[
     OutputFormat::Raw,
 ];
 
-/// Complete v1 command/format matrix. Extending a command requires changing this table.
+/// Complete v1 command/format matrix in the same canonical order as [`CommandName::ALL`].
+/// Contract tests validate that every vocabulary entry appears exactly once.
 pub const COMMAND_OUTPUT_CONTRACTS: &[CommandOutputContract] = &[
     CommandOutputContract::from_command(CommandName::Build),
     CommandOutputContract::from_command(CommandName::Dissect),

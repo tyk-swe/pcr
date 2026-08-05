@@ -4,34 +4,20 @@
 use std::io::Write;
 use std::process::Stdio;
 
+use packetcraftr::output::contract::Command as CommandName;
+
 use super::support::binary;
 
 #[test]
 fn help_parse_error_and_version_contracts_are_structurally_valid() {
-    const COMMANDS: &[&str] = &[
-        "build",
-        "dissect",
-        "protocols",
-        "read",
-        "interfaces",
-        "plan",
-        "send",
-        "exchange",
-        "capture",
-        "expert",
-        "follow",
-        "replay",
-        "scan",
-        "stats",
-        "traceroute",
-        "dns",
-        "fuzz",
-        "routes",
-    ];
+    let mut help_arguments = vec![vec!["--help"]];
+    help_arguments.extend(
+        CommandName::ALL
+            .iter()
+            .map(|command| vec![command.as_str(), "--help"]),
+    );
 
-    for arguments in std::iter::once(vec!["--help"])
-        .chain(COMMANDS.iter().map(|command| vec![*command, "--help"]))
-    {
+    for arguments in help_arguments {
         let output = binary().args(arguments).output().unwrap();
         assert!(output.status.success());
         assert!(output.stderr.is_empty());

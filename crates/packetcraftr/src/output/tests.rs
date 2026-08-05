@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::collections::HashSet;
 use std::net::IpAddr;
 use std::time::{Duration, UNIX_EPOCH};
 
@@ -55,8 +56,137 @@ use super::routes::Result as RoutesCommandResult;
 use super::scan::{Classification as ScanClassification, Result as ScanCommandResult};
 use super::traceroute::{Completion as TraceCompletionReason, Result as TracerouteCommandResult};
 
+const EXPECTED_BUILD_FORMATS: &[OutputFormat] = &[
+    OutputFormat::Text,
+    OutputFormat::Json,
+    OutputFormat::Hex,
+    OutputFormat::Raw,
+];
+const EXPECTED_AGGREGATE_FORMATS: &[OutputFormat] = &[OutputFormat::Text, OutputFormat::Json];
+const EXPECTED_SEND_FORMATS: &[OutputFormat] = &[
+    OutputFormat::Text,
+    OutputFormat::Json,
+    OutputFormat::Hex,
+    OutputFormat::Raw,
+    OutputFormat::Pcap,
+    OutputFormat::Pcapng,
+];
+const EXPECTED_EXCHANGE_FORMATS: &[OutputFormat] = &[
+    OutputFormat::Text,
+    OutputFormat::Json,
+    OutputFormat::Ndjson,
+    OutputFormat::Pcap,
+    OutputFormat::Pcapng,
+];
+const EXPECTED_CAPTURE_FORMATS: &[OutputFormat] = &[
+    OutputFormat::Text,
+    OutputFormat::Ndjson,
+    OutputFormat::Hex,
+    OutputFormat::Pcap,
+    OutputFormat::Pcapng,
+];
+const EXPECTED_REPLAY_FORMATS: &[OutputFormat] = &[
+    OutputFormat::Text,
+    OutputFormat::Json,
+    OutputFormat::Ndjson,
+    OutputFormat::Pcap,
+    OutputFormat::Pcapng,
+];
+const EXPECTED_TOOL_FORMATS: &[OutputFormat] =
+    &[OutputFormat::Text, OutputFormat::Json, OutputFormat::Ndjson];
+const EXPECTED_FOLLOW_FORMATS: &[OutputFormat] = &[
+    OutputFormat::Text,
+    OutputFormat::Json,
+    OutputFormat::Hex,
+    OutputFormat::Raw,
+];
+
+fn expected_formats(command: CommandName) -> &'static [OutputFormat] {
+    match command {
+        CommandName::Build | CommandName::Dissect => EXPECTED_BUILD_FORMATS,
+        CommandName::Protocols
+        | CommandName::Plan
+        | CommandName::Interfaces
+        | CommandName::Routes
+        | CommandName::Stats => EXPECTED_AGGREGATE_FORMATS,
+        CommandName::Send => EXPECTED_SEND_FORMATS,
+        CommandName::Exchange => EXPECTED_EXCHANGE_FORMATS,
+        CommandName::Capture | CommandName::Read => EXPECTED_CAPTURE_FORMATS,
+        CommandName::Replay => EXPECTED_REPLAY_FORMATS,
+        CommandName::Follow => EXPECTED_FOLLOW_FORMATS,
+        CommandName::Scan
+        | CommandName::Traceroute
+        | CommandName::Dns
+        | CommandName::Fuzz
+        | CommandName::Expert => EXPECTED_TOOL_FORMATS,
+    }
+}
+
 #[test]
-fn command_matrix_is_complete_and_has_no_duplicate_formats() {
+fn command_name_vocabulary_has_unique_variants_and_serialized_names() {
+    let mut variants = HashSet::new();
+    let mut serialized_names = HashSet::new();
+
+    for command in CommandName::ALL {
+        assert!(
+            variants.insert(*command),
+            "duplicate command variant: {command}"
+        );
+        assert!(
+            serialized_names.insert(command.as_str()),
+            "duplicate serialized command name: {command}"
+        );
+        assert_eq!(
+            serde_json::to_value(command).unwrap().as_str(),
+            Some(command.as_str()),
+            "serialized spelling drifted for {command}"
+        );
+    }
+}
+
+#[test]
+fn command_output_contracts_cover_vocabulary_once_in_canonical_order() {
+    assert_eq!(COMMAND_OUTPUT_CONTRACTS.len(), CommandName::ALL.len());
+
+    let mut contract_commands = HashSet::new();
+    let mut serialized_contract_names = HashSet::new();
+    for (command, contract) in CommandName::ALL.iter().zip(COMMAND_OUTPUT_CONTRACTS.iter()) {
+        assert_eq!(contract.command, *command, "command contract order drifted");
+    }
+
+    for command in CommandName::ALL {
+        let matches = COMMAND_OUTPUT_CONTRACTS
+            .iter()
+            .filter(|contract| contract.command == *command)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            matches.len(),
+            1,
+            "expected exactly one output contract for {command}"
+        );
+    }
+
+    for contract in COMMAND_OUTPUT_CONTRACTS {
+        assert!(
+            CommandName::ALL.contains(&contract.command),
+            "output contract has command outside the authoritative vocabulary: {}",
+            contract.command
+        );
+        assert!(
+            contract_commands.insert(contract.command),
+            "duplicate output contract for {}",
+            contract.command
+        );
+        assert!(
+            serialized_contract_names.insert(contract.command.as_str()),
+            "duplicate serialized output contract name: {}",
+            contract.command
+        );
+    }
+}
+
+#[test]
+fn command_output_contracts_have_exact_supported_formats() {
     const ALL_FORMATS: &[OutputFormat] = &[
         OutputFormat::Text,
         OutputFormat::Json,
@@ -66,14 +196,15 @@ fn command_matrix_is_complete_and_has_no_duplicate_formats() {
         OutputFormat::Pcap,
         OutputFormat::Pcapng,
     ];
-    assert_eq!(COMMAND_OUTPUT_CONTRACTS.len(), 18);
-    for (contract_index, contract) in COMMAND_OUTPUT_CONTRACTS.iter().enumerate() {
-        assert!(!contract.formats.is_empty());
-        assert!(
-            !COMMAND_OUTPUT_CONTRACTS[..contract_index]
-                .iter()
-                .any(|prior| prior.command == contract.command)
+
+    for contract in COMMAND_OUTPUT_CONTRACTS {
+        assert_eq!(
+            contract.formats,
+            expected_formats(contract.command),
+            "supported format set drifted for {}",
+            contract.command
         );
+        assert!(!contract.formats.is_empty());
         for (index, format) in contract.formats.iter().enumerate() {
             assert!(!contract.formats[..index].contains(format));
         }

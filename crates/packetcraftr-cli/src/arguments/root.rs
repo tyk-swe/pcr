@@ -191,7 +191,10 @@ pub(crate) enum Command {
 
 #[cfg(test)]
 mod tests {
-    use clap::Parser;
+    use std::collections::BTreeSet;
+
+    use clap::{CommandFactory, Parser};
+    use packetcraftr::output::contract::Command as CommandName;
 
     use super::{Cli, CliColorChoice};
 
@@ -227,5 +230,30 @@ mod tests {
         let help = error.to_string();
         assert!(help.contains("Usage: packetcraftr build [OPTIONS]"));
         assert!(!help.contains("packetcraftr.exe"));
+    }
+
+    #[test]
+    fn clap_top_level_commands_match_output_contract_vocabulary() {
+        let clap_commands = Cli::command()
+            .get_subcommands()
+            .map(|command| command.get_name().to_owned())
+            .collect::<BTreeSet<_>>();
+        let contract_commands = CommandName::ALL
+            .iter()
+            .map(|command| command.as_str().to_owned())
+            .collect::<BTreeSet<_>>();
+        let clap_only = clap_commands
+            .difference(&contract_commands)
+            .cloned()
+            .collect::<Vec<_>>();
+        let contract_only = contract_commands
+            .difference(&clap_commands)
+            .cloned()
+            .collect::<Vec<_>>();
+
+        assert!(
+            clap_only.is_empty() && contract_only.is_empty(),
+            "commands present in Clap but absent from the output contract: {clap_only:?}; commands present in the output contract but absent from Clap: {contract_only:?}"
+        );
     }
 }

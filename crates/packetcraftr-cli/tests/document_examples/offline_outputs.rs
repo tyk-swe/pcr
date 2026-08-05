@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use super::{
-    COMMAND_OUTPUT_CONTRACTS, PathBuf, assert_gre_sctp_example, assert_igmp_example, binary,
-    example, json_file,
+    CommandName, PathBuf, assert_gre_sctp_example, assert_igmp_example, binary, example, json_file,
 };
 
 #[test]
@@ -129,18 +128,28 @@ fn published_follow_outputs_match_the_cli() {
 
 #[test]
 fn every_command_has_published_success_and_error_goldens() {
-    for contract in COMMAND_OUTPUT_CONTRACTS {
-        let command = contract.command.as_str();
-        let success = example(&format!("output-{command}-success.json"));
-        let event = example(&format!("output-{command}-event.json"));
+    for command_name in CommandName::ALL {
+        let command = command_name.as_str();
+        let success_name = format!("output-{command}-success.json");
+        let event_name = format!("output-{command}-event.json");
+        let error_name = format!("output-{command}-error.json");
+        let success = example(&success_name);
+        let event = example(&event_name);
         assert!(
             success.is_file() || event.is_file(),
             "{command} has no success/event golden"
         );
+        if success.is_file() {
+            assert_eq!(json_file(&success_name)["command"], command);
+        }
+        if event.is_file() {
+            assert_eq!(json_file(&event_name)["command"], command);
+        }
         assert!(
-            example(&format!("output-{command}-error.json")).is_file(),
+            example(&error_name).is_file(),
             "{command} has no error golden"
         );
+        assert_eq!(json_file(&error_name)["command"], command);
     }
 }
 

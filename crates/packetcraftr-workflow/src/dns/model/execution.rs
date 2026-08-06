@@ -13,7 +13,7 @@ use packetcraftr_protocol::{
 };
 
 use crate::Stats;
-use crate::kernel::probe::nonzero_ipv4_identification;
+use crate::probe::nonzero_ipv4_identification;
 
 use super::super::DEFAULT_DNS_SERVER_PORT;
 use super::request::DnsQueryType;

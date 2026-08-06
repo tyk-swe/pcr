@@ -257,16 +257,7 @@ fn unknown_runtime_route_fields_fail_closed_but_destination_port_does_not() {
 #[test]
 fn malformed_route_layers_fail_closed() {
     for protocol in [
-        "ethernet",
-        "raw_ip",
-        "ipv4",
-        "ipv6_srh",
-        "udp",
-        "gre",
-        "vxlan",
-        "geneve",
-        "mpls",
-        "ppp",
+        "ethernet", "raw_ip", "ipv4", "ipv6_srh", "udp", "gre", "vxlan", "geneve", "mpls", "ppp",
     ] {
         let mut packet = Packet::new();
         packet.push(crate::layer::MalformedLayer::new(

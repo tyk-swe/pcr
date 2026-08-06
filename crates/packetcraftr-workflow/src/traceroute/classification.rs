@@ -6,7 +6,7 @@ use std::net::IpAddr;
 use packetcraftr_packet::semantics::{self, BuiltinProtocol};
 use packetcraftr_packet::{Packet, decode::DecodedPacket, registry::ProtocolRegistry};
 
-use crate::kernel::probe::{self, Correlation};
+use crate::probe::{self, Correlation};
 
 use super::model::{TracerouteResponseKind, TracerouteStrategy};
 

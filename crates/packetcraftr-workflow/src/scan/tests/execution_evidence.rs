@@ -8,8 +8,7 @@ use std::time::{Duration, UNIX_EPOCH};
 use packetcraftr_capture::{Frame, LinkType};
 use packetcraftr_protocol::{builtin::registry as default_registry, network::Ipv4, transport::Tcp};
 
-use crate::kernel::policy_authorizer::PolicyAuthorizer;
-use crate::kernel::target::Target;
+use crate::target::{PolicyAuthorizer, Target};
 use crate::{AddressFamily, BoundaryError};
 
 use super::super::engine::scan;

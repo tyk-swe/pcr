@@ -12,7 +12,7 @@
 
 use std::time::Duration;
 
-use crate::kernel::evidence::EvidenceDiagnosticDescriptor;
+use crate::probe::evidence::EvidenceDiagnosticDescriptor;
 
 pub const DEFAULT_SCAN_BATCH_SIZE: usize = 64;
 pub const DEFAULT_MAX_SCAN_PORTS: usize = 1_024;
@@ -43,14 +43,9 @@ mod probe;
 mod tests;
 
 /// Executes scan batches through a client's capture-ready exchange lifecycle.
-pub type ClientExecutor<'a, R, N, I> = crate::kernel::client_executor::ClientExecutor<
-    'a,
-    R,
-    N,
-    I,
-    crate::kernel::client_executor::Scan,
->;
-pub use crate::kernel::policy_authorizer::PolicyAuthorizer;
+pub type ClientExecutor<'a, R, N, I> =
+    crate::probe::client_executor::ClientExecutor<'a, R, N, I, crate::probe::client_executor::Scan>;
+pub use crate::target::PolicyAuthorizer;
 pub use classification::{
     ScanResponseClassification as ResponseClassification,
     classify_scan_response as classify_response,

@@ -3,6 +3,7 @@
 
 //! Replay CLI command logic.
 
+pub(super) mod arguments;
 mod conversion;
 mod execution;
 mod rendering;
@@ -17,12 +18,12 @@ use packetcraftr::{
     output, workflow,
 };
 
-use crate::arguments::ReplayArgs;
+use self::arguments::ReplayArgs;
 use crate::errors::CliError;
 use crate::filtering::{self, Capabilities, FrameSelector};
 use crate::input::validate_capture_stream_limits;
 use crate::rendering::{capture_file_format, emit_json, emit_json_compact, write_stdout_line};
-use crate::runtime::default_registry_arc;
+use crate::system::default_registry_arc;
 
 use conversion::{replay_timing, requested_replay_interface};
 use execution::{DisplayFilterSelector, execute_replay};
@@ -34,10 +35,7 @@ use rendering::{
 #[cfg(test)]
 use conversion::requested_replay_interface as test_requested_replay_interface;
 
-pub(crate) fn run_replay(
-    arguments: ReplayArgs,
-    output: output::contract::Format,
-) -> Result<(), CliError> {
+pub(super) fn run(arguments: ReplayArgs, output: output::contract::Format) -> Result<(), CliError> {
     let policy = arguments.policy.clone().into_policy();
     validate_capture_stream_limits(
         policy.max_packets_per_operation,

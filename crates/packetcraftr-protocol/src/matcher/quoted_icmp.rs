@@ -99,11 +99,8 @@ fn directly_received_icmp(response: &Packet) -> Option<(BuiltinProtocol, &dyn La
         .enumerate()
         .find_map(|(index, layer)| {
             let protocol = BuiltinProtocol::of(layer)?;
-            matches!(
-                protocol,
-                BuiltinProtocol::Icmpv4 | BuiltinProtocol::Icmpv6
-            )
-            .then_some((index, protocol, layer))
+            matches!(protocol, BuiltinProtocol::Icmpv4 | BuiltinProtocol::Icmpv6)
+                .then_some((index, protocol, layer))
         })?;
     if icmp_index <= outer_network_index {
         return None;
@@ -112,9 +109,7 @@ fn directly_received_icmp(response: &Packet) -> Option<(BuiltinProtocol, &dyn La
         .iter()
         .skip(outer_network_index + 1)
         .take(icmp_index - outer_network_index - 1)
-        .all(|layer| {
-            BuiltinProtocol::of(layer).is_some_and(BuiltinProtocol::is_ipv6_extension)
-        });
+        .all(|layer| BuiltinProtocol::of(layer).is_some_and(BuiltinProtocol::is_ipv6_extension));
     if !directly_nested {
         return None;
     }
@@ -340,11 +335,7 @@ fn parse_quoted_probe(bytes: &[u8]) -> Option<QuotedProbe<'_>> {
     }
 }
 
-fn parse_quoted_ipv6_payload(
-    bytes: &[u8],
-    mut protocol: u8,
-    end: usize,
-) -> Option<(u8, &[u8])> {
+fn parse_quoted_ipv6_payload(bytes: &[u8], mut protocol: u8, end: usize) -> Option<(u8, &[u8])> {
     let mut offset = IPV6_HEADER_LEN;
     let mut extension_count = 0_usize;
     loop {

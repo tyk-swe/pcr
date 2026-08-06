@@ -12,7 +12,7 @@ use packetcraftr_workflow::dns::{
 };
 use serde::Serialize;
 
-use super::super::common::compact_hex;
+use super::super::hex::compact_hex;
 
 /// Output-v1 DNS section.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]

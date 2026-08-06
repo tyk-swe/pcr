@@ -14,7 +14,7 @@ use super::super::model::{
 };
 use super::super::mutation::prepare;
 use super::{fuzz_protocol_registry, udp_fuzz_packet};
-use crate::kernel::clock::Clock;
+use crate::clock::Clock;
 use crate::{BoundaryError, Stats};
 use packetcraftr_capture::{Frame, LinkType};
 use packetcraftr_core::budget::Deadline;

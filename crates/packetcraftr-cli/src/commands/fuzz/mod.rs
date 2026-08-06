@@ -3,6 +3,7 @@
 
 //! Fuzz CLI command logic.
 
+pub(super) mod arguments;
 mod execution;
 mod rendering;
 
@@ -11,20 +12,17 @@ use std::time::Duration;
 
 use packetcraftr::{client, net, output, packet, workflow};
 
-use crate::arguments::FuzzArgs;
+use self::arguments::FuzzArgs;
 use crate::errors::CliError;
 use crate::input::read_recipe;
 use crate::rendering::emit_json;
-use crate::runtime::{DeferredInterface, default_registry_arc, workflow_exchange_options};
+use crate::system::{DeferredInterface, default_registry_arc, workflow_exchange_options};
 
 use super::scan::validate_live_interface_selector;
 use execution::CliFuzzExecutor;
 use rendering::{render_fuzz_stream, render_fuzz_text};
 
-pub(crate) fn run_fuzz(
-    arguments: FuzzArgs,
-    output: output::contract::Format,
-) -> Result<(), CliError> {
+pub(super) fn run(arguments: FuzzArgs, output: output::contract::Format) -> Result<(), CliError> {
     let FuzzArgs {
         recipe,
         seed,

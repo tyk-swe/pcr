@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use packetcraftr_packet::decode::DecodedPacket;
 
-use crate::kernel::evidence::{
+use crate::probe::evidence::{
     ExchangeEvidence, ExchangeEvidenceError, MatchedResponseEvidence, ResponseEvidence,
     format_exchange_evidence_error,
     validate_exchange_evidence as validate_shared_exchange_evidence,

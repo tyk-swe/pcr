@@ -5,7 +5,7 @@ use std::net::IpAddr;
 
 use packetcraftr_packet::{Packet, decode::DecodedPacket, registry::ProtocolRegistry};
 
-use crate::kernel::probe::Correlation;
+use crate::probe::Correlation;
 
 use super::model::{ScanClassification, ScanTransport};
 
@@ -27,7 +27,7 @@ pub fn classify_scan_response(
     response: &DecodedPacket,
 ) -> Option<ScanResponseClassification> {
     let observation =
-        crate::kernel::probe::observe(registry, transport.probe_transport(), request, response)?;
+        crate::probe::observe(registry, transport.probe_transport(), request, response)?;
     let classification = match observation.correlation {
         Correlation::TcpReset | Correlation::PortUnreachable => ScanClassification::Closed,
         Correlation::TcpSynAck | Correlation::UdpReply | Correlation::IcmpReply => {

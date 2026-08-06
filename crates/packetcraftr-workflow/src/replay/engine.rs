@@ -9,7 +9,7 @@ use std::time::Duration;
 use packetcraftr_capture::{Format, Reader};
 use packetcraftr_core::budget::{Deadline, DeadlineExceeded};
 
-use crate::kernel::clock::Clock as WorkflowClock;
+use crate::clock::Clock as WorkflowClock;
 
 use super::error::ReplayError;
 use super::model::{

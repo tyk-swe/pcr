@@ -12,9 +12,7 @@ use super::super::error::TracerouteError;
 use super::support::{
     CountingRejectExecutor, NoopClock, UndecodedExecutor, udp_traceroute_request,
 };
-use crate::kernel::policy_authorizer::PolicyAuthorizer;
-use crate::kernel::target::{Authorizer, Target};
-use crate::target::Authorized;
+use crate::target::{Authorized, Authorizer, PolicyAuthorizer, Target};
 use crate::{AddressFamily, BoundaryError};
 use packetcraftr_client::policy::Policy as TrafficPolicy;
 use packetcraftr_client::target::{Error as TargetResolutionError, Resolver as HostnameResolver};

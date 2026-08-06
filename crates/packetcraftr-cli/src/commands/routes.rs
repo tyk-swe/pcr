@@ -7,7 +7,11 @@ use packetcraftr::{net, output};
 use super::super::errors::CliError;
 use super::super::rendering::{emit_json, write_stdout_line};
 
-pub(crate) fn run_routes(output: output::contract::Format) -> Result<(), CliError> {
+pub(super) const AFTER_LONG_HELP: &str = r#"Examples:
+  packetcraftr routes
+  packetcraftr --output json routes"#;
+
+pub(super) fn run(output: output::contract::Format) -> Result<(), CliError> {
     let interfaces = net::interface::SystemProvider
         .interfaces()
         .map_err(CliError::classified)?;

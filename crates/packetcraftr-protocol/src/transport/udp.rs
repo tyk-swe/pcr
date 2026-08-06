@@ -173,13 +173,10 @@ impl LayerCodec for UdpCodec {
                 BuiltinProtocol::from_id(child.protocol_id()),
                 Some(BuiltinProtocol::Padding | BuiltinProtocol::Malformed)
             )
-            && let Some(selected) = child_discriminators(
-                layer.source_port,
-                layer.destination_port,
-                covered_payload,
-            )
-            .into_iter()
-            .find_map(|discriminator| context.registry.child_for("udp", discriminator))
+            && let Some(selected) =
+                child_discriminators(layer.source_port, layer.destination_port, covered_payload)
+                    .into_iter()
+                    .find_map(|discriminator| context.registry.child_for("udp", discriminator))
             && *selected != *child.protocol_id()
         {
             let message = match context

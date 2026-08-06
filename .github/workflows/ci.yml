@@ -140,19 +140,8 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Source conventions
         run: scripts/check-conventions
-      - name: Workspace architecture
+      - name: Semantic architecture boundaries
         run: scripts/check-arch
-      # `packetcraftr-analysis` runs without authorization gates because it has
-      # no resolver, route, capture, or transmission seam. That is only true
-      # while it cannot reach one, so assert the dependency edge itself.
-      - name: Offline analysis has no live dependency
-        run: |
-          if cargo tree --locked --package packetcraftr-analysis --edges normal \
-            | grep --extended-regexp 'packetcraftr-(client|net)'; then
-            echo "::error::packetcraftr-analysis reaches a live crate; \
-            the offline/live separation is no longer enforced by the graph"
-            exit 1
-          fi
       # The fuzz targets are a separate workspace, so the root `cargo fmt --all`
       # and the `test` job's clippy gate never reach them. Apply both here.
       - name: Fuzz target formatting

@@ -13,7 +13,7 @@ use packetcraftr_packet::{
 };
 use packetcraftr_protocol::application::Dns;
 
-use crate::kernel::probe::{self, Transport as ProbeTransport};
+use crate::probe::{self, Transport as ProbeTransport};
 
 use super::super::model::{DnsLimits, DnsProbe, ValidatedDnsResponse};
 use super::decode::decode_dns_response;

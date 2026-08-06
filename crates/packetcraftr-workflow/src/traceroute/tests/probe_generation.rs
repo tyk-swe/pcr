@@ -11,7 +11,7 @@ use super::super::model::TracerouteStrategy;
 use super::super::plan::build_batches;
 use super::super::probe::sent_traceroute_probe_matches;
 use super::support::{CountingRejectExecutor, FixedAuthorizer, NoopClock, udp_traceroute_request};
-use crate::kernel::target::Target;
+use crate::target::Target;
 use packetcraftr_protocol::builtin::registry as default_registry;
 use packetcraftr_protocol::network::{Ipv4, Ipv6};
 

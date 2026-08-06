@@ -3,9 +3,9 @@
 
 use packetcraftr::{net, workflow};
 
-use crate::arguments::{CliReplayTiming, ReplayArgs};
+use super::arguments::{CliReplayTiming, ReplayArgs};
 use crate::errors::CliError;
-use crate::runtime::validate_interface_selector;
+use crate::system::validate_interface_selector;
 
 pub(super) fn replay_timing(arguments: &ReplayArgs) -> Result<workflow::replay::Timing, CliError> {
     let timing = if let Some(rate) = arguments.rate {

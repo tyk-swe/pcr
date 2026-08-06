@@ -15,9 +15,7 @@ use packetcraftr_core::error::Classified;
 use packetcraftr_net::capture::DEFAULT_CAPTURE_QUEUE_FRAMES;
 use packetcraftr_protocol::builtin::registry as default_registry;
 
-use crate::kernel::policy_authorizer::PolicyAuthorizer;
-use crate::kernel::target::{Authorizer, Target};
-use crate::target::Authorized;
+use crate::target::{Authorized, Authorizer, PolicyAuthorizer, Target};
 use crate::{AddressFamily, BoundaryError};
 
 use super::super::engine::dns;

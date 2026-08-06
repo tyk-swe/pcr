@@ -269,9 +269,7 @@ fn tunneled_or_ip_in_ip_icmp_errors_are_not_direct_responses() {
             ..Ipv4::default()
         })
         .push(quoted_error.clone());
-    assert!(
-        quoted_icmp_error_kind(&request, &tunneled, QuotedProbeTransport::Udp).is_none()
-    );
+    assert!(quoted_icmp_error_kind(&request, &tunneled, QuotedProbeTransport::Udp).is_none());
     assert!(
         !ReverseFlowMatcher::new(BuiltinProtocol::Udp)
             .matches(&request, &tunneled)
@@ -279,19 +277,18 @@ fn tunneled_or_ip_in_ip_icmp_errors_are_not_direct_responses() {
     );
 
     let mut gre = Packet::new();
-    gre
-        .push(Ipv4 {
-            source: Ipv4Addr::new(10, 0, 0, 200),
-            destination: source,
-            ..Ipv4::default()
-        })
-        .push(Gre::default())
-        .push(Ipv4 {
-            source: router,
-            destination: source,
-            ..Ipv4::default()
-        })
-        .push(quoted_error.clone());
+    gre.push(Ipv4 {
+        source: Ipv4Addr::new(10, 0, 0, 200),
+        destination: source,
+        ..Ipv4::default()
+    })
+    .push(Gre::default())
+    .push(Ipv4 {
+        source: router,
+        destination: source,
+        ..Ipv4::default()
+    })
+    .push(quoted_error.clone());
     assert!(quoted_icmp_error_kind(&request, &gre, QuotedProbeTransport::Udp).is_none());
 
     let mut transport_wrapped = Packet::new();
@@ -373,9 +370,7 @@ fn quoted_icmpv6_walks_extension_headers_and_rejects_nonfirst_fragments() {
             body: Bytes::from(body),
             ..Icmpv6::default()
         });
-    assert!(
-        quoted_icmp_error_kind(&request, &response, QuotedProbeTransport::Udp).is_some()
-    );
+    assert!(quoted_icmp_error_kind(&request, &response, QuotedProbeTransport::Udp).is_some());
     assert!(
         ReverseFlowMatcher::new(BuiltinProtocol::Udp)
             .matches(&request, &response)

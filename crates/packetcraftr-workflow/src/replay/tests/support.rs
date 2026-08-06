@@ -11,7 +11,7 @@ use super::super::model::{
     ReplayTransmission, ReplayTransmitter,
 };
 use crate::BoundaryError;
-use crate::kernel::clock::Clock as WorkflowClock;
+use crate::clock::Clock as WorkflowClock;
 use packetcraftr_capture::{Frame, LinkType, Reader, Writer};
 use packetcraftr_core::error::{Classification, Kind};
 use packetcraftr_net::{

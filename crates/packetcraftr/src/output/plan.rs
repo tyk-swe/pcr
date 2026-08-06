@@ -5,8 +5,8 @@
 
 use serde::Serialize;
 
-use crate::output::network::model::PlannedRouteOutput;
-pub use crate::output::network::model::{
+use crate::output::network::PlannedRouteOutput;
+pub use crate::output::network::{
     InterfaceCapabilityOutput as Capability, PlannedRouteOutput as Plan,
     RouteDecisionOutput as Decision, RouteInterfaceOutput as Interface,
     RouteMacAddressOutput as MacAddress, RouteModeOutput as Mode, RouteScopeOutput as Scope,

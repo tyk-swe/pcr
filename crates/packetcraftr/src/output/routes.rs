@@ -5,8 +5,8 @@
 
 use serde::Serialize;
 
-pub use crate::output::network::model::RouteDecisionOutput as Decision;
-use crate::output::network::model::RouteDecisionOutput;
+pub use crate::output::network::RouteDecisionOutput as Decision;
+use crate::output::network::RouteDecisionOutput;
 
 /// Aggregate result of `routes`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

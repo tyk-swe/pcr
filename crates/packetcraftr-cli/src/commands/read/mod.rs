@@ -3,6 +3,7 @@
 
 //! Read CLI command logic.
 
+pub(super) mod arguments;
 mod conversion;
 mod execution;
 mod rendering;
@@ -16,21 +17,18 @@ use packetcraftr::{
     output, packet,
 };
 
-use crate::arguments::ReadArgs;
+use self::arguments::ReadArgs;
 use crate::errors::CliError;
 use crate::filtering::{self, Capabilities};
 use crate::input::validate_capture_stream_limits;
 use crate::rendering::capture_file_format;
-use crate::runtime::default_registry_arc;
+use crate::system::default_registry_arc;
 
 use conversion::{decode_options, next_frame_number};
 use execution::write_filtered_capture;
 use rendering::render_read_record;
 
-pub(crate) fn run_read(
-    arguments: ReadArgs,
-    output: output::contract::Format,
-) -> Result<(), CliError> {
+pub(super) fn run(arguments: ReadArgs, output: output::contract::Format) -> Result<(), CliError> {
     let ReadArgs {
         path,
         max_frames,

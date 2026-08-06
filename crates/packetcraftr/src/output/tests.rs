@@ -40,15 +40,13 @@ use packetcraftr_workflow::{
     },
 };
 
-use super::contract::{
-    CONTRACTS as COMMAND_OUTPUT_CONTRACTS, Command as CommandName, Format as OutputFormat,
-};
+use super::contract::{CONTRACTS, Command, Format};
 use super::dns::{
     AttemptStatus as DnsAttemptStatus, RecordData as DnsRecordData, Result as DnsCommandResult,
 };
-use super::envelope::{Aggregate as AggregateOutput, Stream as StreamRecord};
+use super::envelope::{Aggregate, Stream};
 use super::exchange::Result as ExchangeCommandResult;
-use super::frame::{Captured as FrameOutput, Timestamp as OutputTimestamp};
+use super::frame::{Captured, Timestamp};
 use super::fuzz::Outcome as FuzzCaseOutcome;
 use super::interfaces::Result as InterfacesCommandResult;
 use super::read::Result as ReadFrameCommandResult;
@@ -56,70 +54,62 @@ use super::routes::Result as RoutesCommandResult;
 use super::scan::{Classification as ScanClassification, Result as ScanCommandResult};
 use super::traceroute::{Completion as TraceCompletionReason, Result as TracerouteCommandResult};
 
-const EXPECTED_BUILD_FORMATS: &[OutputFormat] = &[
-    OutputFormat::Text,
-    OutputFormat::Json,
-    OutputFormat::Hex,
-    OutputFormat::Raw,
+const EXPECTED_BUILD_FORMATS: &[Format] = &[Format::Text, Format::Json, Format::Hex, Format::Raw];
+const EXPECTED_AGGREGATE_FORMATS: &[Format] = &[Format::Text, Format::Json];
+const EXPECTED_SEND_FORMATS: &[Format] = &[
+    Format::Text,
+    Format::Json,
+    Format::Hex,
+    Format::Raw,
+    Format::Pcap,
+    Format::Pcapng,
 ];
-const EXPECTED_AGGREGATE_FORMATS: &[OutputFormat] = &[OutputFormat::Text, OutputFormat::Json];
-const EXPECTED_SEND_FORMATS: &[OutputFormat] = &[
-    OutputFormat::Text,
-    OutputFormat::Json,
-    OutputFormat::Hex,
-    OutputFormat::Raw,
-    OutputFormat::Pcap,
-    OutputFormat::Pcapng,
+const EXPECTED_EXCHANGE_FORMATS: &[Format] = &[
+    Format::Text,
+    Format::Json,
+    Format::Ndjson,
+    Format::Pcap,
+    Format::Pcapng,
 ];
-const EXPECTED_EXCHANGE_FORMATS: &[OutputFormat] = &[
-    OutputFormat::Text,
-    OutputFormat::Json,
-    OutputFormat::Ndjson,
-    OutputFormat::Pcap,
-    OutputFormat::Pcapng,
+const EXPECTED_CAPTURE_FORMATS: &[Format] = &[
+    Format::Text,
+    Format::Ndjson,
+    Format::Hex,
+    Format::Pcap,
+    Format::Pcapng,
 ];
-const EXPECTED_CAPTURE_FORMATS: &[OutputFormat] = &[
-    OutputFormat::Text,
-    OutputFormat::Ndjson,
-    OutputFormat::Hex,
-    OutputFormat::Pcap,
-    OutputFormat::Pcapng,
+const EXPECTED_REPLAY_FORMATS: &[Format] = &[
+    Format::Text,
+    Format::Json,
+    Format::Ndjson,
+    Format::Pcap,
+    Format::Pcapng,
 ];
-const EXPECTED_REPLAY_FORMATS: &[OutputFormat] = &[
-    OutputFormat::Text,
-    OutputFormat::Json,
-    OutputFormat::Ndjson,
-    OutputFormat::Pcap,
-    OutputFormat::Pcapng,
-];
-const EXPECTED_TOOL_FORMATS: &[OutputFormat] =
-    &[OutputFormat::Text, OutputFormat::Json, OutputFormat::Ndjson];
-const EXPECTED_FOLLOW_FORMATS: &[OutputFormat] = &[
-    OutputFormat::Text,
-    OutputFormat::Json,
-    OutputFormat::Ndjson,
-    OutputFormat::Hex,
-    OutputFormat::Raw,
+const EXPECTED_TOOL_FORMATS: &[Format] = &[Format::Text, Format::Json, Format::Ndjson];
+const EXPECTED_FOLLOW_FORMATS: &[Format] = &[
+    Format::Text,
+    Format::Json,
+    Format::Ndjson,
+    Format::Hex,
+    Format::Raw,
 ];
 
-fn expected_formats(command: CommandName) -> &'static [OutputFormat] {
+fn expected_formats(command: Command) -> &'static [Format] {
     match command {
-        CommandName::Build | CommandName::Dissect => EXPECTED_BUILD_FORMATS,
-        CommandName::Protocols
-        | CommandName::Plan
-        | CommandName::Interfaces
-        | CommandName::Routes
-        | CommandName::Stats => EXPECTED_AGGREGATE_FORMATS,
-        CommandName::Send => EXPECTED_SEND_FORMATS,
-        CommandName::Exchange => EXPECTED_EXCHANGE_FORMATS,
-        CommandName::Capture | CommandName::Read => EXPECTED_CAPTURE_FORMATS,
-        CommandName::Replay => EXPECTED_REPLAY_FORMATS,
-        CommandName::Follow => EXPECTED_FOLLOW_FORMATS,
-        CommandName::Scan
-        | CommandName::Traceroute
-        | CommandName::Dns
-        | CommandName::Fuzz
-        | CommandName::Expert => EXPECTED_TOOL_FORMATS,
+        Command::Build | Command::Dissect => EXPECTED_BUILD_FORMATS,
+        Command::Protocols
+        | Command::Plan
+        | Command::Interfaces
+        | Command::Routes
+        | Command::Stats => EXPECTED_AGGREGATE_FORMATS,
+        Command::Send => EXPECTED_SEND_FORMATS,
+        Command::Exchange => EXPECTED_EXCHANGE_FORMATS,
+        Command::Capture | Command::Read => EXPECTED_CAPTURE_FORMATS,
+        Command::Replay => EXPECTED_REPLAY_FORMATS,
+        Command::Follow => EXPECTED_FOLLOW_FORMATS,
+        Command::Scan | Command::Traceroute | Command::Dns | Command::Fuzz | Command::Expert => {
+            EXPECTED_TOOL_FORMATS
+        }
     }
 }
 
@@ -128,7 +118,7 @@ fn command_name_vocabulary_has_unique_variants_and_serialized_names() {
     let mut variants = HashSet::new();
     let mut serialized_names = HashSet::new();
 
-    for command in CommandName::ALL {
+    for command in Command::ALL {
         assert!(
             variants.insert(*command),
             "duplicate command variant: {command}"
@@ -147,16 +137,16 @@ fn command_name_vocabulary_has_unique_variants_and_serialized_names() {
 
 #[test]
 fn command_output_contracts_cover_vocabulary_once_in_canonical_order() {
-    assert_eq!(COMMAND_OUTPUT_CONTRACTS.len(), CommandName::ALL.len());
+    assert_eq!(CONTRACTS.len(), Command::ALL.len());
 
     let mut contract_commands = HashSet::new();
     let mut serialized_contract_names = HashSet::new();
-    for (command, contract) in CommandName::ALL.iter().zip(COMMAND_OUTPUT_CONTRACTS.iter()) {
+    for (command, contract) in Command::ALL.iter().zip(CONTRACTS.iter()) {
         assert_eq!(contract.command, *command, "command contract order drifted");
     }
 
-    for command in CommandName::ALL {
-        let matches = COMMAND_OUTPUT_CONTRACTS
+    for command in Command::ALL {
+        let matches = CONTRACTS
             .iter()
             .filter(|contract| contract.command == *command)
             .collect::<Vec<_>>();
@@ -167,9 +157,9 @@ fn command_output_contracts_cover_vocabulary_once_in_canonical_order() {
         );
     }
 
-    for contract in COMMAND_OUTPUT_CONTRACTS {
+    for contract in CONTRACTS {
         assert!(
-            CommandName::ALL.contains(&contract.command),
+            Command::ALL.contains(&contract.command),
             "output contract has command outside the authoritative vocabulary: {}",
             contract.command
         );
@@ -188,17 +178,17 @@ fn command_output_contracts_cover_vocabulary_once_in_canonical_order() {
 
 #[test]
 fn command_output_contracts_have_exact_supported_formats() {
-    const ALL_FORMATS: &[OutputFormat] = &[
-        OutputFormat::Text,
-        OutputFormat::Json,
-        OutputFormat::Ndjson,
-        OutputFormat::Hex,
-        OutputFormat::Raw,
-        OutputFormat::Pcap,
-        OutputFormat::Pcapng,
+    const ALL_FORMATS: &[Format] = &[
+        Format::Text,
+        Format::Json,
+        Format::Ndjson,
+        Format::Hex,
+        Format::Raw,
+        Format::Pcap,
+        Format::Pcapng,
     ];
 
-    for contract in COMMAND_OUTPUT_CONTRACTS {
+    for contract in CONTRACTS {
         assert_eq!(
             contract.formats,
             expected_formats(contract.command),
@@ -298,8 +288,8 @@ fn workflow_enums_convert_to_output_owned_v1_spellings() {
 
 #[test]
 fn aggregate_and_stream_envelopes_freeze_mode_and_sequence() {
-    let aggregate = AggregateOutput::success(
-        CommandName::Routes,
+    let aggregate = Aggregate::success(
+        Command::Routes,
         RoutesCommandResult { routes: Vec::new() },
         Vec::new(),
     );
@@ -307,11 +297,11 @@ fn aggregate_and_stream_envelopes_freeze_mode_and_sequence() {
     assert_eq!(value["mode"], "aggregate");
     assert!(value.get("sequence").is_none());
 
-    let stream = StreamRecord::success(
-        CommandName::Read,
+    let stream = Stream::success(
+        Command::Read,
         7,
         ReadFrameCommandResult {
-            frame: FrameOutput::try_from_frame(
+            frame: Captured::try_from_frame(
                 Frame::new(UNIX_EPOCH, packetcraftr_capture::LinkType::RAW, vec![0_u8]).unwrap(),
             )
             .unwrap(),
@@ -387,8 +377,8 @@ fn pre_epoch_timestamps_use_canonical_signed_unix_parts() {
         .checked_sub(Duration::new(2, 250_000_000))
         .unwrap();
     assert_eq!(
-        OutputTimestamp::try_from(timestamp).unwrap(),
-        OutputTimestamp {
+        Timestamp::try_from(timestamp).unwrap(),
+        Timestamp {
             unix_seconds: -3,
             nanoseconds: 750_000_000,
         }
@@ -398,9 +388,8 @@ fn pre_epoch_timestamps_use_canonical_signed_unix_parts() {
 #[test]
 fn fractional_pre_epoch_timestamp_accepts_the_signed_seconds_minimum() {
     assert_eq!(
-        OutputTimestamp::from_pre_epoch_duration(Duration::new(i64::MAX as u64, 250_000_000,))
-            .unwrap(),
-        OutputTimestamp {
+        Timestamp::from_pre_epoch_duration(Duration::new(i64::MAX as u64, 250_000_000,)).unwrap(),
+        Timestamp {
             unix_seconds: i64::MIN,
             nanoseconds: 750_000_000,
         }
@@ -410,7 +399,7 @@ fn fractional_pre_epoch_timestamp_accepts_the_signed_seconds_minimum() {
 #[test]
 fn frame_results_preserve_capture_fields() {
     let frame = Frame::new(UNIX_EPOCH, packetcraftr_capture::LinkType::RAW, vec![0_u8]).unwrap();
-    let output = FrameOutput::try_from_frame(frame).unwrap();
+    let output = Captured::try_from_frame(frame).unwrap();
     assert_eq!(output.captured_length, 1);
     assert_eq!(output.original_length, 1);
     assert_eq!(output.bytes(), &[0]);
@@ -478,9 +467,7 @@ fn exchange_output_preserves_every_evidence_family_and_operation_stats() {
 
 #[test]
 fn unsupported_format_errors_name_all_supported_choices() {
-    let error = CommandName::Read
-        .require_format(OutputFormat::Json)
-        .unwrap_err();
+    let error = Command::Read.require_format(Format::Json).unwrap_err();
     assert_eq!(error.classification().code, "cli.output_format");
     assert_eq!(
         error.to_string(),
@@ -490,28 +477,25 @@ fn unsupported_format_errors_name_all_supported_choices() {
 
 #[test]
 fn capture_and_replay_formats_are_stable() {
+    assert_eq!(Command::Protocols.formats(), &[Format::Text, Format::Json]);
     assert_eq!(
-        CommandName::Protocols.formats(),
-        &[OutputFormat::Text, OutputFormat::Json]
-    );
-    assert_eq!(
-        CommandName::Read.formats(),
+        Command::Read.formats(),
         &[
-            OutputFormat::Text,
-            OutputFormat::Ndjson,
-            OutputFormat::Hex,
-            OutputFormat::Pcap,
-            OutputFormat::Pcapng,
+            Format::Text,
+            Format::Ndjson,
+            Format::Hex,
+            Format::Pcap,
+            Format::Pcapng,
         ]
     );
     assert_eq!(
-        CommandName::Replay.formats(),
+        Command::Replay.formats(),
         &[
-            OutputFormat::Text,
-            OutputFormat::Json,
-            OutputFormat::Ndjson,
-            OutputFormat::Pcap,
-            OutputFormat::Pcapng,
+            Format::Text,
+            Format::Json,
+            Format::Ndjson,
+            Format::Pcap,
+            Format::Pcapng,
         ]
     );
 }
@@ -552,7 +536,7 @@ fn scan_output_preserves_per_attempt_facts_and_timeout_classification() {
 
     let (result, diagnostics, stats) = ScanCommandResult::try_from_scan(result).unwrap();
     let value = serde_json::to_value(
-        AggregateOutput::success(CommandName::Scan, result, diagnostics).with_stats(stats),
+        Aggregate::success(Command::Scan, result, diagnostics).with_stats(stats),
     )
     .unwrap();
     assert_eq!(value["result"]["ports"][0]["classification"], "timeout");
@@ -613,7 +597,7 @@ fn traceroute_output_preserves_typed_per_attempt_timing_and_terminal_evidence() 
     let (result, diagnostics, stats) =
         TracerouteCommandResult::try_from_traceroute(result).unwrap();
     let value = serde_json::to_value(
-        AggregateOutput::success(CommandName::Traceroute, result, diagnostics).with_stats(stats),
+        Aggregate::success(Command::Traceroute, result, diagnostics).with_stats(stats),
     )
     .unwrap();
     assert_eq!(value["result"]["destination"], "192.168.56.10");

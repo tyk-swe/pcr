@@ -3,6 +3,7 @@
 
 //! DNS CLI command logic.
 
+pub(super) mod arguments;
 mod conversion;
 mod execution;
 mod rendering;
@@ -12,10 +13,10 @@ use std::time::Duration;
 
 use packetcraftr::{client, net, output, packet, workflow};
 
-use crate::arguments::DnsArgs;
+use self::arguments::DnsArgs;
 use crate::errors::CliError;
 use crate::rendering::emit_json;
-use crate::runtime::{
+use crate::system::{
     DeferredInterface, default_registry_arc, parse_workflow_target, workflow_exchange_options,
 };
 
@@ -24,10 +25,7 @@ use conversion::{generated_dns_source_port, generated_dns_transaction_id};
 use execution::CliDnsExecutor;
 use rendering::{render_dns_stream, render_dns_text};
 
-pub(crate) fn run_dns(
-    arguments: DnsArgs,
-    output: output::contract::Format,
-) -> Result<(), CliError> {
+pub(super) fn run(arguments: DnsArgs, output: output::contract::Format) -> Result<(), CliError> {
     let DnsArgs {
         server,
         name,

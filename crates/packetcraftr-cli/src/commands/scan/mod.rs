@@ -3,6 +3,7 @@
 
 //! Scan CLI command logic.
 
+pub(super) mod arguments;
 mod conversion;
 mod execution;
 mod rendering;
@@ -12,10 +13,10 @@ use std::time::Duration;
 
 use packetcraftr::{client, net, output, packet, workflow};
 
-use crate::arguments::ScanArgs;
+use self::arguments::ScanArgs;
 use crate::errors::CliError;
 use crate::rendering::emit_json;
-use crate::runtime::{
+use crate::system::{
     DeferredInterface, default_registry_arc, parse_workflow_target, workflow_exchange_options,
 };
 
@@ -24,10 +25,7 @@ pub(crate) use conversion::validate_live_interface_selector;
 use execution::CliScanExecutor;
 use rendering::{render_scan_stream, render_scan_text};
 
-pub(crate) fn run_scan(
-    arguments: ScanArgs,
-    output: output::contract::Format,
-) -> Result<(), CliError> {
+pub(super) fn run(arguments: ScanArgs, output: output::contract::Format) -> Result<(), CliError> {
     let ScanArgs {
         target,
         transport,

@@ -10,8 +10,8 @@ use packetcraftr_packet::{
     Packet, decode::Dissector, field::FieldKind, registry::ProtocolRegistry,
 };
 
-use crate::kernel::clock::Clock;
-use crate::kernel::evidence::EvidenceBudget;
+use crate::clock::Clock;
+use crate::probe::evidence::EvidenceBudget;
 
 use super::SYNTHESIZED_ETHERNET_BYTES;
 use super::error::{FuzzError, duration_limit};

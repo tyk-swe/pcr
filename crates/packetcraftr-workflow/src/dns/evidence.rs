@@ -9,7 +9,7 @@ use packetcraftr_packet::{
     Packet, codec::NetworkEnvelope, decode::DecodedPacket, semantics::BuiltinProtocol,
 };
 
-use crate::kernel::evidence::{
+use crate::probe::evidence::{
     ExchangeEvidenceError, ResponseEvidence, validate_aggregate_evidence_limits,
     validate_capture_statistics_evidence, validate_response_frames_and_deadlines,
     validate_sent_byte_accounting,

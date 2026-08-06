@@ -5,10 +5,13 @@
 
 #![forbid(unsafe_code)]
 
-#[cfg_attr(
-    not(any(feature = "native-layer2", feature = "native-layer3")),
-    allow(unused_imports)
-)]
+#[cfg(any(
+    test,
+    all(
+        any(feature = "native-layer2", feature = "native-layer3"),
+        any(target_os = "linux", target_os = "macos", windows)
+    )
+))]
 use crate::route::InterfaceId;
 
 #[cfg(all(

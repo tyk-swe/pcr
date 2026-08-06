@@ -10,7 +10,7 @@ use packetcraftr_net::capture::{DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUE
 use packetcraftr_packet::template::DEFAULT_MAX_TEMPLATE_PACKETS;
 
 use crate::AddressFamily;
-use crate::kernel::target::Target;
+use crate::target::Target;
 
 use super::super::error::ScanError;
 use super::super::{
@@ -35,11 +35,11 @@ impl ScanTransport {
         }
     }
 
-    pub(in crate::scan) const fn probe_transport(self) -> crate::kernel::probe::Transport {
+    pub(in crate::scan) const fn probe_transport(self) -> crate::probe::Transport {
         match self {
-            Self::Tcp => crate::kernel::probe::Transport::Tcp,
-            Self::Udp => crate::kernel::probe::Transport::Udp,
-            Self::Icmp => crate::kernel::probe::Transport::Icmp,
+            Self::Tcp => crate::probe::Transport::Tcp,
+            Self::Udp => crate::probe::Transport::Udp,
+            Self::Icmp => crate::probe::Transport::Icmp,
         }
     }
 }
@@ -215,10 +215,10 @@ mod tests {
 
     use super::{ScanLimits, ScanRequest, ScanTransport};
     use crate::AddressFamily;
-    use crate::kernel::probe::Transport as ProbeTransport;
-    use crate::kernel::target::Target;
+    use crate::probe::Transport as ProbeTransport;
     use crate::scan::error::ScanError;
     use crate::scan::{MAX_SCAN_ATTEMPTS, MAX_SCAN_DURATION, MAX_SCAN_PROBES, MAX_SCAN_RATE};
+    use crate::target::Target;
 
     fn request(transport: ScanTransport, ports: Vec<u16>) -> ScanRequest {
         ScanRequest {

@@ -6,7 +6,7 @@ use packetcraftr::{
     net, output,
 };
 
-use super::arguments::CliColorChoice;
+use super::cli::CliColorChoice;
 
 #[derive(Debug)]
 pub(super) struct CliError {
@@ -164,33 +164,14 @@ fn option_value_before_end_of_options<'a>(
 }
 
 pub(super) fn command_from_env() -> Option<output::contract::Command> {
-    const COMMANDS: &[(&str, output::contract::Command)] = &[
-        ("build", output::contract::Command::Build),
-        ("dissect", output::contract::Command::Dissect),
-        ("protocols", output::contract::Command::Protocols),
-        ("plan", output::contract::Command::Plan),
-        ("send", output::contract::Command::Send),
-        ("exchange", output::contract::Command::Exchange),
-        ("capture", output::contract::Command::Capture),
-        ("expert", output::contract::Command::Expert),
-        ("follow", output::contract::Command::Follow),
-        ("read", output::contract::Command::Read),
-        ("replay", output::contract::Command::Replay),
-        ("scan", output::contract::Command::Scan),
-        ("stats", output::contract::Command::Stats),
-        ("traceroute", output::contract::Command::Traceroute),
-        ("dns", output::contract::Command::Dns),
-        ("fuzz", output::contract::Command::Fuzz),
-        ("interfaces", output::contract::Command::Interfaces),
-        ("routes", output::contract::Command::Routes),
-    ];
     std::env::args_os()
         .take_while(|argument| argument.as_os_str() != "--")
         .find_map(|argument| {
             let argument = argument.to_str()?;
-            COMMANDS
+            output::contract::Command::ALL
                 .iter()
-                .find_map(|(name, command)| (*name == argument).then_some(*command))
+                .copied()
+                .find(|command| command.as_str() == argument)
         })
 }
 

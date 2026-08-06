@@ -3,6 +3,7 @@
 
 //! Capture CLI command logic.
 
+pub(super) mod arguments;
 mod conversion;
 mod execution;
 mod rendering;
@@ -18,7 +19,7 @@ use packetcraftr::{
     output,
 };
 
-use crate::arguments::CaptureArgs;
+use self::arguments::CaptureArgs;
 use crate::capture_output::CaptureOutput;
 use crate::errors::CliError;
 use crate::filtering::{self, Capabilities, FrameSelector};
@@ -26,13 +27,13 @@ use crate::rendering::{
     capture_file_format, emit_json_compact, render_diagnostics_text, spaced_hex, write_plain_line,
     write_stdout_line,
 };
-use crate::runtime::{default_registry_arc, prepare_route_request, system_client};
+use crate::system::{default_registry_arc, prepare_route_request, system_client};
 
 use conversion::validate_capture_window;
 use execution::{CaptureBudget, drive_capture, shutdown_after_error};
 use rendering::render_diagnostics_stderr;
 
-pub(crate) fn run_capture(
+pub(super) fn run(
     arguments: CaptureArgs,
     output: output::contract::Format,
 ) -> Result<(), CliError> {

@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::BoundaryError;
-use crate::kernel::client_executor::{ClientExecutor, Dns};
-use crate::kernel::probe::{self, Transport as ProbeTransport};
+use crate::probe::client_executor::{ClientExecutor, Dns};
+use crate::probe::{self, Transport as ProbeTransport};
 use packetcraftr_net::{
     capture::CaptureProvider,
     route::{NeighborResolver, RouteProvider},

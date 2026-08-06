@@ -23,8 +23,8 @@ use packetcraftr_packet::{
 };
 use packetcraftr_protocol::{network::Ipv4, transport::Tcp, transport::Udp};
 
-use crate::kernel::clock::Clock;
-use crate::kernel::target::{Authorizer, Target};
+use crate::clock::Clock;
+use crate::target::{Authorizer, Target};
 use crate::{AddressFamily, BoundaryError, Stats};
 
 use super::super::model::{

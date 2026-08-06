@@ -89,7 +89,7 @@ pub(super) fn worst_case_duration(
 }
 
 fn rate_delay(probes: usize, rate: Option<u32>) -> Result<Duration, TracerouteError> {
-    crate::kernel::clock::rate_delay(probes, rate).ok_or(TracerouteError::InvalidLimit {
+    crate::clock::rate_delay(probes, rate).ok_or(TracerouteError::InvalidLimit {
         field: "probes_per_second",
         value: u64::from(rate.unwrap_or_default()),
         reason: "rate-delay arithmetic overflowed".to_owned(),

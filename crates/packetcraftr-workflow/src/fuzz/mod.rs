@@ -51,10 +51,5 @@ pub use model::{
     FuzzTargetParseError as TargetParseError,
 };
 /// Executes fuzz cases through a client's capture-ready exchange lifecycle.
-pub type ClientExecutor<'a, R, N, I> = crate::kernel::client_executor::ClientExecutor<
-    'a,
-    R,
-    N,
-    I,
-    crate::kernel::client_executor::Fuzz,
->;
+pub type ClientExecutor<'a, R, N, I> =
+    crate::probe::client_executor::ClientExecutor<'a, R, N, I, crate::probe::client_executor::Fuzz>;

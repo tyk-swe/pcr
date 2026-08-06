@@ -10,7 +10,7 @@ use packetcraftr::{
     packet::{self, Packet},
 };
 
-use super::arguments::RecipeArgs;
+use super::command_options::RecipeArgs;
 use super::errors::CliError;
 
 pub(super) fn read_recipe(

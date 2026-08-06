@@ -47,10 +47,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Reorganized command arguments around their owning CLI commands, separated
-  scan and traceroute planning/probe/evidence responsibilities, isolated DNS
-  evidence validation and filter runtime comparisons, removed unnecessary
-  exchange and replay phase indirection, and split broad tests into
+- Reorganized the CLI into command-owned vertical slices, flattened facade
+  output modules, separated shared workflow target/clock/probe mechanics, and
+  removed the hardcoded workspace package and dependency-edge registry.
+  Cargo metadata now defines the graph while focused checks retain acyclicity,
+  offline/live capability isolation, and native unsafe-code confinement.
+  Existing public paths remain, while shared `AddressFamily` and
+  `PolicyAuthorizer` types are now also discoverable under `workflow::target`.
+  CLI behavior, wire bytes, schemas, and serialized documents are unchanged.
+- Separated scan and traceroute planning/probe/evidence responsibilities,
+  isolated DNS evidence validation and filter runtime comparisons, removed
+  unnecessary exchange and replay phase indirection, and split broad tests into
   behavior-oriented suites. Public facade paths, CLI behavior, wire bytes,
   schemas, and serialized output contracts are unchanged.
 - **Breaking:** Canonicalized traffic-policy CLI arguments and removed accepted
@@ -66,7 +73,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `scripts/test-native-e2e` is now `scripts/test-e2e`. Behavior is unchanged;
   documentation, CI workflows, and harness messages reference the new names.
 - Separate mixed protocol families and extract inline test modules across `packetcraftr-protocol` into dedicated modules (`ipv6::{options, fragment, srh}`, `capture::{bsd, sll}`, `tunnel::ipsec::{ah, esp}`).
-- **Breaking:** Consolidated the workspace from thirteen packages to ten.
+- **Breaking:** Consolidated several single-purpose workspace packages into
+  responsibility-owned domains.
   `packetcraftr-error` and `packetcraftr-budget` are now
   `packetcraftr-core::{error,budget}`, shared frame types moved to
   `packetcraftr-core::frame`, reassembly moved to

@@ -11,7 +11,7 @@
 
 use std::time::Duration;
 
-use crate::kernel::evidence::EvidenceDiagnosticDescriptor;
+use crate::probe::evidence::EvidenceDiagnosticDescriptor;
 
 pub const DEFAULT_TRACEROUTE_FIRST_HOP: u8 = 1;
 pub const DEFAULT_TRACEROUTE_MAX_HOPS: u8 = 30;
@@ -42,14 +42,14 @@ mod probe;
 mod tests;
 
 /// Executes traceroute batches through a client's capture-ready exchange lifecycle.
-pub type ClientExecutor<'a, R, N, I> = crate::kernel::client_executor::ClientExecutor<
+pub type ClientExecutor<'a, R, N, I> = crate::probe::client_executor::ClientExecutor<
     'a,
     R,
     N,
     I,
-    crate::kernel::client_executor::Traceroute,
+    crate::probe::client_executor::Traceroute,
 >;
-pub use crate::kernel::policy_authorizer::PolicyAuthorizer;
+pub use crate::target::PolicyAuthorizer;
 pub use classification::{
     TracerouteResponseClassification as ResponseClassification,
     classify_traceroute_response as classify_response,

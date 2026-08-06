@@ -14,11 +14,11 @@ use packetcraftr::{
     packet::{filter::Filter, registry::Registry},
 };
 
-use super::super::arguments::{OfflineAnalysisLimits, OfflineCaptureLimits};
+use super::super::command_options::{OfflineAnalysisLimits, OfflineCaptureLimits};
 use super::super::errors::CliError;
 use super::super::filtering::{self, Capabilities};
 use super::super::input::validate_capture_stream_limits;
-use super::super::runtime::default_registry_arc;
+use super::super::system::default_registry_arc;
 
 /// Validated, I/O-free analysis state.
 pub(super) struct PreparedOfflineAnalysis {

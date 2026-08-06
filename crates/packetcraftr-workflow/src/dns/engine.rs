@@ -11,12 +11,12 @@ use packetcraftr_packet::{
 };
 
 use crate::Stats;
-use crate::kernel::clock::Clock;
-use crate::kernel::evidence::{
+use crate::clock::Clock;
+use crate::probe::evidence::{
     EvidenceBudget, ResponseCandidate, push_undecoded_limit_diagnostic, response_within_deadline,
     retain_evidence, select_response_candidate,
 };
-use crate::kernel::target::Authorizer;
+use crate::target::Authorizer;
 
 use super::error::DnsError;
 use super::evidence::validate_dns_execution;
@@ -442,7 +442,7 @@ pub(super) fn dns_source_port(base: u16, attempt: u32) -> u16 {
 }
 
 fn dns_rate_delay(rate: Option<u32>) -> Result<Duration, DnsError> {
-    crate::kernel::clock::rate_delay(1, rate).ok_or(DnsError::InvalidLimit {
+    crate::clock::rate_delay(1, rate).ok_or(DnsError::InvalidLimit {
         field: "queries_per_second",
         value: u64::from(rate.unwrap_or_default()),
         reason: "rate-delay arithmetic overflowed".to_owned(),

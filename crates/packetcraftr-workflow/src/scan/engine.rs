@@ -14,14 +14,14 @@ use packetcraftr_packet::{
     registry::ProtocolRegistry,
 };
 
-use crate::kernel::bounded_probe::{
-    ProbeBatch, ProbeExecution, ProbeLifecycle, ProbeRunConfig, run_batches,
-};
-use crate::kernel::clock::Clock;
-use crate::kernel::evidence::{
+use crate::clock::Clock;
+use crate::probe::evidence::{
     EvidenceBudget, ResponseSelector, retain_evidence, retain_undecoded_frames,
 };
-use crate::kernel::target::{Authorizer, approve_operation, resolve_selected};
+use crate::probe::runner::{
+    ProbeBatch, ProbeExecution, ProbeLifecycle, ProbeRunConfig, run_batches,
+};
+use crate::target::{Authorizer, approve_operation, resolve_selected};
 use crate::{BoundaryError, Stats};
 
 use super::classification::classify_scan_response;

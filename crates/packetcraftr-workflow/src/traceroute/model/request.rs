@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use packetcraftr_net::capture::{DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES};
 
 use crate::AddressFamily;
-use crate::kernel::probe::Transport as ProbeTransport;
-use crate::kernel::target::Target;
+use crate::probe::Transport as ProbeTransport;
+use crate::target::Target;
 
 use super::super::error::TracerouteError;
 use super::super::{
@@ -224,9 +224,9 @@ mod tests {
 
     use super::{TracerouteLimits, TracerouteRequest, TracerouteStrategy};
     use crate::AddressFamily;
-    use crate::kernel::probe::Transport as ProbeTransport;
-    use crate::kernel::target::Target;
+    use crate::probe::Transport as ProbeTransport;
     use crate::scan::{MAX_SCAN_PROBES, MAX_SCAN_RATE};
+    use crate::target::Target;
     use crate::traceroute::error::TracerouteError;
     use crate::traceroute::{MAX_TRACEROUTE_DURATION, MAX_TRACEROUTE_PROBES_PER_HOP};
 

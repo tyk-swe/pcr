@@ -71,11 +71,10 @@ fn malformed_gre_cannot_hide_a_public_destination() {
     outer.extend_from_slice(&raw_ipv4(Ipv4Addr::new(8, 8, 8, 8)));
 
     assert!(matches!(
-        client
-            .send(
-                raw_ethernet_request(outer, 0x0800, false),
-                permissive_layer2_options(),
-            ),
+        client.send(
+            raw_ethernet_request(outer, 0x0800, false),
+            permissive_layer2_options(),
+        ),
         Err(ClientError::Policy(
             TrafficPolicyError::InvalidPacketSemantics { .. }
         ))

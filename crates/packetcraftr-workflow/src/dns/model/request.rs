@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use packetcraftr_net::capture::{DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES};
 
 use crate::AddressFamily;
-use crate::kernel::target::Target;
 use crate::scan::MAX_SCAN_RATE;
+use crate::target::Target;
 
 use super::super::error::DnsError;
 use super::super::wire::canonical_query_name;

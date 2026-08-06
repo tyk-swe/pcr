@@ -87,40 +87,56 @@ Every pull request must have one primary responsibility.
 - Update fixtures, goldens, examples, and schemas together when an approved
   serialized or CLI contract changes.
 
-The workspace has ten packages. Shared budgets, errors, and frames live in
-`packetcraftr-core`; offline capture-file I/O in `packetcraftr-capture`;
-runtime-neutral packet behavior in `packetcraftr-packet`; built-in protocols in
-`packetcraftr-protocol`; and native interfaces, routes, capture, and transmission
-in `packetcraftr-net`. Policy-gated send and exchange behavior belongs to
-`packetcraftr-client`, offline analysis and reassembly to
-`packetcraftr-analysis`, and live workflows to `packetcraftr-workflow`.
-`packetcraftr` is the facade and owns render-neutral output contracts, while
-`packetcraftr-cli` owns command parsing, composition, rendering, and process
-behavior.
+Responsibility, rather than a fixed topology, determines package and module
+ownership:
 
-The exact normal internal dependency graph is:
+- `packetcraftr-core` owns cross-domain budgets and classified boundary errors.
+- `packetcraftr-capture` owns portable, bounded capture-file I/O.
+- `packetcraftr-packet` owns runtime-neutral packet models, registries,
+  construction, dissection, filtering, and protocol identity.
+- `packetcraftr-protocol` owns built-in codecs, matchers, capture roots, and
+  their deterministic registration.
+- `packetcraftr-analysis` owns the offline capture pipeline, statistics,
+  following, expert diagnostics, and reassembly.
+- `packetcraftr-net` owns interfaces, route/neighbor planning, provider traits,
+  and the narrowly reviewable native adapters under `src/platform/`.
+- `packetcraftr-client` owns traffic policy plus policy-gated send and exchange
+  lifecycles; `packetcraftr-workflow` owns bounded replay, scan, traceroute,
+  DNS, and fuzz operations.
+- `packetcraftr` is the consumption facade and owns serialized output contracts;
+  `packetcraftr-cli` owns process behavior and command-line presentation.
 
-| Package | Direct internal dependencies |
-| --- | --- |
-| `packetcraftr-core` | none |
-| `packetcraftr-capture` | core |
-| `packetcraftr-packet` | core |
-| `packetcraftr-protocol` | core, packet |
-| `packetcraftr-net` | core, packet |
-| `packetcraftr-client` | core, net, packet, protocol |
-| `packetcraftr-analysis` | core, capture, packet, protocol |
-| `packetcraftr-workflow` | core, capture, client, net, packet, protocol |
-| `packetcraftr` | core, capture, packet, protocol, net, client, analysis, workflow |
-| `packetcraftr-cli` | packetcraftr |
+Cargo manifests and `cargo metadata` are the only complete description of the
+workspace graph. `scripts/check-arch` derives that graph and checks only
+acyclicity and the semantic boundary that `packetcraftr-analysis` has no direct
+or transitive path to the live capability owners `packetcraftr-client` and
+`packetcraftr-net`. Adding a legitimate package or dependency does not require
+editing a global registry or edge table. If live-capability ownership moves,
+update the focused check as part of that move.
 
-`scripts/check-arch` enforces that graph. In particular,
-`packetcraftr-analysis` must have no direct or transitive path to
-`packetcraftr-client` or `packetcraftr-net`; the dependency boundary guarantees
-that offline analysis cannot resolve, route, capture, or transmit live traffic.
-Prefer specific module names that describe their responsibility, and keep the
-graph acyclic. Unsafe code is confined to
-`crates/packetcraftr-net/src/platform/`, and every unsafe block needs a specific
-`SAFETY` explanation.
+Common changes start here:
+
+- Add or change one CLI option in
+  `crates/packetcraftr-cli/src/commands/<command>/arguments.rs`; execution,
+  command-specific conversion, and rendering stay in the same command subtree.
+- Change a serialized result in `crates/packetcraftr/src/output/<command>.rs`
+  (or the multi-file `output/dns/` domain) without changing its workflow model.
+- Add an offline operation under `crates/packetcraftr-analysis/src/` and compose
+  it from the matching CLI command without introducing a live dependency.
+- Add a live workflow under `crates/packetcraftr-workflow/src/`; shared target,
+  clock, batch, correlation, or evidence mechanics belong to the existing
+  `target`, `clock`, or private `probe` owners rather than a generic bucket.
+- Add a native backend only under
+  `crates/packetcraftr-net/src/platform/`, keeping provider-facing contracts in
+  the surrounding network domain.
+- Add a built-in protocol beside its protocol family, then add its neutral
+  identity/capability row to `packetcraftr-packet/src/protocol_catalog.rs` and
+  its payload edges or capture roots to the focused registration modules. This
+  split prevents a packet-framework → built-in-codec dependency cycle.
+
+Unsafe code and FFI are confined to `crates/packetcraftr-net/src/platform/`;
+every unsafe block needs a specific `SAFETY` explanation. Prefer module names
+that describe their responsibility and keep the Cargo graph acyclic.
 
 ## Code review
 

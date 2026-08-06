@@ -18,7 +18,7 @@ use super::support::{
     FixedAuthorizer, MixedHopExecutor, NoopClock, UndecodedExecutor, frame_at, icmpv4_error,
     ipv4_udp_quote, udp_traceroute_request,
 };
-use crate::kernel::target::Target;
+use crate::target::Target;
 use crate::{BoundaryError, Stats};
 use packetcraftr_capture::Frame;
 use packetcraftr_net::capture::CaptureStatistics;

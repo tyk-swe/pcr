@@ -208,7 +208,7 @@ mod tests {
     use super::{CaptureBudget, drive_capture};
     use crate::{
         filtering::{self, Capabilities, FrameSelector},
-        runtime::default_registry_arc,
+        system::default_registry_arc,
     };
 
     struct ScriptedCapture {

@@ -13,7 +13,7 @@ use packetcraftr_protocol::{
     transport::{Tcp, Udp},
 };
 
-use crate::kernel::probe::{nonzero_ipv4_identification, packet_shape_matches};
+use crate::probe::{nonzero_ipv4_identification, packet_shape_matches};
 
 use super::TRACEROUTE_SOURCE_PORT;
 use super::model::{TracerouteProbe, TracerouteStrategy};

@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use crate::kernel::evidence::EvidenceDiagnosticDescriptor;
+use crate::probe::evidence::EvidenceDiagnosticDescriptor;
 
 pub const DNS_HEADER_BYTES: usize = 12;
 pub const DEFAULT_DNS_SERVER_PORT: u16 = 53;
@@ -53,14 +53,9 @@ mod tests;
 mod wire;
 
 /// Executes DNS queries through a client's capture-ready exchange lifecycle.
-pub type ClientExecutor<'a, R, N, I> = crate::kernel::client_executor::ClientExecutor<
-    'a,
-    R,
-    N,
-    I,
-    crate::kernel::client_executor::Dns,
->;
-pub use crate::kernel::policy_authorizer::PolicyAuthorizer;
+pub type ClientExecutor<'a, R, N, I> =
+    crate::probe::client_executor::ClientExecutor<'a, R, N, I, crate::probe::client_executor::Dns>;
+pub use crate::target::PolicyAuthorizer;
 pub use engine::dns as run;
 pub use error::{DnsError as Error, DnsWireError as WireError};
 pub use model::{

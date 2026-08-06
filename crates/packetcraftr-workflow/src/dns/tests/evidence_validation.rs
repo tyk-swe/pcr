@@ -18,9 +18,8 @@ use packetcraftr_core::error::Classified;
 use packetcraftr_packet::{Packet, decode::DecodedPacket};
 use packetcraftr_protocol::builtin::registry as default_registry;
 
-use crate::kernel::clock::Clock;
-use crate::kernel::target::{Authorizer, Target};
-use crate::target::Authorized;
+use crate::clock::Clock;
+use crate::target::{Authorized, Authorizer, Target};
 use crate::{BoundaryError, Stats};
 
 use super::super::engine::dns;

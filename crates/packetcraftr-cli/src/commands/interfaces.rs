@@ -6,7 +6,11 @@ use packetcraftr::{net, output};
 use super::super::errors::CliError;
 use super::super::rendering::{emit_json, write_stdout_line};
 
-pub(crate) fn run_interfaces(output: output::contract::Format) -> Result<(), CliError> {
+pub(super) const AFTER_LONG_HELP: &str = r#"Examples:
+  packetcraftr interfaces
+  packetcraftr --output json interfaces"#;
+
+pub(super) fn run(output: output::contract::Format) -> Result<(), CliError> {
     let interfaces = net::interface::Provider::interfaces(&net::interface::SystemProvider)
         .map_err(CliError::classified)?;
     let result = output::interfaces::Result::new(interfaces);

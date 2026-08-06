@@ -10,8 +10,7 @@ use packetcraftr_capture::{Frame, LinkType};
 use packetcraftr_packet::{Packet, decode::DecodedPacket, layer::Raw};
 use packetcraftr_protocol::{builtin::registry as default_registry, network::Ipv4, transport::Udp};
 
-use crate::kernel::target::{Authorizer, Target};
-use crate::target::Authorized;
+use crate::target::{Authorized, Authorizer, Target};
 use crate::{AddressFamily, BoundaryError, Stats};
 
 use super::super::DNS_FLAG_TRUNCATED;

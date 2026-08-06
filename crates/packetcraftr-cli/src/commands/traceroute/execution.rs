@@ -4,7 +4,7 @@
 use packetcraftr::{client, workflow};
 
 use crate::errors::CliError;
-use crate::runtime::{DeferredInterface, SystemClient};
+use crate::system::{DeferredInterface, SystemClient};
 
 pub(super) struct CliTracerouteExecutor {
     pub(super) client: SystemClient,

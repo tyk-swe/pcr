@@ -125,31 +125,19 @@ or `target\release\packetcraftr.exe` on Windows.
 
 ## Workspace layout
 
-PacketcraftR has ten Cargo packages under `crates/`. The `packetcraftr` facade
-re-exports the compiled domains, owns render-neutral output models, and exposes
-analysis reassembly as `packetcraftr::reassembly`; `packetcraftr-cli` builds the
-`packetcraftr` binary. Depend on the facade for the whole library, on domain
-crates such as `packetcraftr-core` or `packetcraftr-capture` for a lower layer,
-or on `packetcraftr-analysis` for offline analysis and independent reassembly.
+The `packetcraftr` facade is the convenient whole-library dependency. It
+re-exports packet, protocol, capture, analysis, networking, client, and
+workflow APIs, owns the versioned render-neutral output contract, and exposes
+analysis reassembly as `packetcraftr::reassembly`. Consumers that need a
+smaller compilation or capability surface can depend on an individual domain
+crate, especially `packetcraftr-analysis` for offline-only analysis and
+reassembly. The `packetcraftr-cli` package builds the `packetcraftr` binary.
 
-The normal internal dependency graph is exact:
-
-| Package | Direct internal dependencies |
-| --- | --- |
-| `packetcraftr-core` | none |
-| `packetcraftr-capture` | core |
-| `packetcraftr-packet` | core |
-| `packetcraftr-protocol` | core, packet |
-| `packetcraftr-net` | core, packet |
-| `packetcraftr-client` | core, net, packet, protocol |
-| `packetcraftr-analysis` | core, capture, packet, protocol |
-| `packetcraftr-workflow` | core, capture, client, net, packet, protocol |
-| `packetcraftr` | core, capture, packet, protocol, net, client, analysis, workflow |
-| `packetcraftr-cli` | packetcraftr |
-
-`scripts/check-arch` enforces this graph, including the
-absence of any analysis path to the live client or network crates. `AGENTS.md`
-describes the layering and offline/live boundary.
+Cargo manifests and `cargo metadata` are the authoritative workspace graph.
+The graph may evolve with the responsibilities; the stable rule is that
+offline analysis cannot depend directly or transitively on the live client or
+native network capability owners. Contributor ownership and common change
+locations are documented in `CONTRIBUTING.md` and `AGENTS.md`.
 
 ## Cargo features and tested profiles
 

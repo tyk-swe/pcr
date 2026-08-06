@@ -10,9 +10,9 @@ use packetcraftr_packet::diagnostic::Diagnostic;
 use packetcraftr_workflow::dns::Result as DnsResult;
 use serde::Serialize;
 
-use super::super::contract::OutputContractError;
-use super::super::envelope::OperationStats;
-use super::super::frame::{FrameOutput, OutputTimestamp};
+use super::super::contract::Error;
+use super::super::envelope::Stats;
+use super::super::frame::{Captured, Timestamp};
 use super::record::{DnsEdnsOutput, DnsRecordOutput, DnsRejectedRecordOutput, DnsSection};
 
 /// Output-v1 DNS terminal outcome.
@@ -110,9 +110,7 @@ struct DnsResponseOutputFields {
 }
 
 impl DnsCommandResult {
-    pub fn try_from_dns(
-        result: DnsResult,
-    ) -> Result<(Self, Vec<Diagnostic>, OperationStats), OutputContractError> {
+    pub fn try_from_dns(result: DnsResult) -> Result<(Self, Vec<Diagnostic>, Stats), Error> {
         let DnsResult {
             server,
             server_port,
@@ -178,29 +176,26 @@ impl DnsCommandResult {
                     source_port: evidence.source_port,
                     status: evidence.status.into(),
                     sent_at: evidence.sent_at.try_into()?,
-                    received_at: evidence
-                        .received_at
-                        .map(OutputTimestamp::try_from)
-                        .transpose()?,
+                    received_at: evidence.received_at.map(Timestamp::try_from).transpose()?,
                     latency: evidence.latency,
                     frame: evidence
                         .response
-                        .map(FrameOutput::try_from_frame)
+                        .map(Captured::try_from_frame)
                         .transpose()?,
                     response_code: evidence.response_code,
                     reason: evidence.reason,
                 })
             })
-            .collect::<Result<Vec<_>, OutputContractError>>()?;
+            .collect::<Result<Vec<_>, Error>>()?;
         let undecoded_outputs = undecoded
             .into_iter()
             .map(|evidence| {
                 Ok(DnsUndecodedOutput {
                     attempt: evidence.attempt,
-                    frame: FrameOutput::try_from_frame(evidence.frame)?,
+                    frame: Captured::try_from_frame(evidence.frame)?,
                 })
             })
-            .collect::<Result<Vec<_>, OutputContractError>>()?;
+            .collect::<Result<Vec<_>, Error>>()?;
         let operation_stats = stats.into();
         let DnsResponseOutputFields {
             response_code,
@@ -257,13 +252,13 @@ pub struct DnsAttemptOutput {
     pub server_address: IpAddr,
     pub source_port: u16,
     pub status: DnsOutcome,
-    pub sent_at: OutputTimestamp,
+    pub sent_at: Timestamp,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub received_at: Option<OutputTimestamp>,
+    pub received_at: Option<Timestamp>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub latency: Option<Duration>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub frame: Option<FrameOutput>,
+    pub frame: Option<Captured>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_code: Option<u16>,
     pub reason: String,
@@ -272,7 +267,7 @@ pub struct DnsAttemptOutput {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct DnsUndecodedOutput {
     pub attempt: u32,
-    pub frame: FrameOutput,
+    pub frame: Captured,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use packetcraftr::{client, packet, workflow};
 
 use crate::errors::CliError;
-use crate::runtime::{DeferredInterface, system_client};
+use crate::system::{DeferredInterface, system_client};
 
 pub(super) struct CliScanExecutor {
     pub(super) registry: Arc<packet::registry::Registry>,

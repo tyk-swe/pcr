@@ -9,7 +9,6 @@
 
 pub mod build;
 pub mod capture;
-mod common;
 pub mod contract;
 pub mod dissect;
 pub mod dns;
@@ -19,6 +18,7 @@ pub mod expert;
 pub mod follow;
 mod frame;
 pub mod fuzz;
+mod hex;
 pub mod interfaces;
 mod network;
 pub mod plan;

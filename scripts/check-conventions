@@ -26,6 +26,11 @@ for file in "${files[@]}"; do
     if [[ ${header[0]-} != "$expected_copyright" || ${header[1]-} != "$expected_spdx" ]]; then
         report "$file" 'missing the copyright/SPDX header pair on lines 1-2'
     fi
+
+    if [[ $file != crates/packetcraftr-net/src/platform/* ]] \
+        && grep -Eq '#!?\[[^]]*(allow|expect|warn)\(unsafe_code\)' "$file"; then
+        report "$file" 'may not relax unsafe_code outside packetcraftr-net/src/platform/'
+    fi
 done
 
 if ((status == 0)); then

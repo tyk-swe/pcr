@@ -5,9 +5,9 @@ use std::collections::HashSet;
 
 use packetcraftr::workflow;
 
-use crate::arguments::CliScanPortSpec;
+use super::arguments::CliScanPortSpec;
 use crate::errors::CliError;
-use crate::runtime::validate_interface_selector;
+use crate::system::validate_interface_selector;
 
 pub(crate) fn validate_live_interface_selector(
     command: &str,

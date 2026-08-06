@@ -13,7 +13,7 @@ use super::super::model::{
 };
 use super::support::{FixedAuthorizer, MixedHopExecutor, NoopClock, udp_traceroute_request};
 use crate::BoundaryError;
-use crate::kernel::target::Target;
+use crate::target::Target;
 use packetcraftr_protocol::builtin::registry as default_registry;
 
 #[test]

@@ -3,6 +3,7 @@
 
 //! Traceroute CLI command logic.
 
+pub(super) mod arguments;
 mod execution;
 mod rendering;
 
@@ -11,10 +12,10 @@ use std::time::Duration;
 
 use packetcraftr::{client, net, output, packet, workflow};
 
-use crate::arguments::TracerouteArgs;
+use self::arguments::TracerouteArgs;
 use crate::errors::CliError;
 use crate::rendering::emit_json;
-use crate::runtime::{
+use crate::system::{
     DeferredInterface, default_registry_arc, parse_workflow_target, system_client,
     workflow_exchange_options,
 };
@@ -23,7 +24,7 @@ use super::scan::validate_live_interface_selector;
 use execution::CliTracerouteExecutor;
 use rendering::{render_traceroute_stream, render_traceroute_text};
 
-pub(crate) fn run_traceroute(
+pub(super) fn run(
     arguments: TracerouteArgs,
     output: output::contract::Format,
 ) -> Result<(), CliError> {

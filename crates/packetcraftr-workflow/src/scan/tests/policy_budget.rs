@@ -10,8 +10,7 @@ use std::time::Duration;
 use packetcraftr_core::error::{Classification as ErrorClassification, Classified, Kind};
 use packetcraftr_protocol::builtin::registry as default_registry;
 
-use crate::kernel::policy_authorizer::PolicyAuthorizer;
-use crate::kernel::target::{Authorizer, Target};
+use crate::target::{Authorizer, PolicyAuthorizer, Target};
 use crate::{AddressFamily, BoundaryError};
 
 use super::super::engine::scan;

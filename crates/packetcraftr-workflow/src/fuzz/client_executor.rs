@@ -7,7 +7,7 @@ use std::net::IpAddr;
 use std::time::Duration;
 
 use crate::BoundaryError;
-use crate::kernel::client_executor::{ClientExecutor, Fuzz};
+use crate::probe::client_executor::{ClientExecutor, Fuzz};
 use packetcraftr_net::{
     capture::CaptureProvider,
     route::{NeighborResolver, RouteProvider},

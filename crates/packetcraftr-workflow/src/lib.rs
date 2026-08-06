@@ -8,24 +8,24 @@
 //! [`scan`], [`traceroute`], [`dns`], and [`replay`] are live domains: their
 //! public entry points require authorization and finite operation budgets.
 //! [`fuzz::run`] is deliberately offline, while [`fuzz::run_live`] makes its
-//! registry, authorization, execution, and clock boundaries explicit. Private kernel
-//! modules own only contracts that are genuinely shared across these domains,
-//! such as clocks, target authorization, probe lifecycles, and exact evidence
-//! accounting; packet generation, validation, and classification remain with
-//! their domain.
+//! registry, authorization, execution, and clock boundaries explicit. Shared
+//! probe mechanics own only the batch lifecycle, wire correlation, and exact
+//! evidence accounting used across live domains; targets and clocks have
+//! explicit top-level owners, while packet generation, validation, and
+//! classification remain with each workflow.
 
+pub mod clock;
 pub mod dns;
 pub mod fuzz;
-mod kernel;
+mod probe;
 pub mod replay;
 pub mod scan;
+pub mod target;
 pub mod traceroute;
 
-pub use kernel::address_family::AddressFamily;
-pub use kernel::clock;
-pub use kernel::target;
 pub use packetcraftr_client::Stats;
 pub use packetcraftr_core::error::BoundaryError;
+pub use target::AddressFamily;
 
 #[cfg(test)]
 mod tests {

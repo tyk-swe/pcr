@@ -19,7 +19,7 @@
 //! module and re-exports analysis reassembly at [`reassembly`]. Depend on an
 //! individual domain crate to compile only part of the stack.
 //!
-//! The ten canonical domains are:
+//! The current facade exposes these responsibility-oriented domains:
 //!
 //! - [`analysis`] runs bounded offline capture analysis, expert diagnostics,
 //!   and stream reassembly;

@@ -164,7 +164,7 @@ jobs:
           restore-keys: cargo-release-v1-${{ matrix.target.triple }}-${{ matrix.variant.name }}-${{ hashFiles('rust-toolchain.toml') }}-
       - if: runner.os == 'Linux'
         name: Install Linux linker
-        run: sudo apt-get update && sudo apt-get install --yes clang mold
+        run: sudo apt-get update && sudo apt-get install --yes clang lld
       - if: runner.os == 'Linux' && matrix.variant.name == 'all-features'
         name: Install libpcap development files
         run: sudo apt-get install --yes libpcap-dev

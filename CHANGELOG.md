@@ -94,7 +94,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   send, exchange}` are now the top-level `output::{interfaces, plan, routes,
   send, exchange}` modules. Serialized command documents are unchanged.
 - Adopted cargo-nextest 0.9.140 for repository unit and integration tests and
-  mold for Linux linking across local development, CI, fuzzing, native E2E,
+  lld for Linux linking across local development, CI, fuzzing, native E2E,
   coverage, and release builds. Doctests continue to use Cargo's standard test
   runner.
 - Removed unread build-context metadata and unused output enum string helpers,

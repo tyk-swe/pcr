@@ -31,7 +31,7 @@ jobs:
             ~/.cargo/git/db
           key: cargo-tools-deny-v3-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml') }}-0.20.2-${{ hashFiles('Cargo.lock', 'fuzz/Cargo.lock') }}
       - name: Install Linux linker
-        run: sudo apt-get update && sudo apt-get install --yes clang mold
+        run: sudo apt-get update && sudo apt-get install --yes clang lld
       - name: Install pinned cargo-deny
         run: cargo install cargo-deny --locked --version 0.20.2
       - name: Enforce the RUSTSEC-2024-0436 internal remediation target
@@ -76,7 +76,7 @@ jobs:
           restore-keys: cargo-test-${{ matrix.platform }}-${{ hashFiles('rust-toolchain.toml') }}-
       - if: runner.os == 'Linux'
         name: Install Linux build dependencies
-        run: sudo apt-get update && sudo apt-get install --yes clang libpcap-dev mold
+        run: sudo apt-get update && sudo apt-get install --yes clang libpcap-dev lld
       - uses: taiki-e/install-action@67729d5c413db75907f0ad1e39bb04b9c868ff60 # v2.85.7
         with:
           tool: nextest@0.9.140
@@ -126,7 +126,7 @@ jobs:
           key: cargo-quality-linux-v4-${{ hashFiles('rust-toolchain.toml') }}-msrv-1.96.0-hack-0.6.45-${{ hashFiles('Cargo.lock', 'fuzz/Cargo.lock') }}
           restore-keys: cargo-quality-linux-v4-${{ hashFiles('rust-toolchain.toml') }}-msrv-1.96.0-
       - name: Install Linux build dependencies
-        run: sudo apt-get update && sudo apt-get install --yes clang libpcap-dev mold
+        run: sudo apt-get update && sudo apt-get install --yes clang libpcap-dev lld
       - run: rustup toolchain install 1.96.0 --profile minimal
       - run: rustup component add clippy rustfmt
       - run: cargo install cargo-hack --locked --version 0.6.45
@@ -177,7 +177,7 @@ jobs:
             target
           key: cargo-portable-${{ matrix.target }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock') }}
       - name: Install Linux linker
-        run: sudo apt-get update && sudo apt-get install --yes clang mold
+        run: sudo apt-get update && sudo apt-get install --yes clang lld
       - run: rustup target add ${{ matrix.target }}
       - name: Check portable interface-enumeration profile
         run: >-
@@ -204,7 +204,7 @@ jobs:
             target/llvm-cov-target
           key: cargo-coverage-linux-v4-${{ hashFiles('rust-toolchain.toml') }}-nextest-0.9.140-llvm-cov-0.8.7-${{ hashFiles('Cargo.lock') }}
       - name: Install Linux build dependencies
-        run: sudo apt-get update && sudo apt-get install --yes clang libpcap-dev mold
+        run: sudo apt-get update && sudo apt-get install --yes clang libpcap-dev lld
       - run: rustup component add llvm-tools-preview
       - uses: taiki-e/install-action@67729d5c413db75907f0ad1e39bb04b9c868ff60 # v2.85.7
         with:
@@ -255,7 +255,7 @@ jobs:
             fuzz/target
           key: cargo-fuzz-linux-v2-nightly-2026-07-11-0.13.2-${{ hashFiles('Cargo.lock', 'fuzz/Cargo.lock') }}
       - name: Install Linux build dependencies
-        run: sudo apt-get update && sudo apt-get install --yes clang libpcap-dev mold
+        run: sudo apt-get update && sudo apt-get install --yes clang libpcap-dev lld
       - run: rustup toolchain install nightly-2026-07-11 --profile minimal
       - run: cargo install cargo-fuzz --locked --version 0.13.2
       - name: Run fixed deterministic budget

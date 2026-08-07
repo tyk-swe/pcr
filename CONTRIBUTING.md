@@ -9,7 +9,7 @@ public issue.
 
 The package uses Rust 2024. Rust 1.97 is pinned in `rust-toolchain.toml`, and
 Rust 1.96 is the minimum supported version. Normal test execution requires
-cargo-nextest 0.9.140. Linux builds use clang as the linker driver and mold as
+cargo-nextest 0.9.140. Linux builds use clang as the linker driver and lld as
 the linker; all-feature builds also require the `libpcap-dev` development
 package. Install the pinned test runner with
 `cargo install --locked cargo-nextest --version 0.9.140` if it is not already

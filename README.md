@@ -111,7 +111,7 @@ archives need neither.
 ### Build from source
 
 The repository pins Rust 1.97 in `rust-toolchain.toml`; Rust 1.96 is the
-minimum supported version. Linux source builds also require clang and mold.
+minimum supported version. Linux source builds also require clang and lld.
 Build from a checkout with the committed lockfile:
 
 ```console
@@ -179,12 +179,12 @@ cargo build --locked --release --all-features
 
 All source builds require a Rust toolchain, Cargo, and the platform linker
 needed by the selected Rust target. The repository configures Linux targets to
-use clang as the linker driver and mold as the linker, so both must be
+use clang as the linker driver and lld as the linker, so both must be
 installed for Linux source builds. Native dependencies vary by feature set:
 
 | Platform | All-features prerequisites | Pcap-free prerequisites |
 | --- | --- | --- |
-| Linux | clang and mold, plus libpcap development files at build time and libpcap at runtime. Debian/Ubuntu CI installs `clang`, `mold`, and `libpcap-dev`. | clang and mold. No libpcap dependency. Native routes use route netlink; raw Layer 3 uses raw sockets. |
+| Linux | clang and lld, plus libpcap development files at build time and libpcap at runtime. Debian/Ubuntu CI installs `clang`, `lld`, and `libpcap-dev`. | clang and lld. No libpcap dependency. Native routes use route netlink; raw Layer 3 uses raw sockets. |
 | macOS | The system/build environment must provide libpcap. Capture and Layer 2 injection also need access to macOS BPF devices. | No libpcap dependency. Native routes use the routing socket; raw Layer 3 uses raw sockets. |
 | Windows x86-64 MSVC | A working Rust MSVC linker for source builds. At runtime PacketcraftR securely loads Npcap 1.88 from the system Npcap directory; install it for all users. | A working Rust MSVC linker for source builds. No Npcap dependency. |
 

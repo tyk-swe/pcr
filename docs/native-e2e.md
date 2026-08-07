@@ -55,7 +55,7 @@ Python harness.
 - `sysctl`;
 - Python 3.9 or newer with `jsonschema` Draft 2020-12 support;
 - Cargo and the repository's pinned Rust toolchain;
-- clang and mold, used by the repository's Linux linker configuration;
+- clang and lld, used by the repository's Linux linker configuration;
 - `libpcap` development files for the all-feature build
   (`libpcap-dev` on Ubuntu/Debian);
 - sufficient authority to create named namespaces and veth devices, configure

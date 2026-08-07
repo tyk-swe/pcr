@@ -21,7 +21,7 @@ Place unit tests beside their modules. Integration tests live in `crates/packetc
 - `cargo clippy --locked --all-targets --all-features -- -D warnings`: apply the CI lint gate.
 - `cargo fmt --manifest-path fuzz/Cargo.toml -- --check` and `cargo clippy --manifest-path fuzz/Cargo.toml --locked --all-targets -- -D warnings`: apply the same gates to the fuzz workspace, which the root `--all` flags do not reach.
 
-Rust 1.97 is pinned; 1.96 is the MSRV. Normal test execution requires cargo-nextest 0.9.140. Linux builds require clang and mold; all-feature Linux builds also require `libpcap-dev`.
+Rust 1.97 is pinned; 1.96 is the MSRV. Normal test execution requires cargo-nextest 0.9.140. Linux builds require clang and lld; all-feature Linux builds also require `libpcap-dev`.
 
 ## Coding Style & Naming Conventions
 

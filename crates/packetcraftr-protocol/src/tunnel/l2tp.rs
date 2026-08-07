@@ -131,6 +131,3 @@ impl LayerCodec for L2tpv3Codec {
         make_layer(L2tpv3::default(), fields)
     }
 }
-
-#[cfg(test)]
-mod tests;

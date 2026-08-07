@@ -53,7 +53,7 @@ body:
     id: reproduction
     attributes:
       label: Minimal reproduction
-      description: Provide the smallest deterministic steps, input shape, or sanitized fixture.
+      description: Provide the smallest deterministic steps, input shape, or sanitized sample.
       placeholder: |
         1. Run ...
         2. Observe ...

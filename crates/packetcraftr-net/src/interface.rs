@@ -18,8 +18,7 @@ pub use super::route::models::InterfaceId as Id;
     all(
         feature = "native-route",
         any(target_os = "linux", target_os = "macos", windows)
-    ),
-    test
+    )
 ))]
 pub(crate) use self::{Address as InterfaceAddress, Flags as InterfaceFlags};
 #[doc(hidden)]

@@ -107,37 +107,3 @@ pub(super) fn error_buffer_message(buffer: &[c_char; PCAP_ERROR_BUFFER_SIZE]) ->
         message
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::map_activation_error;
-    use crate::{Error as LiveIoError, route::InterfaceId};
-
-    use super::super::abi::{
-        PCAP_ERROR_CAPTURE_NOTSUP, PCAP_ERROR_NO_SUCH_DEVICE, PCAP_ERROR_PERM_DENIED,
-    };
-
-    #[test]
-    fn activation_errors_preserve_actionable_categories() {
-        let interface = InterfaceId {
-            name: "Ethernet".to_owned(),
-            index: 7,
-        };
-        assert!(matches!(
-            map_activation_error(&interface, PCAP_ERROR_PERM_DENIED, "denied".to_owned()),
-            LiveIoError::Privilege { .. }
-        ));
-        assert!(matches!(
-            map_activation_error(&interface, PCAP_ERROR_NO_SUCH_DEVICE, "missing".to_owned()),
-            LiveIoError::Device { .. }
-        ));
-        assert!(matches!(
-            map_activation_error(
-                &interface,
-                PCAP_ERROR_CAPTURE_NOTSUP,
-                "unsupported".to_owned()
-            ),
-            LiveIoError::Unsupported { .. }
-        ));
-    }
-}

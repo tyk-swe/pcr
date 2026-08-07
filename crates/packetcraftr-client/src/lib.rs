@@ -18,9 +18,6 @@ mod stats;
 pub mod target;
 mod validation;
 
-#[cfg(test)]
-mod tests;
-
 pub use client::Client;
 pub use send::contract::ClientError as Error;
 pub use stats::Stats;

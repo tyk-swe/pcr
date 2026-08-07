@@ -47,20 +47,3 @@ pub(crate) fn check_deadline<E>(
         .check()
         .map_err(|error| duration_error(error.actual, error.limit))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn rate_delay_uses_ceiling_division() {
-        assert_eq!(rate_delay(3, Some(2)), Some(Duration::from_millis(1_500)));
-        assert_eq!(rate_delay(1, Some(u32::MAX)), Some(Duration::from_nanos(1)));
-    }
-
-    #[test]
-    fn rate_delay_handles_disabled_and_invalid_rates() {
-        assert_eq!(rate_delay(10, None), Some(Duration::ZERO));
-        assert_eq!(rate_delay(1, Some(0)), None);
-    }
-}

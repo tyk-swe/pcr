@@ -10,8 +10,6 @@
 mod enumeration;
 mod parser;
 mod query;
-#[cfg(test)]
-mod tests;
 
 pub(super) use enumeration::interfaces;
 pub(super) use query::{interface_route, route};

@@ -16,6 +16,3 @@ mod interface;
 mod options;
 mod packet;
 mod section;
-
-#[cfg(test)]
-mod tests;

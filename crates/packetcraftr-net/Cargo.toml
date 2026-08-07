@@ -35,9 +35,6 @@ packetcraftr-packet.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 
-[dev-dependencies]
-packetcraftr-protocol.workspace = true
-
 [target.'cfg(not(windows))'.dependencies]
 pnet_datalink = { workspace = true, optional = true }
 

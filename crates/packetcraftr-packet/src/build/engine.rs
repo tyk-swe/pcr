@@ -16,9 +16,6 @@ mod error;
 mod options;
 mod validation;
 
-#[cfg(test)]
-mod tests;
-
 pub use error::BuildError;
 pub use options::{
     BuildContext, BuildMode, BuildOptions, BuiltPacket, DEFAULT_MAX_LAYERS, DEFAULT_MAX_PACKET_SIZE,

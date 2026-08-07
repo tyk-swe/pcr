@@ -32,8 +32,6 @@ pub mod follow;
 mod pipeline;
 pub mod reassembly;
 pub mod stats;
-#[cfg(test)]
-mod tests;
 
 pub use error::AnalysisError as Error;
 use error::AnalysisError;

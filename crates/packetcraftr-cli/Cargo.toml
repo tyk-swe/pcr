@@ -25,9 +25,6 @@ packetcraftr.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
-[dev-dependencies]
-jsonschema.workspace = true
-
 [[bin]]
 name = "packetcraftr"
 path = "src/main.rs"

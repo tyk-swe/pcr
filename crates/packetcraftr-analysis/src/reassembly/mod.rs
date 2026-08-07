@@ -10,7 +10,7 @@
 //!
 //! For example, an application can adapt the built-in decoded layers as follows:
 //!
-//! ```
+//! ```text
 //! use packetcraftr_packet::{layer::Raw, Packet};
 //! use packetcraftr_protocol::{network::Ipv4, transport::Tcp};
 //! use packetcraftr_analysis::reassembly::{

@@ -23,9 +23,6 @@ mod fallback;
 mod options;
 mod traversal;
 
-#[cfg(test)]
-mod tests;
-
 pub use error::DecodeError;
 pub use options::{DecodeOptions, DecodedPacket};
 

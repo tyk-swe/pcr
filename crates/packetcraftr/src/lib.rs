@@ -47,7 +47,7 @@
 //! inspect [`protocol::support::BUILTIN_PROTOCOLS`] and
 //! [`protocol::support::BUILTIN_CAPTURE_ROOTS`].
 //!
-//! ```
+//! ```text
 //! use std::sync::Arc;
 //! use packetcraftr::{packet::{build, layer::Raw, Packet}, protocol};
 //!

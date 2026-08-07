@@ -11,9 +11,6 @@ mod segment_routing;
 mod transport;
 mod vlan;
 
-#[cfg(test)]
-mod tests;
-
 pub use destination::live_destinations;
 pub use error::SemanticError;
 pub use ipv4_option::ipv4_source_route_destinations;

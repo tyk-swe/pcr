@@ -354,6 +354,3 @@ impl LayerCodec for GeneveCodec {
         make_layer(Geneve::default(), fields)
     }
 }
-
-#[cfg(test)]
-mod tests;

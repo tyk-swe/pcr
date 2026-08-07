@@ -32,20 +32,19 @@ Feature/platform effects:
 ## Native networking failure paths
 
 - [ ] Not applicable; this PR does not change native networking.
-- [ ] Applicable; deterministic tests cover the relevant failure paths and are
-      listed below.
+- [ ] Applicable; the relevant failure paths were analyzed and the validation
+      evidence is listed below.
 
 <!-- For native changes, cover relevant permission/backend failures, invalid or
 stale interfaces, timeouts/cancellation, partial I/O, queue overflow, and
-cleanup/shutdown behavior. Do not mark this complete with success-path tests
-alone. -->
+cleanup/shutdown behavior. -->
 
 Failure-path evidence:
 
-## Test plan
+## Validation plan
 
 <!-- List exact commands and outcomes. Include applicable portable, default,
-all-feature, platform-specific, schema/example, and documentation checks. -->
+all-feature, platform-specific, schema/example, and documentation validation. -->
 
 | Command or check | Result |
 | --- | --- |
@@ -53,16 +52,14 @@ all-feature, platform-specific, schema/example, and documentation checks. -->
 
 ## Review checklist
 
-- [ ] Focused regression coverage was added or the test-only/documentation-only
-      rationale is stated.
+- [ ] Focused validation evidence or the documentation-only rationale is stated.
 - [ ] User-visible work is recorded under `CHANGELOG.md` `[Unreleased]`, or the
       omission is explained.
 - [ ] Public API impact is disclosed above.
 - [ ] Schema/output impact is disclosed above.
 - [ ] CODEOWNERS reviewers for every touched boundary are requested.
 - [ ] New or expanded modules remain cohesive.
-- [ ] Fixtures, goldens, examples, and schemas remain synchronized where
-      applicable.
+- [ ] Published examples and schemas remain synchronized where applicable.
 
 Review routing notes:
 

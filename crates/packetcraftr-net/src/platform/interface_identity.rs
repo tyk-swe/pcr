@@ -5,12 +5,9 @@
 
 #![forbid(unsafe_code)]
 
-#[cfg(any(
-    test,
-    all(
-        any(feature = "native-layer2", feature = "native-layer3"),
-        any(target_os = "linux", target_os = "macos", windows)
-    )
+#[cfg(all(
+    any(feature = "native-layer2", feature = "native-layer3"),
+    any(target_os = "linux", target_os = "macos", windows)
 ))]
 use crate::route::InterfaceId;
 
@@ -50,14 +47,10 @@ pub(crate) fn validate_current_interface_identity(
     })
 }
 
-#[cfg(any(
-    test,
-    all(
-        any(feature = "native-layer2", feature = "native-layer3"),
-        any(target_os = "linux", target_os = "macos", windows)
-    )
+#[cfg(all(
+    any(feature = "native-layer2", feature = "native-layer3"),
+    any(target_os = "linux", target_os = "macos", windows)
 ))]
-#[allow(dead_code)]
 pub(crate) fn interface_identity_matches(actual: &InterfaceId, expected: &InterfaceId) -> bool {
     actual.index == expected.index && actual.name == expected.name
 }

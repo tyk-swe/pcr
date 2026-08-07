@@ -43,8 +43,6 @@ mod pnet_enumeration;
 ))]
 mod raw_ip;
 mod route_dispatch;
-#[cfg(test)]
-mod tests;
 mod unsupported;
 #[cfg(all(windows, any(feature = "native-interfaces", feature = "native-route")))]
 mod windows;
@@ -60,15 +58,6 @@ pub(crate) use super::route::{
 };
 pub(crate) use capture_dispatch::{system_capture, system_capture_with_filter};
 pub(crate) use interface_dispatch::system_interfaces;
-#[cfg(any(
-    test,
-    all(
-        any(feature = "native-layer2", feature = "native-layer3"),
-        any(target_os = "linux", target_os = "macos", windows)
-    )
-))]
-#[allow(unused_imports)]
-pub(crate) use interface_identity::interface_identity_matches;
 #[cfg(all(
     any(feature = "native-layer2", feature = "native-layer3"),
     any(target_os = "linux", target_os = "macos", windows)

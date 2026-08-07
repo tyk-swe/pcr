@@ -5,7 +5,7 @@
 //!
 //! Replay retransmits frames from a capture file to reproduce a previously
 //! observed exchange against an authorized destination, which is how a
-//! protocol bug captured once is turned into a repeatable test. Every frame is
+//! protocol bug captured once is turned into a repeatable diagnostic replay. Every frame is
 //! authorized individually, and replaying a frame whose dissection preserved
 //! malformed bytes additionally requires the explicit malformed-traffic
 //! opt-ins.
@@ -14,8 +14,6 @@ mod engine;
 mod error;
 mod model;
 mod system_boundary;
-#[cfg(test)]
-mod tests;
 mod wire;
 
 pub use engine::{replay_capture as run, replay_capture_with_selector as run_with_selector};

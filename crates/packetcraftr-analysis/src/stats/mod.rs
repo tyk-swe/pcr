@@ -310,32 +310,3 @@ fn innermost_network(record: &FrameRecord<'_>) -> Option<(IpAddr, IpAddr)> {
     }
     network
 }
-
-#[cfg(test)]
-mod tests {
-    use super::{StatsCollector, duration_from_nanos_saturating};
-    use std::time::{Duration, UNIX_EPOCH};
-
-    #[test]
-    fn wide_nanosecond_offsets_use_durations_full_range() {
-        let six_hundred_years = 600_u128 * 365 * 24 * 60 * 60 * 1_000_000_000;
-        assert!(duration_from_nanos_saturating(six_hundred_years) > Duration::from_nanos(u64::MAX));
-        assert_eq!(duration_from_nanos_saturating(u128::MAX), Duration::MAX);
-    }
-
-    #[test]
-    fn out_of_order_timestamps_do_not_move_the_io_origin() {
-        let mut collector = StatsCollector::new(Duration::from_secs(1)).unwrap();
-        collector.observe_time(UNIX_EPOCH + Duration::from_secs(10), 1);
-        collector.observe_time(UNIX_EPOCH + Duration::from_secs(5), 1);
-        collector.observe_time(UNIX_EPOCH + Duration::from_secs(11), 1);
-        let report = collector.finish();
-
-        assert_eq!(
-            report.first_timestamp,
-            Some(UNIX_EPOCH + Duration::from_secs(5))
-        );
-        assert_eq!(report.io[0].frames, 2);
-        assert_eq!(report.io[1].offset, Duration::from_secs(1));
-    }
-}

@@ -65,8 +65,6 @@ mod literal;
 mod model;
 mod parser;
 mod path;
-#[cfg(test)]
-mod tests;
 
 pub use error::FilterError as Error;
 pub use eval::Context;

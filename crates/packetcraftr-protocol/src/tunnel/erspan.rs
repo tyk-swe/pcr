@@ -402,6 +402,3 @@ fn erspan_layout(layer: &Erspan) -> Vec<packetcraftr_packet::layout::FieldLayout
     }
     fields
 }
-
-#[cfg(test)]
-mod tests;

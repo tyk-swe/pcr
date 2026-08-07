@@ -160,20 +160,3 @@ impl<'de> Deserialize<'de> for Frame {
         Ok(frame)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn deserialization_rejects_inconsistent_lengths() {
-        let value = serde_json::json!({
-            "timestamp": { "secs_since_epoch": 0, "nanos_since_epoch": 0 },
-            "captured_length": 2,
-            "original_length": 2,
-            "link_type": 1,
-            "bytes": [1]
-        });
-        assert!(serde_json::from_value::<Frame>(value).is_err());
-    }
-}

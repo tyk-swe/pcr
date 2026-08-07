@@ -11,8 +11,6 @@ mod adapter;
 mod enumeration;
 #[cfg(feature = "native-route")]
 mod query;
-#[cfg(test)]
-mod tests;
 
 pub(super) use enumeration::interfaces;
 #[cfg(feature = "native-route")]

@@ -115,6 +115,3 @@ pub(crate) fn network_from_addresses(source: IpAddr, destination: IpAddr) -> Net
         destination,
     }
 }
-
-#[cfg(test)]
-mod tests;

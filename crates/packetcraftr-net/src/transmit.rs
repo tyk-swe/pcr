@@ -113,7 +113,7 @@ pub struct Report {
     pub wire_bytes: Bytes,
 }
 
-/// Unified packet-I/O seam used by the root client and test providers.
+/// Unified packet-I/O seam used by the root client and injected providers.
 pub trait Sender: Send + Sync {
     fn send(&self, frame: Frame<'_>) -> Result<Report, Error>;
 }

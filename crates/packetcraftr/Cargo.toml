@@ -29,19 +29,3 @@ packetcraftr-packet.workspace = true
 packetcraftr-protocol.workspace = true
 packetcraftr-workflow.workspace = true
 serde.workspace = true
-
-[dev-dependencies]
-criterion.workspace = true
-serde_json.workspace = true
-
-[[bench]]
-name = "packet_pipeline"
-harness = false
-
-[[bench]]
-name = "reassembly"
-harness = false
-
-[[bench]]
-name = "workflow_scan"
-harness = false

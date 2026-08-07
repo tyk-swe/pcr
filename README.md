@@ -139,7 +139,7 @@ offline analysis cannot depend directly or transitively on the live client or
 native network capability owners. Contributor ownership and common change
 locations are documented in `CONTRIBUTING.md` and `AGENTS.md`.
 
-## Cargo features and tested profiles
+## Cargo features and build profiles
 
 `packetcraftr-net` defines `native-interfaces`, `native-route`,
 `native-layer2`, and `native-layer3`; the `packetcraftr` and `packetcraftr-cli`
@@ -152,7 +152,7 @@ than by enabling a feature.
 Cargo features are package-scoped, so a `--features` invocation must name the
 package with `--package`.
 
-The profile names below are repository, CI, or release labels, not additional
+The profile names below are documentation and release labels, not additional
 Cargo feature names. In particular, there is no `portable` or `pcap-free`
 feature.
 
@@ -184,13 +184,12 @@ installed for Linux source builds. Native dependencies vary by feature set:
 
 | Platform | All-features prerequisites | Pcap-free prerequisites |
 | --- | --- | --- |
-| Linux | clang and lld, plus libpcap development files at build time and libpcap at runtime. Debian/Ubuntu CI installs `clang`, `lld`, and `libpcap-dev`. | clang and lld. No libpcap dependency. Native routes use route netlink; raw Layer 3 uses raw sockets. |
+| Linux | clang and lld, plus libpcap development files at build time and libpcap at runtime. | clang and lld. No libpcap dependency. Native routes use route netlink; raw Layer 3 uses raw sockets. |
 | macOS | The system/build environment must provide libpcap. Capture and Layer 2 injection also need access to macOS BPF devices. | No libpcap dependency. Native routes use the routing socket; raw Layer 3 uses raw sockets. |
 | Windows x86-64 MSVC | A working Rust MSVC linker for source builds. At runtime PacketcraftR securely loads Npcap 1.88 from the system Npcap directory; install it for all users. | A working Rust MSVC linker for source builds. No Npcap dependency. |
 
-The release workflow builds Linux x86-64, macOS x86-64 and Arm64, and Windows
-x86-64 MSVC. CI also compile-checks FreeBSD interface-enumeration and feature
-combinations, but PacketcraftR has no FreeBSD native route, Layer 2, or raw
+The supported binary targets are Linux x86-64, macOS x86-64 and Arm64, and
+Windows x86-64 MSVC. PacketcraftR has no FreeBSD native route, Layer 2, or raw
 Layer 3 backend and publishes no FreeBSD binary archive.
 
 ## Offline quick start

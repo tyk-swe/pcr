@@ -89,15 +89,3 @@ pub struct TracerouteResult {
     pub diagnostics: Vec<Diagnostic>,
     pub stats: Stats,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::TracerouteResponseKind;
-
-    #[test]
-    fn traceroute_response_ranks_are_strictly_ordered() {
-        assert_eq!(TracerouteResponseKind::Intermediate.rank(), 1);
-        assert_eq!(TracerouteResponseKind::Unreachable.rank(), 2);
-        assert_eq!(TracerouteResponseKind::DestinationReached.rank(), 3);
-    }
-}

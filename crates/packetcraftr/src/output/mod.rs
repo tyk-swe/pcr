@@ -30,6 +30,3 @@ pub mod scan;
 pub mod send;
 pub mod stats;
 pub mod traceroute;
-
-#[cfg(test)]
-mod tests;

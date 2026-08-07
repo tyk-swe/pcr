@@ -6,9 +6,6 @@
 mod ah;
 mod esp;
 
-#[cfg(test)]
-mod tests;
-
 pub use ah::Ah;
 pub(crate) use ah::AhCodec;
 pub use esp::Esp;

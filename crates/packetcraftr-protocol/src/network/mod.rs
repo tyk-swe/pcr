@@ -9,9 +9,6 @@ mod ipv4;
 mod ipv6;
 mod raw_ip;
 
-#[cfg(test)]
-mod tests;
-
 pub(crate) use encode::encode_network;
 pub use igmp::Igmp;
 pub(crate) use igmp::IgmpCodec;

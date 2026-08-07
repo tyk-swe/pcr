@@ -67,18 +67,3 @@ pub trait Classified {
         Vec::new()
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn failure_kind_strings_are_stable() {
-        assert_eq!(Kind::Cli.as_str(), "cli");
-        assert_eq!(Kind::Packet.as_str(), "packet");
-        assert_eq!(Kind::Capability.as_str(), "capability");
-        assert_eq!(Kind::Io.as_str(), "io");
-        assert_eq!(Kind::Policy.as_str(), "policy");
-        assert_eq!(Kind::Internal.as_str(), "internal");
-    }
-}

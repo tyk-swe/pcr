@@ -29,7 +29,7 @@ use super::options::NeighborResolutionOptions;
 use super::wire::{build_request_frame, match_neighbor_response};
 
 /// Injectable active resolver. Production composition uses the `System*`
-/// providers; tests and applications can supply deterministic providers.
+/// providers; applications can supply controlled providers.
 #[derive(Debug)]
 pub struct ActiveNeighborResolver<L, C> {
     layer2: L,

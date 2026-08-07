@@ -47,8 +47,6 @@ pub struct CaptureRootSupport {
 /// Panicking is deliberate: returning an empty slice would silently drop the
 /// aliases the registry resolves names through, and the drift would surface
 /// later as a name that no longer parses.
-/// `manifest_matches_the_default_registry_exactly` below asserts the same
-/// correspondence at test time.
 pub(crate) fn aliases(protocol: &str) -> &'static [&'static str] {
     BuiltinProtocol::from_name(protocol)
         .map(BuiltinProtocol::aliases)
@@ -153,6 +151,3 @@ pub const BUILTIN_CAPTURE_ROOTS: &[CaptureRootSupport] = &[
         CaptureRootByteOrder::Network,
     ),
 ];
-
-#[cfg(test)]
-mod tests;

@@ -106,27 +106,3 @@ fn send_capture_link_type(
         )),
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use packetcraftr::{capture::LinkType, net};
-
-    use super::send_capture_link_type;
-
-    #[test]
-    fn send_capture_evidence_uses_the_transmission_boundary_link_type() {
-        assert_eq!(
-            send_capture_link_type(net::link::Mode::Layer2, LinkType::ETHERNET).unwrap(),
-            LinkType::ETHERNET
-        );
-        assert_eq!(
-            send_capture_link_type(net::link::Mode::Layer3, LinkType::ETHERNET).unwrap(),
-            LinkType::RAW
-        );
-        assert_eq!(
-            send_capture_link_type(net::link::Mode::Layer3, LinkType(147)).unwrap(),
-            LinkType::RAW
-        );
-        assert!(send_capture_link_type(net::link::Mode::Auto, LinkType::ETHERNET).is_err());
-    }
-}

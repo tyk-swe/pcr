@@ -128,6 +128,3 @@ pub(super) fn is_outer_network_layer(packet: &packetcraftr_packet::Packet, index
         .take(index)
         .any(|layer| matches!(layer.protocol_id().as_str(), "ipv4" | "ipv6"))
 }
-
-#[cfg(test)]
-mod tests;

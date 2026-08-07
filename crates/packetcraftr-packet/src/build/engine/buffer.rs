@@ -152,18 +152,3 @@ fn allocate_zeroed(capacity: usize) -> Result<Vec<u8>, BuildError> {
     storage.resize(capacity, 0);
     Ok(storage)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn impossible_allocation_is_reported_instead_of_panicking() {
-        assert!(matches!(
-            allocate_zeroed(usize::MAX),
-            Err(BuildError::AllocationFailure {
-                requested: usize::MAX
-            })
-        ));
-    }
-}

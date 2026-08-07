@@ -33,7 +33,3 @@
 
 # Workspace-wide dependency, feature, lint, and profile policy.
 /Cargo.toml @tyk-swe
-/scripts/check-arch @tyk-swe
-
-/.github/workflows/ci.yml @tyk-swe
-/.github/workflows/release.yml @tyk-swe

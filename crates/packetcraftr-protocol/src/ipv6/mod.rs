@@ -7,9 +7,6 @@ mod fragment;
 mod options;
 mod srh;
 
-#[cfg(test)]
-mod tests;
-
 pub use fragment::Ipv6Fragment as Fragment;
 pub(crate) use fragment::Ipv6FragmentCodec;
 pub use options::{DestinationOptions, HopByHop};

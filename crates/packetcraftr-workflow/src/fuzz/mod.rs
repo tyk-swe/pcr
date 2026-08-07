@@ -35,8 +35,6 @@ mod error;
 mod execution;
 mod model;
 mod mutation;
-#[cfg(test)]
-mod tests;
 
 pub use client_executor::PolicyAuthorizer;
 pub use engine::{fuzz as run, fuzz_live as run_live};

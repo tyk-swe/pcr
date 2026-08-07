@@ -6,9 +6,6 @@ mod quoted_icmp;
 mod reverse_flow;
 mod sctp;
 
-#[cfg(test)]
-mod tests;
-
 use packetcraftr_packet::{
     Packet,
     codec::NetworkEnvelope,

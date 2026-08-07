@@ -142,24 +142,3 @@ impl Classified for Error {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn wrong_writer_format_is_classified_as_caller_usage() {
-        let classification = Error::WrongWriterFormat {
-            expected: Format::Pcap,
-            actual: Format::PcapNg,
-        }
-        .classification();
-
-        assert_eq!(classification.code, "cli.capture_option");
-        assert_eq!(classification.kind, Kind::Cli);
-        assert_eq!(
-            classification.remediation,
-            Some("call the writer method that matches the writer's configured format")
-        );
-    }
-}

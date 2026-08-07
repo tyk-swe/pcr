@@ -18,8 +18,6 @@ pub(super) use time::{monotonic_packet_time, system_time};
 
 mod queue;
 mod session;
-#[cfg(test)]
-mod tests;
 mod time;
 mod worker;
 

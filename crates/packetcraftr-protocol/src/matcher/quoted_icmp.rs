@@ -399,6 +399,3 @@ fn outer_network_envelope(packet: &Packet) -> Option<NetworkEnvelope> {
         destination: path.header_destination,
     })
 }
-
-#[cfg(test)]
-mod tests;

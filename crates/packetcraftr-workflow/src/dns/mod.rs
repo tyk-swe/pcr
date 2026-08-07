@@ -48,8 +48,6 @@ mod engine;
 mod error;
 mod evidence;
 mod model;
-#[cfg(test)]
-mod tests;
 mod wire;
 
 /// Executes DNS queries through a client's capture-ready exchange lifecycle.

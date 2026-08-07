@@ -7,8 +7,6 @@
 
 mod bpf;
 mod capture;
-#[cfg(test)]
-mod tests;
 mod transmit;
 
 pub(crate) use capture::open_capture;

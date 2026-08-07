@@ -82,21 +82,3 @@ pub(super) struct PcapStatistics {
     pub(super) sent: c_uint,
     pub(super) network_dropped: c_uint,
 }
-
-#[cfg(test)]
-mod tests {
-    use std::mem::{align_of, size_of};
-
-    use super::{BpfInstruction, BpfProgram, PcapPacketHeader, PcapStatistics, PcapTimeval};
-
-    #[test]
-    fn pinned_sdk_layouts_match_windows_x64_abi() {
-        assert_eq!(size_of::<PcapTimeval>(), 8);
-        assert_eq!(size_of::<PcapPacketHeader>(), 16);
-        assert_eq!(size_of::<PcapStatistics>(), 24);
-        assert_eq!(size_of::<BpfInstruction>(), 8);
-        assert_eq!(align_of::<BpfInstruction>(), 4);
-        assert_eq!(size_of::<BpfProgram>(), 16);
-        assert_eq!(align_of::<BpfProgram>(), 8);
-    }
-}

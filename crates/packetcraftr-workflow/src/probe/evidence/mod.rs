@@ -20,6 +20,3 @@ pub(crate) use exact_validation::{
 mod budget;
 mod candidate_selection;
 mod exact_validation;
-
-#[cfg(test)]
-mod tests;

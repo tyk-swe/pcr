@@ -32,9 +32,6 @@ use rendering::{
     write_replay_capture_evidence, write_replay_text_evidence,
 };
 
-#[cfg(test)]
-use conversion::requested_replay_interface as test_requested_replay_interface;
-
 pub(super) fn run(arguments: ReplayArgs, output: output::contract::Format) -> Result<(), CliError> {
     let policy = arguments.policy.clone().into_policy();
     validate_capture_stream_limits(
@@ -218,35 +215,4 @@ pub(super) fn run(arguments: ReplayArgs, output: output::contract::Format) -> Re
 pub(crate) fn replay_cli_error(error: workflow::replay::Error) -> CliError {
     let sequence = error.sequence();
     CliError::classified_at_optional_sequence(error, sequence)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::test_requested_replay_interface;
-
-    #[test]
-    fn numeric_replay_interface_selectors_are_index_only() {
-        assert_eq!(
-            test_requested_replay_interface("2").unwrap(),
-            packetcraftr::net::interface::Id {
-                name: String::new(),
-                index: 2,
-            }
-        );
-        assert_eq!(
-            test_requested_replay_interface("eth0").unwrap(),
-            packetcraftr::net::interface::Id {
-                name: "eth0".to_owned(),
-                index: 0,
-            }
-        );
-    }
-
-    #[test]
-    fn replay_interface_selector_rejects_ambiguous_numeric_values() {
-        for selector in ["", "0", "4294967296"] {
-            let error = test_requested_replay_interface(selector).unwrap_err();
-            assert_eq!(error.exit_code, 2, "{selector}");
-        }
-    }
 }

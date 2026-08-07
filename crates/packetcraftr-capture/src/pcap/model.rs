@@ -43,7 +43,7 @@ impl Default for Limits {
 /// value therefore disables that class of input rather than being rejected
 /// uniformly during construction.
 ///
-/// ```
+/// ```text
 /// use std::io::Cursor;
 /// use packetcraftr_capture::{LinkType, Reader, ReaderOptions, Writer};
 ///
@@ -85,7 +85,7 @@ impl Default for ReaderOptions {
 
 /// Classic PCAP file configuration.
 ///
-/// ```
+/// ```text
 /// use packetcraftr_capture::{Endianness, LinkType, PcapOptions, Writer};
 ///
 /// # fn example() -> Result<(), packetcraftr_capture::Error> {
@@ -124,7 +124,7 @@ impl Default for PcapOptions {
 
 /// PCAPNG section configuration.
 ///
-/// ```
+/// ```text
 /// use packetcraftr_capture::{LinkType, PcapNgOptions, Writer};
 ///
 /// # fn example() -> Result<(), packetcraftr_capture::Error> {

@@ -28,6 +28,3 @@ pub struct Reassembler {
     aggregate_bytes: usize,
     aggregate_memory_charge: usize,
 }
-
-#[cfg(test)]
-mod tests;

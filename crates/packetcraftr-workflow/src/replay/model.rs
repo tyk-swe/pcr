@@ -214,7 +214,7 @@ pub trait ReplayAuthorizer {
     ) -> Result<(), crate::BoundaryError>;
 }
 
-/// Exact-frame transmitter seam used by native adapters and deterministic tests.
+/// Exact-frame transmitter seam used by native and injected adapters.
 pub trait ReplayTransmitter {
     /// Resolve and validate the concrete interface before any intentional delay.
     fn validate_interface(

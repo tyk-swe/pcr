@@ -47,12 +47,9 @@ packetcraftr-workflow = { path = "crates/packetcraftr-workflow", version = "0.4.
 anstream = "1"
 bytes = { version = "1", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
-criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
-jsonschema = { version = "0.49", default-features = false }
 # Pinned exactly: a 0.0.x release carries no semver guarantee, and this parser
-# enforces the duplicate-key, alias-expansion, and recursion limits that
-# `stable_document_parser_rejects_ambiguous_or_amplifying_yaml` asserts. A patch
-# bump could relax one silently, so take it deliberately.
+# enforces duplicate-key, alias-expansion, and recursion limits. A patch bump
+# could relax one silently, so take it deliberately.
 noyalib = { version = "=0.0.17", default-features = false, features = ["std", "fast-int", "fast-float"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["unbounded_depth"] }
@@ -77,5 +74,5 @@ windows = { version = "0.62", default-features = false, features = [
 
 [profile.release]
 # Packet offsets, lengths, and accounting must fail closed in optimized builds
-# just as they do in development and CI profiles.
+# just as they do in development builds.
 overflow-checks = true

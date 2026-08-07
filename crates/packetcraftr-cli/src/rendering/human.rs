@@ -2,8 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::io::{self, Write};
-#[cfg(test)]
-use std::{cell::RefCell, str};
 
 use packetcraftr::{output, packet};
 
@@ -46,10 +44,6 @@ pub(crate) fn write_plain_line(arguments: std::fmt::Arguments<'_>) -> Result<(),
 }
 
 pub(crate) fn write_machine_line(rendered: &str) -> Result<(), CliError> {
-    #[cfg(test)]
-    if let Some(result) = write_test_stdout(rendered, true) {
-        return result.map_err(|source| CliError::new(5, format!("write stdout failed: {source}")));
-    }
     let mut stdout = io::stdout().lock();
     write_terminated(&mut stdout, rendered, true)
         .map_err(|source| CliError::new(5, format!("write stdout failed: {source}")))
@@ -77,10 +71,6 @@ pub(crate) fn emit_stderr_message(message: &str) -> Result<(), CliError> {
 }
 
 fn write_human_stdout(rendered: &str, append_newline: bool) -> Result<(), CliError> {
-    #[cfg(test)]
-    if let Some(result) = write_test_stdout(rendered, append_newline) {
-        return result.map_err(|source| CliError::new(5, format!("write stdout failed: {source}")));
-    }
     let stdout = anstream::stdout();
     let mut stdout = stdout.lock();
     write_terminated(&mut stdout, rendered, append_newline)
@@ -104,38 +94,4 @@ fn write_terminated(
         writer.write_all(b"\n")?;
     }
     writer.flush()
-}
-
-#[cfg(test)]
-thread_local! {
-    static TEST_STDOUT: RefCell<Option<Vec<u8>>> = const { RefCell::new(None) };
-}
-
-#[cfg(test)]
-fn write_test_stdout(rendered: &str, append_newline: bool) -> Option<io::Result<()>> {
-    TEST_STDOUT.with(|slot| {
-        slot.borrow_mut()
-            .as_mut()
-            .map(|writer| write_terminated(writer, rendered, append_newline))
-    })
-}
-
-#[cfg(test)]
-pub(crate) fn capture_stdout<T>(operation: impl FnOnce() -> T) -> (T, String) {
-    TEST_STDOUT.with(|slot| {
-        assert!(
-            slot.borrow().is_none(),
-            "test stdout capture cannot be nested"
-        );
-        *slot.borrow_mut() = Some(Vec::new());
-        let result = operation();
-        let bytes = slot
-            .borrow_mut()
-            .take()
-            .expect("test stdout capture remains installed");
-        let rendered = str::from_utf8(&bytes)
-            .expect("CLI output is valid UTF-8")
-            .to_owned();
-        (result, rendered)
-    })
 }

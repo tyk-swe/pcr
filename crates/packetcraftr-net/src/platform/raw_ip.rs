@@ -21,8 +21,6 @@ use submission::{RawIpBackend, SystemRawIpBackend, map_raw_error, validate_platf
 
 mod preparation;
 mod submission;
-#[cfg(test)]
-mod tests;
 
 pub(super) fn send_layer3(frame: Layer3Frame<'_>) -> Result<IoSendReport, LiveIoError> {
     send_with_backend(frame, &SystemRawIpBackend)

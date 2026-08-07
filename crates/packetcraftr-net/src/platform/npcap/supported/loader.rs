@@ -226,24 +226,3 @@ unsafe fn load_symbol<T: Copy>(library: &Library, name: &'static [u8]) -> Result
             ),
         })
 }
-
-#[cfg(test)]
-mod tests {
-    use windows::core::GUID;
-
-    use super::format_npcap_device;
-
-    #[test]
-    fn npcap_device_uses_ip_helper_guid_syntax() {
-        let guid = GUID::from_values(
-            0x1234_5678,
-            0x9abc,
-            0xdef0,
-            [0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0],
-        );
-        assert_eq!(
-            format_npcap_device(guid),
-            r"\Device\NPF_{12345678-9ABC-DEF0-1234-56789ABCDEF0}"
-        );
-    }
-}

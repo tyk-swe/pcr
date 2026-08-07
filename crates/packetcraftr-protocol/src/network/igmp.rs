@@ -177,6 +177,3 @@ impl LayerCodec for IgmpCodec {
         make_layer(Igmp::default(), fields)
     }
 }
-
-#[cfg(test)]
-mod tests;

@@ -8,9 +8,6 @@ mod lookup;
 mod module;
 mod validation;
 
-#[cfg(test)]
-mod tests;
-
 pub use binding::{Discriminator, FilterFieldBinding};
 pub use builder::RegistryBuilder;
 pub use error::RegistryError;

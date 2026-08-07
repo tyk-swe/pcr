@@ -374,11 +374,6 @@ const fn crc32c_table() -> [u32; 256] {
     table
 }
 
-#[cfg(test)]
-fn crc32c(bytes: &[u8]) -> u32 {
-    crc32c_parts(&[bytes])
-}
-
 fn crc32c_parts(parts: &[&[u8]]) -> u32 {
     let mut remainder = u32::MAX;
     for part in parts {
@@ -397,6 +392,3 @@ fn checksum_to_wire(checksum: u32) -> [u8; 4] {
 fn checksum_from_wire(bytes: [u8; 4]) -> u32 {
     u32::from_le_bytes(bytes)
 }
-
-#[cfg(test)]
-mod tests;

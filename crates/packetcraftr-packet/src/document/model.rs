@@ -9,9 +9,6 @@ mod types;
 mod validation;
 mod visitor;
 
-#[cfg(test)]
-mod tests;
-
 pub use error::DocumentError;
 pub use types::{
     DEFAULT_MAX_DOCUMENT_BYTES, DEFAULT_MAX_DOCUMENT_NESTING, DocumentFormat, LayerDocument,

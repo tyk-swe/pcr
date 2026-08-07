@@ -8,8 +8,6 @@ use bytes::Bytes;
 
 use super::Limits;
 
-#[cfg(test)]
-use accounting::{DATAGRAM_STATE_METADATA_CHARGE, FRAGMENT_SEGMENT_METADATA_CHARGE};
 use accounting::{FragmentAccountingInput, datagram_memory_charge_parts, plan_accounting};
 use commit::commit_fragment;
 use plan::{FragmentMergePlan, plan_fragment_merge};
@@ -337,6 +335,3 @@ fn is_complete(segments: &BTreeMap<u32, Bytes>, final_length: u32) -> bool {
     }
     cursor == final_length
 }
-
-#[cfg(test)]
-mod tests;

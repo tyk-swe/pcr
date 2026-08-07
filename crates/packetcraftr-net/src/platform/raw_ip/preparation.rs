@@ -178,7 +178,7 @@ fn ipv4_submission(bytes: &Bytes) -> Bytes {
     bytes.clone()
 }
 
-#[cfg(any(test, target_os = "macos"))]
+#[cfg(target_os = "macos")]
 pub(super) fn macos_ipv4_submission(bytes: &Bytes) -> Bytes {
     let mut submission = bytes.to_vec();
     let total_length = u16::from_be_bytes([submission[2], submission[3]]);
@@ -204,7 +204,7 @@ fn validate_windows_restrictions(
     Ok(())
 }
 
-#[cfg(any(test, windows))]
+#[cfg(windows)]
 pub(super) fn upper_protocol(bytes: &[u8]) -> Result<u8, LiveIoError> {
     if bytes[0] >> 4 == 4 {
         return Ok(bytes[9]);
@@ -250,12 +250,6 @@ pub(super) fn upper_protocol(bytes: &[u8]) -> Result<u8, LiveIoError> {
     }
 }
 
-#[cfg(test)]
-pub(super) fn checksum(bytes: &[u8]) -> u16 {
-    checksum_impl(bytes)
-}
-
-#[cfg(not(test))]
 fn checksum(bytes: &[u8]) -> u16 {
     checksum_impl(bytes)
 }

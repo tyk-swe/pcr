@@ -120,6 +120,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   construction and their `PacketIo`/capture delegation remain unchanged.
 - Unified the scan, traceroute, DNS, and fuzz `ClientExecutor` re-exports around
   one shared carrier while retaining their domain-specific executor traits.
+- Removed repository test suites and fixtures, benchmarks, the standalone fuzz
+  harness, maintenance scripts, and GitHub-hosted CI, release, dependency, E2E,
+  and fuzz automation. Shipped commands and runtime APIs are unchanged.
 
 ### Fixed
 

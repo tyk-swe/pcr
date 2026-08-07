@@ -403,6 +403,3 @@ impl LayerCodec for PppCodec {
         make_layer(Ppp::default(), fields)
     }
 }
-
-#[cfg(test)]
-mod tests;

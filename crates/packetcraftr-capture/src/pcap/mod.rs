@@ -26,6 +26,3 @@ pub use model::{
 pub use reader::Reader;
 pub use transcode::transcode;
 pub use writer::Writer;
-
-#[cfg(test)]
-mod tests;

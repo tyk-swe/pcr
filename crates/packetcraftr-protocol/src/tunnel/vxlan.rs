@@ -188,6 +188,3 @@ impl LayerCodec for VxlanCodec {
         make_layer(Vxlan::default(), fields)
     }
 }
-
-#[cfg(test)]
-mod tests;

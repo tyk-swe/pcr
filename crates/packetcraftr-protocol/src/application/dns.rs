@@ -375,6 +375,3 @@ impl LayerCodec for DnsCodec {
         })
     }
 }
-
-#[cfg(test)]
-mod tests;

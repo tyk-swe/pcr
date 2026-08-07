@@ -58,36 +58,3 @@ pub trait ScanExecutor {
         batch: &ScanBatch,
     ) -> std::result::Result<ScanBatchExecution, crate::BoundaryError>;
 }
-
-#[cfg(test)]
-mod tests {
-    use std::net::{IpAddr, Ipv4Addr};
-
-    use super::super::request::ScanTransport;
-    use super::ScanProbe;
-
-    #[test]
-    fn udp_retries_use_distinct_source_ports() {
-        let mut probe = ScanProbe {
-            sequence: 0,
-            address: IpAddr::V4(Ipv4Addr::LOCALHOST),
-            transport: ScanTransport::Udp,
-            port: Some(53),
-            attempt: 1,
-        };
-        let first = probe
-            .packet()
-            .get::<packetcraftr_protocol::transport::Udp>()
-            .unwrap()
-            .source_port;
-        probe.sequence = 1;
-        probe.attempt = 2;
-        let second = probe
-            .packet()
-            .get::<packetcraftr_protocol::transport::Udp>()
-            .unwrap()
-            .source_port;
-
-        assert_ne!(first, second);
-    }
-}

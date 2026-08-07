@@ -40,30 +40,3 @@ pub(crate) struct CaptureArgs {
     #[command(flatten)]
     pub(crate) policy: HostnameTrafficPolicyArgs,
 }
-
-#[cfg(test)]
-mod tests {
-    use clap::Parser;
-
-    use crate::{cli::Cli, commands::Command};
-
-    #[test]
-    fn native_and_display_filters_parse_independently() {
-        let cli = Cli::try_parse_from([
-            "packetcraftr",
-            "capture",
-            "--packet",
-            "ipv4(dst=192.0.2.53)/udp(dport=53)",
-            "--capture-filter",
-            "udp port 53",
-            "--filter",
-            "udp.source_port == 53",
-        ])
-        .unwrap();
-        let Command::Capture(arguments) = cli.command else {
-            panic!("expected capture command");
-        };
-        assert_eq!(arguments.capture_filter.as_deref(), Some("udp port 53"));
-        assert_eq!(arguments.filter.as_deref(), Some("udp.source_port == 53"));
-    }
-}

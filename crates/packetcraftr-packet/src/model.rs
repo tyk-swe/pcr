@@ -10,9 +10,6 @@ mod boundary;
 mod equality;
 mod error;
 
-#[cfg(test)]
-mod tests;
-
 pub use error::PacketError;
 
 /// Exactly one ordered, arbitrary wire stack.

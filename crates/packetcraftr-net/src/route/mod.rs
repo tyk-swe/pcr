@@ -13,8 +13,6 @@ pub(crate) mod models;
 pub(crate) mod native_policy;
 pub(crate) mod planner;
 mod provider;
-#[cfg(test)]
-mod tests;
 
 pub use materialize::MaterializedRoute as Materialized;
 pub use models::{

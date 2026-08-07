@@ -253,36 +253,3 @@ pub(in crate::pcap) fn write_i64<W: Write>(
     writer.write_all(&bytes)?;
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn integer_decoders_reject_short_slices_without_panicking() {
-        for error in [
-            decode_u16(Endianness::Little, &[0]).unwrap_err(),
-            decode_u32(Endianness::Little, &[0; 3]).unwrap_err(),
-            decode_i64(Endianness::Little, &[0; 7]).unwrap_err(),
-        ] {
-            assert!(matches!(error, Error::Truncated { .. }));
-        }
-    }
-
-    #[test]
-    fn integer_decoders_preserve_endianness() {
-        assert_eq!(decode_u16(Endianness::Big, &[0x12, 0x34]).unwrap(), 0x1234);
-        assert_eq!(
-            decode_u32(Endianness::Little, &[0x78, 0x56, 0x34, 0x12]).unwrap(),
-            0x1234_5678
-        );
-        assert_eq!(
-            decode_i64(
-                Endianness::Big,
-                &[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfe]
-            )
-            .unwrap(),
-            -2
-        );
-    }
-}

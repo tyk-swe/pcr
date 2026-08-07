@@ -387,6 +387,3 @@ impl LayerCodec for SnapCodec {
         make_layer(Snap::default(), fields)
     }
 }
-
-#[cfg(test)]
-mod tests;

@@ -216,7 +216,6 @@ const FOLLOW_FORMATS: &[Format] = &[
 ];
 
 /// Complete v1 command/format matrix in the same canonical order as [`Command::ALL`].
-/// Contract tests validate that every vocabulary entry appears exactly once.
 pub const CONTRACTS: &[CommandContract] = &[
     CommandContract::from_command(Command::Build),
     CommandContract::from_command(Command::Dissect),

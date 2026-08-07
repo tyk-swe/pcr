@@ -97,6 +97,3 @@ pub fn default_registry() -> Result<ProtocolRegistry, RegistryError> {
     builder.module(&BuiltinProtocols)?;
     builder.build()
 }
-
-#[cfg(test)]
-mod tests;

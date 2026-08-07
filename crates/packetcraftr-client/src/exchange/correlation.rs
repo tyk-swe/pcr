@@ -356,3 +356,44 @@ fn unsolicited_freshness(
         eligible_requests,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+
+    #[test]
+    fn unsolicited_freshness_requires_proven_ingress_after_at_least_one_send() {
+        let base = Instant::now();
+        let sent = [
+            base + Duration::from_millis(10),
+            base + Duration::from_millis(20),
+            base + Duration::from_millis(30),
+        ];
+        let deadline = base + Duration::from_millis(40);
+
+        assert!(unsolicited_freshness(None, &sent, deadline).is_none());
+        assert!(
+            unsolicited_freshness(Some(base + Duration::from_millis(9)), &sent, deadline).is_none()
+        );
+        assert!(
+            unsolicited_freshness(Some(deadline + Duration::from_nanos(1)), &sent, deadline)
+                .is_none()
+        );
+
+        let first = unsolicited_freshness(Some(sent[0]), &sent, deadline)
+            .expect("first request is eligible at its send marker");
+        assert_eq!(first.received_at, sent[0]);
+        assert_eq!(first.eligible_requests, 1);
+
+        let between =
+            unsolicited_freshness(Some(base + Duration::from_millis(25)), &sent, deadline)
+                .expect("two requests are eligible between second and third send");
+        assert_eq!(between.eligible_requests, 2);
+
+        let final_frame = unsolicited_freshness(Some(deadline), &sent, deadline)
+            .expect("all requests remain eligible through the deadline");
+        assert_eq!(final_frame.eligible_requests, 3);
+    }
+}

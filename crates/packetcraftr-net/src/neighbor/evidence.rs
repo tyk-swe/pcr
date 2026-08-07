@@ -155,3 +155,217 @@ pub(super) fn retain_matching_evidence(
     *captured_bytes += frame_length;
     captured.push(frame);
 }
+
+#[cfg(test)]
+mod tests {
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+    use std::time::{Duration, SystemTime};
+
+    use super::*;
+    use crate::link::MacAddress;
+    use crate::route::{InterfaceId, NeighborVlanKind, NeighborVlanTag};
+
+    fn request() -> NeighborRequest {
+        NeighborRequest {
+            interface: InterfaceId {
+                name: "fixture0".to_owned(),
+                index: 3,
+            },
+            interface_source: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
+            interface_mac: MacAddress([0x02, 0, 0, 0, 0, 1]),
+            target: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2)),
+            vlan_tags: Vec::new(),
+            mtu: 1_500,
+            link_type: LinkType::ETHERNET,
+        }
+    }
+
+    fn frame(bytes: &[u8]) -> Frame {
+        Frame::new(SystemTime::UNIX_EPOCH, LinkType::ETHERNET, bytes.to_vec())
+            .expect("fixture frame")
+    }
+
+    #[test]
+    fn valid_neighbor_request_passes_all_invariants() {
+        assert!(validate_request(&request()).is_ok());
+    }
+
+    #[test]
+    fn neighbor_request_rejects_each_invalid_identity_and_wire_bound() {
+        let cases = [
+            NeighborRequest {
+                target: IpAddr::V6(Ipv6Addr::LOCALHOST),
+                ..request()
+            },
+            NeighborRequest {
+                interface_source: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                ..request()
+            },
+            NeighborRequest {
+                interface_source: IpAddr::V4(Ipv4Addr::new(224, 0, 0, 1)),
+                ..request()
+            },
+            NeighborRequest {
+                target: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                ..request()
+            },
+            NeighborRequest {
+                target: IpAddr::V4(Ipv4Addr::new(224, 0, 0, 1)),
+                ..request()
+            },
+            NeighborRequest {
+                link_type: LinkType::RAW,
+                ..request()
+            },
+            NeighborRequest {
+                interface_mac: MacAddress([0xff; 6]),
+                ..request()
+            },
+            NeighborRequest {
+                mtu: 0,
+                ..request()
+            },
+            NeighborRequest {
+                vlan_tags: vec![
+                    NeighborVlanTag {
+                        kind: NeighborVlanKind::Ieee8021Q,
+                        priority: 0,
+                        drop_eligible: false,
+                        vlan_id: 1,
+                    };
+                    MAX_NEIGHBOR_VLAN_TAGS + 1
+                ],
+                ..request()
+            },
+            NeighborRequest {
+                vlan_tags: vec![NeighborVlanTag {
+                    kind: NeighborVlanKind::Ieee8021Q,
+                    priority: 8,
+                    drop_eligible: false,
+                    vlan_id: 1,
+                }],
+                ..request()
+            },
+            NeighborRequest {
+                vlan_tags: vec![NeighborVlanTag {
+                    kind: NeighborVlanKind::Ieee8021Q,
+                    priority: 0,
+                    drop_eligible: false,
+                    vlan_id: 4_096,
+                }],
+                ..request()
+            },
+        ];
+
+        for invalid in cases {
+            assert!(matches!(
+                validate_request(&invalid),
+                Err(NeighborError::InvalidRequest { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn capture_and_send_evidence_must_match_configured_and_submitted_bytes() {
+        let request = request();
+        assert!(validate_captured_frame(&request, &frame(&[1, 2]), 2).is_ok());
+        assert!(matches!(
+            validate_captured_frame(&request, &frame(&[1, 2, 3]), 2),
+            Err(NeighborError::Resolution { .. })
+        ));
+
+        let expected = Bytes::from_static(&[1, 2, 3]);
+        assert!(
+            validate_send_report(
+                &request,
+                &expected,
+                IoSendReport {
+                    bytes_sent: 3,
+                    wire_bytes: expected.clone(),
+                }
+            )
+            .is_ok()
+        );
+        assert!(matches!(
+            validate_send_report(
+                &request,
+                &expected,
+                IoSendReport {
+                    bytes_sent: 2,
+                    wire_bytes: expected.clone(),
+                }
+            ),
+            Err(NeighborError::Io {
+                source: LiveIoError::PartialSend { .. },
+                ..
+            })
+        ));
+        assert!(matches!(
+            validate_send_report(
+                &request,
+                &expected,
+                IoSendReport {
+                    bytes_sent: 3,
+                    wire_bytes: Bytes::from_static(&[3, 2, 1]),
+                }
+            ),
+            Err(NeighborError::Io {
+                source: LiveIoError::InvalidSendEvidence { .. },
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn evidence_retention_drops_late_frames_but_matching_retention_evicts_oldest() {
+        let options = NeighborResolutionOptions {
+            max_attempts: 1,
+            attempt_timeout: Duration::from_secs(1),
+            cache_ttl: Duration::from_secs(1),
+            max_cache_entries: 1,
+            max_capture_queue_frames: 2,
+            max_captured_bytes: 4,
+            snap_length: 128,
+        };
+        let mut captured = Vec::new();
+        let mut bytes = 0;
+        let mut truncated = false;
+        retain_evidence(
+            frame(&[1, 2]),
+            &options,
+            &mut captured,
+            &mut bytes,
+            &mut truncated,
+        );
+        retain_evidence(
+            frame(&[3, 4]),
+            &options,
+            &mut captured,
+            &mut bytes,
+            &mut truncated,
+        );
+        retain_evidence(
+            frame(&[5]),
+            &options,
+            &mut captured,
+            &mut bytes,
+            &mut truncated,
+        );
+        assert_eq!(captured.len(), 2);
+        assert_eq!(bytes, 4);
+        assert!(truncated);
+
+        truncated = false;
+        retain_matching_evidence(
+            frame(&[9, 9, 9]),
+            &options,
+            &mut captured,
+            &mut bytes,
+            &mut truncated,
+        );
+        assert_eq!(captured.len(), 1);
+        assert_eq!(captured[0].bytes().as_ref(), [9, 9, 9]);
+        assert_eq!(bytes, 3);
+        assert!(truncated);
+    }
+}

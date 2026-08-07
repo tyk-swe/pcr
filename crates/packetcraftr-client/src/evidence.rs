@@ -61,3 +61,95 @@ pub(super) fn reserve_capture_evidence(
     *retained_bytes = byte_total;
     true
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reservation_commits_both_counters_only_when_every_bound_fits() {
+        let mut frames = 1;
+        let mut bytes = 10;
+        let mut diagnostics = Vec::new();
+        assert!(reserve_capture_evidence(
+            &mut frames,
+            &mut bytes,
+            5,
+            2,
+            15,
+            &mut diagnostics,
+        ));
+        assert_eq!((frames, bytes), (2, 15));
+        assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn frame_limit_and_overflow_leave_counters_untouched_and_deduplicate_diagnostics() {
+        let mut frames = 1;
+        let mut bytes = 3;
+        let mut diagnostics = Vec::new();
+        assert!(!reserve_capture_evidence(
+            &mut frames,
+            &mut bytes,
+            1,
+            1,
+            10,
+            &mut diagnostics,
+        ));
+        assert!(!reserve_capture_evidence(
+            &mut frames,
+            &mut bytes,
+            1,
+            1,
+            10,
+            &mut diagnostics,
+        ));
+        assert_eq!((frames, bytes), (1, 3));
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, "exchange.capture_frame_limit");
+
+        frames = usize::MAX;
+        diagnostics.clear();
+        assert!(!reserve_capture_evidence(
+            &mut frames,
+            &mut bytes,
+            1,
+            usize::MAX,
+            10,
+            &mut diagnostics,
+        ));
+        assert_eq!(frames, usize::MAX);
+        assert_eq!(bytes, 3);
+        assert_eq!(diagnostics[0].code, "exchange.capture_frame_limit");
+    }
+
+    #[test]
+    fn byte_limit_and_overflow_leave_counters_untouched() {
+        let mut frames = 1;
+        let mut bytes = 9;
+        let mut diagnostics = Vec::new();
+        assert!(!reserve_capture_evidence(
+            &mut frames,
+            &mut bytes,
+            2,
+            10,
+            10,
+            &mut diagnostics,
+        ));
+        assert_eq!((frames, bytes), (1, 9));
+        assert_eq!(diagnostics[0].code, "exchange.capture_byte_limit");
+
+        bytes = usize::MAX;
+        diagnostics.clear();
+        assert!(!reserve_capture_evidence(
+            &mut frames,
+            &mut bytes,
+            1,
+            10,
+            usize::MAX,
+            &mut diagnostics,
+        ));
+        assert_eq!((frames, bytes), (1, usize::MAX));
+        assert_eq!(diagnostics[0].code, "exchange.capture_byte_limit");
+    }
+}

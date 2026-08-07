@@ -74,3 +74,40 @@ impl StreamIndex {
         Ok(index)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::net::{IpAddr, Ipv4Addr};
+
+    use super::*;
+
+    fn flow(source_port: u16, destination_port: u16) -> FlowKey {
+        FlowKey {
+            source: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
+            source_port,
+            destination: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2)),
+            destination_port,
+        }
+    }
+
+    #[test]
+    fn reverse_directions_share_an_index_and_new_flows_obey_the_limit() {
+        let first = flow(10_000, 443);
+        let mut index = StreamIndex::default();
+
+        assert_eq!(index.assign(&first, 1, 1).expect("first flow must fit"), 0);
+        assert_eq!(
+            index
+                .assign(&first.reverse(), 2, 1)
+                .expect("reverse direction must reuse the conversation"),
+            0
+        );
+        assert!(matches!(
+            index.assign(&flow(10_001, 443), 3, 1),
+            Err(AnalysisError::StreamLimit {
+                number: 3,
+                limit: 1
+            })
+        ));
+    }
+}

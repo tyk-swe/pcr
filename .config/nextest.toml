@@ -1,0 +1,12 @@
+nextest-version = "0.9.143"
+
+[profile.default]
+retries = 0
+fail-fast = true
+slow-timeout = { period = "15s", terminate-after = 4 }
+
+[profile.ci]
+inherits = "default"
+fail-fast = false
+junit.path = "target/nextest/ci/junit.xml"
+junit.report-name = "packetcraftr"

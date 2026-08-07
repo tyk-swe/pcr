@@ -1,0 +1,120 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ubuntu-no-default
+            os: ubuntu-latest
+            cargo_args: --no-default-features
+            native_packages: false
+          - name: ubuntu-default
+            os: ubuntu-latest
+            cargo_args: ""
+            native_packages: false
+          - name: macos-no-default
+            os: macos-latest
+            cargo_args: --no-default-features
+            native_packages: false
+          - name: macos-default
+            os: macos-latest
+            cargo_args: ""
+            native_packages: false
+          - name: windows-no-default
+            os: windows-latest
+            cargo_args: --no-default-features
+            native_packages: false
+          - name: windows-default
+            os: windows-latest
+            cargo_args: ""
+            native_packages: false
+          - name: ubuntu-all-features
+            os: ubuntu-latest
+            cargo_args: --all-features
+            native_packages: true
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Linux native dependencies
+        if: matrix.native_packages
+        run: sudo apt-get update && sudo apt-get install --yes clang lld libpcap-dev
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.97.1
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: nextest@0.9.143
+      - name: Run tests
+        run: cargo nextest run --locked --workspace --profile ci ${{ matrix.cargo_args }}
+      - name: Upload JUnit report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: junit-${{ matrix.name }}
+          path: target/nextest/ci/junit.xml
+          if-no-files-found: error
+
+  quality:
+    name: Quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Linux native dependencies
+        run: sudo apt-get update && sudo apt-get install --yes clang lld libpcap-dev
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.97.1
+          components: clippy,rustfmt
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Run Clippy
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+      - name: Build API documentation
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --locked --workspace --all-features --no-deps
+      - name: Run doctests
+        run: cargo test --locked --workspace --all-features --doc
+      - name: Check dependency policy
+        run: cargo deny check
+
+  msrv:
+    name: MSRV (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: no-default
+            cargo_args: --no-default-features
+          - name: all-features
+            cargo_args: --all-features
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Linux native dependencies
+        run: sudo apt-get update && sudo apt-get install --yes clang lld libpcap-dev
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.96.0
+      - name: Check workspace
+        run: cargo check --locked --workspace --all-targets ${{ matrix.cargo_args }}

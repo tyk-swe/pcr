@@ -29,3 +29,6 @@ packetcraftr-packet.workspace = true
 packetcraftr-protocol.workspace = true
 packetcraftr-workflow.workspace = true
 serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

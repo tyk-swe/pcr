@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added a greenfield, deterministic cargo-nextest 0.9.143 test baseline across
+  every workspace package, plus no-default, default, all-feature, MSRV, doctest,
+  documentation, lint, dependency-policy, and cross-platform CI gates. Tests use
+  synthetic offline inputs and hand-written boundaries without live network I/O.
 - Added finding-level `--min-severity` and repeatable `--code` selectors to
   `packetcraftr expert`, enabling output filtering by minimum severity and exact
   stable code without narrowing capture analysis history or frame selection.

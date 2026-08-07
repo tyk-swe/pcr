@@ -14,6 +14,10 @@ Schemas live in `schemas/`, published examples in `examples/documents/`, and sec
 
 - `cargo build --locked`: build the workspace with pinned dependencies.
 - `cargo run -p packetcraftr-cli -- --help`: run the CLI locally.
+- `cargo nextest run --locked --workspace --no-default-features`: run the portable test profile.
+- `cargo nextest run --locked --workspace`: run the default-feature test profile.
+- `cargo nextest run --locked --workspace --all-features`: run the complete feature test profile.
+- `cargo test --locked --workspace --all-features --doc`: run doctests separately from nextest.
 - `cargo fmt --all -- --check`: verify formatting.
 - `cargo clippy --locked --all-targets --all-features -- -D warnings`: apply the lint gate.
 - `RUSTDOCFLAGS="-D warnings" cargo doc --locked --all-features --no-deps`: verify API documentation.

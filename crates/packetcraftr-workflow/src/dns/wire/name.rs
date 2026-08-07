@@ -145,3 +145,23 @@ pub(super) fn decode_name(
         cursor += length;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compressed_names_reject_self_and_forward_pointers() {
+        assert!(matches!(
+            decode_name(&[0xc0, 0], 0, DnsLimits::default()),
+            Err(DnsWireError::PointerLoop { offset: 0 })
+        ));
+        assert!(matches!(
+            decode_name(&[0xc0, 2, 0], 0, DnsLimits::default()),
+            Err(DnsWireError::ForwardPointer {
+                offset: 0,
+                pointer: 2
+            })
+        ));
+    }
+}

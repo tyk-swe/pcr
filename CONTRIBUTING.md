@@ -19,11 +19,19 @@ cargo build --locked
 cargo check --locked --workspace --no-default-features
 cargo check --locked --workspace
 cargo check --locked --workspace --all-features
+cargo nextest run --locked --workspace --no-default-features
+cargo nextest run --locked --workspace
+cargo nextest run --locked --workspace --all-features
+cargo test --locked --workspace --all-features --doc
 cargo fmt --all -- --check
 cargo clippy --locked --all-targets --all-features -- -D warnings
 RUSTDOCFLAGS="-D warnings" cargo doc --locked --all-features --no-deps
 cargo deny check
 ```
+
+Nextest 0.9.143 or newer is required by the repository configuration. Nextest
+runs unit and integration tests without retries; doctests use Cargo's standard
+test runner and must be run separately with the command above.
 
 The no-default profile builds every crate with its native features turned off,
 so native providers fail closed with a capability error. Default and

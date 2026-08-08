@@ -26,10 +26,8 @@ pub enum FuzzMode {
 pub enum FuzzCaseOutcome {
     Built,
     Rejected,
-    Sent,
     Response,
     Timeout,
-    Error,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -40,13 +38,6 @@ pub struct FuzzMutation {
     pub strategy: FuzzStrategy,
     pub original: FieldValue,
     pub value: FieldValue,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-pub struct FuzzReproduction {
-    pub operation_seed: u64,
-    pub case_index: u64,
-    pub case_seed: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -95,7 +86,6 @@ pub struct FuzzCase {
     pub index: u64,
     pub seed: u64,
     pub mutation: FuzzMutation,
-    pub reproduction: FuzzReproduction,
     pub shrink_values: Vec<FieldValue>,
     pub recipe: Packet,
     pub built: Option<BuiltPacket>,
@@ -113,7 +103,6 @@ pub struct FuzzCase {
 pub struct FuzzStats {
     pub cases_generated: u64,
     pub cases_built: u64,
-    pub cases_rejected: u64,
     pub packets_attempted: u64,
     pub packets_completed: u64,
     pub bytes: u64,

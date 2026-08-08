@@ -79,10 +79,6 @@ impl LayerCodec for GreCodec {
         protocol("gre")
     }
 
-    fn aliases(&self) -> &'static [&'static str] {
-        super::super::support::aliases(self.protocol_id().as_str())
-    }
-
     fn encode(
         &self,
         layer: &dyn Layer,

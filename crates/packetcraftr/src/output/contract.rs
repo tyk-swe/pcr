@@ -159,22 +159,6 @@ pub enum Mode {
     Stream,
 }
 
-/// One row in the public command/format capability matrix.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct CommandContract {
-    pub command: Command,
-    pub formats: &'static [Format],
-}
-
-impl CommandContract {
-    const fn from_command(command: Command) -> Self {
-        Self {
-            command,
-            formats: command.formats(),
-        }
-    }
-}
-
 const BUILD_FORMATS: &[Format] = &[Format::Text, Format::Json, Format::Hex, Format::Raw];
 const AGGREGATE_FORMATS: &[Format] = &[Format::Text, Format::Json];
 const SEND_FORMATS: &[Format] = &[
@@ -213,28 +197,6 @@ const FOLLOW_FORMATS: &[Format] = &[
     Format::Ndjson,
     Format::Hex,
     Format::Raw,
-];
-
-/// Complete v1 command/format matrix in the same canonical order as [`Command::ALL`].
-pub const CONTRACTS: &[CommandContract] = &[
-    CommandContract::from_command(Command::Build),
-    CommandContract::from_command(Command::Dissect),
-    CommandContract::from_command(Command::Protocols),
-    CommandContract::from_command(Command::Plan),
-    CommandContract::from_command(Command::Send),
-    CommandContract::from_command(Command::Exchange),
-    CommandContract::from_command(Command::Capture),
-    CommandContract::from_command(Command::Read),
-    CommandContract::from_command(Command::Replay),
-    CommandContract::from_command(Command::Scan),
-    CommandContract::from_command(Command::Stats),
-    CommandContract::from_command(Command::Expert),
-    CommandContract::from_command(Command::Follow),
-    CommandContract::from_command(Command::Traceroute),
-    CommandContract::from_command(Command::Dns),
-    CommandContract::from_command(Command::Fuzz),
-    CommandContract::from_command(Command::Interfaces),
-    CommandContract::from_command(Command::Routes),
 ];
 
 /// Failure produced while enforcing the shared output contract.

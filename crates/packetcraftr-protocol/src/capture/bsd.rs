@@ -135,10 +135,6 @@ impl LayerCodec for BsdNullCodec {
         protocol("bsd_null")
     }
 
-    fn aliases(&self) -> &'static [&'static str] {
-        crate::support::aliases(self.protocol_id().as_str())
-    }
-
     fn encode(
         &self,
         layer: &dyn Layer,
@@ -178,10 +174,6 @@ impl LayerCodec for BsdNullCodec {
 impl LayerCodec for BsdLoopCodec {
     fn protocol_id(&self) -> ProtocolId {
         protocol("bsd_loop")
-    }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        crate::support::aliases(self.protocol_id().as_str())
     }
 
     fn encode(

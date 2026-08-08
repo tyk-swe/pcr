@@ -9,7 +9,6 @@
 
 mod manifest;
 
-pub(crate) use manifest::aliases;
 pub use manifest::{
     BUILTIN_CAPTURE_ROOTS, BUILTIN_PROTOCOLS, CaptureRootByteOrder as CaptureByteOrder,
     CaptureRootSupport as CaptureRoot, ProtocolSupport as Protocol,

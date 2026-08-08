@@ -193,10 +193,6 @@ impl LayerCodec for VlanCodec {
         protocol("vlan")
     }
 
-    fn aliases(&self) -> &'static [&'static str] {
-        super::super::support::aliases(self.protocol_id().as_str())
-    }
-
     fn encode(
         &self,
         layer: &dyn Layer,
@@ -267,10 +263,6 @@ impl LayerCodec for VlanCodec {
 impl LayerCodec for Vlan8021adCodec {
     fn protocol_id(&self) -> ProtocolId {
         protocol("vlan8021ad")
-    }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        super::super::support::aliases(self.protocol_id().as_str())
     }
 
     fn encode(

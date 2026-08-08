@@ -102,6 +102,24 @@ pub trait Session: Send {
     fn statistics(&self) -> Statistics;
 }
 
+impl<T: Session + ?Sized> Session for Box<T> {
+    fn wait_ready(&mut self, timeout: Duration) -> Result<(), Error> {
+        (**self).wait_ready(timeout)
+    }
+
+    fn next_captured_frame(&mut self, timeout: Duration) -> Result<Option<Captured>, Error> {
+        (**self).next_captured_frame(timeout)
+    }
+
+    fn shutdown(&mut self) -> Result<(), Error> {
+        (**self).shutdown()
+    }
+
+    fn statistics(&self) -> Statistics {
+        (**self).statistics()
+    }
+}
+
 /// Capture evidence paired with an optional monotonic receive marker. Wall-clock
 /// packet time remains in [`CaptureFrame::timestamp`] for output; freshness and
 /// latency use `received_at` so clock precision and adjustment cannot reorder
@@ -222,34 +240,8 @@ pub trait Provider: Send + Sync {
 }
 
 /// Owned native capture session. The native handle and capture worker remain
-/// private behind this platform-neutral session wrapper.
-pub struct SystemSession {
-    inner: Box<dyn Session>,
-}
-
-impl SystemSession {
-    pub(crate) fn new(inner: Box<dyn Session>) -> Self {
-        Self { inner }
-    }
-}
-
-impl Session for SystemSession {
-    fn wait_ready(&mut self, timeout: Duration) -> Result<(), Error> {
-        self.inner.wait_ready(timeout)
-    }
-
-    fn next_captured_frame(&mut self, timeout: Duration) -> Result<Option<Captured>, Error> {
-        self.inner.next_captured_frame(timeout)
-    }
-
-    fn shutdown(&mut self) -> Result<(), Error> {
-        self.inner.shutdown()
-    }
-
-    fn statistics(&self) -> Statistics {
-        self.inner.statistics()
-    }
-}
+/// private behind this platform-neutral trait object.
+pub type SystemSession = Box<dyn Session>;
 
 /// Native capture provider selected for the current target and the explicit
 /// `native-layer2` feature.
@@ -260,7 +252,7 @@ impl Provider for SystemProvider {
     type Capture = SystemSession;
 
     fn arm_capture(&self, route: &PlannedRoute, limits: Limits) -> Result<Self::Capture, Error> {
-        super::platform::system_capture(route, limits).map(SystemSession::new)
+        super::platform::system_capture(route, limits)
     }
 
     fn arm_capture_with_filter(
@@ -269,6 +261,6 @@ impl Provider for SystemProvider {
         limits: Limits,
         filter: &str,
     ) -> Result<Self::Capture, Error> {
-        super::platform::system_capture_with_filter(route, limits, filter).map(SystemSession::new)
+        super::platform::system_capture_with_filter(route, limits, filter)
     }
 }

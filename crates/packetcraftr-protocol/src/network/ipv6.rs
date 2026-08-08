@@ -73,10 +73,6 @@ impl LayerCodec for Ipv6Codec {
     fn protocol_id(&self) -> ProtocolId {
         protocol("ipv6")
     }
-    fn aliases(&self) -> &'static [&'static str] {
-        super::super::support::aliases(self.protocol_id().as_str())
-    }
-
     fn encode(
         &self,
         layer: &dyn Layer,

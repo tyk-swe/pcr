@@ -3,12 +3,10 @@
 
 //! Public built-in codec and capture-root capability tables.
 
-use serde::Serialize;
-
 use packetcraftr_packet::semantics::{BuiltinProtocol, builtin_protocol_catalog};
 
 /// One built-in codec row in the stable protocol contract.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ProtocolSupport {
     pub protocol: &'static str,
     pub aliases: &'static [&'static str],
@@ -20,8 +18,7 @@ pub struct ProtocolSupport {
 }
 
 /// Byte-order rule applied by a registered capture root.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CaptureRootByteOrder {
     /// A captured host-order field is detected and preserved as little or big endian.
     CapturedHost,
@@ -32,25 +29,12 @@ pub enum CaptureRootByteOrder {
 }
 
 /// One numeric DLT/LINKTYPE binding in the default registry.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CaptureRootSupport {
     pub link_type: u32,
     pub protocol: &'static str,
     pub byte_order: CaptureRootByteOrder,
     pub exact_round_trip: bool,
-}
-
-/// The alias list a built-in codec advertises for its own protocol.
-///
-/// Every caller passes the `protocol_id` of the codec it is implementing, so
-/// an unknown name means this manifest has drifted from [`BuiltinProtocol`].
-/// Panicking is deliberate: returning an empty slice would silently drop the
-/// aliases the registry resolves names through, and the drift would surface
-/// later as a name that no longer parses.
-pub(crate) fn aliases(protocol: &str) -> &'static [&'static str] {
-    BuiltinProtocol::from_name(protocol)
-        .map(BuiltinProtocol::aliases)
-        .unwrap_or_else(|| panic!("missing built-in protocol support for {protocol}"))
 }
 
 macro_rules! define_protocol_support {
@@ -59,8 +43,6 @@ macro_rules! define_protocol_support {
             canonical: $canonical:literal,
             aliases: [$($alias:literal),* $(,)?],
             constructible: $constructible:literal,
-            dissect: $dissect:literal,
-            exact_round_trip: $exact_round_trip:literal,
             matcher: $matcher:ident,
             codec: $codec:ident
         }
@@ -72,8 +54,8 @@ macro_rules! define_protocol_support {
                 protocol: $canonical,
                 aliases: &[$($alias),*],
                 build: $constructible,
-                dissect: $dissect,
-                exact_round_trip: $exact_round_trip,
+                dissect: true,
+                exact_round_trip: true,
                 matcher: define_protocol_support!(@matcher $matcher),
                 decode_only: !$constructible,
             }

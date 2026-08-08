@@ -9,7 +9,7 @@ use self::arguments::BuildArgs;
 use super::super::errors::CliError;
 use super::super::input::read_recipe;
 use super::super::rendering::{
-    emit_json, spaced_hex, write_plain_line, write_raw, write_stdout_line,
+    emit_json, render_diagnostics_text, spaced_hex, write_plain_line, write_raw, write_stdout_line,
 };
 use super::super::system::default_registry_arc;
 
@@ -31,13 +31,7 @@ pub(super) fn run(arguments: BuildArgs, output: output::contract::Format) -> Res
         output::contract::Format::Text => {
             write_stdout_line(format_args!("built {} bytes", result.length))?;
             write_stdout_line(format_args!("{}", spaced_hex(result.bytes())))?;
-            for diagnostic in &diagnostics {
-                write_stdout_line(format_args!(
-                    "{:?} {}: {}",
-                    diagnostic.severity, diagnostic.code, diagnostic.message
-                ))?;
-            }
-            Ok(())
+            render_diagnostics_text(&diagnostics)
         }
         output::contract::Format::Hex => write_plain_line(format_args!("{}", result.bytes_hex)),
         output::contract::Format::Raw => write_raw(result.bytes()),

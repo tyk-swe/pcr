@@ -248,17 +248,9 @@ where
                 };
                 let CapturedFrame { frame, received_at } = captured_frame;
                 validate_captured_frame(request, &frame, self.options.snap_length)?;
-                let Some(received_at) = received_at else {
-                    retain_evidence(
-                        frame,
-                        &self.options,
-                        &mut captured,
-                        &mut captured_bytes,
-                        &mut evidence_truncated,
-                    );
-                    continue;
-                };
-                if received_at < send_started || received_at > deadline {
+                if received_at
+                    .is_none_or(|received_at| received_at < send_started || received_at > deadline)
+                {
                     retain_evidence(
                         frame,
                         &self.options,

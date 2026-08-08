@@ -100,10 +100,6 @@ impl LayerCodec for AhCodec {
         protocol("ah")
     }
 
-    fn aliases(&self) -> &'static [&'static str] {
-        crate::support::aliases(self.protocol_id().as_str())
-    }
-
     fn encode(
         &self,
         layer: &dyn Layer,

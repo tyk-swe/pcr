@@ -26,10 +26,6 @@ impl LayerCodec for RawCodec {
         protocol("raw")
     }
 
-    fn aliases(&self) -> &'static [&'static str] {
-        super::support::aliases(self.protocol_id().as_str())
-    }
-
     fn encode(
         &self,
         layer: &dyn Layer,
@@ -76,10 +72,6 @@ pub(super) struct MalformedCodec;
 impl LayerCodec for MalformedCodec {
     fn protocol_id(&self) -> ProtocolId {
         protocol("malformed")
-    }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        super::support::aliases(self.protocol_id().as_str())
     }
 
     fn encode(
@@ -134,10 +126,6 @@ impl LayerCodec for MalformedCodec {
 impl LayerCodec for PaddingCodec {
     fn protocol_id(&self) -> ProtocolId {
         protocol("padding")
-    }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        super::support::aliases(self.protocol_id().as_str())
     }
 
     fn encode(

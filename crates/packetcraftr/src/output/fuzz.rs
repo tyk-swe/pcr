@@ -50,10 +50,8 @@ impl From<packetcraftr_workflow::fuzz::CaseOutcome> for Outcome {
         match value {
             packetcraftr_workflow::fuzz::CaseOutcome::Built => Self::Built,
             packetcraftr_workflow::fuzz::CaseOutcome::Rejected => Self::Rejected,
-            packetcraftr_workflow::fuzz::CaseOutcome::Sent => Self::Sent,
             packetcraftr_workflow::fuzz::CaseOutcome::Response => Self::Response,
             packetcraftr_workflow::fuzz::CaseOutcome::Timeout => Self::Timeout,
-            packetcraftr_workflow::fuzz::CaseOutcome::Error => Self::Error,
         }
     }
 }
@@ -128,16 +126,6 @@ pub struct Reproduction {
     pub case_seed: u64,
 }
 
-impl From<packetcraftr_workflow::fuzz::Reproduction> for Reproduction {
-    fn from(value: packetcraftr_workflow::fuzz::Reproduction) -> Self {
-        Self {
-            operation_seed: value.operation_seed,
-            case_index: value.case_index,
-            case_seed: value.case_seed,
-        }
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Case {
     pub index: u64,
@@ -201,11 +189,16 @@ impl Result {
                     .as_ref()
                     .map(|decoded| PacketDocument::from_packet(&decoded.packet));
                 let output_error = case.error.as_ref().map(OutputError::classified);
+                let reproduction = Reproduction {
+                    operation_seed: seed,
+                    case_index: case.index,
+                    case_seed: case.seed,
+                };
                 Ok(Case {
                     index: case.index,
                     seed: case.seed,
                     mutation: case.mutation.into(),
-                    reproduction: case.reproduction.into(),
+                    reproduction,
                     shrink_values: case.shrink_values,
                     recipe: PacketDocument::from_packet(&case.recipe),
                     frame: built_frame,
@@ -241,7 +234,7 @@ impl Result {
                 mode: mode.into(),
                 cases_generated: stats.cases_generated,
                 cases_built: stats.cases_built,
-                cases_rejected: stats.cases_rejected,
+                cases_rejected: stats.cases_generated.saturating_sub(stats.cases_built),
                 cases: case_outputs,
             },
             diagnostics,

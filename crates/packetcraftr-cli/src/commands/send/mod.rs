@@ -14,7 +14,8 @@ use packetcraftr::{
 use self::arguments::SendArgs;
 use super::super::errors::CliError;
 use super::super::rendering::{
-    emit_json, write_capture_file, write_plain_line, write_raw, write_stdout_line,
+    emit_json, render_diagnostics_text, write_capture_file, write_plain_line, write_raw,
+    write_stdout_line,
 };
 use super::super::system::{default_registry_arc, prepare_route_request, system_client};
 
@@ -55,13 +56,7 @@ pub(super) fn run(arguments: SendArgs, output: output::contract::Format) -> Resu
                 result.route.plan.route.interface.index,
                 result.route.plan.mode
             ))?;
-            for diagnostic in diagnostics {
-                write_stdout_line(format_args!(
-                    "{:?} {}: {}",
-                    diagnostic.severity, diagnostic.code, diagnostic.message
-                ))?;
-            }
-            Ok(())
+            render_diagnostics_text(&diagnostics)
         }
         output::contract::Format::Json => emit_json(
             &output::envelope::Aggregate::success(

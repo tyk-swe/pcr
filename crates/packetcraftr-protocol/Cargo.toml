@@ -15,4 +15,3 @@ workspace = true
 bytes.workspace = true
 packetcraftr-core.workspace = true
 packetcraftr-packet.workspace = true
-serde.workspace = true

@@ -71,10 +71,6 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
         protocol("ipv6_srh")
     }
 
-    fn aliases(&self) -> &'static [&'static str] {
-        crate::support::aliases(self.protocol_id().as_str())
-    }
-
     fn encode(
         &self,
         layer: &dyn Layer,

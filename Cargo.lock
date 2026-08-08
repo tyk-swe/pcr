@@ -570,7 +570,6 @@ dependencies = [
  "bytes",
  "packetcraftr-core",
  "packetcraftr-packet",
- "serde",
 ]
 
 [[package]]

@@ -8,7 +8,7 @@ use packetcraftr_net::{
     route::{NeighborResolver, RouteProvider},
     transmit::PacketIo,
 };
-use packetcraftr_packet::template::{PacketTemplate, TemplateValues};
+use packetcraftr_packet::template::PacketTemplate;
 
 use super::classification::classify_traceroute_response;
 use super::model::{
@@ -90,7 +90,7 @@ where
                         })
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            template = template.axis(1, varying_field, TemplateValues::Values(values));
+            template = template.axis(1, varying_field, values);
         }
 
         let mut options = self.options.clone();

@@ -89,10 +89,6 @@ impl LayerCodec for LlcCodec {
         protocol("llc")
     }
 
-    fn aliases(&self) -> &'static [&'static str] {
-        super::super::support::aliases(self.protocol_id().as_str())
-    }
-
     fn encode(
         &self,
         layer: &dyn Layer,
@@ -268,10 +264,6 @@ pub(crate) struct SnapCodec;
 impl LayerCodec for SnapCodec {
     fn protocol_id(&self) -> ProtocolId {
         protocol("snap")
-    }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        super::super::support::aliases(self.protocol_id().as_str())
     }
 
     fn encode(

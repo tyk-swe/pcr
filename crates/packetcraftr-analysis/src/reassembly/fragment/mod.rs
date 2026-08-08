@@ -254,17 +254,8 @@ impl Reassembler {
         Ok(None)
     }
 
-    pub fn expire(&mut self, now: Instant) -> Vec<Event> {
-        let mut expired = self
-            .flows
-            .iter()
-            .filter_map(|(key, state)| {
-                now.checked_duration_since(state.last_update)
-                    .filter(|idle| *idle >= self.limits.fragment_expiry)
-                    .map(|_| key.clone())
-            })
-            .collect::<Vec<_>>();
-        expired.sort_by_key(|key| {
+    fn remove_flows(&mut self, mut keys: Vec<DatagramKey>) -> Vec<Event> {
+        keys.sort_by_key(|key| {
             (
                 key.source,
                 key.destination,
@@ -272,8 +263,7 @@ impl Reassembler {
                 key.next_header,
             )
         });
-        expired
-            .into_iter()
+        keys.into_iter()
             .filter_map(|key| {
                 let state = self.flows.remove(&key)?;
                 self.aggregate_bytes = self.aggregate_bytes.saturating_sub(state.stored_bytes);
@@ -288,30 +278,22 @@ impl Reassembler {
             .collect()
     }
 
-    pub fn flush(&mut self) -> Vec<Event> {
-        let mut keys = self.flows.keys().cloned().collect::<Vec<_>>();
-        keys.sort_by_key(|key| {
-            (
-                key.source,
-                key.destination,
-                key.identification,
-                key.next_header,
-            )
-        });
-        let events = keys
-            .into_iter()
-            .filter_map(|key| {
-                let state = self.flows.remove(&key)?;
-                Some(Event::Expired {
-                    key,
-                    received_bytes: state.stored_bytes,
-                    fragment_count: state.fragment_count,
-                })
+    pub fn expire(&mut self, now: Instant) -> Vec<Event> {
+        let expired = self
+            .flows
+            .iter()
+            .filter_map(|(key, state)| {
+                now.checked_duration_since(state.last_update)
+                    .filter(|idle| *idle >= self.limits.fragment_expiry)
+                    .map(|_| key.clone())
             })
-            .collect();
-        self.aggregate_bytes = 0;
-        self.aggregate_memory_charge = 0;
-        events
+            .collect::<Vec<_>>();
+        self.remove_flows(expired)
+    }
+
+    pub fn flush(&mut self) -> Vec<Event> {
+        let keys = self.flows.keys().cloned().collect();
+        self.remove_flows(keys)
     }
 }
 

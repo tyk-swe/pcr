@@ -10,6 +10,5 @@ pub use request::{
     FuzzLimits, FuzzLiveOptions, FuzzRequest, FuzzStrategy, FuzzTarget, FuzzTargetParseError,
 };
 pub use result::{
-    FuzzCase, FuzzCaseFailure, FuzzCaseOutcome, FuzzMode, FuzzMutation, FuzzReproduction,
-    FuzzResult, FuzzStats,
+    FuzzCase, FuzzCaseFailure, FuzzCaseOutcome, FuzzMode, FuzzMutation, FuzzResult, FuzzStats,
 };

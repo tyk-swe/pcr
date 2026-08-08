@@ -8,7 +8,8 @@ use packetcraftr::{analysis, output};
 use self::arguments::{CliFollowDirection, FollowArgs};
 use super::super::errors::CliError;
 use super::super::rendering::{
-    emit_json, emit_json_compact, emit_stderr_message, write_raw, write_stdout_line,
+    emit_json, emit_json_compact, emit_stderr_message, emit_stream_record, write_raw,
+    write_stdout_line,
 };
 use super::offline_analysis::{
     PreparedOfflineAnalysis, open_offline_reader, prepare_offline_analysis,
@@ -174,20 +175,11 @@ fn emit_chunk(
             retained.push(chunk.into());
             Ok(())
         }
-        output::contract::Format::Ndjson => {
-            emit_json_compact(&output::envelope::Stream::success(
-                output::contract::Command::Follow,
-                *sequence,
-                output::follow::Chunk::from(chunk),
-                Vec::new(),
-            ))
-            .map_err(|error| error.at_sequence(*sequence))?;
-            *sequence = sequence.checked_add(1).ok_or_else(|| {
-                CliError::classified(output::contract::Error::SequenceOverflow)
-                    .at_sequence(*sequence)
-            })?;
-            Ok(())
-        }
+        output::contract::Format::Ndjson => emit_stream_record(
+            output::contract::Command::Follow,
+            sequence,
+            output::follow::Chunk::from(chunk),
+        ),
         _ => unreachable!("the format contract admits only text, json, ndjson, hex, and raw"),
     }
 }

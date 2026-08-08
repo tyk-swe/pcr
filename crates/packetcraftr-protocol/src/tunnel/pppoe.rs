@@ -79,10 +79,6 @@ impl LayerCodec for PppoeCodec {
         protocol("pppoe")
     }
 
-    fn aliases(&self) -> &'static [&'static str] {
-        super::super::support::aliases(self.protocol_id().as_str())
-    }
-
     fn encode(
         &self,
         layer: &dyn Layer,
@@ -312,10 +308,6 @@ pub(crate) struct PppCodec;
 impl LayerCodec for PppCodec {
     fn protocol_id(&self) -> ProtocolId {
         protocol("ppp")
-    }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        super::super::support::aliases(self.protocol_id().as_str())
     }
 
     fn encode(

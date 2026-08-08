@@ -17,24 +17,15 @@ use super::super::{
 };
 
 use preparation::prepare;
-use submission::{RawIpBackend, SystemRawIpBackend, map_raw_error, validate_platform_support};
+use submission::{map_raw_error, send, validate_platform_support};
 
 mod preparation;
 mod submission;
 
 pub(super) fn send_layer3(frame: Layer3Frame<'_>) -> Result<IoSendReport, LiveIoError> {
-    send_with_backend(frame, &SystemRawIpBackend)
-}
-
-fn send_with_backend<B: RawIpBackend>(
-    frame: Layer3Frame<'_>,
-    backend: &B,
-) -> Result<IoSendReport, LiveIoError> {
     let packet = prepare(frame)?;
     validate_platform_support(&packet)?;
-    let actual = backend
-        .send(&packet)
-        .map_err(|error| map_raw_error(&packet.interface, error))?;
+    let actual = send(&packet).map_err(|error| map_raw_error(&packet.interface, error))?;
     let expected = packet.submission.len();
     if actual != expected {
         return Err(LiveIoError::PartialSend { expected, actual });

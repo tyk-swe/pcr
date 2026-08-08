@@ -83,10 +83,6 @@ impl LayerCodec for SctpCodec {
         protocol("sctp")
     }
 
-    fn aliases(&self) -> &'static [&'static str] {
-        super::super::support::aliases(self.protocol_id().as_str())
-    }
-
     fn encode(
         &self,
         layer: &dyn Layer,

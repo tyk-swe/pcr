@@ -314,10 +314,6 @@ impl LayerCodec for DnsCodec {
         protocol("dns")
     }
 
-    fn aliases(&self) -> &'static [&'static str] {
-        super::super::support::aliases(self.protocol_id().as_str())
-    }
-
     fn published_schema(&self) -> Option<&'static packetcraftr_packet::layer::LayerSchema> {
         Some(dns_schema())
     }

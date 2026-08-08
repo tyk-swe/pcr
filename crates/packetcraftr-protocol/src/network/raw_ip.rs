@@ -28,10 +28,6 @@ impl LayerCodec for RawIpCodec {
     fn accepts_decoded_protocol(&self, protocol: &ProtocolId) -> bool {
         matches!(protocol.as_str(), "ipv4" | "ipv6")
     }
-    fn aliases(&self) -> &'static [&'static str] {
-        super::super::support::aliases(self.protocol_id().as_str())
-    }
-
     fn encode(
         &self,
         _layer: &dyn Layer,

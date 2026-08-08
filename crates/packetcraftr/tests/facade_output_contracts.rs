@@ -3,7 +3,7 @@
 
 use packetcraftr::{
     output::{
-        contract::{CONTRACTS, Command, Format, SCHEMA_V1},
+        contract::{Command, Format, SCHEMA_V1},
         envelope::{Aggregate, Stream},
     },
     protocol,
@@ -11,14 +11,12 @@ use packetcraftr::{
 use serde_json::{Value, json};
 
 #[test]
-fn facade_reexports_domains_and_the_contract_matrix_is_complete() {
+fn facade_reexports_domains_and_command_formats_are_complete() {
     let registry = protocol::builtin::registry().expect("facade protocol re-export must work");
     assert!(registry.codec("ipv4").is_some());
-    assert_eq!(CONTRACTS.len(), Command::ALL.len());
-    for (contract, command) in CONTRACTS.iter().zip(Command::ALL) {
-        assert_eq!(&contract.command, command);
-        assert!(!contract.formats.is_empty());
-        assert!(contract.command.require_format(contract.formats[0]).is_ok());
+    for command in Command::ALL {
+        assert!(!command.formats().is_empty());
+        assert!(command.require_format(command.formats()[0]).is_ok());
     }
     assert!(Command::Protocols.require_format(Format::Ndjson).is_err());
 }

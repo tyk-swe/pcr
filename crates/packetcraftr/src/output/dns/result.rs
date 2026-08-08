@@ -40,19 +40,6 @@ impl From<packetcraftr_workflow::dns::Outcome> for DnsOutcome {
     }
 }
 
-impl From<packetcraftr_workflow::dns::AttemptStatus> for DnsOutcome {
-    fn from(value: packetcraftr_workflow::dns::AttemptStatus) -> Self {
-        match value {
-            packetcraftr_workflow::dns::AttemptStatus::Response => Self::Response,
-            packetcraftr_workflow::dns::AttemptStatus::Truncated => Self::Truncated,
-            packetcraftr_workflow::dns::AttemptStatus::Timeout => Self::Timeout,
-            packetcraftr_workflow::dns::AttemptStatus::Unrelated => Self::Unrelated,
-            packetcraftr_workflow::dns::AttemptStatus::DecodeFailure => Self::DecodeFailure,
-            packetcraftr_workflow::dns::AttemptStatus::NetworkFailure => Self::NetworkFailure,
-        }
-    }
-}
-
 /// Aggregate result of `dns`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct DnsCommandResult {

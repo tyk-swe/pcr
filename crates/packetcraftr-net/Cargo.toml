@@ -18,12 +18,12 @@ workspace = true
 [features]
 native-interfaces = ["dep:pnet_datalink", "dep:windows"]
 native-route = [
-    "native-interfaces",
     "dep:futures-util",
     "dep:libc",
     "dep:rtnetlink",
     "dep:socket2",
     "dep:tokio",
+    "dep:windows",
 ]
 native-layer2 = ["native-interfaces", "dep:libloading", "dep:pcap"]
 native-layer3 = ["native-interfaces", "dep:socket2"]

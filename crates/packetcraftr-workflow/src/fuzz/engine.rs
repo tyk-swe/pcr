@@ -42,7 +42,6 @@ pub fn fuzz(
         stats: FuzzStats {
             cases_generated: request.cases as u64,
             cases_built: prepared.built_case_count,
-            cases_rejected: request.cases as u64 - prepared.built_case_count,
             packets_attempted: request.cases as u64,
             packets_completed: prepared.built_case_count,
             bytes: prepared.built_byte_count,
@@ -145,7 +144,6 @@ where
     let mut stats = FuzzStats {
         cases_generated: request.cases as u64,
         cases_built: prepared.built_case_count,
-        cases_rejected: request.cases as u64 - prepared.built_case_count,
         ..FuzzStats::default()
     };
     let retained_byte_count =

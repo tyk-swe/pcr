@@ -564,23 +564,15 @@ fn field_values_raw_layers_and_diagnostics_have_stable_views() {
 fn templates_expand_cartesian_axes_and_report_limits_and_edit_errors() {
     let mut base = Packet::new();
     base.push(Probe::default());
-    let generated = Arc::new(|index| FieldValue::Text(format!("label-{index}")));
     let template = template::Template::new(base)
-        .axis(
-            0,
-            "value",
-            template::Values::UnsignedRange {
-                start: 10,
-                end_inclusive: 11,
-            },
-        )
+        .axis(0, "value", vec![10_u8.into(), 11_u8.into()])
         .axis(
             0,
             "label",
-            template::Values::Generated {
-                count: 2,
-                generator: generated,
-            },
+            vec![
+                FieldValue::Text("label-0".to_owned()),
+                FieldValue::Text("label-1".to_owned()),
+            ],
         );
     assert_eq!(template.expansion_len().expect("bounded product"), 4);
     assert!(matches!(
@@ -612,33 +604,18 @@ fn templates_expand_cartesian_axes_and_report_limits_and_edit_errors() {
         ]
     );
 
-    let empty = template::Template::new(Packet::new()).axis(
-        0,
-        "value",
-        template::Values::UnsignedRange {
-            start: 2,
-            end_inclusive: 1,
-        },
-    );
+    let empty = template::Template::new(Packet::new()).axis(0, "value", Vec::new());
     assert_eq!(empty.expansion_len().expect("empty range"), 0);
     assert_eq!(empty.expand(0).expect("empty expansion").len(), 0);
 
-    let bad_index = template::Template::new(Packet::new()).axis(
-        1,
-        "value",
-        template::Values::Values(vec![1_u8.into()]),
-    );
+    let bad_index = template::Template::new(Packet::new()).axis(1, "value", vec![1_u8.into()]);
     assert!(matches!(
         bad_index.expand(1).expect("one ordinal").next(),
         Some(Err(template::Error::LayerIndex { index: 1, len: 0 }))
     ));
     let mut packet = Packet::new();
     packet.push(Probe::default());
-    let bad_field = template::Template::new(packet).axis(
-        0,
-        "missing",
-        template::Values::Values(vec![1_u8.into()]),
-    );
+    let bad_field = template::Template::new(packet).axis(0, "missing", vec![1_u8.into()]);
     assert!(matches!(
         bad_field.expand(1).expect("one ordinal").next(),
         Some(Err(template::Error::Field { layer: 0, .. }))

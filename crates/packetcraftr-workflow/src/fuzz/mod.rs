@@ -46,9 +46,8 @@ pub use model::{
     FuzzCaseFailure as CaseFailure, FuzzCaseOutcome as CaseOutcome,
     FuzzExecutionCase as ExecutionCase, FuzzExecutor as Executor, FuzzLimits as Limits,
     FuzzLiveOptions as LiveOptions, FuzzMode as Mode, FuzzMutation as Mutation,
-    FuzzReproduction as Reproduction, FuzzRequest as Request, FuzzResult as Result,
-    FuzzStats as Stats, FuzzStrategy as Strategy, FuzzTarget as Target,
-    FuzzTargetParseError as TargetParseError,
+    FuzzRequest as Request, FuzzResult as Result, FuzzStats as Stats, FuzzStrategy as Strategy,
+    FuzzTarget as Target, FuzzTargetParseError as TargetParseError,
 };
 /// Executes fuzz cases through a client's capture-ready exchange lifecycle.
 pub type ClientExecutor<'a, R, N, I> =

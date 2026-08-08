@@ -21,8 +21,8 @@ use super::super::engine::{PreparedFuzz, ResolvedField};
 use super::super::error::{FuzzError, duration_limit};
 use super::super::execution::case_seed;
 use super::super::model::{
-    FuzzCase, FuzzCaseFailure, FuzzCaseOutcome, FuzzLimits, FuzzMutation, FuzzReproduction,
-    FuzzRequest, FuzzStrategy, FuzzTarget,
+    FuzzCase, FuzzCaseFailure, FuzzCaseOutcome, FuzzLimits, FuzzMutation, FuzzRequest,
+    FuzzStrategy, FuzzTarget,
 };
 use super::decode::dissect_built;
 use super::value::{bounded_value_size, index_from, mutation_value, shrink_values};
@@ -89,11 +89,6 @@ pub(in crate::fuzz) fn prepare(
             original: original.clone(),
             value: value.clone(),
         };
-        let reproduction = FuzzReproduction {
-            operation_seed: request.seed,
-            case_index: index,
-            case_seed: seed,
-        };
         let shrink_values = shrink_values(&value, request.limits.max_shrink_steps);
         let set_result = recipe
             .layer_mut(field.target.layer)
@@ -110,7 +105,6 @@ pub(in crate::fuzz) fn prepare(
             index,
             seed,
             mutation,
-            reproduction,
             shrink_values,
             recipe,
             built: None,

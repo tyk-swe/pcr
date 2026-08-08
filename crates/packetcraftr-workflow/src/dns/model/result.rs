@@ -276,17 +276,6 @@ impl ValidatedDnsResponse {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum DnsAttemptStatus {
-    Response,
-    Truncated,
-    Timeout,
-    Unrelated,
-    DecodeFailure,
-    NetworkFailure,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
 pub enum DnsOutcome {
     Response,
     Truncated,
@@ -301,7 +290,7 @@ pub struct DnsAttemptEvidence {
     pub attempt: u32,
     pub server_address: IpAddr,
     pub source_port: u16,
-    pub status: DnsAttemptStatus,
+    pub status: DnsOutcome,
     pub sent_at: SystemTime,
     pub received_at: Option<SystemTime>,
     pub latency: Option<Duration>,

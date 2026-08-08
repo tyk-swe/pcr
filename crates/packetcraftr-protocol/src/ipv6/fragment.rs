@@ -58,10 +58,6 @@ impl LayerCodec for Ipv6FragmentCodec {
         protocol("ipv6_fragment")
     }
 
-    fn aliases(&self) -> &'static [&'static str] {
-        crate::support::aliases(self.protocol_id().as_str())
-    }
-
     fn encode(
         &self,
         layer: &dyn Layer,

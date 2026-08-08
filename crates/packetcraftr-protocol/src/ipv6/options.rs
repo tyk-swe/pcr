@@ -182,10 +182,6 @@ impl LayerCodec for HopByHopCodec {
         protocol("ipv6_hop_by_hop")
     }
 
-    fn aliases(&self) -> &'static [&'static str] {
-        crate::support::aliases(self.protocol_id().as_str())
-    }
-
     fn encode(
         &self,
         layer: &dyn Layer,
@@ -233,10 +229,6 @@ impl LayerCodec for HopByHopCodec {
 impl LayerCodec for DestinationOptionsCodec {
     fn protocol_id(&self) -> ProtocolId {
         protocol("ipv6_destination_options")
-    }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        crate::support::aliases(self.protocol_id().as_str())
     }
 
     fn encode(

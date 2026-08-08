@@ -31,27 +31,33 @@ impl RegistryBuilder {
     where
         C: LayerCodec + 'static,
     {
-        self.register_codec_with_origin(Arc::new(codec), false)
+        let aliases = codec.aliases();
+        self.register_codec_with_origin(Arc::new(codec), false, aliases)
     }
 
-    pub fn register_builtin_codec<C>(&mut self, codec: C) -> Result<&mut Self, RegistryError>
+    pub fn register_builtin_codec<C>(
+        &mut self,
+        codec: C,
+        aliases: &'static [&'static str],
+    ) -> Result<&mut Self, RegistryError>
     where
         C: LayerCodec + 'static,
     {
-        self.register_codec_with_origin(Arc::new(codec), true)
+        self.register_codec_with_origin(Arc::new(codec), true, aliases)
     }
 
     pub(super) fn register_codec_with_origin(
         &mut self,
         codec: Arc<dyn LayerCodec>,
         builtin: bool,
+        advertised_aliases: &[&str],
     ) -> Result<&mut Self, RegistryError> {
         let protocol = codec.protocol_id();
         if self.codecs.contains_key(&protocol) {
             return Err(RegistryError::DuplicateProtocol { protocol });
         }
         let mut aliases = Vec::new();
-        for alias in std::iter::once(protocol.as_str()).chain(codec.aliases().iter().copied()) {
+        for alias in std::iter::once(protocol.as_str()).chain(advertised_aliases.iter().copied()) {
             let alias = alias.trim().to_ascii_lowercase();
             if !aliases.contains(&alias) {
                 aliases.push(alias);

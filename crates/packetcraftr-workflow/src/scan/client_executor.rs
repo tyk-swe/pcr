@@ -8,10 +8,7 @@ use packetcraftr_net::{
     route::{NeighborResolver, RouteProvider},
     transmit::PacketIo,
 };
-use packetcraftr_packet::{
-    field::FieldValue,
-    template::{PacketTemplate, TemplateValues},
-};
+use packetcraftr_packet::{field::FieldValue, template::PacketTemplate};
 
 use super::classification::classify_scan_response;
 use super::model::{
@@ -70,7 +67,7 @@ where
                         })
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            template = template.axis(1, "destination_port", TemplateValues::Values(ports));
+            template = template.axis(1, "destination_port", ports);
         }
         let mut options = self.options.clone();
         options.timeout = batch.timeout;

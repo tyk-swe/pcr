@@ -34,42 +34,34 @@ pub(super) struct RawSocketError {
     pub(super) source: io::Error,
 }
 
-pub(super) trait RawIpBackend {
-    fn send(&self, packet: &PreparedRawIp) -> Result<usize, RawSocketError>;
-}
-
-pub(super) struct SystemRawIpBackend;
-
-impl RawIpBackend for SystemRawIpBackend {
-    fn send(&self, packet: &PreparedRawIp) -> Result<usize, RawSocketError> {
-        let domain = match packet.family {
-            IpFamily::V4 => Domain::IPV4,
-            IpFamily::V6 => Domain::IPV6,
-        };
-        let socket = Socket::new(domain, Type::RAW, Some(Protocol::from(IPPROTO_RAW)))
-            .map_err(|source| raw_error("opening a raw IP socket", source))?;
-        match packet.family {
-            IpFamily::V4 => socket
-                .set_header_included_v4(true)
-                .map_err(|source| raw_error("enabling IPv4 header inclusion", source))?,
-            IpFamily::V6 => socket
-                .set_header_included_v6(true)
-                .map_err(|source| raw_error("enabling IPv6 header inclusion", source))?,
-        }
-
-        bind_interface(&socket, packet)?;
-        if packet.destination == IpAddr::V4(Ipv4Addr::BROADCAST) {
-            socket
-                .set_broadcast(true)
-                .map_err(|source| raw_error("enabling IPv4 broadcast", source))?;
-        }
-        socket
-            .send_to(
-                &packet.submission,
-                &socket_address(packet.destination, packet.interface.index),
-            )
-            .map_err(|source| raw_error("sending the raw IP datagram", source))
+pub(super) fn send(packet: &PreparedRawIp) -> Result<usize, RawSocketError> {
+    let domain = match packet.family {
+        IpFamily::V4 => Domain::IPV4,
+        IpFamily::V6 => Domain::IPV6,
+    };
+    let socket = Socket::new(domain, Type::RAW, Some(Protocol::from(IPPROTO_RAW)))
+        .map_err(|source| raw_error("opening a raw IP socket", source))?;
+    match packet.family {
+        IpFamily::V4 => socket
+            .set_header_included_v4(true)
+            .map_err(|source| raw_error("enabling IPv4 header inclusion", source))?,
+        IpFamily::V6 => socket
+            .set_header_included_v6(true)
+            .map_err(|source| raw_error("enabling IPv6 header inclusion", source))?,
     }
+
+    bind_interface(&socket, packet)?;
+    if packet.destination == IpAddr::V4(Ipv4Addr::BROADCAST) {
+        socket
+            .set_broadcast(true)
+            .map_err(|source| raw_error("enabling IPv4 broadcast", source))?;
+    }
+    socket
+        .send_to(
+            &packet.submission,
+            &socket_address(packet.destination, packet.interface.index),
+        )
+        .map_err(|source| raw_error("sending the raw IP datagram", source))
 }
 
 #[cfg(target_os = "linux")]

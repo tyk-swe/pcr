@@ -74,14 +74,12 @@ fn register_catalog(builder: &mut RegistryBuilder) -> Result<(), RegistryError> 
                 canonical: $canonical:literal,
                 aliases: [$($alias:literal),* $(,)?],
                 constructible: $constructible:literal,
-                dissect: $dissect:literal,
-                exact_round_trip: $exact_round_trip:literal,
                 matcher: $matcher:ident,
                 codec: $codec:ident
             }
         )*) => {{
             $(
-                builder.register_builtin_codec($codec)?;
+                builder.register_builtin_codec($codec, BuiltinProtocol::$variant.aliases())?;
                 register_matcher!($variant, $matcher);
             )*
             Ok(())

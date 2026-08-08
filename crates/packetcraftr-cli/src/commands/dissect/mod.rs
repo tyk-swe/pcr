@@ -14,7 +14,9 @@ use self::arguments::DissectArgs;
 use super::super::errors::CliError;
 use super::super::filtering::{self, Capabilities};
 use super::super::input::{read_bounded_file, read_stdin_bounded};
-use super::super::rendering::{emit_json, write_plain_line, write_raw, write_stdout_line};
+use super::super::rendering::{
+    emit_json, render_diagnostics_text, write_plain_line, write_raw, write_stdout_line,
+};
 use super::super::system::default_registry_arc;
 
 pub(super) fn run(
@@ -75,13 +77,7 @@ pub(super) fn run(
             for (index, layer) in result.packet.layers.iter().enumerate() {
                 write_stdout_line(format_args!("{index}: {}", layer.protocol))?;
             }
-            for diagnostic in &diagnostics {
-                write_stdout_line(format_args!(
-                    "{:?} {}: {}",
-                    diagnostic.severity, diagnostic.code, diagnostic.message
-                ))?;
-            }
-            Ok(())
+            render_diagnostics_text(&diagnostics)
         }
         output::contract::Format::Hex => {
             if !kept {

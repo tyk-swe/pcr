@@ -95,10 +95,6 @@ impl LayerCodec for Ipv4Codec {
         protocol("ipv4")
     }
 
-    fn aliases(&self) -> &'static [&'static str] {
-        super::super::support::aliases(self.protocol_id().as_str())
-    }
-
     fn encode(
         &self,
         layer: &dyn Layer,

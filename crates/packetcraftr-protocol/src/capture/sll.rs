@@ -99,10 +99,6 @@ impl LayerCodec for LinuxSllCodec {
         protocol("linux_sll")
     }
 
-    fn aliases(&self) -> &'static [&'static str] {
-        crate::support::aliases(self.protocol_id().as_str())
-    }
-
     fn encode(
         &self,
         layer: &dyn Layer,
@@ -202,10 +198,6 @@ impl LayerCodec for LinuxSllCodec {
 impl LayerCodec for LinuxSll2Codec {
     fn protocol_id(&self) -> ProtocolId {
         protocol("linux_sll2")
-    }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        crate::support::aliases(self.protocol_id().as_str())
     }
 
     fn encode(

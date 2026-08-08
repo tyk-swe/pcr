@@ -8,7 +8,7 @@ mod result;
 pub use execution::{DnsExchange, DnsExchangeExecution, DnsExecutor, DnsMatchedResponse, DnsProbe};
 pub use request::{DnsLimits, DnsQueryType, DnsRequest};
 pub use result::{
-    DnsAttemptEvidence, DnsAttemptStatus, DnsEdns, DnsEdnsOption, DnsName, DnsOutcome, DnsRecord,
-    DnsRecordValue, DnsRejectedRecord, DnsResult, DnsSection, DnsUndecodedEvidence,
-    ValidatedDnsResponse,
+    DnsAttemptEvidence, DnsEdns, DnsEdnsOption, DnsName, DnsOutcome,
+    DnsOutcome as DnsAttemptStatus, DnsRecord, DnsRecordValue, DnsRejectedRecord, DnsResult,
+    DnsSection, DnsUndecodedEvidence, ValidatedDnsResponse,
 };

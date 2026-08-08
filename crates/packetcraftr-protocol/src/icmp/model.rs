@@ -112,10 +112,6 @@ impl LayerCodec for Icmpv4Codec {
         protocol("icmpv4")
     }
 
-    fn aliases(&self) -> &'static [&'static str] {
-        super::super::support::aliases(self.protocol_id().as_str())
-    }
-
     fn encode(
         &self,
         layer: &dyn Layer,
@@ -203,10 +199,6 @@ pub(crate) struct Icmpv6Codec;
 impl LayerCodec for Icmpv6Codec {
     fn protocol_id(&self) -> ProtocolId {
         protocol("icmpv6")
-    }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        super::super::support::aliases(self.protocol_id().as_str())
     }
 
     fn encode(

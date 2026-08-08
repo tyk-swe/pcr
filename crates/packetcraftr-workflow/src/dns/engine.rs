@@ -21,8 +21,8 @@ use crate::target::Authorizer;
 use super::error::DnsError;
 use super::evidence::validate_dns_execution;
 use super::model::{
-    DnsAttemptEvidence, DnsAttemptStatus, DnsExchange, DnsExecutor, DnsLimits, DnsOutcome,
-    DnsProbe, DnsRequest, DnsResult, DnsUndecodedEvidence,
+    DnsAttemptEvidence, DnsExchange, DnsExecutor, DnsLimits, DnsOutcome, DnsProbe, DnsRequest,
+    DnsResult, DnsUndecodedEvidence,
 };
 use super::wire::{DnsResponseClassification, classify_dns_response, encode_dns_query};
 use super::{DNS_EPHEMERAL_SOURCE_PORT_BASE, DNS_EVIDENCE_DIAGNOSTICS, MAX_DNS_PROBE_OVERHEAD};
@@ -222,7 +222,7 @@ where
                 &mut result.diagnostics,
             )
             .then(|| candidate.decoded.frame.clone());
-            match candidate.observation {
+            let (status, response_code, reason) = match candidate.observation {
                 DnsResponseClassification::Response(response) => {
                     let truncated = response.truncated;
                     let response_code = Some(response.response_code);
@@ -235,93 +235,49 @@ where
                             response.response_code_name()
                         )
                     };
-                    result.outcome = if truncated {
+                    let status = if truncated {
                         DnsOutcome::Truncated
                     } else {
                         DnsOutcome::Response
                     };
+                    result.outcome = status;
                     result.response = Some(response);
-                    DnsAttemptEvidence {
-                        attempt,
-                        server_address,
-                        source_port,
-                        status: if truncated {
-                            DnsAttemptStatus::Truncated
-                        } else {
-                            DnsAttemptStatus::Response
-                        },
-                        sent_at,
-                        received_at: Some(received_at),
-                        latency,
-                        response: response_frame,
-                        response_code,
-                        reason,
-                    }
+                    (status, response_code, reason)
                 }
                 DnsResponseClassification::NetworkFailure { reason } => {
-                    update_dns_fallback(
-                        &mut result.outcome,
-                        &mut fallback_rank,
-                        DnsOutcome::NetworkFailure,
-                    );
-                    DnsAttemptEvidence {
-                        attempt,
-                        server_address,
-                        source_port,
-                        status: DnsAttemptStatus::NetworkFailure,
-                        sent_at,
-                        received_at: Some(received_at),
-                        latency,
-                        response: response_frame,
-                        response_code: None,
-                        reason,
-                    }
+                    let status = DnsOutcome::NetworkFailure;
+                    update_dns_fallback(&mut result.outcome, &mut fallback_rank, status);
+                    (status, None, reason)
                 }
                 DnsResponseClassification::DecodeFailure { reason } => {
-                    update_dns_fallback(
-                        &mut result.outcome,
-                        &mut fallback_rank,
-                        DnsOutcome::DecodeFailure,
-                    );
-                    DnsAttemptEvidence {
-                        attempt,
-                        server_address,
-                        source_port,
-                        status: DnsAttemptStatus::DecodeFailure,
-                        sent_at,
-                        received_at: Some(received_at),
-                        latency,
-                        response: response_frame,
-                        response_code: None,
-                        reason,
-                    }
+                    let status = DnsOutcome::DecodeFailure;
+                    update_dns_fallback(&mut result.outcome, &mut fallback_rank, status);
+                    (status, None, reason)
                 }
                 DnsResponseClassification::Unrelated { reason } => {
-                    update_dns_fallback(
-                        &mut result.outcome,
-                        &mut fallback_rank,
-                        DnsOutcome::Unrelated,
-                    );
-                    DnsAttemptEvidence {
-                        attempt,
-                        server_address,
-                        source_port,
-                        status: DnsAttemptStatus::Unrelated,
-                        sent_at,
-                        received_at: Some(received_at),
-                        latency,
-                        response: response_frame,
-                        response_code: None,
-                        reason,
-                    }
+                    let status = DnsOutcome::Unrelated;
+                    update_dns_fallback(&mut result.outcome, &mut fallback_rank, status);
+                    (status, None, reason)
                 }
+            };
+            DnsAttemptEvidence {
+                attempt,
+                server_address,
+                source_port,
+                status,
+                sent_at,
+                received_at: Some(received_at),
+                latency,
+                response: response_frame,
+                response_code,
+                reason,
             }
         } else {
             DnsAttemptEvidence {
                 attempt,
                 server_address,
                 source_port,
-                status: DnsAttemptStatus::Timeout,
+                status: DnsOutcome::Timeout,
                 sent_at,
                 received_at: None,
                 latency: None,
@@ -333,7 +289,7 @@ where
         };
         let terminal = matches!(
             evidence.status,
-            DnsAttemptStatus::Response | DnsAttemptStatus::Truncated
+            DnsOutcome::Response | DnsOutcome::Truncated
         );
         result.attempts.push(evidence);
         // Correlated response evidence has priority over ambient undecodable

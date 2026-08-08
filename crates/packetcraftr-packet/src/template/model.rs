@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::fmt;
-use std::sync::Arc;
-
 use thiserror::Error;
 
 use super::super::Packet;
@@ -12,74 +9,7 @@ use super::super::layer::FieldError;
 
 pub const DEFAULT_MAX_TEMPLATE_PACKETS: usize = 10_000;
 
-#[derive(Clone)]
-pub enum TemplateValues {
-    Values(Vec<FieldValue>),
-    UnsignedRange {
-        start: u64,
-        end_inclusive: u64,
-    },
-    Generated {
-        count: usize,
-        generator: Arc<dyn Fn(usize) -> FieldValue + Send + Sync>,
-    },
-}
-
-impl fmt::Debug for TemplateValues {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Values(values) => formatter.debug_tuple("Values").field(values).finish(),
-            Self::UnsignedRange {
-                start,
-                end_inclusive,
-            } => formatter
-                .debug_struct("UnsignedRange")
-                .field("start", start)
-                .field("end_inclusive", end_inclusive)
-                .finish(),
-            Self::Generated { count, .. } => formatter
-                .debug_struct("Generated")
-                .field("count", count)
-                .finish_non_exhaustive(),
-        }
-    }
-}
-
-impl TemplateValues {
-    fn len(&self) -> Option<usize> {
-        match self {
-            Self::Values(values) => Some(values.len()),
-            Self::UnsignedRange {
-                start,
-                end_inclusive,
-            } => {
-                if start > end_inclusive {
-                    Some(0)
-                } else {
-                    end_inclusive
-                        .checked_sub(*start)
-                        .and_then(|span| span.checked_add(1))
-                        .and_then(|count| usize::try_from(count).ok())
-                }
-            }
-            Self::Generated { count, .. } => Some(*count),
-        }
-    }
-
-    fn value(&self, index: usize) -> Option<FieldValue> {
-        match self {
-            Self::Values(values) => values.get(index).cloned(),
-            Self::UnsignedRange {
-                start,
-                end_inclusive,
-            } => {
-                let value = start.checked_add(index as u64)?;
-                (value <= *end_inclusive).then_some(FieldValue::Unsigned(value))
-            }
-            Self::Generated { count, generator } => (index < *count).then(|| generator(index)),
-        }
-    }
-}
+pub type TemplateValues = Vec<FieldValue>;
 
 #[derive(Clone, Debug)]
 struct TemplateAxis {
@@ -117,9 +47,8 @@ impl PacketTemplate {
             return Ok(1);
         }
         self.axes.iter().try_fold(1usize, |product, axis| {
-            let length = axis.values.len().ok_or(TemplateError::ExpansionOverflow)?;
             product
-                .checked_mul(length)
+                .checked_mul(axis.values.len())
                 .ok_or(TemplateError::ExpansionOverflow)
         })
     }
@@ -158,17 +87,13 @@ impl Iterator for PacketTemplateIter<'_> {
         let mut packet = self.template.base.clone();
         let mut divisor = self.total;
         for axis in &self.template.axes {
-            let Some(length) = axis.values.len() else {
-                return Some(Err(TemplateError::ExpansionOverflow));
-            };
+            let length = axis.values.len();
             if length == 0 {
                 return None;
             }
             divisor /= length;
             let index = (ordinal / divisor) % length;
-            let Some(value) = axis.values.value(index) else {
-                return Some(Err(TemplateError::ExpansionOverflow));
-            };
+            let value = axis.values[index].clone();
             let Some(layer) = packet.layer_mut(axis.layer) else {
                 return Some(Err(TemplateError::LayerIndex {
                     index: axis.layer,

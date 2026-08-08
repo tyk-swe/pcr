@@ -1,0 +1,449 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
+use std::collections::BTreeMap;
+use std::io::Cursor;
+use std::net::Ipv4Addr;
+use std::sync::Arc;
+use std::time::{Duration, SystemTime};
+
+use bytes::Bytes;
+use packetcraftr_analysis::expert::{
+    ExpertCollector, ExpertSummary, Finding, StreamRef, StreamTransport,
+};
+use packetcraftr_analysis::{Options, run};
+use packetcraftr_capture::{Frame, LinkType, Reader, Writer};
+use packetcraftr_packet::Packet;
+use packetcraftr_packet::build::{Builder, Context as BuildContext, Options as BuildOptions};
+use packetcraftr_packet::diagnostic::DiagnosticSeverity;
+use packetcraftr_packet::layer::Raw;
+use packetcraftr_packet::registry::ProtocolRegistry;
+use packetcraftr_protocol::builtin;
+use packetcraftr_protocol::network::Ipv4;
+use packetcraftr_protocol::transport::Tcp;
+
+const CLIENT: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 1);
+const SERVER: Ipv4Addr = Ipv4Addr::new(198, 51, 100, 2);
+
+#[derive(Clone)]
+struct TcpSpec {
+    source: Ipv4Addr,
+    destination: Ipv4Addr,
+    source_port: u16,
+    destination_port: u16,
+    sequence: u32,
+    acknowledgment: u32,
+    flags: u16,
+    window: u16,
+    options: Bytes,
+}
+
+fn registry() -> Arc<ProtocolRegistry> {
+    Arc::new(builtin::registry().expect("built-in protocols must register"))
+}
+
+fn client(sequence: u32, acknowledgment: u32, flags: u16, window: u16) -> TcpSpec {
+    TcpSpec {
+        source: CLIENT,
+        destination: SERVER,
+        source_port: 40_000,
+        destination_port: 443,
+        sequence,
+        acknowledgment,
+        flags,
+        window,
+        options: Bytes::new(),
+    }
+}
+
+fn server(sequence: u32, acknowledgment: u32, flags: u16, window: u16) -> TcpSpec {
+    TcpSpec {
+        source: SERVER,
+        destination: CLIENT,
+        source_port: 443,
+        destination_port: 40_000,
+        sequence,
+        acknowledgment,
+        flags,
+        window,
+        options: Bytes::new(),
+    }
+}
+
+fn with_window_scale(mut spec: TcpSpec, shift: u8) -> TcpSpec {
+    spec.options = Bytes::from(vec![3, 3, shift, 0]);
+    spec
+}
+
+fn frame(
+    registry: &Arc<ProtocolRegistry>,
+    timestamp: SystemTime,
+    spec: &TcpSpec,
+    payload: &[u8],
+) -> Frame {
+    let mut packet = Packet::new();
+    packet.push(Ipv4 {
+        source: spec.source,
+        destination: spec.destination,
+        ..Ipv4::default()
+    });
+    packet.push(Tcp {
+        source_port: spec.source_port,
+        destination_port: spec.destination_port,
+        sequence: spec.sequence,
+        acknowledgment: spec.acknowledgment,
+        flags: spec.flags,
+        window: spec.window,
+        options: spec.options.clone(),
+        ..Tcp::default()
+    });
+    if !payload.is_empty() {
+        packet.push(Raw::new(payload.to_vec()));
+    }
+    let built = Builder::new(Arc::clone(registry))
+        .build(packet, BuildContext::default(), BuildOptions::default())
+        .expect("TCP fixture must build");
+    Frame::new(timestamp, LinkType::IPV4, built.bytes).expect("TCP fixture frame must be valid")
+}
+
+fn analyze(segments: &[(TcpSpec, &[u8])]) -> (Vec<Finding>, ExpertSummary) {
+    let registry = registry();
+    let mut writer = Writer::pcap(Vec::new(), LinkType::IPV4).expect("capture writer initializes");
+    for (index, (spec, payload)) in segments.iter().enumerate() {
+        let timestamp = SystemTime::UNIX_EPOCH
+            + Duration::from_secs(u64::try_from(index).expect("fixture index fits u64"));
+        writer
+            .write_frame(&frame(&registry, timestamp, spec, payload))
+            .expect("fixture frame writes");
+    }
+    let mut capture = Reader::new(Cursor::new(writer.into_inner())).expect("fixture capture opens");
+    let mut collector = ExpertCollector::new();
+    let mut findings = Vec::new();
+    let run_summary = run(
+        &mut capture,
+        registry,
+        &Options {
+            tcp_events: true,
+            ..Options::default()
+        },
+        |record| {
+            findings.extend(collector.observe(&record));
+            Ok(())
+        },
+    )
+    .expect("expert pass succeeds");
+    let (trailing, summary) =
+        collector.finish(&run_summary.trailing_tcp_events, run_summary.frames_read);
+    findings.extend(trailing);
+    (findings, summary)
+}
+
+fn finding(severity: DiagnosticSeverity, code: &str, number: u64, message: &str) -> Finding {
+    Finding {
+        severity,
+        code: code.to_owned(),
+        number,
+        stream: Some(StreamRef {
+            transport: StreamTransport::Tcp,
+            index: 0,
+        }),
+        message: message.to_owned(),
+    }
+}
+
+fn assert_expert(
+    segments: &[(TcpSpec, &[u8])],
+    expected: Vec<Finding>,
+    errors: u64,
+    warnings: u64,
+    notes: u64,
+) {
+    let (actual, summary) = analyze(segments);
+    assert_eq!(actual, expected);
+
+    let mut codes = BTreeMap::new();
+    for item in &expected {
+        *codes.entry(item.code.clone()).or_default() += 1;
+    }
+    assert_eq!(
+        summary,
+        ExpertSummary {
+            findings: u64::try_from(expected.len()).expect("fixture count fits u64"),
+            errors,
+            warnings,
+            notes,
+            codes,
+        }
+    );
+}
+
+#[test]
+fn duplicate_acknowledgments_require_outstanding_payload_and_keep_order() {
+    let segments: Vec<(TcpSpec, &[u8])> = vec![
+        (client(100, 0, Tcp::SYN, 1_000), b""),
+        (server(500, 101, Tcp::SYN | Tcp::ACK, 1_000), b""),
+        (client(101, 501, Tcp::ACK, 1_000), b""),
+        (client(101, 501, Tcp::ACK, 1_000), b"abc"),
+        (server(501, 101, Tcp::ACK, 1_000), b""),
+        (server(501, 101, Tcp::ACK, 1_000), b""),
+        (server(501, 104, Tcp::ACK, 1_000), b""),
+        (server(501, 104, Tcp::ACK, 1_000), b""),
+    ];
+    assert_expert(
+        &segments,
+        vec![
+            finding(
+                DiagnosticSeverity::Warning,
+                "tcp.duplicate_ack",
+                5,
+                "198.51.100.2:443 repeats acknowledgment 101 (duplicate #1)",
+            ),
+            finding(
+                DiagnosticSeverity::Warning,
+                "tcp.duplicate_ack",
+                6,
+                "198.51.100.2:443 repeats acknowledgment 101 (duplicate #2)",
+            ),
+        ],
+        0,
+        2,
+        0,
+    );
+}
+
+#[test]
+fn keep_alive_and_zero_window_probe_shapes_remain_distinct() {
+    let segments: Vec<(TcpSpec, &[u8])> = vec![
+        (client(100, 0, Tcp::SYN, 100), b""),
+        (server(500, 101, Tcp::SYN | Tcp::ACK, 100), b""),
+        (client(101, 501, Tcp::ACK, 100), b""),
+        (client(101, 501, Tcp::ACK, 100), b"a"),
+        (server(501, 102, Tcp::ACK, 100), b""),
+        (client(101, 501, Tcp::ACK, 100), b""),
+        (server(501, 102, Tcp::ACK, 0), b""),
+        (client(102, 501, Tcp::ACK, 100), b"z"),
+    ];
+    assert_expert(
+        &segments,
+        vec![
+            finding(
+                DiagnosticSeverity::Info,
+                "tcp.keep_alive",
+                6,
+                "192.0.2.1:40000 probes the peer",
+            ),
+            finding(
+                DiagnosticSeverity::Warning,
+                "tcp.zero_window",
+                7,
+                "198.51.100.2:443 advertises a zero receive window",
+            ),
+            finding(
+                DiagnosticSeverity::Info,
+                "tcp.zero_window_probe",
+                8,
+                "192.0.2.1:40000 probes the peer's zero receive window",
+            ),
+        ],
+        0,
+        1,
+        2,
+    );
+}
+
+#[test]
+fn gap_retransmission_conflict_and_end_residue_have_exact_attribution() {
+    let segments: Vec<(TcpSpec, &[u8])> = vec![
+        (client(100, 0, Tcp::SYN, 1_000), b""),
+        (server(500, 101, Tcp::SYN | Tcp::ACK, 1_000), b""),
+        (client(101, 501, Tcp::ACK, 1_000), b""),
+        (client(101, 501, Tcp::ACK, 1_000), b"abc"),
+        (client(106, 501, Tcp::ACK, 1_000), b"xy"),
+        (client(101, 501, Tcp::ACK, 1_000), b"abc"),
+        (client(101, 501, Tcp::ACK, 1_000), b"abd"),
+    ];
+    assert_expert(
+        &segments,
+        vec![
+            finding(
+                DiagnosticSeverity::Warning,
+                "tcp.previous_segment_not_captured",
+                5,
+                "192.0.2.1:40000 resumes at sequence 106 before sequence 104 arrived",
+            ),
+            finding(
+                DiagnosticSeverity::Warning,
+                "tcp.retransmission",
+                6,
+                "3 byte(s) at sequence 101 retransmit previously seen data",
+            ),
+            finding(
+                DiagnosticSeverity::Error,
+                "tcp.retransmission_conflicting",
+                7,
+                "3 byte(s) at sequence 101 retransmit previously seen data with different content",
+            ),
+            finding(
+                DiagnosticSeverity::Info,
+                "tcp.incomplete_at_end",
+                7,
+                "2 byte(s) from 192.0.2.1:40000 were still awaiting missing earlier data when the capture ended",
+            ),
+        ],
+        1,
+        2,
+        1,
+    );
+}
+
+#[test]
+fn unscaled_window_full_and_exceeded_findings_are_exact() {
+    let segments: Vec<(TcpSpec, &[u8])> = vec![
+        (client(100, 0, Tcp::SYN, 100), b""),
+        (server(500, 101, Tcp::SYN | Tcp::ACK, 3), b""),
+        (client(101, 501, Tcp::ACK, 100), b""),
+        (client(101, 501, Tcp::ACK, 100), b"abc"),
+        (client(104, 501, Tcp::ACK, 100), b"d"),
+    ];
+    assert_expert(
+        &segments,
+        vec![
+            finding(
+                DiagnosticSeverity::Warning,
+                "tcp.window_full",
+                4,
+                "192.0.2.1:40000 has filled the peer's 3-byte receive window",
+            ),
+            finding(
+                DiagnosticSeverity::Warning,
+                "tcp.window_exceeded",
+                5,
+                "192.0.2.1:40000 has sent 1 byte(s) beyond the peer's 3-byte receive window",
+            ),
+        ],
+        0,
+        2,
+        0,
+    );
+}
+
+#[test]
+fn negotiated_window_scale_applies_only_after_the_syn_window() {
+    let segments: Vec<(TcpSpec, &[u8])> = vec![
+        (with_window_scale(client(100, 0, Tcp::SYN, 100), 2), b""),
+        (
+            with_window_scale(server(500, 101, Tcp::SYN | Tcp::ACK, 2), 2),
+            b"",
+        ),
+        (client(101, 501, Tcp::ACK, 100), b""),
+        (server(501, 101, Tcp::ACK, 2), b""),
+        (client(101, 501, Tcp::ACK, 100), b"abcdefgh"),
+        (client(109, 501, Tcp::ACK, 100), b"i"),
+    ];
+    assert_expert(
+        &segments,
+        vec![
+            finding(
+                DiagnosticSeverity::Warning,
+                "tcp.window_full",
+                5,
+                "192.0.2.1:40000 has filled the peer's 8-byte receive window",
+            ),
+            finding(
+                DiagnosticSeverity::Warning,
+                "tcp.window_exceeded",
+                6,
+                "192.0.2.1:40000 has sent 1 byte(s) beyond the peer's 8-byte receive window",
+            ),
+        ],
+        0,
+        2,
+        0,
+    );
+}
+
+#[test]
+fn reordered_window_update_does_not_replace_the_newer_advertisement() {
+    let segments: Vec<(TcpSpec, &[u8])> = vec![
+        (client(100, 0, Tcp::SYN, 100), b""),
+        (server(500, 101, Tcp::SYN | Tcp::ACK, 10), b""),
+        (client(101, 501, Tcp::ACK, 100), b""),
+        (server(502, 101, Tcp::ACK, 5), b""),
+        (server(501, 101, Tcp::ACK, 1), b""),
+        (client(101, 501, Tcp::ACK, 100), b"abcde"),
+    ];
+    assert_expert(
+        &segments,
+        vec![finding(
+            DiagnosticSeverity::Warning,
+            "tcp.window_full",
+            6,
+            "192.0.2.1:40000 has filled the peer's 5-byte receive window",
+        )],
+        0,
+        1,
+        0,
+    );
+}
+
+#[test]
+fn clean_close_produces_no_expert_findings() {
+    let segments: Vec<(TcpSpec, &[u8])> = vec![
+        (client(100, 0, Tcp::SYN, 100), b""),
+        (server(500, 101, Tcp::SYN | Tcp::ACK, 100), b""),
+        (client(101, 501, Tcp::ACK, 100), b""),
+        (client(101, 501, Tcp::FIN | Tcp::ACK, 100), b""),
+        (server(501, 102, Tcp::ACK, 100), b""),
+        (server(501, 102, Tcp::FIN | Tcp::ACK, 100), b""),
+        (client(102, 502, Tcp::ACK, 100), b""),
+    ];
+    assert_expert(&segments, Vec::new(), 0, 0, 0);
+}
+
+#[test]
+fn reset_is_attributed_before_state_is_retired() {
+    let segments: Vec<(TcpSpec, &[u8])> = vec![
+        (client(100, 0, Tcp::SYN, 100), b""),
+        (server(500, 101, Tcp::SYN | Tcp::ACK, 100), b""),
+        (client(101, 501, Tcp::ACK, 100), b""),
+        (server(501, 101, Tcp::RST | Tcp::ACK, 100), b""),
+    ];
+    assert_expert(
+        &segments,
+        vec![finding(
+            DiagnosticSeverity::Warning,
+            "tcp.reset",
+            4,
+            "connection reset by 198.51.100.2:443",
+        )],
+        0,
+        1,
+        0,
+    );
+}
+
+#[test]
+fn renewed_syn_clears_stale_tuple_window_state() {
+    let segments: Vec<(TcpSpec, &[u8])> = vec![
+        (client(100, 0, Tcp::SYN, 100), b""),
+        (server(500, 101, Tcp::SYN | Tcp::ACK, 100), b""),
+        (client(101, 501, Tcp::ACK, 100), b""),
+        (server(501, 101, Tcp::ACK, 0), b""),
+        (client(1_000, 0, Tcp::SYN, 100), b""),
+        (server(2_000, 1_001, Tcp::SYN | Tcp::ACK, 100), b""),
+        (client(1_001, 2_001, Tcp::ACK, 100), b""),
+        (client(1_001, 2_001, Tcp::ACK, 100), b"abcd"),
+    ];
+    assert_expert(
+        &segments,
+        vec![finding(
+            DiagnosticSeverity::Warning,
+            "tcp.zero_window",
+            4,
+            "198.51.100.2:443 advertises a zero receive window",
+        )],
+        0,
+        1,
+        0,
+    );
+}

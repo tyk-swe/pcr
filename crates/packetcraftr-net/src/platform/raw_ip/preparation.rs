@@ -10,7 +10,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use bytes::Bytes;
 
 use super::super::super::{Error as LiveIoError, transmit::Layer3Frame};
-use crate::route::InterfaceId;
+use crate::{checksum, route::InterfaceId};
 
 const IPV4_MINIMUM_HEADER: usize = 20;
 const IPV6_HEADER: usize = 40;
@@ -130,7 +130,7 @@ fn validate_ipv4(bytes: &[u8]) -> Result<(Ipv4Addr, Ipv4Addr), LiveIoError> {
             "IPv4 identification is zero and would be replaced by the operating system".to_owned(),
         ));
     }
-    if checksum(&bytes[..header_length]) != 0 {
+    if checksum::compute(&bytes[..header_length]) != 0 {
         return Err(invalid_frame(
             "IPv4 header checksum would be rewritten by the operating system".to_owned(),
         ));
@@ -248,29 +248,6 @@ pub(super) fn upper_protocol(bytes: &[u8]) -> Result<u8, LiveIoError> {
             .filter(|offset| *offset <= bytes.len())
             .ok_or_else(|| invalid_frame("IPv6 extension exceeds packet bytes".to_owned()))?;
     }
-}
-
-fn checksum(bytes: &[u8]) -> u16 {
-    checksum_impl(bytes)
-}
-
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "the fold loop only exits once sum >> 16 is zero, so sum is at most 0xffff"
-)]
-fn checksum_impl(bytes: &[u8]) -> u16 {
-    let mut sum = 0_u64;
-    let mut chunks = bytes.chunks_exact(2);
-    for chunk in &mut chunks {
-        sum += u64::from(u16::from_be_bytes([chunk[0], chunk[1]]));
-    }
-    if let Some(byte) = chunks.remainder().first() {
-        sum += u64::from(u16::from_be_bytes([*byte, 0]));
-    }
-    while sum > u64::from(u16::MAX) {
-        sum = (sum & u64::from(u16::MAX)) + (sum >> 16);
-    }
-    !(sum as u16)
 }
 
 fn invalid_frame(message: String) -> LiveIoError {

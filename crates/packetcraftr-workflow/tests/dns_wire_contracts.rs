@@ -4,7 +4,9 @@
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 use bytes::Bytes;
-use packetcraftr_workflow::dns::{self, Limits, Name, QueryType, RecordValue, Section, WireError};
+use packetcraftr_workflow::dns::{
+    self, Limits, Name, QueryType, Record, RecordValue, Section, WireError,
+};
 
 const ID: u16 = 0x4a5b;
 const RESPONSE: u16 = 0x8000;
@@ -100,6 +102,15 @@ fn decode(message: &[u8], query_name: &str, query_type: QueryType) -> dns::Valid
 }
 
 #[test]
+fn public_decode_aliases_keep_their_function_contracts() {
+    type Decode =
+        fn(&[u8], &str, QueryType, u16, Limits) -> Result<dns::ValidatedResponse, WireError>;
+
+    let _: Decode = dns::decode_response;
+    let _: Decode = dns::decode_tcp_frame;
+}
+
+#[test]
 fn query_encoder_canonicalizes_names_flags_and_all_type_codes() {
     let cases = [
         (QueryType::A, 1, "a"),
@@ -185,23 +196,37 @@ fn basic_response_retains_header_flags_and_a_record() {
         &[],
     );
     let decoded = decode(&message, "WWW.Example.COM", QueryType::A);
-    assert_eq!(decoded.transaction_id, ID);
-    assert_eq!(decoded.response_code, 0);
-    assert_eq!(decoded.response_code_name(), "no_error");
-    assert!(decoded.authoritative);
-    assert!(!decoded.truncated);
-    assert!(decoded.recursion_desired);
-    assert!(decoded.recursion_available);
-    assert!(decoded.authenticated_data);
-    assert!(decoded.checking_disabled);
-    assert_eq!(decoded.answers.len(), 1);
-    assert_eq!(decoded.answers[0].owner.to_string(), "www.example.com.");
-    assert_eq!(decoded.answers[0].class, 1);
-    assert_eq!(decoded.answers[0].ttl, 300);
+    let owner = Name::from_labels([
+        Bytes::from_static(b"www"),
+        Bytes::from_static(b"example"),
+        Bytes::from_static(b"com"),
+    ])
+    .expect("fixture owner");
     assert_eq!(
-        decoded.answers[0].value,
-        RecordValue::A(Ipv4Addr::new(192, 0, 2, 10))
+        decoded,
+        dns::ValidatedResponse {
+            transaction_id: ID,
+            response_code: 0,
+            edns: None,
+            authoritative: true,
+            truncated: false,
+            recursion_desired: true,
+            recursion_available: true,
+            authenticated_data: true,
+            checking_disabled: true,
+            answers: vec![Record {
+                owner,
+                class: 1,
+                ttl: 300,
+                value: RecordValue::A(Ipv4Addr::new(192, 0, 2, 10)),
+            }],
+            authorities: Vec::new(),
+            additionals: Vec::new(),
+            rejected_records: Vec::new(),
+            rejected_record_count: 0,
+        }
     );
+    assert_eq!(decoded.response_code_name(), "no_error");
 }
 
 #[test]
@@ -215,11 +240,131 @@ fn truncated_response_stops_after_the_complete_question() {
         &[],
     );
     message.truncate(name("example.test.").len() + 16);
-    let decoded = decode(&message, "example.test", QueryType::A);
-    assert!(decoded.truncated);
-    assert!(decoded.authoritative);
-    assert!(decoded.answers.is_empty());
-    assert!(decoded.edns.is_none());
+    let decoded = dns::decode_response(
+        &message,
+        "example.test",
+        QueryType::A,
+        ID,
+        Limits {
+            max_records: 0,
+            ..Limits::default()
+        },
+    )
+    .expect("truncation returns before record limits and partial RDATA");
+    assert_eq!(
+        decoded,
+        dns::ValidatedResponse {
+            transaction_id: ID,
+            response_code: 0,
+            edns: None,
+            authoritative: true,
+            truncated: true,
+            recursion_desired: false,
+            recursion_available: false,
+            authenticated_data: false,
+            checking_disabled: false,
+            answers: Vec::new(),
+            authorities: Vec::new(),
+            additionals: Vec::new(),
+            rejected_records: Vec::new(),
+            rejected_record_count: 0,
+        }
+    );
+}
+
+#[test]
+fn decoder_error_precedence_is_stable() {
+    assert!(matches!(
+        dns::decode_response(&[], "", QueryType::A, ID, Limits::default()),
+        Err(WireError::InvalidName { .. })
+    ));
+
+    let base = response("example.test.", QueryType::A, RESPONSE, &[], &[], &[]);
+    let mut combined = base.clone();
+    combined[0..2].copy_from_slice(&(ID + 1).to_be_bytes());
+    combined[2..4].copy_from_slice(&((1_u16 << 11) | 0x40).to_be_bytes());
+    combined[4..6].copy_from_slice(&2_u16.to_be_bytes());
+    assert!(matches!(
+        dns::decode_response(
+            &combined,
+            "example.test",
+            QueryType::A,
+            ID,
+            Limits::default()
+        ),
+        Err(WireError::NotResponse)
+    ));
+
+    combined[2..4].copy_from_slice(&(RESPONSE | (1 << 11) | 0x40).to_be_bytes());
+    assert!(matches!(
+        dns::decode_response(
+            &combined,
+            "example.test",
+            QueryType::A,
+            ID,
+            Limits::default()
+        ),
+        Err(WireError::UnsupportedOpcode { opcode: 1 })
+    ));
+
+    combined[2..4].copy_from_slice(&(RESPONSE | 0x40).to_be_bytes());
+    assert!(matches!(
+        dns::decode_response(
+            &combined,
+            "example.test",
+            QueryType::A,
+            ID,
+            Limits::default()
+        ),
+        Err(WireError::ReservedHeaderBits)
+    ));
+
+    combined[2..4].copy_from_slice(&RESPONSE.to_be_bytes());
+    assert!(matches!(
+        dns::decode_response(
+            &combined,
+            "example.test",
+            QueryType::A,
+            ID,
+            Limits::default()
+        ),
+        Err(WireError::TransactionIdMismatch { .. })
+    ));
+
+    let mut truncated_wrong_question = base;
+    truncated_wrong_question[2..4].copy_from_slice(&(RESPONSE | TRUNCATED).to_be_bytes());
+    truncated_wrong_question[13] = b'x';
+    assert!(matches!(
+        dns::decode_response(
+            &truncated_wrong_question,
+            "example.test",
+            QueryType::A,
+            ID,
+            Limits::default()
+        ),
+        Err(WireError::QuestionNameMismatch { .. })
+    ));
+
+    let opt = WireRecord {
+        owner: name("."),
+        type_code: 41,
+        class: 1_232,
+        ttl: 0,
+        rdata: Vec::new(),
+    };
+    let mut misplaced_with_trailing =
+        response("example.test.", QueryType::A, RESPONSE, &[opt], &[], &[]);
+    misplaced_with_trailing.push(0xff);
+    assert!(matches!(
+        dns::decode_response(
+            &misplaced_with_trailing,
+            "example.test",
+            QueryType::A,
+            ID,
+            Limits::default()
+        ),
+        Err(WireError::TrailingBytes { remaining: 1 })
+    ));
 }
 
 #[test]

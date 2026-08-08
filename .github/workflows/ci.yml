@@ -71,6 +71,25 @@ jobs:
           path: target/nextest/ci/junit.xml
           if-no-files-found: error
 
+  native-all-features:
+    name: Native all-features check (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos
+            os: macos-latest
+          - name: windows
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.97.1
+      - name: Check all native features
+        run: cargo check --locked --workspace --all-targets --all-features
+
   quality:
     name: Quality
     runs-on: ubuntu-latest

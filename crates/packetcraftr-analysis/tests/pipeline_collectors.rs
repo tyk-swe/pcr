@@ -6,7 +6,9 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use packetcraftr_analysis::expert::{ExpertCollector, StreamTransport};
+use packetcraftr_analysis::expert::{
+    ExpertCollector, ExpertSummary, Finding, StreamRef, StreamTransport,
+};
 use packetcraftr_analysis::follow::{Direction as FollowDirection, FollowCollector, Selector};
 use packetcraftr_analysis::reassembly::tcp;
 use packetcraftr_analysis::stats::{StatsCollector, TransportKind};
@@ -24,6 +26,33 @@ use packetcraftr_protocol::transport::{Tcp, Udp};
 
 const CLIENT: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 1);
 const SERVER: Ipv4Addr = Ipv4Addr::new(198, 51, 100, 2);
+
+#[test]
+fn expert_public_models_and_collector_keep_their_contracts() {
+    type Finish = fn(ExpertCollector, &[tcp::Event], u64) -> (Vec<Finding>, ExpertSummary);
+
+    fn assert_model<T: Clone + std::fmt::Debug + Eq>() {}
+    fn assert_collector<T: Default + std::fmt::Debug>() {}
+    fn observe<'record>(
+        collector: &mut ExpertCollector,
+        record: &packetcraftr_analysis::FrameRecord<'record>,
+    ) -> Vec<Finding> {
+        collector.observe(record)
+    }
+
+    assert_model::<Finding>();
+    assert_model::<ExpertSummary>();
+    assert_model::<StreamRef>();
+    assert_model::<StreamTransport>();
+    assert_collector::<ExpertCollector>();
+
+    let _: fn() -> ExpertCollector = ExpertCollector::new;
+    let _: for<'record> fn(
+        &mut ExpertCollector,
+        &packetcraftr_analysis::FrameRecord<'record>,
+    ) -> Vec<Finding> = observe;
+    let _: Finish = ExpertCollector::finish;
+}
 
 fn registry() -> Arc<ProtocolRegistry> {
     Arc::new(builtin::registry().expect("built-in protocols must register"))

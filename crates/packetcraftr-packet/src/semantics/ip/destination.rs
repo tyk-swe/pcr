@@ -79,7 +79,6 @@ pub fn live_destinations(packet: &Packet) -> Result<Vec<IpAddr>, SemanticError> 
 
 // Keep this match exhaustive so every newly added built-in protocol must make
 // an explicit live-authorization decision.
-#[allow(clippy::match_like_matches_macro)]
 fn malformed_protocol_may_hide_destination(protocol: BuiltinProtocol) -> bool {
     match protocol {
         BuiltinProtocol::Ah

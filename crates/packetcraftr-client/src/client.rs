@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use packetcraftr_net::route::{NeighborResolver, RoutePlanner, RouteProvider};
+use packetcraftr_net::route::{NeighborResolver, RouteProvider};
 use packetcraftr_net::transmit::PacketIo;
 use packetcraftr_packet::registry::ProtocolRegistry;
 
@@ -18,7 +18,6 @@ pub struct Client<R, N, I> {
     pub(crate) neighbors: N,
     pub(crate) io: I,
     pub(crate) policy: TrafficPolicy,
-    pub(crate) planner: RoutePlanner,
 }
 
 impl<R, N, I> Client<R, N, I>
@@ -40,7 +39,6 @@ where
             neighbors,
             io,
             policy,
-            planner: RoutePlanner,
         }
     }
 

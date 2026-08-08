@@ -9,13 +9,11 @@ use super::super::layer::FieldError;
 
 pub const DEFAULT_MAX_TEMPLATE_PACKETS: usize = 10_000;
 
-pub type TemplateValues = Vec<FieldValue>;
-
 #[derive(Clone, Debug)]
 struct TemplateAxis {
     layer: usize,
     field: String,
-    values: TemplateValues,
+    values: Vec<FieldValue>,
 }
 
 #[derive(Clone, Debug)]
@@ -33,7 +31,7 @@ impl PacketTemplate {
     }
 
     #[must_use]
-    pub fn axis(mut self, layer: usize, field: impl Into<String>, values: TemplateValues) -> Self {
+    pub fn axis(mut self, layer: usize, field: impl Into<String>, values: Vec<FieldValue>) -> Self {
         self.axes.push(TemplateAxis {
             layer,
             field: field.into(),

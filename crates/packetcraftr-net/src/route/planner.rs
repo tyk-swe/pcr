@@ -16,8 +16,6 @@ use super::intent::{
     arp_link_macs, extract_neighbor_vlan_tags, multicast_mac, outer_ethernet_mac,
     packet_has_link_layer_intent,
 };
-use super::materialize::materialize;
-pub(crate) use super::materialize::{MaterializedRoute, NeighborError, NeighborResolver};
 use super::models::{LinkMode, PlanOptions, PlannedRoute, RouteProvider};
 
 #[derive(Debug, Error)]
@@ -137,244 +135,227 @@ impl Classified for PlanError {
     }
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct RoutePlanner;
-
-impl RoutePlanner {
-    /// Perform passive route/source/link selection. This never invokes ARP/NDP,
-    /// capture, or transmission.
-    pub fn plan<P: RouteProvider>(
-        &self,
-        packet: &Packet,
-        destination: Option<IpAddr>,
-        options: &PlanOptions,
-        provider: &P,
-    ) -> Result<PlannedRoute, PlanError> {
-        if let Some(protocol) = semantics::outer_layers(packet).find_map(|layer| {
-            matches!(
-                BuiltinProtocol::of(layer),
-                Some(
-                    BuiltinProtocol::BsdNull
-                        | BuiltinProtocol::BsdLoop
-                        | BuiltinProtocol::LinuxSll
-                        | BuiltinProtocol::LinuxSll2
-                )
+/// Perform passive route/source/link selection. This never invokes ARP/NDP,
+/// capture, or transmission.
+pub fn plan<P: RouteProvider>(
+    packet: &Packet,
+    destination: Option<IpAddr>,
+    options: &PlanOptions,
+    provider: &P,
+) -> Result<PlannedRoute, PlanError> {
+    if let Some(protocol) = semantics::outer_layers(packet).find_map(|layer| {
+        matches!(
+            BuiltinProtocol::of(layer),
+            Some(
+                BuiltinProtocol::BsdNull
+                    | BuiltinProtocol::BsdLoop
+                    | BuiltinProtocol::LinuxSll
+                    | BuiltinProtocol::LinuxSll2
             )
-            .then(|| layer.protocol_id().clone())
-        }) {
-            return Err(PlanError::OfflineOnlyLinkHeader { protocol });
+        )
+        .then(|| layer.protocol_id().clone())
+    }) {
+        return Err(PlanError::OfflineOnlyLinkHeader { protocol });
+    }
+    let has_link_layer_intent = packet_has_link_layer_intent(packet);
+    if options.link_mode == LinkMode::Layer3 && has_link_layer_intent {
+        return Err(PlanError::EthernetInLayer3);
+    }
+    let outer_ip_protocol = semantics::outer_layers(packet).find_map(|layer| {
+        let protocol = BuiltinProtocol::of(layer)?;
+        protocol.is_ip().then_some(protocol)
+    });
+    let ip_path = semantics::outer_ip_path(packet).map_err(|source| {
+        let message = source.to_string();
+        match outer_ip_protocol {
+            Some(BuiltinProtocol::Ipv4) => PlanError::InvalidSourceRouting { message },
+            _ => PlanError::InvalidSegmentRouting { message },
         }
-        let has_link_layer_intent = packet_has_link_layer_intent(packet);
-        if options.link_mode == LinkMode::Layer3 && has_link_layer_intent {
-            return Err(PlanError::EthernetInLayer3);
-        }
-        let outer_ip_protocol = semantics::outer_layers(packet).find_map(|layer| {
-            let protocol = BuiltinProtocol::of(layer)?;
-            protocol.is_ip().then_some(protocol)
+    })?;
+    if ip_path.as_ref().is_some_and(|path| {
+        matches!(path.header_destination, IpAddr::V4(destination) if destination.is_unspecified())
+            && !path.declared_route_destinations.is_empty()
+    }) {
+        return Err(PlanError::InvalidSourceRouting {
+            message: "the IPv4 header destination must name the active LSRR/SSRR hop".to_owned(),
         });
-        let ip_path = semantics::outer_ip_path(packet).map_err(|source| {
-            let message = source.to_string();
-            match outer_ip_protocol {
-                Some(BuiltinProtocol::Ipv4) => PlanError::InvalidSourceRouting { message },
-                _ => PlanError::InvalidSegmentRouting { message },
-            }
-        })?;
-        if ip_path.as_ref().is_some_and(|path| {
-            matches!(path.header_destination, IpAddr::V4(destination) if destination.is_unspecified())
-                && !path.declared_route_destinations.is_empty()
-        }) {
-            return Err(PlanError::InvalidSourceRouting {
-                message: "the IPv4 header destination must name the active LSRR/SSRR hop"
-                    .to_owned(),
-            });
-        }
-        let has_ip = ip_path.is_some();
-        let ip_root = packet
-            .layer(0)
-            .and_then(BuiltinProtocol::of)
-            .is_some_and(BuiltinProtocol::is_ip);
+    }
+    let has_ip = ip_path.is_some();
+    let ip_root = packet
+        .layer(0)
+        .and_then(BuiltinProtocol::of)
+        .is_some_and(BuiltinProtocol::is_ip);
 
-        let packet_destination = ip_path
-            .as_ref()
-            .map(|path| path.header_destination)
-            .filter(|destination| !destination.is_unspecified());
-        let final_destination = ip_path
-            .as_ref()
-            .map(|path| path.final_destination)
-            .filter(|destination| !destination.is_unspecified())
-            .or(destination);
-        let lookup_destination = ip_path
-            .as_ref()
-            .map(|path| path.active_destination)
-            .filter(|destination| !destination.is_unspecified())
-            .or(packet_destination)
-            .or(final_destination);
+    let packet_destination = ip_path
+        .as_ref()
+        .map(|path| path.header_destination)
+        .filter(|destination| !destination.is_unspecified());
+    let final_destination = ip_path
+        .as_ref()
+        .map(|path| path.final_destination)
+        .filter(|destination| !destination.is_unspecified())
+        .or(destination);
+    let lookup_destination = ip_path
+        .as_ref()
+        .map(|path| path.active_destination)
+        .filter(|destination| !destination.is_unspecified())
+        .or(packet_destination)
+        .or(final_destination);
 
-        if let (Some(preferred_source), Some(lookup_destination)) =
-            (options.preferred_source, lookup_destination)
-            && preferred_source.is_ipv4() != lookup_destination.is_ipv4()
-        {
-            return Err(PlanError::PreferredSourceFamilyMismatch {
-                preferred_source,
+    if let (Some(preferred_source), Some(lookup_destination)) =
+        (options.preferred_source, lookup_destination)
+        && preferred_source.is_ipv4() != lookup_destination.is_ipv4()
+    {
+        return Err(PlanError::PreferredSourceFamilyMismatch {
+            preferred_source,
+            destination: lookup_destination,
+        });
+    }
+
+    if final_destination.is_none() && (has_ip || options.link_mode == LinkMode::Layer3) {
+        return Err(PlanError::MissingDestination);
+    }
+
+    let route = match lookup_destination {
+        Some(lookup_destination) => provider
+            .lookup_with_preferences(
+                lookup_destination,
+                options.interface.as_ref(),
+                options.preferred_source,
+            )
+            .map_err(|source| PlanError::RouteLookup {
                 destination: lookup_destination,
-            });
-        }
-
-        if final_destination.is_none() && (has_ip || options.link_mode == LinkMode::Layer3) {
-            return Err(PlanError::MissingDestination);
-        }
-
-        let route = match lookup_destination {
-            Some(lookup_destination) => provider
-                .lookup_with_preferences(
-                    lookup_destination,
-                    options.interface.as_ref(),
-                    options.preferred_source,
-                )
-                .map_err(|source| PlanError::RouteLookup {
-                    destination: lookup_destination,
+                failure: provider.classify_error(&source),
+                message: source.to_string(),
+            })?,
+        None => {
+            let interface = options
+                .interface
+                .as_ref()
+                .ok_or(PlanError::MissingLayer2Interface)?;
+            provider
+                .lookup_interface(interface)
+                .map_err(|source| PlanError::InterfaceLookup {
+                    interface: interface.name.clone(),
                     failure: provider.classify_error(&source),
                     message: source.to_string(),
-                })?,
-            None => {
-                let interface = options
-                    .interface
-                    .as_ref()
-                    .ok_or(PlanError::MissingLayer2Interface)?;
-                provider
-                    .lookup_interface(interface)
-                    .map_err(|source| PlanError::InterfaceLookup {
-                        interface: interface.name.clone(),
-                        failure: provider.classify_error(&source),
-                        message: source.to_string(),
-                    })?
-                    .ok_or_else(|| PlanError::InterfaceLookupUnsupported {
-                        interface: interface.name.clone(),
-                    })?
-            }
-        };
-        if let Some(requested) = &options.interface
-            && route.interface != *requested
-        {
-            return Err(PlanError::InterfaceMismatch {
-                requested: requested.name.clone(),
-                requested_index: requested.index,
-                selected: route.interface.name.clone(),
-                selected_index: route.interface.index,
-            });
+                })?
+                .ok_or_else(|| PlanError::InterfaceLookupUnsupported {
+                    interface: interface.name.clone(),
+                })?
         }
-        if let Some(requested) = options.preferred_source
-            && route.selected_address != Some(requested)
-            && route.preferred_source != Some(requested)
-        {
-            return Err(PlanError::PreferredSourceNotSelected {
-                requested,
-                selected: route.selected_address.or(route.preferred_source),
-            });
-        }
-
-        let mode = match options.link_mode {
-            LinkMode::Layer3 => LinkMode::Layer3,
-            LinkMode::Layer2 => LinkMode::Layer2,
-            LinkMode::Auto if has_link_layer_intent => LinkMode::Layer2,
-            LinkMode::Auto if ip_root && route.capability.supports_layer3() => LinkMode::Layer3,
-            LinkMode::Auto => LinkMode::Layer2,
-        };
-        if mode == LinkMode::Layer2 && !route.capability.supports_layer2() {
-            return Err(PlanError::Layer2Unsupported);
-        }
-        if mode == LinkMode::Layer3 && !route.capability.supports_layer3() {
-            return Err(PlanError::Layer3Unsupported);
-        }
-
-        let explicit_source = ip_path
-            .as_ref()
-            .map(|path| path.source)
-            .filter(|source| !source.is_unspecified());
-        let packet_source = has_ip
-            .then(|| {
-                explicit_source
-                    .or(route.preferred_source)
-                    .or(route.selected_address)
-            })
-            .flatten();
-        if let (Some(source), Some(final_destination)) = (packet_source, final_destination)
-            && source.is_ipv4() != final_destination.is_ipv4()
-        {
-            return Err(PlanError::SourceFamilyMismatch {
-                destination: final_destination,
-            });
-        }
-        if has_ip && packet_source.is_none() {
-            return Err(PlanError::MissingPacketSource);
-        }
-        let neighbor_source = lookup_destination.and_then(|lookup_destination| {
-            route
-                .selected_address
-                .filter(|source| source.is_ipv4() == lookup_destination.is_ipv4())
-                .or_else(|| {
-                    route
-                        .preferred_source
-                        .filter(|source| source.is_ipv4() == lookup_destination.is_ipv4())
-                })
+    };
+    if let Some(requested) = &options.interface
+        && route.interface != *requested
+    {
+        return Err(PlanError::InterfaceMismatch {
+            requested: requested.name.clone(),
+            requested_index: requested.index,
+            selected: route.interface.name.clone(),
+            selected_index: route.interface.index,
         });
-        let explicit_destination_mac = outer_ethernet_mac(packet, semantics::DESTINATION);
-        let explicit_source_mac = outer_ethernet_mac(packet, semantics::SOURCE);
-        let (arp_source_mac, arp_destination_mac) = arp_link_macs(packet);
-        let destination_mac = explicit_destination_mac
-            .or(arp_destination_mac)
-            .or_else(|| lookup_destination.and_then(multicast_mac));
-        if mode == LinkMode::Layer2 && destination_mac.is_none() {
-            let Some(lookup_destination) = lookup_destination else {
-                return Err(PlanError::MissingLayer2DestinationMac);
-            };
-            if neighbor_source.is_none() && !lookup_destination.is_multicast() {
-                return Err(PlanError::MissingNeighborSource);
-            }
-        }
-        let source_mac = explicit_source_mac.or(arp_source_mac).or(route.source_mac);
-        let neighbor_vlan_tags = extract_neighbor_vlan_tags(packet)?;
-        let mut visited_destinations = ip_path
-            .map(|path| {
-                path.visited_destinations
-                    .into_iter()
-                    .filter(|destination| !destination.is_unspecified())
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        if visited_destinations.is_empty()
-            && let Some(final_destination) = final_destination
-        {
-            visited_destinations.push(final_destination);
-        }
+    }
+    if let Some(requested) = options.preferred_source
+        && route.selected_address != Some(requested)
+        && route.preferred_source != Some(requested)
+    {
+        return Err(PlanError::PreferredSourceNotSelected {
+            requested,
+            selected: route.selected_address.or(route.preferred_source),
+        });
+    }
 
-        Ok(PlannedRoute {
-            neighbor_target: (mode == LinkMode::Layer2)
-                .then(|| {
-                    lookup_destination.map(|destination| route.next_hop.unwrap_or(destination))
-                })
-                .flatten(),
-            destination_mac,
-            source_mac,
-            neighbor_vlan_tags,
-            synthesized_ethernet: mode == LinkMode::Layer2
-                && !semantics::outer_layers(packet)
-                    .any(|layer| BuiltinProtocol::of(layer) == Some(BuiltinProtocol::Ethernet)),
-            route,
-            mode,
-            lookup_destination,
-            final_destination,
-            visited_destinations,
-            packet_source,
-            neighbor_source,
+    let mode = match options.link_mode {
+        LinkMode::Layer3 => LinkMode::Layer3,
+        LinkMode::Layer2 => LinkMode::Layer2,
+        LinkMode::Auto if has_link_layer_intent => LinkMode::Layer2,
+        LinkMode::Auto if ip_root && route.capability.supports_layer3() => LinkMode::Layer3,
+        LinkMode::Auto => LinkMode::Layer2,
+    };
+    if mode == LinkMode::Layer2 && !route.capability.supports_layer2() {
+        return Err(PlanError::Layer2Unsupported);
+    }
+    if mode == LinkMode::Layer3 && !route.capability.supports_layer3() {
+        return Err(PlanError::Layer3Unsupported);
+    }
+
+    let explicit_source = ip_path
+        .as_ref()
+        .map(|path| path.source)
+        .filter(|source| !source.is_unspecified());
+    let packet_source = has_ip
+        .then(|| {
+            explicit_source
+                .or(route.preferred_source)
+                .or(route.selected_address)
         })
+        .flatten();
+    if let (Some(source), Some(final_destination)) = (packet_source, final_destination)
+        && source.is_ipv4() != final_destination.is_ipv4()
+    {
+        return Err(PlanError::SourceFamilyMismatch {
+            destination: final_destination,
+        });
+    }
+    if has_ip && packet_source.is_none() {
+        return Err(PlanError::MissingPacketSource);
+    }
+    let neighbor_source = lookup_destination.and_then(|lookup_destination| {
+        route
+            .selected_address
+            .filter(|source| source.is_ipv4() == lookup_destination.is_ipv4())
+            .or_else(|| {
+                route
+                    .preferred_source
+                    .filter(|source| source.is_ipv4() == lookup_destination.is_ipv4())
+            })
+    });
+    let explicit_destination_mac = outer_ethernet_mac(packet, semantics::DESTINATION);
+    let explicit_source_mac = outer_ethernet_mac(packet, semantics::SOURCE);
+    let (arp_source_mac, arp_destination_mac) = arp_link_macs(packet);
+    let destination_mac = explicit_destination_mac
+        .or(arp_destination_mac)
+        .or_else(|| lookup_destination.and_then(multicast_mac));
+    if mode == LinkMode::Layer2 && destination_mac.is_none() {
+        let Some(lookup_destination) = lookup_destination else {
+            return Err(PlanError::MissingLayer2DestinationMac);
+        };
+        if neighbor_source.is_none() && !lookup_destination.is_multicast() {
+            return Err(PlanError::MissingNeighborSource);
+        }
+    }
+    let source_mac = explicit_source_mac.or(arp_source_mac).or(route.source_mac);
+    let neighbor_vlan_tags = extract_neighbor_vlan_tags(packet)?;
+    let mut visited_destinations = ip_path
+        .map(|path| {
+            path.visited_destinations
+                .into_iter()
+                .filter(|destination| !destination.is_unspecified())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if visited_destinations.is_empty()
+        && let Some(final_destination) = final_destination
+    {
+        visited_destinations.push(final_destination);
     }
 
-    pub fn materialize<N: NeighborResolver>(
-        &self,
-        plan: PlannedRoute,
-        resolver: &N,
-    ) -> Result<MaterializedRoute, NeighborError> {
-        materialize(plan, resolver)
-    }
+    Ok(PlannedRoute {
+        neighbor_target: (mode == LinkMode::Layer2)
+            .then(|| lookup_destination.map(|destination| route.next_hop.unwrap_or(destination)))
+            .flatten(),
+        destination_mac,
+        source_mac,
+        neighbor_vlan_tags,
+        synthesized_ethernet: mode == LinkMode::Layer2
+            && !semantics::outer_layers(packet)
+                .any(|layer| BuiltinProtocol::of(layer) == Some(BuiltinProtocol::Ethernet)),
+        route,
+        mode,
+        lookup_destination,
+        final_destination,
+        visited_destinations,
+        packet_source,
+        neighbor_source,
+    })
 }

@@ -9,7 +9,6 @@ use super::super::super::layer::ProtocolId;
 use super::super::super::matcher::ResponseMatcher;
 use super::binding::{ChildBinding, Discriminator, FilterFieldBinding};
 use super::error::RegistryError;
-use super::module::ProtocolModule;
 
 #[derive(Default)]
 pub struct RegistryBuilder {
@@ -187,14 +186,6 @@ impl RegistryBuilder {
             }
         }
         self.filter_fields.insert(normalized, binding);
-        Ok(self)
-    }
-
-    pub fn module<M>(&mut self, module: &M) -> Result<&mut Self, RegistryError>
-    where
-        M: ProtocolModule,
-    {
-        module.register(self)?;
         Ok(self)
     }
 }

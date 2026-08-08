@@ -5,9 +5,9 @@
 
 mod model;
 
+#[doc(hidden)]
+pub use model::PacketTemplate;
 pub use model::{
     DEFAULT_MAX_TEMPLATE_PACKETS, PacketTemplate as Template, PacketTemplateIter as Iter,
-    TemplateError as Error, TemplateValues as Values,
+    TemplateError as Error,
 };
-#[doc(hidden)]
-pub use model::{PacketTemplate, TemplateValues};

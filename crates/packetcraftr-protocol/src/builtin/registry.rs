@@ -26,24 +26,13 @@ use tunnel::{
 };
 
 use packetcraftr_packet::{
-    registry::{ProtocolModule, ProtocolRegistry, RegistryBuilder, RegistryError},
+    registry::{ProtocolRegistry, RegistryBuilder, RegistryError},
     semantics::{BuiltinProtocol, builtin_protocol_catalog},
 };
 
 use application::DnsCodec;
 
 mod registration;
-
-/// Complete, deterministic built-in protocol registration for the portable kernel.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct BuiltinProtocols;
-
-impl ProtocolModule for BuiltinProtocols {
-    fn register(&self, builder: &mut RegistryBuilder) -> Result<(), RegistryError> {
-        register_catalog(builder)?;
-        registration::register(builder)
-    }
-}
 
 fn register_catalog(builder: &mut RegistryBuilder) -> Result<(), RegistryError> {
     macro_rules! register_matcher {
@@ -92,6 +81,7 @@ fn register_catalog(builder: &mut RegistryBuilder) -> Result<(), RegistryError> 
 /// Build the default immutable registry without global mutable registration.
 pub fn default_registry() -> Result<ProtocolRegistry, RegistryError> {
     let mut builder = ProtocolRegistry::builder();
-    builder.module(&BuiltinProtocols)?;
+    register_catalog(&mut builder)?;
+    registration::register(&mut builder)?;
     builder.build()
 }

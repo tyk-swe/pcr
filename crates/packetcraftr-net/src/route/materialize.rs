@@ -15,7 +15,8 @@ use packetcraftr_core::frame::Frame;
 
 use super::models::{LinkMode, NeighborRequest, NeighborResolution, PlannedRoute};
 
-pub(crate) fn materialize<N: NeighborResolver>(
+/// Materialize a planned route, invoking neighbor resolution when required.
+pub fn materialize<N: NeighborResolver>(
     mut plan: PlannedRoute,
     resolver: &N,
 ) -> Result<MaterializedRoute, NeighborError> {

@@ -5,12 +5,6 @@ use std::net::Ipv4Addr;
 
 use super::error::SemanticError;
 
-/// Returns every address carried by Loose or Strict Source Route. Malformed
-/// options fail closed even when the malformed option itself is not a route.
-pub fn ipv4_source_route_destinations(options: &[u8]) -> Result<Vec<Ipv4Addr>, SemanticError> {
-    Ok(parse_ipv4_source_routes(options)?.declared)
-}
-
 #[derive(Default)]
 pub(super) struct ParsedIpv4SourceRoutes {
     pub(super) declared: Vec<Ipv4Addr>,

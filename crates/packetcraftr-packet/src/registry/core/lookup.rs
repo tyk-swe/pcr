@@ -113,11 +113,6 @@ impl ProtocolRegistry {
         self.matchers.get(protocol)
     }
 
-    /// Protocols with registered request/response matchers.
-    pub fn matcher_protocols(&self) -> impl ExactSizeIterator<Item = &ProtocolId> {
-        self.matchers.keys()
-    }
-
     pub fn protocols(&self) -> impl ExactSizeIterator<Item = &ProtocolId> {
         self.codecs.keys()
     }

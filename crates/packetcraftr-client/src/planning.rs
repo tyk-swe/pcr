@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use packetcraftr_net::{
     Error as LiveIoError,
-    route::{NeighborResolver, PlanOptions, PlannedRoute, RouteProvider},
+    route::{NeighborResolver, PlanOptions, PlannedRoute, RouteProvider, plan as plan_route},
     transmit::PacketIo,
 };
 use packetcraftr_packet::{Packet, semantics::BuiltinProtocol};
@@ -90,7 +90,7 @@ where
         if let Some(deadline) = deadline {
             ensure_preparation_deadline(deadline)?;
         }
-        let plan = self.planner.plan(packet, destination, options, provider)?;
+        let plan = plan_route(packet, destination, options, provider)?;
         for destination in &plan.visited_destinations {
             self.policy.authorize_destination(*destination)?;
         }

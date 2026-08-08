@@ -9,7 +9,7 @@ use packetcraftr_core::frame::LinkType;
 use packetcraftr_net::{
     Error, capture,
     link::{Capability, MacAddress, Mode},
-    route::{Decision, InterfaceId, Options, Planner, Provider, Scope, SelectionReason},
+    route::{Decision, InterfaceId, Options, Provider, Scope, SelectionReason, plan as plan_route},
 };
 use packetcraftr_packet::{Packet, layer::Raw};
 use packetcraftr_protocol::link::Ethernet;
@@ -124,18 +124,17 @@ fn destination_free_layer2_planning_uses_only_the_requested_interface() {
         interface_calls: AtomicUsize::new(0),
     };
 
-    let plan = Planner
-        .plan(
-            &packet,
-            None,
-            &Options {
-                link_mode: Mode::Layer2,
-                interface: Some(interface.clone()),
-                preferred_source: None,
-            },
-            &provider,
-        )
-        .expect("explicit Layer 2 interface must plan passively");
+    let plan = plan_route(
+        &packet,
+        None,
+        &Options {
+            link_mode: Mode::Layer2,
+            interface: Some(interface.clone()),
+            preferred_source: None,
+        },
+        &provider,
+    )
+    .expect("explicit Layer 2 interface must plan passively");
 
     assert_eq!(provider.interface_calls.load(Ordering::SeqCst), 1);
     assert_eq!(plan.route.interface, interface);

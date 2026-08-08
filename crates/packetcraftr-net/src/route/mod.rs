@@ -14,12 +14,12 @@ pub(crate) mod native_policy;
 pub(crate) mod planner;
 mod provider;
 
-pub use materialize::MaterializedRoute as Materialized;
+pub use materialize::{MaterializedRoute as Materialized, materialize};
 pub use models::{
     DestinationScope as Scope, PlanOptions as Options, PlannedRoute as Plan,
     RouteDecision as Decision, RouteProvider as Provider, RouteSelectionReason as SelectionReason,
 };
-pub use planner::{PlanError as Error, RoutePlanner as Planner};
+pub use planner::{PlanError as Error, plan};
 pub use provider::{NativeRouteError as SystemError, SystemRouteProvider as SystemProvider};
 
 #[doc(hidden)]
@@ -30,7 +30,7 @@ pub use models::{
     NeighborVlanTag, PlanOptions, PlannedRoute, RouteDecision, RouteProvider, RouteSelectionReason,
 };
 #[doc(hidden)]
-pub use planner::{PlanError, RoutePlanner};
+pub use planner::PlanError;
 #[doc(hidden)]
 pub use provider::{NativeRouteError, SystemRouteProvider};
 

@@ -147,12 +147,10 @@ impl Packet {
     }
 
     pub fn by_protocol(&self, protocol: &ProtocolId) -> Option<&dyn Layer> {
-        for layer in &self.layers {
-            if layer.protocol_id() == protocol {
-                return Some(layer.as_ref());
-            }
-        }
-        None
+        self.layers
+            .iter()
+            .map(Box::as_ref)
+            .find(|layer| layer.protocol_id() == protocol)
     }
 
     pub fn by_protocol_mut(&mut self, protocol: &ProtocolId) -> Option<&mut dyn Layer> {

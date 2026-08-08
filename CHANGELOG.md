@@ -51,13 +51,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Breaking:** Removed repository-unused Rust API scaffolding: template axes now
-  take `Vec<FieldValue>` directly, DNS attempt status aliases the terminal
-  outcome, workflow fuzz results no longer store derivable reproduction and
-  rejected-case fields, and the duplicate command-contract table and invariant
-  built-in capability methods are gone. Built-in codec aliases now come from
-  the protocol catalog at registration, and protocol capability rows no longer
-  implement `Serialize`. Output-v1 documents and schemas are unchanged.
+- **Breaking:** Removed repository-unused Rust API scaffolding: built-ins now
+  register directly without `ProtocolModule`, route planning and materialization
+  are functions rather than a stored `RoutePlanner`, template axes take
+  `Vec<FieldValue>` directly without a value alias, DNS attempt status aliases
+  the terminal outcome, and workflow fuzz results no longer store derivable
+  reproduction and rejected-case fields. The unused matcher iterator and IPv4
+  source-route helper, duplicate command-contract table, and invariant built-in
+  capability methods are gone. Built-in codec aliases now come from the protocol
+  catalog at registration, and protocol capability rows no longer implement
+  `Serialize`. Output-v1 documents and schemas are unchanged.
 - `packetcraftr-net`'s `native-route` feature no longer enables
   `native-interfaces`, avoiding the unrelated `pnet_datalink` dependency in
   route-only builds while retaining the native Windows route dependency.

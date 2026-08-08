@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use packetcraftr_net::{
-    route::{MaterializedRoute, NeighborResolver, PlannedRoute, RouteProvider},
+    route::{MaterializedRoute, NeighborResolver, PlannedRoute, RouteProvider, materialize},
     transmit::PacketIo,
 };
 use packetcraftr_packet::{
@@ -153,7 +153,7 @@ where
                 mut preliminary_build,
             } = planned_packet;
             let preliminary_len = preliminary_build.bytes.len();
-            let route = self.planner.materialize(plan, &self.neighbors)?;
+            let route = materialize(plan, &self.neighbors)?;
             ensure_preparation_deadline(deadline)?;
             // Neighbor materialization is the only step that resolves link fields.
             let link_changed = materialize_link_fields(&mut packet, &route)?;

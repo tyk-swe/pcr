@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use packetcraftr_net::{
     capture::CaptureStatistics,
-    route::{NeighborResolver, RouteProvider},
+    route::{NeighborResolver, RouteProvider, materialize},
     transmit::{PacketIo, TransmissionFrame},
 };
 use packetcraftr_packet::{Packet, build::Builder};
@@ -47,7 +47,7 @@ where
         self.policy
             .authorize_operation(1, preliminary.bytes.len() as u64)?;
         let preliminary_len = preliminary.bytes.len();
-        let route = self.planner.materialize(plan, &self.neighbors)?;
+        let route = materialize(plan, &self.neighbors)?;
         let link_changed = materialize_link_fields(&mut packet_to_send, &route)?;
         let built = if link_changed {
             let built = if patch_builtin_ethernet(&self.registry, &mut preliminary, &packet_to_send)

@@ -20,8 +20,8 @@ use packetcraftr_net::{
     link::{Capability, MacAddress, Mode},
     neighbor,
     route::{
-        Decision, Error as PlanError, InterfaceId, Materialized, Options, Plan, Planner, Provider,
-        Scope, SelectionReason,
+        Decision, Error as PlanError, InterfaceId, Materialized, Options, Plan, Provider, Scope,
+        SelectionReason, plan as plan_route,
     },
     transmit::{
         Dispatch, Frame, Layer2Frame, Layer2Sender, Layer3Frame, Layer3Sender, Report, Sender,
@@ -486,7 +486,7 @@ fn planner_rejects_invalid_input_before_route_lookup() {
     };
 
     assert!(matches!(
-        Planner.plan(
+        plan_route(
             &raw,
             None,
             &Options {
@@ -500,7 +500,7 @@ fn planner_rejects_invalid_input_before_route_lookup() {
     assert_eq!(LOOKUP_CALLS.load(Ordering::SeqCst), 0);
 
     assert!(matches!(
-        Planner.plan(
+        plan_route(
             &raw,
             Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9))),
             &Options {
@@ -520,7 +520,7 @@ fn planner_rejects_invalid_input_before_route_lookup() {
     });
     ethernet.push(Raw::new(vec![1_u8]));
     assert!(matches!(
-        Planner.plan(
+        plan_route(
             &ethernet,
             None,
             &Options {
@@ -540,14 +540,13 @@ fn planner_maps_provider_failures_and_contract_mismatches() {
     packet.push(Raw::new(vec![1_u8]));
     let destination = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
 
-    let error = Planner
-        .plan(
-            &packet,
-            Some(destination),
-            &Options::default(),
-            &routes(Err(RouteFailure)),
-        )
-        .expect_err("lookup failure must be typed");
+    let error = plan_route(
+        &packet,
+        Some(destination),
+        &Options::default(),
+        &routes(Err(RouteFailure)),
+    )
+    .expect_err("lookup failure must be typed");
     assert!(matches!(
         error,
         PlanError::RouteLookup {
@@ -564,7 +563,7 @@ fn planner_maps_provider_failures_and_contract_mismatches() {
     };
     let requested = interface();
     assert!(matches!(
-        Planner.plan(
+        plan_route(
             &packet,
             Some(destination),
             &Options {
@@ -577,7 +576,7 @@ fn planner_maps_provider_failures_and_contract_mismatches() {
     ));
 
     assert!(matches!(
-        Planner.plan(
+        plan_route(
             &packet,
             Some(destination),
             &Options {
@@ -601,14 +600,13 @@ fn planner_selects_auto_layer3_for_ip_root_and_enforces_capability() {
     });
     packet.push(Raw::new(vec![1_u8]));
 
-    let plan = Planner
-        .plan(
-            &packet,
-            None,
-            &Options::default(),
-            &routes(Ok(decision(Capability::Layer2And3))),
-        )
-        .expect("IP root with Layer 3 capability must plan");
+    let plan = plan_route(
+        &packet,
+        None,
+        &Options::default(),
+        &routes(Ok(decision(Capability::Layer2And3))),
+    )
+    .expect("IP root with Layer 3 capability must plan");
     assert_eq!(plan.mode, Mode::Layer3);
     assert_eq!(plan.lookup_destination, Some(IpAddr::V4(destination)));
     assert_eq!(
@@ -617,7 +615,7 @@ fn planner_selects_auto_layer3_for_ip_root_and_enforces_capability() {
     );
 
     assert!(matches!(
-        Planner.plan(
+        plan_route(
             &packet,
             None,
             &Options {
@@ -638,7 +636,7 @@ fn planner_selects_auto_layer3_for_ip_root_and_enforces_capability() {
     });
     ethernet.push(Raw::new(vec![1_u8]));
     assert!(matches!(
-        Planner.plan(
+        plan_route(
             &ethernet,
             None,
             &Options {

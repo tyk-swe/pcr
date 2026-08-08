@@ -47,7 +47,7 @@ macro_rules! define_protocol_support {
             codec: $codec:ident
         }
     )*) => {
-        /// Every codec registered by [`crate::builtin::Module`], in
+        /// Every codec registered by [`crate::builtin::registry`], in
         /// stable manifest order.
         pub const BUILTIN_PROTOCOLS: &[ProtocolSupport] = &[$(
             ProtocolSupport {

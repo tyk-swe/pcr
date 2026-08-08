@@ -13,7 +13,6 @@ mod vlan;
 
 pub use destination::live_destinations;
 pub use error::SemanticError;
-pub use ipv4_option::ipv4_source_route_destinations;
 pub use path::{
     DESTINATION, DESTINATION_PORT, IPV4_OPTIONS, IpPath, LAST_ENTRY, SEGMENTS, SEGMENTS_LEFT,
     SOURCE, SOURCE_PORT, TARGET_PROTOCOL, enclosing_ip_path, outer_ip_path, outer_layers,

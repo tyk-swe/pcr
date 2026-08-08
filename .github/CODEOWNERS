@@ -1,18 +1,18 @@
 # Safety-sensitive and serialized-contract review routing.
 
-# The only crate allowed to contain unsafe code, plus its live I/O seams.
-/crates/packetcraftr-net/src/platform/** @tyk-swe
-/crates/packetcraftr-net/src/transmit.rs @tyk-swe
-/crates/packetcraftr-net/src/capture.rs @tyk-swe
-/crates/packetcraftr-net/src/route/** @tyk-swe
-/crates/packetcraftr-net/src/interface.rs @tyk-swe
+# Native adapters and live I/O seams.
+/crates/packetcraftr-network/src/platform/** @tyk-swe
+/crates/packetcraftr-network/src/transmit.rs @tyk-swe
+/crates/packetcraftr-network/src/capture.rs @tyk-swe
+/crates/packetcraftr-network/src/route/** @tyk-swe
+/crates/packetcraftr-network/src/interface.rs @tyk-swe
 
-/crates/packetcraftr-client/src/exchange/** @tyk-swe
-/crates/packetcraftr-client/src/policy/** @tyk-swe
-/crates/packetcraftr-client/src/materialize.rs @tyk-swe
+/crates/packetcraftr-live/src/exchange/** @tyk-swe
+/crates/packetcraftr-live/src/policy/** @tyk-swe
+/crates/packetcraftr-live/src/materialize.rs @tyk-swe
 
-/crates/packetcraftr-protocol/src/matcher/** @tyk-swe
-/crates/packetcraftr-workflow/src/probe.rs @tyk-swe
+/crates/packetcraftr-packet/src/protocol/matcher/** @tyk-swe
+/crates/packetcraftr-live/src/probe/** @tyk-swe
 
 /crates/packetcraftr/src/output/** @tyk-swe @rkdxodud-tyk
 /schemas/** @tyk-swe @rkdxodud-tyk
@@ -20,16 +20,16 @@
 /crates/packetcraftr-packet/src/document/model.rs @tyk-swe @rkdxodud-tyk
 /crates/packetcraftr-packet/src/field/value.rs @tyk-swe @rkdxodud-tyk
 /crates/packetcraftr-packet/src/layout/model.rs @tyk-swe @rkdxodud-tyk
-/crates/packetcraftr-protocol/src/**/model.rs @tyk-swe @rkdxodud-tyk
-/crates/packetcraftr-protocol/src/network/igmp.rs @tyk-swe @rkdxodud-tyk
-/crates/packetcraftr-protocol/src/transport/sctp.rs @tyk-swe @rkdxodud-tyk
+/crates/packetcraftr-packet/src/protocol/**/model.rs @tyk-swe @rkdxodud-tyk
+/crates/packetcraftr-packet/src/protocol/network/igmp.rs @tyk-swe @rkdxodud-tyk
+/crates/packetcraftr-packet/src/protocol/transport/sctp.rs @tyk-swe @rkdxodud-tyk
 
 /crates/packetcraftr-packet/src/protocol_catalog.rs @tyk-swe
-/crates/packetcraftr-protocol/src/builtin/registry.rs @tyk-swe
+/crates/packetcraftr-packet/src/protocol/builtin/registry.rs @tyk-swe
 
 # GitHub uses only the last matching CODEOWNERS pattern. Keep every owner for
 # this contract-and-catalog overlap on the same line.
-/crates/packetcraftr-protocol/src/support/manifest.rs @tyk-swe @rkdxodud-tyk
+/crates/packetcraftr-packet/src/protocol/support/manifest.rs @tyk-swe @rkdxodud-tyk
 
 # Workspace-wide dependency, feature, lint, and profile policy.
 /Cargo.toml @tyk-swe

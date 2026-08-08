@@ -13,9 +13,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use packetcraftr::{
-    capture::{self, Limits, PcapNgOptions, PcapOptions, Writer},
-    net,
-    net::capture::Provider as _,
+    analysis::pcap::{self as capture, Limits, PcapNgOptions, PcapOptions, Writer},
+    network as net,
+    network::capture::Provider as _,
     output,
 };
 

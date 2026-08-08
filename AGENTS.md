@@ -2,9 +2,9 @@
 
 ## Project Structure & Module Organization
 
-PacketcraftR is a Rust 2024 Cargo workspace for packet construction, dissection, capture I/O, and bounded diagnostics. Cargo manifests are the source of truth for its package graph; do not maintain a second package list or dependency table. Keep the graph acyclic when changing dependencies. Reassembly belongs to analysis, native adapters to `packetcraftr-net/src/platform/`, policy-gated send/exchange to client, live diagnostic operations to workflow, and versioned serialized output models to the facade.
+PacketcraftR is a Rust 2024 Cargo workspace for packet construction, dissection, capture I/O, and bounded diagnostics. Cargo manifests are the source of truth for its package graph; do not maintain a second package list or dependency table. Keep the graph acyclic when changing dependencies. Packet mechanics, budgets, errors, frame types, built-in codecs, and offline fuzz campaigns belong to packet; PCAP I/O, reassembly, and offline diagnostics to analysis; native adapters to `packetcraftr-network/src/platform/`; policy-gated send/exchange and live diagnostics to live; and versioned serialized output models to the facade.
 
-The offline/live split is a dependency edge, not a convention. `packetcraftr-analysis` holds the offline capture pipeline and reassembly algorithms and must never depend on `packetcraftr-client` or `packetcraftr-net`; that absence is what guarantees it has no resolver, route, capture, or transmission seam to gate. Live probing lives in `packetcraftr-workflow`. Both use the bottom-layer budgets and errors in `packetcraftr-core`.
+The offline/live split is a dependency edge, not a convention. `packetcraftr-analysis` holds PCAP I/O, the offline capture pipeline, and reassembly algorithms and must never depend on `packetcraftr-live` or `packetcraftr-network`; that absence is what guarantees it has no resolver, route, live capture, or transmission seam to gate. Live probing lives in `packetcraftr-live`. Both use the bottom-layer budgets, errors, and frames in `packetcraftr-packet`.
 
 For CLI work, start in `crates/packetcraftr-cli/src/commands/<command>/`: each command owns its arguments, execution adapters, conversions, and command-specific rendering. Reusable Clap groups are in `command_options`; process startup is in `startup.rs`, and native provider composition is in `system`. Serialized command results live directly in `crates/packetcraftr/src/output/<command>.rs`, with `output/dns/` retained as a multi-file domain. Shared live-workflow mechanics have concrete `clock`, `target`, and private `probe` owners.
 
@@ -27,7 +27,7 @@ Rust 1.97.1 is pinned; 1.96 is the MSRV. Linux builds require clang and lld; all
 
 ## Coding Style & Naming Conventions
 
-Use rustfmt defaults and four-space indentation. Name modules and functions in `snake_case`, types and traits in `UpperCamelCase`, and constants in `SCREAMING_SNAKE_CASE`. Every Rust source file under `crates/` needs the copyright and SPDX header. Keep `unsafe` code inside `crates/packetcraftr-net/src/platform/`, with a specific `SAFETY` explanation.
+Use rustfmt defaults and four-space indentation. Name modules and functions in `snake_case`, types and traits in `UpperCamelCase`, and constants in `SCREAMING_SNAKE_CASE`. Every Rust source file under `crates/` needs the copyright and SPDX header. Keep `unsafe` code inside `crates/packetcraftr-network/src/platform/`, with a specific `SAFETY` explanation.
 
 `overflow-checks` cannot see through an `as` conversion, so narrowing casts are denied. Prefer `From`, `TryFrom`, or keeping the wire-width value alongside its widened form. Where a cast is genuinely lossless, attach `#[expect(clippy::cast_possible_truncation, reason = "…")]` to the tightest enclosing item and name the guard or invariant that bounds it, the same way an `unsafe` block names its `SAFETY` argument. Use `#[expect]` rather than `#[allow]` so an annotation that stops applying fails the build.
 

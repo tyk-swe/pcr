@@ -7,11 +7,11 @@
 use std::io::Read;
 use std::sync::Arc;
 
-use packetcraftr_capture::{Error as CaptureError, Reader};
-use packetcraftr_core::budget::Deadline;
-use packetcraftr_packet::decode::{DecodeOptions, DecodedPacket, Decoder};
+use crate::pcap::{Error as CaptureError, Reader};
+use packetcraftr_packet::budget::Deadline;
+use packetcraftr_packet::decode::{Decoder, Options as DecodeOptions, Result as DecodedPacket};
 use packetcraftr_packet::filter::Context as FilterContext;
-use packetcraftr_packet::registry::ProtocolRegistry;
+use packetcraftr_packet::registry::Registry;
 
 use crate::AnalysisError;
 use crate::adapter::{tcp_segment, udp_flow};
@@ -66,7 +66,7 @@ pub struct AnalysisSummary {
 /// the same today as it did the day it was recorded.
 pub fn run<R, F>(
     reader: &mut Reader<R>,
-    registry: Arc<ProtocolRegistry>,
+    registry: Arc<Registry>,
     options: &AnalysisOptions<'_>,
     mut sink: F,
 ) -> Result<AnalysisSummary, AnalysisError>

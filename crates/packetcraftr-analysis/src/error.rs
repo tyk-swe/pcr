@@ -6,10 +6,10 @@
 use std::time::Duration;
 use thiserror::Error;
 
+use crate::pcap::Error as CaptureError;
 use crate::reassembly::tcp::Error as TcpError;
-use packetcraftr_capture::Error as CaptureError;
-use packetcraftr_core::error::{Classification, Classified, Kind};
 use packetcraftr_packet::decode::Error as DecodeError;
+use packetcraftr_packet::error::{Classification, Classified, Kind};
 
 #[derive(Debug, Error)]
 #[non_exhaustive]

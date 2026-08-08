@@ -25,13 +25,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Breaking:** Consolidated several single-purpose workspace packages into
-  responsibility-owned domains: `packetcraftr-error` and `packetcraftr-budget`
-  are now `packetcraftr-core::{error,budget}`, shared frame types moved to
-  `packetcraftr-core::frame`, reassembly moved to
-  `packetcraftr-analysis::reassembly`, and render-neutral output models moved
-  to `packetcraftr::output`. Removed packages have no compatibility crates;
-  documented facade re-exports remain.
+- **Breaking:** Consolidated the workspace into six packages. Budgets, errors,
+  frames, packet mechanics, built-in codecs, and deterministic offline fuzzing
+  now live in `packetcraftr-packet`; PCAP I/O and offline diagnostics live in
+  `packetcraftr-analysis`; native networking lives in
+  `packetcraftr-network`; and policy-gated operations live in
+  `packetcraftr-live`. The facade exposes only `packet`, `analysis`, `network`,
+  `live`, and `output`; removed crates and former facade aliases have no
+  compatibility shims. CLI flags and serialized contracts are unchanged.
 - **Breaking:** Flattened command output paths: `output::capture::Read` is now
   `output::read::Result`, while `output::network::{interfaces, plan, routes,
   send, exchange}` are now the top-level `output::{interfaces, plan, routes,
@@ -47,7 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   permissive and packet/byte flags; `capture`, `scan`, `traceroute`, and `dns`
   lost their permissive flag; and `fuzz` lost its hostname-resolution flags.
   Applicable authorization behavior and stable error codes are unchanged.
-- `packetcraftr-net/native-route` no longer enables `native-interfaces`, so a
+- `packetcraftr-network/native-route` no longer enables `native-interfaces`, so a
   route-only build avoids the unrelated interface-enumeration dependency.
 - Replay now uses the canonical built-in dissector and shared fail-closed route
   semantics instead of a separate wire-route parser.

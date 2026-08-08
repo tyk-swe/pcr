@@ -5,6 +5,4 @@
 
 mod model;
 
-#[doc(hidden)]
-pub use model::DiagnosticSeverity;
 pub use model::{Diagnostic, DiagnosticSeverity as Severity, push_diagnostic_once};

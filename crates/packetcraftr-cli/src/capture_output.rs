@@ -5,7 +5,8 @@
 
 use std::io::Write;
 
-use packetcraftr::capture::{Error, Format, Frame, Interface, Limits, LinkType, Writer};
+use packetcraftr::analysis::pcap::{Error, Format, Interface, Limits, Writer};
+use packetcraftr::packet::frame::{Frame, LinkType};
 
 #[derive(Clone, Copy, Debug)]
 struct LinkTypeMapping {

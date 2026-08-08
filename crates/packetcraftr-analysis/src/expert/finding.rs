@@ -3,7 +3,7 @@
 
 //! Consistent expert-finding construction and attribution.
 
-use packetcraftr_packet::diagnostic::DiagnosticSeverity;
+use packetcraftr_packet::diagnostic::Severity as DiagnosticSeverity;
 
 use super::{Finding, StreamRef};
 

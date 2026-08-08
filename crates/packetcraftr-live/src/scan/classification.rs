@@ -1,0 +1,48 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
+use std::net::IpAddr;
+
+use packetcraftr_packet::{Packet, decode::Result as DecodedPacket, registry::Registry};
+
+use crate::probe::Correlation;
+
+use super::model::{ScanClassification, ScanTransport};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ScanResponseClassification {
+    pub classification: ScanClassification,
+    pub responder: IpAddr,
+    pub reason: &'static str,
+    pub(super) correlation: Correlation,
+}
+
+/// Pure response classifier used by the workflow. A return value of `None`
+/// means the response is corrupt, unrelated, or not protocol-consistent with
+/// the request and must not influence classification.
+pub fn classify_scan_response(
+    registry: &Registry,
+    transport: ScanTransport,
+    request: &Packet,
+    response: &DecodedPacket,
+) -> Option<ScanResponseClassification> {
+    let observation =
+        crate::probe::observe(registry, transport.probe_transport(), request, response)?;
+    let classification = match observation.correlation {
+        Correlation::TcpReset | Correlation::PortUnreachable => ScanClassification::Closed,
+        Correlation::TcpSynAck | Correlation::UdpReply | Correlation::IcmpReply => {
+            ScanClassification::Open
+        }
+        Correlation::TcpOther => ScanClassification::Unknown,
+        Correlation::TimeExceeded | Correlation::AdministrativelyProhibited => {
+            ScanClassification::Filtered
+        }
+        Correlation::DestinationUnreachable => ScanClassification::Unreachable,
+    };
+    Some(ScanResponseClassification {
+        classification,
+        responder: observation.responder,
+        reason: observation.reason,
+        correlation: observation.correlation,
+    })
+}

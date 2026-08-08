@@ -11,15 +11,12 @@ publish.workspace = true
 [lints]
 workspace = true
 
-# Offline by construction: this crate must not depend on `packetcraftr-client`
-# or `packetcraftr-net`. Analysis runs without authorization gates because it
+# Offline by construction: this crate must not depend on `packetcraftr-live`
+# or `packetcraftr-network`. Analysis runs without authorization gates because it
 # has no resolver, route, capture, or transmission seam, and the absence of
 # those dependencies is what keeps that true.
 [dependencies]
 bytes.workspace = true
-packetcraftr-capture.workspace = true
-packetcraftr-core.workspace = true
 packetcraftr-packet.workspace = true
-packetcraftr-protocol.workspace = true
 serde.workspace = true
 thiserror.workspace = true

@@ -3,8 +3,8 @@
 
 //! Output contract for the `send` command.
 
-use packetcraftr_client::send::Report as SendReport;
-use packetcraftr_net::route::Materialized as DomainMaterializedRoute;
+use packetcraftr_live::send::Report as SendReport;
+use packetcraftr_network::route::Materialized as DomainMaterializedRoute;
 use packetcraftr_packet::diagnostic::Diagnostic;
 use serde::Serialize;
 

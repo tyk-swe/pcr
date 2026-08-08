@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 
 use clap::{Args, ValueEnum};
-use packetcraftr::capture;
+use packetcraftr::analysis::pcap as capture;
 
 use crate::command_options::{CliLinkMode, ReplayPolicyArgs};
 

@@ -3,7 +3,7 @@
 
 use thiserror::Error;
 
-use packetcraftr_core::frame::FrameError as CaptureError;
+use crate::frame::FrameError as CaptureError;
 
 use super::super::super::layer::{FieldError, ProtocolId};
 

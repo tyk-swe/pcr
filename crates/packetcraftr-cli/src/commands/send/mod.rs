@@ -7,8 +7,8 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use packetcraftr::{
-    capture::{Frame, LinkType},
-    client, net, output, packet,
+    live as client, network as net, output, packet,
+    packet::frame::{Frame, LinkType},
 };
 
 use self::arguments::SendArgs;

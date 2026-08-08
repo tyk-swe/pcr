@@ -8,5 +8,4 @@ mod engine;
 pub use engine::{
     DecodeError as Error, DecodeOptions as Options, DecodedPacket as Result, Dissector as Decoder,
 };
-#[doc(hidden)]
-pub use engine::{DecodeError, DecodeOptions, DecodedPacket, Dissector};
+pub(crate) use engine::{DecodeOptions, DecodedPacket, Dissector};

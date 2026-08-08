@@ -10,7 +10,7 @@
 //! analysis needs no authorization gates and runs in every build profile.
 //!
 //! That separation is why this is a crate rather than a module: it depends on
-//! neither `packetcraftr-client` nor `packetcraftr-net`, so a live seam added
+//! neither `packetcraftr-live` nor `packetcraftr-network`, so a live seam added
 //! here fails to build instead of quietly bypassing an authorization gate.
 //!
 //! Conversation indices are assigned in first-seen order over the whole
@@ -21,7 +21,7 @@
 
 #![forbid(unsafe_code)]
 
-pub(crate) use packetcraftr_core::error::BoundaryError;
+pub(crate) use packetcraftr_packet::error::BoundaryError;
 pub(crate) use reassembly::tcp::FlowKey;
 
 mod adapter;
@@ -29,6 +29,7 @@ mod conversation_index;
 mod error;
 pub mod expert;
 pub mod follow;
+pub mod pcap;
 mod pipeline;
 pub mod reassembly;
 pub mod stats;

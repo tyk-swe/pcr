@@ -6,14 +6,12 @@
 pub(crate) mod model;
 mod reflection;
 
-#[doc(hidden)]
-pub use model::{
-    FieldError, FieldSchema, LayerSchema, MalformedLayer, ProtocolId, malformed_layout,
-    padding_layout, raw_layout,
-};
+pub(crate) use model::{FieldError, LayerSchema, MalformedLayer, ProtocolId};
 pub use model::{
     Layer, LayerSchema as Schema, MalformedLayer as Malformed, Padding, ProtocolId as Id, Raw,
 };
+#[doc(hidden)]
+pub use model::{malformed_layout, padding_layout, raw_layout};
 #[doc(hidden)]
 pub use reflection::{
     ReflectiveField, ReflectiveFieldError, reflect_get, reflect_set, reflective_layer,

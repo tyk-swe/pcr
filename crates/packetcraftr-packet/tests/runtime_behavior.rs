@@ -7,15 +7,14 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
-use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_packet::codec::{
     Codec, DecodeContext, Decoded, EncodeContext, Encoded, Error as CodecError,
 };
 use packetcraftr_packet::diagnostic::{Diagnostic, Severity, push_diagnostic_once};
-use packetcraftr_packet::field::{FieldValue, WireValue};
+use packetcraftr_packet::field::{Error as FieldError, Value as FieldValue, Wire as WireValue};
+use packetcraftr_packet::frame::{Frame, LinkType};
 use packetcraftr_packet::layer::{
-    FieldError, Layer, Malformed, Padding, ProtocolId, Raw, malformed_layout, padding_layout,
-    raw_layout,
+    Id as ProtocolId, Layer, Malformed, Padding, Raw, malformed_layout, padding_layout, raw_layout,
 };
 use packetcraftr_packet::layout::{Field, Range};
 use packetcraftr_packet::registry::{

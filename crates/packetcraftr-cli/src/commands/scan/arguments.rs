@@ -5,7 +5,7 @@ use std::net::IpAddr;
 use std::str::FromStr;
 
 use clap::{Args, ValueEnum};
-use packetcraftr::{packet, workflow};
+use packetcraftr::{live as workflow, packet};
 
 use crate::command_options::{
     CaptureLimitArgs, CliAddressFamily, CliLinkMode, HostnameTrafficPolicyArgs,

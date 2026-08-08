@@ -462,13 +462,9 @@ version = "0.4.0"
 dependencies = [
  "bytes",
  "packetcraftr-analysis",
- "packetcraftr-capture",
- "packetcraftr-client",
- "packetcraftr-core",
- "packetcraftr-net",
+ "packetcraftr-live",
+ "packetcraftr-network",
  "packetcraftr-packet",
- "packetcraftr-protocol",
- "packetcraftr-workflow",
  "serde",
  "serde_json",
 ]
@@ -478,20 +474,7 @@ name = "packetcraftr-analysis"
 version = "0.4.0"
 dependencies = [
  "bytes",
- "packetcraftr-capture",
- "packetcraftr-core",
  "packetcraftr-packet",
- "packetcraftr-protocol",
- "serde",
- "thiserror 2.0.19",
-]
-
-[[package]]
-name = "packetcraftr-capture"
-version = "0.4.0"
-dependencies = [
- "bytes",
- "packetcraftr-core",
  "serde",
  "thiserror 2.0.19",
 ]
@@ -509,38 +492,27 @@ dependencies = [
 ]
 
 [[package]]
-name = "packetcraftr-client"
+name = "packetcraftr-live"
 version = "0.4.0"
 dependencies = [
  "bytes",
- "packetcraftr-core",
- "packetcraftr-net",
+ "packetcraftr-analysis",
+ "packetcraftr-network",
  "packetcraftr-packet",
- "packetcraftr-protocol",
  "serde",
+ "serde_json",
  "thiserror 2.0.19",
 ]
 
 [[package]]
-name = "packetcraftr-core"
-version = "0.4.0"
-dependencies = [
- "bytes",
- "serde",
- "thiserror 2.0.19",
-]
-
-[[package]]
-name = "packetcraftr-net"
+name = "packetcraftr-network"
 version = "0.4.0"
 dependencies = [
  "bytes",
  "futures-util",
  "libc",
  "libloading 0.9.0",
- "packetcraftr-core",
  "packetcraftr-packet",
- "packetcraftr-protocol",
  "pcap",
  "pnet_datalink",
  "rtnetlink",
@@ -557,33 +529,8 @@ version = "0.4.0"
 dependencies = [
  "bytes",
  "noyalib",
- "packetcraftr-core",
  "serde",
  "serde_json",
- "thiserror 2.0.19",
-]
-
-[[package]]
-name = "packetcraftr-protocol"
-version = "0.4.0"
-dependencies = [
- "bytes",
- "packetcraftr-core",
- "packetcraftr-packet",
-]
-
-[[package]]
-name = "packetcraftr-workflow"
-version = "0.4.0"
-dependencies = [
- "bytes",
- "packetcraftr-capture",
- "packetcraftr-client",
- "packetcraftr-core",
- "packetcraftr-net",
- "packetcraftr-packet",
- "packetcraftr-protocol",
- "serde",
  "thiserror 2.0.19",
 ]
 

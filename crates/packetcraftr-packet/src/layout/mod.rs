@@ -8,5 +8,4 @@ mod model;
 pub use model::{
     ByteRange as Range, FieldLayout as Field, LayerLayout as Layer, PacketLayout as Packet,
 };
-#[doc(hidden)]
-pub use model::{ByteRange, FieldLayout, LayerLayout, PacketLayout};
+pub(crate) use model::{ByteRange, FieldLayout, LayerLayout, PacketLayout};

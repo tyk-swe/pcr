@@ -6,8 +6,8 @@ pub(super) mod arguments;
 use std::time::SystemTime;
 
 use packetcraftr::{
-    capture::{Frame, LinkType},
     output, packet,
+    packet::frame::{Frame, LinkType},
 };
 
 use self::arguments::DissectArgs;

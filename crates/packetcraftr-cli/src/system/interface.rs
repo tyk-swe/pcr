@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr::net;
+use packetcraftr::network as net;
 
 use super::super::errors::CliError;
 

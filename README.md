@@ -82,6 +82,14 @@ on a domain crate when a smaller capability surface matters; in particular,
 `packetcraftr-analysis` is offline-only. Cargo manifests and `cargo metadata`
 are the source of truth for the workspace graph.
 
+The dependency layers put `packetcraftr-packet` at the bottom. Offline
+`packetcraftr-analysis` and native `packetcraftr-network` depend only on that
+packet layer. Policy-gated `packetcraftr-live` builds on all three; the facade
+builds on the four domain crates, and the CLI builds only on the facade.
+Analysis has no direct or transitive dependency on the network or live layer,
+so adding a resolver, route, capture, or transmission seam there requires an
+explicit Cargo graph change.
+
 ## Quick start
 
 These commands are offline and work in every build profile:

@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::time::{Duration, SystemTime};
 
-use packetcraftr_protocol::network::{Ipv4, Ipv6};
+use packetcraftr_packet::protocol::network::{Ipv4, Ipv6};
 
 use crate::AnalysisError;
 use crate::adapter::{tcp_segment, udp_flow};

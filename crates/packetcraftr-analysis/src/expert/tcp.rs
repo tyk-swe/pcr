@@ -3,7 +3,7 @@
 
 //! Ordered TCP expert transition orchestration and shared direction state.
 
-use packetcraftr_packet::diagnostic::DiagnosticSeverity;
+use packetcraftr_packet::diagnostic::Severity as DiagnosticSeverity;
 
 use super::finding::new as new_finding;
 use super::generation;

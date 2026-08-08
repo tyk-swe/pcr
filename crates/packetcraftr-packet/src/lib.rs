@@ -5,18 +5,23 @@
 
 //! Runtime-neutral packet model, construction, decoding, and extension contracts.
 
+pub mod budget;
 pub mod build;
 pub mod codec;
 pub mod decode;
 pub mod diagnostic;
 pub mod document;
+pub mod error;
 pub mod expression;
 pub mod field;
 pub mod filter;
+pub mod frame;
+pub mod fuzz;
 pub mod layer;
 pub mod layout;
 pub mod matcher;
 mod model;
+pub mod protocol;
 mod protocol_catalog;
 pub mod registry;
 #[doc(hidden)]

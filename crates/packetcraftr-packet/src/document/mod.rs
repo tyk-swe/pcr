@@ -5,8 +5,6 @@
 
 mod model;
 
-#[doc(hidden)]
-pub use model::PacketDocument;
 pub use model::{
     DEFAULT_MAX_DOCUMENT_BYTES, DEFAULT_MAX_DOCUMENT_NESTING, DocumentError as Error,
     DocumentFormat as Format, LayerDocument as Layer, MAX_DOCUMENT_NESTING,

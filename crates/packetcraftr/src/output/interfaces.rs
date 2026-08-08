@@ -5,7 +5,7 @@
 
 use serde::Serialize;
 
-use packetcraftr_net::interface::Info;
+use packetcraftr_network::interface::Info;
 
 pub use crate::output::network::{
     InterfaceCapabilityOutput as Capability, InterfaceFlagsOutput as Flags,

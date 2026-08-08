@@ -6,7 +6,7 @@ use packetcraftr::{
         contract::{Command, Format, SCHEMA_V1},
         envelope::{Aggregate, Stream},
     },
-    protocol,
+    packet::protocol,
 };
 use serde_json::{Value, json};
 

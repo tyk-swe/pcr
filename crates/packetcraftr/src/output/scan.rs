@@ -8,8 +8,8 @@ use std::time::Duration;
 
 use serde::Serialize;
 
+use packetcraftr_live::scan::Result as ScanResult;
 use packetcraftr_packet::diagnostic::Diagnostic;
-use packetcraftr_workflow::scan::Result as ScanResult;
 
 use super::contract::Error;
 use super::envelope::Stats;
@@ -29,15 +29,15 @@ pub enum Classification {
     Timeout,
 }
 
-impl From<packetcraftr_workflow::scan::Classification> for Classification {
-    fn from(value: packetcraftr_workflow::scan::Classification) -> Self {
+impl From<packetcraftr_live::scan::Classification> for Classification {
+    fn from(value: packetcraftr_live::scan::Classification) -> Self {
         match value {
-            packetcraftr_workflow::scan::Classification::Open => Self::Open,
-            packetcraftr_workflow::scan::Classification::Closed => Self::Closed,
-            packetcraftr_workflow::scan::Classification::Filtered => Self::Filtered,
-            packetcraftr_workflow::scan::Classification::Unreachable => Self::Unreachable,
-            packetcraftr_workflow::scan::Classification::Unknown => Self::Unknown,
-            packetcraftr_workflow::scan::Classification::Timeout => Self::Timeout,
+            packetcraftr_live::scan::Classification::Open => Self::Open,
+            packetcraftr_live::scan::Classification::Closed => Self::Closed,
+            packetcraftr_live::scan::Classification::Filtered => Self::Filtered,
+            packetcraftr_live::scan::Classification::Unreachable => Self::Unreachable,
+            packetcraftr_live::scan::Classification::Unknown => Self::Unknown,
+            packetcraftr_live::scan::Classification::Timeout => Self::Timeout,
         }
     }
 }
@@ -50,11 +50,11 @@ pub enum ProbeStatus {
     Timeout,
 }
 
-impl From<packetcraftr_workflow::scan::ProbeStatus> for ProbeStatus {
-    fn from(value: packetcraftr_workflow::scan::ProbeStatus) -> Self {
+impl From<packetcraftr_live::scan::ProbeStatus> for ProbeStatus {
+    fn from(value: packetcraftr_live::scan::ProbeStatus) -> Self {
         match value {
-            packetcraftr_workflow::scan::ProbeStatus::Response => Self::Response,
-            packetcraftr_workflow::scan::ProbeStatus::Timeout => Self::Timeout,
+            packetcraftr_live::scan::ProbeStatus::Response => Self::Response,
+            packetcraftr_live::scan::ProbeStatus::Timeout => Self::Timeout,
         }
     }
 }
@@ -118,12 +118,8 @@ impl Result {
                     .into_iter()
                     .map(|evidence| {
                         let protocol = match (endpoint.transport, endpoint.address) {
-                            (packetcraftr_workflow::scan::Transport::Icmp, IpAddr::V4(_)) => {
-                                "icmpv4"
-                            }
-                            (packetcraftr_workflow::scan::Transport::Icmp, IpAddr::V6(_)) => {
-                                "icmpv6"
-                            }
+                            (packetcraftr_live::scan::Transport::Icmp, IpAddr::V4(_)) => "icmpv4",
+                            (packetcraftr_live::scan::Transport::Icmp, IpAddr::V6(_)) => "icmpv6",
                             _ => endpoint.transport.as_str(),
                         };
                         Ok(Evidence {

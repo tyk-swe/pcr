@@ -3,8 +3,8 @@
 
 use std::sync::Arc;
 
+use crate::frame::{Frame, LinkType};
 use bytes::Bytes;
-use packetcraftr_core::frame::{Frame, LinkType};
 
 use super::super::Packet;
 use super::super::diagnostic::Diagnostic;

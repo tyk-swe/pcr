@@ -7,10 +7,10 @@ use std::net::IpAddr;
 
 use bytes::Bytes;
 use packetcraftr_packet::Packet;
-use packetcraftr_packet::decode::DecodedPacket;
+use packetcraftr_packet::decode::Result as DecodedPacket;
 use packetcraftr_packet::layer::Padding;
-use packetcraftr_protocol::network::{Ipv4, Ipv6};
-use packetcraftr_protocol::transport::{Tcp, Udp};
+use packetcraftr_packet::protocol::network::{Ipv4, Ipv6};
+use packetcraftr_packet::protocol::transport::{Tcp, Udp};
 
 use crate::reassembly::tcp::{FlowKey, Segment};
 

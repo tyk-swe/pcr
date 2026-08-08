@@ -11,7 +11,7 @@ mod rendering;
 use std::sync::Arc;
 use std::time::Duration;
 
-use packetcraftr::{client, net, output, packet, workflow};
+use packetcraftr::{live as client, live as workflow, network as net, output, packet};
 
 use self::arguments::ScanArgs;
 use crate::errors::CliError;

@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use packetcraftr::{
-    error::{Classification, Classified, Kind},
-    net, output,
+    network as net, output,
+    packet::error::{Classification, Classified, Kind},
 };
 
 use super::cli::CliColorChoice;
@@ -86,8 +86,8 @@ impl CliError {
         self
     }
 
-    pub(super) fn into_boundary_error(self) -> packetcraftr::workflow::BoundaryError {
-        packetcraftr::workflow::BoundaryError::new(self.message, self.classification, self.causes)
+    pub(super) fn into_boundary_error(self) -> packetcraftr::live::BoundaryError {
+        packetcraftr::live::BoundaryError::new(self.message, self.classification, self.causes)
     }
 
     pub(super) fn with_cleanup(mut self, cleanup: net::Error) -> Self {

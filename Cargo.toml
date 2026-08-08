@@ -36,13 +36,9 @@ cast_precision_loss = "deny"
 # pins the shared workspace version. Bump these with `workspace.package.version`.
 packetcraftr = { path = "crates/packetcraftr", version = "0.4.0", default-features = false }
 packetcraftr-analysis = { path = "crates/packetcraftr-analysis", version = "0.4.0" }
-packetcraftr-capture = { path = "crates/packetcraftr-capture", version = "0.4.0" }
-packetcraftr-client = { path = "crates/packetcraftr-client", version = "0.4.0" }
-packetcraftr-core = { path = "crates/packetcraftr-core", version = "0.4.0" }
-packetcraftr-net = { path = "crates/packetcraftr-net", version = "0.4.0" }
+packetcraftr-live = { path = "crates/packetcraftr-live", version = "0.4.0" }
+packetcraftr-network = { path = "crates/packetcraftr-network", version = "0.4.0" }
 packetcraftr-packet = { path = "crates/packetcraftr-packet", version = "0.4.0" }
-packetcraftr-protocol = { path = "crates/packetcraftr-protocol", version = "0.4.0" }
-packetcraftr-workflow = { path = "crates/packetcraftr-workflow", version = "0.4.0" }
 
 anstream = "1"
 bytes = { version = "1", features = ["serde"] }

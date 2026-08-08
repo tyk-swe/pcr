@@ -4,8 +4,9 @@
 use std::io::{self, Write};
 
 use packetcraftr::{
-    capture::{Format, Frame, Writer},
+    analysis::pcap::{Format, Writer},
     output,
+    packet::frame::Frame,
 };
 
 use super::super::capture_output::CaptureOutput;

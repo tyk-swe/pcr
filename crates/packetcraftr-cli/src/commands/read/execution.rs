@@ -5,8 +5,9 @@ use std::fs::File;
 use std::io;
 
 use packetcraftr::{
-    capture::{self, Format as CaptureFormat, Limits, LinkType, Reader, Writer},
+    analysis::pcap::{self as capture, Format as CaptureFormat, Limits, Reader, Writer},
     output, packet,
+    packet::frame::LinkType,
 };
 
 use crate::capture_output::CaptureOutput;

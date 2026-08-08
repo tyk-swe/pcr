@@ -4,8 +4,9 @@
 use std::sync::Arc;
 
 use packetcraftr::{
-    client::{self, Client},
-    net, packet, protocol,
+    live::{self as client, Client},
+    network as net, packet,
+    packet::protocol,
 };
 
 use super::super::errors::CliError;

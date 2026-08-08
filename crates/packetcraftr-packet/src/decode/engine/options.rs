@@ -1,8 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::frame::Frame;
 use bytes::Bytes;
-use packetcraftr_core::frame::Frame;
 
 use super::super::super::Packet;
 use super::super::super::build::{DEFAULT_MAX_LAYERS, DEFAULT_MAX_PACKET_SIZE};

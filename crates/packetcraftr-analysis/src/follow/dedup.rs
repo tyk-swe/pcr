@@ -4,7 +4,7 @@
 //! Sequence tracking and payload deduplication for followed TCP conversations.
 
 use bytes::Bytes;
-use packetcraftr_protocol::transport::Tcp;
+use packetcraftr_packet::protocol::transport::Tcp;
 
 use crate::reassembly::tcp::FlowKey;
 

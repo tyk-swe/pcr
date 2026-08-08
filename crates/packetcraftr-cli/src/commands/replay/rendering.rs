@@ -6,8 +6,8 @@ use std::io::Write;
 use std::time::Duration;
 
 use packetcraftr::{
-    capture::{self, Format, Limits, Reader, Writer},
-    net, output, workflow,
+    analysis::pcap::{self as capture, Format, Limits, Reader, Writer},
+    live as workflow, network as net, output,
 };
 
 use crate::capture_output::CaptureOutput;

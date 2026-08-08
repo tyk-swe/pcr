@@ -4,8 +4,8 @@
 use std::sync::Arc;
 
 use packetcraftr::{
-    capture::Frame,
-    error::{Classification, Kind},
+    packet::error::{Classification, Kind},
+    packet::frame::Frame,
     packet::{
         self,
         filter::{Context, Error as FilterError, Filter, Options as FilterOptions},

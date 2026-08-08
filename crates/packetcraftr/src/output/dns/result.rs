@@ -6,8 +6,8 @@
 use std::net::IpAddr;
 use std::time::Duration;
 
+use packetcraftr_live::dns::Result as DnsResult;
 use packetcraftr_packet::diagnostic::Diagnostic;
-use packetcraftr_workflow::dns::Result as DnsResult;
 use serde::Serialize;
 
 use super::super::contract::Error;
@@ -27,15 +27,15 @@ pub enum DnsOutcome {
     NetworkFailure,
 }
 
-impl From<packetcraftr_workflow::dns::Outcome> for DnsOutcome {
-    fn from(value: packetcraftr_workflow::dns::Outcome) -> Self {
+impl From<packetcraftr_live::dns::Outcome> for DnsOutcome {
+    fn from(value: packetcraftr_live::dns::Outcome) -> Self {
         match value {
-            packetcraftr_workflow::dns::Outcome::Response => Self::Response,
-            packetcraftr_workflow::dns::Outcome::Truncated => Self::Truncated,
-            packetcraftr_workflow::dns::Outcome::Timeout => Self::Timeout,
-            packetcraftr_workflow::dns::Outcome::Unrelated => Self::Unrelated,
-            packetcraftr_workflow::dns::Outcome::DecodeFailure => Self::DecodeFailure,
-            packetcraftr_workflow::dns::Outcome::NetworkFailure => Self::NetworkFailure,
+            packetcraftr_live::dns::Outcome::Response => Self::Response,
+            packetcraftr_live::dns::Outcome::Truncated => Self::Truncated,
+            packetcraftr_live::dns::Outcome::Timeout => Self::Timeout,
+            packetcraftr_live::dns::Outcome::Unrelated => Self::Unrelated,
+            packetcraftr_live::dns::Outcome::DecodeFailure => Self::DecodeFailure,
+            packetcraftr_live::dns::Outcome::NetworkFailure => Self::NetworkFailure,
         }
     }
 }

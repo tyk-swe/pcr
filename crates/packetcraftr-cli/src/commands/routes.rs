@@ -1,8 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr::net::{interface::Provider as _, route::Provider as _};
-use packetcraftr::{net, output};
+use packetcraftr::network::{interface::Provider as _, route::Provider as _};
+use packetcraftr::{network as net, output};
 
 use super::super::errors::CliError;
 use super::super::rendering::{emit_json, write_stdout_line};

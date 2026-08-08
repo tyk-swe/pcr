@@ -3,7 +3,7 @@
 
 use std::time::{Duration, Instant};
 
-use packetcraftr::{capture::Frame, client, net, output, packet};
+use packetcraftr::{live as client, network as net, output, packet, packet::frame::Frame};
 
 use crate::errors::CliError;
 use crate::filtering::FrameSelector;

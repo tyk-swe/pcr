@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use clap::Args;
-use packetcraftr::client;
+use packetcraftr::live as client;
 
 use crate::command_options::CaptureLimitArgs;
 use crate::commands::send::arguments::SendArgs;

@@ -8,7 +8,7 @@ use std::net::IpAddr;
 
 use serde::Serialize;
 
-use packetcraftr_net::{
+use packetcraftr_network::{
     interface::{Flags as InterfaceFlags, Id as InterfaceId, Info as InterfaceInfo},
     link::{Capability as LinkCapability, Mode as LinkMode},
     route::{Decision as RouteDecision, Plan as PlannedRoute},
@@ -115,13 +115,13 @@ pub enum RouteSelectionOutput {
     InterfaceOnly,
 }
 
-impl From<packetcraftr_net::route::SelectionReason> for RouteSelectionOutput {
-    fn from(value: packetcraftr_net::route::SelectionReason) -> Self {
+impl From<packetcraftr_network::route::SelectionReason> for RouteSelectionOutput {
+    fn from(value: packetcraftr_network::route::SelectionReason) -> Self {
         match value {
-            packetcraftr_net::route::SelectionReason::Local => Self::Local,
-            packetcraftr_net::route::SelectionReason::OnLink => Self::OnLink,
-            packetcraftr_net::route::SelectionReason::Gateway => Self::Gateway,
-            packetcraftr_net::route::SelectionReason::InterfaceOnly => Self::InterfaceOnly,
+            packetcraftr_network::route::SelectionReason::Local => Self::Local,
+            packetcraftr_network::route::SelectionReason::OnLink => Self::OnLink,
+            packetcraftr_network::route::SelectionReason::Gateway => Self::Gateway,
+            packetcraftr_network::route::SelectionReason::InterfaceOnly => Self::InterfaceOnly,
         }
     }
 }
@@ -137,15 +137,15 @@ pub enum RouteScopeOutput {
     Unspecified,
 }
 
-impl From<packetcraftr_net::route::Scope> for RouteScopeOutput {
-    fn from(value: packetcraftr_net::route::Scope) -> Self {
+impl From<packetcraftr_network::route::Scope> for RouteScopeOutput {
+    fn from(value: packetcraftr_network::route::Scope) -> Self {
         match value {
-            packetcraftr_net::route::Scope::Host => Self::Host,
-            packetcraftr_net::route::Scope::Link => Self::Link,
-            packetcraftr_net::route::Scope::Private => Self::Private,
-            packetcraftr_net::route::Scope::Global => Self::Global,
-            packetcraftr_net::route::Scope::Multicast => Self::Multicast,
-            packetcraftr_net::route::Scope::Unspecified => Self::Unspecified,
+            packetcraftr_network::route::Scope::Host => Self::Host,
+            packetcraftr_network::route::Scope::Link => Self::Link,
+            packetcraftr_network::route::Scope::Private => Self::Private,
+            packetcraftr_network::route::Scope::Global => Self::Global,
+            packetcraftr_network::route::Scope::Multicast => Self::Multicast,
+            packetcraftr_network::route::Scope::Unspecified => Self::Unspecified,
         }
     }
 }
@@ -174,8 +174,8 @@ impl From<LinkMode> for RouteModeOutput {
 #[serde(transparent)]
 pub struct RouteMacAddressOutput(pub [u8; 6]);
 
-impl From<packetcraftr_net::link::MacAddress> for RouteMacAddressOutput {
-    fn from(value: packetcraftr_net::link::MacAddress) -> Self {
+impl From<packetcraftr_network::link::MacAddress> for RouteMacAddressOutput {
+    fn from(value: packetcraftr_network::link::MacAddress) -> Self {
         Self(value.0)
     }
 }
@@ -198,11 +198,11 @@ pub enum RouteVlanKindOutput {
     Ieee8021Ad,
 }
 
-impl From<packetcraftr_net::neighbor::VlanKind> for RouteVlanKindOutput {
-    fn from(value: packetcraftr_net::neighbor::VlanKind) -> Self {
+impl From<packetcraftr_network::neighbor::VlanKind> for RouteVlanKindOutput {
+    fn from(value: packetcraftr_network::neighbor::VlanKind) -> Self {
         match value {
-            packetcraftr_net::neighbor::VlanKind::Ieee8021Q => Self::Ieee8021Q,
-            packetcraftr_net::neighbor::VlanKind::Ieee8021Ad => Self::Ieee8021Ad,
+            packetcraftr_network::neighbor::VlanKind::Ieee8021Q => Self::Ieee8021Q,
+            packetcraftr_network::neighbor::VlanKind::Ieee8021Ad => Self::Ieee8021Ad,
         }
     }
 }
@@ -215,8 +215,8 @@ pub struct RouteVlanTagOutput {
     pub vlan_id: u16,
 }
 
-impl From<packetcraftr_net::neighbor::VlanTag> for RouteVlanTagOutput {
-    fn from(value: packetcraftr_net::neighbor::VlanTag) -> Self {
+impl From<packetcraftr_network::neighbor::VlanTag> for RouteVlanTagOutput {
+    fn from(value: packetcraftr_network::neighbor::VlanTag) -> Self {
         Self {
             kind: value.kind.into(),
             priority: value.priority,

@@ -9,47 +9,43 @@
 //! format, and testing parser robustness against malformed input. Building,
 //! dissection, capture-file I/O, and fuzz-case generation are offline and
 //! runtime-neutral; the live paths are separate, require operation
-//! authorization through [`client::policy::Policy`], and run under finite
+//! authorization through [`live::policy::Policy`], and run under finite
 //! packet, byte, duration, and evidence budgets.
 //!
 //! # Domain map
 //!
 //! The workspace's domains are independently compiled where their dependency
 //! boundaries require it. This facade also owns the render-neutral [`output`]
-//! module and re-exports analysis reassembly at [`reassembly`]. Depend on an
-//! individual domain crate to compile only part of the stack.
+//! module. Depend on an individual domain crate to compile only part of the
+//! stack.
 //!
 //! The current facade exposes these responsibility-oriented domains:
 //!
-//! - [`analysis`] runs bounded offline capture analysis, expert diagnostics,
-//!   and stream reassembly;
-//! - [`capture`] reads and writes bounded classic PCAP and PCAPNG streams;
-//! - [`client`] plans and executes policy-gated send and exchange operations;
-//! - [`core`] provides shared errors, budgets, and frame types;
-//! - [`net`] defines interfaces, routes, providers, and native I/O boundaries;
+//! - [`packet`] owns budgets, errors, frames, packet mechanics, built-in
+//!   protocols, and deterministic offline fuzz campaigns;
+//! - [`analysis`] owns bounded PCAP/PCAPNG I/O, offline analysis, expert
+//!   diagnostics, following, statistics, and reassembly;
+//! - [`network`] defines interfaces, links, neighbors, routes, capture,
+//!   transmission, and native I/O boundaries;
+//! - [`live`] owns policy-gated send, exchange, replay, scan, traceroute, DNS,
+//!   and live fuzz execution;
 //! - [`output`] defines render-neutral output models and versioned envelopes;
-//! - [`packet`] owns layers, documents, registries, exact building, and bounded
-//!   dissection;
-//! - [`protocol`] supplies the built-in codecs, matchers, capture roots, and
-//!   capability tables;
-//! - [`reassembly`] provides bounded fragment and transport reassembly state;
-//!   and
-//! - [`workflow`] implements replay, scan, traceroute, DNS, and fuzz workflows.
+//!   it is implemented by this facade crate.
 //!
-//! [`analysis`] and [`workflow`] are separate crates because the offline and
-//! live halves of the toolkit must not blur: [`analysis`] depends on neither
-//! [`client`] nor [`net`], so it cannot acquire a resolver, route, capture, or
-//! transmission seam without that dependency edge appearing first.
+//! [`analysis`] and [`live`] are separate crates because the offline and live
+//! halves of the toolkit must not blur: [`analysis`] depends on neither
+//! [`network`] nor [`live`], so it cannot acquire a resolver, route, capture,
+//! or transmission seam without that dependency edge appearing first.
 //!
-//! The packet and protocol domains are runtime-neutral. Native availability is
-//! selected separately through Cargo features and the providers in [`net`].
+//! The packet domain is runtime-neutral. Native availability is selected
+//! separately through Cargo features and the providers in [`network`].
 //! Consumers that need exact built-in codec or capture-root capabilities should
-//! inspect [`protocol::support::BUILTIN_PROTOCOLS`] and
-//! [`protocol::support::BUILTIN_CAPTURE_ROOTS`].
+//! inspect [`packet::protocol::support::BUILTIN_PROTOCOLS`] and
+//! [`packet::protocol::support::BUILTIN_CAPTURE_ROOTS`].
 //!
 //! ```text
 //! use std::sync::Arc;
-//! use packetcraftr::{packet::{build, layer::Raw, Packet}, protocol};
+//! use packetcraftr::{packet::{build, layer::Raw, Packet}, packet::protocol as protocol};
 //!
 //! let registry = Arc::new(protocol::builtin::registry()?);
 //! let mut packet = Packet::new();
@@ -66,14 +62,8 @@
 #![forbid(unsafe_code)]
 
 pub use packetcraftr_analysis as analysis;
-pub use packetcraftr_analysis::reassembly;
-pub use packetcraftr_capture as capture;
-pub use packetcraftr_client as client;
-pub use packetcraftr_core as core;
-pub use packetcraftr_core::error;
-pub use packetcraftr_net as net;
+pub use packetcraftr_live as live;
+pub use packetcraftr_network as network;
 pub use packetcraftr_packet as packet;
-pub use packetcraftr_protocol as protocol;
-pub use packetcraftr_workflow as workflow;
 
 pub mod output;

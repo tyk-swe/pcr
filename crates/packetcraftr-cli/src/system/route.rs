@@ -4,7 +4,7 @@
 use std::net::IpAddr;
 use std::time::Duration;
 
-use packetcraftr::{client, net, packet, packet::Packet};
+use packetcraftr::{live as client, network as net, packet, packet::Packet};
 
 use super::super::command_options::RouteArgs;
 use super::super::errors::CliError;

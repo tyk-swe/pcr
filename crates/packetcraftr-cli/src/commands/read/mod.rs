@@ -12,9 +12,9 @@ use std::fs::File;
 use std::io;
 
 use packetcraftr::{
-    capture::{Limits, Reader, ReaderOptions, transcode},
-    error::{Classification, Kind},
+    analysis::pcap::{Limits, Reader, ReaderOptions, transcode},
     output, packet,
+    packet::error::{Classification, Kind},
 };
 
 use self::arguments::ReadArgs;
@@ -133,26 +133,28 @@ pub(super) fn run(arguments: ReadArgs, output: output::contract::Format) -> Resu
         };
         frames = next_frame_number(frames, sequence)?;
         if frames > max_frames {
-            return Err(
-                CliError::classified(packetcraftr::capture::Error::FrameLimitExceeded {
+            return Err(CliError::classified(
+                packetcraftr::analysis::pcap::Error::FrameLimitExceeded {
                     actual: frames,
                     limit: max_frames,
-                })
-                .at_sequence(sequence),
-            );
+                },
+            )
+            .at_sequence(sequence));
         }
         captured_bytes = captured_bytes
             .checked_add(u64::from(frame.captured_length()))
             .ok_or_else(|| {
-                CliError::classified(packetcraftr::capture::Error::StreamByteLimitExceeded {
-                    actual: u64::MAX,
-                    limit: max_bytes,
-                })
+                CliError::classified(
+                    packetcraftr::analysis::pcap::Error::StreamByteLimitExceeded {
+                        actual: u64::MAX,
+                        limit: max_bytes,
+                    },
+                )
                 .at_sequence(sequence)
             })?;
         if captured_bytes > max_bytes {
             return Err(CliError::classified(
-                packetcraftr::capture::Error::StreamByteLimitExceeded {
+                packetcraftr::analysis::pcap::Error::StreamByteLimitExceeded {
                     actual: captured_bytes,
                     limit: max_bytes,
                 },

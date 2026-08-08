@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use clap::Args;
-use packetcraftr::{capture, client, net};
+use packetcraftr::{analysis::pcap as capture, live as client, network as net};
 
 #[derive(Clone, Debug, Args)]
 struct PublicDestinationArgs {

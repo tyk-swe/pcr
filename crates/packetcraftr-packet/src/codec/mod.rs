@@ -5,8 +5,7 @@
 
 mod contract;
 
-#[doc(hidden)]
-pub use contract::{
+pub(crate) use contract::{
     CodecError, DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext,
 };
 pub use contract::{

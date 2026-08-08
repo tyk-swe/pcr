@@ -1,6 +1,6 @@
 [package]
 name = "packetcraftr-packet"
-description = "Packet layers, registries, exact building, and bounded dissection"
+description = "PacketcraftR domain types, packet mechanics, and built-in protocol codecs"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -14,7 +14,6 @@ workspace = true
 [dependencies]
 bytes.workspace = true
 noyalib.workspace = true
-packetcraftr-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

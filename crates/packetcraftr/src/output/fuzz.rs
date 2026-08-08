@@ -7,8 +7,11 @@ use std::fmt;
 
 use serde::Serialize;
 
-use packetcraftr_packet::{diagnostic::Diagnostic as PacketDiagnostic, document::PacketDocument};
-use packetcraftr_workflow::fuzz::Result as FuzzResult;
+use packetcraftr_live::fuzz as live_fuzz;
+use packetcraftr_packet::fuzz as packet_fuzz;
+use packetcraftr_packet::{
+    diagnostic::Diagnostic as PacketDiagnostic, document::Packet as PacketDocument,
+};
 
 use super::contract::Error as ContractError;
 use super::envelope::{Diagnostic, Error as OutputError, Stats};
@@ -24,11 +27,10 @@ pub enum Mode {
     Live,
 }
 
-impl From<packetcraftr_workflow::fuzz::Mode> for Mode {
-    fn from(value: packetcraftr_workflow::fuzz::Mode) -> Self {
+impl From<packetcraftr_live::fuzz::Mode> for Mode {
+    fn from(value: packetcraftr_live::fuzz::Mode) -> Self {
         match value {
-            packetcraftr_workflow::fuzz::Mode::Offline => Self::Offline,
-            packetcraftr_workflow::fuzz::Mode::Live => Self::Live,
+            packetcraftr_live::fuzz::Mode::Live => Self::Live,
         }
     }
 }
@@ -45,13 +47,22 @@ pub enum Outcome {
     Error,
 }
 
-impl From<packetcraftr_workflow::fuzz::CaseOutcome> for Outcome {
-    fn from(value: packetcraftr_workflow::fuzz::CaseOutcome) -> Self {
+impl From<packetcraftr_live::fuzz::CaseOutcome> for Outcome {
+    fn from(value: packetcraftr_live::fuzz::CaseOutcome) -> Self {
         match value {
-            packetcraftr_workflow::fuzz::CaseOutcome::Built => Self::Built,
-            packetcraftr_workflow::fuzz::CaseOutcome::Rejected => Self::Rejected,
-            packetcraftr_workflow::fuzz::CaseOutcome::Response => Self::Response,
-            packetcraftr_workflow::fuzz::CaseOutcome::Timeout => Self::Timeout,
+            packetcraftr_live::fuzz::CaseOutcome::Built => Self::Built,
+            packetcraftr_live::fuzz::CaseOutcome::Rejected => Self::Rejected,
+            packetcraftr_live::fuzz::CaseOutcome::Response => Self::Response,
+            packetcraftr_live::fuzz::CaseOutcome::Timeout => Self::Timeout,
+        }
+    }
+}
+
+impl From<packet_fuzz::CaseOutcome> for Outcome {
+    fn from(value: packet_fuzz::CaseOutcome) -> Self {
+        match value {
+            packet_fuzz::CaseOutcome::Built => Self::Built,
+            packet_fuzz::CaseOutcome::Rejected => Self::Rejected,
         }
     }
 }
@@ -83,13 +94,13 @@ impl fmt::Display for Strategy {
     }
 }
 
-impl From<packetcraftr_workflow::fuzz::Strategy> for Strategy {
-    fn from(value: packetcraftr_workflow::fuzz::Strategy) -> Self {
+impl From<packet_fuzz::Strategy> for Strategy {
+    fn from(value: packet_fuzz::Strategy) -> Self {
         match value {
-            packetcraftr_workflow::fuzz::Strategy::Boundary => Self::Boundary,
-            packetcraftr_workflow::fuzz::Strategy::Random => Self::Random,
-            packetcraftr_workflow::fuzz::Strategy::BitFlip => Self::BitFlip,
-            packetcraftr_workflow::fuzz::Strategy::Malformed => Self::Malformed,
+            packet_fuzz::Strategy::Boundary => Self::Boundary,
+            packet_fuzz::Strategy::Random => Self::Random,
+            packet_fuzz::Strategy::BitFlip => Self::BitFlip,
+            packet_fuzz::Strategy::Malformed => Self::Malformed,
         }
     }
 }
@@ -101,12 +112,12 @@ pub struct Mutation {
     pub protocol: String,
     pub field: String,
     pub strategy: Strategy,
-    pub original: packetcraftr_packet::field::FieldValue,
-    pub value: packetcraftr_packet::field::FieldValue,
+    pub original: packetcraftr_packet::field::Value,
+    pub value: packetcraftr_packet::field::Value,
 }
 
-impl From<packetcraftr_workflow::fuzz::Mutation> for Mutation {
-    fn from(value: packetcraftr_workflow::fuzz::Mutation) -> Self {
+impl From<packet_fuzz::Mutation> for Mutation {
+    fn from(value: packet_fuzz::Mutation) -> Self {
         Self {
             layer: value.layer,
             protocol: value.protocol,
@@ -132,7 +143,7 @@ pub struct Case {
     pub seed: u64,
     pub mutation: Mutation,
     pub reproduction: Reproduction,
-    pub shrink_values: Vec<packetcraftr_packet::field::FieldValue>,
+    pub shrink_values: Vec<packetcraftr_packet::field::Value>,
     pub recipe: PacketDocument,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub frame: Option<Wire>,
@@ -164,10 +175,51 @@ pub struct Result {
 }
 
 impl Result {
-    pub fn try_from_fuzz(
-        result: FuzzResult,
+    pub fn try_from_offline(
+        result: packet_fuzz::Result,
     ) -> std::result::Result<(Self, Vec<PacketDiagnostic>, Stats), ContractError> {
-        let FuzzResult {
+        let packet_fuzz::Result {
+            seed,
+            first_case,
+            cases,
+            diagnostics,
+            stats,
+        } = result;
+        let case_outputs = cases
+            .into_iter()
+            .map(|case| {
+                let outcome = case.outcome.into();
+                convert_case(
+                    seed,
+                    case,
+                    outcome,
+                    None,
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                )
+            })
+            .collect::<std::result::Result<Vec<_>, ContractError>>()?;
+        let operation_stats = (&stats).into();
+        Ok((
+            Self {
+                seed,
+                first_case,
+                mode: Mode::Offline,
+                cases_generated: stats.cases_generated,
+                cases_built: stats.cases_built,
+                cases_rejected: stats.cases_generated.saturating_sub(stats.cases_built),
+                cases: case_outputs,
+            },
+            diagnostics,
+            operation_stats,
+        ))
+    }
+
+    pub fn try_from_live(
+        result: live_fuzz::Result,
+    ) -> std::result::Result<(Self, Vec<PacketDiagnostic>, Stats), ContractError> {
+        let live_fuzz::Result {
             mode,
             seed,
             first_case,
@@ -178,52 +230,23 @@ impl Result {
         let case_outputs = cases
             .into_iter()
             .map(|case| {
-                let built_frame = case
-                    .built
-                    .as_ref()
-                    .map(|built| Wire::new(built.bytes.clone()));
-                let requires_live_opt_in =
-                    case.built.as_ref().map(|built| built.requires_live_opt_in);
-                let decoded_packet = case
-                    .decoded
-                    .as_ref()
-                    .map(|decoded| PacketDocument::from_packet(&decoded.packet));
-                let output_error = case.error.as_ref().map(OutputError::classified);
-                let reproduction = Reproduction {
-                    operation_seed: seed,
-                    case_index: case.index,
-                    case_seed: case.seed,
-                };
-                Ok(Case {
-                    index: case.index,
-                    seed: case.seed,
-                    mutation: case.mutation.into(),
-                    reproduction,
-                    shrink_values: case.shrink_values,
-                    recipe: PacketDocument::from_packet(&case.recipe),
-                    frame: built_frame,
-                    decoded: decoded_packet,
-                    requires_live_opt_in,
-                    outcome: case.outcome.into(),
-                    error: output_error,
-                    sent: case.sent.map(Captured::try_from_frame).transpose()?,
-                    responses: case
-                        .responses
-                        .into_iter()
-                        .map(Captured::try_from_frame)
-                        .collect::<std::result::Result<Vec<_>, _>>()?,
-                    unmatched: case
-                        .unmatched
-                        .into_iter()
-                        .map(Captured::try_from_frame)
-                        .collect::<std::result::Result<Vec<_>, _>>()?,
-                    undecoded: case
-                        .undecoded
-                        .into_iter()
-                        .map(Captured::try_from_frame)
-                        .collect::<std::result::Result<Vec<_>, _>>()?,
-                    diagnostics: case.diagnostics.into_iter().map(Into::into).collect(),
-                })
+                let live_fuzz::Case {
+                    prepared,
+                    outcome,
+                    sent,
+                    responses,
+                    unmatched,
+                    undecoded,
+                } = case;
+                convert_case(
+                    seed,
+                    prepared,
+                    outcome.into(),
+                    sent,
+                    responses,
+                    unmatched,
+                    undecoded,
+                )
             })
             .collect::<std::result::Result<Vec<_>, ContractError>>()?;
         let operation_stats = (&stats).into();
@@ -241,6 +264,65 @@ impl Result {
             operation_stats,
         ))
     }
+}
+
+fn convert_case(
+    operation_seed: u64,
+    case: packet_fuzz::Case,
+    outcome: Outcome,
+    sent: Option<packetcraftr_packet::frame::Frame>,
+    responses: Vec<packetcraftr_packet::frame::Frame>,
+    unmatched: Vec<packetcraftr_packet::frame::Frame>,
+    undecoded: Vec<packetcraftr_packet::frame::Frame>,
+) -> std::result::Result<Case, ContractError> {
+    let packet_fuzz::Case {
+        index,
+        seed,
+        mutation,
+        shrink_values,
+        recipe,
+        built,
+        decoded,
+        error,
+        diagnostics,
+        ..
+    } = case;
+    let frame = built.as_ref().map(|built| Wire::new(built.bytes.clone()));
+    let requires_live_opt_in = built.as_ref().map(|built| built.requires_live_opt_in);
+    let decoded = decoded
+        .as_ref()
+        .map(|decoded| PacketDocument::from_packet(&decoded.packet));
+    Ok(Case {
+        index,
+        seed,
+        mutation: mutation.into(),
+        reproduction: Reproduction {
+            operation_seed,
+            case_index: index,
+            case_seed: seed,
+        },
+        shrink_values,
+        recipe: PacketDocument::from_packet(&recipe),
+        frame,
+        decoded,
+        requires_live_opt_in,
+        outcome,
+        error: error.as_ref().map(OutputError::classified),
+        sent: sent.map(Captured::try_from_frame).transpose()?,
+        responses: responses
+            .into_iter()
+            .map(Captured::try_from_frame)
+            .collect::<std::result::Result<Vec<_>, _>>()?,
+        unmatched: unmatched
+            .into_iter()
+            .map(Captured::try_from_frame)
+            .collect::<std::result::Result<Vec<_>, _>>()?,
+        undecoded: undecoded
+            .into_iter()
+            .map(Captured::try_from_frame)
+            .collect::<std::result::Result<Vec<_>, _>>()?,
+        diagnostics: diagnostics.into_iter().map(Into::into).collect(),
+    })
 }
 
 /// Independently useful events in deterministic `fuzz` streaming output.

@@ -4,7 +4,7 @@
 use std::net::IpAddr;
 
 use clap::{Args, ValueEnum};
-use packetcraftr::workflow;
+use packetcraftr::live as workflow;
 
 use crate::command_options::{
     CaptureLimitArgs, CliAddressFamily, CliLinkMode, HostnameTrafficPolicyArgs,

@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use packetcraftr::{client, packet, workflow};
+use packetcraftr::{live as client, live as workflow, packet};
 
 use crate::errors::CliError;
 use crate::system::{DeferredInterface, system_client};
@@ -24,6 +24,6 @@ impl workflow::scan::Executor for CliScanExecutor {
             .resolve_into(&mut self.exchange.send.plan)
             .map_err(CliError::into_boundary_error)?;
         let client = system_client(Arc::clone(&self.registry), self.policy.clone());
-        workflow::scan::ClientExecutor::new(&client, self.exchange.clone()).execute(batch)
+        workflow::ExchangeExecutor::new(&client, self.exchange.clone()).execute(batch)
     }
 }

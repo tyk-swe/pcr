@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use packetcraftr_packet::diagnostic::DiagnosticSeverity;
+use packetcraftr_packet::diagnostic::Severity as DiagnosticSeverity;
 
 use super::super::finding::new as new_finding;
 use super::super::observation::TcpObservation;

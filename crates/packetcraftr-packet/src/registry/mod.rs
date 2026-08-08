@@ -5,11 +5,9 @@
 
 mod core;
 
-#[doc(hidden)]
-pub use super::codec::{CodecError, LayerDecodeContext, LayerEncodeContext};
+pub(crate) use super::codec::{CodecError, LayerDecodeContext, LayerEncodeContext};
 pub use core::{
     Discriminator, FilterFieldBinding, ProtocolRegistry as Registry, RegistryBuilder as Builder,
     RegistryError as Error,
 };
-#[doc(hidden)]
-pub use core::{ProtocolRegistry, RegistryBuilder, RegistryError};
+pub(crate) use core::{ProtocolRegistry, RegistryBuilder, RegistryError};

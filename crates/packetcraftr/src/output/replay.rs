@@ -7,10 +7,8 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use packetcraftr_net::{interface::Id as InterfaceId, link::Mode as NetworkLinkMode};
-use packetcraftr_workflow::replay::{
-    FrameEvidence as ReplayFrameEvidence, Summary as ReplaySummary,
-};
+use packetcraftr_live::replay::{FrameEvidence as ReplayFrameEvidence, Summary as ReplaySummary};
+use packetcraftr_network::{interface::Id as InterfaceId, link::Mode as NetworkLinkMode};
 
 use super::contract::Error;
 pub use super::frame::Captured;
@@ -23,11 +21,11 @@ pub enum SourceFormat {
     PcapNg,
 }
 
-impl From<packetcraftr_capture::Format> for SourceFormat {
-    fn from(value: packetcraftr_capture::Format) -> Self {
+impl From<packetcraftr_analysis::pcap::Format> for SourceFormat {
+    fn from(value: packetcraftr_analysis::pcap::Format) -> Self {
         match value {
-            packetcraftr_capture::Format::Pcap => Self::Pcap,
-            packetcraftr_capture::Format::PcapNg => Self::PcapNg,
+            packetcraftr_analysis::pcap::Format::Pcap => Self::Pcap,
+            packetcraftr_analysis::pcap::Format::PcapNg => Self::PcapNg,
         }
     }
 }
@@ -41,13 +39,13 @@ pub enum Timing {
     Immediate,
 }
 
-impl From<packetcraftr_workflow::replay::Timing> for Timing {
-    fn from(value: packetcraftr_workflow::replay::Timing) -> Self {
+impl From<packetcraftr_live::replay::Timing> for Timing {
+    fn from(value: packetcraftr_live::replay::Timing) -> Self {
         match value {
-            packetcraftr_workflow::replay::Timing::Original => Self::Original,
-            packetcraftr_workflow::replay::Timing::Scaled(scale) => Self::Scaled(scale),
-            packetcraftr_workflow::replay::Timing::FixedRate(rate) => Self::FixedRate(rate),
-            packetcraftr_workflow::replay::Timing::Immediate => Self::Immediate,
+            packetcraftr_live::replay::Timing::Original => Self::Original,
+            packetcraftr_live::replay::Timing::Scaled(scale) => Self::Scaled(scale),
+            packetcraftr_live::replay::Timing::FixedRate(rate) => Self::FixedRate(rate),
+            packetcraftr_live::replay::Timing::Immediate => Self::Immediate,
             // See the `field::Kind` conversion: the v1 schema pins this value
             // set, so an added timing policy needs a schema revision.
             _ => unreachable!("replay timing {value:?} has no v1 output representation"),

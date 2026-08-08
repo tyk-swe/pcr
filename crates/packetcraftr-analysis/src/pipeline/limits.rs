@@ -5,7 +5,7 @@
 
 use std::time::Duration;
 
-use packetcraftr_capture::{DEFAULT_SIZE_LIMIT, DEFAULT_STREAM_BYTES, DEFAULT_STREAM_FRAMES};
+use crate::pcap::{DEFAULT_SIZE_LIMIT, DEFAULT_STREAM_BYTES, DEFAULT_STREAM_FRAMES};
 use packetcraftr_packet::filter::Filter;
 
 use crate::AnalysisError;

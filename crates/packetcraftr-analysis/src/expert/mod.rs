@@ -5,8 +5,8 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use packetcraftr_packet::diagnostic::DiagnosticSeverity;
-use packetcraftr_protocol::transport::Tcp;
+use packetcraftr_packet::diagnostic::Severity as DiagnosticSeverity;
+use packetcraftr_packet::protocol::transport::Tcp;
 
 use crate::adapter::{transport_payload, transports};
 use crate::pipeline::FrameRecord;

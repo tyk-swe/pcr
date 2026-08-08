@@ -6,5 +6,4 @@
 mod contract;
 
 pub use contract::{MatchResult as Result, ResponseMatcher as Matcher};
-#[doc(hidden)]
-pub use contract::{MatchResult, ResponseMatcher};
+pub(crate) use contract::{MatchResult, ResponseMatcher};

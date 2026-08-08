@@ -7,8 +7,8 @@ use std::collections::HashSet;
 use std::time::SystemTime;
 
 use bytes::Bytes;
-use packetcraftr_packet::decode::DecodedPacket;
-use packetcraftr_protocol::transport::Tcp;
+use packetcraftr_packet::decode::Result as DecodedPacket;
+use packetcraftr_packet::protocol::transport::Tcp;
 
 use crate::AnalysisError;
 use crate::adapter::transports;

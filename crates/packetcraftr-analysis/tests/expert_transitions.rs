@@ -11,16 +11,17 @@ use bytes::Bytes;
 use packetcraftr_analysis::expert::{
     ExpertCollector, ExpertSummary, Finding, StreamRef, StreamTransport,
 };
+use packetcraftr_analysis::pcap::{Reader, Writer};
 use packetcraftr_analysis::{Options, run};
-use packetcraftr_capture::{Frame, LinkType, Reader, Writer};
 use packetcraftr_packet::Packet;
 use packetcraftr_packet::build::{Builder, Context as BuildContext, Options as BuildOptions};
-use packetcraftr_packet::diagnostic::DiagnosticSeverity;
+use packetcraftr_packet::diagnostic::Severity as DiagnosticSeverity;
+use packetcraftr_packet::frame::{Frame, LinkType};
 use packetcraftr_packet::layer::Raw;
-use packetcraftr_packet::registry::ProtocolRegistry;
-use packetcraftr_protocol::builtin;
-use packetcraftr_protocol::network::Ipv4;
-use packetcraftr_protocol::transport::Tcp;
+use packetcraftr_packet::protocol::builtin;
+use packetcraftr_packet::protocol::network::Ipv4;
+use packetcraftr_packet::protocol::transport::Tcp;
+use packetcraftr_packet::registry::Registry;
 
 const CLIENT: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 1);
 const SERVER: Ipv4Addr = Ipv4Addr::new(198, 51, 100, 2);
@@ -38,7 +39,7 @@ struct TcpSpec {
     options: Bytes,
 }
 
-fn registry() -> Arc<ProtocolRegistry> {
+fn registry() -> Arc<Registry> {
     Arc::new(builtin::registry().expect("built-in protocols must register"))
 }
 
@@ -75,12 +76,7 @@ fn with_window_scale(mut spec: TcpSpec, shift: u8) -> TcpSpec {
     spec
 }
 
-fn frame(
-    registry: &Arc<ProtocolRegistry>,
-    timestamp: SystemTime,
-    spec: &TcpSpec,
-    payload: &[u8],
-) -> Frame {
+fn frame(registry: &Arc<Registry>, timestamp: SystemTime, spec: &TcpSpec, payload: &[u8]) -> Frame {
     let mut packet = Packet::new();
     packet.push(Ipv4 {
         source: spec.source,

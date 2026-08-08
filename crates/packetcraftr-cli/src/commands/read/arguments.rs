@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 
 use clap::Args;
-use packetcraftr::capture;
+use packetcraftr::analysis::pcap as capture;
 
 pub(crate) const AFTER_LONG_HELP: &str = r#"Examples:
   packetcraftr read capture.pcapng --max-frames 100

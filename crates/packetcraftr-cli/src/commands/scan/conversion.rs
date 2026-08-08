@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 
-use packetcraftr::workflow;
+use packetcraftr::live as workflow;
 
 use super::arguments::CliScanPortSpec;
 use crate::errors::CliError;

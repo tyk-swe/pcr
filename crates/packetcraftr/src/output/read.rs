@@ -3,8 +3,8 @@
 
 //! Output contract for the `read` command.
 
-use packetcraftr_capture::Frame as CaptureFrame;
-use packetcraftr_packet::decode::DecodedPacket;
+use packetcraftr_packet::decode::Result as DecodedPacket;
+use packetcraftr_packet::frame::Frame as CaptureFrame;
 use serde::Serialize;
 
 use super::contract::Error;

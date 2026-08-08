@@ -3,10 +3,7 @@
 
 use std::fs::File;
 
-use packetcraftr::{
-    capture::{Frame, Reader},
-    workflow,
-};
+use packetcraftr::{analysis::pcap::Reader, live as workflow, packet::frame::Frame};
 
 use crate::errors::CliError;
 use crate::filtering::FrameSelector;

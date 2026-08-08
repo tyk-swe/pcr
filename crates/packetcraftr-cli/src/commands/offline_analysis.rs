@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use packetcraftr::{
     analysis,
-    capture::{Reader, ReaderOptions},
+    analysis::pcap::{Reader, ReaderOptions},
     packet::{filter::Filter, registry::Registry},
 };
 

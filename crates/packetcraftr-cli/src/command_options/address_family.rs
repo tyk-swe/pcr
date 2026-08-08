@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use clap::ValueEnum;
-use packetcraftr::workflow;
+use packetcraftr::live as workflow;
 
 /// Address-family selection shared by target-based live workflows.
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
@@ -13,7 +13,7 @@ pub(crate) enum CliAddressFamily {
     Ipv6,
 }
 
-impl From<CliAddressFamily> for workflow::AddressFamily {
+impl From<CliAddressFamily> for workflow::target::Family {
     fn from(value: CliAddressFamily) -> Self {
         match value {
             CliAddressFamily::Any => Self::Any,

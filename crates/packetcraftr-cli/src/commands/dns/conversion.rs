@@ -5,7 +5,7 @@ use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
 use std::time::SystemTime;
 
-use packetcraftr::workflow;
+use packetcraftr::live as workflow;
 
 pub(super) fn generated_dns_transaction_id() -> u16 {
     let bytes = generated_dns_entropy().to_le_bytes();

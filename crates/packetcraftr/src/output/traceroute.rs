@@ -8,8 +8,8 @@ use std::time::Duration;
 
 use serde::Serialize;
 
+use packetcraftr_live::traceroute::Result as TracerouteResult;
 use packetcraftr_packet::diagnostic::Diagnostic;
-use packetcraftr_workflow::traceroute::Result as TracerouteResult;
 
 use super::contract::Error;
 use super::envelope::Stats;
@@ -25,11 +25,11 @@ pub enum ProbeStatus {
     Timeout,
 }
 
-impl From<packetcraftr_workflow::traceroute::ProbeStatus> for ProbeStatus {
-    fn from(value: packetcraftr_workflow::traceroute::ProbeStatus) -> Self {
+impl From<packetcraftr_live::traceroute::ProbeStatus> for ProbeStatus {
+    fn from(value: packetcraftr_live::traceroute::ProbeStatus) -> Self {
         match value {
-            packetcraftr_workflow::traceroute::ProbeStatus::Response => Self::Response,
-            packetcraftr_workflow::traceroute::ProbeStatus::Timeout => Self::Timeout,
+            packetcraftr_live::traceroute::ProbeStatus::Response => Self::Response,
+            packetcraftr_live::traceroute::ProbeStatus::Timeout => Self::Timeout,
         }
     }
 }
@@ -43,14 +43,14 @@ pub enum ResponseKind {
     Unreachable,
 }
 
-impl From<packetcraftr_workflow::traceroute::ResponseKind> for ResponseKind {
-    fn from(value: packetcraftr_workflow::traceroute::ResponseKind) -> Self {
+impl From<packetcraftr_live::traceroute::ResponseKind> for ResponseKind {
+    fn from(value: packetcraftr_live::traceroute::ResponseKind) -> Self {
         match value {
-            packetcraftr_workflow::traceroute::ResponseKind::Intermediate => Self::Intermediate,
-            packetcraftr_workflow::traceroute::ResponseKind::DestinationReached => {
+            packetcraftr_live::traceroute::ResponseKind::Intermediate => Self::Intermediate,
+            packetcraftr_live::traceroute::ResponseKind::DestinationReached => {
                 Self::DestinationReached
             }
-            packetcraftr_workflow::traceroute::ResponseKind::Unreachable => Self::Unreachable,
+            packetcraftr_live::traceroute::ResponseKind::Unreachable => Self::Unreachable,
         }
     }
 }
@@ -65,15 +65,15 @@ pub enum Completion {
     Timeout,
 }
 
-impl From<packetcraftr_workflow::traceroute::Completion> for Completion {
-    fn from(value: packetcraftr_workflow::traceroute::Completion) -> Self {
+impl From<packetcraftr_live::traceroute::Completion> for Completion {
+    fn from(value: packetcraftr_live::traceroute::Completion) -> Self {
         match value {
-            packetcraftr_workflow::traceroute::Completion::DestinationReached => {
+            packetcraftr_live::traceroute::Completion::DestinationReached => {
                 Self::DestinationReached
             }
-            packetcraftr_workflow::traceroute::Completion::Unreachable => Self::Unreachable,
-            packetcraftr_workflow::traceroute::Completion::MaximumHops => Self::MaximumHops,
-            packetcraftr_workflow::traceroute::Completion::Timeout => Self::Timeout,
+            packetcraftr_live::traceroute::Completion::Unreachable => Self::Unreachable,
+            packetcraftr_live::traceroute::Completion::MaximumHops => Self::MaximumHops,
+            packetcraftr_live::traceroute::Completion::Timeout => Self::Timeout,
         }
     }
 }

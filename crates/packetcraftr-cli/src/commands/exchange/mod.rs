@@ -6,7 +6,7 @@ pub(super) mod arguments;
 use std::sync::Arc;
 use std::time::Duration;
 
-use packetcraftr::{client, output, packet};
+use packetcraftr::{live as client, output, packet};
 
 use self::arguments::ExchangeArgs;
 use super::super::errors::CliError;

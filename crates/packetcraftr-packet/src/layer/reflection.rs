@@ -36,21 +36,21 @@ macro_rules! reflective_layer {
         }
         layout $vis:vis fn $layout:ident($($layout_arg:ident: $layout_ty:ty),* $(,)?) ;
     ) => {
-        fn $schema() -> &'static $crate::layer::LayerSchema {
-            static SCHEMA: std::sync::OnceLock<$crate::layer::LayerSchema> =
+        fn $schema() -> &'static $crate::layer::Schema {
+            static SCHEMA: std::sync::OnceLock<$crate::layer::Schema> =
                 std::sync::OnceLock::new();
-            static FIELDS: &[$crate::layer::FieldSchema] = &[
+            static FIELDS: &[$crate::field::Schema] = &[
                 $(
-                    $crate::layer::FieldSchema {
+                    $crate::field::Schema {
                         name: $field,
-                        kind: $crate::field::FieldKind::$kind,
+                        kind: $crate::field::Kind::$kind,
                         derived: $derived,
                         required: $required,
                         description: $description,
                     }
                 ),*
             ];
-            SCHEMA.get_or_init(|| $crate::layer::LayerSchema {
+            SCHEMA.get_or_init(|| $crate::layer::Schema {
                 protocol: $protocol,
                 name: $layer_name,
                 fields: FIELDS,
@@ -58,7 +58,7 @@ macro_rules! reflective_layer {
         }
 
         impl $crate::layer::Layer for $ty {
-            fn schema(&self) -> &'static $crate::layer::LayerSchema {
+            fn schema(&self) -> &'static $crate::layer::Schema {
                 $schema()
             }
 
@@ -74,7 +74,7 @@ macro_rules! reflective_layer {
                 self
             }
 
-            fn field(&self, name: &str) -> Option<$crate::field::FieldValue> {
+            fn field(&self, name: &str) -> Option<$crate::field::Value> {
                 match name {
                     $(
                         $field $(| $alias)* => {
@@ -89,8 +89,8 @@ macro_rules! reflective_layer {
             fn set_field(
                 &mut self,
                 name: &str,
-                value: $crate::field::FieldValue,
-            ) -> Result<(), $crate::layer::FieldError> {
+                value: $crate::field::Value,
+            ) -> Result<(), $crate::field::Error> {
                 match name {
                     $(
                         $field $(| $alias)* => {
@@ -100,7 +100,7 @@ macro_rules! reflective_layer {
                             $set
                         }
                     ),*
-                    _ => Err($crate::layer::FieldError::UnknownField {
+                    _ => Err($crate::field::Error::UnknownField {
                         protocol: $schema().protocol.clone(),
                         field: name.to_owned(),
                     }),

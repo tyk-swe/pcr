@@ -12,8 +12,8 @@
 //!
 //! ```text
 //! use packetcraftr_packet::{layer::Raw, Packet};
-//! use packetcraftr_protocol::{network::Ipv4, transport::Tcp};
-//! use packetcraftr_analysis::reassembly::{
+//! use packetcraftr_packet::protocol::{network::Ipv4, transport::Tcp};
+//! use crate::reassembly::{
 //!     fragment::{DatagramKey, Fragment},
 //!     tcp::{FlowKey, Segment},
 //! };

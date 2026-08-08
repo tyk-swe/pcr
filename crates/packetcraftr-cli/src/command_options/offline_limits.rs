@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use clap::Args;
-use packetcraftr::{analysis, capture};
+use packetcraftr::{analysis, analysis::pcap as capture};
 
 /// Capture-reader bounds shared by offline commands.
 #[derive(Clone, Copy, Debug, Args)]

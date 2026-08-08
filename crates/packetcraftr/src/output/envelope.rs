@@ -8,12 +8,12 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use packetcraftr_core::error::{Classification, Classified, Kind};
 use packetcraftr_packet::diagnostic::Diagnostic as PacketDiagnostic;
+use packetcraftr_packet::error::{Classification, Classified, Kind};
 
 use super::contract::{Command, Mode, SCHEMA_V1};
 
-pub use packetcraftr_core::error::Kind as ErrorKind;
+pub use packetcraftr_packet::error::Kind as ErrorKind;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Error {
@@ -61,8 +61,8 @@ const fn is_zero(value: &u64) -> bool {
     *value == 0
 }
 
-impl From<packetcraftr_net::capture::Statistics> for CaptureStats {
-    fn from(value: packetcraftr_net::capture::Statistics) -> Self {
+impl From<packetcraftr_network::capture::Statistics> for CaptureStats {
+    fn from(value: packetcraftr_network::capture::Statistics) -> Self {
         Self {
             received_frames: value.received_frames,
             received_bytes: value.received_bytes,
@@ -84,8 +84,8 @@ pub struct Stats {
     pub capture: CaptureStats,
 }
 
-impl From<packetcraftr_client::Stats> for Stats {
-    fn from(value: packetcraftr_client::Stats) -> Self {
+impl From<packetcraftr_live::Stats> for Stats {
+    fn from(value: packetcraftr_live::Stats) -> Self {
         Self {
             packets_attempted: value.packets_attempted,
             packets_completed: value.packets_completed,
@@ -96,14 +96,26 @@ impl From<packetcraftr_client::Stats> for Stats {
     }
 }
 
-impl From<&packetcraftr_workflow::fuzz::Stats> for Stats {
-    fn from(value: &packetcraftr_workflow::fuzz::Stats) -> Self {
+impl From<&packetcraftr_live::fuzz::Stats> for Stats {
+    fn from(value: &packetcraftr_live::fuzz::Stats) -> Self {
         Self {
             packets_attempted: value.packets_attempted,
             packets_completed: value.packets_completed,
             bytes: value.bytes,
             elapsed: value.elapsed,
             capture: value.capture.into(),
+        }
+    }
+}
+
+impl From<&packetcraftr_packet::fuzz::Stats> for Stats {
+    fn from(value: &packetcraftr_packet::fuzz::Stats) -> Self {
+        Self {
+            packets_attempted: value.packets_attempted,
+            packets_completed: value.packets_completed,
+            bytes: value.bytes,
+            elapsed: value.elapsed,
+            capture: CaptureStats::default(),
         }
     }
 }
@@ -117,12 +129,12 @@ pub enum DiagnosticSeverity {
     Error,
 }
 
-impl From<packetcraftr_packet::diagnostic::DiagnosticSeverity> for DiagnosticSeverity {
-    fn from(value: packetcraftr_packet::diagnostic::DiagnosticSeverity) -> Self {
+impl From<packetcraftr_packet::diagnostic::Severity> for DiagnosticSeverity {
+    fn from(value: packetcraftr_packet::diagnostic::Severity) -> Self {
         match value {
-            packetcraftr_packet::diagnostic::DiagnosticSeverity::Info => Self::Info,
-            packetcraftr_packet::diagnostic::DiagnosticSeverity::Warning => Self::Warning,
-            packetcraftr_packet::diagnostic::DiagnosticSeverity::Error => Self::Error,
+            packetcraftr_packet::diagnostic::Severity::Info => Self::Info,
+            packetcraftr_packet::diagnostic::Severity::Warning => Self::Warning,
+            packetcraftr_packet::diagnostic::Severity::Error => Self::Error,
         }
     }
 }
@@ -134,8 +146,8 @@ pub struct DiagnosticRange {
     pub end: usize,
 }
 
-impl From<packetcraftr_packet::layout::ByteRange> for DiagnosticRange {
-    fn from(value: packetcraftr_packet::layout::ByteRange) -> Self {
+impl From<packetcraftr_packet::layout::Range> for DiagnosticRange {
+    fn from(value: packetcraftr_packet::layout::Range) -> Self {
         Self {
             start: value.start,
             end: value.end,

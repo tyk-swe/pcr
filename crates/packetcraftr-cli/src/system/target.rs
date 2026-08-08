@@ -3,20 +3,14 @@
 
 use std::net::IpAddr;
 
-use packetcraftr::{client, packet::Packet, workflow};
+use packetcraftr::{live as client, live as workflow, packet::Packet};
 
 use super::super::errors::CliError;
 
 pub(crate) fn parse_workflow_target(target: String) -> Result<workflow::target::Target, CliError> {
-    match target
+    target
         .parse::<client::target::Target>()
-        .map_err(CliError::classified)?
-    {
-        client::target::Target::Address(address) => Ok(workflow::target::Target::Address(address)),
-        client::target::Target::Hostname(hostname) => {
-            Ok(workflow::target::Target::Hostname(hostname.to_string()))
-        }
-    }
+        .map_err(CliError::classified)
 }
 
 pub(crate) fn resolve_live_destination(
@@ -36,13 +30,13 @@ pub(crate) fn resolve_live_destination(
     let ip_version = packet
         .iter()
         .find_map(|layer| match layer.protocol_id().as_str() {
-            "ipv4" => Some(client::target::IpVersion::V4),
-            "ipv6" => Some(client::target::IpVersion::V6),
+            "ipv4" => Some(client::target::Family::Ipv4),
+            "ipv6" => Some(client::target::Family::Ipv6),
             _ => None,
         });
     match ip_version {
         Some(version) => resolved
-            .address_for_version(version)
+            .address_for_family(version)
             .map(Some)
             .ok_or_else(|| {
                 CliError::classified(client::target::Error::AddressFamilyUnavailable {

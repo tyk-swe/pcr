@@ -8,8 +8,11 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use bytes::Bytes;
 use serde::Serialize;
 
-use packetcraftr_capture::Frame;
-use packetcraftr_packet::{decode::DecodedPacket, document::PacketDocument, layout::PacketLayout};
+use packetcraftr_packet::frame::Frame;
+use packetcraftr_packet::{
+    decode::Result as DecodedPacket, document::Packet as PacketDocument,
+    layout::Packet as PacketLayout,
+};
 
 use super::contract::Error;
 use super::envelope::Diagnostic;
@@ -113,12 +116,12 @@ pub enum Direction {
     Unknown,
 }
 
-impl From<packetcraftr_capture::Direction> for Direction {
-    fn from(value: packetcraftr_capture::Direction) -> Self {
+impl From<packetcraftr_packet::frame::Direction> for Direction {
+    fn from(value: packetcraftr_packet::frame::Direction) -> Self {
         match value {
-            packetcraftr_capture::Direction::Inbound => Self::Inbound,
-            packetcraftr_capture::Direction::Outbound => Self::Outbound,
-            packetcraftr_capture::Direction::Unknown => Self::Unknown,
+            packetcraftr_packet::frame::Direction::Inbound => Self::Inbound,
+            packetcraftr_packet::frame::Direction::Outbound => Self::Outbound,
+            packetcraftr_packet::frame::Direction::Unknown => Self::Unknown,
         }
     }
 }

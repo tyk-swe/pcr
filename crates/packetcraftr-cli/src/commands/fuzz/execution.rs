@@ -4,7 +4,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use packetcraftr::{client, packet, workflow};
+use packetcraftr::{live as client, live as workflow, packet};
 
 use crate::errors::CliError;
 use crate::system::{DeferredInterface, system_client};
@@ -26,6 +26,6 @@ impl workflow::fuzz::Executor for CliFuzzExecutor {
             .resolve_into(&mut self.exchange.send.plan)
             .map_err(CliError::into_boundary_error)?;
         let client = system_client(Arc::clone(&self.registry), self.policy.clone());
-        workflow::fuzz::ClientExecutor::new(&client, self.exchange.clone()).execute(case, timeout)
+        workflow::ExchangeExecutor::new(&client, self.exchange.clone()).execute(case, timeout)
     }
 }

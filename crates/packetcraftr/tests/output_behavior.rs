@@ -4,13 +4,12 @@
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::time::{Duration, UNIX_EPOCH};
 
-use packetcraftr::capture::{Direction as CaptureDirection, Frame, LinkType};
-use packetcraftr::core::error::{Classified, Kind};
-use packetcraftr::net::{
+use packetcraftr::network::{
+    interface::Id as InterfaceId,
     interface::{Address, Flags, Info},
     link::{Capability, MacAddress, Mode as LinkMode},
     neighbor::{VlanKind, VlanTag},
-    route::{Decision, InterfaceId, Plan, Scope, SelectionReason},
+    route::{Decision, Plan, Scope, SelectionReason},
 };
 use packetcraftr::output::{
     contract::{Command, Error as ContractError, Format},
@@ -26,12 +25,14 @@ use packetcraftr::output::{
     send::Wire,
     stats::Timestamp,
 };
+use packetcraftr::packet::error::{Classified, Kind};
+use packetcraftr::packet::frame::{Direction as CaptureDirection, Frame, LinkType};
+use packetcraftr::packet::protocol::support::BUILTIN_PROTOCOLS;
 use packetcraftr::packet::{
     diagnostic::Diagnostic,
     field::{Kind as PacketFieldKind, Schema},
-    layout::ByteRange,
+    layout::Range as ByteRange,
 };
-use packetcraftr::protocol::support::BUILTIN_PROTOCOLS;
 use serde_json::json;
 
 #[test]
@@ -130,12 +131,12 @@ fn envelopes_convert_diagnostics_errors_and_statistics() {
         .at_layer(2)
         .at_field("checksum");
     diagnostic.range = Some(ByteRange { start: 4, end: 6 });
-    let client_stats = packetcraftr::client::Stats {
+    let client_stats = packetcraftr::live::Stats {
         packets_attempted: 3,
         packets_completed: 2,
         bytes: 99,
         elapsed: Duration::from_millis(125),
-        capture: packetcraftr::net::capture::Statistics {
+        capture: packetcraftr::network::capture::Statistics {
             received_frames: 4,
             received_bytes: 120,
             dropped_frames: 1,

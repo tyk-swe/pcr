@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr::{client, workflow};
+use packetcraftr::{live as client, live as workflow};
 
 use crate::errors::CliError;
 use crate::system::{DeferredInterface, SystemClient};
@@ -20,7 +20,6 @@ impl workflow::traceroute::Executor for CliTracerouteExecutor {
         self.interface
             .resolve_into(&mut self.exchange.send.plan)
             .map_err(CliError::into_boundary_error)?;
-        workflow::traceroute::ClientExecutor::new(&self.client, self.exchange.clone())
-            .execute(batch)
+        workflow::ExchangeExecutor::new(&self.client, self.exchange.clone()).execute(batch)
     }
 }

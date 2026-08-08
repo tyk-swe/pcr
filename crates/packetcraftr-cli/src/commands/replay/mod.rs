@@ -14,8 +14,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use packetcraftr::{
-    capture::{Reader, ReaderOptions},
-    output, workflow,
+    analysis::pcap::{Reader, ReaderOptions},
+    live as workflow, output,
 };
 
 use self::arguments::ReplayArgs;

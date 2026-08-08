@@ -6,7 +6,7 @@ use std::io::{self, IsTerminal, Read};
 use std::path::Path;
 
 use packetcraftr::{
-    error::{Classification, Kind},
+    packet::error::{Classification, Kind},
     packet::{self, Packet},
 };
 

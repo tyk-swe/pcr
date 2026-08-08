@@ -23,12 +23,18 @@ allow = [
     "ISC",
     "MIT",
     "Unicode-3.0",
-    "Zlib",
 ]
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
 highlight = "simplest-path"
+skip = [
+    { name = "bitflags", version = "=1.3.2" },
+    { name = "syn", version = "=2.0.119" },
+    { name = "thiserror", version = "=1.0.69" },
+    { name = "thiserror-impl", version = "=1.0.69" },
+    { name = "windows-sys", version = "=0.36.1" },
+]
 
 [sources]
 unknown-registry = "deny"

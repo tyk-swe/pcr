@@ -54,7 +54,7 @@ thiserror = "2"
 
 futures-util = { version = "0.3", default-features = false }
 libc = { version = "0.2", default-features = false }
-libloading = { version = "0.9", default-features = false, features = ["std"] }
+libloading = "0.8"
 pcap = { version = "2.4", default-features = false }
 pnet_datalink = { version = "0.35", default-features = false, features = ["std"] }
 rtnetlink = { version = "0.21", default-features = false, features = ["tokio_socket"] }

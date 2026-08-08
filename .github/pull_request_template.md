@@ -1,66 +1,41 @@
 ## Primary responsibility
 
-<!-- State the single outcome this PR is responsible for. Link the issue. -->
-
-Primary responsibility:
+<!-- State the single outcome and link the issue. -->
 
 Related issue:
 
-- [ ] This PR has one primary responsibility.
-- [ ] Mechanical refactoring and behavior changes are in separate PRs. This PR
-      does not mix them.
+## Impact
 
-## Impact disclosure
+<!-- Describe each item or write "None". -->
 
-Public Rust API:
+- Public Rust API:
+- Schema, structured output, or published documents:
+- Cargo features or supported platforms:
+- Security or live-network boundaries:
 
-- [ ] No public Rust API change.
-- [ ] Public Rust API change; the exact additions, removals, and compatibility
-      impact are described below.
+## Native networking
 
-Schema or structured output:
+<!-- If applicable, cover unavailable backends, permissions, stale interfaces,
+timeouts/cancellation, partial I/O, queue/accounting limits, and cleanup. -->
 
-- [ ] No schema, output serialization, envelope, protocol-support manifest, or
-      published-document change.
-- [ ] Contract change; the exact field-level and compatibility impact is
-      described below.
-
-Feature/platform effects:
-
-<!-- Identify feature flags and Linux, macOS, or Windows effects, or write N/A. -->
-
-## Native networking failure paths
-
-- [ ] Not applicable; this PR does not change native networking.
-- [ ] Applicable; the relevant failure paths were analyzed and the validation
-      evidence is listed below.
-
-<!-- For native changes, cover relevant permission/backend failures, invalid or
-stale interfaces, timeouts/cancellation, partial I/O, queue overflow, and
-cleanup/shutdown behavior. -->
+Applicable: yes / no
 
 Failure-path evidence:
 
-## Validation plan
+## Validation
 
-<!-- List exact commands and outcomes. Include applicable portable, default,
-all-feature, platform-specific, schema/example, and documentation validation. -->
+<!-- List exact commands and outcomes, including applicable feature profiles,
+platform checks, schema/example checks, and documentation checks. -->
 
 | Command or check | Result |
 | --- | --- |
 |  |  |
 
-## Review checklist
+## Checklist
 
-- [ ] Focused validation evidence or the documentation-only rationale is stated.
-- [ ] User-visible work is recorded under `CHANGELOG.md` `[Unreleased]`, or the
-      omission is explained.
-- [ ] Public API impact is disclosed above.
-- [ ] Schema/output impact is disclosed above.
-- [ ] CODEOWNERS reviewers for every touched boundary are requested.
-- [ ] New or expanded modules remain cohesive.
-- [ ] Published examples and schemas remain synchronized where applicable.
-
-Review routing notes:
-
-<!-- Note cross-boundary CODEOWNERS routing or additional reviewers. -->
+- [ ] The change has one primary responsibility.
+- [ ] Public API, output, feature, and platform effects are disclosed above.
+- [ ] User-visible changes are recorded under `[Unreleased]`, or omission is explained.
+- [ ] Schemas and examples are synchronized where applicable.
+- [ ] Relevant CODEOWNERS reviewers are requested.
+- [ ] The full diff contains no unrelated behavior or generated-file changes.

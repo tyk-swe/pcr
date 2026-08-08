@@ -9,199 +9,83 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added a greenfield, deterministic cargo-nextest 0.9.143 test baseline across
-  every workspace package, plus no-default, default, all-feature, MSRV, doctest,
-  documentation, lint, dependency-policy, and cross-platform CI gates. Tests use
-  synthetic offline inputs and hand-written boundaries without live network I/O.
-- Added finding-level `--min-severity` and repeatable `--code` selectors to
-  `packetcraftr expert`, enabling output filtering by minimum severity and exact
-  stable code without narrowing capture analysis history or frame selection.
-- Added `scan --ports` bounded inclusive range syntax: each comma-delimited
-  token may now be a `u16` port or an inclusive `START-END` range. Ranges
-  deduplicate stably in first-seen order alongside individual ports and
-  expansion stops as soon as another distinct port would exceed `--max-ports`,
-  preserving the existing `cli.scan_limit` classification and `Vec<u16>` workflow
-  request contract.
-
-- Added incremental NDJSON output to the offline `follow` command.
-  `packetcraftr --output ndjson follow capture.pcapng --stream tcp:7` now
-  streams one record per direction-selected delivered chunk in delivery
-  order, then one terminal summary record with an empty `chunks` array.
-  Chunk sequences are contiguous starting at 0, direction-filtered chunks
-  consume no sequence, and a terminal stream error continues at the next
-  sequence. Aggregate JSON retains all chunks unchanged; text, hex, and raw
-  output are unchanged.
-- Added `packetcraftr capture --capture-filter <BPF>` to install native
-  libpcap/Npcap BPF before frames enter PacketcraftR's queue or operation
-  budgets, independently of the existing post-capture `--filter` display
-  language. Native compilation uses the selected interface's IPv4 netmask and
-  accepts the stable resolver-free BPF core with numeric operands to prevent
-  hidden name resolution.
-- Strengthened release archive validation so every produced archive is
-  smoke-tested as a usable PacketcraftR installation, not merely as a binary
-  that responds to `--version`. The release workflow now extracts each archive
-  and invokes the binary by absolute path only (never resolving another
-  `packetcraftr` from `PATH`, `target/`, or the build workspace) for offline
-  `--version`, `--help`, raw packet build, structured `protocols` and `dissect`
-  JSON envelope validation, and machine-output styling checks. The Linux
-  `libpcap`/`ldd` checks and SHA-256 checksum generation and verification are
-  preserved, and every release target and feature variant including pcap-free
-  archives runs the full functional smoke suite. CLI behavior, wire bytes,
-  schemas, and serialized output contracts are unchanged.
+- Added `expert --min-severity` and repeatable `--code` finding selectors.
+- Added bounded inclusive ranges to `scan --ports`; ranges and individual
+  ports deduplicate in first-seen order and remain subject to `--max-ports`.
+- Added incremental `follow` NDJSON: delivered chunks stream in order followed
+  by one terminal summary record. JSON, text, hex, and raw behavior is unchanged.
+- Added resolver-free native BPF through `capture --capture-filter`. It runs
+  before PacketcraftR's queue and budgets and is independent of the existing
+  post-capture `--filter` language.
+- Added bounded, exact-round-trip DNS-over-UDP header and question dissection
+  for port 53 while retaining raw handling for custom ports.
+- Added a deterministic cargo-nextest 0.9.143 baseline and cross-platform CI
+  for no-default, default, all-feature, MSRV, doctest, rustdoc, lint, and
+  dependency-policy checks.
 
 ### Changed
 
-- **Breaking:** Removed repository-unused Rust API scaffolding: built-ins now
-  register directly without `ProtocolModule`, route planning and materialization
-  are functions rather than a stored `RoutePlanner`, template axes take
-  `Vec<FieldValue>` directly without a value alias, DNS attempt status aliases
-  the terminal outcome, and workflow fuzz results no longer store derivable
-  reproduction and rejected-case fields. The unused matcher iterator and IPv4
-  source-route helper, duplicate command-contract table, and invariant built-in
-  capability methods are gone. Built-in codec aliases now come from the protocol
-  catalog at registration, and protocol capability rows no longer implement
-  `Serialize`. Output-v1 documents and schemas are unchanged.
-- `packetcraftr-net`'s `native-route` feature no longer enables
-  `native-interfaces`, avoiding the unrelated `pnet_datalink` dependency in
-  route-only builds while retaining the native Windows route dependency.
-- Reorganized the CLI into command-owned vertical slices, flattened facade
-  output modules, separated shared workflow target/clock/probe mechanics, and
-  removed the hardcoded workspace package and dependency-edge registry.
-  Cargo metadata now defines the graph while focused checks retain acyclicity,
-  offline/live capability isolation, and native unsafe-code confinement.
-  Existing public paths remain, while shared `AddressFamily` and
-  `PolicyAuthorizer` types are now also discoverable under `workflow::target`.
-  CLI behavior, wire bytes, schemas, and serialized documents are unchanged.
-- Separated scan and traceroute planning/probe/evidence responsibilities,
-  isolated DNS evidence validation and filter runtime comparisons, removed
-  unnecessary exchange and replay phase indirection, and split broad tests into
-  behavior-oriented suites. Public facade paths, CLI behavior, wire bytes,
-  schemas, and serialized output contracts are unchanged.
-- **Breaking:** Canonicalized traffic-policy CLI arguments and removed accepted
-  no-op options: `plan` no longer exposes `--allow-permissive-packets`,
-  `--max-packets`, or `--max-bytes`; `capture`, `scan`, `traceroute`, and `dns`
-  no longer expose `--allow-permissive-packets`; and `fuzz` no longer exposes
-  `--allow-hostname-resolution` or `--max-resolved-addresses`. Applicable flag
-  names, defaults, authorization semantics, and stable error codes are
-  unchanged.
-- Renamed the repository entry-point scripts to shorter names:
-  `scripts/check-source-conventions` is now `scripts/check-conventions`,
-  `scripts/check-workspace-architecture` is now `scripts/check-arch`, and
-  `scripts/test-native-e2e` is now `scripts/test-e2e`. Behavior is unchanged;
-  documentation, CI workflows, and harness messages reference the new names.
-- Separate mixed protocol families and extract inline test modules across `packetcraftr-protocol` into dedicated modules (`ipv6::{options, fragment, srh}`, `capture::{bsd, sll}`, `tunnel::ipsec::{ah, esp}`).
 - **Breaking:** Consolidated several single-purpose workspace packages into
-  responsibility-owned domains.
-  `packetcraftr-error` and `packetcraftr-budget` are now
-  `packetcraftr-core::{error,budget}`, shared frame types moved to
+  responsibility-owned domains: `packetcraftr-error` and `packetcraftr-budget`
+  are now `packetcraftr-core::{error,budget}`, shared frame types moved to
   `packetcraftr-core::frame`, reassembly moved to
   `packetcraftr-analysis::reassembly`, and render-neutral output models moved
-  into `packetcraftr::output`. Existing facade error, capture-frame,
-  reassembly, and output paths remain re-exported where specified; the removed
-  packages have no compatibility wrappers. Packet behavior, features, and
-  serialized output contracts are unchanged.
-- **Breaking:** Renamed the `packetcraftr-session` package and
-  `packetcraftr_session` crate to `packetcraftr-reassembly` and
-  `packetcraftr_reassembly`. The facade path is now
-  `packetcraftr::reassembly`, and the shared configuration type moved from
-  `session::ReassemblyLimits` to `reassembly::Limits`; the old paths have no
-  compatibility aliases.
+  to `packetcraftr::output`. Removed packages have no compatibility crates;
+  documented facade re-exports remain.
 - **Breaking:** Flattened command output paths: `output::capture::Read` is now
   `output::read::Result`, while `output::network::{interfaces, plan, routes,
   send, exchange}` are now the top-level `output::{interfaces, plan, routes,
   send, exchange}` modules. Serialized command documents are unchanged.
-- Adopted cargo-nextest 0.9.140 for repository unit and integration tests and
-  lld for Linux linking across local development, CI, fuzzing, native E2E,
-  coverage, and release builds. Doctests continue to use Cargo's standard test
-  runner.
-- Removed unread build-context metadata and unused output enum string helpers,
-  replaced the capture/send composite wrapper with tuple composition, and
-  collapsed duplicated command-output and DNS text formatting paths. This is a
-  breaking Rust API cleanup; emitted command documents are unchanged.
-- Removed repository-unused public scaffolding, including the secondary error
-  category taxonomy, impossible capture-frame validation, packet normalization
-  and layout-reflection hooks, offline fragment reporting and unused analysis
-  summaries/index accessors, reassembly limit getters, and duplicate output
-  result models. This is a breaking Rust API and output-schema simplification;
-  emitted command documents are unchanged.
-- Replaced replay's separate wire-route parser with the canonical built-in
-  dissector and shared fail-closed packet routing semantics.
-- Registered a bounded DNS-over-UDP dissector that publishes read-only header
-  and question fields, retains the complete payload for exact round trips, and
-  selects typed DNS on UDP port 53 while preserving raw custom-port payloads.
-- Removed the unused aggregate protocol-support manifest, workflow matrix, and
-  fallback metadata. Consumers should use `support::BUILTIN_PROTOCOLS` and
-  `support::BUILTIN_CAPTURE_ROOTS`, the tables used by the runtime registry and
-  protocol-discovery command.
-- Removed unused `Composite` and `Dispatch` provider-introspection methods;
-  construction and their `PacketIo`/capture delegation remain unchanged.
-- Unified the scan, traceroute, DNS, and fuzz `ClientExecutor` re-exports around
-  one shared carrier while retaining their domain-specific executor traits.
-- Removed repository test suites and fixtures, benchmarks, the standalone fuzz
-  harness, maintenance scripts, and GitHub-hosted CI, release, dependency, E2E,
-  and fuzz automation. Shipped commands and runtime APIs are unchanged.
+- **Breaking:** Removed unused public scaffolding across the Rust API, including
+  `ProtocolModule`, stored `RoutePlanner`, `TemplateValues`, secondary error
+  categories, packet normalization/layout hooks, fragment report and reassembly
+  getters, provider introspection, the duplicate command-contract table, and
+  aggregate support/workflow manifests. Fuzz and DNS workflow models no longer
+  store values derivable by the facade output layer. Output-v1 wire documents
+  remain compatible except for the separately documented `follow` stream.
+- **Breaking:** Removed accepted no-op traffic-policy options: `plan` lost its
+  permissive and packet/byte flags; `capture`, `scan`, `traceroute`, and `dns`
+  lost their permissive flag; and `fuzz` lost its hostname-resolution flags.
+  Applicable authorization behavior and stable error codes are unchanged.
+- `packetcraftr-net/native-route` no longer enables `native-interfaces`, so a
+  route-only build avoids the unrelated interface-enumeration dependency.
+- Replay now uses the canonical built-in dissector and shared fail-closed route
+  semantics instead of a separate wire-route parser.
+- Internal ownership now follows command and domain boundaries, Cargo metadata
+  defines the workspace graph, and Linux builds use lld. CLI behavior, packet
+  bytes, and existing structured documents are unchanged.
+- Consolidated user, contributor, security, and review documentation around
+  generated CLI help, Cargo metadata, schemas, and CI as authoritative sources.
 
 ### Fixed
 
-- Restored all-feature macOS and Windows native-route builds after the platform
-  module split, made the offline capture-clock overflow regression portable to
-  Windows, and repaired the registry schema documentation link.
 - Tightened output validation to reject malformed IP addresses and DNS records
-  containing fields from a different record type. IP-address rejection requires
-  JSON Schema `format` assertions, which the bundled validators now enable.
-- Rejected live packets whose final Ethernet/VLAN bytes, malformed routing
-  layers, custom registries, or non-atomic IP fragments could conceal an
-  unauthorized destination; checks run on exact preliminary and rebuilt bytes
-  before neighbor discovery, capture, or transmission.
-- Made deadline arithmetic fail closed on duration overflow, refreshed active
-  TCP generations monotonically, accepted valid nonzero PCAPNG padding, and
-  made capture-writer flush failures retryable.
-- Registered GRE Transparent Ethernet Bridging and the complete built-in
-  EtherType child set, rejected native route sources absent from their selected
-  interface, and capped route MTUs to the route/interface minimum.
-- Validated fuzz recipes and live-capture PCAPNG settings before input or live
-  side effects, and preserved deadline-held unsolicited evidence while
-  assigning each response frame to one deterministic request.
-- Rejected reverse-flow correlation that only reversed an encapsulated probe's
-  inner transport tuple, so injected or captured inner-tuple replies can no
-  longer be treated as valid responses for tunneled probes; a direct reply must
-  also reverse the transmitted outer envelope.
-- Accepted synthesized Ethernet envelopes when validating sent DNS probes and
-  rejected encoding dissected DNS layers whose public fields diverge from their
-  retained wire payload.
-- Bounded cumulative PCAPNG metadata bytes before block-body reads, with a new
-  `ReaderOptions::max_metadata_bytes_per_frame` ceiling and resource-limit
-  classification for capture size, interface, and metadata limits.
-- Hardened fragment and TCP reassembly against malformed wire alignment,
-  regressing timestamps, phantom empty generations, infallible scratch
-  allocations, and incorrect accounting of complete single-fragment datagrams.
-- Fixed offline analysis clock overflow, out-of-order I/O bucket origins,
-  multi-century bucket offsets, and stale simultaneous-open state after TCP
-  closure or eviction.
-- Made packet-buffer allocation failures typed, rejected unsupported expression
-  escapes, preserved negative `frame.time_epoch` values, accepted valid IPv6
-  SRH TLVs/padding, and tightened bare-RST response correlation.
-- Fixed native capture queue draining and bounded shutdown, Npcap activation
-  warnings, finite Linux netlink operations and shutdown, and NDP responses
-  carried after supported IPv6 extension headers.
-- Re-authorized every materialized packet destination, classified IPv4-mapped
-  IPv6 addresses by their mapped address, and preserved unmatched or
-  freshness-less ambient exchange evidence.
-- Prevented one unsolicited frame from satisfying multiple probes, preserved
-  executor failures and committed replay evidence across deadline boundaries,
-  varied UDP scan retry identities, rejected duplicate fuzz strategies, and
-  shared fuzz preparation/evidence aggregate byte accounting.
-- Required successful CI for the exact release tag commit, synchronized fuzz
-  Clippy policy with the workspace, and moved the Rust 1.97 pin to 1.97.1.
-- Fixed `replay --interface <INDEX>` treating a numeric selector as both an
-  interface index and a literal interface name, which prevented ordinary
-  numeric interface selection from resolving.
-- Fixed filtered replay NDJSON records reusing source-capture positions as
-  stream-envelope sequences, which could make evidence and completion records
-  duplicate or nonmonotonic. Stream sequences are now contiguous while each
-  replay result continues to report its independent `source_sequence`.
-- Rejected non-contiguous macOS interface netmasks instead of deriving
-  misleading route prefixes from them.
+  containing fields from another record type; schema validators now enable IP
+  `format` assertions.
+- Hardened live authorization over final Ethernet/VLAN bytes, custom
+  registries, malformed routing layers, fragments, and IPv4-mapped IPv6
+  addresses. Every materialized destination is re-authorized before native I/O.
+- Required tunneled responses to reverse the transmitted outer envelope and
+  prevented one ambient frame from satisfying multiple probes. Unmatched and
+  freshness-less evidence is retained deterministically.
+- Hardened native routes and capture: route sources must belong to the selected
+  interface, MTUs use the route/interface minimum, non-contiguous macOS masks
+  are rejected, macOS/Windows route builds work again, and numeric replay
+  interface selectors resolve correctly.
+- Fixed capture queue draining and bounded shutdown, Npcap activation warnings,
+  finite Linux netlink shutdown, and NDP after supported IPv6 extension headers.
+- Accepted valid PCAPNG padding, bounded cumulative metadata before allocation,
+  and made capture-writer flush failures retryable.
+- Hardened fragment/TCP reassembly, capture-clock and statistics arithmetic,
+  packet allocation, expression escapes, IPv6 SRH padding, negative capture
+  timestamps, and bare-RST matching.
+- Validated fuzz recipes and live-capture settings before side effects; fixed
+  fuzz accounting, duplicate strategies, UDP retry identities, deadline-held
+  evidence, and committed replay evidence across deadline boundaries.
+- Validated synthesized Ethernet DNS evidence and rejected re-encoding typed
+  DNS fields that disagree with their retained wire payload.
+- Made filtered replay NDJSON envelope sequences contiguous while preserving
+  each record's independent `source_sequence`.
 
 ## [0.4.0] - 2026-07-29
 

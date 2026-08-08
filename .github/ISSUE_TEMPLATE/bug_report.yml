@@ -36,7 +36,7 @@ body:
     attributes:
       label: Environment
       description: Include operating system, version, architecture, and relevant feature profile.
-      placeholder: Ubuntu 24.04 x86_64, Rust 1.97, --all-features
+      placeholder: Ubuntu 24.04 x86_64, Rust 1.97.1, --all-features
     validations:
       required: true
 

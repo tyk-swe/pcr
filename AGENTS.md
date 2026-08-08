@@ -23,7 +23,7 @@ Schemas live in `schemas/`, published examples in `examples/documents/`, and sec
 - `RUSTDOCFLAGS="-D warnings" cargo doc --locked --all-features --no-deps`: verify API documentation.
 - `cargo deny check`: verify dependency policy.
 
-Rust 1.97 is pinned; 1.96 is the MSRV. Linux builds require clang and lld; all-feature Linux builds also require `libpcap-dev`.
+Rust 1.97.1 is pinned; 1.96 is the MSRV. Linux builds require clang and lld; all-feature Linux builds also require `libpcap-dev`.
 
 ## Coding Style & Naming Conventions
 

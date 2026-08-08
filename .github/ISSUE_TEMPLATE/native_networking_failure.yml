@@ -86,7 +86,7 @@ body:
     attributes:
       label: Exact Cargo features
       description: Required for source builds; write N/A for release archives.
-      placeholder: --no-default-features --features cli,native-route,native-layer3
+      placeholder: --no-default-features --features native-route,native-layer3
     validations:
       required: true
 

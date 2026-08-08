@@ -38,6 +38,8 @@ mod evidence;
 mod model;
 mod plan;
 mod probe;
+#[cfg(test)]
+mod tests;
 
 /// Executes traceroute batches through a client's capture-ready exchange lifecycle.
 pub type ClientExecutor<'a, R, N, I> = crate::probe::client_executor::ClientExecutor<

@@ -39,6 +39,8 @@ mod evidence;
 mod model;
 mod plan;
 mod probe;
+#[cfg(test)]
+mod tests;
 
 /// Executes scan batches through a client's capture-ready exchange lifecycle.
 pub type ClientExecutor<'a, R, N, I> =

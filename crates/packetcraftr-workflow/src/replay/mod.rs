@@ -14,6 +14,8 @@ mod engine;
 mod error;
 mod model;
 mod system_boundary;
+#[cfg(test)]
+mod tests;
 mod wire;
 
 pub use engine::{replay_capture as run, replay_capture_with_selector as run_with_selector};

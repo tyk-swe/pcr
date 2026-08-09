@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! TCP receive-window advertisement and sender-boundary transitions.
-
 use std::collections::HashMap;
 
 use packetcraftr_packet::diagnostic::Severity as DiagnosticSeverity;
@@ -33,9 +31,7 @@ pub(super) fn update_advertisement(
 ) {
     let TcpObservation { flow, tcp, syn, .. } = *observation;
     let sent = flows.entry(flow.clone()).or_default();
-    // Window updates follow TCP's SND.WL1/WL2 rule: a newer segment
-    // sequence, or the same sequence with an acknowledgment no older than
-    // the last update's. An older retransmission never replaces the window.
+    // SND.WL1/WL2 compare sequence and acknowledgment with serial arithmetic.
     let window_update = match (sent.window_sequence, sent.window_acknowledgment) {
         (Some(update_sequence), Some(update_acknowledgment)) => {
             let sequence_delta = tcp.sequence.wrapping_sub(update_sequence);
@@ -81,15 +77,11 @@ pub(super) fn analyze_sender(
         return;
     };
 
-    // SYN and FIN consume sequence numbers, so a closing data segment can
-    // fill the last byte of the window.
     let end = tcp.sequence.wrapping_add(
         u32::try_from(payload_len).unwrap_or(u32::MAX) + u32::from(syn) + u32::from(fin),
     );
     let in_flight = end.wrapping_sub(peer_ack);
     let handshake_seen = peer.syn_seen && flows.get(flow).is_some_and(|sender| sender.syn_seen);
-    // Scaling applies only when both SYNs offered it. The receiver's shift is
-    // capped at 14, and the SYN's own window is never scaled.
     let shift = match (
         flows.get(flow).and_then(|sender| sender.window_shift),
         peer.window_shift,
@@ -102,9 +94,6 @@ pub(super) fn analyze_sender(
         return;
     }
 
-    // A byte at the edge of a zero window is the conventional persist probe;
-    // larger sends overrun it. Positive windows distinguish exact fill from
-    // an overrun only when the handshake made scaling knowable.
     if peer_window == 0 {
         if in_flight > 0 {
             if payload_len == 1 && !fin && in_flight == 1 {
@@ -160,10 +149,6 @@ pub(super) fn analyze_sender(
     }
 }
 
-/// Extracts the shift a SYN's window-scale option advertises, when present.
-///
-/// Padding is skipped, while an end marker or malformed length stops the
-/// defensive walk.
 pub(super) fn scale(options: &[u8]) -> Option<u8> {
     let mut rest = options;
     loop {

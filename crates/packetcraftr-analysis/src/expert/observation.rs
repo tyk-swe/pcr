@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Immutable normalized TCP facts for one matched frame.
-
 use super::{FlowKey, FrameRecord, StreamRef, Tcp, tcp_stream_ref};
 
 #[derive(Clone, Copy)]

@@ -20,7 +20,7 @@ use packetcraftr_packet::frame::{Frame, LinkType};
 use packetcraftr_packet::layer::Raw;
 use packetcraftr_packet::protocol::builtin;
 use packetcraftr_packet::protocol::network::Ipv4;
-use packetcraftr_packet::protocol::transport::Tcp;
+use packetcraftr_packet::protocol::transport::{Tcp, Udp};
 use packetcraftr_packet::registry::Registry;
 
 const CLIENT: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 1);
@@ -102,15 +102,28 @@ fn frame(registry: &Arc<Registry>, timestamp: SystemTime, spec: &TcpSpec, payloa
     Frame::new(timestamp, LinkType::IPV4, built.bytes).expect("TCP fixture frame must be valid")
 }
 
-fn analyze(segments: &[(TcpSpec, &[u8])]) -> (Vec<Finding>, ExpertSummary) {
-    let registry = registry();
+fn udp_frame(registry: &Arc<Registry>, timestamp: SystemTime) -> Frame {
+    let mut packet = Packet::new();
+    packet.push(Ipv4 {
+        source: CLIENT,
+        destination: SERVER,
+        ..Ipv4::default()
+    });
+    packet.push(Udp {
+        source_port: 53_000,
+        destination_port: 53,
+        ..Udp::default()
+    });
+    let built = Builder::new(Arc::clone(registry))
+        .build(packet, BuildContext::default(), BuildOptions::default())
+        .expect("UDP fixture must build");
+    Frame::new(timestamp, LinkType::IPV4, built.bytes).expect("UDP fixture frame must be valid")
+}
+
+fn analyze_frames(registry: Arc<Registry>, frames: &[Frame]) -> (Vec<Finding>, ExpertSummary) {
     let mut writer = Writer::pcap(Vec::new(), LinkType::IPV4).expect("capture writer initializes");
-    for (index, (spec, payload)) in segments.iter().enumerate() {
-        let timestamp = SystemTime::UNIX_EPOCH
-            + Duration::from_secs(u64::try_from(index).expect("fixture index fits u64"));
-        writer
-            .write_frame(&frame(&registry, timestamp, spec, payload))
-            .expect("fixture frame writes");
+    for frame in frames {
+        writer.write_frame(frame).expect("fixture frame writes");
     }
     let mut capture = Reader::new(Cursor::new(writer.into_inner())).expect("fixture capture opens");
     let mut collector = ExpertCollector::new();
@@ -132,6 +145,20 @@ fn analyze(segments: &[(TcpSpec, &[u8])]) -> (Vec<Finding>, ExpertSummary) {
         collector.finish(&run_summary.trailing_tcp_events, run_summary.frames_read);
     findings.extend(trailing);
     (findings, summary)
+}
+
+fn analyze(segments: &[(TcpSpec, &[u8])]) -> (Vec<Finding>, ExpertSummary) {
+    let registry = registry();
+    let frames = segments
+        .iter()
+        .enumerate()
+        .map(|(index, (spec, payload))| {
+            let timestamp = SystemTime::UNIX_EPOCH
+                + Duration::from_secs(u64::try_from(index).expect("fixture index fits u64"));
+            frame(&registry, timestamp, spec, payload)
+        })
+        .collect::<Vec<_>>();
+    analyze_frames(registry, &frames)
 }
 
 fn finding(severity: DiagnosticSeverity, code: &str, number: u64, message: &str) -> Finding {
@@ -244,6 +271,30 @@ fn keep_alive_and_zero_window_probe_shapes_remain_distinct() {
         0,
         1,
         2,
+    );
+}
+
+#[test]
+fn one_byte_keep_alive_suppresses_overlap_retransmission() {
+    let segments: Vec<(TcpSpec, &[u8])> = vec![
+        (client(100, 0, Tcp::SYN, 100), b""),
+        (server(500, 101, Tcp::SYN | Tcp::ACK, 100), b""),
+        (client(101, 501, Tcp::ACK, 100), b""),
+        (client(101, 501, Tcp::ACK, 100), b"a"),
+        (server(501, 102, Tcp::ACK, 100), b""),
+        (client(101, 501, Tcp::ACK, 100), b"z"),
+    ];
+    assert_expert(
+        &segments,
+        vec![finding(
+            DiagnosticSeverity::Info,
+            "tcp.keep_alive",
+            6,
+            "192.0.2.1:40000 probes the peer",
+        )],
+        0,
+        0,
+        1,
     );
 }
 
@@ -394,6 +445,88 @@ fn clean_close_produces_no_expert_findings() {
         (client(102, 502, Tcp::ACK, 100), b""),
     ];
     assert_expert(&segments, Vec::new(), 0, 0, 0);
+}
+
+#[test]
+fn clean_close_applies_after_gap_fill_and_covers_late_retransmission() {
+    let segments: Vec<(TcpSpec, &[u8])> = vec![
+        (client(100, 0, Tcp::SYN, 100), b""),
+        (server(500, 101, Tcp::SYN | Tcp::ACK, 100), b""),
+        (client(101, 501, Tcp::ACK, 100), b""),
+        (client(104, 501, Tcp::FIN | Tcp::ACK, 100), b"def"),
+        (client(101, 501, Tcp::ACK, 100), b"abc"),
+        (client(101, 501, Tcp::ACK, 100), b"abc"),
+    ];
+    assert_expert(
+        &segments,
+        vec![
+            finding(
+                DiagnosticSeverity::Warning,
+                "tcp.previous_segment_not_captured",
+                4,
+                "192.0.2.1:40000 resumes at sequence 104 before sequence 101 arrived",
+            ),
+            finding(
+                DiagnosticSeverity::Warning,
+                "tcp.retransmission",
+                6,
+                "3 byte(s) at sequence 101 retransmit previously seen data",
+            ),
+        ],
+        0,
+        2,
+        0,
+    );
+}
+
+#[test]
+fn non_tcp_sweep_retires_expired_expert_generation() {
+    let registry = registry();
+    let timestamp = |seconds| SystemTime::UNIX_EPOCH + Duration::from_secs(seconds);
+    let frames = vec![
+        frame(&registry, timestamp(0), &client(100, 0, Tcp::SYN, 100), b""),
+        frame(
+            &registry,
+            timestamp(1),
+            &server(500, 101, Tcp::SYN | Tcp::ACK, 100),
+            b"",
+        ),
+        frame(
+            &registry,
+            timestamp(2),
+            &client(101, 501, Tcp::ACK, 100),
+            b"",
+        ),
+        frame(
+            &registry,
+            timestamp(3),
+            &client(101, 501, Tcp::ACK, 100),
+            b"abc",
+        ),
+        frame(
+            &registry,
+            timestamp(4),
+            &client(104, 501, Tcp::FIN | Tcp::ACK, 100),
+            b"",
+        ),
+        frame(
+            &registry,
+            timestamp(5),
+            &client(105, 501, Tcp::ACK, 100),
+            b"def",
+        ),
+        udp_frame(&registry, timestamp(126)),
+        frame(
+            &registry,
+            timestamp(127),
+            &client(105, 501, Tcp::ACK, 100),
+            b"ghi",
+        ),
+    ];
+
+    let (findings, summary) = analyze_frames(registry, &frames);
+    assert!(findings.is_empty());
+    assert_eq!(summary, ExpertSummary::default());
 }
 
 #[test]

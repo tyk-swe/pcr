@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! TCP flow-generation transitions for reused endpoint tuples.
-
 use std::collections::HashMap;
 
 use super::tcp::{DirectionState, window_scale};
@@ -26,17 +24,9 @@ pub(super) fn apply(
         ..
     } = observation;
     let reverse = flow.reverse();
-    // A SYN that does not continue this direction's current generation
-    // starts a new connection over the same endpoints, so every cursor
-    // learned about the old one is stale. A client SYN replaces the whole
-    // conversation; a SYN-ACK joins the generation its peer opened and
-    // renews only its own direction.
     let mut syn_renews = false;
     if *syn {
         let first = tcp.sequence.wrapping_add(1);
-        // The acknowledgment of a current-generation SYN-ACK falls inside
-        // the reverse direction's tracked range. The verdict is three-way:
-        // confirmed, contradicted, or no tracked evidence either way.
         let reverse_range_verdict =
             flows
                 .get(&reverse)

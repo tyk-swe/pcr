@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Duplicate-ACK detection and monotonic acknowledgment transitions.
-
 use std::collections::HashMap;
 
 use packetcraftr_packet::diagnostic::Severity as DiagnosticSeverity;
@@ -31,10 +29,6 @@ pub(super) fn observe_duplicate(
         ack,
     } = *observation;
 
-    // A duplicate acknowledgment is a pure repeat from the same direction.
-    // It is loss evidence only while the peer has payload outstanding beyond
-    // it. A zero-length keep-alive repeats the prior ACK but is already
-    // classified as the probe it is.
     if ack && payload_len == 0 && !keep_alive && !syn && !fin && !rst {
         let outstanding = flows.get(reverse).is_none_or(|peer| {
             peer.payload_next.is_some_and(|next| {
@@ -64,8 +58,6 @@ pub(super) fn observe_duplicate(
     }
 }
 
-/// Records a non-backward acknowledgment and reports whether the same header
-/// is eligible to update its advertised window.
 pub(super) fn update(
     flows: &mut HashMap<FlowKey, DirectionState>,
     observation: &TcpObservation<'_>,
@@ -83,8 +75,7 @@ pub(super) fn update(
     }
 
     let sent = flows.entry(flow.clone()).or_default();
-    // A reordered or retransmitted segment can carry an older
-    // acknowledgment; TCP never moves the acknowledged point backward.
+    // Acknowledgments advance with TCP serial arithmetic.
     let backward = ack
         && sent
             .acknowledgment
@@ -94,8 +85,6 @@ pub(super) fn update(
     }
 
     if ack {
-        // A changed acknowledgment or window starts a new streak, so the
-        // first repeat of the new value is duplicate #1 again.
         if sent.acknowledgment != Some(tcp.acknowledgment) || sent.window != Some(tcp.window) {
             sent.duplicate_acks = 0;
         }

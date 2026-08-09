@@ -3,18 +3,19 @@
 
 use std::net::IpAddr;
 
-use bytes::Bytes;
 use thiserror::Error;
 
 use packetcraftr_network::{
     Error as LiveIoError,
     neighbor::Error as NeighborError,
     route::{Error as PlanError, Materialized as MaterializedRoute, Options as PlanOptions},
+    transmit::{Report as IoSendReport, TimingEvidence},
 };
 use packetcraftr_packet::build::{
     Error as BuildError, Options as BuildOptions, Result as BuiltPacket,
 };
 use packetcraftr_packet::error::{Classification, Classified, Kind};
+use packetcraftr_packet::frame::{Frame, LinkType};
 
 use super::super::Stats;
 use super::super::policy::TrafficPolicyError;
@@ -31,10 +32,154 @@ pub struct SendOptions {
 
 #[derive(Clone, Debug)]
 pub struct SendReport {
-    pub built: BuiltPacket,
-    pub route: MaterializedRoute,
-    pub wire_bytes: Bytes,
-    pub stats: Stats,
+    pub(crate) sent: SentPacket,
+    pub(crate) stats: Stats,
+}
+
+/// Opaque successful transmission receipt. It binds the semantic build,
+/// materialized route, exact provider-accepted bytes, and provider timing for
+/// one send. No public constructor exists.
+#[derive(Clone, Debug)]
+pub struct SentPacket {
+    built: BuiltPacket,
+    route: MaterializedRoute,
+    evidence: Frame,
+    timing: TimingEvidence,
+}
+
+impl SentPacket {
+    pub(crate) fn from_report(
+        built: BuiltPacket,
+        route: MaterializedRoute,
+        report: &IoSendReport,
+    ) -> Result<Self, LiveIoError> {
+        let timing = report.validate_against(&built.bytes)?;
+        let link_type = match route.plan.mode {
+            packetcraftr_network::link::Mode::Layer2 => route.plan.route.link_type,
+            packetcraftr_network::link::Mode::Layer3 => LinkType::RAW,
+            packetcraftr_network::link::Mode::Auto => {
+                return Err(LiveIoError::UnresolvedLinkMode);
+            }
+        };
+        let captured_length = u32::try_from(report.wire_bytes().len()).map_err(|_| {
+            LiveIoError::InvalidSendEvidence {
+                message: "provider-accepted bytes exceed frame length range".to_owned(),
+            }
+        })?;
+        let evidence = Frame::try_with_optional_timestamp(
+            timing.output_wall_clock(),
+            link_type,
+            captured_length,
+            captured_length,
+            report.wire_bytes().clone(),
+        )
+        .map_err(|source| LiveIoError::InvalidSendEvidence {
+            message: source.to_string(),
+        })?;
+        Ok(Self {
+            built,
+            route,
+            evidence,
+            timing,
+        })
+    }
+
+    pub fn built(&self) -> &BuiltPacket {
+        &self.built
+    }
+
+    pub fn packet(&self) -> &packetcraftr_packet::Packet {
+        &self.built.packet
+    }
+
+    pub fn route(&self) -> &MaterializedRoute {
+        &self.route
+    }
+
+    pub fn evidence(&self) -> &Frame {
+        &self.evidence
+    }
+
+    pub fn wire_bytes(&self) -> &bytes::Bytes {
+        self.evidence.bytes()
+    }
+
+    pub fn bytes_sent(&self) -> usize {
+        self.evidence.bytes().len()
+    }
+
+    pub fn timing(&self) -> TimingEvidence {
+        self.timing
+    }
+
+    pub fn freshness_at(&self) -> std::time::Instant {
+        self.timing.freshness_at()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(bytes: bytes::Bytes, at: std::time::Instant) -> Self {
+        Self::for_test_with_timing(bytes, TimingEvidence::commit(at, None))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test_with_timing(bytes: bytes::Bytes, timing: TimingEvidence) -> Self {
+        use packetcraftr_network::{
+            interface::Id as InterfaceId,
+            link::{Capability, Mode},
+            route::{Decision, Materialized, Plan, Scope, SelectionReason},
+        };
+
+        let built = BuiltPacket {
+            bytes: bytes.clone(),
+            packet: packetcraftr_packet::Packet::new(),
+            layout: Default::default(),
+            diagnostics: Vec::new(),
+            requires_live_opt_in: false,
+        };
+        let route = Materialized {
+            plan: Plan {
+                route: Decision {
+                    interface: InterfaceId {
+                        name: "fixture0".to_owned(),
+                        index: 1,
+                    },
+                    source_mac: None,
+                    selected_address: None,
+                    preferred_source: None,
+                    next_hop: None,
+                    selection_reason: SelectionReason::InterfaceOnly,
+                    destination_scope: Scope::Unspecified,
+                    mtu: 1500,
+                    capability: Capability::Layer3,
+                    link_type: LinkType::RAW,
+                },
+                mode: Mode::Layer3,
+                lookup_destination: None,
+                final_destination: None,
+                visited_destinations: Vec::new(),
+                packet_source: None,
+                neighbor_source: None,
+                neighbor_target: None,
+                destination_mac: None,
+                source_mac: None,
+                neighbor_vlan_tags: Vec::new(),
+                synthesized_ethernet: false,
+            },
+            neighbor_resolution: None,
+        };
+        let report = IoSendReport::accepted(bytes, timing);
+        Self::from_report(built, route, &report).expect("valid receipt fixture")
+    }
+}
+
+impl SendReport {
+    pub fn sent(&self) -> &SentPacket {
+        &self.sent
+    }
+
+    pub fn stats(&self) -> &Stats {
+        &self.stats
+    }
 }
 
 #[derive(Debug, Error)]

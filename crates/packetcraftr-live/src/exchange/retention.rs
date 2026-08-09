@@ -3,6 +3,7 @@
 
 //! Unsolicited and undecodable frame retention under aggregate bounds.
 
+use packetcraftr_network::capture::CaptureRecordId;
 use packetcraftr_packet::frame::Frame;
 use packetcraftr_packet::{decode::Result as DecodedPacket, diagnostic::push_diagnostic_once};
 
@@ -29,8 +30,10 @@ impl ExchangeAccumulator {
     pub(super) fn retain_unsolicited(
         &mut self,
         decoded: DecodedPacket,
+        record_id: CaptureRecordId,
+        received_at: Option<std::time::Instant>,
         options: &ExchangeOptions,
-        freshness: Option<super::accumulator::UnsolicitedFreshness>,
+        workflow_eligible: bool,
     ) {
         if self.unsolicited.len() + self.undecoded.len() >= options.max_unsolicited {
             push_diagnostic_once(
@@ -46,12 +49,22 @@ impl ExchangeAccumulator {
             return;
         }
         if self.reserve_decoded_evidence(decoded.original.len(), options) {
-            self.unsolicited.push(decoded);
-            self.unsolicited_freshness.push(freshness);
+            self.unsolicited.push(super::contract::UnsolicitedResponse {
+                record_id,
+                response: decoded,
+                received_at,
+                workflow_eligible,
+            });
         }
     }
 
-    pub(super) fn retain_undecoded(&mut self, frame: Frame, options: &ExchangeOptions) {
+    pub(super) fn retain_undecoded(
+        &mut self,
+        frame: Frame,
+        record_id: CaptureRecordId,
+        received_at: Option<std::time::Instant>,
+        options: &ExchangeOptions,
+    ) {
         if self.unsolicited.len() + self.undecoded.len() >= options.max_unsolicited {
             push_diagnostic_once(
                 &mut self.diagnostics,
@@ -66,7 +79,11 @@ impl ExchangeAccumulator {
             return;
         }
         if self.reserve_decoded_evidence(frame.bytes().len(), options) {
-            self.undecoded.push(frame);
+            self.undecoded.push(super::contract::UndecodedCapture {
+                record_id,
+                frame,
+                received_at,
+            });
         }
     }
 }

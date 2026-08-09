@@ -42,7 +42,10 @@ pub(super) fn render_traceroute_text(
                     .response_kind
                     .map(trace_response_kind_name)
                     .unwrap_or("none"),
-                output_timestamp_text(probe.sent_at),
+                probe
+                    .sent_at
+                    .map(output_timestamp_text)
+                    .unwrap_or_else(|| "none".to_owned()),
                 probe
                     .received_at
                     .map(output_timestamp_text)

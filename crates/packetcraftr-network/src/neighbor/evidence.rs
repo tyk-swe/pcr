@@ -11,9 +11,8 @@ use super::error::{map_io_error, resolution_error};
 use super::options::NeighborResolutionOptions;
 use super::wire::is_unicast_mac;
 use crate::{
-    Error as LiveIoError,
     route::{MAX_NEIGHBOR_VLAN_TAGS, NeighborError, NeighborRequest},
-    transmit::IoSendReport,
+    transmit::{IoSendReport, TimingEvidence},
 };
 use packetcraftr_packet::frame::{Frame, LinkType};
 
@@ -97,27 +96,10 @@ pub(super) fn validate_send_report(
     request: &NeighborRequest,
     expected: &Bytes,
     report: IoSendReport,
-) -> Result<(), NeighborError> {
-    if report.bytes_sent != expected.len() {
-        return Err(map_io_error(
-            request,
-            "sending discovery request",
-            LiveIoError::PartialSend {
-                expected: expected.len(),
-                actual: report.bytes_sent,
-            },
-        ));
-    }
-    if report.wire_bytes != *expected {
-        return Err(map_io_error(
-            request,
-            "validating discovery send evidence",
-            LiveIoError::InvalidSendEvidence {
-                message: "discovery wire bytes differ from the exact submitted frame".to_owned(),
-            },
-        ));
-    }
-    Ok(())
+) -> Result<TimingEvidence, NeighborError> {
+    report
+        .validate_against(expected)
+        .map_err(|error| map_io_error(request, "validating discovery send evidence", error))
 }
 
 pub(super) fn retain_evidence(
@@ -162,6 +144,7 @@ mod tests {
     use std::time::{Duration, SystemTime};
 
     use super::*;
+    use crate::Error as LiveIoError;
     use crate::link::MacAddress;
     use crate::route::{InterfaceId, NeighborVlanKind, NeighborVlanTag};
 
@@ -275,25 +258,24 @@ mod tests {
         ));
 
         let expected = Bytes::from_static(&[1, 2, 3]);
-        assert!(
-            validate_send_report(
-                &request,
-                &expected,
-                IoSendReport {
-                    bytes_sent: 3,
-                    wire_bytes: expected.clone(),
-                }
-            )
-            .is_ok()
+        let valid = IoSendReport::from_provider(
+            3,
+            expected.clone(),
+            TimingEvidence::commit(
+                std::time::Instant::now(),
+                Some(std::time::SystemTime::now()),
+            ),
         );
+        assert!(validate_send_report(&request, &expected, valid).is_ok());
         assert!(matches!(
             validate_send_report(
                 &request,
                 &expected,
-                IoSendReport {
-                    bytes_sent: 2,
-                    wire_bytes: expected.clone(),
-                }
+                IoSendReport::from_provider(
+                    2,
+                    expected.clone(),
+                    TimingEvidence::commit(std::time::Instant::now(), None),
+                )
             ),
             Err(NeighborError::Io {
                 source: LiveIoError::PartialSend { .. },
@@ -304,10 +286,11 @@ mod tests {
             validate_send_report(
                 &request,
                 &expected,
-                IoSendReport {
-                    bytes_sent: 3,
-                    wire_bytes: Bytes::from_static(&[3, 2, 1]),
-                }
+                IoSendReport::from_provider(
+                    3,
+                    Bytes::from_static(&[3, 2, 1]),
+                    TimingEvidence::commit(std::time::Instant::now(), None),
+                )
             ),
             Err(NeighborError::Io {
                 source: LiveIoError::InvalidSendEvidence { .. },

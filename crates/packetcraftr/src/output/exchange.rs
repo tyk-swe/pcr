@@ -35,51 +35,57 @@ impl ExchangeCommandResult {
     pub fn try_from_exchange(
         result: ExchangeResult,
     ) -> std::result::Result<(Self, Vec<Diagnostic>, Stats), Error> {
-        let ExchangeResult {
-            sent,
-            sent_evidence: _,
-            responses,
-            unanswered,
-            unsolicited,
-            undecoded,
-            mut diagnostics,
-            stats,
-        } = result;
-        let sent_frames = sent
-            .into_iter()
-            .map(|built| {
-                diagnostics.extend(built.diagnostics);
-                Wire::new(built.bytes)
-            })
+        let sent_frames = result
+            .sent()
+            .iter()
+            .map(|sent| Wire::new(sent.wire_bytes().clone()))
             .collect();
-        let response_outputs = responses
-            .into_iter()
+        let response_outputs = result
+            .responses()
+            .iter()
             .map(|response| {
                 Ok(ExchangeResponseOutput {
-                    request_index: response.request_index as u64,
-                    response: Decoded::try_from_decoded(response.response)?,
-                    latency: response.latency,
+                    request_index: response.request_index() as u64,
+                    response: Decoded::try_from_decoded(response.response().clone())?,
+                    latency: response.latency(),
                 })
             })
             .collect::<std::result::Result<Vec<_>, Error>>()?;
-        let unsolicited_outputs = unsolicited
-            .into_iter()
-            .map(Decoded::try_from_decoded)
+        let unsolicited_outputs = result
+            .unsolicited()
+            .iter()
+            .map(|response| Decoded::try_from_decoded(response.response().clone()))
             .collect::<std::result::Result<Vec<_>, _>>()?;
-        let undecoded_frames = undecoded
-            .into_iter()
-            .map(Captured::try_from_frame)
+        let undecoded_frames = result
+            .undecoded()
+            .iter()
+            .map(|capture| Captured::try_from_frame(capture.frame().clone()))
             .collect::<std::result::Result<Vec<_>, _>>()?;
+        let diagnostics = result
+            .diagnostics()
+            .iter()
+            .cloned()
+            .chain(
+                result
+                    .sent()
+                    .iter()
+                    .flat_map(|sent| sent.built().diagnostics.iter().cloned()),
+            )
+            .collect();
         Ok((
             Self {
                 sent: sent_frames,
                 responses: response_outputs,
-                unanswered: unanswered.into_iter().map(|index| index as u64).collect(),
+                unanswered: result
+                    .unanswered()
+                    .iter()
+                    .map(|index| *index as u64)
+                    .collect(),
                 unsolicited: unsolicited_outputs,
                 undecoded: undecoded_frames,
             },
             diagnostics,
-            stats.into(),
+            result.stats().clone().into(),
         ))
     }
 }

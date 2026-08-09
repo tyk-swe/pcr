@@ -13,8 +13,8 @@ use packetcraftr_packet::{
 };
 
 use super::accumulator::{
-    ExchangeAccumulator, ExchangeProcessContext, ExchangeProcessOutcome, UnsolicitedFreshness,
-    WorkflowPromotionContext, WorkflowResponseMatcher,
+    ExchangeAccumulator, ExchangeProcessContext, ExchangeProcessOutcome, WorkflowPromotionContext,
+    WorkflowResponseMatcher,
 };
 use super::contract::{ExchangeOptions, MatchedResponse};
 
@@ -28,17 +28,22 @@ impl ExchangeAccumulator {
             registry,
             dissector,
             prepared,
-            sent_at,
+            sent,
             deadline,
             options,
         } = context;
-        let Captured { frame, received_at } = captured;
+        let record_id = captured.id();
+        let Captured {
+            frame, received_at, ..
+        } = captured;
         if self.correlation_deadline_expired || Instant::now() >= deadline {
             self.mark_correlation_deadline_expired();
             let raw_frame = frame.clone();
             match dissector.decode(frame, options.decode.clone()) {
-                Ok(decoded) => self.retain_unsolicited(decoded, options, None),
-                Err(_) => self.retain_undecoded(raw_frame, options),
+                Ok(decoded) => {
+                    self.retain_unsolicited(decoded, record_id, received_at, options, false)
+                }
+                Err(_) => self.retain_undecoded(raw_frame, record_id, received_at, options),
             }
             return ExchangeProcessOutcome::CorrelationDeadlineExpired;
         }
@@ -46,14 +51,14 @@ impl ExchangeAccumulator {
         let decoded = match dissector.decode(frame, options.decode.clone()) {
             Ok(decoded) => {
                 if Instant::now() >= deadline {
-                    return self.expire_decoded(decoded, options);
+                    return self.expire_decoded(decoded, record_id, received_at, options);
                 }
                 decoded
             }
             Err(error) => {
                 if Instant::now() >= deadline {
                     self.mark_correlation_deadline_expired();
-                    self.retain_undecoded(raw_frame, options);
+                    self.retain_undecoded(raw_frame, record_id, received_at, options);
                     return ExchangeProcessOutcome::CorrelationDeadlineExpired;
                 }
                 push_diagnostic_once(
@@ -63,7 +68,7 @@ impl ExchangeAccumulator {
                         format!("captured frame could not be decoded: {error}"),
                     ),
                 );
-                self.retain_undecoded(raw_frame, options);
+                self.retain_undecoded(raw_frame, record_id, received_at, options);
                 return ExchangeProcessOutcome::Continue;
             }
         };
@@ -71,7 +76,7 @@ impl ExchangeAccumulator {
             diagnostic.code.contains("checksum") && diagnostic.severity != DiagnosticSeverity::Info
         });
         if Instant::now() >= deadline {
-            return self.expire_decoded(decoded, options);
+            return self.expire_decoded(decoded, record_id, received_at, options);
         }
         if integrity_failure {
             push_diagnostic_once(
@@ -81,11 +86,7 @@ impl ExchangeAccumulator {
                     "a response with failed checksum validation was not correlated",
                 ),
             );
-            self.retain_unsolicited(
-                decoded,
-                options,
-                unsolicited_freshness(received_at, sent_at, deadline),
-            );
+            self.retain_unsolicited(decoded, record_id, received_at, options, true);
             return ExchangeProcessOutcome::Continue;
         }
 
@@ -99,28 +100,31 @@ impl ExchangeAccumulator {
             );
         }
 
-        let mut matched: Option<(usize, MatchResult)> = None;
-        for (request_index, prepared_request) in prepared.iter().take(sent_at.len()).enumerate() {
+        let mut candidates = Vec::new();
+        for (request_index, prepared_request) in prepared.iter().take(sent.len()).enumerate() {
             if Instant::now() >= deadline {
-                return self.expire_decoded(decoded, options);
+                return self.expire_decoded(decoded, record_id, received_at, options);
             }
             let Some(received_at) = received_at else {
                 continue;
             };
-            if received_at < sent_at[request_index] || received_at > deadline {
+            if received_at < sent[request_index].freshness_at()
+                || received_at > deadline
+                || !wall_clock_is_consistent(&sent[request_index], &decoded)
+            {
                 continue;
             }
             let mut result = None;
             for layer in prepared_request.built.packet.iter() {
                 if Instant::now() >= deadline {
-                    return self.expire_decoded(decoded, options);
+                    return self.expire_decoded(decoded, record_id, Some(received_at), options);
                 }
                 let Some(matcher) = registry.matcher(layer.protocol_id().as_str()) else {
                     continue;
                 };
                 let candidate = matcher.matches(&prepared_request.built.packet, &decoded.packet);
                 if Instant::now() >= deadline {
-                    return self.expire_decoded(decoded, options);
+                    return self.expire_decoded(decoded, record_id, Some(received_at), options);
                 }
                 if candidate.matched
                     && result
@@ -131,31 +135,51 @@ impl ExchangeAccumulator {
                 }
             }
             if Instant::now() >= deadline {
-                return self.expire_decoded(decoded, options);
+                return self.expire_decoded(decoded, record_id, Some(received_at), options);
             }
             let Some(result) = result else {
                 continue;
             };
-            let replace = matched.as_ref().is_none_or(|(best_index, best)| {
-                result.confidence > best.confidence
-                    || (result.confidence == best.confidence
-                        && self.response_counts[request_index] < self.response_counts[*best_index])
-                    || (result.confidence == best.confidence
-                        && self.response_counts[request_index] == self.response_counts[*best_index]
-                        && request_index < *best_index)
-            });
-            if replace {
-                matched = Some((request_index, result));
-            }
+            candidates.push((request_index, result));
         }
         if Instant::now() >= deadline {
-            return self.expire_decoded(decoded, options);
+            return self.expire_decoded(decoded, record_id, received_at, options);
         }
 
-        if let Some((request_index, _)) = matched {
+        let Some(best_confidence) = candidates.iter().map(|(_, result)| result.confidence).max()
+        else {
+            if sent.len() < prepared.len() {
+                push_diagnostic_once(
+                    &mut self.diagnostics,
+                    Diagnostic::info(
+                        "exchange.pre_send_frame",
+                        "a captured frame arrived before one or more requests were sent and was not correlated to those requests",
+                    ),
+                );
+            }
+            self.retain_unsolicited(decoded, record_id, received_at, options, true);
+            return ExchangeProcessOutcome::Continue;
+        };
+        let best: Vec<_> = candidates
+            .into_iter()
+            .filter(|(_, result)| result.confidence == best_confidence)
+            .collect();
+        if best.len() != 1 {
+            push_diagnostic_once(
+                &mut self.diagnostics,
+                Diagnostic::warning(
+                    "exchange.ambiguous_capture",
+                    "a captured response matched multiple requests with equal confidence; it was retained without request attribution",
+                ),
+            );
+            self.retain_unsolicited(decoded, record_id, received_at, options, false);
+            return ExchangeProcessOutcome::Continue;
+        }
+        let request_index = best[0].0;
+        {
             let received_at = received_at.expect("only timestamped capture frames can match");
             if Instant::now() >= deadline {
-                return self.expire_decoded(decoded, options);
+                return self.expire_decoded(decoded, record_id, Some(received_at), options);
             }
             if self.responses.len() >= options.max_responses {
                 push_diagnostic_once(
@@ -171,31 +195,18 @@ impl ExchangeAccumulator {
                 return ExchangeProcessOutcome::Continue;
             }
             if Instant::now() >= deadline {
-                return self.expire_decoded(decoded, options);
+                return self.expire_decoded(decoded, record_id, Some(received_at), options);
             }
             if self.reserve_decoded_evidence(decoded.original.len(), options) {
                 self.response_counts[request_index] += 1;
-                self.responses.push(MatchedResponse {
+                self.responses.push(MatchedResponse::new(
+                    record_id,
                     request_index,
-                    response: decoded,
-                    latency: received_at.saturating_duration_since(sent_at[request_index]),
-                });
+                    decoded,
+                    received_at,
+                    received_at.saturating_duration_since(sent[request_index].freshness_at()),
+                ));
             }
-        } else {
-            if sent_at.len() < prepared.len() {
-                push_diagnostic_once(
-                    &mut self.diagnostics,
-                    Diagnostic::info(
-                        "exchange.pre_send_frame",
-                        "a captured frame arrived before one or more requests were sent and was not correlated to those requests",
-                    ),
-                );
-            }
-            self.retain_unsolicited(
-                decoded,
-                options,
-                unsolicited_freshness(received_at, sent_at, deadline),
-            );
         }
         ExchangeProcessOutcome::Continue
     }
@@ -207,16 +218,14 @@ impl ExchangeAccumulator {
     ) -> ExchangeProcessOutcome {
         let WorkflowPromotionContext {
             prepared,
-            sent_at,
+            sent,
             deadline,
             max_responses,
         } = context;
-        debug_assert_eq!(self.unsolicited.len(), self.unsolicited_freshness.len());
         if self.workflow_examined_unsolicited >= self.unsolicited.len() {
             return ExchangeProcessOutcome::Continue;
         }
         if Instant::now() >= deadline {
-            self.unsolicited_freshness.fill(None);
             self.workflow_examined_unsolicited = self.unsolicited.len();
             self.mark_correlation_deadline_expired();
             return ExchangeProcessOutcome::CorrelationDeadlineExpired;
@@ -226,78 +235,77 @@ impl ExchangeAccumulator {
             return ExchangeProcessOutcome::Continue;
         }
 
-        let mut candidates = self
+        let pending = self
             .unsolicited
-            .split_off(self.workflow_examined_unsolicited)
-            .into_iter()
-            .zip(
-                self.unsolicited_freshness
-                    .split_off(self.workflow_examined_unsolicited),
-            );
-        while let Some((decoded, freshness)) = candidates.next() {
+            .split_off(self.workflow_examined_unsolicited);
+        for mut decoded in pending {
             if Instant::now() >= deadline {
                 self.unsolicited.push(decoded);
-                self.unsolicited_freshness.push(None);
-                for (decoded, _) in candidates {
-                    self.unsolicited.push(decoded);
-                    self.unsolicited_freshness.push(None);
-                }
-                self.unsolicited_freshness.fill(None);
                 self.workflow_examined_unsolicited = self.unsolicited.len();
                 self.mark_correlation_deadline_expired();
                 return ExchangeProcessOutcome::CorrelationDeadlineExpired;
             }
-            let Some(freshness) = freshness else {
+            if !decoded.workflow_eligible {
                 self.unsolicited.push(decoded);
-                self.unsolicited_freshness.push(None);
-                continue;
-            };
-            if self.workflow_response_limit_reached(max_responses) {
-                self.unsolicited.push(decoded);
-                self.unsolicited_freshness.push(Some(freshness));
                 continue;
             }
-            let mut winner = None;
-            for (request_index, prepared_request) in prepared
-                .iter()
-                .enumerate()
-                .take(freshness.eligible_requests)
+            let Some(received_at) = decoded.received_at else {
+                decoded.workflow_eligible = false;
+                self.unsolicited.push(decoded);
+                continue;
+            };
+            let eligible_requests = sent.partition_point(|send| send.freshness_at() <= received_at);
+            if eligible_requests == 0 || received_at > deadline {
+                self.unsolicited.push(decoded);
+                continue;
+            }
+            if self.workflow_response_limit_reached(max_responses) {
+                self.unsolicited.push(decoded);
+                continue;
+            }
+            let mut winners = Vec::new();
+            for (request_index, prepared_request) in
+                prepared.iter().enumerate().take(eligible_requests)
             {
                 let matched =
-                    matches_request(request_index, &prepared_request.built.packet, &decoded);
+                    matches_request(
+                        request_index,
+                        &prepared_request.built.packet,
+                        &decoded.response,
+                    ) && wall_clock_is_consistent(&sent[request_index], &decoded.response);
                 if Instant::now() >= deadline {
                     self.unsolicited.push(decoded);
-                    self.unsolicited_freshness.push(None);
-                    for (decoded, _) in candidates {
-                        self.unsolicited.push(decoded);
-                        self.unsolicited_freshness.push(None);
-                    }
-                    self.unsolicited_freshness.fill(None);
                     self.workflow_examined_unsolicited = self.unsolicited.len();
                     self.mark_correlation_deadline_expired();
                     return ExchangeProcessOutcome::CorrelationDeadlineExpired;
                 }
-                if matched
-                    && winner.is_none_or(|best_index| {
-                        self.response_counts[request_index] < self.response_counts[best_index]
-                    })
-                {
-                    winner = Some(request_index);
+                if matched {
+                    winners.push(request_index);
                 }
             }
-            let Some(request_index) = winner else {
+            if winners.len() != 1 {
+                if winners.len() > 1 {
+                    push_diagnostic_once(
+                        &mut self.diagnostics,
+                        Diagnostic::warning(
+                            "exchange.ambiguous_capture",
+                            "an unsolicited response matched multiple identical requests; it remained unattribtued",
+                        ),
+                    );
+                    decoded.workflow_eligible = false;
+                }
                 self.unsolicited.push(decoded);
-                self.unsolicited_freshness.push(Some(freshness));
                 continue;
-            };
+            }
+            let request_index = winners[0];
             self.response_counts[request_index] += 1;
-            self.responses.push(MatchedResponse {
+            self.responses.push(MatchedResponse::new(
+                decoded.record_id,
                 request_index,
-                response: decoded,
-                latency: freshness
-                    .received_at
-                    .saturating_duration_since(sent_at[request_index]),
-            });
+                decoded.response,
+                received_at,
+                received_at.saturating_duration_since(sent[request_index].freshness_at()),
+            ));
         }
         self.workflow_examined_unsolicited = self.unsolicited.len();
         // Ambient frames remain available from Client::exchange, but the
@@ -336,64 +344,19 @@ impl ExchangeAccumulator {
     fn expire_decoded(
         &mut self,
         decoded: DecodedPacket,
+        record_id: packetcraftr_network::capture::CaptureRecordId,
+        received_at: Option<Instant>,
         options: &ExchangeOptions,
     ) -> ExchangeProcessOutcome {
         self.mark_correlation_deadline_expired();
-        self.retain_unsolicited(decoded, options, None);
+        self.retain_unsolicited(decoded, record_id, received_at, options, false);
         ExchangeProcessOutcome::CorrelationDeadlineExpired
     }
 }
 
-fn unsolicited_freshness(
-    received_at: Option<Instant>,
-    sent_at: &[Instant],
-    deadline: Instant,
-) -> Option<UnsolicitedFreshness> {
-    let received_at = received_at.filter(|received_at| *received_at <= deadline)?;
-    let eligible_requests = sent_at.partition_point(|sent| *sent <= received_at);
-    (eligible_requests != 0).then_some(UnsolicitedFreshness {
-        received_at,
-        eligible_requests,
-    })
-}
-
-#[cfg(test)]
-mod tests {
-    use std::time::Duration;
-
-    use super::*;
-
-    #[test]
-    fn unsolicited_freshness_requires_proven_ingress_after_at_least_one_send() {
-        let base = Instant::now();
-        let sent = [
-            base + Duration::from_millis(10),
-            base + Duration::from_millis(20),
-            base + Duration::from_millis(30),
-        ];
-        let deadline = base + Duration::from_millis(40);
-
-        assert!(unsolicited_freshness(None, &sent, deadline).is_none());
-        assert!(
-            unsolicited_freshness(Some(base + Duration::from_millis(9)), &sent, deadline).is_none()
-        );
-        assert!(
-            unsolicited_freshness(Some(deadline + Duration::from_nanos(1)), &sent, deadline)
-                .is_none()
-        );
-
-        let first = unsolicited_freshness(Some(sent[0]), &sent, deadline)
-            .expect("first request is eligible at its send marker");
-        assert_eq!(first.received_at, sent[0]);
-        assert_eq!(first.eligible_requests, 1);
-
-        let between =
-            unsolicited_freshness(Some(base + Duration::from_millis(25)), &sent, deadline)
-                .expect("two requests are eligible between second and third send");
-        assert_eq!(between.eligible_requests, 2);
-
-        let final_frame = unsolicited_freshness(Some(deadline), &sent, deadline)
-            .expect("all requests remain eligible through the deadline");
-        assert_eq!(final_frame.eligible_requests, 3);
+fn wall_clock_is_consistent(sent: &crate::send::SentPacket, decoded: &DecodedPacket) -> bool {
+    match (sent.timing().output_wall_clock(), decoded.frame.timestamp) {
+        (Some(sent_at), Some(received_at)) => received_at >= sent_at,
+        _ => true,
     }
 }

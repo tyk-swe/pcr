@@ -3,19 +3,17 @@
 
 //! Ordered packet transmission and inter-send correlation drains.
 
-use std::time::{Instant, SystemTime};
+use std::time::Instant;
 
 use packetcraftr_network::{
     Error as LiveIoError,
     capture::Session,
-    link::Mode as LinkMode,
     transmit::{Frame as TransmissionFrame, Sender as PacketIo},
 };
-use packetcraftr_packet::frame::{Frame, LinkType};
 
 use super::transaction::ExchangeTransaction;
 use super::{ExchangeProcessOutcome, WorkflowResponseMatcher};
-use crate::validation::validate_send_report;
+use crate::send::SentPacket;
 
 impl<C: Session> ExchangeTransaction<C> {
     pub(super) fn send_requests<I: PacketIo>(
@@ -56,24 +54,10 @@ impl<C: Session> ExchangeTransaction<C> {
         let prepared = &self.prepared[send_index];
         let built = &prepared.built;
         let route = &prepared.route;
-        let send_started = Instant::now();
-        let send_wall_time = SystemTime::now();
         let frame = TransmissionFrame::try_new(&built.bytes, route)?;
         let report = io.send(frame)?;
-        validate_send_report(&built.bytes, &report)?;
-        let link_type = match route.plan.mode {
-            LinkMode::Layer2 => route.plan.route.link_type,
-            LinkMode::Layer3 => LinkType::RAW,
-            LinkMode::Auto => return Err(LiveIoError::UnresolvedLinkMode),
-        };
-        let evidence =
-            Frame::new(send_wall_time, link_type, built.bytes.clone()).map_err(|source| {
-                LiveIoError::InvalidSendEvidence {
-                    message: source.to_string(),
-                }
-            })?;
-        self.sent_at.push(send_started);
-        self.sent_evidence.push(evidence);
+        let sent = SentPacket::from_report(built.clone(), route.clone(), &report)?;
+        self.sent.push(sent);
         self.completed_sends =
             self.completed_sends
                 .checked_add(1)

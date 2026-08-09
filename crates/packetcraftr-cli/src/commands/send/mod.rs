@@ -4,12 +4,8 @@
 pub(super) mod arguments;
 
 use std::sync::Arc;
-use std::time::SystemTime;
 
-use packetcraftr::{
-    live as client, network as net, output, packet,
-    packet::frame::{Frame, LinkType},
-};
+use packetcraftr::{live as client, output, packet};
 
 use self::arguments::SendArgs;
 use super::super::errors::CliError;
@@ -43,8 +39,7 @@ pub(super) fn run(arguments: SendArgs, output: output::contract::Format) -> Resu
             },
         )
         .map_err(CliError::classified)?;
-    let capture_link_type =
-        send_capture_link_type(report.route.plan.mode, report.route.plan.route.link_type)?;
+    let sent_frame = report.sent().evidence().clone();
     let (result, diagnostics, stats) =
         output::send::Result::try_from_report(report).map_err(CliError::classified)?;
     match output {
@@ -71,33 +66,13 @@ pub(super) fn run(arguments: SendArgs, output: output::contract::Format) -> Resu
         }
         output::contract::Format::Raw => write_raw(result.frame.bytes()),
         output::contract::Format::Pcap | output::contract::Format::Pcapng => {
-            let frame = Frame::new(
-                SystemTime::now(),
-                capture_link_type,
-                result.frame.bytes().to_vec(),
-            )
-            .map_err(|source| CliError::new(3, source.to_string()))?;
-            write_capture_file(output, [frame])
+            write_capture_file(output, [sent_frame])
         }
         _ => Err(CliError::classified(
             output::contract::Error::UnsupportedFormat {
                 command: output::contract::Command::Send,
                 format: output,
             },
-        )),
-    }
-}
-
-fn send_capture_link_type(
-    mode: net::link::Mode,
-    route_link_type: LinkType,
-) -> Result<LinkType, CliError> {
-    match mode {
-        net::link::Mode::Layer2 => Ok(route_link_type),
-        net::link::Mode::Layer3 => Ok(LinkType::RAW),
-        net::link::Mode::Auto => Err(CliError::new(
-            70,
-            "send result retained an unresolved automatic link mode",
         )),
     }
 }

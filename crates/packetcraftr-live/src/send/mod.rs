@@ -6,5 +6,5 @@
 pub(crate) mod contract;
 pub(crate) mod execution;
 
-pub(crate) use contract::{ClientError, SendOptions, SendReport};
-pub use contract::{SendOptions as Options, SendReport as Report};
+pub(crate) use contract::{ClientError, SendOptions, SendReport, SentPacket};
+pub use contract::{SendOptions as Options, SendReport as Report, SentPacket as Receipt};

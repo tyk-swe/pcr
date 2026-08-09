@@ -47,7 +47,10 @@ pub(super) fn render_scan_text(
                 evidence.attempt,
                 scan_probe_status_name(evidence.status),
                 scan_classification_name(evidence.classification),
-                output_timestamp_text(evidence.sent_at),
+                evidence
+                    .sent_at
+                    .map(output_timestamp_text)
+                    .unwrap_or_else(|| "none".to_owned()),
                 evidence
                     .received_at
                     .map(output_timestamp_text)

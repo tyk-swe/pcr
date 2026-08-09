@@ -19,7 +19,7 @@ use crate::materialize::{
     patch_builtin_ethernet, require_fixed_width_link_materialization,
 };
 use crate::send::{ClientError, SendOptions, SendReport};
-use crate::validation::{validate_mtu, validate_send_report};
+use crate::validation::validate_mtu;
 
 impl<R, N, I> Client<R, N, I>
 where
@@ -71,13 +71,10 @@ where
         let io_report = self
             .io
             .send(TransmissionFrame::try_new(&built.bytes, &route)?)?;
-        validate_send_report(&built.bytes, &io_report)?;
-        let bytes_sent = io_report.bytes_sent;
-        let wire_bytes = io_report.wire_bytes;
+        let sent = super::SentPacket::from_report(built, route, &io_report)?;
+        let bytes_sent = sent.bytes_sent();
         Ok(SendReport {
-            built,
-            route,
-            wire_bytes,
+            sent,
             stats: Stats {
                 packets_attempted: 1,
                 packets_completed: 1,

@@ -19,6 +19,7 @@ use super::{
     WorkflowResponseMatcher,
 };
 use crate::send::ClientError;
+use crate::send::SentPacket;
 
 /// Mutable live-operation state, created after capture is armed.
 pub(crate) struct ExchangeTransaction<C: Session> {
@@ -31,8 +32,7 @@ pub(crate) struct ExchangeTransaction<C: Session> {
     pub(super) prepared: Vec<PreparedExchangePacket>,
     pub(super) packet_count: u64,
     pub(super) total_bytes: u64,
-    pub(super) sent_at: Vec<Instant>,
-    pub(super) sent_evidence: Vec<packetcraftr_packet::frame::Frame>,
+    pub(super) sent: Vec<SentPacket>,
     pub(super) completed_sends: u64,
     pub(super) dissector: Dissector,
     pub(super) captured: ExchangeAccumulator,
@@ -57,8 +57,7 @@ impl<C: Session> ExchangeTransaction<C> {
             prepared: prepared.packets,
             packet_count: prepared.packet_count,
             total_bytes: prepared.total_bytes,
-            sent_at: Vec::with_capacity(request_count),
-            sent_evidence: Vec::with_capacity(request_count),
+            sent: Vec::with_capacity(request_count),
             completed_sends: 0,
             captured: ExchangeAccumulator::new(request_count),
             correlation_stopped: false,

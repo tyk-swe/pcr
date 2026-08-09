@@ -8,7 +8,12 @@ use packetcraftr_packet::diagnostic::{Diagnostic, push_diagnostic_once};
 use packetcraftr_packet::frame::Frame;
 use packetcraftr_packet::fuzz::Limits;
 
+use crate::exchange::MatchedResponse;
 use crate::probe::evidence::EvidenceBudget;
+use crate::probe::evidence::{
+    ExchangeEvidence, ExchangeEvidenceError, MatchedResponseEvidence, ResponseEvidence,
+    validate_exchange_evidence as validate_shared_exchange_evidence,
+};
 
 use super::MAX_DURATION;
 use super::boundary::FuzzCaseExecution;
@@ -51,66 +56,77 @@ pub(super) fn validate_execution(
     timeout: Duration,
     deadline: &Deadline,
 ) -> Result<(), FuzzError> {
-    if execution.stats.packets_attempted != 1 || execution.stats.packets_completed != 1 {
+    if execution.case_index() != case.index || execution.seed() != case.seed {
         return Err(FuzzError::InvalidEvidence {
             case_index: case.index,
-            message: "successful live execution must account for exactly one attempted and completed packet".to_owned(),
+            message: "executor retained evidence for a different authorized fuzz case".to_owned(),
         });
     }
-    if execution.stats.bytes != execution.sent.bytes().len() as u64
-        || execution.built.bytes != execution.sent.bytes()
-    {
+    if !execution.sent().packet().structurally_eq(&case.recipe) {
         return Err(FuzzError::InvalidEvidence {
             case_index: case.index,
-            message: "sent frame, built bytes, and byte statistics disagree".to_owned(),
+            message: "executor substituted a packet for the authorized prepared fuzz case"
+                .to_owned(),
         });
     }
-    if execution.built.bytes.len() > limits.max_packet_bytes {
+    if execution.sent().built().bytes.len() > limits.max_packet_bytes {
         return Err(FuzzError::InvalidEvidence {
             case_index: case.index,
             message: format!(
                 "executor built {} bytes, exceeding max_packet_bytes={}",
-                execution.built.bytes.len(),
+                execution.sent().built().bytes.len(),
                 limits.max_packet_bytes
             ),
         });
     }
-    let Some(sent_at) = execution.sent.timestamp else {
-        return Err(FuzzError::InvalidEvidence {
-            case_index: case.index,
-            message: "executor returned sent frame without a timestamp".to_owned(),
-        });
-    };
-    execution
-        .stats
-        .capture
-        .validate()
-        .map_err(|source| FuzzError::InvalidEvidence {
-            case_index: case.index,
-            message: format!("invalid capture statistics: {source}"),
-        })?;
-    for response in &execution.responses {
-        deadline.check().map_err(duration_limit)?;
-        let Some(received_at) = response.timestamp else {
-            return Err(FuzzError::InvalidEvidence {
-                case_index: case.index,
-                message: "executor returned response frame without a timestamp".to_owned(),
-            });
-        };
-        let within_deadline = received_at
-            .duration_since(sent_at)
-            .is_ok_and(|latency| latency <= timeout);
-        if !within_deadline {
-            return Err(FuzzError::InvalidEvidence {
-                case_index: case.index,
-                message: format!(
-                    "response timestamp is outside the sent frame's {timeout:?} deadline"
-                ),
-            });
-        }
-    }
+    validate_shared_exchange_evidence(
+        ExchangeEvidence {
+            request_count: 1,
+            sent: std::slice::from_ref(execution.sent()),
+            matched_responses: execution.responses(),
+            unsolicited: execution.unmatched(),
+            undecoded: execution.undecoded(),
+            timeout,
+            stats: execution.stats(),
+        },
+        limits.max_evidence_frames,
+        limits.max_evidence_bytes,
+        |_, packet| packet.structurally_eq(&case.recipe),
+    )
+    .map_err(|error| FuzzError::InvalidEvidence {
+        case_index: case.index,
+        message: format_fuzz_evidence_error(error),
+    })?;
     deadline.check().map_err(duration_limit)?;
     Ok(())
+}
+
+impl ResponseEvidence for MatchedResponse {
+    fn response(&self) -> &packetcraftr_packet::decode::Result {
+        self.response()
+    }
+
+    fn latency(&self) -> Duration {
+        self.latency()
+    }
+
+    fn record_id(&self) -> packetcraftr_network::capture::CaptureRecordId {
+        self.record_id()
+    }
+
+    fn received_at(&self) -> std::time::Instant {
+        self.received_at()
+    }
+}
+
+impl MatchedResponseEvidence for MatchedResponse {
+    fn request_index(&self) -> usize {
+        self.request_index()
+    }
+}
+
+fn format_fuzz_evidence_error(error: ExchangeEvidenceError) -> String {
+    format!("invalid trusted fuzz exchange evidence: {error:?}")
 }
 
 pub(super) fn add_execution_stats(

@@ -336,10 +336,13 @@ struct CountingLayer2(Arc<AtomicUsize>);
 impl Layer2Sender for CountingLayer2 {
     fn send_layer2(&self, frame: Layer2Frame<'_>) -> Result<Report, Error> {
         self.0.fetch_add(1, Ordering::SeqCst);
-        Ok(Report {
-            bytes_sent: frame.bytes().len(),
-            wire_bytes: frame.bytes().clone(),
-        })
+        Ok(Report::accepted(
+            frame.bytes().clone(),
+            packetcraftr_network::transmit::TimingEvidence::commit(
+                Instant::now(),
+                Some(SystemTime::now()),
+            ),
+        ))
     }
 }
 
@@ -349,10 +352,13 @@ struct CountingLayer3(Arc<AtomicUsize>);
 impl Layer3Sender for CountingLayer3 {
     fn send_layer3(&self, frame: Layer3Frame<'_>) -> Result<Report, Error> {
         self.0.fetch_add(1, Ordering::SeqCst);
-        Ok(Report {
-            bytes_sent: frame.bytes().len(),
-            wire_bytes: frame.bytes().clone(),
-        })
+        Ok(Report::accepted(
+            frame.bytes().clone(),
+            packetcraftr_network::transmit::TimingEvidence::commit(
+                Instant::now(),
+                Some(SystemTime::now()),
+            ),
+        ))
     }
 }
 
@@ -392,7 +398,7 @@ fn typed_transmission_frames_enforce_mode_and_dispatch_exact_bytes() {
     assert_eq!(frame.bytes(), &bytes);
     assert_eq!(frame.route(), &layer2_route);
     let report = dispatch.send(frame).expect("fixture send");
-    assert_eq!(report.wire_bytes, bytes);
+    assert_eq!(report.wire_bytes(), &bytes);
     assert_eq!(layer2_calls.load(Ordering::SeqCst), 1);
     assert_eq!(layer3_calls.load(Ordering::SeqCst), 0);
 
@@ -400,6 +406,58 @@ fn typed_transmission_frames_enforce_mode_and_dispatch_exact_bytes() {
         .send(Frame::try_new(&bytes, &layer3_route).expect("Layer 3 frame"))
         .expect("fixture send");
     assert_eq!(layer3_calls.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn provider_report_rejects_byte_and_timing_forgery() {
+    let expected = Bytes::from_static(&[1, 2, 3]);
+    let commit = Instant::now();
+    assert!(
+        Report::accepted(
+            expected.clone(),
+            packetcraftr_network::transmit::TimingEvidence::commit(commit, None),
+        )
+        .validate_against(&expected)
+        .is_ok()
+    );
+
+    assert!(matches!(
+        Report::accepted(
+            Bytes::from_static(&[3, 2, 1]),
+            packetcraftr_network::transmit::TimingEvidence::commit(commit, None),
+        )
+        .validate_against(&expected),
+        Err(Error::InvalidSendEvidence { .. })
+    ));
+
+    let started = Instant::now();
+    let finished = started - Duration::from_nanos(1);
+    assert!(matches!(
+        Report::accepted(
+            expected.clone(),
+            packetcraftr_network::transmit::TimingEvidence::submission_interval(
+                started, finished, None, None,
+            ),
+        )
+        .validate_against(&expected),
+        Err(Error::InvalidSendTiming { .. })
+    ));
+
+    let wall_started = SystemTime::UNIX_EPOCH + Duration::from_secs(2);
+    let wall_finished = SystemTime::UNIX_EPOCH + Duration::from_secs(1);
+    assert!(matches!(
+        Report::accepted(
+            expected.clone(),
+            packetcraftr_network::transmit::TimingEvidence::submission_interval(
+                started,
+                started,
+                Some(wall_started),
+                Some(wall_finished),
+            ),
+        )
+        .validate_against(&expected),
+        Err(Error::InvalidSendTiming { .. })
+    ));
 }
 
 #[test]

@@ -66,7 +66,7 @@ impl<C: Session> ExchangeTransaction<C> {
                     registry: &self.registry,
                     dissector: &self.dissector,
                     prepared: &self.prepared,
-                    sent_at: &self.sent_at,
+                    sent: &self.sent,
                     deadline: self.deadline,
                     options: &self.options,
                 };
@@ -92,7 +92,7 @@ impl<C: Session> ExchangeTransaction<C> {
             registry: &self.registry,
             dissector: &self.dissector,
             prepared: &self.prepared,
-            sent_at: &self.sent_at,
+            sent: &self.sent,
             deadline: self.deadline,
             options: &self.options,
         };
@@ -114,7 +114,7 @@ impl<C: Session> ExchangeTransaction<C> {
         };
         let context = WorkflowPromotionContext {
             prepared: &self.prepared,
-            sent_at: &self.sent_at,
+            sent: &self.sent,
             deadline: self.deadline,
             max_responses: self.options.max_responses,
         };

@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** Live transmission and workflow evidence now cross opaque
+  provider-accepted receipts with exact bytes, trusted monotonic timing, route
+  materialization, and capture-record identity. High-level scan, traceroute,
+  DNS, and fuzz results can no longer be forged from independently supplied
+  packets, frames, timestamps, or latencies; ambiguous and unmarked captures
+  remain explicitly unattributed.
 - **Breaking:** Capture rewriting is now a bounded, same-format operation that
   preserves every validated source record and rejects CLI format conversion or
   filtering instead of silently normalizing PCAPNG structure. The capture API

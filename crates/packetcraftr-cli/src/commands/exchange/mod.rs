@@ -70,17 +70,27 @@ pub(super) fn run(
         output::contract::Format::Pcap | output::contract::Format::Pcapng
     ) {
         let frames = result
-            .sent_evidence
+            .sent()
             .iter()
-            .cloned()
+            .map(|sent| sent.evidence().clone())
             .chain(
                 result
-                    .responses
+                    .responses()
                     .iter()
-                    .map(|response| response.response.frame.clone()),
+                    .map(|response| response.response().frame.clone()),
             )
-            .chain(result.unsolicited.iter().map(|packet| packet.frame.clone()))
-            .chain(result.undecoded.iter().cloned())
+            .chain(
+                result
+                    .unsolicited()
+                    .iter()
+                    .map(|packet| packet.response().frame.clone()),
+            )
+            .chain(
+                result
+                    .undecoded()
+                    .iter()
+                    .map(|capture| capture.frame().clone()),
+            )
             .collect::<Vec<_>>();
         let mut frames = frames;
         frames.sort_by_key(|frame| frame.timestamp);

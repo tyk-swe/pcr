@@ -3,11 +3,13 @@
 
 //! Exact-frame, deadline, statistics, and exchange-contract validation.
 
+use std::collections::HashSet;
 use std::time::Duration;
 
 use crate::Stats;
-use packetcraftr_network::capture::Statistics;
-use packetcraftr_packet::frame::Frame;
+use crate::exchange::{UndecodedCapture, UnsolicitedResponse};
+use crate::send::SentPacket;
+use packetcraftr_network::capture::{CaptureRecordId, Statistics};
 use packetcraftr_packet::{Packet, decode::Result as DecodedPacket};
 
 use super::budget::{checked_frame_bytes, checked_frame_count, checked_sent_frame_bytes};
@@ -29,6 +31,8 @@ pub(crate) fn validate_capture_statistics(statistics: Statistics) -> Result<(), 
 pub(crate) trait ResponseEvidence {
     fn response(&self) -> &DecodedPacket;
     fn latency(&self) -> Duration;
+    fn record_id(&self) -> CaptureRecordId;
+    fn received_at(&self) -> std::time::Instant;
 }
 
 pub(crate) trait MatchedResponseEvidence: ResponseEvidence {
@@ -37,11 +41,10 @@ pub(crate) trait MatchedResponseEvidence: ResponseEvidence {
 
 pub(crate) struct ExchangeEvidence<'a, M> {
     pub(crate) request_count: usize,
-    pub(crate) sent_packets: &'a [Packet],
-    pub(crate) sent_frames: &'a [Frame],
+    pub(crate) sent: &'a [SentPacket],
     pub(crate) matched_responses: &'a [M],
-    pub(crate) unsolicited: &'a [DecodedPacket],
-    pub(crate) undecoded: &'a [Frame],
+    pub(crate) unsolicited: &'a [UnsolicitedResponse],
+    pub(crate) undecoded: &'a [UndecodedCapture],
     pub(crate) timeout: Duration,
     pub(crate) stats: &'a Stats,
 }
@@ -50,8 +53,7 @@ pub(crate) struct ExchangeEvidence<'a, M> {
 pub(crate) enum ExchangeEvidenceError {
     SentCardinality {
         expected: usize,
-        packets: usize,
-        frames: usize,
+        receipts: usize,
     },
     MatchedResponseOutsideBatch,
     CapturedFrameCountOverflow,
@@ -67,13 +69,16 @@ pub(crate) enum ExchangeEvidenceError {
     SentPacketMismatch {
         request_index: usize,
     },
+    DuplicateCaptureRecord {
+        record_id: CaptureRecordId,
+    },
+    ContradictoryTiming {
+        request_index: usize,
+    },
     SentByteCountOverflow,
     SentByteCountMismatch {
         reported: u64,
         actual: u64,
-    },
-    TimestampUnavailable {
-        evidence: &'static str,
     },
     InvalidMatchedResponse {
         message: String,
@@ -93,8 +98,8 @@ pub(crate) enum ExchangeEvidenceError {
 
 pub(crate) fn validate_aggregate_evidence_limits<M: ResponseEvidence>(
     matched_responses: &[M],
-    unsolicited: &[DecodedPacket],
-    undecoded: &[Frame],
+    unsolicited: &[UnsolicitedResponse],
+    undecoded: &[UndecodedCapture],
     max_captured_frames: usize,
     max_captured_bytes: usize,
 ) -> Result<(), ExchangeEvidenceError> {
@@ -111,8 +116,12 @@ pub(crate) fn validate_aggregate_evidence_limits<M: ResponseEvidence>(
         matched_responses
             .iter()
             .map(|response| &response.response().frame)
-            .chain(unsolicited.iter().map(|response| &response.frame))
-            .chain(undecoded),
+            .chain(
+                unsolicited
+                    .iter()
+                    .map(|response| &response.response().frame),
+            )
+            .chain(undecoded.iter().map(UndecodedCapture::frame)),
     )
     .ok_or(ExchangeEvidenceError::CapturedByteCountOverflow)?;
     if captured_bytes > max_captured_bytes {
@@ -125,10 +134,10 @@ pub(crate) fn validate_aggregate_evidence_limits<M: ResponseEvidence>(
 }
 
 pub(crate) fn validate_sent_byte_accounting(
-    sent_frames: &[Frame],
+    sent: &[SentPacket],
     reported: u64,
 ) -> Result<(), ExchangeEvidenceError> {
-    let actual = checked_sent_frame_bytes(sent_frames)
+    let actual = checked_sent_frame_bytes(sent.iter().map(SentPacket::evidence))
         .ok_or(ExchangeEvidenceError::SentByteCountOverflow)?;
     if reported != actual {
         return Err(ExchangeEvidenceError::SentByteCountMismatch { reported, actual });
@@ -136,39 +145,27 @@ pub(crate) fn validate_sent_byte_accounting(
     Ok(())
 }
 
-pub(crate) fn validate_sent_frame_timestamps(
-    sent_frames: &[Frame],
-) -> Result<(), ExchangeEvidenceError> {
-    for frame in sent_frames {
-        validate_frame_timestamp(frame, "sent frame")?;
+pub(crate) fn validate_sent_timing(sent: &[SentPacket]) -> Result<(), ExchangeEvidenceError> {
+    for receipt in sent {
+        if !receipt.timing().is_monotonic() || !receipt.timing().has_ordered_wall_bounds() {
+            return Err(ExchangeEvidenceError::ContradictoryTiming { request_index: 0 });
+        }
     }
     Ok(())
 }
 
 pub(crate) fn validate_response_frames_and_deadlines<M: ResponseEvidence>(
     matched_responses: &[M],
-    unsolicited: &[DecodedPacket],
+    unsolicited: &[UnsolicitedResponse],
     timeout: Duration,
 ) -> Result<(), ExchangeEvidenceError> {
     for response in matched_responses {
         validate_exact_matched_response(response.response())?;
-        validate_frame_timestamp(&response.response().frame, "matched response")?;
         validate_matched_response_deadline(response.latency(), timeout)?;
     }
     for response in unsolicited {
-        validate_decoded_frame(response, "unsolicited response")
+        validate_decoded_frame(response.response(), "unsolicited response")
             .map_err(|message| ExchangeEvidenceError::InvalidUnsolicitedResponse { message })?;
-        validate_frame_timestamp(&response.frame, "unsolicited response")?;
-    }
-    Ok(())
-}
-
-fn validate_frame_timestamp(
-    frame: &Frame,
-    evidence: &'static str,
-) -> Result<(), ExchangeEvidenceError> {
-    if frame.timestamp.is_none() {
-        return Err(ExchangeEvidenceError::TimestampUnavailable { evidence });
     }
     Ok(())
 }
@@ -201,13 +198,9 @@ pub(crate) fn format_exchange_evidence_error(
     workflow: &str,
 ) -> String {
     match error {
-        ExchangeEvidenceError::SentCardinality {
-            expected,
-            packets,
-            frames,
-        } => format!(
-            "expected {expected} sent packets and frames, received {packets} packets and {frames} frames"
-        ),
+        ExchangeEvidenceError::SentCardinality { expected, receipts } => {
+            format!("expected {expected} sent receipts, received {receipts}")
+        }
         ExchangeEvidenceError::MatchedResponseOutsideBatch => {
             format!("matched response references a request outside the {batch_kind}")
         }
@@ -226,6 +219,12 @@ pub(crate) fn format_exchange_evidence_error(
         ExchangeEvidenceError::SentPacketMismatch { .. } => {
             format!("sent packet does not preserve the {workflow} destination and probe identity")
         }
+        ExchangeEvidenceError::DuplicateCaptureRecord { record_id } => {
+            format!("capture record {record_id:?} appeared in multiple evidence categories")
+        }
+        ExchangeEvidenceError::ContradictoryTiming { .. } => {
+            "trusted transmission timing evidence is contradictory".to_owned()
+        }
         ExchangeEvidenceError::InvalidMatchedResponse { message }
         | ExchangeEvidenceError::InvalidUnsolicitedResponse { message }
         | ExchangeEvidenceError::InvalidCaptureStatistics { message } => message,
@@ -235,9 +234,6 @@ pub(crate) fn format_exchange_evidence_error(
         ExchangeEvidenceError::SentByteCountMismatch { reported, actual } => format!(
             "successful exchange reported {reported} sent bytes for {actual} exact frame bytes"
         ),
-        ExchangeEvidenceError::TimestampUnavailable { evidence } => {
-            format!("executor returned {evidence} without a timestamp")
-        }
         ExchangeEvidenceError::MatchedResponseAfterTimeout { latency, timeout } => {
             format!("matched response latency {latency:?} exceeds timeout {timeout:?}")
         }
@@ -257,13 +253,10 @@ where
     M: MatchedResponseEvidence,
     F: FnMut(usize, &Packet) -> bool,
 {
-    if evidence.sent_packets.len() != evidence.request_count
-        || evidence.sent_frames.len() != evidence.request_count
-    {
+    if evidence.sent.len() != evidence.request_count {
         return Err(ExchangeEvidenceError::SentCardinality {
             expected: evidence.request_count,
-            packets: evidence.sent_packets.len(),
-            frames: evidence.sent_frames.len(),
+            receipts: evidence.sent.len(),
         });
     }
     if evidence
@@ -282,14 +275,50 @@ where
         max_captured_bytes,
     )?;
 
-    for (request_index, sent) in evidence.sent_packets.iter().enumerate() {
-        if !sent_packet_matches(request_index, sent) {
+    for (request_index, sent) in evidence.sent.iter().enumerate() {
+        if !sent_packet_matches(request_index, sent.packet()) {
             return Err(ExchangeEvidenceError::SentPacketMismatch { request_index });
         }
     }
 
-    validate_sent_byte_accounting(evidence.sent_frames, evidence.stats.bytes)?;
-    validate_sent_frame_timestamps(evidence.sent_frames)?;
+    validate_sent_byte_accounting(evidence.sent, evidence.stats.bytes)?;
+    validate_sent_timing(evidence.sent)?;
+    let mut record_ids = HashSet::new();
+    for response in evidence.matched_responses {
+        if !record_ids.insert(response.record_id()) {
+            return Err(ExchangeEvidenceError::DuplicateCaptureRecord {
+                record_id: response.record_id(),
+            });
+        }
+        let request_index = response.request_index();
+        let expected_latency = response
+            .received_at()
+            .checked_duration_since(evidence.sent[request_index].freshness_at())
+            .ok_or(ExchangeEvidenceError::ContradictoryTiming { request_index })?;
+        if response.latency() != expected_latency {
+            return Err(ExchangeEvidenceError::ContradictoryTiming { request_index });
+        }
+        if let Some(sent_wall) = evidence.sent[request_index].timing().output_wall_clock()
+            && let Some(received_wall) = response.response().frame.timestamp
+            && received_wall < sent_wall
+        {
+            return Err(ExchangeEvidenceError::ContradictoryTiming { request_index });
+        }
+    }
+    for response in evidence.unsolicited {
+        if !record_ids.insert(response.record_id()) {
+            return Err(ExchangeEvidenceError::DuplicateCaptureRecord {
+                record_id: response.record_id(),
+            });
+        }
+    }
+    for frame in evidence.undecoded {
+        if !record_ids.insert(frame.record_id()) {
+            return Err(ExchangeEvidenceError::DuplicateCaptureRecord {
+                record_id: frame.record_id(),
+            });
+        }
+    }
     validate_response_frames_and_deadlines(
         evidence.matched_responses,
         evidence.unsolicited,

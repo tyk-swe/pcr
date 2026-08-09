@@ -10,7 +10,7 @@ use packetcraftr_network::{
 };
 use packetcraftr_packet::template::Template as PacketTemplate;
 
-use super::model::{DnsExchange, DnsExchangeExecution, DnsExecutor, DnsMatchedResponse};
+use super::model::{DnsExchange, DnsExchangeExecution, DnsExecutor};
 
 /// Executes one DNS query through the client's capture-ready exchange
 /// lifecycle.
@@ -49,43 +49,7 @@ where
                 },
             )
             .map_err(BoundaryError::from_error)?;
-        let crate::exchange::Result {
-            mut sent,
-            mut sent_evidence,
-            responses,
-            unanswered: _,
-            unsolicited,
-            undecoded,
-            diagnostics,
-            stats,
-        } = result;
-        if sent.len() != 1 || sent_evidence.len() != 1 {
-            return Err(invalid_client_result(
-                "single-query DNS exchange returned an invalid sent-evidence count",
-            ));
-        }
-        if responses.iter().any(|response| response.request_index != 0) {
-            return Err(invalid_client_result(
-                "single-query DNS exchange returned a response for an unknown request index",
-            ));
-        }
-        Ok(DnsExchangeExecution {
-            sent: sent.pop().expect("validated one sent packet").packet,
-            sent_evidence: sent_evidence
-                .pop()
-                .expect("validated one sent evidence frame"),
-            responses: responses
-                .into_iter()
-                .map(|response| DnsMatchedResponse {
-                    response: response.response,
-                    latency: response.latency,
-                })
-                .collect(),
-            unsolicited,
-            undecoded,
-            diagnostics,
-            stats,
-        })
+        DnsExchangeExecution::from_exchange(&result)
     }
 }
 
@@ -94,13 +58,5 @@ fn invalid_client_execution(message: impl Into<String>) -> BoundaryError {
         message,
         "cli.dns_executor",
         "use one bounded UDP DNS query and retain at least one response",
-    )
-}
-
-fn invalid_client_result(message: impl Into<String>) -> BoundaryError {
-    BoundaryError::internal_execution(
-        message,
-        "internal.dns_executor",
-        "treat the DNS operation as incomplete because client evidence was inconsistent",
     )
 }

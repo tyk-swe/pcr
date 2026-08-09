@@ -10,9 +10,7 @@ use packetcraftr_network::{
 use packetcraftr_packet::{field::Value as FieldValue, template::Template as PacketTemplate};
 
 use super::classification::classify_scan_response;
-use super::model::{
-    ScanBatch, ScanBatchExecution, ScanExecutor, ScanMatchedResponse, ScanTransport,
-};
+use super::model::{ScanBatch, ScanBatchExecution, ScanExecutor, ScanTransport};
 
 /// Executes homogeneous scan batches through the client's capture-ready
 /// exchange lifecycle.
@@ -81,32 +79,7 @@ where
                 })
             })
             .map_err(BoundaryError::from_error)?;
-        let crate::exchange::Result {
-            sent,
-            sent_evidence,
-            responses,
-            unanswered: _,
-            unsolicited,
-            undecoded,
-            diagnostics,
-            stats,
-        } = exchange;
-        Ok(ScanBatchExecution {
-            sent: sent.into_iter().map(|built| built.packet).collect(),
-            sent_evidence,
-            responses: responses
-                .into_iter()
-                .map(|response| ScanMatchedResponse {
-                    request_index: response.request_index,
-                    response: response.response,
-                    latency: response.latency,
-                })
-                .collect(),
-            unsolicited,
-            undecoded,
-            diagnostics,
-            stats,
-        })
+        ScanBatchExecution::from_exchange(batch, &exchange)
     }
 }
 

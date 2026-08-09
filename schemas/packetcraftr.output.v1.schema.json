@@ -3395,7 +3395,6 @@
         "attempt",
         "status",
         "classification",
-        "sent_at",
         "reason"
       ],
       "properties": {
@@ -3485,7 +3484,6 @@
               "strategy",
               "destination",
               "status",
-              "sent_at",
               "reason"
             ],
             "properties": {
@@ -3634,7 +3632,6 @@
         "server_address",
         "source_port",
         "status",
-        "sent_at",
         "reason"
       ],
       "properties": {

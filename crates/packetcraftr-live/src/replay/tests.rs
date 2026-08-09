@@ -9,8 +9,10 @@ use std::time::{Duration, UNIX_EPOCH};
 use bytes::Bytes;
 use packetcraftr_analysis::pcap::{Reader, Writer};
 use packetcraftr_network::{
-    Error as LiveIoError, interface::Id as InterfaceId, link::Mode as LinkMode,
-    transmit::Report as IoSendReport,
+    Error as LiveIoError,
+    interface::Id as InterfaceId,
+    link::Mode as LinkMode,
+    transmit::{Report as IoSendReport, TimingEvidence},
 };
 use packetcraftr_packet::error::{Classification, Kind};
 use packetcraftr_packet::frame::{Frame, LinkType};
@@ -89,14 +91,15 @@ impl ReplayTransmitter for RecordingTransmitter {
         };
         Ok(ReplayTransmission {
             interface: reported_interface,
-            report: IoSendReport {
-                bytes_sent: if self.partial {
+            report: IoSendReport::from_provider(
+                if self.partial {
                     frame.bytes().len().saturating_sub(1)
                 } else {
                     frame.bytes().len()
                 },
-                wire_bytes: frame.bytes().clone(),
-            },
+                frame.bytes().clone(),
+                TimingEvidence::commit(std::time::Instant::now(), None),
+            ),
         })
     }
 }
@@ -268,20 +271,21 @@ fn replay_transmission_evidence_requires_exact_wire_length_and_bytes() {
     validate_transmission_evidence(
         1,
         &frame,
-        &IoSendReport {
-            bytes_sent: 3,
-            wire_bytes: frame.bytes().clone(),
-        },
+        &IoSendReport::accepted(
+            frame.bytes().clone(),
+            TimingEvidence::commit(std::time::Instant::now(), None),
+        ),
     )
     .unwrap();
 
     let partial = validate_transmission_evidence(
         2,
         &frame,
-        &IoSendReport {
-            bytes_sent: 2,
-            wire_bytes: frame.bytes().clone(),
-        },
+        &IoSendReport::from_provider(
+            2,
+            frame.bytes().clone(),
+            TimingEvidence::commit(std::time::Instant::now(), None),
+        ),
     )
     .unwrap_err();
     assert!(matches!(
@@ -292,10 +296,11 @@ fn replay_transmission_evidence_requires_exact_wire_length_and_bytes() {
     let mismatch = validate_transmission_evidence(
         3,
         &frame,
-        &IoSendReport {
-            bytes_sent: 3,
-            wire_bytes: Bytes::from_static(&[0x45, 1, 3]),
-        },
+        &IoSendReport::from_provider(
+            3,
+            Bytes::from_static(&[0x45, 1, 3]),
+            TimingEvidence::commit(std::time::Instant::now(), None),
+        ),
     )
     .unwrap_err();
     assert!(matches!(

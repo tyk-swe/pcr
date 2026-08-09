@@ -92,7 +92,8 @@ pub struct Probe {
     pub response_kind: Option<ResponseKind>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub responder: Option<IpAddr>,
-    pub sent_at: Timestamp,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sent_at: Option<Timestamp>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub received_at: Option<Timestamp>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -161,7 +162,7 @@ impl Result {
                             status: probe.status.into(),
                             response_kind: probe.response_kind.map(Into::into),
                             responder: probe.responder,
-                            sent_at: probe.sent_at.try_into()?,
+                            sent_at: probe.sent_at.map(Timestamp::try_from).transpose()?,
                             received_at: probe.received_at.map(Timestamp::try_from).transpose()?,
                             latency: probe.latency,
                             frame: probe.response.map(Captured::try_from_frame).transpose()?,

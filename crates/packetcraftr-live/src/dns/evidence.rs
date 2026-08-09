@@ -10,9 +10,8 @@ use packetcraftr_packet::{
 };
 
 use crate::probe::evidence::{
-    ExchangeEvidenceError, ResponseEvidence, validate_aggregate_evidence_limits,
-    validate_capture_statistics_evidence, validate_response_frames_and_deadlines,
-    validate_sent_byte_accounting, validate_sent_frame_timestamps,
+    ExchangeEvidence, ExchangeEvidenceError, MatchedResponseEvidence, ResponseEvidence,
+    validate_exchange_evidence as validate_shared_exchange_evidence,
 };
 
 use super::error::DnsError;
@@ -21,11 +20,25 @@ use super::wire::dns_payload;
 
 impl ResponseEvidence for DnsMatchedResponse {
     fn response(&self) -> &DecodedPacket {
-        &self.response
+        self.inner.response()
     }
 
-    fn latency(&self) -> Duration {
-        self.latency
+    fn latency(&self) -> std::time::Duration {
+        self.inner.latency()
+    }
+
+    fn record_id(&self) -> packetcraftr_network::capture::CaptureRecordId {
+        self.inner.record_id()
+    }
+
+    fn received_at(&self) -> std::time::Instant {
+        self.inner.received_at()
+    }
+}
+
+impl MatchedResponseEvidence for DnsMatchedResponse {
+    fn request_index(&self) -> usize {
+        self.inner.request_index()
     }
 }
 
@@ -36,13 +49,13 @@ pub(super) fn validate_dns_execution(
     timeout: Duration,
 ) -> Result<(), DnsError> {
     let attempt = probe.attempt;
-    let Some(network) = dns_network_envelope(&execution.sent) else {
+    let Some(network) = dns_network_envelope(execution.sent.packet()) else {
         return Err(DnsError::InvalidEvidence {
             attempt,
             message: "sent packet has no IPv4 or IPv6 tuple".to_owned(),
         });
     };
-    let Some(ports) = dns_udp_ports(&execution.sent) else {
+    let Some(ports) = dns_udp_ports(execution.sent.packet()) else {
         return Err(DnsError::InvalidEvidence {
             attempt,
             message: "sent packet has no complete UDP tuple".to_owned(),
@@ -53,24 +66,22 @@ pub(super) fn validate_dns_execution(
     } else {
         BuiltinProtocol::Ipv6
     };
-    let network_index = execution
-        .sent
+    let packet = execution.sent.packet();
+    let network_index = packet
         .iter()
         .next()
         .filter(|layer| BuiltinProtocol::of(*layer) == Some(BuiltinProtocol::Ethernet))
         .map_or(0, |_| 1);
-    if execution.sent.len() != network_index + 3
-        || !execution
-            .sent
+    if packet.len() != network_index + 3
+        || !packet
             .iter()
             .nth(network_index)
             .is_some_and(|layer| BuiltinProtocol::of(layer) == Some(network_protocol))
-        || !execution
-            .sent
+        || !packet
             .iter()
             .nth(network_index + 1)
             .is_some_and(|layer| BuiltinProtocol::of(layer) == Some(BuiltinProtocol::Udp))
-        || dns_payload(&execution.sent).as_deref() != Some(probe.query.as_ref())
+        || dns_payload(packet).as_deref() != Some(probe.query.as_ref())
         || network.destination != probe.server_address
         || ports.source != probe.source_port
         || ports.destination != probe.server_port
@@ -81,30 +92,19 @@ pub(super) fn validate_dns_execution(
                 .to_owned(),
         });
     }
-    if execution.stats.packets_attempted != 1 || execution.stats.packets_completed != 1 {
-        return Err(DnsError::InvalidEvidence {
-            attempt,
-            message: "successful exchange statistics must account for exactly one DNS query"
-                .to_owned(),
-        });
-    }
-    validate_sent_byte_accounting(
-        std::slice::from_ref(&execution.sent_evidence),
-        execution.stats.bytes,
-    )
-    .map_err(|error| map_dns_evidence_error(attempt, error))?;
-    validate_sent_frame_timestamps(std::slice::from_ref(&execution.sent_evidence))
-        .map_err(|error| map_dns_evidence_error(attempt, error))?;
-    validate_capture_statistics_evidence(execution.stats.capture)
-        .map_err(|error| map_dns_evidence_error(attempt, error))?;
-    validate_response_frames_and_deadlines(&execution.responses, &execution.unsolicited, timeout)
-        .map_err(|error| map_dns_evidence_error(attempt, error))?;
-    validate_aggregate_evidence_limits(
-        &execution.responses,
-        &execution.unsolicited,
-        &execution.undecoded,
+    validate_shared_exchange_evidence(
+        ExchangeEvidence {
+            request_count: 1,
+            sent: std::slice::from_ref(&execution.sent),
+            matched_responses: &execution.responses,
+            unsolicited: &execution.unsolicited,
+            undecoded: &execution.undecoded,
+            timeout,
+            stats: &execution.stats,
+        },
         limits.max_evidence_frames,
         limits.max_evidence_bytes,
+        |_, _| true,
     )
     .map_err(|error| map_dns_evidence_error(attempt, error))?;
     Ok(())
@@ -130,9 +130,6 @@ fn map_dns_evidence_error(attempt: u32, error: ExchangeEvidenceError) -> DnsErro
         ExchangeEvidenceError::SentByteCountMismatch { reported, actual } => format!(
             "successful exchange reported {reported} sent bytes for {actual} exact frame bytes"
         ),
-        ExchangeEvidenceError::TimestampUnavailable { evidence } => {
-            format!("executor returned {evidence} without a timestamp")
-        }
         ExchangeEvidenceError::InvalidMatchedResponse { message }
         | ExchangeEvidenceError::InvalidUnsolicitedResponse { message }
         | ExchangeEvidenceError::InvalidCaptureStatistics { message } => message,
@@ -142,7 +139,9 @@ fn map_dns_evidence_error(attempt: u32, error: ExchangeEvidenceError) -> DnsErro
         ExchangeEvidenceError::SentCardinality { .. }
         | ExchangeEvidenceError::MatchedResponseOutsideBatch
         | ExchangeEvidenceError::SentPacketMismatch { .. }
-        | ExchangeEvidenceError::IncompleteStatistics => {
+        | ExchangeEvidenceError::IncompleteStatistics
+        | ExchangeEvidenceError::DuplicateCaptureRecord { .. }
+        | ExchangeEvidenceError::ContradictoryTiming { .. } => {
             unreachable!("DNS validation does not produce batch-only evidence errors")
         }
     };

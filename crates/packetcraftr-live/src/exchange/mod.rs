@@ -23,7 +23,8 @@ pub(crate) use accumulator::{
 };
 pub use contract::{
     DEFAULT_MAX_UNSOLICITED_FRAMES, ExchangeOptions as Options, ExchangeResult as Result,
-    MAX_EXCHANGE_TIMEOUT, MatchedResponse as Response,
+    MAX_EXCHANGE_TIMEOUT, MatchedResponse, MatchedResponse as Response, UndecodedCapture,
+    UnsolicitedResponse,
 };
 pub(crate) use contract::{ExchangeOptions, ExchangeResult};
 pub(crate) use preparation::{PreparedExchange, PreparedExchangePacket};

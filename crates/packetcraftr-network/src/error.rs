@@ -46,6 +46,8 @@ pub enum Error {
     },
     #[error("packet transmission wire evidence is inconsistent: {message}")]
     InvalidSendEvidence { message: String },
+    #[error("packet transmission timing evidence is inconsistent: {message}")]
+    InvalidSendTiming { message: String },
     #[error("Layer 2 envelope synthesis failed: {message}")]
     Encapsulation { message: String },
     #[error("raw Layer 3 frame is invalid for native transmission: {message}")]
@@ -218,6 +220,7 @@ impl Classified for Error {
             | Self::UnresolvedLinkMode
             | Self::InvalidSendReport { .. }
             | Self::InvalidSendEvidence { .. }
+            | Self::InvalidSendTiming { .. }
             | Self::InvalidCaptureStatistics { .. } => Classification::new(
                 "internal.live_io_invariant",
                 Kind::Internal,

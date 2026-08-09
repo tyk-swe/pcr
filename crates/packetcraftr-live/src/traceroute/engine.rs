@@ -262,7 +262,6 @@ fn process_batch(
     enforce_deadline(deadline)?;
     let TracerouteBatchExecution {
         sent,
-        sent_evidence,
         mut responses,
         unsolicited,
         undecoded: batch_undecoded,
@@ -276,30 +275,26 @@ fn process_batch(
     let mut response_selector = ResponseSelector::new(&mut responses, &unsolicited);
 
     let mut probes = Vec::with_capacity(batch.probes.len());
-    for (request_index, ((probe, built), sent_frame)) in batch
-        .probes
-        .iter()
-        .zip(sent.iter())
-        .zip(sent_evidence.iter())
-        .enumerate()
-    {
+    for (request_index, (probe, receipt)) in batch.probes.iter().zip(sent.iter()).enumerate() {
         enforce_deadline(deadline)?;
-        let sent_at = crate::live_timestamp(sent_frame);
+        let sent_at = receipt.freshness_at();
+        let sent_wall = receipt.timing().output_wall_clock();
         let best = response_selector.select(
             request_index,
             sent_at,
             batch.timeout,
-            |response| classify_traceroute_response(registry, probe.strategy, built, response),
+            sent_wall,
+            |response| {
+                classify_traceroute_response(registry, probe.strategy, receipt.packet(), response)
+            },
             |observation| observation.kind.rank(),
             |observation| observation.responder,
             || enforce_deadline(deadline),
         )?;
 
         let evidence = if let Some(candidate) = best {
-            let received_at = crate::live_timestamp(&candidate.decoded.frame);
-            let latency = candidate
-                .latency
-                .or_else(|| received_at.duration_since(sent_at).ok());
+            let received_at = candidate.decoded.frame.timestamp;
+            let latency = candidate.latency;
             let response = retain_evidence(
                 evidence.budget,
                 &candidate.decoded.frame,
@@ -319,8 +314,8 @@ fn process_batch(
                 status: TracerouteProbeStatus::Response,
                 response_kind: Some(candidate.observation.kind),
                 responder: Some(candidate.observation.responder),
-                sent_at,
-                received_at: Some(received_at),
+                sent_at: sent_wall,
+                received_at,
                 latency,
                 response,
                 reason: candidate.observation.reason.to_owned(),
@@ -336,7 +331,7 @@ fn process_batch(
                 status: TracerouteProbeStatus::Timeout,
                 response_kind: None,
                 responder: None,
-                sent_at,
+                sent_at: sent_wall,
                 received_at: None,
                 latency: None,
                 response: None,
@@ -350,7 +345,10 @@ fn process_batch(
 
     let hop_limit = batch.probes[0].hop_limit;
     retain_undecoded_frames(
-        batch_undecoded,
+        batch_undecoded
+            .into_iter()
+            .map(|capture| capture.frame().clone())
+            .collect(),
         evidence.undecoded,
         limits.max_undecoded,
         evidence.budget,

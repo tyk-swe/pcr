@@ -239,7 +239,7 @@ where
             interface: transmission.interface,
             link_mode: mode,
             scheduled_delay: delay,
-            bytes_sent: transmission.report.bytes_sent as u64,
+            bytes_sent: transmission.report.bytes_sent() as u64,
             frame,
         });
         emitted?;

@@ -71,20 +71,15 @@ impl SendCommandResult {
     pub fn try_from_report(
         report: SendReport,
     ) -> std::result::Result<(Self, Vec<Diagnostic>, Stats), Error> {
-        let SendReport {
-            built,
-            route,
-            wire_bytes,
-            stats,
-        } = report;
-        let frame = Wire::new(wire_bytes);
+        let sent = report.sent();
+        let frame = Wire::new(sent.wire_bytes().clone());
         Ok((
             Self {
                 frame,
-                route: MaterializedRouteOutput::try_from_route(route)?,
+                route: MaterializedRouteOutput::try_from_route(sent.route().clone())?,
             },
-            built.diagnostics,
-            stats.into(),
+            sent.built().diagnostics.clone(),
+            report.stats().clone().into(),
         ))
     }
 }

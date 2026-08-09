@@ -48,6 +48,7 @@ where
     let live = live.validate()?;
     let mut deadline = Deadline::new(request.limits.max_duration);
     let live_dissector = Dissector::new(Arc::clone(&registry));
+    let build_registry = Arc::clone(&registry);
     let campaign = packet_fuzz::Campaign::prepare(request, packet, registry, &mut deadline)?;
     let built_case_count = campaign.built_case_count();
     let retained_byte_count = campaign.retained_byte_count();
@@ -159,11 +160,14 @@ where
             scheduled_delay = prospective_scheduled_delay;
         }
         deadline.check().map_err(duration_limit)?;
-        let execution_case = FuzzExecutionCase {
-            index: case.index,
-            seed: case.seed,
-            packet: case.recipe.clone(),
-        };
+        let authorized_build = case.built.clone().expect("selected built case");
+        let execution_case = FuzzExecutionCase::from_prepared(
+            case.index,
+            case.seed,
+            authorized_build,
+            Arc::clone(&build_registry),
+            request.build.clone(),
+        );
         deadline
             .start_accounting(Duration::ZERO)
             .map_err(duration_limit)?;
@@ -175,34 +179,47 @@ where
             })?;
         deadline.check().map_err(duration_limit)?;
         deadline
-            .account(execution.stats.elapsed)
+            .account(execution.stats().elapsed)
             .map_err(duration_limit)?;
         validate_execution(case, &execution, request.limits, live.timeout, &deadline)?;
-        add_execution_stats(&mut stats, &execution.stats, case.index)?;
+        add_execution_stats(&mut stats, execution.stats(), case.index)?;
         if stats.bytes > request.limits.max_total_bytes as u64 {
             return Err(FuzzError::ByteLimit {
                 actual: stats.bytes,
                 limit: request.limits.max_total_bytes as u64,
             });
         }
-        let had_response = !execution.responses.is_empty();
-        case.diagnostics = execution.built.diagnostics.clone();
+        let had_response = !execution.responses().is_empty();
+        case.diagnostics = execution.sent().built().diagnostics.clone();
         case.decoded = dissect_built(
             &live_dissector,
-            &execution.built,
+            execution.sent().built(),
             request.limits,
             &mut case.diagnostics,
         );
         deadline.check().map_err(duration_limit)?;
-        case.built = Some(execution.built);
-        case.sent = Some(execution.sent);
-        case.diagnostics.extend(execution.diagnostics);
+        case.built = Some(execution.sent().built().clone());
+        case.sent = Some(execution.sent().evidence().clone());
+        case.diagnostics
+            .extend(execution.diagnostics().iter().cloned());
         retain_evidence(
             case,
             ExecutionEvidence {
-                responses: execution.responses,
-                unmatched: execution.unmatched,
-                undecoded: execution.undecoded,
+                responses: execution
+                    .responses()
+                    .iter()
+                    .map(|response| response.response().frame.clone())
+                    .collect(),
+                unmatched: execution
+                    .unmatched()
+                    .iter()
+                    .map(|response| response.response().frame.clone())
+                    .collect(),
+                undecoded: execution
+                    .undecoded()
+                    .iter()
+                    .map(|capture| capture.frame().clone())
+                    .collect(),
             },
             evidence_limits,
             &mut evidence,

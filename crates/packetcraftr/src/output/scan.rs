@@ -71,7 +71,8 @@ pub struct Evidence {
     pub classification: Classification,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub responder: Option<IpAddr>,
-    pub sent_at: Timestamp,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sent_at: Option<Timestamp>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub received_at: Option<Timestamp>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -130,7 +131,7 @@ impl Result {
                             status: evidence.status.into(),
                             classification: evidence.classification.into(),
                             responder: evidence.responder,
-                            sent_at: evidence.sent_at.try_into()?,
+                            sent_at: evidence.sent_at.map(Timestamp::try_from).transpose()?,
                             received_at: evidence
                                 .received_at
                                 .map(Timestamp::try_from)

@@ -3,7 +3,7 @@
 
 //! DNS retry orchestration across authorization, execution, and outcomes.
 
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant};
 
 use packetcraftr_packet::budget::{Deadline, DeadlineExceeded};
 use packetcraftr_packet::{
@@ -183,13 +183,15 @@ where
             push_diagnostic_once(&mut result.diagnostics, diagnostic);
         }
 
-        let sent_at = crate::live_timestamp(&execution.sent_evidence);
+        let sent_at = execution.sent.freshness_at();
+        let sent_wall = execution.sent.timing().output_wall_clock();
         let mut best: Option<ResponseCandidate<'_, DnsResponseClassification>> = None;
         let candidate_context = DnsCandidateContext {
             registry,
             probe: &probe,
-            sent: &execution.sent,
+            sent: execution.sent.packet(),
             sent_at,
+            sent_wall,
             timeout: request.timeout,
             limits: request.limits,
         };
@@ -197,20 +199,26 @@ where
             consider_dns_candidate(
                 &mut best,
                 &candidate_context,
-                &matched.response,
-                Some(matched.latency),
+                matched.response(),
+                Some(matched.latency()),
+                Some(matched.received_at()),
                 &deadline,
             )?;
         }
         for decoded in &execution.unsolicited {
-            consider_dns_candidate(&mut best, &candidate_context, decoded, None, &deadline)?;
+            consider_dns_candidate(
+                &mut best,
+                &candidate_context,
+                decoded.response(),
+                None,
+                decoded.received_at(),
+                &deadline,
+            )?;
         }
 
         let evidence = if let Some(candidate) = best {
-            let received_at = crate::live_timestamp(&candidate.decoded.frame);
-            let latency = candidate
-                .latency
-                .or_else(|| received_at.duration_since(sent_at).ok());
+            let received_at = candidate.decoded.frame.timestamp;
+            let latency = candidate.latency;
             let response_frame = retain_evidence(
                 &mut evidence_budget,
                 &candidate.decoded.frame,
@@ -263,8 +271,8 @@ where
                 server_address,
                 source_port,
                 status,
-                sent_at,
-                received_at: Some(received_at),
+                sent_at: sent_wall,
+                received_at,
                 latency,
                 response: response_frame,
                 response_code,
@@ -276,7 +284,7 @@ where
                 server_address,
                 source_port,
                 status: DnsOutcome::Timeout,
-                sent_at,
+                sent_at: sent_wall,
                 received_at: None,
                 latency: None,
                 response: None,
@@ -304,15 +312,16 @@ where
             }
             if retain_evidence(
                 &mut evidence_budget,
-                &frame,
+                frame.frame(),
                 DNS_EVIDENCE_DIAGNOSTICS,
                 request.limits.max_evidence_frames,
                 request.limits.max_evidence_bytes,
                 &mut result.diagnostics,
             ) {
-                result
-                    .undecoded
-                    .push(DnsUndecodedEvidence { attempt, frame });
+                result.undecoded.push(DnsUndecodedEvidence {
+                    attempt,
+                    frame: frame.frame().clone(),
+                });
             }
             enforce_deadline(&deadline)?;
         }
@@ -336,7 +345,8 @@ struct DnsCandidateContext<'a> {
     registry: &'a Registry,
     probe: &'a DnsProbe,
     sent: &'a Packet,
-    sent_at: SystemTime,
+    sent_at: Instant,
+    sent_wall: Option<std::time::SystemTime>,
     timeout: Duration,
     limits: DnsLimits,
 }
@@ -346,30 +356,30 @@ fn consider_dns_candidate<'a>(
     context: &DnsCandidateContext<'_>,
     decoded: &'a DecodedPacket,
     latency: Option<Duration>,
+    captured_at: Option<Instant>,
     deadline: &Deadline,
 ) -> Result<(), DnsError> {
     enforce_deadline(deadline)?;
-    if response_within_deadline(
-        latency,
-        crate::live_timestamp(&decoded.frame),
-        context.sent_at,
-        context.timeout,
-    ) && let Some(classification) = classify_dns_response(
-        context.registry,
-        context.probe,
-        context.sent,
-        decoded,
-        context.limits,
-    ) {
+    if response_within_deadline(latency, captured_at, context.sent_at, context.timeout)
+        && let Some(classification) = classify_dns_response(
+            context.registry,
+            context.probe,
+            context.sent,
+            decoded,
+            context.limits,
+        )
+    {
         select_response_candidate(
             best,
             ResponseCandidate {
                 observation: classification,
                 decoded,
                 latency,
+                captured_at,
             },
             context.sent_at,
             context.timeout,
+            context.sent_wall,
             DnsResponseClassification::rank,
             |_| (),
         );

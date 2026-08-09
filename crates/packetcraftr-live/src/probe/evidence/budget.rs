@@ -165,8 +165,10 @@ pub(crate) fn checked_frame_bytes<'a>(
     })
 }
 
-pub(crate) fn checked_sent_frame_bytes(frames: &[Frame]) -> Option<u64> {
-    frames.iter().try_fold(0_u64, |total, frame| {
+pub(crate) fn checked_sent_frame_bytes<'a>(
+    frames: impl IntoIterator<Item = &'a Frame>,
+) -> Option<u64> {
+    frames.into_iter().try_fold(0_u64, |total, frame| {
         total.checked_add(frame.bytes().len() as u64)
     })
 }

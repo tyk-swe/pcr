@@ -6,6 +6,7 @@
 #![allow(unsafe_code)]
 
 use pcap::{Capture, Error as PcapError};
+use std::time::{Instant, SystemTime};
 
 use super::capture::map_open_error;
 use crate::{
@@ -31,13 +32,22 @@ pub(crate) fn send_layer2(frame: Layer2Frame<'_>) -> Result<IoSendReport, LiveIo
         .immediate_mode(true)
         .open()
         .map_err(|error| map_open_error(interface, error))?;
+    let started = Instant::now();
+    let wall_started = SystemTime::now();
     capture
         .sendpacket(frame.bytes().as_ref())
         .map_err(|error| map_send_error(interface, error))?;
-    Ok(IoSendReport {
-        bytes_sent: frame.bytes().len(),
-        wire_bytes: frame.bytes().clone(),
-    })
+    let finished = Instant::now();
+    let wall_finished = SystemTime::now();
+    Ok(IoSendReport::accepted(
+        frame.bytes().clone(),
+        crate::transmit::TimingEvidence::submission_interval(
+            started,
+            finished,
+            Some(wall_started),
+            Some(wall_finished),
+        ),
+    ))
 }
 
 pub(super) fn map_send_error(interface: &InterfaceId, error: PcapError) -> LiveIoError {

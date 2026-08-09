@@ -1,310 +1,261 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
-use crate::Stats;
 use bytes::Bytes;
-use packetcraftr_packet::frame::{Frame, LinkType};
-use packetcraftr_packet::{Packet, decode::Result as DecodedPacket, layout};
+use packetcraftr_network::{capture::Captured, transmit::TimingEvidence};
+use packetcraftr_packet::{Packet, decode::Result as DecodedPacket};
 
-use super::exact_validation::validate_decoded_frame;
-use super::{
-    ExchangeEvidence, ExchangeEvidenceError, MatchedResponseEvidence, ResponseCandidate,
-    ResponseEvidence, response_within_deadline, select_response_candidate,
-    validate_exchange_evidence,
+use super::exact_validation::{
+    ExchangeEvidence, ExchangeEvidenceError, validate_exchange_evidence,
 };
+use super::{ResponseCandidate, response_within_deadline, select_response_candidate};
+use crate::Stats;
+use crate::exchange::{MatchedResponse, UndecodedCapture, UnsolicitedResponse};
+use crate::send::SentPacket;
 
-struct TestObservation {
-    rank: u8,
-    key: (u8, u16),
-    identity: u8,
-}
-
-fn candidate<'a>(
-    decoded: &'a DecodedPacket,
-    rank: u8,
-    key: (u8, u16),
-    identity: u8,
-    latency: Option<Duration>,
-) -> ResponseCandidate<'a, TestObservation> {
-    ResponseCandidate {
-        observation: TestObservation {
-            rank,
-            key,
-            identity,
-        },
-        decoded,
-        latency,
+fn decoded(frame: packetcraftr_packet::frame::Frame) -> DecodedPacket {
+    DecodedPacket {
+        packet: Packet::new(),
+        original: frame.bytes().clone(),
+        frame,
+        layout: packetcraftr_packet::layout::Packet::default(),
+        diagnostics: Vec::new(),
     }
 }
 
-fn choose<'a>(
-    best: &mut Option<ResponseCandidate<'a, TestObservation>>,
-    value: ResponseCandidate<'a, TestObservation>,
-) {
-    let _ = select_response_candidate(
-        best,
-        value,
-        UNIX_EPOCH,
-        Duration::from_millis(10),
-        |observation| observation.rank,
-        |observation| observation.key,
-    );
+fn empty_frame() -> packetcraftr_packet::frame::Frame {
+    packetcraftr_packet::frame::Frame::without_timestamp(
+        packetcraftr_packet::frame::LinkType::RAW,
+        Bytes::new(),
+    )
+    .expect("empty fixture frame")
 }
 
 #[test]
-fn evidence_selection_enforces_monotonic_and_wall_clock_deadlines() {
-    let within_wall_clock = decoded_at(Duration::from_millis(1), &[1]);
-    let after_wall_clock = decoded_at(Duration::from_millis(11), &[2]);
-    let mut best = None;
-    choose(
-        &mut best,
-        candidate(
-            &within_wall_clock,
-            1,
-            (0, 0),
-            1,
-            Some(Duration::from_millis(11)),
-        ),
-    );
-    choose(&mut best, candidate(&after_wall_clock, 1, (0, 0), 2, None));
-    assert!(best.is_none());
+fn missing_ingress_marker_cannot_prove_freshness() {
+    let sent = Instant::now();
+    assert!(!response_within_deadline(
+        Some(Duration::from_nanos(1)),
+        None,
+        sent,
+        Duration::from_secs(1),
+    ));
+}
+
+#[test]
+fn claimed_latency_must_equal_monotonic_capture_interval() {
+    let sent = Instant::now();
+    let captured = sent + Duration::from_millis(2);
     assert!(response_within_deadline(
-        Some(Duration::from_millis(10)),
-        UNIX_EPOCH,
-        UNIX_EPOCH,
-        Duration::from_millis(10),
+        Some(Duration::from_millis(2)),
+        Some(captured),
+        sent,
+        Duration::from_secs(1),
     ));
     assert!(!response_within_deadline(
-        None,
-        UNIX_EPOCH,
-        UNIX_EPOCH + Duration::from_millis(1),
-        Duration::from_millis(10),
+        Some(Duration::from_millis(1)),
+        Some(captured),
+        sent,
+        Duration::from_secs(1),
+    ));
+    assert!(!response_within_deadline(
+        Some(Duration::from_nanos(1)),
+        Some(sent - Duration::from_millis(1)),
+        sent,
+        Duration::from_secs(1),
     ));
 }
 
 #[test]
-fn evidence_selection_prioritizes_rank_and_stably_keeps_fully_tied_candidates() {
-    let earlier = decoded_at(Duration::from_millis(1), &[1]);
-    let later = decoded_at(Duration::from_millis(9), &[9]);
-    let mut best = None;
-    choose(
-        &mut best,
-        candidate(&earlier, 1, (0, 0), 1, Some(Duration::from_millis(1))),
-    );
-    choose(
-        &mut best,
-        candidate(&later, 2, (9, 9), 2, Some(Duration::from_millis(9))),
-    );
-    assert_eq!(best.as_ref().unwrap().observation.identity, 2);
-
-    let tied = decoded_at(Duration::from_millis(1), &[1]);
-    let mut best = None;
-    choose(&mut best, candidate(&tied, 1, (0, 0), 1, None));
-    choose(&mut best, candidate(&tied, 1, (0, 0), 2, None));
-    assert_eq!(best.unwrap().observation.identity, 1);
-}
-
-#[test]
-fn evidence_exact_frame_validation_preserves_failure_context() {
-    let frame = frame(&[1]);
+fn candidate_selection_never_uses_wall_clock_or_request_order_as_freshness() {
+    let sent = Instant::now();
+    let captured = sent + Duration::from_millis(1);
     let decoded = DecodedPacket {
         packet: Packet::new(),
-        original: Bytes::from_static(&[2]),
-        frame,
-        layout: layout::Packet::default(),
+        original: bytes::Bytes::new(),
+        frame: packetcraftr_packet::frame::Frame::without_timestamp(
+            packetcraftr_packet::frame::LinkType::RAW,
+            bytes::Bytes::new(),
+        )
+        .expect("empty fixture frame"),
+        layout: packetcraftr_packet::layout::Packet::default(),
         diagnostics: Vec::new(),
     };
-    assert_eq!(
-        validate_decoded_frame(&decoded, "matched response"),
-        Err("matched response original bytes differ from its exact frame".to_owned())
-    );
-}
-
-struct NoMatchedResponses;
-
-impl ResponseEvidence for NoMatchedResponses {
-    fn response(&self) -> &DecodedPacket {
-        unreachable!("no matched response is inspected")
-    }
-
-    fn latency(&self) -> Duration {
-        unreachable!("no matched response is timed")
-    }
-}
-
-impl MatchedResponseEvidence for NoMatchedResponses {
-    fn request_index(&self) -> usize {
-        unreachable!("no matched response is attributed")
-    }
-}
-
-struct MatchedResponse {
-    request_index: usize,
-    response: DecodedPacket,
-    latency: Duration,
-}
-
-impl ResponseEvidence for MatchedResponse {
-    fn response(&self) -> &DecodedPacket {
-        &self.response
-    }
-
-    fn latency(&self) -> Duration {
-        self.latency
-    }
-}
-
-impl MatchedResponseEvidence for MatchedResponse {
-    fn request_index(&self) -> usize {
-        self.request_index
-    }
+    let mut best = None;
+    let value = ResponseCandidate {
+        observation: 0_u8,
+        decoded: &decoded,
+        latency: Some(Duration::from_millis(1)),
+        captured_at: Some(captured),
+    };
+    assert!(select_response_candidate(
+        &mut best,
+        value,
+        sent,
+        Duration::from_secs(1),
+        None,
+        |_| 0_u8,
+        |_| 0_u8,
+    ));
+    assert!(best.is_some());
 }
 
 #[test]
-fn evidence_aggregate_validation_reports_cardinality_and_byte_accounting_failures() {
-    let sent_frame = frame(&[1, 2]);
-    let sent_packets = [Packet::new()];
-    let sent_frames = [sent_frame];
-    let matched = Vec::<NoMatchedResponses>::new();
+fn one_capture_record_cannot_be_matched_to_two_requests() {
+    let sent_at = Instant::now();
+    let sent = [
+        SentPacket::for_test(Bytes::new(), sent_at),
+        SentPacket::for_test(Bytes::new(), sent_at),
+    ];
+    let captured = Captured::new(empty_frame(), sent_at + Duration::from_millis(1));
+    let record_id = captured.id();
+    let response_frame = empty_frame();
+    let matched = [
+        MatchedResponse::new(
+            record_id,
+            0,
+            decoded(response_frame.clone()),
+            sent_at + Duration::from_millis(1),
+            Duration::from_millis(1),
+        ),
+        MatchedResponse::new(
+            record_id,
+            1,
+            decoded(response_frame),
+            sent_at + Duration::from_millis(1),
+            Duration::from_millis(1),
+        ),
+    ];
     let stats = Stats {
-        packets_attempted: 1,
-        packets_completed: 1,
-        bytes: 2,
+        packets_attempted: 2,
+        packets_completed: 2,
         ..Stats::default()
     };
-    let evidence = ExchangeEvidence {
-        request_count: 1,
-        sent_packets: &sent_packets,
-        sent_frames: &sent_frames,
-        matched_responses: &matched,
-        unsolicited: &[],
-        undecoded: &[],
-        timeout: Duration::from_secs(1),
-        stats: &stats,
-    };
-    assert_eq!(
-        validate_exchange_evidence(evidence, 1, 2, |_, _| false),
-        Err(ExchangeEvidenceError::SentPacketMismatch { request_index: 0 })
-    );
-
-    let stats = Stats { bytes: 1, ..stats };
-    let evidence = ExchangeEvidence {
-        request_count: 1,
-        sent_packets: &sent_packets,
-        sent_frames: &sent_frames,
-        matched_responses: &matched,
-        unsolicited: &[],
-        undecoded: &[],
-        timeout: Duration::from_secs(1),
-        stats: &stats,
-    };
-    assert_eq!(
-        validate_exchange_evidence(evidence, 1, 2, |_, _| true),
-        Err(ExchangeEvidenceError::SentByteCountMismatch {
-            reported: 1,
-            actual: 2,
-        })
-    );
+    assert!(matches!(
+        validate_exchange_evidence(
+            ExchangeEvidence::<MatchedResponse> {
+                request_count: 2,
+                sent: &sent,
+                matched_responses: &matched,
+                unsolicited: &[],
+                undecoded: &[],
+                timeout: Duration::from_secs(1),
+                stats: &stats,
+            },
+            4,
+            4,
+            |_, _| true,
+        ),
+        Err(ExchangeEvidenceError::DuplicateCaptureRecord { .. })
+    ));
 }
 
 #[test]
-fn evidence_aggregate_validation_rejects_untimestamped_live_evidence() {
-    let sent_packets = [Packet::new()];
-    let untimestamped_sent = [untimestamped_frame(&[1])];
-    let matched = Vec::<NoMatchedResponses>::new();
+fn one_capture_record_cannot_be_retained_in_two_categories() {
+    let captured = Captured::without_ingress_time(empty_frame());
+    let record_id = captured.id();
+    let unsolicited = [UnsolicitedResponse::for_test(
+        record_id,
+        decoded(empty_frame()),
+        None,
+        false,
+    )];
+    let undecoded = [UndecodedCapture::for_test(record_id, empty_frame(), None)];
+    let stats = Stats::default();
+    assert!(matches!(
+        validate_exchange_evidence(
+            ExchangeEvidence::<MatchedResponse> {
+                request_count: 0,
+                sent: &[],
+                matched_responses: &[],
+                unsolicited: &unsolicited,
+                undecoded: &undecoded,
+                timeout: Duration::from_secs(1),
+                stats: &stats,
+            },
+            4,
+            4,
+            |_, _| true,
+        ),
+        Err(ExchangeEvidenceError::DuplicateCaptureRecord { .. })
+    ));
+}
+
+#[test]
+fn ambiguous_unsolicited_records_are_not_promoted_by_response_selection() {
+    let sent_at = Instant::now();
+    let captured = Captured::new(empty_frame(), sent_at + Duration::from_millis(1));
+    let response = UnsolicitedResponse::for_test(
+        captured.id(),
+        decoded(empty_frame()),
+        captured.received_at,
+        false,
+    );
+    let mut matched: Vec<MatchedResponse> = Vec::new();
+    let unsolicited = [response];
+    let mut selector = super::ResponseSelector::new(&mut matched, &unsolicited);
+    let selected = selector
+        .select(
+            0,
+            sent_at,
+            Duration::from_secs(1),
+            None,
+            |_| Some(()),
+            |_| 0_u8,
+            |_| 0_u8,
+            || Ok::<(), ()>(()),
+        )
+        .expect("selection callback succeeds");
+    assert!(selected.is_none());
+}
+
+#[test]
+fn wall_clock_cannot_override_monotonic_evidence() {
+    let sent_at = Instant::now();
+    let sent_wall = std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(2);
+    let receipt = SentPacket::for_test_with_timing(
+        Bytes::new(),
+        TimingEvidence::commit(sent_at, Some(sent_wall)),
+    );
+    let received_at = sent_at + Duration::from_millis(1);
+    let received_wall = std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(1);
+    let response_frame = packetcraftr_packet::frame::Frame::try_with_optional_timestamp(
+        Some(received_wall),
+        packetcraftr_packet::frame::LinkType::RAW,
+        0,
+        0,
+        Bytes::new(),
+    )
+    .expect("timestamped fixture frame");
+    let matched = [MatchedResponse::new(
+        Captured::new(empty_frame(), received_at).id(),
+        0,
+        decoded(response_frame),
+        received_at,
+        Duration::from_millis(1),
+    )];
     let stats = Stats {
         packets_attempted: 1,
         packets_completed: 1,
-        bytes: 1,
         ..Stats::default()
     };
-    let evidence = ExchangeEvidence {
-        request_count: 1,
-        sent_packets: &sent_packets,
-        sent_frames: &untimestamped_sent,
-        matched_responses: &matched,
-        unsolicited: &[],
-        undecoded: &[],
-        timeout: Duration::from_secs(1),
-        stats: &stats,
-    };
-    assert_eq!(
-        validate_exchange_evidence(evidence, 1, 1, |_, _| true),
-        Err(ExchangeEvidenceError::TimestampUnavailable {
-            evidence: "sent frame"
-        })
-    );
-
-    let sent_frames = [frame(&[1])];
-    let response = MatchedResponse {
-        request_index: 0,
-        response: decoded_without_timestamp(&[2]),
-        latency: Duration::from_millis(1),
-    };
-    let evidence = ExchangeEvidence {
-        request_count: 1,
-        sent_packets: &sent_packets,
-        sent_frames: &sent_frames,
-        matched_responses: std::slice::from_ref(&response),
-        unsolicited: &[],
-        undecoded: &[],
-        timeout: Duration::from_secs(1),
-        stats: &stats,
-    };
-    assert_eq!(
-        validate_exchange_evidence(evidence, 1, 2, |_, _| true),
-        Err(ExchangeEvidenceError::TimestampUnavailable {
-            evidence: "matched response"
-        })
-    );
-
-    let unsolicited = [decoded_without_timestamp(&[3])];
-    let evidence = ExchangeEvidence {
-        request_count: 1,
-        sent_packets: &sent_packets,
-        sent_frames: &sent_frames,
-        matched_responses: &matched,
-        unsolicited: &unsolicited,
-        undecoded: &[],
-        timeout: Duration::from_secs(1),
-        stats: &stats,
-    };
-    assert_eq!(
-        validate_exchange_evidence(evidence, 1, 2, |_, _| true),
-        Err(ExchangeEvidenceError::TimestampUnavailable {
-            evidence: "unsolicited response"
-        })
-    );
-}
-
-fn frame(bytes: &'static [u8]) -> Frame {
-    Frame::new(SystemTime::UNIX_EPOCH, LinkType::RAW, bytes).expect("evidence frame")
-}
-
-fn untimestamped_frame(bytes: &'static [u8]) -> Frame {
-    Frame::without_timestamp(LinkType::RAW, bytes).expect("untimestamped evidence frame")
-}
-
-fn decoded_at(offset: Duration, bytes: &'static [u8]) -> DecodedPacket {
-    let frame = Frame::new(UNIX_EPOCH + offset, LinkType::RAW, bytes).expect("decoded frame");
-    DecodedPacket {
-        packet: Packet::new(),
-        original: frame.bytes().clone(),
-        frame,
-        layout: layout::Packet::default(),
-        diagnostics: Vec::new(),
-    }
-}
-
-fn decoded_without_timestamp(bytes: &'static [u8]) -> DecodedPacket {
-    let frame = untimestamped_frame(bytes);
-    DecodedPacket {
-        packet: Packet::new(),
-        original: frame.bytes().clone(),
-        frame,
-        layout: layout::Packet::default(),
-        diagnostics: Vec::new(),
-    }
+    assert!(matches!(
+        validate_exchange_evidence(
+            ExchangeEvidence {
+                request_count: 1,
+                sent: std::slice::from_ref(&receipt),
+                matched_responses: &matched,
+                unsolicited: &[],
+                undecoded: &[],
+                timeout: Duration::from_secs(1),
+                stats: &stats,
+            },
+            4,
+            4,
+            |_, _| true,
+        ),
+        Err(ExchangeEvidenceError::ContradictoryTiming { .. })
+    ));
 }

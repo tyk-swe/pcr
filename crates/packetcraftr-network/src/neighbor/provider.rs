@@ -223,16 +223,16 @@ where
         }
 
         for attempt in 1..=self.options.max_attempts {
-            let send_started = Instant::now();
             let frame = Layer2Frame::try_new(request_bytes, route)
                 .map_err(|error| map_io_error(request, "constructing discovery frame", error))?;
             let report = self
                 .layer2
                 .send_layer2(frame)
                 .map_err(|error| map_io_error(request, "sending discovery request", error))?;
-            validate_send_report(request, request_bytes, report)?;
+            let timing = validate_send_report(request, request_bytes, report)?;
+            let freshness_at = timing.freshness_at();
 
-            let deadline = send_started
+            let deadline = freshness_at
                 .checked_add(self.options.attempt_timeout)
                 .ok_or_else(|| invalid_configuration("attempt deadline overflowed".to_owned()))?;
             while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
@@ -243,10 +243,12 @@ where
                 else {
                     break;
                 };
-                let CapturedFrame { frame, received_at } = captured_frame;
+                let CapturedFrame {
+                    frame, received_at, ..
+                } = captured_frame;
                 validate_captured_frame(request, &frame, self.options.snap_length)?;
                 if received_at
-                    .is_none_or(|received_at| received_at < send_started || received_at > deadline)
+                    .is_none_or(|received_at| received_at < freshness_at || received_at > deadline)
                 {
                     retain_evidence(
                         frame,

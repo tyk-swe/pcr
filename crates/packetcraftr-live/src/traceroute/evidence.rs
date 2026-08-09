@@ -27,8 +27,7 @@ pub(super) fn validate_execution(
     validate_shared_exchange_evidence(
         ExchangeEvidence {
             request_count: batch.probes.len(),
-            sent_packets: &execution.sent,
-            sent_frames: &execution.sent_evidence,
+            sent: &execution.sent,
             matched_responses: &execution.responses,
             unsolicited: &execution.unsolicited,
             undecoded: &execution.undecoded,
@@ -44,17 +43,25 @@ pub(super) fn validate_execution(
 
 impl ResponseEvidence for TracerouteMatchedResponse {
     fn response(&self) -> &DecodedPacket {
-        &self.response
+        self.inner.response()
     }
 
     fn latency(&self) -> Duration {
-        self.latency
+        self.inner.latency()
+    }
+
+    fn record_id(&self) -> packetcraftr_network::capture::CaptureRecordId {
+        self.inner.record_id()
+    }
+
+    fn received_at(&self) -> std::time::Instant {
+        self.inner.received_at()
     }
 }
 
 impl MatchedResponseEvidence for TracerouteMatchedResponse {
     fn request_index(&self) -> usize {
-        self.request_index
+        self.inner.request_index()
     }
 }
 

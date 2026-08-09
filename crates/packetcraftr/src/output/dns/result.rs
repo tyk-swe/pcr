@@ -162,7 +162,7 @@ impl DnsCommandResult {
                     server_address: evidence.server_address,
                     source_port: evidence.source_port,
                     status: evidence.status.into(),
-                    sent_at: evidence.sent_at.try_into()?,
+                    sent_at: evidence.sent_at.map(Timestamp::try_from).transpose()?,
                     received_at: evidence.received_at.map(Timestamp::try_from).transpose()?,
                     latency: evidence.latency,
                     frame: evidence
@@ -239,7 +239,8 @@ pub struct DnsAttemptOutput {
     pub server_address: IpAddr,
     pub source_port: u16,
     pub status: DnsOutcome,
-    pub sent_at: Timestamp,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sent_at: Option<Timestamp>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub received_at: Option<Timestamp>,
     #[serde(skip_serializing_if = "Option::is_none")]

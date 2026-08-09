@@ -11,8 +11,7 @@ use packetcraftr_packet::template::Template as PacketTemplate;
 
 use super::classification::classify_traceroute_response;
 use super::model::{
-    TracerouteBatch, TracerouteBatchExecution, TracerouteExecutor, TracerouteMatchedResponse,
-    TracerouteStrategy,
+    TracerouteBatch, TracerouteBatchExecution, TracerouteExecutor, TracerouteStrategy,
 };
 
 /// Executes homogeneous traceroute hop batches through the client's
@@ -110,32 +109,7 @@ where
                 })
             })
             .map_err(BoundaryError::from_error)?;
-        let crate::exchange::Result {
-            sent,
-            sent_evidence,
-            responses,
-            unanswered: _,
-            unsolicited,
-            undecoded,
-            diagnostics,
-            stats,
-        } = exchange;
-        Ok(TracerouteBatchExecution {
-            sent: sent.into_iter().map(|built| built.packet).collect(),
-            sent_evidence,
-            responses: responses
-                .into_iter()
-                .map(|response| TracerouteMatchedResponse {
-                    request_index: response.request_index,
-                    response: response.response,
-                    latency: response.latency,
-                })
-                .collect(),
-            unsolicited,
-            undecoded,
-            diagnostics,
-            stats,
-        })
+        TracerouteBatchExecution::from_exchange(batch, &exchange)
     }
 }
 

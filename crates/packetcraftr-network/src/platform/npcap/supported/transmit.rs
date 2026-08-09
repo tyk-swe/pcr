@@ -14,6 +14,7 @@ use crate::{
     Error as LiveIoError,
     transmit::{IoSendReport, Layer2Frame},
 };
+use std::time::{Instant, SystemTime};
 
 pub(super) fn send_layer2(frame: Layer2Frame<'_>) -> Result<IoSendReport, LiveIoError> {
     let interface = &frame.route().plan.route.interface;
@@ -24,11 +25,15 @@ pub(super) fn send_layer2(frame: Layer2Frame<'_>) -> Result<IoSendReport, LiveIo
         ),
     })?;
     let handle = open_handle(interface, SEND_SNAPSHOT_LENGTH, PromiscuousMode::Disabled)?;
+    let started = Instant::now();
+    let wall_started = SystemTime::now();
     // SAFETY: the byte slice remains valid for the synchronous call and length
     // is its exact checked c_int representation.
     let result = unsafe {
         (handle.api.pcap_sendpacket)(handle.raw.as_ptr(), frame.bytes().as_ptr(), length)
     };
+    let finished = Instant::now();
+    let wall_finished = SystemTime::now();
     if result != 0 {
         let message = handle.error_message();
         let lower = message.to_ascii_lowercase();
@@ -47,8 +52,13 @@ pub(super) fn send_layer2(frame: Layer2Frame<'_>) -> Result<IoSendReport, LiveIo
             ),
         });
     }
-    Ok(IoSendReport {
-        bytes_sent: frame.bytes().len(),
-        wire_bytes: frame.bytes().clone(),
-    })
+    Ok(IoSendReport::accepted(
+        frame.bytes().clone(),
+        crate::transmit::TimingEvidence::submission_interval(
+            started,
+            finished,
+            Some(wall_started),
+            Some(wall_finished),
+        ),
+    ))
 }

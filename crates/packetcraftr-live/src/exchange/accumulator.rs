@@ -5,33 +5,27 @@
 
 use std::time::Instant;
 
-use packetcraftr_packet::frame::Frame;
 use packetcraftr_packet::{
     Packet,
-    build::Result as BuiltPacket,
     decode::{Decoder as Dissector, Result as DecodedPacket},
     registry::Registry,
 };
 
-use super::contract::{ExchangeOptions, ExchangeResult, MatchedResponse};
+use super::contract::{
+    ExchangeOptions, ExchangeResult, MatchedResponse, UndecodedCapture, UnsolicitedResponse,
+};
 use super::preparation::PreparedExchangePacket;
 use crate::Stats;
-
-#[derive(Clone, Copy)]
-pub(super) struct UnsolicitedFreshness {
-    pub(super) received_at: Instant,
-    pub(super) eligible_requests: usize,
-}
+use crate::send::SentPacket;
 
 pub(crate) type WorkflowResponseMatcher<'a> =
     dyn FnMut(usize, &Packet, &DecodedPacket) -> bool + 'a;
 
 pub(crate) struct ExchangeAccumulator {
     pub(crate) responses: Vec<MatchedResponse>,
-    pub(crate) unsolicited: Vec<DecodedPacket>,
-    pub(crate) undecoded: Vec<Frame>,
+    pub(crate) unsolicited: Vec<UnsolicitedResponse>,
+    pub(crate) undecoded: Vec<UndecodedCapture>,
     pub(crate) diagnostics: Vec<packetcraftr_packet::diagnostic::Diagnostic>,
-    pub(super) unsolicited_freshness: Vec<Option<UnsolicitedFreshness>>,
     pub(super) retained_frames: usize,
     pub(super) retained_bytes: usize,
     pub(crate) response_counts: Vec<usize>,
@@ -44,7 +38,7 @@ pub(crate) struct ExchangeProcessContext<'a> {
     pub(crate) registry: &'a Registry,
     pub(crate) dissector: &'a Dissector,
     pub(crate) prepared: &'a [PreparedExchangePacket],
-    pub(crate) sent_at: &'a [Instant],
+    pub(crate) sent: &'a [SentPacket],
     pub(crate) deadline: Instant,
     pub(crate) options: &'a ExchangeOptions,
 }
@@ -52,7 +46,7 @@ pub(crate) struct ExchangeProcessContext<'a> {
 #[derive(Clone, Copy)]
 pub(crate) struct WorkflowPromotionContext<'a> {
     pub(crate) prepared: &'a [PreparedExchangePacket],
-    pub(crate) sent_at: &'a [Instant],
+    pub(crate) sent: &'a [SentPacket],
     pub(crate) deadline: Instant,
     pub(crate) max_responses: usize,
 }
@@ -70,7 +64,6 @@ impl ExchangeAccumulator {
             unsolicited: Vec::new(),
             undecoded: Vec::new(),
             diagnostics: Vec::new(),
-            unsolicited_freshness: Vec::new(),
             retained_frames: 0,
             retained_bytes: 0,
             response_counts: vec![0; requests],
@@ -81,15 +74,12 @@ impl ExchangeAccumulator {
 
     pub(crate) fn finish(
         self,
-        sent: Vec<BuiltPacket>,
-        sent_evidence: Vec<Frame>,
+        sent: Vec<SentPacket>,
         unanswered: Vec<usize>,
         stats: Stats,
     ) -> ExchangeResult {
-        debug_assert_eq!(self.unsolicited.len(), self.unsolicited_freshness.len());
         ExchangeResult {
             sent,
-            sent_evidence,
             responses: self.responses,
             unanswered,
             unsolicited: self.unsolicited,

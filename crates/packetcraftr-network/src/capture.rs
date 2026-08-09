@@ -3,6 +3,7 @@
 
 //! Owned live-capture sessions and bounded queue configuration.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -23,6 +24,21 @@ pub const DEFAULT_CAPTURE_QUEUE_BYTES: usize = 256 * 1024 * 1024;
 
 /// Maximum blocking wait accepted by an owned capture session.
 pub const MAX_TIMEOUT: Duration = Duration::from_secs(60 * 60);
+
+static NEXT_CAPTURE_RECORD_ID: AtomicU64 = AtomicU64::new(1);
+
+/// Opaque identity assigned exactly once when a record enters a capture
+/// provider. It has no public constructor, so callers can only retain or
+/// compare identities supplied by the capture boundary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct CaptureRecordId(u64);
+
+impl CaptureRecordId {
+    fn next() -> Self {
+        let id = NEXT_CAPTURE_RECORD_ID.fetch_add(1, Ordering::Relaxed);
+        Self(id)
+    }
+}
 
 /// Capture counters for accepted frames and pre-delivery loss. Native receiver
 /// drops are a subset; overflow events are bounded-queue observations.
@@ -117,6 +133,7 @@ impl<T: Session + ?Sized> Session for Box<T> {
 /// output-only; freshness and latency use `received_at` to avoid reordering.
 #[derive(Clone, Debug)]
 pub struct Captured {
+    id: CaptureRecordId,
     pub frame: CaptureFrame,
     /// Monotonic ingress time; `None` cannot prove freshness.
     pub received_at: Option<Instant>,
@@ -129,12 +146,21 @@ impl Captured {
 
     /// Retains an optional provider-supplied monotonic ingress marker.
     pub fn with_ingress_time(frame: CaptureFrame, received_at: Option<Instant>) -> Self {
-        Self { frame, received_at }
+        Self {
+            id: CaptureRecordId::next(),
+            frame,
+            received_at,
+        }
     }
 
     /// Evidence without an ingress marker cannot satisfy freshness correlation.
     pub fn without_ingress_time(frame: CaptureFrame) -> Self {
         Self::with_ingress_time(frame, None)
+    }
+
+    /// Returns the stable identity of this ingress record.
+    pub fn id(&self) -> CaptureRecordId {
+        self.id
     }
 }
 

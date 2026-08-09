@@ -37,7 +37,10 @@ pub(super) fn render_dns_text(
             attempt.server_address,
             attempt.source_port,
             dns_outcome_name(attempt.status),
-            output_timestamp_text(attempt.sent_at),
+            attempt
+                .sent_at
+                .map(output_timestamp_text)
+                .unwrap_or_else(|| "none".to_owned()),
             attempt
                 .received_at
                 .map(output_timestamp_text)

@@ -4,7 +4,6 @@ use std::net::IpAddr;
 use std::time::Duration;
 
 use bytes::Bytes;
-use packetcraftr_packet::frame::Frame;
 use packetcraftr_packet::protocol::{
     application::Dns,
     network::{Ipv4, Ipv6},
@@ -14,8 +13,10 @@ use packetcraftr_packet::{
     Packet, decode::Result as DecodedPacket, diagnostic::Diagnostic, layer::Raw,
 };
 
-use crate::Stats;
+use crate::exchange::{ExchangeResult, MatchedResponse, UndecodedCapture, UnsolicitedResponse};
 use crate::probe::nonzero_ipv4_identification;
+use crate::send::SentPacket;
+use crate::{BoundaryError, Stats};
 
 use super::super::DEFAULT_DNS_SERVER_PORT;
 use super::request::DnsQueryType;
@@ -80,19 +81,86 @@ pub struct DnsExchange {
 
 #[derive(Clone, Debug)]
 pub struct DnsMatchedResponse {
-    pub response: DecodedPacket,
-    pub latency: Duration,
+    pub(crate) inner: MatchedResponse,
+}
+
+impl DnsMatchedResponse {
+    pub fn response(&self) -> &DecodedPacket {
+        self.inner.response()
+    }
+    pub fn latency(&self) -> Duration {
+        self.inner.latency()
+    }
+
+    pub(crate) fn received_at(&self) -> std::time::Instant {
+        self.inner.received_at()
+    }
 }
 
 #[derive(Clone, Debug)]
 pub struct DnsExchangeExecution {
-    pub sent: Packet,
-    pub sent_evidence: Frame,
-    pub responses: Vec<DnsMatchedResponse>,
-    pub unsolicited: Vec<DecodedPacket>,
-    pub undecoded: Vec<Frame>,
-    pub diagnostics: Vec<Diagnostic>,
-    pub stats: Stats,
+    pub(crate) sent: SentPacket,
+    pub(crate) responses: Vec<DnsMatchedResponse>,
+    pub(crate) unsolicited: Vec<UnsolicitedResponse>,
+    pub(crate) undecoded: Vec<UndecodedCapture>,
+    pub(crate) diagnostics: Vec<Diagnostic>,
+    pub(crate) stats: Stats,
+}
+
+impl DnsExchangeExecution {
+    pub fn from_exchange(exchange: &ExchangeResult) -> Result<Self, BoundaryError> {
+        let Some(sent) = exchange.sent().first().cloned() else {
+            return Err(BoundaryError::internal_execution(
+                "DNS exchange did not produce a sent receipt",
+                "internal.dns_execution",
+                "discard incomplete trusted exchange evidence",
+            ));
+        };
+        if exchange.sent().len() != 1
+            || exchange
+                .responses()
+                .iter()
+                .any(|response| response.request_index() != 0)
+        {
+            return Err(BoundaryError::internal_execution(
+                "single-query DNS exchange returned an invalid request identity",
+                "internal.dns_execution",
+                "discard mismatched trusted exchange evidence",
+            ));
+        }
+        Ok(Self {
+            sent,
+            responses: exchange
+                .responses()
+                .iter()
+                .cloned()
+                .map(|inner| DnsMatchedResponse { inner })
+                .collect(),
+            unsolicited: exchange.unsolicited().to_vec(),
+            undecoded: exchange.undecoded().to_vec(),
+            diagnostics: exchange.diagnostics().to_vec(),
+            stats: exchange.stats().clone(),
+        })
+    }
+
+    pub fn sent(&self) -> &SentPacket {
+        &self.sent
+    }
+    pub fn responses(&self) -> &[DnsMatchedResponse] {
+        &self.responses
+    }
+    pub fn unsolicited(&self) -> &[UnsolicitedResponse] {
+        &self.unsolicited
+    }
+    pub fn undecoded(&self) -> &[UndecodedCapture] {
+        &self.undecoded
+    }
+    pub fn diagnostics(&self) -> &[Diagnostic] {
+        &self.diagnostics
+    }
+    pub fn stats(&self) -> &Stats {
+        &self.stats
+    }
 }
 
 pub trait DnsExecutor {

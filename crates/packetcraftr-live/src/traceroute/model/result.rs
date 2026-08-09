@@ -57,7 +57,7 @@ pub struct TracerouteProbeEvidence {
     pub status: TracerouteProbeStatus,
     pub response_kind: Option<TracerouteResponseKind>,
     pub responder: Option<IpAddr>,
-    pub sent_at: SystemTime,
+    pub sent_at: Option<SystemTime>,
     pub received_at: Option<SystemTime>,
     pub latency: Option<Duration>,
     pub response: Option<Frame>,

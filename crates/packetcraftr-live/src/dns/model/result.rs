@@ -291,7 +291,7 @@ pub struct DnsAttemptEvidence {
     pub server_address: IpAddr,
     pub source_port: u16,
     pub status: DnsOutcome,
-    pub sent_at: SystemTime,
+    pub sent_at: Option<SystemTime>,
     pub received_at: Option<SystemTime>,
     pub latency: Option<Duration>,
     pub response: Option<Frame>,

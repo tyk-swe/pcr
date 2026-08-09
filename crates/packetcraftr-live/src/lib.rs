@@ -30,9 +30,3 @@ pub use packetcraftr_packet::error::BoundaryError;
 pub use probe::client_executor::ExchangeExecutor;
 pub use send::contract::ClientError as Error;
 pub use stats::Stats;
-
-fn live_timestamp(frame: &packetcraftr_packet::frame::Frame) -> std::time::SystemTime {
-    frame
-        .timestamp
-        .expect("live capture and transmission adapters always timestamp evidence frames")
-}

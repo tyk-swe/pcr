@@ -28,7 +28,6 @@ fn system_capture_inner(
     limits: super::super::capture::CaptureQueueLimits,
     capture_filter: Option<&str>,
 ) -> Result<Box<dyn super::super::capture::CaptureSession>, LiveIoError> {
-    // Reject invalid bounds before opening a device or allocating native resources.
     let validated_limits = limits.validate()?;
     #[cfg(any(target_os = "linux", target_os = "macos", windows))]
     {
@@ -251,9 +250,7 @@ fn is_ether_operand_modifier(atom: &str) -> bool {
     any(target_os = "linux", target_os = "macos", windows)
 ))]
 fn is_bpf_keyword(atom: &str) -> bool {
-    // ponytail: accept only the libpcap 1.0 keyword floor required by the pcap
-    // dependency and reject every other ID token instead of duplicating the
-    // context-sensitive grammar; extend this when the runtime floor advances.
+    // Allow only libpcap 1.0 keywords; extend this list with the supported runtime floor.
     const KEYWORDS: &str = concat!(
         "dst src link ether ppp slip fddi tr wlan arp rarp ip sctp tcp udp icmp igmp igrp pim ",
         "vrrp radio ip6 icmp6 ah esp atalk aarp decnet lat sca moprc mopdl iso esis es-is isis ",

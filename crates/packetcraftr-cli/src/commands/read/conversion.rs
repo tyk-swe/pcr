@@ -11,10 +11,8 @@ pub(super) fn next_frame_number(value: u64, sequence: u64) -> Result<u64, crate:
     })
 }
 
-/// Decode bounds derived from the operator's per-frame capture limit.
-///
-/// The reader already accepted the frame at this size, so the dissector must
-/// not then refuse it at its own smaller default.
+/// Decode bounds use the accepted per-frame capture limit, not the smaller
+/// dissector default.
 pub(super) fn decode_options(max_frame_bytes: usize) -> packet::decode::Options {
     packet::decode::Options {
         max_packet_size: max_frame_bytes,

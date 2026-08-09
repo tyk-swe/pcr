@@ -34,8 +34,7 @@ pub(super) fn shift_padding_for_remove(layers: &mut [Box<dyn Layer>], index: usi
         };
         padding.outside_layer = match padding.outside_layer {
             Some(outside_layer) if outside_layer > index => Some(outside_layer - 1),
-            // The successor shifts into the removed layer's index and
-            // remains the first layer that excludes this padding.
+            // The successor now occupies the removed index.
             Some(outside_layer) if outside_layer == index => Some(index),
             value => value,
         };

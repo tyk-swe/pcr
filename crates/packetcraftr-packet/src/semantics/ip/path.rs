@@ -32,10 +32,7 @@ pub struct IpPath {
     pub declared_route_destinations: Vec<IpAddr>,
 }
 
-/// Number of leading layers that belong to the packet transmitted directly on
-/// the wire. Layers after an encapsulation boundary describe a tunneled frame,
-/// so they carry no link-layer or routing intent of their own; the boundary
-/// layer itself is still part of the outer packet.
+/// Number of directly transmitted layers through the first encapsulation boundary.
 pub fn outer_scope_len(packet: &Packet) -> usize {
     packet
         .iter()
@@ -45,9 +42,7 @@ pub fn outer_scope_len(packet: &Packet) -> usize {
         .map_or(packet.len(), |boundary| boundary + 1)
 }
 
-/// Layers that express intent for the packet transmitted directly on the
-/// wire. Layers behind an encapsulation boundary describe a tunneled packet
-/// and must not supply outer link-layer or routing intent.
+/// Layers of the directly transmitted packet, through its encapsulation boundary.
 pub fn outer_layers(packet: &Packet) -> impl Iterator<Item = &dyn Layer> {
     packet.iter().take(outer_scope_len(packet))
 }

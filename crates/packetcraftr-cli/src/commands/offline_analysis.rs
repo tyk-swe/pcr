@@ -27,10 +27,8 @@ pub(super) struct PreparedOfflineAnalysis {
     pub(super) limits: analysis::Limits,
 }
 
-/// Validates finite bounds and compiles the optional stream-aware filter.
-///
-/// The ordering here is part of the CLI contract: capture bounds precede
-/// registry/filter preparation, which precedes analysis bounds.
+/// Validates capture bounds, prepares registry/filter state, then validates
+/// analysis bounds.
 pub(super) fn prepare_offline_analysis(
     limits: OfflineAnalysisLimits,
     filter_source: Option<&str>,

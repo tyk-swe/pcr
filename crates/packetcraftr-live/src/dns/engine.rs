@@ -27,10 +27,8 @@ use super::model::{
 use super::wire::{DnsResponseClassification, classify_dns_response, encode_dns_query};
 use super::{DNS_EPHEMERAL_SOURCE_PORT_BASE, DNS_EVIDENCE_DIAGNOSTICS, MAX_DNS_PROBE_OVERHEAD};
 
-/// Executes a bounded DNS workflow through the shared policy, retry clock,
-/// protocol registry, and exchange seams. Every retry repeats declared-name
-/// authorization, resolution, and authorization of every answer before a new
-/// probe is constructed.
+/// Executes bounded DNS retries, repeating declared-name authorization,
+/// resolution, and resolved-answer authorization before each probe.
 pub fn dns<A, E, C>(
     request: &DnsRequest,
     authorizer: &mut A,

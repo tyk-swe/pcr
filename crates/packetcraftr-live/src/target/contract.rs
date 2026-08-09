@@ -125,9 +125,7 @@ impl Family {
     }
 }
 
-/// A target whose declared hostname and every selected address have passed the
-/// current traffic policy. Fields stay private so callers cannot forge this
-/// authorization token.
+/// Policy-authorized target with private fields that prevent forgery.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Authorized {
     pub(crate) declared: Target,

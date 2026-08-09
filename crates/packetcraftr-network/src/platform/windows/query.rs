@@ -133,8 +133,7 @@ pub(in crate::platform) fn route(
             index: output_index,
         })?;
     let mut interface = adapter.interface;
-    // The route decision always reports the family-specific index returned by
-    // IP Helper while retaining the adapter's portable metadata.
+    // Use the family-specific IP Helper index with portable adapter metadata.
     interface.id.index = output_index;
     let normalized_constraint = constrained_interface.as_ref().map(|adapter| InterfaceId {
         name: adapter.interface.id.name.clone(),
@@ -194,9 +193,7 @@ pub(super) fn encode_address(address: IpAddr, scope_id: u32) -> SOCKADDR_INET {
                     },
                 },
                 Anonymous: SOCKADDR_IN6_0 {
-                    // A zone index is meaningful only for scoped IPv6
-                    // destinations. GetBestRoute2 rejects a non-zero scope on
-                    // loopback and global addresses with ERROR_INVALID_PARAMETER.
+                    // GetBestRoute2 accepts a scope ID only for link-local or multicast IPv6.
                     sin6_scope_id: if address.is_unicast_link_local() || address.is_multicast() {
                         scope_id
                     } else {

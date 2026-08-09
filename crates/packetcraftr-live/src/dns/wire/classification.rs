@@ -44,10 +44,8 @@ pub const fn response_code_name(code: u16) -> &'static str {
     }
 }
 
-/// Pure, protocol-aware classification of one decoded frame against an exact
-/// DNS probe. `None` means the frame has no structural relationship to the
-/// request. A reverse-tuple frame with invalid integrity remains typed decode
-/// failure evidence, but can never become an accepted DNS response.
+/// Classifies a decoded frame against a DNS probe. Invalid correlated frames
+/// are decode failures, never accepted responses.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DnsResponseClassification {
     Response(ValidatedDnsResponse),

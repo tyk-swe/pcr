@@ -2,10 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 //! Live network interfaces, routing, neighbor discovery, transmission, and capture.
-//!
-//! Native handles and platform-specific representations remain behind the private
-//! `platform` boundary. Public contracts are grouped by responsibility and use
-//! concise names within their owning namespace.
 
 pub mod capture;
 mod checksum;

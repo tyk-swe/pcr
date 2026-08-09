@@ -179,28 +179,19 @@ pub struct ReplaySummary {
     pub scheduled_duration: Duration,
 }
 
-/// Prospective operation totals checked before authorizing the current frame.
-///
-/// Both totals count only frames that reach the wire, including the frame
-/// under authorization; frames a [`ReplaySelector`] skipped are charged to the
-/// read-side stream budgets instead, never to the policy.
+/// Prospective totals for the frame being authorized. They include only frames
+/// that reach the wire; skipped frames charge read-side budgets, not policy.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ReplayAuthorizationContext {
     pub packets: u64,
     pub wire_bytes: u64,
 }
 
-/// Frame-selection seam applied before any authorization, delay, or
-/// transmission work for a frame.
+/// Selects a one-based capture frame before byte accounting, authorization, delay,
+/// or transmission.
 ///
-/// `number` is the 1-based position of the frame in the capture stream,
-/// matching the numbering that capture-reading commands expose, so positional
-/// selection composes with the same numbers an operator saw elsewhere. A
-/// skipped frame still counts against the frame budget — selection can never
-/// extend how much input one operation reads — but it is never authorized or
-/// transmitted, contributes no bytes, and leaves the timing reference
-/// untouched: delays are computed between the frames actually transmitted,
-/// preserving their original wire spacing.
+/// Skipped frames consume the read-side frame budget only; they affect neither
+/// policy totals nor timing. Selected frames retain capture spacing.
 pub trait ReplaySelector {
     /// Decides whether this frame proceeds to authorization and transmission.
     fn select(&mut self, number: u64, frame: &Frame) -> Result<bool, crate::BoundaryError>;

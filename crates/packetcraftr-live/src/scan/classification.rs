@@ -17,9 +17,8 @@ pub struct ScanResponseClassification {
     pub(super) correlation: Correlation,
 }
 
-/// Pure response classifier used by the workflow. A return value of `None`
-/// means the response is corrupt, unrelated, or not protocol-consistent with
-/// the request and must not influence classification.
+/// Classifies a valid correlated response; corrupt, unrelated, or inconsistent
+/// responses return `None`.
 pub fn classify_scan_response(
     registry: &Registry,
     transport: ScanTransport,

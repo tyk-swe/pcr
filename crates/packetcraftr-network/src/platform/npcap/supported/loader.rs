@@ -38,8 +38,7 @@ use super::{
 use crate::{Error as LiveIoError, route::InterfaceId};
 
 pub(super) struct NpcapApi {
-    // Function pointers remain valid only while their defining module is
-    // loaded. This owner keeps it live for every use of the inert pointers.
+    // Keeps the DLL loaded while function pointers are used.
     pub(super) _library: Library,
     pub(super) pcap_create: PcapCreate,
     pub(super) pcap_set_snaplen: PcapSetInteger,
@@ -192,8 +191,7 @@ fn format_npcap_device(guid: GUID) -> String {
 }
 
 fn npcap_library_path() -> Result<PathBuf, LiveIoError> {
-    // Windows paths can be up to 32,767 UTF-16 code units. A fixed maximum
-    // buffer avoids trusting mutable environment variables for DLL lookup.
+    // A fixed maximum path buffer avoids environment-controlled DLL lookup.
     let mut windows_directory = vec![0_u16; 32_768];
     // SAFETY: the entire mutable UTF-16 buffer is provided to the system API,
     // which returns the number of initialized code units.

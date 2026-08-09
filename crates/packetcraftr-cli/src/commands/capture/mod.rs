@@ -52,11 +52,8 @@ pub(super) fn run(
         .validate()
         .map_err(CliError::classified)?;
     let registry = default_registry_arc()?;
-    // The display filter compiles before any route, resolution, or capture
-    // work, so a mistyped expression is refused without live side effects.
-    // Received frames are dissected under the same snapshot bound the capture
-    // reads with; this selects what is reported, it does not narrow what the
-    // backend captures.
+    // Compile the display filter before live work; it affects reporting only and
+    // uses the capture snapshot bound.
     let selector = match filter.as_deref() {
         Some(source) => {
             let filter = filtering::compile(source, &registry, Capabilities::frames_only())?;

@@ -20,8 +20,7 @@ use super::{
 };
 use crate::send::ClientError;
 
-/// State that exists only after capture has been armed. The transaction owns
-/// all mutable live-operation state; phase modules only operate on this owner.
+/// Mutable live-operation state, created after capture is armed.
 pub(crate) struct ExchangeTransaction<C: Session> {
     pub(super) registry: Arc<Registry>,
     pub(super) capture: CaptureGuard<C>,

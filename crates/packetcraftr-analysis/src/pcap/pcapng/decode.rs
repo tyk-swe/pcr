@@ -253,8 +253,7 @@ pub(in crate::pcap) fn read_next_pcapng_frame<R: Read>(
                 .map(Some);
             }
             _ => {
-                // Metadata and extension blocks are length-delimited, so an
-                // unknown block can be skipped without guessing its layout.
+                // Unknown PCAPNG blocks are length-delimited and safely skippable.
             }
         }
     }

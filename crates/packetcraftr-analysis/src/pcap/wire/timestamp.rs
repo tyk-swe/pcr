@@ -103,10 +103,7 @@ pub(in crate::pcap) fn timestamp_to_ticks(
             format: Format::PcapNg,
         });
     }
-    // Zero ticks are representable independently of the resolution's
-    // denominator. This also keeps writing symmetric with
-    // `timestamp_from_ticks`, which accepts zero for decimal exponents whose
-    // denominator is too large for u128.
+    // Zero ticks are representable at every resolution.
     if relative_seconds == 0 && nanoseconds == 0 {
         return Ok(0);
     }

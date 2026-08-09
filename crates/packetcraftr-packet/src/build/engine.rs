@@ -35,9 +35,8 @@ impl Builder {
     ///
     /// # Panics
     ///
-    /// Panics if a layer index validated earlier in the same call is no longer
-    /// present, which would mean this builder had corrupted its own state.
-    /// Malformed input is reported through [`BuildError`] instead.
+    /// Panics only if the builder corrupts its validated state; malformed input returns
+    /// [`BuildError`].
     pub fn build(
         &self,
         packet: Packet,
@@ -53,10 +52,8 @@ impl Builder {
                 limit: options.max_layers,
             });
         }
-        // Reject definitely oversized pass-through layers before their codecs
-        // duplicate the buffers. An arbitrary external byte-valued reflective
-        // field is not necessarily emitted on the wire, so it cannot safely be
-        // included in this lower bound.
+        // Only pass-through bytes are a safe pre-encoding lower bound; other fields might not
+        // reach the wire.
         let pass_through_bytes = validation::pass_through_byte_length(&packet)?;
         if pass_through_bytes > options.max_packet_size {
             return Err(BuildError::PacketSizeLimit {
@@ -87,8 +84,7 @@ impl Builder {
             &mut diagnostics,
         )?;
 
-        // The reverse walk keeps the source packet intact for every codec and
-        // accumulates each materialized result once before restoring source order.
+        // Encode in reverse, then restore source order.
         let mut bytes = PacketBuffer::default();
         let mut layouts = Vec::with_capacity(packet.len());
         let mut materialized_layers = Vec::with_capacity(packet.len());

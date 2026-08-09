@@ -1,11 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Typed Layer 2 and Layer 3 transmission contracts.
-//!
-//! These traits describe how a materialized route reaches a backend; they
-//! carry no policy of their own. Callers authorize a destination through the
-//! client policy layer before constructing a transmitter.
+//! Typed Layer 2 and Layer 3 transmission contracts; callers own policy authorization.
 
 use bytes::Bytes;
 
@@ -18,8 +14,7 @@ pub(crate) use self::{
     Sender as PacketIo, SystemLayer2 as SystemLayer2Io,
 };
 
-/// A complete Layer 2 frame. Construction rejects a route selected for raw
-/// Layer 3 transmission.
+/// Complete Layer 2 frame with a verified Layer 2 route.
 #[derive(Clone, Copy, Debug)]
 pub struct Layer2Frame<'a> {
     bytes: &'a Bytes,
@@ -41,8 +36,7 @@ impl<'a> Layer2Frame<'a> {
     }
 }
 
-/// A raw Layer 3 packet. Construction rejects a route selected for link-layer
-/// transmission, preventing an Ethernet envelope from reaching a raw socket.
+/// Raw Layer 3 packet with a verified Layer 3 route.
 #[derive(Clone, Copy, Debug)]
 pub struct Layer3Frame<'a> {
     bytes: &'a Bytes,
@@ -121,8 +115,7 @@ pub trait Layer2Sender: Send + Sync {
     fn send_layer2(&self, frame: Layer2Frame<'_>) -> Result<Report, Error>;
 }
 
-/// Native Layer 2 injection provider selected for the current target. Builds
-/// without `native-layer2` return an actionable capability error.
+/// Target-selected native Layer 2 provider; requires `native-layer2`.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SystemLayer2;
 
@@ -137,8 +130,7 @@ pub trait Layer3Sender: Send + Sync {
     fn send_layer3(&self, frame: Layer3Frame<'_>) -> Result<Report, Error>;
 }
 
-/// Native raw-IP provider selected for the current target. Builds without
-/// `native-layer3` return an actionable capability error.
+/// Target-selected native Layer 3 provider; requires `native-layer3`.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SystemLayer3;
 

@@ -17,9 +17,8 @@ impl RegistryBuilder {
     ///
     /// # Panics
     ///
-    /// Panics if a binding table is empty, which the builder never produces:
-    /// an entry exists only once something has been bound into it. Unresolved
-    /// or conflicting registrations are reported through [`RegistryError`].
+    /// Panics only if the builder corrupts a binding table; registration errors return
+    /// [`RegistryError`].
     pub fn build(mut self) -> Result<ProtocolRegistry, RegistryError> {
         for protocol in self.roots.values() {
             if !self.codecs.contains_key(protocol) {
@@ -80,9 +79,7 @@ impl RegistryBuilder {
                 });
             }
         }
-        // Capture each protocol's reflective schema once. Constructible codecs
-        // retain the default factory behavior through LayerCodec's default
-        // hook, while decode-only codecs may publish static schemas directly.
+        // Collect schemas once; codecs can use a default factory or publish a static schema.
         let mut schemas = BTreeMap::new();
         for (protocol, codec) in &self.codecs {
             if let Some(schema) = codec.published_schema() {

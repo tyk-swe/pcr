@@ -24,10 +24,8 @@ pub const DEFAULT_CAPTURE_QUEUE_BYTES: usize = 256 * 1024 * 1024;
 /// Maximum blocking wait accepted by an owned capture session.
 pub const MAX_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 
-/// Backend capture counters. Received counters include frames accepted by the
-/// owned capture session. Dropped counters describe frames/bytes lost before
-/// delivery; receiver drops are the subset reported by the native capture
-/// source, and overflow events count distinct bounded-queue observations.
+/// Capture counters for accepted frames and pre-delivery loss. Native receiver
+/// drops are a subset; overflow events are bounded-queue observations.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Statistics {
     pub received_frames: u64,
@@ -67,8 +65,7 @@ impl Statistics {
             || self.receiver_dropped_frames != 0
     }
 
-    /// Converts incomplete evidence into its typed queue-loss or receiver-loss
-    /// error. Complete statistics return `None`.
+    /// Returns a typed loss error, or `None` for complete evidence.
     pub fn evidence_loss_error(self) -> Option<Error> {
         if !self.has_loss() {
             None
@@ -92,11 +89,9 @@ pub trait Session: Send {
     /// Readiness is an explicit barrier. No exchange frame may be sent first.
     fn wait_ready(&mut self, timeout: Duration) -> Result<(), Error>;
     fn next_captured_frame(&mut self, timeout: Duration) -> Result<Option<Captured>, Error>;
-    /// Stop the receiver and join all capture work before returning. An error
-    /// means the implementation could not confirm complete cleanup.
+    /// Stops and joins capture; errors leave cleanup unconfirmed.
     fn shutdown(&mut self) -> Result<(), Error>;
-    /// Returns cumulative backend counters, including queue loss that was not
-    /// otherwise observable through delivered frames.
+    /// Returns cumulative counters, including undelivered queue loss.
     fn statistics(&self) -> Statistics;
 }
 
@@ -118,15 +113,12 @@ impl<T: Session + ?Sized> Session for Box<T> {
     }
 }
 
-/// Capture evidence paired with an optional monotonic receive marker. Wall-clock
-/// packet time remains in [`CaptureFrame::timestamp`] for output; freshness and
-/// latency use `received_at` so clock precision and adjustment cannot reorder
-/// evidence.
+/// Capture evidence with an optional monotonic ingress marker. Wall-clock time is
+/// output-only; freshness and latency use `received_at` to avoid reordering.
 #[derive(Clone, Debug)]
 pub struct Captured {
     pub frame: CaptureFrame,
-    /// Monotonic time recorded at capture ingress. `None` means the provider
-    /// cannot prove when the frame entered its capture path.
+    /// Monotonic ingress time; `None` cannot prove freshness.
     pub received_at: Option<Instant>,
 }
 
@@ -140,8 +132,7 @@ impl Captured {
         Self { frame, received_at }
     }
 
-    /// Retains a frame from a provider that cannot report capture ingress time.
-    /// Such a frame is evidence, but cannot satisfy freshness correlation.
+    /// Evidence without an ingress marker cannot satisfy freshness correlation.
     pub fn without_ingress_time(frame: CaptureFrame) -> Self {
         Self::with_ingress_time(frame, None)
     }
@@ -176,8 +167,7 @@ impl Default for Limits {
 }
 
 impl Limits {
-    /// Validates bounded non-zero limits and byte/snap consistency before a
-    /// backend allocates or starts capture.
+    /// Validates bounded nonzero limits and byte/snap consistency before capture.
     pub fn validate(self) -> Result<Self, Error> {
         for (field, value) in [
             ("max_frames", self.max_frames),
@@ -222,9 +212,7 @@ pub trait Provider: Send + Sync {
 
     fn arm_capture(&self, route: &PlannedRoute, limits: Limits) -> Result<Self::Capture, Error>;
 
-    /// Starts capture with a native libpcap/Npcap BPF filter. Providers that
-    /// cannot install native filters fail closed instead of falling back to
-    /// unfiltered capture.
+    /// Starts capture with native BPF filtering; unsupported providers fail closed.
     fn arm_capture_with_filter(
         &self,
         _route: &PlannedRoute,
@@ -237,12 +225,10 @@ pub trait Provider: Send + Sync {
     }
 }
 
-/// Owned native capture session. The native handle and capture worker remain
-/// private behind this platform-neutral trait object.
+/// Platform-native capture session with private handle and worker.
 pub type SystemSession = Box<dyn Session>;
 
-/// Native capture provider selected for the current target and the explicit
-/// `native-layer2` feature.
+/// Target-selected native capture provider; requires `native-layer2`.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SystemProvider;
 

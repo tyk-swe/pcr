@@ -1,11 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Native-system composition used by CLI commands.
-//!
-//! This module binds the facade's provider traits to system route, neighbor,
-//! capture, and transmission adapters. It does not own command dispatch or
-//! output rendering.
+//! Native provider composition for CLI commands; dispatch and rendering remain
+//! elsewhere.
 
 mod client;
 mod interface;

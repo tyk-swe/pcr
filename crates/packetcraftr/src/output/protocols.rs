@@ -81,9 +81,7 @@ impl From<field::Kind> for FieldKind {
             field::Kind::Ipv6 => Self::Ipv6,
             field::Kind::Mac => Self::Mac,
             field::Kind::List => Self::List,
-            // `field::Kind` is `#[non_exhaustive]`, but the v1 output schema
-            // pins this value set. A new kind needs a schema revision and an
-            // explicit arm here, never a silent substitution.
+            // v1 pins this value set; new kinds require a schema revision and explicit arm.
             _ => unreachable!("field kind {value:?} has no v1 output representation"),
         }
     }

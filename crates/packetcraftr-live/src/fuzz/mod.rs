@@ -1,11 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Authorized, paced execution of a prepared packet fuzz campaign.
-//!
-//! Deterministic mutation and offline execution live in
-//! [`packetcraftr_packet::fuzz`]. [`run`] prepares exactly that packet-layer
-//! campaign before adding authorization, transmission, and capture evidence.
+//! Authorized, paced live execution of packet-layer fuzz campaigns.
 
 use std::time::Duration;
 

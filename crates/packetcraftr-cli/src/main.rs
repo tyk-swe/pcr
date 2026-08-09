@@ -1,13 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The `packetcraftr` command-line interface.
-//!
-//! This crate is the only PacketcraftR target that renders to a terminal. It
-//! parses arguments, composes the library domains re-exported by the
-//! `packetcraftr` facade, and serializes every result through
-//! `packetcraftr::output` so the JSON contract stays independent of the
-//! terminal presentation.
+//! The `packetcraftr` CLI parses arguments, runs facade workflows, and renders
+//! results through the versioned [`packetcraftr::output`] contract.
 
 #![forbid(unsafe_code)]
 

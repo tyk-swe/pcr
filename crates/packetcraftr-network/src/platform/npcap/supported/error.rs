@@ -92,8 +92,7 @@ pub(super) fn interface_conversion_error(
 }
 
 pub(super) fn error_buffer_message(buffer: &[c_char; PCAP_ERROR_BUFFER_SIZE]) -> String {
-    // Decode only within PCAP_ERRBUF_SIZE even if an incompatible runtime
-    // fails to terminate its diagnostic.
+    // Bound decoding to `PCAP_ERRBUF_SIZE` if the runtime omits NUL termination.
     let bytes: Vec<u8> = buffer
         .iter()
         .copied()

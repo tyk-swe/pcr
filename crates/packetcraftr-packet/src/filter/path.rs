@@ -198,9 +198,7 @@ fn kinds_for(
     path: &str,
 ) -> Result<Vec<FieldSpec>, FilterError> {
     let Some(schema) = registry.schema(protocol) else {
-        // Bindings are validated when the registry is built, so an absent
-        // schema here means a decode-only protocol whose kinds are unknown
-        // until a packet supplies one. Compare without a compile-time check.
+        // Decode-only schemas are unknown until runtime; defer static type checks.
         return Ok(Vec::new());
     };
     let mut kinds = Vec::with_capacity(fields.len());
@@ -237,10 +235,7 @@ pub(super) fn resolve(
         path: path.to_owned(),
     };
 
-    // An occurrence selects one layer out of several, which only means
-    // something for a path that reads a layer at all. Accepting it silently on
-    // a synthetic name would make `frame#2.len` behave exactly like
-    // `frame.len`, hiding the mistake.
+    // Reject occurrences on synthetic fields rather than silently ignoring them.
     let reject_occurrence = |synthetic: &str| -> Result<(), FilterError> {
         match occurrence {
             None => Ok(()),
@@ -268,9 +263,7 @@ pub(super) fn resolve(
                 path: path.to_owned(),
             }));
         }
-        // `tcp.stream` and `udp.stream` name the conversation index the caller
-        // assigns, not a header field, so they are reserved for every
-        // transport rather than resolved through the registry.
+        // Stream fields are caller-assigned, not registry-defined header fields.
         if tail == "stream" && matches!(head, "tcp" | "udp") {
             reject_occurrence(&stripped)?;
             let transport = if head == "tcp" {
@@ -390,11 +383,7 @@ pub(super) fn attach_slice(
     if matches!(field.source, FieldSource::Frame(_) | FieldSource::Stream(_)) {
         return Err(unsliceable());
     }
-    // A numeric or boolean field has no byte projection, so slicing it would
-    // yield no candidate and the filter would quietly match nothing. Reject it
-    // here instead. Kinds are empty only for a decode-only protocol, whose
-    // fields are not knowable until a packet supplies one; allow those through
-    // rather than refusing a path that may well be sliceable.
+    // Reject known non-byte fields; defer unknown decode-only schemas.
     if !field.kinds.is_empty()
         && !field
             .kinds
@@ -404,8 +393,7 @@ pub(super) fn attach_slice(
         return Err(unsliceable());
     }
     field.slice = Some(slice);
-    // Reading bytes out of a field erases its declared kind, so the literal is
-    // checked against bytes instead.
+    // A slice projects the field to bytes.
     field.kinds = vec![FieldSpec::synthetic(FieldKind::Bytes)];
     Ok(())
 }

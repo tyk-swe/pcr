@@ -160,10 +160,8 @@ impl Captured {
     }
 }
 
-/// The dissected layer stack of a frame, without repeating the frame itself.
-///
-/// `read --dissect` already emits the capture record, so embedding a whole
-/// [`Decoded`] there would serialize the frame twice.
+/// A dissected frame's layer stack, excluding the raw frame to avoid serializing
+/// it twice.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Stack {
     pub packet: PacketDocument,

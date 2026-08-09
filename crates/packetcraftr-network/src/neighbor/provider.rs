@@ -28,8 +28,7 @@ use super::evidence::{
 use super::options::NeighborResolutionOptions;
 use super::wire::{build_request_frame, match_neighbor_response};
 
-/// Injectable active resolver. Production composition uses the `System*`
-/// providers; applications can supply controlled providers.
+/// Injectable active resolver; production uses `System*` providers.
 #[derive(Debug)]
 pub struct ActiveNeighborResolver<L, C> {
     layer2: L,
@@ -138,8 +137,7 @@ where
             .map_err(|error| map_io_error(request, "arming capture", error))?;
         let primary = self.exchange(request, &request_bytes, &materialized_route, &mut capture);
         let cleanup = capture.shutdown();
-        // Shutdown joins the owned worker, so counters read afterward are the
-        // final statistics for this discovery session.
+        // A successful shutdown makes these final discovery-session statistics.
         let statistics = capture.statistics();
         let outcome = match (primary, cleanup) {
             (Ok(outcome), Ok(())) => outcome,
@@ -206,8 +204,7 @@ where
         let mut captured_bytes = 0usize;
         let mut evidence_truncated = false;
 
-        // Frames captured before the first request are evidence but cannot
-        // satisfy this lookup.
+        // Pre-request frames are retained as evidence, never as lookup matches.
         for _ in 0..self.options.max_capture_queue_frames {
             let Some(captured_frame) = capture
                 .next_captured_frame(Duration::ZERO)

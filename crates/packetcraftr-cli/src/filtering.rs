@@ -15,12 +15,9 @@ use packetcraftr::{
 
 use super::errors::CliError;
 
-/// What a command can offer a compiled filter.
+/// Filter capabilities a command declares before input is read.
 ///
-/// A filter that reads `tcp.stream` only means something where conversations
-/// are being tracked. Commands declare what they maintain so an unsupported
-/// path is refused before any input is read, rather than quietly matching no
-/// frames.
+/// Unsupported stream fields fail rather than silently matching no frames.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Capabilities {
     pub(crate) stream_index: bool,
@@ -66,13 +63,9 @@ pub(crate) fn compile(
     Ok(filter)
 }
 
-/// Evaluates a compiled filter against whole frames for streaming commands.
+/// Evaluates a compiled filter against complete bounded frames.
 ///
-/// Commands that handle complete frames — live capture and replay — dissect
-/// each frame under the same per-frame bound the command reads with, then
-/// apply the filter to the decoded stack. A frame that cannot be dissected is
-/// an error rather than a silent mismatch, so a frame the filter could not
-/// observe is never quietly dropped or kept.
+/// Undissectable frames are errors rather than silent mismatches.
 pub(crate) struct FrameSelector {
     decoder: packet::decode::Decoder,
     filter: Filter,
@@ -109,10 +102,7 @@ impl FrameSelector {
     }
 }
 
-/// Maps a filter compilation failure onto the CLI error taxonomy.
-///
-/// Every variant is a mistake in the filter the operator typed, so all of them
-/// classify as command-line errors rather than packet or capability failures.
+/// Converts a filter compilation failure into the CLI error taxonomy.
 fn cli_error(error: FilterError) -> CliError {
     let remediation = match &error {
         FilterError::UnknownField { .. } | FilterError::UnresolvableProtocol { .. } => {

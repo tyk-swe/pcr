@@ -47,9 +47,7 @@ where
     match namespace {
         Some(namespace) => with_netlink_in_namespace(namespace, operation),
         None => {
-            // Namespace metadata is only needed to cache workers safely. A
-            // fresh thread inherits the caller's current network namespace,
-            // so netlink remains usable when procfs is not mounted.
+            // Without namespace metadata, do not cache workers; fresh threads inherit the caller's namespace.
             NETLINK_WORKER.with(|worker| worker.borrow_mut().take());
             with_uncached_netlink(operation)
         }
@@ -71,9 +69,7 @@ where
             .as_ref()
             .is_none_or(|worker| worker.namespace != namespace)
         {
-            // Linux network namespaces are selected per calling thread. Drop
-            // and join a worker inherited from an earlier namespace before
-            // opening a netlink socket in the caller's current namespace.
+            // Replace workers created in another per-thread network namespace.
             worker.take();
             *worker = Some(NetlinkWorker::start(namespace)?);
         }
@@ -85,9 +81,7 @@ where
             Ok(value) => Ok(value),
             Err(NetlinkExecutionError::Operation(error)) => Err(error),
             Err(NetlinkExecutionError::Worker(error)) => {
-                // A broken command or response channel means this worker can
-                // no longer make progress. Joining it here lets the next call
-                // initialize a fresh worker instead of retaining a dead one.
+                // A broken channel makes this worker unusable; replace it on the next call.
                 worker.take();
                 Err(error)
             }

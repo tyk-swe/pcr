@@ -1,12 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Target-native raw IPv4/IPv6 transmission.
-//!
-//! This is the platform I/O boundary only: it emits bytes a caller has already
-//! built and authorized. Destination authorization, route consistency, MTU,
-//! and capture readiness are enforced upstream by the client policy layer, and
-//! this module is reached only after those checks pass.
+//! Target-native raw IP transmission after upstream authorization, route, MTU,
+//! and capture-readiness checks.
 
 #![cfg_attr(windows, allow(unsafe_code))]
 #![cfg_attr(not(windows), forbid(unsafe_code))]

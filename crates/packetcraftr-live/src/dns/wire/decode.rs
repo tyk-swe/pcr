@@ -43,9 +43,8 @@ pub fn decode_dns_tcp_frame(
     decode_dns_response(payload, query_name, query_type, transaction_id, limits)
 }
 
-/// Decodes and validates one complete DNS response. Only records relevant to
-/// the validated question are returned as accepted section data; all other
-/// declared records contribute to a bounded rejected-record audit trail.
+/// Decodes a DNS response, accepting relevant records and retaining a bounded
+/// audit of other declared records.
 pub fn decode_dns_response(
     message: &[u8],
     query_name: &str,

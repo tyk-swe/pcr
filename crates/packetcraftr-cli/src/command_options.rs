@@ -1,11 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Reusable Clap groups for packet input, routing, authorization, and bounds.
-//!
-//! Command-specific options stay in `commands/<command>/arguments.rs`. This
-//! module contains only groups whose parsing and conversion contract is shared
-//! by multiple commands.
+//! Shared Clap groups; command-specific options stay in `commands/<command>/arguments.rs`.
 
 pub(crate) use address_family::CliAddressFamily;
 pub(crate) use capture_limits::CaptureLimitArgs;

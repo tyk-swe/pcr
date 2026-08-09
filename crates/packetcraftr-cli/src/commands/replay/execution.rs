@@ -10,11 +10,8 @@ use crate::filtering::FrameSelector;
 
 use super::replay_cli_error;
 
-/// Bridges the CLI display filter onto the replay engine's selection seam.
-///
-/// A frame the filter rejects is skipped before the engine authorizes,
-/// delays, or transmits it, and a frame the filter cannot dissect stops the
-/// operation instead of being quietly replayed or dropped.
+/// Bridges the CLI display filter to replay selection. Rejected frames skip
+/// authorization, delay, and transmission; undecodable frames fail replay.
 pub(super) struct DisplayFilterSelector<'a> {
     pub(super) selector: &'a FrameSelector,
 }

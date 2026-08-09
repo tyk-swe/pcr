@@ -22,8 +22,7 @@ pub(super) fn matches(value: &FieldValue, operator: CompareOperator, literal: &L
             _ => false,
         };
     }
-    // A list matches when any element does, mirroring how repeated layers and
-    // multi-field paths behave elsewhere in the grammar.
+    // Lists match when any element matches.
     if let FieldValue::List(values) = value {
         return values
             .iter()
@@ -92,8 +91,7 @@ fn compare(value: &FieldValue, literal: &Literal) -> Option<Ordering> {
         (FieldValue::Bytes(left), Literal::Text(right)) => {
             Some(left.as_ref().cmp(right.as_bytes()))
         }
-        // A one-byte field compares against a plain number, so a single byte
-        // can be written without an ambiguous bare hex pair.
+        // A one-byte field may compare to a plain number.
         (FieldValue::Bytes(left), Literal::Unsigned(right)) => match left.as_ref() {
             [only] => Some(u64::from(*only).cmp(right)),
             _ => None,

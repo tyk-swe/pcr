@@ -57,11 +57,8 @@ impl Reassembler {
     ///
     /// # Panics
     ///
-    /// Panics if a flow whose generation is unchanged is not established,
-    /// which would mean the plan and commit halves of this reassembler had
-    /// disagreed. Every input-driven rejection, including exhausted budgets,
-    /// is reported through [`enum@Error`], and a rejected segment leaves the flow
-    /// table untouched.
+    /// Panics only if planning and commit disagree about an unchanged flow;
+    /// input errors return [`enum@Error`] without mutating the flow table.
     pub fn push(&mut self, segment: Segment, now: Instant) -> Result<Vec<Event>, Error> {
         self.validate_limits()?;
         if segment.payload.is_empty()
@@ -106,8 +103,7 @@ impl Reassembler {
         };
 
         let plan = {
-            // A replacement generation is planned against an empty state. The
-            // established entry remains untouched until that plan succeeds.
+            // Plan replacements against empty state without mutating the established flow.
             let empty = TcpFlowState::new(first_payload_sequence, now);
             let state = if changes_generation {
                 &empty

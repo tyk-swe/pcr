@@ -54,11 +54,8 @@ where
             return Err(shutdown_after_error(&mut capture, error));
         }
     }
-    // Two counters, because they answer different questions: `frames` counts
-    // every frame the backend delivered, which is what the policy budgets
-    // account for whether or not the display filter keeps the frame, while
-    // `matched` numbers the records actually emitted so a filtered stream
-    // stays contiguous. Without a display filter the two never diverge.
+    // `frames` counts all captured frames for policy; `matched` numbers emitted
+    // filtered records.
     let mut frames = 0_u64;
     let mut matched = 0_u64;
     let mut bytes = 0_u64;

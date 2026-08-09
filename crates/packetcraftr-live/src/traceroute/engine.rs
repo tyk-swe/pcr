@@ -33,16 +33,13 @@ use super::model::{
 use super::plan::{build_batches, worst_case_duration};
 use super::{MAX_TRACEROUTE_PROBE_BYTES, TRACEROUTE_EVIDENCE_DIAGNOSTICS};
 
-/// Resolves and authorizes the complete target set before constructing a
-/// probe, approves the complete packet/byte/time budget, and preserves every
-/// attempt until checksum-valid evidence reaches a terminal outcome.
+/// Resolves and authorizes all targets before probe construction, approves the full
+/// packet, byte, and time budget, and retains each attempt until checksum-valid terminal evidence.
 ///
 /// # Panics
 ///
-/// Panics if a UDP or TCP strategy reaches probe construction without the
-/// destination port its request was validated to carry. Every input-driven
-/// rejection, including an out-of-range probe port, is reported through
-/// [`TracerouteError`].
+/// Panics only if a validated UDP/TCP request lacks its destination port;
+/// input errors return [`TracerouteError`].
 pub fn traceroute<A, E, C>(
     request: &TracerouteRequest,
     authorizer: &mut A,

@@ -170,8 +170,7 @@ impl LayerCodec for Ipv6FragmentCodec {
             next: if fragment_offset == 0 && offset_flags & 1 == 0 {
                 vec![Discriminator(u64::from(input[0]))]
             } else {
-                // A non-initial fragment cannot be decoded as a transport
-                // header; preserve its bytes explicitly as Raw.
+                // Non-atomic fragments retain opaque Raw payloads.
                 vec![Discriminator(255)]
             },
             fields: fragment_layout(),

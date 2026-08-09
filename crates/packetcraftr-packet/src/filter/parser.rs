@@ -80,8 +80,7 @@ pub(super) fn compile(
     registry: &ProtocolRegistry,
     options: &FilterOptions,
 ) -> Result<Compiled, FilterError> {
-    // The byte bound is checked before anything scans the source, so an
-    // oversized input never costs work proportional to its full length.
+    // Reject oversized input before scanning it.
     if source.len() > options.max_bytes {
         return Err(FilterError::SizeLimit {
             actual: source.len(),
@@ -260,8 +259,7 @@ fn parse_predicate(
             protocol,
             occurrence,
         } => {
-            // A bare protocol name admits no slice and no comparison; it is a
-            // presence test on its own.
+            // Bare protocols are presence tests, not comparable or sliceable fields.
             if let Some(Spanned {
                 token: Token::Slice(_),
                 offset: slice_offset,
@@ -312,8 +310,7 @@ fn parse_predicate(
         }) => {
             let (value, next) = parse_literal(tokens, index + 1, *operator_offset)?;
             check_literal(&field, &value, *operator_offset)?;
-            // A prefix names a set of addresses, so only membership is
-            // meaningful. Ordering one would evaluate false for every packet.
+            // Prefixes support membership only.
             if value.is_prefix()
                 && !matches!(operator, CompareOperator::Equal | CompareOperator::NotEqual)
             {
@@ -366,8 +363,7 @@ fn parse_membership(
         });
     };
     if !matches!(first.token, Token::LeftBrace) {
-        // `ip.src in 10.0.0.0/8` reads naturally and means the same as `==`
-        // against a prefix, so accept the unbraced form for a single value.
+        // Accept one unbraced `in` value.
         let (value, next) = parse_literal(tokens, start, offset)?;
         check_literal(&field, &value, offset)?;
         return Ok((
@@ -434,8 +430,7 @@ fn parse_literal(
     let value = match token {
         Token::Text(text) => Literal::Text(text.clone()),
         Token::Word(word) => literal::parse(word)
-            // An unquoted word that is not a recognizable number, address, or
-            // byte run is taken as text, matching how operators write it.
+            // Remaining unquoted words are text literals.
             .unwrap_or_else(|| Literal::Text(word.clone())),
         other => {
             return Err(FilterError::Syntax {

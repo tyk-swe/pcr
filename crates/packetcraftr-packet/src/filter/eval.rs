@@ -177,8 +177,7 @@ fn is_set(value: &FieldValue) -> bool {
         FieldValue::Bool(value) => *value,
         FieldValue::Unsigned(value) => *value != 0,
         FieldValue::Signed(value) => *value != 0,
-        // Only flags reach this path, so any other shape is treated as set
-        // simply by existing.
+        // Other representations are set by presence.
         _ => true,
     }
 }

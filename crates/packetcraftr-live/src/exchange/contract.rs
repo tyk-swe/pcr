@@ -62,10 +62,8 @@ pub struct MatchedResponse {
 #[derive(Clone, Debug)]
 pub struct ExchangeResult {
     pub sent: Vec<BuiltPacket>,
-    /// Timestamped exact frames accepted by the send provider. Layer 2 sends
-    /// retain the planned link type; raw Layer 3 sends use DLT_RAW so the
-    /// evidence can be written to a capture stream without inventing an
-    /// Ethernet envelope.
+    /// Timestamped exact provider-accepted frames. Layer 3 evidence uses
+    /// DLT_RAW; Layer 2 evidence retains its planned link type.
     pub sent_evidence: Vec<Frame>,
     pub responses: Vec<MatchedResponse>,
     pub unanswered: Vec<usize>,

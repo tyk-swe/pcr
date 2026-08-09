@@ -157,8 +157,7 @@ impl RegistryBuilder {
                 existing: existing.protocol().clone(),
             });
         }
-        // Structural defects need no registry context, so reject them at the
-        // call site rather than deferring to `build`.
+        // Reject structural binding defects at registration.
         let invalid = |reason: String| RegistryError::InvalidFilterField {
             path: normalized.clone(),
             reason,
@@ -176,9 +175,7 @@ impl RegistryBuilder {
                     u64::BITS
                 )));
             }
-            // The extraction is `(value & mask) >> shift`, so a shift past the
-            // mask's highest selected bit yields zero for every packet. Such a
-            // binding would build cleanly and then silently never match.
+            // Shifting past every selected bit would create a non-matching binding.
             if mask >> shift == 0 {
                 return Err(invalid(format!(
                     "its bit shift {shift} discards every bit selected by mask {mask:#x}"

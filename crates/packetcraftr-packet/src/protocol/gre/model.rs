@@ -307,8 +307,7 @@ impl LayerCodec for GreCodec {
 }
 
 fn gre_layout(layer: &Gre) -> Vec<crate::layout::FieldLayout> {
-    // Optional GRE fields move according to the preceding presence bits, so
-    // only the fixed prefix is generated from the field declaration.
+    // GRE optional fields are dynamic; only the fixed prefix is static.
     let mut fields = gre_static_layout();
     let mut cursor = GRE_BASE_LEN;
     if layer.checksum.is_some() {

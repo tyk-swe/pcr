@@ -1,9 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! macOS route and interface adapter backed by `getifaddrs(3)` and a routing
-//! socket. Route lookup is passive: it does not perform neighbor discovery,
-//! capture, or transmission.
+//! Passive macOS route/interface adapter backed by `getifaddrs(3)` and routing sockets.
+//! It performs no neighbor discovery, capture, or transmission.
 
 #![allow(unsafe_code)]
 

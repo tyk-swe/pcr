@@ -1,8 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-/// Streams, authorizes, schedules, and transmits a capture without retaining
-/// more than the current frame.
+/// Streams, authorizes, schedules, and transmits without retaining more than one frame.
 use std::io::Read;
 use std::time::Duration;
 
@@ -36,13 +35,11 @@ where
     replay_capture_with_selector(reader, options, None, authorizer, transmitter, clock, emit)
 }
 
-/// Replays a capture, transmitting only the frames the selector keeps.
+/// Replays only the capture frames the selector keeps.
 ///
 /// # Panics
 ///
-/// Panics if completed frames exceed the attempted frames validated for the
-/// same run, which would mean the transmitter had reported more work than the
-/// budget authorized.
+/// Panics only if the transmitter reports more completed frames than authorized.
 pub fn replay_capture_with_selector<R, A, T, C, F>(
     reader: &mut Reader<R>,
     options: &ReplayOptions,
@@ -115,10 +112,8 @@ where
         }
         frames_attempted = next_frames;
 
-        // Selection happens after the read-side budgets, so a skipped frame
-        // still consumes one unit of the frame budget, and before the byte
-        // budget, timing, and authorization, so it contributes no bytes, no
-        // delay, and never reaches policy or the wire.
+        // Selection consumes the read-side frame budget but precedes byte accounting,
+        // authorization, timing, and transmission.
         if let Some(selector) = selector.as_deref_mut() {
             enforce_deadline(&deadline, sequence)?;
             let selected = selector
@@ -178,9 +173,8 @@ where
         deadline
             .check_additional(delay)
             .map_err(|error| duration_limit(sequence, error))?;
-        // The policy budgets govern live transmission, so the prospective
-        // totals count only frames that reach the wire: skipped frames are
-        // charged to the read-side frame budget above, never to the policy.
+        // Policy budgets cover prospective wire frames only; skipped frames use the
+        // read-side frame budget, never policy.
         let next_completed = frames_completed
             .checked_add(1)
             .expect("completed frames cannot exceed validated attempted frames");

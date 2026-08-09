@@ -137,8 +137,7 @@ impl Classified for PlanError {
     }
 }
 
-/// Perform passive route/source/link selection. This never invokes ARP/NDP,
-/// capture, or transmission.
+/// Passively selects route, source, and link without ARP/NDP, capture, or transmission.
 pub fn plan<P: RouteProvider>(
     packet: &Packet,
     destination: Option<IpAddr>,

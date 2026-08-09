@@ -36,9 +36,8 @@ pub(in crate::platform) fn system_time(
     })
 }
 
-/// Projects a kernel wall-clock packet timestamp onto the monotonic clock.
-/// Future timestamps and packet ages older than the monotonic clock can
-/// represent are deliberately left unmarked.
+/// Projects a wall-clock timestamp to monotonic time; returns `None` for future
+/// or unrepresentably old packets.
 pub(in crate::platform) fn monotonic_packet_time(
     packet_timestamp: SystemTime,
     observed_wall: SystemTime,

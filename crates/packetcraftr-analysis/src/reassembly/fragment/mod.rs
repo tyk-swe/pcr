@@ -64,12 +64,8 @@ impl Reassembler {
     ///
     /// # Panics
     ///
-    /// Panics if a flow validated earlier in the same call has since
-    /// disappeared, or if a completed datagram is missing the segment the
-    /// merge plan just placed in it. Both would mean this reassembler had
-    /// corrupted its own state; every input-driven rejection, including
-    /// conflicting overlaps and exhausted budgets, is reported through
-    /// [`enum@Error`].
+    /// Panics only if reassembly loses a validated flow or planned segment;
+    /// input errors return [`enum@Error`].
     pub fn push(&mut self, fragment: Fragment, now: Instant) -> Result<Option<Event>, Error> {
         let Fragment {
             key,

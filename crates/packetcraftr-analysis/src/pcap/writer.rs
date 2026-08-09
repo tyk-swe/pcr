@@ -77,8 +77,7 @@ impl<W: Write> Writer<W> {
         match format {
             Format::Pcap => Self::pcap(inner, link_type),
             Format::PcapNg => {
-                // Validate the mandatory default interface before the section
-                // header is committed to the caller's output.
+                // Validate the default interface before writing the section header.
                 if link_type.0 > u16::MAX as u32 {
                     return Err(Error::LinkTypeOutOfRange {
                         link_type: link_type.0,

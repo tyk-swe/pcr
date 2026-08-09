@@ -13,8 +13,7 @@ use std::{
 use crate::route::NativeRouteError;
 
 pub(super) fn sockaddr_ip(bytes: &[u8]) -> Option<IpAddr> {
-    // Darwin sockaddr starts with sa_len then sa_family. Never inspect the
-    // family until both bytes are present.
+    // Darwin sockaddr stores `sa_family` after its leading length byte.
     let family = *bytes.get(1)? as libc::sa_family_t;
     match i32::from(family) {
         libc::AF_INET if bytes.len() >= size_of::<libc::sockaddr_in>() => {
@@ -76,10 +75,7 @@ pub(super) fn parse_route_addresses(
         let has_later_address = ((index + 1)..address_slots).any(|later| mask & (1 << later) != 0);
         let next_offset = match padded_end {
             Some(end) if end <= bytes.len() => end,
-            // Darwin may omit only the otherwise-unused alignment trailer
-            // after the final compact sockaddr. Its declared bytes remain
-            // complete and there is no later address whose alignment could
-            // become ambiguous.
+            // Darwin may omit the unused alignment trailer after the final sockaddr.
             _ if !has_later_address && address_end == bytes.len() => address_end,
             _ => {
                 return Err(NativeRouteError::InvalidResponse {
@@ -97,10 +93,7 @@ pub(super) fn parse_route_addresses(
 }
 
 pub(super) fn roundup(length: usize) -> usize {
-    // Darwin's routing socket uses ROUNDUP32 for sockaddr records on both
-    // x86_64 and arm64. This is deliberately independent of pointer/long
-    // width; using c_long here skips four bytes after values such as the
-    // 20-byte sockaddr_dl emitted for a directly connected route.
+    // Darwin routing sockets use 32-bit sockaddr alignment, not pointer-width alignment.
     let alignment = size_of::<u32>();
     if length == 0 {
         alignment

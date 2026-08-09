@@ -19,9 +19,8 @@ use crate::BoundaryError;
 use super::super::model::{ReplayAuthorizationContext, ReplayAuthorizer};
 use super::super::wire::replay_network_envelope;
 
-/// Production replay authorizer. It checks complete capture evidence, applies
-/// the traffic policy to raw routing destinations before any I/O, and requires
-/// an exact decode/build round trip.
+/// Validates complete capture evidence, applies policy to raw routing destinations
+/// before I/O, and requires an exact decode/build round trip.
 pub struct SystemAuthorizer {
     policy: crate::policy::Policy,
     registry: Arc<Registry>,

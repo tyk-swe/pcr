@@ -1,13 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Bounded, structured traceroute over the shared authorization, exchange,
-//! protocol-correlation, and capture-evidence contracts.
-//!
-//! Traceroute maps the forwarding path to an authorized destination by sending
-//! TTL-limited probes and correlating the ICMP responses, for diagnosing
-//! routing and reachability problems. Destination authorization is required
-//! before the first probe, and hop count, attempts, and timeouts are finite.
+//! Policy-gated traceroute to authorized destinations, with finite hop, attempt,
+//! timeout, and evidence limits.
 
 use std::time::Duration;
 

@@ -168,16 +168,12 @@ pub(super) fn compatible(spec: FieldSpec, literal: &Literal) -> bool {
         FieldKind::Bool => matches!(literal, Literal::Bool(_) | Literal::Unsigned(0 | 1)),
         FieldKind::Unsigned | FieldKind::Signed => match literal {
             Literal::Unsigned(_) | Literal::Signed(_) => true,
-            // An unbuilt derived field reflects as the text `auto`; that is the
-            // only way text can appear on a number. Accepting text more widely
-            // would let `frame.len == nope` compile and match nothing.
+            // Only derived numeric fields accept reflected `auto` text.
             Literal::Text(text) => spec.derived && text == AUTO_WIRE_VALUE,
             _ => false,
         },
         FieldKind::Text => matches!(literal, Literal::Text(_)),
-        // A byte field is equally addressable as a hex run or as text. A
-        // number covers the single-byte case, which has no unambiguous run
-        // spelling: `raw.bytes[0:1] == 0xaa`.
+        // Byte fields also accept a one-byte number.
         FieldKind::Bytes => match literal {
             Literal::Bytes(_) | Literal::Mac(_) | Literal::Text(_) => true,
             Literal::Unsigned(value) => *value <= u64::from(u8::MAX),
@@ -186,8 +182,7 @@ pub(super) fn compatible(spec: FieldSpec, literal: &Literal) -> bool {
         FieldKind::Ipv4 => matches!(literal, Literal::Ipv4(_) | Literal::Ipv4Net(..)),
         FieldKind::Ipv6 => matches!(literal, Literal::Ipv6(_) | Literal::Ipv6Net(..)),
         FieldKind::Mac => matches!(literal, Literal::Mac(_) | Literal::Bytes(_)),
-        // A list is compared element-wise, so any element-compatible literal
-        // may appear against it.
+        // Lists compare element-wise.
         FieldKind::List => true,
     }
 }

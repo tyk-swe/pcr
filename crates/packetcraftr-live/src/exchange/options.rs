@@ -11,8 +11,7 @@ use super::super::send::ClientError;
 use super::{ExchangeOptions, MAX_EXCHANGE_TIMEOUT};
 
 impl ExchangeOptions {
-    /// Validates every finite timeout and aggregate retention bound before a
-    /// resolver, route, neighbor, capture, or transmission provider is used.
+    /// Validates finite options and retention bounds before live providers run.
     pub fn validate(&self) -> Result<CaptureQueueLimits, ClientError> {
         if self.timeout > MAX_EXCHANGE_TIMEOUT {
             return Err(ClientError::InvalidExchangeOption {

@@ -34,9 +34,8 @@ use super::model::{
 use super::plan::{build_batches, worst_case_duration};
 use super::{IPV4_PROBE_BYTES, IPV6_PROBE_BYTES, SCAN_EVIDENCE_DIAGNOSTICS};
 
-/// Resolves and authorizes the complete target set before constructing any
-/// probe, applies operation-wide packet/byte/duration limits, schedules
-/// homogeneous batches, and classifies only checksum-valid correlated facts.
+/// Resolves and authorizes all targets before constructing probes, enforces operation
+/// limits, executes batches, and classifies only checksum-valid correlated responses.
 pub fn scan<A, E, C>(
     request: &ScanRequest,
     authorizer: &mut A,

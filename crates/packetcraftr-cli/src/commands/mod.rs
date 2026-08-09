@@ -1,11 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Cohesive command-line slices.
-//!
-//! Each module owns its Clap arguments, validation and conversion ordering,
-//! execution adapter, and command-specific rendering. Cross-command code lives
-//! outside this tree only when it has a concrete reusable responsibility.
+//! Command-line slices that own their arguments, conversion, execution, and rendering.
 
 use clap::Subcommand;
 use packetcraftr::output;

@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! CLI rendering pipeline for machine serialization, stream sequencing, capture files, and styled human terminal output.
+//! Machine, capture-file, and human-terminal rendering.
 
 mod capture_file;
 mod human;

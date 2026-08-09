@@ -1,11 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Versioned structured-output contracts.
-//!
-//! The v1 vocabulary is deliberately scoped by responsibility and command. Types
-//! in this module describe the serialized CLI contract; they are not aliases for
-//! workflow results intended to evolve independently.
+//! Versioned, render-neutral CLI output. Its types are separate from workflow
+//! results so both can evolve independently.
 
 pub mod build;
 pub mod capture;

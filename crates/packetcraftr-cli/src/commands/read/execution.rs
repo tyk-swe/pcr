@@ -16,17 +16,8 @@ use crate::rendering::capture_file_format;
 
 use super::conversion::{decode_options, next_frame_number};
 
-/// Rewrites a capture, keeping only the frames a filter accepts.
-///
-/// This is a filtering counterpart to `transcode`, which copies every record
-/// and so cannot select. Matching frames are written as they are found rather
-/// than collected first, so peak memory stays independent of how much of the
-/// capture the filter accepts.
-///
-/// Frame and byte budgets count every frame the input yields, not just the
-/// survivors, so filtering can never raise how much input one invocation
-/// reads. The writer inherits the same bounds, so an operator who raised a
-/// limit to accept an input does not then hit the default on the way out.
+/// Streams selected frames without buffering the capture, enforcing input and
+/// output bounds independently.
 pub(super) fn write_filtered_capture(
     reader: &mut Reader<File>,
     decoder: &packet::decode::Decoder,
@@ -37,13 +28,8 @@ pub(super) fn write_filtered_capture(
     max_interfaces: usize,
 ) -> Result<(), CliError> {
     let format = capture_file_format(output)?;
-    // Classic PCAP declares one link type for the whole file and carries no
-    // interface metadata, so `transcode` refuses to write it from a PCAPNG
-    // source. Filtering does not change that: deciding the link type from the
-    // first surviving frame would commit a header to standard output before a
-    // later frame of another link type could be found. Refuse it up front and
-    // identically, so a filter never turns a rejected conversion into a
-    // half-written file.
+    // A filtered PCAPNG cannot become classic PCAP: a later retained frame may
+    // use another link type. Reject before writing the header.
     if format == CaptureFormat::Pcap && reader.format() != CaptureFormat::Pcap {
         return Err(CliError::classified(
             capture::Error::MetadataNotRepresentable {

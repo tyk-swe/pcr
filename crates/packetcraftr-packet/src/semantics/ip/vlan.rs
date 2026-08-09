@@ -21,9 +21,7 @@ pub struct VlanMetadata {
     pub vlan_id: u16,
 }
 
-/// VLAN tags on the directly transmitted packet, outermost first. Tags inside
-/// an encapsulated frame belong to the tunneled network, not to the link this
-/// packet leaves on.
+/// Outermost-first VLAN tags on the directly transmitted packet.
 pub fn vlan_metadata(packet: &Packet) -> Result<Vec<VlanMetadata>, SemanticError> {
     packet
         .iter()

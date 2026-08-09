@@ -1,14 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Bounded structured scanning over the shared resolver, policy, template,
-//! exchange, matcher, and capture-evidence APIs.
-//!
-//! Scanning here means reachability and service-response inventory on networks
-//! the operator is authorized to test: send a templated probe, correlate the
-//! response, and classify it with capture-backed evidence. Every run requires
-//! destination authorization and terminates on finite packet, byte, duration,
-//! and evidence budgets.
+//! Policy-gated scanning of authorized targets with finite packet, byte,
+//! duration, and evidence budgets.
 
 use std::time::Duration;
 

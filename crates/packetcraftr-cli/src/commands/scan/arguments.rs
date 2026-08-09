@@ -23,10 +23,7 @@ Port syntax:
   Expansion is bounded by --max-ports and stops as soon as another distinct
   port would exceed that limit."#;
 
-/// One CLI `--ports` token: either a single u16 port or an inclusive
-/// `START-END` range. This is a CLI-only concern; expansion into the
-/// `Vec<u16>` carried by `workflow::scan::Request` happens in
-/// `commands::scan::conversion`.
+/// One CLI `--ports` token: a u16 port or inclusive `START-END` range.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CliScanPortSpec {
     Single(u16),

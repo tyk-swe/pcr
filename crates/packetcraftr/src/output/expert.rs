@@ -28,10 +28,7 @@ impl From<DiagnosticSeverity> for Severity {
     }
 }
 
-/// The transport whose conversation numbering a stream index belongs to.
-///
-/// TCP and UDP indices are allocated independently, so the index alone
-/// cannot name a conversation in a capture holding both.
+/// Transport namespace for a stream index; TCP and UDP indices are independent.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StreamTransport {
@@ -57,11 +54,8 @@ impl From<AnalysisStreamTransport> for StreamTransport {
     }
 }
 
-/// One finding, attributed to the capture frame that revealed it.
-///
-/// `transport` and `stream` are present together: the pair names the
-/// conversation in the same vocabulary the `tcp.stream` and `udp.stream`
-/// display filters use.
+/// A finding attributed to one capture frame. `transport` and `stream` jointly
+/// identify its conversation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Finding {
     pub severity: Severity,
@@ -94,10 +88,8 @@ pub struct CodeCount {
     pub findings: u64,
 }
 
-/// Aggregate or terminal result of `expert`.
-///
-/// The aggregate carries every finding; the NDJSON terminal record carries
-/// the totals with an empty list, since each finding was already streamed.
+/// Aggregate result or terminal NDJSON record; the latter omits already-streamed
+/// findings.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Result {
     pub frames_read: u64,

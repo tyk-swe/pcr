@@ -133,9 +133,7 @@ where
             )
             .map_err(|source| AnalysisError::Decode { number, source })?;
 
-        // Conversation indices exist independently of the filter, so an
-        // index reported by an unfiltered run names the same conversation in
-        // a filtered one.
+        // Assign stream IDs before filtering to keep them stable across runs.
         let segment = tcp_segment(&decoded);
         let tcp_stream = match &segment {
             Some(segment) => Some(tcp_streams.assign(&segment.flow, number, limits.max_flows)?),

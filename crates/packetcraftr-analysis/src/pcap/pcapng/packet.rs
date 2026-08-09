@@ -192,8 +192,7 @@ pub(in crate::pcap) fn parse_simple_packet(
             reason: "simple packet block length does not match its packet length",
         });
     }
-    // A Simple Packet Block has no timestamp field. UNIX_EPOCH is the
-    // deterministic sentinel used by the raw capture record model.
+    // Simple Packet Blocks lack timestamps; use the raw-record sentinel.
     let mut frame = Frame::try_with_lengths(
         UNIX_EPOCH,
         interface.link_type,

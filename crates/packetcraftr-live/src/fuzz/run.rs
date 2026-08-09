@@ -25,14 +25,12 @@ use super::{
     decode::{dissect_built, has_link_root},
 };
 
-/// Generate and validate every case offline, authorize the complete campaign,
-/// then execute built cases through the shared live boundary.
+/// Builds and validates all cases offline, then authorizes and executes the campaign.
 ///
 /// # Panics
 ///
-/// Panics if the executor selects a case that was never built, which would
-/// mean the boundary had returned evidence for a case outside the authorized
-/// campaign.
+/// Panics only if an internally selected case was never built; input errors return
+/// [`FuzzError`].
 pub fn run<A, E, C>(
     request: &packet_fuzz::Request,
     live: LiveOptions,

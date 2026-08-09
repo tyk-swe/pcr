@@ -1,10 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Crate-private native adapter boundary.
-//!
-//! This directory is the only location in the crate permitted to contain FFI
-//! or narrowly reviewed unsafe code. Public traits and values live in `net`.
+//! Crate-private FFI and reviewed-unsafe-code boundary.
 
 mod capture_dispatch;
 mod interface_dispatch;

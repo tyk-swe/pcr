@@ -27,8 +27,7 @@ pub struct Id {
     pub index: u32,
 }
 
-/// One address assigned to an interface, without any operating-system type in
-/// the public provider boundary.
+/// Portable address assigned to an interface.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Address {
     pub address: IpAddr,
@@ -55,8 +54,7 @@ pub struct Info {
     pub mac_address: Option<MacAddress>,
     pub addresses: Vec<Address>,
     pub flags: Flags,
-    /// Native interface MTU. Temporary portable enumeration adapters may not
-    /// expose it and return `None`.
+    /// Native MTU, if reported by the adapter.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mtu: Option<u32>,
     pub capability: Capability,

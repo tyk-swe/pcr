@@ -276,8 +276,7 @@ const DIRECT: &[Direct] = &[
         protocol: "gre",
         field: "protocol_type",
     },
-    // The traffic-class bits were named EXP for two decades, and the S bit
-    // is conventionally filtered as "bottom".
+    // Conventional MPLS aliases.
     Direct {
         path: "mpls.exp",
         protocol: "mpls",
@@ -288,9 +287,7 @@ const DIRECT: &[Direct] = &[
         protocol: "mpls",
         field: "bottom_of_stack",
     },
-    // VXLAN's and GENEVE's conventional spellings (vxlan.vni, geneve.vni,
-    // …) are their canonical field names, which resolve without
-    // registration.
+    // Canonical VXLAN and GENEVE VNI paths need no aliases.
 ];
 
 /// The nine TCP control flags, in their wire bit order.
@@ -354,8 +351,7 @@ const BITS: &[Bits] = &[
         field: "flags",
         mask: 0x100,
     },
-    // The accurate-ECN bit was named NS for two decades, and that spelling is
-    // still what most operators reach for, so both resolve to the same bit.
+    // Keep `ns` as the conventional alias for `ae`.
     Bits {
         path: "tcp.flags.ns",
         protocol: "tcp",
@@ -421,8 +417,7 @@ pub(super) fn register_filter_fields(builder: &mut RegistryBuilder) -> Result<()
                 protocol: entry.protocol.into(),
                 field: entry.field,
                 mask: entry.mask,
-                // Right-aligning the selected bit makes every flag compare
-                // against 0 and 1 rather than its positional weight.
+                // Shift flags to compare as 0 or 1.
                 shift: entry.mask.trailing_zeros(),
             },
         )?;

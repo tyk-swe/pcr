@@ -120,15 +120,13 @@ impl StatsCollector {
                 .add(bytes);
         }
 
-        // IP endpoints: the innermost network layer's source transmitted
-        // this frame and its destination received it.
+        // Count innermost-network endpoints as sender and receiver.
         if let Some((source, destination)) = innermost_network(record) {
             self.endpoints.entry(source).or_default().tx.add(bytes);
             self.endpoints.entry(destination).or_default().rx.add(bytes);
         }
 
-        // Conversations and ports, keyed by the indices the pipeline
-        // assigned so filters, follow-ups, and reports all agree.
+        // Use pipeline-assigned stream IDs for stable conversation and port stats.
         if let (Some(stream), Some(segment)) = (record.tcp_stream, tcp_segment(record.decoded)) {
             self.conversation(TransportKind::Tcp, stream, &segment.flow, bytes, timestamp);
         }
@@ -148,8 +146,7 @@ impl StatsCollector {
             None => timestamp,
         });
 
-        // I/O series: a frame timestamped before the first observed frame
-        // belongs to the first bucket rather than to invented negative time.
+        // Bucket timestamps before the capture origin at zero.
         let offset = timestamp.duration_since(origin).unwrap_or(Duration::ZERO);
         let bucket = offset.as_nanos() / self.interval.as_nanos().max(1);
         self.io
@@ -262,9 +259,7 @@ impl StatsCollector {
             .io
             .into_iter()
             .map(|(bucket, tally)| IoBucketStat {
-                // Computed in wide nanoseconds so a small interval over a
-                // long capture keeps exact offsets; only spans beyond what
-                // Duration can hold at all saturate.
+                // Compute offsets in u128; saturate only when converting to Duration.
                 offset: duration_from_nanos_saturating(
                     interval.as_nanos().saturating_mul(u128::from(bucket)),
                 ),

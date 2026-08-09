@@ -13,6 +13,9 @@ mod error;
 pub use error::PacketError;
 
 /// Exactly one ordered, arbitrary wire stack.
+///
+/// Cached encoded payload lengths are invalidated by every public operation
+/// that can change the layers or a layer's fields.
 #[derive(Clone, Default)]
 pub struct Packet {
     layers: Vec<Box<dyn Layer>>,
@@ -40,6 +43,14 @@ impl Packet {
             layers,
             encoded_payload_lengths,
         }
+    }
+
+    pub(crate) fn set_encoded_payload_lengths(
+        &mut self,
+        encoded_payload_lengths: Vec<Option<usize>>,
+    ) {
+        debug_assert_eq!(encoded_payload_lengths.len(), self.layers.len());
+        self.encoded_payload_lengths = encoded_payload_lengths;
     }
 
     pub fn len(&self) -> usize {
@@ -133,11 +144,18 @@ impl Packet {
             .find_map(|layer| layer.as_any().downcast_ref::<T>())
     }
 
+    /// Returns the first layer of type `T` for mutation.
+    ///
+    /// Obtaining mutable layer access invalidates cached encoded payload
+    /// lengths before the reference is returned. A failed type lookup does
+    /// not change the packet.
     pub fn get_mut<T: Layer + 'static>(&mut self) -> Option<&mut T> {
+        let index = self
+            .layers
+            .iter()
+            .position(|layer| layer.as_any().is::<T>())?;
         self.invalidate_encoded_payload_lengths();
-        self.layers
-            .iter_mut()
-            .find_map(|layer| layer.as_any_mut().downcast_mut::<T>())
+        self.layers[index].as_any_mut().downcast_mut::<T>()
     }
 
     pub fn get_all<T: Layer + 'static>(&self) -> impl Iterator<Item = &T> {
@@ -153,14 +171,18 @@ impl Packet {
             .find(|layer| layer.protocol_id() == protocol)
     }
 
+    /// Returns the first layer with `protocol` for mutation.
+    ///
+    /// Obtaining mutable layer access invalidates cached encoded payload
+    /// lengths before the reference is returned. A failed protocol lookup
+    /// does not change the packet.
     pub fn by_protocol_mut(&mut self, protocol: &ProtocolId) -> Option<&mut dyn Layer> {
+        let index = self
+            .layers
+            .iter()
+            .position(|layer| layer.protocol_id() == protocol)?;
         self.invalidate_encoded_payload_lengths();
-        for layer in &mut self.layers {
-            if layer.protocol_id() == protocol {
-                return Some(layer.as_mut());
-            }
-        }
-        None
+        Some(self.layers[index].as_mut())
     }
 
     pub fn all_by_protocol<'a>(
@@ -176,35 +198,25 @@ impl Packet {
         self.layers.get(index).map(Box::as_ref)
     }
 
+    /// Returns a layer at `index` for mutation.
+    ///
+    /// Obtaining mutable layer access invalidates cached encoded payload
+    /// lengths before the reference is returned. An out-of-bounds index does
+    /// not change the packet.
     pub fn layer_mut(&mut self, index: usize) -> Option<&mut dyn Layer> {
-        self.invalidate_encoded_payload_lengths();
-        match self.layers.get_mut(index) {
-            Some(layer) => Some(layer.as_mut()),
-            None => None,
+        if index >= self.layers.len() {
+            return None;
         }
-    }
-
-    /// Mutates a layer whose encoded payload boundary is known to be unchanged.
-    /// Callers must update only fixed-width fields covered by an existing layout.
-    pub fn mutate_fixed_width_layer<T: Layer + 'static>(
-        &mut self,
-        index: usize,
-        mutate: impl FnOnce(&mut T),
-    ) -> bool {
-        let Some(layer) = self.layers.get_mut(index) else {
-            return false;
-        };
-        let Some(layer) = layer.as_any_mut().downcast_mut::<T>() else {
-            return false;
-        };
-        mutate(layer);
-        true
+        self.invalidate_encoded_payload_lengths();
+        Some(self.layers[index].as_mut())
     }
 
     pub fn iter(&self) -> impl ExactSizeIterator<Item = &dyn Layer> + DoubleEndedIterator {
         self.layers.iter().map(Box::as_ref)
     }
 
+    /// Edits a reflected field, invalidating cached encoded payload lengths
+    /// before the field mutation is attempted.
     pub fn edit(
         &mut self,
         protocol: &ProtocolId,
@@ -225,6 +237,10 @@ impl Packet {
         equality::structurally_eq(self, other)
     }
 
+    /// Returns the cached number of encoded bytes after the layer at `index`.
+    ///
+    /// The value includes trailing padding and is available only for packets
+    /// produced by the decoder or builder without subsequent mutable access.
     pub fn encoded_payload_length(&self, index: usize) -> Option<usize> {
         self.encoded_payload_lengths.get(index).copied().flatten()
     }

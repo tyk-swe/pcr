@@ -328,9 +328,26 @@ fn packet_mutation_reflection_and_boundaries_are_consistent() {
         .replace(0, Child { value: 9 })
         .expect("replace layer");
     assert_eq!(removed.protocol_id().as_str(), "child");
-    assert!(packet.mutate_fixed_width_layer::<Child>(0, |child| child.value = 10));
-    assert!(!packet.mutate_fixed_width_layer::<Probe>(0, |_| {}));
-    assert!(!packet.mutate_fixed_width_layer::<Child>(99, |_| {}));
+    packet
+        .layer_mut(0)
+        .and_then(|layer| layer.as_any_mut().downcast_mut::<Child>())
+        .expect("child layer at index 0")
+        .value = 10;
+    let before_failed_mutations = packet.clone();
+    assert!(
+        packet
+            .layer_mut(0)
+            .and_then(|layer| layer.as_any_mut().downcast_mut::<Probe>())
+            .is_none()
+    );
+    assert!(packet.layer_mut(99).is_none());
+    assert!(packet.get_mut::<Raw>().is_none());
+    assert!(packet.by_protocol_mut(&"absent".into()).is_none());
+    assert!(matches!(
+        packet.replace(99, Child::default()),
+        Err(packetcraftr_packet::Error::IndexOutOfBounds { index: 99, len: 4 })
+    ));
+    assert!(packet.structurally_eq(&before_failed_mutations));
     assert_eq!(packet.get::<Child>().map(|child| child.value), Some(10));
 
     assert!(matches!(
@@ -353,6 +370,7 @@ fn packet_mutation_reflection_and_boundaries_are_consistent() {
             .and_then(|layer| layer.field("value")),
         Some(42_u8.into())
     );
+    let before_failed_edits = packet.clone();
     assert!(packet.by_protocol_mut(&"absent".into()).is_none());
     assert!(matches!(
         packet.edit(&"absent".into(), "value", 1_u8.into()),
@@ -370,6 +388,7 @@ fn packet_mutation_reflection_and_boundaries_are_consistent() {
             FieldError::OutOfRange { .. }
         ))
     ));
+    assert!(packet.structurally_eq(&before_failed_edits));
 
     let clone = packet.clone();
     assert!(packet.structurally_eq(&clone));
@@ -797,7 +816,36 @@ fn registry_build_decode_and_error_paths_are_bounded() {
     assert_eq!(decoded.packet.len(), 2);
     assert_eq!(decoded.original.as_ref(), &[9, 4]);
     assert_eq!(decoded.layout.layers.len(), 2);
+    assert_eq!(decoded.packet.encoded_payload_length(0), Some(1));
+    assert_eq!(decoded.packet.encoded_payload_length(1), Some(0));
     assert_eq!(decoded.diagnostics.len(), 1);
+
+    let before_failed_lookups = decoded.packet.clone();
+    let mut failed_lookups = decoded.packet;
+    assert!(failed_lookups.get_mut::<Raw>().is_none());
+    assert!(failed_lookups.by_protocol_mut(&"absent".into()).is_none());
+    assert!(failed_lookups.layer_mut(99).is_none());
+    assert!(matches!(
+        failed_lookups.insert_boxed(99, Box::new(Probe::default())),
+        Err(packetcraftr_packet::Error::IndexOutOfBounds { index: 99, len: 2 })
+    ));
+    assert!(matches!(
+        failed_lookups.replace_boxed(99, Box::new(Probe::default())),
+        Err(packetcraftr_packet::Error::IndexOutOfBounds { index: 99, len: 2 })
+    ));
+    assert!(matches!(
+        failed_lookups.remove(99),
+        Err(packetcraftr_packet::Error::IndexOutOfBounds { index: 99, len: 2 })
+    ));
+    assert!(failed_lookups.structurally_eq(&before_failed_lookups));
+    assert_eq!(
+        failed_lookups.encoded_payload_length(0),
+        before_failed_lookups.encoded_payload_length(0)
+    );
+    assert_eq!(
+        failed_lookups.encoded_payload_length(1),
+        before_failed_lookups.encoded_payload_length(1)
+    );
 
     let frame = Frame::new(
         SystemTime::UNIX_EPOCH + Duration::from_secs(5),
@@ -821,6 +869,7 @@ fn registry_build_decode_and_error_paths_are_bounded() {
         raw.packet.get::<Raw>().map(|raw| raw.bytes.as_ref()),
         Some(&[1, 2][..])
     );
+    assert_eq!(raw.packet.encoded_payload_length(0), Some(0));
     assert_eq!(raw.diagnostics[0].code, "decode.unsupported_link_type");
 
     assert!(matches!(

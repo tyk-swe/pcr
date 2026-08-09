@@ -55,6 +55,10 @@ archives do not.
 ### Build from source
 
 The repository pins Rust 1.97.1; Rust 1.96 is the minimum supported version.
+Cargo uses sccache as its compiler wrapper, so install a compatible `sccache`
+executable on `PATH` before building; 0.17.0 is the tested version. Prefer a
+prebuilt or package-manager installation from the
+[upstream installation guide](https://github.com/mozilla/sccache#installation).
 Linux builds require clang and lld. Install libpcap development files (for
 example, `libpcap-dev` on Debian/Ubuntu) for an all-feature build.
 

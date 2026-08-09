@@ -8,7 +8,11 @@ public issue.
 
 The workspace uses Rust 2024, pins Rust 1.97.1, and supports Rust 1.96 or newer.
 Linux builds use clang and lld; all-feature builds also need libpcap development
-files. cargo-nextest 0.9.143 or newer is required for the nextest commands.
+files. Cargo uses sccache as its compiler wrapper, so install a compatible
+`sccache` executable on `PATH` before running project commands; 0.17.0 is the
+tested version. Prefer a prebuilt or package-manager installation from the
+[upstream installation guide](https://github.com/mozilla/sccache#installation).
+cargo-nextest 0.9.143 or newer is required for the nextest commands.
 
 Run the checks that cover your change:
 

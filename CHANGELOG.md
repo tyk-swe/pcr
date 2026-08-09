@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Source, CI, and release builds now use sccache; source builds require a
+  compatible `sccache` executable on `PATH`.
+
 ## [0.5.0-beta.1] - 2026-08-09
 
 ### Added

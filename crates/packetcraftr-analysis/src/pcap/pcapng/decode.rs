@@ -274,16 +274,6 @@ pub(in crate::pcap) fn read_next_pcapng_record<R: Read>(
             )
         }
         PCAPNG_ENHANCED_PACKET_BLOCK | PCAPNG_PACKET_BLOCK | PCAPNG_SIMPLE_PACKET_BLOCK => {
-            let local_interface = if block_type == PCAPNG_SIMPLE_PACKET_BLOCK {
-                0
-            } else if block_type == PCAPNG_PACKET_BLOCK {
-                u32::from(super::super::wire::decode_u16(
-                    section_endianness,
-                    &body[..2],
-                )?)
-            } else {
-                decode_u32(section_endianness, &body[..4])?
-            };
             let frame = match block_type {
                 PCAPNG_ENHANCED_PACKET_BLOCK => parse_enhanced_packet(
                     body,
@@ -306,6 +296,16 @@ pub(in crate::pcap) fn read_next_pcapng_record<R: Read>(
                     state.interface_base,
                     options.max_size,
                 )?,
+            };
+            let local_interface = if block_type == PCAPNG_SIMPLE_PACKET_BLOCK {
+                0
+            } else if block_type == PCAPNG_PACKET_BLOCK {
+                u32::from(super::super::wire::decode_u16(
+                    section_endianness,
+                    &body[..2],
+                )?)
+            } else {
+                decode_u32(section_endianness, &body[..4])?
             };
             let parsed_options = parse_options(
                 packet_options(block_type, body, section_endianness)?,

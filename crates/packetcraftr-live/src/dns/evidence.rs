@@ -12,7 +12,7 @@ use packetcraftr_packet::{
 use crate::probe::evidence::{
     ExchangeEvidenceError, ResponseEvidence, validate_aggregate_evidence_limits,
     validate_capture_statistics_evidence, validate_response_frames_and_deadlines,
-    validate_sent_byte_accounting,
+    validate_sent_byte_accounting, validate_sent_frame_timestamps,
 };
 
 use super::error::DnsError;
@@ -93,6 +93,8 @@ pub(super) fn validate_dns_execution(
         execution.stats.bytes,
     )
     .map_err(|error| map_dns_evidence_error(attempt, error))?;
+    validate_sent_frame_timestamps(std::slice::from_ref(&execution.sent_evidence))
+        .map_err(|error| map_dns_evidence_error(attempt, error))?;
     validate_capture_statistics_evidence(execution.stats.capture)
         .map_err(|error| map_dns_evidence_error(attempt, error))?;
     validate_response_frames_and_deadlines(&execution.responses, &execution.unsolicited, timeout)
@@ -128,6 +130,9 @@ fn map_dns_evidence_error(attempt: u32, error: ExchangeEvidenceError) -> DnsErro
         ExchangeEvidenceError::SentByteCountMismatch { reported, actual } => format!(
             "successful exchange reported {reported} sent bytes for {actual} exact frame bytes"
         ),
+        ExchangeEvidenceError::TimestampUnavailable { evidence } => {
+            format!("executor returned {evidence} without a timestamp")
+        }
         ExchangeEvidenceError::InvalidMatchedResponse { message }
         | ExchangeEvidenceError::InvalidUnsolicitedResponse { message }
         | ExchangeEvidenceError::InvalidCaptureStatistics { message } => message,

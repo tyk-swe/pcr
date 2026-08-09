@@ -928,6 +928,18 @@ fn malformed_pcapng_packets_and_options_are_rejected() {
         reader.next_frame(),
         Err(Error::InvalidData { .. })
     ));
+
+    for block_type in [6, 2] {
+        let bytes = pcapng_stream(endianness, &[metadata_block(endianness, block_type)]);
+        let mut reader = Reader::new(Cursor::new(bytes)).expect("section opens");
+        assert!(matches!(
+            reader.next_frame(),
+            Err(Error::InvalidData {
+                format: Format::PcapNg,
+                ..
+            })
+        ));
+    }
 }
 
 #[test]

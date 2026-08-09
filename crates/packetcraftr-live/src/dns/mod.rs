@@ -48,6 +48,8 @@ mod engine;
 mod error;
 mod evidence;
 mod model;
+#[cfg(test)]
+mod tests;
 mod wire;
 
 pub use crate::target::PolicyAuthorizer;

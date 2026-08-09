@@ -75,6 +75,12 @@ pub(super) fn validate_execution(
             ),
         });
     }
+    let Some(sent_at) = execution.sent.timestamp else {
+        return Err(FuzzError::InvalidEvidence {
+            case_index: case.index,
+            message: "executor returned sent frame without a timestamp".to_owned(),
+        });
+    };
     execution
         .stats
         .capture
@@ -85,8 +91,14 @@ pub(super) fn validate_execution(
         })?;
     for response in &execution.responses {
         deadline.check().map_err(duration_limit)?;
-        let within_deadline = crate::live_timestamp(response)
-            .duration_since(crate::live_timestamp(&execution.sent))
+        let Some(received_at) = response.timestamp else {
+            return Err(FuzzError::InvalidEvidence {
+                case_index: case.index,
+                message: "executor returned response frame without a timestamp".to_owned(),
+            });
+        };
+        let within_deadline = received_at
+            .duration_since(sent_at)
             .is_ok_and(|latency| latency <= timeout);
         if !within_deadline {
             return Err(FuzzError::InvalidEvidence {

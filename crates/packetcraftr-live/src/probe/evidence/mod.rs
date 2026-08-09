@@ -15,6 +15,7 @@ pub(crate) use exact_validation::{
     format_exchange_evidence_error, validate_aggregate_evidence_limits,
     validate_capture_statistics_evidence, validate_exchange_evidence,
     validate_response_frames_and_deadlines, validate_sent_byte_accounting,
+    validate_sent_frame_timestamps,
 };
 
 mod budget;

@@ -140,6 +140,28 @@ impl MatchedResponseEvidence for NoMatchedResponses {
     }
 }
 
+struct MatchedResponse {
+    request_index: usize,
+    response: DecodedPacket,
+    latency: Duration,
+}
+
+impl ResponseEvidence for MatchedResponse {
+    fn response(&self) -> &DecodedPacket {
+        &self.response
+    }
+
+    fn latency(&self) -> Duration {
+        self.latency
+    }
+}
+
+impl MatchedResponseEvidence for MatchedResponse {
+    fn request_index(&self) -> usize {
+        self.request_index
+    }
+}
+
 #[test]
 fn evidence_aggregate_validation_reports_cardinality_and_byte_accounting_failures() {
     let sent_frame = frame(&[1, 2]);
@@ -187,12 +209,97 @@ fn evidence_aggregate_validation_reports_cardinality_and_byte_accounting_failure
     );
 }
 
+#[test]
+fn evidence_aggregate_validation_rejects_untimestamped_live_evidence() {
+    let sent_packets = [Packet::new()];
+    let untimestamped_sent = [untimestamped_frame(&[1])];
+    let matched = Vec::<NoMatchedResponses>::new();
+    let stats = Stats {
+        packets_attempted: 1,
+        packets_completed: 1,
+        bytes: 1,
+        ..Stats::default()
+    };
+    let evidence = ExchangeEvidence {
+        request_count: 1,
+        sent_packets: &sent_packets,
+        sent_frames: &untimestamped_sent,
+        matched_responses: &matched,
+        unsolicited: &[],
+        undecoded: &[],
+        timeout: Duration::from_secs(1),
+        stats: &stats,
+    };
+    assert_eq!(
+        validate_exchange_evidence(evidence, 1, 1, |_, _| true),
+        Err(ExchangeEvidenceError::TimestampUnavailable {
+            evidence: "sent frame"
+        })
+    );
+
+    let sent_frames = [frame(&[1])];
+    let response = MatchedResponse {
+        request_index: 0,
+        response: decoded_without_timestamp(&[2]),
+        latency: Duration::from_millis(1),
+    };
+    let evidence = ExchangeEvidence {
+        request_count: 1,
+        sent_packets: &sent_packets,
+        sent_frames: &sent_frames,
+        matched_responses: std::slice::from_ref(&response),
+        unsolicited: &[],
+        undecoded: &[],
+        timeout: Duration::from_secs(1),
+        stats: &stats,
+    };
+    assert_eq!(
+        validate_exchange_evidence(evidence, 1, 2, |_, _| true),
+        Err(ExchangeEvidenceError::TimestampUnavailable {
+            evidence: "matched response"
+        })
+    );
+
+    let unsolicited = [decoded_without_timestamp(&[3])];
+    let evidence = ExchangeEvidence {
+        request_count: 1,
+        sent_packets: &sent_packets,
+        sent_frames: &sent_frames,
+        matched_responses: &matched,
+        unsolicited: &unsolicited,
+        undecoded: &[],
+        timeout: Duration::from_secs(1),
+        stats: &stats,
+    };
+    assert_eq!(
+        validate_exchange_evidence(evidence, 1, 2, |_, _| true),
+        Err(ExchangeEvidenceError::TimestampUnavailable {
+            evidence: "unsolicited response"
+        })
+    );
+}
+
 fn frame(bytes: &'static [u8]) -> Frame {
     Frame::new(SystemTime::UNIX_EPOCH, LinkType::RAW, bytes).expect("evidence frame")
 }
 
+fn untimestamped_frame(bytes: &'static [u8]) -> Frame {
+    Frame::without_timestamp(LinkType::RAW, bytes).expect("untimestamped evidence frame")
+}
+
 fn decoded_at(offset: Duration, bytes: &'static [u8]) -> DecodedPacket {
     let frame = Frame::new(UNIX_EPOCH + offset, LinkType::RAW, bytes).expect("decoded frame");
+    DecodedPacket {
+        packet: Packet::new(),
+        original: frame.bytes().clone(),
+        frame,
+        layout: layout::Packet::default(),
+        diagnostics: Vec::new(),
+    }
+}
+
+fn decoded_without_timestamp(bytes: &'static [u8]) -> DecodedPacket {
+    let frame = untimestamped_frame(bytes);
     DecodedPacket {
         packet: Packet::new(),
         original: frame.bytes().clone(),

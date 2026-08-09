@@ -72,6 +72,9 @@ pub(crate) enum ExchangeEvidenceError {
         reported: u64,
         actual: u64,
     },
+    TimestampUnavailable {
+        evidence: &'static str,
+    },
     InvalidMatchedResponse {
         message: String,
     },
@@ -133,6 +136,15 @@ pub(crate) fn validate_sent_byte_accounting(
     Ok(())
 }
 
+pub(crate) fn validate_sent_frame_timestamps(
+    sent_frames: &[Frame],
+) -> Result<(), ExchangeEvidenceError> {
+    for frame in sent_frames {
+        validate_frame_timestamp(frame, "sent frame")?;
+    }
+    Ok(())
+}
+
 pub(crate) fn validate_response_frames_and_deadlines<M: ResponseEvidence>(
     matched_responses: &[M],
     unsolicited: &[DecodedPacket],
@@ -140,11 +152,23 @@ pub(crate) fn validate_response_frames_and_deadlines<M: ResponseEvidence>(
 ) -> Result<(), ExchangeEvidenceError> {
     for response in matched_responses {
         validate_exact_matched_response(response.response())?;
+        validate_frame_timestamp(&response.response().frame, "matched response")?;
         validate_matched_response_deadline(response.latency(), timeout)?;
     }
     for response in unsolicited {
         validate_decoded_frame(response, "unsolicited response")
             .map_err(|message| ExchangeEvidenceError::InvalidUnsolicitedResponse { message })?;
+        validate_frame_timestamp(&response.frame, "unsolicited response")?;
+    }
+    Ok(())
+}
+
+fn validate_frame_timestamp(
+    frame: &Frame,
+    evidence: &'static str,
+) -> Result<(), ExchangeEvidenceError> {
+    if frame.timestamp.is_none() {
+        return Err(ExchangeEvidenceError::TimestampUnavailable { evidence });
     }
     Ok(())
 }
@@ -211,6 +235,9 @@ pub(crate) fn format_exchange_evidence_error(
         ExchangeEvidenceError::SentByteCountMismatch { reported, actual } => format!(
             "successful exchange reported {reported} sent bytes for {actual} exact frame bytes"
         ),
+        ExchangeEvidenceError::TimestampUnavailable { evidence } => {
+            format!("executor returned {evidence} without a timestamp")
+        }
         ExchangeEvidenceError::MatchedResponseAfterTimeout { latency, timeout } => {
             format!("matched response latency {latency:?} exceeds timeout {timeout:?}")
         }
@@ -262,6 +289,7 @@ where
     }
 
     validate_sent_byte_accounting(evidence.sent_frames, evidence.stats.bytes)?;
+    validate_sent_frame_timestamps(evidence.sent_frames)?;
     validate_response_frames_and_deadlines(
         evidence.matched_responses,
         evidence.unsolicited,

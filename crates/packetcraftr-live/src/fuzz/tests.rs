@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
+use packetcraftr_packet::error::Classified;
 use packetcraftr_packet::frame::{Frame, LinkType};
 use packetcraftr_packet::fuzz as packet_fuzz;
 use packetcraftr_packet::protocol::{
@@ -69,6 +70,38 @@ impl Executor for RebuildingExecutor {
     }
 }
 
+struct UntimestampedFuzzExecutor {
+    registry: Arc<Registry>,
+}
+
+impl Executor for UntimestampedFuzzExecutor {
+    fn execute(
+        &mut self,
+        case: &ExecutionCase,
+        _timeout: Duration,
+    ) -> Result<Execution, BoundaryError> {
+        let built = Builder::new(Arc::clone(&self.registry))
+            .build(case.packet.clone(), Context::default(), Options::default())
+            .expect("prepared case must rebuild");
+        let sent = Frame::without_timestamp(LinkType::IPV4, built.bytes.clone())
+            .expect("built packet is a valid frame");
+        Ok(Execution {
+            stats: Stats {
+                packets_attempted: 1,
+                packets_completed: 1,
+                bytes: built.bytes.len() as u64,
+                ..Stats::default()
+            },
+            built,
+            sent,
+            responses: Vec::new(),
+            unmatched: Vec::new(),
+            undecoded: Vec::new(),
+            diagnostics: Vec::new(),
+        })
+    }
+}
+
 #[derive(Default)]
 struct NoopClock;
 
@@ -84,7 +117,10 @@ fn packet() -> Packet {
     let mut packet = Packet::new();
     packet
         .push(Ipv4::default())
-        .push(Udp::default())
+        .push(Udp {
+            destination_port: 9,
+            ..Udp::default()
+        })
         .push(Raw::new(Bytes::from_static(b"campaign")));
     packet
 }
@@ -130,4 +166,35 @@ fn live_execution_uses_the_identical_packet_campaign() {
             live.built.as_ref().map(|built| built.bytes.as_ref())
         );
     }
+}
+
+#[test]
+fn live_fuzz_executor_evidence_requires_sent_timestamp() {
+    let registry = Arc::new(default_registry().expect("built-in registry"));
+    let request = packet_fuzz::Request {
+        cases: 1,
+        strategies: vec![packet_fuzz::Strategy::BitFlip],
+        targets: vec!["2.bytes".parse().expect("raw field target")],
+        ..packet_fuzz::Request::default()
+    };
+    let mut authorizer = AllowAll;
+    let mut executor = UntimestampedFuzzExecutor {
+        registry: Arc::clone(&registry),
+    };
+    let error = run(
+        &request,
+        LiveOptions {
+            timeout: Duration::from_millis(1),
+            ..LiveOptions::default()
+        },
+        packet(),
+        registry,
+        &mut authorizer,
+        &mut executor,
+        &mut NoopClock,
+    )
+    .expect_err("untimestamped sent evidence must be rejected");
+
+    assert_eq!(error.classification().code, "internal.fuzz_evidence");
+    assert!(error.to_string().contains("sent frame without a timestamp"));
 }

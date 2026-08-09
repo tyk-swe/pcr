@@ -11,6 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Source, CI, and release builds now use sccache; source builds require a
   compatible `sccache` executable on `PATH`.
+- **Breaking:** Removed the generic `Packet::mutate_fixed_width_layer` escape
+  hatch. All public mutable layer access now invalidates cached encoded
+  payload lengths; decoded packets populate those lengths from their layer
+  ranges.
+
+### Fixed
+
+- Preserved TCP response correlation for Layer2 exchanges whose TCP
+  sequence-space length depends on encoded payload caches.
 
 ## [0.5.0-beta.1] - 2026-08-09
 

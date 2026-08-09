@@ -6,9 +6,10 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
+use packetcraftr_packet::field::Value as FieldValue;
 use packetcraftr_packet::filter::{Context as FilterContext, Filter, Options as FilterOptions};
 use packetcraftr_packet::frame::{Frame, LinkType};
-use packetcraftr_packet::layer::{Layer, Malformed, Raw};
+use packetcraftr_packet::layer::{Layer, Malformed, Padding, Raw};
 use packetcraftr_packet::protocol::application::Dns;
 use packetcraftr_packet::protocol::capture::{BsdLoop, BsdNull, LinuxSll, LinuxSll2};
 use packetcraftr_packet::protocol::gre::Gre;
@@ -629,4 +630,134 @@ fn response_matchers_correlate_reverse_udp_and_icmp_echo_flows() {
         )
         .is_none()
     );
+}
+
+#[test]
+fn tcp_response_correlation_uses_decoded_payload_after_every_mutation_api() {
+    let registry = registry();
+    let tcp_matcher = registry.matcher("tcp").expect("TCP matcher");
+    let mut response = Packet::new();
+    response.push(ipv4([198, 51, 100, 2], [192, 0, 2, 1]));
+    response.push(Tcp {
+        source_port: 80,
+        destination_port: 40_000,
+        acknowledgment: 104,
+        flags: Tcp::ACK,
+        ..Tcp::default()
+    });
+
+    type Mutator = fn(&mut Packet);
+    let mutators: [(&str, Mutator); 6] = [
+        ("get_mut", |packet| {
+            packet.get_mut::<Raw>().expect("Raw").bytes = Bytes::from_static(&[2, 3, 4]);
+        }),
+        ("by_protocol_mut", |packet| {
+            packet
+                .by_protocol_mut(&"raw".into())
+                .expect("Raw protocol")
+                .set_field("bytes", FieldValue::Bytes(Bytes::from_static(&[2, 3, 4])))
+                .expect("Raw bytes field");
+        }),
+        ("layer_mut", |packet| {
+            packet
+                .layer_mut(2)
+                .expect("Raw layer")
+                .as_any_mut()
+                .downcast_mut::<Raw>()
+                .expect("Raw type")
+                .bytes = Bytes::from_static(&[2, 3, 4]);
+        }),
+        ("edit", |packet| {
+            packet
+                .edit(
+                    &"raw".into(),
+                    "bytes",
+                    FieldValue::Bytes(Bytes::from_static(&[2, 3, 4])),
+                )
+                .expect("Raw edit");
+        }),
+        ("replace", |packet| {
+            packet
+                .replace(2, Raw::new(Bytes::from_static(&[2, 3, 4])))
+                .expect("Raw replacement");
+        }),
+        ("replace_boxed", |packet| {
+            packet
+                .replace_boxed(2, Box::new(Raw::new(Bytes::from_static(&[2, 3, 4]))))
+                .expect("boxed Raw replacement");
+        }),
+    ];
+
+    for (name, mutate) in mutators {
+        let mut request = Packet::new();
+        request.push(ipv4([192, 0, 2, 1], [198, 51, 100, 2]));
+        request.push(Tcp {
+            source_port: 40_000,
+            destination_port: 80,
+            sequence: 100,
+            ..Tcp::default()
+        });
+        request.push(Raw::new(Bytes::from_static(&[1])));
+        let builder = build::Builder::new(Arc::clone(&registry));
+        let built = builder
+            .build(
+                request,
+                build::Context::default(),
+                build::Options::default(),
+            )
+            .expect("TCP request builds");
+        let mut request = decode::Decoder::new(Arc::clone(&registry))
+            .decode_with_root(built.bytes, "ipv4".into(), decode::Options::default())
+            .expect("TCP request decodes")
+            .packet;
+
+        assert_eq!(request.encoded_payload_length(1), Some(1), "{name} setup");
+        mutate(&mut request);
+        assert_eq!(
+            request.encoded_payload_length(1),
+            None,
+            "{name} invalidates"
+        );
+        assert!(
+            tcp_matcher.matches(&request, &response).matched,
+            "{name} must use the new TCP payload length"
+        );
+    }
+}
+
+#[test]
+fn tcp_response_correlation_preserves_syn_fin_and_trailing_padding_rules() {
+    let registry = registry();
+    let matcher = registry.matcher("tcp").expect("TCP matcher");
+    let mut request = Packet::new();
+    request.push(ipv4([192, 0, 2, 1], [198, 51, 100, 2]));
+    request.push(Tcp {
+        source_port: 40_000,
+        destination_port: 80,
+        sequence: 100,
+        flags: Tcp::SYN | Tcp::FIN,
+        ..Tcp::default()
+    });
+    request.push(Raw::new(Bytes::from_static(&[1])));
+    request.push(Padding::after_layer(Bytes::from_static(&[0xaa, 0xbb]), 0));
+
+    let built = build::Builder::new(Arc::clone(&registry))
+        .build(
+            request,
+            build::Context::default(),
+            build::Options::default(),
+        )
+        .expect("padded TCP request builds");
+    assert_eq!(built.packet.encoded_payload_length(1), Some(3));
+
+    let mut response = Packet::new();
+    response.push(ipv4([198, 51, 100, 2], [192, 0, 2, 1]));
+    response.push(Tcp {
+        source_port: 80,
+        destination_port: 40_000,
+        acknowledgment: 103,
+        flags: Tcp::ACK,
+        ..Tcp::default()
+    });
+    assert!(matcher.matches(&built.packet, &response).matched);
 }

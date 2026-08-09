@@ -95,6 +95,7 @@ pub(super) fn raw_decoded_frame(frame: Frame, diagnostic: Diagnostic) -> Decoded
     let original = frame.bytes().clone();
     let mut packet = Packet::new();
     packet.push(Raw::new(original.clone()));
+    packet.set_encoded_payload_lengths(vec![Some(0)]);
     DecodedPacket {
         packet,
         original: original.clone(),

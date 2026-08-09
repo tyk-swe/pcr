@@ -186,9 +186,10 @@ pub(super) fn materialize_link_fields(
     Ok(changed)
 }
 
-/// Applies resolved MAC addresses to a preliminary build when every encoder is
-/// a crate-provided codec. External codecs may derive arbitrary bytes from the
-/// Ethernet model, so they must use the full rebuild path.
+/// Applies the resolved MAC addresses to a preliminary build when every
+/// encoder is a crate-provided codec and the verified Ethernet layout is
+/// exactly the fixed 14-byte header. External codecs use the full rebuild
+/// path because they may derive arbitrary bytes from the Ethernet model.
 pub(super) fn patch_builtin_ethernet(
     registry: &Registry,
     preliminary: &mut BuiltPacket,
@@ -253,16 +254,15 @@ pub(super) fn patch_builtin_ethernet(
     {
         return false;
     }
-
-    let patched = preliminary
-        .packet
-        .mutate_fixed_width_layer(0, |ethernet: &mut Ethernet| {
-            ethernet.destination = materialized.destination;
-            ethernet.source = materialized.source;
-        });
-    if !patched {
+    if tcp_payload_length_cache_required(&preliminary.packet) {
         return false;
     }
+
+    let Some(ethernet) = preliminary.packet.get_mut::<Ethernet>() else {
+        return false;
+    };
+    ethernet.destination = materialized.destination;
+    ethernet.source = materialized.source;
 
     let bytes = std::mem::take(&mut preliminary.bytes);
     preliminary.bytes = match bytes.try_into_mut() {
@@ -281,14 +281,41 @@ pub(super) fn patch_builtin_ethernet(
     true
 }
 
+fn tcp_payload_length_cache_required(packet: &Packet) -> bool {
+    for (tcp_index, layer) in packet.iter().enumerate() {
+        if BuiltinProtocol::of(layer) != Some(BuiltinProtocol::Tcp)
+            || packet.encoded_payload_length(tcp_index).is_none()
+        {
+            continue;
+        }
+        for child in packet.iter().skip(tcp_index + 1) {
+            match BuiltinProtocol::of(child) {
+                Some(BuiltinProtocol::Padding) => {
+                    let inside_tcp_payload = child
+                        .field("outside_layer")
+                        .and_then(|value| value.as_u64())
+                        .and_then(|value| usize::try_from(value).ok())
+                        .is_some_and(|outside_layer| tcp_index < outside_layer);
+                    if inside_tcp_payload {
+                        return true;
+                    }
+                    break;
+                }
+                Some(BuiltinProtocol::Raw) => {}
+                _ => return true,
+            }
+        }
+    }
+    false
+}
+
 pub(super) fn require_fixed_width_link_materialization(
     preliminary_len: usize,
     materialized_len: usize,
 ) -> Result<(), ClientError> {
     if materialized_len != preliminary_len {
-        // Only fixed-width MAC fields may change after the preliminary build.
-        // Treat a custom codec violating that contract as a materialization
-        // error rather than authorizing or accounting for a different shape.
+        // A full materialization rebuild must retain the planned frame shape;
+        // transmission accounting and authorization are based on it.
         return Err(ClientError::PacketMaterialization {
             layer: 0,
             field: BuiltinProtocol::Ethernet.as_str(),
@@ -298,4 +325,208 @@ pub(super) fn require_fixed_width_link_materialization(
         });
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{net::Ipv4Addr, sync::Arc};
+
+    use packetcraftr_packet::field::Wire as WireValue;
+    use packetcraftr_packet::layer::{Padding, Raw};
+    use packetcraftr_packet::protocol::{application::Dns, builtin, network::Ipv4, transport::Tcp};
+
+    use super::*;
+
+    #[test]
+    fn builtin_ethernet_patch_keeps_model_and_bytes_in_agreement() {
+        let registry = Arc::new(builtin::registry().expect("built-in registry"));
+        let builder = packetcraftr_packet::build::Builder::new(Arc::clone(&registry));
+        let mut packet = Packet::new();
+        packet.push(Ethernet {
+            ether_type: WireValue::Exact(0x88b5),
+            ..Ethernet::default()
+        });
+        packet.push(Raw::new(Bytes::from_static(&[0xde, 0xad])));
+        let mut preliminary = builder
+            .build(
+                packet,
+                BuildContext::default(),
+                packetcraftr_packet::build::Options::default(),
+            )
+            .expect("preliminary packet");
+        assert_eq!(preliminary.packet.encoded_payload_length(0), Some(2));
+
+        let mut materialized = preliminary.packet.clone();
+        let destination = [0x10, 0x11, 0x12, 0x13, 0x14, 0x15];
+        let source = [0x20, 0x21, 0x22, 0x23, 0x24, 0x25];
+        let ethernet = materialized.get_mut::<Ethernet>().expect("Ethernet");
+        ethernet.destination = destination;
+        ethernet.source = source;
+        let expected = builder
+            .build(
+                materialized.clone(),
+                BuildContext::default(),
+                packetcraftr_packet::build::Options::default(),
+            )
+            .expect("materialized packet");
+
+        assert!(patch_builtin_ethernet(
+            &registry,
+            &mut preliminary,
+            &materialized
+        ));
+        assert_eq!(preliminary.bytes, expected.bytes);
+        assert_eq!(
+            preliminary.packet.get::<Ethernet>().unwrap().destination,
+            destination
+        );
+        assert_eq!(preliminary.packet.get::<Ethernet>().unwrap().source, source);
+        assert_eq!(&preliminary.bytes[..6], &destination);
+        assert_eq!(&preliminary.bytes[6..12], &source);
+        assert_eq!(preliminary.packet.encoded_payload_length(0), None);
+    }
+
+    #[test]
+    fn builtin_ethernet_patch_rebuilds_when_tcp_payload_cache_is_required() {
+        let registry = Arc::new(builtin::registry().expect("built-in registry"));
+        let builder = packetcraftr_packet::build::Builder::new(Arc::clone(&registry));
+        let query = Bytes::from_static(&[
+            0x12, 0x34, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 3, b'w', b'w',
+            b'w', 7, b'e', b'x', b'a', b'm', b'p', b'l', b'e', 3, b'c', b'o', b'm', 0, 0, 1, 0, 1,
+        ]);
+        let mut packet = Packet::new();
+        packet.push(Ethernet::default());
+        packet.push(Ipv4 {
+            source: Ipv4Addr::new(192, 0, 2, 1),
+            destination: Ipv4Addr::new(198, 51, 100, 2),
+            ..Ipv4::default()
+        });
+        packet.push(Tcp {
+            source_port: 40_000,
+            destination_port: 53,
+            sequence: 100,
+            ..Tcp::default()
+        });
+        packet.push(Dns::from_wire(query.clone()).expect("valid DNS query"));
+        let options = packetcraftr_packet::build::Options {
+            mode: packetcraftr_packet::build::Mode::Permissive,
+            ..packetcraftr_packet::build::Options::default()
+        };
+        let mut preliminary = builder
+            .build(packet.clone(), BuildContext::default(), options.clone())
+            .expect("permissive TCP/DNS packet");
+        assert_eq!(
+            preliminary.packet.encoded_payload_length(2),
+            Some(query.len())
+        );
+        let original_bytes = preliminary.bytes.clone();
+
+        let destination = [0x10, 0x11, 0x12, 0x13, 0x14, 0x15];
+        let source = [0x20, 0x21, 0x22, 0x23, 0x24, 0x25];
+        let mut materialized = packet;
+        let ethernet = materialized.get_mut::<Ethernet>().expect("Ethernet");
+        ethernet.destination = destination;
+        ethernet.source = source;
+
+        assert!(!patch_builtin_ethernet(
+            &registry,
+            &mut preliminary,
+            &materialized
+        ));
+        assert_eq!(preliminary.bytes, original_bytes);
+        assert_eq!(
+            preliminary.packet.encoded_payload_length(2),
+            Some(query.len())
+        );
+
+        let rebuilt = builder
+            .build(materialized, BuildContext::default(), options)
+            .expect("fallback rebuild");
+        assert_eq!(rebuilt.packet.encoded_payload_length(2), Some(query.len()));
+        let payload_len = u32::try_from(query.len()).expect("query length fits u32");
+        let mut response = Packet::new();
+        response.push(Ipv4 {
+            source: Ipv4Addr::new(198, 51, 100, 2),
+            destination: Ipv4Addr::new(192, 0, 2, 1),
+            ..Ipv4::default()
+        });
+        response.push(Tcp {
+            source_port: 53,
+            destination_port: 40_000,
+            acknowledgment: 101 + payload_len,
+            flags: Tcp::ACK,
+            ..Tcp::default()
+        });
+        assert!(
+            registry
+                .matcher("tcp")
+                .expect("TCP matcher")
+                .matches(&rebuilt.packet, &response)
+                .matched
+        );
+    }
+
+    #[test]
+    fn builtin_ethernet_patch_rebuilds_when_tcp_padding_cache_is_required() {
+        let registry = Arc::new(builtin::registry().expect("built-in registry"));
+        let builder = packetcraftr_packet::build::Builder::new(Arc::clone(&registry));
+        let mut packet = Packet::new();
+        packet.push(Ethernet::default());
+        packet.push(Ipv4 {
+            source: Ipv4Addr::new(192, 0, 2, 1),
+            destination: Ipv4Addr::new(198, 51, 100, 2),
+            ..Ipv4::default()
+        });
+        packet.push(Tcp {
+            source_port: 40_000,
+            destination_port: 80,
+            sequence: 100,
+            ..Tcp::default()
+        });
+        packet.push(Raw::new(Bytes::from_static(&[0xde, 0xad])));
+        packet.push(Padding::after_layer(Bytes::from_static(&[0xbe]), 3));
+        let options = packetcraftr_packet::build::Options {
+            mode: packetcraftr_packet::build::Mode::Permissive,
+            ..packetcraftr_packet::build::Options::default()
+        };
+        let mut preliminary = builder
+            .build(packet.clone(), BuildContext::default(), options.clone())
+            .expect("permissive TCP padding packet");
+        assert_eq!(preliminary.packet.encoded_payload_length(2), Some(3));
+
+        let mut materialized = packet;
+        let ethernet = materialized.get_mut::<Ethernet>().expect("Ethernet");
+        ethernet.destination = [0x10, 0x11, 0x12, 0x13, 0x14, 0x15];
+        ethernet.source = [0x20, 0x21, 0x22, 0x23, 0x24, 0x25];
+
+        assert!(!patch_builtin_ethernet(
+            &registry,
+            &mut preliminary,
+            &materialized
+        ));
+        let rebuilt = builder
+            .build(materialized, BuildContext::default(), options)
+            .expect("fallback rebuild");
+        assert_eq!(rebuilt.packet.encoded_payload_length(2), Some(3));
+        let mut response = Packet::new();
+        response.push(Ipv4 {
+            source: Ipv4Addr::new(198, 51, 100, 2),
+            destination: Ipv4Addr::new(192, 0, 2, 1),
+            ..Ipv4::default()
+        });
+        response.push(Tcp {
+            source_port: 80,
+            destination_port: 40_000,
+            acknowledgment: 104,
+            flags: Tcp::ACK,
+            ..Tcp::default()
+        });
+        assert!(
+            registry
+                .matcher("tcp")
+                .expect("TCP matcher")
+                .matches(&rebuilt.packet, &response)
+                .matched
+        );
+    }
 }

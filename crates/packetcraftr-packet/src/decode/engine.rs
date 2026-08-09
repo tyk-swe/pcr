@@ -378,6 +378,12 @@ impl Dissector {
             append_padding(&mut packet, &mut layouts, bytes, offset, outside_layer);
         }
 
+        let encoded_payload_lengths = layouts
+            .iter()
+            .map(|layout| original.len().checked_sub(layout.range.end))
+            .collect();
+        packet.set_encoded_payload_lengths(encoded_payload_lengths);
+
         Ok(DecodedPacket {
             packet,
             original,

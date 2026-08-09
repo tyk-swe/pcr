@@ -256,8 +256,9 @@ fn pcap_writer_options_and_metadata_rejections_are_atomic() {
     ));
     wrong_link.direction = None;
 
+    // Stay below microsecond precision while respecting Windows' 100 ns system-time ticks.
     let imprecise = frame_at(
-        SystemTime::UNIX_EPOCH + Duration::from_nanos(1),
+        SystemTime::UNIX_EPOCH + Duration::from_nanos(100),
         LinkType::ETHERNET,
         b"x",
     );

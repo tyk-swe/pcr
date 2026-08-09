@@ -198,20 +198,21 @@ fn envelopes_convert_diagnostics_errors_and_statistics() {
 
 #[test]
 fn frame_output_preserves_time_direction_lengths_and_exact_bytes() {
+    // Windows represents `SystemTime` in 100 ns ticks.
     let positive =
-        Timestamp::try_from(UNIX_EPOCH + Duration::new(7, 123)).expect("positive timestamp fits");
+        Timestamp::try_from(UNIX_EPOCH + Duration::new(7, 100)).expect("positive timestamp fits");
     assert_eq!(positive.unix_seconds, 7);
-    assert_eq!(positive.nanoseconds, 123);
+    assert_eq!(positive.nanoseconds, 100);
 
     let integral = Timestamp::try_from(UNIX_EPOCH - Duration::from_secs(2))
         .expect("integral pre-epoch timestamp fits");
     assert_eq!(integral.unix_seconds, -2);
     assert_eq!(integral.nanoseconds, 0);
 
-    let fractional = Timestamp::try_from(UNIX_EPOCH - Duration::new(2, 250))
+    let fractional = Timestamp::try_from(UNIX_EPOCH - Duration::new(2, 200))
         .expect("fractional pre-epoch timestamp fits");
     assert_eq!(fractional.unix_seconds, -3);
-    assert_eq!(fractional.nanoseconds, 999_999_750);
+    assert_eq!(fractional.nanoseconds, 999_999_800);
 
     let wire = Wire::new(vec![0, 1, 0xfe, 0xff]);
     assert_eq!(wire.bytes(), &[0, 1, 0xfe, 0xff]);

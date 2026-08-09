@@ -8,6 +8,7 @@ use std::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
+    thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
 
@@ -17,6 +18,39 @@ use packetcraftr_packet::frame::{Frame, LinkType};
 use super::{NativeCaptureEvent, NativeCaptureSource, queue::SharedCapture};
 
 const STATISTICS_INTERVAL: Duration = Duration::from_millis(250);
+const REAPER_POLL_INTERVAL: Duration = Duration::from_millis(10);
+
+pub(super) fn transfer_capture_worker(
+    worker: JoinHandle<()>,
+    stop: Arc<AtomicBool>,
+    interrupt: Option<Arc<dyn super::CaptureInterrupt>>,
+) {
+    transfer_capture_worker_with_callback(worker, stop, interrupt, || {});
+}
+
+fn transfer_capture_worker_with_callback<F>(
+    worker: JoinHandle<()>,
+    stop: Arc<AtomicBool>,
+    interrupt: Option<Arc<dyn super::CaptureInterrupt>>,
+    after_join: F,
+) where
+    F: FnOnce() + Send + 'static,
+{
+    let _ = thread::Builder::new()
+        .name("packetcraftr-capture-reaper".to_owned())
+        .spawn(move || {
+            stop.store(true, Ordering::Release);
+            while !worker.is_finished() {
+                if let Some(interrupt) = &interrupt {
+                    interrupt.interrupt();
+                }
+                thread::park_timeout(REAPER_POLL_INTERVAL);
+            }
+            let _ = worker.join();
+            after_join();
+        })
+        .expect("could not start the native capture worker reaper");
+}
 
 pub(super) fn capture_worker(
     source: &mut dyn NativeCaptureSource,

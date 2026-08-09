@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Source, CI, and release builds now use sccache; source builds require a
   compatible `sccache` executable on `PATH`.
 
+### Fixed
+
+- Native capture and Linux netlink workers now retain ownership across finite
+  shutdown timeouts and transfer unfinished threads to explicit reapers.
+
 ## [0.5.0-beta.1] - 2026-08-09
 
 ### Added

@@ -5,7 +5,7 @@ use std::io::Cursor;
 use std::time::{Duration, SystemTime};
 
 use packetcraftr_analysis::pcap::{
-    Endianness, Error, Format, Limits, PcapOptions, Reader, ReaderOptions, Writer, transcode,
+    Endianness, Error, Format, Limits, PcapOptions, Reader, ReaderOptions, Writer, rewrite,
 };
 use packetcraftr_packet::frame::{Frame, LinkType};
 
@@ -76,24 +76,23 @@ fn truncated_records_and_declared_size_limits_fail_closed() {
 }
 
 #[test]
-fn bounded_transcode_preserves_frames_and_reports_accounting() {
-    let mut source = Reader::new(Cursor::new(pcap(Endianness::Big))).expect("capture must open");
-    let (bytes, report) = transcode(
+fn bounded_rewrite_preserves_records_and_reports_accounting() {
+    let input = pcap(Endianness::Big);
+    let mut source = Reader::new(Cursor::new(input.clone())).expect("capture must open");
+    let (bytes, report) = rewrite(
         &mut source,
         Vec::new(),
-        Format::PcapNg,
         Limits {
             max_frames: 1,
             max_bytes: 4,
         },
     )
-    .expect("pcap to pcapng must transcode");
+    .expect("same-format rewrite must succeed");
     assert_eq!(report.frames, 1);
     assert_eq!(report.captured_bytes, 4);
-    assert_eq!(report.endianness, Endianness::Big);
-
-    let mut decoded = Reader::new(Cursor::new(bytes)).expect("pcapng must open");
-    assert_eq!(decoded.format(), Format::PcapNg);
+    assert_eq!(bytes, input);
+    let mut decoded = Reader::new(Cursor::new(bytes)).expect("pcap must open");
+    assert_eq!(decoded.format(), Format::Pcap);
     assert_eq!(
         decoded
             .next_frame()

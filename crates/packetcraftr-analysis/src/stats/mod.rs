@@ -98,9 +98,16 @@ impl StatsCollector {
     }
 
     /// Folds one matched frame into every table.
-    pub fn observe(&mut self, record: &FrameRecord<'_>) {
+    pub fn observe(&mut self, record: &FrameRecord<'_>) -> Result<(), AnalysisError> {
         let bytes = u64::from(record.decoded.frame.captured_length());
-        let timestamp = record.decoded.frame.timestamp;
+        let timestamp =
+            record
+                .decoded
+                .frame
+                .timestamp
+                .ok_or(AnalysisError::TimestampUnavailable {
+                    number: record.number,
+                })?;
         self.frames += 1;
         self.bytes += bytes;
         self.observe_time(timestamp, bytes);
@@ -133,6 +140,7 @@ impl StatsCollector {
         if let (Some(stream), Some(flow)) = (record.udp_stream, udp_flow(record.decoded)) {
             self.conversation(TransportKind::Udp, stream, &flow, bytes, timestamp);
         }
+        Ok(())
     }
 
     fn observe_time(&mut self, timestamp: SystemTime, bytes: u64) {

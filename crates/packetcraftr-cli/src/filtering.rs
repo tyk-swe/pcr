@@ -93,12 +93,14 @@ impl FrameSelector {
                 },
             )
             .map_err(|source| CliError::new(3, source.to_string()))?;
-        Ok(self.filter.matches(&Context {
-            decoded: &decoded,
-            number,
-            tcp_stream: None,
-            udp_stream: None,
-        }))
+        self.filter
+            .matches(&Context {
+                decoded: &decoded,
+                number,
+                tcp_stream: None,
+                udp_stream: None,
+            })
+            .map_err(cli_error)
     }
 }
 

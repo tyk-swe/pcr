@@ -5,20 +5,26 @@
 
 use std::io::Read;
 
+use bytes::Bytes;
+
 use super::super::{
     error::Error,
-    model::{Endianness, Format},
+    model::{Endianness, Format, PcapNgOption},
     wire::{
         decode_i64, decode_u16, decode_u32, read_exact_counted, read_exact_or_eof, read_exact_vec,
     },
 };
-use super::options::visit_options;
+use super::options::parse_options;
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(in crate::pcap) struct SectionHeader {
     pub endianness: Endianness,
+    pub major: u16,
+    pub minor: u16,
     pub length: Option<u64>,
+    pub options: Vec<PcapNgOption>,
     pub block_length: usize,
+    pub raw: Bytes,
 }
 
 pub(in crate::pcap) fn read_pcapng_block_header<R: Read>(
@@ -113,16 +119,29 @@ pub(in crate::pcap) fn read_section_header_with_length<R: Read>(
             reason: "section length is not a multiple of four",
         });
     }
-    visit_options(
+    let options = parse_options(
         &scratch[12..footer_offset],
         endianness,
         "pcapng section options",
-        |_, _| Ok(()),
     )?;
+    let mut raw = Vec::new();
+    raw.try_reserve_exact(block_length_usize)
+        .map_err(|_| Error::AllocationFailed {
+            kind: "pcapng section header",
+            requested: block_length_usize,
+        })?;
+    raw.extend_from_slice(&super::super::wire::PCAPNG_SECTION_HEADER);
+    raw.extend_from_slice(&raw_length);
+    raw.extend_from_slice(&raw_bom);
+    raw.extend_from_slice(scratch);
     Ok(SectionHeader {
         endianness,
+        major,
+        minor,
         length: u64::try_from(section_length).ok(),
+        options,
         block_length: block_length_usize,
+        raw: Bytes::from(raw),
     })
 }
 

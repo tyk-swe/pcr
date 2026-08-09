@@ -10,6 +10,7 @@ use crate::pcap::Error as CaptureError;
 use crate::reassembly::tcp::Error as TcpError;
 use packetcraftr_packet::decode::Error as DecodeError;
 use packetcraftr_packet::error::{Classification, Classified, Kind};
+use packetcraftr_packet::filter::Error as FilterError;
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -32,6 +33,12 @@ pub enum AnalysisError {
         #[source]
         source: DecodeError,
     },
+    #[error("display filter failed at frame {number}: {source}")]
+    Filter {
+        number: u64,
+        #[source]
+        source: FilterError,
+    },
     #[error("conversation table reached the configured limit of {limit} flows at frame {number}")]
     StreamLimit { number: u64, limit: usize },
     #[error("TCP reassembly failed at frame {number}: {source}")]
@@ -44,6 +51,8 @@ pub enum AnalysisError {
     DurationLimit { actual: Duration, limit: Duration },
     #[error("capture timestamp at frame {number} exceeds the monotonic analysis clock range")]
     TimestampRange { number: u64 },
+    #[error("capture frame {number} has no timestamp required by offline analysis")]
+    TimestampUnavailable { number: u64 },
     #[error("analysis consumer failed at frame {number}: {source}")]
     Sink {
         number: u64,
@@ -77,6 +86,22 @@ impl Classified for AnalysisError {
                 Kind::Packet,
                 Some("repair the capture timestamp that exceeds the platform clock range"),
             ),
+            Self::TimestampUnavailable { .. } => Classification::new(
+                "packet.timestamp_unavailable",
+                Kind::Packet,
+                Some("use timestamped packet blocks for time-dependent offline analysis"),
+            ),
+            Self::Filter {
+                source: FilterError::TimestampUnavailable,
+                ..
+            } => Classification::new(
+                "packet.timestamp_unavailable",
+                Kind::Packet,
+                Some("remove frame.time_epoch from the filter or use timestamped packet blocks"),
+            ),
+            Self::Filter { .. } => {
+                Classification::new("cli.filter", Kind::Cli, Some("repair the display filter"))
+            }
             Self::StreamLimit { .. } | Self::DurationLimit { .. } => resource_limit(),
             // Reassembly fails for two distinct reasons: a finite budget was
             // exhausted, or the capture itself carries conflicting data. Only
@@ -98,6 +123,7 @@ impl Classified for AnalysisError {
         match self {
             Self::Capture { source, .. } => vec![source.to_string()],
             Self::Decode { source, .. } => vec![source.to_string()],
+            Self::Filter { source, .. } => vec![source.to_string()],
             Self::Reassembly { source, .. } => vec![source.to_string()],
             Self::Sink { source, .. } => source.causes(),
             _ => Vec::new(),

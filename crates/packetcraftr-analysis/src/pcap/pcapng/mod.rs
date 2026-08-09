@@ -3,7 +3,7 @@
 
 //! Pure PCAPNG block parsing, section state, and encoding.
 
-pub(super) use decode::{PcapNgState, read_next_pcapng_frame};
+pub(super) use decode::{PcapNgState, read_next_pcapng_record};
 pub(super) use encode::{
     select_interface, validate_new_interface, write_enhanced_packet, write_interface_description,
     write_section_header,

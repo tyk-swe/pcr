@@ -232,7 +232,7 @@ fn expert_reports_tcp_state_in_aggregate_stream_and_text_modes() {
 }
 
 #[test]
-fn read_transcodes_and_dissects_classic_and_pcapng_captures() {
+fn read_rewrites_same_format_and_rejects_lossy_capture_output() {
     let capture = write_capture();
     let path = path_text(capture.path());
 
@@ -266,27 +266,26 @@ fn read_transcodes_and_dissects_classic_and_pcapng_captures() {
 
     let pcap = run(&["--output", "pcap", "read", path]);
     assert!(pcap.status.success(), "{:?}", pcap.stderr);
-    assert!(pcap.stdout.starts_with(&[0xd4, 0xc3, 0xb2, 0xa1]));
+    assert_eq!(
+        pcap.stdout,
+        std::fs::read(capture.path()).expect("capture reads")
+    );
 
     let pcapng = run(&["--output", "pcapng", "read", path]);
-    assert!(pcapng.status.success(), "{:?}", pcapng.stderr);
-    assert!(pcapng.stdout.starts_with(&[0x0a, 0x0d, 0x0d, 0x0a]));
+    assert!(!pcapng.status.success());
+    assert!(
+        String::from_utf8_lossy(&pcapng.stderr).contains("without normalization"),
+        "{:?}",
+        pcapng.stderr
+    );
 
-    let mut converted = tempfile::NamedTempFile::new().expect("converted capture must open");
-    converted
-        .write_all(&pcapng.stdout)
-        .expect("converted capture must write");
-    let converted_path = path_text(converted.path());
-    let stats = run(&[
-        "--output",
-        "json",
-        "stats",
-        converted_path,
-        "--table",
-        "protocols",
-    ]);
-    assert!(stats.status.success(), "{:?}", stats.stderr);
-    assert_eq!(parse_json(&stats)["result"]["frames_read"], 5);
+    let filtered = run(&["--output", "pcap", "read", path, "--filter", "udp"]);
+    assert!(!filtered.status.success());
+    assert!(
+        String::from_utf8_lossy(&filtered.stderr).contains("cannot filter records"),
+        "{:?}",
+        filtered.stderr
+    );
 }
 
 #[test]

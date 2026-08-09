@@ -41,8 +41,8 @@ impl<W: Write> CaptureOutput<W> {
         }
     }
 
-    /// Copies exact source PCAPNG interface descriptions and remaps IDs.
-    pub(crate) fn source_preserving(writer: Writer<W>) -> Self {
+    /// Maps declared interface descriptions into a newly generated capture.
+    pub(crate) fn interface_mapped(writer: Writer<W>) -> Self {
         Self {
             writer,
             interfaces: InterfaceLifecycle::SourceInterfaces(Vec::new()),
@@ -99,7 +99,7 @@ impl<W: Write> CaptureOutput<W> {
         self.writer.write_frame(&frame)
     }
 
-    /// Registers one exact source interface and returns its output ID.
+    /// Registers one declared interface and returns its output ID.
     fn add_source_interface(
         &mut self,
         source_id: Option<u32>,
@@ -111,7 +111,7 @@ impl<W: Write> CaptureOutput<W> {
         let mappings = match &mut self.interfaces {
             InterfaceLifecycle::SourceInterfaces(mappings) => mappings,
             InterfaceLifecycle::LinkTypes(_) => {
-                unreachable!("source interfaces are registered only on preserving output")
+                unreachable!("source interfaces are registered only on interface-mapped output")
             }
         };
         if let Some(mapping) = mappings
@@ -128,21 +128,7 @@ impl<W: Write> CaptureOutput<W> {
         Ok(Some(output_id))
     }
 
-    /// Copies every source interface discovered so far, exactly once.
-    pub(crate) fn synchronize_source_interfaces(
-        &mut self,
-        interfaces: &[Interface],
-    ) -> Result<(), Error> {
-        if self.format() == Format::Pcap {
-            return Ok(());
-        }
-        for (source_id, description) in (0_u32..).zip(interfaces.iter().copied()) {
-            self.add_source_interface(Some(source_id), description)?;
-        }
-        Ok(())
-    }
-
-    /// Writes evidence carrying its exact source interface description.
+    /// Writes evidence using a declared interface description.
     pub(crate) fn write_source_frame(
         &mut self,
         source_id: Option<u32>,
@@ -150,26 +136,6 @@ impl<W: Write> CaptureOutput<W> {
         mut frame: Frame,
     ) -> Result<(), Error> {
         frame.interface = self.add_source_interface(source_id, description)?;
-        self.writer.write_frame(&frame)
-    }
-
-    /// Writes a frame after its reader's known interfaces were synchronized.
-    pub(crate) fn write_synchronized_frame(&mut self, mut frame: Frame) -> Result<(), Error> {
-        frame.interface = match (self.format(), frame.interface) {
-            (Format::Pcap, _) | (Format::PcapNg, None) => None,
-            (Format::PcapNg, Some(source_id)) => {
-                let InterfaceLifecycle::SourceInterfaces(mappings) = &self.interfaces else {
-                    unreachable!("synchronized frames require source-preserving output");
-                };
-                Some(
-                    mappings
-                        .iter()
-                        .find(|mapping| mapping.source_id == Some(source_id))
-                        .expect("source interfaces are synchronized before their frames")
-                        .output_id,
-                )
-            }
-        };
         self.writer.write_frame(&frame)
     }
 

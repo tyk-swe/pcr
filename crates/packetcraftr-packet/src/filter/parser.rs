@@ -9,7 +9,7 @@ use super::ast::{Op, Predicate};
 use super::error::FilterError;
 use super::lexer::{CompareOperator, Spanned, Token, tokenize};
 use super::literal::{self, Literal};
-use super::path::{self, FieldRef, FieldSource, Resolved};
+use super::path::{self, FieldRef, FieldSource, FrameField, Resolved};
 
 pub const DEFAULT_MAX_FILTER_BYTES: usize = 64 * 1024;
 /// Absolute parenthesis nesting accepted by the display-filter parser.
@@ -46,6 +46,9 @@ pub struct Requirements {
     /// The filter reads `tcp.stream` or `udp.stream`, so it only makes sense
     /// where a conversation index is being maintained.
     pub stream_index: bool,
+    /// The filter reads `frame.time_epoch`, so frames without captured time
+    /// must be diagnosed by the caller.
+    pub timestamp: bool,
 }
 
 /// Binding power of the boolean operators. `not` binds tightest, then `and`,
@@ -301,6 +304,9 @@ fn parse_predicate(
     }
     if matches!(field.source, FieldSource::Stream(_)) {
         requirements.stream_index = true;
+    }
+    if matches!(field.source, FieldSource::Frame(FrameField::TimeEpoch)) {
+        requirements.timestamp = true;
     }
 
     match tokens.get(index) {

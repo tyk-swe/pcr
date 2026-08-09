@@ -55,7 +55,10 @@ impl OutputFailure {
     }
 }
 
-/// A streaming capture writer over any [`Write`] implementation.
+/// A streaming writer that creates a new capture from frames.
+///
+/// It emits generated classic packet records or PCAPNG Enhanced Packet Blocks;
+/// use [`super::rewrite`] when source block structure must be retained.
 pub struct Writer<W> {
     inner: W,
     pub(super) state: WriterState,
@@ -263,7 +266,7 @@ impl<W: Write> Writer<W> {
             } => (
                 *endianness,
                 validate_new_interface(
-                    description,
+                    description.clone(),
                     interfaces,
                     self.max_size,
                     self.max_interfaces,
@@ -370,8 +373,11 @@ impl<W: Write> Writer<W> {
             });
         }
 
+        let captured_time = frame.timestamp.ok_or(Error::TimestampUnavailable {
+            format: Format::PcapNg,
+        })?;
         let timestamp = timestamp_to_ticks(
-            frame.timestamp,
+            captured_time,
             interface.timestamp_resolution,
             interface.timestamp_offset,
         )?;

@@ -53,7 +53,9 @@ pub enum FrameError {
 /// Complete bytes and capture metadata, independent of successful dissection.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Frame {
-    pub timestamp: SystemTime,
+    /// Capture time, or [`None`] when the source record carries no timestamp.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timestamp: Option<SystemTime>,
     captured_length: u32,
     original_length: u32,
     pub link_type: LinkType,
@@ -76,7 +78,7 @@ impl Frame {
                 actual: bytes.len(),
             })?;
         Ok(Self {
-            timestamp,
+            timestamp: Some(timestamp),
             captured_length: length,
             original_length: length,
             link_type,
@@ -88,6 +90,59 @@ impl Frame {
 
     pub fn try_with_lengths(
         timestamp: SystemTime,
+        link_type: LinkType,
+        captured_length: u32,
+        original_length: u32,
+        bytes: impl Into<Bytes>,
+    ) -> Result<Self, FrameError> {
+        let bytes = bytes.into();
+        if bytes.len() != captured_length as usize {
+            return Err(FrameError::CapturedLengthMismatch {
+                declared: captured_length,
+                actual: bytes.len(),
+            });
+        }
+        if original_length < captured_length {
+            return Err(FrameError::OriginalLengthTooSmall {
+                captured: captured_length,
+                original: original_length,
+            });
+        }
+        Ok(Self {
+            timestamp: Some(timestamp),
+            captured_length,
+            original_length,
+            link_type,
+            interface: None,
+            direction: None,
+            bytes,
+        })
+    }
+
+    /// Constructs a frame whose source record does not provide a timestamp.
+    pub fn without_timestamp(
+        link_type: LinkType,
+        bytes: impl Into<Bytes>,
+    ) -> Result<Self, FrameError> {
+        let bytes = bytes.into();
+        let length =
+            u32::try_from(bytes.len()).map_err(|_| FrameError::CapturedLengthTooLarge {
+                actual: bytes.len(),
+            })?;
+        Ok(Self {
+            timestamp: None,
+            captured_length: length,
+            original_length: length,
+            link_type,
+            interface: None,
+            direction: None,
+            bytes,
+        })
+    }
+
+    /// Constructs a frame with explicit lengths and optional capture time.
+    pub fn try_with_optional_timestamp(
+        timestamp: Option<SystemTime>,
         link_type: LinkType,
         captured_length: u32,
         original_length: u32,
@@ -137,7 +192,7 @@ impl<'de> Deserialize<'de> for Frame {
     {
         #[derive(Deserialize)]
         struct Record {
-            timestamp: SystemTime,
+            timestamp: Option<SystemTime>,
             captured_length: u32,
             original_length: u32,
             link_type: LinkType,
@@ -147,7 +202,7 @@ impl<'de> Deserialize<'de> for Frame {
         }
 
         let record = Record::deserialize(deserializer)?;
-        let mut frame = Frame::try_with_lengths(
+        let mut frame = Frame::try_with_optional_timestamp(
             record.timestamp,
             record.link_type,
             record.captured_length,

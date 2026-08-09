@@ -3,6 +3,7 @@
 
 use std::fmt;
 
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
 pub use packetcraftr_packet::frame::DEFAULT_SIZE_LIMIT;
@@ -199,9 +200,9 @@ pub enum TimestampResolution {
 /// Metadata associated with one capture interface.
 ///
 /// The index in [`crate::pcap::Reader::interfaces`] is the global interface
-/// ID used by [`packetcraftr_packet::frame::Frame::interface`]. Multiple PCAPNG sections are normalized to
-/// one monotonically increasing namespace.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// ID used by [`packetcraftr_packet::frame::Frame::interface`]. Source-local
+/// section and interface identifiers remain available on [`CaptureRecord`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Interface {
     pub link_type: LinkType,
     pub snap_len: u32,
@@ -209,15 +210,144 @@ pub struct Interface {
     pub timestamp_offset: i64,
 }
 
-/// Result of a bounded streaming capture copy.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TranscodeReport {
-    pub source_format: Format,
-    pub target_format: Format,
+/// One option carried by a PCAPNG section, interface, or packet block.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PcapNgOption {
+    pub code: u16,
+    pub value: Bytes,
+}
+
+/// Parsed classic-PCAP global-header fields that affect packet interpretation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PcapHeader {
     pub endianness: Endianness,
+    pub timestamp_resolution: TimestampResolution,
+    pub snap_len: u32,
+    /// Complete 32-bit network word, including standardized high-bit FCS metadata.
+    pub network: u32,
+    #[serde(skip)]
+    pub(super) raw: Bytes,
+}
+
+/// Parsed PCAPNG section-header fields.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Section {
+    pub index: u64,
+    pub endianness: Endianness,
+    pub major: u16,
+    pub minor: u16,
+    pub length: Option<u64>,
+    pub options: Vec<PcapNgOption>,
+    #[serde(skip)]
+    pub(super) raw: Bytes,
+}
+
+/// Header consumed when a streaming reader is opened.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CaptureHeader {
+    Pcap(PcapHeader),
+    PcapNg(Section),
+}
+
+impl CaptureHeader {
+    pub fn format(&self) -> Format {
+        match self {
+            Self::Pcap(_) => Format::Pcap,
+            Self::PcapNg(_) => Format::PcapNg,
+        }
+    }
+
+    pub(super) fn raw(&self) -> &[u8] {
+        match self {
+            Self::Pcap(header) => &header.raw,
+            Self::PcapNg(section) => &section.raw,
+        }
+    }
+}
+
+/// Packet-block representation retained by one [`CaptureRecord`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PacketBlockKind {
+    Classic,
+    Enhanced,
+    Simple,
+    Obsolete,
+}
+
+/// Metadata-block representation retained by one [`CaptureRecord`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MetadataBlockKind {
+    Section(Section),
+    InterfaceDescription {
+        section: u64,
+        local_id: u32,
+        global_id: u32,
+        interface: Interface,
+        options: Vec<PcapNgOption>,
+    },
+    NameResolution {
+        section: u64,
+    },
+    InterfaceStatistics {
+        section: u64,
+        interface_id: u32,
+    },
+    Custom {
+        section: u64,
+        block_type: u32,
+    },
+    Unknown {
+        section: u64,
+        block_type: u32,
+    },
+}
+
+/// Kind and source location of one capture record.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecordKind {
+    Packet {
+        block: PacketBlockKind,
+        section: Option<u64>,
+        interface_id: Option<u32>,
+        options: Vec<PcapNgOption>,
+    },
+    Metadata(MetadataBlockKind),
+}
+
+/// One bounded source record, including its validated raw representation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CaptureRecord {
+    pub kind: RecordKind,
+    pub frame: Option<packetcraftr_packet::frame::Frame>,
+    pub(super) format: Format,
+    pub(super) raw: Bytes,
+}
+
+impl CaptureRecord {
+    pub fn format(&self) -> Format {
+        self.format
+    }
+
+    pub fn raw_bytes(&self) -> &[u8] {
+        &self.raw
+    }
+
+    pub fn frame(&self) -> Option<&packetcraftr_packet::frame::Frame> {
+        self.frame.as_ref()
+    }
+}
+
+/// Result of a bounded streaming capture rewrite.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RewriteReport {
+    pub format: Format,
     pub frames: u64,
     pub captured_bytes: u64,
     pub interfaces: usize,
+    pub metadata_records: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

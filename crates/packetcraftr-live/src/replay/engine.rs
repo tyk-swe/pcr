@@ -62,6 +62,7 @@ where
     enforce_deadline(&deadline, 0)?;
     let source_format = reader.format();
     let mut previous_timestamp = None;
+    let mut has_previous = false;
     let mut frames_attempted = 0_u64;
     let mut frames_completed = 0_u64;
     let mut bytes_completed = 0_u64;
@@ -83,7 +84,7 @@ where
                     .then(|| reader.interfaces().first())
                     .flatten()
             })
-            .copied()
+            .cloned()
             .ok_or_else(|| ReplayError::InvalidEvidence {
                 sequence,
                 message: "capture frame has no matching interface metadata".to_owned(),
@@ -141,8 +142,8 @@ where
         }
 
         let mode = replay_link_mode(sequence, frame.link_type, options.link_mode)?;
-        let delay = match previous_timestamp {
-            Some(previous) => match timing.delay_between(previous, frame.timestamp) {
+        let delay = if has_previous {
+            match timing.delay_between(previous_timestamp, frame.timestamp, sequence) {
                 Ok(delay) => delay,
                 Err(ReplayError::InvalidTiming { mode, value }) => {
                     return Err(ReplayError::Timing {
@@ -152,8 +153,9 @@ where
                     });
                 }
                 Err(error) => return Err(error),
-            },
-            None => Duration::ZERO,
+            }
+        } else {
+            Duration::ZERO
         };
         let next_duration =
             scheduled_duration
@@ -228,7 +230,8 @@ where
         frames_completed = next_completed;
         bytes_completed = next_bytes;
         scheduled_duration = next_duration;
-        previous_timestamp = Some(frame.timestamp);
+        previous_timestamp = frame.timestamp;
+        has_previous = true;
         let emitted = emit(ReplayFrameEvidence {
             source_sequence: sequence,
             source_interface_id: frame.interface,

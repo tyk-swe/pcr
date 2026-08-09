@@ -3,9 +3,11 @@
 
 //! Shared bounded option framing.
 
+use bytes::Bytes;
+
 use super::super::{
     error::Error,
-    model::{Endianness, Format},
+    model::{Endianness, Format, PcapNgOption},
     wire::{PCAPNG_OPTION_END, align_to_usize, decode_u16},
 };
 
@@ -63,4 +65,20 @@ where
         offset = end;
     }
     Ok(())
+}
+
+pub(super) fn parse_options(
+    options: &[u8],
+    endianness: Endianness,
+    context: &'static str,
+) -> Result<Vec<PcapNgOption>, Error> {
+    let mut parsed = Vec::new();
+    visit_options(options, endianness, context, |code, value| {
+        parsed.push(PcapNgOption {
+            code,
+            value: Bytes::copy_from_slice(value),
+        });
+        Ok(())
+    })?;
+    Ok(parsed)
 }

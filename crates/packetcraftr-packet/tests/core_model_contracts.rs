@@ -76,7 +76,7 @@ fn frame_new_sets_exact_lengths_and_exposes_metadata() {
     frame.interface = Some(9);
     frame.direction = Some(Direction::Outbound);
 
-    assert_eq!(frame.timestamp, timestamp);
+    assert_eq!(frame.timestamp, Some(timestamp));
     assert_eq!(frame.link_type, LinkType::RAW);
     assert_eq!(frame.captured_length(), 3);
     assert_eq!(frame.original_length(), 3);

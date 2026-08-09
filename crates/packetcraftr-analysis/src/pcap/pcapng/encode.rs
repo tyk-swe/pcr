@@ -19,7 +19,7 @@ use super::super::{
     },
 };
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub(in crate::pcap) struct InterfacePlan {
     pub id: u32,
     pub description: Interface,
@@ -190,7 +190,7 @@ pub(in crate::pcap) fn select_interface(
         }
         return Ok(InterfacePlan {
             id: interface_id,
-            description: *interface,
+            description: interface.clone(),
             requires_description_block: false,
         });
     }
@@ -206,7 +206,7 @@ pub(in crate::pcap) fn select_interface(
             timestamp_resolution: WRITER_TIMESTAMP_RESOLUTION,
             timestamp_offset: 0,
         };
-        let id = validate_new_interface(description, interfaces, max_size, max_interfaces)?;
+        let id = validate_new_interface(description.clone(), interfaces, max_size, max_interfaces)?;
         return Ok(InterfacePlan {
             id,
             description,
@@ -225,7 +225,7 @@ pub(in crate::pcap) fn select_interface(
     let id = index as u32;
     Ok(InterfacePlan {
         id,
-        description: *description,
+        description: description.clone(),
         requires_description_block: false,
     })
 }

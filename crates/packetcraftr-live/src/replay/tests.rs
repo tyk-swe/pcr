@@ -175,6 +175,36 @@ fn replay_timing_validation_rejects_non_finite_and_non_positive_values() {
 }
 
 #[test]
+fn replay_timing_requires_capture_time_only_for_source_interval_modes() {
+    assert_eq!(
+        ReplayTiming::Immediate
+            .delay_between(None, None, 2)
+            .expect("immediate timing is independent of capture time"),
+        Duration::ZERO
+    );
+    assert_eq!(
+        ReplayTiming::FixedRate(2.0)
+            .delay_between(None, None, 2)
+            .expect("fixed timing is independent of capture time"),
+        Duration::from_millis(500)
+    );
+    assert!(matches!(
+        ReplayTiming::Original.delay_between(None, Some(UNIX_EPOCH), 2),
+        Err(ReplayError::TimestampUnavailable {
+            sequence: 2,
+            mode: "original"
+        })
+    ));
+    assert!(matches!(
+        ReplayTiming::Scaled(2.0).delay_between(Some(UNIX_EPOCH), None, 3),
+        Err(ReplayError::TimestampUnavailable {
+            sequence: 3,
+            mode: "scaled"
+        })
+    ));
+}
+
+#[test]
 fn replay_network_envelope_rejects_malformed_ip_envelopes() {
     for (bytes, expected) in [
         (Vec::new(), "empty"),

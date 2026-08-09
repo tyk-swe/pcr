@@ -3,8 +3,6 @@
 
 //! Packet-block parsing.
 
-use std::time::UNIX_EPOCH;
-
 use bytes::Bytes;
 
 use packetcraftr_packet::frame::{Direction, Frame};
@@ -192,9 +190,8 @@ pub(in crate::pcap) fn parse_simple_packet(
             reason: "simple packet block length does not match its packet length",
         });
     }
-    // Simple Packet Blocks lack timestamps; use the raw-record sentinel.
-    let mut frame = Frame::try_with_lengths(
-        UNIX_EPOCH,
+    let mut frame = Frame::try_with_optional_timestamp(
+        None,
         interface.link_type,
         captured_length,
         original_length,

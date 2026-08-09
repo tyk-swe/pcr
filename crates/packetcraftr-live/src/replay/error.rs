@@ -28,6 +28,10 @@ pub enum ReplayError {
         mode: &'static str,
         value: f64,
     },
+    #[error(
+        "replay {mode} timing requires a timestamp at source frame {sequence}, but none is available"
+    )]
+    TimestampUnavailable { sequence: u64, mode: &'static str },
     #[error("capture read failed at source frame {sequence}: {source}")]
     Capture {
         sequence: u64,
@@ -122,6 +126,7 @@ impl ReplayError {
             | Self::UnsupportedLinkType { sequence, .. }
             | Self::LinkModeMismatch { sequence, .. }
             | Self::Timing { sequence, .. }
+            | Self::TimestampUnavailable { sequence, .. }
             | Self::Selection { sequence, .. }
             | Self::Authorization { sequence, .. }
             | Self::Transmission { sequence, .. }
@@ -163,9 +168,12 @@ impl Classified for ReplayError {
             Self::Timing { .. } => Classification::new(
                 "packet.replay_timing",
                 Kind::Packet,
-                Some(
-                    "reduce the captured interval or select a bounded fixed/immediate replay timing",
-                ),
+                Some("reduce the captured interval or select a bounded replay timing"),
+            ),
+            Self::TimestampUnavailable { .. } => Classification::new(
+                "packet.timestamp_unavailable",
+                Kind::Packet,
+                Some("select bounded fixed-rate or immediate replay timing"),
             ),
             Self::UnsupportedLinkType { .. } | Self::LinkModeMismatch { .. } => {
                 Classification::new(

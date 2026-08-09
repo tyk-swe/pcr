@@ -40,7 +40,9 @@ pub(super) fn run(arguments: StatsArgs, output: output::contract::Format) -> Res
         limits,
     };
     let summary = analysis::run(&mut reader, registry, &options, |record| {
-        collector.observe(&record);
+        collector
+            .observe(&record)
+            .expect("the analysis pipeline supplies timestamped statistics records");
         Ok(())
     })
     .map_err(CliError::classified)?;

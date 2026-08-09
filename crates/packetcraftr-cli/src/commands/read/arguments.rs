@@ -10,7 +10,10 @@ pub(crate) const AFTER_LONG_HELP: &str = r#"Examples:
   packetcraftr read capture.pcapng --max-frames 100
   packetcraftr --output ndjson read capture.pcap
   packetcraftr read capture.pcapng --filter 'tcp.flags.syn == 1 && !tcp.flags.ack' --dissect
-  packetcraftr --output pcapng read capture.pcapng --filter 'ip.src in 10.0.0.0/8' > subset.pcapng"#;
+  packetcraftr --output pcapng read capture.pcapng > validated-copy.pcapng
+
+Capture output validates and rewrites every source record without normalization.
+It requires the output format to match the input and cannot be combined with --filter."#;
 
 #[derive(Debug, Args)]
 pub(crate) struct ReadArgs {
@@ -28,7 +31,7 @@ pub(crate) struct ReadArgs {
     /// Maximum PCAPNG interfaces accepted from the input.
     #[arg(long, default_value_t = capture::DEFAULT_INTERFACE_LIMIT)]
     pub(crate) max_interfaces: usize,
-    /// Keep only frames matching a display filter; implies dissection.
+    /// Keep only frames matching a display filter; unavailable for capture output.
     #[arg(long, value_name = "EXPR")]
     pub(crate) filter: Option<String>,
     /// Include each frame's dissected layer stack in the output.

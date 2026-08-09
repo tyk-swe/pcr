@@ -130,7 +130,9 @@ impl From<packetcraftr_packet::frame::Direction> for Direction {
 pub struct Captured {
     #[serde(skip)]
     bytes: Bytes,
-    pub timestamp: Timestamp,
+    /// Capture time, omitted when the source record does not provide one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timestamp: Option<Timestamp>,
     pub captured_length: u32,
     pub original_length: u32,
     pub link_type: u32,
@@ -144,7 +146,7 @@ pub struct Captured {
 impl Captured {
     pub fn try_from_frame(frame: Frame) -> Result<Self, Error> {
         Ok(Self {
-            timestamp: frame.timestamp.try_into()?,
+            timestamp: frame.timestamp.map(Timestamp::try_from).transpose()?,
             captured_length: frame.captured_length(),
             original_length: frame.original_length(),
             link_type: frame.link_type.0,

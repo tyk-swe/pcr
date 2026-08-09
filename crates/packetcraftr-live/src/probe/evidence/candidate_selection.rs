@@ -50,7 +50,7 @@ pub(crate) fn select_response_candidate<'a, O, K: Ord>(
 ) -> bool {
     if !response_within_deadline(
         candidate.latency,
-        candidate.decoded.frame.timestamp,
+        crate::live_timestamp(&candidate.decoded.frame),
         sent_at,
         timeout,
     ) {

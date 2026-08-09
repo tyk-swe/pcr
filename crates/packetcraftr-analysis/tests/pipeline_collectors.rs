@@ -425,7 +425,7 @@ fn stats_collect_all_tables_with_directional_and_time_accounting() {
         Arc::clone(&registry),
         &Options::default(),
         |record| {
-            collector.observe(&record);
+            collector.observe(&record).expect("record has capture time");
             Ok(())
         },
     )

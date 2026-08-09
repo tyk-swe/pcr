@@ -122,7 +122,9 @@ where
                 },
             })?;
 
-        let timestamp = frame.timestamp;
+        let timestamp = frame
+            .timestamp
+            .ok_or(AnalysisError::TimestampUnavailable { number })?;
         let decoded = decoder
             .decode(
                 frame,
@@ -145,12 +147,14 @@ where
         };
 
         if let Some(filter) = options.filter
-            && !filter.matches(&FilterContext {
-                decoded: &decoded,
-                number,
-                tcp_stream,
-                udp_stream,
-            })
+            && !filter
+                .matches(&FilterContext {
+                    decoded: &decoded,
+                    number,
+                    tcp_stream,
+                    udp_stream,
+                })
+                .map_err(|source| AnalysisError::Filter { number, source })?
         {
             continue;
         }

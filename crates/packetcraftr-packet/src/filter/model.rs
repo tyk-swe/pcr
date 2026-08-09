@@ -11,7 +11,7 @@ use super::parser::{self, FilterOptions, Requirements};
 ///
 /// Compilation resolves every field path against the registry, so a filter
 /// that names an unknown protocol or field fails once, up front, instead of
-/// quietly matching no packets. Evaluation afterwards is infallible.
+/// quietly matching no packets. Evaluation diagnoses unavailable frame facts.
 #[derive(Clone, Debug)]
 pub struct Filter {
     program: Vec<Op>,
@@ -34,15 +34,18 @@ impl Filter {
 
     /// What this filter needs from its caller beyond the dissected packet.
     ///
-    /// Callers check this before reading any input so a filter that depends on
-    /// a conversation index is rejected where none is maintained, rather than
-    /// evaluating to false on every packet.
+    /// Callers can inspect this before evaluation to reject unavailable
+    /// conversation indexes. Timestamp availability is also checked by
+    /// [`matches`](Self::matches) for every frame.
     pub fn requirements(&self) -> Requirements {
         self.requirements
     }
 
     /// Whether one packet satisfies this filter.
-    pub fn matches(&self, context: &Context<'_>) -> bool {
-        eval::evaluate(&self.program, context)
+    pub fn matches(&self, context: &Context<'_>) -> Result<bool, FilterError> {
+        if self.requirements.timestamp && context.decoded.frame.timestamp.is_none() {
+            return Err(FilterError::TimestampUnavailable);
+        }
+        Ok(eval::evaluate(&self.program, context))
     }
 }

@@ -85,9 +85,8 @@ pub(super) fn validate_execution(
         })?;
     for response in &execution.responses {
         deadline.check().map_err(duration_limit)?;
-        let within_deadline = response
-            .timestamp
-            .duration_since(execution.sent.timestamp)
+        let within_deadline = crate::live_timestamp(response)
+            .duration_since(crate::live_timestamp(&execution.sent))
             .is_ok_and(|latency| latency <= timeout);
         if !within_deadline {
             return Err(FuzzError::InvalidEvidence {

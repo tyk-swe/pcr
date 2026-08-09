@@ -74,7 +74,7 @@ pub(super) fn replay_capture_output<W: Write>(
                     },
                 ));
             }
-            let interface = reader.interfaces()[0];
+            let interface = reader.interfaces()[0].clone();
             let snap_length = usize::try_from(interface.snap_len).map_err(|_| {
                 CliError::new(2, "capture snap length exceeds the platform size limit")
             })?;
@@ -99,7 +99,7 @@ pub(super) fn replay_capture_output<W: Write>(
         ),
     }
     .map_err(CliError::classified)?;
-    let mut output = CaptureOutput::source_preserving(writer);
+    let mut output = CaptureOutput::interface_mapped(writer);
     output
         .set_stream_limits(Limits {
             max_frames: limits.max_frames,

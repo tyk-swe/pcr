@@ -6,7 +6,7 @@ use std::time::{Duration, SystemTime};
 
 use packetcraftr_analysis::pcap::{
     Endianness, Error, Format, Interface, Limits, PcapNgOptions, PcapOptions, Reader,
-    ReaderOptions, TimestampResolution, Writer, transcode,
+    ReaderOptions, TimestampResolution, Writer, rewrite,
 };
 use packetcraftr_packet::error::{Classified, Kind};
 use packetcraftr_packet::frame::{Direction, Frame, LinkType};
@@ -378,7 +378,7 @@ fn pcapng_round_trip_preserves_interfaces_directions_and_signed_time() {
         };
         assert_eq!(
             writer
-                .add_interface_description(description)
+                .add_interface_description(description.clone())
                 .expect("interface fits"),
             0
         );
@@ -656,7 +656,7 @@ fn reader_accessors_and_microsecond_precision_work_with_chunked_input() {
     assert_eq!(reader.get_ref().position(), 24);
     reader.get_mut().set_position(24);
     let decoded = reader.next().expect("one item").expect("valid item");
-    assert_eq!(decoded.timestamp, timestamp);
+    assert_eq!(decoded.timestamp, Some(timestamp));
     assert_eq!(decoded.bytes().as_ref(), b"payload");
     assert!(reader.next().is_none());
 }
@@ -696,10 +696,10 @@ fn pcapng_reader_supports_obsolete_simple_and_multiple_sections() {
     assert_eq!(old.interface, Some(0));
     assert_eq!(
         old.timestamp,
-        SystemTime::UNIX_EPOCH + Duration::from_millis(1_500)
+        Some(SystemTime::UNIX_EPOCH + Duration::from_millis(1_500))
     );
     let simple = reader.next_frame().expect("simple parses").expect("exists");
-    assert_eq!(simple.timestamp, SystemTime::UNIX_EPOCH);
+    assert_eq!(simple.timestamp, None);
     assert_eq!(simple.original_length(), 6);
     let second = reader
         .next_frame()
@@ -931,7 +931,7 @@ fn malformed_pcapng_packets_and_options_are_rejected() {
 }
 
 #[test]
-fn transcode_covers_both_targets_and_rejects_unrepresentable_or_bounded_copies() {
+fn rewrite_is_same_format_and_enforces_stream_bounds() {
     let frames = [
         frame_at(SystemTime::UNIX_EPOCH, LinkType::ETHERNET, b"one"),
         frame_at(
@@ -948,18 +948,16 @@ fn transcode_covers_both_targets_and_rejects_unrepresentable_or_bounded_copies()
         &frames,
     );
     let mut source = Reader::new(Cursor::new(pcap.clone())).expect("source opens");
-    let (copy, report) = transcode(
+    let (copy, report) = rewrite(
         &mut source,
         Vec::new(),
-        Format::Pcap,
         Limits {
             max_frames: 2,
             max_bytes: 6,
         },
     )
     .expect("classic copy works");
-    assert_eq!(report.source_format, Format::Pcap);
-    assert_eq!(report.target_format, Format::Pcap);
+    assert_eq!(report.format, Format::Pcap);
     assert_eq!(report.frames, 2);
     assert_eq!(report.captured_bytes, 6);
     assert_eq!(report.interfaces, 1);
@@ -972,10 +970,9 @@ fn transcode_covers_both_targets_and_rejects_unrepresentable_or_bounded_copies()
 
     let mut source = Reader::new(Cursor::new(pcap)).expect("source opens");
     assert!(matches!(
-        transcode(
+        rewrite(
             &mut source,
             Vec::new(),
-            Format::PcapNg,
             Limits {
                 max_frames: 1,
                 max_bytes: 99,
@@ -990,14 +987,11 @@ fn transcode_covers_both_targets_and_rejects_unrepresentable_or_bounded_copies()
     let pcapng = Writer::new(Vec::new(), Format::PcapNg, LinkType::ETHERNET)
         .expect("pcapng initializes")
         .into_inner();
-    let mut source = Reader::new(Cursor::new(pcapng)).expect("pcapng opens");
-    assert!(matches!(
-        transcode(&mut source, Vec::new(), Format::Pcap, Limits::default()),
-        Err(Error::MetadataNotRepresentable {
-            format: Format::Pcap,
-            ..
-        })
-    ));
+    let mut source = Reader::new(Cursor::new(pcapng.clone())).expect("pcapng opens");
+    let (copy, report) =
+        rewrite(&mut source, Vec::new(), Limits::default()).expect("pcapng rewrite remains pcapng");
+    assert_eq!(copy, pcapng);
+    assert_eq!(report.format, Format::PcapNg);
 }
 
 #[test]

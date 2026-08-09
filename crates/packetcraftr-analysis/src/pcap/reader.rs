@@ -5,12 +5,13 @@ use std::io::Read;
 
 use packetcraftr_packet::frame::{Frame, LinkType};
 
-use super::classic::{read_next_pcap_frame, read_pcap_header};
+use super::classic::{read_next_pcap_record, read_pcap_header};
 use super::error::Error;
 use super::model::{
-    Endianness, Format, Interface, ReaderOptions, TimestampPrecision, TimestampResolution,
+    CaptureHeader, CaptureRecord, Endianness, Format, Interface, ReaderOptions, Section,
+    TimestampPrecision, TimestampResolution,
 };
-use super::pcapng::{PcapNgState, read_next_pcapng_frame, read_section_header_after_type};
+use super::pcapng::{PcapNgState, read_next_pcapng_record, read_section_header_after_type};
 use super::wire::{PCAPNG_SECTION_HEADER, read_exact_or_eof};
 
 pub(super) enum ReaderState {
@@ -25,17 +26,24 @@ pub(super) enum ReaderState {
 
 /// A streaming capture reader over any [`Read`] implementation.
 ///
-/// Construction consumes only the container header.  Each call to
-/// [`next_frame`](Self::next_frame) then reads at most one packet plus any
-/// intervening metadata blocks.
+/// Construction consumes only the container header. Use
+/// [`next_record`](Self::next_record) when source structure matters;
+/// [`next_frame`](Self::next_frame) is a packet-only adapter that consumes and
+/// omits intervening metadata records from its return value.
 pub struct Reader<R> {
     inner: R,
     state: ReaderState,
+    header: CaptureHeader,
     interfaces: Vec<Interface>,
     options: ReaderOptions,
-    pub(super) max_total_interfaces: usize,
     scratch: Vec<u8>,
     finished: bool,
+}
+
+fn wrap_pcap_header(
+    value: (ReaderState, super::model::PcapHeader),
+) -> (ReaderState, CaptureHeader) {
+    (value.0, CaptureHeader::Pcap(value.1))
 }
 
 impl<R: Read> Reader<R> {
@@ -54,28 +62,46 @@ impl<R: Read> Reader<R> {
             return Err(Error::EmptyInput);
         }
 
-        let state = match magic {
-            [0xd4, 0xc3, 0xb2, 0xa1] => read_pcap_header(
+        let (state, header) = match magic {
+            [0xd4, 0xc3, 0xb2, 0xa1] => wrap_pcap_header(read_pcap_header(
                 &mut inner,
+                magic,
                 Endianness::Little,
                 TimestampPrecision::Microseconds,
-            )?,
-            [0xa1, 0xb2, 0xc3, 0xd4] => read_pcap_header(
+            )?),
+            [0xa1, 0xb2, 0xc3, 0xd4] => wrap_pcap_header(read_pcap_header(
                 &mut inner,
+                magic,
                 Endianness::Big,
                 TimestampPrecision::Microseconds,
-            )?,
-            [0x4d, 0x3c, 0xb2, 0xa1] => read_pcap_header(
+            )?),
+            [0x4d, 0x3c, 0xb2, 0xa1] => wrap_pcap_header(read_pcap_header(
                 &mut inner,
+                magic,
                 Endianness::Little,
                 TimestampPrecision::Nanoseconds,
-            )?,
-            [0xa1, 0xb2, 0x3c, 0x4d] => {
-                read_pcap_header(&mut inner, Endianness::Big, TimestampPrecision::Nanoseconds)?
-            }
+            )?),
+            [0xa1, 0xb2, 0x3c, 0x4d] => wrap_pcap_header(read_pcap_header(
+                &mut inner,
+                magic,
+                Endianness::Big,
+                TimestampPrecision::Nanoseconds,
+            )?),
             PCAPNG_SECTION_HEADER => {
                 let header = read_section_header_after_type(&mut inner, max_size, &mut scratch)?;
-                ReaderState::PcapNg(PcapNgState::new(header))
+                let section = Section {
+                    index: 0,
+                    endianness: header.endianness,
+                    major: header.major,
+                    minor: header.minor,
+                    length: header.length,
+                    options: header.options.clone(),
+                    raw: header.raw.clone(),
+                };
+                (
+                    ReaderState::PcapNg(PcapNgState::new(header)),
+                    CaptureHeader::PcapNg(section),
+                )
             }
             unknown_magic => {
                 return Err(Error::UnrecognizedFormat {
@@ -110,9 +136,9 @@ impl<R: Read> Reader<R> {
         Ok(Self {
             inner,
             state,
+            header,
             interfaces,
             options,
-            max_total_interfaces,
             scratch,
             finished: false,
         })
@@ -120,13 +146,13 @@ impl<R: Read> Reader<R> {
 
     /// Returns the detected capture format.
     pub fn format(&self) -> Format {
-        match self.state {
-            ReaderState::Pcap { .. } => Format::Pcap,
-            ReaderState::PcapNg(_) => Format::PcapNg,
-        }
+        self.header.format()
     }
 
-    /// Returns the capture byte order.
+    /// Returns the current byte order.
+    ///
+    /// For PCAPNG this starts with the first section and changes after a later
+    /// section header is consumed.
     pub fn endianness(&self) -> Endianness {
         match self.state {
             ReaderState::Pcap { endianness, .. } => endianness,
@@ -148,19 +174,23 @@ impl<R: Read> Reader<R> {
         &self.interfaces
     }
 
-    /// Reads the next frame, or `None` after a clean end of file.
-    pub fn next_frame(&mut self) -> Result<Option<Frame>, Error> {
+    /// Returns the validated source header.
+    pub fn header(&self) -> &CaptureHeader {
+        &self.header
+    }
+
+    /// Reads the next source record, including metadata and validated bytes.
+    pub fn next_record(&mut self) -> Result<Option<CaptureRecord>, Error> {
         if self.finished {
             return Ok(None);
         }
-
         let result = match &mut self.state {
             ReaderState::Pcap {
                 endianness,
                 precision,
                 snap_len,
                 link_type,
-            } => read_next_pcap_frame(
+            } => read_next_pcap_record(
                 &mut self.inner,
                 *endianness,
                 *precision,
@@ -168,7 +198,7 @@ impl<R: Read> Reader<R> {
                 *link_type,
                 self.options.max_size,
             ),
-            ReaderState::PcapNg(state) => read_next_pcapng_frame(
+            ReaderState::PcapNg(state) => read_next_pcapng_record(
                 &mut self.inner,
                 state,
                 &mut self.interfaces,
@@ -176,19 +206,28 @@ impl<R: Read> Reader<R> {
                 &mut self.scratch,
             ),
         };
-
         match result {
-            Ok(frame) => {
-                if frame.is_none() {
+            Ok(record) => {
+                if record.is_none() {
                     self.finished = true;
                 }
-                Ok(frame)
+                Ok(record)
             }
             Err(error) => {
                 self.finished = true;
                 Err(error)
             }
         }
+    }
+
+    /// Reads the next frame, consuming but not returning metadata records.
+    pub fn next_frame(&mut self) -> Result<Option<Frame>, Error> {
+        while let Some(record) = self.next_record()? {
+            if let Some(frame) = record.frame {
+                return Ok(Some(frame));
+            }
+        }
+        Ok(None)
     }
 
     pub fn get_ref(&self) -> &R {

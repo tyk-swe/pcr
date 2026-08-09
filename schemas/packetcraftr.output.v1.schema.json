@@ -2813,7 +2813,6 @@
     "frame": {
       "type": "object",
       "required": [
-        "timestamp",
         "captured_length",
         "original_length",
         "link_type",

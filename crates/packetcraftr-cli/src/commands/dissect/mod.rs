@@ -55,12 +55,14 @@ pub(super) fn run(
     // nothing and the command still succeeds, while an unsupported output
     // format is refused whether or not the frame matched.
     let kept = match &filter {
-        Some(filter) => filter.matches(&packet::filter::Context {
-            decoded: &decoded,
-            number: 1,
-            tcp_stream: None,
-            udp_stream: None,
-        }),
+        Some(filter) => filter
+            .matches(&packet::filter::Context {
+                decoded: &decoded,
+                number: 1,
+                tcp_stream: None,
+                udp_stream: None,
+            })
+            .map_err(|source| CliError::new(3, source.to_string()))?,
         None => true,
     };
     let (result, diagnostics) = output::dissect::Result::from_decoded(decoded);

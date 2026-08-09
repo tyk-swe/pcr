@@ -5,13 +5,12 @@ use thiserror::Error;
 
 use super::super::layer::ProtocolId;
 
-/// Why a display filter could not be compiled.
-///
-/// Every variant is a compile-time failure. Evaluation itself cannot fail: a
-/// compiled filter either matches a packet or does not.
+/// Why a display filter could not be compiled or evaluated.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum FilterError {
+    #[error("display filter requires frame.time_epoch, but the frame has no timestamp")]
+    TimestampUnavailable,
     #[error("display filter is empty")]
     Empty,
     #[error("display filter has {actual} bytes, exceeding limit {limit}")]

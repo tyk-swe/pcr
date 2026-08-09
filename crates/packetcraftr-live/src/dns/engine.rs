@@ -183,7 +183,7 @@ where
             push_diagnostic_once(&mut result.diagnostics, diagnostic);
         }
 
-        let sent_at = execution.sent_evidence.timestamp;
+        let sent_at = crate::live_timestamp(&execution.sent_evidence);
         let mut best: Option<ResponseCandidate<'_, DnsResponseClassification>> = None;
         let candidate_context = DnsCandidateContext {
             registry,
@@ -207,7 +207,7 @@ where
         }
 
         let evidence = if let Some(candidate) = best {
-            let received_at = candidate.decoded.frame.timestamp;
+            let received_at = crate::live_timestamp(&candidate.decoded.frame);
             let latency = candidate
                 .latency
                 .or_else(|| received_at.duration_since(sent_at).ok());
@@ -351,7 +351,7 @@ fn consider_dns_candidate<'a>(
     enforce_deadline(deadline)?;
     if response_within_deadline(
         latency,
-        decoded.frame.timestamp,
+        crate::live_timestamp(&decoded.frame),
         context.sent_at,
         context.timeout,
     ) && let Some(classification) = classify_dns_response(

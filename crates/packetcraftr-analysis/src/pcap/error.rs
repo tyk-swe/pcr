@@ -13,6 +13,11 @@ use packetcraftr_packet::frame::FrameError;
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum Error {
+    #[error("failed to allocate {requested} bytes for {kind}")]
+    AllocationFailed {
+        kind: &'static str,
+        requested: usize,
+    },
     #[error(transparent)]
     Frame(#[from] FrameError),
     #[error("capture I/O failed: {0}")]
@@ -60,6 +65,8 @@ pub enum Error {
     SectionRemainderTooSmall { remaining: u64 },
     #[error("timestamp cannot be represented in {format}")]
     TimestampOutOfRange { format: Format },
+    #[error("{format:?} output requires a timestamp, but this frame has none")]
+    TimestampUnavailable { format: Format },
     #[error("timestamp fraction {fraction} is invalid for a denominator of {denominator}")]
     InvalidTimestampFraction { fraction: u32, denominator: u32 },
     #[error("link type {link_type} cannot be represented in a capture interface header")]
@@ -113,6 +120,11 @@ impl Classified for Error {
                 "cli.capture_option",
                 Kind::Cli,
                 Some("call the writer method that matches the writer's configured format"),
+            ),
+            Self::TimestampUnavailable { .. } => Classification::new(
+                "packet.timestamp_unavailable",
+                Kind::Packet,
+                Some("use a timestamped frame with generated capture writers"),
             ),
             Self::SizeLimitExceeded { .. }
             | Self::InterfaceLimit { .. }

@@ -17,7 +17,7 @@ authorized to test.
   JSON, or YAML and emit exact bytes.
 - Dissect bounded frames while preserving unknown and malformed bytes with
   diagnostics.
-- Read, filter, write, and transcode classic PCAP and PCAPNG files.
+- Read and filter classic PCAP and PCAPNG files, and validate same-format rewrites without normalization.
 - Analyze captures offline with statistics, conversation following, expert
   findings, and bounded IP/TCP reassembly.
 - Inspect interfaces and routes, send or replay packets, and run bounded

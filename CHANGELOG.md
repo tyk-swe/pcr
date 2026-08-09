@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** Capture rewriting is now a bounded, same-format operation that
+  preserves every validated source record and rejects CLI format conversion or
+  filtering instead of silently normalizing PCAPNG structure. The capture API
+  exposes section-local records, packet block kinds, arbitrary options, and
+  the complete classic-PCAP network word; `transcode` has been removed.
+- **Breaking:** Capture-frame timestamps are optional because PCAPNG Simple
+  Packet Blocks do not carry time. Timestamp-dependent filters, offline
+  analysis, original/scaled replay timing, and capture writers diagnose missing
+  time; immediate/fixed-rate replay and structured frame output support it.
 - Source, CI, and release builds now use sccache; source builds require a
   compatible `sccache` executable on `PATH`.
 

@@ -284,9 +284,10 @@ fn process_batch(
         .enumerate()
     {
         enforce_deadline(deadline)?;
+        let sent_at = crate::live_timestamp(sent_frame);
         let best = response_selector.select(
             request_index,
-            sent_frame.timestamp,
+            sent_at,
             batch.timeout,
             |response| classify_traceroute_response(registry, probe.strategy, built, response),
             |observation| observation.kind.rank(),
@@ -295,10 +296,10 @@ fn process_batch(
         )?;
 
         let evidence = if let Some(candidate) = best {
-            let received_at = candidate.decoded.frame.timestamp;
+            let received_at = crate::live_timestamp(&candidate.decoded.frame);
             let latency = candidate
                 .latency
-                .or_else(|| received_at.duration_since(sent_frame.timestamp).ok());
+                .or_else(|| received_at.duration_since(sent_at).ok());
             let response = retain_evidence(
                 evidence.budget,
                 &candidate.decoded.frame,
@@ -318,7 +319,7 @@ fn process_batch(
                 status: TracerouteProbeStatus::Response,
                 response_kind: Some(candidate.observation.kind),
                 responder: Some(candidate.observation.responder),
-                sent_at: sent_frame.timestamp,
+                sent_at,
                 received_at: Some(received_at),
                 latency,
                 response,
@@ -335,7 +336,7 @@ fn process_batch(
                 status: TracerouteProbeStatus::Timeout,
                 response_kind: None,
                 responder: None,
-                sent_at: sent_frame.timestamp,
+                sent_at,
                 received_at: None,
                 latency: None,
                 response: None,

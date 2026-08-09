@@ -83,13 +83,14 @@ pub(in crate::pcap) fn write_pcap_frame<W: Write>(
         });
     }
 
-    let elapsed =
-        frame
-            .timestamp
-            .duration_since(UNIX_EPOCH)
-            .map_err(|_| Error::TimestampOutOfRange {
-                format: Format::Pcap,
-            })?;
+    let timestamp = frame.timestamp.ok_or(Error::TimestampUnavailable {
+        format: Format::Pcap,
+    })?;
+    let elapsed = timestamp
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| Error::TimestampOutOfRange {
+            format: Format::Pcap,
+        })?;
     let seconds = u32::try_from(elapsed.as_secs()).map_err(|_| Error::TimestampOutOfRange {
         format: Format::Pcap,
     })?;

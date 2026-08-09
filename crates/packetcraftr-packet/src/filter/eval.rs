@@ -233,7 +233,11 @@ fn frame_value(context: &Context<'_>, which: FrameField) -> Option<FieldValue> {
     Some(match which {
         FrameField::Number => FieldValue::Unsigned(context.number),
         // Floor to whole Unix seconds, matching the capture and output layers.
-        FrameField::TimeEpoch => match frame.timestamp.duration_since(UNIX_EPOCH) {
+        FrameField::TimeEpoch => match frame
+            .timestamp
+            .expect("Filter::matches rejects unavailable required timestamps")
+            .duration_since(UNIX_EPOCH)
+        {
             Ok(elapsed) => FieldValue::Unsigned(elapsed.as_secs()),
             Err(error) => {
                 let elapsed = error.duration();

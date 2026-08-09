@@ -51,14 +51,19 @@ impl ReplayTiming {
 
     pub(super) fn delay_between(
         self,
-        previous: SystemTime,
-        current: SystemTime,
+        previous: Option<SystemTime>,
+        current: Option<SystemTime>,
+        sequence: u64,
     ) -> Result<Duration, ReplayError> {
         self.validate()?;
-        let original = current.duration_since(previous).unwrap_or(Duration::ZERO);
         match self {
-            Self::Original => Ok(original),
+            Self::Original => {
+                let (previous, current) = required_times(previous, current, sequence, "original")?;
+                Ok(current.duration_since(previous).unwrap_or(Duration::ZERO))
+            }
             Self::Scaled(factor) => {
+                let (previous, current) = required_times(previous, current, sequence, "scaled")?;
+                let original = current.duration_since(previous).unwrap_or(Duration::ZERO);
                 let delay =
                     Duration::try_from_secs_f64(original.as_secs_f64() * factor).map_err(|_| {
                         ReplayError::InvalidTiming {
@@ -91,6 +96,18 @@ impl ReplayTiming {
             }
             Self::Immediate => Ok(Duration::ZERO),
         }
+    }
+}
+
+fn required_times(
+    previous: Option<SystemTime>,
+    current: Option<SystemTime>,
+    sequence: u64,
+    mode: &'static str,
+) -> Result<(SystemTime, SystemTime), ReplayError> {
+    match (previous, current) {
+        (Some(previous), Some(current)) => Ok((previous, current)),
+        _ => Err(ReplayError::TimestampUnavailable { sequence, mode }),
     }
 }
 

@@ -92,7 +92,7 @@ fn ethernet_ipv4_udp_raw_round_trip_exercises_filter_language() {
             .iter()
             .any(|diagnostic| diagnostic.code == "build.ipv4_options_padded")
     );
-    decoded.frame.timestamp = SystemTime::UNIX_EPOCH + Duration::from_secs(123);
+    decoded.frame.timestamp = Some(SystemTime::UNIX_EPOCH + Duration::from_secs(123));
     decoded.frame.interface = Some(4);
 
     let registry = registry();
@@ -105,12 +105,27 @@ fn ethernet_ipv4_udp_raw_round_trip_exercises_filter_language() {
     let filter =
         Filter::compile(source, &registry, FilterOptions::default()).expect("valid filter");
     assert!(filter.requirements().stream_index);
-    assert!(filter.matches(&FilterContext {
-        decoded: &decoded,
-        number: 7,
-        tcp_stream: None,
-        udp_stream: Some(3),
-    }));
+    assert!(
+        filter
+            .matches(&FilterContext {
+                decoded: &decoded,
+                number: 7,
+                tcp_stream: None,
+                udp_stream: Some(3),
+            })
+            .expect("timestamp is available")
+    );
+
+    decoded.frame.timestamp = None;
+    assert!(matches!(
+        filter.matches(&FilterContext {
+            decoded: &decoded,
+            number: 9,
+            tcp_stream: None,
+            udp_stream: Some(3),
+        }),
+        Err(packetcraftr_packet::filter::Error::TimestampUnavailable)
+    ));
 
     for source in [
         "tcp",
@@ -123,12 +138,14 @@ fn ethernet_ipv4_udp_raw_round_trip_exercises_filter_language() {
         let filter = Filter::compile(source, &registry, FilterOptions::default())
             .expect("valid negative filter");
         assert!(
-            !filter.matches(&FilterContext {
-                decoded: &decoded,
-                number: 7,
-                tcp_stream: None,
-                udp_stream: Some(3),
-            }),
+            !filter
+                .matches(&FilterContext {
+                    decoded: &decoded,
+                    number: 7,
+                    tcp_stream: None,
+                    udp_stream: Some(3),
+                })
+                .expect("timestamp is available"),
             "{source}"
         );
     }

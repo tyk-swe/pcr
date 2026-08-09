@@ -295,9 +295,10 @@ fn process_batch(
         .enumerate()
     {
         enforce_deadline(deadline)?;
+        let sent_at = crate::live_timestamp(sent_frame);
         let best = response_selector.select(
             request_index,
-            sent_frame.timestamp,
+            sent_at,
             batch.timeout,
             |response| classify_scan_response(registry, probe.transport, built, response),
             |observation| observation.classification.rank(),
@@ -312,10 +313,10 @@ fn process_batch(
             .expect("validated scan probe must have a result endpoint");
         let endpoint = &mut output.endpoints[endpoint_index];
         let evidence = if let Some(candidate) = best {
-            let received_at = candidate.decoded.frame.timestamp;
+            let received_at = crate::live_timestamp(&candidate.decoded.frame);
             let latency = candidate
                 .latency
-                .or_else(|| received_at.duration_since(sent_frame.timestamp).ok());
+                .or_else(|| received_at.duration_since(sent_at).ok());
             let response = retain_evidence(
                 &mut output.evidence_budget,
                 &candidate.decoded.frame,
@@ -333,7 +334,7 @@ fn process_batch(
                 status: ScanProbeStatus::Response,
                 classification: candidate.observation.classification,
                 responder: Some(candidate.observation.responder),
-                sent_at: sent_frame.timestamp,
+                sent_at,
                 received_at: Some(received_at),
                 latency,
                 response,
@@ -345,7 +346,7 @@ fn process_batch(
                 status: ScanProbeStatus::Timeout,
                 classification: ScanClassification::Timeout,
                 responder: None,
-                sent_at: sent_frame.timestamp,
+                sent_at,
                 received_at: None,
                 latency: None,
                 response: None,

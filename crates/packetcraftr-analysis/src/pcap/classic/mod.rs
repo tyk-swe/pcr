@@ -6,5 +6,5 @@
 mod decode;
 mod encode;
 
-pub(in crate::pcap) use decode::{read_next_pcap_frame, read_pcap_header};
+pub(in crate::pcap) use decode::{read_next_pcap_record, read_pcap_header};
 pub(in crate::pcap) use encode::{write_pcap_frame, write_pcap_header};

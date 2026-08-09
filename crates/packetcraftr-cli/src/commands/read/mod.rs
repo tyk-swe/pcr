@@ -5,14 +5,13 @@
 
 pub(super) mod arguments;
 mod conversion;
-mod execution;
 mod rendering;
 
 use std::fs::File;
 use std::io;
 
 use packetcraftr::{
-    analysis::pcap::{Limits, Reader, ReaderOptions, transcode},
+    analysis::pcap::{Limits, Reader, ReaderOptions, rewrite},
     output, packet,
     packet::error::{Classification, Kind},
 };
@@ -25,7 +24,6 @@ use crate::rendering::capture_file_format;
 use crate::system::default_registry_arc;
 
 use conversion::{decode_options, next_frame_number};
-use execution::write_filtered_capture;
 use rendering::render_read_record;
 
 pub(super) fn run(arguments: ReadArgs, output: output::contract::Format) -> Result<(), CliError> {
@@ -59,8 +57,7 @@ pub(super) fn run(arguments: ReadArgs, output: output::contract::Format) -> Resu
         ));
     }
 
-    // Dissection is the price of filtering, and of showing the layer stack.
-    // With neither requested, reading stays exactly the copy it always was.
+    // Dissection is the price of filtering and of showing the layer stack.
     let decoding = if filter.is_some() || dissect {
         let registry = default_registry_arc()?;
         let compiled = match filter.as_deref() {
@@ -96,24 +93,35 @@ pub(super) fn run(arguments: ReadArgs, output: output::contract::Format) -> Resu
         output,
         output::contract::Format::Pcap | output::contract::Format::Pcapng
     ) {
-        // Transcoding copies every record verbatim, so it cannot honour a
-        // filter. Selecting frames instead writes a new capture containing
-        // only the survivors, which is how a subset is extracted.
-        if let Some((decoder, Some(compiled))) = &decoding {
-            return write_filtered_capture(
-                &mut reader,
-                decoder,
-                compiled,
-                output,
-                stream_limits,
-                max_frame_bytes,
-                max_interfaces,
-            );
+        if filter.is_some() {
+            return Err(CliError::from_classification(
+                Classification::new(
+                    "cli.capture_rewrite_filter",
+                    Kind::Cli,
+                    Some("use text, hex, or ndjson output to filter frames"),
+                ),
+                "capture rewriting cannot filter records without discarding source structure",
+                Vec::new(),
+            ));
         }
         let format = capture_file_format(output)?;
+        if format != reader.format() {
+            return Err(CliError::from_classification(
+                Classification::new(
+                    "cli.capture_rewrite_format",
+                    Kind::Cli,
+                    Some("select the capture output format matching the input capture"),
+                ),
+                format!(
+                    "capture rewriting cannot convert {:?} input to {format:?} without normalization",
+                    reader.format()
+                ),
+                Vec::new(),
+            ));
+        }
         let stdout = io::stdout();
-        let (_output, _report) = transcode(&mut reader, stdout.lock(), format, stream_limits)
-            .map_err(CliError::classified)?;
+        let (_output, _report) =
+            rewrite(&mut reader, stdout.lock(), stream_limits).map_err(CliError::classified)?;
         return Ok(());
     }
 
@@ -170,12 +178,31 @@ pub(super) fn run(arguments: ReadArgs, output: output::contract::Format) -> Resu
                     .decode(frame.clone(), decode_options(max_frame_bytes))
                     .map_err(|source| CliError::new(3, source.to_string()).at_sequence(sequence))?;
                 if let Some(compiled) = compiled
-                    && !compiled.matches(&packet::filter::Context {
-                        decoded: &decoded,
-                        number: frames,
-                        tcp_stream: None,
-                        udp_stream: None,
-                    })
+                    && compiled.requirements().timestamp
+                    && frame.timestamp.is_none()
+                {
+                    return Err(CliError::from_classification(
+                        Classification::new(
+                            "packet.timestamp_unavailable",
+                            Kind::Packet,
+                            Some("remove frame.time_epoch from the filter or use timestamped packet blocks"),
+                        ),
+                        format!("frame {frames} has no timestamp required by frame.time_epoch"),
+                        Vec::new(),
+                    )
+                    .at_sequence(sequence));
+                }
+                if let Some(compiled) = compiled
+                    && !compiled
+                        .matches(&packet::filter::Context {
+                            decoded: &decoded,
+                            number: frames,
+                            tcp_stream: None,
+                            udp_stream: None,
+                        })
+                        .map_err(|source| {
+                            CliError::new(3, source.to_string()).at_sequence(sequence)
+                        })?
                 {
                     continue;
                 }

@@ -4,8 +4,8 @@ PacketcraftR is a Rust library and command-line tool for exact packet
 construction, bounded dissection, capture-file I/O, offline analysis, and
 policy-gated live networking.
 
-The current release is `0.4.0`. PacketcraftR is stable but pre-1.0, so Rust
-APIs and versioned serialized contracts may change between minor releases.
+PacketcraftR is currently a pre-1.0 beta (`0.5.0-beta.1`). Rust APIs and
+versioned serialized contracts may change incompatibly between beta releases.
 Review the [changelog](CHANGELOG.md) before upgrading.
 
 Use live networking only on systems and networks you own or are explicitly

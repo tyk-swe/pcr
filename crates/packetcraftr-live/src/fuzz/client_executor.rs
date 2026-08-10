@@ -94,11 +94,6 @@ where
             )));
         }
         let sent = sent.pop().expect("validated one sent fuzz packet");
-        if sent.wire_bytes() != &case.authorized_bytes {
-            return Err(invalid_client_execution(
-                "fuzz execution did not transmit the authorized prepared bytes",
-            ));
-        }
         Ok(FuzzCaseExecution {
             permit: case.permit,
             sent,

@@ -10,7 +10,6 @@ use packetcraftr_packet::{Packet, diagnostic::Diagnostic};
 pub struct FuzzExecutionCase {
     pub(crate) permit: crate::evidence::ExecutionPermit,
     pub(crate) packet: Packet,
-    pub(crate) authorized_bytes: bytes::Bytes,
 }
 
 #[derive(Clone, Debug)]

@@ -91,6 +91,25 @@ fn evidence_selection_prioritizes_rank_and_stably_keeps_fully_tied_candidates() 
     );
     assert_eq!(best.as_ref().unwrap().observation.identity, 2);
 
+    let earlier_higher_bytes = decoded_at(Duration::from_millis(1), &[9]);
+    let later_lower_bytes = decoded_at(Duration::from_millis(2), &[1]);
+    let mut best = None;
+    choose(
+        &mut best,
+        candidate(
+            &earlier_higher_bytes,
+            1,
+            (0, 0),
+            1,
+            Duration::from_millis(1),
+        ),
+    );
+    choose(
+        &mut best,
+        candidate(&later_lower_bytes, 1, (0, 0), 2, Duration::from_millis(2)),
+    );
+    assert_eq!(best.as_ref().unwrap().observation.identity, 1);
+
     let tied = decoded_at(Duration::from_millis(1), &[1]);
     let mut best = None;
     choose(

@@ -34,14 +34,8 @@ fn attribution(winners: &[usize]) -> Attribution {
     }
 }
 
-fn capture_follows_send(
-    received_at: Instant,
-    captured_wall: Option<std::time::SystemTime>,
-    timing: TransmissionTiming,
-) -> bool {
+fn capture_follows_send(received_at: Instant, timing: TransmissionTiming) -> bool {
     received_at >= timing.freshness_marker().monotonic()
-        && captured_wall
-            .is_none_or(|captured_wall| captured_wall >= timing.freshness_marker().wall_clock())
 }
 
 impl ExchangeAccumulator {
@@ -143,16 +137,7 @@ impl ExchangeAccumulator {
             if received_at > deadline {
                 continue;
             }
-            if !capture_follows_send(received_at, raw_frame.timestamp, timing) {
-                if received_at >= timing.freshness_marker().monotonic() {
-                    push_diagnostic_once(
-                        &mut self.diagnostics,
-                        Diagnostic::warning(
-                            "exchange.contradictory_clocks",
-                            "capture monotonic and wall-clock evidence disagree; the frame was not correlated",
-                        ),
-                    );
-                }
+            if !capture_follows_send(received_at, timing) {
                 continue;
             }
             let mut result = None;
@@ -547,20 +532,16 @@ mod tests {
     }
 
     #[test]
-    fn contradictory_monotonic_and_wall_clock_evidence_is_rejected() {
+    fn monotonic_ingress_proves_freshness_despite_wall_clock_skew() {
         let report = Submission::start().complete(0, Bytes::new());
         let marker = report.timing().freshness_marker();
         let received_at = marker.monotonic() + Duration::from_millis(1);
-        let captured_wall = marker
+        let _captured_wall = marker
             .wall_clock()
             .checked_sub(Duration::from_millis(1))
             .expect("marker permits subtraction");
 
-        assert!(!capture_follows_send(
-            received_at,
-            Some(captured_wall),
-            report.timing(),
-        ));
+        assert!(capture_follows_send(received_at, report.timing()));
     }
 
     #[test]
@@ -573,10 +554,6 @@ mod tests {
             .expect("marker permits subtraction");
         let _untrusted_claim = Duration::from_millis(1);
 
-        assert!(!capture_follows_send(
-            pre_send,
-            Some(marker.wall_clock()),
-            report.timing(),
-        ));
+        assert!(!capture_follows_send(pre_send, report.timing()));
     }
 }

@@ -46,10 +46,13 @@ pub(crate) fn select_response_candidate<'a, O, K: Ord>(
         if candidate_key != current_key {
             return candidate_key < current_key;
         }
+        if candidate.latency != current.latency {
+            return preferred_latency(candidate.latency, current.latency);
+        }
         if candidate.decoded.frame.bytes() != current.decoded.frame.bytes() {
             return candidate.decoded.frame.bytes() < current.decoded.frame.bytes();
         }
-        preferred_latency(candidate.latency, current.latency)
+        false
     });
     if candidate_precedes {
         *best = Some(candidate);

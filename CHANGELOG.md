@@ -16,14 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Fixed byte-slice ends beyond the available value now contribute no candidate;
   only an omitted end extends to the actual end.
 - **Breaking:** Original and scaled replay timing now reject unavailable or
-  backward timestamps by default. The explicit `--nonmonotonic-timestamps
-  clamp` policy schedules no delay for a backward record and emits a typed
-  adjustment report. Replay output now names zero-based capture positions
-  `source_index`; selectors and human output use one-based source ordinals.
-- **Breaking:** Serialized diagnostics now include the required semantic
-  `category` field (`general` or `integrity`). Live response correlation and
-  DNS classification use this category instead of searching diagnostic codes
-  for the word `checksum`.
+  backward timestamps by default. `--clamp-nonmonotonic-timestamps` schedules
+  no delay for a backward record and reports the adjustment as
+  `timestamp_clamped_by` in streaming frame output.
+- Marked packet-integrity diagnostics explicitly so live response correlation
+  and DNS classification no longer search diagnostic codes for the word
+  `checksum`.
 
 - **Breaking:** Live transmission now returns opaque provider receipts that bind
   semantic builds, materialized routes, exact accepted bytes, byte counts, and
@@ -49,15 +47,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Charged TCP reassembly history buffers by their actual allocated capacity,
-  including allocator over-allocation, while preserving plan-before-commit
-  behavior when the aggregate memory budget rejects that capacity.
-- Required native capture statistics providers to mark counter resets with a
-  generation transition. Same-generation 32-bit wraps remain supported;
-  unexplained generation changes and counter arithmetic overflow now fail
-  without inflating receiver-drop totals.
-- Rebased statistics I/O buckets to the chronologically earliest matched
-  timestamp, so out-of-order capture records no longer collapse into the
-  first-observed bucket.
+  while preserving plan-before-commit behavior when the aggregate memory
+  budget rejects that capacity.
+- Treated a lower native capture drop counter as a reset and charged its current
+  value instead of interpreting the decrease as a 32-bit wrap.
 - Separated prefilter conversation indexing (`max_indexed_flows`) from
   selected-flow and reassembly accounting (`max_flows`). Filters that do not
   read stream fields now reject traffic before it can consume a selected-flow
@@ -156,7 +149,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Validated synthesized Ethernet DNS evidence and rejected re-encoding typed
   DNS fields that disagree with their retained wire payload.
 - Made filtered replay NDJSON envelope sequences contiguous while preserving
-  each record's independent zero-based `source_index`.
+  each record's independent `source_sequence`.
 
 ## [0.4.0] - 2026-07-29
 

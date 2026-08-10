@@ -82,7 +82,7 @@ pub(super) fn replay_network_envelope(frame: &Frame) -> Result<NetworkEnvelope, 
 }
 
 pub(super) fn replay_link_mode(
-    source_index: u64,
+    sequence: u64,
     link_type: LinkType,
     requested: LinkMode,
 ) -> Result<LinkMode, ReplayError> {
@@ -91,7 +91,7 @@ pub(super) fn replay_link_mode(
         LinkType::BSD_RAW | LinkType::RAW | LinkType::IPV4 | LinkType::IPV6 => LinkMode::Layer3,
         _ => {
             return Err(ReplayError::UnsupportedLinkType {
-                source_index,
+                sequence,
                 link_type: link_type.0,
             });
         }
@@ -100,7 +100,7 @@ pub(super) fn replay_link_mode(
         LinkMode::Auto => Ok(supported),
         requested if requested == supported => Ok(requested),
         requested => Err(ReplayError::LinkModeMismatch {
-            source_index,
+            sequence,
             link_type: link_type.0,
             requested,
         }),
@@ -108,14 +108,11 @@ pub(super) fn replay_link_mode(
 }
 
 pub(super) fn validate_transmission_evidence(
-    source_index: u64,
+    sequence: u64,
     frame: &Frame,
     report: &IoSendReport,
 ) -> Result<(), ReplayError> {
     report
         .validate_exact(frame.bytes())
-        .map_err(|source| ReplayError::Transmission {
-            source_index,
-            source,
-        })
+        .map_err(|source| ReplayError::Transmission { sequence, source })
 }

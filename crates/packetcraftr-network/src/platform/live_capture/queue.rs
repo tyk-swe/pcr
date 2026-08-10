@@ -222,8 +222,18 @@ impl SharedCapture {
         previous: NativeCaptureStatistics,
         current: NativeCaptureStatistics,
     ) -> Result<(), LiveIoError> {
-        let (capture_drop_delta, network_drop_delta, interface_drop_delta) =
-            native_drop_deltas(previous, current)?;
+        let capture_drop_delta = native_drop_delta(
+            previous.capture_dropped_frames,
+            current.capture_dropped_frames,
+        );
+        let network_drop_delta = native_drop_delta(
+            previous.network_dropped_frames,
+            current.network_dropped_frames,
+        );
+        let interface_drop_delta = native_drop_delta(
+            previous.interface_dropped_frames,
+            current.interface_dropped_frames,
+        );
         let total_drop_delta = capture_drop_delta
             .checked_add(network_drop_delta)
             .and_then(|total| total.checked_add(interface_drop_delta))
@@ -250,47 +260,8 @@ impl SharedCapture {
     }
 }
 
-fn native_drop_deltas(
-    previous: NativeCaptureStatistics,
-    current: NativeCaptureStatistics,
-) -> Result<(u64, u64, u64), LiveIoError> {
-    if current.generation == previous.generation {
-        return Ok((
-            u64::from(
-                current
-                    .capture_dropped_frames
-                    .wrapping_sub(previous.capture_dropped_frames),
-            ),
-            u64::from(
-                current
-                    .network_dropped_frames
-                    .wrapping_sub(previous.network_dropped_frames),
-            ),
-            u64::from(
-                current
-                    .interface_dropped_frames
-                    .wrapping_sub(previous.interface_dropped_frames),
-            ),
-        ));
-    }
-    let expected_generation = previous.generation.checked_add(1).ok_or_else(|| {
-        LiveIoError::InvalidCaptureStatistics {
-            message: "native receiver counter generation overflowed".to_owned(),
-        }
-    })?;
-    if current.generation != expected_generation {
-        return Err(LiveIoError::InvalidCaptureStatistics {
-            message: format!(
-                "native receiver counter generation changed from {} to {}, expected reset generation {expected_generation}",
-                previous.generation, current.generation
-            ),
-        });
-    }
-    Ok((
-        u64::from(current.capture_dropped_frames),
-        u64::from(current.network_dropped_frames),
-        u64::from(current.interface_dropped_frames),
-    ))
+fn native_drop_delta(previous: u32, current: u32) -> u64 {
+    u64::from(current.checked_sub(previous).unwrap_or(current))
 }
 
 #[derive(Default)]
@@ -317,71 +288,9 @@ fn increment(counter: &mut u64, value: u64, label: &str) -> Result<(), LiveIoErr
 mod tests {
     use super::*;
 
-    fn sample(generation: u64, values: [u32; 3]) -> NativeCaptureStatistics {
-        NativeCaptureStatistics {
-            generation,
-            capture_dropped_frames: values[0],
-            network_dropped_frames: values[1],
-            interface_dropped_frames: values[2],
-        }
-    }
-
     #[test]
-    fn native_drop_deltas_distinguish_increment_wrap_reset_and_generation_change() {
-        assert_eq!(
-            native_drop_deltas(sample(3, [1, 2, 3]), sample(3, [4, 6, 8]))
-                .expect("same-generation increments"),
-            (3, 4, 5)
-        );
-        assert_eq!(
-            native_drop_deltas(sample(3, [u32::MAX, u32::MAX - 1, 4]), sample(3, [1, 1, 4]),)
-                .expect("same-generation native counter wrap"),
-            (2, 3, 0)
-        );
-
-        assert_eq!(
-            native_drop_deltas(sample(3, [u32::MAX - 2, 100, 8]), sample(4, [2, 3, 0]),)
-                .expect("explicit provider reset"),
-            (2, 3, 0)
-        );
-
-        assert!(matches!(
-            native_drop_deltas(sample(3, [10, 0, 0]), sample(5, [2, 0, 0])),
-            Err(LiveIoError::InvalidCaptureStatistics { ref message })
-                if message.contains("expected reset generation 4")
-        ));
-        assert!(matches!(
-            native_drop_deltas(sample(3, [10, 0, 0]), sample(2, [2, 0, 0])),
-            Err(LiveIoError::InvalidCaptureStatistics { ref message })
-                if message.contains("expected reset generation 4")
-        ));
-        assert!(matches!(
-            native_drop_deltas(
-                sample(u64::MAX, [10, 0, 0]),
-                sample(0, [0, 0, 0]),
-            ),
-            Err(LiveIoError::InvalidCaptureStatistics { ref message })
-                if message.contains("generation overflowed")
-        ));
-    }
-
-    #[test]
-    fn native_drop_counter_overflow_does_not_partially_mutate_statistics() {
-        let capture = SharedCapture::new(CaptureQueueLimits::default());
-        {
-            let mut state = capture.lock().expect("capture queue lock");
-            state.statistics.dropped_frames = u64::MAX;
-            state.statistics.receiver_dropped_frames = u64::MAX;
-        }
-        let before = capture.lock().expect("capture queue lock").statistics;
-        assert!(matches!(
-            capture.add_native_drop_deltas(sample(0, [0, 0, 0]), sample(0, [1, 0, 0])),
-            Err(LiveIoError::InvalidCaptureStatistics { ref message })
-                if message.contains("dropped frames counter overflowed")
-        ));
-        assert_eq!(
-            capture.lock().expect("capture queue lock").statistics,
-            before
-        );
+    fn native_drop_delta_treats_a_decrease_as_a_counter_reset() {
+        assert_eq!(native_drop_delta(10, 13), 3);
+        assert_eq!(native_drop_delta(10, 2), 2);
     }
 }

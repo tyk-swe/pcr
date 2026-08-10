@@ -6,6 +6,5 @@
 mod model;
 
 pub use model::{
-    Diagnostic, DiagnosticCategory as Category, DiagnosticSeverity as Severity,
-    has_integrity_failure, push_diagnostic_once,
+    Diagnostic, DiagnosticSeverity as Severity, has_integrity_failure, push_diagnostic_once,
 };

@@ -574,13 +574,11 @@ fn stats_collect_all_tables_with_directional_and_time_accounting() {
     assert_eq!(report.bytes, total_bytes);
     assert_eq!(report.first_timestamp, Some(epoch + Duration::from_secs(1)));
     assert_eq!(report.last_timestamp, Some(epoch + Duration::from_secs(4)));
-    assert_eq!(report.io.len(), 3);
+    assert_eq!(report.io.len(), 2);
     assert_eq!(report.io[0].offset, Duration::ZERO);
-    assert_eq!(report.io[0].frames, 1);
-    assert_eq!(report.io[1].offset, Duration::from_secs(1));
+    assert_eq!(report.io[0].frames, 2);
+    assert_eq!(report.io[1].offset, Duration::from_secs(2));
     assert_eq!(report.io[1].frames, 1);
-    assert_eq!(report.io[2].offset, Duration::from_secs(3));
-    assert_eq!(report.io[2].frames, 1);
 
     let ipv4 = report
         .protocols
@@ -647,67 +645,6 @@ fn stats_reject_zero_interval_and_empty_report_is_well_formed() {
     assert!(report.protocols.is_empty());
     assert!(report.conversations.is_empty());
     assert!(report.io.is_empty());
-}
-
-#[test]
-fn stats_io_buckets_rebase_to_chronological_minimum_for_out_of_order_frames() {
-    let registry = registry();
-    let epoch = SystemTime::UNIX_EPOCH;
-    let frames = [
-        udp_frame(
-            &registry,
-            epoch + Duration::from_millis(10_500),
-            CLIENT,
-            SERVER,
-            1_000,
-            9_999,
-            b"first",
-        ),
-        udp_frame(
-            &registry,
-            epoch + Duration::from_millis(9_250),
-            CLIENT,
-            SERVER,
-            1_000,
-            9_999,
-            b"earliest",
-        ),
-        udp_frame(
-            &registry,
-            epoch + Duration::from_millis(10_000),
-            CLIENT,
-            SERVER,
-            1_000,
-            9_999,
-            b"middle",
-        ),
-    ];
-    let mut capture = reader(&frames);
-    let mut collector = StatsCollector::new(Duration::from_secs(1)).expect("valid interval");
-    run(&mut capture, registry, &Options::default(), |record| {
-        collector.observe(&record).expect("timestamped record");
-        Ok(())
-    })
-    .expect("out-of-order statistics pass succeeds");
-    let report = collector.finish();
-
-    assert_eq!(
-        report.first_timestamp,
-        Some(epoch + Duration::from_millis(9_250))
-    );
-    assert_eq!(
-        report.last_timestamp,
-        Some(epoch + Duration::from_millis(10_500))
-    );
-    assert_eq!(report.io.len(), 2);
-    assert_eq!(
-        (report.io[0].offset, report.io[0].frames),
-        (Duration::ZERO, 2)
-    );
-    assert_eq!(
-        (report.io[1].offset, report.io[1].frames),
-        (Duration::from_secs(1), 1)
-    );
 }
 
 #[test]

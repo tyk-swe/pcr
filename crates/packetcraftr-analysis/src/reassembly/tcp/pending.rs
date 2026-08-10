@@ -159,7 +159,7 @@ pub(super) fn plan_push(
             final_offset: fin_offset,
         });
     }
-    let mut accounting = plan_push_accounting(PushAccountingInput {
+    let accounting = plan_push_accounting(PushAccountingInput {
         limits,
         state,
         pending_bytes,
@@ -178,10 +178,11 @@ pub(super) fn plan_push(
             limit: limits.max_bytes_per_flow,
         },
     )?;
-    let (history_replacement, actual_history_allocation) =
+    let history_replacement =
         prepare_emitted_history(state, initial_history_capacity, history_allocation)?;
-    accounting
-        .reconcile_history_allocation(actual_history_allocation, limits.max_aggregate_bytes)?;
+    let actual_history_allocation = history_replacement
+        .as_ref()
+        .map_or(state.emitted_history.capacity(), VecDeque::capacity);
     let direct_payload = if merge.direct_output {
         let end = payload_start
             .checked_add(payload.len())
@@ -202,8 +203,11 @@ pub(super) fn plan_push(
     let final_fin_offset = state.fin_offset.or(incoming_fin_offset);
     let closed =
         segment.rst || final_fin_offset.is_some_and(|fin_offset| final_next_offset >= fin_offset);
-    let (aggregate_bytes, aggregate_memory_charge) =
-        accounting.final_aggregates(closed, limits.max_aggregate_bytes)?;
+    let (aggregate_bytes, aggregate_memory_charge) = accounting.final_aggregates(
+        closed,
+        actual_history_allocation,
+        limits.max_aggregate_bytes,
+    )?;
     Ok(PushPlan {
         payload_sequence,
         incoming_fin_offset,

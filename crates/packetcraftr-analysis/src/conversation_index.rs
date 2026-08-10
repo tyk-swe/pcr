@@ -59,19 +59,14 @@ impl StreamIndex {
         number: u64,
         max_flows: usize,
     ) -> Result<u64, AnalysisError> {
-        let canonical = CanonicalFlow::from_flow(flow);
-        if let Some(index) = self.assignments.get(&canonical) {
-            return Ok(*index);
-        }
-        if self.assignments.len() >= max_flows {
-            return Err(AnalysisError::StreamLimit {
+        self.assign_under_limit(
+            flow,
+            max_flows,
+            AnalysisError::StreamLimit {
                 number,
                 limit: max_flows,
-            });
-        }
-        let index = self.assignments.len() as u64;
-        self.assignments.insert(canonical, index);
-        Ok(index)
+            },
+        )
     }
 
     /// Assigns a capture-stable index under the distinct prefilter budget.
@@ -81,15 +76,28 @@ impl StreamIndex {
         number: u64,
         max_indexed_flows: usize,
     ) -> Result<u64, AnalysisError> {
+        self.assign_under_limit(
+            flow,
+            max_indexed_flows,
+            AnalysisError::StreamIndexLimit {
+                number,
+                limit: max_indexed_flows,
+            },
+        )
+    }
+
+    fn assign_under_limit(
+        &mut self,
+        flow: &FlowKey,
+        limit: usize,
+        limit_error: AnalysisError,
+    ) -> Result<u64, AnalysisError> {
         let canonical = CanonicalFlow::from_flow(flow);
         if let Some(index) = self.assignments.get(&canonical) {
             return Ok(*index);
         }
-        if self.assignments.len() >= max_indexed_flows {
-            return Err(AnalysisError::StreamIndexLimit {
-                number,
-                limit: max_indexed_flows,
-            });
+        if self.assignments.len() >= limit {
+            return Err(limit_error);
         }
         let index = self.assignments.len() as u64;
         self.assignments.insert(canonical, index);

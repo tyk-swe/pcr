@@ -18,9 +18,8 @@ use packetcraftr_packet::frame::{Frame, LinkType};
 use super::engine::{replay_capture, replay_capture_with_selector};
 use super::error::ReplayError;
 use super::model::{
-    NonmonotonicTimestampPolicy, ReplayAuthorizationContext, ReplayAuthorizer, ReplayLimits,
-    ReplayOptions, ReplaySelector, ReplayTiming, ReplayTransmission, ReplayTransmitter,
-    TimestampAdjustment,
+    ReplayAuthorizationContext, ReplayAuthorizer, ReplayLimits, ReplayOptions, ReplaySelector,
+    ReplayTiming, ReplayTransmission, ReplayTransmitter,
 };
 use super::wire::{replay_link_mode, replay_network_envelope, validate_transmission_evidence};
 use crate::BoundaryError;
@@ -117,15 +116,15 @@ impl WorkflowClock for RecordingClock {
 }
 
 struct RecordingSelector {
-    ordinals: Vec<u64>,
+    numbers: Vec<u64>,
     skip: Option<u64>,
     keep: bool,
 }
 
 impl ReplaySelector for RecordingSelector {
-    fn select(&mut self, source_ordinal: u64, _frame: &Frame) -> Result<bool, BoundaryError> {
-        self.ordinals.push(source_ordinal);
-        Ok(self.keep && self.skip != Some(source_ordinal))
+    fn select(&mut self, number: u64, _frame: &Frame) -> Result<bool, BoundaryError> {
+        self.numbers.push(number);
+        Ok(self.keep && self.skip != Some(number))
     }
 }
 
@@ -154,7 +153,7 @@ fn replay_options(timing: ReplayTiming) -> ReplayOptions {
         interface: test_interface(),
         link_mode: LinkMode::Auto,
         timing,
-        nonmonotonic_timestamps: NonmonotonicTimestampPolicy::Reject,
+        clamp_nonmonotonic_timestamps: false,
         limits: ReplayLimits::default(),
     }
 }
@@ -180,45 +179,30 @@ fn replay_timing_validation_rejects_non_finite_and_non_positive_values() {
 fn replay_timing_requires_capture_time_only_for_source_interval_modes() {
     assert_eq!(
         ReplayTiming::Immediate
-            .delay_between(None, None, 2, NonmonotonicTimestampPolicy::Reject,)
+            .delay_between(None, None, 2, false)
             .expect("immediate timing is independent of capture time"),
         (Duration::ZERO, None)
     );
     assert_eq!(
         ReplayTiming::FixedRate(2.0)
-            .delay_between(None, None, 2, NonmonotonicTimestampPolicy::Reject,)
+            .delay_between(None, None, 2, false)
             .expect("fixed timing is independent of capture time"),
         (Duration::from_millis(500), None)
     );
     assert!(matches!(
-        ReplayTiming::Original.delay_between(
-            Some(UNIX_EPOCH + Duration::from_secs(2)),
-            Some(UNIX_EPOCH + Duration::from_secs(1)),
-            2,
-            NonmonotonicTimestampPolicy::Reject,
-        ),
-        Err(ReplayError::NonmonotonicTimestamp {
-            source_index: 2,
-            mode: "original",
-            backward_by,
-        }) if backward_by == Duration::from_secs(1)
+        ReplayTiming::Original.delay_between(None, Some(UNIX_EPOCH), 2, false,),
+        Err(ReplayError::TimestampUnavailable {
+            sequence: 2,
+            mode: "original"
+        })
     ));
-    assert_eq!(
-        ReplayTiming::Scaled(2.0)
-            .delay_between(
-                Some(UNIX_EPOCH + Duration::from_secs(2)),
-                Some(UNIX_EPOCH + Duration::from_secs(1)),
-                3,
-                NonmonotonicTimestampPolicy::Clamp,
-            )
-            .expect("explicit clamp accepts backward timestamp"),
-        (
-            Duration::ZERO,
-            Some(TimestampAdjustment::NonmonotonicClamped {
-                backward_by: Duration::from_secs(1),
-            }),
-        )
-    );
+    assert!(matches!(
+        ReplayTiming::Scaled(2.0).delay_between(Some(UNIX_EPOCH), None, 3, false),
+        Err(ReplayError::TimestampUnavailable {
+            sequence: 3,
+            mode: "scaled"
+        })
+    ));
 }
 
 #[test]
@@ -245,7 +229,7 @@ fn original_timing_rejects_an_unavailable_first_timestamp_before_authorization()
     assert!(matches!(
         error,
         ReplayError::TimestampUnavailable {
-            source_index: 0,
+            sequence: 0,
             mode: "original"
         }
     ));
@@ -254,7 +238,7 @@ fn original_timing_rejects_an_unavailable_first_timestamp_before_authorization()
 }
 
 #[test]
-fn nonmonotonic_timestamps_reject_by_default_or_emit_explicit_clamp_report() {
+fn nonmonotonic_timestamps_reject_by_default_or_report_an_explicit_clamp() {
     let frames: &[(Duration, &[u8])] = &[
         (Duration::from_secs(2), &[1]),
         (Duration::from_secs(1), &[2]),
@@ -276,7 +260,7 @@ fn nonmonotonic_timestamps_reject_by_default_or_emit_explicit_clamp_report() {
     assert!(matches!(
         error,
         ReplayError::NonmonotonicTimestamp {
-            source_index: 1,
+            sequence: 1,
             backward_by,
             ..
         } if backward_by == Duration::from_secs(1)
@@ -287,7 +271,7 @@ fn nonmonotonic_timestamps_reject_by_default_or_emit_explicit_clamp_report() {
 
     let mut reader = capture_reader(LinkType::ETHERNET, frames);
     let mut options = replay_options(ReplayTiming::Original);
-    options.nonmonotonic_timestamps = NonmonotonicTimestampPolicy::Clamp;
+    options.clamp_nonmonotonic_timestamps = true;
     let mut authorizer = RecordingAuthorizer::default();
     let mut transmitter = RecordingTransmitter::default();
     let mut clock = RecordingClock::default();
@@ -308,14 +292,12 @@ fn nonmonotonic_timestamps_reject_by_default_or_emit_explicit_clamp_report() {
         clock.delays,
         [Duration::ZERO, Duration::ZERO, Duration::from_secs(1)]
     );
-    assert_eq!(summary.timestamp_adjustments, 1);
+    assert_eq!(summary.frames_completed, 3);
     assert_eq!(
-        evidence[1].timestamp_adjustment,
-        Some(TimestampAdjustment::NonmonotonicClamped {
-            backward_by: Duration::from_secs(1),
-        })
+        evidence[1].timestamp_clamped_by,
+        Some(Duration::from_secs(1))
     );
-    assert_eq!(evidence[2].timestamp_adjustment, None);
+    assert_eq!(evidence[2].timestamp_clamped_by, None);
 }
 
 #[test]
@@ -355,12 +337,12 @@ fn replay_network_envelope_rejects_malformed_ip_envelopes() {
 }
 
 #[test]
-fn replay_link_mode_errors_preserve_source_index_and_requested_mode() {
+fn replay_link_mode_errors_preserve_sequence_and_requested_mode() {
     let error = replay_link_mode(7, LinkType(999), LinkMode::Auto).unwrap_err();
     assert!(matches!(
         error,
         ReplayError::UnsupportedLinkType {
-            source_index: 7,
+            sequence: 7,
             link_type: 999
         }
     ));
@@ -369,7 +351,7 @@ fn replay_link_mode_errors_preserve_source_index_and_requested_mode() {
     assert!(matches!(
         error,
         ReplayError::LinkModeMismatch {
-            source_index: 8,
+            sequence: 8,
             link_type,
             requested: LinkMode::Layer3
         } if link_type == LinkType::ETHERNET.0
@@ -394,10 +376,7 @@ fn replay_transmission_evidence_requires_exact_wire_length_and_bytes() {
     .unwrap_err();
     assert!(matches!(
         partial,
-        ReplayError::Transmission {
-            source_index: 2,
-            ..
-        }
+        ReplayError::Transmission { sequence: 2, .. }
     ));
 
     let mismatch = validate_transmission_evidence(
@@ -408,10 +387,7 @@ fn replay_transmission_evidence_requires_exact_wire_length_and_bytes() {
     .unwrap_err();
     assert!(matches!(
         mismatch,
-        ReplayError::Transmission {
-            source_index: 3,
-            ..
-        }
+        ReplayError::Transmission { sequence: 3, .. }
     ));
 }
 
@@ -436,10 +412,7 @@ fn replay_authorization_denial_has_no_later_io_side_effects() {
 
     assert!(matches!(
         error,
-        ReplayError::Authorization {
-            source_index: 0,
-            ..
-        }
+        ReplayError::Authorization { sequence: 0, .. }
     ));
     assert_eq!(authorizer.calls, 1);
     assert_eq!(transmitter.validation_calls, 0);
@@ -458,7 +431,7 @@ fn replay_selector_skips_authorization_and_preserves_transmitted_spacing() {
         ],
     );
     let mut selector = RecordingSelector {
-        ordinals: Vec::new(),
+        numbers: Vec::new(),
         skip: Some(2),
         keep: true,
     };
@@ -480,7 +453,7 @@ fn replay_selector_skips_authorization_and_preserves_transmitted_spacing() {
     )
     .unwrap();
 
-    assert_eq!(selector.ordinals, [1, 2, 3]);
+    assert_eq!(selector.numbers, [1, 2, 3]);
     assert_eq!(
         authorizer.contexts,
         [
@@ -502,7 +475,7 @@ fn replay_selector_skips_authorization_and_preserves_transmitted_spacing() {
     assert_eq!(
         emitted
             .iter()
-            .map(|evidence| evidence.source_index)
+            .map(|evidence| evidence.source_sequence)
             .collect::<Vec<_>>(),
         [0, 2]
     );
@@ -519,7 +492,7 @@ fn replay_selector_skipped_frames_still_consume_the_frame_budget() {
         ],
     );
     let mut selector = RecordingSelector {
-        ordinals: Vec::new(),
+        numbers: Vec::new(),
         skip: None,
         keep: false,
     };
@@ -541,12 +514,12 @@ fn replay_selector_skipped_frames_still_consume_the_frame_budget() {
     assert!(matches!(
         error,
         ReplayError::FrameLimit {
-            source_index: 2,
+            sequence: 2,
             actual: 3,
             limit: 2,
         }
     ));
-    assert_eq!(selector.ordinals, [1, 2]);
+    assert_eq!(selector.numbers, [1, 2]);
     assert_eq!(authorizer.calls, 0);
     assert_eq!(transmitter.transmission_calls, 0);
 }

@@ -6,7 +6,6 @@
   "result": {
     "source_format": "pcap",
     "timing": "immediate",
-    "nonmonotonic_timestamps": "reject",
     "requested_interface": {
       "name": "lab0",
       "index": 2
@@ -19,7 +18,6 @@
       "secs": 0,
       "nanos": 0
     },
-    "timestamp_adjustments": 0,
     "frames": []
   },
   "diagnostics": []

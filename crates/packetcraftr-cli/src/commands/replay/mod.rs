@@ -86,14 +86,7 @@ pub(super) fn run(arguments: ReplayArgs, output: output::contract::Format) -> Re
         interface: requested_interface.clone(),
         link_mode: arguments.link_mode.into(),
         timing,
-        nonmonotonic_timestamps: match arguments.nonmonotonic_timestamps {
-            arguments::CliNonmonotonicTimestamps::Reject => {
-                workflow::replay::NonmonotonicTimestampPolicy::Reject
-            }
-            arguments::CliNonmonotonicTimestamps::Clamp => {
-                workflow::replay::NonmonotonicTimestampPolicy::Clamp
-            }
-        },
+        clamp_nonmonotonic_timestamps: arguments.clamp_nonmonotonic_timestamps,
         limits,
     };
     let mut adapter = frame_filter
@@ -119,19 +112,15 @@ pub(super) fn run(arguments: ReplayArgs, output: output::contract::Format) -> Re
             )?;
             match &frame_filter {
                 None => write_stdout_line(format_args!(
-                    "replayed {} frame(s), {} byte(s), scheduled delay {:?}, {} timestamp adjustment(s)",
-                    summary.frames_completed,
-                    summary.bytes_completed,
-                    summary.scheduled_duration,
-                    summary.timestamp_adjustments,
+                    "replayed {} frame(s), {} byte(s), scheduled delay {:?}",
+                    summary.frames_completed, summary.bytes_completed, summary.scheduled_duration
                 )),
                 Some(_) => write_stdout_line(format_args!(
-                    "replayed {} of {} frame(s), {} byte(s), scheduled delay {:?}, {} timestamp adjustment(s)",
+                    "replayed {} of {} frame(s), {} byte(s), scheduled delay {:?}",
                     summary.frames_completed,
                     summary.frames_attempted,
                     summary.bytes_completed,
-                    summary.scheduled_duration,
-                    summary.timestamp_adjustments,
+                    summary.scheduled_duration
                 )),
             }
         }
@@ -225,24 +214,6 @@ pub(super) fn run(arguments: ReplayArgs, output: output::contract::Format) -> Re
 }
 
 pub(crate) fn replay_cli_error(error: workflow::replay::Error) -> CliError {
-    let sequence = error.source_index();
+    let sequence = error.sequence();
     CliError::classified_at_optional_sequence(error, sequence)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{Duration, replay_cli_error, workflow};
-
-    #[test]
-    fn replay_cli_error_preserves_source_index_as_stream_sequence() {
-        let error = workflow::replay::Error::NonmonotonicTimestamp {
-            source_index: 17,
-            mode: "original",
-            backward_by: Duration::from_millis(1),
-        };
-
-        let error = replay_cli_error(error);
-
-        assert_eq!(error.sequence, Some(17));
-    }
 }

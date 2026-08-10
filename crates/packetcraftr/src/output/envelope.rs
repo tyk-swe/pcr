@@ -129,23 +129,6 @@ pub enum DiagnosticSeverity {
     Error,
 }
 
-/// Output-v1 semantic diagnostic category.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DiagnosticCategory {
-    General,
-    Integrity,
-}
-
-impl From<packetcraftr_packet::diagnostic::Category> for DiagnosticCategory {
-    fn from(value: packetcraftr_packet::diagnostic::Category) -> Self {
-        match value {
-            packetcraftr_packet::diagnostic::Category::General => Self::General,
-            packetcraftr_packet::diagnostic::Category::Integrity => Self::Integrity,
-        }
-    }
-}
-
 impl From<packetcraftr_packet::diagnostic::Severity> for DiagnosticSeverity {
     fn from(value: packetcraftr_packet::diagnostic::Severity) -> Self {
         match value {
@@ -176,9 +159,10 @@ impl From<packetcraftr_packet::layout::Range> for DiagnosticRange {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Diagnostic {
     pub code: String,
-    pub category: DiagnosticCategory,
     pub severity: DiagnosticSeverity,
     pub message: String,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub integrity_failure: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub layer: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -191,9 +175,9 @@ impl From<PacketDiagnostic> for Diagnostic {
     fn from(value: PacketDiagnostic) -> Self {
         Self {
             code: value.code,
-            category: value.category.into(),
             severity: value.severity.into(),
             message: value.message,
+            integrity_failure: value.integrity_failure,
             layer: value.layer,
             field: value.field,
             range: value.range.map(Into::into),

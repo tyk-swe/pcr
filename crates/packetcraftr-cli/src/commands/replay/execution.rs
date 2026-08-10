@@ -17,13 +17,9 @@ pub(super) struct DisplayFilterSelector<'a> {
 }
 
 impl workflow::replay::Selector for DisplayFilterSelector<'_> {
-    fn select(
-        &mut self,
-        source_ordinal: u64,
-        frame: &Frame,
-    ) -> Result<bool, workflow::BoundaryError> {
+    fn select(&mut self, number: u64, frame: &Frame) -> Result<bool, workflow::BoundaryError> {
         self.selector
-            .keep(source_ordinal, frame)
+            .keep(number, frame)
             .map_err(CliError::into_boundary_error)
     }
 }

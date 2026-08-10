@@ -12,7 +12,7 @@ use super::{
 };
 use crate::{
     Error as LiveIoError,
-    transmit::{IoSendReport, Layer2Frame},
+    transmit::{IoSendReport, Layer2Frame, Submission},
 };
 
 pub(super) fn send_layer2(frame: Layer2Frame<'_>) -> Result<IoSendReport, LiveIoError> {
@@ -24,6 +24,7 @@ pub(super) fn send_layer2(frame: Layer2Frame<'_>) -> Result<IoSendReport, LiveIo
         ),
     })?;
     let handle = open_handle(interface, SEND_SNAPSHOT_LENGTH, PromiscuousMode::Disabled)?;
+    let submission = Submission::start();
     // SAFETY: the byte slice remains valid for the synchronous call and length
     // is its exact checked c_int representation.
     let result = unsafe {
@@ -47,8 +48,5 @@ pub(super) fn send_layer2(frame: Layer2Frame<'_>) -> Result<IoSendReport, LiveIo
             ),
         });
     }
-    Ok(IoSendReport::committed(
-        frame.bytes().len(),
-        frame.bytes().clone(),
-    ))
+    Ok(submission.complete(frame.bytes().len(), frame.bytes().clone()))
 }

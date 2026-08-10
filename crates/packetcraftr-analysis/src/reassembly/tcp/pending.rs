@@ -159,7 +159,7 @@ pub(super) fn plan_push(
             final_offset: fin_offset,
         });
     }
-    let accounting = plan_push_accounting(PushAccountingInput {
+    let mut accounting = plan_push_accounting(PushAccountingInput {
         limits,
         state,
         pending_bytes,
@@ -178,8 +178,10 @@ pub(super) fn plan_push(
             limit: limits.max_bytes_per_flow,
         },
     )?;
-    let history_replacement =
+    let (history_replacement, actual_history_allocation) =
         prepare_emitted_history(state, initial_history_capacity, history_allocation)?;
+    accounting
+        .reconcile_history_allocation(actual_history_allocation, limits.max_aggregate_bytes)?;
     let direct_payload = if merge.direct_output {
         let end = payload_start
             .checked_add(payload.len())

@@ -100,27 +100,35 @@ pub(super) fn prepare_emitted_history(
     state: &TcpFlowState,
     retained_capacity: usize,
     capacity: usize,
-) -> Result<Option<VecDeque<u8>>, Error> {
+) -> Result<(Option<VecDeque<u8>>, usize), Error> {
+    prepare_emitted_history_with(state, retained_capacity, capacity, |buffer, requested| {
+        buffer.try_reserve_exact(requested)
+    })
+}
+
+fn prepare_emitted_history_with<F>(
+    state: &TcpFlowState,
+    retained_capacity: usize,
+    capacity: usize,
+    reserve: F,
+) -> Result<(Option<VecDeque<u8>>, usize), Error>
+where
+    F: FnOnce(&mut VecDeque<u8>, usize) -> Result<(), std::collections::TryReserveError>,
+{
     if state.emitted_history.capacity() == capacity {
-        return Ok(None);
+        return Ok((None, capacity));
     }
     let mut resized = VecDeque::new();
-    resized
-        .try_reserve_exact(capacity)
-        .map_err(|_| Error::AllocationFailed {
-            requested: capacity,
-        })?;
-    if resized.capacity() != capacity {
-        return Err(Error::AllocationFailed {
-            requested: capacity,
-        });
-    }
+    reserve(&mut resized, capacity).map_err(|_| Error::AllocationFailed {
+        requested: capacity,
+    })?;
     let skip = state
         .emitted_history
         .len()
         .saturating_sub(retained_capacity);
     resized.extend(state.emitted_history.range(skip..).copied());
-    Ok(Some(resized))
+    let allocated_capacity = resized.capacity();
+    Ok((Some(resized), allocated_capacity))
 }
 
 #[expect(
@@ -162,4 +170,34 @@ pub(super) fn append_emitted_history(
         .emitted_history
         .extend(output[output_skip..].iter().copied());
     state.history_start_offset = history_start_offset;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prepared_history_reports_allocator_overallocation_without_mutating_flow() {
+        let mut state = TcpFlowState::new(1, Instant::now());
+        state.emitted_history.extend([1, 2, 3]);
+        let old_history = state.emitted_history.clone();
+        let old_capacity = state.emitted_history.capacity();
+        let requested = old_capacity.saturating_add(1);
+
+        let (replacement, allocated_capacity) = prepare_emitted_history_with(
+            &state,
+            state.emitted_history.len(),
+            requested,
+            |buffer, requested| buffer.try_reserve_exact(requested.saturating_add(17)),
+        )
+        .expect("simulated over-allocation is accepted for accounting");
+
+        assert!(allocated_capacity > requested);
+        assert_eq!(
+            replacement.as_ref().map(VecDeque::capacity),
+            Some(allocated_capacity)
+        );
+        assert_eq!(state.emitted_history, old_history);
+        assert_eq!(flow_memory_charge(&state), Some(old_capacity));
+    }
 }

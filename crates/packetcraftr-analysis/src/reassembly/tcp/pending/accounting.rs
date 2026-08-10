@@ -112,6 +112,24 @@ pub(super) fn plan_push_accounting(
 }
 
 impl PushAccountingPlan {
+    pub(super) fn reconcile_history_allocation(
+        &mut self,
+        actual_capacity: usize,
+        limit: usize,
+    ) -> Result<(), Error> {
+        let prospective_aggregate_memory = self
+            .prospective_aggregate_memory
+            .checked_sub(self.history_allocation)
+            .and_then(|charge| charge.checked_add(actual_capacity))
+            .ok_or(Error::AggregateByteLimit { limit })?;
+        if prospective_aggregate_memory > limit {
+            return Err(Error::AggregateByteLimit { limit });
+        }
+        self.history_allocation = actual_capacity;
+        self.prospective_aggregate_memory = prospective_aggregate_memory;
+        Ok(())
+    }
+
     pub(super) fn final_aggregates(
         self,
         closed: bool,
@@ -131,5 +149,49 @@ impl PushAccountingPlan {
                 .checked_sub(self.old_memory_charge)
                 .ok_or(Error::AggregateByteLimit { limit })?,
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn plan() -> PushAccountingPlan {
+        PushAccountingPlan {
+            initial_history_capacity: 4,
+            history_allocation: 4,
+            prospective_aggregate_bytes: 3,
+            prospective_aggregate_memory: 10,
+            aggregate_base_bytes: 0,
+            aggregate_base_memory_charge: 0,
+            old_retained_bytes: 0,
+            old_memory_charge: 0,
+        }
+    }
+
+    #[test]
+    fn allocator_overallocation_is_charged_and_failure_is_transactional() {
+        let mut accepted = plan();
+        accepted
+            .reconcile_history_allocation(9, 15)
+            .expect("actual allocation fits aggregate memory budget");
+        assert_eq!(accepted.history_allocation, 9);
+        assert_eq!(accepted.prospective_aggregate_memory, 15);
+
+        let mut rejected = plan();
+        assert!(matches!(
+            rejected.reconcile_history_allocation(10, 15),
+            Err(Error::AggregateByteLimit { limit: 15 })
+        ));
+        assert_eq!(rejected.history_allocation, 4);
+        assert_eq!(rejected.prospective_aggregate_memory, 10);
+
+        let mut overflow = plan();
+        assert!(matches!(
+            overflow.reconcile_history_allocation(usize::MAX, usize::MAX),
+            Err(Error::AggregateByteLimit { limit: usize::MAX })
+        ));
+        assert_eq!(overflow.history_allocation, 4);
+        assert_eq!(overflow.prospective_aggregate_memory, 10);
     }
 }

@@ -32,6 +32,10 @@ pub(super) struct NativeCapturedPacket {
 
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct NativeCaptureStatistics {
+    /// Counter generation owned by the provider for this activated source.
+    /// Equal generations continue with native u32 wrap; advancing exactly once
+    /// reports a reset whose current values are the new generation's totals.
+    pub generation: u64,
     pub capture_dropped_frames: u32,
     pub network_dropped_frames: u32,
     pub interface_dropped_frames: u32,

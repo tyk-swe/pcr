@@ -224,6 +224,7 @@ impl NativeCaptureSource for NpcapCaptureSource {
             });
         }
         Ok(NativeCaptureStatistics {
+            generation: 0,
             capture_dropped_frames: statistics.dropped,
             network_dropped_frames: statistics.network_dropped,
             interface_dropped_frames: statistics.interface_dropped,

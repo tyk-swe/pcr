@@ -51,6 +51,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Charged TCP reassembly history buffers by their actual allocated capacity,
   including allocator over-allocation, while preserving plan-before-commit
   behavior when the aggregate memory budget rejects that capacity.
+- Required native capture statistics providers to mark counter resets with a
+  generation transition. Same-generation 32-bit wraps remain supported;
+  unexplained generation changes and counter arithmetic overflow now fail
+  without inflating receiver-drop totals.
 - Accepted valid injected-provider transmission reports across backward
   wall-clock adjustments by validating timing with monotonic endpoints.
 - Preserved TCP response correlation for Layer2 exchanges whose TCP

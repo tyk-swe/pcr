@@ -134,6 +134,7 @@ impl NativeCaptureSource for PcapCaptureSource {
         self.capture
             .stats()
             .map(|statistics| NativeCaptureStatistics {
+                generation: 0,
                 capture_dropped_frames: statistics.dropped,
                 network_dropped_frames: 0,
                 interface_dropped_frames: statistics.if_dropped,

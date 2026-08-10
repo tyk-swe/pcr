@@ -155,11 +155,10 @@ impl Timing {
         self.completed
     }
 
-    /// Whether monotonic and wall-clock endpoints describe the same ordering.
+    /// Whether monotonic endpoints describe a valid interval or exact event.
     pub fn is_consistent(self) -> bool {
         self.started.monotonic <= self.completed.monotonic
-            && self.started.wall_clock <= self.completed.wall_clock
-            && (!self.exact || self.started == self.completed)
+            && (!self.exact || self.started.monotonic == self.completed.monotonic)
     }
 }
 
@@ -231,7 +230,7 @@ impl Report {
         self.timing
     }
 
-    /// Validates count, exact accepted bytes, and provider clock ordering for
+    /// Validates count, exact accepted bytes, and provider monotonic timing for
     /// one submitted frame.
     pub fn validate_exact(&self, expected: &Bytes) -> Result<(), super::Error> {
         if self.bytes_sent != expected.len() {
@@ -253,8 +252,7 @@ impl Report {
         }
         if !self.timing.is_consistent() {
             return Err(super::Error::InvalidSendEvidence {
-                message: "provider timing has contradictory monotonic and wall-clock ordering"
-                    .to_owned(),
+                message: "provider timing has inconsistent monotonic endpoints".to_owned(),
             });
         }
         Ok(())
@@ -319,5 +317,35 @@ where
             Frame::Layer2(frame) => self.layer2.send_layer2(frame),
             Frame::Layer3(frame) => self.layer3.send_layer3(frame),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+
+    #[test]
+    fn backward_wall_clock_step_does_not_invalidate_submission_timing() {
+        let expected = Bytes::from_static(&[1, 2, 3]);
+        let started_monotonic = Instant::now();
+        let report = Report {
+            bytes_sent: expected.len(),
+            wire_bytes: expected.clone(),
+            timing: Timing {
+                started: TimeMarker {
+                    monotonic: started_monotonic,
+                    wall_clock: SystemTime::UNIX_EPOCH + Duration::from_secs(2),
+                },
+                completed: TimeMarker {
+                    monotonic: started_monotonic + Duration::from_millis(1),
+                    wall_clock: SystemTime::UNIX_EPOCH + Duration::from_secs(1),
+                },
+                exact: false,
+            },
+        };
+
+        assert!(report.validate_exact(&expected).is_ok());
     }
 }

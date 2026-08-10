@@ -229,7 +229,7 @@ impl LayerCodec for TcpCodec {
             && transport_checksum(network, 6, input)? != 0
         {
             diagnostics.push(
-                Diagnostic::warning("decode.tcp_checksum", "TCP checksum mismatch")
+                Diagnostic::integrity_warning("decode.tcp_checksum", "TCP checksum mismatch")
                     .at_field("checksum"),
             );
         }

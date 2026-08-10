@@ -8,7 +8,7 @@ use packetcraftr_packet::protocol::application::Dns;
 use packetcraftr_packet::{
     Packet,
     decode::Result as DecodedPacket,
-    diagnostic::Severity as DiagnosticSeverity,
+    diagnostic::has_integrity_failure,
     layer::{Malformed as MalformedLayer, Raw},
     registry::Registry,
 };
@@ -80,11 +80,9 @@ pub fn classify_dns_response(
         });
     }
     if direct_udp_match(registry, sent, &response.packet) {
-        if response.diagnostics.iter().any(|diagnostic| {
-            diagnostic.code.contains("checksum") && diagnostic.severity != DiagnosticSeverity::Info
-        }) {
+        if has_integrity_failure(&response.diagnostics) {
             return Some(DnsResponseClassification::DecodeFailure {
-                reason: "correlated UDP response has an invalid checksum diagnostic".to_owned(),
+                reason: "correlated UDP response has an integrity-failure diagnostic".to_owned(),
             });
         }
         let Some(payload) = dns_payload(&response.packet) else {
@@ -161,5 +159,100 @@ pub(crate) fn dns_payload(packet: &Packet) -> Option<Bytes> {
             .downcast_ref::<Raw>()
             .map(|raw| raw.bytes.clone()),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::{IpAddr, Ipv4Addr};
+
+    use packetcraftr_packet::diagnostic::Diagnostic;
+    use packetcraftr_packet::frame::{Frame, LinkType};
+    use packetcraftr_packet::layout::Packet as PacketLayout;
+    use packetcraftr_packet::protocol::{network::Ipv4, transport::Udp};
+
+    use super::*;
+    use crate::dns::model::DnsQueryType;
+
+    fn decoded(packet: Packet, diagnostic: Diagnostic) -> DecodedPacket {
+        let frame = Frame::without_timestamp(LinkType::RAW, Bytes::from_static(&[0]))
+            .expect("decoded DNS fixture frame");
+        DecodedPacket {
+            packet,
+            original: frame.bytes().clone(),
+            frame,
+            layout: PacketLayout::default(),
+            diagnostics: vec![diagnostic],
+        }
+    }
+
+    fn fixture() -> (Registry, DnsProbe, Packet, Packet) {
+        let server = Ipv4Addr::new(10, 0, 0, 53);
+        let probe = DnsProbe {
+            attempt: 1,
+            server_address: IpAddr::V4(server),
+            server_port: 53,
+            source_port: 49_152,
+            transaction_id: 0x1234,
+            query_name: "example.com".to_owned(),
+            query_type: DnsQueryType::A,
+            query: Bytes::from_static(&[0]),
+        };
+        let sent = probe.packet();
+        let mut response = Packet::new();
+        response.push(Ipv4 {
+            source: server,
+            ..Ipv4::default()
+        });
+        response.push(Udp {
+            source_port: 53,
+            destination_port: probe.source_port,
+            ..Udp::default()
+        });
+        response.push(Raw::new(Bytes::from_static(&[0])));
+        (
+            packetcraftr_packet::protocol::builtin::registry().expect("built-in registry"),
+            probe,
+            sent,
+            response,
+        )
+    }
+
+    #[test]
+    fn dns_integrity_classification_uses_category_not_diagnostic_text() {
+        let (registry, probe, sent, response) = fixture();
+        let mentioned = classify_dns_response(
+            &registry,
+            &probe,
+            &sent,
+            &decoded(
+                response.clone(),
+                Diagnostic::warning("decode.checksum_note", "checksum mentioned only"),
+            ),
+            DnsLimits::default(),
+        )
+        .expect("tuple-correlated response");
+        assert!(matches!(
+            mentioned,
+            DnsResponseClassification::DecodeFailure { ref reason }
+                if !reason.contains("integrity-failure diagnostic")
+        ));
+
+        let typed = classify_dns_response(
+            &registry,
+            &probe,
+            &sent,
+            &decoded(
+                response,
+                Diagnostic::integrity_warning("decode.renamed", "renamed diagnostic"),
+            ),
+            DnsLimits::default(),
+        )
+        .expect("tuple-correlated response");
+        assert!(matches!(
+            typed,
+            DnsResponseClassification::DecodeFailure { ref reason }
+                if reason.contains("integrity-failure diagnostic")
+        ));
     }
 }

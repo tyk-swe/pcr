@@ -273,7 +273,7 @@ impl LayerCodec for GreCodec {
         }
         if checksum_present && context.verify_checksums && checksum(input) != 0 {
             diagnostics.push(
-                Diagnostic::warning("decode.gre_checksum", "GRE checksum mismatch")
+                Diagnostic::integrity_warning("decode.gre_checksum", "GRE checksum mismatch")
                     .at_field("checksum"),
             );
         }

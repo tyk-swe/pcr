@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   clamp` policy schedules no delay for a backward record and emits a typed
   adjustment report. Replay output now names zero-based capture positions
   `source_index`; selectors and human output use one-based source ordinals.
+- **Breaking:** Serialized diagnostics now include the required semantic
+  `category` field (`general` or `integrity`). Live response correlation and
+  DNS classification use this category instead of searching diagnostic codes
+  for the word `checksum`.
 
 - **Breaking:** Live transmission now returns opaque provider receipts that bind
   semantic builds, materialized routes, exact accepted bytes, byte counts, and

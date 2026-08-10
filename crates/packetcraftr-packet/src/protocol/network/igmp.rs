@@ -144,7 +144,7 @@ impl LayerCodec for IgmpCodec {
         let mut diagnostics = Vec::new();
         if context.verify_checksums && checksum(input) != 0 {
             diagnostics.push(
-                Diagnostic::warning("decode.igmp_checksum", "IGMP checksum mismatch")
+                Diagnostic::integrity_warning("decode.igmp_checksum", "IGMP checksum mismatch")
                     .at_field("checksum"),
             );
         }

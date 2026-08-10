@@ -384,6 +384,23 @@ fn scan_tcp_correlation_requires_integrity_and_classifies_valid_replies() {
         )
         .is_none()
     );
+    assert_eq!(
+        classify_scan_response(
+            &registry,
+            ScanTransport::Tcp,
+            &request,
+            &decoded(
+                tcp_packet(remote, local, 443, 50_000, Tcp::SYN | Tcp::ACK),
+                vec![Diagnostic::warning(
+                    "tcp.checksum_note",
+                    "message mentions checksum",
+                )],
+            ),
+        )
+        .expect("untyped checksum wording does not reject correlation")
+        .classification,
+        ScanClassification::Open
+    );
     assert!(
         classify_scan_response(
             &registry,
@@ -391,7 +408,10 @@ fn scan_tcp_correlation_requires_integrity_and_classifies_valid_replies() {
             &request,
             &decoded(
                 tcp_packet(remote, local, 443, 50_000, Tcp::SYN | Tcp::ACK),
-                vec![Diagnostic::warning("tcp.checksum", "invalid checksum")],
+                vec![Diagnostic::integrity_warning(
+                    "tcp.validation_failed",
+                    "invalid integrity",
+                )],
             ),
         )
         .is_none()

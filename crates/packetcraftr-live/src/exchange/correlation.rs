@@ -9,7 +9,7 @@ use packetcraftr_network::capture::{Captured, RecordIdentity};
 use packetcraftr_network::transmit::Timing as TransmissionTiming;
 use packetcraftr_packet::{
     decode::Result as DecodedPacket,
-    diagnostic::{Diagnostic, Severity as DiagnosticSeverity, push_diagnostic_once},
+    diagnostic::{Diagnostic, has_integrity_failure, push_diagnostic_once},
     matcher::Result as MatchResult,
 };
 
@@ -93,9 +93,7 @@ impl ExchangeAccumulator {
                 return ExchangeProcessOutcome::Continue;
             }
         };
-        let integrity_failure = decoded.diagnostics.iter().any(|diagnostic| {
-            diagnostic.code.contains("checksum") && diagnostic.severity != DiagnosticSeverity::Info
-        });
+        let integrity_failure = has_integrity_failure(&decoded.diagnostics);
         if Instant::now() >= deadline {
             return self.expire_decoded(identity, decoded, options);
         }
@@ -104,7 +102,7 @@ impl ExchangeAccumulator {
                 &mut self.diagnostics,
                 Diagnostic::warning(
                     "exchange.integrity_rejected",
-                    "a response with failed checksum validation was not correlated",
+                    "a response with failed integrity validation was not correlated",
                 ),
             );
             self.retain_unsolicited(

@@ -317,8 +317,11 @@ impl LayerCodec for Ipv4Codec {
         let mut diagnostics = Vec::new();
         if context.verify_checksums && checksum(&input[..header_len]) != 0 {
             diagnostics.push(
-                Diagnostic::warning("decode.ipv4_checksum", "IPv4 header checksum mismatch")
-                    .at_field("checksum"),
+                Diagnostic::integrity_warning(
+                    "decode.ipv4_checksum",
+                    "IPv4 header checksum mismatch",
+                )
+                .at_field("checksum"),
             );
         }
         let fragment_offset = flags_offset & 0x1fff;

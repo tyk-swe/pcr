@@ -47,6 +47,7 @@
       "diagnostics": [
         {
           "code": "fuzz.decode_unavailable",
+          "category": "general",
           "severity": "info",
           "message": "built root has no registered capture-link representation; exact bytes are retained"
         }

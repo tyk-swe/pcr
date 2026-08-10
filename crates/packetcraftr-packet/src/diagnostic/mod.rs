@@ -5,4 +5,7 @@
 
 mod model;
 
-pub use model::{Diagnostic, DiagnosticSeverity as Severity, push_diagnostic_once};
+pub use model::{
+    Diagnostic, DiagnosticCategory as Category, DiagnosticSeverity as Severity,
+    has_integrity_failure, push_diagnostic_once,
+};

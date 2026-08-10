@@ -34,7 +34,7 @@ use super::plan::{build_batches, worst_case_duration};
 use super::{MAX_TRACEROUTE_PROBE_BYTES, TRACEROUTE_EVIDENCE_DIAGNOSTICS};
 
 /// Resolves and authorizes all targets before probe construction, approves the full
-/// packet, byte, and time budget, and retains each attempt until checksum-valid terminal evidence.
+/// packet, byte, and time budget, and retains each attempt until integrity-valid terminal evidence.
 ///
 /// # Panics
 ///
@@ -344,7 +344,7 @@ fn process_batch(
                 received_at: None,
                 latency: None,
                 response: None,
-                reason: "no checksum-valid, protocol-consistent response before the deadline"
+                reason: "no integrity-valid, protocol-consistent response before the deadline"
                     .to_owned(),
             }
         };

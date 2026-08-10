@@ -283,7 +283,7 @@ where
                 latency: None,
                 response: None,
                 response_code: None,
-                reason: "no checksum-valid, tuple-correlated DNS response before the deadline"
+                reason: "no integrity-valid, tuple-correlated DNS response before the deadline"
                     .to_owned(),
             }
         };

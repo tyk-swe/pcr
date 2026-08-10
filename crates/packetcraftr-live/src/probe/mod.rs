@@ -15,7 +15,7 @@ use packetcraftr_packet::protocol::{
 use packetcraftr_packet::{
     Packet,
     decode::Result as DecodedPacket,
-    diagnostic::Severity as DiagnosticSeverity,
+    diagnostic::has_integrity_failure,
     registry::Registry,
     semantics::{self, BuiltinProtocol},
 };
@@ -103,9 +103,7 @@ pub(crate) fn observe(
     request: &Packet,
     response: &DecodedPacket,
 ) -> Option<Observation> {
-    if response.diagnostics.iter().any(|diagnostic| {
-        diagnostic.code.contains("checksum") && diagnostic.severity != DiagnosticSeverity::Info
-    }) {
+    if has_integrity_failure(&response.diagnostics) {
         return None;
     }
     let responder = semantics::outer_ip_path(&response.packet).ok()??.source;

@@ -46,6 +46,7 @@
   "diagnostics": [
     {
       "code": "decode.unsupported_link_type",
+      "category": "general",
       "severity": "warning",
       "message": "no root binding for link type 147"
     }

@@ -4447,6 +4447,7 @@
       "type": "object",
       "required": [
         "code",
+        "category",
         "severity",
         "message"
       ],
@@ -4454,6 +4455,13 @@
         "code": {
           "type": "string",
           "minLength": 1
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "general",
+            "integrity"
+          ]
         },
         "severity": {
           "type": "string",

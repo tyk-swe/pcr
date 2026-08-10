@@ -271,7 +271,7 @@ impl LayerCodec for UdpCodec {
             if checksum_value == 0 {
                 if matches!(network.source, IpAddr::V6(_)) {
                     diagnostics.push(
-                        Diagnostic::warning(
+                        Diagnostic::integrity_warning(
                             "decode.udp_checksum",
                             "zero UDP checksum is invalid for IPv6",
                         )
@@ -280,7 +280,7 @@ impl LayerCodec for UdpCodec {
                 }
             } else if transport_checksum(network, 17, &input[..length])? != 0 {
                 diagnostics.push(
-                    Diagnostic::warning("decode.udp_checksum", "UDP checksum mismatch")
+                    Diagnostic::integrity_warning("decode.udp_checksum", "UDP checksum mismatch")
                         .at_field("checksum"),
                 );
             }

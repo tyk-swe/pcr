@@ -163,7 +163,7 @@ impl LayerCodec for Icmpv4Codec {
         let mut diagnostics = Vec::new();
         if context.verify_checksums && checksum(input) != 0 {
             diagnostics.push(
-                Diagnostic::warning("decode.icmpv4_checksum", "ICMPv4 checksum mismatch")
+                Diagnostic::integrity_warning("decode.icmpv4_checksum", "ICMPv4 checksum mismatch")
                     .at_field("checksum"),
             );
         }
@@ -256,7 +256,7 @@ impl LayerCodec for Icmpv6Codec {
             && transport_checksum(network, 58, input)? != 0
         {
             diagnostics.push(
-                Diagnostic::warning("decode.icmpv6_checksum", "ICMPv6 checksum mismatch")
+                Diagnostic::integrity_warning("decode.icmpv6_checksum", "ICMPv6 checksum mismatch")
                     .at_field("checksum"),
             );
         }

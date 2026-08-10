@@ -35,7 +35,7 @@ use super::plan::{build_batches, worst_case_duration};
 use super::{IPV4_PROBE_BYTES, IPV6_PROBE_BYTES, SCAN_EVIDENCE_DIAGNOSTICS};
 
 /// Resolves and authorizes all targets before constructing probes, enforces operation
-/// limits, executes batches, and classifies only checksum-valid correlated responses.
+/// limits, executes batches, and classifies only integrity-valid correlated responses.
 pub fn scan<A, E, C>(
     request: &ScanRequest,
     authorizer: &mut A,
@@ -349,7 +349,7 @@ fn process_batch(
                 received_at: None,
                 latency: None,
                 response: None,
-                reason: "no checksum-valid, protocol-consistent response before the deadline"
+                reason: "no integrity-valid, protocol-consistent response before the deadline"
                     .to_owned(),
             }
         };

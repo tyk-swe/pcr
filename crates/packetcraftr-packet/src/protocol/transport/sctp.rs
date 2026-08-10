@@ -162,7 +162,7 @@ impl LayerCodec for SctpCodec {
             let expected = crc32c_parts(&[&input[..8], &zero_checksum, &input[SCTP_HEADER_LEN..]]);
             if checksum != expected {
                 diagnostics.push(
-                    Diagnostic::warning("decode.sctp_checksum", "SCTP checksum mismatch")
+                    Diagnostic::integrity_warning("decode.sctp_checksum", "SCTP checksum mismatch")
                         .at_field("checksum"),
                 );
             }

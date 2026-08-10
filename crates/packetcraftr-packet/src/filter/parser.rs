@@ -9,7 +9,7 @@ use super::ast::{Op, Predicate};
 use super::error::FilterError;
 use super::lexer::{CompareOperator, Spanned, Token, tokenize};
 use super::literal::{self, Literal};
-use super::path::{self, FieldRef, FieldSource, FrameField, Resolved};
+use super::path::{self, FieldRef, FieldSource, FrameField, Resolved, StreamTransport};
 
 pub const DEFAULT_MAX_FILTER_BYTES: usize = 64 * 1024;
 /// Absolute parenthesis nesting accepted by the display-filter parser.
@@ -43,12 +43,30 @@ impl Default for FilterOptions {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Requirements {
-    /// The filter reads `tcp.stream` or `udp.stream`, so it only makes sense
-    /// where a conversation index is being maintained.
+    /// The filter reads `tcp.stream` or `udp.stream`.
+    ///
+    /// This aggregate remains useful to callers whose conversation indexing
+    /// capability always covers both transports. Callers that prepare indexes
+    /// on demand can inspect [`tcp_stream`](Self::tcp_stream) and
+    /// [`udp_stream`](Self::udp_stream) instead.
     pub stream_index: bool,
+    /// The filter reads `tcp.stream`, so TCP conversation indexes are needed.
+    pub tcp_stream: bool,
+    /// The filter reads `udp.stream`, so UDP conversation indexes are needed.
+    pub udp_stream: bool,
     /// The filter reads `frame.time_epoch`, so frames without captured time
     /// must be diagnosed by the caller.
     pub timestamp: bool,
+}
+
+impl Requirements {
+    fn require_stream(&mut self, transport: StreamTransport) {
+        self.stream_index = true;
+        match transport {
+            StreamTransport::Tcp => self.tcp_stream = true,
+            StreamTransport::Udp => self.udp_stream = true,
+        }
+    }
 }
 
 /// Binding power of the boolean operators. `not` binds tightest, then `and`,
@@ -302,8 +320,8 @@ fn parse_predicate(
         path::attach_slice(&mut field, contents, *slice_offset)?;
         index += 1;
     }
-    if matches!(field.source, FieldSource::Stream(_)) {
-        requirements.stream_index = true;
+    if let FieldSource::Stream(transport) = &field.source {
+        requirements.require_stream(*transport);
     }
     if matches!(field.source, FieldSource::Frame(FrameField::TimeEpoch)) {
         requirements.timestamp = true;

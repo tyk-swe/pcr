@@ -30,6 +30,7 @@ pub(super) mod commit;
 pub(super) fn plan_push(
     limits: &Limits,
     state: &TcpFlowState,
+    state_is_accounted: bool,
     aggregate_base_bytes: usize,
     aggregate_base_memory_charge: usize,
     segment: &Segment,
@@ -121,12 +122,18 @@ pub(super) fn plan_push(
         });
     }
 
-    let old_retained_bytes = retained_bytes(state).ok_or(Error::AggregateByteLimit {
-        limit: limits.max_aggregate_bytes,
-    })?;
-    let old_memory_charge = flow_memory_charge(state).ok_or(Error::AggregateByteLimit {
-        limit: limits.max_aggregate_bytes,
-    })?;
+    let (old_retained_bytes, old_memory_charge) = if state_is_accounted {
+        (
+            retained_bytes(state).ok_or(Error::AggregateByteLimit {
+                limit: limits.max_aggregate_bytes,
+            })?,
+            flow_memory_charge(state).ok_or(Error::AggregateByteLimit {
+                limit: limits.max_aggregate_bytes,
+            })?,
+        )
+    } else {
+        (0, 0)
+    };
     let mut merge = plan_pending_merge(&state.pending, offset, payload, state.next_offset).ok_or(
         Error::FlowByteLimit {
             limit: limits.max_bytes_per_flow,
@@ -159,6 +166,15 @@ pub(super) fn plan_push(
             final_offset: fin_offset,
         });
     }
+    let final_next_offset = state
+        .next_offset
+        .checked_add(merge.emitted_segment_bytes as u64)
+        .ok_or(Error::FlowByteLimit {
+            limit: limits.max_bytes_per_flow,
+        })?;
+    let final_fin_offset = state.fin_offset.or(incoming_fin_offset);
+    let closed =
+        segment.rst || final_fin_offset.is_some_and(|fin_offset| final_next_offset >= fin_offset);
     let accounting = plan_push_accounting(PushAccountingInput {
         limits,
         state,
@@ -169,6 +185,7 @@ pub(super) fn plan_push(
         old_memory_charge,
         aggregate_base_bytes,
         aggregate_base_memory_charge,
+        retains_flow_state: !closed,
     })?;
     let initial_history_capacity = accounting.initial_history_capacity;
     let history_allocation = accounting.history_allocation;
@@ -191,15 +208,6 @@ pub(super) fn plan_push(
         None
     };
 
-    let final_next_offset = state
-        .next_offset
-        .checked_add(merge.emitted_segment_bytes as u64)
-        .ok_or(Error::FlowByteLimit {
-            limit: limits.max_bytes_per_flow,
-        })?;
-    let final_fin_offset = state.fin_offset.or(incoming_fin_offset);
-    let closed =
-        segment.rst || final_fin_offset.is_some_and(|fin_offset| final_next_offset >= fin_offset);
     let (aggregate_bytes, aggregate_memory_charge) =
         accounting.final_aggregates(closed, limits.max_aggregate_bytes)?;
     Ok(PushPlan {

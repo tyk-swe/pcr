@@ -7,7 +7,7 @@ use std::time::Instant;
 use bytes::Bytes;
 
 use super::Error;
-use super::PENDING_SEGMENT_METADATA_CHARGE;
+use super::{PENDING_SEGMENT_METADATA_CHARGE, TCP_FLOW_STATE_METADATA_CHARGE};
 
 #[derive(Debug)]
 pub(super) struct TcpFlowState {
@@ -49,9 +49,29 @@ pub(super) fn retained_bytes(state: &TcpFlowState) -> Option<usize> {
     state.pending_bytes.checked_add(state.emitted_history.len())
 }
 
+pub(super) fn buffer_memory_charge_parts(
+    pending_bytes: usize,
+    segment_count: usize,
+    history_capacity: usize,
+) -> Option<usize> {
+    pending_memory_charge(pending_bytes, segment_count)?.checked_add(history_capacity)
+}
+
+pub(super) fn flow_memory_charge_parts(
+    pending_bytes: usize,
+    segment_count: usize,
+    history_capacity: usize,
+) -> Option<usize> {
+    buffer_memory_charge_parts(pending_bytes, segment_count, history_capacity)
+        .and_then(|charge| charge.checked_add(TCP_FLOW_STATE_METADATA_CHARGE))
+}
+
 pub(super) fn flow_memory_charge(state: &TcpFlowState) -> Option<usize> {
-    pending_memory_charge(state.pending_bytes, state.pending.len())?
-        .checked_add(state.emitted_history.capacity())
+    flow_memory_charge_parts(
+        state.pending_bytes,
+        state.pending.len(),
+        state.emitted_history.capacity(),
+    )
 }
 
 pub(super) fn planned_history_allocation(current: usize, required: usize, limit: usize) -> usize {

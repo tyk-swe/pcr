@@ -349,9 +349,14 @@ pub(super) fn attach_slice(
     let slice = match contents.split_once(':') {
         None => {
             let start = bound(contents)?;
+            let end = start.checked_add(1).ok_or_else(|| {
+                syntax(format!(
+                    "byte slice index {start} has no representable exclusive end"
+                ))
+            })?;
             ByteSlice {
                 start,
-                end: Some(start.saturating_add(1)),
+                end: Some(end),
             }
         }
         Some((start, end)) => {

@@ -105,7 +105,10 @@ fn ethernet_ipv4_udp_raw_round_trip_exercises_filter_language() {
     );
     let filter =
         Filter::compile(source, &registry, FilterOptions::default()).expect("valid filter");
-    assert!(filter.requirements().stream_index);
+    let requirements = filter.requirements();
+    assert!(requirements.stream_index);
+    assert!(!requirements.tcp_stream);
+    assert!(requirements.udp_stream);
     assert!(
         filter
             .matches(&FilterContext {
@@ -179,6 +182,33 @@ fn ethernet_ipv4_udp_raw_round_trip_exercises_filter_language() {
             },
         )
         .is_err()
+    );
+
+    let tcp_requirements = Filter::compile("tcp.stream == 1", &registry, FilterOptions::default())
+        .expect("valid TCP stream filter")
+        .requirements();
+    assert!(tcp_requirements.stream_index);
+    assert!(tcp_requirements.tcp_stream);
+    assert!(!tcp_requirements.udp_stream);
+
+    let both_requirements = Filter::compile(
+        "tcp.stream == 1 || udp.stream == 2",
+        &registry,
+        FilterOptions::default(),
+    )
+    .expect("valid mixed stream filter")
+    .requirements();
+    assert!(both_requirements.stream_index);
+    assert!(both_requirements.tcp_stream);
+    assert!(both_requirements.udp_stream);
+
+    let overflowed_index = format!("ethernet.source[{}] == 00", usize::MAX);
+    let error = Filter::compile(&overflowed_index, &registry, FilterOptions::default())
+        .expect_err("a single-byte slice must have a representable exclusive end");
+    assert!(
+        error
+            .to_string()
+            .contains("has no representable exclusive end")
     );
 }
 

@@ -5,7 +5,10 @@
 
 use super::super::{
     Error, Limits,
-    state::{TcpFlowState, pending_memory_charge, planned_history_allocation},
+    state::{
+        TcpFlowState, buffer_memory_charge_parts, flow_memory_charge_parts,
+        planned_history_allocation,
+    },
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -30,6 +33,7 @@ pub(super) struct PushAccountingInput<'a> {
     pub(super) old_memory_charge: usize,
     pub(super) aggregate_base_bytes: usize,
     pub(super) aggregate_base_memory_charge: usize,
+    pub(super) retains_flow_state: bool,
 }
 
 pub(super) fn plan_push_accounting(
@@ -45,6 +49,7 @@ pub(super) fn plan_push_accounting(
         old_memory_charge,
         aggregate_base_bytes,
         aggregate_base_memory_charge,
+        retains_flow_state,
     } = input;
     let initial_history_capacity = limits.max_bytes_per_flow.saturating_sub(pending_bytes);
     let final_pending_bytes = pending_bytes.saturating_sub(emitted_segment_bytes);
@@ -75,11 +80,24 @@ pub(super) fn plan_push_accounting(
             .ok_or(Error::AggregateByteLimit {
                 limit: limits.max_aggregate_bytes,
             })?;
-    let prospective_memory = pending_memory_charge(final_pending_bytes, final_pending_segments)
-        .and_then(|charge| charge.checked_add(history_allocation))
-        .ok_or(Error::AggregateByteLimit {
-            limit: limits.max_aggregate_bytes,
-        })?;
+    let prospective_memory = if retains_flow_state {
+        flow_memory_charge_parts(
+            final_pending_bytes,
+            final_pending_segments,
+            history_allocation,
+        )
+    } else {
+        // An immediately closed generation never enters the flow table, but
+        // buffers materialized while processing it remain budgeted.
+        buffer_memory_charge_parts(
+            final_pending_bytes,
+            final_pending_segments,
+            history_allocation,
+        )
+    }
+    .ok_or(Error::AggregateByteLimit {
+        limit: limits.max_aggregate_bytes,
+    })?;
     let prospective_aggregate_bytes = aggregate_base_bytes
         .checked_sub(old_retained_bytes)
         .and_then(|bytes| bytes.checked_add(prospective_retained))

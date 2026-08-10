@@ -379,6 +379,86 @@ fn tcp_flow_opening_replacement_and_limits_have_stable_queries() {
 }
 
 #[test]
+fn tcp_flow_state_metadata_is_bounded_and_only_charged_while_retained() {
+    let now = Instant::now();
+    let first = flow(10_100);
+    let second = flow(10_101);
+    let mut reassembler = TcpReassembler::new(Limits {
+        max_aggregate_bytes: 128,
+        ..Limits::default()
+    });
+
+    reassembler
+        .open_flow(first.clone(), 100, now)
+        .expect("one empty flow state fits the aggregate budget");
+    assert_eq!(reassembler.aggregate_bytes(), 0);
+    assert_eq!(reassembler.aggregate_memory_charge(), 128);
+    reassembler
+        .open_flow(first.clone(), 101, now)
+        .expect("replacement reuses the existing flow's metadata budget");
+    assert_eq!(
+        reassembler.open_flow(second.clone(), 200, now),
+        Err(TcpError::AggregateByteLimit { limit: 128 })
+    );
+    assert_eq!(reassembler.flow_count(), 1);
+    assert_eq!(reassembler.flow_base_sequence(&first), Some(101));
+    assert_eq!(reassembler.flow_base_sequence(&second), None);
+    assert_eq!(reassembler.aggregate_memory_charge(), 128);
+
+    assert_eq!(reassembler.evict_flow(&first).len(), 1);
+    assert_eq!(reassembler.aggregate_memory_charge(), 0);
+    assert!(
+        reassembler
+            .push(segment(second.clone(), 200, b"", true, false, false), now)
+            .expect("eviction returns the metadata charge to the budget")
+            .is_empty()
+    );
+    assert_eq!(reassembler.flow_base_sequence(&second), Some(201));
+    assert_eq!(reassembler.aggregate_memory_charge(), 128);
+    assert_eq!(
+        reassembler
+            .push(segment(second.clone(), 201, b"", false, false, true), now)
+            .expect("closing a retained flow releases its metadata charge"),
+        vec![TcpEvent::Closed {
+            flow: second,
+            reset: true,
+        }]
+    );
+    assert_eq!(reassembler.flow_count(), 0);
+    assert_eq!(reassembler.aggregate_memory_charge(), 0);
+
+    let reset = flow(10_102);
+    let mut zero_budget = TcpReassembler::new(Limits {
+        max_aggregate_bytes: 0,
+        ..Limits::default()
+    });
+    assert_eq!(
+        zero_budget
+            .push(segment(reset.clone(), 300, b"", false, false, true), now)
+            .expect("an immediately closed flow retains no metadata"),
+        vec![TcpEvent::Closed {
+            flow: reset,
+            reset: true,
+        }]
+    );
+    assert_eq!(zero_budget.flow_count(), 0);
+    assert_eq!(zero_budget.aggregate_memory_charge(), 0);
+
+    let finish = flow(10_103);
+    assert_eq!(
+        zero_budget
+            .push(segment(finish.clone(), 400, b"", false, true, false), now)
+            .expect("an immediately finished flow retains no metadata"),
+        vec![TcpEvent::Closed {
+            flow: finish,
+            reset: false,
+        }]
+    );
+    assert_eq!(zero_budget.flow_count(), 0);
+    assert_eq!(zero_budget.aggregate_memory_charge(), 0);
+}
+
+#[test]
 fn tcp_direct_delivery_and_retransmission_history_are_byte_exact() {
     let now = Instant::now();
     let key = flow(10_003);

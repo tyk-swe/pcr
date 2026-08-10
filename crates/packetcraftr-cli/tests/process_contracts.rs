@@ -127,3 +127,20 @@ fn invalid_input_and_live_policy_gates_have_structured_exit_codes() {
     let value: Value = serde_json::from_slice(&denied.stdout).expect("error JSON must parse");
     assert_eq!(value["error"]["code"], "policy.public_destination");
 }
+
+#[test]
+fn clap_failures_preserve_unambiguous_invocation_context() {
+    let invalid_color = run(&["--output", "json", "--color", "build", "protocols"]);
+    assert_eq!(invalid_color.status.code(), Some(2));
+    let value: Value =
+        serde_json::from_slice(&invalid_color.stdout).expect("error JSON must parse");
+    assert_eq!(value["command"], "protocols");
+    assert_eq!(value["error"]["kind"], "cli");
+
+    let invalid_subcommand = run(&["--output", "json", "not-a-command", "build"]);
+    assert_eq!(invalid_subcommand.status.code(), Some(2));
+    let value: Value =
+        serde_json::from_slice(&invalid_subcommand.stdout).expect("error JSON must parse");
+    assert!(value["command"].is_null());
+    assert_eq!(value["error"]["kind"], "cli");
+}

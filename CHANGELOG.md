@@ -29,6 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hatch. All public mutable layer access now invalidates cached encoded
   payload lengths; decoded packets populate those lengths from their layer
   ranges.
+- Display-filter requirements now identify TCP and UDP stream-index needs
+  independently while retaining the aggregate stream-index signal.
+- The workspace now uses Cargo resolver version 3 so dependency selection
+  honors the declared workspace Rust version.
 
 ### Fixed
 
@@ -38,11 +42,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sequence-space length depends on encoded payload caches.
 - Bounded live duplicate capture tracking to retained exchange evidence.
 - Kept neighbor resolution attempt timeouts anchored before Layer2 sends.
-
-### Fixed
-
 - Native capture and Linux netlink workers now retain ownership across finite
   shutdown timeouts and transfer unfinished threads to explicit reapers.
+- Rejected byte-slice filter indices whose exclusive upper bound cannot be
+  represented instead of silently compiling them as empty ranges.
+- Accounted for retained TCP flow-table metadata within the aggregate
+  reassembly budget, including transactional replacement and close handling.
+- Correctly attributed structured CLI parse errors without mistaking the
+  executable, global-option values, or later positionals for the command.
 
 ## [0.5.0-beta.1] - 2026-08-09
 

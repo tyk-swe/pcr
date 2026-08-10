@@ -6,7 +6,10 @@ use std::time::Instant;
 
 use super::pending::{commit::commit_push, plan_push};
 use super::state::{TcpFlowState, flow_memory_charge, retained_bytes};
-use super::{Error, Event, FlowKey, Limits, Reassembler, Segment, TCP_SERIAL_HALF_SPACE};
+use super::{
+    Error, Event, FlowKey, Limits, Reassembler, Segment, TCP_FLOW_STATE_METADATA_CHARGE,
+    TCP_SERIAL_HALF_SPACE,
+};
 
 impl Reassembler {
     pub fn new(limits: Limits) -> Self {
@@ -31,25 +34,25 @@ impl Reassembler {
             existing.last_update = existing.last_update.max(now);
             return Ok(());
         }
-        let last_update = self
+        let existing = self.flows.get(&flow);
+        if self
             .flows
-            .get(&flow)
-            .map_or(now, |state| state.last_update.max(now));
-        if let Some(stale) = self.flows.remove(&flow) {
-            self.aggregate_bytes = self
-                .aggregate_bytes
-                .saturating_sub(retained_bytes(&stale).unwrap_or(0));
-            self.aggregate_memory_charge = self
-                .aggregate_memory_charge
-                .saturating_sub(flow_memory_charge(&stale).unwrap_or(0));
-        }
-        if self.flows.len() >= self.limits.max_flows {
+            .len()
+            .saturating_sub(usize::from(existing.is_some()))
+            >= self.limits.max_flows
+        {
             return Err(Error::FlowLimit {
                 limit: self.limits.max_flows,
             });
         }
+        let (aggregate_bytes, aggregate_memory_charge) =
+            self.plan_replacement_accounting(existing, TCP_FLOW_STATE_METADATA_CHARGE)?;
+
+        let last_update = existing.map_or(now, |state| state.last_update.max(now));
         self.flows
             .insert(flow, TcpFlowState::new(first_payload_sequence, last_update));
+        self.aggregate_bytes = aggregate_bytes;
+        self.aggregate_memory_charge = aggregate_memory_charge;
         Ok(())
     }
 
@@ -87,15 +90,7 @@ impl Reassembler {
             }
 
             let (aggregate_bytes, aggregate_memory_charge) = if changes_generation {
-                match existing {
-                    Some(stale) => (
-                        self.aggregate_bytes
-                            .saturating_sub(retained_bytes(stale).unwrap_or(0)),
-                        self.aggregate_memory_charge
-                            .saturating_sub(flow_memory_charge(stale).unwrap_or(0)),
-                    ),
-                    None => (self.aggregate_bytes, self.aggregate_memory_charge),
-                }
+                self.plan_replacement_accounting(existing, 0)?
             } else {
                 (self.aggregate_bytes, self.aggregate_memory_charge)
             };
@@ -115,6 +110,7 @@ impl Reassembler {
             plan_push(
                 &self.limits,
                 state,
+                !changes_generation,
                 aggregate_bytes,
                 aggregate_memory_charge,
                 &segment,
@@ -204,6 +200,37 @@ impl Reassembler {
             });
         }
         Ok(())
+    }
+
+    fn plan_replacement_accounting(
+        &self,
+        existing: Option<&TcpFlowState>,
+        replacement_memory_charge: usize,
+    ) -> Result<(usize, usize), Error> {
+        let accounting_error = || Error::AggregateByteLimit {
+            limit: self.limits.max_aggregate_bytes,
+        };
+        let old_retained_bytes = existing
+            .map_or(Some(0), retained_bytes)
+            .ok_or_else(accounting_error)?;
+        let old_memory_charge = existing
+            .map_or(Some(0), flow_memory_charge)
+            .ok_or_else(accounting_error)?;
+        let aggregate_bytes = self
+            .aggregate_bytes
+            .checked_sub(old_retained_bytes)
+            .ok_or_else(accounting_error)?;
+        let aggregate_memory_charge = self
+            .aggregate_memory_charge
+            .checked_sub(old_memory_charge)
+            .and_then(|charge| charge.checked_add(replacement_memory_charge))
+            .ok_or_else(accounting_error)?;
+        if aggregate_bytes > self.limits.max_aggregate_bytes
+            || aggregate_memory_charge > self.limits.max_aggregate_bytes
+        {
+            return Err(accounting_error());
+        }
+        Ok((aggregate_bytes, aggregate_memory_charge))
     }
 
     #[expect(

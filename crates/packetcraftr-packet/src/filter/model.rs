@@ -34,9 +34,9 @@ impl Filter {
 
     /// What this filter needs from its caller beyond the dissected packet.
     ///
-    /// Callers can inspect this before evaluation to reject unavailable
-    /// conversation indexes. Timestamp availability is also checked by
-    /// [`matches`](Self::matches) for every frame.
+    /// Callers can inspect this before evaluation to prepare exactly the TCP
+    /// and UDP conversation indexes the filter reads. Timestamp availability
+    /// is also checked by [`matches`](Self::matches) for every frame.
     pub fn requirements(&self) -> Requirements {
         self.requirements
     }

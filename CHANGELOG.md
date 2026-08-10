@@ -36,6 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   wall-clock adjustments by validating timing with monotonic endpoints.
 - Preserved TCP response correlation for Layer2 exchanges whose TCP
   sequence-space length depends on encoded payload caches.
+- Bounded live duplicate capture tracking to retained exchange evidence.
+- Kept neighbor resolution attempt timeouts anchored before Layer2 sends.
 
 ### Fixed
 

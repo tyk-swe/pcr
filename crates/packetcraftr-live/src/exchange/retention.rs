@@ -3,6 +3,7 @@
 
 //! Unsolicited and undecodable frame retention under aggregate bounds.
 
+use packetcraftr_network::capture::RecordIdentity;
 use packetcraftr_packet::frame::Frame;
 use packetcraftr_packet::{decode::Result as DecodedPacket, diagnostic::push_diagnostic_once};
 
@@ -28,6 +29,7 @@ impl ExchangeAccumulator {
 
     pub(super) fn retain_unsolicited(
         &mut self,
+        identity: RecordIdentity,
         decoded: DecodedPacket,
         options: &ExchangeOptions,
         freshness: Option<super::accumulator::UnsolicitedFreshness>,
@@ -46,12 +48,18 @@ impl ExchangeAccumulator {
             return;
         }
         if self.reserve_decoded_evidence(decoded.original.len(), options) {
+            self.mark_record_retained(identity);
             self.unsolicited.push(decoded);
             self.unsolicited_freshness.push(freshness);
         }
     }
 
-    pub(super) fn retain_undecoded(&mut self, frame: Frame, options: &ExchangeOptions) {
+    pub(super) fn retain_undecoded(
+        &mut self,
+        identity: RecordIdentity,
+        frame: Frame,
+        options: &ExchangeOptions,
+    ) {
         if self.unsolicited.len() + self.undecoded.len() >= options.max_unsolicited {
             push_diagnostic_once(
                 &mut self.diagnostics,
@@ -66,6 +74,7 @@ impl ExchangeAccumulator {
             return;
         }
         if self.reserve_decoded_evidence(frame.bytes().len(), options) {
+            self.mark_record_retained(identity);
             self.undecoded.push(frame);
         }
     }

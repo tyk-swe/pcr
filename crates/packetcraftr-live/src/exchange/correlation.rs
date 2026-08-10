@@ -5,7 +5,7 @@
 
 use std::time::Instant;
 
-use packetcraftr_network::capture::Captured;
+use packetcraftr_network::capture::{Captured, RecordIdentity};
 use packetcraftr_network::transmit::Timing as TransmissionTiming;
 use packetcraftr_packet::{
     decode::Result as DecodedPacket,
@@ -44,7 +44,8 @@ impl ExchangeAccumulator {
         captured: Captured,
         context: ExchangeProcessContext<'_>,
     ) -> ExchangeProcessOutcome {
-        if !self.accept_record(captured.identity()) {
+        let identity = captured.identity();
+        if !self.can_retain_record(identity) {
             return ExchangeProcessOutcome::DuplicateRecordIdentity;
         }
         let ExchangeProcessContext {
@@ -62,8 +63,8 @@ impl ExchangeAccumulator {
             self.mark_correlation_deadline_expired();
             let raw_frame = frame.clone();
             match dissector.decode(frame, options.decode.clone()) {
-                Ok(decoded) => self.retain_unsolicited(decoded, options, None),
-                Err(_) => self.retain_undecoded(raw_frame, options),
+                Ok(decoded) => self.retain_unsolicited(identity, decoded, options, None),
+                Err(_) => self.retain_undecoded(identity, raw_frame, options),
             }
             return ExchangeProcessOutcome::CorrelationDeadlineExpired;
         }
@@ -71,14 +72,14 @@ impl ExchangeAccumulator {
         let decoded = match dissector.decode(frame, options.decode.clone()) {
             Ok(decoded) => {
                 if Instant::now() >= deadline {
-                    return self.expire_decoded(decoded, options);
+                    return self.expire_decoded(identity, decoded, options);
                 }
                 decoded
             }
             Err(error) => {
                 if Instant::now() >= deadline {
                     self.mark_correlation_deadline_expired();
-                    self.retain_undecoded(raw_frame, options);
+                    self.retain_undecoded(identity, raw_frame, options);
                     return ExchangeProcessOutcome::CorrelationDeadlineExpired;
                 }
                 push_diagnostic_once(
@@ -88,7 +89,7 @@ impl ExchangeAccumulator {
                         format!("captured frame could not be decoded: {error}"),
                     ),
                 );
-                self.retain_undecoded(raw_frame, options);
+                self.retain_undecoded(identity, raw_frame, options);
                 return ExchangeProcessOutcome::Continue;
             }
         };
@@ -96,7 +97,7 @@ impl ExchangeAccumulator {
             diagnostic.code.contains("checksum") && diagnostic.severity != DiagnosticSeverity::Info
         });
         if Instant::now() >= deadline {
-            return self.expire_decoded(decoded, options);
+            return self.expire_decoded(identity, decoded, options);
         }
         if integrity_failure {
             push_diagnostic_once(
@@ -107,6 +108,7 @@ impl ExchangeAccumulator {
                 ),
             );
             self.retain_unsolicited(
+                identity,
                 decoded,
                 options,
                 unsolicited_freshness(received_at, sent, deadline),
@@ -128,7 +130,7 @@ impl ExchangeAccumulator {
         let mut equally_best = Vec::new();
         for (request_index, prepared_request) in prepared.iter().take(sent.len()).enumerate() {
             if Instant::now() >= deadline {
-                return self.expire_decoded(decoded, options);
+                return self.expire_decoded(identity, decoded, options);
             }
             let Some(received_at) = received_at else {
                 continue;
@@ -143,14 +145,14 @@ impl ExchangeAccumulator {
             let mut result = None;
             for layer in prepared_request.built.packet.iter() {
                 if Instant::now() >= deadline {
-                    return self.expire_decoded(decoded, options);
+                    return self.expire_decoded(identity, decoded, options);
                 }
                 let Some(matcher) = registry.matcher(layer.protocol_id().as_str()) else {
                     continue;
                 };
                 let candidate = matcher.matches(&prepared_request.built.packet, &decoded.packet);
                 if Instant::now() >= deadline {
-                    return self.expire_decoded(decoded, options);
+                    return self.expire_decoded(identity, decoded, options);
                 }
                 if candidate.matched
                     && result
@@ -161,7 +163,7 @@ impl ExchangeAccumulator {
                 }
             }
             if Instant::now() >= deadline {
-                return self.expire_decoded(decoded, options);
+                return self.expire_decoded(identity, decoded, options);
             }
             let Some(result) = result else {
                 continue;
@@ -181,7 +183,7 @@ impl ExchangeAccumulator {
             }
         }
         if Instant::now() >= deadline {
-            return self.expire_decoded(decoded, options);
+            return self.expire_decoded(identity, decoded, options);
         }
 
         if attribution(&equally_best) == Attribution::Ambiguous {
@@ -193,6 +195,7 @@ impl ExchangeAccumulator {
                 ),
             );
             self.retain_unsolicited(
+                identity,
                 decoded,
                 options,
                 unsolicited_freshness(received_at, sent, deadline),
@@ -200,7 +203,7 @@ impl ExchangeAccumulator {
         } else if let Some((request_index, _)) = matched {
             let received_at = received_at.expect("only timestamped capture frames can match");
             if Instant::now() >= deadline {
-                return self.expire_decoded(decoded, options);
+                return self.expire_decoded(identity, decoded, options);
             }
             if self.responses.len() >= options.max_responses {
                 push_diagnostic_once(
@@ -216,9 +219,10 @@ impl ExchangeAccumulator {
                 return ExchangeProcessOutcome::Continue;
             }
             if Instant::now() >= deadline {
-                return self.expire_decoded(decoded, options);
+                return self.expire_decoded(identity, decoded, options);
             }
             if self.reserve_decoded_evidence(decoded.original.len(), options) {
+                self.mark_record_retained(identity);
                 self.response_counts[request_index] += 1;
                 self.responses.push(MatchedResponse {
                     request_index,
@@ -239,6 +243,7 @@ impl ExchangeAccumulator {
                 );
             }
             self.retain_unsolicited(
+                identity,
                 decoded,
                 options,
                 unsolicited_freshness(received_at, sent, deadline),
@@ -390,11 +395,12 @@ impl ExchangeAccumulator {
 
     fn expire_decoded(
         &mut self,
+        identity: RecordIdentity,
         decoded: DecodedPacket,
         options: &ExchangeOptions,
     ) -> ExchangeProcessOutcome {
         self.mark_correlation_deadline_expired();
-        self.retain_unsolicited(decoded, options, None);
+        self.retain_unsolicited(identity, decoded, options, None);
         ExchangeProcessOutcome::CorrelationDeadlineExpired
     }
 }
@@ -521,6 +527,53 @@ mod tests {
             accumulator.responses.len()
                 + accumulator.unsolicited.len()
                 + accumulator.undecoded.len(),
+            1
+        );
+    }
+
+    #[test]
+    fn duplicate_tracking_is_bounded_to_retained_evidence() {
+        let retained = Captured::new(
+            Frame::without_timestamp(LinkType::RAW, Bytes::from_static(&[0x45]))
+                .expect("fixture frame"),
+            Instant::now(),
+        );
+        let dropped = Captured::new(
+            Frame::without_timestamp(LinkType::RAW, Bytes::from_static(&[0x45]))
+                .expect("fixture frame"),
+            Instant::now(),
+        );
+        let registry = Arc::new(default_registry().expect("built-in registry"));
+        let dissector = Decoder::new(Arc::clone(&registry));
+        let options = ExchangeOptions {
+            max_unsolicited: 1,
+            ..ExchangeOptions::default()
+        };
+        let mut accumulator = ExchangeAccumulator::new(0);
+        let context = ExchangeProcessContext {
+            registry: &registry,
+            dissector: &dissector,
+            prepared: &[],
+            sent: &[],
+            deadline: Instant::now() + Duration::from_secs(1),
+            options: &options,
+        };
+
+        assert_eq!(
+            accumulator.process(retained, context),
+            ExchangeProcessOutcome::Continue
+        );
+        assert_eq!(
+            accumulator.process(dropped.clone(), context),
+            ExchangeProcessOutcome::Continue
+        );
+        assert_eq!(
+            accumulator.process(dropped, context),
+            ExchangeProcessOutcome::Continue
+        );
+        assert_eq!(accumulator.retained_record_identities.len(), 1);
+        assert_eq!(
+            accumulator.unsolicited.len() + accumulator.undecoded.len(),
             1
         );
     }

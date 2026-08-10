@@ -37,7 +37,7 @@ pub(crate) struct ExchangeAccumulator {
     pub(crate) response_counts: Vec<usize>,
     pub(super) correlation_deadline_expired: bool,
     pub(super) workflow_examined_unsolicited: usize,
-    pub(super) seen_records: HashSet<RecordIdentity>,
+    pub(super) retained_record_identities: HashSet<RecordIdentity>,
 }
 
 #[derive(Clone, Copy)]
@@ -78,12 +78,16 @@ impl ExchangeAccumulator {
             response_counts: vec![0; requests],
             correlation_deadline_expired: false,
             workflow_examined_unsolicited: 0,
-            seen_records: HashSet::new(),
+            retained_record_identities: HashSet::new(),
         }
     }
 
-    pub(super) fn accept_record(&mut self, identity: RecordIdentity) -> bool {
-        self.seen_records.insert(identity)
+    pub(super) fn can_retain_record(&self, identity: RecordIdentity) -> bool {
+        !self.retained_record_identities.contains(&identity)
+    }
+
+    pub(super) fn mark_record_retained(&mut self, identity: RecordIdentity) {
+        self.retained_record_identities.insert(identity);
     }
 
     pub(crate) fn finish(

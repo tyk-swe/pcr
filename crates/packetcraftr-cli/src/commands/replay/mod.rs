@@ -225,5 +225,24 @@ pub(super) fn run(arguments: ReplayArgs, output: output::contract::Format) -> Re
 }
 
 pub(crate) fn replay_cli_error(error: workflow::replay::Error) -> CliError {
-    CliError::classified(error)
+    let sequence = error.source_index();
+    CliError::classified_at_optional_sequence(error, sequence)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Duration, replay_cli_error, workflow};
+
+    #[test]
+    fn replay_cli_error_preserves_source_index_as_stream_sequence() {
+        let error = workflow::replay::Error::NonmonotonicTimestamp {
+            source_index: 17,
+            mode: "original",
+            backward_by: Duration::from_millis(1),
+        };
+
+        let error = replay_cli_error(error);
+
+        assert_eq!(error.sequence, Some(17));
+    }
 }

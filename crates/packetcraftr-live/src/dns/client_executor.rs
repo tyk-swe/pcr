@@ -51,7 +51,6 @@ where
             .map_err(BoundaryError::from_error)?;
         let crate::exchange::Result {
             mut sent,
-            mut sent_evidence,
             responses,
             unanswered: _,
             unsolicited,
@@ -59,7 +58,7 @@ where
             diagnostics,
             stats,
         } = result;
-        if sent.len() != 1 || sent_evidence.len() != 1 {
+        if sent.len() != 1 {
             return Err(invalid_client_result(
                 "single-query DNS exchange returned an invalid sent-evidence count",
             ));
@@ -70,10 +69,8 @@ where
             ));
         }
         Ok(DnsExchangeExecution {
-            sent: sent.pop().expect("validated one sent packet").packet,
-            sent_evidence: sent_evidence
-                .pop()
-                .expect("validated one sent evidence frame"),
+            permit: exchange.permit,
+            sent: sent.pop().expect("validated one sent packet"),
             responses: responses
                 .into_iter()
                 .map(|response| DnsMatchedResponse {

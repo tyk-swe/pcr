@@ -32,6 +32,7 @@ impl ScanProbe {
 pub struct ScanBatch {
     pub probes: Vec<ScanProbe>,
     pub timeout: Duration,
+    pub(crate) permit: crate::evidence::ExecutionPermit,
 }
 
 #[derive(Clone, Debug)]
@@ -43,13 +44,13 @@ pub struct ScanMatchedResponse {
 
 #[derive(Clone, Debug)]
 pub struct ScanBatchExecution {
-    pub sent: Vec<Packet>,
-    pub sent_evidence: Vec<Frame>,
-    pub responses: Vec<ScanMatchedResponse>,
-    pub unsolicited: Vec<DecodedPacket>,
-    pub undecoded: Vec<Frame>,
-    pub diagnostics: Vec<Diagnostic>,
-    pub stats: Stats,
+    pub(crate) permit: crate::evidence::ExecutionPermit,
+    pub(crate) sent: Vec<crate::SentPacket>,
+    pub(crate) responses: Vec<ScanMatchedResponse>,
+    pub(crate) unsolicited: Vec<DecodedPacket>,
+    pub(crate) undecoded: Vec<Frame>,
+    pub(crate) diagnostics: Vec<Diagnostic>,
+    pub(crate) stats: Stats,
 }
 
 pub trait ScanExecutor {

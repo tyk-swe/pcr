@@ -53,6 +53,7 @@ pub(super) fn build_batches(
         batches.push(TracerouteBatch {
             probes,
             timeout: request.timeout,
+            permit: crate::evidence::ExecutionPermit::new(),
         });
     }
     Ok(batches)

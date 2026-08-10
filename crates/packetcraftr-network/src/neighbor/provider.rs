@@ -22,8 +22,8 @@ use crate::{
 use super::cache::{NeighborCache, NeighborCacheKey, NeighborExchangeOutcome};
 use super::error::{invalid_configuration, map_io_error};
 use super::evidence::{
-    retain_evidence, retain_matching_evidence, validate_captured_frame, validate_request,
-    validate_send_report,
+    retain_evidence, retain_matching_evidence, validate_captured_frame, validate_neighbor_send,
+    validate_request,
 };
 use super::options::NeighborResolutionOptions;
 use super::wire::{build_request_frame, match_neighbor_response};
@@ -223,18 +223,18 @@ where
         }
 
         for attempt in 1..=self.options.max_attempts {
-            let send_started = Instant::now();
+            let deadline = Instant::now()
+                .checked_add(self.options.attempt_timeout)
+                .ok_or_else(|| invalid_configuration("attempt deadline overflowed".to_owned()))?;
             let frame = Layer2Frame::try_new(request_bytes, route)
                 .map_err(|error| map_io_error(request, "constructing discovery frame", error))?;
             let report = self
                 .layer2
                 .send_layer2(frame)
                 .map_err(|error| map_io_error(request, "sending discovery request", error))?;
-            validate_send_report(request, request_bytes, report)?;
+            validate_neighbor_send(request, request_bytes, &report)?;
+            let freshness_marker = report.timing().freshness_marker().monotonic();
 
-            let deadline = send_started
-                .checked_add(self.options.attempt_timeout)
-                .ok_or_else(|| invalid_configuration("attempt deadline overflowed".to_owned()))?;
             while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
                 let Some(captured_frame) =
                     capture.next_captured_frame(remaining).map_err(|error| {
@@ -243,11 +243,13 @@ where
                 else {
                     break;
                 };
-                let CapturedFrame { frame, received_at } = captured_frame;
+                let CapturedFrame {
+                    frame, received_at, ..
+                } = captured_frame;
                 validate_captured_frame(request, &frame, self.options.snap_length)?;
-                if received_at
-                    .is_none_or(|received_at| received_at < send_started || received_at > deadline)
-                {
+                if received_at.is_none_or(|received_at| {
+                    received_at < freshness_marker || received_at > deadline
+                }) {
                     retain_evidence(
                         frame,
                         &self.options,
@@ -316,5 +318,136 @@ fn discovery_route(request: &NeighborRequest, destination_mac: MacAddress) -> Pl
         source_mac: Some(request.interface_mac),
         neighbor_vlan_tags: request.vlan_tags.clone(),
         synthesized_ethernet: false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::{IpAddr, Ipv4Addr};
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    use crate::Error as LiveIoError;
+    use crate::interface::Id as InterfaceId;
+    use crate::transmit::IoSendReport;
+    use packetcraftr_packet::frame::LinkType;
+
+    use super::*;
+
+    #[derive(Clone)]
+    struct SlowLayer2 {
+        delay: Duration,
+    }
+
+    impl Layer2Io for SlowLayer2 {
+        fn send_layer2(&self, frame: Layer2Frame<'_>) -> Result<IoSendReport, LiveIoError> {
+            std::thread::sleep(self.delay);
+            Ok(IoSendReport::committed(
+                frame.bytes().len(),
+                frame.bytes().clone(),
+            ))
+        }
+    }
+
+    #[derive(Clone)]
+    struct UnusedCaptureProvider;
+
+    impl CaptureProvider for UnusedCaptureProvider {
+        type Capture = ObservedCapture;
+
+        fn arm_capture(
+            &self,
+            _route: &PlannedRoute,
+            _limits: CaptureQueueLimits,
+        ) -> Result<Self::Capture, LiveIoError> {
+            panic!("provider fixture is not used by direct exchange tests")
+        }
+    }
+
+    struct ObservedCapture {
+        timeouts: Arc<Mutex<Vec<Duration>>>,
+    }
+
+    impl CaptureSession for ObservedCapture {
+        fn wait_ready(&mut self, _timeout: Duration) -> Result<(), LiveIoError> {
+            Ok(())
+        }
+
+        fn next_captured_frame(
+            &mut self,
+            timeout: Duration,
+        ) -> Result<Option<CapturedFrame>, LiveIoError> {
+            self.timeouts
+                .lock()
+                .expect("timeout observations")
+                .push(timeout);
+            Ok(None)
+        }
+
+        fn shutdown(&mut self) -> Result<(), LiveIoError> {
+            Ok(())
+        }
+
+        fn statistics(&self) -> Statistics {
+            Statistics::default()
+        }
+    }
+
+    fn request() -> NeighborRequest {
+        NeighborRequest {
+            interface: InterfaceId {
+                name: "fixture0".to_owned(),
+                index: 7,
+            },
+            interface_source: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
+            interface_mac: MacAddress([0x02, 0, 0, 0, 0, 1]),
+            target: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2)),
+            vlan_tags: Vec::new(),
+            mtu: 1_500,
+            link_type: LinkType::ETHERNET,
+        }
+    }
+
+    #[test]
+    fn slow_send_consumes_attempt_timeout_before_capture_wait() {
+        let timeouts = Arc::new(Mutex::new(Vec::new()));
+        let options = NeighborResolutionOptions {
+            max_attempts: 1,
+            attempt_timeout: Duration::from_millis(1),
+            cache_ttl: Duration::from_secs(1),
+            max_cache_entries: 1,
+            max_capture_queue_frames: 1,
+            max_captured_bytes: 128,
+            snap_length: 128,
+        };
+        let resolver = ActiveNeighborResolver::try_new(
+            SlowLayer2 {
+                delay: Duration::from_millis(10),
+            },
+            UnusedCaptureProvider,
+            options,
+        )
+        .expect("resolver options");
+        let request = request();
+        let (request_bytes, destination_mac) =
+            build_request_frame(&request).expect("discovery frame");
+        let route = MaterializedRoute {
+            plan: discovery_route(&request, destination_mac),
+            neighbor_resolution: None,
+        };
+        let mut capture = ObservedCapture {
+            timeouts: Arc::clone(&timeouts),
+        };
+
+        let outcome = resolver
+            .exchange(&request, &request_bytes, &route, &mut capture)
+            .expect("exchange completes without a response");
+
+        assert_eq!(outcome.attempts, 1);
+        assert_eq!(outcome.mac_address, None);
+        assert_eq!(
+            *timeouts.lock().expect("timeout observations"),
+            vec![Duration::ZERO]
+        );
     }
 }

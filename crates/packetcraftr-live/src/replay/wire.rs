@@ -112,24 +112,7 @@ pub(super) fn validate_transmission_evidence(
     frame: &Frame,
     report: &IoSendReport,
 ) -> Result<(), ReplayError> {
-    if report.bytes_sent != frame.bytes().len() {
-        return Err(ReplayError::Transmission {
-            sequence,
-            source: LiveIoError::PartialSend {
-                expected: frame.bytes().len(),
-                actual: report.bytes_sent,
-            },
-        });
-    }
-    if report.wire_bytes != *frame.bytes() {
-        return Err(ReplayError::InvalidEvidence {
-            sequence,
-            message: format!(
-                "backend returned {} wire bytes that differ from the {} submitted bytes",
-                report.wire_bytes.len(),
-                frame.bytes().len()
-            ),
-        });
-    }
-    Ok(())
+    report
+        .validate_exact(frame.bytes())
+        .map_err(|source| ReplayError::Transmission { sequence, source })
 }

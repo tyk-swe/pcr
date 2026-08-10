@@ -3,17 +3,14 @@
 
 use std::net::IpAddr;
 
-use bytes::Bytes;
 use thiserror::Error;
 
 use packetcraftr_network::{
     Error as LiveIoError,
     neighbor::Error as NeighborError,
-    route::{Error as PlanError, Materialized as MaterializedRoute, Options as PlanOptions},
+    route::{Error as PlanError, Options as PlanOptions},
 };
-use packetcraftr_packet::build::{
-    Error as BuildError, Options as BuildOptions, Result as BuiltPacket,
-};
+use packetcraftr_packet::build::{Error as BuildError, Options as BuildOptions};
 use packetcraftr_packet::error::{Classification, Classified, Kind};
 
 use super::super::Stats;
@@ -31,9 +28,7 @@ pub struct SendOptions {
 
 #[derive(Clone, Debug)]
 pub struct SendReport {
-    pub built: BuiltPacket,
-    pub route: MaterializedRoute,
-    pub wire_bytes: Bytes,
+    pub sent: crate::SentPacket,
     pub stats: Stats,
 }
 

@@ -25,8 +25,7 @@ pub(super) fn validate_exchange_evidence(
     validate_shared_exchange_evidence(
         ExchangeEvidence {
             request_count: batch.probes.len(),
-            sent_packets: &exchange.sent,
-            sent_frames: &exchange.sent_evidence,
+            sent: &exchange.sent,
             matched_responses: &exchange.responses,
             unsolicited: &exchange.unsolicited,
             undecoded: &exchange.undecoded,

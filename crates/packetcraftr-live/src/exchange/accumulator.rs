@@ -3,12 +3,12 @@
 
 //! Bounded response/result state for one armed exchange.
 
-use std::time::Instant;
+use std::{collections::HashSet, time::Instant};
 
+use packetcraftr_network::capture::RecordIdentity;
 use packetcraftr_packet::frame::Frame;
 use packetcraftr_packet::{
     Packet,
-    build::Result as BuiltPacket,
     decode::{Decoder as Dissector, Result as DecodedPacket},
     registry::Registry,
 };
@@ -37,6 +37,7 @@ pub(crate) struct ExchangeAccumulator {
     pub(crate) response_counts: Vec<usize>,
     pub(super) correlation_deadline_expired: bool,
     pub(super) workflow_examined_unsolicited: usize,
+    pub(super) retained_record_identities: HashSet<RecordIdentity>,
 }
 
 #[derive(Clone, Copy)]
@@ -44,7 +45,7 @@ pub(crate) struct ExchangeProcessContext<'a> {
     pub(crate) registry: &'a Registry,
     pub(crate) dissector: &'a Dissector,
     pub(crate) prepared: &'a [PreparedExchangePacket],
-    pub(crate) sent_at: &'a [Instant],
+    pub(crate) sent: &'a [crate::SentPacket],
     pub(crate) deadline: Instant,
     pub(crate) options: &'a ExchangeOptions,
 }
@@ -52,7 +53,7 @@ pub(crate) struct ExchangeProcessContext<'a> {
 #[derive(Clone, Copy)]
 pub(crate) struct WorkflowPromotionContext<'a> {
     pub(crate) prepared: &'a [PreparedExchangePacket],
-    pub(crate) sent_at: &'a [Instant],
+    pub(crate) sent: &'a [crate::SentPacket],
     pub(crate) deadline: Instant,
     pub(crate) max_responses: usize,
 }
@@ -61,6 +62,7 @@ pub(crate) struct WorkflowPromotionContext<'a> {
 pub(crate) enum ExchangeProcessOutcome {
     Continue,
     CorrelationDeadlineExpired,
+    DuplicateRecordIdentity,
 }
 
 impl ExchangeAccumulator {
@@ -76,20 +78,27 @@ impl ExchangeAccumulator {
             response_counts: vec![0; requests],
             correlation_deadline_expired: false,
             workflow_examined_unsolicited: 0,
+            retained_record_identities: HashSet::new(),
         }
+    }
+
+    pub(super) fn can_retain_record(&self, identity: RecordIdentity) -> bool {
+        !self.retained_record_identities.contains(&identity)
+    }
+
+    pub(super) fn mark_record_retained(&mut self, identity: RecordIdentity) {
+        self.retained_record_identities.insert(identity);
     }
 
     pub(crate) fn finish(
         self,
-        sent: Vec<BuiltPacket>,
-        sent_evidence: Vec<Frame>,
+        sent: Vec<crate::SentPacket>,
         unanswered: Vec<usize>,
         stats: Stats,
     ) -> ExchangeResult {
         debug_assert_eq!(self.unsolicited.len(), self.unsolicited_freshness.len());
         ExchangeResult {
             sent,
-            sent_evidence,
             responses: self.responses,
             unanswered,
             unsolicited: self.unsolicited,

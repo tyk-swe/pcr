@@ -1,40 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Post-transmission send-report and MTU validation.
+//! MTU validation for exact built packets.
 
-use bytes::Bytes;
-
-use packetcraftr_network::{Error as LiveIoError, transmit::Report as IoSendReport};
 use packetcraftr_packet::{
     build::Result as BuiltPacket, layer::Padding, semantics::BuiltinProtocol,
 };
 
 use super::send::ClientError;
-
-pub(super) fn validate_send_report(
-    expected: &Bytes,
-    report: &IoSendReport,
-) -> Result<(), LiveIoError> {
-    if report.bytes_sent != expected.len() {
-        return Err(LiveIoError::PartialSend {
-            expected: expected.len(),
-            actual: report.bytes_sent,
-        });
-    }
-    if report.wire_bytes.len() != report.bytes_sent {
-        return Err(LiveIoError::InvalidSendReport {
-            bytes_sent: report.bytes_sent,
-            wire_bytes: report.wire_bytes.len(),
-        });
-    }
-    if report.wire_bytes != *expected {
-        return Err(LiveIoError::InvalidSendEvidence {
-            message: "wire_bytes differ from the exact submitted packet".to_owned(),
-        });
-    }
-    Ok(())
-}
 
 pub(super) fn validate_mtu(built: &BuiltPacket, mtu: u32) -> Result<(), ClientError> {
     let network_layer = built.packet.iter().enumerate().find_map(|(index, layer)| {
@@ -77,6 +50,9 @@ mod tests {
     use std::net::Ipv4Addr;
     use std::sync::Arc;
 
+    use bytes::Bytes;
+    use packetcraftr_network::Error as LiveIoError;
+    use packetcraftr_network::transmit::Submission;
     use packetcraftr_packet::protocol::{link::Ethernet, network::Ipv4, transport::Udp};
     use packetcraftr_packet::{
         Packet,
@@ -91,49 +67,33 @@ mod tests {
     fn send_report_requires_exact_count_length_and_wire_bytes() {
         let expected = Bytes::from_static(&[1, 2, 3]);
         assert!(
-            validate_send_report(
-                &expected,
-                &IoSendReport {
-                    bytes_sent: 3,
-                    wire_bytes: expected.clone(),
-                }
-            )
-            .is_ok()
+            Submission::start()
+                .complete(3, expected.clone())
+                .validate_exact(&expected)
+                .is_ok()
         );
         assert!(matches!(
-            validate_send_report(
-                &expected,
-                &IoSendReport {
-                    bytes_sent: 2,
-                    wire_bytes: Bytes::from_static(&[1, 2]),
-                }
-            ),
+            Submission::start()
+                .complete(2, Bytes::from_static(&[1, 2]))
+                .validate_exact(&expected),
             Err(LiveIoError::PartialSend {
                 expected: 3,
                 actual: 2
             })
         ));
         assert!(matches!(
-            validate_send_report(
-                &expected,
-                &IoSendReport {
-                    bytes_sent: 3,
-                    wire_bytes: Bytes::from_static(&[1, 2]),
-                }
-            ),
+            Submission::start()
+                .complete(3, Bytes::from_static(&[1, 2]))
+                .validate_exact(&expected),
             Err(LiveIoError::InvalidSendReport {
                 bytes_sent: 3,
                 wire_bytes: 2
             })
         ));
         assert!(matches!(
-            validate_send_report(
-                &expected,
-                &IoSendReport {
-                    bytes_sent: 3,
-                    wire_bytes: Bytes::from_static(&[3, 2, 1]),
-                }
-            ),
+            Submission::start()
+                .complete(3, Bytes::from_static(&[3, 2, 1]))
+                .validate_exact(&expected),
             Err(LiveIoError::InvalidSendEvidence { .. })
         ));
     }

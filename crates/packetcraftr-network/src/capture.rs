@@ -3,6 +3,7 @@
 
 //! Owned live-capture sessions and bounded queue configuration.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -115,8 +116,15 @@ impl<T: Session + ?Sized> Session for Box<T> {
 
 /// Capture evidence with an optional monotonic ingress marker. Wall-clock time is
 /// output-only; freshness and latency use `received_at` to avoid reordering.
+/// Opaque identity assigned exactly once when a record enters capture.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct RecordIdentity(u64);
+
+static NEXT_RECORD_ID: AtomicU64 = AtomicU64::new(1);
+
 #[derive(Clone, Debug)]
 pub struct Captured {
+    identity: RecordIdentity,
     pub frame: CaptureFrame,
     /// Monotonic ingress time; `None` cannot prove freshness.
     pub received_at: Option<Instant>,
@@ -128,13 +136,31 @@ impl Captured {
     }
 
     /// Retains an optional provider-supplied monotonic ingress marker.
+    ///
+    /// # Panics
+    ///
+    /// Panics only if the process exhausts the non-reusable capture-record
+    /// identity space.
     pub fn with_ingress_time(frame: CaptureFrame, received_at: Option<Instant>) -> Self {
-        Self { frame, received_at }
+        let identity = NEXT_RECORD_ID
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                current.checked_add(1)
+            })
+            .expect("capture record identity space exhausted");
+        Self {
+            identity: RecordIdentity(identity),
+            frame,
+            received_at,
+        }
     }
 
     /// Evidence without an ingress marker cannot satisfy freshness correlation.
     pub fn without_ingress_time(frame: CaptureFrame) -> Self {
         Self::with_ingress_time(frame, None)
+    }
+
+    pub fn identity(&self) -> RecordIdentity {
+        self.identity
     }
 }
 

@@ -83,7 +83,6 @@ where
             .map_err(BoundaryError::from_error)?;
         let crate::exchange::Result {
             sent,
-            sent_evidence,
             responses,
             unanswered: _,
             unsolicited,
@@ -92,8 +91,8 @@ where
             stats,
         } = exchange;
         Ok(ScanBatchExecution {
-            sent: sent.into_iter().map(|built| built.packet).collect(),
-            sent_evidence,
+            permit: batch.permit,
+            sent,
             responses: responses
                 .into_iter()
                 .map(|response| ScanMatchedResponse {

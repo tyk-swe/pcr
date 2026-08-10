@@ -11,7 +11,7 @@ use super::capture::map_open_error;
 use crate::{
     Error as LiveIoError,
     route::InterfaceId,
-    transmit::{IoSendReport, Layer2Frame},
+    transmit::{IoSendReport, Layer2Frame, Submission},
 };
 
 const READ_TIMEOUT_MILLIS: i32 = 50;
@@ -31,13 +31,11 @@ pub(crate) fn send_layer2(frame: Layer2Frame<'_>) -> Result<IoSendReport, LiveIo
         .immediate_mode(true)
         .open()
         .map_err(|error| map_open_error(interface, error))?;
+    let submission = Submission::start();
     capture
         .sendpacket(frame.bytes().as_ref())
         .map_err(|error| map_send_error(interface, error))?;
-    Ok(IoSendReport {
-        bytes_sent: frame.bytes().len(),
-        wire_bytes: frame.bytes().clone(),
-    })
+    Ok(submission.complete(frame.bytes().len(), frame.bytes().clone()))
 }
 
 pub(super) fn map_send_error(interface: &InterfaceId, error: PcapError) -> LiveIoError {

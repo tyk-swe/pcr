@@ -35,14 +35,8 @@ impl<C: Session> ExchangeTransaction<C> {
             .enumerate()
             .filter_map(|(index, count)| (*count == 0).then_some(index))
             .collect();
-        let sent = self
-            .prepared
-            .into_iter()
-            .map(|prepared| prepared.built)
-            .collect();
         Ok(self.captured.finish(
-            sent,
-            self.sent_evidence,
+            self.sent,
             unanswered,
             Stats {
                 packets_attempted: self.packet_count,

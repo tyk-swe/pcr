@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** Live transmission now returns opaque provider receipts that bind
+  semantic builds, materialized routes, exact accepted bytes, byte counts, and
+  provider-established monotonic/wall-clock timing. Capture correlation uses
+  opaque ingress identity and monotonic freshness, and high-level executor
+  successes are invocation-bound rather than caller-constructible evidence.
 - **Breaking:** Capture rewriting is now a bounded, same-format operation that
   preserves every validated source record and rejects CLI format conversion or
   filtering instead of silently normalizing PCAPNG structure. The capture API
@@ -27,8 +32,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Accepted valid injected-provider transmission reports across backward
+  wall-clock adjustments by validating timing with monotonic endpoints.
 - Preserved TCP response correlation for Layer2 exchanges whose TCP
   sequence-space length depends on encoded payload caches.
+- Bounded live duplicate capture tracking to retained exchange evidence.
+- Kept neighbor resolution attempt timeouts anchored before Layer2 sends.
 
 ### Fixed
 

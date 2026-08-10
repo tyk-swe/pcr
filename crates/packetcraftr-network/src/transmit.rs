@@ -4,6 +4,7 @@
 //! Typed Layer 2 and Layer 3 transmission contracts; callers own policy authorization.
 
 use bytes::Bytes;
+use std::time::{Instant, SystemTime};
 
 use super::Error;
 use super::link::Mode;
@@ -99,10 +100,163 @@ fn require_link_mode(route: &MaterializedRoute, expected: Mode) -> Result<(), Er
     }
 }
 
+/// A monotonic/wall-clock observation captured as one provider event.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TimeMarker {
+    monotonic: Instant,
+    wall_clock: SystemTime,
+}
+
+impl TimeMarker {
+    fn now() -> Self {
+        Self {
+            monotonic: Instant::now(),
+            wall_clock: SystemTime::now(),
+        }
+    }
+
+    pub fn monotonic(self) -> Instant {
+        self.monotonic
+    }
+
+    pub fn wall_clock(self) -> SystemTime {
+        self.wall_clock
+    }
+}
+
+/// Provider-established transmission timing.
+///
+/// An exact marker identifies the provider's successful commit event. A
+/// submission interval means only that acceptance occurred after `started`
+/// and no later than `completed`; captures inside that interval are not proven
+/// to be post-send.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Timing {
+    started: TimeMarker,
+    completed: TimeMarker,
+    exact: bool,
+}
+
+impl Timing {
+    pub fn started(self) -> TimeMarker {
+        self.started
+    }
+
+    pub fn completed(self) -> TimeMarker {
+        self.completed
+    }
+
+    pub fn exact_commit(self) -> Option<TimeMarker> {
+        self.exact.then_some(self.completed)
+    }
+
+    /// Earliest marker after which a capture is proven to follow acceptance.
+    pub fn freshness_marker(self) -> TimeMarker {
+        self.completed
+    }
+
+    /// Whether monotonic endpoints describe a valid interval or exact event.
+    pub fn is_consistent(self) -> bool {
+        self.started.monotonic <= self.completed.monotonic
+            && (!self.exact || self.started.monotonic == self.completed.monotonic)
+    }
+}
+
+/// In-progress injected-provider submission.
+///
+/// Providers that lack an exact commit event create this immediately before
+/// entering their send operation and complete it only after success. Clock
+/// endpoints cannot be supplied independently by callers.
+#[derive(Debug)]
+pub struct Submission {
+    started: TimeMarker,
+}
+
+impl Submission {
+    pub fn start() -> Self {
+        Self {
+            started: TimeMarker::now(),
+        }
+    }
+
+    pub fn started(&self) -> TimeMarker {
+        self.started
+    }
+
+    pub fn complete(self, bytes_sent: usize, wire_bytes: Bytes) -> Report {
+        Report {
+            bytes_sent,
+            wire_bytes,
+            timing: Timing {
+                started: self.started,
+                completed: TimeMarker::now(),
+                exact: false,
+            },
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Report {
-    pub bytes_sent: usize,
-    pub wire_bytes: Bytes,
+    bytes_sent: usize,
+    wire_bytes: Bytes,
+    timing: Timing,
+}
+
+impl Report {
+    /// Records an exact successful provider commit at the call site.
+    pub fn committed(bytes_sent: usize, wire_bytes: Bytes) -> Self {
+        let committed = TimeMarker::now();
+        Self {
+            bytes_sent,
+            wire_bytes,
+            timing: Timing {
+                started: committed,
+                completed: committed,
+                exact: true,
+            },
+        }
+    }
+
+    pub fn bytes_sent(&self) -> usize {
+        self.bytes_sent
+    }
+
+    pub fn wire_bytes(&self) -> &Bytes {
+        &self.wire_bytes
+    }
+
+    pub fn timing(&self) -> Timing {
+        self.timing
+    }
+
+    /// Validates count, exact accepted bytes, and provider monotonic timing for
+    /// one submitted frame.
+    pub fn validate_exact(&self, expected: &Bytes) -> Result<(), super::Error> {
+        if self.bytes_sent != expected.len() {
+            return Err(super::Error::PartialSend {
+                expected: expected.len(),
+                actual: self.bytes_sent,
+            });
+        }
+        if self.wire_bytes.len() != self.bytes_sent {
+            return Err(super::Error::InvalidSendReport {
+                bytes_sent: self.bytes_sent,
+                wire_bytes: self.wire_bytes.len(),
+            });
+        }
+        if self.wire_bytes.as_ref() != expected.as_ref() {
+            return Err(super::Error::InvalidSendEvidence {
+                message: "provider-accepted bytes differ from the exact submitted frame".to_owned(),
+            });
+        }
+        if !self.timing.is_consistent() {
+            return Err(super::Error::InvalidSendEvidence {
+                message: "provider timing has inconsistent monotonic endpoints".to_owned(),
+            });
+        }
+        Ok(())
+    }
 }
 
 /// Unified packet-I/O seam used by the root client and injected providers.
@@ -163,5 +317,35 @@ where
             Frame::Layer2(frame) => self.layer2.send_layer2(frame),
             Frame::Layer3(frame) => self.layer3.send_layer3(frame),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+
+    #[test]
+    fn backward_wall_clock_step_does_not_invalidate_submission_timing() {
+        let expected = Bytes::from_static(&[1, 2, 3]);
+        let started_monotonic = Instant::now();
+        let report = Report {
+            bytes_sent: expected.len(),
+            wire_bytes: expected.clone(),
+            timing: Timing {
+                started: TimeMarker {
+                    monotonic: started_monotonic,
+                    wall_clock: SystemTime::UNIX_EPOCH + Duration::from_secs(2),
+                },
+                completed: TimeMarker {
+                    monotonic: started_monotonic + Duration::from_millis(1),
+                    wall_clock: SystemTime::UNIX_EPOCH + Duration::from_secs(1),
+                },
+                exact: false,
+            },
+        };
+
+        assert!(report.validate_exact(&expected).is_ok());
     }
 }

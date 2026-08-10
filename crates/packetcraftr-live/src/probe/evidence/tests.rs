@@ -6,7 +6,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use crate::Stats;
 use bytes::Bytes;
 use packetcraftr_packet::frame::{Frame, LinkType};
-use packetcraftr_packet::{Packet, decode::Result as DecodedPacket, layout};
+use packetcraftr_packet::{Packet, decode::Result as DecodedPacket, layer::Raw, layout};
 
 use super::exact_validation::validate_decoded_frame;
 use super::{
@@ -26,7 +26,7 @@ fn candidate<'a>(
     rank: u8,
     key: (u8, u16),
     identity: u8,
-    latency: Option<Duration>,
+    latency: Duration,
 ) -> ResponseCandidate<'a, TestObservation> {
     ResponseCandidate {
         observation: TestObservation {
@@ -46,7 +46,6 @@ fn choose<'a>(
     let _ = select_response_candidate(
         best,
         value,
-        UNIX_EPOCH,
         Duration::from_millis(10),
         |observation| observation.rank,
         |observation| observation.key,
@@ -54,32 +53,25 @@ fn choose<'a>(
 }
 
 #[test]
-fn evidence_selection_enforces_monotonic_and_wall_clock_deadlines() {
+fn evidence_selection_enforces_trusted_monotonic_latency_deadlines() {
     let within_wall_clock = decoded_at(Duration::from_millis(1), &[1]);
     let after_wall_clock = decoded_at(Duration::from_millis(11), &[2]);
     let mut best = None;
     choose(
         &mut best,
-        candidate(
-            &within_wall_clock,
-            1,
-            (0, 0),
-            1,
-            Some(Duration::from_millis(11)),
-        ),
+        candidate(&within_wall_clock, 1, (0, 0), 1, Duration::from_millis(11)),
     );
-    choose(&mut best, candidate(&after_wall_clock, 1, (0, 0), 2, None));
+    choose(
+        &mut best,
+        candidate(&after_wall_clock, 1, (0, 0), 2, Duration::from_millis(11)),
+    );
     assert!(best.is_none());
     assert!(response_within_deadline(
-        Some(Duration::from_millis(10)),
-        UNIX_EPOCH,
-        UNIX_EPOCH,
+        Duration::from_millis(10),
         Duration::from_millis(10),
     ));
     assert!(!response_within_deadline(
-        None,
-        UNIX_EPOCH,
-        UNIX_EPOCH + Duration::from_millis(1),
+        Duration::from_millis(11),
         Duration::from_millis(10),
     ));
 }
@@ -91,18 +83,43 @@ fn evidence_selection_prioritizes_rank_and_stably_keeps_fully_tied_candidates() 
     let mut best = None;
     choose(
         &mut best,
-        candidate(&earlier, 1, (0, 0), 1, Some(Duration::from_millis(1))),
+        candidate(&earlier, 1, (0, 0), 1, Duration::from_millis(1)),
     );
     choose(
         &mut best,
-        candidate(&later, 2, (9, 9), 2, Some(Duration::from_millis(9))),
+        candidate(&later, 2, (9, 9), 2, Duration::from_millis(9)),
     );
     assert_eq!(best.as_ref().unwrap().observation.identity, 2);
 
+    let earlier_higher_bytes = decoded_at(Duration::from_millis(1), &[9]);
+    let later_lower_bytes = decoded_at(Duration::from_millis(2), &[1]);
+    let mut best = None;
+    choose(
+        &mut best,
+        candidate(
+            &earlier_higher_bytes,
+            1,
+            (0, 0),
+            1,
+            Duration::from_millis(1),
+        ),
+    );
+    choose(
+        &mut best,
+        candidate(&later_lower_bytes, 1, (0, 0), 2, Duration::from_millis(2)),
+    );
+    assert_eq!(best.as_ref().unwrap().observation.identity, 1);
+
     let tied = decoded_at(Duration::from_millis(1), &[1]);
     let mut best = None;
-    choose(&mut best, candidate(&tied, 1, (0, 0), 1, None));
-    choose(&mut best, candidate(&tied, 1, (0, 0), 2, None));
+    choose(
+        &mut best,
+        candidate(&tied, 1, (0, 0), 1, Duration::from_millis(1)),
+    );
+    choose(
+        &mut best,
+        candidate(&tied, 1, (0, 0), 2, Duration::from_millis(1)),
+    );
     assert_eq!(best.unwrap().observation.identity, 1);
 }
 
@@ -164,9 +181,7 @@ impl MatchedResponseEvidence for MatchedResponse {
 
 #[test]
 fn evidence_aggregate_validation_reports_cardinality_and_byte_accounting_failures() {
-    let sent_frame = frame(&[1, 2]);
-    let sent_packets = [Packet::new()];
-    let sent_frames = [sent_frame];
+    let sent = [crate::evidence::test_sent_packet(raw_packet(&[1, 2]))];
     let matched = Vec::<NoMatchedResponses>::new();
     let stats = Stats {
         packets_attempted: 1,
@@ -176,8 +191,7 @@ fn evidence_aggregate_validation_reports_cardinality_and_byte_accounting_failure
     };
     let evidence = ExchangeEvidence {
         request_count: 1,
-        sent_packets: &sent_packets,
-        sent_frames: &sent_frames,
+        sent: &sent,
         matched_responses: &matched,
         unsolicited: &[],
         undecoded: &[],
@@ -192,8 +206,7 @@ fn evidence_aggregate_validation_reports_cardinality_and_byte_accounting_failure
     let stats = Stats { bytes: 1, ..stats };
     let evidence = ExchangeEvidence {
         request_count: 1,
-        sent_packets: &sent_packets,
-        sent_frames: &sent_frames,
+        sent: &sent,
         matched_responses: &matched,
         unsolicited: &[],
         undecoded: &[],
@@ -210,9 +223,8 @@ fn evidence_aggregate_validation_reports_cardinality_and_byte_accounting_failure
 }
 
 #[test]
-fn evidence_aggregate_validation_rejects_untimestamped_live_evidence() {
-    let sent_packets = [Packet::new()];
-    let untimestamped_sent = [untimestamped_frame(&[1])];
+fn evidence_aggregate_validation_rejects_untimestamped_capture_evidence() {
+    let sent = [crate::evidence::test_sent_packet(raw_packet(&[1]))];
     let matched = Vec::<NoMatchedResponses>::new();
     let stats = Stats {
         packets_attempted: 1,
@@ -220,24 +232,6 @@ fn evidence_aggregate_validation_rejects_untimestamped_live_evidence() {
         bytes: 1,
         ..Stats::default()
     };
-    let evidence = ExchangeEvidence {
-        request_count: 1,
-        sent_packets: &sent_packets,
-        sent_frames: &untimestamped_sent,
-        matched_responses: &matched,
-        unsolicited: &[],
-        undecoded: &[],
-        timeout: Duration::from_secs(1),
-        stats: &stats,
-    };
-    assert_eq!(
-        validate_exchange_evidence(evidence, 1, 1, |_, _| true),
-        Err(ExchangeEvidenceError::TimestampUnavailable {
-            evidence: "sent frame"
-        })
-    );
-
-    let sent_frames = [frame(&[1])];
     let response = MatchedResponse {
         request_index: 0,
         response: decoded_without_timestamp(&[2]),
@@ -245,8 +239,7 @@ fn evidence_aggregate_validation_rejects_untimestamped_live_evidence() {
     };
     let evidence = ExchangeEvidence {
         request_count: 1,
-        sent_packets: &sent_packets,
-        sent_frames: &sent_frames,
+        sent: &sent,
         matched_responses: std::slice::from_ref(&response),
         unsolicited: &[],
         undecoded: &[],
@@ -263,8 +256,7 @@ fn evidence_aggregate_validation_rejects_untimestamped_live_evidence() {
     let unsolicited = [decoded_without_timestamp(&[3])];
     let evidence = ExchangeEvidence {
         request_count: 1,
-        sent_packets: &sent_packets,
-        sent_frames: &sent_frames,
+        sent: &sent,
         matched_responses: &matched,
         unsolicited: &unsolicited,
         undecoded: &[],
@@ -277,6 +269,12 @@ fn evidence_aggregate_validation_rejects_untimestamped_live_evidence() {
             evidence: "unsolicited response"
         })
     );
+}
+
+fn raw_packet(bytes: &'static [u8]) -> Packet {
+    let mut packet = Packet::new();
+    packet.push(Raw::new(Bytes::from_static(bytes)));
+    packet
 }
 
 fn frame(bytes: &'static [u8]) -> Frame {

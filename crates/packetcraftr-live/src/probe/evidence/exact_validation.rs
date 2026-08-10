@@ -5,12 +5,13 @@
 
 use std::time::Duration;
 
+use crate::SentPacket;
 use crate::Stats;
 use packetcraftr_network::capture::Statistics;
 use packetcraftr_packet::frame::Frame;
 use packetcraftr_packet::{Packet, decode::Result as DecodedPacket};
 
-use super::budget::{checked_frame_bytes, checked_frame_count, checked_sent_frame_bytes};
+use super::budget::{checked_frame_bytes, checked_frame_count};
 
 pub(crate) fn validate_decoded_frame(decoded: &DecodedPacket, kind: &str) -> Result<(), String> {
     if decoded.original != decoded.frame.bytes() {
@@ -37,8 +38,7 @@ pub(crate) trait MatchedResponseEvidence: ResponseEvidence {
 
 pub(crate) struct ExchangeEvidence<'a, M> {
     pub(crate) request_count: usize,
-    pub(crate) sent_packets: &'a [Packet],
-    pub(crate) sent_frames: &'a [Frame],
+    pub(crate) sent: &'a [SentPacket],
     pub(crate) matched_responses: &'a [M],
     pub(crate) unsolicited: &'a [DecodedPacket],
     pub(crate) undecoded: &'a [Frame],
@@ -50,8 +50,7 @@ pub(crate) struct ExchangeEvidence<'a, M> {
 pub(crate) enum ExchangeEvidenceError {
     SentCardinality {
         expected: usize,
-        packets: usize,
-        frames: usize,
+        receipts: usize,
     },
     MatchedResponseOutsideBatch,
     CapturedFrameCountOverflow,
@@ -125,22 +124,17 @@ pub(crate) fn validate_aggregate_evidence_limits<M: ResponseEvidence>(
 }
 
 pub(crate) fn validate_sent_byte_accounting(
-    sent_frames: &[Frame],
+    sent: &[SentPacket],
     reported: u64,
 ) -> Result<(), ExchangeEvidenceError> {
-    let actual = checked_sent_frame_bytes(sent_frames)
+    let actual = sent
+        .iter()
+        .try_fold(0_u64, |total, sent| {
+            total.checked_add(sent.bytes_sent() as u64)
+        })
         .ok_or(ExchangeEvidenceError::SentByteCountOverflow)?;
     if reported != actual {
         return Err(ExchangeEvidenceError::SentByteCountMismatch { reported, actual });
-    }
-    Ok(())
-}
-
-pub(crate) fn validate_sent_frame_timestamps(
-    sent_frames: &[Frame],
-) -> Result<(), ExchangeEvidenceError> {
-    for frame in sent_frames {
-        validate_frame_timestamp(frame, "sent frame")?;
     }
     Ok(())
 }
@@ -201,13 +195,9 @@ pub(crate) fn format_exchange_evidence_error(
     workflow: &str,
 ) -> String {
     match error {
-        ExchangeEvidenceError::SentCardinality {
-            expected,
-            packets,
-            frames,
-        } => format!(
-            "expected {expected} sent packets and frames, received {packets} packets and {frames} frames"
-        ),
+        ExchangeEvidenceError::SentCardinality { expected, receipts } => {
+            format!("expected {expected} sent receipts, received {receipts}")
+        }
         ExchangeEvidenceError::MatchedResponseOutsideBatch => {
             format!("matched response references a request outside the {batch_kind}")
         }
@@ -257,13 +247,10 @@ where
     M: MatchedResponseEvidence,
     F: FnMut(usize, &Packet) -> bool,
 {
-    if evidence.sent_packets.len() != evidence.request_count
-        || evidence.sent_frames.len() != evidence.request_count
-    {
+    if evidence.sent.len() != evidence.request_count {
         return Err(ExchangeEvidenceError::SentCardinality {
             expected: evidence.request_count,
-            packets: evidence.sent_packets.len(),
-            frames: evidence.sent_frames.len(),
+            receipts: evidence.sent.len(),
         });
     }
     if evidence
@@ -282,14 +269,13 @@ where
         max_captured_bytes,
     )?;
 
-    for (request_index, sent) in evidence.sent_packets.iter().enumerate() {
-        if !sent_packet_matches(request_index, sent) {
+    for (request_index, sent) in evidence.sent.iter().enumerate() {
+        if !sent_packet_matches(request_index, &sent.built().packet) {
             return Err(ExchangeEvidenceError::SentPacketMismatch { request_index });
         }
     }
 
-    validate_sent_byte_accounting(evidence.sent_frames, evidence.stats.bytes)?;
-    validate_sent_frame_timestamps(evidence.sent_frames)?;
+    validate_sent_byte_accounting(evidence.sent, evidence.stats.bytes)?;
     validate_response_frames_and_deadlines(
         evidence.matched_responses,
         evidence.unsolicited,

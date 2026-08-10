@@ -43,8 +43,10 @@ pub(super) fn run(arguments: SendArgs, output: output::contract::Format) -> Resu
             },
         )
         .map_err(CliError::classified)?;
-    let capture_link_type =
-        send_capture_link_type(report.route.plan.mode, report.route.plan.route.link_type)?;
+    let capture_link_type = send_capture_link_type(
+        report.sent.route().plan.mode,
+        report.sent.route().plan.route.link_type,
+    )?;
     let (result, diagnostics, stats) =
         output::send::Result::try_from_report(report).map_err(CliError::classified)?;
     match output {

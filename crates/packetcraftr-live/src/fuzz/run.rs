@@ -6,13 +6,21 @@ use std::time::Duration;
 
 use packetcraftr_packet::budget::Deadline;
 use packetcraftr_packet::{
-    Packet, decode::Decoder as Dissector, fuzz as packet_fuzz, registry::Registry,
+    Packet,
+    build::{Builder, Context as BuildContext, Result as BuiltPacket},
+    decode::Decoder as Dissector,
+    fuzz as packet_fuzz,
+    registry::Registry,
 };
 
 use crate::clock::Clock;
+use crate::materialize::{
+    build_context, materialize_link_fields, materialize_link_structure, materialize_network_fields,
+    patch_builtin_ethernet, require_fixed_width_link_materialization,
+};
 use crate::probe::evidence::EvidenceBudget;
 
-use super::boundary::{FuzzAuthorizer, FuzzExecutionCase, FuzzExecutor};
+use super::boundary::{FuzzAuthorizer, FuzzCaseExecution, FuzzExecutionCase, FuzzExecutor};
 use super::error::{FuzzError, duration_limit};
 use super::execution::{
     ExecutionEvidence, add_execution_stats, rate_delay, retain_evidence, validate_execution,
@@ -48,7 +56,8 @@ where
     let live = live.validate()?;
     let mut deadline = Deadline::new(request.limits.max_duration);
     let live_dissector = Dissector::new(Arc::clone(&registry));
-    let campaign = packet_fuzz::Campaign::prepare(request, packet, registry, &mut deadline)?;
+    let campaign =
+        packet_fuzz::Campaign::prepare(request, packet, Arc::clone(&registry), &mut deadline)?;
     let built_case_count = campaign.built_case_count();
     let retained_byte_count = campaign.retained_byte_count();
     let mut cases = campaign
@@ -160,8 +169,7 @@ where
         }
         deadline.check().map_err(duration_limit)?;
         let execution_case = FuzzExecutionCase {
-            index: case.index,
-            seed: case.seed,
+            permit: crate::evidence::ExecutionPermit::new(),
             packet: case.recipe.clone(),
         };
         deadline
@@ -173,6 +181,25 @@ where
                 case_index: case.index,
                 source,
             })?;
+        if execution.permit != execution_case.permit {
+            return Err(FuzzError::InvalidEvidence {
+                case_index: case.index,
+                message: "executor returned evidence for a different execution permit".to_owned(),
+            });
+        }
+        let expected_live_build =
+            expected_live_build(request, case.recipe.clone(), &registry, &execution).map_err(
+                |message| FuzzError::InvalidEvidence {
+                    case_index: case.index,
+                    message,
+                },
+            )?;
+        if execution.sent.wire_bytes() != &expected_live_build.bytes {
+            return Err(FuzzError::InvalidEvidence {
+                case_index: case.index,
+                message: "executor substituted bytes for the route-materialized case".to_owned(),
+            });
+        }
         deadline.check().map_err(duration_limit)?;
         deadline
             .account(execution.stats.elapsed)
@@ -186,16 +213,16 @@ where
             });
         }
         let had_response = !execution.responses.is_empty();
-        case.diagnostics = execution.built.diagnostics.clone();
+        case.diagnostics = execution.sent.built().diagnostics.clone();
         case.decoded = dissect_built(
             &live_dissector,
-            &execution.built,
+            execution.sent.built(),
             request.limits,
             &mut case.diagnostics,
         );
         deadline.check().map_err(duration_limit)?;
-        case.built = Some(execution.built);
-        case.sent = Some(execution.sent);
+        case.built = Some(execution.sent.built().clone());
+        case.sent = Some(execution.sent.frame().clone());
         case.diagnostics.extend(execution.diagnostics);
         retain_evidence(
             case,
@@ -235,4 +262,47 @@ where
         diagnostics: operation_diagnostics,
         stats,
     })
+}
+
+fn expected_live_build(
+    request: &packet_fuzz::Request,
+    mut packet: Packet,
+    registry: &Arc<Registry>,
+    execution: &FuzzCaseExecution,
+) -> std::result::Result<BuiltPacket, String> {
+    let route = execution.sent.route();
+    materialize_network_fields(&mut packet, &route.plan).map_err(|source| source.to_string())?;
+    materialize_link_structure(&mut packet, &route.plan).map_err(|source| source.to_string())?;
+
+    let context = build_context(&route.plan);
+    let builder = Builder::new(Arc::clone(registry));
+    let mut preliminary = build_packet(&builder, packet.clone(), context.clone(), request)?;
+    let preliminary_len = preliminary.bytes.len();
+
+    if materialize_link_fields(&mut packet, route).map_err(|source| source.to_string())? {
+        if patch_builtin_ethernet(registry, &mut preliminary, &packet) {
+            require_fixed_width_link_materialization(preliminary_len, preliminary.bytes.len())
+                .map_err(|source| source.to_string())?;
+            return Ok(preliminary);
+        }
+        let materialized = build_packet(&builder, packet, context, request)?;
+        require_fixed_width_link_materialization(preliminary_len, materialized.bytes.len())
+            .map_err(|source| source.to_string())?;
+        return Ok(materialized);
+    }
+
+    require_fixed_width_link_materialization(preliminary_len, preliminary.bytes.len())
+        .map_err(|source| source.to_string())?;
+    Ok(preliminary)
+}
+
+fn build_packet(
+    builder: &Builder,
+    packet: Packet,
+    context: BuildContext,
+    request: &packet_fuzz::Request,
+) -> std::result::Result<BuiltPacket, String> {
+    builder
+        .build(packet, context, request.build.clone())
+        .map_err(|source| source.to_string())
 }

@@ -11,11 +11,13 @@ use super::error::{map_io_error, resolution_error};
 use super::options::NeighborResolutionOptions;
 use super::wire::is_unicast_mac;
 use crate::{
-    Error as LiveIoError,
     route::{MAX_NEIGHBOR_VLAN_TAGS, NeighborError, NeighborRequest},
     transmit::IoSendReport,
 };
 use packetcraftr_packet::frame::{Frame, LinkType};
+
+#[cfg(test)]
+use crate::Error as LiveIoError;
 
 pub(super) fn validate_request(request: &NeighborRequest) -> Result<(), NeighborError> {
     if request.interface_source.is_ipv4() != request.target.is_ipv4() {
@@ -93,31 +95,14 @@ pub(super) fn validate_captured_frame(
     Ok(())
 }
 
-pub(super) fn validate_send_report(
+pub(super) fn validate_neighbor_send(
     request: &NeighborRequest,
     expected: &Bytes,
-    report: IoSendReport,
+    report: &IoSendReport,
 ) -> Result<(), NeighborError> {
-    if report.bytes_sent != expected.len() {
-        return Err(map_io_error(
-            request,
-            "sending discovery request",
-            LiveIoError::PartialSend {
-                expected: expected.len(),
-                actual: report.bytes_sent,
-            },
-        ));
-    }
-    if report.wire_bytes != *expected {
-        return Err(map_io_error(
-            request,
-            "validating discovery send evidence",
-            LiveIoError::InvalidSendEvidence {
-                message: "discovery wire bytes differ from the exact submitted frame".to_owned(),
-            },
-        ));
-    }
-    Ok(())
+    report
+        .validate_exact(expected)
+        .map_err(|source| map_io_error(request, "validating discovery send evidence", source))
 }
 
 pub(super) fn retain_evidence(
@@ -276,24 +261,18 @@ mod tests {
 
         let expected = Bytes::from_static(&[1, 2, 3]);
         assert!(
-            validate_send_report(
+            validate_neighbor_send(
                 &request,
                 &expected,
-                IoSendReport {
-                    bytes_sent: 3,
-                    wire_bytes: expected.clone(),
-                }
+                &IoSendReport::committed(3, expected.clone())
             )
             .is_ok()
         );
         assert!(matches!(
-            validate_send_report(
+            validate_neighbor_send(
                 &request,
                 &expected,
-                IoSendReport {
-                    bytes_sent: 2,
-                    wire_bytes: expected.clone(),
-                }
+                &IoSendReport::committed(2, expected.clone())
             ),
             Err(NeighborError::Io {
                 source: LiveIoError::PartialSend { .. },
@@ -301,13 +280,10 @@ mod tests {
             })
         ));
         assert!(matches!(
-            validate_send_report(
+            validate_neighbor_send(
                 &request,
                 &expected,
-                IoSendReport {
-                    bytes_sent: 3,
-                    wire_bytes: Bytes::from_static(&[3, 2, 1]),
-                }
+                &IoSendReport::committed(3, Bytes::from_static(&[3, 2, 1]))
             ),
             Err(NeighborError::Io {
                 source: LiveIoError::InvalidSendEvidence { .. },

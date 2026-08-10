@@ -4,24 +4,23 @@ use std::net::IpAddr;
 use std::time::Duration;
 
 use packetcraftr_packet::frame::Frame;
-use packetcraftr_packet::{Packet, build::Result as BuiltPacket, diagnostic::Diagnostic};
+use packetcraftr_packet::{Packet, diagnostic::Diagnostic};
 
 #[derive(Clone, Debug)]
 pub struct FuzzExecutionCase {
-    pub index: u64,
-    pub seed: u64,
-    pub packet: Packet,
+    pub(crate) permit: crate::evidence::ExecutionPermit,
+    pub(crate) packet: Packet,
 }
 
 #[derive(Clone, Debug)]
 pub struct FuzzCaseExecution {
-    pub built: BuiltPacket,
-    pub sent: Frame,
-    pub responses: Vec<Frame>,
-    pub unmatched: Vec<Frame>,
-    pub undecoded: Vec<Frame>,
-    pub diagnostics: Vec<Diagnostic>,
-    pub stats: crate::Stats,
+    pub(crate) permit: crate::evidence::ExecutionPermit,
+    pub(crate) sent: crate::SentPacket,
+    pub(crate) responses: Vec<Frame>,
+    pub(crate) unmatched: Vec<Frame>,
+    pub(crate) undecoded: Vec<Frame>,
+    pub(crate) diagnostics: Vec<Diagnostic>,
+    pub(crate) stats: crate::Stats,
 }
 
 pub trait FuzzAuthorizer {

@@ -37,7 +37,6 @@ impl ExchangeCommandResult {
     ) -> std::result::Result<(Self, Vec<Diagnostic>, Stats), Error> {
         let ExchangeResult {
             sent,
-            sent_evidence: _,
             responses,
             unanswered,
             unsolicited,
@@ -47,9 +46,9 @@ impl ExchangeCommandResult {
         } = result;
         let sent_frames = sent
             .into_iter()
-            .map(|built| {
-                diagnostics.extend(built.diagnostics);
-                Wire::new(built.bytes)
+            .map(|sent| {
+                diagnostics.extend(sent.built().diagnostics.clone());
+                Wire::new(sent.wire_bytes().clone())
             })
             .collect();
         let response_outputs = responses

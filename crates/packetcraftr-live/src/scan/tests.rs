@@ -155,7 +155,6 @@ impl ScanExecutor for TimeoutExecutor {
             batch.probes.iter().map(|probe| probe.port).collect(),
         ));
         let mut sent = Vec::new();
-        let mut sent_evidence = Vec::new();
         let mut bytes = 0_u64;
         for probe in &batch.probes {
             let mut packet = probe_packet(probe);
@@ -169,21 +168,13 @@ impl ScanExecutor for TimeoutExecutor {
                         "fd00::1".parse().unwrap();
                 }
             }
-            let wire = Bytes::from_static(&[0x45]);
-            bytes += wire.len() as u64;
-            sent.push(packet);
-            sent_evidence.push(
-                Frame::new(
-                    UNIX_EPOCH + Duration::from_secs(probe.sequence + 1),
-                    LinkType::RAW,
-                    wire,
-                )
-                .expect("sent evidence frame"),
-            );
+            let receipt = crate::evidence::test_sent_packet(packet);
+            bytes += receipt.bytes_sent() as u64;
+            sent.push(receipt);
         }
         Ok(ScanBatchExecution {
+            permit: batch.permit,
             sent,
-            sent_evidence,
             responses: Vec::new(),
             unsolicited: Vec::new(),
             undecoded: Vec::new(),

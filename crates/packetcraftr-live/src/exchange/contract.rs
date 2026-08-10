@@ -10,7 +10,6 @@ use packetcraftr_network::capture::{
 };
 use packetcraftr_packet::frame::Frame;
 use packetcraftr_packet::{
-    build::Result as BuiltPacket,
     decode::{Options as DecodeOptions, Result as DecodedPacket},
     template::DEFAULT_MAX_TEMPLATE_PACKETS,
 };
@@ -61,10 +60,8 @@ pub struct MatchedResponse {
 
 #[derive(Clone, Debug)]
 pub struct ExchangeResult {
-    pub sent: Vec<BuiltPacket>,
-    /// Timestamped exact provider-accepted frames. Layer 3 evidence uses
-    /// DLT_RAW; Layer 2 evidence retains its planned link type.
-    pub sent_evidence: Vec<Frame>,
+    /// Trusted receipts for exact provider-accepted transmissions.
+    pub sent: Vec<crate::SentPacket>,
     pub responses: Vec<MatchedResponse>,
     pub unanswered: Vec<usize>,
     pub unsolicited: Vec<DecodedPacket>,

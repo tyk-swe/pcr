@@ -273,34 +273,35 @@ fn process_batch(
 ) -> Result<(), ScanError> {
     enforce_deadline(deadline)?;
     let ScanBatchExecution {
+        permit,
         sent,
-        sent_evidence,
         mut responses,
-        unsolicited,
+        unsolicited: _,
         undecoded: batch_undecoded,
         diagnostics: batch_diagnostics,
         stats: _,
     } = exchange;
+    if permit != batch.permit {
+        return Err(ScanError::InvalidEvidence {
+            sequence: batch.sequence(),
+            message: "executor returned evidence for a different execution permit".to_owned(),
+        });
+    }
     for diagnostic in batch_diagnostics {
         push_diagnostic_once(&mut output.diagnostics, diagnostic);
     }
     enforce_deadline(deadline)?;
-    let mut response_selector = ResponseSelector::new(&mut responses, &unsolicited);
+    let mut response_selector = ResponseSelector::new(&mut responses);
 
-    for (request_index, ((probe, built), sent_frame)) in batch
-        .probes
-        .iter()
-        .zip(sent.iter())
-        .zip(sent_evidence.iter())
-        .enumerate()
-    {
+    for (request_index, (probe, sent)) in batch.probes.iter().zip(sent.iter()).enumerate() {
         enforce_deadline(deadline)?;
-        let sent_at = crate::live_timestamp(sent_frame);
+        let sent_at = sent.timing().freshness_marker().wall_clock();
         let best = response_selector.select(
             request_index,
-            sent_at,
             batch.timeout,
-            |response| classify_scan_response(registry, probe.transport, built, response),
+            |response| {
+                classify_scan_response(registry, probe.transport, &sent.built().packet, response)
+            },
             |observation| observation.classification.rank(),
             |observation| observation.responder,
             || enforce_deadline(deadline),
@@ -314,9 +315,7 @@ fn process_batch(
         let endpoint = &mut output.endpoints[endpoint_index];
         let evidence = if let Some(candidate) = best {
             let received_at = crate::live_timestamp(&candidate.decoded.frame);
-            let latency = candidate
-                .latency
-                .or_else(|| received_at.duration_since(sent_at).ok());
+            let latency = candidate.latency;
             let response = retain_evidence(
                 &mut output.evidence_budget,
                 &candidate.decoded.frame,
@@ -336,7 +335,7 @@ fn process_batch(
                 responder: Some(candidate.observation.responder),
                 sent_at,
                 received_at: Some(received_at),
-                latency,
+                latency: Some(latency),
                 response,
                 reason: candidate.observation.reason.to_owned(),
             }

@@ -76,6 +76,7 @@ pub struct DnsExchange {
     pub probe: DnsProbe,
     pub timeout: Duration,
     pub max_responses: usize,
+    pub(crate) permit: crate::evidence::ExecutionPermit,
 }
 
 #[derive(Clone, Debug)]
@@ -86,13 +87,13 @@ pub struct DnsMatchedResponse {
 
 #[derive(Clone, Debug)]
 pub struct DnsExchangeExecution {
-    pub sent: Packet,
-    pub sent_evidence: Frame,
-    pub responses: Vec<DnsMatchedResponse>,
-    pub unsolicited: Vec<DecodedPacket>,
-    pub undecoded: Vec<Frame>,
-    pub diagnostics: Vec<Diagnostic>,
-    pub stats: Stats,
+    pub(crate) permit: crate::evidence::ExecutionPermit,
+    pub(crate) sent: crate::SentPacket,
+    pub(crate) responses: Vec<DnsMatchedResponse>,
+    pub(crate) unsolicited: Vec<DecodedPacket>,
+    pub(crate) undecoded: Vec<Frame>,
+    pub(crate) diagnostics: Vec<Diagnostic>,
+    pub(crate) stats: Stats,
 }
 
 pub trait DnsExecutor {

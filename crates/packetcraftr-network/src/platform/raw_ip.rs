@@ -9,7 +9,7 @@
 
 use super::super::{
     Error as LiveIoError,
-    transmit::{IoSendReport, Layer3Frame},
+    transmit::{IoSendReport, Layer3Frame, Submission},
 };
 
 use preparation::prepare;
@@ -21,13 +21,11 @@ mod submission;
 pub(super) fn send_layer3(frame: Layer3Frame<'_>) -> Result<IoSendReport, LiveIoError> {
     let packet = prepare(frame)?;
     validate_platform_support(&packet)?;
+    let submission = Submission::start();
     let actual = send(&packet).map_err(|error| map_raw_error(&packet.interface, error))?;
     let expected = packet.submission.len();
     if actual != expected {
         return Err(LiveIoError::PartialSend { expected, actual });
     }
-    Ok(IoSendReport {
-        bytes_sent: packet.wire_bytes.len(),
-        wire_bytes: packet.wire_bytes,
-    })
+    Ok(submission.complete(packet.wire_bytes.len(), packet.wire_bytes))
 }

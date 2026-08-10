@@ -55,6 +55,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   generation transition. Same-generation 32-bit wraps remain supported;
   unexplained generation changes and counter arithmetic overflow now fail
   without inflating receiver-drop totals.
+- Rebased statistics I/O buckets to the chronologically earliest matched
+  timestamp, so out-of-order capture records no longer collapse into the
+  first-observed bucket.
+- Separated prefilter conversation indexing (`max_indexed_flows`) from
+  selected-flow and reassembly accounting (`max_flows`). Filters that do not
+  read stream fields now reject traffic before it can consume a selected-flow
+  slot; stream-field filters retain capture-stable stream IDs under the
+  explicit indexing budget.
 - Accepted valid injected-provider transmission reports across backward
   wall-clock adjustments by validating timing with monotonic endpoints.
 - Preserved TCP response correlation for Layer2 exchanges whose TCP

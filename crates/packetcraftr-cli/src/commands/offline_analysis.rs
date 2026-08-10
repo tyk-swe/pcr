@@ -53,6 +53,7 @@ pub(super) fn prepare_offline_analysis(
         max_frames: capture.max_frames,
         max_bytes: capture.max_bytes,
         max_frame_bytes: capture.max_frame_bytes,
+        max_indexed_flows: limits.max_indexed_flows,
         max_flows: limits.max_flows,
         max_duration: Duration::from_millis(limits.max_duration_ms),
     };

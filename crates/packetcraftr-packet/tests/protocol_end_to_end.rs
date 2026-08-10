@@ -106,6 +106,8 @@ fn ethernet_ipv4_udp_raw_round_trip_exercises_filter_language() {
     let filter =
         Filter::compile(source, &registry, FilterOptions::default()).expect("valid filter");
     assert!(filter.requirements().stream_index);
+    assert!(!filter.requirements().tcp_stream);
+    assert!(filter.requirements().udp_stream);
     assert!(
         filter
             .matches(&FilterContext {

@@ -64,12 +64,11 @@ pub struct StatsCollector {
     bytes: u64,
     first_timestamp: Option<SystemTime>,
     last_timestamp: Option<SystemTime>,
-    io_origin: Option<SystemTime>,
     protocols: BTreeMap<String, Tally>,
     conversations: BTreeMap<(TransportKind, u64), ConversationState>,
     endpoints: BTreeMap<IpAddr, EndpointTally>,
     ports: BTreeMap<(TransportKind, u16), Tally>,
-    io: BTreeMap<u64, Tally>,
+    io: BTreeMap<SystemTime, Tally>,
 }
 
 impl StatsCollector {
@@ -88,7 +87,6 @@ impl StatsCollector {
             bytes: 0,
             first_timestamp: None,
             last_timestamp: None,
-            io_origin: None,
             protocols: BTreeMap::new(),
             conversations: BTreeMap::new(),
             endpoints: BTreeMap::new(),
@@ -144,7 +142,6 @@ impl StatsCollector {
     }
 
     fn observe_time(&mut self, timestamp: SystemTime, bytes: u64) {
-        let origin = *self.io_origin.get_or_insert(timestamp);
         self.first_timestamp = Some(
             self.first_timestamp
                 .map_or(timestamp, |first| first.min(timestamp)),
@@ -154,13 +151,7 @@ impl StatsCollector {
             None => timestamp,
         });
 
-        // Bucket timestamps before the capture origin at zero.
-        let offset = timestamp.duration_since(origin).unwrap_or(Duration::ZERO);
-        let bucket = offset.as_nanos() / self.interval.as_nanos().max(1);
-        self.io
-            .entry(u64::try_from(bucket).unwrap_or(u64::MAX))
-            .or_default()
-            .add(bytes);
+        self.io.entry(timestamp).or_default().add(bytes);
     }
 
     fn conversation(
@@ -203,6 +194,10 @@ impl StatsCollector {
     }
 
     /// Finishes the pass and produces every table in its stable order.
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "sorted observed timestamps and Duration-derived buckets make each expect an internal invariant"
+    )]
     pub fn finish(self) -> StatsReport {
         let mut protocols = self
             .protocols
@@ -263,13 +258,32 @@ impl StatsCollector {
             .collect();
 
         let interval = self.interval;
-        let io = self
-            .io
+        let mut bucket_tallies = BTreeMap::<u128, Tally>::new();
+        if let Some(origin) = self.first_timestamp {
+            for (timestamp, tally) in self.io {
+                let offset = timestamp
+                    .duration_since(origin)
+                    .expect("the chronological minimum does not follow an observed timestamp");
+                let bucket = offset.as_nanos() / interval.as_nanos();
+                let bucket_tally = bucket_tallies.entry(bucket).or_default();
+                bucket_tally.frames = bucket_tally
+                    .frames
+                    .checked_add(tally.frames)
+                    .expect("one bucket cannot exceed the checked aggregate frame tally");
+                bucket_tally.bytes = bucket_tally
+                    .bytes
+                    .checked_add(tally.bytes)
+                    .expect("one bucket cannot exceed the checked aggregate byte tally");
+            }
+        }
+        let io = bucket_tallies
             .into_iter()
             .map(|(bucket, tally)| IoBucketStat {
-                // Compute offsets in u128; saturate only when converting to Duration.
-                offset: duration_from_nanos_saturating(
-                    interval.as_nanos().saturating_mul(u128::from(bucket)),
+                offset: duration_from_nanos(
+                    interval
+                        .as_nanos()
+                        .checked_mul(bucket)
+                        .expect("a bucket start cannot exceed its observed timestamp offset"),
                 ),
                 frames: tally.frames,
                 bytes: tally.bytes,
@@ -291,11 +305,10 @@ impl StatsCollector {
     }
 }
 
-fn duration_from_nanos_saturating(nanoseconds: u128) -> Duration {
+fn duration_from_nanos(nanoseconds: u128) -> Duration {
     const NANOS_PER_SECOND: u128 = 1_000_000_000;
-    let Ok(seconds) = u64::try_from(nanoseconds / NANOS_PER_SECOND) else {
-        return Duration::MAX;
-    };
+    let seconds = u64::try_from(nanoseconds / NANOS_PER_SECOND)
+        .expect("bucket offsets originate from a representable Duration");
     let subsecond = u32::try_from(nanoseconds % NANOS_PER_SECOND)
         .expect("nanosecond remainder is less than one billion");
     Duration::new(seconds, subsecond)

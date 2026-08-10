@@ -164,12 +164,19 @@ fn server_tcp(sequence: u32, acknowledgment: u32, flags: u16, window: u16) -> Tc
 
 #[test]
 fn limits_validate_each_finite_budget_before_input_is_read() {
-    for field in ["max_frames", "max_bytes", "max_frame_bytes", "max_flows"] {
+    for field in [
+        "max_frames",
+        "max_bytes",
+        "max_frame_bytes",
+        "max_indexed_flows",
+        "max_flows",
+    ] {
         let mut limits = Limits::default();
         match field {
             "max_frames" => limits.max_frames = 0,
             "max_bytes" => limits.max_bytes = 0,
             "max_frame_bytes" => limits.max_frame_bytes = 0,
+            "max_indexed_flows" => limits.max_indexed_flows = 0,
             "max_flows" => limits.max_flows = 0,
             _ => unreachable!(),
         }
@@ -252,6 +259,11 @@ fn pipeline_assigns_stable_indices_before_filtering() {
         Arc::clone(&registry),
         &Options {
             filter: Some(&filter),
+            limits: Limits {
+                max_indexed_flows: 2,
+                max_flows: 1,
+                ..Limits::default()
+            },
             ..Options::default()
         },
         |record| {
@@ -265,6 +277,132 @@ fn pipeline_assigns_stable_indices_before_filtering() {
     assert_eq!(summary.frames_read, 3);
     assert_eq!(summary.frames_matched, 2);
     assert!(summary.trailing_tcp_events.is_empty());
+}
+
+#[test]
+fn rejected_flows_only_charge_indexing_when_stream_fields_require_it() {
+    let registry = registry();
+    let epoch = SystemTime::UNIX_EPOCH;
+    let frames = [
+        tcp_frame(&registry, epoch, client_tcp(100, 0, Tcp::SYN, 1_000), b""),
+        tcp_frame(
+            &registry,
+            epoch + Duration::from_secs(1),
+            TcpSpec {
+                source_port: 40_001,
+                ..client_tcp(200, 0, Tcp::SYN, 1_000)
+            },
+            b"",
+        ),
+    ];
+    let packet_filter = Filter::compile(
+        "tcp.source_port == 40001",
+        registry.as_ref(),
+        FilterOptions::default(),
+    )
+    .expect("packet-field filter compiles");
+    assert!(!packet_filter.requirements().stream_index);
+    let mut capture = reader(&frames);
+    let mut seen = Vec::new();
+    run(
+        &mut capture,
+        Arc::clone(&registry),
+        &Options {
+            filter: Some(&packet_filter),
+            limits: Limits {
+                max_flows: 1,
+                ..Limits::default()
+            },
+            ..Options::default()
+        },
+        |record| {
+            seen.push((record.number, record.tcp_stream));
+            Ok(())
+        },
+    )
+    .expect("rejected flow does not consume selected-flow budget");
+    assert_eq!(seen, vec![(2, Some(0))]);
+
+    let tcp_only_filter = Filter::compile(
+        "tcp.stream == 0",
+        registry.as_ref(),
+        FilterOptions::default(),
+    )
+    .expect("TCP stream-field filter compiles");
+    assert!(tcp_only_filter.requirements().tcp_stream);
+    assert!(!tcp_only_filter.requirements().udp_stream);
+    let mixed_frames = [
+        udp_frame(
+            &registry,
+            epoch,
+            CLIENT,
+            SERVER,
+            50_000,
+            9_999,
+            b"first rejected UDP flow",
+        ),
+        udp_frame(
+            &registry,
+            epoch + Duration::from_secs(1),
+            CLIENT,
+            SERVER,
+            50_001,
+            9_999,
+            b"second rejected UDP flow",
+        ),
+        frames[0].clone(),
+    ];
+    let mut capture = reader(&mixed_frames);
+    let mut seen = Vec::new();
+    run(
+        &mut capture,
+        Arc::clone(&registry),
+        &Options {
+            filter: Some(&tcp_only_filter),
+            limits: Limits {
+                max_indexed_flows: 1,
+                max_flows: 1,
+                ..Limits::default()
+            },
+            ..Options::default()
+        },
+        |record| {
+            seen.push((record.number, record.tcp_stream));
+            Ok(())
+        },
+    )
+    .expect("an unrequested UDP index does not consume the TCP indexing budget");
+    assert_eq!(seen, vec![(3, Some(0))]);
+
+    let stream_filter = Filter::compile(
+        "tcp.stream == 1",
+        registry.as_ref(),
+        FilterOptions::default(),
+    )
+    .expect("stream-field filter compiles");
+    let mut capture = reader(&frames);
+    let error = run(
+        &mut capture,
+        registry,
+        &Options {
+            filter: Some(&stream_filter),
+            limits: Limits {
+                max_indexed_flows: 1,
+                max_flows: 1,
+                ..Limits::default()
+            },
+            ..Options::default()
+        },
+        |_| Ok(()),
+    )
+    .expect_err("stream-field filter requires bounded prefilter indexing");
+    assert!(matches!(
+        error,
+        Error::StreamIndexLimit {
+            number: 2,
+            limit: 1
+        }
+    ));
 }
 
 #[test]
@@ -436,11 +574,13 @@ fn stats_collect_all_tables_with_directional_and_time_accounting() {
     assert_eq!(report.bytes, total_bytes);
     assert_eq!(report.first_timestamp, Some(epoch + Duration::from_secs(1)));
     assert_eq!(report.last_timestamp, Some(epoch + Duration::from_secs(4)));
-    assert_eq!(report.io.len(), 2);
+    assert_eq!(report.io.len(), 3);
     assert_eq!(report.io[0].offset, Duration::ZERO);
-    assert_eq!(report.io[0].frames, 2);
-    assert_eq!(report.io[1].offset, Duration::from_secs(2));
+    assert_eq!(report.io[0].frames, 1);
+    assert_eq!(report.io[1].offset, Duration::from_secs(1));
     assert_eq!(report.io[1].frames, 1);
+    assert_eq!(report.io[2].offset, Duration::from_secs(3));
+    assert_eq!(report.io[2].frames, 1);
 
     let ipv4 = report
         .protocols
@@ -507,6 +647,67 @@ fn stats_reject_zero_interval_and_empty_report_is_well_formed() {
     assert!(report.protocols.is_empty());
     assert!(report.conversations.is_empty());
     assert!(report.io.is_empty());
+}
+
+#[test]
+fn stats_io_buckets_rebase_to_chronological_minimum_for_out_of_order_frames() {
+    let registry = registry();
+    let epoch = SystemTime::UNIX_EPOCH;
+    let frames = [
+        udp_frame(
+            &registry,
+            epoch + Duration::from_millis(10_500),
+            CLIENT,
+            SERVER,
+            1_000,
+            9_999,
+            b"first",
+        ),
+        udp_frame(
+            &registry,
+            epoch + Duration::from_millis(9_250),
+            CLIENT,
+            SERVER,
+            1_000,
+            9_999,
+            b"earliest",
+        ),
+        udp_frame(
+            &registry,
+            epoch + Duration::from_millis(10_000),
+            CLIENT,
+            SERVER,
+            1_000,
+            9_999,
+            b"middle",
+        ),
+    ];
+    let mut capture = reader(&frames);
+    let mut collector = StatsCollector::new(Duration::from_secs(1)).expect("valid interval");
+    run(&mut capture, registry, &Options::default(), |record| {
+        collector.observe(&record).expect("timestamped record");
+        Ok(())
+    })
+    .expect("out-of-order statistics pass succeeds");
+    let report = collector.finish();
+
+    assert_eq!(
+        report.first_timestamp,
+        Some(epoch + Duration::from_millis(9_250))
+    );
+    assert_eq!(
+        report.last_timestamp,
+        Some(epoch + Duration::from_millis(10_500))
+    );
+    assert_eq!(report.io.len(), 2);
+    assert_eq!(
+        (report.io[0].offset, report.io[0].frames),
+        (Duration::ZERO, 2)
+    );
+    assert_eq!(
+        (report.io[1].offset, report.io[1].frames),
+        (Duration::from_secs(1), 1)
+    );
 }
 
 #[test]

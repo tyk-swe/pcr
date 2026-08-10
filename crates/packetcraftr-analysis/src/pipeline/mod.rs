@@ -57,9 +57,10 @@ pub struct AnalysisSummary {
 ///
 /// The reader arrives configured with its own per-frame and interface
 /// bounds; this loop enforces the aggregate frame, byte, flow, and duration
-/// budgets, dissects under `limits.max_frame_bytes`, assigns conversation
-/// indices to every frame, applies the filter, and drives reassembly for the
-/// frames the filter keeps.
+/// budgets, dissects under `limits.max_frame_bytes`, applies the filter, and
+/// drives selected-flow indexing and reassembly for frames the filter keeps.
+/// A filter that reads stream fields first assigns capture-stable indices
+/// under the separate `max_indexed_flows` budget.
 ///
 /// Reassembly follows capture time, not wall-clock time: idle expiry is
 /// measured between frame timestamps, so analyzing an old capture behaves
@@ -80,6 +81,14 @@ where
     let decoder = Decoder::new(registry);
     let mut tcp_streams = StreamIndex::default();
     let mut udp_streams = StreamIndex::default();
+    let mut selected_tcp_flows = StreamIndex::default();
+    let mut selected_udp_flows = StreamIndex::default();
+    let requirements = options
+        .filter
+        .map(|filter| filter.requirements())
+        .unwrap_or_default();
+    let prefilter_tcp_streams = requirements.tcp_stream;
+    let prefilter_udp_streams = requirements.udp_stream;
     let mut reassembly_dispatch = ReassemblyDispatch::new(options.tcp_events, limits.max_flows);
     let mut clock = CaptureClock::new();
 
@@ -135,15 +144,21 @@ where
             )
             .map_err(|source| AnalysisError::Decode { number, source })?;
 
-        // Assign stream IDs before filtering to keep them stable across runs.
         let segment = tcp_segment(&decoded);
-        let tcp_stream = match &segment {
-            Some(segment) => Some(tcp_streams.assign(&segment.flow, number, limits.max_flows)?),
-            None => None,
+        let mut tcp_stream = match (&segment, prefilter_tcp_streams) {
+            (Some(segment), true) => Some(tcp_streams.assign_prefilter(
+                &segment.flow,
+                number,
+                limits.max_indexed_flows,
+            )?),
+            _ => None,
         };
-        let udp_stream = match udp_flow(&decoded) {
-            Some(flow) => Some(udp_streams.assign(&flow, number, limits.max_flows)?),
-            None => None,
+        let flow = udp_flow(&decoded);
+        let mut udp_stream = match (&flow, prefilter_udp_streams) {
+            (Some(flow), true) => {
+                Some(udp_streams.assign_prefilter(flow, number, limits.max_indexed_flows)?)
+            }
+            _ => None,
         };
 
         if let Some(filter) = options.filter
@@ -157,6 +172,20 @@ where
                 .map_err(|source| AnalysisError::Filter { number, source })?
         {
             continue;
+        }
+        if let Some(segment) = &segment {
+            if prefilter_tcp_streams {
+                selected_tcp_flows.assign(&segment.flow, number, limits.max_flows)?;
+            } else {
+                tcp_stream = Some(tcp_streams.assign(&segment.flow, number, limits.max_flows)?);
+            }
+        }
+        if let Some(flow) = &flow {
+            if prefilter_udp_streams {
+                selected_udp_flows.assign(flow, number, limits.max_flows)?;
+            } else {
+                udp_stream = Some(udp_streams.assign(flow, number, limits.max_flows)?);
+            }
         }
         frames_matched += 1;
 

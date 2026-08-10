@@ -46,6 +46,10 @@ pub struct Requirements {
     /// The filter reads `tcp.stream` or `udp.stream`, so it only makes sense
     /// where a conversation index is being maintained.
     pub stream_index: bool,
+    /// The filter reads `tcp.stream`.
+    pub tcp_stream: bool,
+    /// The filter reads `udp.stream`.
+    pub udp_stream: bool,
     /// The filter reads `frame.time_epoch`, so frames without captured time
     /// must be diagnosed by the caller.
     pub timestamp: bool,
@@ -302,8 +306,12 @@ fn parse_predicate(
         path::attach_slice(&mut field, contents, *slice_offset)?;
         index += 1;
     }
-    if matches!(field.source, FieldSource::Stream(_)) {
+    if let FieldSource::Stream(transport) = &field.source {
         requirements.stream_index = true;
+        match *transport {
+            path::StreamTransport::Tcp => requirements.tcp_stream = true,
+            path::StreamTransport::Udp => requirements.udp_stream = true,
+        }
     }
     if matches!(field.source, FieldSource::Frame(FrameField::TimeEpoch)) {
         requirements.timestamp = true;

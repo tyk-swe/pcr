@@ -29,6 +29,9 @@ pub(crate) struct OfflineAnalysisLimits {
     /// Maximum distinct conversations tracked per transport.
     #[arg(long, default_value_t = analysis::Limits::default().max_flows)]
     pub(crate) max_flows: usize,
+    /// Maximum conversations indexed before a stream-field filter runs.
+    #[arg(long, default_value_t = analysis::Limits::default().max_indexed_flows)]
+    pub(crate) max_indexed_flows: usize,
     /// Maximum analysis run time in milliseconds.
     #[arg(long, default_value_t = 3_600_000)]
     pub(crate) max_duration_ms: u64,

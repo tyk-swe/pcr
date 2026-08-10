@@ -39,10 +39,10 @@ impl CanonicalFlow {
 
 /// First-seen conversation numbering, stable for a given input.
 ///
-/// Indices are assigned in the order conversations first appear in the
-/// capture, before any display filter is applied, so `tcp.stream 7` names the
-/// same conversation whether or not the run was filtered — which is what lets
-/// one command report an index and another extract it.
+/// Indices are assigned in the order conversations reach this table. The
+/// pipeline feeds every frame into it before a stream-aware filter, preserving
+/// capture-stable IDs, and otherwise feeds only selected frames so rejected
+/// traffic does not consume the selected-flow budget.
 #[derive(Debug, Default)]
 pub(super) struct StreamIndex {
     assignments: HashMap<CanonicalFlow, u64>,
@@ -67,6 +67,28 @@ impl StreamIndex {
             return Err(AnalysisError::StreamLimit {
                 number,
                 limit: max_flows,
+            });
+        }
+        let index = self.assignments.len() as u64;
+        self.assignments.insert(canonical, index);
+        Ok(index)
+    }
+
+    /// Assigns a capture-stable index under the distinct prefilter budget.
+    pub(super) fn assign_prefilter(
+        &mut self,
+        flow: &FlowKey,
+        number: u64,
+        max_indexed_flows: usize,
+    ) -> Result<u64, AnalysisError> {
+        let canonical = CanonicalFlow::from_flow(flow);
+        if let Some(index) = self.assignments.get(&canonical) {
+            return Ok(*index);
+        }
+        if self.assignments.len() >= max_indexed_flows {
+            return Err(AnalysisError::StreamIndexLimit {
+                number,
+                limit: max_indexed_flows,
             });
         }
         let index = self.assignments.len() as u64;

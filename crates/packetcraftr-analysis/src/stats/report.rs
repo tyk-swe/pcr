@@ -108,6 +108,7 @@ pub struct StatsReport {
     pub endpoints: Vec<EndpointStat>,
     /// Sorted by transport, then port.
     pub ports: Vec<PortStat>,
-    /// Non-empty buckets in time order, offset from the first matched frame.
+    /// Non-empty buckets in time order, offset from the chronologically
+    /// earliest matched frame (`first_timestamp`), regardless of input order.
     pub io: Vec<IoBucketStat>,
 }

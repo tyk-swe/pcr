@@ -22,6 +22,11 @@ pub struct AnalysisLimits {
     pub max_frames: u64,
     pub max_bytes: u64,
     pub max_frame_bytes: usize,
+    /// Maximum conversations indexed before filtering when a compiled filter
+    /// reads `tcp.stream` or `udp.stream`.
+    pub max_indexed_flows: usize,
+    /// Maximum selected conversations tracked per transport and available to
+    /// matched-frame consumers and TCP reassembly.
     pub max_flows: usize,
     pub max_duration: Duration,
 }
@@ -32,6 +37,7 @@ impl Default for AnalysisLimits {
             max_frames: DEFAULT_STREAM_FRAMES,
             max_bytes: DEFAULT_STREAM_BYTES,
             max_frame_bytes: DEFAULT_SIZE_LIMIT,
+            max_indexed_flows: DEFAULT_MAX_ANALYSIS_FLOWS,
             max_flows: DEFAULT_MAX_ANALYSIS_FLOWS,
             max_duration: Duration::from_secs(3_600),
         }
@@ -44,6 +50,7 @@ impl AnalysisLimits {
             ("max_frames", self.max_frames),
             ("max_bytes", self.max_bytes),
             ("max_frame_bytes", self.max_frame_bytes as u64),
+            ("max_indexed_flows", self.max_indexed_flows as u64),
             ("max_flows", self.max_flows as u64),
         ] {
             if value == 0 {
@@ -77,7 +84,9 @@ impl AnalysisLimits {
 pub struct AnalysisOptions<'a> {
     /// Keeps only matching frames; compiled by the caller so filter mistakes
     /// surface before any input is read. Conversation indices are assigned
-    /// before the filter runs, so `tcp.stream` and `udp.stream` resolve.
+    /// before filtering only when the compiled requirements read
+    /// `tcp.stream` or `udp.stream`; other filters do not charge rejected
+    /// traffic to selected-flow accounting.
     pub filter: Option<&'a Filter>,
     /// Drives bounded TCP reassembly over the matched frames and delivers
     /// its events with each record. Costs memory proportional to reordering,

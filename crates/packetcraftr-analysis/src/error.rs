@@ -41,6 +41,10 @@ pub enum AnalysisError {
     },
     #[error("conversation table reached the configured limit of {limit} flows at frame {number}")]
     StreamLimit { number: u64, limit: usize },
+    #[error(
+        "prefilter conversation index reached the configured limit of {limit} flows at frame {number}"
+    )]
+    StreamIndexLimit { number: u64, limit: usize },
     #[error("TCP reassembly failed at frame {number}: {source}")]
     Reassembly {
         number: u64,
@@ -102,7 +106,9 @@ impl Classified for AnalysisError {
             Self::Filter { .. } => {
                 Classification::new("cli.filter", Kind::Cli, Some("repair the display filter"))
             }
-            Self::StreamLimit { .. } | Self::DurationLimit { .. } => resource_limit(),
+            Self::StreamLimit { .. }
+            | Self::StreamIndexLimit { .. }
+            | Self::DurationLimit { .. } => resource_limit(),
             // Reassembly fails for two distinct reasons: a finite budget was
             // exhausted, or the capture itself carries conflicting data. Only
             // the former is answered by raising budgets.

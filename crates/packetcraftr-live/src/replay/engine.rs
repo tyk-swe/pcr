@@ -236,11 +236,10 @@ where
             source_sequence: sequence,
             source_interface_id: frame.interface,
             capture_interface,
-            interface: transmission.interface,
             link_mode: mode,
             scheduled_delay: delay,
-            bytes_sent: transmission.report.bytes_sent as u64,
             frame,
+            transmission,
         });
         emitted?;
         enforce_deadline(&deadline, sequence)?;

@@ -3,21 +3,15 @@
 
 use std::convert::Infallible;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use bytes::Bytes;
 use packetcraftr_packet::error::Classified;
-use packetcraftr_packet::frame::{Frame, LinkType};
 use packetcraftr_packet::fuzz as packet_fuzz;
 use packetcraftr_packet::protocol::{
     builtin::registry as default_registry, network::Ipv4, transport::Udp,
 };
-use packetcraftr_packet::{
-    Packet,
-    build::{Builder, Context, Options},
-    layer::Raw,
-    registry::Registry,
-};
+use packetcraftr_packet::{Packet, layer::Raw};
 
 use crate::clock::Clock;
 use crate::{BoundaryError, Stats};
@@ -38,9 +32,7 @@ impl Authorizer for AllowAll {
     }
 }
 
-struct RebuildingExecutor {
-    registry: Arc<Registry>,
-}
+struct RebuildingExecutor;
 
 impl Executor for RebuildingExecutor {
     fn execute(
@@ -48,19 +40,15 @@ impl Executor for RebuildingExecutor {
         case: &ExecutionCase,
         _timeout: Duration,
     ) -> Result<Execution, BoundaryError> {
-        let built = Builder::new(Arc::clone(&self.registry))
-            .build(case.packet.clone(), Context::default(), Options::default())
-            .expect("prepared case must rebuild");
-        let sent = Frame::new(SystemTime::UNIX_EPOCH, LinkType::IPV4, built.bytes.clone())
-            .expect("built packet is a valid frame");
+        let sent = crate::evidence::test_sent_packet(case.packet.clone());
         Ok(Execution {
+            permit: case.permit,
             stats: Stats {
                 packets_attempted: 1,
                 packets_completed: 1,
-                bytes: built.bytes.len() as u64,
+                bytes: sent.bytes_sent() as u64,
                 ..Stats::default()
             },
-            built,
             sent,
             responses: Vec::new(),
             unmatched: Vec::new(),
@@ -70,29 +58,23 @@ impl Executor for RebuildingExecutor {
     }
 }
 
-struct UntimestampedFuzzExecutor {
-    registry: Arc<Registry>,
-}
+struct SubstitutingFuzzExecutor;
 
-impl Executor for UntimestampedFuzzExecutor {
+impl Executor for SubstitutingFuzzExecutor {
     fn execute(
         &mut self,
-        case: &ExecutionCase,
+        _case: &ExecutionCase,
         _timeout: Duration,
     ) -> Result<Execution, BoundaryError> {
-        let built = Builder::new(Arc::clone(&self.registry))
-            .build(case.packet.clone(), Context::default(), Options::default())
-            .expect("prepared case must rebuild");
-        let sent = Frame::without_timestamp(LinkType::IPV4, built.bytes.clone())
-            .expect("built packet is a valid frame");
+        let sent = crate::evidence::test_sent_packet(packet());
         Ok(Execution {
+            permit: _case.permit,
             stats: Stats {
                 packets_attempted: 1,
                 packets_completed: 1,
-                bytes: built.bytes.len() as u64,
+                bytes: sent.bytes_sent() as u64,
                 ..Stats::default()
             },
-            built,
             sent,
             responses: Vec::new(),
             unmatched: Vec::new(),
@@ -138,9 +120,7 @@ fn live_execution_uses_the_identical_packet_campaign() {
     let offline =
         packet_fuzz::run(&request, packet(), Arc::clone(&registry)).expect("offline campaign");
     let mut authorizer = AllowAll;
-    let mut executor = RebuildingExecutor {
-        registry: Arc::clone(&registry),
-    };
+    let mut executor = RebuildingExecutor;
     let live = run(
         &request,
         LiveOptions {
@@ -169,7 +149,7 @@ fn live_execution_uses_the_identical_packet_campaign() {
 }
 
 #[test]
-fn live_fuzz_executor_evidence_requires_sent_timestamp() {
+fn live_fuzz_rejects_substituted_authorized_case() {
     let registry = Arc::new(default_registry().expect("built-in registry"));
     let request = packet_fuzz::Request {
         cases: 1,
@@ -178,9 +158,7 @@ fn live_fuzz_executor_evidence_requires_sent_timestamp() {
         ..packet_fuzz::Request::default()
     };
     let mut authorizer = AllowAll;
-    let mut executor = UntimestampedFuzzExecutor {
-        registry: Arc::clone(&registry),
-    };
+    let mut executor = SubstitutingFuzzExecutor;
     let error = run(
         &request,
         LiveOptions {
@@ -193,8 +171,8 @@ fn live_fuzz_executor_evidence_requires_sent_timestamp() {
         &mut executor,
         &mut NoopClock,
     )
-    .expect_err("untimestamped sent evidence must be rejected");
+    .expect_err("substituted sent evidence must be rejected");
 
     assert_eq!(error.classification().code, "internal.fuzz_evidence");
-    assert!(error.to_string().contains("sent frame without a timestamp"));
+    assert!(error.to_string().contains("substituted bytes"));
 }

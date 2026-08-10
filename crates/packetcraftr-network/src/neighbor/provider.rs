@@ -22,8 +22,8 @@ use crate::{
 use super::cache::{NeighborCache, NeighborCacheKey, NeighborExchangeOutcome};
 use super::error::{invalid_configuration, map_io_error};
 use super::evidence::{
-    retain_evidence, retain_matching_evidence, validate_captured_frame, validate_request,
-    validate_send_report,
+    retain_evidence, retain_matching_evidence, validate_captured_frame, validate_neighbor_send,
+    validate_request,
 };
 use super::options::NeighborResolutionOptions;
 use super::wire::{build_request_frame, match_neighbor_response};
@@ -223,16 +223,16 @@ where
         }
 
         for attempt in 1..=self.options.max_attempts {
-            let send_started = Instant::now();
             let frame = Layer2Frame::try_new(request_bytes, route)
                 .map_err(|error| map_io_error(request, "constructing discovery frame", error))?;
             let report = self
                 .layer2
                 .send_layer2(frame)
                 .map_err(|error| map_io_error(request, "sending discovery request", error))?;
-            validate_send_report(request, request_bytes, report)?;
+            validate_neighbor_send(request, request_bytes, &report)?;
+            let freshness_marker = report.timing().freshness_marker().monotonic();
 
-            let deadline = send_started
+            let deadline = freshness_marker
                 .checked_add(self.options.attempt_timeout)
                 .ok_or_else(|| invalid_configuration("attempt deadline overflowed".to_owned()))?;
             while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
@@ -243,11 +243,13 @@ where
                 else {
                     break;
                 };
-                let CapturedFrame { frame, received_at } = captured_frame;
+                let CapturedFrame {
+                    frame, received_at, ..
+                } = captured_frame;
                 validate_captured_frame(request, &frame, self.options.snap_length)?;
-                if received_at
-                    .is_none_or(|received_at| received_at < send_started || received_at > deadline)
-                {
+                if received_at.is_none_or(|received_at| {
+                    received_at < freshness_marker || received_at > deadline
+                }) {
                     retain_evidence(
                         frame,
                         &self.options,

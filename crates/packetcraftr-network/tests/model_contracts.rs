@@ -336,10 +336,8 @@ struct CountingLayer2(Arc<AtomicUsize>);
 impl Layer2Sender for CountingLayer2 {
     fn send_layer2(&self, frame: Layer2Frame<'_>) -> Result<Report, Error> {
         self.0.fetch_add(1, Ordering::SeqCst);
-        Ok(Report {
-            bytes_sent: frame.bytes().len(),
-            wire_bytes: frame.bytes().clone(),
-        })
+        Ok(packetcraftr_network::transmit::Submission::start()
+            .complete(frame.bytes().len(), frame.bytes().clone()))
     }
 }
 
@@ -349,10 +347,8 @@ struct CountingLayer3(Arc<AtomicUsize>);
 impl Layer3Sender for CountingLayer3 {
     fn send_layer3(&self, frame: Layer3Frame<'_>) -> Result<Report, Error> {
         self.0.fetch_add(1, Ordering::SeqCst);
-        Ok(Report {
-            bytes_sent: frame.bytes().len(),
-            wire_bytes: frame.bytes().clone(),
-        })
+        Ok(packetcraftr_network::transmit::Submission::start()
+            .complete(frame.bytes().len(), frame.bytes().clone()))
     }
 }
 
@@ -392,7 +388,7 @@ fn typed_transmission_frames_enforce_mode_and_dispatch_exact_bytes() {
     assert_eq!(frame.bytes(), &bytes);
     assert_eq!(frame.route(), &layer2_route);
     let report = dispatch.send(frame).expect("fixture send");
-    assert_eq!(report.wire_bytes, bytes);
+    assert_eq!(report.wire_bytes(), &bytes);
     assert_eq!(layer2_calls.load(Ordering::SeqCst), 1);
     assert_eq!(layer3_calls.load(Ordering::SeqCst), 0);
 

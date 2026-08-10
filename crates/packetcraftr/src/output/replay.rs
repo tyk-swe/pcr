@@ -136,10 +136,10 @@ impl Frame {
     pub fn try_from_evidence(evidence: ReplayFrameEvidence) -> std::result::Result<Self, Error> {
         Ok(Self {
             source_sequence: evidence.source_sequence,
-            interface: evidence.interface.into(),
+            interface: evidence.transmission().interface.clone().into(),
             link_mode: evidence.link_mode.into(),
             scheduled_delay: evidence.scheduled_delay,
-            bytes_sent: evidence.bytes_sent,
+            bytes_sent: evidence.transmission().report.bytes_sent() as u64,
             frame: Captured::try_from_frame(evidence.frame)?,
             transmitted: true,
         })

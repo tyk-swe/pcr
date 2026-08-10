@@ -26,8 +26,8 @@ pub(super) fn send_layer3(frame: Layer3Frame<'_>) -> Result<IoSendReport, LiveIo
     if actual != expected {
         return Err(LiveIoError::PartialSend { expected, actual });
     }
-    Ok(IoSendReport {
-        bytes_sent: packet.wire_bytes.len(),
-        wire_bytes: packet.wire_bytes,
-    })
+    Ok(IoSendReport::committed(
+        packet.wire_bytes.len(),
+        packet.wire_bytes,
+    ))
 }

@@ -30,6 +30,7 @@ impl TracerouteProbe {
 pub struct TracerouteBatch {
     pub probes: Vec<TracerouteProbe>,
     pub timeout: Duration,
+    pub(crate) permit: crate::evidence::ExecutionPermit,
 }
 
 #[derive(Clone, Debug)]
@@ -41,13 +42,13 @@ pub struct TracerouteMatchedResponse {
 
 #[derive(Clone, Debug)]
 pub struct TracerouteBatchExecution {
-    pub sent: Vec<Packet>,
-    pub sent_evidence: Vec<Frame>,
-    pub responses: Vec<TracerouteMatchedResponse>,
-    pub unsolicited: Vec<DecodedPacket>,
-    pub undecoded: Vec<Frame>,
-    pub diagnostics: Vec<Diagnostic>,
-    pub stats: Stats,
+    pub(crate) permit: crate::evidence::ExecutionPermit,
+    pub(crate) sent: Vec<crate::SentPacket>,
+    pub(crate) responses: Vec<TracerouteMatchedResponse>,
+    pub(crate) unsolicited: Vec<DecodedPacket>,
+    pub(crate) undecoded: Vec<Frame>,
+    pub(crate) diagnostics: Vec<Diagnostic>,
+    pub(crate) stats: Stats,
 }
 
 pub trait TracerouteExecutor {

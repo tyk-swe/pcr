@@ -34,10 +34,10 @@ pub(crate) fn send_layer2(frame: Layer2Frame<'_>) -> Result<IoSendReport, LiveIo
     capture
         .sendpacket(frame.bytes().as_ref())
         .map_err(|error| map_send_error(interface, error))?;
-    Ok(IoSendReport {
-        bytes_sent: frame.bytes().len(),
-        wire_bytes: frame.bytes().clone(),
-    })
+    Ok(IoSendReport::committed(
+        frame.bytes().len(),
+        frame.bytes().clone(),
+    ))
 }
 
 pub(super) fn map_send_error(interface: &InterfaceId, error: PcapError) -> LiveIoError {

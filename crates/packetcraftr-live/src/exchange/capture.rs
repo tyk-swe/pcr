@@ -33,13 +33,22 @@ fn drain_available<C: Session>(
         let Some(frame) = capture.inner.next_captured_frame(Duration::ZERO)? else {
             return Ok(());
         };
-        if captured.process(frame, context) == ExchangeProcessOutcome::CorrelationDeadlineExpired {
-            if enforced_deadline.is_some() {
-                return Err(LiveIoError::DeadlineExceeded {
-                    operation: "draining capture before all requests were sent",
+        match captured.process(frame, context) {
+            ExchangeProcessOutcome::CorrelationDeadlineExpired => {
+                if enforced_deadline.is_some() {
+                    return Err(LiveIoError::DeadlineExceeded {
+                        operation: "draining capture before all requests were sent",
+                    });
+                }
+                return Ok(());
+            }
+            ExchangeProcessOutcome::DuplicateRecordIdentity => {
+                return Err(LiveIoError::Capture {
+                    message: "capture provider returned the same ingress record more than once"
+                        .to_owned(),
                 });
             }
-            return Ok(());
+            ExchangeProcessOutcome::Continue => {}
         }
     }
     push_diagnostic_once(
@@ -66,14 +75,20 @@ impl<C: Session> ExchangeTransaction<C> {
                     registry: &self.registry,
                     dissector: &self.dissector,
                     prepared: &self.prepared,
-                    sent_at: &self.sent_at,
+                    sent: &self.sent,
                     deadline: self.deadline,
                     options: &self.options,
                 };
-                if self.captured.process(frame, context)
-                    == ExchangeProcessOutcome::CorrelationDeadlineExpired
-                {
-                    break;
+                match self.captured.process(frame, context) {
+                    ExchangeProcessOutcome::CorrelationDeadlineExpired => break,
+                    ExchangeProcessOutcome::DuplicateRecordIdentity => {
+                        return Err(LiveIoError::Capture {
+                            message:
+                                "capture provider returned the same ingress record more than once"
+                                    .to_owned(),
+                        });
+                    }
+                    ExchangeProcessOutcome::Continue => {}
                 }
                 if self.promote_workflow(workflow_matcher)
                     == ExchangeProcessOutcome::CorrelationDeadlineExpired
@@ -92,7 +107,7 @@ impl<C: Session> ExchangeTransaction<C> {
             registry: &self.registry,
             dissector: &self.dissector,
             prepared: &self.prepared,
-            sent_at: &self.sent_at,
+            sent: &self.sent,
             deadline: self.deadline,
             options: &self.options,
         };
@@ -114,7 +129,7 @@ impl<C: Session> ExchangeTransaction<C> {
         };
         let context = WorkflowPromotionContext {
             prepared: &self.prepared,
-            sent_at: &self.sent_at,
+            sent: &self.sent,
             deadline: self.deadline,
             max_responses: self.options.max_responses,
         };

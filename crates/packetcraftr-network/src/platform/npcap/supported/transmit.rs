@@ -47,8 +47,8 @@ pub(super) fn send_layer2(frame: Layer2Frame<'_>) -> Result<IoSendReport, LiveIo
             ),
         });
     }
-    Ok(IoSendReport {
-        bytes_sent: frame.bytes().len(),
-        wire_bytes: frame.bytes().clone(),
-    })
+    Ok(IoSendReport::committed(
+        frame.bytes().len(),
+        frame.bytes().clone(),
+    ))
 }

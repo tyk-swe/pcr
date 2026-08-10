@@ -48,7 +48,7 @@ pub(super) fn validate_execution(
     case: &Case,
     execution: &FuzzCaseExecution,
     limits: Limits,
-    timeout: Duration,
+    _timeout: Duration,
     deadline: &Deadline,
 ) -> Result<(), FuzzError> {
     if execution.stats.packets_attempted != 1 || execution.stats.packets_completed != 1 {
@@ -57,30 +57,22 @@ pub(super) fn validate_execution(
             message: "successful live execution must account for exactly one attempted and completed packet".to_owned(),
         });
     }
-    if execution.stats.bytes != execution.sent.bytes().len() as u64
-        || execution.built.bytes != execution.sent.bytes()
-    {
+    if execution.stats.bytes != execution.sent.bytes_sent() as u64 {
         return Err(FuzzError::InvalidEvidence {
             case_index: case.index,
-            message: "sent frame, built bytes, and byte statistics disagree".to_owned(),
+            message: "sent receipt and byte statistics disagree".to_owned(),
         });
     }
-    if execution.built.bytes.len() > limits.max_packet_bytes {
+    if execution.sent.built().bytes.len() > limits.max_packet_bytes {
         return Err(FuzzError::InvalidEvidence {
             case_index: case.index,
             message: format!(
                 "executor built {} bytes, exceeding max_packet_bytes={}",
-                execution.built.bytes.len(),
+                execution.sent.built().bytes.len(),
                 limits.max_packet_bytes
             ),
         });
     }
-    let Some(sent_at) = execution.sent.timestamp else {
-        return Err(FuzzError::InvalidEvidence {
-            case_index: case.index,
-            message: "executor returned sent frame without a timestamp".to_owned(),
-        });
-    };
     execution
         .stats
         .capture
@@ -91,23 +83,12 @@ pub(super) fn validate_execution(
         })?;
     for response in &execution.responses {
         deadline.check().map_err(duration_limit)?;
-        let Some(received_at) = response.timestamp else {
+        let Some(_received_at) = response.timestamp else {
             return Err(FuzzError::InvalidEvidence {
                 case_index: case.index,
                 message: "executor returned response frame without a timestamp".to_owned(),
             });
         };
-        let within_deadline = received_at
-            .duration_since(sent_at)
-            .is_ok_and(|latency| latency <= timeout);
-        if !within_deadline {
-            return Err(FuzzError::InvalidEvidence {
-                case_index: case.index,
-                message: format!(
-                    "response timestamp is outside the sent frame's {timeout:?} deadline"
-                ),
-            });
-        }
     }
     deadline.check().map_err(duration_limit)?;
     Ok(())

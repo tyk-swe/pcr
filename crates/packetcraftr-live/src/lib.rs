@@ -26,6 +26,7 @@ pub mod traceroute;
 mod validation;
 
 pub use client::Client;
+pub use evidence::SentPacket;
 pub use packetcraftr_packet::error::BoundaryError;
 pub use probe::client_executor::ExchangeExecutor;
 pub use send::contract::ClientError as Error;

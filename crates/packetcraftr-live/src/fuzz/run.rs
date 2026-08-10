@@ -160,9 +160,14 @@ where
         }
         deadline.check().map_err(duration_limit)?;
         let execution_case = FuzzExecutionCase {
-            index: case.index,
-            seed: case.seed,
+            permit: crate::evidence::ExecutionPermit::new(),
             packet: case.recipe.clone(),
+            authorized_bytes: case
+                .built
+                .as_ref()
+                .expect("selected built case")
+                .bytes
+                .clone(),
         };
         deadline
             .start_accounting(Duration::ZERO)
@@ -173,6 +178,18 @@ where
                 case_index: case.index,
                 source,
             })?;
+        if execution.permit != execution_case.permit {
+            return Err(FuzzError::InvalidEvidence {
+                case_index: case.index,
+                message: "executor returned evidence for a different execution permit".to_owned(),
+            });
+        }
+        if execution.sent.wire_bytes() != &execution_case.authorized_bytes {
+            return Err(FuzzError::InvalidEvidence {
+                case_index: case.index,
+                message: "executor substituted bytes for the authorized prepared case".to_owned(),
+            });
+        }
         deadline.check().map_err(duration_limit)?;
         deadline
             .account(execution.stats.elapsed)
@@ -186,16 +203,16 @@ where
             });
         }
         let had_response = !execution.responses.is_empty();
-        case.diagnostics = execution.built.diagnostics.clone();
+        case.diagnostics = execution.sent.built().diagnostics.clone();
         case.decoded = dissect_built(
             &live_dissector,
-            &execution.built,
+            execution.sent.built(),
             request.limits,
             &mut case.diagnostics,
         );
         deadline.check().map_err(duration_limit)?;
-        case.built = Some(execution.built);
-        case.sent = Some(execution.sent);
+        case.built = Some(execution.sent.built().clone());
+        case.sent = Some(execution.sent.frame().clone());
         case.diagnostics.extend(execution.diagnostics);
         retain_evidence(
             case,

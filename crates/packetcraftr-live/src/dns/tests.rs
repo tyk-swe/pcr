@@ -5,9 +5,6 @@ use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr};
 use std::time::Duration;
 
-use bytes::Bytes;
-use packetcraftr_packet::error::{Classified, Kind};
-use packetcraftr_packet::frame::{Frame, LinkType};
 use packetcraftr_packet::protocol::builtin::registry as default_registry;
 
 use crate::clock::Clock;
@@ -52,16 +49,15 @@ impl Authorizer for SingleAddressAuthorizer {
     }
 }
 
-struct UntimestampedSentExecutor;
+struct TrustedReceiptExecutor;
 
-impl DnsExecutor for UntimestampedSentExecutor {
+impl DnsExecutor for TrustedReceiptExecutor {
     fn execute(&mut self, exchange: &DnsExchange) -> Result<DnsExchangeExecution, BoundaryError> {
-        let sent = exchange.probe.packet();
-        let sent_evidence = Frame::without_timestamp(LinkType::RAW, Bytes::from_static(&[0x45]))
-            .expect("fixture frame");
+        let sent = crate::evidence::test_sent_packet(exchange.probe.packet());
+        let bytes = sent.bytes_sent() as u64;
         Ok(DnsExchangeExecution {
+            permit: exchange.permit,
             sent,
-            sent_evidence,
             responses: Vec::new(),
             unsolicited: Vec::new(),
             undecoded: Vec::new(),
@@ -69,7 +65,7 @@ impl DnsExecutor for UntimestampedSentExecutor {
             stats: Stats {
                 packets_attempted: 1,
                 packets_completed: 1,
-                bytes: 1,
+                bytes,
                 elapsed: Duration::from_millis(1),
                 ..Stats::default()
             },
@@ -95,18 +91,14 @@ fn dns_request(address: IpAddr) -> DnsRequest {
 }
 
 #[test]
-fn dns_executor_evidence_requires_sent_timestamp() {
+fn dns_executor_success_uses_trusted_sent_timestamp() {
     let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 53));
-    let error = dns(
+    dns(
         &dns_request(address),
         &mut SingleAddressAuthorizer { address },
         &default_registry().expect("built-in registry"),
-        &mut UntimestampedSentExecutor,
+        &mut TrustedReceiptExecutor,
         &mut NoopClock,
     )
-    .expect_err("untimestamped sent evidence must be rejected");
-
-    assert_eq!(error.classification().kind, Kind::Internal);
-    assert_eq!(error.classification().code, "internal.dns_evidence");
-    assert!(error.to_string().contains("sent frame without a timestamp"));
+    .expect("trusted receipt provides send timing");
 }

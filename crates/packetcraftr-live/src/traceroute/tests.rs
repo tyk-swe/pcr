@@ -29,8 +29,8 @@ use super::engine::traceroute;
 use super::error::TracerouteError;
 use super::model::{
     TracerouteBatch, TracerouteBatchExecution, TracerouteCompletion, TracerouteExecutor,
-    TracerouteLimits, TracerouteProbe, TracerouteProbeStatus, TracerouteRequest,
-    TracerouteResponseKind, TracerouteStrategy,
+    TracerouteLimits, TracerouteMatchedResponse, TracerouteProbe, TracerouteProbeStatus,
+    TracerouteRequest, TracerouteResponseKind, TracerouteStrategy,
 };
 use super::probe::probe_packet;
 use crate::clock::Clock;
@@ -161,19 +161,20 @@ impl TracerouteExecutor for NoResponseExecutor {
         batch: &TracerouteBatch,
     ) -> Result<TracerouteBatchExecution, BoundaryError> {
         let mut sent = Vec::new();
-        let mut sent_evidence = Vec::new();
+        let mut bytes = 0_u64;
         for probe in &batch.probes {
             let mut packet = probe_packet(probe);
             if let Some(ipv4) = packet.get_mut::<Ipv4>() {
                 ipv4.source = Ipv4Addr::new(10, 0, 0, 1);
             }
-            sent.push(packet);
-            sent_evidence.push(frame_at(probe.sequence + 1));
+            let receipt = crate::evidence::test_sent_packet(packet);
+            bytes += receipt.bytes_sent() as u64;
+            sent.push(receipt);
         }
         let count = u64::try_from(batch.probes.len()).expect("test batch fits u64");
         Ok(TracerouteBatchExecution {
+            permit: batch.permit,
             sent,
-            sent_evidence,
             responses: Vec::new(),
             unsolicited: Vec::new(),
             undecoded: Vec::new(),
@@ -181,7 +182,7 @@ impl TracerouteExecutor for NoResponseExecutor {
             stats: Stats {
                 packets_attempted: count,
                 packets_completed: count,
-                bytes: count,
+                bytes,
                 elapsed: Duration::from_millis(1),
                 capture: packetcraftr_network::capture::Statistics::default(),
             },
@@ -200,12 +201,13 @@ impl TracerouteExecutor for MixedHopExecutor {
         let remote = Ipv4Addr::new(10, 0, 0, 9);
         let router = Ipv4Addr::new(10, 0, 0, 254);
         let mut sent = Vec::new();
-        let mut sent_evidence = Vec::new();
+        let mut bytes = 0_u64;
         for probe in &batch.probes {
             let mut packet = probe_packet(probe);
             packet.get_mut::<Ipv4>().expect("IPv4 probe").source = local;
-            sent.push(packet);
-            sent_evidence.push(frame_at(probe.sequence + 1));
+            let receipt = crate::evidence::test_sent_packet(packet);
+            bytes += receipt.bytes_sent() as u64;
+            sent.push(receipt);
         }
         let responder = if batch.probes[0].hop_limit == 1 {
             icmpv4_error(
@@ -213,7 +215,7 @@ impl TracerouteExecutor for MixedHopExecutor {
                 local,
                 11,
                 0,
-                ipv4_udp_quote(&sent[0]),
+                ipv4_udp_quote(&sent[0].built().packet),
                 batch.probes[0].sequence + 1,
                 Vec::new(),
             )
@@ -223,23 +225,27 @@ impl TracerouteExecutor for MixedHopExecutor {
                 local,
                 3,
                 3,
-                ipv4_udp_quote(&sent[0]),
+                ipv4_udp_quote(&sent[0].built().packet),
                 batch.probes[0].sequence + 1,
                 Vec::new(),
             )
         };
         let count = u64::try_from(batch.probes.len()).expect("test batch fits u64");
         Ok(TracerouteBatchExecution {
+            permit: batch.permit,
             sent,
-            sent_evidence,
-            responses: Vec::new(),
-            unsolicited: vec![responder],
+            responses: vec![TracerouteMatchedResponse {
+                request_index: 0,
+                response: responder,
+                latency: Duration::from_millis(1),
+            }],
+            unsolicited: Vec::new(),
             undecoded: Vec::new(),
             diagnostics: Vec::new(),
             stats: Stats {
                 packets_attempted: count,
                 packets_completed: count,
-                bytes: count,
+                bytes,
                 elapsed: Duration::from_millis(1),
                 capture: packetcraftr_network::capture::Statistics::default(),
             },

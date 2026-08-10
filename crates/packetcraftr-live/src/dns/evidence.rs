@@ -12,7 +12,7 @@ use packetcraftr_packet::{
 use crate::probe::evidence::{
     ExchangeEvidenceError, ResponseEvidence, validate_aggregate_evidence_limits,
     validate_capture_statistics_evidence, validate_response_frames_and_deadlines,
-    validate_sent_byte_accounting, validate_sent_frame_timestamps,
+    validate_sent_byte_accounting,
 };
 
 use super::error::DnsError;
@@ -36,13 +36,14 @@ pub(super) fn validate_dns_execution(
     timeout: Duration,
 ) -> Result<(), DnsError> {
     let attempt = probe.attempt;
-    let Some(network) = dns_network_envelope(&execution.sent) else {
+    let sent_packet = &execution.sent.built().packet;
+    let Some(network) = dns_network_envelope(sent_packet) else {
         return Err(DnsError::InvalidEvidence {
             attempt,
             message: "sent packet has no IPv4 or IPv6 tuple".to_owned(),
         });
     };
-    let Some(ports) = dns_udp_ports(&execution.sent) else {
+    let Some(ports) = dns_udp_ports(sent_packet) else {
         return Err(DnsError::InvalidEvidence {
             attempt,
             message: "sent packet has no complete UDP tuple".to_owned(),
@@ -55,22 +56,28 @@ pub(super) fn validate_dns_execution(
     };
     let network_index = execution
         .sent
+        .built()
+        .packet
         .iter()
         .next()
         .filter(|layer| BuiltinProtocol::of(*layer) == Some(BuiltinProtocol::Ethernet))
         .map_or(0, |_| 1);
-    if execution.sent.len() != network_index + 3
+    if sent_packet.len() != network_index + 3
         || !execution
             .sent
+            .built()
+            .packet
             .iter()
             .nth(network_index)
             .is_some_and(|layer| BuiltinProtocol::of(layer) == Some(network_protocol))
         || !execution
             .sent
+            .built()
+            .packet
             .iter()
             .nth(network_index + 1)
             .is_some_and(|layer| BuiltinProtocol::of(layer) == Some(BuiltinProtocol::Udp))
-        || dns_payload(&execution.sent).as_deref() != Some(probe.query.as_ref())
+        || dns_payload(sent_packet).as_deref() != Some(probe.query.as_ref())
         || network.destination != probe.server_address
         || ports.source != probe.source_port
         || ports.destination != probe.server_port
@@ -88,12 +95,7 @@ pub(super) fn validate_dns_execution(
                 .to_owned(),
         });
     }
-    validate_sent_byte_accounting(
-        std::slice::from_ref(&execution.sent_evidence),
-        execution.stats.bytes,
-    )
-    .map_err(|error| map_dns_evidence_error(attempt, error))?;
-    validate_sent_frame_timestamps(std::slice::from_ref(&execution.sent_evidence))
+    validate_sent_byte_accounting(std::slice::from_ref(&execution.sent), execution.stats.bytes)
         .map_err(|error| map_dns_evidence_error(attempt, error))?;
     validate_capture_statistics_evidence(execution.stats.capture)
         .map_err(|error| map_dns_evidence_error(attempt, error))?;

@@ -70,9 +70,9 @@ pub(super) fn run(
         output::contract::Format::Pcap | output::contract::Format::Pcapng
     ) {
         let frames = result
-            .sent_evidence
+            .sent
             .iter()
-            .cloned()
+            .map(|sent| sent.frame().clone())
             .chain(
                 result
                     .responses

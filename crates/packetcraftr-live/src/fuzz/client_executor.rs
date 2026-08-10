@@ -80,7 +80,6 @@ where
             .map_err(BoundaryError::from_error)?;
         let crate::exchange::Result {
             mut sent,
-            mut sent_evidence,
             responses,
             unanswered: _,
             unsolicited,
@@ -88,17 +87,20 @@ where
             diagnostics,
             stats,
         } = exchange;
-        if sent.len() != 1 || sent_evidence.len() != 1 {
+        if sent.len() != 1 {
             return Err(invalid_client_execution(format!(
-                "expected one built and sent frame, received {} built and {} sent",
-                sent.len(),
-                sent_evidence.len()
+                "expected one sent receipt, received {}",
+                sent.len()
             )));
         }
-        let built = sent.pop().expect("validated one built fuzz packet");
-        let sent = sent_evidence.pop().expect("validated one sent fuzz frame");
+        let sent = sent.pop().expect("validated one sent fuzz packet");
+        if sent.wire_bytes() != &case.authorized_bytes {
+            return Err(invalid_client_execution(
+                "fuzz execution did not transmit the authorized prepared bytes",
+            ));
+        }
         Ok(FuzzCaseExecution {
-            built,
+            permit: case.permit,
             sent,
             responses: responses
                 .into_iter()

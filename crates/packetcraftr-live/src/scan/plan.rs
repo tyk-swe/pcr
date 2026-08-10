@@ -40,6 +40,7 @@ pub(super) fn build_batches(
                 batches.push(ScanBatch {
                     probes,
                     timeout: request.timeout,
+                    permit: crate::evidence::ExecutionPermit::new(),
                 });
             }
         }

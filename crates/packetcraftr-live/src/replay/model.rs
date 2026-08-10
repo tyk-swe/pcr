@@ -173,16 +173,21 @@ pub struct ReplayOptions {
 }
 
 /// Per-frame evidence emitted only after exact transmission is confirmed.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReplayFrameEvidence {
     pub source_sequence: u64,
     pub source_interface_id: Option<u32>,
     pub capture_interface: Interface,
-    pub interface: InterfaceId,
     pub link_mode: LinkMode,
     pub scheduled_delay: Duration,
-    pub bytes_sent: u64,
     pub frame: Frame,
+    pub(super) transmission: ReplayTransmission,
+}
+
+impl ReplayFrameEvidence {
+    pub fn transmission(&self) -> &ReplayTransmission {
+        &self.transmission
+    }
 }
 
 /// Terminal counters for a completed replay stream.

@@ -14,12 +14,14 @@ use super::literal::Literal;
 /// Values whose type cannot be compared with the literal simply do not match;
 /// the compile-time compatibility check is what reports genuine mistakes.
 pub(super) fn matches(value: &FieldValue, operator: CompareOperator, literal: &Literal) -> bool {
-    if let Some(contained) = containment(value, literal) {
-        // Prefix literals describe a set, so only membership is meaningful.
-        return match operator {
-            CompareOperator::Equal => contained,
-            CompareOperator::NotEqual => !contained,
-            _ => false,
+    if matches!(operator, CompareOperator::Equal | CompareOperator::NotEqual) {
+        let Some(equal) = equals(value, literal) else {
+            return false;
+        };
+        return if operator == CompareOperator::Equal {
+            equal
+        } else {
+            !equal
         };
     }
     // Lists match when any element matches.
@@ -39,6 +41,28 @@ pub(super) fn matches(value: &FieldValue, operator: CompareOperator, literal: &L
         CompareOperator::Less => ordering == Ordering::Less,
         CompareOperator::LessOrEqual => ordering != Ordering::Greater,
     }
+}
+
+/// Whether any comparable scalar represented by `value` equals `literal`.
+///
+/// [`None`] distinguishes an empty or wholly uncomparable list from a list
+/// whose comparable elements all differ. Inequality needs that distinction so
+/// absence never becomes a match.
+pub(super) fn equals(value: &FieldValue, literal: &Literal) -> Option<bool> {
+    if let FieldValue::List(values) = value {
+        let mut comparable = false;
+        for element in values {
+            let Some(equal) = equals(element, literal) else {
+                continue;
+            };
+            comparable = true;
+            if equal {
+                return Some(true);
+            }
+        }
+        return comparable.then_some(false);
+    }
+    containment(value, literal).or_else(|| compare(value, literal).map(|ordering| ordering.is_eq()))
 }
 
 /// Tests prefix membership, or reports [`None`] when the literal is not a prefix.

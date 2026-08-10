@@ -363,9 +363,9 @@ const BITS: &[Bits] = &[
 /// Paths that read either endpoint of a pair.
 ///
 /// A comparison holds when either field satisfies it, so `tcp.port == 443`
-/// finds both directions of a conversation. That also means `tcp.port != 443`
-/// holds whenever *either* endpoint differs; reach for `tcp.srcport` or
-/// `tcp.dstport` when the direction matters.
+/// finds both directions of a conversation. Inequality complements equality
+/// over both fields, so `tcp.port != 443` holds only when neither endpoint is
+/// 443; reach for `tcp.srcport` or `tcp.dstport` when direction matters.
 const EITHER: &[Either] = &[
     Either {
         path: "eth.addr",

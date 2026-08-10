@@ -183,6 +183,88 @@ fn ethernet_ipv4_udp_raw_round_trip_exercises_filter_language() {
 }
 
 #[test]
+fn multivalued_filter_inequality_complements_equality() {
+    let registry = registry();
+    let matches = |source: &str, decoded: &decode::Result| {
+        Filter::compile(source, &registry, FilterOptions::default())
+            .expect("valid filter")
+            .matches(&FilterContext {
+                decoded,
+                number: 1,
+                tcp_stream: None,
+                udp_stream: None,
+            })
+            .expect("filter facts are available")
+    };
+
+    let mut tunnel = Packet::new();
+    tunnel.push(ipv4([192, 0, 2, 1], [192, 0, 2, 2]));
+    tunnel.push(Udp {
+        source_port: 50_000,
+        destination_port: 6_081,
+        ..Udp::default()
+    });
+    tunnel.push(Geneve::default());
+    tunnel.push(ipv4([10, 0, 0, 1], [10, 0, 0, 2]));
+    tunnel.push(Tcp {
+        source_port: 443,
+        destination_port: 80,
+        ..Tcp::default()
+    });
+    tunnel.push(Raw::new(b"prefix".to_vec()));
+    let (_, tunnel) = round_trip(tunnel, "ipv4");
+
+    for source in [
+        "tcp.port == 443",
+        "tcp.port != 22",
+        "ipv4.source == 10.0.0.1",
+        "ipv4.source != 203.0.113.1",
+        "ipv4.source == 10.0.0.0/8",
+        "ipv4#1.source != 10.0.0.1",
+        "raw.bytes[0:] == 70:72:65:66:69:78",
+    ] {
+        assert!(matches(source, &tunnel), "{source}");
+    }
+    for source in [
+        "tcp.port != 443",
+        "ipv4.source != 10.0.0.1",
+        "ipv4.source != 10.0.0.0/8",
+        "ipv4#2.source != 10.0.0.1",
+        "raw.bytes[0:99] == 70:72:65:66:69:78",
+        "raw.bytes[0:99] != 00",
+    ] {
+        assert!(!matches(source, &tunnel), "{source}");
+    }
+
+    let two_questions = vec![
+        0x12, 0x34, 0x01, 0x00, 0x00, 0x02, 0, 0, 0, 0, 0, 0, 3, b'o', b'n', b'e', 0, 0, 1, 0, 1,
+        3, b't', b'w', b'o', 0, 0, 1, 0, 1,
+    ];
+    let mut packet = Packet::new();
+    packet.push(ipv4([192, 0, 2, 1], [192, 0, 2, 53]));
+    packet.push(Udp {
+        destination_port: 53,
+        ..Udp::default()
+    });
+    packet.push(Dns::from_wire(two_questions).expect("two-question DNS message"));
+    let (_, dns) = round_trip(packet, "ipv4");
+    assert!(matches("dns.qname == \"two.\"", &dns));
+    assert!(!matches("dns.qname != \"two.\"", &dns));
+    assert!(matches("dns.qname != \"missing.\"", &dns));
+
+    let mut empty_dns = Packet::new();
+    empty_dns.push(ipv4([192, 0, 2, 1], [192, 0, 2, 53]));
+    empty_dns.push(Udp {
+        destination_port: 53,
+        ..Udp::default()
+    });
+    empty_dns.push(Dns::from_wire(vec![0; 12]).expect("empty DNS message"));
+    let (_, empty_dns) = round_trip(empty_dns, "ipv4");
+    assert!(!matches("dns.qname != \"missing.\"", &empty_dns));
+    assert!(!matches("tcp.source_port != 1", &empty_dns));
+}
+
+#[test]
 fn ipv6_extensions_tcp_and_segment_routing_round_trip() {
     let mut extension_packet = Packet::new();
     extension_packet.push(ipv6("2001:db8::1", "2001:db8::2"));

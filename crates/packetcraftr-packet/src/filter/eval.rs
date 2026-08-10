@@ -80,9 +80,15 @@ fn test(predicate: &Predicate, context: &Context<'_>) -> bool {
             field,
             operator,
             value,
-        } => any_value(context, field, |candidate| {
-            comparison::matches(candidate, *operator, value)
-        }),
+        } => {
+            if *operator == CompareOperator::NotEqual {
+                no_value_equals(context, field, value)
+            } else {
+                any_value(context, field, |candidate| {
+                    comparison::matches(candidate, *operator, value)
+                })
+            }
+        }
         Predicate::Membership { field, values } => any_value(context, field, |candidate| {
             values
                 .iter()
@@ -120,7 +126,9 @@ fn layers<'a>(
 ///
 /// A path can yield several values: a protocol may appear more than once in a
 /// tunnelled stack, and an `Either` binding names more than one field. Any
-/// single match is enough, which is also how the grammar documents `!=`.
+/// single match is enough for presence, equality, ordering, membership, and
+/// containment. Inequality uses [`no_value_equals`] because it quantifies over
+/// the complete path instead.
 fn any_value<F>(context: &Context<'_>, field: &FieldRef, mut predicate: F) -> bool
 where
     F: FnMut(&FieldValue) -> bool,
@@ -161,6 +169,23 @@ where
             false
         }
     }
+}
+
+/// Whether the path has comparable values and none of them equals `literal`.
+fn no_value_equals(
+    context: &Context<'_>,
+    field: &FieldRef,
+    literal: &super::literal::Literal,
+) -> bool {
+    let mut comparable = false;
+    let equal = any_value(context, field, |candidate| {
+        let Some(equal) = comparison::equals(candidate, literal) else {
+            return false;
+        };
+        comparable = true;
+        equal
+    });
+    comparable && !equal
 }
 
 fn access_fields(access: &FieldAccess) -> &[&'static str] {
@@ -221,7 +246,11 @@ fn project(
         FieldValue::Ipv6(address) => Bytes::copy_from_slice(&address.octets()),
         _ => return None,
     };
-    let end = slice.end.unwrap_or(bytes.len()).min(bytes.len());
+    let end = match slice.end {
+        Some(end) if end > bytes.len() => return None,
+        Some(end) => end,
+        None => bytes.len(),
+    };
     if slice.start > end {
         return None;
     }

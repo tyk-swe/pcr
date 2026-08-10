@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** Display-filter inequality now complements equality across the
+  complete multivalued path. `field != value` matches only when at least one
+  comparable candidate exists and none equals the value, including list
+  fields, repeated tunnel layers, and endpoint aliases such as `tcp.port`.
+  Fixed byte-slice ends beyond the available value now contribute no candidate;
+  only an omitted end extends to the actual end.
+
 - **Breaking:** Live transmission now returns opaque provider receipts that bind
   semantic builds, materialized routes, exact accepted bytes, byte counts, and
   provider-established monotonic/wall-clock timing. Capture correlation uses

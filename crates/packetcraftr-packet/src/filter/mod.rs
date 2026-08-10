@@ -36,10 +36,16 @@
 //!
 //! Where a protocol repeats, as in a tunnelled stack, an unqualified path
 //! matches **any** occurrence; `ipv4#1` and `ipv4#2` select the outer and
-//! inner layer explicitly. The same "any match wins" rule applies to paths
-//! that read either of two fields, such as `tcp.port`, so `tcp.port != 80`
-//! holds when *either* endpoint is not port 80. Use `tcp.srcport` or
-//! `tcp.dstport` when that distinction matters.
+//! inner layer explicitly. Equality, ordering, membership, and containment
+//! match when any comparable candidate satisfies them. Inequality is the
+//! complement of equality over the whole multivalued path: `tcp.port != 80`
+//! holds only when neither endpoint is port 80. The same rule applies to list
+//! fields and repeated layers. A missing, empty, or wholly uncomparable path
+//! does not match either operator.
+//!
+//! A fixed byte-slice end must be available in full or the path contributes no
+//! candidate. Only an omitted end, as in `raw.bytes[4:]`, extends to the actual
+//! end of a shorter value.
 //!
 //! There is deliberately no regular-expression operator, which would mean
 //! taking on a regex dependency. `contains` plus byte-slice equality covers

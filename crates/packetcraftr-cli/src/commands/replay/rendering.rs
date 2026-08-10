@@ -17,33 +17,43 @@ use crate::rendering::{emit_json_compact, next_stream_sequence, spaced_hex, writ
 pub(super) fn replay_output_frame(
     evidence: workflow::replay::FrameEvidence,
 ) -> Result<output::replay::Frame, workflow::replay::Error> {
-    let sequence = evidence.source_sequence;
+    let source_index = evidence.source_index;
     output::replay::Frame::try_from_evidence(evidence)
-        .map_err(|source| workflow::replay::Error::output(sequence, source.to_string()))
+        .map_err(|source| workflow::replay::Error::output(source_index, source.to_string()))
 }
 
 pub(super) fn write_replay_text_evidence(
     evidence: workflow::replay::FrameEvidence,
 ) -> Result<(), workflow::replay::Error> {
     let result = replay_output_frame(evidence)?;
+    let source_ordinal = result.source_index.checked_add(1).ok_or_else(|| {
+        workflow::replay::Error::output(result.source_index, "source ordinal overflow")
+    })?;
+    let adjustment = match result.timestamp_adjustment {
+        Some(output::replay::TimestampAdjustment::NonmonotonicClamped { backward_by }) => {
+            format!(" timing_adjustment=nonmonotonic_clamped backward_by={backward_by:?}")
+        }
+        None => String::new(),
+    };
     write_stdout_line(format_args!(
-        "{}: sent {} bytes via {} (index {}, {:?}) dlt={} {}",
-        result.source_sequence,
+        "{}: sent {} bytes via {} (index {}, {:?}) dlt={} {}{}",
+        source_ordinal,
         result.bytes_sent,
         result.interface.name,
         result.interface.index,
         result.link_mode,
         result.frame.link_type,
-        spaced_hex(result.frame.bytes())
+        spaced_hex(result.frame.bytes()),
+        adjustment,
     ))
-    .map_err(|source| workflow::replay::Error::output(result.source_sequence, source.message))
+    .map_err(|source| workflow::replay::Error::output(result.source_index, source.message))
 }
 
 pub(super) fn emit_replay_ndjson_evidence(
     sequence: &mut u64,
     evidence: workflow::replay::FrameEvidence,
 ) -> Result<(), workflow::replay::Error> {
-    let source_sequence = evidence.source_sequence;
+    let source_index = evidence.source_index;
     let result = replay_output_frame(evidence)?;
     emit_json_compact(&output::envelope::Stream::success(
         output::contract::Command::Replay,
@@ -51,9 +61,9 @@ pub(super) fn emit_replay_ndjson_evidence(
         result,
         Vec::new(),
     ))
-    .map_err(|source| workflow::replay::Error::output(source_sequence, source.message))?;
+    .map_err(|source| workflow::replay::Error::output(source_index, source.message))?;
     *sequence = next_stream_sequence(*sequence)
-        .map_err(|source| workflow::replay::Error::output(source_sequence, source.message))?;
+        .map_err(|source| workflow::replay::Error::output(source_index, source.message))?;
     Ok(())
 }
 
@@ -113,14 +123,14 @@ pub(super) fn write_replay_capture_evidence<W: Write>(
     writer: &mut CaptureOutput<W>,
     evidence: workflow::replay::FrameEvidence,
 ) -> Result<(), workflow::replay::Error> {
-    let sequence = evidence.source_sequence;
+    let source_index = evidence.source_index;
     writer
         .write_source_frame(
             evidence.source_interface_id,
             evidence.capture_interface,
             evidence.frame,
         )
-        .map_err(|source| workflow::replay::Error::output(sequence, source.to_string()))
+        .map_err(|source| workflow::replay::Error::output(source_index, source.to_string()))
 }
 
 pub(super) fn replay_stats(

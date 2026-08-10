@@ -1745,12 +1745,14 @@
       "required": [
         "source_format",
         "timing",
+        "nonmonotonic_timestamps",
         "requested_interface",
         "requested_link_mode",
         "frames_attempted",
         "frames_completed",
         "bytes_completed",
         "scheduled_duration",
+        "timestamp_adjustments",
         "frames"
       ],
       "properties": {
@@ -1763,6 +1765,9 @@
         },
         "timing": {
           "$ref": "#/$defs/replayTiming"
+        },
+        "nonmonotonic_timestamps": {
+          "$ref": "#/$defs/nonmonotonicTimestampPolicy"
         },
         "requested_interface": {
           "$ref": "#/$defs/interfaceId"
@@ -1781,6 +1786,9 @@
         },
         "scheduled_duration": {
           "$ref": "#/$defs/duration"
+        },
+        "timestamp_adjustments": {
+          "$ref": "#/$defs/uint64"
         },
         "frames": {
           "type": "array",
@@ -2206,16 +2214,17 @@
     "replayFrameResult": {
       "type": "object",
       "required": [
-        "source_sequence",
+        "source_index",
         "interface",
         "link_mode",
         "scheduled_delay",
+        "timestamp_adjustment",
         "bytes_sent",
         "frame",
         "transmitted"
       ],
       "properties": {
-        "source_sequence": {
+        "source_index": {
           "$ref": "#/$defs/uint64"
         },
         "interface": {
@@ -2226,6 +2235,16 @@
         },
         "scheduled_delay": {
           "$ref": "#/$defs/duration"
+        },
+        "timestamp_adjustment": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/replayTimestampAdjustment"
+            }
+          ]
         },
         "bytes_sent": {
           "$ref": "#/$defs/uint64"
@@ -3141,6 +3160,29 @@
           "additionalProperties": false
         }
       ]
+    },
+    "nonmonotonicTimestampPolicy": {
+      "type": "string",
+      "enum": [
+        "reject",
+        "clamp"
+      ]
+    },
+    "replayTimestampAdjustment": {
+      "type": "object",
+      "required": [
+        "kind",
+        "backward_by"
+      ],
+      "properties": {
+        "kind": {
+          "const": "nonmonotonic_clamped"
+        },
+        "backward_by": {
+          "$ref": "#/$defs/duration"
+        }
+      },
+      "additionalProperties": false
     },
     "interface": {
       "type": "object",

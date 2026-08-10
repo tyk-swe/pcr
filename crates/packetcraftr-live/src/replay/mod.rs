@@ -15,9 +15,10 @@ mod wire;
 pub use engine::{replay_capture as run, replay_capture_with_selector as run_with_selector};
 pub use error::ReplayError as Error;
 pub use model::{
-    MAX_REPLAY_DURATION, ReplayAuthorizationContext as AuthorizationContext,
-    ReplayAuthorizer as Authorizer, ReplayFrameEvidence as FrameEvidence, ReplayLimits as Limits,
-    ReplayOptions as Options, ReplaySelector as Selector, ReplaySummary as Summary,
-    ReplayTiming as Timing, ReplayTransmission as Transmission, ReplayTransmitter as Transmitter,
+    MAX_REPLAY_DURATION, NonmonotonicTimestampPolicy,
+    ReplayAuthorizationContext as AuthorizationContext, ReplayAuthorizer as Authorizer,
+    ReplayFrameEvidence as FrameEvidence, ReplayLimits as Limits, ReplayOptions as Options,
+    ReplaySelector as Selector, ReplaySummary as Summary, ReplayTiming as Timing,
+    ReplayTransmission as Transmission, ReplayTransmitter as Transmitter, TimestampAdjustment,
 };
 pub use system_boundary::{SystemAuthorizer, SystemTransmitter};

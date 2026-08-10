@@ -23,9 +23,13 @@ pub const MAX_REPLAY_DURATION: Duration = packetcraftr_network::capture::MAX_TIM
 #[non_exhaustive]
 #[serde(rename_all = "snake_case")]
 pub enum ReplayTiming {
+    /// Preserve intervals between selected capture timestamps.
     Original,
+    /// Multiply selected capture intervals by the positive finite factor.
     Scaled(f64),
+    /// Replay selected frames at the positive finite frames-per-second rate.
     FixedRate(f64),
+    /// Schedule every selected frame without an inter-frame delay.
     Immediate,
 }
 
@@ -53,17 +57,32 @@ impl ReplayTiming {
         self,
         previous: Option<SystemTime>,
         current: Option<SystemTime>,
-        sequence: u64,
-    ) -> Result<Duration, ReplayError> {
+        source_index: u64,
+        nonmonotonic_timestamps: NonmonotonicTimestampPolicy,
+    ) -> Result<(Duration, Option<TimestampAdjustment>), ReplayError> {
         self.validate()?;
         match self {
             Self::Original => {
-                let (previous, current) = required_times(previous, current, sequence, "original")?;
-                Ok(current.duration_since(previous).unwrap_or(Duration::ZERO))
+                let (previous, current) =
+                    required_times(previous, current, source_index, "original")?;
+                interval(
+                    previous,
+                    current,
+                    source_index,
+                    "original",
+                    nonmonotonic_timestamps,
+                )
             }
             Self::Scaled(factor) => {
-                let (previous, current) = required_times(previous, current, sequence, "scaled")?;
-                let original = current.duration_since(previous).unwrap_or(Duration::ZERO);
+                let (previous, current) =
+                    required_times(previous, current, source_index, "scaled")?;
+                let (original, adjustment) = interval(
+                    previous,
+                    current,
+                    source_index,
+                    "scaled",
+                    nonmonotonic_timestamps,
+                )?;
                 let delay =
                     Duration::try_from_secs_f64(original.as_secs_f64() * factor).map_err(|_| {
                         ReplayError::InvalidTiming {
@@ -77,7 +96,7 @@ impl ReplayTiming {
                         value: factor,
                     });
                 }
-                Ok(delay)
+                Ok((delay, adjustment))
             }
             Self::FixedRate(rate) => {
                 let delay = Duration::try_from_secs_f64(1.0 / rate).map_err(|_| {
@@ -92,9 +111,22 @@ impl ReplayTiming {
                         value: rate,
                     });
                 }
-                Ok(delay)
+                Ok((delay, None))
             }
-            Self::Immediate => Ok(Duration::ZERO),
+            Self::Immediate => Ok((Duration::ZERO, None)),
+        }
+    }
+
+    pub(super) const fn requires_capture_timestamp(self) -> bool {
+        matches!(self, Self::Original | Self::Scaled(_))
+    }
+
+    pub(super) const fn mode_name(self) -> &'static str {
+        match self {
+            Self::Original => "original",
+            Self::Scaled(_) => "scaled",
+            Self::FixedRate(_) => "fixed_rate",
+            Self::Immediate => "immediate",
         }
     }
 }
@@ -102,13 +134,60 @@ impl ReplayTiming {
 fn required_times(
     previous: Option<SystemTime>,
     current: Option<SystemTime>,
-    sequence: u64,
+    source_index: u64,
     mode: &'static str,
 ) -> Result<(SystemTime, SystemTime), ReplayError> {
-    match (previous, current) {
-        (Some(previous), Some(current)) => Ok((previous, current)),
-        _ => Err(ReplayError::TimestampUnavailable { sequence, mode }),
+    let unavailable = || ReplayError::TimestampUnavailable { source_index, mode };
+    Ok((
+        previous.ok_or_else(unavailable)?,
+        current.ok_or_else(unavailable)?,
+    ))
+}
+
+fn interval(
+    previous: SystemTime,
+    current: SystemTime,
+    source_index: u64,
+    mode: &'static str,
+    policy: NonmonotonicTimestampPolicy,
+) -> Result<(Duration, Option<TimestampAdjustment>), ReplayError> {
+    match current.duration_since(previous) {
+        Ok(delay) => Ok((delay, None)),
+        Err(error) => {
+            let backward_by = error.duration();
+            match policy {
+                NonmonotonicTimestampPolicy::Reject => Err(ReplayError::NonmonotonicTimestamp {
+                    source_index,
+                    mode,
+                    backward_by,
+                }),
+                NonmonotonicTimestampPolicy::Clamp => Ok((
+                    Duration::ZERO,
+                    Some(TimestampAdjustment::NonmonotonicClamped { backward_by }),
+                )),
+            }
+        }
     }
+}
+
+/// Policy for a selected frame whose timestamp precedes the prior selected frame.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+#[serde(rename_all = "snake_case")]
+pub enum NonmonotonicTimestampPolicy {
+    /// Fail before authorizing, delaying, or transmitting the affected frame.
+    #[default]
+    Reject,
+    /// Schedule no delay and emit a typed adjustment report with the frame.
+    Clamp,
+}
+
+/// Typed report emitted when replay timing explicitly adjusts capture time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum TimestampAdjustment {
+    NonmonotonicClamped { backward_by: Duration },
 }
 
 /// Finite resource ceilings applied before authorizing or transmitting a frame.
@@ -169,17 +248,20 @@ pub struct ReplayOptions {
     pub interface: InterfaceId,
     pub link_mode: LinkMode,
     pub timing: ReplayTiming,
+    pub nonmonotonic_timestamps: NonmonotonicTimestampPolicy,
     pub limits: ReplayLimits,
 }
 
 /// Per-frame evidence emitted only after exact transmission is confirmed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReplayFrameEvidence {
-    pub source_sequence: u64,
+    /// Zero-based position in the source capture.
+    pub source_index: u64,
     pub source_interface_id: Option<u32>,
     pub capture_interface: Interface,
     pub link_mode: LinkMode,
     pub scheduled_delay: Duration,
+    pub timestamp_adjustment: Option<TimestampAdjustment>,
     pub frame: Frame,
     pub(super) transmission: ReplayTransmission,
 }
@@ -195,10 +277,12 @@ impl ReplayFrameEvidence {
 pub struct ReplaySummary {
     pub source_format: Format,
     pub timing: ReplayTiming,
+    pub nonmonotonic_timestamps: NonmonotonicTimestampPolicy,
     pub frames_attempted: u64,
     pub frames_completed: u64,
     pub bytes_completed: u64,
     pub scheduled_duration: Duration,
+    pub timestamp_adjustments: u64,
 }
 
 /// Prospective totals for the frame being authorized. They include only frames
@@ -209,14 +293,14 @@ pub struct ReplayAuthorizationContext {
     pub wire_bytes: u64,
 }
 
-/// Selects a one-based capture frame before byte accounting, authorization, delay,
+/// Selects a one-based capture-frame ordinal before byte accounting, authorization, delay,
 /// or transmission.
 ///
 /// Skipped frames consume the read-side frame budget only; they affect neither
 /// policy totals nor timing. Selected frames retain capture spacing.
 pub trait ReplaySelector {
     /// Decides whether this frame proceeds to authorization and transmission.
-    fn select(&mut self, number: u64, frame: &Frame) -> Result<bool, crate::BoundaryError>;
+    fn select(&mut self, source_ordinal: u64, frame: &Frame) -> Result<bool, crate::BoundaryError>;
 }
 
 /// Explicit policy seam invoked before delay or transmission.

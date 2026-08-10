@@ -24,6 +24,15 @@ pub(crate) enum CliReplayTiming {
     Immediate,
 }
 
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+pub(crate) enum CliNonmonotonicTimestamps {
+    /// Reject a backward timestamp before authorizing or transmitting its frame.
+    #[default]
+    Reject,
+    /// Schedule no delay and report each adjusted timestamp in replay evidence.
+    Clamp,
+}
+
 #[derive(Debug, Args)]
 pub(crate) struct ReplayArgs {
     /// Classic PCAP or PCAPNG input path.
@@ -37,6 +46,9 @@ pub(crate) struct ReplayArgs {
     /// Preserve captured intervals or send immediately.
     #[arg(long, value_enum, default_value_t = CliReplayTiming::Original)]
     pub(crate) timing: CliReplayTiming,
+    /// Behavior when a selected timestamp precedes the prior selected timestamp.
+    #[arg(long, value_enum, default_value_t = CliNonmonotonicTimestamps::Reject)]
+    pub(crate) nonmonotonic_timestamps: CliNonmonotonicTimestamps,
     /// Positive multiplier for captured replay speed (2 means twice as fast).
     #[arg(long, conflicts_with = "rate")]
     pub(crate) speed: Option<f64>,

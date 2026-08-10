@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fields, repeated tunnel layers, and endpoint aliases such as `tcp.port`.
   Fixed byte-slice ends beyond the available value now contribute no candidate;
   only an omitted end extends to the actual end.
+- **Breaking:** Original and scaled replay timing now reject unavailable or
+  backward timestamps by default. The explicit `--nonmonotonic-timestamps
+  clamp` policy schedules no delay for a backward record and emits a typed
+  adjustment report. Replay output now names zero-based capture positions
+  `source_index`; selectors and human output use one-based source ordinals.
 
 - **Breaking:** Live transmission now returns opaque provider receipts that bind
   semantic builds, materialized routes, exact accepted bytes, byte counts, and
@@ -132,7 +137,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Validated synthesized Ethernet DNS evidence and rejected re-encoding typed
   DNS fields that disagree with their retained wire payload.
 - Made filtered replay NDJSON envelope sequences contiguous while preserving
-  each record's independent `source_sequence`.
+  each record's independent zero-based `source_index`.
 
 ## [0.4.0] - 2026-07-29
 

@@ -86,6 +86,14 @@ pub(super) fn run(arguments: ReplayArgs, output: output::contract::Format) -> Re
         interface: requested_interface.clone(),
         link_mode: arguments.link_mode.into(),
         timing,
+        nonmonotonic_timestamps: match arguments.nonmonotonic_timestamps {
+            arguments::CliNonmonotonicTimestamps::Reject => {
+                workflow::replay::NonmonotonicTimestampPolicy::Reject
+            }
+            arguments::CliNonmonotonicTimestamps::Clamp => {
+                workflow::replay::NonmonotonicTimestampPolicy::Clamp
+            }
+        },
         limits,
     };
     let mut adapter = frame_filter
@@ -111,15 +119,19 @@ pub(super) fn run(arguments: ReplayArgs, output: output::contract::Format) -> Re
             )?;
             match &frame_filter {
                 None => write_stdout_line(format_args!(
-                    "replayed {} frame(s), {} byte(s), scheduled delay {:?}",
-                    summary.frames_completed, summary.bytes_completed, summary.scheduled_duration
+                    "replayed {} frame(s), {} byte(s), scheduled delay {:?}, {} timestamp adjustment(s)",
+                    summary.frames_completed,
+                    summary.bytes_completed,
+                    summary.scheduled_duration,
+                    summary.timestamp_adjustments,
                 )),
                 Some(_) => write_stdout_line(format_args!(
-                    "replayed {} of {} frame(s), {} byte(s), scheduled delay {:?}",
+                    "replayed {} of {} frame(s), {} byte(s), scheduled delay {:?}, {} timestamp adjustment(s)",
                     summary.frames_completed,
                     summary.frames_attempted,
                     summary.bytes_completed,
-                    summary.scheduled_duration
+                    summary.scheduled_duration,
+                    summary.timestamp_adjustments,
                 )),
             }
         }
@@ -213,6 +225,5 @@ pub(super) fn run(arguments: ReplayArgs, output: output::contract::Format) -> Re
 }
 
 pub(crate) fn replay_cli_error(error: workflow::replay::Error) -> CliError {
-    let sequence = error.sequence();
-    CliError::classified_at_optional_sequence(error, sequence)
+    CliError::classified(error)
 }

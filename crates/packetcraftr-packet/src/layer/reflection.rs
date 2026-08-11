@@ -241,41 +241,32 @@ impl ReflectiveField for Bytes {
     }
 }
 
-impl ReflectiveField for std::net::Ipv4Addr {
-    fn reflective_value(&self) -> FieldValue {
-        (*self).into()
-    }
+macro_rules! ip_reflective_field {
+    ($ty:ty, $variant:ident, $expected:literal) => {
+        impl ReflectiveField for $ty {
+            fn reflective_value(&self) -> FieldValue {
+                (*self).into()
+            }
 
-    fn set_reflective_value(&mut self, value: FieldValue) -> Result<(), ReflectiveFieldError> {
-        let value = match value {
-            FieldValue::Ipv4(value) => value,
-            FieldValue::Text(value) => value
-                .parse()
-                .map_err(|_| ReflectiveFieldError::WrongType("ipv4"))?,
-            _ => return Err(ReflectiveFieldError::WrongType("ipv4")),
-        };
-        *self = value;
-        Ok(())
-    }
+            fn set_reflective_value(
+                &mut self,
+                value: FieldValue,
+            ) -> Result<(), ReflectiveFieldError> {
+                *self = match value {
+                    FieldValue::$variant(value) => value,
+                    FieldValue::Text(value) => value
+                        .parse()
+                        .map_err(|_| ReflectiveFieldError::WrongType($expected))?,
+                    _ => return Err(ReflectiveFieldError::WrongType($expected)),
+                };
+                Ok(())
+            }
+        }
+    };
 }
 
-impl ReflectiveField for std::net::Ipv6Addr {
-    fn reflective_value(&self) -> FieldValue {
-        (*self).into()
-    }
-
-    fn set_reflective_value(&mut self, value: FieldValue) -> Result<(), ReflectiveFieldError> {
-        let value = match value {
-            FieldValue::Ipv6(value) => value,
-            FieldValue::Text(value) => value
-                .parse()
-                .map_err(|_| ReflectiveFieldError::WrongType("ipv6"))?,
-            _ => return Err(ReflectiveFieldError::WrongType("ipv6")),
-        };
-        *self = value;
-        Ok(())
-    }
-}
+ip_reflective_field!(std::net::Ipv4Addr, Ipv4, "ipv4");
+ip_reflective_field!(std::net::Ipv6Addr, Ipv6, "ipv6");
 
 impl ReflectiveField for [u8; 6] {
     fn reflective_value(&self) -> FieldValue {

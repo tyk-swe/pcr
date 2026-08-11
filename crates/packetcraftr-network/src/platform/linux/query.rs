@@ -20,14 +20,14 @@ use rtnetlink::{
     },
 };
 
-use super::{
-    super::{NativeRouteSnapshot, finish_route},
-    os_error,
-};
+use super::os_error;
 use crate::{
     interface::{InterfaceAddress, InterfaceFlags, InterfaceInfo},
     link::{Capability, MacAddress},
-    route::{InterfaceId, NativeRouteError, RouteDecision, RouteSelectionReason},
+    route::{
+        InterfaceId, NativeRouteError, NativeRouteSnapshot, RouteDecision, RouteSelectionReason,
+        finish_route,
+    },
 };
 use packetcraftr_packet::frame::LinkType;
 

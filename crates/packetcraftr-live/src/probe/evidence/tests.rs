@@ -10,9 +10,8 @@ use packetcraftr_packet::{Packet, decode::Result as DecodedPacket, layer::Raw, l
 
 use super::exact_validation::validate_decoded_frame;
 use super::{
-    ExchangeEvidence, ExchangeEvidenceError, MatchedResponseEvidence, ResponseCandidate,
-    ResponseEvidence, response_within_deadline, select_response_candidate,
-    validate_exchange_evidence,
+    ExchangeEvidence, ExchangeEvidenceError, ResponseCandidate, response_within_deadline,
+    select_response_candidate, validate_exchange_evidence,
 };
 
 struct TestObservation {
@@ -139,50 +138,10 @@ fn evidence_exact_frame_validation_preserves_failure_context() {
     );
 }
 
-struct NoMatchedResponses;
-
-impl ResponseEvidence for NoMatchedResponses {
-    fn response(&self) -> &DecodedPacket {
-        unreachable!("no matched response is inspected")
-    }
-
-    fn latency(&self) -> Duration {
-        unreachable!("no matched response is timed")
-    }
-}
-
-impl MatchedResponseEvidence for NoMatchedResponses {
-    fn request_index(&self) -> usize {
-        unreachable!("no matched response is attributed")
-    }
-}
-
-struct MatchedResponse {
-    request_index: usize,
-    response: DecodedPacket,
-    latency: Duration,
-}
-
-impl ResponseEvidence for MatchedResponse {
-    fn response(&self) -> &DecodedPacket {
-        &self.response
-    }
-
-    fn latency(&self) -> Duration {
-        self.latency
-    }
-}
-
-impl MatchedResponseEvidence for MatchedResponse {
-    fn request_index(&self) -> usize {
-        self.request_index
-    }
-}
-
 #[test]
 fn evidence_aggregate_validation_reports_cardinality_and_byte_accounting_failures() {
     let sent = [crate::evidence::test_sent_packet(raw_packet(&[1, 2]))];
-    let matched = Vec::<NoMatchedResponses>::new();
+    let matched = Vec::<crate::exchange::Response>::new();
     let stats = Stats {
         packets_attempted: 1,
         packets_completed: 1,
@@ -225,14 +184,14 @@ fn evidence_aggregate_validation_reports_cardinality_and_byte_accounting_failure
 #[test]
 fn evidence_aggregate_validation_rejects_untimestamped_capture_evidence() {
     let sent = [crate::evidence::test_sent_packet(raw_packet(&[1]))];
-    let matched = Vec::<NoMatchedResponses>::new();
+    let matched = Vec::<crate::exchange::Response>::new();
     let stats = Stats {
         packets_attempted: 1,
         packets_completed: 1,
         bytes: 1,
         ..Stats::default()
     };
-    let response = MatchedResponse {
+    let response = crate::exchange::Response {
         request_index: 0,
         response: decoded_without_timestamp(&[2]),
         latency: Duration::from_millis(1),

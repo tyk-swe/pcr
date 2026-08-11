@@ -86,6 +86,9 @@ impl SharedCapture {
     pub(super) fn enqueue(&self, captured: CapturedFrame) -> Result<(), LiveIoError> {
         let mut state = self.lock()?;
         let frame_bytes = captured.frame.bytes().len();
+        let mut queued_bytes = state.queued_bytes;
+        let mut statistics = state.statistics;
+        let mut drop_count = 0usize;
         let would_exceed_frames = state.queue.len() >= self.limits.max_frames;
         let would_exceed_bytes = state
             .queued_bytes
@@ -93,38 +96,22 @@ impl SharedCapture {
             .is_none_or(|bytes| bytes > self.limits.max_bytes);
         if would_exceed_frames || would_exceed_bytes {
             match self.limits.overflow_policy {
-                CaptureOverflowPolicy::Fail => {
-                    let mut statistics = state.statistics;
-                    increment(&mut statistics.overflow_events, 1, "overflow events")?;
-                    increment(&mut statistics.dropped_frames, 1, "dropped frames")?;
-                    increment(
-                        &mut statistics.dropped_bytes,
-                        frame_bytes as u64,
-                        "dropped bytes",
-                    )?;
+                policy @ (CaptureOverflowPolicy::Fail | CaptureOverflowPolicy::DropNewest) => {
+                    record_overflow(&mut statistics, 1, frame_bytes as u64)?;
                     state.statistics = statistics;
-                    return Err(LiveIoError::CaptureQueueOverflow {
-                        dropped_frames: statistics.dropped_frames,
-                        dropped_bytes: statistics.dropped_bytes,
-                        overflow_events: statistics.overflow_events,
-                    });
-                }
-                CaptureOverflowPolicy::DropNewest => {
-                    let mut statistics = state.statistics;
-                    increment(&mut statistics.overflow_events, 1, "overflow events")?;
-                    increment(&mut statistics.dropped_frames, 1, "dropped frames")?;
-                    increment(
-                        &mut statistics.dropped_bytes,
-                        frame_bytes as u64,
-                        "dropped bytes",
-                    )?;
-                    state.statistics = statistics;
-                    return Ok(());
+                    return if policy == CaptureOverflowPolicy::Fail {
+                        Err(LiveIoError::CaptureQueueOverflow {
+                            dropped_frames: statistics.dropped_frames,
+                            dropped_bytes: statistics.dropped_bytes,
+                            overflow_events: statistics.overflow_events,
+                        })
+                    } else {
+                        Ok(())
+                    };
                 }
                 CaptureOverflowPolicy::DropOldest => {
                     let mut retained_frames = state.queue.len();
                     let mut retained_bytes = state.queued_bytes;
-                    let mut drop_count = 0usize;
                     let mut drop_bytes = 0usize;
                     for dropped in &state.queue {
                         if retained_frames < self.limits.max_frames
@@ -155,60 +142,24 @@ impl SharedCapture {
                             .checked_add(frame_bytes)
                             .is_none_or(|bytes| bytes > self.limits.max_bytes)
                     {
-                        let mut statistics = state.statistics;
-                        increment(&mut statistics.overflow_events, 1, "overflow events")?;
-                        increment(&mut statistics.dropped_frames, 1, "dropped frames")?;
-                        increment(
-                            &mut statistics.dropped_bytes,
-                            frame_bytes as u64,
-                            "dropped bytes",
-                        )?;
+                        record_overflow(&mut statistics, 1, frame_bytes as u64)?;
                         state.statistics = statistics;
                         return Ok(());
                     }
-
-                    let mut statistics = state.statistics;
-                    increment(&mut statistics.overflow_events, 1, "overflow events")?;
-                    increment(
-                        &mut statistics.dropped_frames,
-                        drop_count as u64,
-                        "dropped frames",
-                    )?;
-                    increment(
-                        &mut statistics.dropped_bytes,
-                        drop_bytes as u64,
-                        "dropped bytes",
-                    )?;
-                    increment(&mut statistics.received_frames, 1, "received frames")?;
-                    increment(
-                        &mut statistics.received_bytes,
-                        frame_bytes as u64,
-                        "received bytes",
-                    )?;
-                    for _ in 0..drop_count {
-                        state.queue.pop_front();
-                    }
-                    state.queued_bytes = retained_bytes + frame_bytes;
-                    state.statistics = statistics;
-                    state.queue.push_back(captured);
-                    drop(state);
-                    self.changed.notify_one();
-                    return Ok(());
+                    record_overflow(&mut statistics, drop_count as u64, drop_bytes as u64)?;
+                    queued_bytes = retained_bytes;
                 }
             }
         }
-        let queued_bytes = state.queued_bytes.checked_add(frame_bytes).ok_or_else(|| {
+        queued_bytes = queued_bytes.checked_add(frame_bytes).ok_or_else(|| {
             LiveIoError::InvalidCaptureStatistics {
                 message: "native capture queue byte accounting overflowed".to_owned(),
             }
         })?;
-        let mut statistics = state.statistics;
-        increment(&mut statistics.received_frames, 1, "received frames")?;
-        increment(
-            &mut statistics.received_bytes,
-            frame_bytes as u64,
-            "received bytes",
-        )?;
+        record_received(&mut statistics, frame_bytes as u64)?;
+        for _ in 0..drop_count {
+            state.queue.pop_front();
+        }
         state.queued_bytes = queued_bytes;
         state.statistics = statistics;
         state.queue.push_back(captured);
@@ -267,6 +218,33 @@ pub(super) struct CaptureState {
     pub(super) queue: VecDeque<CapturedFrame>,
     pub(super) queued_bytes: usize,
     pub(super) statistics: Statistics,
+}
+
+fn record_overflow(
+    statistics: &mut Statistics,
+    dropped_frames: u64,
+    dropped_bytes: u64,
+) -> Result<(), LiveIoError> {
+    increment(&mut statistics.overflow_events, 1, "overflow events")?;
+    increment(
+        &mut statistics.dropped_frames,
+        dropped_frames,
+        "dropped frames",
+    )?;
+    increment(
+        &mut statistics.dropped_bytes,
+        dropped_bytes,
+        "dropped bytes",
+    )
+}
+
+fn record_received(statistics: &mut Statistics, received_bytes: u64) -> Result<(), LiveIoError> {
+    increment(&mut statistics.received_frames, 1, "received frames")?;
+    increment(
+        &mut statistics.received_bytes,
+        received_bytes,
+        "received bytes",
+    )
 }
 
 fn increment(counter: &mut u64, value: u64, label: &str) -> Result<(), LiveIoError> {

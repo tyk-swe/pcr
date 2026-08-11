@@ -65,9 +65,7 @@ impl Packet {
     where
         L: Layer + 'static,
     {
-        self.layers.push(Box::new(layer));
-        self.invalidate_encoded_payload_lengths();
-        self
+        self.push_boxed(Box::new(layer))
     }
 
     pub fn push_boxed(&mut self, layer: Box<dyn Layer>) -> &mut Self {
@@ -246,8 +244,8 @@ impl Packet {
     }
 
     fn invalidate_encoded_payload_lengths(&mut self) {
-        self.encoded_payload_lengths.clear();
         self.encoded_payload_lengths.resize(self.layers.len(), None);
+        self.encoded_payload_lengths.fill(None);
     }
 }
 
@@ -266,10 +264,14 @@ where
     L: Layer + 'static,
 {
     fn from_iter<T: IntoIterator<Item = L>>(iter: T) -> Self {
-        let mut packet = Self::new();
-        for layer in iter {
-            packet.push(layer);
+        let layers = iter
+            .into_iter()
+            .map(|layer| Box::new(layer) as Box<dyn Layer>)
+            .collect::<Vec<_>>();
+        let encoded_payload_lengths = vec![None; layers.len()];
+        Self {
+            layers,
+            encoded_payload_lengths,
         }
-        packet
     }
 }

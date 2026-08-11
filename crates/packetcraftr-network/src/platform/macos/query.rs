@@ -15,11 +15,9 @@ use socket2::{Domain, Socket, Type};
 
 use super::enumeration::{interfaces, os_error};
 use super::parser::{parse_route_addresses, roundup};
-use crate::{
-    platform::{
-        NativeRouteSnapshot, finish_route, interface_decision, validate_preferred_source_family,
-    },
-    route::{InterfaceId, NativeRouteError, RouteDecision, RouteSelectionReason, find_interface},
+use crate::route::{
+    InterfaceId, NativeRouteError, NativeRouteSnapshot, RouteDecision, RouteSelectionReason,
+    find_interface, finish_route, interface_decision, validate_preferred_source_family,
 };
 
 static ROUTE_SEQUENCE: AtomicI32 = AtomicI32::new(1);

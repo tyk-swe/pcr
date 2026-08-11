@@ -8,7 +8,7 @@ use packetcraftr::{analysis, output};
 use self::arguments::{CliFollowDirection, FollowArgs};
 use super::super::errors::CliError;
 use super::super::rendering::{
-    emit_json, emit_json_compact, emit_stderr_message, emit_stream_record, write_raw,
+    emit_aggregate, emit_stderr_message, emit_stream, emit_stream_record, write_raw,
     write_stdout_line,
 };
 use super::offline_analysis::{
@@ -104,7 +104,7 @@ pub(super) fn run(arguments: FollowArgs, output: output::contract::Format) -> Re
                 )),
             }
         }
-        output::contract::Format::Json => emit_json(&output::envelope::Aggregate::success(
+        output::contract::Format::Json => emit_aggregate(
             output::contract::Command::Follow,
             output::follow::Result::from_summary(
                 selector.transport.into(),
@@ -113,12 +113,12 @@ pub(super) fn run(arguments: FollowArgs, output: output::contract::Format) -> Re
                 retained,
             ),
             Vec::new(),
-        )),
+        ),
         output::contract::Format::Ndjson => {
             // Every direction-selected chunk was already streamed; the
             // terminal record carries only the totals and an empty chunk
             // list, so NDJSON does not retain payloads.
-            emit_json_compact(&output::envelope::Stream::success(
+            emit_stream(
                 output::contract::Command::Follow,
                 sequence,
                 output::follow::Result::from_summary(
@@ -128,8 +128,7 @@ pub(super) fn run(arguments: FollowArgs, output: output::contract::Format) -> Re
                     Vec::new(),
                 ),
                 Vec::new(),
-            ))
-            .map_err(|error| error.at_sequence(sequence))
+            )
         }
         output::contract::Format::Hex | output::contract::Format::Raw => {
             // Standard output stays pure payload, so incompleteness is

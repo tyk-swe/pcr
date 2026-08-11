@@ -5,7 +5,7 @@ use packetcraftr::network::{interface::Provider as _, route::Provider as _};
 use packetcraftr::{network as net, output};
 
 use super::super::errors::CliError;
-use super::super::rendering::{emit_json, optional_display, write_stdout_line};
+use super::super::rendering::{emit_aggregate, optional_display, write_stdout_line};
 
 pub(super) const AFTER_LONG_HELP: &str = r#"Examples:
   packetcraftr routes
@@ -52,11 +52,9 @@ pub(super) fn run(output: output::contract::Format) -> Result<(), CliError> {
             }
             Ok(())
         }
-        output::contract::Format::Json => emit_json(&output::envelope::Aggregate::success(
-            output::contract::Command::Routes,
-            result,
-            Vec::new(),
-        )),
+        output::contract::Format::Json => {
+            emit_aggregate(output::contract::Command::Routes, result, Vec::new())
+        }
         _ => Err(CliError::classified(
             output::contract::Error::UnsupportedFormat {
                 command: output::contract::Command::Routes,

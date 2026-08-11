@@ -5,25 +5,29 @@
 
 #![forbid(unsafe_code)]
 
-use super::super::Error as LiveIoError;
+use crate::{
+    Error as LiveIoError,
+    transmit::{IoSendReport, Layer2Frame},
+};
 
 #[cfg(all(
     feature = "native-layer2",
     any(target_os = "linux", target_os = "macos")
 ))]
-pub(crate) fn system_send_layer2(
-    frame: super::super::transmit::Layer2Frame<'_>,
-) -> Result<super::super::transmit::IoSendReport, LiveIoError> {
-    super::validate_current_interface_identity(&frame.route().plan.route.interface)?;
-    super::pcap_backend::send_layer2(frame)
-}
+use super::pcap_backend as layer2_backend;
 
 #[cfg(all(feature = "native-layer2", windows))]
-pub(crate) fn system_send_layer2(
-    frame: super::super::transmit::Layer2Frame<'_>,
-) -> Result<super::super::transmit::IoSendReport, LiveIoError> {
-    super::validate_current_interface_identity(&frame.route().plan.route.interface)?;
-    super::npcap::send_layer2(frame)
+use super::npcap as layer2_backend;
+
+#[cfg(all(
+    feature = "native-layer2",
+    any(target_os = "linux", target_os = "macos", windows)
+))]
+pub(crate) fn system_send_layer2(frame: Layer2Frame<'_>) -> Result<IoSendReport, LiveIoError> {
+    super::interface_identity::validate_current_interface_identity(
+        &frame.route().plan.route.interface,
+    )?;
+    layer2_backend::send_layer2(frame)
 }
 
 #[cfg(any(
@@ -33,10 +37,9 @@ pub(crate) fn system_send_layer2(
         not(any(target_os = "linux", target_os = "macos", windows))
     )
 ))]
-pub(crate) fn system_send_layer2(
-    _frame: super::super::transmit::Layer2Frame<'_>,
-) -> Result<super::super::transmit::IoSendReport, LiveIoError> {
-    Err(super::unsupported_live_io(
-        "enable the native-layer2 feature on a supported target for Layer 2 injection",
-    ))
+pub(crate) fn system_send_layer2(_frame: Layer2Frame<'_>) -> Result<IoSendReport, LiveIoError> {
+    Err(LiveIoError::Unsupported {
+        message: "enable the native-layer2 feature on a supported target for Layer 2 injection"
+            .to_owned(),
+    })
 }

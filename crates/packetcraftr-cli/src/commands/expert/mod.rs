@@ -10,9 +10,7 @@ use packetcraftr::{analysis, output};
 
 use self::arguments::{CliExpertSeverity, ExpertArgs};
 use super::super::errors::CliError;
-use super::super::rendering::{
-    emit_json, emit_json_compact, emit_stream_record, write_stdout_line,
-};
+use super::super::rendering::{emit_aggregate, emit_stream, emit_stream_record, write_stdout_line};
 use super::offline_analysis::{
     PreparedOfflineAnalysis, open_offline_reader, prepare_offline_analysis,
 };
@@ -117,7 +115,7 @@ pub(super) fn run(arguments: ExpertArgs, output: output::contract::Format) -> Re
             summary.frames_matched,
             summary.frames_read,
         )),
-        output::contract::Format::Json => emit_json(&output::envelope::Aggregate::success(
+        output::contract::Format::Json => emit_aggregate(
             output::contract::Command::Expert,
             output::expert::Result {
                 frames_read: summary.frames_read,
@@ -133,11 +131,11 @@ pub(super) fn run(arguments: ExpertArgs, output: output::contract::Format) -> Re
                 findings: retained,
             },
             Vec::new(),
-        )),
+        ),
         output::contract::Format::Ndjson => {
             // Every finding was already streamed; the terminal record
             // carries only the totals.
-            emit_json_compact(&output::envelope::Stream::success(
+            emit_stream(
                 output::contract::Command::Expert,
                 sequence,
                 output::expert::Result {
@@ -154,8 +152,7 @@ pub(super) fn run(arguments: ExpertArgs, output: output::contract::Format) -> Re
                     findings: Vec::new(),
                 },
                 Vec::new(),
-            ))
-            .map_err(|error| error.at_sequence(sequence))
+            )
         }
         _ => unreachable!("the format contract admits only text, json, and ndjson"),
     }

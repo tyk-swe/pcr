@@ -1,12 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 use std::net::IpAddr;
-use std::time::Duration;
 
-use packetcraftr_packet::frame::Frame;
-use packetcraftr_packet::{Packet, decode::Result as DecodedPacket, diagnostic::Diagnostic};
-
-use crate::Stats;
+use packetcraftr_packet::Packet;
 
 use super::request::ScanTransport;
 
@@ -28,30 +24,9 @@ impl ScanProbe {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ScanBatch {
-    pub probes: Vec<ScanProbe>,
-    pub timeout: Duration,
-    pub(crate) permit: crate::evidence::ExecutionPermit,
-}
-
-#[derive(Clone, Debug)]
-pub struct ScanMatchedResponse {
-    pub request_index: usize,
-    pub response: DecodedPacket,
-    pub latency: Duration,
-}
-
-#[derive(Clone, Debug)]
-pub struct ScanBatchExecution {
-    pub(crate) permit: crate::evidence::ExecutionPermit,
-    pub(crate) sent: Vec<crate::SentPacket>,
-    pub(crate) responses: Vec<ScanMatchedResponse>,
-    pub(crate) unsolicited: Vec<DecodedPacket>,
-    pub(crate) undecoded: Vec<Frame>,
-    pub(crate) diagnostics: Vec<Diagnostic>,
-    pub(crate) stats: Stats,
-}
+pub type ScanBatch = crate::probe::runner::Batch<ScanProbe>;
+pub use crate::exchange::Response as ScanMatchedResponse;
+pub use crate::probe::runner::BatchExecution as ScanBatchExecution;
 
 pub trait ScanExecutor {
     fn execute(

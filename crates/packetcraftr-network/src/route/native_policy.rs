@@ -5,12 +5,12 @@
 
 use std::net::IpAddr;
 
-use crate::interface::{InterfaceAddress, InterfaceInfo};
-
-use super::{
-    DestinationScope, InterfaceId, NativeRouteError, RouteDecision, RouteSelectionReason,
-    validate_native_interface,
+use crate::{
+    interface::{InterfaceAddress, InterfaceInfo},
+    platform::validate_native_interface,
 };
+
+use super::{DestinationScope, InterfaceId, NativeRouteError, RouteDecision, RouteSelectionReason};
 
 pub(crate) struct NativeRouteSnapshot {
     pub interface: InterfaceInfo,

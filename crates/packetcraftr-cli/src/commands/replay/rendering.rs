@@ -12,7 +12,7 @@ use packetcraftr::{
 
 use crate::capture_output::CaptureOutput;
 use crate::errors::CliError;
-use crate::rendering::{emit_json_compact, next_stream_sequence, spaced_hex, write_stdout_line};
+use crate::rendering::{emit_stream_record, spaced_hex, write_stdout_line};
 
 pub(super) fn replay_output_frame(
     evidence: workflow::replay::FrameEvidence,
@@ -45,16 +45,8 @@ pub(super) fn emit_replay_ndjson_evidence(
 ) -> Result<(), workflow::replay::Error> {
     let source_sequence = evidence.source_sequence;
     let result = replay_output_frame(evidence)?;
-    emit_json_compact(&output::envelope::Stream::success(
-        output::contract::Command::Replay,
-        *sequence,
-        result,
-        Vec::new(),
-    ))
-    .map_err(|source| workflow::replay::Error::output(source_sequence, source.message))?;
-    *sequence = next_stream_sequence(*sequence)
-        .map_err(|source| workflow::replay::Error::output(source_sequence, source.message))?;
-    Ok(())
+    emit_stream_record(output::contract::Command::Replay, sequence, result)
+        .map_err(|source| workflow::replay::Error::output(source_sequence, source.message))
 }
 
 pub(super) fn replay_capture_output<W: Write>(

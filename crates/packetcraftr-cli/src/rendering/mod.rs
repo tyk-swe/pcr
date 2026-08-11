@@ -17,10 +17,10 @@ pub(crate) use human::{
 };
 
 pub(crate) use machine::{
-    comma_separated, emit_json, emit_json_compact, optional_display, output_timestamp_text,
-    render_optional, spaced_hex,
+    captured_frame_text, comma_separated, emit_aggregate, emit_aggregate_with_stats, emit_json,
+    emit_json_compact, optional_display, output_timestamp_text, render_optional, spaced_hex,
 };
 
-pub(crate) use sequence::{emit_stream_record, next_stream_sequence};
+pub(crate) use sequence::{emit_stream, emit_stream_record, emit_stream_with_stats};
 
 pub(crate) use style::terminal_document;

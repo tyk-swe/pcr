@@ -5,31 +5,18 @@
 
 #![forbid(unsafe_code)]
 
-#[cfg(all(
-    any(feature = "native-layer2", feature = "native-layer3"),
-    any(target_os = "linux", target_os = "macos", windows)
-))]
-use crate::route::InterfaceId;
-
-#[cfg(all(
-    any(feature = "native-layer2", feature = "native-layer3"),
-    any(target_os = "linux", target_os = "macos", windows)
-))]
 use crate::{
-    Error as LiveIoError, interface::InterfaceInfo, platform::interface_dispatch::system_interfaces,
+    Error as LiveIoError, interface::InterfaceInfo,
+    platform::interface_dispatch::system_interfaces, route::InterfaceId,
 };
 
-#[cfg(all(
-    any(feature = "native-layer2", feature = "native-layer3"),
-    any(target_os = "linux", target_os = "macos", windows)
-))]
-pub(crate) fn validate_current_interface_identity(
+pub(super) fn validate_current_interface_identity(
     expected: &InterfaceId,
 ) -> Result<InterfaceInfo, LiveIoError> {
     let mut interfaces = system_interfaces()?;
     if let Some(position) = interfaces
         .iter()
-        .position(|interface| interface_identity_matches(&interface.id, expected))
+        .position(|interface| interface.id == *expected)
     {
         return Ok(interfaces.swap_remove(position));
     }
@@ -45,12 +32,4 @@ pub(crate) fn validate_current_interface_identity(
             expected.name, expected.index
         ),
     })
-}
-
-#[cfg(all(
-    any(feature = "native-layer2", feature = "native-layer3"),
-    any(target_os = "linux", target_os = "macos", windows)
-))]
-pub(crate) fn interface_identity_matches(actual: &InterfaceId, expected: &InterfaceId) -> bool {
-    actual.index == expected.index && actual.name == expected.name
 }

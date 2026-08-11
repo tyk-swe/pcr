@@ -5,8 +5,9 @@ use packetcraftr::{output, packet};
 
 use crate::errors::CliError;
 use crate::rendering::{
-    comma_separated, emit_json_compact, emit_stream_record, optional_display,
-    output_timestamp_text, render_diagnostics_text, render_optional, spaced_hex, write_stdout_line,
+    captured_frame_text, comma_separated, emit_stream_record, emit_stream_with_stats,
+    optional_display, output_timestamp_text, render_diagnostics_text, render_optional,
+    write_stdout_line,
 };
 
 pub(super) fn render_scan_text(
@@ -49,24 +50,12 @@ pub(super) fn render_scan_text(
                 evidence.reason,
             ))?;
             if let Some(frame) = &evidence.frame {
-                write_stdout_line(format_args!(
-                    "    frame dlt={} caplen={} wirelen={} {}",
-                    frame.link_type,
-                    frame.captured_length,
-                    frame.original_length,
-                    spaced_hex(frame.bytes())
-                ))?;
+                write_stdout_line(format_args!("    frame {}", captured_frame_text(frame)))?;
             }
         }
     }
     for frame in &result.undecoded {
-        write_stdout_line(format_args!(
-            "undecoded dlt={} caplen={} wirelen={} {}",
-            frame.link_type,
-            frame.captured_length,
-            frame.original_length,
-            spaced_hex(frame.bytes())
-        ))?;
+        write_stdout_line(format_args!("undecoded {}", captured_frame_text(frame)))?;
     }
     write_stdout_line(format_args!(
         "scanned {} endpoint(s) with {} completed probe(s), {} byte(s)",
@@ -132,17 +121,14 @@ pub(super) fn render_scan_stream(
             output::scan::Event::Undecoded { frame },
         )?;
     }
-    emit_json_compact(
-        &output::envelope::Stream::success(
-            output::contract::Command::Scan,
-            sequence,
-            output::scan::Event::Complete {
-                target,
-                resolved_addresses,
-            },
-            diagnostics,
-        )
-        .with_stats(stats),
+    emit_stream_with_stats(
+        output::contract::Command::Scan,
+        sequence,
+        output::scan::Event::Complete {
+            target,
+            resolved_addresses,
+        },
+        diagnostics,
+        stats,
     )
-    .map_err(|error| error.at_sequence(sequence))
 }

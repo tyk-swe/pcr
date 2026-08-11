@@ -4,7 +4,9 @@
 use packetcraftr::output;
 
 use crate::errors::CliError;
-use crate::rendering::{emit_json_compact, spaced_hex, write_plain_line, write_stdout_line};
+use crate::rendering::{
+    captured_frame_text, emit_stream, spaced_hex, write_plain_line, write_stdout_line,
+};
 
 pub(super) fn render_read_record(
     result: &output::read::Result,
@@ -14,11 +16,8 @@ pub(super) fn render_read_record(
     match output_format {
         output::contract::Format::Text => match &result.decoded {
             None => write_stdout_line(format_args!(
-                "{sequence}: dlt={} caplen={} wirelen={} {}",
-                result.frame.link_type,
-                result.frame.captured_length,
-                result.frame.original_length,
-                spaced_hex(result.frame.bytes())
+                "{sequence}: {}",
+                captured_frame_text(&result.frame)
             )),
             Some(decoded) => write_stdout_line(format_args!(
                 "{sequence}: dlt={} caplen={} wirelen={} layers={} {}",
@@ -38,13 +37,12 @@ pub(super) fn render_read_record(
         output::contract::Format::Hex => {
             write_plain_line(format_args!("{}", result.frame.bytes_hex))
         }
-        output::contract::Format::Ndjson => emit_json_compact(&output::envelope::Stream::success(
+        output::contract::Format::Ndjson => emit_stream(
             output::contract::Command::Read,
             sequence,
             result,
             Vec::new(),
-        ))
-        .map_err(|error| error.at_sequence(sequence)),
+        ),
         _ => Err(CliError::classified(
             output::contract::Error::UnsupportedFormat {
                 command: output::contract::Command::Read,

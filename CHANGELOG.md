@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** Live scan, traceroute, and DNS executors now share the canonical
+  exchange response-evidence type. Custom DNS executors must set its request
+  index, which is normally zero for the single DNS probe in an exchange. DNS
+  evidence-limit errors now use the shared captured-frame/byte terminology.
 - **Breaking:** Live transmission now returns opaque provider receipts that bind
   semantic builds, materialized routes, exact accepted bytes, byte counts, and
   provider-established monotonic/wall-clock timing. Capture correlation uses

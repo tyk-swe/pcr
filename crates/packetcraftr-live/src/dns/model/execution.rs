@@ -79,11 +79,7 @@ pub struct DnsExchange {
     pub(crate) permit: crate::evidence::ExecutionPermit,
 }
 
-#[derive(Clone, Debug)]
-pub struct DnsMatchedResponse {
-    pub response: DecodedPacket,
-    pub latency: Duration,
-}
+pub use crate::exchange::Response as DnsMatchedResponse;
 
 #[derive(Clone, Debug)]
 pub struct DnsExchangeExecution {

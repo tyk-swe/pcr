@@ -15,7 +15,7 @@ use packetcraftr::{live as client, live as workflow, network as net, output, pac
 
 use self::arguments::DnsArgs;
 use crate::errors::CliError;
-use crate::rendering::emit_json;
+use crate::rendering::emit_aggregate_with_stats;
 use crate::system::{
     DeferredInterface, default_registry_arc, parse_workflow_target, workflow_exchange_options,
 };
@@ -121,14 +121,9 @@ pub(super) fn run(arguments: DnsArgs, output: output::contract::Format) -> Resul
         output::dns::Result::try_from_dns(result).map_err(CliError::classified)?;
     match output {
         output::contract::Format::Text => render_dns_text(result, diagnostics, stats),
-        output::contract::Format::Json => emit_json(
-            &output::envelope::Aggregate::success(
-                output::contract::Command::Dns,
-                result,
-                diagnostics,
-            )
-            .with_stats(stats),
-        ),
+        output::contract::Format::Json => {
+            emit_aggregate_with_stats(output::contract::Command::Dns, result, diagnostics, stats)
+        }
         output::contract::Format::Ndjson => render_dns_stream(result, diagnostics, stats),
         _ => Err(CliError::classified(
             output::contract::Error::UnsupportedFormat {

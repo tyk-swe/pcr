@@ -21,11 +21,10 @@ use windows::Win32::Networking::WinSock::{
 
 use super::adapter::{adapter_index_for, find_windows_adapter};
 use super::enumeration::{adapter_snapshots, win32_error};
-use crate::platform::{
-    NativeRouteSnapshot, finish_route, interface_decision, validate_preferred_source_family,
+use crate::route::{
+    InterfaceId, NativeRouteError, NativeRouteSnapshot, RouteDecision, RouteSelectionReason,
+    finish_route, interface_decision, validate_preferred_source_family,
 };
-use crate::route::InterfaceId;
-use crate::route::{NativeRouteError, RouteDecision, RouteSelectionReason};
 
 pub(in crate::platform) fn route(
     destination: IpAddr,

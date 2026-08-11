@@ -5,46 +5,36 @@
 
 #![forbid(unsafe_code)]
 
-use super::super::Error as LiveIoError;
+use crate::{
+    Error as LiveIoError,
+    capture::{CaptureQueueLimits, CaptureSession},
+    route::PlannedRoute,
+};
 
-pub(crate) fn system_capture(
-    route: &super::super::route::PlannedRoute,
-    limits: super::super::capture::CaptureQueueLimits,
-) -> Result<Box<dyn super::super::capture::CaptureSession>, LiveIoError> {
-    system_capture_inner(route, limits, None)
-}
-
-pub(crate) fn system_capture_with_filter(
-    route: &super::super::route::PlannedRoute,
-    limits: super::super::capture::CaptureQueueLimits,
-    filter: &str,
-) -> Result<Box<dyn super::super::capture::CaptureSession>, LiveIoError> {
-    system_capture_inner(route, limits, Some(filter))
-}
+#[cfg(all(feature = "native-layer2", windows))]
+use super::npcap as capture_backend;
+#[cfg(all(
+    feature = "native-layer2",
+    any(target_os = "linux", target_os = "macos")
+))]
+use super::pcap_backend as capture_backend;
 
 #[cfg(feature = "native-layer2")]
-fn system_capture_inner(
-    route: &super::super::route::PlannedRoute,
-    limits: super::super::capture::CaptureQueueLimits,
+pub(crate) fn system_capture(
+    route: &PlannedRoute,
+    limits: CaptureQueueLimits,
     capture_filter: Option<&str>,
-) -> Result<Box<dyn super::super::capture::CaptureSession>, LiveIoError> {
+) -> Result<Box<dyn CaptureSession>, LiveIoError> {
     let validated_limits = limits.validate()?;
     #[cfg(any(target_os = "linux", target_os = "macos", windows))]
     {
         if let Some(filter) = capture_filter {
             validate_resolver_free_capture_filter(&route.route.interface, filter)?;
         }
-        let interface = super::validate_current_interface_identity(&route.route.interface)?;
+        let interface =
+            super::interface_identity::validate_current_interface_identity(&route.route.interface)?;
         let netmask = capture_netmask(route.route.selected_address, &interface);
-        #[cfg(any(target_os = "linux", target_os = "macos"))]
-        let parts = super::pcap_backend::open_capture(
-            &route.route.interface,
-            validated_limits,
-            capture_filter,
-            netmask,
-        )?;
-        #[cfg(windows)]
-        let parts = super::npcap::open_capture(
+        let parts = capture_backend::open_capture(
             &route.route.interface,
             validated_limits,
             capture_filter,
@@ -58,21 +48,21 @@ fn system_capture_inner(
     #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
     {
         let _ = (route, validated_limits, capture_filter);
-        Err(super::unsupported_live_io(
-            "native Layer 2 capture is unsupported on this target",
-        ))
+        Err(LiveIoError::Unsupported {
+            message: "native Layer 2 capture is unsupported on this target".to_owned(),
+        })
     }
 }
 
 #[cfg(not(feature = "native-layer2"))]
-fn system_capture_inner(
-    _route: &super::super::route::PlannedRoute,
-    _limits: super::super::capture::CaptureQueueLimits,
+pub(crate) fn system_capture(
+    _route: &PlannedRoute,
+    _limits: CaptureQueueLimits,
     _capture_filter: Option<&str>,
-) -> Result<Box<dyn super::super::capture::CaptureSession>, LiveIoError> {
-    Err(super::unsupported_live_io(
-        "enable the native-layer2 feature for native packet capture",
-    ))
+) -> Result<Box<dyn CaptureSession>, LiveIoError> {
+    Err(LiveIoError::Unsupported {
+        message: "enable the native-layer2 feature for native packet capture".to_owned(),
+    })
 }
 
 #[cfg(all(
@@ -80,7 +70,7 @@ fn system_capture_inner(
     any(target_os = "linux", target_os = "macos", windows)
 ))]
 fn validate_resolver_free_capture_filter(
-    interface: &super::super::route::InterfaceId,
+    interface: &crate::route::InterfaceId,
     source: &str,
 ) -> Result<(), LiveIoError> {
     if capture_filter_has_symbolic_operand(source) {
@@ -161,7 +151,8 @@ fn capture_filter_has_symbolic_operand(source: &str) -> bool {
     any(target_os = "linux", target_os = "macos", windows)
 ))]
 fn is_numeric_bpf_atom(atom: &str, allow_ethernet_mac: bool) -> bool {
-    if is_numeric_mac(atom) && !allow_ethernet_mac && is_hostname_shaped_mac(atom) {
+    let numeric_mac = is_numeric_mac(atom);
+    if numeric_mac && !allow_ethernet_mac && is_hostname_shaped_mac(atom) {
         return false;
     }
     atom.bytes().all(|byte| byte.is_ascii_digit())
@@ -173,17 +164,13 @@ fn is_numeric_bpf_atom(atom: &str, allow_ethernet_mac: bool) -> bool {
             })
         || {
             let mut components = atom.split('.');
-            let count = components
-                .by_ref()
-                .take(5)
-                .filter(|component| {
+            let count = components.clone().count();
+            (2..=4).contains(&count)
+                && components.all(|component| {
                     !component.is_empty() && component.bytes().all(|byte| byte.is_ascii_digit())
                 })
-                .count();
-            (2..=4).contains(&count)
-                && count == atom.bytes().filter(|byte| *byte == b'.').count() + 1
         }
-        || is_numeric_mac(atom)
+        || numeric_mac
 }
 
 #[cfg(all(
@@ -191,30 +178,11 @@ fn is_numeric_bpf_atom(atom: &str, allow_ethernet_mac: bool) -> bool {
     any(target_os = "linux", target_os = "macos", windows)
 ))]
 fn is_numeric_mac(atom: &str) -> bool {
-    if atom.len() == 12 && atom.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return true;
-    }
-    for separator in [':', '-', '.'] {
-        let mut components = atom.split(separator);
-        let count = components.clone().count();
-        if count == 6
-            && components.clone().all(|component| {
-                (1..=2).contains(&component.len())
-                    && component.bytes().all(|byte| byte.is_ascii_hexdigit())
-            })
-        {
-            return true;
-        }
-        if separator == '.'
-            && count == 3
-            && components.all(|component| {
-                component.len() == 4 && component.bytes().all(|byte| byte.is_ascii_hexdigit())
-            })
-        {
-            return true;
-        }
-    }
-    false
+    is_plain_mac(atom)
+        || is_hex_sequence(atom, ':', 6, 1, 2)
+        || is_hex_sequence(atom, '-', 6, 1, 2)
+        || is_hex_sequence(atom, '.', 6, 1, 2)
+        || is_hex_sequence(atom, '.', 3, 4, 4)
 }
 
 #[cfg(all(
@@ -222,16 +190,34 @@ fn is_numeric_mac(atom: &str) -> bool {
     any(target_os = "linux", target_os = "macos", windows)
 ))]
 fn is_hostname_shaped_mac(atom: &str) -> bool {
-    (atom.len() == 12 && atom.bytes().all(|byte| byte.is_ascii_hexdigit()))
-        || (atom.split('.').count() == 3
-            && atom.split('.').all(|component| {
-                component.len() == 4 && component.bytes().all(|byte| byte.is_ascii_hexdigit())
-            }))
-        || (atom.split('-').count() == 6
-            && atom.split('-').all(|component| {
-                (1..=2).contains(&component.len())
-                    && component.bytes().all(|byte| byte.is_ascii_hexdigit())
-            }))
+    is_plain_mac(atom) || is_hex_sequence(atom, '.', 3, 4, 4) || is_hex_sequence(atom, '-', 6, 1, 2)
+}
+
+#[cfg(all(
+    feature = "native-layer2",
+    any(target_os = "linux", target_os = "macos", windows)
+))]
+fn is_plain_mac(atom: &str) -> bool {
+    atom.len() == 12 && atom.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+#[cfg(all(
+    feature = "native-layer2",
+    any(target_os = "linux", target_os = "macos", windows)
+))]
+fn is_hex_sequence(
+    atom: &str,
+    separator: char,
+    component_count: usize,
+    minimum_width: usize,
+    maximum_width: usize,
+) -> bool {
+    let mut components = atom.split(separator);
+    components.clone().count() == component_count
+        && components.all(|component| {
+            (minimum_width..=maximum_width).contains(&component.len())
+                && component.bytes().all(|byte| byte.is_ascii_hexdigit())
+        })
 }
 
 #[cfg(all(
@@ -275,7 +261,7 @@ fn is_bpf_keyword(atom: &str) -> bool {
 ))]
 fn capture_netmask(
     selected_address: Option<std::net::IpAddr>,
-    interface: &super::super::interface::InterfaceInfo,
+    interface: &crate::interface::InterfaceInfo,
 ) -> Option<u32> {
     let selected_address = match selected_address {
         Some(std::net::IpAddr::V4(address)) => Some(address),

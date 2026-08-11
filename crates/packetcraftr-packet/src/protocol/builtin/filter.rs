@@ -16,277 +16,67 @@
 
 use crate::registry::{FilterFieldBinding, RegistryBuilder, RegistryError};
 
-/// An alternate name for exactly one reflective field.
-struct Direct {
-    path: &'static str,
-    protocol: &'static str,
-    field: &'static str,
-}
+type Direct = (&'static str, &'static str, &'static str);
+type Either = (&'static str, &'static str, &'static [&'static str]);
 
-/// One flag out of a packed field.
-struct Bits {
-    path: &'static str,
-    protocol: &'static str,
-    field: &'static str,
-    mask: u64,
-}
-
-/// A name that reads either endpoint of a pair.
-struct Either {
-    path: &'static str,
-    protocol: &'static str,
-    fields: &'static [&'static str],
-}
-
+/// Alternate names for exactly one reflective field, as `(path, protocol, field)`.
 const DIRECT: &[Direct] = &[
     // Link layer.
-    Direct {
-        path: "eth.src",
-        protocol: "ethernet",
-        field: "source",
-    },
-    Direct {
-        path: "eth.dst",
-        protocol: "ethernet",
-        field: "destination",
-    },
-    Direct {
-        path: "eth.type",
-        protocol: "ethernet",
-        field: "ether_type",
-    },
-    Direct {
-        path: "vlan.id",
-        protocol: "vlan",
-        field: "vlan_id",
-    },
-    Direct {
-        path: "vlan.dei",
-        protocol: "vlan",
-        field: "drop_eligible",
-    },
-    Direct {
-        path: "vlan.etype",
-        protocol: "vlan",
-        field: "ether_type",
-    },
-    Direct {
-        path: "qinq.id",
-        protocol: "vlan8021ad",
-        field: "vlan_id",
-    },
-    Direct {
-        path: "qinq.etype",
-        protocol: "vlan8021ad",
-        field: "ether_type",
-    },
+    ("eth.src", "ethernet", "source"),
+    ("eth.dst", "ethernet", "destination"),
+    ("eth.type", "ethernet", "ether_type"),
+    ("vlan.id", "vlan", "vlan_id"),
+    ("vlan.dei", "vlan", "drop_eligible"),
+    ("vlan.etype", "vlan", "ether_type"),
+    ("qinq.id", "vlan8021ad", "vlan_id"),
+    ("qinq.etype", "vlan8021ad", "ether_type"),
     // ARP, whose canonical names describe the roles rather than the wire.
-    Direct {
-        path: "arp.opcode",
-        protocol: "arp",
-        field: "operation",
-    },
-    Direct {
-        path: "arp.src.hw_mac",
-        protocol: "arp",
-        field: "sender_hardware",
-    },
-    Direct {
-        path: "arp.src.proto_ipv4",
-        protocol: "arp",
-        field: "sender_protocol",
-    },
-    Direct {
-        path: "arp.dst.hw_mac",
-        protocol: "arp",
-        field: "target_hardware",
-    },
-    Direct {
-        path: "arp.dst.proto_ipv4",
-        protocol: "arp",
-        field: "target_protocol",
-    },
+    ("arp.opcode", "arp", "operation"),
+    ("arp.src.hw_mac", "arp", "sender_hardware"),
+    ("arp.src.proto_ipv4", "arp", "sender_protocol"),
+    ("arp.dst.hw_mac", "arp", "target_hardware"),
+    ("arp.dst.proto_ipv4", "arp", "target_protocol"),
     // IPv4.
-    Direct {
-        path: "ip.src",
-        protocol: "ipv4",
-        field: "source",
-    },
-    Direct {
-        path: "ip.dst",
-        protocol: "ipv4",
-        field: "destination",
-    },
-    Direct {
-        path: "ip.proto",
-        protocol: "ipv4",
-        field: "protocol",
-    },
-    Direct {
-        path: "ip.len",
-        protocol: "ipv4",
-        field: "total_length",
-    },
-    Direct {
-        path: "ip.id",
-        protocol: "ipv4",
-        field: "identification",
-    },
-    Direct {
-        path: "ip.dsfield",
-        protocol: "ipv4",
-        field: "dscp_ecn",
-    },
-    Direct {
-        path: "ip.frag_offset",
-        protocol: "ipv4",
-        field: "fragment_offset",
-    },
-    Direct {
-        path: "ip.flags.df",
-        protocol: "ipv4",
-        field: "dont_fragment",
-    },
-    Direct {
-        path: "ip.flags.mf",
-        protocol: "ipv4",
-        field: "more_fragments",
-    },
-    Direct {
-        path: "ip.flags.rb",
-        protocol: "ipv4",
-        field: "reserved_flag",
-    },
+    ("ip.src", "ipv4", "source"),
+    ("ip.dst", "ipv4", "destination"),
+    ("ip.proto", "ipv4", "protocol"),
+    ("ip.len", "ipv4", "total_length"),
+    ("ip.id", "ipv4", "identification"),
+    ("ip.dsfield", "ipv4", "dscp_ecn"),
+    ("ip.frag_offset", "ipv4", "fragment_offset"),
+    ("ip.flags.df", "ipv4", "dont_fragment"),
+    ("ip.flags.mf", "ipv4", "more_fragments"),
+    ("ip.flags.rb", "ipv4", "reserved_flag"),
     // IPv6.
-    Direct {
-        path: "ipv6.src",
-        protocol: "ipv6",
-        field: "source",
-    },
-    Direct {
-        path: "ipv6.dst",
-        protocol: "ipv6",
-        field: "destination",
-    },
-    Direct {
-        path: "ipv6.hlim",
-        protocol: "ipv6",
-        field: "hop_limit",
-    },
-    Direct {
-        path: "ipv6.plen",
-        protocol: "ipv6",
-        field: "payload_length",
-    },
-    Direct {
-        path: "ipv6.nxt",
-        protocol: "ipv6",
-        field: "next_header",
-    },
-    Direct {
-        path: "ipv6.tclass",
-        protocol: "ipv6",
-        field: "traffic_class",
-    },
-    Direct {
-        path: "ipv6.flow",
-        protocol: "ipv6",
-        field: "flow_label",
-    },
+    ("ipv6.src", "ipv6", "source"),
+    ("ipv6.dst", "ipv6", "destination"),
+    ("ipv6.hlim", "ipv6", "hop_limit"),
+    ("ipv6.plen", "ipv6", "payload_length"),
+    ("ipv6.nxt", "ipv6", "next_header"),
+    ("ipv6.tclass", "ipv6", "traffic_class"),
+    ("ipv6.flow", "ipv6", "flow_label"),
     // IPv6 fragmentation and segment routing.
-    Direct {
-        path: "frag6.offset",
-        protocol: "ipv6_fragment",
-        field: "fragment_offset",
-    },
-    Direct {
-        path: "frag6.id",
-        protocol: "ipv6_fragment",
-        field: "identification",
-    },
-    Direct {
-        path: "frag6.more",
-        protocol: "ipv6_fragment",
-        field: "more_fragments",
-    },
-    Direct {
-        path: "srh.left",
-        protocol: "ipv6_srh",
-        field: "segments_left",
-    },
+    ("frag6.offset", "ipv6_fragment", "fragment_offset"),
+    ("frag6.id", "ipv6_fragment", "identification"),
+    ("frag6.more", "ipv6_fragment", "more_fragments"),
+    ("srh.left", "ipv6_srh", "segments_left"),
     // Transport.
-    Direct {
-        path: "tcp.srcport",
-        protocol: "tcp",
-        field: "source_port",
-    },
-    Direct {
-        path: "tcp.dstport",
-        protocol: "tcp",
-        field: "destination_port",
-    },
-    Direct {
-        path: "tcp.seq",
-        protocol: "tcp",
-        field: "sequence",
-    },
-    Direct {
-        path: "tcp.ack",
-        protocol: "tcp",
-        field: "acknowledgment",
-    },
-    Direct {
-        path: "tcp.window_size",
-        protocol: "tcp",
-        field: "window",
-    },
-    Direct {
-        path: "tcp.urgent",
-        protocol: "tcp",
-        field: "urgent_pointer",
-    },
-    Direct {
-        path: "udp.srcport",
-        protocol: "udp",
-        field: "source_port",
-    },
-    Direct {
-        path: "udp.dstport",
-        protocol: "udp",
-        field: "destination_port",
-    },
-    Direct {
-        path: "sctp.srcport",
-        protocol: "sctp",
-        field: "source_port",
-    },
-    Direct {
-        path: "sctp.dstport",
-        protocol: "sctp",
-        field: "destination_port",
-    },
-    Direct {
-        path: "sctp.vtag",
-        protocol: "sctp",
-        field: "verification_tag",
-    },
+    ("tcp.srcport", "tcp", "source_port"),
+    ("tcp.dstport", "tcp", "destination_port"),
+    ("tcp.seq", "tcp", "sequence"),
+    ("tcp.ack", "tcp", "acknowledgment"),
+    ("tcp.window_size", "tcp", "window"),
+    ("tcp.urgent", "tcp", "urgent_pointer"),
+    ("udp.srcport", "udp", "source_port"),
+    ("udp.dstport", "udp", "destination_port"),
+    ("sctp.srcport", "sctp", "source_port"),
+    ("sctp.dstport", "sctp", "destination_port"),
+    ("sctp.vtag", "sctp", "verification_tag"),
     // Tunnelling.
-    Direct {
-        path: "gre.proto",
-        protocol: "gre",
-        field: "protocol_type",
-    },
+    ("gre.proto", "gre", "protocol_type"),
     // Conventional MPLS aliases.
-    Direct {
-        path: "mpls.exp",
-        protocol: "mpls",
-        field: "traffic_class",
-    },
-    Direct {
-        path: "mpls.bottom",
-        protocol: "mpls",
-        field: "bottom_of_stack",
-    },
+    ("mpls.exp", "mpls", "traffic_class"),
+    ("mpls.bottom", "mpls", "bottom_of_stack"),
     // Canonical VXLAN and GENEVE VNI paths need no aliases.
 ];
 
@@ -296,68 +86,18 @@ const DIRECT: &[Direct] = &[
 /// awkward to compare directly; each entry here reads a single flag as `0` or
 /// `1`. Bit values follow RFC 9293, so bit 8 is the accurate-ECN bit
 /// historically named NS.
-const BITS: &[Bits] = &[
-    Bits {
-        path: "tcp.flags.fin",
-        protocol: "tcp",
-        field: "flags",
-        mask: 0x001,
-    },
-    Bits {
-        path: "tcp.flags.syn",
-        protocol: "tcp",
-        field: "flags",
-        mask: 0x002,
-    },
-    Bits {
-        path: "tcp.flags.reset",
-        protocol: "tcp",
-        field: "flags",
-        mask: 0x004,
-    },
-    Bits {
-        path: "tcp.flags.push",
-        protocol: "tcp",
-        field: "flags",
-        mask: 0x008,
-    },
-    Bits {
-        path: "tcp.flags.ack",
-        protocol: "tcp",
-        field: "flags",
-        mask: 0x010,
-    },
-    Bits {
-        path: "tcp.flags.urg",
-        protocol: "tcp",
-        field: "flags",
-        mask: 0x020,
-    },
-    Bits {
-        path: "tcp.flags.ece",
-        protocol: "tcp",
-        field: "flags",
-        mask: 0x040,
-    },
-    Bits {
-        path: "tcp.flags.cwr",
-        protocol: "tcp",
-        field: "flags",
-        mask: 0x080,
-    },
-    Bits {
-        path: "tcp.flags.ae",
-        protocol: "tcp",
-        field: "flags",
-        mask: 0x100,
-    },
+const TCP_FLAG_BITS: &[(&str, u64)] = &[
+    ("tcp.flags.fin", 0x001),
+    ("tcp.flags.syn", 0x002),
+    ("tcp.flags.reset", 0x004),
+    ("tcp.flags.push", 0x008),
+    ("tcp.flags.ack", 0x010),
+    ("tcp.flags.urg", 0x020),
+    ("tcp.flags.ece", 0x040),
+    ("tcp.flags.cwr", 0x080),
+    ("tcp.flags.ae", 0x100),
     // Keep `ns` as the conventional alias for `ae`.
-    Bits {
-        path: "tcp.flags.ns",
-        protocol: "tcp",
-        field: "flags",
-        mask: 0x100,
-    },
+    ("tcp.flags.ns", 0x100),
 ];
 
 /// Paths that read either endpoint of a pair.
@@ -367,67 +107,43 @@ const BITS: &[Bits] = &[
 /// holds whenever *either* endpoint differs; reach for `tcp.srcport` or
 /// `tcp.dstport` when the direction matters.
 const EITHER: &[Either] = &[
-    Either {
-        path: "eth.addr",
-        protocol: "ethernet",
-        fields: &["source", "destination"],
-    },
-    Either {
-        path: "ip.addr",
-        protocol: "ipv4",
-        fields: &["source", "destination"],
-    },
-    Either {
-        path: "ipv6.addr",
-        protocol: "ipv6",
-        fields: &["source", "destination"],
-    },
-    Either {
-        path: "tcp.port",
-        protocol: "tcp",
-        fields: &["source_port", "destination_port"],
-    },
-    Either {
-        path: "udp.port",
-        protocol: "udp",
-        fields: &["source_port", "destination_port"],
-    },
-    Either {
-        path: "sctp.port",
-        protocol: "sctp",
-        fields: &["source_port", "destination_port"],
-    },
+    ("eth.addr", "ethernet", &["source", "destination"]),
+    ("ip.addr", "ipv4", &["source", "destination"]),
+    ("ipv6.addr", "ipv6", &["source", "destination"]),
+    ("tcp.port", "tcp", &["source_port", "destination_port"]),
+    ("udp.port", "udp", &["source_port", "destination_port"]),
+    ("sctp.port", "sctp", &["source_port", "destination_port"]),
 ];
 
 /// Registers every conventional spelling for the built-in protocols.
 pub(super) fn register_filter_fields(builder: &mut RegistryBuilder) -> Result<(), RegistryError> {
-    for entry in DIRECT {
+    for &(path, protocol, field) in DIRECT {
         builder.bind_filter_field(
-            entry.path,
+            path,
             FilterFieldBinding::Direct {
-                protocol: entry.protocol.into(),
-                field: entry.field,
+                protocol: protocol.into(),
+                field,
             },
         )?;
     }
-    for entry in BITS {
+    for &(path, mask) in TCP_FLAG_BITS {
         builder.bind_filter_field(
-            entry.path,
+            path,
             FilterFieldBinding::Bits {
-                protocol: entry.protocol.into(),
-                field: entry.field,
-                mask: entry.mask,
+                protocol: "tcp".into(),
+                field: "flags",
+                mask,
                 // Shift flags to compare as 0 or 1.
-                shift: entry.mask.trailing_zeros(),
+                shift: mask.trailing_zeros(),
             },
         )?;
     }
-    for entry in EITHER {
+    for &(path, protocol, fields) in EITHER {
         builder.bind_filter_field(
-            entry.path,
+            path,
             FilterFieldBinding::Either {
-                protocol: entry.protocol.into(),
-                fields: entry.fields,
+                protocol: protocol.into(),
+                fields,
             },
         )?;
     }

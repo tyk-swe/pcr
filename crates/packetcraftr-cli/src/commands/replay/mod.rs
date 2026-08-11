@@ -22,7 +22,9 @@ use self::arguments::ReplayArgs;
 use crate::errors::CliError;
 use crate::filtering::{self, Capabilities, FrameSelector};
 use crate::input::validate_capture_stream_limits;
-use crate::rendering::{capture_file_format, emit_json, emit_json_compact, write_stdout_line};
+use crate::rendering::{
+    capture_file_format, emit_aggregate_with_stats, emit_stream_with_stats, write_stdout_line,
+};
 use crate::system::default_registry_arc;
 
 use conversion::{replay_timing, requested_replay_interface};
@@ -144,14 +146,7 @@ pub(super) fn run(arguments: ReplayArgs, output: output::contract::Format) -> Re
                 options.link_mode,
                 frames,
             );
-            emit_json(
-                &output::envelope::Aggregate::success(
-                    output::contract::Command::Replay,
-                    result,
-                    Vec::new(),
-                )
-                .with_stats(stats),
-            )
+            emit_aggregate_with_stats(output::contract::Command::Replay, result, Vec::new(), stats)
         }
         output::contract::Format::Ndjson => {
             let mut sequence = 0_u64;
@@ -171,16 +166,13 @@ pub(super) fn run(arguments: ReplayArgs, output: output::contract::Format) -> Re
                 options.link_mode,
                 Vec::new(),
             );
-            emit_json_compact(
-                &output::envelope::Stream::success(
-                    output::contract::Command::Replay,
-                    sequence,
-                    result,
-                    Vec::new(),
-                )
-                .with_stats(stats),
+            emit_stream_with_stats(
+                output::contract::Command::Replay,
+                sequence,
+                result,
+                Vec::new(),
+                stats,
             )
-            .map_err(|error| error.at_sequence(sequence))
         }
         output::contract::Format::Pcap | output::contract::Format::Pcapng => {
             let format = capture_file_format(output)?;

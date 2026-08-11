@@ -14,8 +14,8 @@ use packetcraftr::{
 use self::arguments::SendArgs;
 use super::super::errors::CliError;
 use super::super::rendering::{
-    emit_json, render_diagnostics_text, write_capture_file, write_plain_line, write_raw,
-    write_stdout_line,
+    emit_aggregate_with_stats, render_diagnostics_text, write_capture_file, write_plain_line,
+    write_raw, write_stdout_line,
 };
 use super::super::system::{default_registry_arc, prepare_route_request, system_client};
 
@@ -60,14 +60,9 @@ pub(super) fn run(arguments: SendArgs, output: output::contract::Format) -> Resu
             ))?;
             render_diagnostics_text(&diagnostics)
         }
-        output::contract::Format::Json => emit_json(
-            &output::envelope::Aggregate::success(
-                output::contract::Command::Send,
-                result,
-                diagnostics,
-            )
-            .with_stats(stats),
-        ),
+        output::contract::Format::Json => {
+            emit_aggregate_with_stats(output::contract::Command::Send, result, diagnostics, stats)
+        }
         output::contract::Format::Hex => {
             write_plain_line(format_args!("{}", result.frame.bytes_hex))
         }

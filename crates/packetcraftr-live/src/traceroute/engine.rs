@@ -11,15 +11,13 @@ use packetcraftr_packet::{
     registry::Registry,
 };
 
+use crate::BoundaryError;
 use crate::clock::Clock;
 use crate::probe::evidence::{
     EvidenceBudget, ResponseSelector, retain_evidence, retain_undecoded_frames,
 };
-use crate::probe::runner::{
-    ProbeBatch, ProbeExecution, ProbeLifecycle, ProbeRunConfig, run_batches,
-};
+use crate::probe::runner::{ProbeBatch, ProbeLifecycle, ProbeRunConfig, run_batches};
 use crate::target::{Authorizer, approve_operation, resolve_selected};
-use crate::{BoundaryError, Stats};
 
 use super::classification::classify_traceroute_response;
 use super::error::TracerouteError;
@@ -392,11 +390,5 @@ impl ProbeBatch for TracerouteBatch {
 
     fn probe_count(&self) -> usize {
         self.probes.len()
-    }
-}
-
-impl ProbeExecution for TracerouteBatchExecution {
-    fn stats(&self) -> &Stats {
-        &self.stats
     }
 }

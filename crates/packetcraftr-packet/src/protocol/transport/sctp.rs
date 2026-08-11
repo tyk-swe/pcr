@@ -17,7 +17,7 @@ use crate::{
 
 use super::super::common::{
     ValueExpectation, aliased_fields, invalid, make_layer, payload_without_padding, protocol,
-    truncated, validate_dependent, wrong_layer,
+    resolve_fixed, truncated, wrong_layer,
 };
 
 const SCTP_HEADER_LEN: usize = 12;
@@ -115,13 +115,14 @@ impl LayerCodec for SctpCodec {
         header[2..4].copy_from_slice(&layer.destination_port.to_be_bytes());
         header[4..8].copy_from_slice(&layer.verification_tag.to_be_bytes());
         let expected_checksum = crc32c_parts(&[&header, covered_payload]);
-        let (checksum, materialized_checksum) = resolve_u32(
+        let (checksum, materialized_checksum) = resolve_fixed(
             "sctp",
             "checksum",
             &layer.checksum,
             ValueExpectation::Required(expected_checksum),
             context.mode,
             &mut diagnostics,
+            checksum_from_wire,
         )?;
         header[8..12].copy_from_slice(&checksum_to_wire(checksum));
 
@@ -305,45 +306,6 @@ fn validate_chunks(payload: &[u8], require_zero_padding: bool) -> Result<(), Str
         ));
     }
     Ok(())
-}
-
-fn resolve_u32(
-    name: &str,
-    field: &str,
-    value: &WireValue<u32>,
-    expectation: ValueExpectation<u32>,
-    mode: BuildMode,
-    diagnostics: &mut Vec<Diagnostic>,
-) -> Result<(u32, WireValue<u32>), CodecError> {
-    let expected = match expectation {
-        ValueExpectation::Required(value) | ValueExpectation::Suggested(value) => value,
-    };
-    match value {
-        WireValue::Auto => Ok((expected, WireValue::Exact(expected))),
-        WireValue::Exact(actual) => {
-            validate_dependent(name, field, *actual, expectation, mode, diagnostics)?;
-            Ok((*actual, value.clone()))
-        }
-        WireValue::Raw(bytes) => {
-            if mode == BuildMode::Strict {
-                return Err(invalid(
-                    name,
-                    format!("raw {field} requires permissive build mode"),
-                ));
-            }
-            let raw: [u8; 4] = bytes.as_ref().try_into().map_err(|_| {
-                invalid(name, format!("raw {field} must contain exactly four bytes"))
-            })?;
-            diagnostics.push(
-                Diagnostic::warning(
-                    "build.raw_dependent_field",
-                    format!("emitting raw {field} value"),
-                )
-                .at_field(field),
-            );
-            Ok((checksum_from_wire(raw), value.clone()))
-        }
-    }
 }
 
 const fn crc32c_table() -> [u32; 256] {

@@ -11,10 +11,12 @@ use self::{
     query::{query_interfaces, query_route},
     worker::with_netlink,
 };
-use super::{find_interface, interface_decision, validate_preferred_source_family};
 use crate::{
     interface::InterfaceInfo,
-    route::{InterfaceId, NativeRouteError, RouteDecision},
+    route::{
+        InterfaceId, NativeRouteError, RouteDecision, find_interface, interface_decision,
+        validate_preferred_source_family,
+    },
 };
 
 mod query;

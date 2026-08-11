@@ -5,27 +5,33 @@
 
 #![forbid(unsafe_code)]
 
-use super::super::{Error as LiveIoError, interface::InterfaceInfo};
+use crate::{Error as LiveIoError, interface::InterfaceInfo};
 
 #[cfg(all(feature = "native-route", target_os = "linux"))]
-pub(crate) fn system_interfaces() -> Result<Vec<InterfaceInfo>, LiveIoError> {
-    super::linux::interfaces()
-        .and_then(super::validate_native_interfaces)
-        .map_err(super::interface_error)
-}
+use super::linux as native;
 
 #[cfg(all(feature = "native-route", target_os = "macos"))]
-pub(crate) fn system_interfaces() -> Result<Vec<InterfaceInfo>, LiveIoError> {
-    super::macos::interfaces()
-        .and_then(super::validate_native_interfaces)
-        .map_err(super::interface_error)
-}
+use super::macos as native;
 
 #[cfg(all(any(feature = "native-interfaces", feature = "native-route"), windows))]
+use super::windows as native;
+
+#[cfg(any(
+    all(feature = "native-route", target_os = "linux"),
+    all(feature = "native-route", target_os = "macos"),
+    all(any(feature = "native-interfaces", feature = "native-route"), windows)
+))]
 pub(crate) fn system_interfaces() -> Result<Vec<InterfaceInfo>, LiveIoError> {
-    super::windows::interfaces()
-        .and_then(super::validate_native_interfaces)
-        .map_err(super::interface_error)
+    native::interfaces()
+        .and_then(super::interface_validation::validate_native_interfaces)
+        .map_err(|error| match error {
+            crate::route::NativeRouteError::Unsupported { message } => {
+                LiveIoError::Unsupported { message }
+            }
+            error => LiveIoError::InterfaceDiscovery {
+                message: error.to_string(),
+            },
+        })
 }
 
 #[cfg(all(
@@ -34,9 +40,9 @@ pub(crate) fn system_interfaces() -> Result<Vec<InterfaceInfo>, LiveIoError> {
     not(feature = "native-interfaces")
 ))]
 pub(crate) fn system_interfaces() -> Result<Vec<InterfaceInfo>, LiveIoError> {
-    Err(super::unsupported_live_io(
-        "native route and interface discovery is unsupported on this target",
-    ))
+    Err(LiveIoError::Unsupported {
+        message: "native route and interface discovery is unsupported on this target".to_owned(),
+    })
 }
 
 #[cfg(all(
@@ -53,7 +59,8 @@ pub(crate) fn system_interfaces() -> Result<Vec<InterfaceInfo>, LiveIoError> {
 
 #[cfg(all(not(feature = "native-route"), not(feature = "native-interfaces")))]
 pub(crate) fn system_interfaces() -> Result<Vec<InterfaceInfo>, LiveIoError> {
-    Err(super::unsupported_live_io(
-        "interface enumeration is unavailable without the native-interfaces feature",
-    ))
+    Err(LiveIoError::Unsupported {
+        message: "interface enumeration is unavailable without the native-interfaces feature"
+            .to_owned(),
+    })
 }

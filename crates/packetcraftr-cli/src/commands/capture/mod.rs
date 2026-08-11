@@ -24,8 +24,8 @@ use crate::capture_output::CaptureOutput;
 use crate::errors::CliError;
 use crate::filtering::{self, Capabilities, FrameSelector};
 use crate::rendering::{
-    capture_file_format, emit_json_compact, render_diagnostics_text, spaced_hex, write_plain_line,
-    write_stdout_line,
+    capture_file_format, captured_frame_text, emit_stream, emit_stream_with_stats,
+    render_diagnostics_text, write_plain_line, write_stdout_line,
 };
 use crate::system::{default_registry_arc, prepare_route_request, system_client};
 
@@ -90,13 +90,7 @@ pub(super) fn run(
                 |frame, sequence| {
                     let frame = output::capture::Frame::try_from_frame(frame)
                         .map_err(CliError::classified)?;
-                    write_stdout_line(format_args!(
-                        "{sequence}: dlt={} caplen={} wirelen={} {}",
-                        frame.link_type,
-                        frame.captured_length,
-                        frame.original_length,
-                        spaced_hex(frame.bytes())
-                    ))
+                    write_stdout_line(format_args!("{sequence}: {}", captured_frame_text(&frame)))
                 },
             )?;
             match &selector {
@@ -140,26 +134,22 @@ pub(super) fn run(
                 |frame, sequence| {
                     let frame = output::capture::Frame::try_from_frame(frame)
                         .map_err(CliError::classified)?;
-                    emit_json_compact(&output::envelope::Stream::success(
+                    emit_stream(
                         output::contract::Command::Capture,
                         sequence,
                         output::capture::Event::Frame { frame },
                         Vec::new(),
-                    ))
-                    .map_err(|error| error.at_sequence(sequence))
+                    )
                 },
             )?;
             let sequence = outcome.stats.packets_completed;
-            emit_json_compact(
-                &output::envelope::Stream::success(
-                    output::contract::Command::Capture,
-                    sequence,
-                    output::capture::Event::Complete { frames: sequence },
-                    outcome.diagnostics,
-                )
-                .with_stats(outcome.stats),
+            emit_stream_with_stats(
+                output::contract::Command::Capture,
+                sequence,
+                output::capture::Event::Complete { frames: sequence },
+                outcome.diagnostics,
+                outcome.stats,
             )
-            .map_err(|error| error.at_sequence(sequence))
         }
         output::contract::Format::Pcap | output::contract::Format::Pcapng => {
             let format = capture_file_format(output)?;

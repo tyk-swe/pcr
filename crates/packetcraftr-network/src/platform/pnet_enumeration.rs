@@ -5,7 +5,7 @@
 
 #![forbid(unsafe_code)]
 
-use super::super::{
+use crate::{
     interface::{InterfaceAddress, InterfaceFlags, InterfaceInfo},
     link::{Capability, MacAddress},
     route::InterfaceId,

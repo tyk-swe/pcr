@@ -6,6 +6,7 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::time::Duration;
 
 use packetcraftr_packet::protocol::builtin::registry as default_registry;
+use packetcraftr_packet::{Packet, decode::Result as DecodedPacket, frame::Frame, frame::LinkType};
 
 use crate::clock::Clock;
 use crate::target::{Authorized, Authorizer, Family, Target};
@@ -73,6 +74,27 @@ impl DnsExecutor for TrustedReceiptExecutor {
     }
 }
 
+struct InvalidResponseIndexExecutor;
+
+impl DnsExecutor for InvalidResponseIndexExecutor {
+    fn execute(&mut self, exchange: &DnsExchange) -> Result<DnsExchangeExecution, BoundaryError> {
+        let mut execution = TrustedReceiptExecutor.execute(exchange)?;
+        let frame = Frame::without_timestamp(LinkType::RAW, &[0_u8][..]).expect("evidence frame");
+        execution.responses.push(crate::exchange::Response {
+            request_index: 1,
+            response: DecodedPacket {
+                packet: Packet::new(),
+                original: frame.bytes().clone(),
+                frame,
+                layout: packetcraftr_packet::layout::Packet::default(),
+                diagnostics: Vec::new(),
+            },
+            latency: Duration::ZERO,
+        });
+        Ok(execution)
+    }
+}
+
 fn dns_request(address: IpAddr) -> DnsRequest {
     DnsRequest {
         server: Target::Address(address),
@@ -101,4 +123,23 @@ fn dns_executor_success_uses_trusted_sent_timestamp() {
         &mut NoopClock,
     )
     .expect("trusted receipt provides send timing");
+}
+
+#[test]
+fn dns_executor_rejects_nonzero_response_index() {
+    let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 53));
+    let error = dns(
+        &dns_request(address),
+        &mut SingleAddressAuthorizer { address },
+        &default_registry().expect("built-in registry"),
+        &mut InvalidResponseIndexExecutor,
+        &mut NoopClock,
+    )
+    .expect_err("nonzero DNS response index must be rejected");
+
+    assert!(
+        error
+            .to_string()
+            .contains("response for an unknown request index")
+    );
 }

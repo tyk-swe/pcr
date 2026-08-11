@@ -5,7 +5,7 @@
 
 use std::time::Duration;
 
-use packetcraftr_packet::budget::{Deadline, DeadlineExceeded};
+use packetcraftr_packet::budget::Deadline;
 use packetcraftr_packet::{diagnostic::push_diagnostic_once, registry::Registry};
 
 use crate::Stats;
@@ -14,7 +14,7 @@ use crate::probe::evidence::{
     EvidenceBudget, ResponseCandidate, push_undecoded_limit_diagnostic, response_within_deadline,
     retain_evidence, select_response_candidate,
 };
-use crate::target::Authorizer;
+use crate::target::{Authorizer, approve_operation, resolve_selected};
 
 use super::error::DnsError;
 use super::evidence::validate_dns_execution;
@@ -82,10 +82,13 @@ where
     // This complete-operation gate deliberately precedes resolution and probe
     // construction. The authorizer's resolver path independently enforces the
     // declared hostname before every resolver side effect.
-    enforce_deadline(&deadline)?;
-    let authorization = authorizer.authorize_operation(packet_count, maximum_wire_bytes);
-    enforce_deadline(&deadline)?;
-    authorization?;
+    approve_operation(
+        authorizer,
+        packet_count,
+        maximum_wire_bytes,
+        &deadline,
+        duration_error,
+    )?;
 
     let mut result = DnsResult {
         server: request.server.to_string(),
@@ -106,15 +109,14 @@ where
     let mut scheduled_delay = Duration::ZERO;
 
     for attempt in 1..=request.attempts {
-        enforce_deadline(&deadline)?;
         if attempt != 1 {
-            enforce_deadline(&deadline)?;
-            deadline.start_accounting(delay).map_err(duration_limit)?;
+            deadline.check()?;
+            deadline.start_accounting(delay)?;
             clock.sleep(delay).map_err(|source| DnsError::Clock {
                 attempt,
                 message: source.to_string(),
             })?;
-            deadline.account(delay).map_err(duration_limit)?;
+            deadline.account(delay)?;
             scheduled_delay =
                 scheduled_delay
                     .checked_add(delay)
@@ -123,21 +125,15 @@ where
                         limit: request.limits.max_duration,
                     })?;
         }
-        enforce_deadline(&deadline)?;
-        let resolved = authorizer.resolve_and_authorize(&request.server);
-        enforce_deadline(&deadline)?;
-        let resolved = resolved?;
-        result.server = resolved.declared.to_string();
-        let addresses = resolved
-            .addresses
-            .into_iter()
-            .filter(|address| request.address_family.accepts(*address))
-            .fold(Vec::new(), |mut unique, address| {
-                if !unique.contains(&address) {
-                    unique.push(address);
-                }
-                unique
-            });
+        let resolved = resolve_selected(
+            authorizer,
+            &request.server,
+            request.address_family,
+            &deadline,
+            duration_error,
+        )?;
+        result.server = resolved.declared;
+        let addresses = resolved.addresses;
         if addresses.is_empty() {
             return Err(DnsError::Family {
                 family: request.address_family.label(),
@@ -161,9 +157,7 @@ where
             query_type: request.query_type,
             query: query.clone(),
         };
-        deadline
-            .start_accounting(Duration::ZERO)
-            .map_err(duration_limit)?;
+        deadline.start_accounting(Duration::ZERO)?;
         let execution_request = DnsExchange {
             probe: probe.clone(),
             timeout: request.timeout,
@@ -171,7 +165,7 @@ where
             permit: crate::evidence::ExecutionPermit::new(),
         };
         let execution = executor.execute(&execution_request);
-        enforce_deadline(&deadline)?;
+        deadline.check()?;
         let execution = execution.map_err(|source| DnsError::Execution { attempt, source })?;
         if execution.permit != execution_request.permit {
             return Err(DnsError::InvalidEvidence {
@@ -179,11 +173,9 @@ where
                 message: "executor returned evidence for a different execution permit".to_owned(),
             });
         }
-        deadline
-            .account(execution.stats.elapsed)
-            .map_err(duration_limit)?;
+        deadline.account(execution.stats.elapsed)?;
         validate_dns_execution(&probe, &execution, request.limits, request.timeout)?;
-        enforce_deadline(&deadline)?;
+        deadline.check()?;
         result
             .stats
             .checked_add(&execution.stats)
@@ -196,7 +188,7 @@ where
         let sent_packet = &execution.sent.built().packet;
         let mut best: Option<ResponseCandidate<'_, DnsResponseClassification>> = None;
         for matched in &execution.responses {
-            enforce_deadline(&deadline)?;
+            deadline.check()?;
             if response_within_deadline(matched.latency, request.timeout)
                 && let Some(classification) = classify_dns_response(
                     registry,
@@ -218,7 +210,7 @@ where
                     |_| (),
                 );
             }
-            enforce_deadline(&deadline)?;
+            deadline.check()?;
         }
 
         let evidence = if let Some(candidate) = best {
@@ -306,7 +298,7 @@ where
         // Correlated response evidence has priority over ambient undecodable
         // frames under the one operation-wide retention budget.
         for frame in execution.undecoded {
-            enforce_deadline(&deadline)?;
+            deadline.check()?;
             if result.undecoded.len() >= request.limits.max_undecoded {
                 push_undecoded_limit_diagnostic(
                     &mut result.diagnostics,
@@ -327,13 +319,13 @@ where
                     .undecoded
                     .push(DnsUndecodedEvidence { attempt, frame });
             }
-            enforce_deadline(&deadline)?;
+            deadline.check()?;
         }
         if terminal {
             break;
         }
     }
-    enforce_deadline(&deadline)?;
+    deadline.check()?;
     result.stats.elapsed =
         result
             .stats
@@ -384,13 +376,6 @@ fn update_dns_fallback(outcome: &mut DnsOutcome, rank: &mut u8, candidate: DnsOu
     }
 }
 
-fn enforce_deadline(deadline: &Deadline) -> Result<(), DnsError> {
-    deadline.check().map_err(duration_limit)
-}
-
-fn duration_limit(error: DeadlineExceeded) -> DnsError {
-    DnsError::DurationLimit {
-        actual: error.actual,
-        limit: error.limit,
-    }
+fn duration_error(actual: Duration, limit: Duration) -> DnsError {
+    DnsError::DurationLimit { actual, limit }
 }

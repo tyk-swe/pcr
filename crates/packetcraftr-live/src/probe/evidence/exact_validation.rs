@@ -27,19 +27,10 @@ pub(crate) fn validate_capture_statistics(statistics: Statistics) -> Result<(), 
         .map_err(|error| format!("capture statistics are invalid: {error}"))
 }
 
-pub(crate) trait ResponseEvidence {
-    fn response(&self) -> &DecodedPacket;
-    fn latency(&self) -> Duration;
-}
-
-pub(crate) trait MatchedResponseEvidence: ResponseEvidence {
-    fn request_index(&self) -> usize;
-}
-
-pub(crate) struct ExchangeEvidence<'a, M> {
+pub(crate) struct ExchangeEvidence<'a> {
     pub(crate) request_count: usize,
     pub(crate) sent: &'a [SentPacket],
-    pub(crate) matched_responses: &'a [M],
+    pub(crate) matched_responses: &'a [crate::exchange::Response],
     pub(crate) unsolicited: &'a [DecodedPacket],
     pub(crate) undecoded: &'a [Frame],
     pub(crate) timeout: Duration,
@@ -90,8 +81,8 @@ pub(crate) enum ExchangeEvidenceError {
     IncompleteStatistics,
 }
 
-pub(crate) fn validate_aggregate_evidence_limits<M: ResponseEvidence>(
-    matched_responses: &[M],
+pub(crate) fn validate_aggregate_evidence_limits(
+    matched_responses: &[crate::exchange::Response],
     unsolicited: &[DecodedPacket],
     undecoded: &[Frame],
     max_captured_frames: usize,
@@ -109,7 +100,7 @@ pub(crate) fn validate_aggregate_evidence_limits<M: ResponseEvidence>(
     let captured_bytes = checked_frame_bytes(
         matched_responses
             .iter()
-            .map(|response| &response.response().frame)
+            .map(|response| &response.response.frame)
             .chain(unsolicited.iter().map(|response| &response.frame))
             .chain(undecoded),
     )
@@ -139,18 +130,20 @@ pub(crate) fn validate_sent_byte_accounting(
     Ok(())
 }
 
-pub(crate) fn validate_response_frames_and_deadlines<M: ResponseEvidence>(
-    matched_responses: &[M],
+pub(crate) fn validate_response_frames_and_deadlines(
+    matched_responses: &[crate::exchange::Response],
     unsolicited: &[DecodedPacket],
     timeout: Duration,
 ) -> Result<(), ExchangeEvidenceError> {
     for response in matched_responses {
-        validate_decoded_frame(response.response(), "matched response")
+        validate_decoded_frame(&response.response, "matched response")
             .map_err(|message| ExchangeEvidenceError::InvalidMatchedResponse { message })?;
-        validate_frame_timestamp(&response.response().frame, "matched response")?;
-        let latency = response.latency();
-        if latency > timeout {
-            return Err(ExchangeEvidenceError::MatchedResponseAfterTimeout { latency, timeout });
+        validate_frame_timestamp(&response.response.frame, "matched response")?;
+        if response.latency > timeout {
+            return Err(ExchangeEvidenceError::MatchedResponseAfterTimeout {
+                latency: response.latency,
+                timeout,
+            });
         }
     }
     for response in unsolicited {
@@ -226,14 +219,13 @@ pub(crate) fn format_exchange_evidence_error(
     }
 }
 
-pub(crate) fn validate_exchange_evidence<M, F>(
-    evidence: ExchangeEvidence<'_, M>,
+pub(crate) fn validate_exchange_evidence<F>(
+    evidence: ExchangeEvidence<'_>,
     max_captured_frames: usize,
     max_captured_bytes: usize,
     mut sent_packet_matches: F,
 ) -> Result<(), ExchangeEvidenceError>
 where
-    M: MatchedResponseEvidence,
     F: FnMut(usize, &Packet) -> bool,
 {
     if evidence.sent.len() != evidence.request_count {
@@ -245,7 +237,7 @@ where
     if evidence
         .matched_responses
         .iter()
-        .any(|response| response.request_index() >= evidence.request_count)
+        .any(|response| response.request_index >= evidence.request_count)
     {
         return Err(ExchangeEvidenceError::MatchedResponseOutsideBatch);
     }

@@ -133,21 +133,17 @@ impl<W: Write> Writer<W> {
             });
         }
         write_pcap_header(&mut inner, endianness, precision, snap_len_u32, link_type)?;
-        Ok(Self {
+        Ok(Self::from_state(
             inner,
-            state: WriterState::Pcap {
+            WriterState::Pcap {
                 endianness,
                 precision,
                 snap_len: snap_len_u32,
                 link_type,
             },
             max_size,
-            max_interfaces: DEFAULT_INTERFACE_LIMIT,
-            stream_limits: Limits::default(),
-            frames_written: 0,
-            captured_bytes_written: 0,
-            output_failure: None,
-        })
+            DEFAULT_INTERFACE_LIMIT,
+        ))
     }
 
     /// Creates a little-endian PCAPNG writer without an interface block.
@@ -170,19 +166,28 @@ impl<W: Write> Writer<W> {
             });
         }
         write_section_header(&mut inner, endianness)?;
-        Ok(Self {
+        Ok(Self::from_state(
             inner,
-            state: WriterState::PcapNg {
+            WriterState::PcapNg {
                 endianness,
                 interfaces: Vec::new(),
             },
+            max_size,
+            max_interfaces,
+        ))
+    }
+
+    fn from_state(inner: W, state: WriterState, max_size: usize, max_interfaces: usize) -> Self {
+        Self {
+            inner,
+            state,
             max_size,
             max_interfaces,
             stream_limits: Limits::default(),
             frames_written: 0,
             captured_bytes_written: 0,
             output_failure: None,
-        })
+        }
     }
 
     pub fn format(&self) -> Format {
@@ -299,32 +304,11 @@ impl<W: Write> Writer<W> {
         self.ensure_output_available()?;
         validate_frame_size(frame, self.max_size)?;
 
-        let next_frames = self
-            .frames_written
-            .checked_add(1)
-            .ok_or(Error::FrameLimitExceeded {
-                actual: u64::MAX,
-                limit: self.stream_limits.max_frames,
-            })?;
-        if next_frames > self.stream_limits.max_frames {
-            return Err(Error::FrameLimitExceeded {
-                actual: next_frames,
-                limit: self.stream_limits.max_frames,
-            });
-        }
-        let next_bytes = self
-            .captured_bytes_written
-            .checked_add(u64::from(frame.captured_length()))
-            .ok_or(Error::StreamByteLimitExceeded {
-                actual: u64::MAX,
-                limit: self.stream_limits.max_bytes,
-            })?;
-        if next_bytes > self.stream_limits.max_bytes {
-            return Err(Error::StreamByteLimitExceeded {
-                actual: next_bytes,
-                limit: self.stream_limits.max_bytes,
-            });
-        }
+        let (next_frames, next_bytes) = self.stream_limits.advance(
+            self.frames_written,
+            self.captured_bytes_written,
+            frame.captured_length(),
+        )?;
 
         match &self.state {
             WriterState::Pcap {

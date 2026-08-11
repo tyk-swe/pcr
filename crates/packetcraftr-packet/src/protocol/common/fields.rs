@@ -39,36 +39,15 @@ pub(crate) fn resolve_u8(
     mode: BuildMode,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(u8, WireValue<u8>), CodecError> {
-    let expected = expectation.value();
-    match value {
-        WireValue::Auto => Ok((expected, WireValue::Exact(expected))),
-        WireValue::Exact(actual) => {
-            validate_dependent(name, field, *actual, expectation, mode, diagnostics)?;
-            Ok((*actual, value.clone()))
-        }
-        WireValue::Raw(bytes) => {
-            if mode == BuildMode::Strict {
-                return Err(invalid(
-                    name,
-                    format!("raw {field} requires permissive build mode"),
-                ));
-            }
-            if bytes.len() != 1 {
-                return Err(invalid(
-                    name,
-                    format!("raw {field} must contain exactly one byte"),
-                ));
-            }
-            diagnostics.push(
-                Diagnostic::warning(
-                    "build.raw_dependent_field",
-                    format!("emitting raw {field} value"),
-                )
-                .at_field(field),
-            );
-            Ok((bytes[0], value.clone()))
-        }
-    }
+    resolve_fixed(
+        name,
+        field,
+        value,
+        expectation,
+        mode,
+        diagnostics,
+        |[value]| value,
+    )
 }
 
 pub(crate) fn resolve_u16(
@@ -79,6 +58,29 @@ pub(crate) fn resolve_u16(
     mode: BuildMode,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(u16, WireValue<u16>), CodecError> {
+    resolve_fixed(
+        name,
+        field,
+        value,
+        expectation,
+        mode,
+        diagnostics,
+        u16::from_be_bytes,
+    )
+}
+
+pub(crate) fn resolve_fixed<T, const N: usize>(
+    name: &str,
+    field: &str,
+    value: &WireValue<T>,
+    expectation: ValueExpectation<T>,
+    mode: BuildMode,
+    diagnostics: &mut Vec<Diagnostic>,
+    decode_raw: impl FnOnce([u8; N]) -> T,
+) -> Result<(T, WireValue<T>), CodecError>
+where
+    T: Copy + fmt::Display + PartialEq,
+{
     let expected = expectation.value();
     match value {
         WireValue::Auto => Ok((expected, WireValue::Exact(expected))),
@@ -93,12 +95,15 @@ pub(crate) fn resolve_u16(
                     format!("raw {field} requires permissive build mode"),
                 ));
             }
-            if bytes.len() != 2 {
-                return Err(invalid(
-                    name,
-                    format!("raw {field} must contain exactly two bytes"),
-                ));
-            }
+            let raw_size = match N {
+                1 => "one byte",
+                2 => "two bytes",
+                4 => "four bytes",
+                _ => "the fixed field width",
+            };
+            let raw = bytes.as_ref().try_into().map_err(|_| {
+                invalid(name, format!("raw {field} must contain exactly {raw_size}"))
+            })?;
             diagnostics.push(
                 Diagnostic::warning(
                     "build.raw_dependent_field",
@@ -106,12 +111,12 @@ pub(crate) fn resolve_u16(
                 )
                 .at_field(field),
             );
-            Ok((u16::from_be_bytes([bytes[0], bytes[1]]), value.clone()))
+            Ok((decode_raw(raw), value.clone()))
         }
     }
 }
 
-pub(crate) fn validate_dependent<T>(
+fn validate_dependent<T>(
     name: &str,
     field: &str,
     actual: T,

@@ -262,7 +262,7 @@ impl Provider for SystemProvider {
     type Capture = SystemSession;
 
     fn arm_capture(&self, route: &PlannedRoute, limits: Limits) -> Result<Self::Capture, Error> {
-        super::platform::system_capture(route, limits)
+        super::platform::system_capture(route, limits, None)
     }
 
     fn arm_capture_with_filter(
@@ -271,6 +271,6 @@ impl Provider for SystemProvider {
         limits: Limits,
         filter: &str,
     ) -> Result<Self::Capture, Error> {
-        super::platform::system_capture_with_filter(route, limits, filter)
+        super::platform::system_capture(route, limits, Some(filter))
     }
 }

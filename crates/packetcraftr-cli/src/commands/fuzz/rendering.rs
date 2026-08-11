@@ -5,8 +5,8 @@ use packetcraftr::{output, packet};
 
 use crate::errors::CliError;
 use crate::rendering::{
-    emit_json_compact, emit_stream_record, render_diagnostics_text, render_output_diagnostics_text,
-    spaced_hex, write_stdout_line,
+    captured_frame_text, emit_stream_record, emit_stream_with_stats, render_diagnostics_text,
+    render_output_diagnostics_text, spaced_hex, write_stdout_line,
 };
 
 pub(super) fn render_fuzz_text(
@@ -55,13 +55,7 @@ pub(super) fn render_fuzz_text(
             ))?;
         }
         if let Some(sent) = &case.sent {
-            write_stdout_line(format_args!(
-                "  sent dlt={} caplen={} wirelen={} {}",
-                sent.link_type,
-                sent.captured_length,
-                sent.original_length,
-                spaced_hex(sent.bytes())
-            ))?;
+            write_stdout_line(format_args!("  sent {}", captured_frame_text(sent)))?;
         }
         for (kind, frames) in [
             ("response", &case.responses),
@@ -69,13 +63,7 @@ pub(super) fn render_fuzz_text(
             ("undecoded", &case.undecoded),
         ] {
             for frame in frames {
-                write_stdout_line(format_args!(
-                    "  {kind} dlt={} caplen={} wirelen={} {}",
-                    frame.link_type,
-                    frame.captured_length,
-                    frame.original_length,
-                    spaced_hex(frame.bytes())
-                ))?;
+                write_stdout_line(format_args!("  {kind} {}", captured_frame_text(frame)))?;
             }
         }
         render_output_diagnostics_text(&case.diagnostics)?;
@@ -112,23 +100,20 @@ pub(super) fn render_fuzz_stream(
             },
         )?;
     }
-    emit_json_compact(
-        &output::envelope::Stream::success(
-            output::contract::Command::Fuzz,
-            sequence,
-            output::fuzz::Event::Complete {
-                operation_seed: seed,
-                first_case,
-                mode,
-                cases_generated,
-                cases_built,
-                cases_rejected,
-            },
-            diagnostics,
-        )
-        .with_stats(stats),
+    emit_stream_with_stats(
+        output::contract::Command::Fuzz,
+        sequence,
+        output::fuzz::Event::Complete {
+            operation_seed: seed,
+            first_case,
+            mode,
+            cases_generated,
+            cases_built,
+            cases_rejected,
+        },
+        diagnostics,
+        stats,
     )
-    .map_err(|error| error.at_sequence(sequence))
 }
 
 fn fuzz_mode_name(value: output::fuzz::Mode) -> &'static str {

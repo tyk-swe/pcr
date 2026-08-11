@@ -9,7 +9,7 @@ use packetcraftr::output;
 
 use self::arguments::PlanArgs;
 use super::super::errors::CliError;
-use super::super::rendering::{emit_json, optional_display, write_stdout_line};
+use super::super::rendering::{emit_aggregate, optional_display, write_stdout_line};
 use super::super::system::{default_registry_arc, prepare_route_request, system_client};
 
 pub(super) fn run(arguments: PlanArgs, output: output::contract::Format) -> Result<(), CliError> {
@@ -25,11 +25,9 @@ pub(super) fn run(arguments: PlanArgs, output: output::contract::Format) -> Resu
     };
     match output {
         output::contract::Format::Text => render_planned_route(&result.route),
-        output::contract::Format::Json => emit_json(&output::envelope::Aggregate::success(
-            output::contract::Command::Plan,
-            result,
-            Vec::new(),
-        )),
+        output::contract::Format::Json => {
+            emit_aggregate(output::contract::Command::Plan, result, Vec::new())
+        }
         _ => Err(CliError::classified(
             output::contract::Error::UnsupportedFormat {
                 command: output::contract::Command::Plan,

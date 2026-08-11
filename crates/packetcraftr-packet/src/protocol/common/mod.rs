@@ -20,7 +20,7 @@ pub(crate) use errors::{
 };
 pub(crate) use fields::{
     ValueExpectation, aliased_fields, expected_discriminator, expected_discriminator_for_value,
-    make_layer, resolve_u8, resolve_u16, validate_dependent,
+    make_layer, resolve_fixed, resolve_u8, resolve_u16,
 };
 pub(crate) use payload::payload_without_padding;
 pub(crate) use validation::{

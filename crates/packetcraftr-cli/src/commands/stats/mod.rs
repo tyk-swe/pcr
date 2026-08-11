@@ -10,7 +10,7 @@ use packetcraftr::{analysis, output};
 
 use self::arguments::{CliStatsTable, StatsArgs};
 use super::super::errors::CliError;
-use super::super::rendering::{emit_json, write_stdout_line};
+use super::super::rendering::{emit_aggregate, write_stdout_line};
 use super::offline_analysis::{
     PreparedOfflineAnalysis, open_offline_reader, prepare_offline_analysis,
 };
@@ -57,11 +57,7 @@ pub(super) fn run(arguments: StatsArgs, output: output::contract::Format) -> Res
                 summary.frames_read,
             )
             .map_err(CliError::classified)?;
-            emit_json(&output::envelope::Aggregate::success(
-                output::contract::Command::Stats,
-                result,
-                Vec::new(),
-            ))
+            emit_aggregate(output::contract::Command::Stats, result, Vec::new())
         }
         _ => unreachable!("the format contract admits only text and json"),
     }

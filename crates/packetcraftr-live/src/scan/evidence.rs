@@ -3,18 +3,13 @@
 
 //! Exact scan executor-evidence validation and accounting errors.
 
-use std::time::Duration;
-
-use packetcraftr_packet::decode::Result as DecodedPacket;
-
 use crate::probe::evidence::{
-    ExchangeEvidence, ExchangeEvidenceError, MatchedResponseEvidence, ResponseEvidence,
-    format_exchange_evidence_error,
+    ExchangeEvidence, ExchangeEvidenceError, format_exchange_evidence_error,
     validate_exchange_evidence as validate_shared_exchange_evidence,
 };
 
 use super::error::ScanError;
-use super::model::{ScanBatch, ScanBatchExecution, ScanLimits, ScanMatchedResponse};
+use super::model::{ScanBatch, ScanBatchExecution, ScanLimits};
 use super::probe::sent_scan_probe_matches;
 
 pub(super) fn validate_exchange_evidence(
@@ -37,22 +32,6 @@ pub(super) fn validate_exchange_evidence(
         |request_index, sent| sent_scan_probe_matches(&batch.probes[request_index], sent),
     )
     .map_err(|error| map_scan_evidence_error(batch, error))
-}
-
-impl ResponseEvidence for ScanMatchedResponse {
-    fn response(&self) -> &DecodedPacket {
-        &self.response
-    }
-
-    fn latency(&self) -> Duration {
-        self.latency
-    }
-}
-
-impl MatchedResponseEvidence for ScanMatchedResponse {
-    fn request_index(&self) -> usize {
-        self.request_index
-    }
 }
 
 fn map_scan_evidence_error(batch: &ScanBatch, error: ExchangeEvidenceError) -> ScanError {

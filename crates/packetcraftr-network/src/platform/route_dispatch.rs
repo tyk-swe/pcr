@@ -7,33 +7,27 @@
 
 use std::net::IpAddr;
 
-use super::super::route::{InterfaceId, NativeRouteError, RouteDecision};
+use crate::route::{InterfaceId, NativeRouteError, RouteDecision};
 
 #[cfg(all(feature = "native-route", target_os = "linux"))]
-pub(crate) fn system_route(
-    destination: IpAddr,
-    interface_hint: Option<&InterfaceId>,
-    preferred_source: Option<IpAddr>,
-) -> Result<RouteDecision, NativeRouteError> {
-    super::linux::route(destination, interface_hint, preferred_source)
-}
+use super::linux as native;
 
 #[cfg(all(feature = "native-route", target_os = "macos"))]
-pub(crate) fn system_route(
-    destination: IpAddr,
-    interface_hint: Option<&InterfaceId>,
-    preferred_source: Option<IpAddr>,
-) -> Result<RouteDecision, NativeRouteError> {
-    super::macos::route(destination, interface_hint, preferred_source)
-}
+use super::macos as native;
 
 #[cfg(all(feature = "native-route", windows))]
+use super::windows as native;
+
+#[cfg(all(
+    feature = "native-route",
+    any(target_os = "linux", target_os = "macos", windows)
+))]
 pub(crate) fn system_route(
     destination: IpAddr,
     interface_hint: Option<&InterfaceId>,
     preferred_source: Option<IpAddr>,
 ) -> Result<RouteDecision, NativeRouteError> {
-    super::windows::route(destination, interface_hint, preferred_source)
+    native::route(destination, interface_hint, preferred_source)
 }
 
 #[cfg(all(
@@ -45,9 +39,9 @@ pub(crate) fn system_route(
     _interface_hint: Option<&InterfaceId>,
     _preferred_source: Option<IpAddr>,
 ) -> Result<RouteDecision, NativeRouteError> {
-    Err(super::unsupported_native_route(
-        "native route selection is unsupported on this target",
-    ))
+    Err(NativeRouteError::Unsupported {
+        message: "native route selection is unsupported on this target".to_owned(),
+    })
 }
 
 #[cfg(not(feature = "native-route"))]
@@ -56,30 +50,20 @@ pub(crate) fn system_route(
     _interface_hint: Option<&InterfaceId>,
     _preferred_source: Option<IpAddr>,
 ) -> Result<RouteDecision, NativeRouteError> {
-    Err(super::unsupported_native_route(
-        "enable the native-route feature for passive operating-system route selection",
-    ))
+    Err(NativeRouteError::Unsupported {
+        message: "enable the native-route feature for passive operating-system route selection"
+            .to_owned(),
+    })
 }
 
-#[cfg(all(feature = "native-route", target_os = "linux"))]
+#[cfg(all(
+    feature = "native-route",
+    any(target_os = "linux", target_os = "macos", windows)
+))]
 pub(crate) fn system_interface_route(
     interface: &InterfaceId,
 ) -> Result<RouteDecision, NativeRouteError> {
-    super::linux::interface_route(interface)
-}
-
-#[cfg(all(feature = "native-route", target_os = "macos"))]
-pub(crate) fn system_interface_route(
-    interface: &InterfaceId,
-) -> Result<RouteDecision, NativeRouteError> {
-    super::macos::interface_route(interface)
-}
-
-#[cfg(all(feature = "native-route", windows))]
-pub(crate) fn system_interface_route(
-    interface: &InterfaceId,
-) -> Result<RouteDecision, NativeRouteError> {
-    super::windows::interface_route(interface)
+    native::interface_route(interface)
 }
 
 #[cfg(all(
@@ -89,16 +73,17 @@ pub(crate) fn system_interface_route(
 pub(crate) fn system_interface_route(
     _interface: &InterfaceId,
 ) -> Result<RouteDecision, NativeRouteError> {
-    Err(super::unsupported_native_route(
-        "native interface selection is unsupported on this target",
-    ))
+    Err(NativeRouteError::Unsupported {
+        message: "native interface selection is unsupported on this target".to_owned(),
+    })
 }
 
 #[cfg(not(feature = "native-route"))]
 pub(crate) fn system_interface_route(
     _interface: &InterfaceId,
 ) -> Result<RouteDecision, NativeRouteError> {
-    Err(super::unsupported_native_route(
-        "enable the native-route feature for passive operating-system interface selection",
-    ))
+    Err(NativeRouteError::Unsupported {
+        message: "enable the native-route feature for passive operating-system interface selection"
+            .to_owned(),
+    })
 }

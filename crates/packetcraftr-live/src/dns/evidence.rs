@@ -5,29 +5,17 @@
 
 use std::time::Duration;
 
-use packetcraftr_packet::{
-    Packet, codec::NetworkEnvelope, decode::Result as DecodedPacket, semantics::BuiltinProtocol,
-};
+use packetcraftr_packet::{Packet, codec::NetworkEnvelope, semantics::BuiltinProtocol};
 
 use crate::probe::evidence::{
-    ExchangeEvidenceError, ResponseEvidence, validate_aggregate_evidence_limits,
+    ExchangeEvidenceError, format_exchange_evidence_error, validate_aggregate_evidence_limits,
     validate_capture_statistics_evidence, validate_response_frames_and_deadlines,
     validate_sent_byte_accounting,
 };
 
 use super::error::DnsError;
-use super::model::{DnsExchangeExecution, DnsLimits, DnsMatchedResponse, DnsProbe};
+use super::model::{DnsExchangeExecution, DnsLimits, DnsProbe};
 use super::wire::dns_payload;
-
-impl ResponseEvidence for DnsMatchedResponse {
-    fn response(&self) -> &DecodedPacket {
-        &self.response
-    }
-
-    fn latency(&self) -> Duration {
-        self.latency
-    }
-}
 
 pub(super) fn validate_dns_execution(
     probe: &DnsProbe,
@@ -95,6 +83,17 @@ pub(super) fn validate_dns_execution(
                 .to_owned(),
         });
     }
+    if execution
+        .responses
+        .iter()
+        .any(|response| response.request_index != 0)
+    {
+        return Err(DnsError::InvalidEvidence {
+            attempt,
+            message: "single-query DNS exchange returned a response for an unknown request index"
+                .to_owned(),
+        });
+    }
     validate_sent_byte_accounting(std::slice::from_ref(&execution.sent), execution.stats.bytes)
         .map_err(|error| map_dns_evidence_error(attempt, error))?;
     validate_capture_statistics_evidence(execution.stats.capture)
@@ -114,39 +113,13 @@ pub(super) fn validate_dns_execution(
 
 fn map_dns_evidence_error(attempt: u32, error: ExchangeEvidenceError) -> DnsError {
     let message = match error {
-        ExchangeEvidenceError::CapturedFrameCountOverflow => {
-            "executor frame-count accounting overflowed".to_owned()
-        }
-        ExchangeEvidenceError::CapturedFrameLimitExceeded { actual, limit } => {
-            format!("executor returned {actual} frames beyond max_evidence_frames={limit}")
-        }
-        ExchangeEvidenceError::CapturedByteCountOverflow => {
-            "executor frame-byte accounting overflowed".to_owned()
-        }
-        ExchangeEvidenceError::CapturedByteLimitExceeded { actual, limit } => {
-            format!("executor returned {actual} frame bytes beyond max_evidence_bytes={limit}")
-        }
-        ExchangeEvidenceError::SentByteCountOverflow => {
-            "sent frame byte accounting overflowed".to_owned()
-        }
-        ExchangeEvidenceError::SentByteCountMismatch { reported, actual } => format!(
-            "successful exchange reported {reported} sent bytes for {actual} exact frame bytes"
-        ),
-        ExchangeEvidenceError::TimestampUnavailable { evidence } => {
-            format!("executor returned {evidence} without a timestamp")
-        }
-        ExchangeEvidenceError::InvalidMatchedResponse { message }
-        | ExchangeEvidenceError::InvalidUnsolicitedResponse { message }
-        | ExchangeEvidenceError::InvalidCaptureStatistics { message } => message,
-        ExchangeEvidenceError::MatchedResponseAfterTimeout { latency, timeout } => {
-            format!("matched response latency {latency:?} exceeds timeout {timeout:?}")
-        }
         ExchangeEvidenceError::SentCardinality { .. }
         | ExchangeEvidenceError::MatchedResponseOutsideBatch
         | ExchangeEvidenceError::SentPacketMismatch { .. }
         | ExchangeEvidenceError::IncompleteStatistics => {
             unreachable!("DNS validation does not produce batch-only evidence errors")
         }
+        error => format_exchange_evidence_error(error, "DNS exchange", "DNS"),
     };
     DnsError::InvalidEvidence { attempt, message }
 }

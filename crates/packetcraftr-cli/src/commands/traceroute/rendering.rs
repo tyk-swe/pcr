@@ -5,8 +5,9 @@ use packetcraftr::{output, packet};
 
 use crate::errors::CliError;
 use crate::rendering::{
-    comma_separated, emit_json_compact, emit_stream_record, optional_display,
-    output_timestamp_text, render_diagnostics_text, render_optional, spaced_hex, write_stdout_line,
+    captured_frame_text, comma_separated, emit_stream_record, emit_stream_with_stats,
+    optional_display, output_timestamp_text, render_diagnostics_text, render_optional,
+    write_stdout_line,
 };
 
 pub(super) fn render_traceroute_text(
@@ -42,24 +43,15 @@ pub(super) fn render_traceroute_text(
                 probe.reason,
             ))?;
             if let Some(frame) = &probe.frame {
-                write_stdout_line(format_args!(
-                    "    frame dlt={} caplen={} wirelen={} {}",
-                    frame.link_type,
-                    frame.captured_length,
-                    frame.original_length,
-                    spaced_hex(frame.bytes())
-                ))?;
+                write_stdout_line(format_args!("    frame {}", captured_frame_text(frame)))?;
             }
         }
     }
     for evidence in &result.undecoded {
         write_stdout_line(format_args!(
-            "undecoded hop={} dlt={} caplen={} wirelen={} {}",
+            "undecoded hop={} {}",
             evidence.hop_limit,
-            evidence.frame.link_type,
-            evidence.frame.captured_length,
-            evidence.frame.original_length,
-            spaced_hex(evidence.frame.bytes())
+            captured_frame_text(&evidence.frame)
         ))?;
     }
     write_stdout_line(format_args!(
@@ -133,21 +125,18 @@ pub(super) fn render_traceroute_stream(
             },
         )?;
     }
-    emit_json_compact(
-        &output::envelope::Stream::success(
-            output::contract::Command::Traceroute,
-            sequence,
-            output::traceroute::Event::Complete {
-                target,
-                resolved_addresses,
-                destination,
-                strategy,
-                destination_port,
-                completion,
-            },
-            diagnostics,
-        )
-        .with_stats(stats),
+    emit_stream_with_stats(
+        output::contract::Command::Traceroute,
+        sequence,
+        output::traceroute::Event::Complete {
+            target,
+            resolved_addresses,
+            destination,
+            strategy,
+            destination_port,
+            completion,
+        },
+        diagnostics,
+        stats,
     )
-    .map_err(|error| error.at_sequence(sequence))
 }

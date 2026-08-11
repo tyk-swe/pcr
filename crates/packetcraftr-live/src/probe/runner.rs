@@ -5,11 +5,33 @@
 
 use std::time::Duration;
 
-use crate::Stats;
 use packetcraftr_packet::budget::Deadline;
 use packetcraftr_packet::error::BoundaryError;
+use packetcraftr_packet::frame::Frame;
+use packetcraftr_packet::{decode::Result as DecodedPacket, diagnostic::Diagnostic};
 
 use crate::clock::{Clock, check_deadline, rate_delay};
+use crate::{SentPacket, Stats};
+
+/// Common request envelope for homogeneous scan and traceroute batches.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Batch<P> {
+    pub probes: Vec<P>,
+    pub timeout: Duration,
+    pub(crate) permit: crate::evidence::ExecutionPermit,
+}
+
+/// Common executor evidence returned by homogeneous probe batches.
+#[derive(Clone, Debug)]
+pub struct BatchExecution {
+    pub(crate) permit: crate::evidence::ExecutionPermit,
+    pub(crate) sent: Vec<SentPacket>,
+    pub(crate) responses: Vec<crate::exchange::Response>,
+    pub(crate) unsolicited: Vec<DecodedPacket>,
+    pub(crate) undecoded: Vec<Frame>,
+    pub(crate) diagnostics: Vec<Diagnostic>,
+    pub(crate) stats: Stats,
+}
 
 pub(crate) trait ProbeBatch {
     fn sequence(&self) -> u64;
@@ -18,6 +40,12 @@ pub(crate) trait ProbeBatch {
 
 pub(crate) trait ProbeExecution {
     fn stats(&self) -> &Stats;
+}
+
+impl ProbeExecution for BatchExecution {
+    fn stats(&self) -> &Stats {
+        &self.stats
+    }
 }
 
 pub(crate) struct BatchRun<O> {

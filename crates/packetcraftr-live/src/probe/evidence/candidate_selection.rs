@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use packetcraftr_packet::decode::Result as DecodedPacket;
 
-use super::exact_validation::MatchedResponseEvidence;
+use crate::exchange::Response;
 
 pub(crate) fn response_within_deadline(latency: Duration, timeout: Duration) -> bool {
     latency <= timeout
@@ -62,13 +62,13 @@ pub(crate) fn select_response_candidate<'a, O, K: Ord>(
 
 /// Stable, linear-time response grouping shared by every bounded probe batch.
 /// Sorting is stable so equal request indices preserve executor evidence order.
-pub(crate) struct ResponseSelector<'a, M> {
-    matched: Peekable<Iter<'a, M>>,
+pub(crate) struct ResponseSelector<'a> {
+    matched: Peekable<Iter<'a, Response>>,
 }
 
-impl<'a, M: MatchedResponseEvidence> ResponseSelector<'a, M> {
-    pub(crate) fn new(matched: &'a mut [M]) -> Self {
-        matched.sort_by_key(MatchedResponseEvidence::request_index);
+impl<'a> ResponseSelector<'a> {
+    pub(crate) fn new(matched: &'a mut [Response]) -> Self {
+        matched.sort_by_key(|response| response.request_index);
         Self {
             matched: matched.iter().peekable(),
         }
@@ -87,20 +87,20 @@ impl<'a, M: MatchedResponseEvidence> ResponseSelector<'a, M> {
         while self
             .matched
             .peek()
-            .is_some_and(|response| response.request_index() == request_index)
+            .is_some_and(|response| response.request_index == request_index)
         {
             check_deadline()?;
             let response = self
                 .matched
                 .next()
                 .expect("peeked matched response must remain available");
-            if let Some(observation) = classify(response.response())
+            if let Some(observation) = classify(&response.response)
                 && select_response_candidate(
                     &mut best,
                     ResponseCandidate {
                         observation,
-                        decoded: response.response(),
-                        latency: response.latency(),
+                        decoded: &response.response,
+                        latency: response.latency,
                     },
                     timeout,
                     &rank,

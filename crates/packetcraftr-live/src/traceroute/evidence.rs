@@ -3,20 +3,13 @@
 
 //! Exact traceroute executor-evidence validation and accounting errors.
 
-use std::time::Duration;
-
-use packetcraftr_packet::decode::Result as DecodedPacket;
-
 use crate::probe::evidence::{
-    ExchangeEvidence, ExchangeEvidenceError, MatchedResponseEvidence, ResponseEvidence,
-    format_exchange_evidence_error,
+    ExchangeEvidence, ExchangeEvidenceError, format_exchange_evidence_error,
     validate_exchange_evidence as validate_shared_exchange_evidence,
 };
 
 use super::error::TracerouteError;
-use super::model::{
-    TracerouteBatch, TracerouteBatchExecution, TracerouteLimits, TracerouteMatchedResponse,
-};
+use super::model::{TracerouteBatch, TracerouteBatchExecution, TracerouteLimits};
 use super::probe::sent_traceroute_probe_matches;
 
 pub(super) fn validate_execution(
@@ -39,22 +32,6 @@ pub(super) fn validate_execution(
         |request_index, sent| sent_traceroute_probe_matches(&batch.probes[request_index], sent),
     )
     .map_err(|error| map_traceroute_evidence_error(batch, error))
-}
-
-impl ResponseEvidence for TracerouteMatchedResponse {
-    fn response(&self) -> &DecodedPacket {
-        &self.response
-    }
-
-    fn latency(&self) -> Duration {
-        self.latency
-    }
-}
-
-impl MatchedResponseEvidence for TracerouteMatchedResponse {
-    fn request_index(&self) -> usize {
-        self.request_index
-    }
 }
 
 fn map_traceroute_evidence_error(

@@ -11,8 +11,7 @@ use packetcraftr_packet::template::Template as PacketTemplate;
 
 use super::classification::classify_traceroute_response;
 use super::model::{
-    TracerouteBatch, TracerouteBatchExecution, TracerouteExecutor, TracerouteMatchedResponse,
-    TracerouteStrategy,
+    TracerouteBatch, TracerouteBatchExecution, TracerouteExecutor, TracerouteStrategy,
 };
 
 /// Executes homogeneous traceroute hop batches through the client's
@@ -119,14 +118,7 @@ where
         Ok(TracerouteBatchExecution {
             permit: batch.permit,
             sent,
-            responses: responses
-                .into_iter()
-                .map(|response| TracerouteMatchedResponse {
-                    request_index: response.request_index,
-                    response: response.response,
-                    latency: response.latency,
-                })
-                .collect(),
+            responses,
             unsolicited,
             undecoded,
             diagnostics,

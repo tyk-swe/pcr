@@ -11,8 +11,8 @@ use packetcraftr::{live as client, output, packet};
 use self::arguments::ExchangeArgs;
 use super::super::errors::CliError;
 use super::super::rendering::{
-    emit_json, emit_json_compact, emit_stream_record, render_diagnostics_text, write_capture_file,
-    write_stdout_line,
+    emit_aggregate_with_stats, emit_stream_record, emit_stream_with_stats, render_diagnostics_text,
+    write_capture_file, write_stdout_line,
 };
 use super::super::system::{default_registry_arc, prepare_route_request, system_client};
 use super::send::arguments::SendArgs;
@@ -102,13 +102,11 @@ pub(super) fn run(
             ))?;
             render_diagnostics_text(&diagnostics)
         }
-        output::contract::Format::Json => emit_json(
-            &output::envelope::Aggregate::success(
-                output::contract::Command::Exchange,
-                result,
-                diagnostics,
-            )
-            .with_stats(stats),
+        output::contract::Format::Json => emit_aggregate_with_stats(
+            output::contract::Command::Exchange,
+            result,
+            diagnostics,
+            stats,
         ),
         output::contract::Format::Ndjson => render_exchange_stream(result, diagnostics, stats),
         _ => Err(CliError::classified(
@@ -179,14 +177,11 @@ fn render_exchange_stream(
             output::exchange::Event::Undecoded { frame },
         )?;
     }
-    emit_json_compact(
-        &output::envelope::Stream::success(
-            output::contract::Command::Exchange,
-            sequence,
-            output::exchange::Event::Complete { unanswered },
-            diagnostics,
-        )
-        .with_stats(stats),
+    emit_stream_with_stats(
+        output::contract::Command::Exchange,
+        sequence,
+        output::exchange::Event::Complete { unanswered },
+        diagnostics,
+        stats,
     )
-    .map_err(|error| error.at_sequence(sequence))
 }

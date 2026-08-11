@@ -4,7 +4,7 @@
 use packetcraftr::{network as net, output};
 
 use super::super::errors::CliError;
-use super::super::rendering::{emit_json, write_stdout_line};
+use super::super::rendering::{emit_aggregate, write_stdout_line};
 
 pub(super) const AFTER_LONG_HELP: &str = r#"Examples:
   packetcraftr interfaces
@@ -26,11 +26,9 @@ pub(super) fn run(output: output::contract::Format) -> Result<(), CliError> {
             }
             Ok(())
         }
-        output::contract::Format::Json => emit_json(&output::envelope::Aggregate::success(
-            output::contract::Command::Interfaces,
-            result,
-            Vec::new(),
-        )),
+        output::contract::Format::Json => {
+            emit_aggregate(output::contract::Command::Interfaces, result, Vec::new())
+        }
         _ => Err(CliError::classified(
             output::contract::Error::UnsupportedFormat {
                 command: output::contract::Command::Interfaces,

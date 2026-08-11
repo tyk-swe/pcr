@@ -11,7 +11,7 @@ use packetcraftr::{
 
 use self::arguments::ProtocolsArgs;
 use super::super::errors::CliError;
-use super::super::rendering::{emit_json, write_stdout_line};
+use super::super::rendering::{emit_aggregate, write_stdout_line};
 use super::super::system::default_registry_arc;
 
 pub(super) fn run(
@@ -47,11 +47,9 @@ fn list_protocols(format: output::contract::Format) -> Result<(), CliError> {
             }
             Ok(())
         }
-        output::contract::Format::Json => emit_json(&output::envelope::Aggregate::success(
-            output::contract::Command::Protocols,
-            result,
-            Vec::new(),
-        )),
+        output::contract::Format::Json => {
+            emit_aggregate(output::contract::Command::Protocols, result, Vec::new())
+        }
         _ => unreachable!("protocols format is checked before command dispatch"),
     }
 }
@@ -81,11 +79,11 @@ fn describe_protocol(name: &str, format: output::contract::Format) -> Result<(),
     let detail = output::protocols::Detail::new(output::protocols::Summary::from(support), fields);
     match format {
         output::contract::Format::Text => render_detail(&detail),
-        output::contract::Format::Json => emit_json(&output::envelope::Aggregate::success(
+        output::contract::Format::Json => emit_aggregate(
             output::contract::Command::Protocols,
             output::protocols::DetailResult { protocol: detail },
             Vec::new(),
-        )),
+        ),
         _ => unreachable!("protocols format is checked before command dispatch"),
     }
 }

@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 pub use packetcraftr_packet::frame::DEFAULT_SIZE_LIMIT;
 use packetcraftr_packet::frame::LinkType;
 
+use super::error::Error;
+
 /// Default maximum number of interface descriptions retained per PCAPNG section.
 pub const DEFAULT_INTERFACE_LIMIT: usize = 4_096;
 /// Default maximum interface descriptions retained across all PCAPNG sections.
@@ -35,6 +37,41 @@ impl Default for Limits {
             max_frames: DEFAULT_STREAM_FRAMES,
             max_bytes: DEFAULT_STREAM_BYTES,
         }
+    }
+}
+
+impl Limits {
+    pub(super) fn advance(
+        self,
+        frames: u64,
+        captured_bytes: u64,
+        frame_bytes: u32,
+    ) -> Result<(u64, u64), Error> {
+        let frames = frames.checked_add(1).ok_or(Error::FrameLimitExceeded {
+            actual: u64::MAX,
+            limit: self.max_frames,
+        })?;
+        if frames > self.max_frames {
+            return Err(Error::FrameLimitExceeded {
+                actual: frames,
+                limit: self.max_frames,
+            });
+        }
+
+        let captured_bytes = captured_bytes.checked_add(u64::from(frame_bytes)).ok_or(
+            Error::StreamByteLimitExceeded {
+                actual: u64::MAX,
+                limit: self.max_bytes,
+            },
+        )?;
+        if captured_bytes > self.max_bytes {
+            return Err(Error::StreamByteLimitExceeded {
+                actual: captured_bytes,
+                limit: self.max_bytes,
+            });
+        }
+
+        Ok((frames, captured_bytes))
     }
 }
 

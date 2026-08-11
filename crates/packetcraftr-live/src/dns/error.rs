@@ -6,6 +6,7 @@ use std::time::Duration;
 use thiserror::Error;
 
 use crate::BoundaryError;
+use packetcraftr_packet::budget::DeadlineExceeded;
 use packetcraftr_packet::error::{Classification, Classified, Kind};
 
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
@@ -124,6 +125,15 @@ pub enum DnsError {
     InvalidEvidence { attempt: u32, message: String },
     #[error("DNS statistic accounting overflowed on attempt {attempt}")]
     StatisticsOverflow { attempt: u32 },
+}
+
+impl From<DeadlineExceeded> for DnsError {
+    fn from(error: DeadlineExceeded) -> Self {
+        Self::DurationLimit {
+            actual: error.actual,
+            limit: error.limit,
+        }
+    }
 }
 
 impl DnsError {

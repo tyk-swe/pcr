@@ -10,7 +10,7 @@ use packetcraftr_network::{
 };
 use packetcraftr_packet::template::Template as PacketTemplate;
 
-use super::model::{DnsExchange, DnsExchangeExecution, DnsExecutor, DnsMatchedResponse};
+use super::model::{DnsExchange, DnsExchangeExecution, DnsExecutor};
 
 /// Executes one DNS query through the client's capture-ready exchange
 /// lifecycle.
@@ -71,13 +71,7 @@ where
         Ok(DnsExchangeExecution {
             permit: exchange.permit,
             sent: sent.pop().expect("validated one sent packet"),
-            responses: responses
-                .into_iter()
-                .map(|response| DnsMatchedResponse {
-                    response: response.response,
-                    latency: response.latency,
-                })
-                .collect(),
+            responses,
             unsolicited,
             undecoded,
             diagnostics,

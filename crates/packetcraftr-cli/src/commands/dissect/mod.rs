@@ -15,7 +15,7 @@ use super::super::errors::CliError;
 use super::super::filtering::{self, Capabilities};
 use super::super::input::{read_bounded_file, read_stdin_bounded};
 use super::super::rendering::{
-    emit_json, render_diagnostics_text, write_plain_line, write_raw, write_stdout_line,
+    emit_aggregate, render_diagnostics_text, write_plain_line, write_raw, write_stdout_line,
 };
 use super::super::system::default_registry_arc;
 
@@ -97,11 +97,7 @@ pub(super) fn run(
             if !kept {
                 return Ok(());
             }
-            emit_json(&output::envelope::Aggregate::success(
-                output::contract::Command::Dissect,
-                result,
-                diagnostics,
-            ))
+            emit_aggregate(output::contract::Command::Dissect, result, diagnostics)
         }
         _ => Err(CliError::classified(
             output::contract::Error::UnsupportedFormat {

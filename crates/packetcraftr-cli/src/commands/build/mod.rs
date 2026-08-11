@@ -9,7 +9,8 @@ use self::arguments::BuildArgs;
 use super::super::errors::CliError;
 use super::super::input::read_recipe;
 use super::super::rendering::{
-    emit_json, render_diagnostics_text, spaced_hex, write_plain_line, write_raw, write_stdout_line,
+    emit_aggregate, render_diagnostics_text, spaced_hex, write_plain_line, write_raw,
+    write_stdout_line,
 };
 use super::super::system::default_registry_arc;
 
@@ -35,11 +36,9 @@ pub(super) fn run(arguments: BuildArgs, output: output::contract::Format) -> Res
         }
         output::contract::Format::Hex => write_plain_line(format_args!("{}", result.bytes_hex)),
         output::contract::Format::Raw => write_raw(result.bytes()),
-        output::contract::Format::Json => emit_json(&output::envelope::Aggregate::success(
-            output::contract::Command::Build,
-            result,
-            diagnostics,
-        )),
+        output::contract::Format::Json => {
+            emit_aggregate(output::contract::Command::Build, result, diagnostics)
+        }
         _ => Err(CliError::classified(
             output::contract::Error::UnsupportedFormat {
                 command: output::contract::Command::Build,

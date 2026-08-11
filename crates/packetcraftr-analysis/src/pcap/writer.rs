@@ -266,7 +266,7 @@ impl<W: Write> Writer<W> {
             } => (
                 *endianness,
                 validate_new_interface(
-                    description.clone(),
+                    &description,
                     interfaces,
                     self.max_size,
                     self.max_interfaces,

@@ -6,7 +6,7 @@
 use bytes::Bytes;
 
 use super::{FieldError, LayerSchema};
-use crate::field::{FieldValue, WireValue};
+use crate::field::{FieldValue, WireValue, parse_mac};
 
 /// Declares a layer's schema, getter/setter dispatch, and static layout.
 /// Encoding and decoding remain handwritten in protocol modules.
@@ -286,23 +286,7 @@ impl ReflectiveField for [u8; 6] {
         let value = match value {
             FieldValue::Mac(value) => value,
             FieldValue::Text(value) => {
-                let normalized = value.replace('-', ":");
-                let mut output = [0_u8; 6];
-                let mut parts = normalized.split(':');
-                for byte in &mut output {
-                    let Some(part) = parts.next() else {
-                        return Err(ReflectiveFieldError::WrongType("mac address"));
-                    };
-                    if part.len() != 2 {
-                        return Err(ReflectiveFieldError::WrongType("mac address"));
-                    }
-                    *byte = u8::from_str_radix(part, 16)
-                        .map_err(|_| ReflectiveFieldError::WrongType("mac address"))?;
-                }
-                if parts.next().is_some() {
-                    return Err(ReflectiveFieldError::WrongType("mac address"));
-                }
-                output
+                parse_mac(&value).ok_or(ReflectiveFieldError::WrongType("mac address"))?
             }
             _ => return Err(ReflectiveFieldError::WrongType("mac address")),
         };

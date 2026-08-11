@@ -65,17 +65,13 @@ impl ExchangeCommandResult {
             .into_iter()
             .map(Decoded::try_from_decoded)
             .collect::<std::result::Result<Vec<_>, _>>()?;
-        let undecoded_frames = undecoded
-            .into_iter()
-            .map(Captured::try_from_frame)
-            .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok((
             Self {
                 sent: sent_frames,
                 responses: response_outputs,
                 unanswered: unanswered.into_iter().map(|index| index as u64).collect(),
                 unsolicited: unsolicited_outputs,
-                undecoded: undecoded_frames,
+                undecoded: Captured::try_from_frames(undecoded)?,
             },
             diagnostics,
             stats.into(),

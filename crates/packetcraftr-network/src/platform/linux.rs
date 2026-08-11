@@ -35,7 +35,7 @@ pub(super) fn route(
 }
 
 pub(super) fn interface_route(requested: &InterfaceId) -> Result<RouteDecision, NativeRouteError> {
-    interface_decision(find_interface(interfaces()?, requested)?)
+    interface_decision(find_interface(&interfaces()?, requested)?)
 }
 
 fn os_error(operation: &'static str, error: impl std::fmt::Display) -> NativeRouteError {

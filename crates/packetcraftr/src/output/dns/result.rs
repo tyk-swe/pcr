@@ -183,7 +183,6 @@ impl DnsCommandResult {
                 })
             })
             .collect::<Result<Vec<_>, Error>>()?;
-        let operation_stats = stats.into();
         let DnsResponseOutputFields {
             response_code,
             response_code_name,
@@ -228,7 +227,7 @@ impl DnsCommandResult {
                 undecoded: undecoded_outputs,
             },
             diagnostics,
-            operation_stats,
+            stats.into(),
         ))
     }
 }

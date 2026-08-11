@@ -154,20 +154,15 @@ impl Result {
                 })
             })
             .collect::<std::result::Result<Vec<_>, Error>>()?;
-        let undecoded_frames = undecoded
-            .into_iter()
-            .map(Captured::try_from_frame)
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-        let operation_stats = stats.into();
         Ok((
             Self {
                 target,
                 resolved_addresses,
                 ports: port_outputs,
-                undecoded: undecoded_frames,
+                undecoded: Captured::try_from_frames(undecoded)?,
             },
             diagnostics,
-            operation_stats,
+            stats.into(),
         ))
     }
 }

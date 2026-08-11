@@ -16,7 +16,10 @@ pub(crate) use human::{
     render_diagnostics_text, render_output_diagnostics_text, write_plain_line, write_stdout_line,
 };
 
-pub(crate) use machine::{emit_json, emit_json_compact, output_timestamp_text, spaced_hex};
+pub(crate) use machine::{
+    comma_separated, emit_json, emit_json_compact, optional_display, output_timestamp_text,
+    render_optional, spaced_hex,
+};
 
 pub(crate) use sequence::{emit_stream_record, next_stream_sequence};
 

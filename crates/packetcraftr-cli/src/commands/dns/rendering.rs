@@ -5,8 +5,8 @@ use packetcraftr::{output, packet};
 
 use crate::errors::CliError;
 use crate::rendering::{
-    emit_json_compact, emit_stream_record, output_timestamp_text, render_diagnostics_text,
-    spaced_hex, write_stdout_line,
+    comma_separated, emit_json_compact, emit_stream_record, optional_display,
+    output_timestamp_text, render_diagnostics_text, render_optional, spaced_hex, write_stdout_line,
 };
 
 pub(super) fn render_dns_text(
@@ -18,12 +18,7 @@ pub(super) fn render_dns_text(
         "server={}:{} resolved={} query={} type={} id={} transport={} outcome={}",
         result.server,
         result.server_port,
-        result
-            .resolved_addresses
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join(","),
+        comma_separated(&result.resolved_addresses),
         result.query_name,
         result.query_type,
         result.transaction_id,
@@ -38,18 +33,9 @@ pub(super) fn render_dns_text(
             attempt.source_port,
             dns_outcome_name(attempt.status),
             output_timestamp_text(attempt.sent_at),
-            attempt
-                .received_at
-                .map(output_timestamp_text)
-                .unwrap_or_else(|| "none".to_owned()),
-            attempt
-                .latency
-                .map(|value| format!("{value:?}"))
-                .unwrap_or_else(|| "none".to_owned()),
-            attempt
-                .response_code
-                .map(|value| value.to_string())
-                .unwrap_or_else(|| "none".to_owned()),
+            render_optional(attempt.received_at, output_timestamp_text),
+            render_optional(attempt.latency, |value| format!("{value:?}")),
+            optional_display(attempt.response_code),
             attempt.reason,
         ))?;
         if let Some(frame) = &attempt.frame {
@@ -89,19 +75,10 @@ pub(super) fn render_dns_text(
     }
     write_stdout_line(format_args!(
         "dns response_code={} response_name={} authoritative={} truncated={} accepted={} rejected={} queries={} bytes={}",
-        result
-            .response_code
-            .map(|value| value.to_string())
-            .unwrap_or_else(|| "none".to_owned()),
+        optional_display(result.response_code),
         result.response_code_name.as_deref().unwrap_or("none"),
-        result
-            .authoritative
-            .map(|value| value.to_string())
-            .unwrap_or_else(|| "none".to_owned()),
-        result
-            .truncated
-            .map(|value| value.to_string())
-            .unwrap_or_else(|| "none".to_owned()),
+        optional_display(result.authoritative),
+        optional_display(result.truncated),
         result.answers.len() + result.authorities.len() + result.additionals.len(),
         result.rejected_record_count,
         stats.packets_completed,

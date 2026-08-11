@@ -81,7 +81,7 @@ impl FollowCollector {
         Self {
             selector,
             summary: FollowSummary::default(),
-            dedup: Deduplicator::new(),
+            dedup: Deduplicator::default(),
         }
     }
 

@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::net::IpAddr;
-
 use crate::protocol::transport::Tcp;
 use crate::{
     Packet,
@@ -12,8 +10,8 @@ use crate::{
 };
 
 use super::{
-    QuotedProbeTransport, network_endpoints_before, quoted_icmp_error_kind,
-    reversed_protocol_layers, sctp::sctp_initiate_tag,
+    QuotedProbeTransport, quoted_icmp_error_kind, response_source, reversed_protocol_layers,
+    sctp::sctp_initiate_tag, unsigned_field,
 };
 
 #[derive(Clone, Debug)]
@@ -57,24 +55,14 @@ impl ResponseMatcher for ReverseFlowMatcher {
                     let request_layer_index = layers.request_index;
                     let request_layer = layers.request;
                     let response_layer = layers.response;
-                    let Some(request_flags) = request_layer
-                        .field("flags")
-                        .and_then(|value| value.as_u64())
-                        .and_then(|value| u16::try_from(value).ok())
+                    let Some(request_flags) = unsigned_field::<u16>(request_layer, "flags") else {
+                        return MatchResult::no_match();
+                    };
+                    let Some(request_sequence) = unsigned_field::<u32>(request_layer, "sequence")
                     else {
                         return MatchResult::no_match();
                     };
-                    let Some(request_sequence) = request_layer
-                        .field("sequence")
-                        .and_then(|value| value.as_u64())
-                        .and_then(|value| u32::try_from(value).ok())
-                    else {
-                        return MatchResult::no_match();
-                    };
-                    let Some(response_flags) = response_layer
-                        .field("flags")
-                        .and_then(|value| value.as_u64())
-                        .and_then(|value| u16::try_from(value).ok())
+                    let Some(response_flags) = unsigned_field::<u16>(response_layer, "flags")
                     else {
                         return MatchResult::no_match();
                     };
@@ -90,10 +78,8 @@ impl ResponseMatcher for ReverseFlowMatcher {
                     let has_ack = response_flags & Tcp::ACK != 0;
                     let has_rst = response_flags & Tcp::RST != 0;
                     if has_ack {
-                        let Some(response_acknowledgment) = response_layer
-                            .field("acknowledgment")
-                            .and_then(|value| value.as_u64())
-                            .and_then(|value| u32::try_from(value).ok())
+                        let Some(response_acknowledgment) =
+                            unsigned_field::<u32>(response_layer, "acknowledgment")
                         else {
                             return MatchResult::no_match();
                         };
@@ -101,17 +87,13 @@ impl ResponseMatcher for ReverseFlowMatcher {
                             return MatchResult::no_match();
                         }
                     } else if has_rst && request_flags & Tcp::ACK != 0 {
-                        let Some(request_acknowledgment) = request_layer
-                            .field("acknowledgment")
-                            .and_then(|value| value.as_u64())
-                            .and_then(|value| u32::try_from(value).ok())
+                        let Some(request_acknowledgment) =
+                            unsigned_field::<u32>(request_layer, "acknowledgment")
                         else {
                             return MatchResult::no_match();
                         };
-                        let Some(response_sequence) = response_layer
-                            .field("sequence")
-                            .and_then(|value| value.as_u64())
-                            .and_then(|value| u32::try_from(value).ok())
+                        let Some(response_sequence) =
+                            unsigned_field::<u32>(response_layer, "sequence")
                         else {
                             return MatchResult::no_match();
                         };
@@ -164,11 +146,8 @@ impl ResponseMatcher for ReverseFlowMatcher {
         }
     }
 
-    fn responder(&self, _request: &Packet, response: &Packet) -> Option<IpAddr> {
-        let response_layer_index = response
-            .iter()
-            .rposition(|layer| BuiltinProtocol::of(layer) == Some(self.protocol))?;
-        network_endpoints_before(response, response_layer_index).map(|endpoints| endpoints.source)
+    fn responder(&self, _request: &Packet, response: &Packet) -> Option<std::net::IpAddr> {
+        response_source(response, self.protocol)
     }
 }
 

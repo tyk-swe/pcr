@@ -184,7 +184,6 @@ impl Result {
                 })
             })
             .collect::<std::result::Result<Vec<_>, Error>>()?;
-        let operation_stats = stats.into();
         Ok((
             Self {
                 target,
@@ -197,7 +196,7 @@ impl Result {
                 completion: completion.into(),
             },
             diagnostics,
-            operation_stats,
+            stats.into(),
         ))
     }
 }

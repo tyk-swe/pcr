@@ -53,9 +53,7 @@ pub(super) fn plan_push(
                 .ok_or(Error::FlowByteLimit {
                     limit: limits.max_bytes_per_flow,
                 })?;
-        (absolute_fin >= 0)
-            .then(|| u64::try_from(absolute_fin).ok())
-            .flatten()
+        u64::try_from(absolute_fin).ok()
     } else {
         None
     };

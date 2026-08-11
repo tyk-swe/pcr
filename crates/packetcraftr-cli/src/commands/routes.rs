@@ -5,7 +5,7 @@ use packetcraftr::network::{interface::Provider as _, route::Provider as _};
 use packetcraftr::{network as net, output};
 
 use super::super::errors::CliError;
-use super::super::rendering::{emit_json, write_stdout_line};
+use super::super::rendering::{emit_json, optional_display, write_stdout_line};
 
 pub(super) const AFTER_LONG_HELP: &str = r#"Examples:
   packetcraftr routes
@@ -64,10 +64,4 @@ pub(super) fn run(output: output::contract::Format) -> Result<(), CliError> {
             },
         )),
     }
-}
-
-fn optional_display<T: std::fmt::Display>(value: Option<T>) -> String {
-    value
-        .map(|value| value.to_string())
-        .unwrap_or_else(|| "none".to_owned())
 }

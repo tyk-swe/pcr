@@ -176,7 +176,7 @@ impl StatsCollector {
             .conversations
             .entry((transport, stream))
             .or_insert_with(|| ConversationState {
-                flow: canonical.clone(),
+                flow: canonical,
                 tally: DirectionalTally::default(),
                 first_timestamp: timestamp,
                 last_timestamp: timestamp,

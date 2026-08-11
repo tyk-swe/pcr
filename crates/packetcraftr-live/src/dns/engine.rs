@@ -6,9 +6,7 @@
 use std::time::Duration;
 
 use packetcraftr_packet::budget::{Deadline, DeadlineExceeded};
-use packetcraftr_packet::{
-    Packet, decode::Result as DecodedPacket, diagnostic::push_diagnostic_once, registry::Registry,
-};
+use packetcraftr_packet::{diagnostic::push_diagnostic_once, registry::Registry};
 
 use crate::Stats;
 use crate::clock::Clock;
@@ -21,8 +19,8 @@ use crate::target::Authorizer;
 use super::error::DnsError;
 use super::evidence::validate_dns_execution;
 use super::model::{
-    DnsAttemptEvidence, DnsExchange, DnsExecutor, DnsLimits, DnsOutcome, DnsProbe, DnsRequest,
-    DnsResult, DnsUndecodedEvidence,
+    DnsAttemptEvidence, DnsExchange, DnsExecutor, DnsOutcome, DnsProbe, DnsRequest, DnsResult,
+    DnsUndecodedEvidence,
 };
 use super::wire::{DnsResponseClassification, classify_dns_response, encode_dns_query};
 use super::{DNS_EPHEMERAL_SOURCE_PORT_BASE, DNS_EVIDENCE_DIAGNOSTICS, MAX_DNS_PROBE_OVERHEAD};
@@ -186,28 +184,41 @@ where
             .map_err(duration_limit)?;
         validate_dns_execution(&probe, &execution, request.limits, request.timeout)?;
         enforce_deadline(&deadline)?;
-        add_dns_stats(&mut result.stats, &execution.stats, attempt)?;
+        result
+            .stats
+            .checked_add(&execution.stats)
+            .ok_or(DnsError::StatisticsOverflow { attempt })?;
         for diagnostic in execution.diagnostics {
             push_diagnostic_once(&mut result.diagnostics, diagnostic);
         }
 
         let sent_at = execution.sent.timing().freshness_marker().wall_clock();
+        let sent_packet = &execution.sent.built().packet;
         let mut best: Option<ResponseCandidate<'_, DnsResponseClassification>> = None;
-        let candidate_context = DnsCandidateContext {
-            registry,
-            probe: &probe,
-            sent: &execution.sent.built().packet,
-            timeout: request.timeout,
-            limits: request.limits,
-        };
         for matched in &execution.responses {
-            consider_dns_candidate(
-                &mut best,
-                &candidate_context,
-                &matched.response,
-                matched.latency,
-                &deadline,
-            )?;
+            enforce_deadline(&deadline)?;
+            if response_within_deadline(matched.latency, request.timeout)
+                && let Some(classification) = classify_dns_response(
+                    registry,
+                    &probe,
+                    sent_packet,
+                    &matched.response,
+                    request.limits,
+                )
+            {
+                select_response_candidate(
+                    &mut best,
+                    ResponseCandidate {
+                        observation: classification,
+                        decoded: &matched.response,
+                        latency: matched.latency,
+                    },
+                    request.timeout,
+                    DnsResponseClassification::rank,
+                    |_| (),
+                );
+            }
+            enforce_deadline(&deadline)?;
         }
 
         let evidence = if let Some(candidate) = best {
@@ -334,46 +345,6 @@ where
     Ok(result)
 }
 
-struct DnsCandidateContext<'a> {
-    registry: &'a Registry,
-    probe: &'a DnsProbe,
-    sent: &'a Packet,
-    timeout: Duration,
-    limits: DnsLimits,
-}
-
-fn consider_dns_candidate<'a>(
-    best: &mut Option<ResponseCandidate<'a, DnsResponseClassification>>,
-    context: &DnsCandidateContext<'_>,
-    decoded: &'a DecodedPacket,
-    latency: Duration,
-    deadline: &Deadline,
-) -> Result<(), DnsError> {
-    enforce_deadline(deadline)?;
-    if response_within_deadline(latency, context.timeout)
-        && let Some(classification) = classify_dns_response(
-            context.registry,
-            context.probe,
-            context.sent,
-            decoded,
-            context.limits,
-        )
-    {
-        select_response_candidate(
-            best,
-            ResponseCandidate {
-                observation: classification,
-                decoded,
-                latency,
-            },
-            context.timeout,
-            DnsResponseClassification::rank,
-            |_| (),
-        );
-    }
-    enforce_deadline(deadline)
-}
-
 #[expect(
     clippy::cast_possible_truncation,
     reason = "range_start plus a remainder modulo width stays inside the u16 ephemeral port \
@@ -413,11 +384,6 @@ fn update_dns_fallback(outcome: &mut DnsOutcome, rank: &mut u8, candidate: DnsOu
     }
 }
 
-fn add_dns_stats(total: &mut Stats, value: &Stats, attempt: u32) -> Result<(), DnsError> {
-    total
-        .checked_add(value)
-        .ok_or(DnsError::StatisticsOverflow { attempt })
-}
 fn enforce_deadline(deadline: &Deadline) -> Result<(), DnsError> {
     deadline.check().map_err(duration_limit)
 }

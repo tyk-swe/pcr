@@ -125,7 +125,7 @@ pub(in crate::pcap) fn write_enhanced_packet<W: Write>(
 }
 
 pub(in crate::pcap) fn validate_new_interface(
-    description: Interface,
+    description: &Interface,
     existing_interfaces: &[Interface],
     max_size: usize,
     max_interfaces: usize,
@@ -206,7 +206,7 @@ pub(in crate::pcap) fn select_interface(
             timestamp_resolution: WRITER_TIMESTAMP_RESOLUTION,
             timestamp_offset: 0,
         };
-        let id = validate_new_interface(description.clone(), interfaces, max_size, max_interfaces)?;
+        let id = validate_new_interface(&description, interfaces, max_size, max_interfaces)?;
         return Ok(InterfacePlan {
             id,
             description,

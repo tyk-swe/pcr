@@ -67,21 +67,15 @@ impl ReassemblyDispatch {
         }
 
         if pushable && let Some(segment) = segment {
-            let acknowledged = transports(&decoded.packet)
+            let acknowledgment = transports(&decoded.packet)
                 .tcp
-                .is_some_and(|(_, _, tcp)| tcp.flags & Tcp::ACK != 0);
+                .filter(|(_, _, tcp)| tcp.flags & Tcp::ACK != 0)
+                .map(|(_, _, tcp)| tcp.acknowledgment);
             let flow = segment.flow.clone();
-            let pure_syn = segment.syn && !acknowledged && segment.payload.is_empty();
+            let pure_syn = segment.syn && acknowledgment.is_none() && segment.payload.is_empty();
 
             if segment.syn {
                 let first = segment.sequence.wrapping_add(1);
-                let acknowledgment = acknowledged
-                    .then(|| {
-                        transports(&decoded.packet)
-                            .tcp
-                            .map(|(_, _, tcp)| tcp.acknowledgment)
-                    })
-                    .flatten();
                 let reverse = segment.flow.reverse();
                 let reverse_verdict = acknowledgment.and_then(|acknowledgment| {
                     match (

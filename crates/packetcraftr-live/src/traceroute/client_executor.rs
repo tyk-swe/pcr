@@ -27,11 +27,9 @@ where
         &mut self,
         batch: &TracerouteBatch,
     ) -> Result<TracerouteBatchExecution, BoundaryError> {
-        let Some(first) = batch.probes.first() else {
-            return Err(invalid_client_execution(
-                "traceroute executor received an empty hop batch",
-            ));
-        };
+        let first = batch.probes.first().ok_or_else(|| {
+            invalid_client_execution("traceroute executor received an empty hop batch")
+        })?;
         if batch
             .probes
             .iter()
@@ -69,8 +67,7 @@ where
             TracerouteStrategy::Tcp => "sequence",
             TracerouteStrategy::Icmp => "body",
         };
-        let first_packet = first.packet();
-        let mut template = PacketTemplate::new(first_packet);
+        let mut template = PacketTemplate::new(first.packet());
         if batch.probes.len() > 1 {
             let values = batch
                 .probes

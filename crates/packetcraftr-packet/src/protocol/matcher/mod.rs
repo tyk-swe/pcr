@@ -112,3 +112,17 @@ fn network_endpoints_before(packet: &Packet, upper_layer_index: usize) -> Option
         destination: path.final_destination,
     })
 }
+
+fn unsigned_field<T>(layer: &dyn Layer, field: &str) -> Option<T>
+where
+    T: TryFrom<u64>,
+{
+    T::try_from(layer.field(field)?.as_u64()?).ok()
+}
+
+fn response_source(response: &Packet, protocol: BuiltinProtocol) -> Option<std::net::IpAddr> {
+    let index = response
+        .iter()
+        .rposition(|layer| BuiltinProtocol::of(layer) == Some(protocol))?;
+    network_endpoints_before(response, index).map(|endpoints| endpoints.source)
+}

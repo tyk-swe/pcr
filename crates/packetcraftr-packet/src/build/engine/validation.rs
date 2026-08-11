@@ -177,23 +177,16 @@ pub(super) fn validate_bindings(
 
 pub(super) fn pass_through_byte_length(packet: &Packet) -> Result<usize, BuildError> {
     packet.iter().try_fold(0_usize, |total, layer| {
-        let length = layer
-            .as_any()
-            .downcast_ref::<Raw>()
-            .map(|layer| layer.bytes.len())
-            .or_else(|| {
-                layer
-                    .as_any()
-                    .downcast_ref::<Padding>()
-                    .map(|layer| layer.bytes.len())
-            })
-            .or_else(|| {
-                layer
-                    .as_any()
-                    .downcast_ref::<MalformedLayer>()
-                    .map(|layer| layer.bytes.len())
-            })
-            .unwrap_or(0);
+        let layer = layer.as_any();
+        let length = if let Some(layer) = layer.downcast_ref::<Raw>() {
+            layer.bytes.len()
+        } else if let Some(layer) = layer.downcast_ref::<Padding>() {
+            layer.bytes.len()
+        } else if let Some(layer) = layer.downcast_ref::<MalformedLayer>() {
+            layer.bytes.len()
+        } else {
+            0
+        };
         total.checked_add(length).ok_or(BuildError::LengthOverflow)
     })
 }

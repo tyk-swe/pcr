@@ -26,12 +26,12 @@ use crate::{
 pub(crate) fn validate_current_interface_identity(
     expected: &InterfaceId,
 ) -> Result<InterfaceInfo, LiveIoError> {
-    let interfaces = system_interfaces()?;
-    if let Some(interface) = interfaces
+    let mut interfaces = system_interfaces()?;
+    if let Some(position) = interfaces
         .iter()
-        .find(|interface| interface_identity_matches(&interface.id, expected))
+        .position(|interface| interface_identity_matches(&interface.id, expected))
     {
-        return Ok(interface.clone());
+        return Ok(interfaces.swap_remove(position));
     }
     let actual = interfaces
         .iter()

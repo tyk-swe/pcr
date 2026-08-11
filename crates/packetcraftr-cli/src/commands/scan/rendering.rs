@@ -5,8 +5,8 @@ use packetcraftr::{output, packet};
 
 use crate::errors::CliError;
 use crate::rendering::{
-    emit_json_compact, emit_stream_record, output_timestamp_text, render_diagnostics_text,
-    spaced_hex, write_stdout_line,
+    comma_separated, emit_json_compact, emit_stream_record, optional_display,
+    output_timestamp_text, render_diagnostics_text, render_optional, spaced_hex, write_stdout_line,
 };
 
 pub(super) fn render_scan_text(
@@ -17,12 +17,7 @@ pub(super) fn render_scan_text(
     write_stdout_line(format_args!(
         "target={} resolved={}",
         result.target,
-        result
-            .resolved_addresses
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join(",")
+        comma_separated(&result.resolved_addresses)
     ))?;
     for port in &result.ports {
         let destination = port
@@ -48,18 +43,9 @@ pub(super) fn render_scan_text(
                 scan_probe_status_name(evidence.status),
                 scan_classification_name(evidence.classification),
                 output_timestamp_text(evidence.sent_at),
-                evidence
-                    .received_at
-                    .map(output_timestamp_text)
-                    .unwrap_or_else(|| "none".to_owned()),
-                evidence
-                    .responder
-                    .map(|value| value.to_string())
-                    .unwrap_or_else(|| "none".to_owned()),
-                evidence
-                    .latency
-                    .map(|value| format!("{value:?}"))
-                    .unwrap_or_else(|| "none".to_owned()),
+                render_optional(evidence.received_at, output_timestamp_text),
+                optional_display(evidence.responder),
+                render_optional(evidence.latency, |value| format!("{value:?}")),
                 evidence.reason,
             ))?;
             if let Some(frame) = &evidence.frame {

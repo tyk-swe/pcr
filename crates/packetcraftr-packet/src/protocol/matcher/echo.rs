@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::net::IpAddr;
-
 use crate::{
     Packet,
     field::FieldValue,
@@ -11,8 +9,7 @@ use crate::{
 };
 
 use super::{
-    QuotedProbeTransport, network_endpoints_before, quoted_icmp_error_kind,
-    reversed_protocol_layers,
+    QuotedProbeTransport, quoted_icmp_error_kind, response_source, reversed_protocol_layers,
 };
 
 #[derive(Clone, Debug)]
@@ -84,10 +81,7 @@ impl ResponseMatcher for EchoMatcher {
         MatchResult::matched(100, "matching ICMP echo identifiers and sequences")
     }
 
-    fn responder(&self, _request: &Packet, response: &Packet) -> Option<IpAddr> {
-        let response_layer_index = response
-            .iter()
-            .rposition(|layer| BuiltinProtocol::of(layer) == Some(self.protocol))?;
-        network_endpoints_before(response, response_layer_index).map(|endpoints| endpoints.source)
+    fn responder(&self, _request: &Packet, response: &Packet) -> Option<std::net::IpAddr> {
+        response_source(response, self.protocol)
     }
 }

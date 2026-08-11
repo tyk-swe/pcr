@@ -157,6 +157,10 @@ impl Captured {
         })
     }
 
+    pub(crate) fn try_from_frames(frames: Vec<Frame>) -> Result<Vec<Self>, Error> {
+        frames.into_iter().map(Self::try_from_frame).collect()
+    }
+
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
     }

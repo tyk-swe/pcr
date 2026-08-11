@@ -172,15 +172,7 @@ pub(in crate::pcap) fn write_padding<W: Write>(
 }
 
 pub(in crate::pcap) fn decode_u16(endianness: Endianness, bytes: &[u8]) -> Result<u16, Error> {
-    let word: [u8; 2] = bytes
-        .get(..2)
-        .ok_or(Error::Truncated {
-            context: "two-byte field",
-            expected: 2,
-            actual: bytes.len(),
-        })?
-        .try_into()
-        .expect("two-byte slice");
+    let word = decode_array::<2>(bytes, "two-byte field")?;
     Ok(match endianness {
         Endianness::Little => u16::from_le_bytes(word),
         Endianness::Big => u16::from_be_bytes(word),
@@ -188,15 +180,7 @@ pub(in crate::pcap) fn decode_u16(endianness: Endianness, bytes: &[u8]) -> Resul
 }
 
 pub(in crate::pcap) fn decode_u32(endianness: Endianness, bytes: &[u8]) -> Result<u32, Error> {
-    let word: [u8; 4] = bytes
-        .get(..4)
-        .ok_or(Error::Truncated {
-            context: "four-byte field",
-            expected: 4,
-            actual: bytes.len(),
-        })?
-        .try_into()
-        .expect("four-byte slice");
+    let word = decode_array::<4>(bytes, "four-byte field")?;
     Ok(match endianness {
         Endianness::Little => u32::from_le_bytes(word),
         Endianness::Big => u32::from_be_bytes(word),
@@ -204,19 +188,26 @@ pub(in crate::pcap) fn decode_u32(endianness: Endianness, bytes: &[u8]) -> Resul
 }
 
 pub(in crate::pcap) fn decode_i64(endianness: Endianness, bytes: &[u8]) -> Result<i64, Error> {
-    let word: [u8; 8] = bytes
-        .get(..8)
-        .ok_or(Error::Truncated {
-            context: "eight-byte field",
-            expected: 8,
-            actual: bytes.len(),
-        })?
-        .try_into()
-        .expect("eight-byte slice");
+    let word = decode_array::<8>(bytes, "eight-byte field")?;
     Ok(match endianness {
         Endianness::Little => i64::from_le_bytes(word),
         Endianness::Big => i64::from_be_bytes(word),
     })
+}
+
+fn decode_array<const LENGTH: usize>(
+    bytes: &[u8],
+    context: &'static str,
+) -> Result<[u8; LENGTH], Error> {
+    Ok(bytes
+        .get(..LENGTH)
+        .ok_or(Error::Truncated {
+            context,
+            expected: LENGTH,
+            actual: bytes.len(),
+        })?
+        .try_into()
+        .expect("length-checked byte slice"))
 }
 
 pub(in crate::pcap) fn write_u16<W: Write>(

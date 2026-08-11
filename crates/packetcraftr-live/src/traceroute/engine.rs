@@ -5,7 +5,7 @@
 
 use std::time::Duration;
 
-use packetcraftr_packet::budget::{Deadline, DeadlineExceeded};
+use packetcraftr_packet::budget::Deadline;
 use packetcraftr_packet::{
     diagnostic::{Diagnostic, push_diagnostic_once},
     registry::Registry,
@@ -369,14 +369,7 @@ fn process_batch(
 }
 
 fn enforce_deadline(deadline: &Deadline) -> Result<(), TracerouteError> {
-    deadline.check().map_err(duration_limit)
-}
-
-fn duration_limit(error: DeadlineExceeded) -> TracerouteError {
-    TracerouteError::DurationLimit {
-        actual: error.actual,
-        limit: error.limit,
-    }
+    crate::clock::check_deadline(deadline, traceroute_duration_error)
 }
 
 fn traceroute_duration_error(actual: Duration, limit: Duration) -> TracerouteError {

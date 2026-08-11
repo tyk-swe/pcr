@@ -87,13 +87,10 @@ impl LayerCodec for Ipv6Codec {
             return Err(invalid("ipv6", "flow label exceeds 20 bits"));
         }
         let inherit_context = is_outer_network_layer(context.packet, context.index);
-        let source = if layer.source.is_unspecified() && inherit_context {
-            match context.build_context.source {
-                Some(IpAddr::V6(source)) => source,
-                _ => layer.source,
-            }
-        } else {
-            layer.source
+        let inherit_source = inherit_context && layer.source.is_unspecified();
+        let source = match context.build_context.source {
+            Some(IpAddr::V6(source)) if inherit_source => source,
+            _ => layer.source,
         };
         let srh_active = context
             .packet
@@ -132,19 +129,14 @@ impl LayerCodec for Ipv6Codec {
                 &mut diagnostics,
             )?;
         }
-        let destination = if layer.destination.is_unspecified() {
-            srh_active.unwrap_or({
-                if inherit_context {
-                    match context.build_context.destination {
-                        Some(IpAddr::V6(destination)) => destination,
-                        _ => layer.destination,
-                    }
-                } else {
-                    layer.destination
-                }
-            })
-        } else {
-            layer.destination
+        let destination = match (
+            layer.destination.is_unspecified(),
+            srh_active,
+            context.build_context.destination,
+        ) {
+            (true, Some(active), _) => active,
+            (true, None, Some(IpAddr::V6(destination))) if inherit_context => destination,
+            _ => layer.destination,
         };
         let covered_payload = payload_without_padding("ipv6", payload, context)?;
         let expected_length = u16::try_from(covered_payload.len())

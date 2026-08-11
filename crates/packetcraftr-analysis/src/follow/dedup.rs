@@ -33,10 +33,6 @@ pub(super) struct Deduplicator {
 }
 
 impl Deduplicator {
-    pub(super) fn new() -> Self {
-        Self::default()
-    }
-
     pub(super) fn mark_closed(&mut self, flow: &FlowKey, client: &FlowKey) {
         let closed = if flow == client {
             &mut self.client_closed

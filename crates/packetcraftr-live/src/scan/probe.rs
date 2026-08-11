@@ -41,22 +41,6 @@ pub(super) fn probe_packet(probe: &ScanProbe) -> Packet {
                 identification: nonzero_ipv4_identification(probe.sequence),
                 ..Ipv4::default()
             });
-            match probe.transport {
-                ScanTransport::Tcp => packet.push(Tcp {
-                    destination_port: probe.port.expect("validated TCP scan port"),
-                    sequence: probe.sequence as u32,
-                    ..Tcp::default()
-                }),
-                ScanTransport::Udp => packet.push(Udp {
-                    source_port: scan_udp_source_port(probe.attempt),
-                    destination_port: probe.port.expect("validated UDP scan port"),
-                    ..Udp::default()
-                }),
-                ScanTransport::Icmp => packet.push(Icmpv4 {
-                    body: icmp_identity(probe.sequence),
-                    ..Icmpv4::default()
-                }),
-            };
         }
         IpAddr::V6(destination) => {
             packet.push(Ipv6 {
@@ -64,24 +48,30 @@ pub(super) fn probe_packet(probe: &ScanProbe) -> Packet {
                 flow_label: (probe.sequence as u32) & 0x000f_ffff,
                 ..Ipv6::default()
             });
-            match probe.transport {
-                ScanTransport::Tcp => packet.push(Tcp {
-                    destination_port: probe.port.expect("validated TCP scan port"),
-                    sequence: probe.sequence as u32,
-                    ..Tcp::default()
-                }),
-                ScanTransport::Udp => packet.push(Udp {
-                    source_port: scan_udp_source_port(probe.attempt),
-                    destination_port: probe.port.expect("validated UDP scan port"),
-                    ..Udp::default()
-                }),
-                ScanTransport::Icmp => packet.push(Icmpv6 {
-                    body: icmp_identity(probe.sequence),
-                    ..Icmpv6::default()
-                }),
-            };
         }
     }
+    match probe.transport {
+        ScanTransport::Tcp => packet.push(Tcp {
+            destination_port: probe.port.expect("validated TCP scan port"),
+            sequence: probe.sequence as u32,
+            ..Tcp::default()
+        }),
+        ScanTransport::Udp => packet.push(Udp {
+            source_port: scan_udp_source_port(probe.attempt),
+            destination_port: probe.port.expect("validated UDP scan port"),
+            ..Udp::default()
+        }),
+        ScanTransport::Icmp => match probe.address {
+            IpAddr::V4(_) => packet.push(Icmpv4 {
+                body: icmp_identity(probe.sequence),
+                ..Icmpv4::default()
+            }),
+            IpAddr::V6(_) => packet.push(Icmpv6 {
+                body: icmp_identity(probe.sequence),
+                ..Icmpv6::default()
+            }),
+        },
+    };
     packet
 }
 

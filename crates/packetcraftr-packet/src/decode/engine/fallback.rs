@@ -93,21 +93,22 @@ pub(super) fn append_missing_required_layer(
 
 pub(super) fn raw_decoded_frame(frame: Frame, diagnostic: Diagnostic) -> DecodedPacket {
     let original = frame.bytes().clone();
+    let original_len = original.len();
     let mut packet = Packet::new();
     packet.push(Raw::new(original.clone()));
     packet.set_encoded_payload_lengths(vec![Some(0)]);
     DecodedPacket {
         packet,
-        original: original.clone(),
+        original,
         frame,
         layout: PacketLayout {
             layers: vec![LayerLayout {
                 index: 0,
                 protocol: ProtocolId::new(BuiltinProtocol::Raw.as_str()),
-                range: ByteRange::new(0, original.len()),
+                range: ByteRange::new(0, original_len),
                 fields: vec![FieldLayout {
                     name: "bytes".to_owned(),
-                    range: ByteRange::new(0, original.len()),
+                    range: ByteRange::new(0, original_len),
                 }],
             }],
         },

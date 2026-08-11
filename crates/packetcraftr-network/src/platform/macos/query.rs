@@ -33,7 +33,7 @@ pub(in crate::platform) fn route(
 
     let available = interfaces()?;
     let mut constrained_interface = interface_hint
-        .map(|requested| find_interface(available.clone(), requested))
+        .map(|requested| find_interface(&available, requested))
         .transpose()?;
     if let Some(source) = preferred_source {
         let source_interface = available
@@ -107,7 +107,7 @@ pub(in crate::platform) fn route(
 pub(in crate::platform) fn interface_route(
     requested: &InterfaceId,
 ) -> Result<RouteDecision, NativeRouteError> {
-    interface_decision(find_interface(interfaces()?, requested)?)
+    interface_decision(find_interface(&interfaces()?, requested)?)
 }
 
 struct RouteResponse {

@@ -145,9 +145,13 @@ pub(crate) fn validate_response_frames_and_deadlines<M: ResponseEvidence>(
     timeout: Duration,
 ) -> Result<(), ExchangeEvidenceError> {
     for response in matched_responses {
-        validate_exact_matched_response(response.response())?;
+        validate_decoded_frame(response.response(), "matched response")
+            .map_err(|message| ExchangeEvidenceError::InvalidMatchedResponse { message })?;
         validate_frame_timestamp(&response.response().frame, "matched response")?;
-        validate_matched_response_deadline(response.latency(), timeout)?;
+        let latency = response.latency();
+        if latency > timeout {
+            return Err(ExchangeEvidenceError::MatchedResponseAfterTimeout { latency, timeout });
+        }
     }
     for response in unsolicited {
         validate_decoded_frame(response, "unsolicited response")
@@ -163,21 +167,6 @@ fn validate_frame_timestamp(
 ) -> Result<(), ExchangeEvidenceError> {
     if frame.timestamp.is_none() {
         return Err(ExchangeEvidenceError::TimestampUnavailable { evidence });
-    }
-    Ok(())
-}
-
-fn validate_exact_matched_response(response: &DecodedPacket) -> Result<(), ExchangeEvidenceError> {
-    validate_decoded_frame(response, "matched response")
-        .map_err(|message| ExchangeEvidenceError::InvalidMatchedResponse { message })
-}
-
-fn validate_matched_response_deadline(
-    latency: Duration,
-    timeout: Duration,
-) -> Result<(), ExchangeEvidenceError> {
-    if latency > timeout {
-        return Err(ExchangeEvidenceError::MatchedResponseAfterTimeout { latency, timeout });
     }
     Ok(())
 }

@@ -38,16 +38,11 @@ impl MaterializedRouteOutput {
         let neighbor = route
             .neighbor_resolution
             .map(|resolution| {
-                let captured = resolution
-                    .captured
-                    .into_iter()
-                    .map(Captured::try_from_frame)
-                    .collect::<std::result::Result<Vec<_>, _>>()?;
                 Ok(NeighborEvidenceOutput {
                     mac_address: resolution.mac_address.to_string(),
                     attempts: resolution.attempts,
                     cache_hit: resolution.cache_hit,
-                    captured,
+                    captured: Captured::try_from_frames(resolution.captured)?,
                     evidence_truncated: resolution.evidence_truncated,
                     capture_statistics: resolution.capture_statistics.into(),
                 })
@@ -72,10 +67,9 @@ impl SendCommandResult {
         report: SendReport,
     ) -> std::result::Result<(Self, Vec<Diagnostic>, Stats), Error> {
         let SendReport { sent, stats } = report;
-        let frame = Wire::new(sent.wire_bytes().clone());
         Ok((
             Self {
-                frame,
+                frame: Wire::new(sent.wire_bytes().clone()),
                 route: MaterializedRouteOutput::try_from_route(sent.route().clone())?,
             },
             sent.built().diagnostics.clone(),

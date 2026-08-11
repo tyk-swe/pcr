@@ -32,34 +32,22 @@ pub(crate) fn encode_network(
         };
         if let Some(ipv4) = layer.as_any().downcast_ref::<Ipv4>() {
             let inherit_context = is_outer_network_layer(context.packet, index);
-            let source = if ipv4.source.is_unspecified() && inherit_context {
-                context
-                    .build_context
-                    .source
-                    .and_then(|source| match source {
-                        IpAddr::V4(source) => Some(source),
-                        IpAddr::V6(_) => None,
-                    })
-                    .unwrap_or(ipv4.source)
-            } else {
-                ipv4.source
+            let inherit_source = inherit_context && ipv4.source.is_unspecified();
+            let inherit_destination = inherit_context && ipv4.destination.is_unspecified();
+            let source = match context.build_context.source {
+                Some(IpAddr::V4(source)) if inherit_source => source,
+                _ => ipv4.source,
             };
-            let destination = if ipv4.destination.is_unspecified() && inherit_context {
-                context
-                    .build_context
-                    .destination
-                    .and_then(|destination| match destination {
-                        IpAddr::V4(destination) => Some(destination),
-                        IpAddr::V6(_) => None,
-                    })
-                    .unwrap_or(ipv4.destination)
-            } else {
-                ipv4.destination
+            let destination = match context.build_context.destination {
+                Some(IpAddr::V4(destination)) if inherit_destination => destination,
+                _ => ipv4.destination,
             };
             return Ok(network_from_addresses(source.into(), destination.into()));
         }
         if let Some(ipv6) = layer.as_any().downcast_ref::<Ipv6>() {
             let inherit_context = is_outer_network_layer(context.packet, index);
+            let inherit_source = inherit_context && ipv6.source.is_unspecified();
+            let inherit_destination = inherit_context && ipv6.destination.is_unspecified();
             // Only routing headers inside the nearest IPv6 envelope can
             // replace its pseudo-header destination. An SRH belonging to an
             // outer tunnel must not affect an encapsulated transport.
@@ -75,29 +63,13 @@ pub(crate) fn encode_network(
                         .copied()
                 })
                 .last();
-            let source = if ipv6.source.is_unspecified() && inherit_context {
-                context
-                    .build_context
-                    .source
-                    .and_then(|source| match source {
-                        IpAddr::V6(source) => Some(source),
-                        IpAddr::V4(_) => None,
-                    })
-                    .unwrap_or(ipv6.source)
-            } else {
-                ipv6.source
+            let source = match context.build_context.source {
+                Some(IpAddr::V6(source)) if inherit_source => source,
+                _ => ipv6.source,
             };
-            let destination = if ipv6.destination.is_unspecified() && inherit_context {
-                context
-                    .build_context
-                    .destination
-                    .and_then(|destination| match destination {
-                        IpAddr::V6(destination) => Some(destination),
-                        IpAddr::V4(_) => None,
-                    })
-                    .unwrap_or(ipv6.destination)
-            } else {
-                ipv6.destination
+            let destination = match context.build_context.destination {
+                Some(IpAddr::V6(destination)) if inherit_destination => destination,
+                _ => ipv6.destination,
             };
             return Ok(network_from_addresses(
                 source.into(),

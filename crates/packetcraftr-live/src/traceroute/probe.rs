@@ -36,24 +36,6 @@ pub(super) fn probe_packet(probe: &TracerouteProbe) -> Packet {
                 )),
                 ..Ipv4::default()
             });
-            match probe.strategy {
-                TracerouteStrategy::Udp => packet.push(Udp {
-                    source_port: TRACEROUTE_SOURCE_PORT,
-                    destination_port: probe.destination_port.expect("validated UDP port"),
-                    ..Udp::default()
-                }),
-                TracerouteStrategy::Tcp => packet.push(Tcp {
-                    source_port: TRACEROUTE_SOURCE_PORT,
-                    destination_port: probe.destination_port.expect("validated TCP port"),
-                    sequence: probe.sequence as u32,
-                    flags: Tcp::SYN,
-                    ..Tcp::default()
-                }),
-                TracerouteStrategy::Icmp => packet.push(Icmpv4 {
-                    body: traceroute_identity(probe.sequence),
-                    ..Icmpv4::default()
-                }),
-            };
         }
         IpAddr::V6(destination) => {
             packet.push(Ipv6 {
@@ -62,26 +44,32 @@ pub(super) fn probe_packet(probe: &TracerouteProbe) -> Packet {
                 flow_label: u32::from(probe.hop_limit),
                 ..Ipv6::default()
             });
-            match probe.strategy {
-                TracerouteStrategy::Udp => packet.push(Udp {
-                    source_port: TRACEROUTE_SOURCE_PORT,
-                    destination_port: probe.destination_port.expect("validated UDP port"),
-                    ..Udp::default()
-                }),
-                TracerouteStrategy::Tcp => packet.push(Tcp {
-                    source_port: TRACEROUTE_SOURCE_PORT,
-                    destination_port: probe.destination_port.expect("validated TCP port"),
-                    sequence: probe.sequence as u32,
-                    flags: Tcp::SYN,
-                    ..Tcp::default()
-                }),
-                TracerouteStrategy::Icmp => packet.push(Icmpv6 {
-                    body: traceroute_identity(probe.sequence),
-                    ..Icmpv6::default()
-                }),
-            };
         }
     }
+    match probe.strategy {
+        TracerouteStrategy::Udp => packet.push(Udp {
+            source_port: TRACEROUTE_SOURCE_PORT,
+            destination_port: probe.destination_port.expect("validated UDP port"),
+            ..Udp::default()
+        }),
+        TracerouteStrategy::Tcp => packet.push(Tcp {
+            source_port: TRACEROUTE_SOURCE_PORT,
+            destination_port: probe.destination_port.expect("validated TCP port"),
+            sequence: probe.sequence as u32,
+            flags: Tcp::SYN,
+            ..Tcp::default()
+        }),
+        TracerouteStrategy::Icmp => match probe.address {
+            IpAddr::V4(_) => packet.push(Icmpv4 {
+                body: traceroute_identity(probe.sequence),
+                ..Icmpv4::default()
+            }),
+            IpAddr::V6(_) => packet.push(Icmpv6 {
+                body: traceroute_identity(probe.sequence),
+                ..Icmpv6::default()
+            }),
+        },
+    };
     packet
 }
 

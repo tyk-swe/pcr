@@ -7,4 +7,4 @@ mod value;
 
 pub use super::layer::model::{FieldError as Error, FieldSchema as Schema};
 pub use value::{FieldKind as Kind, FieldValue as Value, WireValue as Wire};
-pub(crate) use value::{FieldKind, FieldValue, WireValue};
+pub(crate) use value::{FieldKind, FieldValue, WireValue, parse_mac};

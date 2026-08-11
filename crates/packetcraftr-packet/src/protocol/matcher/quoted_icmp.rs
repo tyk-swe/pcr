@@ -11,7 +11,7 @@ use crate::{
     semantics::{self, BuiltinProtocol},
 };
 
-use super::sctp::sctp_initiate_tag;
+use super::{sctp::sctp_initiate_tag, unsigned_field};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum QuotedIcmpError {
@@ -52,8 +52,8 @@ pub fn quoted_icmp_error_kind(
         return None;
     }
     let (icmp_protocol, layer) = directly_received_icmp(response)?;
-    let icmp_type = u8::try_from(layer.field("type")?.as_u64()?).ok()?;
-    let code = u8::try_from(layer.field("code")?.as_u64()?).ok()?;
+    let icmp_type = unsigned_field::<u8>(layer, "type")?;
+    let code = unsigned_field::<u8>(layer, "code")?;
     let kind = match icmp_protocol {
         BuiltinProtocol::Icmpv4 if icmp_type == 3 => match code {
             3 if transport == QuotedProbeTransport::Udp => QuotedIcmpError::PortUnreachable,
@@ -184,20 +184,13 @@ fn quoted_probe_matches(
             }
             match transport {
                 QuotedProbeTransport::Tcp => {
-                    let Some(sequence) = layer
-                        .field("sequence")
-                        .and_then(|value| value.as_u64())
-                        .and_then(|value| u32::try_from(value).ok())
-                    else {
+                    let Some(sequence) = unsigned_field::<u32>(layer, "sequence") else {
                         return false;
                     };
                     quoted.payload.get(4..8) == Some(&sequence.to_be_bytes()[..])
                 }
                 QuotedProbeTransport::Sctp => {
-                    let Some(verification_tag) = layer
-                        .field("verification_tag")
-                        .and_then(|value| value.as_u64())
-                        .and_then(|value| u32::try_from(value).ok())
+                    let Some(verification_tag) = unsigned_field::<u32>(layer, "verification_tag")
                     else {
                         return false;
                     };
@@ -223,18 +216,10 @@ fn quoted_probe_matches(
             else {
                 return false;
             };
-            let Some(icmp_type) = layer
-                .field("type")
-                .and_then(|value| value.as_u64())
-                .and_then(|value| u8::try_from(value).ok())
-            else {
+            let Some(icmp_type) = unsigned_field::<u8>(layer, "type") else {
                 return false;
             };
-            let Some(code) = layer
-                .field("code")
-                .and_then(|value| value.as_u64())
-                .and_then(|value| u8::try_from(value).ok())
-            else {
+            let Some(code) = unsigned_field::<u8>(layer, "code") else {
                 return false;
             };
             let Some(FieldValue::Bytes(body)) = layer.field("body") else {

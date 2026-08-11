@@ -136,7 +136,7 @@ pub(crate) fn interface_decision(
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) fn find_interface(
-    interfaces: Vec<InterfaceInfo>,
+    interfaces: &[InterfaceInfo],
     requested: &InterfaceId,
 ) -> Result<InterfaceInfo, NativeRouteError> {
     if let Some(interface) = interfaces

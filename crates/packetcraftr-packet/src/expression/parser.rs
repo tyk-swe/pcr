@@ -9,7 +9,7 @@ use bytes::Bytes;
 use thiserror::Error;
 
 use super::super::Packet;
-use super::super::field::FieldValue;
+use super::super::field::{FieldValue, parse_mac};
 use super::super::registry::{CodecError, ProtocolRegistry};
 
 pub const DEFAULT_MAX_EXPRESSION_BYTES: usize = 1024 * 1024;
@@ -216,10 +216,7 @@ fn parse_value_bounded(
     if let Ok(value) = Ipv6Addr::from_str(input) {
         return Ok(FieldValue::Ipv6(value));
     }
-    if let Some(value) = input
-        .strip_prefix("0x")
-        .or_else(|| input.strip_prefix("0X"))
-    {
+    if let Some(value) = strip_hex_prefix(input) {
         let parsed = u64::from_str_radix(value, 16).map_err(|_| ExpressionError::Syntax {
             offset: 0,
             message: format!("invalid hexadecimal integer {input}"),
@@ -392,27 +389,15 @@ fn split_top_level_bounded(
     Ok(result)
 }
 
-fn parse_mac(input: &str) -> Option<[u8; 6]> {
-    let normalized = input.replace('-', ":");
-    let parts = normalized.split(':').collect::<Vec<_>>();
-    if parts.len() != 6 {
-        return None;
-    }
-    let mut output = [0u8; 6];
-    for (index, part) in parts.into_iter().enumerate() {
-        if part.len() != 2 {
-            return None;
-        }
-        output[index] = u8::from_str_radix(part, 16).ok()?;
-    }
-    Some(output)
+fn strip_hex_prefix(input: &str) -> Option<&str> {
+    input
+        .strip_prefix("0x")
+        .or_else(|| input.strip_prefix("0X"))
 }
 
 pub fn decode_hex(input: &str) -> Result<Bytes, CodecError> {
     let protocol = super::super::layer::ProtocolId::new("raw");
-    let compact = input
-        .strip_prefix("0x")
-        .or_else(|| input.strip_prefix("0X"))
+    let compact = strip_hex_prefix(input)
         .unwrap_or(input)
         .chars()
         .filter(|character| {

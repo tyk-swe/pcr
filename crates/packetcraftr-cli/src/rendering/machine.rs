@@ -7,6 +7,26 @@ use serde::Serialize;
 use super::super::errors::CliError;
 use super::human::write_machine_line;
 
+pub(crate) fn render_optional<T>(value: Option<T>, render: impl FnOnce(T) -> String) -> String {
+    value.map_or_else(|| "none".to_owned(), render)
+}
+
+pub(crate) fn optional_display<T: std::fmt::Display>(value: Option<T>) -> String {
+    render_optional(value, |value| value.to_string())
+}
+
+pub(crate) fn comma_separated<I, T>(values: I) -> String
+where
+    I: IntoIterator<Item = T>,
+    T: ToString,
+{
+    values
+        .into_iter()
+        .map(|value| value.to_string())
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 pub(crate) fn spaced_hex(bytes: &[u8]) -> String {
     let mut output = String::with_capacity(bytes.len().saturating_mul(3));
     for (index, byte) in bytes.iter().enumerate() {

@@ -5,8 +5,8 @@ use packetcraftr::{output, packet};
 
 use crate::errors::CliError;
 use crate::rendering::{
-    emit_json_compact, emit_stream_record, output_timestamp_text, render_diagnostics_text,
-    spaced_hex, write_stdout_line,
+    comma_separated, emit_json_compact, emit_stream_record, optional_display,
+    output_timestamp_text, render_diagnostics_text, render_optional, spaced_hex, write_stdout_line,
 };
 
 pub(super) fn render_traceroute_text(
@@ -17,18 +17,10 @@ pub(super) fn render_traceroute_text(
     write_stdout_line(format_args!(
         "target={} resolved={} destination={} strategy={} port={}",
         result.target,
-        result
-            .resolved_addresses
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join(","),
+        comma_separated(&result.resolved_addresses),
         result.destination,
         result.strategy,
-        result
-            .destination_port
-            .map(|value| value.to_string())
-            .unwrap_or_else(|| "none".to_owned()),
+        optional_display(result.destination_port),
     ))?;
     for hop in &result.hops {
         write_stdout_line(format_args!("hop={}", hop.hop_limit))?;
@@ -43,22 +35,10 @@ pub(super) fn render_traceroute_text(
                     .map(trace_response_kind_name)
                     .unwrap_or("none"),
                 output_timestamp_text(probe.sent_at),
-                probe
-                    .received_at
-                    .map(output_timestamp_text)
-                    .unwrap_or_else(|| "none".to_owned()),
-                probe
-                    .responder
-                    .map(|value| value.to_string())
-                    .unwrap_or_else(|| "none".to_owned()),
-                probe
-                    .latency
-                    .map(|value| format!("{value:?}"))
-                    .unwrap_or_else(|| "none".to_owned()),
-                probe
-                    .destination_port
-                    .map(|value| value.to_string())
-                    .unwrap_or_else(|| "none".to_owned()),
+                render_optional(probe.received_at, output_timestamp_text),
+                optional_display(probe.responder),
+                render_optional(probe.latency, |value| format!("{value:?}")),
+                optional_display(probe.destination_port),
                 probe.reason,
             ))?;
             if let Some(frame) = &probe.frame {

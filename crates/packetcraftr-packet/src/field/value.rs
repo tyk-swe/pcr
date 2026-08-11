@@ -71,6 +71,19 @@ pub enum FieldValue {
     List(Vec<FieldValue>),
 }
 
+pub(crate) fn parse_mac(input: &str) -> Option<[u8; 6]> {
+    let mut parts = input.split([':', '-']);
+    let mut output = [0_u8; 6];
+    for byte in &mut output {
+        let part = parts.next()?;
+        if part.len() != 2 {
+            return None;
+        }
+        *byte = u8::from_str_radix(part, 16).ok()?;
+    }
+    parts.next().is_none().then_some(output)
+}
+
 mod bytes_as_array {
     use bytes::Bytes;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};

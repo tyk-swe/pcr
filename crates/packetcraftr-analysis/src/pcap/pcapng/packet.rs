@@ -22,27 +22,13 @@ pub(in crate::pcap) fn parse_enhanced_packet(
     interface_base: u32,
     max_size: usize,
 ) -> Result<Frame, Error> {
-    if body.len() < 20 {
-        return Err(Error::InvalidData {
-            format: Format::PcapNg,
-            reason: "enhanced packet block is shorter than 20 bytes",
-        });
-    }
-    let header = PacketHeader {
-        interface_id: decode_u32(endianness, &body[0..4])?,
-        timestamp_ticks: (u64::from(decode_u32(endianness, &body[4..8])?) << 32)
-            | u64::from(decode_u32(endianness, &body[8..12])?),
-        captured_length: decode_u32(endianness, &body[12..16])?,
-        original_length: decode_u32(endianness, &body[16..20])?,
-    };
-    parse_pcapng_packet_body(
+    parse(
         body,
-        20,
-        header,
         endianness,
         interfaces,
         interface_base,
         max_size,
+        false,
     )
 }
 
@@ -53,52 +39,38 @@ pub(in crate::pcap) fn parse_obsolete_packet(
     interface_base: u32,
     max_size: usize,
 ) -> Result<Frame, Error> {
-    if body.len() < 20 {
-        return Err(Error::InvalidData {
-            format: Format::PcapNg,
-            reason: "packet block is shorter than 20 bytes",
-        });
-    }
-    let header = PacketHeader {
-        interface_id: u32::from(decode_u16(endianness, &body[0..2])?),
-        timestamp_ticks: (u64::from(decode_u32(endianness, &body[4..8])?) << 32)
-            | u64::from(decode_u32(endianness, &body[8..12])?),
-        captured_length: decode_u32(endianness, &body[12..16])?,
-        original_length: decode_u32(endianness, &body[16..20])?,
-    };
-    parse_pcapng_packet_body(
-        body,
-        20,
-        header,
-        endianness,
-        interfaces,
-        interface_base,
-        max_size,
-    )
+    parse(body, endianness, interfaces, interface_base, max_size, true)
 }
 
-struct PacketHeader {
-    interface_id: u32,
-    timestamp_ticks: u64,
-    captured_length: u32,
-    original_length: u32,
-}
-
-fn parse_pcapng_packet_body(
+fn parse(
     body: &[u8],
-    data_offset: usize,
-    header: PacketHeader,
     endianness: Endianness,
     interfaces: &[Interface],
     interface_base: u32,
     max_size: usize,
+    obsolete_layout: bool,
 ) -> Result<Frame, Error> {
-    let PacketHeader {
-        interface_id,
-        timestamp_ticks,
-        captured_length,
-        original_length,
-    } = header;
+    const HEADER_LENGTH: usize = 20;
+
+    if body.len() < HEADER_LENGTH {
+        return Err(Error::InvalidData {
+            format: Format::PcapNg,
+            reason: if obsolete_layout {
+                "packet block is shorter than 20 bytes"
+            } else {
+                "enhanced packet block is shorter than 20 bytes"
+            },
+        });
+    }
+    let interface_id = if obsolete_layout {
+        u32::from(decode_u16(endianness, &body[0..2])?)
+    } else {
+        decode_u32(endianness, &body[0..4])?
+    };
+    let timestamp_ticks = (u64::from(decode_u32(endianness, &body[4..8])?) << 32)
+        | u64::from(decode_u32(endianness, &body[8..12])?);
+    let captured_length = decode_u32(endianness, &body[12..16])?;
+    let original_length = decode_u32(endianness, &body[16..20])?;
     validate_declared_lengths(captured_length, original_length, max_size, "pcapng packet")?;
     let interface = interfaces
         .get(interface_id as usize)
@@ -113,7 +85,7 @@ fn parse_pcapng_packet_body(
         });
     }
     let padded_length = align_to_usize(captured_length as usize)?;
-    let data_end = data_offset
+    let data_end = HEADER_LENGTH
         .checked_add(padded_length)
         .ok_or(Error::InvalidData {
             format: Format::PcapNg,
@@ -126,7 +98,7 @@ fn parse_pcapng_packet_body(
             actual: body.len(),
         });
     }
-    let actual_data_end = data_offset + captured_length as usize;
+    let actual_data_end = HEADER_LENGTH + captured_length as usize;
     let direction = parse_packet_direction(&body[data_end..], endianness)?;
     let timestamp = timestamp_from_ticks(
         timestamp_ticks,
@@ -141,7 +113,7 @@ fn parse_pcapng_packet_body(
         interface.link_type,
         captured_length,
         original_length,
-        Bytes::from(copy_bytes_fallibly(&body[data_offset..actual_data_end])?),
+        Bytes::from(copy_bytes_fallibly(&body[HEADER_LENGTH..actual_data_end])?),
     )?;
     frame.interface = Some(global_interface);
     frame.direction = direction;

@@ -190,37 +190,28 @@ fn classify_icmp_error(
             _ => None,
         })?;
     let ipv6 = icmp_protocol == BuiltinProtocol::Icmpv6;
-    let (correlation, reason) = match (kind, ipv6) {
-        (QuotedIcmpError::PortUnreachable, false) => {
-            (Correlation::PortUnreachable, "ICMPv4 port unreachable")
-        }
-        (QuotedIcmpError::PortUnreachable, true) => {
-            (Correlation::PortUnreachable, "ICMPv6 port unreachable")
-        }
-        (QuotedIcmpError::AdministrativelyProhibited, false) => (
+    let (correlation, ipv4_reason, ipv6_reason) = match kind {
+        QuotedIcmpError::PortUnreachable => (
+            Correlation::PortUnreachable,
+            "ICMPv4 port unreachable",
+            "ICMPv6 port unreachable",
+        ),
+        QuotedIcmpError::AdministrativelyProhibited => (
             Correlation::AdministrativelyProhibited,
             "ICMPv4 administratively prohibited",
-        ),
-        (QuotedIcmpError::AdministrativelyProhibited, true) => (
-            Correlation::AdministrativelyProhibited,
             "ICMPv6 policy or administrative rejection",
         ),
-        (QuotedIcmpError::DestinationUnreachable, false) => (
+        QuotedIcmpError::DestinationUnreachable => (
             Correlation::DestinationUnreachable,
             "ICMPv4 destination unreachable",
-        ),
-        (QuotedIcmpError::DestinationUnreachable, true) => (
-            Correlation::DestinationUnreachable,
             "ICMPv6 destination unreachable",
         ),
-        (QuotedIcmpError::TimeExceeded, false) => (
+        QuotedIcmpError::TimeExceeded => (
             Correlation::TimeExceeded,
             "ICMPv4 time exceeded before reaching the endpoint",
-        ),
-        (QuotedIcmpError::TimeExceeded, true) => (
-            Correlation::TimeExceeded,
             "ICMPv6 time exceeded before reaching the endpoint",
         ),
     };
+    let reason = if ipv6 { ipv6_reason } else { ipv4_reason };
     Some(Observation::new(responder, correlation, reason))
 }

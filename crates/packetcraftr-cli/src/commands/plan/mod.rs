@@ -9,7 +9,7 @@ use packetcraftr::output;
 
 use self::arguments::PlanArgs;
 use super::super::errors::CliError;
-use super::super::rendering::{emit_json, write_stdout_line};
+use super::super::rendering::{emit_json, optional_display, write_stdout_line};
 use super::super::system::{default_registry_arc, prepare_route_request, system_client};
 
 pub(super) fn run(arguments: PlanArgs, output: output::contract::Format) -> Result<(), CliError> {
@@ -59,10 +59,4 @@ fn render_planned_route(route: &output::plan::Plan) -> Result<(), CliError> {
             .map(|value| value.to_string())
             .unwrap_or_else(|| "unresolved".to_owned())
     ))
-}
-
-fn optional_display<T: std::fmt::Display>(value: Option<T>) -> String {
-    value
-        .map(|value| value.to_string())
-        .unwrap_or_else(|| "none".to_owned())
 }

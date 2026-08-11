@@ -200,7 +200,6 @@ impl Result {
                 )
             })
             .collect::<std::result::Result<Vec<_>, ContractError>>()?;
-        let operation_stats = (&stats).into();
         Ok((
             Self {
                 seed,
@@ -212,7 +211,7 @@ impl Result {
                 cases: case_outputs,
             },
             diagnostics,
-            operation_stats,
+            (&stats).into(),
         ))
     }
 
@@ -249,7 +248,6 @@ impl Result {
                 )
             })
             .collect::<std::result::Result<Vec<_>, ContractError>>()?;
-        let operation_stats = (&stats).into();
         Ok((
             Self {
                 seed,
@@ -261,7 +259,7 @@ impl Result {
                 cases: case_outputs,
             },
             diagnostics,
-            operation_stats,
+            (&stats).into(),
         ))
     }
 }
@@ -309,18 +307,9 @@ fn convert_case(
         outcome,
         error: error.as_ref().map(OutputError::classified),
         sent: sent.map(Captured::try_from_frame).transpose()?,
-        responses: responses
-            .into_iter()
-            .map(Captured::try_from_frame)
-            .collect::<std::result::Result<Vec<_>, _>>()?,
-        unmatched: unmatched
-            .into_iter()
-            .map(Captured::try_from_frame)
-            .collect::<std::result::Result<Vec<_>, _>>()?,
-        undecoded: undecoded
-            .into_iter()
-            .map(Captured::try_from_frame)
-            .collect::<std::result::Result<Vec<_>, _>>()?,
+        responses: Captured::try_from_frames(responses)?,
+        unmatched: Captured::try_from_frames(unmatched)?,
+        undecoded: Captured::try_from_frames(undecoded)?,
         diagnostics: diagnostics.into_iter().map(Into::into).collect(),
     })
 }

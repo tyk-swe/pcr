@@ -113,21 +113,15 @@ impl LayerCodec for Ipv4Codec {
         }
 
         let inherit_context = is_outer_network_layer(context.packet, context.index);
-        let source = if layer.source.is_unspecified() && inherit_context {
-            match context.build_context.source {
-                Some(IpAddr::V4(source)) => source,
-                _ => layer.source,
-            }
-        } else {
-            layer.source
+        let inherit_source = inherit_context && layer.source.is_unspecified();
+        let inherit_destination = inherit_context && layer.destination.is_unspecified();
+        let source = match context.build_context.source {
+            Some(IpAddr::V4(source)) if inherit_source => source,
+            _ => layer.source,
         };
-        let destination = if layer.destination.is_unspecified() && inherit_context {
-            match context.build_context.destination {
-                Some(IpAddr::V4(destination)) => destination,
-                _ => layer.destination,
-            }
-        } else {
-            layer.destination
+        let destination = match context.build_context.destination {
+            Some(IpAddr::V4(destination)) if inherit_destination => destination,
+            _ => layer.destination,
         };
 
         let mut diagnostics = Vec::new();

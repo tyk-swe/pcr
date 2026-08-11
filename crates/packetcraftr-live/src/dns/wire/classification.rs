@@ -115,21 +115,14 @@ pub fn classify_dns_response(
 }
 
 fn direct_udp_match(registry: &Registry, request: &Packet, response: &Packet) -> bool {
-    if !response
+    response
         .iter()
         .any(|layer| BuiltinProtocol::of(layer) == Some(BuiltinProtocol::Udp))
-    {
-        return false;
-    }
-    let Some(udp) = request
-        .iter()
-        .find(|layer| BuiltinProtocol::of(*layer) == Some(BuiltinProtocol::Udp))
-    else {
-        return false;
-    };
-    registry
-        .matcher(udp.protocol_id().as_str())
-        .is_some_and(|matcher| matcher.matches(request, response).matched)
+        && request
+            .iter()
+            .find(|layer| BuiltinProtocol::of(*layer) == Some(BuiltinProtocol::Udp))
+            .and_then(|udp| registry.matcher(udp.protocol_id().as_str()))
+            .is_some_and(|matcher| matcher.matches(request, response).matched)
 }
 
 pub(crate) fn dns_payload(packet: &Packet) -> Option<Bytes> {

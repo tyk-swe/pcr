@@ -45,7 +45,7 @@ pub(in crate::fuzz) fn dissect_built(
         },
     ) {
         Ok(decoded) => {
-            diagnostics.extend(decoded.diagnostics.clone());
+            diagnostics.extend_from_slice(&decoded.diagnostics);
             Some(decoded)
         }
         Err(source) => {

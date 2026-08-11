@@ -23,11 +23,10 @@ where
     I: PacketIo + CaptureProvider,
 {
     fn execute(&mut self, batch: &ScanBatch) -> Result<ScanBatchExecution, BoundaryError> {
-        let Some(first) = batch.probes.first() else {
-            return Err(invalid_client_execution(
-                "scan executor received an empty batch",
-            ));
-        };
+        let first = batch
+            .probes
+            .first()
+            .ok_or_else(|| invalid_client_execution("scan executor received an empty batch"))?;
         if batch.probes.iter().any(|probe| {
             probe.address != first.address
                 || probe.transport != first.transport

@@ -8,6 +8,9 @@ PacketcraftR is currently a pre-1.0 beta (`0.5.0-beta.1`). Rust APIs and
 versioned serialized contracts may change incompatibly between beta releases.
 Review the [changelog](CHANGELOG.md) before upgrading.
 
+We prioritize future maintainability than tracking past changes before 1.0.
+Any external contributions should awknowlage it.
+
 Use live networking only on systems and networks you own or are explicitly
 authorized to test.
 

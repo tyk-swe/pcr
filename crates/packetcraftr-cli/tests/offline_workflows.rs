@@ -7,6 +7,10 @@ use std::process::{Command, Output, Stdio};
 
 use serde_json::Value;
 
+mod support;
+
+use support::{parse_json, run, run_success};
+
 const UDP_CLIENT: &str = "450000210000000040118e95c0000201c633640230390009000d9f8868656c6c6f";
 const UDP_SERVER: &str = "450000210000000040118e95c6336402c000020100093039000d957e776f726c64";
 const TCP_CLIENT: &str =
@@ -15,13 +19,6 @@ const TCP_SERVER: &str =
     "450000280000000040068e99c6336402c0000201005030390000000a000000045012100083040000";
 const TCP_DATA: &str =
     "4500002b0000000040068e96c0000201c633640230390050000000040000000b50181000be970000616263";
-
-fn run(arguments: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_packetcraftr"))
-        .args(arguments)
-        .output()
-        .expect("CLI process must start")
-}
 
 fn run_with_stdin(arguments: &[&str], input: &[u8]) -> Output {
     let mut child = Command::new(env!("CARGO_BIN_EXE_packetcraftr"))
@@ -38,16 +35,6 @@ fn run_with_stdin(arguments: &[&str], input: &[u8]) -> Output {
         .write_all(input)
         .expect("stdin must accept the frame");
     child.wait_with_output().expect("CLI process must finish")
-}
-
-fn parse_json(output: &Output) -> Value {
-    serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
-        panic!(
-            "command output must be JSON ({error}): stdout={:?}, stderr={:?}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr),
-        )
-    })
 }
 
 fn decode_hex(value: &str) -> Vec<u8> {
@@ -103,7 +90,7 @@ fn stats_exercises_every_table_and_filtering_mode() {
     let path = path_text(capture.path());
 
     for table in ["conversations", "endpoints", "protocols", "ports", "io"] {
-        let output = run(&[
+        let output = run_success(&[
             "--output",
             "json",
             "stats",
@@ -113,7 +100,6 @@ fn stats_exercises_every_table_and_filtering_mode() {
             "--interval-ms",
             "500",
         ]);
-        assert!(output.status.success(), "{table}: {:?}", output.stderr);
         let value = parse_json(&output);
         assert_eq!(value["command"], "stats");
         assert_eq!(value["result"]["table"], table);
@@ -121,7 +107,7 @@ fn stats_exercises_every_table_and_filtering_mode() {
         assert_eq!(value["result"]["frames_matched"], 5);
     }
 
-    let filtered = run(&[
+    let filtered = run_success(&[
         "--output",
         "json",
         "stats",
@@ -131,14 +117,12 @@ fn stats_exercises_every_table_and_filtering_mode() {
         "--filter",
         "udp && ip.src == 192.0.2.1",
     ]);
-    assert!(filtered.status.success(), "{:?}", filtered.stderr);
     let value = parse_json(&filtered);
     assert_eq!(value["result"]["frames_read"], 5);
     assert_eq!(value["result"]["frames_matched"], 1);
 
     for table in ["conversations", "endpoints", "protocols", "ports", "io"] {
-        let output = run(&["stats", path, "--table", table, "--interval-ms", "500"]);
-        assert!(output.status.success(), "{table}: {:?}", output.stderr);
+        let output = run_success(&["stats", path, "--table", table, "--interval-ms", "500"]);
         assert!(String::from_utf8_lossy(&output.stdout).contains("matched 5 of 5"));
     }
 }

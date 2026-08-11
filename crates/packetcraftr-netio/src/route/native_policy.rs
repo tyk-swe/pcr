@@ -271,3 +271,217 @@ fn address_scope(address: IpAddr) -> u8 {
         _ => 4,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::net::{Ipv4Addr, Ipv6Addr};
+
+    use packetcraftr_core::frame::LinkType;
+
+    use super::*;
+    use crate::{
+        interface::{Flags as InterfaceFlags, Id as InterfaceId},
+        link::{Capability, MacAddress},
+    };
+
+    fn v4(a: u8, b: u8, c: u8, d: u8) -> IpAddr {
+        IpAddr::V4(Ipv4Addr::new(a, b, c, d))
+    }
+
+    fn interface() -> InterfaceInfo {
+        InterfaceInfo {
+            id: InterfaceId {
+                name: "fixture0".to_owned(),
+                index: 7,
+            },
+            description: Some("fixture interface".to_owned()),
+            mac_address: Some(MacAddress([0x02, 0, 0, 0, 0, 1])),
+            addresses: vec![
+                InterfaceAddress {
+                    address: v4(10, 0, 0, 2),
+                    prefix_length: 8,
+                },
+                InterfaceAddress {
+                    address: v4(10, 2, 3, 4),
+                    prefix_length: 24,
+                },
+                InterfaceAddress {
+                    address: IpAddr::V6(Ipv6Addr::LOCALHOST),
+                    prefix_length: 128,
+                },
+            ],
+            flags: InterfaceFlags {
+                up: true,
+                multicast: true,
+                ..InterfaceFlags::default()
+            },
+            mtu: Some(1_500),
+            capability: Capability::Layer2And3,
+            link_type: LinkType::ETHERNET,
+        }
+    }
+
+    fn snapshot() -> NativeRouteSnapshot {
+        NativeRouteSnapshot {
+            interface: interface(),
+            selected_address: None,
+            next_hop: Some(v4(10, 2, 3, 1)),
+            route_mtu: Some(1_400),
+            selection_reason: RouteSelectionReason::OnLink,
+        }
+    }
+
+    #[test]
+    fn destination_scope_classification_covers_both_address_families() {
+        let cases = [
+            (v4(0, 0, 0, 0), DestinationScope::Unspecified),
+            (
+                IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+                DestinationScope::Unspecified,
+            ),
+            (v4(224, 0, 0, 1), DestinationScope::Multicast),
+            (
+                "ff02::1".parse::<IpAddr>().expect("IPv6 multicast"),
+                DestinationScope::Multicast,
+            ),
+            (v4(127, 0, 0, 1), DestinationScope::Host),
+            (IpAddr::V6(Ipv6Addr::LOCALHOST), DestinationScope::Host),
+            (v4(169, 254, 1, 2), DestinationScope::Link),
+            (
+                "fe80::1".parse::<IpAddr>().expect("IPv6 link local"),
+                DestinationScope::Link,
+            ),
+            (v4(10, 0, 0, 1), DestinationScope::Private),
+            (
+                "fd00::1".parse::<IpAddr>().expect("IPv6 unique local"),
+                DestinationScope::Private,
+            ),
+            (v4(198, 51, 100, 1), DestinationScope::Global),
+            (
+                "2001:db8::1".parse::<IpAddr>().expect("IPv6 global"),
+                DestinationScope::Global,
+            ),
+        ];
+
+        for (address, expected) in cases {
+            assert_eq!(classify_destination(address), expected, "{address}");
+        }
+    }
+
+    #[test]
+    fn finish_route_selects_the_longest_matching_source_and_normalizes_snapshot() {
+        let destination = v4(10, 2, 3, 99);
+
+        let decision = finish_route(destination, None, None, snapshot()).expect("valid snapshot");
+
+        assert_eq!(decision.selected_address, Some(v4(10, 2, 3, 4)));
+        assert_eq!(decision.next_hop, Some(v4(10, 2, 3, 1)));
+        assert_eq!(decision.selection_reason, RouteSelectionReason::Gateway);
+        assert_eq!(decision.destination_scope, DestinationScope::Private);
+        assert_eq!(decision.mtu, 1_400);
+        assert_eq!(decision.interface, interface().id);
+    }
+
+    #[test]
+    fn finish_route_rejects_inconsistent_native_snapshot_fields() {
+        let destination = v4(10, 2, 3, 99);
+        let wrong_interface = InterfaceId {
+            name: "other0".to_owned(),
+            index: 8,
+        };
+        assert!(matches!(
+            finish_route(destination, Some(&wrong_interface), None, snapshot()),
+            Err(NativeRouteError::InterfaceMismatch { .. })
+        ));
+        assert!(matches!(
+            finish_route(
+                destination,
+                None,
+                Some(IpAddr::V6(Ipv6Addr::LOCALHOST)),
+                snapshot()
+            ),
+            Err(NativeRouteError::SourceFamilyMismatch { .. })
+        ));
+
+        let mut invalid = snapshot();
+        invalid.next_hop = Some(IpAddr::V6(Ipv6Addr::LOCALHOST));
+        assert!(matches!(
+            finish_route(destination, None, None, invalid),
+            Err(NativeRouteError::InvalidResponse { .. })
+        ));
+
+        let mut invalid = snapshot();
+        invalid.selected_address = Some(v4(192, 0, 2, 8));
+        assert!(matches!(
+            finish_route(destination, None, None, invalid),
+            Err(NativeRouteError::InvalidResponse { .. })
+        ));
+        assert!(matches!(
+            finish_route(destination, None, Some(v4(192, 0, 2, 8)), snapshot()),
+            Err(NativeRouteError::SourceUnavailable { .. })
+        ));
+
+        let mut invalid = snapshot();
+        invalid.route_mtu = Some(0);
+        invalid.interface.mtu = None;
+        assert!(matches!(
+            finish_route(destination, None, None, invalid),
+            Err(NativeRouteError::InvalidResponse { .. })
+        ));
+    }
+
+    #[test]
+    fn interface_lookup_requires_the_complete_stable_identity() {
+        let available = interface();
+        assert_eq!(
+            find_interface(std::slice::from_ref(&available), &available.id)
+                .expect("exact identity"),
+            available
+        );
+
+        for requested in [
+            InterfaceId {
+                name: "fixture0".to_owned(),
+                index: 8,
+            },
+            InterfaceId {
+                name: "other0".to_owned(),
+                index: 7,
+            },
+        ] {
+            assert!(matches!(
+                find_interface(std::slice::from_ref(&available), &requested),
+                Err(NativeRouteError::InterfaceMismatch { .. })
+            ));
+        }
+        assert!(matches!(
+            find_interface(
+                std::slice::from_ref(&available),
+                &InterfaceId {
+                    name: "missing0".to_owned(),
+                    index: 99,
+                }
+            ),
+            Err(NativeRouteError::InterfaceNotFound { .. })
+        ));
+    }
+
+    #[test]
+    fn interface_decision_is_destination_free_and_requires_a_nonzero_mtu() {
+        let decision = interface_decision(interface()).expect("valid interface snapshot");
+        assert_eq!(decision.selected_address, None);
+        assert_eq!(decision.next_hop, None);
+        assert_eq!(
+            decision.selection_reason,
+            RouteSelectionReason::InterfaceOnly
+        );
+        assert_eq!(decision.destination_scope, DestinationScope::Unspecified);
+
+        let mut invalid = interface();
+        invalid.mtu = Some(0);
+        assert!(matches!(
+            interface_decision(invalid),
+            Err(NativeRouteError::InvalidResponse { .. })
+        ));
+    }
+}

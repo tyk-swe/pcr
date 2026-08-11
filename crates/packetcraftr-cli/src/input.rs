@@ -171,3 +171,70 @@ pub(super) fn validate_capture_stream_limits(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use std::io::Cursor;
+
+    use super::*;
+
+    #[test]
+    fn bounded_reads_distinguish_empty_exact_and_oversized_input() {
+        assert_eq!(
+            read_bounded_allow_empty(Cursor::new([]), 0).expect("empty input is allowed"),
+            Vec::<u8>::new(),
+        );
+        assert_eq!(
+            read_bounded(Cursor::new(b"abcd"), 4).expect("exact limit is accepted"),
+            b"abcd",
+        );
+
+        let empty = read_bounded(Cursor::new([]), 4).expect_err("required input is empty");
+        assert_eq!(empty.exit_code, 2);
+        assert!(empty.message.contains("non-empty stdin"));
+
+        let oversized =
+            read_bounded_allow_empty(Cursor::new(b"abcde"), 4).expect_err("limit is enforced");
+        assert_eq!(oversized.exit_code, 2);
+        assert_eq!(oversized.message, "packet input exceeds 4 byte limit");
+
+        let unrepresentable = read_bounded_allow_empty(Cursor::new([]), usize::MAX)
+            .expect_err("the sentinel byte must be representable");
+        assert_eq!(unrepresentable.exit_code, 70);
+    }
+
+    #[test]
+    fn capture_stream_limits_reject_each_zero_and_cross_limit_case() {
+        for limits in [(0, 1, 1, 1), (1, 0, 1, 1), (1, 1, 0, 1), (1, 1, 1, 0)] {
+            let error = validate_capture_stream_limits(limits.0, limits.1, limits.2, limits.3)
+                .expect_err("every capture bound must be non-zero");
+            assert_eq!(error.exit_code, 2, "limits={limits:?}");
+            assert_eq!(error.classification.code, "cli.capture_limit");
+        }
+
+        let error = validate_capture_stream_limits(1, 7, 8, 1)
+            .expect_err("one frame cannot exceed the aggregate byte budget");
+        assert_eq!(error.message, "max-frame-bytes 8 exceeds max-bytes 7");
+        validate_capture_stream_limits(1, 8, 8, 1).expect("equal byte bounds are valid");
+    }
+
+    #[test]
+    fn document_extensions_are_case_insensitive_and_explicit() {
+        use packetcraftr::core::document::Format;
+
+        for (path, expected) in [
+            ("packet.json", Some(Format::Json)),
+            ("packet.JSON", Some(Format::Json)),
+            ("packet.yaml", Some(Format::Yaml)),
+            ("packet.yml", Some(Format::Yaml)),
+            ("packet.txt", None),
+            ("packet", None),
+        ] {
+            assert_eq!(
+                document_format_from_path(Path::new(path)),
+                expected,
+                "{path}"
+            );
+        }
+    }
+}

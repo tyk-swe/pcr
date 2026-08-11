@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::str::FromStr;
+use std::time::Duration;
 
+use packetcraftr_core::error::{Classified, Kind};
 use packetcraftr_core::fuzz;
 
 #[test]
@@ -32,4 +34,48 @@ fn fuzz_targets_have_an_unambiguous_layer_field_grammar() {
     assert_eq!(target.field, "destination_port");
     assert!(fuzz::Target::from_str("3.bad-field").is_err());
     assert!(fuzz::Target::from_str("destination_port").is_err());
+}
+
+#[test]
+fn fuzz_failures_retain_stable_boundary_classifications() {
+    let cases = [
+        (fuzz::Error::InvalidStrategies, "cli.fuzz_limit", Kind::Cli),
+        (
+            fuzz::Error::InvalidBasePacket {
+                message: "bad base".to_owned(),
+            },
+            "packet.fuzz_recipe",
+            Kind::Packet,
+        ),
+        (
+            fuzz::Error::NoCompatibleTargets,
+            "packet.fuzz_target",
+            Kind::Packet,
+        ),
+        (
+            fuzz::Error::ByteLimit {
+                actual: 11,
+                limit: 10,
+            },
+            "policy.fuzz_resource_limit",
+            Kind::Policy,
+        ),
+        (
+            fuzz::Error::DurationLimit {
+                actual: Duration::from_secs(11),
+                limit: Duration::from_secs(10),
+            },
+            "policy.fuzz_resource_limit",
+            Kind::Policy,
+        ),
+    ];
+
+    for (error, code, kind) in cases {
+        let classification = error.classification();
+        assert_eq!(classification.code, code);
+        assert_eq!(classification.kind, kind);
+        assert!(classification.remediation.is_some());
+        assert!(error.causes().is_empty());
+        assert!(!error.to_string().is_empty());
+    }
 }

@@ -106,3 +106,37 @@ pub(crate) fn emit_aggregate_with_stats<T: Serialize>(
 ) -> Result<(), CliError> {
     emit_json(&output::envelope::Aggregate::success(command, result, diagnostics).with_stats(stats))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn spaced_hex_is_lowercase_and_exact() {
+        for (bytes, expected) in [
+            (&[][..], ""),
+            (&[0][..], "00"),
+            (&[0, 10, 171, 255][..], "00 0a ab ff"),
+        ] {
+            assert_eq!(spaced_hex(bytes), expected);
+        }
+    }
+
+    #[test]
+    fn timestamp_text_uses_conventional_signed_decimal_notation() {
+        let cases = [
+            ((3, 250_000_000), "3.250000000"),
+            ((-3, 750_000_000), "-2.250000000"),
+            ((-1, 999_999_999), "-0.000000001"),
+            ((-3, 0), "-3.000000000"),
+        ];
+
+        for ((unix_seconds, nanoseconds), expected) in cases {
+            let timestamp = output::capture::Timestamp {
+                unix_seconds,
+                nanoseconds,
+            };
+            assert_eq!(output_timestamp_text(timestamp), expected);
+        }
+    }
+}

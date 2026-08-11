@@ -123,3 +123,41 @@ pub(crate) struct ScanArgs {
     #[command(flatten)]
     pub(crate) policy: HostnameTrafficPolicyArgs,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn port_specs_parse_single_ports_and_inclusive_ranges() {
+        let cases = [
+            ("0", CliScanPortSpec::Single(0)),
+            ("65535", CliScanPortSpec::Single(u16::MAX)),
+            (
+                "80-82",
+                CliScanPortSpec::RangeInclusive { start: 80, end: 82 },
+            ),
+            (
+                "443-443",
+                CliScanPortSpec::RangeInclusive {
+                    start: 443,
+                    end: 443,
+                },
+            ),
+        ];
+
+        for (input, expected) in cases {
+            assert_eq!(input.parse::<CliScanPortSpec>(), Ok(expected), "{input}");
+        }
+    }
+
+    #[test]
+    fn port_specs_reject_missing_reversed_and_non_u16_endpoints() {
+        for input in ["", "65536", "-80", "80-", "82-80", "1-2-3", " 80"] {
+            assert!(
+                input.parse::<CliScanPortSpec>().is_err(),
+                "{input:?} must not parse",
+            );
+        }
+    }
+}

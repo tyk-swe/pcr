@@ -192,3 +192,33 @@ fn key_style() -> Style {
 fn muted_style() -> Style {
     Style::new().dimmed()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn terminal_text_escapes_controls_and_directional_overrides() {
+        let cases = [
+            ("line\r\nnext", false, "line\\r\\nnext"),
+            ("line\r\nnext", true, "line\nnext"),
+            ("a\tb\u{202e}c\u{7f}", false, "a\\tb\\u{202e}c\\u{7f}"),
+        ];
+
+        for (input, preserve_newlines, expected) in cases {
+            assert_eq!(
+                terminal_safe_with_layout(input, preserve_newlines),
+                expected,
+                "input={input:?}, preserve_newlines={preserve_newlines}",
+            );
+        }
+    }
+
+    #[test]
+    fn terminal_documents_strip_ansi_before_preserving_layout() {
+        assert_eq!(
+            terminal_document("\u{1b}[31merror:\u{1b}[0m\n\tvalue"),
+            "error:\n\\tvalue",
+        );
+    }
+}

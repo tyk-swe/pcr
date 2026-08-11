@@ -283,3 +283,108 @@ fn capture_netmask(
     let shift = u32::BITS.checked_sub(u32::from(assigned.prefix_length))?;
     Some(u32::MAX.checked_shl(shift).unwrap_or(0).to_be())
 }
+
+#[cfg(all(
+    test,
+    feature = "native-layer2",
+    any(target_os = "linux", target_os = "macos", windows)
+))]
+mod tests {
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+    use packetcraftr_core::frame::LinkType;
+
+    use super::*;
+    use crate::{
+        interface::{Address as InterfaceAddress, Flags as InterfaceFlags, Info as InterfaceInfo},
+        link::Capability,
+        route::InterfaceId,
+    };
+
+    #[test]
+    fn resolver_free_filter_validator_accepts_only_numeric_operands() {
+        let accepted = [
+            "arp and ether dst 01:02:03:04:05:06",
+            "ip6 and dst host 2001:db8::1",
+            "tcp dst port 443",
+            "ip net 192.0.2.0/24",
+            "ether host 0011.2233.4455",
+            "ip proto 0x11",
+        ];
+        let rejected = [
+            "host example.com",
+            "tcp port https",
+            "gateway router-1",
+            "host 0011.2233.4455",
+            r"ip host \resolver-name",
+        ];
+
+        for filter in accepted {
+            assert!(!capture_filter_has_symbolic_operand(filter), "{filter}");
+        }
+        for filter in rejected {
+            assert!(capture_filter_has_symbolic_operand(filter), "{filter}");
+        }
+    }
+
+    #[test]
+    fn symbolic_filter_failure_preserves_the_selected_interface() {
+        let interface = InterfaceId {
+            name: "fixture0".to_owned(),
+            index: 7,
+        };
+
+        let error = validate_resolver_free_capture_filter(&interface, "host example.com")
+            .expect_err("symbolic host must fail closed");
+
+        assert!(matches!(
+            error,
+            LiveIoError::InvalidCaptureFilter {
+                interface: actual,
+                ..
+            } if actual == interface.name
+        ));
+    }
+
+    #[test]
+    fn capture_netmask_prefers_the_selected_ipv4_assignment() {
+        let interface = InterfaceInfo {
+            id: InterfaceId {
+                name: "fixture0".to_owned(),
+                index: 7,
+            },
+            description: None,
+            mac_address: None,
+            addresses: vec![
+                InterfaceAddress {
+                    address: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
+                    prefix_length: 8,
+                },
+                InterfaceAddress {
+                    address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2)),
+                    prefix_length: 24,
+                },
+            ],
+            flags: InterfaceFlags::default(),
+            mtu: None,
+            capability: Capability::Layer2And3,
+            link_type: LinkType::ETHERNET,
+        };
+
+        assert_eq!(
+            capture_netmask(Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2))), &interface),
+            Some((u32::MAX << 8).to_be())
+        );
+        assert_eq!(
+            capture_netmask(Some(IpAddr::V6(Ipv6Addr::LOCALHOST)), &interface),
+            Some((u32::MAX << 24).to_be())
+        );
+
+        let mut ipv6_only = interface;
+        ipv6_only.addresses = vec![InterfaceAddress {
+            address: IpAddr::V6(Ipv6Addr::LOCALHOST),
+            prefix_length: 128,
+        }];
+        assert_eq!(capture_netmask(None, &ipv6_only), None);
+    }
+}

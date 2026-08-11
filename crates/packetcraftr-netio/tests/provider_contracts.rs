@@ -9,7 +9,6 @@ use packetcraftr_core::frame::LinkType;
 use packetcraftr_core::protocol::link::Ethernet;
 use packetcraftr_core::{Packet, layer::Raw};
 use packetcraftr_netio::{
-    Error, capture,
     interface::Id as InterfaceId,
     link::{Capability, MacAddress, Mode},
     route::{Decision, Options, Provider, Scope, SelectionReason, plan as plan_route},
@@ -46,67 +45,6 @@ impl Provider for PassiveRoutes {
             link_type: LinkType::ETHERNET,
         }))
     }
-}
-
-#[test]
-fn capture_queue_limits_reject_zero_oversize_and_inconsistent_values() {
-    let defaults = capture::Limits::default();
-    assert_eq!(
-        defaults.validate().expect("defaults must be valid"),
-        defaults
-    );
-
-    assert!(matches!(
-        capture::Limits {
-            max_frames: 0,
-            ..defaults
-        }
-        .validate(),
-        Err(Error::InvalidCaptureQueueLimit {
-            field: "max_frames",
-            ..
-        })
-    ));
-    assert!(matches!(
-        capture::Limits {
-            max_bytes: 8,
-            snap_length: 9,
-            ..defaults
-        }
-        .validate(),
-        Err(Error::InvalidCaptureQueueLimit {
-            field: "snap_length",
-            ..
-        })
-    ));
-}
-
-#[test]
-fn capture_statistics_validate_and_classify_loss() {
-    assert!(matches!(
-        capture::Statistics {
-            dropped_bytes: 1,
-            ..capture::Statistics::default()
-        }
-        .validate(),
-        Err(Error::InvalidCaptureStatistics { .. })
-    ));
-
-    let overflow = capture::Statistics {
-        dropped_frames: 2,
-        dropped_bytes: 10,
-        overflow_events: 1,
-        ..capture::Statistics::default()
-    };
-    assert!(overflow.validate().is_ok());
-    assert!(matches!(
-        overflow.evidence_loss_error(),
-        Some(Error::CaptureQueueOverflow {
-            dropped_frames: 2,
-            overflow_events: 1,
-            ..
-        })
-    ));
 }
 
 #[test]

@@ -188,3 +188,187 @@ pub struct MaterializedRoute {
     pub plan: PlannedRoute,
     pub neighbor_resolution: Option<NeighborResolution>,
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        net::{IpAddr, Ipv4Addr},
+        sync::Mutex,
+    };
+
+    use packetcraftr_core::frame::LinkType;
+
+    use super::*;
+    use crate::{
+        interface::Id as InterfaceId,
+        link::{Capability, MacAddress},
+        neighbor::{VlanKind, VlanTag},
+        route::{DestinationScope, RouteDecision, RouteSelectionReason},
+    };
+
+    const INTERFACE_MAC: MacAddress = MacAddress([0x02, 0, 0, 0, 0, 1]);
+    const RESOLVED_MAC: MacAddress = MacAddress([0x02, 0, 0, 0, 0, 9]);
+
+    fn address(last_octet: u8) -> IpAddr {
+        IpAddr::V4(Ipv4Addr::new(192, 0, 2, last_octet))
+    }
+
+    fn unresolved_plan() -> PlannedRoute {
+        PlannedRoute {
+            route: RouteDecision {
+                interface: InterfaceId {
+                    name: "fixture0".to_owned(),
+                    index: 7,
+                },
+                source_mac: Some(INTERFACE_MAC),
+                selected_address: Some(address(2)),
+                preferred_source: None,
+                next_hop: Some(address(1)),
+                selection_reason: RouteSelectionReason::Gateway,
+                destination_scope: DestinationScope::Global,
+                mtu: 1_400,
+                capability: Capability::Layer2And3,
+                link_type: LinkType::ETHERNET,
+            },
+            mode: Mode::Layer2,
+            lookup_destination: Some(address(9)),
+            final_destination: Some(address(9)),
+            visited_destinations: vec![address(9)],
+            packet_source: Some(address(2)),
+            neighbor_source: Some(address(2)),
+            neighbor_target: Some(address(1)),
+            destination_mac: None,
+            source_mac: Some(INTERFACE_MAC),
+            neighbor_vlan_tags: vec![VlanTag {
+                kind: VlanKind::Ieee8021Q,
+                priority: 3,
+                drop_eligible: true,
+                vlan_id: 42,
+            }],
+            synthesized_ethernet: true,
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingResolver {
+        requests: Mutex<Vec<NeighborRequest>>,
+    }
+
+    impl NeighborResolver for RecordingResolver {
+        fn resolve_request(
+            &self,
+            request: &NeighborRequest,
+        ) -> Result<NeighborResolution, NeighborError> {
+            self.requests
+                .lock()
+                .expect("request recorder lock")
+                .push(request.clone());
+            Ok(NeighborResolution {
+                mac_address: RESOLVED_MAC,
+                attempts: 2,
+                cache_hit: false,
+                captured: Vec::new(),
+                evidence_truncated: false,
+                capture_statistics: Statistics::default(),
+            })
+        }
+    }
+
+    #[test]
+    fn materialize_resolves_with_the_complete_planned_link_context() {
+        let plan = unresolved_plan();
+        let expected_request = NeighborRequest {
+            interface: plan.route.interface.clone(),
+            interface_source: address(2),
+            interface_mac: INTERFACE_MAC,
+            target: address(1),
+            vlan_tags: plan.neighbor_vlan_tags.clone(),
+            mtu: 1_400,
+            link_type: LinkType::ETHERNET,
+        };
+        let resolver = RecordingResolver::default();
+
+        let materialized = materialize(plan, &resolver).expect("complete plan must materialize");
+
+        assert_eq!(materialized.plan.destination_mac, Some(RESOLVED_MAC));
+        assert_eq!(
+            materialized
+                .neighbor_resolution
+                .as_ref()
+                .map(|resolution| resolution.mac_address),
+            Some(RESOLVED_MAC)
+        );
+        assert_eq!(
+            *resolver.requests.lock().expect("request recorder lock"),
+            [expected_request]
+        );
+    }
+
+    #[test]
+    fn materialize_skips_resolution_when_the_plan_already_has_a_link_destination() {
+        let mut plan = unresolved_plan();
+        plan.destination_mac = Some(RESOLVED_MAC);
+        let resolver = RecordingResolver::default();
+
+        let materialized = materialize(plan.clone(), &resolver).expect("resolved plan");
+
+        assert_eq!(materialized.plan, plan);
+        assert_eq!(materialized.neighbor_resolution, None);
+        assert!(
+            resolver
+                .requests
+                .lock()
+                .expect("request recorder lock")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn materialize_rejects_each_missing_layer2_input_before_resolution() {
+        type InvalidCase = (fn(&mut PlannedRoute), NeighborError);
+        let cases: [InvalidCase; 4] = [
+            (
+                |plan| plan.neighbor_target = None,
+                NeighborError::MissingNeighborTarget {
+                    interface: "fixture0".to_owned(),
+                },
+            ),
+            (
+                |plan| plan.neighbor_source = None,
+                NeighborError::MissingNeighborSource {
+                    interface: "fixture0".to_owned(),
+                },
+            ),
+            (
+                |plan| plan.route.source_mac = None,
+                NeighborError::MissingSourceMac {
+                    interface: "fixture0".to_owned(),
+                },
+            ),
+            (
+                |plan| {
+                    plan.destination_mac = Some(RESOLVED_MAC);
+                    plan.source_mac = None;
+                },
+                NeighborError::MissingSourceMac {
+                    interface: "fixture0".to_owned(),
+                },
+            ),
+        ];
+
+        for (remove_input, expected) in cases {
+            let mut plan = unresolved_plan();
+            remove_input(&mut plan);
+            let resolver = RecordingResolver::default();
+
+            assert_eq!(materialize(plan, &resolver), Err(expected));
+            assert!(
+                resolver
+                    .requests
+                    .lock()
+                    .expect("request recorder lock")
+                    .is_empty()
+            );
+        }
+    }
+}

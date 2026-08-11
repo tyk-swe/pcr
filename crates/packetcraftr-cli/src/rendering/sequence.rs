@@ -52,3 +52,22 @@ pub(crate) fn next_stream_sequence(sequence: u64) -> Result<u64, CliError> {
         CliError::classified(output::contract::Error::SequenceOverflow).at_sequence(sequence)
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stream_sequence_advances_until_the_contract_limit() {
+        assert_eq!(next_stream_sequence(0).expect("zero can advance"), 1);
+        assert_eq!(
+            next_stream_sequence(u64::MAX - 1).expect("penultimate value can advance"),
+            u64::MAX,
+        );
+
+        let error = next_stream_sequence(u64::MAX).expect_err("maximum must not wrap");
+        assert_eq!(error.exit_code, 70);
+        assert_eq!(error.classification.code, "internal.output_sequence");
+        assert_eq!(error.sequence, Some(u64::MAX));
+    }
+}

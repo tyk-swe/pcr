@@ -122,32 +122,77 @@ mod tests {
     use super::*;
 
     #[test]
-    fn startup_context_uses_only_the_first_root_positional() {
-        let arguments = [
-            "build",
-            "--output",
-            "json",
-            "--color",
-            "build",
-            "protocols",
-            "dissect",
-        ]
-        .map(OsString::from);
+    fn startup_context_scans_global_options_without_guessing_commands() {
+        struct Case {
+            arguments: &'static [&'static str],
+            format: Option<output::contract::Format>,
+            color: &'static str,
+            command: Option<output::contract::Command>,
+        }
 
-        let context = startup_context(&arguments);
+        let cases = [
+            Case {
+                arguments: &[
+                    "packetcraftr",
+                    "protocols",
+                    "--output",
+                    "ndjson",
+                    "--color=never",
+                ],
+                format: Some(output::contract::Format::Ndjson),
+                color: "never",
+                command: Some(output::contract::Command::Protocols),
+            },
+            Case {
+                arguments: &[
+                    "packetcraftr",
+                    "--output=json",
+                    "--output=ndjson",
+                    "--color",
+                    "always",
+                    "--color=never",
+                    "build",
+                ],
+                format: Some(output::contract::Format::Json),
+                color: "always",
+                command: Some(output::contract::Command::Build),
+            },
+            Case {
+                arguments: &["packetcraftr", "--output", "--color=never", "dissect"],
+                format: None,
+                color: "never",
+                command: Some(output::contract::Command::Dissect),
+            },
+            Case {
+                arguments: &["packetcraftr", "--output=json", "invalid", "build"],
+                format: Some(output::contract::Format::Json),
+                color: "auto",
+                command: None,
+            },
+            Case {
+                arguments: &["packetcraftr", "--output=json", "--", "build"],
+                format: Some(output::contract::Format::Json),
+                color: "auto",
+                command: None,
+            },
+        ];
 
-        assert_eq!(context.machine_format, Some(output::contract::Format::Json));
-        assert!(matches!(context.color, CliColorChoice::Auto));
-        assert_eq!(context.command, Some(output::contract::Command::Protocols));
-    }
+        for case in cases {
+            let arguments = case
+                .arguments
+                .iter()
+                .map(OsString::from)
+                .collect::<Vec<_>>();
+            let context = startup_context(&arguments);
 
-    #[test]
-    fn startup_context_does_not_infer_a_command_after_an_invalid_root_positional() {
-        let arguments = ["packetcraftr", "--output=json", "invalid", "build"].map(OsString::from);
-
-        let context = startup_context(&arguments);
-
-        assert_eq!(context.machine_format, Some(output::contract::Format::Json));
-        assert_eq!(context.command, None);
+            assert_eq!(context.machine_format, case.format, "{:?}", case.arguments);
+            assert_eq!(
+                context.color.to_string(),
+                case.color,
+                "{:?}",
+                case.arguments
+            );
+            assert_eq!(context.command, case.command, "{:?}", case.arguments);
+        }
     }
 }

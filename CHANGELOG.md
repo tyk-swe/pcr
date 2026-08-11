@@ -59,6 +59,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   independently while retaining the aggregate stream-index signal.
 - The workspace now uses Cargo resolver version 3 so dependency selection
   honors the declared workspace Rust version.
+- Updated user, contributor, security, and API documentation for the four-crate
+  layout and removed duplicated command, feature, and validation inventories.
 
 ### Fixed
 

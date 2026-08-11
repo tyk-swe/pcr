@@ -1,6 +1,6 @@
 [package]
 name = "packetcraftr-cli"
-description = "Command-line interface for building, dissecting, capturing, and testing network packets"
+description = "PacketcraftR command-line interface and renderers"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

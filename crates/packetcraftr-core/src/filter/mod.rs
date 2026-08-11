@@ -12,45 +12,35 @@
 //! frame.len > 1500 && !padding
 //! ```
 //!
-//! Those spellings are the canonical ones, taken from each protocol's
-//! reflective schema. A protocol module may register further spellings — the
-//! conventional short names and per-flag paths operators are used to — through
-//! [`crate::registry::Builder::bind_filter_field`]; which of those exist
-//! depends on the registry a filter is compiled against.
+//! Canonical `<protocol-or-alias>.<field>` paths come from each protocol's
+//! reflective schema. A registry can add conventional short names, paths that
+//! read either of two fields, and per-flag paths through
+//! [`crate::registry::Builder::bind_filter_field`]. Their availability depends
+//! on the registry used to compile the filter.
 //!
-//! Field paths resolve three ways, in this order. Reserved synthetic names
+//! Paths resolve in this order: reserved synthetic names
 //! (`frame.number`, `frame.time_epoch`, `frame.len`, `frame.cap_len`,
 //! `frame.interface_id`, `frame.link_type`, and `tcp.stream` / `udp.stream`)
-//! come first, so no protocol can redefine them. Then spellings registered
-//! through [`crate::registry::Builder::bind_filter_field`]. Then canonical
-//! `<protocol-or-alias>.<field>` paths, which need no registration because
-//! they come straight from the protocol's reflective schema — every name
-//! listed by `packetcraftr protocols <NAME>` is filterable.
+//! first, registered paths second, and canonical schema paths last. Reserved
+//! names cannot be redefined, and every field listed by
+//! `packetcraftr protocols <NAME>` is filterable without registration.
 //!
 //! A bare protocol name tests whether such a layer is present. A bare field
-//! path tests whether the packet exposes a value for it — except for a flag,
-//! meaning a single-bit selection or a boolean field, where it reads the flag
-//! itself. That is what makes `!tcp.flags.ack` mean "the ACK bit is clear"
-//! rather than "the packet has no ACK bit", which would be true of every TCP
-//! segment ever captured.
+//! path tests whether the packet exposes a value. A single-bit or boolean flag
+//! instead reads the flag itself, so `!tcp.flags.ack` means "the ACK bit is
+//! clear", not "the packet has no ACK field".
 //!
-//! Where a protocol repeats, as in a tunnelled stack, an unqualified path
-//! matches **any** occurrence; `ipv4#1` and `ipv4#2` select the outer and
-//! inner layer explicitly. The same "any match wins" rule applies to paths
-//! that read either of two fields, such as `tcp.port`, so `tcp.port != 80`
-//! holds when *either* endpoint is not port 80. Use `tcp.srcport` or
-//! `tcp.dstport` when that distinction matters.
+//! In a tunnelled stack, an unqualified path matches **any** occurrence;
+//! `ipv4#1` and `ipv4#2` select the outer and inner layers. The same rule
+//! applies to either-field paths: `tcp.port != 80` holds when *either* endpoint
+//! is not port 80. Use `tcp.srcport` or `tcp.dstport` when direction matters.
 //!
-//! There is deliberately no regular-expression operator, which would mean
-//! taking on a regex dependency. `contains` plus byte-slice equality covers
-//! the substring and prefix cases it would otherwise serve. A `contains`
-//! needle is written as a byte run (`47:45`) or quoted text (`"GE"`); a bare
-//! number is refused because it reads as ambiguously decimal or hexadecimal.
+//! Filters have no regular-expression operator. Use `contains` for substrings
+//! and byte-slice equality for prefixes. A `contains` needle must be a byte run
+//! (`47:45`) or quoted text (`"GE"`), not an ambiguous bare number.
 //!
-//! A comparison whose literal could never match the field it names is a
-//! compile error rather than a filter that quietly matches nothing. That
-//! covers a mistyped bareword on a numeric field, an address literal on a
-//! port, slicing a number, and searching a field that holds no bytes.
+//! Type-incompatible literals, slices, and `contains` operations are compile
+//! errors rather than filters that quietly match nothing.
 //!
 //! Compilation is bounded in source length, parenthesis nesting, term count,
 //! and set size. Both the parser and the evaluator use explicit stacks rather

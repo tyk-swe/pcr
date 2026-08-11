@@ -1,25 +1,21 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Bounded offline capture analysis over dissected frames.
+//! Bounded offline capture analysis.
 //!
-//! This module owns the read → dissect → index → filter → dispatch loop the
-//! offline analysis commands share, and the adapters that map decoded layers
-//! onto the independent reassembly module's inputs. Everything here is offline
-//! by design: there is no resolver, route lookup, live capture, or transmission
-//! seam, so analysis needs no authorization gates and runs in every build
-//! profile.
+//! [`pcap`] handles capture files; [`run`] drives the shared read → dissect →
+//! index → filter → dispatch loop; and [`expert`], [`follow`], and [`stats`]
+//! consume it. [`reassembly`] is a standalone algorithm API fed by explicit
+//! decoded-layer adapters.
 //!
-//! The boundary is enforced by the containing `packetcraftr-core` crate, which
-//! depends on neither `packetcraftr-netio` nor `packetcraftr`. A native seam
-//! added here therefore fails to build instead of quietly bypassing an
-//! authorization gate.
+//! There is no resolver, route lookup, live-capture, or transmission seam.
+//! `packetcraftr-core` depends on neither `packetcraftr-netio` nor
+//! `packetcraftr`, so the crate graph enforces this boundary and offline
+//! analysis needs no live-traffic authorization gate.
 //!
-//! Conversation indices are assigned in first-seen order over the whole
-//! capture, before any display filter runs, so an index one command reports
-//! is the index another command extracts. Reassembly, by contrast, consumes
-//! only the frames the filter keeps, so a run narrowed to one conversation
-//! buffers only that conversation.
+//! Conversation indices are assigned over the whole capture before filtering,
+//! so they remain stable across commands. Reassembly consumes only matched
+//! frames, keeping a filtered run scoped to the selected conversations.
 
 pub(crate) use crate::error::BoundaryError;
 pub(crate) use reassembly::tcp::FlowKey;

@@ -3,12 +3,12 @@
 
 //! Policy-gated live workflows and versioned, render-neutral output.
 //!
-//! Runtime-neutral packet mechanics and offline analysis live in
-//! [`core`] and [`analysis`]. Native provider contracts and adapters live in
-//! [`netio`]. Live entry points such as [`scan`], [`dns`], and [`send`] require
-//! a [`policy::Policy`] and finite resource budgets.
+//! [`core`] exposes portable packet mechanics, [`analysis`] exposes offline
+//! capture analysis, and [`netio`] exposes provider contracts and native I/O.
+//! Live entry points such as [`scan`], [`dns`], and [`send`] require a
+//! [`policy::Policy`] and finite resource budgets.
 //!
-//! ```text
+//! ```rust
 //! use std::sync::Arc;
 //! use packetcraftr::core::{build, layer::Raw, protocol, Packet};
 //!

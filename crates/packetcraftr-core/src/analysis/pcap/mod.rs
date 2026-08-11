@@ -3,9 +3,8 @@
 
 //! Pure-Rust, streaming PCAP and PCAPNG support.
 //!
-//! The implementation deliberately depends only on [`std::io`].  Native
-//! libpcap/Npcap is a live-I/O concern and is not required for reading or
-//! writing capture files.
+//! The implementation depends only on [`std::io`]; native libpcap/Npcap is a
+//! live-I/O concern and is not required for capture-file access.
 //!
 //! [`rewrite`] is the fidelity-preserving path: it validates and copies every
 //! bounded source record without changing formats. [`Writer`] creates a new

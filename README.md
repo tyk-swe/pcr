@@ -1,221 +1,138 @@
 # PacketcraftR
 
-PacketcraftR is a Rust library and command-line tool for exact packet
-construction, bounded dissection, capture-file I/O, offline analysis, and
-policy-gated live networking.
+PacketcraftR is a Rust library and CLI for exact packet construction, bounded
+dissection, capture-file I/O, offline analysis, and policy-gated live
+networking.
 
-PacketcraftR is currently a pre-1.0 beta (`0.5.0-beta.1`). Rust APIs and
-versioned serialized contracts may change incompatibly between beta releases.
-Review the [changelog](CHANGELOG.md) before upgrading.
+The current release is a pre-1.0 beta (`0.5.0-beta.1`). Rust APIs and
+versioned serialized contracts may change between beta releases; review the
+[changelog](CHANGELOG.md) before upgrading.
 
-We prioritize future maintainability than tracking past changes before 1.0.
-Any external contributions should awknowlage it.
-
-Use live networking only on systems and networks you own or are explicitly
-authorized to test.
-
-## Capabilities
-
-- Build strict or deliberately permissive packet stacks from expressions,
-  JSON, or YAML and emit exact bytes.
-- Dissect bounded frames while preserving unknown and malformed bytes with
-  diagnostics.
-- Read and filter classic PCAP and PCAPNG files, and validate same-format rewrites without normalization.
-- Analyze captures offline with statistics, conversation following, expert
-  findings, and bounded IP/TCP reassembly.
-- Inspect interfaces and routes, send or replay packets, and run bounded
-  exchange, scan, traceroute, DNS, capture, and fuzz workflows.
-
-Run `packetcraftr protocols` for the authoritative built-in protocol list and
-`packetcraftr <COMMAND> --help` for current options and limits. Built-ins cover
-common capture/link formats, IPv4 and IPv6, control and transport protocols,
-tunnels, overlays, and raw or malformed payload preservation.
-
-Packet documents use the
-[`packetcraftr.packet/v1` schema](schemas/packetcraftr.packet.v1.schema.json).
-Structured results use the
-[`packetcraftr.output/v1` schema](schemas/packetcraftr.output.v1.schema.json).
-Representative documents are in [`examples/documents`](examples/documents).
-
-## Installation
-
-### Release archives
-
-The [GitHub releases](https://github.com/tyk-swe/pcr/releases) provide Linux
-x86-64, macOS x86-64 and Arm64, and Windows x86-64 MSVC archives. Each target
-has two variants:
-
-- `all-features` includes native routes, raw Layer 3 transmission, and
-  libpcap/Npcap Layer 2 capture and injection.
-- `pcap-free` includes native routes and raw Layer 3 transmission without a
-  libpcap/Npcap dependency.
-
-Download the archive and `SHA256SUMS`, verify its checksum, extract it, and put
-`packetcraftr` (or `packetcraftr.exe`) on `PATH`. All-features archives require
-libpcap at runtime on Linux and macOS, or Npcap 1.88 on Windows. Pcap-free
-archives do not.
-
-### Build from source
-
-The repository pins Rust 1.97.1; Rust 1.96 is the minimum supported version.
-Cargo uses sccache as its compiler wrapper, so install a compatible `sccache`
-executable on `PATH` before building; 0.17.0 is the tested version. Prefer a
-prebuilt or package-manager installation from the
-[upstream installation guide](https://github.com/mozilla/sccache#installation).
-Linux builds require clang and lld. Install libpcap development files (for
-example, `libpcap-dev` on Debian/Ubuntu) for an all-feature build.
-
-```console
-cargo build --locked --release -p packetcraftr-cli
-./target/release/packetcraftr --help
-```
-
-The CLI feature profiles are:
-
-| Profile | Cargo arguments after `-p packetcraftr-cli` | Native behavior |
-| --- | --- | --- |
-| Portable | `--no-default-features` | Offline commands only; native providers fail closed. |
-| Default | none | Portable commands plus interface enumeration. |
-| Pcap-free | `--no-default-features --features native-route,native-layer3` | Interfaces, passive routes, and raw Layer 3 send/replay. |
-| Complete | `--all-features` | Pcap-free behavior plus Layer 2 capture/injection and capture-backed workflows. |
-
-`native-route` is independent. `native-layer2` and `native-layer3` each enable
-`native-interfaces`; `native-interfaces` is the default. Features are
-package-scoped, and there are no `portable`, `pcap-free`, or `cli` feature
-names.
-
-The workspace has exactly four crates. `packetcraftr-core` provides packet
-mechanics at its crate root and offline capture analysis under `analysis`.
-`packetcraftr-netio` provides network providers and native I/O. The
-`packetcraftr` library combines both with policy-gated workflows such as
-`packetcraftr::scan`, `packetcraftr::dns`, `packetcraftr::send`, and
-`packetcraftr::policy`, plus versioned models under `packetcraftr::output`. It
-re-exports
-`packetcraftr_core` as `core`, `core::analysis` as `analysis`, and
-`packetcraftr_netio` as `netio`. The former `packet`, `network`, and `live`
-aliases are not retained.
-
-Unlike `packetcraftr-live`, `packetcraftr` enables `native-interfaces` by
-default. Direct `packetcraftr-live` consumers that need the same portable
-footprint should set `default-features = false` on their new `packetcraftr`
-dependency.
-
-The dependency graph puts `packetcraftr-core` at the bottom.
-`packetcraftr-netio` depends only on core, `packetcraftr` depends on both, and
-`packetcraftr-cli` depends only on `packetcraftr`. Because offline analysis
-lives in core, it has no direct or transitive dependency on resolution, route,
-live-capture, or transmission providers. Cargo manifests and `cargo metadata`
-are the source of truth for this graph.
-
-This crate consolidation changes Rust package and module paths. The
-`packetcraftr` CLI executable name, its command-line interface, and the
-versioned packet and output schema shapes are unchanged.
+> **Live-network warning:** use live commands only on systems and networks you
+> own or are explicitly authorized to test. PacketcraftR's opt-in flags are
+> technical policy controls, not permission to target a network.
 
 ## Quick start
 
-These commands are offline and work in every build profile:
+These examples are offline and work in every feature profile:
 
 ```console
 packetcraftr protocols
+packetcraftr protocols ipv4
 packetcraftr --output hex build --packet 'raw(text=hello)'
-packetcraftr --output json dissect \
-  --hex '45000014000000004001f6e7c0000201c6336402'
-packetcraftr --output ndjson read capture.pcapng \
-  --max-frames 100 --max-bytes 10485760
-packetcraftr fuzz --packet 'raw(hex="00")' \
-  --seed 9 --cases 4 --strategy bit-flip --field 0.bytes
+packetcraftr --output json dissect --link-type 228 \
+  --hex '450000210000000040118e95c0000201c633640230390009000d9f8868656c6c6f'
+packetcraftr --output ndjson read capture.pcapng --max-frames 100
 ```
 
-From a source checkout, build a published document with:
+From a source checkout, build a published packet document with:
 
 ```console
 packetcraftr --output json build \
   --packet-file examples/documents/packet-ipv4-udp.json
 ```
 
-For a live lab, replace `eth0` and `192.168.56.10` with an authorized current
-interface and private destination:
+Use `packetcraftr --help` to discover commands,
+`packetcraftr <COMMAND> --help` for current options and limits, and
+`packetcraftr protocols [PROTOCOL]` for the authoritative built-in protocol
+catalog.
+
+| Area | Commands |
+| --- | --- |
+| Packet and capture files | `build`, `dissect`, `protocols`, `read` |
+| Offline analysis | `expert`, `follow`, `stats`, `fuzz` (default mode) |
+| Native inspection and planning | `interfaces`, `routes`, `plan` |
+| Live workflows | `send`, `exchange`, `capture`, `replay`, `scan`, `traceroute`, `dns`, `fuzz --live` |
+
+## Install
+
+[GitHub releases](https://github.com/tyk-swe/pcr/releases) provide Linux x86-64,
+macOS x86-64 and Arm64, and Windows x86-64 MSVC archives. Download the matching
+archive and `SHA256SUMS`, verify the checksum, then place `packetcraftr` (or
+`packetcraftr.exe`) on `PATH`.
+
+- `all-features` archives include routing, raw Layer 3, and Layer 2
+  capture/injection. They require libpcap at runtime on Linux and macOS, or
+  Npcap 1.88 on Windows.
+- `pcap-free` archives include routing and raw Layer 3 without a
+  libpcap/Npcap dependency.
+
+To build from source, install the pinned Rust 1.97.1 toolchain and a compatible
+`sccache` executable (0.17.0 is tested). Rust 1.96 is the MSRV. Linux builds
+require clang and lld; all-feature builds also require libpcap development
+files such as `libpcap-dev`.
 
 ```console
-packetcraftr interfaces
-packetcraftr plan \
-  --packet 'ipv4(dst=192.168.56.10)/icmpv4(type=8,code=0)' \
-  --interface eth0 --link-mode layer3
-packetcraftr send \
-  --packet 'ipv4(dst=192.168.56.10)/icmpv4(type=8,code=0)' \
-  --interface eth0 --link-mode layer3
+cargo build --locked --release -p packetcraftr-cli
+./target/release/packetcraftr --help
 ```
 
-`plan` is passive. `send --link-mode layer3` needs the pcap-free or complete
-profile and raw-socket permission. Live capture and capture-backed workflows
-need the complete profile, libpcap/Npcap, and capture permission:
+Add `--no-default-features` for an offline-only build or `--all-features` for
+all native capabilities. The Cargo manifests and command help are authoritative
+for finer-grained feature selection. Missing features, dependencies, or OS
+privileges fail closed.
+
+## Documents and output contracts
+
+- Packet JSON/YAML: [`packetcraftr.packet/v1`](schemas/packetcraftr.packet.v1.schema.json)
+- Structured command output: [`packetcraftr.output/v1`](schemas/packetcraftr.output.v1.schema.json)
+- Published packet and output examples: [`examples/documents`](examples/documents)
+
+The global `--output` option accepts command-specific combinations of `text`,
+`json`, `ndjson`, `hex`, `raw`, `pcap`, and `pcapng`. Put it before the command,
+for example `packetcraftr --output json stats capture.pcapng`. Unsupported
+combinations fail explicitly. Machine and binary formats contain no terminal
+colour codes. Streaming commands use NDJSON.
+
+Structured errors include a stable code, kind, message, and remediation. The v1
+schema and checked-in examples are the contract reference.
+
+## Library layout
+
+Rust users normally depend on the `packetcraftr` facade. It re-exports packet
+mechanics as `core`, offline capture tools as `analysis`, and provider/native
+I/O as `netio`. The core and offline-analysis path has no live-I/O dependency.
+Cargo manifests and `cargo metadata` are the source of truth for the package
+graph and features. Build API documentation with:
 
 ```console
-packetcraftr capture \
-  --packet 'ipv4(dst=192.168.56.53)/udp(dport=53)' \
-  --interface eth0 --timeout-ms 1000 \
-  --capture-filter 'udp port 53' \
-  --filter 'udp.source_port == 53'
+cargo doc --locked --all-features --no-deps --open
 ```
 
-`--capture-filter` is resolver-free native BPF applied before PacketcraftR's
-queue and budgets. `--filter` is PacketcraftR's display language applied after
-capture, so rejected frames have already consumed queue and operation budget.
+## Live-network safety
 
-## Live-operation safety
+Live operations enforce several independent boundaries:
 
-Live commands fail closed at separate authorization boundaries:
-
-- Traffic policy rejects globally routable and multicast destinations by
-  default. `--allow-public-destinations` is a per-command opt-in, not legal
-  authorization or an OS privilege grant. Every declared and decoded
-  route-bearing destination is checked before native I/O.
-- Hostnames require `--allow-hostname-resolution`; resolution is bounded by
-  `--max-resolved-addresses`, and every result must pass destination policy.
-- Permissive or malformed live bytes require both the operation opt-in
-  (`--allow-permissive-live` or `--allow-malformed-live`) and
-  `--allow-permissive-packets` where the command exposes them.
-- Packet, byte, duration, queue, and evidence limits remain active regardless
-  of other opt-ins. Capture-backed active workflows establish capture
-  readiness before transmitting.
+- Globally routable and multicast destinations are denied by default.
+  `--allow-public-destinations` is a command opt-in, not legal authorization or
+  an OS privilege grant.
+- Hostnames require `--allow-hostname-resolution`; resolution is bounded and
+  every returned address must pass destination policy.
+- Permissive or malformed live packets require both the operation-specific
+  opt-in and `--allow-permissive-packets` where those flags are exposed.
+- Packet, byte, duration, queue, and evidence budgets remain active. Active
+  capture-backed workflows establish capture readiness before transmission.
 - Interface identity, route consistency, source ownership, MTU, and final wire
-  bytes are revalidated at the native boundary.
+  bytes are checked again at the native boundary.
 
-Only applicable commands expose each flag. Use the command's `--help` rather
-than copying flags between operations.
+Only applicable commands expose each control. Read that command's `--help`
+instead of copying flags between workflows. For `capture`, `--capture-filter`
+is resolver-free native BPF applied before PacketcraftR's queue and budgets;
+`--filter` is applied after capture, so rejected frames have already consumed
+those resources.
 
-Grant the minimum native permission required:
+Native operations also need the minimum OS permission for the selected path:
 
-| Platform | Native requirements and limits |
+| Platform | Requirements and notable limits |
 | --- | --- |
-| Linux | Layer 2 and raw Layer 3 normally require root or `CAP_NET_RAW`. All-features needs libpcap; routes use route netlink. Containers must expose the interface, route, and capability in the same namespace. |
-| macOS | Layer 2 needs libpcap and BPF-device access; raw sockets normally require root. Exact complete-header raw IPv6 transmission is unsupported, so use an authorized Layer 2 path. |
-| Windows | Layer 2 needs Npcap 1.88, and raw sockets require administrator rights. PacketcraftR loads Npcap from the system Npcap directory. Windows may reject raw UDP whose source is not assigned locally. |
-
-## Output and diagnostics
-
-Global `--output` supports command-specific combinations of `text`, `json`,
-`ndjson`, `hex`, `raw`, `pcap`, and `pcapng`. Machine and binary formats never
-contain terminal styling; `--color auto|always|never` affects only human-facing
-output. Unsupported format/command combinations fail explicitly.
-
-Add `--output json` before a command for classified errors with a stable code,
-kind, message, and remediation. Common failures are:
-
-| Error | Check |
-| --- | --- |
-| `capability.missing_dependency` | Install libpcap/Npcap or use a pcap-free path. |
-| `capability.privilege` | Grant the minimum platform capture/raw-socket permission. |
-| `capability.route` | Enable `native-route`; use pcap-free or complete for the CLI. |
-| `io.interface_not_found`, `io.route_selection` | List interfaces again and verify name/index, source, family, and route constraints. |
-| `io.capture`, `io.capture_readiness` | Verify the complete profile, interface state, dependency, and capture permission. |
-| `policy.public_destination` | Prefer an authorized private lab target or explicitly opt in; hostnames also require resolution authorization. |
+| Linux | Layer 2 and raw Layer 3 usually require root or `CAP_NET_RAW`; complete builds need libpcap. Containers must expose the interface, route, and capability in the same namespace. |
+| macOS | Layer 2 needs libpcap and BPF-device access; raw sockets usually require root. Complete-header raw IPv6 transmission is unsupported. |
+| Windows | Layer 2 needs Npcap 1.88; raw sockets usually require administrator rights. Windows may reject raw UDP with a non-local source. |
 
 ## Contributing, security, and license
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development and review guidance.
-Report suspected vulnerabilities privately as described in
-[SECURITY.md](SECURITY.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidance. Report
+suspected vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
 
 PacketcraftR is licensed under the
 [GNU Affero General Public License v3.0 only](LICENSE).

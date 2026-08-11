@@ -81,20 +81,18 @@ impl Limits {
 /// value therefore disables that class of input rather than being rejected
 /// uniformly during construction.
 ///
-/// ```text
+/// ```rust
 /// use std::io::Cursor;
-/// use crate::analysis::pcap::{Reader, ReaderOptions, Writer};
-/// use crate::frame::LinkType;
+/// use packetcraftr_core::analysis::pcap::{Reader, ReaderOptions, Writer};
+/// use packetcraftr_core::frame::LinkType;
 ///
-/// # fn example() -> Result<(), crate::analysis::pcap::Error> {
 /// let bytes = Writer::pcap(Vec::new(), LinkType::ETHERNET)?.into_inner();
 /// let options = ReaderOptions {
 ///     max_size: 64 * 1024,
 ///     ..ReaderOptions::default()
 /// };
 /// let _reader = Reader::with_options(Cursor::new(bytes), options)?;
-/// # Ok(())
-/// # }
+/// # Ok::<(), packetcraftr_core::analysis::pcap::Error>(())
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ReaderOptions {
@@ -124,11 +122,10 @@ impl Default for ReaderOptions {
 
 /// Classic PCAP file configuration.
 ///
-/// ```text
-/// use crate::analysis::pcap::{Endianness, PcapOptions, Writer};
-/// use crate::frame::LinkType;
+/// ```rust
+/// use packetcraftr_core::analysis::pcap::{Endianness, PcapOptions, Writer};
+/// use packetcraftr_core::frame::LinkType;
 ///
-/// # fn example() -> Result<(), crate::analysis::pcap::Error> {
 /// let options = PcapOptions {
 ///     endianness: Endianness::Big,
 ///     snap_len: 65_535,
@@ -136,8 +133,7 @@ impl Default for ReaderOptions {
 ///     ..PcapOptions::default()
 /// };
 /// let _writer = Writer::pcap_with_options(Vec::new(), LinkType::ETHERNET, options)?;
-/// # Ok(())
-/// # }
+/// # Ok::<(), packetcraftr_core::analysis::pcap::Error>(())
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PcapOptions {
@@ -164,19 +160,17 @@ impl Default for PcapOptions {
 
 /// PCAPNG section configuration.
 ///
-/// ```text
-/// use crate::analysis::pcap::{PcapNgOptions, Writer};
-/// use crate::frame::LinkType;
+/// ```rust
+/// use packetcraftr_core::analysis::pcap::{PcapNgOptions, Writer};
+/// use packetcraftr_core::frame::LinkType;
 ///
-/// # fn example() -> Result<(), crate::analysis::pcap::Error> {
 /// let options = PcapNgOptions {
 ///     max_interfaces: 8,
 ///     ..PcapNgOptions::default()
 /// };
 /// let mut writer = Writer::pcapng_with_options(Vec::new(), options)?;
 /// writer.add_interface(LinkType::ETHERNET)?;
-/// # Ok(())
-/// # }
+/// # Ok::<(), packetcraftr_core::analysis::pcap::Error>(())
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PcapNgOptions {

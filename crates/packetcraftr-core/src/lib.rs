@@ -5,9 +5,10 @@
 
 //! Runtime-neutral packet mechanics and bounded offline analysis.
 //!
-//! This is the portable foundation of PacketcraftR. It contains no resolver,
-//! route lookup, live capture, or transmission seam; those belong to
-//! `packetcraftr-netio` and the policy-gated `packetcraftr` workflows.
+//! This portable foundation has no resolver, route lookup, live-capture, or
+//! transmission seam. Provider contracts and native I/O live in
+//! `packetcraftr-netio`; authorization-gated live workflows live in
+//! `packetcraftr`.
 
 pub mod analysis;
 pub mod budget;

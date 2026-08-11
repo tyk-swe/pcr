@@ -73,7 +73,7 @@ pub struct Writer<W> {
 impl<W: Write> Writer<W> {
     /// Creates a writer with the default format configuration.
     ///
-    /// A PCAPNG writer created this way starts with interface zero.  Use
+    /// A PCAPNG writer created this way starts with interface zero. Use
     /// [`pcapng`](Self::pcapng) followed by [`add_interface`](Self::add_interface)
     /// when all interface descriptions need to be declared explicitly.
     pub fn new(inner: W, format: Format, link_type: LinkType) -> Result<Self, Error> {

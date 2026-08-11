@@ -72,20 +72,7 @@ impl Frame {
         link_type: LinkType,
         bytes: impl Into<Bytes>,
     ) -> Result<Self, FrameError> {
-        let bytes = bytes.into();
-        let length =
-            u32::try_from(bytes.len()).map_err(|_| FrameError::CapturedLengthTooLarge {
-                actual: bytes.len(),
-            })?;
-        Ok(Self {
-            timestamp: Some(timestamp),
-            captured_length: length,
-            original_length: length,
-            link_type,
-            interface: None,
-            direction: None,
-            bytes,
-        })
+        Self::with_inferred_lengths(Some(timestamp), link_type, bytes)
     }
 
     pub fn try_with_lengths(
@@ -95,32 +82,25 @@ impl Frame {
         original_length: u32,
         bytes: impl Into<Bytes>,
     ) -> Result<Self, FrameError> {
-        let bytes = bytes.into();
-        if bytes.len() != captured_length as usize {
-            return Err(FrameError::CapturedLengthMismatch {
-                declared: captured_length,
-                actual: bytes.len(),
-            });
-        }
-        if original_length < captured_length {
-            return Err(FrameError::OriginalLengthTooSmall {
-                captured: captured_length,
-                original: original_length,
-            });
-        }
-        Ok(Self {
-            timestamp: Some(timestamp),
+        Self::try_with_optional_timestamp(
+            Some(timestamp),
+            link_type,
             captured_length,
             original_length,
-            link_type,
-            interface: None,
-            direction: None,
             bytes,
-        })
+        )
     }
 
     /// Constructs a frame whose source record does not provide a timestamp.
     pub fn without_timestamp(
+        link_type: LinkType,
+        bytes: impl Into<Bytes>,
+    ) -> Result<Self, FrameError> {
+        Self::with_inferred_lengths(None, link_type, bytes)
+    }
+
+    fn with_inferred_lengths(
+        timestamp: Option<SystemTime>,
         link_type: LinkType,
         bytes: impl Into<Bytes>,
     ) -> Result<Self, FrameError> {
@@ -129,15 +109,7 @@ impl Frame {
             u32::try_from(bytes.len()).map_err(|_| FrameError::CapturedLengthTooLarge {
                 actual: bytes.len(),
             })?;
-        Ok(Self {
-            timestamp: None,
-            captured_length: length,
-            original_length: length,
-            link_type,
-            interface: None,
-            direction: None,
-            bytes,
-        })
+        Self::try_with_optional_timestamp(timestamp, link_type, length, length, bytes)
     }
 
     /// Constructs a frame with explicit lengths and optional capture time.

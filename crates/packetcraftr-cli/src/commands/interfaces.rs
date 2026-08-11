@@ -29,11 +29,6 @@ pub(super) fn run(output: output::contract::Format) -> Result<(), CliError> {
         output::contract::Format::Json => {
             emit_aggregate(output::contract::Command::Interfaces, result, Vec::new())
         }
-        _ => Err(CliError::classified(
-            output::contract::Error::UnsupportedFormat {
-                command: output::contract::Command::Interfaces,
-                format: output,
-            },
-        )),
+        _ => unreachable!("interfaces format is checked before command dispatch"),
     }
 }

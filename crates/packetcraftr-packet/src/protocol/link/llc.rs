@@ -11,7 +11,7 @@ use crate::{
         LayerEncodeContext,
     },
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
+    layer::{Layer, ProtocolId, reflective_layer},
     registry::Discriminator,
 };
 
@@ -74,9 +74,9 @@ impl Default for Llc {
 reflective_layer! {
     fn llc_schema() => { protocol: protocol("llc"), name: "LLC" }
     impl Llc {
-        "dsap" => { kind: Unsigned, derived: false, required: true, description: "Destination service access point", get |layer| Some(reflect_get(&layer.dsap)), set |layer, value, name| reflect_set(&mut layer.dsap, llc_schema(), name, value), layout: (0, 1) },
-        "ssap" => { kind: Unsigned, derived: false, required: true, description: "Source service access point", get |layer| Some(reflect_get(&layer.ssap)), set |layer, value, name| reflect_set(&mut layer.ssap, llc_schema(), name, value), layout: (1, 2) },
-        "control" => { kind: Bytes, derived: false, required: true, description: "Control field: one byte for U format, two for I and S formats", get |layer| Some(reflect_get(&layer.control)), set |layer, value, name| reflect_set(&mut layer.control, llc_schema(), name, value), layout: (2, control_end) }
+        "dsap" => { kind: Unsigned, derived: false, required: true, description: "Destination service access point", reflect: dsap, layout: (0, 1) },
+        "ssap" => { kind: Unsigned, derived: false, required: true, description: "Source service access point", reflect: ssap, layout: (1, 2) },
+        "control" => { kind: Bytes, derived: false, required: true, description: "Control field: one byte for U format, two for I and S formats", reflect: control, layout: (2, control_end) }
     }
     layout pub(crate) fn llc_layout(control_end: usize);
 }
@@ -197,7 +197,6 @@ impl LayerCodec for LlcCodec {
                 control: Bytes::copy_from_slice(&input[2..header_len]),
             }),
             consumed: header_len,
-            payload_offset: header_len,
             payload_len,
             // Kept even with no payload: a UI frame on a registered SAP
             // pair announces a header, so the decoder reports it missing,
@@ -242,7 +241,7 @@ reflective_layer! {
     fn snap_schema() => { protocol: protocol("snap"), name: "SNAP" }
     impl Snap {
         "oui" => { kind: Unsigned, derived: false, required: true, description: "Organizationally unique identifier; zero selects the EtherType space", get |layer| Some(FieldValue::from(layer.oui)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.oui = u32::try_from(value).ok().filter(|value| *value <= OUI_MAX).ok_or_else(|| out_of_range(snap_schema(), name))?; Ok(()) }, _ => Err(wrong_type(snap_schema(), name, "unsigned")) }, layout: (0, 3) },
-        "protocol_id" => { kind: Unsigned, derived: true, required: false, description: "Protocol identifier within the OUI's numbering", get |layer| Some(reflect_get(&layer.protocol_id)), set |layer, value, name| reflect_set(&mut layer.protocol_id, snap_schema(), name, value), layout: (3, 5) },
+        "protocol_id" => { kind: Unsigned, derived: true, required: false, description: "Protocol identifier within the OUI's numbering", reflect: protocol_id, layout: (3, 5) },
     }
     layout pub(crate) fn snap_layout();
 }
@@ -363,7 +362,6 @@ impl LayerCodec for SnapCodec {
                 protocol_id: WireValue::Exact(protocol_id),
             }),
             consumed: SNAP_LEN,
-            payload_offset: SNAP_LEN,
             payload_len,
             next: vec![Discriminator(snap_discriminator(oui, protocol_id))],
             diagnostics: Vec::new(),

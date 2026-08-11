@@ -195,12 +195,7 @@ pub(super) fn run(arguments: ReplayArgs, output: output::contract::Format) -> Re
             )?;
             writer.flush().map_err(CliError::classified)
         }
-        _ => Err(CliError::classified(
-            output::contract::Error::UnsupportedFormat {
-                command: output::contract::Command::Replay,
-                format: output,
-            },
-        )),
+        _ => unreachable!("replay format is checked before command dispatch"),
     }
 }
 

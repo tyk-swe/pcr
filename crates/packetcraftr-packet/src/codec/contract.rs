@@ -102,8 +102,9 @@ pub struct NetworkEnvelope {
 
 pub struct DecodedLayerValue {
     pub layer: Box<dyn Layer>,
+    /// Number of leading input bytes consumed by this layer. The child
+    /// payload, when present, begins at this offset.
     pub consumed: usize,
-    pub payload_offset: usize,
     pub payload_len: usize,
     pub next: Vec<Discriminator>,
     pub fields: Vec<FieldLayout>,
@@ -118,7 +119,6 @@ impl DecodedLayerValue {
         Self {
             layer,
             consumed,
-            payload_offset: consumed,
             payload_len: 0,
             next: Vec::new(),
             fields: Vec::new(),

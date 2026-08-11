@@ -92,3 +92,10 @@ pub(crate) fn validate_interface_selector(
     }
     Ok(Some(index))
 }
+
+pub(crate) fn validate_live_interface_selector(
+    command: &str,
+    selector: Option<&str>,
+) -> Result<(), CliError> {
+    validate_interface_selector(command, selector).map(|_| ())
+}

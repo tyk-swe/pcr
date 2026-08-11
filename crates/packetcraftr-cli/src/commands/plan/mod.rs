@@ -28,12 +28,7 @@ pub(super) fn run(arguments: PlanArgs, output: output::contract::Format) -> Resu
         output::contract::Format::Json => {
             emit_aggregate(output::contract::Command::Plan, result, Vec::new())
         }
-        _ => Err(CliError::classified(
-            output::contract::Error::UnsupportedFormat {
-                command: output::contract::Command::Plan,
-                format: output,
-            },
-        )),
+        _ => unreachable!("plan format is checked before command dispatch"),
     }
 }
 

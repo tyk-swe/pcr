@@ -12,7 +12,7 @@ use crate::{
     },
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
+    layer::{Layer, ProtocolId, reflective_layer},
 };
 
 use super::super::common::{
@@ -70,29 +70,25 @@ macro_rules! icmp_reflection {
                 "type" => {
                     kind: Unsigned, derived: false, required: true,
                     description: "ICMP message type",
-                    get |layer| Some(reflect_get(&layer.icmp_type)),
-                    set |layer, value, name| reflect_set(&mut layer.icmp_type, $schema(), name, value),
+                    reflect: icmp_type,
                     layout: (0, 1)
                 },
                 "code" => {
                     kind: Unsigned, derived: false, required: true,
                     description: "ICMP message code",
-                    get |layer| Some(reflect_get(&layer.code)),
-                    set |layer, value, name| reflect_set(&mut layer.code, $schema(), name, value),
+                    reflect: code,
                     layout: (1, 2)
                 },
                 "checksum" => {
                     kind: Unsigned, derived: true, required: false,
                     description: "ICMP checksum",
-                    get |layer| Some(reflect_get(&layer.checksum)),
-                    set |layer, value, name| reflect_set(&mut layer.checksum, $schema(), name, value),
+                    reflect: checksum,
                     layout: (2, 4)
                 },
                 "body" => {
                     kind: Bytes, derived: false, required: false,
                     description: "Type-specific ICMP body",
-                    get |layer| Some(reflect_get(&layer.body)),
-                    set |layer, value, name| reflect_set(&mut layer.body, $schema(), name, value),
+                    reflect: body,
                     layout: (4, 4 + body_len)
                 },
             }
@@ -175,7 +171,6 @@ impl LayerCodec for Icmpv4Codec {
                 body: Bytes::copy_from_slice(&input[4..]),
             }),
             consumed: input.len(),
-            payload_offset: input.len(),
             payload_len: 0,
             next: Vec::new(),
             fields: icmpv4_layout(input.len() - ICMP_MIN_LEN),
@@ -268,7 +263,6 @@ impl LayerCodec for Icmpv6Codec {
                 body: Bytes::copy_from_slice(&input[4..]),
             }),
             consumed: input.len(),
-            payload_offset: input.len(),
             payload_len: 0,
             next: Vec::new(),
             fields: icmpv6_layout(input.len() - ICMP_MIN_LEN),

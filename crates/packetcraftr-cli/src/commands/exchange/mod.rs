@@ -109,12 +109,7 @@ pub(super) fn run(
             stats,
         ),
         output::contract::Format::Ndjson => render_exchange_stream(result, diagnostics, stats),
-        _ => Err(CliError::classified(
-            output::contract::Error::UnsupportedFormat {
-                command: output::contract::Command::Exchange,
-                format: output,
-            },
-        )),
+        _ => unreachable!("exchange format is checked before command dispatch"),
     }
 }
 

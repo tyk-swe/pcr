@@ -17,10 +17,10 @@ use self::arguments::DnsArgs;
 use crate::errors::CliError;
 use crate::rendering::emit_aggregate_with_stats;
 use crate::system::{
-    DeferredInterface, default_registry_arc, parse_workflow_target, workflow_exchange_options,
+    DeferredInterface, default_registry_arc, parse_workflow_target,
+    validate_live_interface_selector, workflow_exchange_options,
 };
 
-use super::scan::validate_live_interface_selector;
 use conversion::{generated_dns_source_port, generated_dns_transaction_id};
 use execution::CliDnsExecutor;
 use rendering::{render_dns_stream, render_dns_text};
@@ -46,9 +46,7 @@ pub(super) fn run(arguments: DnsArgs, output: output::contract::Format) -> Resul
         max_txt_bytes,
         max_rejected_records,
         max_undecoded,
-        interface,
-        source,
-        link_mode,
+        route,
         limits,
         policy,
     } = arguments;
@@ -81,16 +79,16 @@ pub(super) fn run(arguments: DnsArgs, output: output::contract::Format) -> Resul
     };
     let policy = policy.into_policy();
     policy.validate().map_err(CliError::classified)?;
-    validate_live_interface_selector("dns", interface.as_deref())?;
+    validate_live_interface_selector("dns", route.interface.as_deref())?;
 
     let registry = default_registry_arc()?;
     let exchange = workflow_exchange_options(
         client::send::Options {
             destination: None,
             plan: net::route::Options {
-                link_mode: link_mode.into(),
+                link_mode: route.link_mode.into(),
                 interface: None,
-                preferred_source: source,
+                preferred_source: route.source,
             },
             build: packet::build::Options::default(),
             allow_permissive_live: false,
@@ -104,7 +102,7 @@ pub(super) fn run(arguments: DnsArgs, output: output::contract::Format) -> Resul
         registry: Arc::clone(&registry),
         policy: policy.clone(),
         exchange,
-        interface: DeferredInterface::new(interface),
+        interface: DeferredInterface::new(route.interface),
     };
     let resolver = client::target::SystemResolver;
     let mut authorizer = workflow::dns::PolicyAuthorizer::new(&policy, &resolver);
@@ -125,12 +123,7 @@ pub(super) fn run(arguments: DnsArgs, output: output::contract::Format) -> Resul
             emit_aggregate_with_stats(output::contract::Command::Dns, result, diagnostics, stats)
         }
         output::contract::Format::Ndjson => render_dns_stream(result, diagnostics, stats),
-        _ => Err(CliError::classified(
-            output::contract::Error::UnsupportedFormat {
-                command: output::contract::Command::Dns,
-                format: output,
-            },
-        )),
+        _ => unreachable!("dns format is checked before command dispatch"),
     }
 }
 

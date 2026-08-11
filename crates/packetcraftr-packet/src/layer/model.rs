@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::super::field::{FieldKind, FieldValue};
-use super::reflection::{reflect_get, reflect_set, reflective_layer};
+use super::reflection::reflective_layer;
 
 /// An open, stable identifier for a protocol layer or codec.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -161,8 +161,7 @@ reflective_layer! {
         "bytes" => {
             kind: Bytes, derived: false, required: false,
             description: "Verbatim bytes",
-            get |layer| Some(reflect_get(&layer.bytes)),
-            set |layer, value, name| reflect_set(&mut layer.bytes, raw_schema(), name, value),
+            reflect: bytes,
             layout: (0, length)
         }
     }
@@ -199,8 +198,7 @@ reflective_layer! {
         "bytes" => {
             kind: Bytes, derived: false, required: false,
             description: "Trailing padding bytes",
-            get |layer| Some(reflect_get(&layer.bytes)),
-            set |layer, value, name| reflect_set(&mut layer.bytes, padding_schema(), name, value),
+            reflect: bytes,
             layout: (0, length)
         },
         "outside_layer" => {
@@ -259,15 +257,13 @@ reflective_layer! {
         "bytes" => {
             kind: Bytes, derived: false, required: false,
             description: "Preserved malformed bytes",
-            get |layer| Some(reflect_get(&layer.bytes)),
-            set |layer, value, name| reflect_set(&mut layer.bytes, malformed_schema(), name, value),
+            reflect: bytes,
             layout: (0, length)
         },
         "reason" => {
             kind: Text, derived: false, required: true,
             description: "Decode or construction finding",
-            get |layer| Some(reflect_get(&layer.reason)),
-            set |layer, value, name| reflect_set(&mut layer.reason, malformed_schema(), name, value)
+            reflect: reason
         }
     }
     layout pub fn malformed_layout(length: usize);

@@ -1,32 +1,25 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::io::Cursor;
-use std::net::{IpAddr, Ipv4Addr};
+mod common;
+
+use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
+use common::{
+    CLIENT, SERVER, TcpSpec, client_tcp, reader, registry, server_tcp, tcp_frame, udp_frame,
+};
 use packetcraftr_analysis::expert::{
     ExpertCollector, ExpertSummary, Finding, StreamRef, StreamTransport,
 };
 use packetcraftr_analysis::follow::{Direction as FollowDirection, FollowCollector, Selector};
-use packetcraftr_analysis::pcap::{Reader, Writer};
 use packetcraftr_analysis::reassembly::tcp;
 use packetcraftr_analysis::stats::{StatsCollector, TransportKind};
 use packetcraftr_analysis::{Error, Limits, Options, run};
-use packetcraftr_packet::Packet;
-use packetcraftr_packet::build::{Builder, Context as BuildContext, Options as BuildOptions};
 use packetcraftr_packet::error::{BoundaryError, Classified, Kind};
 use packetcraftr_packet::filter::{Filter, Options as FilterOptions};
-use packetcraftr_packet::frame::{Frame, LinkType};
-use packetcraftr_packet::layer::Raw;
-use packetcraftr_packet::protocol::builtin;
-use packetcraftr_packet::protocol::network::Ipv4;
-use packetcraftr_packet::protocol::transport::{Tcp, Udp};
-use packetcraftr_packet::registry::Registry;
-
-const CLIENT: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 1);
-const SERVER: Ipv4Addr = Ipv4Addr::new(198, 51, 100, 2);
+use packetcraftr_packet::protocol::transport::Tcp;
 
 #[test]
 fn expert_public_models_and_collector_keep_their_contracts() {
@@ -53,113 +46,6 @@ fn expert_public_models_and_collector_keep_their_contracts() {
         &packetcraftr_analysis::FrameRecord<'record>,
     ) -> Vec<Finding> = observe;
     let _: Finish = ExpertCollector::finish;
-}
-
-fn registry() -> Arc<Registry> {
-    Arc::new(builtin::registry().expect("built-in protocols must register"))
-}
-
-#[derive(Clone, Copy)]
-struct TcpSpec {
-    source: Ipv4Addr,
-    destination: Ipv4Addr,
-    source_port: u16,
-    destination_port: u16,
-    sequence: u32,
-    acknowledgment: u32,
-    flags: u16,
-    window: u16,
-}
-
-fn tcp_frame(
-    registry: &Arc<Registry>,
-    timestamp: SystemTime,
-    spec: TcpSpec,
-    payload: &[u8],
-) -> Frame {
-    let mut packet = Packet::new();
-    packet.push(Ipv4 {
-        source: spec.source,
-        destination: spec.destination,
-        ..Ipv4::default()
-    });
-    packet.push(Tcp {
-        source_port: spec.source_port,
-        destination_port: spec.destination_port,
-        sequence: spec.sequence,
-        acknowledgment: spec.acknowledgment,
-        flags: spec.flags,
-        window: spec.window,
-        ..Tcp::default()
-    });
-    if !payload.is_empty() {
-        packet.push(Raw::new(payload.to_vec()));
-    }
-    let built = Builder::new(Arc::clone(registry))
-        .build(packet, BuildContext::default(), BuildOptions::default())
-        .expect("TCP fixture must build");
-    Frame::new(timestamp, LinkType::IPV4, built.bytes).expect("TCP fixture frame must be valid")
-}
-
-fn udp_frame(
-    registry: &Arc<Registry>,
-    timestamp: SystemTime,
-    source: Ipv4Addr,
-    destination: Ipv4Addr,
-    source_port: u16,
-    destination_port: u16,
-    payload: &[u8],
-) -> Frame {
-    let mut packet = Packet::new();
-    packet.push(Ipv4 {
-        source,
-        destination,
-        ..Ipv4::default()
-    });
-    packet.push(Udp {
-        source_port,
-        destination_port,
-        ..Udp::default()
-    });
-    packet.push(Raw::new(payload.to_vec()));
-    let built = Builder::new(Arc::clone(registry))
-        .build(packet, BuildContext::default(), BuildOptions::default())
-        .expect("UDP fixture must build");
-    Frame::new(timestamp, LinkType::IPV4, built.bytes).expect("UDP fixture frame must be valid")
-}
-
-fn reader(frames: &[Frame]) -> Reader<Cursor<Vec<u8>>> {
-    let mut writer = Writer::pcap(Vec::new(), LinkType::IPV4).expect("capture writer initializes");
-    for frame in frames {
-        writer.write_frame(frame).expect("fixture frame writes");
-    }
-    Reader::new(Cursor::new(writer.into_inner())).expect("fixture capture opens")
-}
-
-fn client_tcp(sequence: u32, acknowledgment: u32, flags: u16, window: u16) -> TcpSpec {
-    TcpSpec {
-        source: CLIENT,
-        destination: SERVER,
-        source_port: 40_000,
-        destination_port: 443,
-        sequence,
-        acknowledgment,
-        flags,
-        window,
-    }
-}
-
-fn server_tcp(sequence: u32, acknowledgment: u32, flags: u16, window: u16) -> TcpSpec {
-    TcpSpec {
-        source: SERVER,
-        destination: CLIENT,
-        source_port: 443,
-        destination_port: 40_000,
-        sequence,
-        acknowledgment,
-        flags,
-        window,
-    }
 }
 
 #[test]
@@ -228,13 +114,7 @@ fn pipeline_assigns_stable_indices_before_filtering() {
             epoch + Duration::from_secs(2),
             TcpSpec {
                 destination_port: 40_001,
-                source_port: 443,
-                source: SERVER,
-                destination: CLIENT,
-                sequence: 500,
-                acknowledgment: 201,
-                flags: Tcp::SYN | Tcp::ACK,
-                window: 1_000,
+                ..server_tcp(500, 201, Tcp::SYN | Tcp::ACK, 1_000)
             },
             b"",
         ),

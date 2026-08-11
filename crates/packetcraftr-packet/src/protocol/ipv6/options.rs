@@ -11,7 +11,7 @@ use crate::{
         LayerEncodeContext,
     },
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
+    layer::{Layer, ProtocolId, reflective_layer},
     registry::Discriminator,
 };
 
@@ -56,8 +56,8 @@ macro_rules! declare_options_layer {
         reflective_layer! {
             fn $schema() => { protocol: protocol($protocol), name: $name }
             impl $ty {
-                "next_header" => { kind: Unsigned, derived: true, required: false, description: "IPv6 next-header discriminator", get |layer| Some(reflect_get(&layer.next_header)), set |layer, value, name| reflect_set(&mut layer.next_header, $schema(), name, value), layout: (0, 1) },
-                "options" => { kind: Bytes, derived: false, required: false, description: "Option bytes, padded to an eight-byte header boundary", get |layer| Some(reflect_get(&layer.options)), set |layer, value, name| reflect_set(&mut layer.options, $schema(), name, value), layout: (2, header_len) },
+                "next_header" => { kind: Unsigned, derived: true, required: false, description: "IPv6 next-header discriminator", reflect: next_header, layout: (0, 1) },
+                "options" => { kind: Bytes, derived: false, required: false, description: "Option bytes, padded to an eight-byte header boundary", reflect: options, layout: (2, header_len) },
             }
             layout pub(crate) fn $layout(header_len: usize);
         }
@@ -167,7 +167,6 @@ where
             Bytes::copy_from_slice(&input[2..header_len]),
         )),
         consumed: header_len,
-        payload_offset: header_len,
         payload_len: input.len() - header_len,
         next: vec![Discriminator(u64::from(input[0]))],
         fields: layout(header_len),

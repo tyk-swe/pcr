@@ -10,7 +10,7 @@ use crate::{
     },
     diagnostic::Diagnostic,
     field::FieldValue,
-    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
+    layer::{Layer, ProtocolId, reflective_layer},
     registry::Discriminator,
 };
 
@@ -55,10 +55,10 @@ impl Default for Vxlan {
 reflective_layer! {
     fn vxlan_schema() => { protocol: protocol("vxlan"), name: "VXLAN" }
     impl Vxlan {
-        "flags" => { kind: Unsigned, derived: false, required: true, description: "VXLAN flag byte; only the VNI-valid bit 0x08 is defined", get |layer| Some(reflect_get(&layer.flags)), set |layer, value, name| reflect_set(&mut layer.flags, vxlan_schema(), name, value), layout: (0, 1) },
+        "flags" => { kind: Unsigned, derived: false, required: true, description: "VXLAN flag byte; only the VNI-valid bit 0x08 is defined", reflect: flags, layout: (0, 1) },
         "reserved1" => { kind: Unsigned, derived: false, required: false, description: "Reserved 24 bits between the flags and the VNI", get |layer| Some(FieldValue::from(layer.reserved1)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.reserved1 = u32::try_from(value).ok().filter(|value| *value <= VNI_MAX).ok_or_else(|| out_of_range(vxlan_schema(), name))?; Ok(()) }, _ => Err(wrong_type(vxlan_schema(), name, "unsigned")) }, layout: (1, 4) },
         "vni" => { kind: Unsigned, derived: false, required: true, description: "24-bit VXLAN network identifier", get |layer| Some(FieldValue::from(layer.vni)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.vni = u32::try_from(value).ok().filter(|value| *value <= VNI_MAX).ok_or_else(|| out_of_range(vxlan_schema(), name))?; Ok(()) }, _ => Err(wrong_type(vxlan_schema(), name, "unsigned")) }, layout: (4, 7) },
-        "reserved2" => { kind: Unsigned, derived: false, required: false, description: "Reserved byte after the VNI", get |layer| Some(reflect_get(&layer.reserved2)), set |layer, value, name| reflect_set(&mut layer.reserved2, vxlan_schema(), name, value), layout: (7, 8) }
+        "reserved2" => { kind: Unsigned, derived: false, required: false, description: "Reserved byte after the VNI", reflect: reserved2, layout: (7, 8) }
     }
     layout pub(crate) fn vxlan_layout();
 }
@@ -167,7 +167,6 @@ impl LayerCodec for VxlanCodec {
             fields: vxlan_layout(),
             layer: Box::new(layer),
             consumed: VXLAN_LEN,
-            payload_offset: VXLAN_LEN,
             payload_len,
             // The encapsulated frame is always Ethernet.
             next: vec![Discriminator(0)],

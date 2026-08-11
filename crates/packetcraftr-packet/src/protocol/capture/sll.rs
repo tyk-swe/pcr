@@ -9,7 +9,7 @@ use crate::{
         LayerEncodeContext,
     },
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
+    layer::{Layer, ProtocolId, reflect_get, reflective_layer},
     registry::Discriminator,
 };
 
@@ -66,11 +66,11 @@ impl Default for LinuxSll2 {
 reflective_layer! {
     fn linux_sll_schema() => { protocol: protocol("linux_sll"), name: "Linux cooked capture v1" }
     impl LinuxSll {
-        "protocol" => { kind: Unsigned, derived: true, required: false, description: "Protocol discriminator", get |layer| Some(reflect_get(&layer.protocol)), set |layer, value, name| reflect_set(&mut layer.protocol, linux_sll_schema(), name, value), layout: (14, 16) },
-        "packet_type" => { kind: Unsigned, derived: false, required: true, description: "Packet direction/type", get |layer| Some(reflect_get(&layer.packet_type)), set |layer, value, name| reflect_set(&mut layer.packet_type, linux_sll_schema(), name, value), layout: (0, 2) },
-        "arp_hardware_type" => { kind: Unsigned, derived: false, required: true, description: "ARP hardware type", get |layer| Some(reflect_get(&layer.arp_hardware_type)), set |layer, value, name| reflect_set(&mut layer.arp_hardware_type, linux_sll_schema(), name, value), layout: (2, 4) },
+        "protocol" => { kind: Unsigned, derived: true, required: false, description: "Protocol discriminator", reflect: protocol, layout: (14, 16) },
+        "packet_type" => { kind: Unsigned, derived: false, required: true, description: "Packet direction/type", reflect: packet_type, layout: (0, 2) },
+        "arp_hardware_type" => { kind: Unsigned, derived: false, required: true, description: "ARP hardware type", reflect: arp_hardware_type, layout: (2, 4) },
         "address_length" => { kind: Unsigned, derived: false, required: true, description: "Link address length", get |layer| Some(reflect_get(&layer.address_length)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.address_length = u16::try_from(value).ok().filter(|value| *value <= 8).ok_or_else(|| out_of_range(linux_sll_schema(), name))?; Ok(()) }, _ => Err(wrong_type(linux_sll_schema(), name, "unsigned")) }, layout: (4, 6) },
-        "address" => { kind: Bytes, derived: false, required: false, description: "Eight-byte link address slot", get |layer| Some(reflect_get(&layer.address)), set |layer, value, name| reflect_set(&mut layer.address, linux_sll_schema(), name, value), layout: (6, 14) },
+        "address" => { kind: Bytes, derived: false, required: false, description: "Eight-byte link address slot", reflect: address, layout: (6, 14) },
     }
     layout pub(crate) fn linux_sll_layout();
 }
@@ -78,12 +78,12 @@ reflective_layer! {
 reflective_layer! {
     fn linux_sll2_schema() => { protocol: protocol("linux_sll2"), name: "Linux cooked capture v2" }
     impl LinuxSll2 {
-        "protocol" => { kind: Unsigned, derived: true, required: false, description: "Protocol discriminator", get |layer| Some(reflect_get(&layer.protocol)), set |layer, value, name| reflect_set(&mut layer.protocol, linux_sll2_schema(), name, value), layout: (0, 2) },
-        "packet_type" => { kind: Unsigned, derived: false, required: true, description: "Packet direction/type", get |layer| Some(reflect_get(&layer.packet_type)), set |layer, value, name| reflect_set(&mut layer.packet_type, linux_sll2_schema(), name, value), layout: (10, 11) },
-        "arp_hardware_type" => { kind: Unsigned, derived: false, required: true, description: "ARP hardware type", get |layer| Some(reflect_get(&layer.arp_hardware_type)), set |layer, value, name| reflect_set(&mut layer.arp_hardware_type, linux_sll2_schema(), name, value), layout: (8, 10) },
-        "interface_index" => { kind: Unsigned, derived: false, required: false, description: "Interface index", get |layer| Some(reflect_get(&layer.interface_index)), set |layer, value, name| reflect_set(&mut layer.interface_index, linux_sll2_schema(), name, value), layout: (4, 8) },
+        "protocol" => { kind: Unsigned, derived: true, required: false, description: "Protocol discriminator", reflect: protocol, layout: (0, 2) },
+        "packet_type" => { kind: Unsigned, derived: false, required: true, description: "Packet direction/type", reflect: packet_type, layout: (10, 11) },
+        "arp_hardware_type" => { kind: Unsigned, derived: false, required: true, description: "ARP hardware type", reflect: arp_hardware_type, layout: (8, 10) },
+        "interface_index" => { kind: Unsigned, derived: false, required: false, description: "Interface index", reflect: interface_index, layout: (4, 8) },
         "address_length" => { kind: Unsigned, derived: false, required: true, description: "Link address length", get |layer| Some(reflect_get(&layer.address_length)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.address_length = u8::try_from(value).ok().filter(|value| *value <= 8).ok_or_else(|| out_of_range(linux_sll2_schema(), name))?; Ok(()) }, _ => Err(wrong_type(linux_sll2_schema(), name, "unsigned")) }, layout: (11, 12) },
-        "address" => { kind: Bytes, derived: false, required: false, description: "Eight-byte link address slot", get |layer| Some(reflect_get(&layer.address)), set |layer, value, name| reflect_set(&mut layer.address, linux_sll2_schema(), name, value), layout: (12, 20) },
+        "address" => { kind: Bytes, derived: false, required: false, description: "Eight-byte link address slot", reflect: address, layout: (12, 20) },
     }
     layout pub(crate) fn linux_sll2_layout();
 }
@@ -177,7 +177,6 @@ impl LayerCodec for LinuxSllCodec {
                 protocol: WireValue::Exact(protocol_value),
             }),
             consumed: 16,
-            payload_offset: 16,
             payload_len: input.len() - 16,
             next: vec![Discriminator(protocol_value.into())],
             fields: linux_sll_layout(),
@@ -283,7 +282,6 @@ impl LayerCodec for LinuxSll2Codec {
                 address,
             }),
             consumed: 20,
-            payload_offset: 20,
             payload_len: input.len() - 20,
             next: vec![Discriminator(protocol_value.into())],
             fields: linux_sll2_layout(),

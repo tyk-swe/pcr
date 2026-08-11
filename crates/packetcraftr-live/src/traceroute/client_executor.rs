@@ -88,13 +88,12 @@ where
             template = template.axis(1, varying_field, values);
         }
 
-        let mut options = self.options.clone();
-        options.timeout = batch.timeout;
-        options.max_template_packets = batch.probes.len();
-        options.send.destination = Some(first.address);
-        let exchange = self
-            .client
-            .exchange_for_workflow(&template, options, |request_index, sent, response| {
+        let exchange = self.exchange_for_workflow(
+            &template,
+            batch.timeout,
+            batch.probes.len(),
+            first.address,
+            |request_index, sent, response| {
                 batch.probes.get(request_index).is_some_and(|probe| {
                     classify_traceroute_response(
                         self.client.registry(),
@@ -104,26 +103,10 @@ where
                     )
                     .is_some()
                 })
-            })
-            .map_err(BoundaryError::from_error)?;
-        let crate::exchange::Result {
-            sent,
-            responses,
-            unanswered: _,
-            unsolicited,
-            undecoded,
-            diagnostics,
-            stats,
-        } = exchange;
-        Ok(TracerouteBatchExecution {
-            permit: batch.permit,
-            sent,
-            responses,
-            unsolicited,
-            undecoded,
-            diagnostics,
-            stats,
-        })
+            },
+        )?;
+        let execution = TracerouteBatchExecution::from_exchange(batch.permit, exchange);
+        Ok(execution)
     }
 }
 

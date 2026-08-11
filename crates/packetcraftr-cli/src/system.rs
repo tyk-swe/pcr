@@ -9,7 +9,9 @@ mod interface;
 mod route;
 mod target;
 
-pub(crate) use interface::{DeferredInterface, validate_interface_selector};
+pub(crate) use interface::{
+    DeferredInterface, validate_interface_selector, validate_live_interface_selector,
+};
 
 pub(crate) use route::{prepare_route_request, workflow_exchange_options};
 

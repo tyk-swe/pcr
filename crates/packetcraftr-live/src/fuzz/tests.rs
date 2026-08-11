@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
-use packetcraftr_network::transmit::Submission;
+use packetcraftr_network::{capture::Statistics as CaptureStatistics, transmit::Submission};
 use packetcraftr_packet::build::{Builder, Options as BuildOptions};
 use packetcraftr_packet::error::Classified;
 use packetcraftr_packet::fuzz as packet_fuzz;
@@ -19,7 +19,80 @@ use packetcraftr_packet::{Packet, layer::Raw};
 use crate::clock::Clock;
 use crate::{BoundaryError, Stats};
 
-use super::{Authorizer, Execution, ExecutionCase, Executor, LiveOptions, run};
+use super::execution::add_execution_stats;
+use super::{Authorizer, Execution, ExecutionCase, Executor, LiveOptions, Stats as FuzzStats, run};
+
+#[test]
+fn execution_statistics_aggregation_is_complete_and_atomic() {
+    let mut total = FuzzStats {
+        cases_generated: 7,
+        cases_built: 5,
+        packets_attempted: 1,
+        packets_completed: 2,
+        bytes: 3,
+        elapsed: Duration::from_secs(4),
+        capture: CaptureStatistics {
+            received_frames: 5,
+            dropped_frames: 6,
+            receiver_dropped_frames: 4,
+            ..CaptureStatistics::default()
+        },
+    };
+    add_execution_stats(
+        &mut total,
+        &Stats {
+            packets_attempted: 10,
+            packets_completed: 20,
+            bytes: 30,
+            elapsed: Duration::from_secs(40),
+            capture: CaptureStatistics {
+                received_frames: 50,
+                dropped_frames: 60,
+                receiver_dropped_frames: 40,
+                ..CaptureStatistics::default()
+            },
+        },
+        11,
+    )
+    .expect("bounded statistics");
+    assert_eq!(
+        total,
+        FuzzStats {
+            cases_generated: 7,
+            cases_built: 5,
+            packets_attempted: 11,
+            packets_completed: 22,
+            bytes: 33,
+            elapsed: Duration::from_secs(44),
+            capture: CaptureStatistics {
+                received_frames: 55,
+                dropped_frames: 66,
+                receiver_dropped_frames: 44,
+                ..CaptureStatistics::default()
+            },
+        }
+    );
+
+    let before = total.clone();
+    let error = add_execution_stats(
+        &mut total,
+        &Stats {
+            packets_attempted: 1,
+            capture: CaptureStatistics {
+                receiver_dropped_frames: u64::MAX,
+                ..CaptureStatistics::default()
+            },
+            ..Stats::default()
+        },
+        12,
+    )
+    .expect_err("capture counter must overflow");
+    assert!(matches!(
+        error,
+        super::Error::StatisticsOverflow { case_index: 12 }
+    ));
+    assert_eq!(total, before);
+}
 
 struct AllowAll;
 

@@ -182,17 +182,13 @@ impl Dissector {
                 }
             })?;
             let binding_parent = actual_protocol;
-            if decoded.consumed > current.len()
-                || decoded.payload_offset > current.len()
-                || decoded.consumed != decoded.payload_offset
-                || (!decoded.stop && decoded.payload_offset == 0)
-            {
+            if decoded.consumed > current.len() || (!decoded.stop && decoded.consumed == 0) {
                 return Err(DecodeError::InvalidCodecCursor {
                     protocol: current_protocol,
                 });
             }
             let payload_end = decoded
-                .payload_offset
+                .consumed
                 .checked_add(decoded.payload_len)
                 .filter(|end| *end <= current.len())
                 .ok_or_else(|| DecodeError::InvalidCodecCursor {
@@ -249,25 +245,23 @@ impl Dissector {
             });
             let next_discriminator = next_selection.as_ref().map(|(value, _)| *value);
             let next_protocol = next_selection.map(|(_, protocol)| protocol);
-            let missing_required_message = (decoded.payload_len == 0)
-                .then(|| {
-                    next_protocol.as_ref().filter(|protocol| {
-                        !matches!(
-                            BuiltinProtocol::from_id(protocol),
-                            Some(
-                                BuiltinProtocol::Raw
-                                    | BuiltinProtocol::Malformed
-                                    | BuiltinProtocol::Padding
-                            )
+            let missing_required_child = if decoded.payload_len == 0 {
+                next_protocol.as_ref().filter(|protocol| {
+                    !matches!(
+                        BuiltinProtocol::from_id(protocol),
+                        Some(
+                            BuiltinProtocol::Raw
+                                | BuiltinProtocol::Malformed
+                                | BuiltinProtocol::Padding
                         )
-                    })
-                })
-                .flatten()
-                .map(|required| {
-                    format!(
-                        "{binding_parent} discriminator requires {required}, but no bytes remain"
                     )
-                });
+                })
+            } else {
+                None
+            };
+            let missing_required_message = missing_required_child.map(|required| {
+                format!("{binding_parent} discriminator requires {required}, but no bytes remain")
+            });
             let unknown_binding_message =
                 (decoded.payload_len > 0 && !decoded.stop && next_protocol.is_none())
                     .then(|| format!("unknown child discriminator after {binding_parent}"));
@@ -287,29 +281,17 @@ impl Dissector {
                 diagnostic
             }));
             if decoded.payload_len == 0 {
-                if let Some(required) = next_protocol.filter(|protocol| {
-                    !matches!(
-                        BuiltinProtocol::from_id(protocol),
-                        Some(
-                            BuiltinProtocol::Raw
-                                | BuiltinProtocol::Malformed
-                                | BuiltinProtocol::Padding
-                        )
-                    )
-                }) {
+                if let Some(message) = missing_required_message {
                     if packet.len() >= options.max_layers {
                         return Err(DecodeError::LayerLimit {
                             limit: options.max_layers,
                         });
                     }
+                    let required = next_protocol
+                        .expect("missing-child diagnostic requires a selected child protocol");
                     append_missing_required_layer(&mut packet, &mut layouts, required, layer_end);
                     diagnostics.push(
-                        Diagnostic::error(
-                            "decode.missing_required_child",
-                            missing_required_message
-                                .expect("typed missing child has a prepared diagnostic"),
-                        )
-                        .at_layer(index),
+                        Diagnostic::error("decode.missing_required_child", message).at_layer(index),
                     );
                 }
                 break;
@@ -338,7 +320,7 @@ impl Dissector {
                 );
                 break;
             }
-            let payload = &current[decoded.payload_offset..payload_end];
+            let payload = &current[decoded.consumed..payload_end];
             absolute_offset = layer_end;
             let Some(next_protocol) = next_protocol else {
                 if packet.len() >= options.max_layers {

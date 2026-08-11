@@ -6,15 +6,6 @@ use std::collections::HashSet;
 use packetcraftr::live as workflow;
 
 use super::arguments::CliScanPortSpec;
-use crate::errors::CliError;
-use crate::system::validate_interface_selector;
-
-pub(crate) fn validate_live_interface_selector(
-    command: &str,
-    selector: Option<&str>,
-) -> Result<(), CliError> {
-    validate_interface_selector(command, selector).map(|_| ())
-}
 
 /// Expand parsed CLI port specs into the stable, deduplicated `Vec<u16>` used
 /// by `workflow::scan::Request`. Ranges are inclusive and iterated directly.

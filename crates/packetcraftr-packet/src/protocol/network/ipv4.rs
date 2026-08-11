@@ -15,7 +15,7 @@ use crate::{
     },
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
+    layer::{Layer, ProtocolId, reflect_get, reflective_layer},
     registry::Discriminator,
 };
 
@@ -70,19 +70,19 @@ impl Default for Ipv4 {
 reflective_layer! {
     fn ipv4_schema() => { protocol: protocol("ipv4"), name: "IPv4" }
     impl Ipv4 {
-        "dscp_ecn" => { kind: Unsigned, derived: false, required: false, description: "DSCP and ECN octet", get |layer| Some(reflect_get(&layer.dscp_ecn)), set |layer, value, name| reflect_set(&mut layer.dscp_ecn, ipv4_schema(), name, value), layout: (1, 2) },
-        "total_length" => { kind: Unsigned, derived: true, required: false, description: "IPv4 total length", get |layer| Some(reflect_get(&layer.total_length)), set |layer, value, name| reflect_set(&mut layer.total_length, ipv4_schema(), name, value), layout: (2, 4) },
-        "identification" => { kind: Unsigned, derived: false, required: false, description: "Fragment identification", get |layer| Some(reflect_get(&layer.identification)), set |layer, value, name| reflect_set(&mut layer.identification, ipv4_schema(), name, value), layout: (4, 6) },
-        "reserved_flag" => { kind: Bool, derived: false, required: false, description: "Reserved IPv4 flag bit", get |layer| Some(reflect_get(&layer.reserved_flag)), set |layer, value, name| reflect_set(&mut layer.reserved_flag, ipv4_schema(), name, value), layout: (6, 8) },
-        "dont_fragment" => { kind: Bool, derived: false, required: false, description: "Don't-fragment flag", get |layer| Some(reflect_get(&layer.dont_fragment)), set |layer, value, name| reflect_set(&mut layer.dont_fragment, ipv4_schema(), name, value), layout: (6, 8) },
-        "more_fragments" => { kind: Bool, derived: false, required: false, description: "More-fragments flag", get |layer| Some(reflect_get(&layer.more_fragments)), set |layer, value, name| reflect_set(&mut layer.more_fragments, ipv4_schema(), name, value), layout: (6, 8) },
+        "dscp_ecn" => { kind: Unsigned, derived: false, required: false, description: "DSCP and ECN octet", reflect: dscp_ecn, layout: (1, 2) },
+        "total_length" => { kind: Unsigned, derived: true, required: false, description: "IPv4 total length", reflect: total_length, layout: (2, 4) },
+        "identification" => { kind: Unsigned, derived: false, required: false, description: "Fragment identification", reflect: identification, layout: (4, 6) },
+        "reserved_flag" => { kind: Bool, derived: false, required: false, description: "Reserved IPv4 flag bit", reflect: reserved_flag, layout: (6, 8) },
+        "dont_fragment" => { kind: Bool, derived: false, required: false, description: "Don't-fragment flag", reflect: dont_fragment, layout: (6, 8) },
+        "more_fragments" => { kind: Bool, derived: false, required: false, description: "More-fragments flag", reflect: more_fragments, layout: (6, 8) },
         "fragment_offset" => { kind: Unsigned, derived: false, required: false, description: "Fragment offset in eight-byte units", get |layer| Some(reflect_get(&layer.fragment_offset)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.fragment_offset = u16::try_from(value).ok().filter(|value| *value <= 0x1fff).ok_or_else(|| out_of_range(ipv4_schema(), name))?; Ok(()) }, _ => Err(wrong_type(ipv4_schema(), name, "unsigned")) }, layout: (6, 8) },
-        "ttl" => { kind: Unsigned, derived: false, required: true, description: "Time to live", get |layer| Some(reflect_get(&layer.ttl)), set |layer, value, name| reflect_set(&mut layer.ttl, ipv4_schema(), name, value), layout: (8, 9) },
-        "protocol" => { kind: Unsigned, derived: true, required: false, description: "Next protocol discriminator", get |layer| Some(reflect_get(&layer.protocol)), set |layer, value, name| reflect_set(&mut layer.protocol, ipv4_schema(), name, value), layout: (9, 10) },
-        "checksum" => { kind: Unsigned, derived: true, required: false, description: "IPv4 header checksum", get |layer| Some(reflect_get(&layer.checksum)), set |layer, value, name| reflect_set(&mut layer.checksum, ipv4_schema(), name, value), layout: (10, 12) },
-        "source" => { kind: Ipv4, derived: false, required: true, description: "Source IPv4 address", get |layer| Some(reflect_get(&layer.source)), set |layer, value, name| reflect_set(&mut layer.source, ipv4_schema(), name, value), layout: (12, 16) },
-        "destination" => { kind: Ipv4, derived: false, required: true, description: "Destination IPv4 address", get |layer| Some(reflect_get(&layer.destination)), set |layer, value, name| reflect_set(&mut layer.destination, ipv4_schema(), name, value), layout: (16, 20) },
-        "options" => { kind: Bytes, derived: false, required: false, description: "Verbatim IPv4 option bytes", get |layer| Some(reflect_get(&layer.options)), set |layer, value, name| reflect_set(&mut layer.options, ipv4_schema(), name, value), layout: (20, header_len) },
+        "ttl" => { kind: Unsigned, derived: false, required: true, description: "Time to live", reflect: ttl, layout: (8, 9) },
+        "protocol" => { kind: Unsigned, derived: true, required: false, description: "Next protocol discriminator", reflect: protocol, layout: (9, 10) },
+        "checksum" => { kind: Unsigned, derived: true, required: false, description: "IPv4 header checksum", reflect: checksum, layout: (10, 12) },
+        "source" => { kind: Ipv4, derived: false, required: true, description: "Source IPv4 address", reflect: source, layout: (12, 16) },
+        "destination" => { kind: Ipv4, derived: false, required: true, description: "Destination IPv4 address", reflect: destination, layout: (16, 20) },
+        "options" => { kind: Bytes, derived: false, required: false, description: "Verbatim IPv4 option bytes", reflect: options, layout: (20, header_len) },
     }
     layout pub(crate) fn ipv4_layout(header_len: usize);
 }
@@ -343,7 +343,6 @@ impl LayerCodec for Ipv4Codec {
                 options: Bytes::copy_from_slice(&input[20..header_len]),
             }),
             consumed: header_len,
-            payload_offset: header_len,
             payload_len,
             next: if fragment_offset == 0 && (flags_offset & 0x2000) == 0 {
                 vec![Discriminator(u64::from(next))]

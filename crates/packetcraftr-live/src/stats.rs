@@ -19,35 +19,17 @@ impl Stats {
     /// Accumulates `value` into these counters, or leaves them untouched and
     /// returns `None` if any single counter would overflow.
     pub fn checked_add(&mut self, value: &Self) -> Option<()> {
-        let mut sum = self.clone();
-        sum.packets_attempted = sum.packets_attempted.checked_add(value.packets_attempted)?;
-        sum.packets_completed = sum.packets_completed.checked_add(value.packets_completed)?;
-        sum.bytes = sum.bytes.checked_add(value.bytes)?;
-        sum.elapsed = sum.elapsed.checked_add(value.elapsed)?;
-        sum.capture.received_frames = sum
-            .capture
-            .received_frames
-            .checked_add(value.capture.received_frames)?;
-        sum.capture.received_bytes = sum
-            .capture
-            .received_bytes
-            .checked_add(value.capture.received_bytes)?;
-        sum.capture.dropped_frames = sum
-            .capture
-            .dropped_frames
-            .checked_add(value.capture.dropped_frames)?;
-        sum.capture.dropped_bytes = sum
-            .capture
-            .dropped_bytes
-            .checked_add(value.capture.dropped_bytes)?;
-        sum.capture.overflow_events = sum
-            .capture
-            .overflow_events
-            .checked_add(value.capture.overflow_events)?;
-        sum.capture.receiver_dropped_frames = sum
-            .capture
-            .receiver_dropped_frames
-            .checked_add(value.capture.receiver_dropped_frames)?;
+        let sum = Self {
+            packets_attempted: self
+                .packets_attempted
+                .checked_add(value.packets_attempted)?,
+            packets_completed: self
+                .packets_completed
+                .checked_add(value.packets_completed)?,
+            bytes: self.bytes.checked_add(value.bytes)?,
+            elapsed: self.elapsed.checked_add(value.elapsed)?,
+            capture: self.capture.checked_add(value.capture)?,
+        };
         *self = sum;
         Some(())
     }

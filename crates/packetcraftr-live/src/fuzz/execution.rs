@@ -99,9 +99,10 @@ pub(super) fn add_execution_stats(
     value: &crate::Stats,
     case_index: u64,
 ) -> Result<(), FuzzError> {
+    let mut sum = total.clone();
     macro_rules! add {
         ($field:ident) => {
-            total.$field = total
+            sum.$field = sum
                 .$field
                 .checked_add(value.$field)
                 .ok_or(FuzzError::StatisticsOverflow { case_index })?;
@@ -110,25 +111,15 @@ pub(super) fn add_execution_stats(
     add!(packets_attempted);
     add!(packets_completed);
     add!(bytes);
-    total.elapsed = total
+    sum.elapsed = sum
         .elapsed
         .checked_add(value.elapsed)
         .ok_or(FuzzError::StatisticsOverflow { case_index })?;
-    macro_rules! add_capture {
-        ($field:ident) => {
-            total.capture.$field = total
-                .capture
-                .$field
-                .checked_add(value.capture.$field)
-                .ok_or(FuzzError::StatisticsOverflow { case_index })?;
-        };
-    }
-    add_capture!(received_frames);
-    add_capture!(received_bytes);
-    add_capture!(dropped_frames);
-    add_capture!(dropped_bytes);
-    add_capture!(overflow_events);
-    add_capture!(receiver_dropped_frames);
+    sum.capture = sum
+        .capture
+        .checked_add(value.capture)
+        .ok_or(FuzzError::StatisticsOverflow { case_index })?;
+    *total = sum;
     Ok(())
 }
 

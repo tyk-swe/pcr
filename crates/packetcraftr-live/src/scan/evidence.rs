@@ -3,10 +3,7 @@
 
 //! Exact scan executor-evidence validation and accounting errors.
 
-use crate::probe::evidence::{
-    ExchangeEvidence, ExchangeEvidenceError, format_exchange_evidence_error,
-    validate_exchange_evidence as validate_shared_exchange_evidence,
-};
+use crate::probe::evidence::{format_exchange_evidence_error, validate_batch_exchange_evidence};
 
 use super::error::ScanError;
 use super::model::{ScanBatch, ScanBatchExecution, ScanLimits};
@@ -17,31 +14,19 @@ pub(super) fn validate_exchange_evidence(
     exchange: &ScanBatchExecution,
     limits: ScanLimits,
 ) -> Result<(), ScanError> {
-    validate_shared_exchange_evidence(
-        ExchangeEvidence {
-            request_count: batch.probes.len(),
-            sent: &exchange.sent,
-            matched_responses: &exchange.responses,
-            unsolicited: &exchange.unsolicited,
-            undecoded: &exchange.undecoded,
-            timeout: batch.timeout,
-            stats: &exchange.stats,
-        },
+    validate_batch_exchange_evidence(
+        batch,
+        exchange,
         limits.max_evidence_frames,
         limits.max_evidence_bytes,
-        |request_index, sent| sent_scan_probe_matches(&batch.probes[request_index], sent),
+        sent_scan_probe_matches,
     )
-    .map_err(|error| map_scan_evidence_error(batch, error))
-}
-
-fn map_scan_evidence_error(batch: &ScanBatch, error: ExchangeEvidenceError) -> ScanError {
-    let batch_sequence = batch.probes[0].sequence;
-    let sequence = match &error {
-        ExchangeEvidenceError::SentPacketMismatch { request_index } => {
-            batch.probes[*request_index].sequence
-        }
-        _ => batch_sequence,
-    };
-    let message = format_exchange_evidence_error(error, "batch", "scan");
-    ScanError::InvalidEvidence { sequence, message }
+    .map_err(|error| ScanError::InvalidEvidence {
+        sequence: error
+            .request_index()
+            .map_or(batch.probes[0].sequence, |index| {
+                batch.probes[index].sequence
+            }),
+        message: format_exchange_evidence_error(error, "batch", "scan"),
+    })
 }

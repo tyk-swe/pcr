@@ -12,7 +12,7 @@ use crate::{
     },
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
+    layer::{Layer, ProtocolId, reflective_layer},
     registry::Discriminator,
 };
 
@@ -146,9 +146,9 @@ impl Default for Ethernet {
 reflective_layer! {
     fn ethernet_schema() => { protocol: protocol("ethernet"), name: "Ethernet II" }
     impl Ethernet {
-        "destination" => { kind: Mac, derived: false, required: true, description: "Destination MAC address", get |layer| Some(reflect_get(&layer.destination)), set |layer, value, name| reflect_set(&mut layer.destination, ethernet_schema(), name, value), layout: (0, 6) },
-        "source" => { kind: Mac, derived: false, required: true, description: "Source MAC address", get |layer| Some(reflect_get(&layer.source)), set |layer, value, name| reflect_set(&mut layer.source, ethernet_schema(), name, value), layout: (6, 12) },
-        "ether_type" => { kind: Unsigned, derived: true, required: false, description: "EtherType discriminator", get |layer| Some(reflect_get(&layer.ether_type)), set |layer, value, name| reflect_set(&mut layer.ether_type, ethernet_schema(), name, value), layout: (12, 14) },
+        "destination" => { kind: Mac, derived: false, required: true, description: "Destination MAC address", reflect: destination, layout: (0, 6) },
+        "source" => { kind: Mac, derived: false, required: true, description: "Source MAC address", reflect: source, layout: (6, 12) },
+        "ether_type" => { kind: Unsigned, derived: true, required: false, description: "EtherType discriminator", reflect: ether_type, layout: (12, 14) },
     }
     layout pub(crate) fn ethernet_layout();
 }
@@ -248,7 +248,6 @@ impl LayerCodec for EthernetCodec {
                 ether_type: WireValue::Exact(ether_type),
             }),
             consumed: ETHERNET_LEN,
-            payload_offset: ETHERNET_LEN,
             payload_len,
             next,
             fields: ethernet_layout(),

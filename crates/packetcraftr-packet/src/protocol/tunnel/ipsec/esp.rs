@@ -10,7 +10,7 @@ use crate::{
     },
     diagnostic::Diagnostic,
     field::FieldValue,
-    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
+    layer::{Layer, ProtocolId, reflective_layer},
     registry::Discriminator,
 };
 
@@ -47,8 +47,8 @@ impl Default for Esp {
 reflective_layer! {
     fn esp_schema() => { protocol: protocol("esp"), name: "ESP" }
     impl Esp {
-        "spi" => { kind: Unsigned, derived: false, required: true, description: "Security parameters index", get |layer| Some(reflect_get(&layer.spi)), set |layer, value, name| reflect_set(&mut layer.spi, esp_schema(), name, value), layout: (0, 4) },
-        "sequence" => { kind: Unsigned, derived: false, required: false, description: "Anti-replay sequence number", get |layer| Some(reflect_get(&layer.sequence)), set |layer, value, name| reflect_set(&mut layer.sequence, esp_schema(), name, value), layout: (4, 8) }
+        "spi" => { kind: Unsigned, derived: false, required: true, description: "Security parameters index", reflect: spi, layout: (0, 4) },
+        "sequence" => { kind: Unsigned, derived: false, required: false, description: "Anti-replay sequence number", reflect: sequence, layout: (4, 8) }
     }
     layout pub(crate) fn esp_layout();
 }
@@ -154,7 +154,6 @@ impl LayerCodec for EspCodec {
                 sequence: u32::from_be_bytes([input[4], input[5], input[6], input[7]]),
             }),
             consumed: ESP_LEN,
-            payload_offset: ESP_LEN,
             payload_len,
             // Ciphertext: always the opaque child.
             next: vec![Discriminator(0)],

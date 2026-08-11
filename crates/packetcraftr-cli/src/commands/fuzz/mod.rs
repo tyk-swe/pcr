@@ -16,9 +16,11 @@ use self::arguments::FuzzArgs;
 use crate::errors::CliError;
 use crate::input::read_recipe;
 use crate::rendering::emit_aggregate_with_stats;
-use crate::system::{DeferredInterface, default_registry_arc, workflow_exchange_options};
+use crate::system::{
+    DeferredInterface, default_registry_arc, validate_live_interface_selector,
+    workflow_exchange_options,
+};
 
-use super::scan::validate_live_interface_selector;
 use execution::CliFuzzExecutor;
 use rendering::{render_fuzz_stream, render_fuzz_text};
 
@@ -42,9 +44,7 @@ pub(super) fn run(arguments: FuzzArgs, output: output::contract::Format) -> Resu
         max_list_items,
         max_shrink_steps,
         max_duration_ms,
-        interface,
-        source,
-        link_mode,
+        route,
         limits,
         policy,
     } = arguments;
@@ -92,14 +92,14 @@ pub(super) fn run(arguments: FuzzArgs, output: output::contract::Format) -> Resu
         .map_err(fuzz_cli_error)?;
         let policy = policy.into_policy();
         policy.validate().map_err(CliError::classified)?;
-        validate_live_interface_selector("fuzz", interface.as_deref())?;
+        validate_live_interface_selector("fuzz", route.interface.as_deref())?;
         let exchange = workflow_exchange_options(
             client::send::Options {
                 destination,
                 plan: net::route::Options {
-                    link_mode: link_mode.into(),
+                    link_mode: route.link_mode.into(),
                     interface: None,
-                    preferred_source: source,
+                    preferred_source: route.source,
                 },
                 build: request.build.clone(),
                 allow_permissive_live: allow_malformed_live,
@@ -121,7 +121,7 @@ pub(super) fn run(arguments: FuzzArgs, output: output::contract::Format) -> Resu
             registry: Arc::clone(&registry),
             policy: policy.clone(),
             exchange,
-            interface: DeferredInterface::new(interface),
+            interface: DeferredInterface::new(route.interface),
         };
         let mut authorizer = workflow::fuzz::PolicyAuthorizer::new(&policy);
         let mut clock = workflow::clock::SystemClock;
@@ -148,12 +148,7 @@ pub(super) fn run(arguments: FuzzArgs, output: output::contract::Format) -> Resu
             emit_aggregate_with_stats(output::contract::Command::Fuzz, result, diagnostics, stats)
         }
         output::contract::Format::Ndjson => render_fuzz_stream(result, diagnostics, stats),
-        _ => Err(CliError::classified(
-            output::contract::Error::UnsupportedFormat {
-                command: output::contract::Command::Fuzz,
-                format: output,
-            },
-        )),
+        _ => unreachable!("fuzz format is checked before command dispatch"),
     }
 }
 

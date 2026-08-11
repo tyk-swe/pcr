@@ -11,7 +11,7 @@ use crate::{
         LayerEncodeContext,
     },
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
+    layer::{Layer, ProtocolId, reflect_get, reflective_layer},
 };
 
 use super::super::common::{
@@ -67,9 +67,9 @@ macro_rules! declare_vlan_layer {
             fn $schema() => { protocol: protocol($protocol), name: $name }
             impl $ty {
                 "priority" => { kind: Unsigned, derived: false, required: false, description: "IEEE 802.1 priority code point", get |layer| Some(reflect_get(&layer.priority)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.priority = u8::try_from(value).ok().filter(|value| *value <= 7).ok_or_else(|| out_of_range($schema(), name))?; Ok(()) }, _ => Err(wrong_type($schema(), name, "unsigned")) }, layout: (0, 2) },
-                "drop_eligible" => { kind: Bool, derived: false, required: false, description: "Drop eligible indicator", get |layer| Some(reflect_get(&layer.drop_eligible)), set |layer, value, name| reflect_set(&mut layer.drop_eligible, $schema(), name, value), layout: (0, 2) },
+                "drop_eligible" => { kind: Bool, derived: false, required: false, description: "Drop eligible indicator", reflect: drop_eligible, layout: (0, 2) },
                 "vlan_id" => { kind: Unsigned, derived: false, required: true, description: "VLAN identifier", get |layer| Some(reflect_get(&layer.vlan_id)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.vlan_id = u16::try_from(value).ok().filter(|value| *value <= 4095).ok_or_else(|| out_of_range($schema(), name))?; Ok(()) }, _ => Err(wrong_type($schema(), name, "unsigned")) }, layout: (0, 2) },
-                "ether_type" => { kind: Unsigned, derived: true, required: false, description: "Encapsulated EtherType", get |layer| Some(reflect_get(&layer.ether_type)), set |layer, value, name| reflect_set(&mut layer.ether_type, $schema(), name, value), layout: (2, 4) },
+                "ether_type" => { kind: Unsigned, derived: true, required: false, description: "Encapsulated EtherType", reflect: ether_type, layout: (2, 4) },
             }
             layout pub(crate) fn $layout();
         }
@@ -178,7 +178,6 @@ fn decode_vlan(
             WireValue::Exact(ether_type),
         ),
         consumed: VLAN_LEN,
-        payload_offset: VLAN_LEN,
         payload_len,
         next,
         fields: layout(),

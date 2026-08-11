@@ -33,6 +33,32 @@ pub struct BatchExecution {
     pub(crate) stats: Stats,
 }
 
+impl BatchExecution {
+    pub(crate) fn from_exchange(
+        permit: crate::evidence::ExecutionPermit,
+        result: crate::exchange::Result,
+    ) -> Self {
+        let crate::exchange::Result {
+            sent,
+            responses,
+            unanswered: _,
+            unsolicited,
+            undecoded,
+            diagnostics,
+            stats,
+        } = result;
+        Self {
+            permit,
+            sent,
+            responses,
+            unsolicited,
+            undecoded,
+            diagnostics,
+            stats,
+        }
+    }
+}
+
 pub(crate) trait ProbeBatch {
     fn sequence(&self) -> u64;
     fn probe_count(&self) -> usize;

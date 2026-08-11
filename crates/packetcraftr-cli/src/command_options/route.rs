@@ -8,14 +8,9 @@ use packetcraftr::network as net;
 
 use super::recipe::RecipeArgs;
 
-/// Route-selection inputs shared by packet-oriented live commands.
+/// Route-selection constraints shared by live commands.
 #[derive(Debug, Args)]
-pub(crate) struct RouteArgs {
-    #[command(flatten)]
-    pub(crate) recipe: RecipeArgs,
-    /// Explicit address or hostname when the packet has no fixed destination.
-    #[arg(long, value_name = "ADDRESS_OR_HOSTNAME")]
-    pub(crate) destination: Option<String>,
+pub(crate) struct RouteSelectionArgs {
     /// Interface name or numeric index used as an exact route constraint.
     #[arg(long, value_name = "NAME_OR_INDEX")]
     pub(crate) interface: Option<String>,
@@ -25,6 +20,18 @@ pub(crate) struct RouteArgs {
     /// Automatic, Layer 2, or raw Layer 3 transmission intent.
     #[arg(long, value_enum, default_value_t = CliLinkMode::Auto)]
     pub(crate) link_mode: CliLinkMode,
+}
+
+/// Route-selection inputs shared by packet-oriented live commands.
+#[derive(Debug, Args)]
+pub(crate) struct RouteArgs {
+    #[command(flatten)]
+    pub(crate) recipe: RecipeArgs,
+    /// Explicit address or hostname when the packet has no fixed destination.
+    #[arg(long, value_name = "ADDRESS_OR_HOSTNAME")]
+    pub(crate) destination: Option<String>,
+    #[command(flatten)]
+    pub(crate) route: RouteSelectionArgs,
 }
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]

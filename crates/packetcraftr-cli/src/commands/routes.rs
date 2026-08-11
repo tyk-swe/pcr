@@ -55,11 +55,6 @@ pub(super) fn run(output: output::contract::Format) -> Result<(), CliError> {
         output::contract::Format::Json => {
             emit_aggregate(output::contract::Command::Routes, result, Vec::new())
         }
-        _ => Err(CliError::classified(
-            output::contract::Error::UnsupportedFormat {
-                command: output::contract::Command::Routes,
-                format: output,
-            },
-        )),
+        _ => unreachable!("routes format is checked before command dispatch"),
     }
 }

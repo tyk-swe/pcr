@@ -49,9 +49,7 @@ pub(crate) fn prepare_route_request(
     let RouteArgs {
         recipe,
         destination,
-        interface,
-        source,
-        link_mode,
+        route,
     } = arguments;
     let packet = read_recipe(recipe, registry)?;
     policy.validate().map_err(CliError::classified)?;
@@ -60,14 +58,14 @@ pub(crate) fn prepare_route_request(
         .authorize_packet_destinations(&packet)
         .map_err(CliError::classified)?;
     let destination = resolve_live_destination(destination, &packet, &policy)?;
-    let interface = resolve_interface(interface, &net::interface::SystemProvider)?;
+    let interface = resolve_interface(route.interface, &net::interface::SystemProvider)?;
     Ok(PreparedRouteRequest {
         packet,
         destination,
         options: net::route::Options {
-            link_mode: link_mode.into(),
+            link_mode: route.link_mode.into(),
             interface,
-            preferred_source: source,
+            preferred_source: route.source,
         },
         policy,
     })

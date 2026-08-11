@@ -12,7 +12,7 @@ use crate::{
     },
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
+    layer::{Layer, ProtocolId, reflect_get, reflective_layer},
     registry::Discriminator,
 };
 
@@ -73,13 +73,13 @@ reflective_layer! {
     fn geneve_schema() => { protocol: protocol("geneve"), name: "GENEVE" }
     impl Geneve {
         "version" => { kind: Unsigned, derived: false, required: false, description: "2-bit GENEVE version; only version 0 is defined", get |layer| Some(reflect_get(&layer.version)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.version = u8::try_from(value).ok().filter(|value| *value <= 3).ok_or_else(|| out_of_range(geneve_schema(), name))?; Ok(()) }, _ => Err(wrong_type(geneve_schema(), name, "unsigned")) }, layout: (0, 1) },
-        "control" => { kind: Bool, derived: false, required: false, description: "Control-packet O bit", get |layer| Some(reflect_get(&layer.control)), set |layer, value, name| reflect_set(&mut layer.control, geneve_schema(), name, value), layout: (1, 2) },
-        "critical" => { kind: Bool, derived: false, required: false, description: "Critical-options-present C bit", get |layer| Some(reflect_get(&layer.critical)), set |layer, value, name| reflect_set(&mut layer.critical, geneve_schema(), name, value), layout: (1, 2) },
+        "control" => { kind: Bool, derived: false, required: false, description: "Control-packet O bit", reflect: control, layout: (1, 2) },
+        "critical" => { kind: Bool, derived: false, required: false, description: "Critical-options-present C bit", reflect: critical, layout: (1, 2) },
         "reserved1" => { kind: Unsigned, derived: false, required: false, description: "Reserved 6 bits after the O and C bits", get |layer| Some(reflect_get(&layer.reserved1)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.reserved1 = u8::try_from(value).ok().filter(|value| *value <= 0x3f).ok_or_else(|| out_of_range(geneve_schema(), name))?; Ok(()) }, _ => Err(wrong_type(geneve_schema(), name, "unsigned")) }, layout: (1, 2) },
-        "protocol_type" => { kind: Unsigned, derived: true, required: false, description: "EtherType of the encapsulated frame", get |layer| Some(reflect_get(&layer.protocol_type)), set |layer, value, name| reflect_set(&mut layer.protocol_type, geneve_schema(), name, value), layout: (2, 4) },
+        "protocol_type" => { kind: Unsigned, derived: true, required: false, description: "EtherType of the encapsulated frame", reflect: protocol_type, layout: (2, 4) },
         "vni" => { kind: Unsigned, derived: false, required: true, description: "24-bit virtual network identifier", get |layer| Some(FieldValue::from(layer.vni)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.vni = u32::try_from(value).ok().filter(|value| *value <= VNI_MAX).ok_or_else(|| out_of_range(geneve_schema(), name))?; Ok(()) }, _ => Err(wrong_type(geneve_schema(), name, "unsigned")) }, layout: (4, 7) },
-        "reserved2" => { kind: Unsigned, derived: false, required: false, description: "Reserved byte after the VNI", get |layer| Some(reflect_get(&layer.reserved2)), set |layer, value, name| reflect_set(&mut layer.reserved2, geneve_schema(), name, value), layout: (7, 8) },
-        "options" => { kind: Bytes, derived: false, required: false, description: "Verbatim GENEVE option TLV bytes", get |layer| Some(reflect_get(&layer.options)), set |layer, value, name| reflect_set(&mut layer.options, geneve_schema(), name, value), layout: (GENEVE_BASE_LEN, options_end) },
+        "reserved2" => { kind: Unsigned, derived: false, required: false, description: "Reserved byte after the VNI", reflect: reserved2, layout: (7, 8) },
+        "options" => { kind: Bytes, derived: false, required: false, description: "Verbatim GENEVE option TLV bytes", reflect: options, layout: (GENEVE_BASE_LEN, options_end) },
     }
     layout pub(crate) fn geneve_layout(options_end: usize);
 }
@@ -334,7 +334,6 @@ impl LayerCodec for GeneveCodec {
             fields: geneve_layout(header_len),
             layer: Box::new(layer),
             consumed: header_len,
-            payload_offset: header_len,
             payload_len,
             next: vec![Discriminator(u64::from(protocol_type))],
             diagnostics,

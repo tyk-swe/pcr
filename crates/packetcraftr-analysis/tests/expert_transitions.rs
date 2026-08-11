@@ -1,131 +1,33 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+mod common;
+
 use std::collections::BTreeMap;
-use std::io::Cursor;
-use std::net::Ipv4Addr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
+use common::{
+    CLIENT, SERVER, TcpSpec, client_tcp as client, reader, registry, server_tcp as server,
+    tcp_frame as frame, udp_frame,
+};
 use packetcraftr_analysis::expert::{
     ExpertCollector, ExpertSummary, Finding, StreamRef, StreamTransport,
 };
-use packetcraftr_analysis::pcap::{Reader, Writer};
 use packetcraftr_analysis::{Options, run};
-use packetcraftr_packet::Packet;
-use packetcraftr_packet::build::{Builder, Context as BuildContext, Options as BuildOptions};
 use packetcraftr_packet::diagnostic::Severity as DiagnosticSeverity;
-use packetcraftr_packet::frame::{Frame, LinkType};
-use packetcraftr_packet::layer::Raw;
-use packetcraftr_packet::protocol::builtin;
-use packetcraftr_packet::protocol::network::Ipv4;
-use packetcraftr_packet::protocol::transport::{Tcp, Udp};
+use packetcraftr_packet::frame::Frame;
+use packetcraftr_packet::protocol::transport::Tcp;
 use packetcraftr_packet::registry::Registry;
-
-const CLIENT: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 1);
-const SERVER: Ipv4Addr = Ipv4Addr::new(198, 51, 100, 2);
-
-#[derive(Clone)]
-struct TcpSpec {
-    source: Ipv4Addr,
-    destination: Ipv4Addr,
-    source_port: u16,
-    destination_port: u16,
-    sequence: u32,
-    acknowledgment: u32,
-    flags: u16,
-    window: u16,
-    options: Bytes,
-}
-
-fn registry() -> Arc<Registry> {
-    Arc::new(builtin::registry().expect("built-in protocols must register"))
-}
-
-fn client(sequence: u32, acknowledgment: u32, flags: u16, window: u16) -> TcpSpec {
-    TcpSpec {
-        source: CLIENT,
-        destination: SERVER,
-        source_port: 40_000,
-        destination_port: 443,
-        sequence,
-        acknowledgment,
-        flags,
-        window,
-        options: Bytes::new(),
-    }
-}
-
-fn server(sequence: u32, acknowledgment: u32, flags: u16, window: u16) -> TcpSpec {
-    TcpSpec {
-        source: SERVER,
-        destination: CLIENT,
-        source_port: 443,
-        destination_port: 40_000,
-        sequence,
-        acknowledgment,
-        flags,
-        window,
-        options: Bytes::new(),
-    }
-}
 
 fn with_window_scale(mut spec: TcpSpec, shift: u8) -> TcpSpec {
     spec.options = Bytes::from(vec![3, 3, shift, 0]);
     spec
 }
 
-fn frame(registry: &Arc<Registry>, timestamp: SystemTime, spec: &TcpSpec, payload: &[u8]) -> Frame {
-    let mut packet = Packet::new();
-    packet.push(Ipv4 {
-        source: spec.source,
-        destination: spec.destination,
-        ..Ipv4::default()
-    });
-    packet.push(Tcp {
-        source_port: spec.source_port,
-        destination_port: spec.destination_port,
-        sequence: spec.sequence,
-        acknowledgment: spec.acknowledgment,
-        flags: spec.flags,
-        window: spec.window,
-        options: spec.options.clone(),
-        ..Tcp::default()
-    });
-    if !payload.is_empty() {
-        packet.push(Raw::new(payload.to_vec()));
-    }
-    let built = Builder::new(Arc::clone(registry))
-        .build(packet, BuildContext::default(), BuildOptions::default())
-        .expect("TCP fixture must build");
-    Frame::new(timestamp, LinkType::IPV4, built.bytes).expect("TCP fixture frame must be valid")
-}
-
-fn udp_frame(registry: &Arc<Registry>, timestamp: SystemTime) -> Frame {
-    let mut packet = Packet::new();
-    packet.push(Ipv4 {
-        source: CLIENT,
-        destination: SERVER,
-        ..Ipv4::default()
-    });
-    packet.push(Udp {
-        source_port: 53_000,
-        destination_port: 53,
-        ..Udp::default()
-    });
-    let built = Builder::new(Arc::clone(registry))
-        .build(packet, BuildContext::default(), BuildOptions::default())
-        .expect("UDP fixture must build");
-    Frame::new(timestamp, LinkType::IPV4, built.bytes).expect("UDP fixture frame must be valid")
-}
-
 fn analyze_frames(registry: Arc<Registry>, frames: &[Frame]) -> (Vec<Finding>, ExpertSummary) {
-    let mut writer = Writer::pcap(Vec::new(), LinkType::IPV4).expect("capture writer initializes");
-    for frame in frames {
-        writer.write_frame(frame).expect("fixture frame writes");
-    }
-    let mut capture = Reader::new(Cursor::new(writer.into_inner())).expect("fixture capture opens");
+    let mut capture = reader(frames);
     let mut collector = ExpertCollector::new();
     let mut findings = Vec::new();
     let run_summary = run(
@@ -155,7 +57,7 @@ fn analyze(segments: &[(TcpSpec, &[u8])]) -> (Vec<Finding>, ExpertSummary) {
         .map(|(index, (spec, payload))| {
             let timestamp = SystemTime::UNIX_EPOCH
                 + Duration::from_secs(u64::try_from(index).expect("fixture index fits u64"));
-            frame(&registry, timestamp, spec, payload)
+            frame(&registry, timestamp, spec.clone(), payload)
         })
         .collect::<Vec<_>>();
     analyze_frames(registry, &frames)
@@ -484,42 +386,42 @@ fn non_tcp_sweep_retires_expired_expert_generation() {
     let registry = registry();
     let timestamp = |seconds| SystemTime::UNIX_EPOCH + Duration::from_secs(seconds);
     let frames = vec![
-        frame(&registry, timestamp(0), &client(100, 0, Tcp::SYN, 100), b""),
+        frame(&registry, timestamp(0), client(100, 0, Tcp::SYN, 100), b""),
         frame(
             &registry,
             timestamp(1),
-            &server(500, 101, Tcp::SYN | Tcp::ACK, 100),
+            server(500, 101, Tcp::SYN | Tcp::ACK, 100),
             b"",
         ),
         frame(
             &registry,
             timestamp(2),
-            &client(101, 501, Tcp::ACK, 100),
+            client(101, 501, Tcp::ACK, 100),
             b"",
         ),
         frame(
             &registry,
             timestamp(3),
-            &client(101, 501, Tcp::ACK, 100),
+            client(101, 501, Tcp::ACK, 100),
             b"abc",
         ),
         frame(
             &registry,
             timestamp(4),
-            &client(104, 501, Tcp::FIN | Tcp::ACK, 100),
+            client(104, 501, Tcp::FIN | Tcp::ACK, 100),
             b"",
         ),
         frame(
             &registry,
             timestamp(5),
-            &client(105, 501, Tcp::ACK, 100),
+            client(105, 501, Tcp::ACK, 100),
             b"def",
         ),
-        udp_frame(&registry, timestamp(126)),
+        udp_frame(&registry, timestamp(126), CLIENT, SERVER, 53_000, 53, b""),
         frame(
             &registry,
             timestamp(127),
-            &client(105, 501, Tcp::ACK, 100),
+            client(105, 501, Tcp::ACK, 100),
             b"ghi",
         ),
     ];

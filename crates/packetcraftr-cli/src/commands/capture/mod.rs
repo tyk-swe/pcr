@@ -236,11 +236,6 @@ pub(super) fn run(
                 .map_err(|source| CliError::new(5, format!("write stdout failed: {source}")))?;
             render_diagnostics_stderr(&outcome.diagnostics)
         }
-        _ => Err(CliError::classified(
-            output::contract::Error::UnsupportedFormat {
-                command: output::contract::Command::Capture,
-                format: output,
-            },
-        )),
+        _ => unreachable!("capture format is checked before command dispatch"),
     }
 }

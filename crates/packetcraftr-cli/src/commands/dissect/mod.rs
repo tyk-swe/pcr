@@ -99,11 +99,6 @@ pub(super) fn run(
             }
             emit_aggregate(output::contract::Command::Dissect, result, diagnostics)
         }
-        _ => Err(CliError::classified(
-            output::contract::Error::UnsupportedFormat {
-                command: output::contract::Command::Dissect,
-                format: output,
-            },
-        )),
+        _ => unreachable!("dissect format is checked before command dispatch"),
     }
 }

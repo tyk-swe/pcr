@@ -256,6 +256,49 @@ fn capture_statistics_distinguish_complete_receiver_loss_and_queue_overflow() {
 }
 
 #[test]
+fn capture_statistics_checked_add_is_complete_and_detects_overflow() {
+    let first = capture::Statistics {
+        received_frames: 1,
+        received_bytes: 2,
+        dropped_frames: 7,
+        dropped_bytes: 4,
+        overflow_events: 5,
+        receiver_dropped_frames: 6,
+    };
+    let second = capture::Statistics {
+        received_frames: 10,
+        received_bytes: 20,
+        dropped_frames: 70,
+        dropped_bytes: 40,
+        overflow_events: 50,
+        receiver_dropped_frames: 60,
+    };
+    assert_eq!(
+        first.checked_add(second),
+        Some(capture::Statistics {
+            received_frames: 11,
+            received_bytes: 22,
+            dropped_frames: 77,
+            dropped_bytes: 44,
+            overflow_events: 55,
+            receiver_dropped_frames: 66,
+        })
+    );
+
+    assert_eq!(
+        capture::Statistics {
+            receiver_dropped_frames: u64::MAX,
+            ..capture::Statistics::default()
+        }
+        .checked_add(capture::Statistics {
+            receiver_dropped_frames: 1,
+            ..capture::Statistics::default()
+        }),
+        None
+    );
+}
+
+#[test]
 fn captured_frame_constructors_preserve_or_omit_monotonic_ingress() {
     let ingress = Instant::now();
     let frame = CaptureFrame::new(SystemTime::UNIX_EPOCH, LinkType::ETHERNET, vec![1_u8])

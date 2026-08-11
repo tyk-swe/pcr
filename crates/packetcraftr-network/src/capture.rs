@@ -43,6 +43,20 @@ const fn is_zero(value: &u64) -> bool {
 }
 
 impl Statistics {
+    /// Returns the fieldwise sum, or `None` if any counter would overflow.
+    pub fn checked_add(self, value: Self) -> Option<Self> {
+        Some(Self {
+            received_frames: self.received_frames.checked_add(value.received_frames)?,
+            received_bytes: self.received_bytes.checked_add(value.received_bytes)?,
+            dropped_frames: self.dropped_frames.checked_add(value.dropped_frames)?,
+            dropped_bytes: self.dropped_bytes.checked_add(value.dropped_bytes)?,
+            overflow_events: self.overflow_events.checked_add(value.overflow_events)?,
+            receiver_dropped_frames: self
+                .receiver_dropped_frames
+                .checked_add(value.receiver_dropped_frames)?,
+        })
+    }
+
     /// Validates required frame/byte counter relationships.
     pub fn validate(self) -> Result<Self, Error> {
         if self.dropped_frames == 0 && self.dropped_bytes != 0 {

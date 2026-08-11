@@ -12,7 +12,7 @@ use crate::{
         LayerEncodeContext,
     },
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
+    layer::{Layer, ProtocolId, reflect_get, reflective_layer},
     registry::Discriminator,
 };
 
@@ -55,13 +55,13 @@ impl Default for Ipv6 {
 reflective_layer! {
     fn ipv6_schema() => { protocol: protocol("ipv6"), name: "IPv6" }
     impl Ipv6 {
-        "traffic_class" => { kind: Unsigned, derived: false, required: false, description: "IPv6 traffic class", get |layer| Some(reflect_get(&layer.traffic_class)), set |layer, value, name| reflect_set(&mut layer.traffic_class, ipv6_schema(), name, value), layout: (0, 4) },
+        "traffic_class" => { kind: Unsigned, derived: false, required: false, description: "IPv6 traffic class", reflect: traffic_class, layout: (0, 4) },
         "flow_label" => { kind: Unsigned, derived: false, required: false, description: "IPv6 flow label", get |layer| Some(reflect_get(&layer.flow_label)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.flow_label = u32::try_from(value).ok().filter(|value| *value <= 0x000f_ffff).ok_or_else(|| out_of_range(ipv6_schema(), name))?; Ok(()) }, _ => Err(wrong_type(ipv6_schema(), name, "unsigned")) }, layout: (0, 4) },
-        "payload_length" => { kind: Unsigned, derived: true, required: false, description: "IPv6 payload length", get |layer| Some(reflect_get(&layer.payload_length)), set |layer, value, name| reflect_set(&mut layer.payload_length, ipv6_schema(), name, value), layout: (4, 6) },
-        "next_header" => { kind: Unsigned, derived: true, required: false, description: "Next-header discriminator", get |layer| Some(reflect_get(&layer.next_header)), set |layer, value, name| reflect_set(&mut layer.next_header, ipv6_schema(), name, value), layout: (6, 7) },
-        "hop_limit" => { kind: Unsigned, derived: false, required: true, description: "Hop limit", get |layer| Some(reflect_get(&layer.hop_limit)), set |layer, value, name| reflect_set(&mut layer.hop_limit, ipv6_schema(), name, value), layout: (7, 8) },
-        "source" => { kind: Ipv6, derived: false, required: true, description: "Source IPv6 address", get |layer| Some(reflect_get(&layer.source)), set |layer, value, name| reflect_set(&mut layer.source, ipv6_schema(), name, value), layout: (8, 24) },
-        "destination" => { kind: Ipv6, derived: false, required: true, description: "Destination IPv6 address", get |layer| Some(reflect_get(&layer.destination)), set |layer, value, name| reflect_set(&mut layer.destination, ipv6_schema(), name, value), layout: (24, 40) },
+        "payload_length" => { kind: Unsigned, derived: true, required: false, description: "IPv6 payload length", reflect: payload_length, layout: (4, 6) },
+        "next_header" => { kind: Unsigned, derived: true, required: false, description: "Next-header discriminator", reflect: next_header, layout: (6, 7) },
+        "hop_limit" => { kind: Unsigned, derived: false, required: true, description: "Hop limit", reflect: hop_limit, layout: (7, 8) },
+        "source" => { kind: Ipv6, derived: false, required: true, description: "Source IPv6 address", reflect: source, layout: (8, 24) },
+        "destination" => { kind: Ipv6, derived: false, required: true, description: "Destination IPv6 address", reflect: destination, layout: (24, 40) },
     }
     layout pub(crate) fn ipv6_layout();
 }
@@ -247,7 +247,6 @@ impl LayerCodec for Ipv6Codec {
                 destination,
             }),
             consumed: IPV6_LEN,
-            payload_offset: IPV6_LEN,
             payload_len: payload_length,
             next: vec![Discriminator(u64::from(next))],
             fields: ipv6_layout(),

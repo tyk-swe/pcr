@@ -39,11 +39,6 @@ pub(super) fn run(arguments: BuildArgs, output: output::contract::Format) -> Res
         output::contract::Format::Json => {
             emit_aggregate(output::contract::Command::Build, result, diagnostics)
         }
-        _ => Err(CliError::classified(
-            output::contract::Error::UnsupportedFormat {
-                command: output::contract::Command::Build,
-                format: output,
-            },
-        )),
+        _ => unreachable!("build format is checked before command dispatch"),
     }
 }

@@ -4,14 +4,15 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::Stats;
+use crate::probe::runner::{Batch, BatchExecution};
 use bytes::Bytes;
 use packetcraftr_packet::frame::{Frame, LinkType};
 use packetcraftr_packet::{Packet, decode::Result as DecodedPacket, layer::Raw, layout};
 
 use super::exact_validation::validate_decoded_frame;
 use super::{
-    ExchangeEvidence, ExchangeEvidenceError, ResponseCandidate, response_within_deadline,
-    select_response_candidate, validate_exchange_evidence,
+    ExchangeEvidenceError, ResponseCandidate, response_within_deadline, select_response_candidate,
+    validate_batch_exchange_evidence,
 };
 
 struct TestObservation {
@@ -49,6 +50,31 @@ fn choose<'a>(
         |observation| observation.rank,
         |observation| observation.key,
     );
+}
+
+fn batch_execution(
+    sent: Vec<crate::SentPacket>,
+    responses: Vec<crate::exchange::Response>,
+    unsolicited: Vec<DecodedPacket>,
+    stats: Stats,
+) -> (Batch<()>, BatchExecution) {
+    let permit = crate::evidence::ExecutionPermit::new();
+    (
+        Batch {
+            probes: vec![()],
+            timeout: Duration::from_secs(1),
+            permit,
+        },
+        BatchExecution {
+            permit,
+            sent,
+            responses,
+            unsolicited,
+            undecoded: Vec::new(),
+            diagnostics: Vec::new(),
+            stats,
+        },
+    )
 }
 
 #[test]
@@ -141,39 +167,21 @@ fn evidence_exact_frame_validation_preserves_failure_context() {
 #[test]
 fn evidence_aggregate_validation_reports_cardinality_and_byte_accounting_failures() {
     let sent = [crate::evidence::test_sent_packet(raw_packet(&[1, 2]))];
-    let matched = Vec::<crate::exchange::Response>::new();
     let stats = Stats {
         packets_attempted: 1,
         packets_completed: 1,
         bytes: 2,
         ..Stats::default()
     };
-    let evidence = ExchangeEvidence {
-        request_count: 1,
-        sent: &sent,
-        matched_responses: &matched,
-        unsolicited: &[],
-        undecoded: &[],
-        timeout: Duration::from_secs(1),
-        stats: &stats,
-    };
+    let (batch, mut execution) = batch_execution(sent.into(), Vec::new(), Vec::new(), stats);
     assert_eq!(
-        validate_exchange_evidence(evidence, 1, 2, |_, _| false),
+        validate_batch_exchange_evidence(&batch, &execution, 1, 2, |_, _| false),
         Err(ExchangeEvidenceError::SentPacketMismatch { request_index: 0 })
     );
 
-    let stats = Stats { bytes: 1, ..stats };
-    let evidence = ExchangeEvidence {
-        request_count: 1,
-        sent: &sent,
-        matched_responses: &matched,
-        unsolicited: &[],
-        undecoded: &[],
-        timeout: Duration::from_secs(1),
-        stats: &stats,
-    };
+    execution.stats.bytes = 1;
     assert_eq!(
-        validate_exchange_evidence(evidence, 1, 2, |_, _| true),
+        validate_batch_exchange_evidence(&batch, &execution, 1, 2, |_, _| true),
         Err(ExchangeEvidenceError::SentByteCountMismatch {
             reported: 1,
             actual: 2,
@@ -184,7 +192,6 @@ fn evidence_aggregate_validation_reports_cardinality_and_byte_accounting_failure
 #[test]
 fn evidence_aggregate_validation_rejects_untimestamped_capture_evidence() {
     let sent = [crate::evidence::test_sent_packet(raw_packet(&[1]))];
-    let matched = Vec::<crate::exchange::Response>::new();
     let stats = Stats {
         packets_attempted: 1,
         packets_completed: 1,
@@ -196,34 +203,18 @@ fn evidence_aggregate_validation_rejects_untimestamped_capture_evidence() {
         response: decoded_without_timestamp(&[2]),
         latency: Duration::from_millis(1),
     };
-    let evidence = ExchangeEvidence {
-        request_count: 1,
-        sent: &sent,
-        matched_responses: std::slice::from_ref(&response),
-        unsolicited: &[],
-        undecoded: &[],
-        timeout: Duration::from_secs(1),
-        stats: &stats,
-    };
+    let (batch, mut execution) = batch_execution(sent.into(), vec![response], Vec::new(), stats);
     assert_eq!(
-        validate_exchange_evidence(evidence, 1, 2, |_, _| true),
+        validate_batch_exchange_evidence(&batch, &execution, 1, 2, |_, _| true),
         Err(ExchangeEvidenceError::TimestampUnavailable {
             evidence: "matched response"
         })
     );
 
-    let unsolicited = [decoded_without_timestamp(&[3])];
-    let evidence = ExchangeEvidence {
-        request_count: 1,
-        sent: &sent,
-        matched_responses: &matched,
-        unsolicited: &unsolicited,
-        undecoded: &[],
-        timeout: Duration::from_secs(1),
-        stats: &stats,
-    };
+    execution.responses.clear();
+    execution.unsolicited.push(decoded_without_timestamp(&[3]));
     assert_eq!(
-        validate_exchange_evidence(evidence, 1, 2, |_, _| true),
+        validate_batch_exchange_evidence(&batch, &execution, 1, 2, |_, _| true),
         Err(ExchangeEvidenceError::TimestampUnavailable {
             evidence: "unsolicited response"
         })

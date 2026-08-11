@@ -7,7 +7,7 @@ use clap::{Args, ValueEnum};
 use packetcraftr::{network as net, packet};
 
 use crate::command_options::{
-    CaptureLimitArgs, CliBuildMode, CliLinkMode, FuzzPolicyArgs, RecipeArgs,
+    CaptureLimitArgs, CliBuildMode, FuzzPolicyArgs, RecipeArgs, RouteSelectionArgs,
 };
 
 pub(crate) const AFTER_LONG_HELP: &str = r#"Examples:
@@ -35,6 +35,11 @@ impl From<CliFuzzStrategy> for packet::fuzz::Strategy {
 }
 
 #[derive(Debug, Args)]
+#[command(
+    mut_arg("interface", |arg| arg.help("Interface name or numeric index used as an exact live route constraint")),
+    mut_arg("source", |arg| arg.help("Interface-owned source preference used only for live route selection")),
+    mut_arg("link_mode", |arg| arg.help("Automatic, Layer 2, or raw Layer 3 live transmission intent"))
+)]
 pub(crate) struct FuzzArgs {
     #[command(flatten)]
     pub(crate) recipe: RecipeArgs,
@@ -94,15 +99,8 @@ pub(crate) struct FuzzArgs {
     /// Maximum worst-case timeout plus intentional rate delay in milliseconds.
     #[arg(long, default_value_t = 3_600_000)]
     pub(crate) max_duration_ms: u64,
-    /// Interface name or numeric index used as an exact live route constraint.
-    #[arg(long, value_name = "NAME_OR_INDEX")]
-    pub(crate) interface: Option<String>,
-    /// Interface-owned source preference used only for live route selection.
-    #[arg(long)]
-    pub(crate) source: Option<IpAddr>,
-    /// Automatic, Layer 2, or raw Layer 3 live transmission intent.
-    #[arg(long, value_enum, default_value_t = CliLinkMode::Auto)]
-    pub(crate) link_mode: CliLinkMode,
+    #[command(flatten)]
+    pub(crate) route: RouteSelectionArgs,
     #[command(flatten)]
     pub(crate) limits: CaptureLimitArgs,
     #[command(flatten)]

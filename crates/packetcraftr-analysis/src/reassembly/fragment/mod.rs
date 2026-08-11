@@ -8,11 +8,11 @@ use bytes::Bytes;
 
 use super::Limits;
 
-use accounting::{FragmentAccountingInput, datagram_memory_charge_parts, plan_accounting};
 use commit::commit_fragment;
-use plan::{FragmentMergePlan, plan_fragment_merge};
+use plan::{
+    FragmentAccountingPlan, FragmentMergePlan, datagram_memory_charge_parts, plan_fragment_merge,
+};
 
-mod accounting;
 mod commit;
 mod contract;
 pub use contract::*;
@@ -173,23 +173,18 @@ impl Reassembler {
             )
         };
 
-        let accounting = plan_accounting(
-            &self.limits,
-            FragmentAccountingInput {
-                previous_stored_bytes,
-                previous_fragment_count,
-                added_bytes: merge.added_bytes,
-                segment_count: merge.segment_count,
-                aggregate_bytes: self.aggregate_bytes,
-                old_memory_charge,
-                aggregate_memory_charge: self.aggregate_memory_charge,
-            },
+        let FragmentAccountingPlan {
+            stored_bytes,
+            aggregate_bytes: aggregate,
+            new_memory_charge,
+            aggregate_memory_charge,
+            fragment_count,
+        } = self.plan_fragment_accounting(
+            previous_stored_bytes,
+            previous_fragment_count,
+            old_memory_charge,
+            &merge,
         )?;
-        let stored_bytes = accounting.stored_bytes;
-        let aggregate = accounting.aggregate_bytes;
-        let new_memory_charge = accounting.new_memory_charge;
-        let aggregate_memory_charge = accounting.aggregate_memory_charge;
-        let fragment_count = accounting.fragment_count;
 
         if has_existing_flow {
             let complete = {

@@ -153,7 +153,10 @@ impl TracerouteExecutor for CountingRejectExecutor {
     }
 }
 
-struct NoResponseExecutor;
+#[derive(Default)]
+struct NoResponseExecutor {
+    invalid_sent_index: Option<usize>,
+}
 
 impl TracerouteExecutor for NoResponseExecutor {
     fn execute(
@@ -170,6 +173,9 @@ impl TracerouteExecutor for NoResponseExecutor {
             let receipt = crate::evidence::test_sent_packet(packet);
             bytes += receipt.bytes_sent() as u64;
             sent.push(receipt);
+        }
+        if let Some(index) = self.invalid_sent_index {
+            sent[index] = sent[0].clone();
         }
         let count = u64::try_from(batch.probes.len()).expect("test batch fits u64");
         Ok(TracerouteBatchExecution {
@@ -379,7 +385,7 @@ fn traceroute_address_ordering_deduplicates_after_family_filtering() {
             addresses: vec![Ipv6Addr::LOCALHOST.into(), first, first, second, first],
         },
         &default_registry().unwrap(),
-        &mut NoResponseExecutor,
+        &mut NoResponseExecutor::default(),
         &mut NoopClock,
     )
     .unwrap();
@@ -571,4 +577,29 @@ fn traceroute_stops_after_the_first_terminal_hop() {
     );
     assert_eq!(result.stats.packets_completed, 4);
     assert_eq!(authorizer.operations, vec![(16, 16 * 74)]);
+}
+
+#[test]
+fn traceroute_invalid_sent_evidence_reports_the_exact_probe_sequence() {
+    let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
+    let request = udp_traceroute_request(Target::Address(address));
+    let error = traceroute(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: vec![address],
+        },
+        &default_registry().unwrap(),
+        &mut NoResponseExecutor {
+            invalid_sent_index: Some(1),
+        },
+        &mut NoopClock,
+    )
+    .unwrap_err();
+
+    assert!(matches!(
+        error,
+        TracerouteError::InvalidEvidence { sequence: 1, message }
+            if message
+                == "sent packet does not preserve the traceroute destination and probe identity"
+    ));
 }

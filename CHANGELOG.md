@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Added checked, all-or-nothing capture-statistics aggregation through
+  `packetcraftr_network::capture::Statistics::checked_add`.
+- **Breaking:** Removed the undocumented `Client::exchange_for_workflow` seam;
+  bounded workflows continue to expose supported executors.
+- **Breaking:** Layer decoders now use `consumed` as the sole child-payload
+  offset; removed the redundant `DecodedLayerValue::payload_offset` field.
 - **Breaking:** Live scan, traceroute, and DNS executors now share the canonical
   exchange response-evidence type. Custom DNS executors must set its request
   index, which is normally zero for the single DNS probe in an exchange. DNS

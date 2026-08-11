@@ -10,7 +10,7 @@ use crate::{
     },
     diagnostic::Diagnostic,
     field::FieldValue,
-    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
+    layer::{Layer, ProtocolId, reflective_layer},
     registry::Discriminator,
 };
 
@@ -55,7 +55,7 @@ impl Default for BsdLoop {
 reflective_layer! {
     fn loop_schema() => { protocol: protocol("bsd_loop"), name: "BSD LOOP" }
     impl BsdLoop {
-        "family" => { kind: Unsigned, derived: false, required: true, description: "Address-family discriminator", get |layer| Some(reflect_get(&layer.family)), set |layer, value, name| reflect_set(&mut layer.family, loop_schema(), name, value), layout: (0, 4) }
+        "family" => { kind: Unsigned, derived: false, required: true, description: "Address-family discriminator", reflect: family, layout: (0, 4) }
     }
     layout pub(crate) fn loop_layout();
 }
@@ -63,7 +63,7 @@ reflective_layer! {
 reflective_layer! {
     fn null_schema() => { protocol: protocol("bsd_null"), name: "BSD NULL" }
     impl BsdNull {
-        "family" => { kind: Unsigned, derived: false, required: true, description: "Address-family discriminator", get |layer| Some(reflect_get(&layer.family)), set |layer, value, name| reflect_set(&mut layer.family, null_schema(), name, value), layout: (0, 4) },
+        "family" => { kind: Unsigned, derived: false, required: true, description: "Address-family discriminator", reflect: family, layout: (0, 4) },
         "byte_order" => { kind: Text, derived: false, required: true, description: "Host byte order used by the captured NULL header", get |layer| Some(FieldValue::Text(match layer.byte_order { CaptureByteOrder::Little => "little", CaptureByteOrder::Big => "big" }.to_owned())), set |layer, value, name| match value { FieldValue::Text(value) if value.eq_ignore_ascii_case("little") => { layer.byte_order = CaptureByteOrder::Little; Ok(()) }, FieldValue::Text(value) if value.eq_ignore_ascii_case("big") => { layer.byte_order = CaptureByteOrder::Big; Ok(()) }, FieldValue::Text(_) => Err(out_of_range(null_schema(), name)), _ => Err(wrong_type(null_schema(), name, "text")) }, layout: (0, 4) }
     }
     layout pub(crate) fn null_layout();
@@ -237,7 +237,6 @@ pub(crate) fn decode_family(
     Ok(DecodedLayerValue {
         layer,
         consumed: 4,
-        payload_offset: 4,
         payload_len: input.len() - 4,
         next: vec![Discriminator(family_discriminator(family))],
         fields: match header {

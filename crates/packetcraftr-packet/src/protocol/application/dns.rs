@@ -351,7 +351,6 @@ impl LayerCodec for DnsCodec {
         Ok(DecodedLayerValue {
             layer: Box::new(layer),
             consumed: input.len(),
-            payload_offset: input.len(),
             payload_len: 0,
             next: Vec::new(),
             fields: dns_layout(),

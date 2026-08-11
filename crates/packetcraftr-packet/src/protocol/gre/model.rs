@@ -62,11 +62,11 @@ impl Default for Gre {
 reflective_layer! {
     fn gre_schema() => { protocol: protocol("gre"), name: "GRE" }
     impl Gre {
-        "protocol_type" => { kind: Unsigned, derived: true, required: false, description: "Encapsulated EtherType discriminator", get |layer| Some(reflect_get(&layer.protocol_type)), set |layer, value, name| reflect_set(&mut layer.protocol_type, gre_schema(), name, value), layout: (2, 4) },
+        "protocol_type" => { kind: Unsigned, derived: true, required: false, description: "Encapsulated EtherType discriminator", reflect: protocol_type, layout: (2, 4) },
         "checksum" => { kind: Unsigned, derived: true, required: false, description: "Optional checksum over the GRE header and payload", get |layer| layer.checksum.as_ref().map(reflect_get), set |layer, value, name| { let mut checksum = layer.checksum.clone().unwrap_or_default(); reflect_set(&mut checksum, gre_schema(), name, value)?; layer.checksum = Some(checksum); Ok(()) } },
         "key" => { kind: Unsigned, derived: false, required: false, description: "Optional GRE key", get |layer| layer.key.map(FieldValue::from), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.key = Some(u32::try_from(value).map_err(|_| out_of_range(gre_schema(), name))?); Ok(()) }, _ => Err(wrong_type(gre_schema(), name, "unsigned")) } },
         "sequence" => { kind: Unsigned, derived: false, required: false, description: "Optional GRE sequence number", get |layer| layer.sequence.map(FieldValue::from), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.sequence = Some(u32::try_from(value).map_err(|_| out_of_range(gre_schema(), name))?); Ok(()) }, _ => Err(wrong_type(gre_schema(), name, "unsigned")) } },
-        "reserved_bits" => { kind: Unsigned, derived: false, required: false, description: "Receiver-ignored GRE bits 6 through 12", get |layer| Some(reflect_get(&layer.reserved_bits)), set |layer, value, name| reflect_set(&mut layer.reserved_bits, gre_schema(), name, value), layout: (0, 2) },
+        "reserved_bits" => { kind: Unsigned, derived: false, required: false, description: "Receiver-ignored GRE bits 6 through 12", reflect: reserved_bits, layout: (0, 2) },
     }
     layout pub(crate) fn gre_static_layout();
 }
@@ -289,7 +289,6 @@ impl LayerCodec for GreCodec {
             fields: gre_layout(&layer),
             layer: Box::new(layer),
             consumed: header_len,
-            payload_offset: header_len,
             payload_len,
             next: vec![Discriminator(u64::from(protocol_type))],
             diagnostics,

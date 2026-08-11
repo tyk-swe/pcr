@@ -10,7 +10,7 @@ pub(crate) use policy::{
     FuzzPolicyArgs, HostnameTrafficPolicyArgs, PlanPolicyArgs, ReplayPolicyArgs, SendPolicyArgs,
 };
 pub(crate) use recipe::{CliBuildMode, RecipeArgs};
-pub(crate) use route::{CliLinkMode, RouteArgs};
+pub(crate) use route::{CliLinkMode, RouteArgs, RouteSelectionArgs};
 
 mod address_family;
 mod capture_limits;

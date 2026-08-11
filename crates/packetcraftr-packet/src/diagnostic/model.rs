@@ -29,31 +29,25 @@ pub struct Diagnostic {
 
 impl Diagnostic {
     pub fn info(code: impl Into<String>, message: impl Into<String>) -> Self {
-        Self {
-            code: code.into(),
-            severity: DiagnosticSeverity::Info,
-            message: message.into(),
-            layer: None,
-            field: None,
-            range: None,
-        }
+        Self::new(DiagnosticSeverity::Info, code, message)
     }
 
     pub fn warning(code: impl Into<String>, message: impl Into<String>) -> Self {
-        Self {
-            code: code.into(),
-            severity: DiagnosticSeverity::Warning,
-            message: message.into(),
-            layer: None,
-            field: None,
-            range: None,
-        }
+        Self::new(DiagnosticSeverity::Warning, code, message)
     }
 
     pub fn error(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::new(DiagnosticSeverity::Error, code, message)
+    }
+
+    fn new(
+        severity: DiagnosticSeverity,
+        code: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Self {
         Self {
             code: code.into(),
-            severity: DiagnosticSeverity::Error,
+            severity,
             message: message.into(),
             layer: None,
             field: None,

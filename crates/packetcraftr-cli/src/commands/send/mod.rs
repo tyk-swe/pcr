@@ -76,12 +76,7 @@ pub(super) fn run(arguments: SendArgs, output: output::contract::Format) -> Resu
             .map_err(|source| CliError::new(3, source.to_string()))?;
             write_capture_file(output, [frame])
         }
-        _ => Err(CliError::classified(
-            output::contract::Error::UnsupportedFormat {
-                command: output::contract::Command::Send,
-                format: output,
-            },
-        )),
+        _ => unreachable!("send format is checked before command dispatch"),
     }
 }
 

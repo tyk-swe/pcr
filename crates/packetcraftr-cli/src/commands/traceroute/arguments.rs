@@ -1,13 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::net::IpAddr;
-
 use clap::{Args, ValueEnum};
 use packetcraftr::{live as workflow, packet};
 
 use crate::command_options::{
-    CaptureLimitArgs, CliAddressFamily, CliLinkMode, HostnameTrafficPolicyArgs,
+    CaptureLimitArgs, CliAddressFamily, HostnameTrafficPolicyArgs, RouteSelectionArgs,
 };
 
 pub(crate) const LONG_ABOUT: &str = "Run bounded, policy-gated traceroute probes. UDP starts at --port and increments the destination port for every probe; TCP keeps --port fixed. Each hop sends its attempts as one burst and shares one --timeout-ms response window. Traceroute supports text, JSON, and NDJSON output. Public destinations and hostname resolution require their respective explicit policy options.";
@@ -72,15 +70,8 @@ pub(crate) struct TracerouteArgs {
     /// Maximum hop-scoped undecodable exact frames retained.
     #[arg(long, default_value_t = workflow::traceroute::DEFAULT_MAX_UNDECODED_TRACEROUTE_FRAMES)]
     pub(crate) max_undecoded: usize,
-    /// Interface name or numeric index used as an exact route constraint.
-    #[arg(long, value_name = "NAME_OR_INDEX")]
-    pub(crate) interface: Option<String>,
-    /// Interface-owned source preference used only for route selection.
-    #[arg(long)]
-    pub(crate) source: Option<IpAddr>,
-    /// Automatic, Layer 2, or raw Layer 3 transmission intent.
-    #[arg(long, value_enum, default_value_t = CliLinkMode::Auto)]
-    pub(crate) link_mode: CliLinkMode,
+    #[command(flatten)]
+    pub(crate) route: RouteSelectionArgs,
     #[command(flatten)]
     pub(crate) limits: CaptureLimitArgs,
     #[command(flatten)]

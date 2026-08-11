@@ -12,7 +12,7 @@ use crate::{
         LayerEncodeContext, NetworkEnvelope,
     },
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
+    layer::{Layer, ProtocolId, reflective_layer},
     registry::Discriminator,
 };
 
@@ -52,13 +52,13 @@ impl Default for SegmentRoutingHeader {
 reflective_layer! {
     fn srh_schema() => { protocol: protocol("ipv6_srh"), name: "IPv6 Segment Routing Header" }
     impl SegmentRoutingHeader {
-        "next_header" => { kind: Unsigned, derived: true, required: false, description: "IPv6 next-header discriminator", get |layer| Some(reflect_get(&layer.next_header)), set |layer, value, name| reflect_set(&mut layer.next_header, srh_schema(), name, value), layout: (0, 1) },
-        "segments_left" => { kind: Unsigned, derived: true, required: false, description: "Remaining segments", get |layer| Some(reflect_get(&layer.segments_left)), set |layer, value, name| reflect_set(&mut layer.segments_left, srh_schema(), name, value), layout: (3, 4) },
-        "last_entry" => { kind: Unsigned, derived: true, required: false, description: "Highest segment-list index", get |layer| Some(reflect_get(&layer.last_entry)), set |layer, value, name| reflect_set(&mut layer.last_entry, srh_schema(), name, value), layout: (4, 5) },
-        "flags" => { kind: Unsigned, derived: false, required: false, description: "SRH flags", get |layer| Some(reflect_get(&layer.flags)), set |layer, value, name| reflect_set(&mut layer.flags, srh_schema(), name, value), layout: (5, 6) },
-        "tag" => { kind: Unsigned, derived: false, required: false, description: "SRH tag", get |layer| Some(reflect_get(&layer.tag)), set |layer, value, name| reflect_set(&mut layer.tag, srh_schema(), name, value), layout: (6, 8) },
+        "next_header" => { kind: Unsigned, derived: true, required: false, description: "IPv6 next-header discriminator", reflect: next_header, layout: (0, 1) },
+        "segments_left" => { kind: Unsigned, derived: true, required: false, description: "Remaining segments", reflect: segments_left, layout: (3, 4) },
+        "last_entry" => { kind: Unsigned, derived: true, required: false, description: "Highest segment-list index", reflect: last_entry, layout: (4, 5) },
+        "flags" => { kind: Unsigned, derived: false, required: false, description: "SRH flags", reflect: flags, layout: (5, 6) },
+        "tag" => { kind: Unsigned, derived: false, required: false, description: "SRH tag", reflect: tag, layout: (6, 8) },
         "segments" => { kind: List, derived: false, required: true, description: "Segments in visit order", get |layer| Some(FieldValue::List(layer.segments.iter().copied().map(FieldValue::Ipv6).collect())), set |layer, value, name| match value { FieldValue::List(values) => { layer.segments = values.into_iter().map(|value| match value { FieldValue::Ipv6(value) => Ok(value), FieldValue::Text(value) => value.parse().map_err(|_| wrong_type(srh_schema(), name, "list of IPv6 addresses")), _ => Err(wrong_type(srh_schema(), name, "list of IPv6 addresses")) }).collect::<Result<Vec<_>, _>>()?; Ok(()) }, _ => Err(wrong_type(srh_schema(), name, "list")) }, layout: (8, segments_end) },
-        "tlvs" => { kind: Bytes, derived: false, required: false, description: "TLV bytes following the segment list, including padding", get |layer| Some(reflect_get(&layer.tlvs)), set |layer, value, name| reflect_set(&mut layer.tlvs, srh_schema(), name, value), layout: (segments_end, header_len) },
+        "tlvs" => { kind: Bytes, derived: false, required: false, description: "TLV bytes following the segment list, including padding", reflect: tlvs, layout: (segments_end, header_len) },
     }
     layout pub(crate) fn srh_layout(segments_end: usize, header_len: usize);
 }
@@ -241,7 +241,6 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
                 tlvs: Bytes::copy_from_slice(&input[segments_end..header_len]),
             }),
             consumed: header_len,
-            payload_offset: header_len,
             payload_len: input.len() - header_len,
             next: vec![Discriminator(u64::from(input[0]))],
             fields: srh_layout(segments_end, header_len),

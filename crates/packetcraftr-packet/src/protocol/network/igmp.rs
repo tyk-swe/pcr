@@ -12,7 +12,7 @@ use crate::{
     },
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
+    layer::{Layer, ProtocolId, reflective_layer},
 };
 
 use super::super::common::{
@@ -48,29 +48,25 @@ reflective_layer! {
         "type" => {
             kind: Unsigned, derived: false, required: true,
             description: "IGMP message type",
-            get |layer| Some(reflect_get(&layer.igmp_type)),
-            set |layer, value, name| reflect_set(&mut layer.igmp_type, igmp_schema(), name, value),
+            reflect: igmp_type,
             layout: (0, 1)
         },
         "code" => {
             kind: Unsigned, derived: false, required: true,
             description: "Type-specific IGMP code or reserved octet",
-            get |layer| Some(reflect_get(&layer.code)),
-            set |layer, value, name| reflect_set(&mut layer.code, igmp_schema(), name, value),
+            reflect: code,
             layout: (1, 2)
         },
         "checksum" => {
             kind: Unsigned, derived: true, required: false,
             description: "IGMP checksum",
-            get |layer| Some(reflect_get(&layer.checksum)),
-            set |layer, value, name| reflect_set(&mut layer.checksum, igmp_schema(), name, value),
+            reflect: checksum,
             layout: (2, 4)
         },
         "body" => {
             kind: Bytes, derived: false, required: false,
             description: "Version- and type-specific IGMP body",
-            get |layer| Some(reflect_get(&layer.body)),
-            set |layer, value, name| reflect_set(&mut layer.body, igmp_schema(), name, value),
+            reflect: body,
             layout: (4, 4 + body_len)
         },
     }
@@ -156,7 +152,6 @@ impl LayerCodec for IgmpCodec {
                 body: Bytes::copy_from_slice(&input[IGMP_HEADER_LEN..]),
             }),
             consumed: input.len(),
-            payload_offset: input.len(),
             payload_len: 0,
             next: Vec::new(),
             fields: igmp_layout(input.len() - IGMP_HEADER_LEN),

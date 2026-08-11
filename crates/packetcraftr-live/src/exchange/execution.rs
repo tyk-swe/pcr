@@ -9,7 +9,7 @@ use packetcraftr_network::{
     capture::Provider as CaptureProvider, neighbor::Resolver as NeighborResolver,
     route::Provider as RouteProvider, transmit::Sender as PacketIo,
 };
-use packetcraftr_packet::{Packet, template::Template as PacketTemplate};
+use packetcraftr_packet::template::Template as PacketTemplate;
 
 use crate::Client;
 use crate::exchange::{
@@ -32,19 +32,7 @@ where
         self.exchange_internal(template, options, None)
     }
 
-    /// Exchange seam used by the bounded workflows to correlate responses to
-    /// the request that produced them. Not part of the documented API.
-    #[doc(hidden)]
-    pub fn exchange_for_workflow(
-        &self,
-        template: &PacketTemplate,
-        options: ExchangeOptions,
-        mut matches_request: impl FnMut(usize, &Packet, &packetcraftr_packet::decode::Result) -> bool,
-    ) -> Result<ExchangeResult, ClientError> {
-        self.exchange_internal(template, options, Some(&mut matches_request))
-    }
-
-    fn exchange_internal(
+    pub(crate) fn exchange_internal(
         &self,
         template: &PacketTemplate,
         options: ExchangeOptions,

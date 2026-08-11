@@ -11,7 +11,7 @@ use crate::{
     },
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
+    layer::{Layer, ProtocolId, reflective_layer},
     registry::Discriminator,
 };
 
@@ -49,26 +49,22 @@ reflective_layer! {
     impl Sctp {
         "source_port" => {
             kind: Unsigned, derived: false, required: true, description: "SCTP source port",
-            get |layer| Some(reflect_get(&layer.source_port)),
-            set |layer, value, name| reflect_set(&mut layer.source_port, sctp_schema(), name, value),
+            reflect: source_port,
             layout: (0, 2)
         },
         "destination_port" => {
             kind: Unsigned, derived: false, required: true, description: "SCTP destination port",
-            get |layer| Some(reflect_get(&layer.destination_port)),
-            set |layer, value, name| reflect_set(&mut layer.destination_port, sctp_schema(), name, value),
+            reflect: destination_port,
             layout: (2, 4)
         },
         "verification_tag" => {
             kind: Unsigned, derived: false, required: true, description: "SCTP verification tag",
-            get |layer| Some(reflect_get(&layer.verification_tag)),
-            set |layer, value, name| reflect_set(&mut layer.verification_tag, sctp_schema(), name, value),
+            reflect: verification_tag,
             layout: (4, 8)
         },
         "checksum" => {
             kind: Unsigned, derived: true, required: false, description: "SCTP CRC32c checksum",
-            get |layer| Some(reflect_get(&layer.checksum)),
-            set |layer, value, name| reflect_set(&mut layer.checksum, sctp_schema(), name, value),
+            reflect: checksum,
             layout: (8, 12)
         },
     }
@@ -177,7 +173,6 @@ impl LayerCodec for SctpCodec {
                 checksum: WireValue::Exact(checksum),
             }),
             consumed: SCTP_HEADER_LEN,
-            payload_offset: SCTP_HEADER_LEN,
             payload_len: input.len() - SCTP_HEADER_LEN,
             next: vec![Discriminator(0)],
             fields: sctp_layout(),

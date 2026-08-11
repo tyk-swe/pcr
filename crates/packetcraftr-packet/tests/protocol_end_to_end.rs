@@ -512,6 +512,38 @@ fn sctp_dns_and_malformed_inputs_cover_bounded_parsers() {
 }
 
 #[test]
+fn typed_child_without_payload_is_preserved_as_malformed() {
+    let mut bytes = vec![0; 14];
+    bytes[12..14].copy_from_slice(&0x0800_u16.to_be_bytes());
+
+    let decoded = decode::Decoder::new(registry())
+        .decode_with_root(bytes, "ethernet".into(), decode::Options::default())
+        .expect("empty typed child should be preserved");
+
+    assert_eq!(decoded.packet.len(), 2);
+    let malformed = decoded
+        .packet
+        .get::<Malformed>()
+        .expect("missing IPv4 header should be materialized as malformed");
+    assert_eq!(
+        malformed
+            .intended_protocol
+            .as_ref()
+            .map(|protocol| protocol.as_str()),
+        Some("ipv4")
+    );
+    assert!(malformed.bytes.is_empty());
+    assert_eq!(malformed.reason, "required child header is absent");
+    assert_eq!(
+        decoded
+            .diagnostics
+            .last()
+            .map(|diagnostic| diagnostic.code.as_str()),
+        Some("decode.missing_required_child")
+    );
+}
+
+#[test]
 fn strict_and_permissive_modes_distinguish_noncanonical_wire_requests() {
     let registry = registry();
     let builder = build::Builder::new(registry);

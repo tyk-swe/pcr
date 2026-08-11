@@ -56,13 +56,10 @@ impl Default for Probe {
 reflective_layer! {
     fn probe_schema() => { protocol: ProtocolId::new("probe"), name: "Probe" }
     impl Probe {
-        "value" => {
+        "value" | "probe_value" => {
             kind: Unsigned, derived: false, required: true,
             description: "One-byte probe value",
-            get |layer| Some(packetcraftr_packet::layer::reflect_get(&layer.value)),
-            set |layer, value, name| packetcraftr_packet::layer::reflect_set(
-                &mut layer.value, probe_schema(), name, value
-            ),
+            reflect: value,
             layout: (0, 1)
         },
         "enabled" => {
@@ -203,7 +200,6 @@ impl Codec for ProbeCodec {
                 ..Probe::default()
             }),
             consumed: 1,
-            payload_offset: 1,
             payload_len,
             next: (payload_len != 0)
                 .then_some(Discriminator(7))
@@ -362,12 +358,12 @@ fn packet_mutation_reflection_and_boundaries_are_consistent() {
     ));
 
     packet
-        .edit(&"probe".into(), "value", 42_u8.into())
+        .edit(&"probe".into(), "probe_value", 42_u8.into())
         .expect("edit reflected value");
     assert_eq!(
         packet
             .by_protocol(&"probe".into())
-            .and_then(|layer| layer.field("value")),
+            .and_then(|layer| layer.field("probe_value")),
         Some(42_u8.into())
     );
     let before_failed_edits = packet.clone();
@@ -870,6 +866,9 @@ fn registry_build_decode_and_error_paths_are_bounded() {
         Some(&[1, 2][..])
     );
     assert_eq!(raw.packet.encoded_payload_length(0), Some(0));
+    assert_eq!(raw.layout.layers.len(), 1);
+    assert_eq!(raw.layout.layers[0].range, Range::new(0, 2));
+    assert_eq!(raw.layout.layers[0].fields, raw_layout(2));
     assert_eq!(raw.diagnostics[0].code, "decode.unsupported_link_type");
 
     assert!(matches!(

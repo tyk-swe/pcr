@@ -43,11 +43,6 @@ pub(super) fn render_read_record(
             result,
             Vec::new(),
         ),
-        _ => Err(CliError::classified(
-            output::contract::Error::UnsupportedFormat {
-                command: output::contract::Command::Read,
-                format: output_format,
-            },
-        )),
+        _ => unreachable!("read format is checked before command dispatch"),
     }
 }

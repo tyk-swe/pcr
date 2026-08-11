@@ -28,8 +28,11 @@ macro_rules! reflective_layer {
                     derived: $derived:literal,
                     required: $required:literal,
                     description: $description:literal,
-                    get |$getter:ident| $get:expr_2021,
-                    set |$setter:ident, $value:ident, $field_name:ident| $set:expr_2021
+                    $(reflect: $member:ident)?
+                    $(
+                        get |$getter:ident| $get:expr_2021,
+                        set |$setter:ident, $value:ident, $field_name:ident| $set:expr_2021
+                    )?
                     $(, layout: ($start:expr_2021, $end:expr_2021))?
                 }
             ),* $(,)?
@@ -77,11 +80,12 @@ macro_rules! reflective_layer {
             fn field(&self, name: &str) -> Option<$crate::field::Value> {
                 match name {
                     $(
-                        $field $(| $alias)* => {
-                            let $getter = self;
-                            $get
-                        }
-                    ),*
+                        $field $(| $alias)* => $crate::reflective_layer!(
+                            @get self;
+                            $(reflect $member)?
+                            $(explicit $getter => $get)?
+                        ),
+                    )*
                     _ => None,
                 }
             }
@@ -93,13 +97,12 @@ macro_rules! reflective_layer {
             ) -> Result<(), $crate::field::Error> {
                 match name {
                     $(
-                        $field $(| $alias)* => {
-                            let $setter = self;
-                            let $value = value;
-                            let $field_name = name;
-                            $set
-                        }
-                    ),*
+                        $field $(| $alias)* => $crate::reflective_layer!(
+                            @set self, value, name, $schema;
+                            $(reflect $member)?
+                            $(explicit $setter, $value, $field_name => $set)?
+                        ),
+                    )*
                     _ => Err($crate::field::Error::UnknownField {
                         protocol: $schema().protocol.clone(),
                         field: name.to_owned(),
@@ -133,6 +136,24 @@ macro_rules! reflective_layer {
             range: $crate::layout::Range::new($start, $end),
         })
     };
+    (@get $layer:expr; reflect $member:ident) => {
+        Some($crate::layer::reflect_get(&$layer.$member))
+    };
+    (@get $layer:expr; explicit $getter:ident => $get:expr) => {{
+        let $getter = $layer;
+        $get
+    }};
+    (@set $layer:expr, $value:expr, $name:expr, $schema:ident; reflect $member:ident) => {
+        $crate::layer::reflect_set(&mut $layer.$member, $schema(), $name, $value)
+    };
+    (@set $layer:expr, $input:expr, $name:expr, $schema:ident;
+        explicit $setter:ident, $value:ident, $field_name:ident => $set:expr
+    ) => {{
+        let $setter = $layer;
+        let $value = $input;
+        let $field_name = $name;
+        $set
+    }};
 }
 
 #[doc(hidden)]

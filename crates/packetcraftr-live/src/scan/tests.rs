@@ -24,6 +24,7 @@ use packetcraftr_packet::{
 
 use super::classification::classify_scan_response;
 use super::engine::scan;
+use super::error::ScanError;
 use super::model::{
     ScanBatch, ScanBatchExecution, ScanClassification, ScanExecutor, ScanLimits, ScanProbeStatus,
     ScanRequest, ScanTransport,
@@ -146,6 +147,7 @@ impl ScanExecutor for CountingRejectExecutor {
 #[derive(Default)]
 struct TimeoutExecutor {
     batches: Vec<(u32, Vec<Option<u16>>)>,
+    invalid_sent_index: Option<usize>,
 }
 
 impl ScanExecutor for TimeoutExecutor {
@@ -171,6 +173,9 @@ impl ScanExecutor for TimeoutExecutor {
             let receipt = crate::evidence::test_sent_packet(packet);
             bytes += receipt.bytes_sent() as u64;
             sent.push(receipt);
+        }
+        if let Some(index) = self.invalid_sent_index {
+            sent[index] = sent[0].clone();
         }
         Ok(ScanBatchExecution {
             permit: batch.permit,
@@ -421,4 +426,30 @@ fn scan_late_unsolicited_response_remains_a_timeout() {
         result.endpoints[0].evidence[0].status,
         ScanProbeStatus::Timeout
     );
+}
+
+#[test]
+fn scan_invalid_sent_evidence_reports_the_exact_probe_sequence() {
+    let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
+    let mut request = tcp_scan_request(Target::Address(address));
+    request.ports = vec![80, 81];
+    let error = scan(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: vec![address],
+        },
+        &default_registry().unwrap(),
+        &mut TimeoutExecutor {
+            invalid_sent_index: Some(1),
+            ..TimeoutExecutor::default()
+        },
+        &mut NoopClock,
+    )
+    .unwrap_err();
+
+    assert!(matches!(
+        error,
+        ScanError::InvalidEvidence { sequence: 1, message }
+            if message == "sent packet does not preserve the scan destination and probe identity"
+    ));
 }

@@ -9,7 +9,7 @@ use crate::{
         LayerEncodeContext,
     },
     field::FieldValue,
-    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
+    layer::{Layer, ProtocolId, reflect_get, reflective_layer},
     registry::Discriminator,
 };
 
@@ -64,8 +64,8 @@ reflective_layer! {
     impl Mpls {
         "label" => { kind: Unsigned, derived: false, required: true, description: "20-bit MPLS label", get |layer| Some(FieldValue::from(layer.label)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.label = u32::try_from(value).ok().filter(|value| *value <= LABEL_MAX).ok_or_else(|| out_of_range(mpls_schema(), name))?; Ok(()) }, _ => Err(wrong_type(mpls_schema(), name, "unsigned")) }, layout: (0, 3) },
         "traffic_class" => { kind: Unsigned, derived: false, required: false, description: "3-bit traffic class, historically the EXP bits", get |layer| Some(reflect_get(&layer.traffic_class)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.traffic_class = u8::try_from(value).ok().filter(|value| *value <= 7).ok_or_else(|| out_of_range(mpls_schema(), name))?; Ok(()) }, _ => Err(wrong_type(mpls_schema(), name, "unsigned")) }, layout: (2, 3) },
-        "bottom_of_stack" => { kind: Bool, derived: false, required: false, description: "S bit: this entry is the bottom of the label stack", get |layer| Some(reflect_get(&layer.bottom_of_stack)), set |layer, value, name| reflect_set(&mut layer.bottom_of_stack, mpls_schema(), name, value), layout: (2, 3) },
-        "ttl" => { kind: Unsigned, derived: false, required: false, description: "Time to live", get |layer| Some(reflect_get(&layer.ttl)), set |layer, value, name| reflect_set(&mut layer.ttl, mpls_schema(), name, value), layout: (3, 4) }
+        "bottom_of_stack" => { kind: Bool, derived: false, required: false, description: "S bit: this entry is the bottom of the label stack", reflect: bottom_of_stack, layout: (2, 3) },
+        "ttl" => { kind: Unsigned, derived: false, required: false, description: "Time to live", reflect: ttl, layout: (3, 4) }
     }
     layout pub(crate) fn mpls_layout();
 }
@@ -167,7 +167,6 @@ impl LayerCodec for MplsCodec {
             fields: mpls_layout(),
             layer: Box::new(layer),
             consumed: MPLS_LEN,
-            payload_offset: MPLS_LEN,
             payload_len,
             next,
             diagnostics: Vec::new(),

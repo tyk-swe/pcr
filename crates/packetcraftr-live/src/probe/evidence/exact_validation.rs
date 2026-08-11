@@ -6,7 +6,7 @@
 use std::time::Duration;
 
 use crate::SentPacket;
-use crate::Stats;
+use crate::probe::runner::{Batch, BatchExecution};
 use packetcraftr_network::capture::Statistics;
 use packetcraftr_packet::frame::Frame;
 use packetcraftr_packet::{Packet, decode::Result as DecodedPacket};
@@ -25,16 +25,6 @@ pub(crate) fn validate_capture_statistics(statistics: Statistics) -> Result<(), 
         .validate()
         .map(|_| ())
         .map_err(|error| format!("capture statistics are invalid: {error}"))
-}
-
-pub(crate) struct ExchangeEvidence<'a> {
-    pub(crate) request_count: usize,
-    pub(crate) sent: &'a [SentPacket],
-    pub(crate) matched_responses: &'a [crate::exchange::Response],
-    pub(crate) unsolicited: &'a [DecodedPacket],
-    pub(crate) undecoded: &'a [Frame],
-    pub(crate) timeout: Duration,
-    pub(crate) stats: &'a Stats,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -79,6 +69,15 @@ pub(crate) enum ExchangeEvidenceError {
         message: String,
     },
     IncompleteStatistics,
+}
+
+impl ExchangeEvidenceError {
+    pub(crate) const fn request_index(&self) -> Option<usize> {
+        match self {
+            Self::SentPacketMismatch { request_index } => Some(*request_index),
+            _ => None,
+        }
+    }
 }
 
 pub(crate) fn validate_aggregate_evidence_limits(
@@ -219,52 +218,53 @@ pub(crate) fn format_exchange_evidence_error(
     }
 }
 
-pub(crate) fn validate_exchange_evidence<F>(
-    evidence: ExchangeEvidence<'_>,
+pub(crate) fn validate_batch_exchange_evidence<P, F>(
+    batch: &Batch<P>,
+    execution: &BatchExecution,
     max_captured_frames: usize,
     max_captured_bytes: usize,
     mut sent_packet_matches: F,
 ) -> Result<(), ExchangeEvidenceError>
 where
-    F: FnMut(usize, &Packet) -> bool,
+    F: FnMut(&P, &Packet) -> bool,
 {
-    if evidence.sent.len() != evidence.request_count {
+    if execution.sent.len() != batch.probes.len() {
         return Err(ExchangeEvidenceError::SentCardinality {
-            expected: evidence.request_count,
-            receipts: evidence.sent.len(),
+            expected: batch.probes.len(),
+            receipts: execution.sent.len(),
         });
     }
-    if evidence
-        .matched_responses
+    if execution
+        .responses
         .iter()
-        .any(|response| response.request_index >= evidence.request_count)
+        .any(|response| response.request_index >= batch.probes.len())
     {
         return Err(ExchangeEvidenceError::MatchedResponseOutsideBatch);
     }
 
     validate_aggregate_evidence_limits(
-        evidence.matched_responses,
-        evidence.unsolicited,
-        evidence.undecoded,
+        &execution.responses,
+        &execution.unsolicited,
+        &execution.undecoded,
         max_captured_frames,
         max_captured_bytes,
     )?;
 
-    for (request_index, sent) in evidence.sent.iter().enumerate() {
-        if !sent_packet_matches(request_index, &sent.built().packet) {
+    for (request_index, sent) in execution.sent.iter().enumerate() {
+        if !sent_packet_matches(&batch.probes[request_index], &sent.built().packet) {
             return Err(ExchangeEvidenceError::SentPacketMismatch { request_index });
         }
     }
 
-    validate_sent_byte_accounting(evidence.sent, evidence.stats.bytes)?;
+    validate_sent_byte_accounting(&execution.sent, execution.stats.bytes)?;
     validate_response_frames_and_deadlines(
-        evidence.matched_responses,
-        evidence.unsolicited,
-        evidence.timeout,
+        &execution.responses,
+        &execution.unsolicited,
+        batch.timeout,
     )?;
-    validate_capture_statistics_evidence(evidence.stats.capture)?;
-    if evidence.stats.packets_attempted != evidence.request_count as u64
-        || evidence.stats.packets_completed != evidence.request_count as u64
+    validate_capture_statistics_evidence(execution.stats.capture)?;
+    if execution.stats.packets_attempted != batch.probes.len() as u64
+        || execution.stats.packets_completed != batch.probes.len() as u64
     {
         return Err(ExchangeEvidenceError::IncompleteStatistics);
     }

@@ -17,10 +17,9 @@ use self::arguments::ScanArgs;
 use crate::errors::CliError;
 use crate::rendering::emit_aggregate_with_stats;
 use crate::system::{
-    DeferredInterface, default_registry_arc, parse_workflow_target, workflow_exchange_options,
+    DeferredInterface, default_registry_arc, parse_workflow_target,
+    validate_live_interface_selector, workflow_exchange_options,
 };
-
-pub(crate) use conversion::validate_live_interface_selector;
 
 use execution::CliScanExecutor;
 use rendering::{render_scan_stream, render_scan_text};
@@ -39,9 +38,7 @@ pub(super) fn run(arguments: ScanArgs, output: output::contract::Format) -> Resu
         max_probes,
         max_duration_ms,
         max_undecoded,
-        interface,
-        source,
-        link_mode,
+        route,
         limits,
         policy,
     } = arguments;
@@ -60,7 +57,7 @@ pub(super) fn run(arguments: ScanArgs, output: output::contract::Format) -> Resu
     let ports = conversion::expand_port_specs(&ports, max_ports).map_err(scan_cli_error)?;
     let policy = policy.into_policy();
     policy.validate().map_err(CliError::classified)?;
-    validate_live_interface_selector("scan", interface.as_deref())?;
+    validate_live_interface_selector("scan", route.interface.as_deref())?;
     let request = workflow::scan::Request {
         target,
         transport: transport.into(),
@@ -76,9 +73,9 @@ pub(super) fn run(arguments: ScanArgs, output: output::contract::Format) -> Resu
         client::send::Options {
             destination: None,
             plan: net::route::Options {
-                link_mode: link_mode.into(),
+                link_mode: route.link_mode.into(),
                 interface: None,
-                preferred_source: source,
+                preferred_source: route.source,
             },
             build: packet::build::Options::default(),
             allow_permissive_live: false,
@@ -92,7 +89,7 @@ pub(super) fn run(arguments: ScanArgs, output: output::contract::Format) -> Resu
         registry: Arc::clone(&registry),
         policy: policy.clone(),
         exchange,
-        interface: DeferredInterface::new(interface),
+        interface: DeferredInterface::new(route.interface),
     };
     let resolver = client::target::SystemResolver;
     let mut authorizer = workflow::scan::PolicyAuthorizer::new(&policy, &resolver);
@@ -114,12 +111,7 @@ pub(super) fn run(arguments: ScanArgs, output: output::contract::Format) -> Resu
             emit_aggregate_with_stats(output::contract::Command::Scan, result, diagnostics, stats)
         }
         output::contract::Format::Ndjson => render_scan_stream(result, diagnostics, stats),
-        _ => Err(CliError::classified(
-            output::contract::Error::UnsupportedFormat {
-                command: output::contract::Command::Scan,
-                format: output,
-            },
-        )),
+        _ => unreachable!("scan format is checked before command dispatch"),
     }
 }
 

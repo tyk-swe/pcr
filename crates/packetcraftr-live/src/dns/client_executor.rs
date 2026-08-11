@@ -32,23 +32,21 @@ where
                 exchange.max_responses, self.options.max_responses
             )));
         }
-        let mut options = self.options.clone();
-        options.timeout = exchange.timeout;
-        options.max_template_packets = 1;
-        options.max_responses = exchange.max_responses;
-        options.max_unsolicited = options.max_unsolicited.min(exchange.max_responses);
-        options.send.destination = Some(exchange.probe.server_address);
-        let result = self
-            .client
-            .exchange_for_workflow(
-                &PacketTemplate::new(exchange.probe.packet()),
-                options,
-                |_request_index, sent, response| {
-                    probe::observe(self.client.registry(), ProbeTransport::Udp, sent, response)
-                        .is_some()
-                },
-            )
-            .map_err(BoundaryError::from_error)?;
+        let options = crate::exchange::Options {
+            max_responses: exchange.max_responses,
+            max_unsolicited: self.options.max_unsolicited.min(exchange.max_responses),
+            ..self.options.clone()
+        };
+        let result = ExchangeExecutor::new(self.client, options).exchange_for_workflow(
+            &PacketTemplate::new(exchange.probe.packet()),
+            exchange.timeout,
+            1,
+            exchange.probe.server_address,
+            |_request_index, sent, response| {
+                probe::observe(self.client.registry(), ProbeTransport::Udp, sent, response)
+                    .is_some()
+            },
+        )?;
         let crate::exchange::Result {
             mut sent,
             responses,

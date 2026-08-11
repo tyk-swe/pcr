@@ -12,7 +12,7 @@ use crate::{
     },
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
+    layer::{Layer, ProtocolId, reflective_layer},
     registry::Discriminator,
     semantics::BuiltinProtocol,
 };
@@ -82,12 +82,12 @@ impl Default for Ah {
 reflective_layer! {
     fn ah_schema() => { protocol: protocol("ah"), name: "AH" }
     impl Ah {
-        "next_header" => { kind: Unsigned, derived: true, required: false, description: "Protocol number of the authenticated payload", get |layer| Some(reflect_get(&layer.next_header)), set |layer, value, name| reflect_set(&mut layer.next_header, ah_schema(), name, value), layout: (0, 1) },
-        "payload_length" => { kind: Unsigned, derived: true, required: false, description: "Header length in 4-byte units minus two", get |layer| Some(reflect_get(&layer.payload_length)), set |layer, value, name| reflect_set(&mut layer.payload_length, ah_schema(), name, value), layout: (1, 2) },
-        "reserved" => { kind: Unsigned, derived: false, required: false, description: "Reserved 16 bits", get |layer| Some(reflect_get(&layer.reserved)), set |layer, value, name| reflect_set(&mut layer.reserved, ah_schema(), name, value), layout: (2, 4) },
-        "spi" => { kind: Unsigned, derived: false, required: true, description: "Security parameters index", get |layer| Some(reflect_get(&layer.spi)), set |layer, value, name| reflect_set(&mut layer.spi, ah_schema(), name, value), layout: (4, 8) },
-        "sequence" => { kind: Unsigned, derived: false, required: false, description: "Anti-replay sequence number", get |layer| Some(reflect_get(&layer.sequence)), set |layer, value, name| reflect_set(&mut layer.sequence, ah_schema(), name, value), layout: (8, 12) },
-        "icv" => { kind: Bytes, derived: false, required: false, description: "Integrity check value, a multiple of 4 bytes", get |layer| Some(reflect_get(&layer.icv)), set |layer, value, name| reflect_set(&mut layer.icv, ah_schema(), name, value), layout: (AH_FIXED_LEN, header_len) },
+        "next_header" => { kind: Unsigned, derived: true, required: false, description: "Protocol number of the authenticated payload", reflect: next_header, layout: (0, 1) },
+        "payload_length" => { kind: Unsigned, derived: true, required: false, description: "Header length in 4-byte units minus two", reflect: payload_length, layout: (1, 2) },
+        "reserved" => { kind: Unsigned, derived: false, required: false, description: "Reserved 16 bits", reflect: reserved, layout: (2, 4) },
+        "spi" => { kind: Unsigned, derived: false, required: true, description: "Security parameters index", reflect: spi, layout: (4, 8) },
+        "sequence" => { kind: Unsigned, derived: false, required: false, description: "Anti-replay sequence number", reflect: sequence, layout: (8, 12) },
+        "icv" => { kind: Bytes, derived: false, required: false, description: "Integrity check value, a multiple of 4 bytes", reflect: icv, layout: (AH_FIXED_LEN, header_len) },
     }
     layout pub(crate) fn ah_layout(header_len: usize);
 }
@@ -312,7 +312,6 @@ impl LayerCodec for AhCodec {
                 icv: Bytes::copy_from_slice(&input[AH_FIXED_LEN..header_len]),
             }),
             consumed: header_len,
-            payload_offset: header_len,
             payload_len,
             next: if cross_family {
                 Vec::new()

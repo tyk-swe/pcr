@@ -14,7 +14,7 @@ use crate::{
     },
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
+    layer::{Layer, ProtocolId, reflect_get, reflective_layer},
     registry::Discriminator,
 };
 
@@ -69,13 +69,13 @@ reflective_layer! {
     fn tcp_schema() => { protocol: protocol("tcp"), name: "TCP" }
     impl Tcp {
         "source_port" => { kind: Unsigned, derived: false, required: true, description: "TCP source port",
-            get |layer| Some(reflect_get(&layer.source_port)), set |layer, value, name| reflect_set(&mut layer.source_port, tcp_schema(), name, value), layout: (0, 2) },
+            reflect: source_port, layout: (0, 2) },
         "destination_port" => { kind: Unsigned, derived: false, required: true, description: "TCP destination port",
-            get |layer| Some(reflect_get(&layer.destination_port)), set |layer, value, name| reflect_set(&mut layer.destination_port, tcp_schema(), name, value), layout: (2, 4) },
+            reflect: destination_port, layout: (2, 4) },
         "sequence" => { kind: Unsigned, derived: false, required: true, description: "Sequence number",
-            get |layer| Some(reflect_get(&layer.sequence)), set |layer, value, name| reflect_set(&mut layer.sequence, tcp_schema(), name, value), layout: (4, 8) },
+            reflect: sequence, layout: (4, 8) },
         "acknowledgment" => { kind: Unsigned, derived: false, required: false, description: "Acknowledgment number",
-            get |layer| Some(reflect_get(&layer.acknowledgment)), set |layer, value, name| reflect_set(&mut layer.acknowledgment, tcp_schema(), name, value), layout: (8, 12) },
+            reflect: acknowledgment, layout: (8, 12) },
         "reserved_bits" => { kind: Unsigned, derived: false, required: false, description: "Three reserved TCP header bits",
             get |layer| Some(reflect_get(&layer.reserved_bits)), set |layer, value, name| match value {
                 FieldValue::Unsigned(value) => { layer.reserved_bits = u8::try_from(value).ok().filter(|value| *value <= 7).ok_or_else(|| out_of_range(tcp_schema(), name))?; Ok(()) },
@@ -87,13 +87,13 @@ reflective_layer! {
                 _ => Err(wrong_type(tcp_schema(), name, "unsigned")),
             }, layout: (12, 14) },
         "window" => { kind: Unsigned, derived: false, required: true, description: "Receive window",
-            get |layer| Some(reflect_get(&layer.window)), set |layer, value, name| reflect_set(&mut layer.window, tcp_schema(), name, value), layout: (14, 16) },
+            reflect: window, layout: (14, 16) },
         "checksum" => { kind: Unsigned, derived: true, required: false, description: "TCP checksum",
-            get |layer| Some(reflect_get(&layer.checksum)), set |layer, value, name| reflect_set(&mut layer.checksum, tcp_schema(), name, value), layout: (16, 18) },
+            reflect: checksum, layout: (16, 18) },
         "urgent_pointer" => { kind: Unsigned, derived: false, required: false, description: "Urgent pointer",
-            get |layer| Some(reflect_get(&layer.urgent_pointer)), set |layer, value, name| reflect_set(&mut layer.urgent_pointer, tcp_schema(), name, value), layout: (18, 20) },
+            reflect: urgent_pointer, layout: (18, 20) },
         "options" => { kind: Bytes, derived: false, required: false, description: "Verbatim standard or unknown TCP options",
-            get |layer| Some(reflect_get(&layer.options)), set |layer, value, name| reflect_set(&mut layer.options, tcp_schema(), name, value), layout: (20, header_len) },
+            reflect: options, layout: (20, header_len) },
     }
     layout pub(crate) fn tcp_layout(header_len: usize);
 }
@@ -248,7 +248,6 @@ impl LayerCodec for TcpCodec {
                 options: Bytes::copy_from_slice(&input[20..header_len]),
             }),
             consumed: header_len,
-            payload_offset: header_len,
             payload_len,
             next: if payload_len == 0 {
                 Vec::new()

@@ -9,7 +9,7 @@ use crate::{
         LayerEncodeContext,
     },
     field::FieldValue,
-    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
+    layer::{Layer, ProtocolId, reflective_layer},
     registry::Discriminator,
 };
 
@@ -40,7 +40,7 @@ impl Default for L2tpv3 {
 reflective_layer! {
     fn l2tpv3_schema() => { protocol: protocol("l2tpv3"), name: "L2TPv3" }
     impl L2tpv3 {
-        "session_id" => { kind: Unsigned, derived: false, required: true, description: "32-bit session identifier; zero is the control connection", get |layer| Some(reflect_get(&layer.session_id)), set |layer, value, name| reflect_set(&mut layer.session_id, l2tpv3_schema(), name, value), layout: (0, 4) }
+        "session_id" => { kind: Unsigned, derived: false, required: true, description: "32-bit session identifier; zero is the control connection", reflect: session_id, layout: (0, 4) }
     }
     layout pub(crate) fn l2tpv3_layout();
 }
@@ -110,7 +110,6 @@ impl LayerCodec for L2tpv3Codec {
                 session_id: u32::from_be_bytes([input[0], input[1], input[2], input[3]]),
             }),
             consumed: L2TPV3_LEN,
-            payload_offset: L2TPV3_LEN,
             payload_len,
             // Cookie and tunneled frame, or control AVPs: always opaque.
             next: vec![Discriminator(0)],

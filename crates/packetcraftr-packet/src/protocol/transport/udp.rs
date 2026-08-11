@@ -13,7 +13,7 @@ use crate::{
     },
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
+    layer::{Layer, ProtocolId, reflective_layer},
     registry::Discriminator,
     semantics::BuiltinProtocol,
 };
@@ -117,15 +117,13 @@ reflective_layer! {
         "length" => {
             kind: Unsigned, derived: true, required: false,
             description: "UDP datagram length",
-            get |layer| Some(reflect_get(&layer.length)),
-            set |layer, value, name| reflect_set(&mut layer.length, udp_schema(), name, value),
+            reflect: length,
             layout: (4, 6)
         },
         "checksum" => {
             kind: Unsigned, derived: true, required: false,
             description: "UDP checksum",
-            get |layer| Some(reflect_get(&layer.checksum)),
-            set |layer, value, name| reflect_set(&mut layer.checksum, udp_schema(), name, value),
+            reflect: checksum,
             layout: (6, 8)
         },
     }
@@ -296,7 +294,6 @@ impl LayerCodec for UdpCodec {
                 checksum: WireValue::Exact(checksum_value),
             }),
             consumed: UDP_LEN,
-            payload_offset: UDP_LEN,
             payload_len,
             // Both endpoints are offered before the raw fallback. Destination
             // normally wins; a plausible DNS response gives source port 53

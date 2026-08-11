@@ -10,7 +10,7 @@ use crate::{
     },
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
+    layer::{Layer, ProtocolId, reflect_get, reflective_layer},
     registry::Discriminator,
 };
 
@@ -64,9 +64,9 @@ reflective_layer! {
     impl Pppoe {
         "version" => { kind: Unsigned, derived: false, required: false, description: "4-bit PPPoE version; only version 1 is defined", get |layer| Some(reflect_get(&layer.version)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.version = u8::try_from(value).ok().filter(|value| *value <= 0xf).ok_or_else(|| out_of_range(pppoe_schema(), name))?; Ok(()) }, _ => Err(wrong_type(pppoe_schema(), name, "unsigned")) }, layout: (0, 1) },
         "type" => { kind: Unsigned, derived: false, required: false, description: "4-bit PPPoE type; only type 1 is defined", get |layer| Some(reflect_get(&layer.kind)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.kind = u8::try_from(value).ok().filter(|value| *value <= 0xf).ok_or_else(|| out_of_range(pppoe_schema(), name))?; Ok(()) }, _ => Err(wrong_type(pppoe_schema(), name, "unsigned")) }, layout: (0, 1) },
-        "code" => { kind: Unsigned, derived: false, required: false, description: "Stage code: zero for session data, a discovery code otherwise", get |layer| Some(reflect_get(&layer.code)), set |layer, value, name| reflect_set(&mut layer.code, pppoe_schema(), name, value), layout: (1, 2) },
-        "session_id" => { kind: Unsigned, derived: false, required: true, description: "Session identifier assigned during discovery", get |layer| Some(reflect_get(&layer.session_id)), set |layer, value, name| reflect_set(&mut layer.session_id, pppoe_schema(), name, value), layout: (2, 4) },
-        "length" => { kind: Unsigned, derived: true, required: false, description: "Payload length excluding the header", get |layer| Some(reflect_get(&layer.length)), set |layer, value, name| reflect_set(&mut layer.length, pppoe_schema(), name, value), layout: (4, 6) },
+        "code" => { kind: Unsigned, derived: false, required: false, description: "Stage code: zero for session data, a discovery code otherwise", reflect: code, layout: (1, 2) },
+        "session_id" => { kind: Unsigned, derived: false, required: true, description: "Session identifier assigned during discovery", reflect: session_id, layout: (2, 4) },
+        "length" => { kind: Unsigned, derived: true, required: false, description: "Payload length excluding the header", reflect: length, layout: (4, 6) },
     }
     layout pub(crate) fn pppoe_layout();
 }
@@ -251,7 +251,6 @@ impl LayerCodec for PppoeCodec {
             fields: pppoe_layout(),
             layer: Box::new(layer),
             consumed: PPPOE_LEN,
-            payload_offset: PPPOE_LEN,
             payload_len: length,
             next: if !discovery {
                 // Session payloads must start with the PPP protocol field,
@@ -297,7 +296,7 @@ impl Default for Ppp {
 reflective_layer! {
     fn ppp_schema() => { protocol: protocol("ppp"), name: "PPP" }
     impl Ppp {
-        "protocol" => { kind: Unsigned, derived: true, required: false, description: "PPP protocol number selecting the payload", get |layer| Some(reflect_get(&layer.protocol)), set |layer, value, name| reflect_set(&mut layer.protocol, ppp_schema(), name, value), layout: (0, 2) },
+        "protocol" => { kind: Unsigned, derived: true, required: false, description: "PPP protocol number selecting the payload", reflect: protocol, layout: (0, 2) },
     }
     layout pub(crate) fn ppp_layout();
 }
@@ -379,7 +378,6 @@ impl LayerCodec for PppCodec {
                 protocol: WireValue::Exact(protocol_number),
             }),
             consumed: PPP_LEN,
-            payload_offset: PPP_LEN,
             payload_len,
             next: if payload_len == 0 { Vec::new() } else { next },
             diagnostics: Vec::new(),

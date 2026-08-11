@@ -329,6 +329,16 @@ fn stats_checked_add_is_complete_and_atomic_on_overflow() {
     assert_eq!(total.checked_add(&overflow), None);
     assert_eq!(total, before);
 
+    let overflow = Stats {
+        capture: Statistics {
+            receiver_dropped_frames: u64::MAX,
+            ..Statistics::default()
+        },
+        ..Stats::default()
+    };
+    assert_eq!(total.checked_add(&overflow), None);
+    assert_eq!(total, before);
+
     let mut elapsed = Stats {
         elapsed: Duration::MAX,
         ..Stats::default()

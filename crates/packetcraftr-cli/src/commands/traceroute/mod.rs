@@ -17,10 +17,9 @@ use crate::errors::CliError;
 use crate::rendering::emit_aggregate_with_stats;
 use crate::system::{
     DeferredInterface, default_registry_arc, parse_workflow_target, system_client,
-    workflow_exchange_options,
+    validate_live_interface_selector, workflow_exchange_options,
 };
 
-use super::scan::validate_live_interface_selector;
 use execution::CliTracerouteExecutor;
 use rendering::{render_traceroute_stream, render_traceroute_text};
 
@@ -41,9 +40,7 @@ pub(super) fn run(
         max_probes,
         max_duration_ms,
         max_undecoded,
-        interface,
-        source,
-        link_mode,
+        route,
         limits,
         policy,
     } = arguments;
@@ -81,7 +78,7 @@ pub(super) fn run(
     request.validate().map_err(traceroute_cli_error)?;
     let policy = policy.into_policy();
     policy.validate().map_err(CliError::classified)?;
-    validate_live_interface_selector("traceroute", interface.as_deref())?;
+    validate_live_interface_selector("traceroute", route.interface.as_deref())?;
     let max_template_packets = usize::try_from(attempts).map_err(|_| {
         CliError::new(
             2,
@@ -94,9 +91,9 @@ pub(super) fn run(
         client::send::Options {
             destination: None,
             plan: net::route::Options {
-                link_mode: link_mode.into(),
+                link_mode: route.link_mode.into(),
                 interface: None,
-                preferred_source: source,
+                preferred_source: route.source,
             },
             build: packet::build::Options::default(),
             allow_permissive_live: false,
@@ -109,7 +106,7 @@ pub(super) fn run(
     let mut executor = CliTracerouteExecutor {
         client: system_client(Arc::clone(&registry), policy.clone()),
         exchange,
-        interface: DeferredInterface::new(interface),
+        interface: DeferredInterface::new(route.interface),
     };
     let resolver = client::target::SystemResolver;
     let mut authorizer = workflow::traceroute::PolicyAuthorizer::new(&policy, &resolver);
@@ -134,12 +131,7 @@ pub(super) fn run(
             stats,
         ),
         output::contract::Format::Ndjson => render_traceroute_stream(result, diagnostics, stats),
-        _ => Err(CliError::classified(
-            output::contract::Error::UnsupportedFormat {
-                command: output::contract::Command::Traceroute,
-                format: output,
-            },
-        )),
+        _ => unreachable!("traceroute format is checked before command dispatch"),
     }
 }
 

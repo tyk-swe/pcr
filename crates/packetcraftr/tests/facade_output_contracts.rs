@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use packetcraftr::{
+    core::protocol,
     output::{
         contract::{Command, Format, SCHEMA_V1},
         envelope::{Aggregate, Stream},
     },
-    packet::protocol,
 };
 use serde_json::{Value, json};
 

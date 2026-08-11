@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use packetcraftr_live::replay::{FrameEvidence as ReplayFrameEvidence, Summary as ReplaySummary};
-use packetcraftr_network::{interface::Id as InterfaceId, link::Mode as NetworkLinkMode};
+use crate::replay::{FrameEvidence as ReplayFrameEvidence, Summary as ReplaySummary};
+use packetcraftr_netio::{interface::Id as InterfaceId, link::Mode as NetworkLinkMode};
 
 use super::contract::Error;
 pub use super::frame::Captured;
@@ -21,11 +21,11 @@ pub enum SourceFormat {
     PcapNg,
 }
 
-impl From<packetcraftr_analysis::pcap::Format> for SourceFormat {
-    fn from(value: packetcraftr_analysis::pcap::Format) -> Self {
+impl From<packetcraftr_core::analysis::pcap::Format> for SourceFormat {
+    fn from(value: packetcraftr_core::analysis::pcap::Format) -> Self {
         match value {
-            packetcraftr_analysis::pcap::Format::Pcap => Self::Pcap,
-            packetcraftr_analysis::pcap::Format::PcapNg => Self::PcapNg,
+            packetcraftr_core::analysis::pcap::Format::Pcap => Self::Pcap,
+            packetcraftr_core::analysis::pcap::Format::PcapNg => Self::PcapNg,
         }
     }
 }
@@ -39,16 +39,13 @@ pub enum Timing {
     Immediate,
 }
 
-impl From<packetcraftr_live::replay::Timing> for Timing {
-    fn from(value: packetcraftr_live::replay::Timing) -> Self {
+impl From<crate::replay::Timing> for Timing {
+    fn from(value: crate::replay::Timing) -> Self {
         match value {
-            packetcraftr_live::replay::Timing::Original => Self::Original,
-            packetcraftr_live::replay::Timing::Scaled(scale) => Self::Scaled(scale),
-            packetcraftr_live::replay::Timing::FixedRate(rate) => Self::FixedRate(rate),
-            packetcraftr_live::replay::Timing::Immediate => Self::Immediate,
-            // See the `field::Kind` conversion: the v1 schema pins this value
-            // set, so an added timing policy needs a schema revision.
-            _ => unreachable!("replay timing {value:?} has no v1 output representation"),
+            crate::replay::Timing::Original => Self::Original,
+            crate::replay::Timing::Scaled(scale) => Self::Scaled(scale),
+            crate::replay::Timing::FixedRate(rate) => Self::FixedRate(rate),
+            crate::replay::Timing::Immediate => Self::Immediate,
         }
     }
 }

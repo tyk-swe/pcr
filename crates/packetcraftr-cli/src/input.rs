@@ -6,8 +6,8 @@ use std::io::{self, IsTerminal, Read};
 use std::path::Path;
 
 use packetcraftr::{
-    packet::error::{Classification, Kind},
-    packet::{self, Packet},
+    core::error::{Classification, Kind},
+    core::{self, Packet},
 };
 
 use super::command_options::RecipeArgs;
@@ -15,9 +15,9 @@ use super::errors::CliError;
 
 pub(super) fn read_recipe(
     arguments: RecipeArgs,
-    registry: &packet::registry::Registry,
+    registry: &core::registry::Registry,
 ) -> Result<Packet, CliError> {
-    let stdin = read_nonterminal_stdin_bounded(packet::document::DEFAULT_MAX_DOCUMENT_BYTES)?;
+    let stdin = read_nonterminal_stdin_bounded(core::document::DEFAULT_MAX_DOCUMENT_BYTES)?;
     let RecipeArgs {
         packet,
         packet_file,
@@ -35,7 +35,7 @@ pub(super) fn read_recipe(
     let (input, path) = match (packet, packet_file, stdin) {
         (Some(expression), None, None) => return parse_expression(&expression, registry),
         (None, Some(path), None) => {
-            let bytes = read_bounded_file(&path, packet::document::DEFAULT_MAX_DOCUMENT_BYTES)?;
+            let bytes = read_bounded_file(&path, core::document::DEFAULT_MAX_DOCUMENT_BYTES)?;
             let input = String::from_utf8(bytes).map_err(|source| {
                 CliError::new(2, format!("packet document is not UTF-8: {source}"))
             })?;
@@ -56,38 +56,35 @@ pub(super) fn read_recipe(
         .or_else(|| {
             trimmed
                 .starts_with('{')
-                .then_some(packet::document::Format::Json)
+                .then_some(core::document::Format::Json)
         })
         .or_else(|| {
             (trimmed.starts_with("schema:") || trimmed.starts_with("---"))
-                .then_some(packet::document::Format::Yaml)
+                .then_some(core::document::Format::Yaml)
         });
     if let Some(format) = format {
-        return packet::document::Packet::parse_with_resource_limits(
+        return core::document::Packet::parse_with_resource_limits(
             &input,
             format,
-            packet::document::DEFAULT_MAX_DOCUMENT_BYTES,
-            packet::build::DEFAULT_MAX_LAYERS,
-            packet::document::DEFAULT_MAX_DOCUMENT_NESTING,
+            core::document::DEFAULT_MAX_DOCUMENT_BYTES,
+            core::build::DEFAULT_MAX_LAYERS,
+            core::document::DEFAULT_MAX_DOCUMENT_NESTING,
         )
-        .and_then(|document| document.to_packet(registry, packet::build::DEFAULT_MAX_LAYERS))
+        .and_then(|document| document.to_packet(registry, core::build::DEFAULT_MAX_LAYERS))
         .map_err(|source| CliError::new(2, source.to_string()));
     }
     parse_expression(&input, registry)
 }
 
-fn parse_expression(
-    input: &str,
-    registry: &packet::registry::Registry,
-) -> Result<Packet, CliError> {
-    packet::expression::parse(input, registry, packet::expression::Options::default())
+fn parse_expression(input: &str, registry: &core::registry::Registry) -> Result<Packet, CliError> {
+    core::expression::parse(input, registry, core::expression::Options::default())
         .map_err(|source| CliError::new(2, source.to_string()))
 }
 
-fn document_format_from_path(path: &Path) -> Option<packet::document::Format> {
+fn document_format_from_path(path: &Path) -> Option<core::document::Format> {
     match path.extension()?.to_str()?.to_ascii_lowercase().as_str() {
-        "json" => Some(packet::document::Format::Json),
-        "yaml" | "yml" => Some(packet::document::Format::Yaml),
+        "json" => Some(core::document::Format::Json),
+        "yaml" | "yml" => Some(core::document::Format::Yaml),
         _ => None,
     }
 }

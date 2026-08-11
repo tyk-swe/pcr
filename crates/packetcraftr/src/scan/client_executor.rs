@@ -1,0 +1,90 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
+use crate::BoundaryError;
+use crate::ExchangeExecutor;
+use packetcraftr_core::{field::Value as FieldValue, template::Template as PacketTemplate};
+use packetcraftr_netio::{
+    capture::Provider as CaptureProvider, neighbor::Resolver as NeighborResolver,
+    route::Provider as RouteProvider, transmit::Sender as PacketIo,
+};
+
+use super::classification::classify_scan_response;
+use super::model::{ScanBatch, ScanBatchExecution, ScanExecutor, ScanTransport};
+
+/// Executes homogeneous scan batches through the client's capture-ready
+/// exchange lifecycle.
+impl<R, N, I> ScanExecutor for ExchangeExecutor<'_, R, N, I>
+where
+    R: RouteProvider,
+    N: NeighborResolver,
+    I: PacketIo + CaptureProvider,
+{
+    fn execute(&mut self, batch: &ScanBatch) -> Result<ScanBatchExecution, BoundaryError> {
+        let first = batch
+            .probes
+            .first()
+            .ok_or_else(|| invalid_client_execution("scan executor received an empty batch"))?;
+        if batch.probes.iter().any(|probe| {
+            probe.address != first.address
+                || probe.transport != first.transport
+                || probe.attempt != first.attempt
+        }) {
+            return Err(invalid_client_execution(
+                "scan executor batches must share address, transport, and attempt",
+            ));
+        }
+        if first.transport == ScanTransport::Icmp && batch.probes.len() != 1 {
+            return Err(invalid_client_execution(
+                "ICMP batches must contain exactly one uniquely identified echo probe",
+            ));
+        }
+        if self.options.max_responses < batch.probes.len() {
+            return Err(invalid_client_execution(format!(
+                "max_responses={} is smaller than scan batch size {}",
+                self.options.max_responses,
+                batch.probes.len()
+            )));
+        }
+
+        let mut template = PacketTemplate::new(first.packet());
+        if batch.probes.len() > 1 {
+            let ports = batch
+                .probes
+                .iter()
+                .map(|probe| {
+                    probe
+                        .port
+                        .map(|port| FieldValue::Unsigned(u64::from(port)))
+                        .ok_or_else(|| {
+                            invalid_client_execution(
+                                "portless probes cannot form a multi-packet batch",
+                            )
+                        })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            template = template.axis(1, "destination_port", ports);
+        }
+        let exchange = self.exchange_for_workflow(
+            &template,
+            batch.timeout,
+            batch.probes.len(),
+            first.address,
+            |request_index, sent, response| {
+                batch.probes.get(request_index).is_some_and(|probe| {
+                    classify_scan_response(self.client.registry(), probe.transport, sent, response)
+                        .is_some()
+                })
+            },
+        )?;
+        Ok(ScanBatchExecution::from_exchange(batch.permit, exchange))
+    }
+}
+
+fn invalid_client_execution(message: impl Into<String>) -> BoundaryError {
+    BoundaryError::execution_validation(
+        message,
+        "cli.scan_executor",
+        "use homogeneous bounded scan batches and retain at least one response per probe",
+    )
+}

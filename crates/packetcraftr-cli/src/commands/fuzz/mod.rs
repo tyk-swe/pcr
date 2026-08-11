@@ -10,7 +10,7 @@ mod rendering;
 use std::sync::Arc;
 use std::time::Duration;
 
-use packetcraftr::{live as client, live as workflow, network as net, output, packet};
+use packetcraftr::{core, netio as net, output};
 
 use self::arguments::FuzzArgs;
 use crate::errors::CliError;
@@ -52,23 +52,23 @@ pub(super) fn run(arguments: FuzzArgs, output: output::contract::Format) -> Resu
         .into_iter()
         .map(|field| {
             field
-                .parse::<packet::fuzz::Target>()
+                .parse::<core::fuzz::Target>()
                 .map_err(|source| CliError::new(2, source.to_string()))
         })
         .collect::<Result<Vec<_>, _>>()?;
     let queue_limits = limits.into_limits();
-    let request = packet::fuzz::Request {
+    let request = core::fuzz::Request {
         seed,
         first_case,
         cases,
         strategies: strategies.into_iter().map(Into::into).collect(),
         targets,
-        build: packet::build::Options {
+        build: core::build::Options {
             mode: mode.into(),
             max_packet_size: queue_limits.snap_length,
-            ..packet::build::Options::default()
+            ..core::build::Options::default()
         },
-        limits: packet::fuzz::Limits {
+        limits: core::fuzz::Limits {
             max_cases,
             max_packet_bytes: queue_limits.snap_length,
             max_total_bytes,
@@ -82,7 +82,7 @@ pub(super) fn run(arguments: FuzzArgs, output: output::contract::Format) -> Resu
     };
     request.validate().map_err(CliError::classified)?;
     let prepared_live = if live {
-        let live_options = workflow::fuzz::LiveOptions {
+        let live_options = packetcraftr::fuzz::LiveOptions {
             timeout: Duration::from_millis(timeout_ms),
             cases_per_second: rate,
             destination,
@@ -94,7 +94,7 @@ pub(super) fn run(arguments: FuzzArgs, output: output::contract::Format) -> Resu
         policy.validate().map_err(CliError::classified)?;
         validate_live_interface_selector("fuzz", route.interface.as_deref())?;
         let exchange = workflow_exchange_options(
-            client::send::Options {
+            packetcraftr::send::Options {
                 destination,
                 plan: net::route::Options {
                     link_mode: route.link_mode.into(),
@@ -123,9 +123,9 @@ pub(super) fn run(arguments: FuzzArgs, output: output::contract::Format) -> Resu
             exchange,
             interface: DeferredInterface::new(route.interface),
         };
-        let mut authorizer = workflow::fuzz::PolicyAuthorizer::new(&policy);
-        let mut clock = workflow::clock::SystemClock;
-        let result = workflow::fuzz::run(
+        let mut authorizer = packetcraftr::fuzz::PolicyAuthorizer::new(&policy);
+        let mut clock = packetcraftr::clock::SystemClock;
+        let result = packetcraftr::fuzz::run(
             &request,
             live_options,
             packet,
@@ -139,7 +139,7 @@ pub(super) fn run(arguments: FuzzArgs, output: output::contract::Format) -> Resu
     } else {
         // This branch intentionally never validates or resolves the live
         // interface and never constructs a native client.
-        let result = packet::fuzz::run(&request, packet, registry).map_err(CliError::classified)?;
+        let result = core::fuzz::run(&request, packet, registry).map_err(CliError::classified)?;
         output::fuzz::Result::try_from_offline(result).map_err(CliError::classified)?
     };
     match output {
@@ -152,7 +152,7 @@ pub(super) fn run(arguments: FuzzArgs, output: output::contract::Format) -> Resu
     }
 }
 
-pub(crate) fn fuzz_cli_error(error: workflow::fuzz::Error) -> CliError {
+pub(crate) fn fuzz_cli_error(error: packetcraftr::fuzz::Error) -> CliError {
     let sequence = error.sequence();
     CliError::classified_at_optional_sequence(error, sequence)
 }

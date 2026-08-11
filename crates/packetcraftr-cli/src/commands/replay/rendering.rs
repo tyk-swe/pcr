@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use packetcraftr::{
     analysis::pcap::{self as capture, Format, Limits, Reader, Writer},
-    live as workflow, network as net, output,
+    netio as net, output,
 };
 
 use crate::capture_output::CaptureOutput;
@@ -15,16 +15,16 @@ use crate::errors::CliError;
 use crate::rendering::{emit_stream_record, spaced_hex, write_stdout_line};
 
 pub(super) fn replay_output_frame(
-    evidence: workflow::replay::FrameEvidence,
-) -> Result<output::replay::Frame, workflow::replay::Error> {
+    evidence: packetcraftr::replay::FrameEvidence,
+) -> Result<output::replay::Frame, packetcraftr::replay::Error> {
     let sequence = evidence.source_sequence;
     output::replay::Frame::try_from_evidence(evidence)
-        .map_err(|source| workflow::replay::Error::output(sequence, source.to_string()))
+        .map_err(|source| packetcraftr::replay::Error::output(sequence, source.to_string()))
 }
 
 pub(super) fn write_replay_text_evidence(
-    evidence: workflow::replay::FrameEvidence,
-) -> Result<(), workflow::replay::Error> {
+    evidence: packetcraftr::replay::FrameEvidence,
+) -> Result<(), packetcraftr::replay::Error> {
     let result = replay_output_frame(evidence)?;
     write_stdout_line(format_args!(
         "{}: sent {} bytes via {} (index {}, {:?}) dlt={} {}",
@@ -36,24 +36,24 @@ pub(super) fn write_replay_text_evidence(
         result.frame.link_type,
         spaced_hex(result.frame.bytes())
     ))
-    .map_err(|source| workflow::replay::Error::output(result.source_sequence, source.message))
+    .map_err(|source| packetcraftr::replay::Error::output(result.source_sequence, source.message))
 }
 
 pub(super) fn emit_replay_ndjson_evidence(
     sequence: &mut u64,
-    evidence: workflow::replay::FrameEvidence,
-) -> Result<(), workflow::replay::Error> {
+    evidence: packetcraftr::replay::FrameEvidence,
+) -> Result<(), packetcraftr::replay::Error> {
     let source_sequence = evidence.source_sequence;
     let result = replay_output_frame(evidence)?;
     emit_stream_record(output::contract::Command::Replay, sequence, result)
-        .map_err(|source| workflow::replay::Error::output(source_sequence, source.message))
+        .map_err(|source| packetcraftr::replay::Error::output(source_sequence, source.message))
 }
 
 pub(super) fn replay_capture_output<W: Write>(
     reader: &Reader<File>,
     output: W,
     format: Format,
-    limits: workflow::replay::Limits,
+    limits: packetcraftr::replay::Limits,
     max_interfaces: usize,
 ) -> Result<CaptureOutput<W>, CliError> {
     let writer = match format {
@@ -103,8 +103,8 @@ pub(super) fn replay_capture_output<W: Write>(
 
 pub(super) fn write_replay_capture_evidence<W: Write>(
     writer: &mut CaptureOutput<W>,
-    evidence: workflow::replay::FrameEvidence,
-) -> Result<(), workflow::replay::Error> {
+    evidence: packetcraftr::replay::FrameEvidence,
+) -> Result<(), packetcraftr::replay::Error> {
     let sequence = evidence.source_sequence;
     writer
         .write_source_frame(
@@ -112,11 +112,11 @@ pub(super) fn write_replay_capture_evidence<W: Write>(
             evidence.capture_interface,
             evidence.frame,
         )
-        .map_err(|source| workflow::replay::Error::output(sequence, source.to_string()))
+        .map_err(|source| packetcraftr::replay::Error::output(sequence, source.to_string()))
 }
 
 pub(super) fn replay_stats(
-    summary: &workflow::replay::Summary,
+    summary: &packetcraftr::replay::Summary,
     elapsed: Duration,
 ) -> output::envelope::Stats {
     output::envelope::Stats {

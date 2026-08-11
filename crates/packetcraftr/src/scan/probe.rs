@@ -1,0 +1,154 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
+//! Exact scan probe construction and sent-packet identity validation.
+
+use std::net::IpAddr;
+
+use bytes::Bytes;
+use packetcraftr_core::protocol::{
+    icmp::{Icmpv4, Icmpv6},
+    network::{Ipv4, Ipv6},
+    transport::{Tcp, Udp},
+};
+use packetcraftr_core::{Packet, semantics::BuiltinProtocol};
+
+use crate::probe::{nonzero_ipv4_identification, packet_shape_matches};
+
+use super::model::{ScanProbe, ScanTransport};
+
+const SCAN_UDP_SOURCE_PORT_BASE: u16 = 49_152;
+
+fn scan_udp_source_port(attempt: u32) -> u16 {
+    let width = u32::from(u16::MAX) - u32::from(SCAN_UDP_SOURCE_PORT_BASE) + 1;
+    let offset = attempt.saturating_sub(1) % width;
+    u16::try_from(u32::from(SCAN_UDP_SOURCE_PORT_BASE) + offset)
+        .expect("ephemeral source-port arithmetic must remain within u16")
+}
+
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "the operation-local sequence is reduced to the 32-bit and 20-bit wire fields the \
+              probe carries; sent_scan_probe_matches applies the same reduction when comparing, \
+              so even a wrapped counter still matches"
+)]
+pub(super) fn probe_packet(probe: &ScanProbe) -> Packet {
+    let mut packet = Packet::new();
+    match probe.address {
+        IpAddr::V4(destination) => {
+            packet.push(Ipv4 {
+                destination,
+                identification: nonzero_ipv4_identification(probe.sequence),
+                ..Ipv4::default()
+            });
+        }
+        IpAddr::V6(destination) => {
+            packet.push(Ipv6 {
+                destination,
+                flow_label: (probe.sequence as u32) & 0x000f_ffff,
+                ..Ipv6::default()
+            });
+        }
+    }
+    match probe.transport {
+        ScanTransport::Tcp => packet.push(Tcp {
+            destination_port: probe.port.expect("validated TCP scan port"),
+            sequence: probe.sequence as u32,
+            ..Tcp::default()
+        }),
+        ScanTransport::Udp => packet.push(Udp {
+            source_port: scan_udp_source_port(probe.attempt),
+            destination_port: probe.port.expect("validated UDP scan port"),
+            ..Udp::default()
+        }),
+        ScanTransport::Icmp => match probe.address {
+            IpAddr::V4(_) => packet.push(Icmpv4 {
+                body: icmp_identity(probe.sequence),
+                ..Icmpv4::default()
+            }),
+            IpAddr::V6(_) => packet.push(Icmpv6 {
+                body: icmp_identity(probe.sequence),
+                ..Icmpv6::default()
+            }),
+        },
+    };
+    packet
+}
+
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "the identity tag is a deliberate 16-bit reduction of the sequence, split across \
+              the two payload bytes below"
+)]
+fn icmp_identity(sequence: u64) -> Bytes {
+    let sequence = sequence as u16;
+    Bytes::copy_from_slice(&[0x50, 0x43, (sequence >> 8) as u8, sequence as u8])
+}
+
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "the observed packet is compared against the same reduction probe_packet applied, \
+              so the narrowing is symmetric on both sides of the comparison"
+)]
+pub(super) fn sent_scan_probe_matches(probe: &ScanProbe, sent: &Packet) -> bool {
+    let network_protocol = if probe.address.is_ipv4() {
+        BuiltinProtocol::Ipv4
+    } else {
+        BuiltinProtocol::Ipv6
+    };
+    let transport_protocol = match probe.transport {
+        ScanTransport::Tcp => BuiltinProtocol::Tcp,
+        ScanTransport::Udp => BuiltinProtocol::Udp,
+        ScanTransport::Icmp if probe.address.is_ipv4() => BuiltinProtocol::Icmpv4,
+        ScanTransport::Icmp => BuiltinProtocol::Icmpv6,
+    };
+    if !packet_shape_matches(sent, &[network_protocol, transport_protocol]) {
+        return false;
+    }
+    let network_matches = match probe.address {
+        IpAddr::V4(destination) => {
+            sent.iter()
+                .filter(|layer| BuiltinProtocol::of(*layer) == Some(BuiltinProtocol::Ipv4))
+                .count()
+                == 1
+                && sent.get::<Ipv4>().is_some_and(|ipv4| {
+                    ipv4.destination == destination
+                        && ipv4.identification == nonzero_ipv4_identification(probe.sequence)
+                })
+        }
+        IpAddr::V6(destination) => {
+            sent.iter()
+                .filter(|layer| BuiltinProtocol::of(*layer) == Some(BuiltinProtocol::Ipv6))
+                .count()
+                == 1
+                && sent.get::<Ipv6>().is_some_and(|ipv6| {
+                    ipv6.destination == destination
+                        && ipv6.flow_label == (probe.sequence as u32) & 0x000f_ffff
+                })
+        }
+    };
+    if !network_matches {
+        return false;
+    }
+    match probe.transport {
+        ScanTransport::Tcp => sent.get::<Tcp>().is_some_and(|tcp| {
+            tcp.destination_port == probe.port.expect("validated TCP scan port")
+                && tcp.sequence == probe.sequence as u32
+                && tcp.flags == Tcp::SYN
+        }),
+        ScanTransport::Udp => sent.get::<Udp>().is_some_and(|udp| {
+            udp.source_port == scan_udp_source_port(probe.attempt)
+                && udp.destination_port == probe.port.expect("validated UDP scan port")
+        }),
+        ScanTransport::Icmp => match probe.address {
+            IpAddr::V4(_) => sent.get::<Icmpv4>().is_some_and(|icmp| {
+                icmp.icmp_type == 8 && icmp.code == 0 && icmp.body == icmp_identity(probe.sequence)
+            }),
+            IpAddr::V6(_) => sent.get::<Icmpv6>().is_some_and(|icmp| {
+                icmp.icmp_type == 128
+                    && icmp.code == 0
+                    && icmp.body == icmp_identity(probe.sequence)
+            }),
+        },
+    }
+}

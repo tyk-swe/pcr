@@ -7,7 +7,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use packetcraftr_packet::error::{Classification, Classified, Kind};
+use packetcraftr_core::error::{Classification, Classified, Kind};
 
 /// Version identifier emitted by every structured CLI record.
 pub const SCHEMA_V1: &str = "packetcraftr.output/v1";

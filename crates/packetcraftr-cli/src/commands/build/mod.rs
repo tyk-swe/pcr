@@ -3,7 +3,7 @@
 
 pub(super) mod arguments;
 
-use packetcraftr::{output, packet};
+use packetcraftr::{core, output};
 
 use self::arguments::BuildArgs;
 use super::super::errors::CliError;
@@ -17,13 +17,13 @@ use super::super::system::default_registry_arc;
 pub(super) fn run(arguments: BuildArgs, output: output::contract::Format) -> Result<(), CliError> {
     let registry = default_registry_arc()?;
     let packet = read_recipe(arguments.recipe, &registry)?;
-    let built = packet::build::Builder::new(registry)
+    let built = core::build::Builder::new(registry)
         .build(
             packet,
-            packet::build::Context::default(),
-            packet::build::Options {
+            core::build::Context::default(),
+            core::build::Options {
                 mode: arguments.mode.into(),
-                ..packet::build::Options::default()
+                ..core::build::Options::default()
             },
         )
         .map_err(|source| CliError::new(3, source.to_string()))?;

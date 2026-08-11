@@ -14,8 +14,8 @@ use std::time::Duration;
 
 use packetcraftr::{
     analysis::pcap::{self as capture, Limits, PcapNgOptions, PcapOptions, Writer},
-    network as net,
-    network::capture::Provider as _,
+    netio as net,
+    netio::capture::Provider as _,
     output,
 };
 

@@ -1,26 +1,16 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Packet construction, offline analysis, native networking, and policy-gated
-//! live workflows.
+//! Policy-gated live workflows and versioned, render-neutral output.
 //!
-//! - [`packet`]: packet mechanics, codecs, budgets, and offline fuzzing.
-//! - [`analysis`]: bounded capture I/O and offline analysis.
-//! - [`network`]: native I/O boundaries.
-//! - [`live`]: policy-gated, budgeted live workflows.
-//! - [`output`]: versioned render-neutral output.
-//!
-//! [`analysis`] depends on neither [`network`] nor [`live`]. [`live`] workflows
-//! require [`live::policy::Policy`] and finite packet, byte, duration, and
-//! evidence budgets.
-//!
-//! Built-in protocol and capture-root support are listed in
-//! [`packet::protocol::support::BUILTIN_PROTOCOLS`] and
-//! [`packet::protocol::support::BUILTIN_CAPTURE_ROOTS`].
+//! Runtime-neutral packet mechanics and offline analysis live in
+//! [`core`] and [`analysis`]. Native provider contracts and adapters live in
+//! [`netio`]. Live entry points such as [`scan`], [`dns`], and [`send`] require
+//! a [`policy::Policy`] and finite resource budgets.
 //!
 //! ```text
 //! use std::sync::Arc;
-//! use packetcraftr::{packet::{build, layer::Raw, Packet}, packet::protocol as protocol};
+//! use packetcraftr::core::{build, layer::Raw, protocol, Packet};
 //!
 //! let registry = Arc::new(protocol::builtin::registry()?);
 //! let mut packet = Packet::new();
@@ -36,9 +26,40 @@
 
 #![forbid(unsafe_code)]
 
-pub use packetcraftr_analysis as analysis;
-pub use packetcraftr_live as live;
-pub use packetcraftr_network as network;
-pub use packetcraftr_packet as packet;
+mod address;
+mod authorization;
+mod client;
+pub mod clock;
+pub mod dns;
+mod evidence;
+pub mod exchange;
+pub mod fuzz;
+mod materialize;
+mod planning;
+pub mod policy;
+mod probe;
+pub mod replay;
+pub mod scan;
+pub mod send;
+mod stats;
+pub mod target;
+pub mod traceroute;
+mod validation;
 
 pub mod output;
+
+pub use client::Client;
+pub use evidence::SentPacket;
+pub use packetcraftr_core as core;
+pub use packetcraftr_core::analysis;
+pub use packetcraftr_core::error::BoundaryError;
+pub use packetcraftr_netio as netio;
+pub use probe::client_executor::ExchangeExecutor;
+pub use send::contract::ClientError as Error;
+pub use stats::Stats;
+
+fn live_timestamp(frame: &packetcraftr_core::frame::Frame) -> std::time::SystemTime {
+    frame
+        .timestamp
+        .expect("live capture and transmission adapters always timestamp evidence frames")
+}

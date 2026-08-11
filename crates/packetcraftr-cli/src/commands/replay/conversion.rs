@@ -1,13 +1,15 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr::{live as workflow, network as net};
+use packetcraftr::netio as net;
 
 use super::arguments::{CliReplayTiming, ReplayArgs};
 use crate::errors::CliError;
 use crate::system::validate_interface_selector;
 
-pub(super) fn replay_timing(arguments: &ReplayArgs) -> Result<workflow::replay::Timing, CliError> {
+pub(super) fn replay_timing(
+    arguments: &ReplayArgs,
+) -> Result<packetcraftr::replay::Timing, CliError> {
     let timing = if let Some(rate) = arguments.rate {
         if matches!(arguments.timing, CliReplayTiming::Immediate) {
             return Err(CliError::new(
@@ -15,7 +17,7 @@ pub(super) fn replay_timing(arguments: &ReplayArgs) -> Result<workflow::replay::
                 "--rate cannot be combined with --timing immediate",
             ));
         }
-        workflow::replay::Timing::FixedRate(rate)
+        packetcraftr::replay::Timing::FixedRate(rate)
     } else if let Some(speed) = arguments.speed {
         if matches!(arguments.timing, CliReplayTiming::Immediate) {
             return Err(CliError::new(
@@ -23,11 +25,11 @@ pub(super) fn replay_timing(arguments: &ReplayArgs) -> Result<workflow::replay::
                 "--speed cannot be combined with --timing immediate",
             ));
         }
-        workflow::replay::Timing::Scaled(1.0 / speed)
+        packetcraftr::replay::Timing::Scaled(1.0 / speed)
     } else {
         match arguments.timing {
-            CliReplayTiming::Original => workflow::replay::Timing::Original,
-            CliReplayTiming::Immediate => workflow::replay::Timing::Immediate,
+            CliReplayTiming::Original => packetcraftr::replay::Timing::Original,
+            CliReplayTiming::Immediate => packetcraftr::replay::Timing::Immediate,
         }
     };
     timing.validate().map_err(CliError::classified)

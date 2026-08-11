@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr::{output, packet};
+use packetcraftr::{core, output};
 use serde::Serialize;
 
 use super::super::errors::CliError;
@@ -21,7 +21,7 @@ pub(crate) fn emit_stream<T: Serialize>(
     command: output::contract::Command,
     sequence: u64,
     result: T,
-    diagnostics: Vec<packet::diagnostic::Diagnostic>,
+    diagnostics: Vec<core::diagnostic::Diagnostic>,
 ) -> Result<(), CliError> {
     emit_json_compact(&output::envelope::Stream::success(
         command,
@@ -36,7 +36,7 @@ pub(crate) fn emit_stream_with_stats<T: Serialize>(
     command: output::contract::Command,
     sequence: u64,
     result: T,
-    diagnostics: Vec<packet::diagnostic::Diagnostic>,
+    diagnostics: Vec<core::diagnostic::Diagnostic>,
     stats: output::envelope::Stats,
 ) -> Result<(), CliError> {
     emit_json_compact(

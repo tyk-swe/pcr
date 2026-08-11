@@ -6,8 +6,11 @@ pub(super) mod arguments;
 use std::time::SystemTime;
 
 use packetcraftr::{
-    output, packet,
-    packet::frame::{Frame, LinkType},
+    core::{
+        self,
+        frame::{Frame, LinkType},
+    },
+    output,
 };
 
 use self::arguments::DissectArgs;
@@ -35,20 +38,18 @@ pub(super) fn run(
         None => None,
     };
     let bytes = match (arguments.hex, arguments.file) {
-        (Some(value), None) => packet::expression::decode_hex(&value)
+        (Some(value), None) => core::expression::decode_hex(&value)
             .map_err(|source| CliError::new(2, source.to_string()))?
             .to_vec(),
-        (None, Some(path)) => {
-            read_bounded_file(&path, packet::document::DEFAULT_MAX_DOCUMENT_BYTES)?
-        }
-        (None, None) => read_stdin_bounded(packet::document::DEFAULT_MAX_DOCUMENT_BYTES)?,
+        (None, Some(path)) => read_bounded_file(&path, core::document::DEFAULT_MAX_DOCUMENT_BYTES)?,
+        (None, None) => read_stdin_bounded(core::document::DEFAULT_MAX_DOCUMENT_BYTES)?,
         (Some(_), Some(_)) => unreachable!("clap enforces conflicts"),
     };
-    let decoded = packet::decode::Decoder::new(registry)
+    let decoded = core::decode::Decoder::new(registry)
         .decode(
             Frame::new(SystemTime::now(), LinkType(arguments.link_type), bytes)
                 .map_err(|source| CliError::new(3, source.to_string()))?,
-            packet::decode::Options::default(),
+            core::decode::Options::default(),
         )
         .map_err(|source| CliError::new(3, source.to_string()))?;
     // The filter selects emission, not validity: a frame it rejects emits
@@ -56,7 +57,7 @@ pub(super) fn run(
     // format is refused whether or not the frame matched.
     let kept = match &filter {
         Some(filter) => filter
-            .matches(&packet::filter::Context {
+            .matches(&core::filter::Context {
                 decoded: &decoded,
                 number: 1,
                 tcp_stream: None,

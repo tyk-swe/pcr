@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr::{output, packet};
+use packetcraftr::{core, output};
 
 use crate::errors::CliError;
 use crate::rendering::{
@@ -12,7 +12,7 @@ use crate::rendering::{
 
 pub(super) fn render_traceroute_text(
     result: output::traceroute::Result,
-    diagnostics: Vec<packet::diagnostic::Diagnostic>,
+    diagnostics: Vec<core::diagnostic::Diagnostic>,
     stats: output::envelope::Stats,
 ) -> Result<(), CliError> {
     write_stdout_line(format_args!(
@@ -90,7 +90,7 @@ pub(super) fn trace_completion_name(value: output::traceroute::Completion) -> &'
 
 pub(super) fn render_traceroute_stream(
     result: output::traceroute::Result,
-    diagnostics: Vec<packet::diagnostic::Diagnostic>,
+    diagnostics: Vec<core::diagnostic::Diagnostic>,
     stats: output::envelope::Stats,
 ) -> Result<(), CliError> {
     let output::traceroute::Result {

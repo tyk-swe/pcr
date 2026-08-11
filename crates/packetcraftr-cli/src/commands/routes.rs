@@ -1,8 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr::network::{interface::Provider as _, route::Provider as _};
-use packetcraftr::{network as net, output};
+use packetcraftr::netio::{interface::Provider as _, route::Provider as _};
+use packetcraftr::{netio as net, output};
 
 use super::super::errors::CliError;
 use super::super::rendering::{emit_aggregate, optional_display, write_stdout_line};

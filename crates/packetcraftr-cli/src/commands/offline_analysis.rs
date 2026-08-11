@@ -11,7 +11,7 @@ use std::time::Duration;
 use packetcraftr::{
     analysis,
     analysis::pcap::{Reader, ReaderOptions},
-    packet::{filter::Filter, registry::Registry},
+    core::{filter::Filter, registry::Registry},
 };
 
 use super::super::command_options::{OfflineAnalysisLimits, OfflineCaptureLimits};

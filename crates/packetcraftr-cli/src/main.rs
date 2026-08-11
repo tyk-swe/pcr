@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The `packetcraftr` CLI parses arguments, runs facade workflows, and renders
+//! The `packetcraftr` CLI parses arguments, runs library workflows, and renders
 //! results through the versioned [`packetcraftr::output`] contract.
 
 #![forbid(unsafe_code)]

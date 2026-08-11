@@ -5,8 +5,8 @@
 
 use serde::Serialize;
 
-use packetcraftr_packet::field;
-use packetcraftr_packet::protocol::support;
+use packetcraftr_core::field;
+use packetcraftr_core::protocol::support;
 
 /// Capability summary for one built-in protocol.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

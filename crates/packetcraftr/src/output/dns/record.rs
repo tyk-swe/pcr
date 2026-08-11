@@ -6,7 +6,7 @@
 use std::fmt;
 use std::net::{Ipv4Addr, Ipv6Addr};
 
-use packetcraftr_live::dns::{
+use crate::dns::{
     Edns as DnsEdns, EdnsOption as DnsEdnsOption, Record as DnsRecord,
     RecordValue as DnsRecordValue,
 };
@@ -23,12 +23,12 @@ pub enum DnsSection {
     Additional,
 }
 
-impl From<packetcraftr_live::dns::Section> for DnsSection {
-    fn from(value: packetcraftr_live::dns::Section) -> Self {
+impl From<crate::dns::Section> for DnsSection {
+    fn from(value: crate::dns::Section) -> Self {
         match value {
-            packetcraftr_live::dns::Section::Answer => Self::Answer,
-            packetcraftr_live::dns::Section::Authority => Self::Authority,
-            packetcraftr_live::dns::Section::Additional => Self::Additional,
+            crate::dns::Section::Answer => Self::Answer,
+            crate::dns::Section::Authority => Self::Authority,
+            crate::dns::Section::Additional => Self::Additional,
         }
     }
 }

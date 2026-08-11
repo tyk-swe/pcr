@@ -4,9 +4,9 @@
 pub(super) mod arguments;
 
 use packetcraftr::{
+    core::error::{Classification, Kind},
+    core::protocol::support,
     output,
-    packet::error::{Classification, Kind},
-    packet::protocol::support,
 };
 
 use self::arguments::ProtocolsArgs;

@@ -3,35 +3,37 @@
 
 use std::net::IpAddr;
 
-use packetcraftr::{live as client, live as workflow, packet::Packet};
+use packetcraftr::core::Packet;
 
 use super::super::errors::CliError;
 
-pub(crate) fn parse_workflow_target(target: String) -> Result<workflow::target::Target, CliError> {
+pub(crate) fn parse_workflow_target(
+    target: String,
+) -> Result<packetcraftr::target::Target, CliError> {
     target
-        .parse::<client::target::Target>()
+        .parse::<packetcraftr::target::Target>()
         .map_err(CliError::classified)
 }
 
 pub(crate) fn resolve_live_destination(
     destination: Option<String>,
     packet: &Packet,
-    policy: &client::policy::Policy,
+    policy: &packetcraftr::policy::Policy,
 ) -> Result<Option<IpAddr>, CliError> {
     let Some(destination) = destination else {
         return Ok(None);
     };
     let target = destination
-        .parse::<client::target::Target>()
+        .parse::<packetcraftr::target::Target>()
         .map_err(CliError::classified)?;
     let resolved = policy
-        .resolve_target(&target, &client::target::SystemResolver)
+        .resolve_target(&target, &packetcraftr::target::SystemResolver)
         .map_err(CliError::classified)?;
     let ip_version = packet
         .iter()
         .find_map(|layer| match layer.protocol_id().as_str() {
-            "ipv4" => Some(client::target::Family::Ipv4),
-            "ipv6" => Some(client::target::Family::Ipv6),
+            "ipv4" => Some(packetcraftr::target::Family::Ipv4),
+            "ipv6" => Some(packetcraftr::target::Family::Ipv6),
             _ => None,
         });
     match ip_version {
@@ -39,7 +41,7 @@ pub(crate) fn resolve_live_destination(
             .address_for_family(version)
             .map(Some)
             .ok_or_else(|| {
-                CliError::classified(client::target::Error::AddressFamilyUnavailable {
+                CliError::classified(packetcraftr::target::Error::AddressFamilyUnavailable {
                     family: version.label(),
                 })
             }),

@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use clap::{Args, ValueEnum};
-use packetcraftr::live as workflow;
 
 use crate::command_options::{
     CaptureLimitArgs, CliAddressFamily, HostnameTrafficPolicyArgs, RouteSelectionArgs,
@@ -27,7 +26,7 @@ pub(crate) enum CliDnsQueryType {
     Any,
 }
 
-impl From<CliDnsQueryType> for workflow::dns::QueryType {
+impl From<CliDnsQueryType> for packetcraftr::dns::QueryType {
     fn from(value: CliDnsQueryType) -> Self {
         match value {
             CliDnsQueryType::A => Self::A,
@@ -59,7 +58,7 @@ pub(crate) struct DnsArgs {
     #[arg(long, value_enum, default_value_t = CliAddressFamily::Any)]
     pub(crate) family: CliAddressFamily,
     /// DNS server UDP port.
-    #[arg(long, default_value_t = workflow::dns::DEFAULT_DNS_SERVER_PORT)]
+    #[arg(long, default_value_t = packetcraftr::dns::DEFAULT_DNS_SERVER_PORT)]
     pub(crate) port: u16,
     /// Explicit 16-bit transaction ID; a process-local value is generated when omitted.
     #[arg(long)]
@@ -71,7 +70,7 @@ pub(crate) struct DnsArgs {
     #[arg(long)]
     pub(crate) no_recursion: bool,
     /// Number of independently re-resolved and re-authorized attempts.
-    #[arg(long, default_value_t = workflow::dns::DEFAULT_DNS_ATTEMPTS)]
+    #[arg(long, default_value_t = packetcraftr::dns::DEFAULT_DNS_ATTEMPTS)]
     pub(crate) attempts: u32,
     /// Response window for each capture-ready query.
     #[arg(long, default_value_t = 1_000)]
@@ -83,25 +82,25 @@ pub(crate) struct DnsArgs {
     #[arg(long, default_value_t = 3_600_000)]
     pub(crate) max_duration_ms: u64,
     /// Maximum complete DNS message bytes decoded.
-    #[arg(long, default_value_t = workflow::dns::MAX_DNS_MESSAGE_BYTES)]
+    #[arg(long, default_value_t = packetcraftr::dns::MAX_DNS_MESSAGE_BYTES)]
     pub(crate) max_message_bytes: usize,
     /// Maximum total answer, authority, and additional records decoded.
-    #[arg(long, default_value_t = workflow::dns::DEFAULT_MAX_DNS_RECORDS)]
+    #[arg(long, default_value_t = packetcraftr::dns::DEFAULT_MAX_DNS_RECORDS)]
     pub(crate) max_records: usize,
     /// Maximum compression-pointer traversals for any decoded DNS name.
-    #[arg(long, default_value_t = workflow::dns::DEFAULT_MAX_DNS_NAME_POINTERS)]
+    #[arg(long, default_value_t = packetcraftr::dns::DEFAULT_MAX_DNS_NAME_POINTERS)]
     pub(crate) max_name_pointers: usize,
     /// Maximum TXT character strings in one record.
-    #[arg(long, default_value_t = workflow::dns::DEFAULT_MAX_DNS_TXT_STRINGS)]
+    #[arg(long, default_value_t = packetcraftr::dns::DEFAULT_MAX_DNS_TXT_STRINGS)]
     pub(crate) max_txt_strings: usize,
     /// Maximum aggregate TXT data bytes in one record.
-    #[arg(long, default_value_t = workflow::dns::DEFAULT_MAX_DNS_TXT_BYTES)]
+    #[arg(long, default_value_t = packetcraftr::dns::DEFAULT_MAX_DNS_TXT_BYTES)]
     pub(crate) max_txt_bytes: usize,
     /// Maximum rejected-record metadata entries retained.
-    #[arg(long, default_value_t = workflow::dns::DEFAULT_MAX_REJECTED_DNS_RECORDS)]
+    #[arg(long, default_value_t = packetcraftr::dns::DEFAULT_MAX_REJECTED_DNS_RECORDS)]
     pub(crate) max_rejected_records: usize,
     /// Maximum undecodable exact frames retained across attempts.
-    #[arg(long, default_value_t = workflow::dns::DEFAULT_MAX_UNDECODED_DNS_FRAMES)]
+    #[arg(long, default_value_t = packetcraftr::dns::DEFAULT_MAX_UNDECODED_DNS_FRAMES)]
     pub(crate) max_undecoded: usize,
     #[command(flatten)]
     pub(crate) route: RouteSelectionArgs,

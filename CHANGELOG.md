@@ -9,11 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** Consolidated the workspace from six crates to four.
+  `packetcraftr-packet` became `packetcraftr-core`, with packet mechanics at its
+  crate root and the former `packetcraftr-analysis` API under
+  `packetcraftr_core::analysis`; `packetcraftr-network` became
+  `packetcraftr-netio`; and the former `packetcraftr-live` workflows now live
+  directly under `packetcraftr`. The main library re-exports `core`,
+  `core::analysis` as `analysis`, and `netio`; the former `packet`, `network`,
+  and `live` aliases have no compatibility shims. The `packetcraftr` CLI name,
+  command-line interface, and versioned packet and output schema shapes are
+  unchanged. Unlike `packetcraftr-live`, `packetcraftr` enables
+  `native-interfaces` by default; direct consumers that need the former
+  portable footprint must set `default-features = false` when migrating.
 - Reorganized packet decoding, fragment reassembly, route planning, and live
-  exchange correlation around explicit phase and state owners. Public APIs,
-  serialized output contracts, and runtime behavior remain unchanged.
+  exchange correlation around explicit phase and state owners. That internal
+  reorganization did not change serialized output contracts or runtime
+  behavior.
 - Added checked, all-or-nothing capture-statistics aggregation through
-  `packetcraftr_network::capture::Statistics::checked_add`.
+  `packetcraftr_netio::capture::Statistics::checked_add`.
 - **Breaking:** Removed the undocumented `Client::exchange_for_workflow` seam;
   bounded workflows continue to expose supported executors.
 - **Breaking:** Layer decoders now use `consumed` as the sole child-payload

@@ -3,8 +3,8 @@
 
 //! Output contracts for the `exchange` command.
 
-use packetcraftr_live::exchange::Result as ExchangeResult;
-use packetcraftr_packet::diagnostic::Diagnostic;
+use crate::exchange::Result as ExchangeResult;
+use packetcraftr_core::diagnostic::Diagnostic;
 use serde::Serialize;
 use std::time::Duration;
 

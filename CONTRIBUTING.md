@@ -38,20 +38,21 @@ check set.
 
 Cargo manifests and `cargo metadata` are the source of truth for packages,
 features, and dependencies. Keep the graph acyclic. In particular,
-`packetcraftr-analysis` must not depend directly or transitively on
-`packetcraftr-network` or `packetcraftr-live`; this dependency boundary keeps
-offline analysis free of resolution, route, capture, and transmission seams.
+`packetcraftr-core` must not depend directly or transitively on
+`packetcraftr-netio` or `packetcraftr`; this dependency boundary keeps
+`packetcraftr_core::analysis` free of resolution, route, live-capture, and
+transmission seams.
 
 Start CLI changes in
 `crates/packetcraftr-cli/src/commands/<command>/`. Serialized command results
 belong in `crates/packetcraftr/src/output/<command>.rs`, offline analysis and
-PCAP I/O in `packetcraftr-analysis`, packet mechanics and built-in codecs in
-`packetcraftr-packet`, live operations and policy-gated send/exchange in
-`packetcraftr-live`, and native adapters in
-`packetcraftr-network/src/platform/`. See [AGENTS.md](AGENTS.md) for the focused
+PCAP I/O in `packetcraftr_core::analysis`, packet mechanics and built-in codecs
+at the `packetcraftr-core` crate root, live operations and policy-gated
+send/exchange directly in `packetcraftr`, and native adapters in
+`packetcraftr-netio/src/platform/`. See [AGENTS.md](AGENTS.md) for the focused
 ownership and coding rules.
 
-Keep `unsafe` inside `packetcraftr-network/src/platform/` and give every unsafe
+Keep `unsafe` inside `packetcraftr-netio/src/platform/` and give every unsafe
 block a specific `SAFETY` explanation. Avoid narrowing `as` conversions; use
 checked conversions or the repository's tightly scoped `#[expect]` convention
 with the bounding invariant stated.

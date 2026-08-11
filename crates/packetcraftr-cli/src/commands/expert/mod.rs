@@ -5,7 +5,7 @@ pub(super) mod arguments;
 
 use std::collections::BTreeMap;
 
-use packetcraftr::packet::diagnostic::Severity as DiagnosticSeverity;
+use packetcraftr::core::diagnostic::Severity as DiagnosticSeverity;
 use packetcraftr::{analysis, output};
 
 use self::arguments::{CliExpertSeverity, ExpertArgs};

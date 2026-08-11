@@ -11,7 +11,7 @@ mod rendering;
 use std::sync::Arc;
 use std::time::Duration;
 
-use packetcraftr::{live as client, live as workflow, network as net, output, packet};
+use packetcraftr::{core, netio as net, output};
 
 use self::arguments::ScanArgs;
 use crate::errors::CliError;
@@ -44,7 +44,7 @@ pub(super) fn run(arguments: ScanArgs, output: output::contract::Format) -> Resu
     } = arguments;
     let target = parse_workflow_target(target)?;
     let queue_limits = limits.into_limits();
-    let scan_limits = workflow::scan::Limits {
+    let scan_limits = packetcraftr::scan::Limits {
         max_ports,
         max_probes,
         batch_size,
@@ -58,7 +58,7 @@ pub(super) fn run(arguments: ScanArgs, output: output::contract::Format) -> Resu
     let policy = policy.into_policy();
     policy.validate().map_err(CliError::classified)?;
     validate_live_interface_selector("scan", route.interface.as_deref())?;
-    let request = workflow::scan::Request {
+    let request = packetcraftr::scan::Request {
         target,
         transport: transport.into(),
         address_family: family.into(),
@@ -70,14 +70,14 @@ pub(super) fn run(arguments: ScanArgs, output: output::contract::Format) -> Resu
     };
     let registry = default_registry_arc()?;
     let exchange = workflow_exchange_options(
-        client::send::Options {
+        packetcraftr::send::Options {
             destination: None,
             plan: net::route::Options {
                 link_mode: route.link_mode.into(),
                 interface: None,
                 preferred_source: route.source,
             },
-            build: packet::build::Options::default(),
+            build: core::build::Options::default(),
             allow_permissive_live: false,
         },
         request.timeout,
@@ -91,10 +91,10 @@ pub(super) fn run(arguments: ScanArgs, output: output::contract::Format) -> Resu
         exchange,
         interface: DeferredInterface::new(route.interface),
     };
-    let resolver = client::target::SystemResolver;
-    let mut authorizer = workflow::scan::PolicyAuthorizer::new(&policy, &resolver);
-    let mut clock = workflow::clock::SystemClock;
-    let result = workflow::scan::run(
+    let resolver = packetcraftr::target::SystemResolver;
+    let mut authorizer = packetcraftr::scan::PolicyAuthorizer::new(&policy, &resolver);
+    let mut clock = packetcraftr::clock::SystemClock;
+    let result = packetcraftr::scan::run(
         &request,
         &mut authorizer,
         &registry,
@@ -115,7 +115,7 @@ pub(super) fn run(arguments: ScanArgs, output: output::contract::Format) -> Resu
     }
 }
 
-pub(crate) fn scan_cli_error(error: workflow::scan::Error) -> CliError {
+pub(crate) fn scan_cli_error(error: packetcraftr::scan::Error) -> CliError {
     let sequence = error.sequence();
     CliError::classified_at_optional_sequence(error, sequence)
 }

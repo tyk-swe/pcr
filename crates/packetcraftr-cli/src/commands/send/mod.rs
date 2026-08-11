@@ -7,8 +7,11 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use packetcraftr::{
-    live as client, network as net, output, packet,
-    packet::frame::{Frame, LinkType},
+    core::{
+        self,
+        frame::{Frame, LinkType},
+    },
+    netio as net, output,
 };
 
 use self::arguments::SendArgs;
@@ -32,12 +35,12 @@ pub(super) fn run(arguments: SendArgs, output: output::contract::Format) -> Resu
     let report = client
         .send(
             request.packet,
-            client::send::Options {
+            packetcraftr::send::Options {
                 destination: request.destination,
                 plan: request.options,
-                build: packet::build::Options {
+                build: core::build::Options {
                     mode: mode.into(),
-                    ..packet::build::Options::default()
+                    ..core::build::Options::default()
                 },
                 allow_permissive_live,
             },

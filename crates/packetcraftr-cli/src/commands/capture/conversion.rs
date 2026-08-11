@@ -3,7 +3,7 @@
 
 use std::time::{Duration, Instant};
 
-use packetcraftr::network as net;
+use packetcraftr::netio as net;
 
 use crate::errors::CliError;
 

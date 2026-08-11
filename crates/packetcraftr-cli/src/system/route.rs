@@ -4,7 +4,7 @@
 use std::net::IpAddr;
 use std::time::Duration;
 
-use packetcraftr::{live as client, network as net, packet, packet::Packet};
+use packetcraftr::{core, core::Packet, netio as net};
 
 use super::super::command_options::RouteArgs;
 use super::super::errors::CliError;
@@ -16,16 +16,16 @@ pub(crate) struct PreparedRouteRequest {
     pub(crate) packet: Packet,
     pub(crate) destination: Option<IpAddr>,
     pub(crate) options: net::route::Options,
-    pub(crate) policy: client::policy::Policy,
+    pub(crate) policy: packetcraftr::policy::Policy,
 }
 
 pub(crate) fn workflow_exchange_options(
-    send: client::send::Options,
+    send: packetcraftr::send::Options,
     timeout: Duration,
     max_template_packets: usize,
     limits: net::capture::Limits,
-) -> Result<client::exchange::Options, CliError> {
-    let mut options = client::exchange::Options {
+) -> Result<packetcraftr::exchange::Options, CliError> {
+    let mut options = packetcraftr::exchange::Options {
         send,
         timeout,
         max_template_packets,
@@ -34,7 +34,7 @@ pub(crate) fn workflow_exchange_options(
         max_capture_queue_frames: limits.max_frames,
         max_captured_bytes: limits.max_bytes,
         capture_overflow_policy: limits.overflow_policy,
-        decode: packet::decode::Options::default(),
+        decode: core::decode::Options::default(),
     };
     options.decode.max_packet_size = limits.snap_length;
     options.validate().map_err(CliError::classified)?;
@@ -43,8 +43,8 @@ pub(crate) fn workflow_exchange_options(
 
 pub(crate) fn prepare_route_request(
     arguments: RouteArgs,
-    policy: client::policy::Policy,
-    registry: &packet::registry::Registry,
+    policy: packetcraftr::policy::Policy,
+    registry: &core::registry::Registry,
 ) -> Result<PreparedRouteRequest, CliError> {
     let RouteArgs {
         recipe,

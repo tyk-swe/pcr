@@ -3,27 +3,27 @@
 
 use std::sync::Arc;
 
-use packetcraftr::{live as client, live as workflow, packet};
+use packetcraftr::core;
 
 use crate::errors::CliError;
 use crate::system::{DeferredInterface, system_client};
 
 pub(super) struct CliScanExecutor {
-    pub(super) registry: Arc<packet::registry::Registry>,
-    pub(super) policy: client::policy::Policy,
-    pub(super) exchange: client::exchange::Options,
+    pub(super) registry: Arc<core::registry::Registry>,
+    pub(super) policy: packetcraftr::policy::Policy,
+    pub(super) exchange: packetcraftr::exchange::Options,
     pub(super) interface: DeferredInterface,
 }
 
-impl workflow::scan::Executor for CliScanExecutor {
+impl packetcraftr::scan::Executor for CliScanExecutor {
     fn execute(
         &mut self,
-        batch: &workflow::scan::Batch,
-    ) -> Result<workflow::scan::Execution, workflow::BoundaryError> {
+        batch: &packetcraftr::scan::Batch,
+    ) -> Result<packetcraftr::scan::Execution, packetcraftr::BoundaryError> {
         self.interface
             .resolve_into(&mut self.exchange.send.plan)
             .map_err(CliError::into_boundary_error)?;
         let client = system_client(Arc::clone(&self.registry), self.policy.clone());
-        workflow::ExchangeExecutor::new(&client, self.exchange.clone()).execute(batch)
+        packetcraftr::ExchangeExecutor::new(&client, self.exchange.clone()).execute(batch)
     }
 }

@@ -3,7 +3,7 @@
 
 use std::io::{self, Write};
 
-use packetcraftr::{output, packet};
+use packetcraftr::{core, output};
 
 use super::super::errors::CliError;
 use super::style::{
@@ -11,7 +11,7 @@ use super::style::{
 };
 
 pub(crate) fn render_diagnostics_text(
-    diagnostics: &[packet::diagnostic::Diagnostic],
+    diagnostics: &[core::diagnostic::Diagnostic],
 ) -> Result<(), CliError> {
     for diagnostic in diagnostics {
         write_stdout_line(format_args!(

@@ -6,7 +6,7 @@
 use bytes::Bytes;
 use serde::Serialize;
 
-use packetcraftr_packet::{
+use packetcraftr_core::{
     decode::Result as DecodedPacket, diagnostic::Diagnostic, document::Packet as PacketDocument,
     layout::Packet as PacketLayout,
 };

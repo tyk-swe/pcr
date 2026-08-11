@@ -1,25 +1,23 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr::{live as client, live as workflow};
-
 use crate::errors::CliError;
 use crate::system::{DeferredInterface, SystemClient};
 
 pub(super) struct CliTracerouteExecutor {
     pub(super) client: SystemClient,
-    pub(super) exchange: client::exchange::Options,
+    pub(super) exchange: packetcraftr::exchange::Options,
     pub(super) interface: DeferredInterface,
 }
 
-impl workflow::traceroute::Executor for CliTracerouteExecutor {
+impl packetcraftr::traceroute::Executor for CliTracerouteExecutor {
     fn execute(
         &mut self,
-        batch: &workflow::traceroute::Batch,
-    ) -> Result<workflow::traceroute::Execution, workflow::BoundaryError> {
+        batch: &packetcraftr::traceroute::Batch,
+    ) -> Result<packetcraftr::traceroute::Execution, packetcraftr::BoundaryError> {
         self.interface
             .resolve_into(&mut self.exchange.send.plan)
             .map_err(CliError::into_boundary_error)?;
-        workflow::ExchangeExecutor::new(&self.client, self.exchange.clone()).execute(batch)
+        packetcraftr::ExchangeExecutor::new(&self.client, self.exchange.clone()).execute(batch)
     }
 }

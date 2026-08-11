@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 
 use clap::{Args, ValueEnum};
-use packetcraftr::packet;
+use packetcraftr::core;
 
 /// Packet input shared by commands that construct or inspect a recipe.
 #[derive(Debug, Args)]
@@ -24,7 +24,7 @@ pub(crate) enum CliBuildMode {
     Permissive,
 }
 
-impl From<CliBuildMode> for packet::build::Mode {
+impl From<CliBuildMode> for core::build::Mode {
     fn from(value: CliBuildMode) -> Self {
         match value {
             CliBuildMode::Strict => Self::Strict,

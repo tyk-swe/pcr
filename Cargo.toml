@@ -35,10 +35,8 @@ cast_precision_loss = "deny"
 # `deny.toml` rejects wildcard dependencies, so each internal path dependency
 # pins the shared workspace version. Bump these with `workspace.package.version`.
 packetcraftr = { path = "crates/packetcraftr", version = "0.5.0-beta.1", default-features = false }
-packetcraftr-analysis = { path = "crates/packetcraftr-analysis", version = "0.5.0-beta.1" }
-packetcraftr-live = { path = "crates/packetcraftr-live", version = "0.5.0-beta.1" }
-packetcraftr-network = { path = "crates/packetcraftr-network", version = "0.5.0-beta.1" }
-packetcraftr-packet = { path = "crates/packetcraftr-packet", version = "0.5.0-beta.1" }
+packetcraftr-core = { path = "crates/packetcraftr-core", version = "0.5.0-beta.1" }
+packetcraftr-netio = { path = "crates/packetcraftr-netio", version = "0.5.0-beta.1" }
 
 anstream = "1"
 bytes = { version = "1", features = ["serde"] }

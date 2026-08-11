@@ -11,7 +11,7 @@ mod rendering;
 use std::sync::Arc;
 use std::time::Duration;
 
-use packetcraftr::{live as client, live as workflow, network as net, output, packet};
+use packetcraftr::{core, netio as net, output};
 
 use self::arguments::DnsArgs;
 use crate::errors::CliError;
@@ -52,7 +52,7 @@ pub(super) fn run(arguments: DnsArgs, output: output::contract::Format) -> Resul
     } = arguments;
     let server = parse_workflow_target(server)?;
     let queue_limits = limits.into_limits();
-    let request = workflow::dns::Request {
+    let request = packetcraftr::dns::Request {
         server,
         address_family: family.into(),
         server_port: port,
@@ -64,7 +64,7 @@ pub(super) fn run(arguments: DnsArgs, output: output::contract::Format) -> Resul
         attempts,
         timeout: Duration::from_millis(timeout_ms),
         queries_per_second: rate,
-        limits: workflow::dns::Limits {
+        limits: packetcraftr::dns::Limits {
             max_message_bytes,
             max_records,
             max_name_pointers,
@@ -83,14 +83,14 @@ pub(super) fn run(arguments: DnsArgs, output: output::contract::Format) -> Resul
 
     let registry = default_registry_arc()?;
     let exchange = workflow_exchange_options(
-        client::send::Options {
+        packetcraftr::send::Options {
             destination: None,
             plan: net::route::Options {
                 link_mode: route.link_mode.into(),
                 interface: None,
                 preferred_source: route.source,
             },
-            build: packet::build::Options::default(),
+            build: core::build::Options::default(),
             allow_permissive_live: false,
         },
         request.timeout,
@@ -104,10 +104,10 @@ pub(super) fn run(arguments: DnsArgs, output: output::contract::Format) -> Resul
         exchange,
         interface: DeferredInterface::new(route.interface),
     };
-    let resolver = client::target::SystemResolver;
-    let mut authorizer = workflow::dns::PolicyAuthorizer::new(&policy, &resolver);
-    let mut clock = workflow::clock::SystemClock;
-    let result = workflow::dns::run(
+    let resolver = packetcraftr::target::SystemResolver;
+    let mut authorizer = packetcraftr::dns::PolicyAuthorizer::new(&policy, &resolver);
+    let mut clock = packetcraftr::clock::SystemClock;
+    let result = packetcraftr::dns::run(
         &request,
         &mut authorizer,
         &registry,
@@ -127,7 +127,7 @@ pub(super) fn run(arguments: DnsArgs, output: output::contract::Format) -> Resul
     }
 }
 
-pub(crate) fn dns_cli_error(error: workflow::dns::Error) -> CliError {
+pub(crate) fn dns_cli_error(error: packetcraftr::dns::Error) -> CliError {
     let sequence = error.sequence();
     CliError::classified_at_optional_sequence(error, sequence)
 }

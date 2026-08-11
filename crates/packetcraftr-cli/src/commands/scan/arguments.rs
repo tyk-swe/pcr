@@ -4,7 +4,7 @@
 use std::str::FromStr;
 
 use clap::{Args, ValueEnum};
-use packetcraftr::{live as workflow, packet};
+use packetcraftr::core;
 
 use crate::command_options::{
     CaptureLimitArgs, CliAddressFamily, HostnameTrafficPolicyArgs, RouteSelectionArgs,
@@ -67,7 +67,7 @@ pub(crate) enum CliScanTransport {
     Icmp,
 }
 
-impl From<CliScanTransport> for workflow::scan::Transport {
+impl From<CliScanTransport> for packetcraftr::scan::Transport {
     fn from(value: CliScanTransport) -> Self {
         match value {
             CliScanTransport::Tcp => Self::Tcp,
@@ -102,19 +102,19 @@ pub(crate) struct ScanArgs {
     #[arg(long)]
     pub(crate) rate: Option<u32>,
     /// Maximum probes sent by one shared-capture exchange batch.
-    #[arg(long, default_value_t = workflow::scan::DEFAULT_SCAN_BATCH_SIZE)]
+    #[arg(long, default_value_t = packetcraftr::scan::DEFAULT_SCAN_BATCH_SIZE)]
     pub(crate) batch_size: usize,
     /// Maximum distinct destination ports accepted by the request.
-    #[arg(long, default_value_t = workflow::scan::DEFAULT_MAX_SCAN_PORTS)]
+    #[arg(long, default_value_t = packetcraftr::scan::DEFAULT_MAX_SCAN_PORTS)]
     pub(crate) max_ports: usize,
     /// Maximum generated probes after target resolution and attempts.
-    #[arg(long, default_value_t = packet::template::DEFAULT_MAX_TEMPLATE_PACKETS)]
+    #[arg(long, default_value_t = core::template::DEFAULT_MAX_TEMPLATE_PACKETS)]
     pub(crate) max_probes: usize,
     /// Maximum worst-case timeout plus intentional rate delay in milliseconds.
     #[arg(long, default_value_t = 3_600_000)]
     pub(crate) max_duration_ms: u64,
     /// Maximum undecodable exact frames retained across the scan.
-    #[arg(long, default_value_t = workflow::scan::DEFAULT_MAX_UNDECODED_SCAN_FRAMES)]
+    #[arg(long, default_value_t = packetcraftr::scan::DEFAULT_MAX_UNDECODED_SCAN_FRAMES)]
     pub(crate) max_undecoded: usize,
     #[command(flatten)]
     pub(crate) route: RouteSelectionArgs,

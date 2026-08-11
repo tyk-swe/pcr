@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use packetcraftr_analysis::stats::{
+use packetcraftr_core::analysis::stats::{
     ConversationStat, EndpointStat, IoBucketStat, PortStat, ProtocolStat, StatsReport,
     TransportKind,
 };

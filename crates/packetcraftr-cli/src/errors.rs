@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use packetcraftr::{
-    network as net, output,
-    packet::error::{Classification, Classified, Kind},
+    core::error::{Classification, Classified, Kind},
+    netio as net, output,
 };
 
 #[derive(Debug)]
@@ -84,8 +84,8 @@ impl CliError {
         self
     }
 
-    pub(super) fn into_boundary_error(self) -> packetcraftr::live::BoundaryError {
-        packetcraftr::live::BoundaryError::new(self.message, self.classification, self.causes)
+    pub(super) fn into_boundary_error(self) -> packetcraftr::BoundaryError {
+        packetcraftr::BoundaryError::new(self.message, self.classification, self.causes)
     }
 
     pub(super) fn with_cleanup(mut self, cleanup: net::Error) -> Self {

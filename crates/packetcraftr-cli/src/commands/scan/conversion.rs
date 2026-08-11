@@ -3,14 +3,12 @@
 
 use std::collections::HashSet;
 
-use packetcraftr::live as workflow;
-
 use super::arguments::CliScanPortSpec;
 
 /// Expand parsed CLI port specs into the stable, deduplicated `Vec<u16>` used
-/// by `workflow::scan::Request`. Ranges are inclusive and iterated directly.
+/// by `packetcraftr::scan::Request`. Ranges are inclusive and iterated directly.
 ///
-/// `max_ports` must already be validated by `workflow::scan::Limits::validate`,
+/// `max_ports` must already be validated by `packetcraftr::scan::Limits::validate`,
 /// which guarantees it is non-zero and at most `u16::MAX + 1`, so converting it
 /// to `u64` here is lossless and never overflows the distinct-count ceiling.
 ///
@@ -20,18 +18,18 @@ use super::arguments::CliScanPortSpec;
 pub(crate) fn expand_port_specs(
     specs: &[CliScanPortSpec],
     max_ports: usize,
-) -> Result<Vec<u16>, workflow::scan::Error> {
+) -> Result<Vec<u16>, packetcraftr::scan::Error> {
     let limit = u64::try_from(max_ports).expect("max_ports fits u64 after Limits::validate");
     let mut ports: Vec<u16> = Vec::new();
     let mut seen: HashSet<u16> = HashSet::new();
-    let mut push_distinct = |port: u16| -> Result<(), workflow::scan::Error> {
+    let mut push_distinct = |port: u16| -> Result<(), packetcraftr::scan::Error> {
         if !seen.insert(port) {
             return Ok(());
         }
         let distinct = u64::try_from(ports.len())
             .expect("port count never exceeds the validated max_ports ceiling");
         if distinct >= limit {
-            return Err(workflow::scan::Error::InvalidLimit {
+            return Err(packetcraftr::scan::Error::InvalidLimit {
                 field: "ports",
                 value: distinct + 1,
                 reason: format!("exceeds max_ports={max_ports}"),

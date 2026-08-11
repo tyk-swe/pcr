@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr::{output, packet};
+use packetcraftr::{core, output};
 
 use crate::errors::CliError;
 use crate::rendering::{
@@ -12,7 +12,7 @@ use crate::rendering::{
 
 pub(super) fn render_scan_text(
     result: output::scan::Result,
-    diagnostics: Vec<packet::diagnostic::Diagnostic>,
+    diagnostics: Vec<core::diagnostic::Diagnostic>,
     stats: output::envelope::Stats,
 ) -> Result<(), CliError> {
     write_stdout_line(format_args!(
@@ -86,7 +86,7 @@ pub(super) fn scan_probe_status_name(value: output::scan::ProbeStatus) -> &'stat
 
 pub(super) fn render_scan_stream(
     result: output::scan::Result,
-    diagnostics: Vec<packet::diagnostic::Diagnostic>,
+    diagnostics: Vec<core::diagnostic::Diagnostic>,
     stats: output::envelope::Stats,
 ) -> Result<(), CliError> {
     let output::scan::Result {

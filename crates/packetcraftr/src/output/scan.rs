@@ -8,8 +8,8 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use packetcraftr_live::scan::Result as ScanResult;
-use packetcraftr_packet::diagnostic::Diagnostic;
+use crate::scan::Result as ScanResult;
+use packetcraftr_core::diagnostic::Diagnostic;
 
 use super::contract::Error;
 use super::envelope::Stats;
@@ -29,15 +29,15 @@ pub enum Classification {
     Timeout,
 }
 
-impl From<packetcraftr_live::scan::Classification> for Classification {
-    fn from(value: packetcraftr_live::scan::Classification) -> Self {
+impl From<crate::scan::Classification> for Classification {
+    fn from(value: crate::scan::Classification) -> Self {
         match value {
-            packetcraftr_live::scan::Classification::Open => Self::Open,
-            packetcraftr_live::scan::Classification::Closed => Self::Closed,
-            packetcraftr_live::scan::Classification::Filtered => Self::Filtered,
-            packetcraftr_live::scan::Classification::Unreachable => Self::Unreachable,
-            packetcraftr_live::scan::Classification::Unknown => Self::Unknown,
-            packetcraftr_live::scan::Classification::Timeout => Self::Timeout,
+            crate::scan::Classification::Open => Self::Open,
+            crate::scan::Classification::Closed => Self::Closed,
+            crate::scan::Classification::Filtered => Self::Filtered,
+            crate::scan::Classification::Unreachable => Self::Unreachable,
+            crate::scan::Classification::Unknown => Self::Unknown,
+            crate::scan::Classification::Timeout => Self::Timeout,
         }
     }
 }
@@ -50,11 +50,11 @@ pub enum ProbeStatus {
     Timeout,
 }
 
-impl From<packetcraftr_live::scan::ProbeStatus> for ProbeStatus {
-    fn from(value: packetcraftr_live::scan::ProbeStatus) -> Self {
+impl From<crate::scan::ProbeStatus> for ProbeStatus {
+    fn from(value: crate::scan::ProbeStatus) -> Self {
         match value {
-            packetcraftr_live::scan::ProbeStatus::Response => Self::Response,
-            packetcraftr_live::scan::ProbeStatus::Timeout => Self::Timeout,
+            crate::scan::ProbeStatus::Response => Self::Response,
+            crate::scan::ProbeStatus::Timeout => Self::Timeout,
         }
     }
 }
@@ -118,8 +118,8 @@ impl Result {
                     .into_iter()
                     .map(|evidence| {
                         let protocol = match (endpoint.transport, endpoint.address) {
-                            (packetcraftr_live::scan::Transport::Icmp, IpAddr::V4(_)) => "icmpv4",
-                            (packetcraftr_live::scan::Transport::Icmp, IpAddr::V6(_)) => "icmpv6",
+                            (crate::scan::Transport::Icmp, IpAddr::V4(_)) => "icmpv4",
+                            (crate::scan::Transport::Icmp, IpAddr::V6(_)) => "icmpv6",
                             _ => endpoint.transport.as_str(),
                         };
                         Ok(Evidence {

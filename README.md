@@ -84,18 +84,32 @@ The CLI feature profiles are:
 package-scoped, and there are no `portable`, `pcap-free`, or `cli` feature
 names.
 
-The `packetcraftr` crate is the facade for library consumers. Depend directly
-on a domain crate when a smaller capability surface matters; in particular,
-`packetcraftr-analysis` is offline-only. Cargo manifests and `cargo metadata`
-are the source of truth for the workspace graph.
+The workspace has exactly four crates. `packetcraftr-core` provides packet
+mechanics at its crate root and offline capture analysis under `analysis`.
+`packetcraftr-netio` provides network providers and native I/O. The
+`packetcraftr` library combines both with policy-gated workflows such as
+`packetcraftr::scan`, `packetcraftr::dns`, `packetcraftr::send`, and
+`packetcraftr::policy`, plus versioned models under `packetcraftr::output`. It
+re-exports
+`packetcraftr_core` as `core`, `core::analysis` as `analysis`, and
+`packetcraftr_netio` as `netio`. The former `packet`, `network`, and `live`
+aliases are not retained.
 
-The dependency layers put `packetcraftr-packet` at the bottom. Offline
-`packetcraftr-analysis` and native `packetcraftr-network` depend only on that
-packet layer. Policy-gated `packetcraftr-live` builds on all three; the facade
-builds on the four domain crates, and the CLI builds only on the facade.
-Analysis has no direct or transitive dependency on the network or live layer,
-so adding a resolver, route, capture, or transmission seam there requires an
-explicit Cargo graph change.
+Unlike `packetcraftr-live`, `packetcraftr` enables `native-interfaces` by
+default. Direct `packetcraftr-live` consumers that need the same portable
+footprint should set `default-features = false` on their new `packetcraftr`
+dependency.
+
+The dependency graph puts `packetcraftr-core` at the bottom.
+`packetcraftr-netio` depends only on core, `packetcraftr` depends on both, and
+`packetcraftr-cli` depends only on `packetcraftr`. Because offline analysis
+lives in core, it has no direct or transitive dependency on resolution, route,
+live-capture, or transmission providers. Cargo manifests and `cargo metadata`
+are the source of truth for this graph.
+
+This crate consolidation changes Rust package and module paths. The
+`packetcraftr` CLI executable name, its command-line interface, and the
+versioned packet and output schema shapes are unchanged.
 
 ## Quick start
 

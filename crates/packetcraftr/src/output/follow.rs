@@ -7,7 +7,7 @@ use std::net::IpAddr;
 
 use serde::Serialize;
 
-use packetcraftr_analysis::follow::{
+use packetcraftr_core::analysis::follow::{
     Chunk as AnalysisChunk, Direction as AnalysisDirection, FollowSummary,
 };
 

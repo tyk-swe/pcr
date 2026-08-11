@@ -3,7 +3,7 @@
 
 use std::fs::File;
 
-use packetcraftr::{analysis::pcap::Reader, live as workflow, packet::frame::Frame};
+use packetcraftr::{analysis::pcap::Reader, core::frame::Frame};
 
 use crate::errors::CliError;
 use crate::filtering::FrameSelector;
@@ -16,8 +16,8 @@ pub(super) struct DisplayFilterSelector<'a> {
     pub(super) selector: &'a FrameSelector,
 }
 
-impl workflow::replay::Selector for DisplayFilterSelector<'_> {
-    fn select(&mut self, number: u64, frame: &Frame) -> Result<bool, workflow::BoundaryError> {
+impl packetcraftr::replay::Selector for DisplayFilterSelector<'_> {
+    fn select(&mut self, number: u64, frame: &Frame) -> Result<bool, packetcraftr::BoundaryError> {
         self.selector
             .keep(number, frame)
             .map_err(CliError::into_boundary_error)
@@ -26,17 +26,17 @@ impl workflow::replay::Selector for DisplayFilterSelector<'_> {
 
 pub(super) fn execute_replay<F>(
     reader: &mut Reader<File>,
-    options: &workflow::replay::Options,
-    selector: Option<&mut dyn workflow::replay::Selector>,
-    authorizer: &mut workflow::replay::SystemAuthorizer,
-    transmitter: &mut workflow::replay::SystemTransmitter,
-    clock: &mut workflow::clock::SystemClock,
+    options: &packetcraftr::replay::Options,
+    selector: Option<&mut dyn packetcraftr::replay::Selector>,
+    authorizer: &mut packetcraftr::replay::SystemAuthorizer,
+    transmitter: &mut packetcraftr::replay::SystemTransmitter,
+    clock: &mut packetcraftr::clock::SystemClock,
     sink: F,
-) -> Result<workflow::replay::Summary, CliError>
+) -> Result<packetcraftr::replay::Summary, CliError>
 where
-    F: FnMut(workflow::replay::FrameEvidence) -> Result<(), workflow::replay::Error>,
+    F: FnMut(packetcraftr::replay::FrameEvidence) -> Result<(), packetcraftr::replay::Error>,
 {
-    workflow::replay::run_with_selector(
+    packetcraftr::replay::run_with_selector(
         reader,
         options,
         selector,

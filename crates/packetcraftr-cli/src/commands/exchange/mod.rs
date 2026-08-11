@@ -6,7 +6,7 @@ pub(super) mod arguments;
 use std::sync::Arc;
 use std::time::Duration;
 
-use packetcraftr::{live as client, output, packet};
+use packetcraftr::{core, output};
 
 use self::arguments::ExchangeArgs;
 use super::super::errors::CliError;
@@ -35,7 +35,7 @@ pub(super) fn run(
         policy,
     } = send;
     let limits = limits.into_limits();
-    let mut options = client::exchange::Options {
+    let mut options = packetcraftr::exchange::Options {
         timeout: Duration::from_millis(timeout_ms),
         max_template_packets: 1,
         max_responses,
@@ -43,7 +43,7 @@ pub(super) fn run(
         max_capture_queue_frames: limits.max_frames,
         max_captured_bytes: limits.max_bytes,
         capture_overflow_policy: limits.overflow_policy,
-        ..client::exchange::Options::default()
+        ..packetcraftr::exchange::Options::default()
     };
     options.decode.max_packet_size = limits.snap_length;
     // Validate before packet parsing can trigger hostname/interface work.
@@ -51,18 +51,18 @@ pub(super) fn run(
 
     let registry = default_registry_arc()?;
     let request = prepare_route_request(route, policy.into_policy(), &registry)?;
-    options.send = client::send::Options {
+    options.send = packetcraftr::send::Options {
         destination: request.destination,
         plan: request.options,
-        build: packet::build::Options {
+        build: core::build::Options {
             mode: mode.into(),
-            ..packet::build::Options::default()
+            ..core::build::Options::default()
         },
         allow_permissive_live,
     };
     let client = system_client(Arc::clone(&registry), request.policy);
     let result = client
-        .exchange(&packet::template::Template::new(request.packet), options)
+        .exchange(&core::template::Template::new(request.packet), options)
         .map_err(CliError::classified)?;
 
     if matches!(
@@ -115,7 +115,7 @@ pub(super) fn run(
 
 fn render_exchange_stream(
     result: output::exchange::Result,
-    diagnostics: Vec<packet::diagnostic::Diagnostic>,
+    diagnostics: Vec<core::diagnostic::Diagnostic>,
     stats: output::envelope::Stats,
 ) -> Result<(), CliError> {
     let output::exchange::Result {

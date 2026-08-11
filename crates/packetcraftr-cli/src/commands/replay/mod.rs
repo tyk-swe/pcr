@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 use packetcraftr::{
     analysis::pcap::{Reader, ReaderOptions},
-    live as workflow, output,
+    output,
 };
 
 use self::arguments::ReplayArgs;
@@ -59,7 +59,7 @@ pub(super) fn run(arguments: ReplayArgs, output: output::contract::Format) -> Re
     };
     let requested_interface = requested_replay_interface(&arguments.interface)?;
     policy.validate().map_err(CliError::classified)?;
-    let limits = workflow::replay::Limits {
+    let limits = packetcraftr::replay::Limits {
         max_frames: policy.max_packets_per_operation,
         max_bytes: policy.max_bytes_per_operation,
         max_frame_bytes: arguments.max_frame_bytes,
@@ -83,8 +83,8 @@ pub(super) fn run(arguments: ReplayArgs, output: output::contract::Format) -> Re
     )
     .map_err(CliError::classified)?;
     let mut authorizer =
-        workflow::replay::SystemAuthorizer::new(policy, arguments.allow_malformed_live);
-    let options = workflow::replay::Options {
+        packetcraftr::replay::SystemAuthorizer::new(policy, arguments.allow_malformed_live);
+    let options = packetcraftr::replay::Options {
         interface: requested_interface.clone(),
         link_mode: arguments.link_mode.into(),
         timing,
@@ -95,9 +95,9 @@ pub(super) fn run(arguments: ReplayArgs, output: output::contract::Format) -> Re
         .map(|selector| DisplayFilterSelector { selector });
     let selector = adapter
         .as_mut()
-        .map(|adapter| adapter as &mut dyn workflow::replay::Selector);
-    let mut transmitter = workflow::replay::SystemTransmitter::new();
-    let mut clock = workflow::clock::SystemClock;
+        .map(|adapter| adapter as &mut dyn packetcraftr::replay::Selector);
+    let mut transmitter = packetcraftr::replay::SystemTransmitter::new();
+    let mut clock = packetcraftr::clock::SystemClock;
     let started = Instant::now();
 
     match output {
@@ -199,7 +199,7 @@ pub(super) fn run(arguments: ReplayArgs, output: output::contract::Format) -> Re
     }
 }
 
-pub(crate) fn replay_cli_error(error: workflow::replay::Error) -> CliError {
+pub(crate) fn replay_cli_error(error: packetcraftr::replay::Error) -> CliError {
     let sequence = error.sequence();
     CliError::classified_at_optional_sequence(error, sequence)
 }

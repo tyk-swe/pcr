@@ -12,8 +12,11 @@ use std::io;
 
 use packetcraftr::{
     analysis::pcap::{Limits, Reader, ReaderOptions, rewrite},
-    output, packet,
-    packet::error::{Classification, Kind},
+    core::{
+        self,
+        error::{Classification, Kind},
+    },
+    output,
 };
 
 use self::arguments::ReadArgs;
@@ -68,7 +71,7 @@ pub(super) fn run(arguments: ReadArgs, output: output::contract::Format) -> Resu
             )?),
             None => None,
         };
-        Some((packet::decode::Decoder::new(registry), compiled))
+        Some((core::decode::Decoder::new(registry), compiled))
     } else {
         None
     };
@@ -194,7 +197,7 @@ pub(super) fn run(arguments: ReadArgs, output: output::contract::Format) -> Resu
                 }
                 if let Some(compiled) = compiled
                     && !compiled
-                        .matches(&packet::filter::Context {
+                        .matches(&core::filter::Context {
                             decoded: &decoded,
                             number: frames,
                             tcp_stream: None,

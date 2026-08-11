@@ -3,14 +3,14 @@
 
 use std::time::{Duration, Instant};
 
-use packetcraftr::{live as client, network as net, output, packet, packet::frame::Frame};
+use packetcraftr::{core, core::frame::Frame, netio as net, output};
 
 use crate::errors::CliError;
 use crate::filtering::FrameSelector;
 
 #[derive(Debug)]
 pub(super) struct CaptureOutcome {
-    pub(super) diagnostics: Vec<packet::diagnostic::Diagnostic>,
+    pub(super) diagnostics: Vec<core::diagnostic::Diagnostic>,
     pub(super) stats: output::envelope::Stats,
 }
 
@@ -20,8 +20,8 @@ pub(super) struct CaptureBudget {
     pub(super) max_bytes: u64,
 }
 
-impl From<&client::policy::Policy> for CaptureBudget {
-    fn from(policy: &client::policy::Policy) -> Self {
+impl From<&packetcraftr::policy::Policy> for CaptureBudget {
+    fn from(policy: &packetcraftr::policy::Policy) -> Self {
         Self {
             max_frames: policy.max_packets_per_operation,
             max_bytes: policy.max_bytes_per_operation,
@@ -92,7 +92,7 @@ where
             )
         })?;
         if next_bytes > budget.max_bytes {
-            let error = CliError::classified(client::policy::Error::ByteLimit {
+            let error = CliError::classified(packetcraftr::policy::Error::ByteLimit {
                 actual: next_bytes,
                 limit: budget.max_bytes,
             })
@@ -156,7 +156,7 @@ where
             )
             .at_sequence(matched));
         }
-        diagnostics.push(packet::diagnostic::Diagnostic::warning(
+        diagnostics.push(core::diagnostic::Diagnostic::warning(
             "capture.evidence_incomplete",
             format!(
                 "capture backend reported {} overflow event(s), {} receiver drop(s), {} total dropped frame(s), and {} dropped byte(s) under {:?}",

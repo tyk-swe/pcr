@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use clap::{Args, ValueEnum};
-use packetcraftr::{analysis::pcap as capture, network as net};
+use packetcraftr::{analysis::pcap as capture, netio as net};
 
 #[derive(Clone, Debug, Args)]
 pub(crate) struct CaptureLimitArgs {

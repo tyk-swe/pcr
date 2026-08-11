@@ -7,9 +7,9 @@ use std::fmt;
 
 use serde::Serialize;
 
-use packetcraftr_live::fuzz as live_fuzz;
-use packetcraftr_packet::fuzz as packet_fuzz;
-use packetcraftr_packet::{
+use crate::fuzz as live_fuzz;
+use packetcraftr_core::fuzz as packet_fuzz;
+use packetcraftr_core::{
     diagnostic::Diagnostic as PacketDiagnostic, document::Packet as PacketDocument,
 };
 
@@ -27,10 +27,10 @@ pub enum Mode {
     Live,
 }
 
-impl From<packetcraftr_live::fuzz::Mode> for Mode {
-    fn from(value: packetcraftr_live::fuzz::Mode) -> Self {
+impl From<crate::fuzz::Mode> for Mode {
+    fn from(value: crate::fuzz::Mode) -> Self {
         match value {
-            packetcraftr_live::fuzz::Mode::Live => Self::Live,
+            crate::fuzz::Mode::Live => Self::Live,
         }
     }
 }
@@ -47,13 +47,13 @@ pub enum Outcome {
     Error,
 }
 
-impl From<packetcraftr_live::fuzz::CaseOutcome> for Outcome {
-    fn from(value: packetcraftr_live::fuzz::CaseOutcome) -> Self {
+impl From<crate::fuzz::CaseOutcome> for Outcome {
+    fn from(value: crate::fuzz::CaseOutcome) -> Self {
         match value {
-            packetcraftr_live::fuzz::CaseOutcome::Built => Self::Built,
-            packetcraftr_live::fuzz::CaseOutcome::Rejected => Self::Rejected,
-            packetcraftr_live::fuzz::CaseOutcome::Response => Self::Response,
-            packetcraftr_live::fuzz::CaseOutcome::Timeout => Self::Timeout,
+            crate::fuzz::CaseOutcome::Built => Self::Built,
+            crate::fuzz::CaseOutcome::Rejected => Self::Rejected,
+            crate::fuzz::CaseOutcome::Response => Self::Response,
+            crate::fuzz::CaseOutcome::Timeout => Self::Timeout,
         }
     }
 }
@@ -112,8 +112,8 @@ pub struct Mutation {
     pub protocol: String,
     pub field: String,
     pub strategy: Strategy,
-    pub original: packetcraftr_packet::field::Value,
-    pub value: packetcraftr_packet::field::Value,
+    pub original: packetcraftr_core::field::Value,
+    pub value: packetcraftr_core::field::Value,
 }
 
 impl From<packet_fuzz::Mutation> for Mutation {
@@ -143,7 +143,7 @@ pub struct Case {
     pub seed: u64,
     pub mutation: Mutation,
     pub reproduction: Reproduction,
-    pub shrink_values: Vec<packetcraftr_packet::field::Value>,
+    pub shrink_values: Vec<packetcraftr_core::field::Value>,
     pub recipe: PacketDocument,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub frame: Option<Wire>,
@@ -268,10 +268,10 @@ fn convert_case(
     operation_seed: u64,
     case: packet_fuzz::Case,
     outcome: Outcome,
-    sent: Option<packetcraftr_packet::frame::Frame>,
-    responses: Vec<packetcraftr_packet::frame::Frame>,
-    unmatched: Vec<packetcraftr_packet::frame::Frame>,
-    undecoded: Vec<packetcraftr_packet::frame::Frame>,
+    sent: Option<packetcraftr_core::frame::Frame>,
+    responses: Vec<packetcraftr_core::frame::Frame>,
+    unmatched: Vec<packetcraftr_core::frame::Frame>,
+    undecoded: Vec<packetcraftr_core::frame::Frame>,
 ) -> std::result::Result<Case, ContractError> {
     let packet_fuzz::Case {
         index,

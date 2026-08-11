@@ -3,7 +3,7 @@
 
 use std::fmt;
 
-use packetcraftr::{output, packet};
+use packetcraftr::{core, output};
 use serde::Serialize;
 
 use super::super::errors::CliError;
@@ -89,7 +89,7 @@ pub(crate) fn emit_json_compact(value: &impl Serialize) -> Result<(), CliError> 
 pub(crate) fn emit_aggregate<T: Serialize>(
     command: output::contract::Command,
     result: T,
-    diagnostics: Vec<packet::diagnostic::Diagnostic>,
+    diagnostics: Vec<core::diagnostic::Diagnostic>,
 ) -> Result<(), CliError> {
     emit_json(&output::envelope::Aggregate::success(
         command,
@@ -101,7 +101,7 @@ pub(crate) fn emit_aggregate<T: Serialize>(
 pub(crate) fn emit_aggregate_with_stats<T: Serialize>(
     command: output::contract::Command,
     result: T,
-    diagnostics: Vec<packet::diagnostic::Diagnostic>,
+    diagnostics: Vec<core::diagnostic::Diagnostic>,
     stats: output::envelope::Stats,
 ) -> Result<(), CliError> {
     emit_json(&output::envelope::Aggregate::success(command, result, diagnostics).with_stats(stats))

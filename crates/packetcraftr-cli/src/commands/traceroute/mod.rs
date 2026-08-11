@@ -10,7 +10,7 @@ mod rendering;
 use std::sync::Arc;
 use std::time::Duration;
 
-use packetcraftr::{live as client, live as workflow, network as net, output, packet};
+use packetcraftr::{core, netio as net, output};
 
 use self::arguments::TracerouteArgs;
 use crate::errors::CliError;
@@ -45,25 +45,25 @@ pub(super) fn run(
         policy,
     } = arguments;
     let target = parse_workflow_target(target)?;
-    let strategy: workflow::traceroute::Strategy = strategy.into();
+    let strategy: packetcraftr::traceroute::Strategy = strategy.into();
     let destination_port = match strategy {
-        workflow::traceroute::Strategy::Udp => {
-            Some(port.unwrap_or(workflow::traceroute::DEFAULT_TRACEROUTE_UDP_PORT))
+        packetcraftr::traceroute::Strategy::Udp => {
+            Some(port.unwrap_or(packetcraftr::traceroute::DEFAULT_TRACEROUTE_UDP_PORT))
         }
-        workflow::traceroute::Strategy::Tcp => {
-            Some(port.unwrap_or(workflow::traceroute::DEFAULT_TRACEROUTE_TCP_PORT))
+        packetcraftr::traceroute::Strategy::Tcp => {
+            Some(port.unwrap_or(packetcraftr::traceroute::DEFAULT_TRACEROUTE_TCP_PORT))
         }
-        workflow::traceroute::Strategy::Icmp => port,
+        packetcraftr::traceroute::Strategy::Icmp => port,
     };
     let queue_limits = limits.into_limits();
-    let trace_limits = workflow::traceroute::Limits {
+    let trace_limits = packetcraftr::traceroute::Limits {
         max_probes,
         max_duration: Duration::from_millis(max_duration_ms),
         max_evidence_frames: queue_limits.max_frames,
         max_evidence_bytes: queue_limits.max_bytes,
         max_undecoded,
     };
-    let request = workflow::traceroute::Request {
+    let request = packetcraftr::traceroute::Request {
         target,
         strategy,
         address_family: family.into(),
@@ -88,14 +88,14 @@ pub(super) fn run(
 
     let registry = default_registry_arc()?;
     let exchange = workflow_exchange_options(
-        client::send::Options {
+        packetcraftr::send::Options {
             destination: None,
             plan: net::route::Options {
                 link_mode: route.link_mode.into(),
                 interface: None,
                 preferred_source: route.source,
             },
-            build: packet::build::Options::default(),
+            build: core::build::Options::default(),
             allow_permissive_live: false,
         },
         request.timeout,
@@ -108,10 +108,10 @@ pub(super) fn run(
         exchange,
         interface: DeferredInterface::new(route.interface),
     };
-    let resolver = client::target::SystemResolver;
-    let mut authorizer = workflow::traceroute::PolicyAuthorizer::new(&policy, &resolver);
-    let mut clock = workflow::clock::SystemClock;
-    let result = workflow::traceroute::run(
+    let resolver = packetcraftr::target::SystemResolver;
+    let mut authorizer = packetcraftr::traceroute::PolicyAuthorizer::new(&policy, &resolver);
+    let mut clock = packetcraftr::clock::SystemClock;
+    let result = packetcraftr::traceroute::run(
         &request,
         &mut authorizer,
         &registry,
@@ -135,7 +135,7 @@ pub(super) fn run(
     }
 }
 
-pub(crate) fn traceroute_cli_error(error: workflow::traceroute::Error) -> CliError {
+pub(crate) fn traceroute_cli_error(error: packetcraftr::traceroute::Error) -> CliError {
     let sequence = error.sequence();
     CliError::classified_at_optional_sequence(error, sequence)
 }

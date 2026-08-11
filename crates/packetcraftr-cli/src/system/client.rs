@@ -4,9 +4,9 @@
 use std::sync::Arc;
 
 use packetcraftr::{
-    live::{self as client, Client},
-    network as net, packet,
-    packet::protocol,
+    Client,
+    core::{self, protocol},
+    netio as net,
 };
 
 use super::super::errors::CliError;
@@ -17,7 +17,7 @@ pub(crate) type SystemExchangeIo = (SystemPacketIo, net::capture::SystemProvider
 pub(crate) type SystemClient =
     Client<net::route::SystemProvider, net::neighbor::SystemResolver, SystemExchangeIo>;
 
-pub(crate) fn default_registry_arc() -> Result<Arc<packet::registry::Registry>, CliError> {
+pub(crate) fn default_registry_arc() -> Result<Arc<core::registry::Registry>, CliError> {
     protocol::builtin::registry()
         .map(Arc::new)
         .map_err(|source| {
@@ -26,8 +26,8 @@ pub(crate) fn default_registry_arc() -> Result<Arc<packet::registry::Registry>, 
 }
 
 pub(crate) fn system_client(
-    registry: Arc<packet::registry::Registry>,
-    policy: client::policy::Policy,
+    registry: Arc<core::registry::Registry>,
+    policy: packetcraftr::policy::Policy,
 ) -> SystemClient {
     Client::new(
         registry,

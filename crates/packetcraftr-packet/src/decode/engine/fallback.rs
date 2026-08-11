@@ -46,6 +46,25 @@ pub(super) fn append_raw(
     layouts.push(layout);
 }
 
+pub(super) fn append_malformed(
+    packet: &mut Packet,
+    layouts: &mut Vec<LayerLayout>,
+    intended: Option<ProtocolId>,
+    bytes: Bytes,
+    reason: String,
+    absolute_offset: usize,
+) {
+    let index = packet.len();
+    let end = absolute_offset.saturating_add(bytes.len());
+    packet.push(MalformedLayer::new(intended, bytes, reason));
+    layouts.push(LayerLayout {
+        index,
+        protocol: ProtocolId::new(BuiltinProtocol::Malformed.as_str()),
+        range: ByteRange::new(absolute_offset, end),
+        fields: Vec::new(),
+    });
+}
+
 fn bytes_layer_layout(
     index: usize,
     protocol: BuiltinProtocol,
@@ -77,18 +96,14 @@ pub(super) fn append_missing_required_layer(
     intended: ProtocolId,
     absolute_offset: usize,
 ) {
-    let index = packet.len();
-    packet.push(MalformedLayer::new(
+    append_malformed(
+        packet,
+        layouts,
         Some(intended),
         Bytes::new(),
-        "required child header is absent",
-    ));
-    layouts.push(LayerLayout {
-        index,
-        protocol: ProtocolId::new(BuiltinProtocol::Malformed.as_str()),
-        range: ByteRange::new(absolute_offset, absolute_offset),
-        fields: Vec::new(),
-    });
+        "required child header is absent".to_owned(),
+        absolute_offset,
+    );
 }
 
 pub(super) fn raw_decoded_frame(frame: Frame, diagnostic: Diagnostic) -> DecodedPacket {

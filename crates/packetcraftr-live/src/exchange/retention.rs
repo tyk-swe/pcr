@@ -7,7 +7,7 @@ use packetcraftr_network::capture::RecordIdentity;
 use packetcraftr_packet::frame::Frame;
 use packetcraftr_packet::{decode::Result as DecodedPacket, diagnostic::push_diagnostic_once};
 
-use super::accumulator::ExchangeAccumulator;
+use super::accumulator::{ExchangeAccumulator, UnsolicitedEvidence};
 use super::contract::ExchangeOptions;
 use crate::evidence::reserve_capture_evidence;
 
@@ -49,8 +49,8 @@ impl ExchangeAccumulator {
         }
         if self.reserve_decoded_evidence(decoded.original.len(), options) {
             self.mark_record_retained(identity);
-            self.unsolicited.push(decoded);
-            self.unsolicited_freshness.push(freshness);
+            self.unsolicited
+                .push(UnsolicitedEvidence { decoded, freshness });
         }
     }
 

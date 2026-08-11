@@ -5,13 +5,98 @@
 
 use std::collections::BTreeMap;
 use std::ops::Bound::{Excluded, Unbounded};
+use std::time::Instant;
 
 use bytes::Bytes;
 
-use super::Error;
-use super::plan::FragmentMergePlan;
+use super::plan::{FragmentAccountingPlan, FragmentMergePlan, FragmentRetentionPlan};
+use super::{Datagram, DatagramState, Error, Event, Fragment, Reassembler, is_complete};
 
-pub(super) fn commit_fragment(
+impl Reassembler {
+    pub(super) fn commit_fragment(
+        &mut self,
+        fragment: Fragment,
+        now: Instant,
+        plan: FragmentRetentionPlan,
+    ) -> Result<Option<Event>, Error> {
+        let Fragment {
+            key, offset, bytes, ..
+        } = fragment;
+        let FragmentRetentionPlan {
+            has_existing_flow,
+            final_length,
+            merge,
+            accounting,
+        } = plan;
+        let FragmentAccountingPlan {
+            stored_bytes,
+            aggregate_bytes,
+            new_memory_charge,
+            aggregate_memory_charge,
+            fragment_count,
+        } = accounting;
+
+        if has_existing_flow {
+            let complete = {
+                let state = self
+                    .flows
+                    .get_mut(&key)
+                    .expect("validated fragment flow remains present");
+                commit_merge(&mut state.segments, offset, bytes, merge)?;
+                state.final_length = final_length;
+                state.stored_bytes = stored_bytes;
+                state.fragment_count = fragment_count;
+                state.last_update = state.last_update.max(now);
+                state.had_conflicting_overlap |= merge.has_conflicting_overlap;
+                state
+                    .final_length
+                    .filter(|length| is_complete(&state.segments, *length))
+            };
+
+            self.aggregate_bytes = aggregate_bytes;
+            self.aggregate_memory_charge = aggregate_memory_charge;
+            if let Some(length) = complete {
+                let state = self
+                    .flows
+                    .remove(&key)
+                    .expect("completed fragment flow remains present");
+                self.aggregate_bytes = self.aggregate_bytes.saturating_sub(state.stored_bytes);
+                self.aggregate_memory_charge = self
+                    .aggregate_memory_charge
+                    .saturating_sub(new_memory_charge);
+                let (_, datagram_bytes) = state
+                    .segments
+                    .into_iter()
+                    .next()
+                    .expect("complete datagram retains its coalesced segment");
+                debug_assert_eq!(datagram_bytes.len(), length as usize);
+                return Ok(Some(Event::Complete(Datagram {
+                    key,
+                    bytes: datagram_bytes,
+                    fragment_count: state.fragment_count,
+                    had_conflicting_overlap: state.had_conflicting_overlap,
+                })));
+            }
+            return Ok(None);
+        }
+
+        let mut state = DatagramState {
+            segments: BTreeMap::new(),
+            final_length,
+            fragment_count,
+            stored_bytes,
+            last_update: now,
+            had_conflicting_overlap: merge.has_conflicting_overlap,
+        };
+        commit_merge(&mut state.segments, offset, bytes, merge)?;
+        self.flows.insert(key, state);
+        self.aggregate_bytes = aggregate_bytes;
+        self.aggregate_memory_charge = aggregate_memory_charge;
+        Ok(None)
+    }
+}
+
+fn commit_merge(
     segments: &mut BTreeMap<u32, Bytes>,
     offset: u32,
     fragment: Bytes,

@@ -23,15 +23,19 @@ pub(super) struct UnsolicitedFreshness {
     pub(super) eligible_requests: usize,
 }
 
+pub(super) struct UnsolicitedEvidence {
+    pub(super) decoded: DecodedPacket,
+    pub(super) freshness: Option<UnsolicitedFreshness>,
+}
+
 pub(crate) type WorkflowResponseMatcher<'a> =
     dyn FnMut(usize, &Packet, &DecodedPacket) -> bool + 'a;
 
 pub(crate) struct ExchangeAccumulator {
     pub(crate) responses: Vec<MatchedResponse>,
-    pub(crate) unsolicited: Vec<DecodedPacket>,
+    pub(super) unsolicited: Vec<UnsolicitedEvidence>,
     pub(crate) undecoded: Vec<Frame>,
     pub(crate) diagnostics: Vec<packetcraftr_packet::diagnostic::Diagnostic>,
-    pub(super) unsolicited_freshness: Vec<Option<UnsolicitedFreshness>>,
     pub(super) retained_frames: usize,
     pub(super) retained_bytes: usize,
     pub(crate) response_counts: Vec<usize>,
@@ -72,7 +76,6 @@ impl ExchangeAccumulator {
             unsolicited: Vec::new(),
             undecoded: Vec::new(),
             diagnostics: Vec::new(),
-            unsolicited_freshness: Vec::new(),
             retained_frames: 0,
             retained_bytes: 0,
             response_counts: vec![0; requests],
@@ -96,12 +99,15 @@ impl ExchangeAccumulator {
         unanswered: Vec<usize>,
         stats: Stats,
     ) -> ExchangeResult {
-        debug_assert_eq!(self.unsolicited.len(), self.unsolicited_freshness.len());
         ExchangeResult {
             sent,
             responses: self.responses,
             unanswered,
-            unsolicited: self.unsolicited,
+            unsolicited: self
+                .unsolicited
+                .into_iter()
+                .map(|evidence| evidence.decoded)
+                .collect(),
             undecoded: self.undecoded,
             diagnostics: self.diagnostics,
             stats,

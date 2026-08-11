@@ -46,8 +46,8 @@ impl std::error::Error for RouteFailure {}
 struct Routes {
     decision: Result<Decision, RouteFailure>,
     interface_decision: Result<Option<Decision>, RouteFailure>,
-    lookup_calls: &'static AtomicUsize,
-    interface_calls: &'static AtomicUsize,
+    lookup_calls: Arc<AtomicUsize>,
+    interface_calls: Arc<AtomicUsize>,
 }
 
 impl Provider for Routes {
@@ -68,9 +68,6 @@ impl Provider for Routes {
         self.interface_decision.clone()
     }
 }
-
-static LOOKUP_CALLS: AtomicUsize = AtomicUsize::new(0);
-static INTERFACE_CALLS: AtomicUsize = AtomicUsize::new(0);
 
 fn interface() -> InterfaceId {
     InterfaceId {
@@ -95,13 +92,11 @@ fn decision(capability: Capability) -> Decision {
 }
 
 fn routes(decision: Result<Decision, RouteFailure>) -> Routes {
-    LOOKUP_CALLS.store(0, Ordering::SeqCst);
-    INTERFACE_CALLS.store(0, Ordering::SeqCst);
     Routes {
         interface_decision: decision.clone().map(Some),
         decision,
-        lookup_calls: &LOOKUP_CALLS,
-        interface_calls: &INTERFACE_CALLS,
+        lookup_calls: Arc::new(AtomicUsize::new(0)),
+        interface_calls: Arc::new(AtomicUsize::new(0)),
     }
 }
 
@@ -537,7 +532,7 @@ fn planner_rejects_invalid_input_before_route_lookup() {
         ),
         Err(PlanError::MissingDestination)
     ));
-    assert_eq!(LOOKUP_CALLS.load(Ordering::SeqCst), 0);
+    assert_eq!(provider.lookup_calls.load(Ordering::SeqCst), 0);
 
     assert!(matches!(
         plan_route(
@@ -551,7 +546,7 @@ fn planner_rejects_invalid_input_before_route_lookup() {
         ),
         Err(PlanError::PreferredSourceFamilyMismatch { .. })
     ));
-    assert_eq!(LOOKUP_CALLS.load(Ordering::SeqCst), 0);
+    assert_eq!(provider.lookup_calls.load(Ordering::SeqCst), 0);
 
     let mut ethernet = Packet::new();
     ethernet.push(Ethernet {
@@ -571,7 +566,7 @@ fn planner_rejects_invalid_input_before_route_lookup() {
         ),
         Err(PlanError::EthernetInLayer3)
     ));
-    assert_eq!(LOOKUP_CALLS.load(Ordering::SeqCst), 0);
+    assert_eq!(provider.lookup_calls.load(Ordering::SeqCst), 0);
 }
 
 #[test]
@@ -687,8 +682,8 @@ fn planner_selects_auto_layer3_for_ip_root_and_enforces_capability() {
             &Routes {
                 decision: Ok(layer3_only.clone()),
                 interface_decision: Ok(Some(layer3_only)),
-                lookup_calls: &LOOKUP_CALLS,
-                interface_calls: &INTERFACE_CALLS,
+                lookup_calls: Arc::new(AtomicUsize::new(0)),
+                interface_calls: Arc::new(AtomicUsize::new(0)),
             }
         ),
         Err(PlanError::Layer2Unsupported)

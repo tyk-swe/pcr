@@ -8,10 +8,24 @@ use std::ops::Bound::{Excluded, Included};
 
 use bytes::Bytes;
 
-use super::{Error, OverlapPolicy, Reassembler};
+use super::{Error, Fragment, OverlapPolicy, Reassembler, datagram_memory_charge};
 
 pub(super) const DATAGRAM_STATE_METADATA_CHARGE: usize = 128;
 pub(super) const FRAGMENT_SEGMENT_METADATA_CHARGE: usize = 64;
+
+#[derive(Clone, Copy, Debug)]
+pub(super) enum FragmentPlan {
+    Complete,
+    Retain(FragmentRetentionPlan),
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(super) struct FragmentRetentionPlan {
+    pub(super) has_existing_flow: bool,
+    pub(super) final_length: Option<u32>,
+    pub(super) merge: FragmentMergePlan,
+    pub(super) accounting: FragmentAccountingPlan,
+}
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct FragmentAccountingPlan {
@@ -53,7 +67,109 @@ impl FragmentMergePlan {
 }
 
 impl Reassembler {
-    pub(super) fn plan_fragment_accounting(
+    pub(super) fn plan_fragment(&self, fragment: &Fragment) -> Result<FragmentPlan, Error> {
+        if fragment.bytes.is_empty() {
+            return Err(Error::EmptyFragment);
+        }
+        if fragment.more_fragments && !fragment.bytes.len().is_multiple_of(8) {
+            return Err(Error::UnalignedNonFinalFragment {
+                length: fragment.bytes.len(),
+            });
+        }
+        if !fragment.offset.is_multiple_of(8) {
+            return Err(Error::UnalignedFragmentOffset {
+                offset: fragment.offset,
+            });
+        }
+
+        let end = fragment
+            .offset
+            .checked_add(u32::try_from(fragment.bytes.len()).map_err(|_| Error::OffsetOverflow)?)
+            .ok_or(Error::OffsetOverflow)?;
+        if usize::try_from(end).map_or(true, |end| end > self.limits.max_bytes_per_flow) {
+            return Err(Error::FlowByteLimit {
+                limit: self.limits.max_bytes_per_flow,
+            });
+        }
+
+        let existing_state = self.flows.get(&fragment.key);
+        if existing_state.is_none() && !fragment.more_fragments && fragment.offset == 0 {
+            if self.limits.max_fragments_per_datagram == 0 {
+                return Err(Error::FragmentLimit { limit: 0 });
+            }
+            return Ok(FragmentPlan::Complete);
+        }
+        if existing_state.is_none() && self.flows.len() >= self.limits.max_flows {
+            return Err(Error::FlowLimit {
+                limit: self.limits.max_flows,
+            });
+        }
+
+        let old_memory_charge = existing_state.and_then(datagram_memory_charge).unwrap_or(0);
+        let previous_stored_bytes = existing_state.map_or(0, |state| state.stored_bytes);
+        let previous_fragment_count = existing_state.map_or(0, |state| state.fragment_count);
+        let existing_final_length = existing_state.and_then(|state| state.final_length);
+
+        if previous_fragment_count >= self.limits.max_fragments_per_datagram {
+            return Err(Error::FragmentLimit {
+                limit: self.limits.max_fragments_per_datagram,
+            });
+        }
+        if let Some(final_length) = existing_final_length
+            && end > final_length
+        {
+            return Err(Error::BeyondFinalLength { final_length });
+        }
+        if !fragment.more_fragments {
+            match existing_final_length {
+                Some(existing_length) if existing_length != end => {
+                    return Err(Error::ConflictingFinalLength {
+                        existing_length,
+                        new_length: end,
+                    });
+                }
+                _ => {
+                    let prior_fragment_extends_past_end = existing_state.is_some_and(|state| {
+                        state
+                            .segments
+                            .last_key_value()
+                            .is_some_and(|(offset, bytes)| {
+                                u64::from(*offset) + bytes.len() as u64 > u64::from(end)
+                            })
+                    });
+                    if prior_fragment_extends_past_end {
+                        return Err(Error::BeyondFinalLength { final_length: end });
+                    }
+                }
+            }
+        }
+
+        let merge = match existing_state {
+            Some(state) => plan_fragment_merge(
+                &state.segments,
+                fragment.offset,
+                &fragment.bytes,
+                self.overlap_policy,
+            )?,
+            None => FragmentMergePlan::disjoint(fragment.bytes.len(), fragment.offset, end, 1),
+        };
+        let accounting = self.plan_fragment_accounting(
+            previous_stored_bytes,
+            previous_fragment_count,
+            old_memory_charge,
+            &merge,
+        )?;
+        Ok(FragmentPlan::Retain(FragmentRetentionPlan {
+            has_existing_flow: existing_state.is_some(),
+            final_length: (!fragment.more_fragments)
+                .then_some(end)
+                .or(existing_final_length),
+            merge,
+            accounting,
+        }))
+    }
+
+    fn plan_fragment_accounting(
         &self,
         previous_stored_bytes: usize,
         previous_fragment_count: usize,

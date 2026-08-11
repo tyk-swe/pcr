@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Reorganized packet decoding, fragment reassembly, route planning, and live
+  exchange correlation around explicit phase and state owners. Public APIs,
+  serialized output contracts, and runtime behavior remain unchanged.
 - Added checked, all-or-nothing capture-statistics aggregation through
   `packetcraftr_network::capture::Statistics::checked_add`.
 - **Breaking:** Removed the undocumented `Client::exchange_for_workflow` seam;

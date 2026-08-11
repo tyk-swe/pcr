@@ -8,10 +8,7 @@ use bytes::Bytes;
 
 use super::Limits;
 
-use commit::commit_fragment;
-use plan::{
-    FragmentAccountingPlan, FragmentMergePlan, datagram_memory_charge_parts, plan_fragment_merge,
-};
+use plan::{FragmentPlan, datagram_memory_charge_parts};
 
 mod commit;
 mod contract;
@@ -67,182 +64,15 @@ impl Reassembler {
     /// Panics only if reassembly loses a validated flow or planned segment;
     /// input errors return [`enum@Error`].
     pub fn push(&mut self, fragment: Fragment, now: Instant) -> Result<Option<Event>, Error> {
-        let Fragment {
-            key,
-            offset,
-            more_fragments,
-            bytes,
-        } = fragment;
-
-        if bytes.is_empty() {
-            return Err(Error::EmptyFragment);
-        }
-        if more_fragments && !bytes.len().is_multiple_of(8) {
-            return Err(Error::UnalignedNonFinalFragment {
-                length: bytes.len(),
-            });
-        }
-        if !offset.is_multiple_of(8) {
-            return Err(Error::UnalignedFragmentOffset { offset });
-        }
-        let end = offset
-            .checked_add(u32::try_from(bytes.len()).map_err(|_| Error::OffsetOverflow)?)
-            .ok_or(Error::OffsetOverflow)?;
-        if usize::try_from(end).map_or(true, |end| end > self.limits.max_bytes_per_flow) {
-            return Err(Error::FlowByteLimit {
-                limit: self.limits.max_bytes_per_flow,
-            });
-        }
-        let has_existing_flow = self.flows.contains_key(&key);
-        if !has_existing_flow && !more_fragments && offset == 0 {
-            if self.limits.max_fragments_per_datagram == 0 {
-                return Err(Error::FragmentLimit { limit: 0 });
-            }
-            return Ok(Some(Event::Complete(Datagram {
-                key,
-                bytes,
+        match self.plan_fragment(&fragment)? {
+            FragmentPlan::Complete => Ok(Some(Event::Complete(Datagram {
+                key: fragment.key,
+                bytes: fragment.bytes,
                 fragment_count: 1,
                 had_conflicting_overlap: false,
-            })));
+            }))),
+            FragmentPlan::Retain(plan) => self.commit_fragment(fragment, now, plan),
         }
-        if !has_existing_flow && self.flows.len() >= self.limits.max_flows {
-            return Err(Error::FlowLimit {
-                limit: self.limits.max_flows,
-            });
-        }
-
-        let (
-            old_memory_charge,
-            previous_stored_bytes,
-            previous_fragment_count,
-            final_length,
-            merge,
-        ) = {
-            let existing_state = self.flows.get(&key);
-            let old_memory_charge = existing_state.and_then(datagram_memory_charge).unwrap_or(0);
-            let previous_stored_bytes = existing_state.map_or(0, |state| state.stored_bytes);
-            let previous_fragment_count = existing_state.map_or(0, |state| state.fragment_count);
-            let existing_final_length = existing_state.and_then(|state| state.final_length);
-
-            if previous_fragment_count >= self.limits.max_fragments_per_datagram {
-                return Err(Error::FragmentLimit {
-                    limit: self.limits.max_fragments_per_datagram,
-                });
-            }
-            if let Some(final_length) = existing_final_length
-                && end > final_length
-            {
-                return Err(Error::BeyondFinalLength { final_length });
-            }
-            if !more_fragments {
-                match existing_final_length {
-                    Some(existing_length) if existing_length != end => {
-                        return Err(Error::ConflictingFinalLength {
-                            existing_length,
-                            new_length: end,
-                        });
-                    }
-                    _ => {
-                        let prior_fragment_extends_past_end = existing_state.is_some_and(|state| {
-                            state
-                                .segments
-                                .last_key_value()
-                                .is_some_and(|(offset, bytes)| {
-                                    u64::from(*offset) + bytes.len() as u64 > u64::from(end)
-                                })
-                        });
-                        if prior_fragment_extends_past_end {
-                            return Err(Error::BeyondFinalLength { final_length: end });
-                        }
-                    }
-                }
-            }
-
-            let merge = match existing_state {
-                Some(state) => {
-                    plan_fragment_merge(&state.segments, offset, &bytes, self.overlap_policy)?
-                }
-                None => FragmentMergePlan::disjoint(bytes.len(), offset, end, 1),
-            };
-            (
-                old_memory_charge,
-                previous_stored_bytes,
-                previous_fragment_count,
-                (!more_fragments).then_some(end).or(existing_final_length),
-                merge,
-            )
-        };
-
-        let FragmentAccountingPlan {
-            stored_bytes,
-            aggregate_bytes: aggregate,
-            new_memory_charge,
-            aggregate_memory_charge,
-            fragment_count,
-        } = self.plan_fragment_accounting(
-            previous_stored_bytes,
-            previous_fragment_count,
-            old_memory_charge,
-            &merge,
-        )?;
-
-        if has_existing_flow {
-            let complete = {
-                let state = self
-                    .flows
-                    .get_mut(&key)
-                    .expect("validated fragment flow remains present");
-                commit_fragment(&mut state.segments, offset, bytes, merge)?;
-                state.final_length = final_length;
-                state.stored_bytes = stored_bytes;
-                state.fragment_count = fragment_count;
-                state.last_update = state.last_update.max(now);
-                state.had_conflicting_overlap |= merge.has_conflicting_overlap;
-                state
-                    .final_length
-                    .filter(|length| is_complete(&state.segments, *length))
-            };
-
-            self.aggregate_bytes = aggregate;
-            self.aggregate_memory_charge = aggregate_memory_charge;
-            if let Some(length) = complete {
-                let state = self
-                    .flows
-                    .remove(&key)
-                    .expect("completed fragment flow remains present");
-                self.aggregate_bytes = self.aggregate_bytes.saturating_sub(state.stored_bytes);
-                self.aggregate_memory_charge = self
-                    .aggregate_memory_charge
-                    .saturating_sub(new_memory_charge);
-                let (_, datagram_bytes) = state
-                    .segments
-                    .into_iter()
-                    .next()
-                    .expect("complete datagram retains its coalesced segment");
-                debug_assert_eq!(datagram_bytes.len(), length as usize);
-                return Ok(Some(Event::Complete(Datagram {
-                    key,
-                    bytes: datagram_bytes,
-                    fragment_count: state.fragment_count,
-                    had_conflicting_overlap: state.had_conflicting_overlap,
-                })));
-            }
-            return Ok(None);
-        }
-
-        let mut state = DatagramState {
-            segments: BTreeMap::new(),
-            final_length,
-            fragment_count,
-            stored_bytes,
-            last_update: now,
-            had_conflicting_overlap: merge.has_conflicting_overlap,
-        };
-        commit_fragment(&mut state.segments, offset, bytes, merge)?;
-        self.flows.insert(key, state);
-        self.aggregate_bytes = aggregate;
-        self.aggregate_memory_charge = aggregate_memory_charge;
-        Ok(None)
     }
 
     fn remove_flows(&mut self, mut keys: Vec<DatagramKey>) -> Vec<Event> {

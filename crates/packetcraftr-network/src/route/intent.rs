@@ -13,7 +13,7 @@ use packetcraftr_packet::{
     semantics::{self, BuiltinProtocol},
 };
 
-use super::planner::PlanError;
+use super::error::PlanError;
 use crate::link::MacAddress;
 use crate::neighbor::{
     MAX_VLAN_TAGS as MAX_NEIGHBOR_VLAN_TAGS, VlanKind as NeighborVlanKind,

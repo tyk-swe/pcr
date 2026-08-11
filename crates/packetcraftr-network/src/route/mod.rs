@@ -3,6 +3,7 @@
 
 #![forbid(unsafe_code)]
 
+mod error;
 pub(crate) mod intent;
 pub(crate) mod materialize;
 pub(crate) mod models;
@@ -14,12 +15,13 @@ pub(crate) mod native_policy;
 pub(crate) mod planner;
 mod provider;
 
+pub use error::PlanError as Error;
 pub use materialize::{MaterializedRoute as Materialized, materialize};
 pub use models::{
     DestinationScope as Scope, PlanOptions as Options, PlannedRoute as Plan,
     RouteDecision as Decision, RouteProvider as Provider, RouteSelectionReason as SelectionReason,
 };
-pub use planner::{PlanError as Error, plan};
+pub use planner::plan;
 pub use provider::{NativeRouteError as SystemError, SystemRouteProvider as SystemProvider};
 
 pub(crate) use materialize::{MaterializedRoute, NeighborError, NeighborResolver};

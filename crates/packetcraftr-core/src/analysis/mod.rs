@@ -18,7 +18,7 @@
 //! frames, keeping a filtered run scoped to the selected conversations.
 
 pub(crate) use crate::error::BoundaryError;
-pub(crate) use reassembly::tcp::FlowKey;
+pub(crate) use reassembly::tcp::ScopedFlowKey;
 
 mod adapter;
 mod conversation_index;
@@ -28,6 +28,7 @@ pub mod follow;
 pub mod pcap;
 mod pipeline;
 pub mod reassembly;
+pub mod scope;
 pub mod stats;
 
 pub use error::AnalysisError as Error;

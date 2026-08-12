@@ -7,6 +7,8 @@ use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::analysis::scope::ScopeId;
+
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct DatagramKey {
     pub source: IpAddr,
@@ -15,9 +17,15 @@ pub struct DatagramKey {
     pub next_header: u8,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct ScopedDatagramKey {
+    pub scope: ScopeId,
+    pub datagram: DatagramKey,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Fragment {
-    pub key: DatagramKey,
+    pub key: ScopedDatagramKey,
     /// Byte offset in the reassembled payload.
     pub offset: u32,
     pub more_fragments: bool,
@@ -33,7 +41,7 @@ pub enum OverlapPolicy {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Datagram {
-    pub key: DatagramKey,
+    pub key: ScopedDatagramKey,
     pub bytes: Bytes,
     pub fragment_count: usize,
     pub had_conflicting_overlap: bool,
@@ -43,7 +51,7 @@ pub struct Datagram {
 pub enum Event {
     Complete(Datagram),
     Expired {
-        key: DatagramKey,
+        key: ScopedDatagramKey,
         received_bytes: usize,
         fragment_count: usize,
     },

@@ -10,10 +10,9 @@ use std::time::{Duration, SystemTime};
 use crate::protocol::network::{Ipv4, Ipv6};
 
 use crate::analysis::AnalysisError;
-use crate::analysis::adapter::{tcp_segment, udp_flow};
 use crate::analysis::conversation_index::CanonicalFlow;
 use crate::analysis::pipeline::FrameRecord;
-use crate::analysis::reassembly::tcp::FlowKey;
+use crate::analysis::reassembly::tcp::ScopedFlowKey;
 
 mod report;
 pub use report::*;
@@ -134,11 +133,11 @@ impl StatsCollector {
         }
 
         // Use pipeline-assigned stream IDs for stable conversation and port stats.
-        if let (Some(stream), Some(segment)) = (record.tcp_stream, tcp_segment(record.decoded)) {
-            self.conversation(TransportKind::Tcp, stream, &segment.flow, bytes, timestamp);
+        if let (Some(stream), Some(flow)) = (record.tcp_stream, record.tcp_flow) {
+            self.conversation(TransportKind::Tcp, stream, flow, bytes, timestamp);
         }
-        if let (Some(stream), Some(flow)) = (record.udp_stream, udp_flow(record.decoded)) {
-            self.conversation(TransportKind::Udp, stream, &flow, bytes, timestamp);
+        if let (Some(stream), Some(flow)) = (record.udp_stream, record.udp_flow) {
+            self.conversation(TransportKind::Udp, stream, flow, bytes, timestamp);
         }
         Ok(())
     }
@@ -167,7 +166,7 @@ impl StatsCollector {
         &mut self,
         transport: TransportKind,
         stream: u64,
-        flow: &FlowKey,
+        flow: &ScopedFlowKey,
         bytes: u64,
         timestamp: SystemTime,
     ) {
@@ -181,7 +180,7 @@ impl StatsCollector {
                 first_timestamp: timestamp,
                 last_timestamp: timestamp,
             });
-        if (flow.source, flow.source_port) == state.flow.first {
+        if (flow.flow.source, flow.flow.source_port) == state.flow.first {
             state.tally.a_to_b.add(bytes);
         } else {
             state.tally.b_to_a.add(bytes);
@@ -190,7 +189,7 @@ impl StatsCollector {
         state.last_timestamp = state.last_timestamp.max(timestamp);
 
         // Each distinct port a frame touches counts once.
-        let mut ports = [flow.source_port, flow.destination_port];
+        let mut ports = [flow.flow.source_port, flow.flow.destination_port];
         ports.sort_unstable();
         let distinct = if ports[0] == ports[1] {
             &ports[..1]

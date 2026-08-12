@@ -9,6 +9,8 @@ use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::analysis::scope::ScopeId;
+
 /// Directional four-tuple identifying a TCP flow.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct FlowKey {
@@ -30,10 +32,27 @@ impl FlowKey {
     }
 }
 
+/// Directional TCP flow qualified by its exact capture scope.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct ScopedFlowKey {
+    pub scope: ScopeId,
+    pub flow: FlowKey,
+}
+
+impl ScopedFlowKey {
+    #[must_use]
+    pub fn reverse(&self) -> Self {
+        Self {
+            scope: self.scope,
+            flow: self.flow.reverse(),
+        }
+    }
+}
+
 /// One TCP segment offered for reassembly.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Segment {
-    pub flow: FlowKey,
+    pub flow: ScopedFlowKey,
     pub sequence: u32,
     pub payload: Bytes,
     pub syn: bool,
@@ -45,27 +64,27 @@ pub struct Segment {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
     Data {
-        flow: FlowKey,
+        flow: ScopedFlowKey,
         sequence: u32,
         bytes: Bytes,
     },
     Retransmission {
-        flow: FlowKey,
+        flow: ScopedFlowKey,
         sequence: u32,
         bytes: usize,
         conflicting: bool,
     },
     Gap {
-        flow: FlowKey,
+        flow: ScopedFlowKey,
         expected_sequence: u32,
         next_sequence: u32,
     },
     Closed {
-        flow: FlowKey,
+        flow: ScopedFlowKey,
         reset: bool,
     },
     Evicted {
-        flow: FlowKey,
+        flow: ScopedFlowKey,
         pending_bytes: usize,
     },
 }

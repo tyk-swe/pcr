@@ -12,6 +12,9 @@ use thiserror::Error;
 /// Default maximum size of a captured frame (16 MiB).
 pub const DEFAULT_SIZE_LIMIT: usize = 16 * 1024 * 1024;
 
+/// Capture-wide interface identifier normalized across PCAPNG sections.
+pub type GlobalInterfaceId = u32;
+
 /// Open numeric libpcap link-layer type.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -60,7 +63,7 @@ pub struct Frame {
     original_length: u32,
     pub link_type: LinkType,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub interface: Option<u32>,
+    pub interface: Option<GlobalInterfaceId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub direction: Option<Direction>,
     bytes: Bytes,
@@ -168,7 +171,7 @@ impl<'de> Deserialize<'de> for Frame {
             captured_length: u32,
             original_length: u32,
             link_type: LinkType,
-            interface: Option<u32>,
+            interface: Option<GlobalInterfaceId>,
             direction: Option<Direction>,
             bytes: Bytes,
         }

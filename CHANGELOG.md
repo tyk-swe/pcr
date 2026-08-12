@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** Offline TCP and IP-fragment reassembly keys now require a
+  compact capture-scope identity created by the exact scope interner.
 - **Breaking:** Consolidated the workspace from six crates to four.
   `packetcraftr-packet` became `packetcraftr-core`, with packet mechanics at its
   crate root and the former `packetcraftr-analysis` API under
@@ -66,6 +68,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Indexed offline TCP and IP-fragment expiry deadlines so dense captures no
   longer scan every resident reassembly flow for each pushable segment.
+- Kept conversation indexing, follow/statistics/expert analysis, TCP
+  reassembly, and IP-fragment reassembly separate across PCAPNG interfaces and
+  semantic encapsulation paths such as VLAN stacks, tunnel identifiers, MPLS
+  labels, and PPPoE sessions.
 - Accepted valid injected-provider transmission reports across backward
   wall-clock adjustments by validating timing with monotonic endpoints.
 - Preserved TCP response correlation for Layer2 exchanges whose TCP

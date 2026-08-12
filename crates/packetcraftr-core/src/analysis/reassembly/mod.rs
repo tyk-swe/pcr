@@ -7,13 +7,11 @@
 //! decoded layers into [`fragment::Fragment`] or [`tcp::Segment`], then push
 //! each value into the corresponding reassembler.
 //!
-//! For TCP, [`tcp::FlowKey`] carries the IP endpoints and transport ports;
-//! [`tcp::Segment`] adds the sequence number, exact payload bytes, and control
-//! flags. For fragments, [`fragment::DatagramKey`] carries the IP endpoints,
-//! identification, and next-header value; [`fragment::Fragment`] adds the byte
-//! offset, more-fragments flag, and payload. Convert IPv4's eight-byte offset
-//! units to bytes. IPv6 supplies the equivalent values from its fragment
-//! extension header.
+//! For TCP, [`tcp::ScopedFlowKey`] qualifies the endpoint tuple with an exact
+//! capture scope; [`tcp::Segment`] adds sequence state, exact payload bytes,
+//! and control flags. [`fragment::ScopedDatagramKey`] does the same for an IP
+//! fragment identity. Convert IPv4's eight-byte offset units to bytes. IPv6
+//! supplies the equivalent values from its fragment extension header.
 
 pub mod fragment;
 pub mod tcp;

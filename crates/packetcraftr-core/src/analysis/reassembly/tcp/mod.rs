@@ -29,8 +29,8 @@ const TCP_SERIAL_HALF_SPACE: usize = 1usize << 31;
 #[derive(Debug)]
 pub struct Reassembler {
     limits: Limits,
-    flows: HashMap<FlowKey, TcpFlowState>,
-    expiry: ExpiryIndex<FlowKey>,
+    flows: HashMap<ScopedFlowKey, TcpFlowState>,
+    expiry: ExpiryIndex<ScopedFlowKey>,
     aggregate_bytes: usize,
     aggregate_memory_charge: usize,
 }

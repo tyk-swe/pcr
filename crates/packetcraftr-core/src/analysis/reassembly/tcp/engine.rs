@@ -7,7 +7,7 @@ use std::time::Instant;
 use super::pending::{commit::commit_push, plan_push};
 use super::state::{TcpFlowState, flow_memory_charge, retained_bytes};
 use super::{
-    Error, Event, FlowKey, Limits, Reassembler, Segment, TCP_FLOW_STATE_METADATA_CHARGE,
+    Error, Event, Limits, Reassembler, ScopedFlowKey, Segment, TCP_FLOW_STATE_METADATA_CHARGE,
     TCP_SERIAL_HALF_SPACE,
 };
 
@@ -24,7 +24,7 @@ impl Reassembler {
 
     pub fn open_flow(
         &mut self,
-        flow: FlowKey,
+        flow: ScopedFlowKey,
         first_payload_sequence: u32,
         now: Instant,
     ) -> Result<(), Error> {
@@ -154,7 +154,7 @@ impl Reassembler {
     /// because a new SYN reuses the four-tuple — retires state that would
     /// otherwise misinterpret the next generation's segments against the old
     /// sequence base. Evicting an unknown flow is a no-op.
-    pub fn evict_flow(&mut self, flow: &FlowKey) -> Vec<Event> {
+    pub fn evict_flow(&mut self, flow: &ScopedFlowKey) -> Vec<Event> {
         self.remove_flows(vec![flow.clone()])
     }
 
@@ -165,7 +165,7 @@ impl Reassembler {
     /// The sequence anchoring a tracked flow's current generation, when the
     /// flow is tracked at all. A caller compares this against a SYN's
     /// implied base to tell a retransmitted handshake from four-tuple reuse.
-    pub fn flow_base_sequence(&self, flow: &FlowKey) -> Option<u32> {
+    pub fn flow_base_sequence(&self, flow: &ScopedFlowKey) -> Option<u32> {
         self.flows.get(flow).map(|state| state.base_sequence)
     }
 
@@ -178,7 +178,7 @@ impl Reassembler {
         reason = "validate_limits rejects max_bytes_per_flow >= TCP_SERIAL_HALF_SPACE (2^31), \
                   so next_offset never reaches 2^32 and the narrowing is lossless"
     )]
-    pub fn flow_next_sequence(&self, flow: &FlowKey) -> Option<u32> {
+    pub fn flow_next_sequence(&self, flow: &ScopedFlowKey) -> Option<u32> {
         self.flows
             .get(flow)
             .map(|state| state.base_sequence.wrapping_add(state.next_offset as u32))
@@ -187,7 +187,7 @@ impl Reassembler {
     /// Whether a tracked flow has carried any payload or a FIN — as opposed
     /// to a bare opening SYN. A caller uses this to tell an in-progress
     /// handshake's half-open state from a previous connection's remains.
-    pub fn flow_observed_payload(&self, flow: &FlowKey) -> bool {
+    pub fn flow_observed_payload(&self, flow: &ScopedFlowKey) -> bool {
         self.flows.get(flow).is_some_and(|state| {
             state.next_offset > 0 || !state.pending.is_empty() || state.fin_offset.is_some()
         })
@@ -248,13 +248,14 @@ impl Reassembler {
         reason = "validate_limits rejects max_bytes_per_flow >= TCP_SERIAL_HALF_SPACE (2^31), so \
                   neither next_offset nor a pending offset reaches 2^32"
     )]
-    fn remove_flows(&mut self, mut keys: Vec<FlowKey>) -> Vec<Event> {
+    fn remove_flows(&mut self, mut keys: Vec<ScopedFlowKey>) -> Vec<Event> {
         keys.sort_by_key(|key| {
             (
-                key.source,
-                key.source_port,
-                key.destination,
-                key.destination_port,
+                key.scope,
+                key.flow.source,
+                key.flow.source_port,
+                key.flow.destination,
+                key.flow.destination_port,
             )
         });
         let mut events = Vec::new();
@@ -294,16 +295,24 @@ mod tests {
     use bytes::Bytes;
 
     use super::*;
+    use crate::analysis::reassembly::tcp::FlowKey;
+    use crate::analysis::scope::ScopeInterner;
 
     const IDLE_FLOW_COUNT: usize = 8_000;
     const ACTIVE_SEGMENT_COUNT: u32 = 100_000;
 
-    fn test_flow(source_port: u16) -> FlowKey {
-        FlowKey {
-            source: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
-            source_port,
-            destination: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2)),
-            destination_port: 443,
+    fn test_flow(source_port: u16) -> ScopedFlowKey {
+        let scope = ScopeInterner::new()
+            .intern(None, Vec::new())
+            .expect("empty scope fits");
+        ScopedFlowKey {
+            scope,
+            flow: FlowKey {
+                source: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
+                source_port,
+                destination: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2)),
+                destination_port: 443,
+            },
         }
     }
 

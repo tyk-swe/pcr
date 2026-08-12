@@ -9,21 +9,39 @@ use packetcraftr_core::analysis::reassembly::{
     Limits,
     fragment::{
         DatagramKey, Error as FragmentError, Event as FragmentEvent, Fragment, OverlapPolicy,
-        Reassembler as FragmentReassembler,
+        Reassembler as FragmentReassembler, ScopedDatagramKey,
     },
-    tcp::{Error as TcpError, Event as TcpEvent, FlowKey, Reassembler as TcpReassembler, Segment},
+    tcp::{
+        Error as TcpError, Event as TcpEvent, FlowKey, Reassembler as TcpReassembler,
+        ScopedFlowKey, Segment,
+    },
 };
+use packetcraftr_core::analysis::scope::{ScopeId, ScopeInterner};
 
-fn datagram(identification: u32) -> DatagramKey {
-    DatagramKey {
-        source: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
-        destination: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2)),
-        identification,
-        next_header: 17,
+fn scope() -> ScopeId {
+    ScopeInterner::new()
+        .intern(None, Vec::new())
+        .expect("one scope fits")
+}
+
+fn datagram(identification: u32) -> ScopedDatagramKey {
+    ScopedDatagramKey {
+        scope: scope(),
+        datagram: DatagramKey {
+            source: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
+            destination: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2)),
+            identification,
+            next_header: 17,
+        },
     }
 }
 
-fn fragment(key: DatagramKey, offset: u32, more_fragments: bool, bytes: &'static [u8]) -> Fragment {
+fn fragment(
+    key: ScopedDatagramKey,
+    offset: u32,
+    more_fragments: bool,
+    bytes: &'static [u8],
+) -> Fragment {
     Fragment {
         key,
         offset,
@@ -32,17 +50,20 @@ fn fragment(key: DatagramKey, offset: u32, more_fragments: bool, bytes: &'static
     }
 }
 
-fn flow(source_port: u16) -> FlowKey {
-    FlowKey {
-        source: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
-        source_port,
-        destination: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2)),
-        destination_port: 443,
+fn flow(source_port: u16) -> ScopedFlowKey {
+    ScopedFlowKey {
+        scope: scope(),
+        flow: FlowKey {
+            source: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
+            source_port,
+            destination: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2)),
+            destination_port: 443,
+        },
     }
 }
 
 fn segment(
-    flow: FlowKey,
+    flow: ScopedFlowKey,
     sequence: u32,
     payload: &'static [u8],
     syn: bool,
@@ -288,7 +309,7 @@ fn fragment_expiry_uses_latest_capture_time_and_flush_resets_accounting() {
             key,
             received_bytes: 8,
             fragment_count: 1
-        } if key.identification == 21
+        } if key.datagram.identification == 21
     ));
     assert_eq!(reassembler.flow_count(), 0);
     assert_eq!(reassembler.aggregate_bytes(), 0);
@@ -324,7 +345,7 @@ fn equal_deadline_expiry_events_use_stable_keys() {
         [
             FragmentEvent::Expired { key: first, .. },
             FragmentEvent::Expired { key: second, .. }
-        ] if first.identification == 30 && second.identification == 31
+        ] if first.datagram.identification == 30 && second.datagram.identification == 31
     ));
 
     let higher = flow(20_000);

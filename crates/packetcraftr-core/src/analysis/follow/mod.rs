@@ -8,7 +8,7 @@ use bytes::Bytes;
 use crate::analysis::adapter::{transport_payload, transports};
 use crate::analysis::expert::StreamTransport;
 use crate::analysis::pipeline::FrameRecord;
-use crate::analysis::reassembly::tcp::{Event as TcpEvent, FlowKey};
+use crate::analysis::reassembly::tcp::{Event as TcpEvent, FlowKey, ScopedFlowKey};
 
 mod dedup;
 use dedup::Deduplicator;
@@ -73,6 +73,7 @@ pub struct FollowSummary {
 pub struct FollowCollector {
     selector: Selector,
     summary: FollowSummary,
+    client_flow: Option<ScopedFlowKey>,
     dedup: Deduplicator,
 }
 
@@ -81,6 +82,7 @@ impl FollowCollector {
         Self {
             selector,
             summary: FollowSummary::default(),
+            client_flow: None,
             dedup: Deduplicator::default(),
         }
     }
@@ -97,7 +99,7 @@ impl FollowCollector {
     /// followed conversation still buffered behind missing segments was
     /// captured but never deliverable.
     pub fn finish(mut self, trailing: &[TcpEvent]) -> FollowSummary {
-        if let Some(client) = self.summary.client_flow.clone() {
+        if let Some(client) = self.client_flow.clone() {
             for event in trailing {
                 if let TcpEvent::Evicted {
                     flow,
@@ -121,7 +123,7 @@ impl FollowCollector {
         // evicts nothing, so closing-segment deduplication stays armed.
         let mut client_evicted = false;
         let mut server_evicted = false;
-        if let Some(client) = self.summary.client_flow.clone() {
+        if let Some(client) = self.client_flow.clone() {
             for event in record.tcp_events {
                 match event {
                     TcpEvent::Evicted {
@@ -147,17 +149,23 @@ impl FollowCollector {
         if record.tcp_stream != Some(self.selector.index) {
             return Vec::new();
         }
-        let Some((_, flow, tcp)) = transports(&record.decoded.packet).tcp else {
+        let Some((_, _, tcp, _)) = transports(&record.decoded.packet).tcp else {
             return Vec::new();
         };
+        let Some(flow) = record.tcp_flow else {
+            return Vec::new();
+        };
+        if self.client_flow.is_none() {
+            self.summary.client_flow = Some(flow.flow.clone());
+            self.client_flow = Some(flow.clone());
+        }
         let client = self
-            .summary
             .client_flow
-            .get_or_insert_with(|| flow.clone())
-            .clone();
+            .clone()
+            .expect("client flow was established");
 
         self.dedup
-            .observe_syn(&flow, &client, tcp, client_evicted, server_evicted);
+            .observe_syn(flow, &client, tcp, client_evicted, server_evicted);
         self.summary.frames += 1;
         let mut chunks = Vec::new();
         for event in record.tcp_events {
@@ -195,16 +203,22 @@ impl FollowCollector {
         if record.udp_stream != Some(self.selector.index) {
             return Vec::new();
         }
-        let Some((index, flow)) = transports(&record.decoded.packet).udp else {
+        let Some((index, _, _)) = transports(&record.decoded.packet).udp else {
             return Vec::new();
         };
+        let Some(flow) = record.udp_flow else {
+            return Vec::new();
+        };
+        if self.client_flow.is_none() {
+            self.summary.client_flow = Some(flow.flow.clone());
+            self.client_flow = Some(flow.clone());
+        }
         let client = self
-            .summary
             .client_flow
-            .get_or_insert_with(|| flow.clone())
-            .clone();
+            .clone()
+            .expect("client flow was established");
         self.summary.frames += 1;
-        let direction = if flow == client {
+        let direction = if *flow == client {
             Direction::ClientToServer
         } else {
             Direction::ServerToClient

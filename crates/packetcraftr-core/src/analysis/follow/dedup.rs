@@ -6,7 +6,7 @@
 use crate::protocol::transport::Tcp;
 use bytes::Bytes;
 
-use crate::analysis::reassembly::tcp::FlowKey;
+use crate::analysis::reassembly::tcp::ScopedFlowKey as FlowKey;
 
 use super::Direction;
 

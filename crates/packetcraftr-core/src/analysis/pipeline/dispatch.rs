@@ -15,12 +15,13 @@ use crate::analysis::adapter::transports;
 use crate::analysis::pipeline::clock::CaptureClock;
 use crate::analysis::reassembly::Limits as TcpReassemblyLimits;
 use crate::analysis::reassembly::tcp::{
-    Error as ReassemblyTcpError, Event as TcpEvent, FlowKey, Reassembler as TcpReassembler, Segment,
+    Error as ReassemblyTcpError, Event as TcpEvent, Reassembler as TcpReassembler, ScopedFlowKey,
+    Segment,
 };
 
 pub(super) struct ReassemblyDispatch {
     tcp_reassembler: Option<TcpReassembler>,
-    half_open_pure_syns: HashSet<FlowKey>,
+    half_open_pure_syns: HashSet<ScopedFlowKey>,
 }
 
 impl ReassemblyDispatch {
@@ -69,8 +70,8 @@ impl ReassemblyDispatch {
         if pushable && let Some(segment) = segment {
             let acknowledgment = transports(&decoded.packet)
                 .tcp
-                .filter(|(_, _, tcp)| tcp.flags & Tcp::ACK != 0)
-                .map(|(_, _, tcp)| tcp.acknowledgment);
+                .filter(|(_, _, tcp, _)| tcp.flags & Tcp::ACK != 0)
+                .map(|(_, _, tcp, _)| tcp.acknowledgment);
             let flow = segment.flow.clone();
             let pure_syn = segment.syn && acknowledgment.is_none() && segment.payload.is_empty();
 

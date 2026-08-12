@@ -6,7 +6,8 @@
 use std::collections::HashMap;
 use std::net::IpAddr;
 
-use super::{AnalysisError, FlowKey};
+use super::{AnalysisError, ScopedFlowKey};
+use crate::analysis::scope::ScopeId;
 
 /// One conversation, with its two endpoints in a direction-neutral order.
 ///
@@ -15,21 +16,24 @@ use super::{AnalysisError, FlowKey};
 /// the two one-way flows the wire carries.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) struct CanonicalFlow {
+    pub(super) scope: ScopeId,
     pub(super) first: (IpAddr, u16),
     pub(super) second: (IpAddr, u16),
 }
 
 impl CanonicalFlow {
-    pub(super) fn from_flow(flow: &FlowKey) -> Self {
-        let near = (flow.source, flow.source_port);
-        let far = (flow.destination, flow.destination_port);
+    pub(super) fn from_flow(flow: &ScopedFlowKey) -> Self {
+        let near = (flow.flow.source, flow.flow.source_port);
+        let far = (flow.flow.destination, flow.flow.destination_port);
         if near <= far {
             Self {
+                scope: flow.scope,
                 first: near,
                 second: far,
             }
         } else {
             Self {
+                scope: flow.scope,
                 first: far,
                 second: near,
             }
@@ -55,7 +59,7 @@ impl StreamIndex {
     /// silent misattribution.
     pub(super) fn assign(
         &mut self,
-        flow: &FlowKey,
+        flow: &ScopedFlowKey,
         number: u64,
         max_flows: usize,
     ) -> Result<u64, AnalysisError> {
@@ -80,13 +84,21 @@ mod tests {
     use std::net::{IpAddr, Ipv4Addr};
 
     use super::*;
+    use crate::analysis::reassembly::tcp::FlowKey;
+    use crate::analysis::scope::ScopeInterner;
 
-    fn flow(source_port: u16, destination_port: u16) -> FlowKey {
-        FlowKey {
-            source: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
-            source_port,
-            destination: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2)),
-            destination_port,
+    fn flow(source_port: u16, destination_port: u16) -> ScopedFlowKey {
+        let scope = ScopeInterner::new()
+            .intern(None, Vec::new())
+            .expect("empty scope fits");
+        ScopedFlowKey {
+            scope,
+            flow: FlowKey {
+                source: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
+                source_port,
+                destination: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2)),
+                destination_port,
+            },
         }
     }
 

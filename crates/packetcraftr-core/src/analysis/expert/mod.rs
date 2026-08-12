@@ -10,7 +10,7 @@ use crate::protocol::transport::Tcp;
 
 use crate::analysis::adapter::{transport_payload, transports};
 use crate::analysis::pipeline::FrameRecord;
-use crate::analysis::reassembly::tcp::{Event as TcpEvent, FlowKey};
+use crate::analysis::reassembly::tcp::{Event as TcpEvent, ScopedFlowKey as FlowKey};
 
 use tcp::DirectionState;
 
@@ -116,9 +116,9 @@ impl ExpertCollector {
         let frame_transports = transports(&record.decoded.packet);
         let mut findings = finding::from_diagnostics(record, &frame_transports);
         self.reconcile_tcp_evictions(record.tcp_events);
-        if let Some((index, flow, tcp)) = frame_transports.tcp {
+        if let (Some((index, _, tcp, _)), Some(flow)) = (frame_transports.tcp, record.tcp_flow) {
             let payload_len = transport_payload(record.decoded, index).len();
-            self.observe_tcp(record, &flow, tcp, payload_len, &mut findings);
+            self.observe_tcp(record, flow, tcp, payload_len, &mut findings);
         }
 
         for finding in &findings {

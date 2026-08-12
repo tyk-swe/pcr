@@ -9,7 +9,7 @@ use super::{PendingMergePlan, PushPlan};
 use crate::analysis::reassembly::tcp::state::{
     TcpFlowState, append_emitted_history, trim_emitted_history,
 };
-use crate::analysis::reassembly::tcp::{Event, FlowKey, Reassembler, Segment};
+use crate::analysis::reassembly::tcp::{Event, Reassembler, ScopedFlowKey, Segment};
 
 pub(in crate::analysis::reassembly::tcp) fn commit_push(
     reassembler: &mut Reassembler,
@@ -78,7 +78,7 @@ pub(in crate::analysis::reassembly::tcp) fn commit_push(
 
 fn commit_flow_push(
     state: &mut TcpFlowState,
-    flow: &FlowKey,
+    flow: &ScopedFlowKey,
     now: Instant,
     max_bytes_per_flow: usize,
     plan: PushPlan,
@@ -160,7 +160,7 @@ fn commit_flow_push(
 )]
 fn emit_data(
     state: &mut TcpFlowState,
-    flow: &FlowKey,
+    flow: &ScopedFlowKey,
     bytes: Bytes,
     max_bytes_per_flow: usize,
     events: &mut Vec<Event>,

@@ -31,8 +31,8 @@ struct DatagramState {
 pub struct Reassembler {
     limits: Limits,
     overlap_policy: OverlapPolicy,
-    flows: HashMap<DatagramKey, DatagramState>,
-    expiry: ExpiryIndex<DatagramKey>,
+    flows: HashMap<ScopedDatagramKey, DatagramState>,
+    expiry: ExpiryIndex<ScopedDatagramKey>,
     aggregate_bytes: usize,
     aggregate_memory_charge: usize,
 }
@@ -79,13 +79,14 @@ impl Reassembler {
         }
     }
 
-    fn remove_flows(&mut self, mut keys: Vec<DatagramKey>) -> Vec<Event> {
+    fn remove_flows(&mut self, mut keys: Vec<ScopedDatagramKey>) -> Vec<Event> {
         keys.sort_by_key(|key| {
             (
-                key.source,
-                key.destination,
-                key.identification,
-                key.next_header,
+                key.scope,
+                key.datagram.source,
+                key.datagram.destination,
+                key.datagram.identification,
+                key.datagram.next_header,
             )
         });
         keys.into_iter()

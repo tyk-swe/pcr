@@ -48,7 +48,7 @@ pub(super) fn observe_duplicate(
                     stream,
                     format!(
                         "{}:{} repeats acknowledgment {} (duplicate #{count})",
-                        flow.source, flow.source_port, tcp.acknowledgment
+                        flow.flow.source, flow.flow.source_port, tcp.acknowledgment
                     ),
                 ));
             }

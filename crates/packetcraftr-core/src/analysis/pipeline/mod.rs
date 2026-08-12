@@ -16,7 +16,8 @@ use crate::registry::Registry;
 use crate::analysis::AnalysisError;
 use crate::analysis::adapter::{tcp_segment, udp_flow};
 use crate::analysis::conversation_index::StreamIndex;
-use crate::analysis::reassembly::tcp::Event as TcpEvent;
+use crate::analysis::reassembly::tcp::{Event as TcpEvent, ScopedFlowKey};
+use crate::analysis::scope::ScopeInterner;
 
 mod clock;
 mod dispatch;
@@ -36,8 +37,12 @@ pub struct FrameRecord<'a> {
     pub decoded: &'a DecodedPacket,
     /// Conversation index of the innermost TCP flow, when there is one.
     pub tcp_stream: Option<u64>,
+    /// Exact scoped identity corresponding to `tcp_stream`.
+    pub tcp_flow: Option<&'a ScopedFlowKey>,
     /// Conversation index of the innermost UDP flow, when there is one.
     pub udp_stream: Option<u64>,
+    /// Exact scoped identity corresponding to `udp_stream`.
+    pub udp_flow: Option<&'a ScopedFlowKey>,
     /// TCP reassembly events this frame produced, when requested, including
     /// evictions of flows whose idle expiry this frame's arrival revealed.
     pub tcp_events: &'a [TcpEvent],
@@ -80,6 +85,7 @@ where
     let decoder = Decoder::new(registry);
     let mut tcp_streams = StreamIndex::default();
     let mut udp_streams = StreamIndex::default();
+    let mut scopes = ScopeInterner::new();
     let mut reassembly_dispatch = ReassemblyDispatch::new(options.tcp_events, limits.max_flows);
     let mut clock = CaptureClock::new();
 
@@ -136,13 +142,16 @@ where
             .map_err(|source| AnalysisError::Decode { number, source })?;
 
         // Assign stream IDs before filtering to keep them stable across runs.
-        let segment = tcp_segment(&decoded);
+        let segment = tcp_segment(&decoded, &mut scopes)
+            .map_err(|source| AnalysisError::Scope { number, source })?;
         let tcp_stream = match &segment {
             Some(segment) => Some(tcp_streams.assign(&segment.flow, number, limits.max_flows)?),
             None => None,
         };
-        let udp_stream = match udp_flow(&decoded) {
-            Some(flow) => Some(udp_streams.assign(&flow, number, limits.max_flows)?),
+        let udp_flow = udp_flow(&decoded, &mut scopes)
+            .map_err(|source| AnalysisError::Scope { number, source })?;
+        let udp_stream = match &udp_flow {
+            Some(flow) => Some(udp_streams.assign(flow, number, limits.max_flows)?),
             None => None,
         };
 
@@ -174,7 +183,9 @@ where
             number,
             decoded: &decoded,
             tcp_stream,
+            tcp_flow: segment.as_ref().map(|segment| &segment.flow),
             udp_stream,
+            udp_flow: udp_flow.as_ref(),
             tcp_events: &tcp_events,
         })
         .map_err(|source| AnalysisError::Sink { number, source })?;

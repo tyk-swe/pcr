@@ -8,6 +8,7 @@ use thiserror::Error;
 
 use crate::analysis::pcap::Error as CaptureError;
 use crate::analysis::reassembly::tcp::Error as TcpError;
+use crate::analysis::scope::ScopeError;
 use crate::decode::Error as DecodeError;
 use crate::error::{Classification, Classified, Kind};
 use crate::filter::Error as FilterError;
@@ -41,6 +42,12 @@ pub enum AnalysisError {
     },
     #[error("conversation table reached the configured limit of {limit} flows at frame {number}")]
     StreamLimit { number: u64, limit: usize },
+    #[error("capture scope indexing failed at frame {number}: {source}")]
+    Scope {
+        number: u64,
+        #[source]
+        source: ScopeError,
+    },
     #[error("TCP reassembly failed at frame {number}: {source}")]
     Reassembly {
         number: u64,
@@ -102,7 +109,9 @@ impl Classified for AnalysisError {
             Self::Filter { .. } => {
                 Classification::new("cli.filter", Kind::Cli, Some("repair the display filter"))
             }
-            Self::StreamLimit { .. } | Self::DurationLimit { .. } => resource_limit(),
+            Self::StreamLimit { .. } | Self::Scope { .. } | Self::DurationLimit { .. } => {
+                resource_limit()
+            }
             // Reassembly fails for two distinct reasons: a finite budget was
             // exhausted, or the capture itself carries conflicting data. Only
             // the former is answered by raising budgets.
@@ -124,6 +133,7 @@ impl Classified for AnalysisError {
             Self::Capture { source, .. } => vec![source.to_string()],
             Self::Decode { source, .. } => vec![source.to_string()],
             Self::Filter { source, .. } => vec![source.to_string()],
+            Self::Scope { source, .. } => vec![source.to_string()],
             Self::Reassembly { source, .. } => vec![source.to_string()],
             Self::Sink { source, .. } => source.causes(),
             _ => Vec::new(),

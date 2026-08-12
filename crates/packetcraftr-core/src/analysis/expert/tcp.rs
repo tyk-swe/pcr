@@ -64,7 +64,7 @@ impl ExpertCollector {
                 observation.stream,
                 format!(
                     "connection reset by {}:{}",
-                    observation.flow.source, observation.flow.source_port
+                    observation.flow.flow.source, observation.flow.flow.source_port
                 ),
             ));
         }

@@ -19,7 +19,7 @@ pub(super) fn report_zero(observation: &TcpObservation<'_>, findings: &mut Vec<F
             observation.stream,
             format!(
                 "{}:{} advertises a zero receive window",
-                observation.flow.source, observation.flow.source_port
+                observation.flow.flow.source, observation.flow.flow.source_port
             ),
         ));
     }
@@ -104,7 +104,7 @@ pub(super) fn analyze_sender(
                     stream,
                     format!(
                         "{}:{} probes the peer's zero receive window",
-                        flow.source, flow.source_port
+                        flow.flow.source, flow.flow.source_port
                     ),
                 ));
             } else {
@@ -115,8 +115,8 @@ pub(super) fn analyze_sender(
                     stream,
                     format!(
                         "{}:{} has sent {} byte(s) beyond the peer's zero receive window",
-                        flow.source,
-                        flow.source_port,
+                        flow.flow.source,
+                        flow.flow.source_port,
                         u64::from(in_flight)
                     ),
                 ));
@@ -130,7 +130,7 @@ pub(super) fn analyze_sender(
             stream,
             format!(
                 "{}:{} has filled the peer's {advertised}-byte receive window",
-                flow.source, flow.source_port
+                flow.flow.source, flow.flow.source_port
             ),
         ));
     } else if handshake_seen && u64::from(in_flight) > advertised {
@@ -141,8 +141,8 @@ pub(super) fn analyze_sender(
             stream,
             format!(
                 "{}:{} has sent {} byte(s) beyond the peer's {advertised}-byte receive window",
-                flow.source,
-                flow.source_port,
+                flow.flow.source,
+                flow.flow.source_port,
                 u64::from(in_flight) - advertised
             ),
         ));

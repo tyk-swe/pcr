@@ -8,11 +8,15 @@ use std::net::IpAddr;
 use crate::Packet;
 use crate::decode::Result as DecodedPacket;
 use crate::layer::Padding;
+use crate::protocol::gre::Gre;
+use crate::protocol::link::{Vlan, Vlan8021ad};
 use crate::protocol::network::{Ipv4, Ipv6};
 use crate::protocol::transport::{Tcp, Udp};
+use crate::protocol::tunnel::{Ah, Erspan, Geneve, L2tpv3, Mpls, Pppoe, Vxlan};
 use bytes::Bytes;
 
-use crate::analysis::reassembly::tcp::{FlowKey, Segment};
+use crate::analysis::reassembly::tcp::{FlowKey, ScopedFlowKey, Segment};
+use crate::analysis::scope::{EncapsulationIdentifier, ScopeError, ScopeInterner};
 
 /// The innermost transport of each kind in a decoded stack.
 ///
@@ -22,8 +26,8 @@ use crate::analysis::reassembly::tcp::{FlowKey, Segment};
 /// separately because an encapsulated frame legitimately belongs to both a
 /// UDP conversation (the tunnel) and a TCP conversation (the payload).
 pub(crate) struct Transports<'a> {
-    pub(crate) tcp: Option<(usize, FlowKey, &'a Tcp)>,
-    pub(crate) udp: Option<(usize, FlowKey)>,
+    pub(crate) tcp: Option<(usize, FlowKey, &'a Tcp, Vec<EncapsulationIdentifier>)>,
+    pub(crate) udp: Option<(usize, FlowKey, Vec<EncapsulationIdentifier>)>,
     /// Index of the outermost transport layer of either kind. In a
     /// same-transport tunnel this differs from the retained innermost
     /// occurrence, marking headers whose conversation carries no index.
@@ -31,7 +35,14 @@ pub(crate) struct Transports<'a> {
 }
 
 pub(crate) fn transports(packet: &Packet) -> Transports<'_> {
-    let mut network: Option<(IpAddr, IpAddr)> = None;
+    struct Network {
+        source: IpAddr,
+        destination: IpAddr,
+        path_index: usize,
+    }
+
+    let mut network: Option<Network> = None;
+    let mut path = Vec::new();
     let mut found = Transports {
         tcp: None,
         udp: None,
@@ -39,39 +50,102 @@ pub(crate) fn transports(packet: &Packet) -> Transports<'_> {
     };
     for (index, layer) in packet.iter().enumerate() {
         if let Some(ipv4) = layer.as_any().downcast_ref::<Ipv4>() {
-            network = Some((ipv4.source.into(), ipv4.destination.into()));
+            let source = IpAddr::V4(ipv4.source);
+            let destination = IpAddr::V4(ipv4.destination);
+            let (first, second) = ordered(source, destination);
+            path.push(EncapsulationIdentifier::Network { first, second });
+            network = Some(Network {
+                source,
+                destination,
+                path_index: path.len() - 1,
+            });
         } else if let Some(ipv6) = layer.as_any().downcast_ref::<Ipv6>() {
-            network = Some((ipv6.source.into(), ipv6.destination.into()));
+            let source = IpAddr::V6(ipv6.source);
+            let destination = IpAddr::V6(ipv6.destination);
+            let (first, second) = ordered(source, destination);
+            path.push(EncapsulationIdentifier::Network { first, second });
+            network = Some(Network {
+                source,
+                destination,
+                path_index: path.len() - 1,
+            });
+        } else if let Some(vlan) = layer.as_any().downcast_ref::<Vlan>() {
+            path.push(EncapsulationIdentifier::Vlan {
+                vlan_id: vlan.vlan_id,
+            });
+        } else if let Some(vlan) = layer.as_any().downcast_ref::<Vlan8021ad>() {
+            path.push(EncapsulationIdentifier::Vlan8021ad {
+                vlan_id: vlan.vlan_id,
+            });
+        } else if let Some(vxlan) = layer.as_any().downcast_ref::<Vxlan>() {
+            path.push(EncapsulationIdentifier::Vxlan { vni: vxlan.vni });
+        } else if let Some(geneve) = layer.as_any().downcast_ref::<Geneve>() {
+            path.push(EncapsulationIdentifier::Geneve { vni: geneve.vni });
+        } else if let Some(gre) = layer.as_any().downcast_ref::<Gre>() {
+            path.push(EncapsulationIdentifier::Gre { key: gre.key });
+        } else if let Some(mpls) = layer.as_any().downcast_ref::<Mpls>() {
+            path.push(EncapsulationIdentifier::Mpls { label: mpls.label });
+        } else if let Some(pppoe) = layer.as_any().downcast_ref::<Pppoe>() {
+            path.push(EncapsulationIdentifier::Pppoe {
+                session_id: pppoe.session_id,
+            });
+        } else if let Some(l2tp) = layer.as_any().downcast_ref::<L2tpv3>() {
+            path.push(EncapsulationIdentifier::L2tpv3 {
+                session_id: l2tp.session_id,
+            });
+        } else if let Some(erspan) = layer.as_any().downcast_ref::<Erspan>() {
+            path.push(EncapsulationIdentifier::Erspan {
+                vlan: erspan.vlan,
+                session_id: erspan.session_id,
+            });
+        } else if let Some(ah) = layer.as_any().downcast_ref::<Ah>() {
+            path.push(EncapsulationIdentifier::Ah { spi: ah.spi });
         } else if let Some(tcp) = layer.as_any().downcast_ref::<Tcp>() {
-            if let Some((source, destination)) = network {
+            if let Some(network) = &network {
                 found.outermost.get_or_insert(index);
+                let flow = FlowKey {
+                    source: network.source,
+                    source_port: tcp.source_port,
+                    destination: network.destination,
+                    destination_port: tcp.destination_port,
+                };
                 found.tcp = Some((
                     index,
-                    FlowKey {
-                        source,
-                        source_port: tcp.source_port,
-                        destination,
-                        destination_port: tcp.destination_port,
-                    },
+                    flow.clone(),
                     tcp,
+                    path_without(&path, network.path_index),
                 ));
             }
         } else if let Some(udp) = layer.as_any().downcast_ref::<Udp>()
-            && let Some((source, destination)) = network
+            && let Some(network) = &network
         {
             found.outermost.get_or_insert(index);
-            found.udp = Some((
-                index,
-                FlowKey {
-                    source,
-                    source_port: udp.source_port,
-                    destination,
-                    destination_port: udp.destination_port,
-                },
-            ));
+            let flow = FlowKey {
+                source: network.source,
+                source_port: udp.source_port,
+                destination: network.destination,
+                destination_port: udp.destination_port,
+            };
+            found.udp = Some((index, flow.clone(), path_without(&path, network.path_index)));
         }
     }
     found
+}
+
+fn ordered<T: Ord>(first: T, second: T) -> (T, T) {
+    if first <= second {
+        (first, second)
+    } else {
+        (second, first)
+    }
+}
+
+fn path_without(path: &[EncapsulationIdentifier], excluded: usize) -> Vec<EncapsulationIdentifier> {
+    path.iter()
+        .enumerate()
+        .filter(|(index, _)| *index != excluded)
+        .map(|(_, identifier)| identifier.clone())
+        .collect()
 }
 
 /// The exact wire bytes of the TCP payload at `transport_index`.
@@ -113,19 +187,32 @@ pub(crate) fn transport_payload(decoded: &DecodedPacket, transport_index: usize)
 ///
 /// A pure control segment has an empty payload rather than no segment,
 /// because an empty SYN, FIN, or RST still carries stream state.
-pub(crate) fn tcp_segment(decoded: &DecodedPacket) -> Option<Segment> {
-    let (index, flow, tcp) = transports(&decoded.packet).tcp?;
-    Some(Segment {
-        flow,
+pub(crate) fn tcp_segment(
+    decoded: &DecodedPacket,
+    scopes: &mut ScopeInterner,
+) -> Result<Option<Segment>, ScopeError> {
+    let Some((index, flow, tcp, encapsulation)) = transports(&decoded.packet).tcp else {
+        return Ok(None);
+    };
+    let scope = scopes.intern(decoded.frame.interface, encapsulation)?;
+    Ok(Some(Segment {
+        flow: ScopedFlowKey { scope, flow },
         sequence: tcp.sequence,
         payload: transport_payload(decoded, index),
         syn: tcp.flags & Tcp::SYN != 0,
         fin: tcp.flags & Tcp::FIN != 0,
         rst: tcp.flags & Tcp::RST != 0,
-    })
+    }))
 }
 
 /// Maps a decoded stack onto the innermost UDP flow, when there is one.
-pub(crate) fn udp_flow(decoded: &DecodedPacket) -> Option<FlowKey> {
-    transports(&decoded.packet).udp.map(|(_, flow)| flow)
+pub(crate) fn udp_flow(
+    decoded: &DecodedPacket,
+    scopes: &mut ScopeInterner,
+) -> Result<Option<ScopedFlowKey>, ScopeError> {
+    let Some((_, flow, encapsulation)) = transports(&decoded.packet).udp else {
+        return Ok(None);
+    };
+    let scope = scopes.intern(decoded.frame.interface, encapsulation)?;
+    Ok(Some(ScopedFlowKey { scope, flow }))
 }

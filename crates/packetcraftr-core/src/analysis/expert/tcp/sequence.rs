@@ -144,7 +144,10 @@ pub(super) fn observe(
             "tcp.keep_alive",
             number,
             stream,
-            format!("{}:{} probes the peer", flow.source, flow.source_port),
+            format!(
+                "{}:{} probes the peer",
+                flow.flow.source, flow.flow.source_port
+            ),
         ));
     }
 
@@ -187,7 +190,7 @@ pub(super) fn observe(
             stream,
             format!(
                 "{}:{} resumes at sequence {} before sequence {next} arrived",
-                flow.source, flow.source_port, tcp.sequence
+                flow.flow.source, flow.flow.source_port, tcp.sequence
             ),
         ));
     }
@@ -257,7 +260,7 @@ pub(super) fn finish(
                 format!(
                     "{} byte(s) from {}:{} were still awaiting missing earlier data \
                      when the capture ended",
-                    pending_bytes, flow.source, flow.source_port
+                    pending_bytes, flow.flow.source, flow.flow.source_port
                 ),
             ))
         })

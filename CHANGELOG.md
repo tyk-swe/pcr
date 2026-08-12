@@ -64,6 +64,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Indexed offline TCP and IP-fragment expiry deadlines so dense captures no
+  longer scan every resident reassembly flow for each pushable segment.
 - Accepted valid injected-provider transmission reports across backward
   wall-clock adjustments by validating timing with monotonic endpoints.
 - Preserved TCP response correlation for Layer2 exchanges whose TCP

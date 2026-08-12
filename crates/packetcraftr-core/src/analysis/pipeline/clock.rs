@@ -22,11 +22,10 @@ pub(super) struct CaptureClock {
 
 /// How far capture time must advance before a pushless frame sweeps again.
 ///
-/// Sweeping scans every buffered flow, so doing it on every frame would make
-/// a dense capture quadratic. Frames that push into a reassembler always
-/// expire first regardless of this throttle — that is what keeps expiry
-/// boundaries exact — so the throttle only paces the release of idle state
-/// while nothing is being pushed, where a one-second lag is harmless.
+/// Frames that push into a reassembler always expire first regardless of this
+/// throttle — that is what keeps expiry boundaries exact. The throttle avoids
+/// even an indexed expiry lookup on every pushless frame, where a one-second
+/// lag in releasing idle state is harmless.
 const SWEEP_GRANULARITY: Duration = Duration::from_secs(1);
 
 impl CaptureClock {

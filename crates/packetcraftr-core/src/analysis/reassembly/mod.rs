@@ -18,5 +18,6 @@
 pub mod fragment;
 pub mod tcp;
 
+mod expiry;
 mod limits;
 pub use limits::Limits;

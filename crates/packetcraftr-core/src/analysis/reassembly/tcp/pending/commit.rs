@@ -23,10 +23,15 @@ pub(in crate::analysis::reassembly::tcp) fn commit_push(
     let aggregate_bytes = plan.aggregate_bytes;
     let aggregate_memory_charge = plan.aggregate_memory_charge;
     let max_bytes_per_flow = reassembler.limits.max_bytes_per_flow;
+    let previous_deadline = reassembler
+        .flows
+        .get(&segment.flow)
+        .and_then(|state| state.deadline);
     let last_update = reassembler
         .flows
         .get(&segment.flow)
         .map_or(now, |state| state.last_update.max(now));
+    let deadline = last_update.checked_add(reassembler.limits.tcp_idle_expiry);
     let Segment {
         flow, rst, payload, ..
     } = segment;
@@ -36,7 +41,7 @@ pub(in crate::analysis::reassembly::tcp) fn commit_push(
         .map(|range| payload.slice(range.clone()));
 
     let (replacement, mut events) = if changes_generation {
-        let mut state = TcpFlowState::new(first_payload_sequence, last_update);
+        let mut state = TcpFlowState::new(first_payload_sequence, last_update, deadline);
         let events = commit_flow_push(
             &mut state,
             &flow,
@@ -51,19 +56,22 @@ pub(in crate::analysis::reassembly::tcp) fn commit_push(
             .flows
             .get_mut(&flow)
             .expect("an unchanged generation has an established flow");
-        (
-            None,
-            commit_flow_push(state, &flow, now, max_bytes_per_flow, plan, direct_payload),
-        )
+        let events = commit_flow_push(state, &flow, now, max_bytes_per_flow, plan, direct_payload);
+        state.deadline = deadline;
+        (None, events)
     };
 
     reassembler.aggregate_bytes = aggregate_bytes;
     reassembler.aggregate_memory_charge = aggregate_memory_charge;
+    reassembler.expiry.remove(previous_deadline, &flow);
     if closed {
         reassembler.flows.remove(&flow);
         events.push(Event::Closed { flow, reset: rst });
-    } else if let Some(state) = replacement {
-        reassembler.flows.insert(flow, state);
+    } else {
+        if let Some(state) = replacement {
+            reassembler.flows.insert(flow.clone(), state);
+        }
+        reassembler.expiry.insert(deadline, flow);
     }
     events
 }

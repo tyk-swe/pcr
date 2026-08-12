@@ -309,6 +309,42 @@ fn fragment_expiry_uses_latest_capture_time_and_flush_resets_accounting() {
 }
 
 #[test]
+fn equal_deadline_expiry_events_use_stable_keys() {
+    let now = Instant::now();
+    let mut fragments = FragmentReassembler::new(Limits::default(), OverlapPolicy::default());
+    fragments
+        .push(fragment(datagram(31), 0, true, b"abcdefgh"), now)
+        .expect("higher datagram retained");
+    fragments
+        .push(fragment(datagram(30), 0, true, b"abcdefgh"), now)
+        .expect("lower datagram retained");
+    let events = fragments.expire(now + Limits::default().fragment_expiry);
+    assert!(matches!(
+        events.as_slice(),
+        [
+            FragmentEvent::Expired { key: first, .. },
+            FragmentEvent::Expired { key: second, .. }
+        ] if first.identification == 30 && second.identification == 31
+    ));
+
+    let higher = flow(20_000);
+    let lower = flow(10_000);
+    let mut tcp = TcpReassembler::new(Limits::default());
+    tcp.open_flow(higher.clone(), 0, now)
+        .expect("higher flow opens");
+    tcp.open_flow(lower.clone(), 0, now)
+        .expect("lower flow opens");
+    let events = tcp.expire(now + Limits::default().tcp_idle_expiry);
+    assert!(matches!(
+        events.as_slice(),
+        [
+            TcpEvent::Evicted { flow: first, .. },
+            TcpEvent::Evicted { flow: second, .. }
+        ] if first == &lower && second == &higher
+    ));
+}
+
+#[test]
 fn tcp_empty_ack_is_ignored_and_invalid_window_is_rejected() {
     let now = Instant::now();
     let key = flow(10_000);
@@ -384,7 +420,7 @@ fn tcp_flow_state_metadata_is_bounded_and_only_charged_while_retained() {
     let first = flow(10_100);
     let second = flow(10_101);
     let mut reassembler = TcpReassembler::new(Limits {
-        max_aggregate_bytes: 128,
+        max_aggregate_bytes: 256,
         ..Limits::default()
     });
 
@@ -392,18 +428,18 @@ fn tcp_flow_state_metadata_is_bounded_and_only_charged_while_retained() {
         .open_flow(first.clone(), 100, now)
         .expect("one empty flow state fits the aggregate budget");
     assert_eq!(reassembler.aggregate_bytes(), 0);
-    assert_eq!(reassembler.aggregate_memory_charge(), 128);
+    assert_eq!(reassembler.aggregate_memory_charge(), 256);
     reassembler
         .open_flow(first.clone(), 101, now)
         .expect("replacement reuses the existing flow's metadata budget");
     assert_eq!(
         reassembler.open_flow(second.clone(), 200, now),
-        Err(TcpError::AggregateByteLimit { limit: 128 })
+        Err(TcpError::AggregateByteLimit { limit: 256 })
     );
     assert_eq!(reassembler.flow_count(), 1);
     assert_eq!(reassembler.flow_base_sequence(&first), Some(101));
     assert_eq!(reassembler.flow_base_sequence(&second), None);
-    assert_eq!(reassembler.aggregate_memory_charge(), 128);
+    assert_eq!(reassembler.aggregate_memory_charge(), 256);
 
     assert_eq!(reassembler.evict_flow(&first).len(), 1);
     assert_eq!(reassembler.aggregate_memory_charge(), 0);
@@ -414,7 +450,7 @@ fn tcp_flow_state_metadata_is_bounded_and_only_charged_while_retained() {
             .is_empty()
     );
     assert_eq!(reassembler.flow_base_sequence(&second), Some(201));
-    assert_eq!(reassembler.aggregate_memory_charge(), 128);
+    assert_eq!(reassembler.aggregate_memory_charge(), 256);
     assert_eq!(
         reassembler
             .push(segment(second.clone(), 201, b"", false, false, true), now)

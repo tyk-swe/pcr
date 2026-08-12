@@ -16,6 +16,7 @@ impl Reassembler {
         Self {
             limits,
             flows: HashMap::new(),
+            expiry: Default::default(),
             aggregate_bytes: 0,
             aggregate_memory_charge: 0,
         }
@@ -31,7 +32,14 @@ impl Reassembler {
         if let Some(existing) = self.flows.get_mut(&flow)
             && existing.base_sequence == first_payload_sequence
         {
+            let previous_deadline = existing.deadline;
             existing.last_update = existing.last_update.max(now);
+            existing.deadline = existing
+                .last_update
+                .checked_add(self.limits.tcp_idle_expiry);
+            let deadline = existing.deadline;
+            self.expiry.remove(previous_deadline, &flow);
+            self.expiry.insert(deadline, flow);
             return Ok(());
         }
         let existing = self.flows.get(&flow);
@@ -49,8 +57,14 @@ impl Reassembler {
             self.plan_replacement_accounting(existing, TCP_FLOW_STATE_METADATA_CHARGE)?;
 
         let last_update = existing.map_or(now, |state| state.last_update.max(now));
-        self.flows
-            .insert(flow, TcpFlowState::new(first_payload_sequence, last_update));
+        let previous_deadline = existing.and_then(|state| state.deadline);
+        let deadline = last_update.checked_add(self.limits.tcp_idle_expiry);
+        self.expiry.remove(previous_deadline, &flow);
+        self.flows.insert(
+            flow.clone(),
+            TcpFlowState::new(first_payload_sequence, last_update, deadline),
+        );
+        self.expiry.insert(deadline, flow);
         self.aggregate_bytes = aggregate_bytes;
         self.aggregate_memory_charge = aggregate_memory_charge;
         Ok(())
@@ -99,7 +113,11 @@ impl Reassembler {
 
         let plan = {
             // Plan replacements against empty state without mutating the established flow.
-            let empty = TcpFlowState::new(first_payload_sequence, now);
+            let empty = TcpFlowState::new(
+                first_payload_sequence,
+                now,
+                now.checked_add(self.limits.tcp_idle_expiry),
+            );
             let state = if changes_generation {
                 &empty
             } else {
@@ -121,15 +139,7 @@ impl Reassembler {
     }
 
     pub fn expire(&mut self, now: Instant) -> Vec<Event> {
-        let keys = self
-            .flows
-            .iter()
-            .filter_map(|(key, state)| {
-                now.checked_duration_since(state.last_update)
-                    .filter(|idle| *idle >= self.limits.tcp_idle_expiry)
-                    .map(|_| key.clone())
-            })
-            .collect::<Vec<_>>();
+        let keys = self.expiry.take_expired(now);
         self.remove_flows(keys)
     }
 
@@ -252,6 +262,7 @@ impl Reassembler {
             let Some(state) = self.flows.remove(&key) else {
                 continue;
             };
+            self.expiry.remove(state.deadline, &key);
             if let Some((&next, _)) = state.pending.first_key_value()
                 && next > state.next_offset
             {
@@ -272,5 +283,84 @@ impl Reassembler {
             });
         }
         events
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::{IpAddr, Ipv4Addr};
+    use std::time::Duration;
+
+    use bytes::Bytes;
+
+    use super::*;
+
+    const IDLE_FLOW_COUNT: usize = 8_000;
+    const ACTIVE_SEGMENT_COUNT: u32 = 100_000;
+
+    fn test_flow(source_port: u16) -> FlowKey {
+        FlowKey {
+            source: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
+            source_port,
+            destination: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2)),
+            destination_port: 443,
+        }
+    }
+
+    #[test]
+    fn dense_flow_expiry_examinations_are_near_linear() {
+        let start = Instant::now();
+        let idle_expiry = Duration::from_secs(120);
+        let mut reassembler = Reassembler::new(Limits {
+            max_flows: IDLE_FLOW_COUNT + 1,
+            tcp_idle_expiry: idle_expiry,
+            ..Limits::default()
+        });
+
+        for index in 0..IDLE_FLOW_COUNT {
+            let source_port = u16::try_from(10_000usize + index).expect("test port fits u16");
+            reassembler
+                .open_flow(test_flow(source_port), 0, start)
+                .expect("idle flow opens");
+        }
+        let active = test_flow(60_000);
+        reassembler
+            .open_flow(active.clone(), 0, start)
+            .expect("active flow opens");
+
+        for sequence in 0..ACTIVE_SEGMENT_COUNT {
+            let now = start + Duration::from_nanos(u64::from(sequence) + 1);
+            assert!(reassembler.expire(now).is_empty());
+            reassembler
+                .push(
+                    Segment {
+                        flow: active.clone(),
+                        sequence,
+                        payload: Bytes::from_static(b"x"),
+                        syn: false,
+                        fin: false,
+                        rst: false,
+                    },
+                    now,
+                )
+                .expect("active segment is accepted");
+        }
+
+        assert_eq!(reassembler.expiry.len(), reassembler.flow_count());
+        assert_eq!(
+            reassembler.expire(start + idle_expiry).len(),
+            IDLE_FLOW_COUNT
+        );
+        assert_eq!(reassembler.flow_count(), 1);
+        assert_eq!(reassembler.expiry.len(), 1);
+        let examined = reassembler.expiry.examined_entries();
+        let expected_upper_bound = usize::try_from(ACTIVE_SEGMENT_COUNT)
+            .expect("segment count fits usize")
+            + IDLE_FLOW_COUNT
+            + 2;
+        assert!(
+            examined <= expected_upper_bound,
+            "expiry examined {examined} entries, expected at most {expected_upper_bound}"
+        );
     }
 }

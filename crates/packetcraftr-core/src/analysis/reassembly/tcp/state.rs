@@ -22,10 +22,11 @@ pub(super) struct TcpFlowState {
     pub(super) pending_bytes: usize,
     pub(super) fin_offset: Option<u64>,
     pub(super) last_update: Instant,
+    pub(super) deadline: Option<Instant>,
 }
 
 impl TcpFlowState {
-    pub(super) fn new(base_sequence: u32, now: Instant) -> Self {
+    pub(super) fn new(base_sequence: u32, now: Instant, deadline: Option<Instant>) -> Self {
         Self {
             base_sequence,
             next_offset: 0,
@@ -35,6 +36,7 @@ impl TcpFlowState {
             pending_bytes: 0,
             fin_offset: None,
             last_update: now,
+            deadline,
         }
     }
 }

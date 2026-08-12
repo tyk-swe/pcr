@@ -37,7 +37,8 @@ impl Reassembler {
         } = accounting;
 
         if has_existing_flow {
-            let complete = {
+            let previous_deadline = self.flows.get(&key).and_then(|state| state.deadline);
+            let (complete, deadline) = {
                 let state = self
                     .flows
                     .get_mut(&key)
@@ -47,12 +48,17 @@ impl Reassembler {
                 state.stored_bytes = stored_bytes;
                 state.fragment_count = fragment_count;
                 state.last_update = state.last_update.max(now);
+                state.deadline = state.last_update.checked_add(self.limits.fragment_expiry);
                 state.had_conflicting_overlap |= merge.has_conflicting_overlap;
-                state
-                    .final_length
-                    .filter(|length| is_complete(&state.segments, *length))
+                (
+                    state
+                        .final_length
+                        .filter(|length| is_complete(&state.segments, *length)),
+                    state.deadline,
+                )
             };
 
+            self.expiry.remove(previous_deadline, &key);
             self.aggregate_bytes = aggregate_bytes;
             self.aggregate_memory_charge = aggregate_memory_charge;
             if let Some(length) = complete {
@@ -77,19 +83,23 @@ impl Reassembler {
                     had_conflicting_overlap: state.had_conflicting_overlap,
                 })));
             }
+            self.expiry.insert(deadline, key);
             return Ok(None);
         }
 
+        let deadline = now.checked_add(self.limits.fragment_expiry);
         let mut state = DatagramState {
             segments: BTreeMap::new(),
             final_length,
             fragment_count,
             stored_bytes,
             last_update: now,
+            deadline,
             had_conflicting_overlap: merge.has_conflicting_overlap,
         };
         commit_merge(&mut state.segments, offset, bytes, merge)?;
-        self.flows.insert(key, state);
+        self.flows.insert(key.clone(), state);
+        self.expiry.insert(deadline, key);
         self.aggregate_bytes = aggregate_bytes;
         self.aggregate_memory_charge = aggregate_memory_charge;
         Ok(None)

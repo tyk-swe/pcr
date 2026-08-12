@@ -10,7 +10,9 @@ use bytes::Bytes;
 
 use super::{Error, Fragment, OverlapPolicy, Reassembler, datagram_memory_charge};
 
-pub(super) const DATAGRAM_STATE_METADATA_CHARGE: usize = 128;
+// Conservative accounting for a datagram's flow-table and expiry-index entries
+// plus otherwise-empty state.
+pub(super) const DATAGRAM_STATE_METADATA_CHARGE: usize = 256;
 pub(super) const FRAGMENT_SEGMENT_METADATA_CHARGE: usize = 64;
 
 #[derive(Clone, Copy, Debug)]

@@ -7,6 +7,7 @@ use std::time::Instant;
 use bytes::Bytes;
 
 use super::Limits;
+use super::expiry::ExpiryIndex;
 
 use plan::{FragmentPlan, datagram_memory_charge_parts};
 
@@ -22,6 +23,7 @@ struct DatagramState {
     fragment_count: usize,
     stored_bytes: usize,
     last_update: Instant,
+    deadline: Option<Instant>,
     had_conflicting_overlap: bool,
 }
 
@@ -30,6 +32,7 @@ pub struct Reassembler {
     limits: Limits,
     overlap_policy: OverlapPolicy,
     flows: HashMap<DatagramKey, DatagramState>,
+    expiry: ExpiryIndex<DatagramKey>,
     aggregate_bytes: usize,
     aggregate_memory_charge: usize,
 }
@@ -40,6 +43,7 @@ impl Reassembler {
             limits,
             overlap_policy,
             flows: HashMap::new(),
+            expiry: Default::default(),
             aggregate_bytes: 0,
             aggregate_memory_charge: 0,
         }
@@ -87,6 +91,7 @@ impl Reassembler {
         keys.into_iter()
             .filter_map(|key| {
                 let state = self.flows.remove(&key)?;
+                self.expiry.remove(state.deadline, &key);
                 self.aggregate_bytes = self.aggregate_bytes.saturating_sub(state.stored_bytes);
                 let charge = datagram_memory_charge(&state).unwrap_or(0);
                 self.aggregate_memory_charge = self.aggregate_memory_charge.saturating_sub(charge);
@@ -100,15 +105,7 @@ impl Reassembler {
     }
 
     pub fn expire(&mut self, now: Instant) -> Vec<Event> {
-        let expired = self
-            .flows
-            .iter()
-            .filter_map(|(key, state)| {
-                now.checked_duration_since(state.last_update)
-                    .filter(|idle| *idle >= self.limits.fragment_expiry)
-                    .map(|_| key.clone())
-            })
-            .collect::<Vec<_>>();
+        let expired = self.expiry.take_expired(now);
         self.remove_flows(expired)
     }
 

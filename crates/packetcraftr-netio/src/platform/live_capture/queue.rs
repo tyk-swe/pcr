@@ -255,3 +255,103 @@ fn increment(counter: &mut u64, value: u64, label: &str) -> Result<(), LiveIoErr
         })?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::SystemTime;
+
+    use packetcraftr_core::frame::{Frame, LinkType};
+
+    use super::*;
+
+    fn captured(bytes: &[u8]) -> CapturedFrame {
+        CapturedFrame::without_ingress_time(
+            Frame::new(SystemTime::UNIX_EPOCH, LinkType::ETHERNET, bytes.to_vec())
+                .expect("fixture frame"),
+        )
+    }
+
+    fn queue(policy: CaptureOverflowPolicy, max_frames: usize, max_bytes: usize) -> SharedCapture {
+        SharedCapture::new(CaptureQueueLimits {
+            max_frames,
+            max_bytes,
+            snap_length: max_bytes,
+            overflow_policy: policy,
+        })
+    }
+
+    #[test]
+    fn overflow_policies_distinguish_failure_drop_and_byte_bounded_eviction() {
+        for policy in [
+            CaptureOverflowPolicy::Fail,
+            CaptureOverflowPolicy::DropNewest,
+            CaptureOverflowPolicy::DropOldest,
+        ] {
+            let queue = queue(policy, 2, 4);
+            queue.enqueue(captured(&[1, 1])).expect("first frame");
+            queue.enqueue(captured(&[2, 2])).expect("second frame");
+            let result = queue.enqueue(captured(&[3, 3, 3]));
+            assert_eq!(result.is_err(), policy == CaptureOverflowPolicy::Fail);
+
+            let state = queue.lock().expect("queue state");
+            let retained = state
+                .queue
+                .iter()
+                .map(|frame| frame.frame.bytes().to_vec())
+                .collect::<Vec<_>>();
+            let expected = if policy == CaptureOverflowPolicy::DropOldest {
+                (vec![vec![3, 3, 3]], 3, 7, 2, 4)
+            } else {
+                (vec![vec![1, 1], vec![2, 2]], 2, 4, 1, 3)
+            };
+            assert_eq!(retained, expected.0, "policy {policy:?}");
+            assert_eq!(
+                state.queued_bytes,
+                retained.iter().map(Vec::len).sum::<usize>()
+            );
+            assert_eq!(state.statistics.received_frames, expected.1);
+            assert_eq!(state.statistics.received_bytes, expected.2);
+            assert_eq!(state.statistics.dropped_frames, expected.3);
+            assert_eq!(state.statistics.dropped_bytes, expected.4);
+            assert_eq!(state.statistics.overflow_events, 1);
+        }
+    }
+
+    #[test]
+    fn native_drop_deltas_handle_counter_wrap_and_commit_atomically() {
+        let queue = queue(CaptureOverflowPolicy::Fail, 1, 1);
+        queue
+            .add_native_drop_deltas(
+                NativeCaptureStatistics {
+                    capture_dropped_frames: u32::MAX,
+                    network_dropped_frames: u32::MAX,
+                    interface_dropped_frames: u32::MAX,
+                },
+                NativeCaptureStatistics::default(),
+            )
+            .expect("each wrapped counter advanced once");
+        {
+            let state = queue.lock().expect("queue state");
+            assert_eq!(state.statistics.dropped_frames, 3);
+            assert_eq!(state.statistics.receiver_dropped_frames, 3);
+        }
+
+        queue.lock().expect("queue state").statistics.dropped_frames = u64::MAX;
+        let error = queue
+            .add_native_drop_deltas(
+                NativeCaptureStatistics::default(),
+                NativeCaptureStatistics {
+                    capture_dropped_frames: 1,
+                    ..NativeCaptureStatistics::default()
+                },
+            )
+            .expect_err("overflow must fail closed");
+        assert!(matches!(
+            error,
+            LiveIoError::InvalidCaptureStatistics { .. }
+        ));
+        let state = queue.lock().expect("queue state");
+        assert_eq!(state.statistics.dropped_frames, u64::MAX);
+        assert_eq!(state.statistics.receiver_dropped_frames, 3);
+    }
+}

@@ -131,3 +131,81 @@ fn cli_error(error: FilterError) -> CliError {
         Vec::new(),
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::UNIX_EPOCH;
+
+    use packetcraftr::core::{frame::LinkType, protocol::builtin};
+
+    use super::*;
+
+    fn registry() -> Arc<Registry> {
+        Arc::new(builtin::registry().expect("built-in registry"))
+    }
+
+    #[test]
+    fn stream_fields_require_stream_capability() {
+        let registry = registry();
+        assert!(compile("tcp.stream == 1", &registry, Capabilities::stream_capable()).is_ok());
+
+        let error = compile("udp.stream == 1", &registry, Capabilities::frames_only())
+            .expect_err("frame-only commands lack stream indices");
+        assert_eq!(error.classification.code, "cli.filter_unsupported_field");
+        assert!(
+            error
+                .classification
+                .remediation
+                .is_some_and(|value| value.contains("stream-aware filters"))
+        );
+        assert!(error.message.contains("tcp.stream"));
+    }
+
+    #[test]
+    fn selector_uses_frame_context_and_surfaces_decode_limits() {
+        let registry = registry();
+        let filter = compile(
+            "frame.number == 2 && frame.len == 14",
+            &registry,
+            Capabilities::frames_only(),
+        )
+        .expect("frame metadata filter");
+        let frame = Frame::new(UNIX_EPOCH, LinkType::ETHERNET, vec![0_u8; 14])
+            .expect("bounded Ethernet frame");
+        let selector = FrameSelector::new(Arc::clone(&registry), filter, 14);
+
+        assert!(!selector.keep(1, &frame).expect("frame dissects"));
+        assert!(selector.keep(2, &frame).expect("frame dissects"));
+
+        let filter = compile("frame.number == 2", &registry, Capabilities::frames_only()).unwrap();
+        let too_small = FrameSelector::new(registry, filter, 13);
+        let error = too_small
+            .keep(2, &frame)
+            .expect_err("decode errors cannot become silent mismatches");
+        assert_eq!(error.classification.code, "packet.error");
+    }
+
+    #[test]
+    fn filter_error_remediation_is_specific() {
+        let registry = registry();
+        let cases = [
+            ("ipv4.missing == 1", "list the fields a protocol exposes"),
+            ("udp.destination_port == 192.0.2.1", "value of its own type"),
+            ("frame.len[0] == 1", "slice only fields that hold bytes"),
+            ("(ethernet", "check the filter syntax"),
+        ];
+
+        for (source, expected_remediation) in cases {
+            let error = compile(source, &registry, Capabilities::frames_only())
+                .expect_err("fixture filter must fail");
+            assert!(
+                error
+                    .classification
+                    .remediation
+                    .is_some_and(|value| value.contains(expected_remediation)),
+                "{source}: {:?}",
+                error.classification.remediation
+            );
+        }
+    }
+}

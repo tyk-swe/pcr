@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::{Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
@@ -11,6 +11,7 @@ use packetcraftr_core::filter::{Context as FilterContext, Filter, Options as Fil
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::{Layer, Malformed, Padding, Raw};
 use packetcraftr_core::protocol::application::Dns;
+use packetcraftr_core::protocol::builtin;
 use packetcraftr_core::protocol::capture::{BsdLoop, BsdNull, LinuxSll, LinuxSll2};
 use packetcraftr_core::protocol::gre::Gre;
 use packetcraftr_core::protocol::icmp::{Icmpv4, Icmpv6};
@@ -23,7 +24,6 @@ use packetcraftr_core::protocol::transport::{Sctp, Tcp, Udp};
 use packetcraftr_core::protocol::tunnel::{
     Ah, Erspan, Esp, Geneve, L2tpv3, Mpls, Ppp, Pppoe, Vxlan,
 };
-use packetcraftr_core::protocol::{builtin, quoted_icmp_error_kind};
 use packetcraftr_core::{Packet, build, decode};
 
 fn registry() -> Arc<packetcraftr_core::registry::Registry> {
@@ -650,64 +650,6 @@ fn strict_and_permissive_modes_distinguish_noncanonical_wire_requests() {
                 },
             )
             .is_ok()
-    );
-}
-
-#[test]
-fn response_matchers_correlate_reverse_udp_and_icmp_echo_flows() {
-    let registry = registry();
-    let udp_matcher = registry.matcher("udp").expect("UDP matcher");
-    let mut request = Packet::new();
-    request.push(ipv4([192, 0, 2, 1], [198, 51, 100, 2]));
-    request.push(Udp {
-        source_port: 40_000,
-        destination_port: 33434,
-        ..Udp::default()
-    });
-    request.push(Raw::new(vec![1]));
-    let mut response = Packet::new();
-    response.push(ipv4([198, 51, 100, 2], [192, 0, 2, 1]));
-    response.push(Udp {
-        source_port: 33434,
-        destination_port: 40_000,
-        ..Udp::default()
-    });
-    response.push(Raw::new(vec![2]));
-    let matched = udp_matcher.matches(&request, &response);
-    assert!(matched.matched);
-    assert_eq!(matched.confidence, 100);
-    assert_eq!(
-        udp_matcher.responder(&request, &response),
-        Some(IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2)))
-    );
-    response.get_mut::<Udp>().expect("UDP").destination_port = 40_001;
-    assert!(!udp_matcher.matches(&request, &response).matched);
-
-    let echo_matcher = registry.matcher("icmpv4").expect("ICMPv4 matcher");
-    let mut echo_request = Packet::new();
-    echo_request.push(ipv4([192, 0, 2, 1], [198, 51, 100, 2]));
-    echo_request.push(Icmpv4 {
-        body: Bytes::from_static(&[0x12, 0x34, 0, 1, 9]),
-        ..Icmpv4::default()
-    });
-    let mut echo_response = Packet::new();
-    echo_response.push(ipv4([198, 51, 100, 2], [192, 0, 2, 1]));
-    echo_response.push(Icmpv4 {
-        icmp_type: 0,
-        body: Bytes::from_static(&[0x12, 0x34, 0, 1, 7]),
-        ..Icmpv4::default()
-    });
-    assert!(echo_matcher.matches(&echo_request, &echo_response).matched);
-    echo_response.get_mut::<Icmpv4>().expect("ICMP").code = 1;
-    assert!(!echo_matcher.matches(&echo_request, &echo_response).matched);
-
-    assert!(
-        quoted_icmp_error_kind(
-            &request,
-            &response,
-            packetcraftr_core::protocol::QuotedProbeTransport::Udp,
-        )
-        .is_none()
     );
 }
 

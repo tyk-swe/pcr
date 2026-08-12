@@ -176,3 +176,60 @@ pub(super) fn map_raw_error(interface: &InterfaceId, error: RawSocketError) -> L
         _ => LiveIoError::Send { message },
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::net::Ipv6Addr;
+
+    use super::*;
+
+    #[test]
+    fn socket_address_scopes_only_ipv6_link_local_and_multicast_destinations() {
+        let cases = [
+            (Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1), 7),
+            (Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 1), 7),
+            (Ipv6Addr::LOCALHOST, 0),
+        ];
+
+        for (address, expected_scope) in cases {
+            let socket = socket_address(IpAddr::V6(address), 7)
+                .as_socket()
+                .expect("IP socket address");
+            let SocketAddr::V6(socket) = socket else {
+                panic!("expected IPv6 socket address")
+            };
+            assert_eq!(socket.scope_id(), expected_scope);
+        }
+    }
+
+    #[test]
+    fn raw_socket_errors_preserve_operation_context_and_stable_type() {
+        let interface = InterfaceId {
+            name: "fixture0".to_owned(),
+            index: 4,
+        };
+        for (kind, expected) in [
+            (io::ErrorKind::PermissionDenied, "privilege"),
+            (io::ErrorKind::Unsupported, "unsupported"),
+            (io::ErrorKind::NotFound, "device"),
+            (io::ErrorKind::ConnectionRefused, "send"),
+        ] {
+            let error = map_raw_error(
+                &interface,
+                raw_error(
+                    "binding fixture socket",
+                    io::Error::new(kind, "fixture failure"),
+                ),
+            );
+            assert!(error.to_string().contains("binding fixture socket"));
+            let actual = match error {
+                LiveIoError::Privilege { .. } => "privilege",
+                LiveIoError::Unsupported { .. } => "unsupported",
+                LiveIoError::Device { ref interface, .. } if interface == "fixture0" => "device",
+                LiveIoError::Send { .. } => "send",
+                other => panic!("unexpected mapping: {other:?}"),
+            };
+            assert_eq!(actual, expected);
+        }
+    }
+}

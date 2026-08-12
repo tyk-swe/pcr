@@ -117,3 +117,85 @@ const fn exit_code_for_kind(kind: Kind) -> u8 {
         Kind::Internal => 70,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn numeric_exit_codes_map_to_stable_classifications() {
+        let cases = [
+            (2, Kind::Cli, "cli.error"),
+            (3, Kind::Packet, "packet.error"),
+            (4, Kind::Capability, "capability.unavailable"),
+            (5, Kind::Io, "io.runtime"),
+            (6, Kind::Policy, "policy.denied"),
+            (1, Kind::Internal, "internal.error"),
+            (70, Kind::Internal, "internal.error"),
+        ];
+
+        for (exit_code, kind, code) in cases {
+            let error = CliError::new(exit_code, "failure");
+            assert_eq!(error.classification.kind, kind, "exit {exit_code}");
+            assert_eq!(error.classification.code, code, "exit {exit_code}");
+        }
+    }
+
+    #[test]
+    fn classified_errors_preserve_causes_sequence_and_boundary_contracts() {
+        let classified = packetcraftr::BoundaryError::new(
+            "fixture failed",
+            Classification::new(
+                "fixture.denied",
+                Kind::Policy,
+                Some("authorize the fixture"),
+            ),
+            vec!["first cause".to_owned(), "second cause".to_owned()],
+        );
+        let error = CliError::classified_at_optional_sequence(classified, Some(8));
+        assert_eq!(error.exit_code, 6);
+        assert_eq!(error.sequence, Some(8));
+
+        let output = error.output_error();
+        assert_eq!(output.code, "fixture.denied");
+        assert_eq!(output.causes, ["first cause", "second cause"]);
+        assert_eq!(output.remediation.as_deref(), Some("authorize the fixture"));
+
+        let boundary = error.into_boundary_error();
+        assert_eq!(boundary.classification().code, "fixture.denied");
+        assert_eq!(boundary.causes(), ["first cause", "second cause"]);
+    }
+
+    #[test]
+    fn cleanup_failure_keeps_the_primary_error_and_existing_sequence() {
+        let cleanup = net::Error::Capture {
+            message: "receiver stopped".to_owned(),
+        };
+        let error = CliError::new(5, "capture failed")
+            .at_sequence(4)
+            .at_sequence_if_absent(9)
+            .with_cleanup(cleanup.clone());
+        assert_eq!(error.sequence, Some(4));
+        assert_eq!(
+            error.message,
+            format!("capture failed; capture shutdown also failed: {cleanup}")
+        );
+        assert_eq!(
+            error.causes,
+            vec!["capture failed".to_owned(), cleanup.to_string()]
+        );
+
+        let error = CliError::from_classification(
+            Classification::new("io.fixture", Kind::Io, None),
+            "capture failed",
+            vec!["original source".to_owned()],
+        )
+        .at_sequence_if_absent(11)
+        .with_cleanup(cleanup.clone());
+        assert_eq!(error.sequence, Some(11));
+        assert_eq!(
+            error.causes,
+            vec!["original source".to_owned(), cleanup.to_string()]
+        );
+    }
+}

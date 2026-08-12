@@ -50,3 +50,40 @@ pub(in crate::platform) fn monotonic_packet_time(
 pub(super) fn monotonic_time_for_age(age: Duration, observed_at: Instant) -> Option<Instant> {
     observed_at.checked_sub(age)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn timestamp_conversion_is_checked_across_clock_domains() {
+        assert_eq!(system_time(0, 0).expect("epoch"), UNIX_EPOCH);
+        assert_eq!(
+            system_time(-1, 500_000).expect("pre-epoch timestamp"),
+            UNIX_EPOCH - Duration::from_millis(500)
+        );
+
+        for invalid in [-1, 1_000_000] {
+            assert!(matches!(
+                system_time(0, invalid),
+                Err(LiveIoError::Capture { .. })
+            ));
+        }
+
+        let observed_at = Instant::now();
+        let observed_wall = UNIX_EPOCH + Duration::from_secs(10);
+        let packet_wall = observed_wall - Duration::from_millis(25);
+        assert_eq!(
+            monotonic_packet_time(packet_wall, observed_wall, observed_at),
+            observed_at.checked_sub(Duration::from_millis(25))
+        );
+        assert_eq!(
+            monotonic_packet_time(
+                observed_wall + Duration::from_nanos(1),
+                observed_wall,
+                observed_at
+            ),
+            None
+        );
+    }
+}

@@ -1,9 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Structured diagnostics produced by build and decode operations.
+
 use serde::{Deserialize, Serialize};
 
-use super::super::layout::ByteRange;
+use crate::layout::ByteRange;
+
+pub use DiagnosticSeverity as Severity;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

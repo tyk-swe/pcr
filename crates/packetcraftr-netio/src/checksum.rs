@@ -3,48 +3,10 @@
 
 //! Private Internet-checksum primitives shared by native wire paths.
 
-#[derive(Debug, Default)]
-struct Accumulator {
-    sum: u64,
-    pending_high: Option<u8>,
-}
-
-impl Accumulator {
-    fn add(&mut self, mut bytes: &[u8]) {
-        if let Some(high) = self.pending_high.take() {
-            if let Some((&low, rest)) = bytes.split_first() {
-                self.sum += u64::from(u16::from_be_bytes([high, low]));
-                bytes = rest;
-            } else {
-                self.pending_high = Some(high);
-                return;
-            }
-        }
-
-        let mut chunks = bytes.chunks_exact(2);
-        for chunk in &mut chunks {
-            self.sum += u64::from(u16::from_be_bytes([chunk[0], chunk[1]]));
-        }
-        self.pending_high = chunks.remainder().first().copied();
-    }
-
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "the fold loop exits only once the sum is at most 0xffff"
-    )]
-    fn finish(mut self) -> u16 {
-        if let Some(high) = self.pending_high {
-            self.sum += u64::from(u16::from_be_bytes([high, 0]));
-        }
-        while self.sum > u64::from(u16::MAX) {
-            self.sum = (self.sum & u64::from(u16::MAX)) + (self.sum >> 16);
-        }
-        !(self.sum as u16)
-    }
-}
+use packetcraftr_core::protocol::ChecksumAccumulator;
 
 pub(crate) fn compute(bytes: &[u8]) -> u16 {
-    let mut accumulator = Accumulator::default();
+    let mut accumulator = ChecksumAccumulator::default();
     accumulator.add(bytes);
     accumulator.finish()
 }
@@ -53,7 +15,7 @@ pub(crate) fn compute_parts(parts: &[&[u8]]) -> u16 {
     if let [bytes] = parts {
         return compute(bytes);
     }
-    let mut accumulator = Accumulator::default();
+    let mut accumulator = ChecksumAccumulator::default();
     for part in parts {
         accumulator.add(part);
     }

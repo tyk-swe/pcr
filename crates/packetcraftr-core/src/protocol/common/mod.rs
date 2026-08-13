@@ -12,6 +12,7 @@ mod fields;
 mod payload;
 mod validation;
 
+pub use checksum::ChecksumAccumulator;
 pub(crate) use checksum::{
     checksum, checksum_parts, network_from_addresses, transport_checksum, transport_checksum_parts,
 };

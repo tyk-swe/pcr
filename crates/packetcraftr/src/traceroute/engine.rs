@@ -70,7 +70,7 @@ where
     if total_probes > request.limits.max_probes {
         return Err(TracerouteError::InvalidLimit {
             field: "probes",
-            value: total_probes as u64,
+            value: u64::try_from(total_probes).unwrap_or(u64::MAX),
             reason: format!("exceeds max_probes={}", request.limits.max_probes),
         });
     }
@@ -79,7 +79,7 @@ where
         let last_offset = total_probes.saturating_sub(1);
         if usize::from(base)
             .checked_add(last_offset)
-            .is_none_or(|last| last > u16::MAX as usize)
+            .is_none_or(|last| last > usize::from(u16::MAX))
         {
             return Err(TracerouteError::InvalidPort {
                 message: format!(
@@ -96,7 +96,8 @@ where
             limit: request.limits.max_duration,
         });
     }
-    let maximum_wire_bytes = (total_probes as u64)
+    let maximum_wire_bytes = u64::try_from(total_probes)
+        .unwrap_or(u64::MAX)
         .checked_mul(MAX_TRACEROUTE_PROBE_BYTES)
         .ok_or(TracerouteError::InvalidLimit {
             field: "wire_bytes",
@@ -105,7 +106,7 @@ where
         })?;
     approve_operation(
         authorizer,
-        total_probes as u64,
+        u64::try_from(total_probes).unwrap_or(u64::MAX),
         maximum_wire_bytes,
         &deadline,
         traceroute_duration_error,
@@ -119,7 +120,8 @@ where
     let config = ProbeRunConfig {
         probes_per_second: request.probes_per_second,
         duration_limit: request.limits.max_duration,
-        final_statistics_sequence: total_probes.saturating_sub(1) as u64,
+        final_statistics_sequence: u64::try_from(total_probes.saturating_sub(1))
+            .unwrap_or(u64::MAX),
     };
     let mut lifecycle = TracerouteProbeLifecycle {
         executor,

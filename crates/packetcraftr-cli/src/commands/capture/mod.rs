@@ -161,7 +161,7 @@ pub(super) fn run(
                         limit: limits.snap_length,
                     })
                 }
-                capture::Format::PcapNg if route.route.link_type.0 > u16::MAX as u32 => {
+                capture::Format::PcapNg if route.route.link_type.0 > u32::from(u16::MAX) => {
                     Some(capture::Error::LinkTypeOutOfRange {
                         link_type: route.route.link_type.0,
                     })

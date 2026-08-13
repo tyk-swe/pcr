@@ -171,7 +171,7 @@ impl TracerouteExecutor for NoResponseExecutor {
                 ipv4.source = Ipv4Addr::new(10, 0, 0, 1);
             }
             let receipt = crate::evidence::test_sent_packet(packet);
-            bytes += receipt.bytes_sent() as u64;
+            bytes += u64::try_from(receipt.bytes_sent()).unwrap();
             sent.push(receipt);
         }
         if let Some(index) = self.invalid_sent_index {
@@ -212,7 +212,7 @@ impl TracerouteExecutor for MixedHopExecutor {
             let mut packet = probe_packet(probe);
             packet.get_mut::<Ipv4>().expect("IPv4 probe").source = local;
             let receipt = crate::evidence::test_sent_packet(packet);
-            bytes += receipt.bytes_sent() as u64;
+            bytes += u64::try_from(receipt.bytes_sent()).unwrap();
             sent.push(receipt);
         }
         let responder = if batch.probes[0].hop_limit == 1 {

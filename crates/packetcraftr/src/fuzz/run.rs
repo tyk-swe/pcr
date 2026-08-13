@@ -86,17 +86,17 @@ where
             SYNTHESIZED_ETHERNET_BYTES
         };
         total
-            .checked_add(built.bytes.len() as u64)
+            .checked_add(u64::try_from(built.bytes.len()).unwrap_or(u64::MAX))
             .and_then(|value| value.checked_add(overhead))
             .ok_or(FuzzError::ByteLimit {
                 actual: u64::MAX,
-                limit: request.limits.max_total_bytes as u64,
+                limit: u64::try_from(request.limits.max_total_bytes).unwrap_or(u64::MAX),
             })
     })?;
-    if maximum_wire_bytes > request.limits.max_total_bytes as u64 {
+    if maximum_wire_bytes > u64::try_from(request.limits.max_total_bytes).unwrap_or(u64::MAX) {
         return Err(FuzzError::ByteLimit {
             actual: maximum_wire_bytes,
-            limit: request.limits.max_total_bytes as u64,
+            limit: u64::try_from(request.limits.max_total_bytes).unwrap_or(u64::MAX),
         });
     }
     let requires_malformed_live = cases.iter().any(|case| {
@@ -129,14 +129,14 @@ where
     deadline.check().map_err(duration_limit)?;
 
     let mut stats = Stats {
-        cases_generated: request.cases as u64,
+        cases_generated: u64::try_from(request.cases).unwrap_or(u64::MAX),
         cases_built: built_case_count,
         ..Stats::default()
     };
     let retained_byte_count =
         usize::try_from(retained_byte_count).map_err(|_| FuzzError::ByteLimit {
             actual: retained_byte_count,
-            limit: request.limits.max_total_bytes as u64,
+            limit: u64::try_from(request.limits.max_total_bytes).unwrap_or(u64::MAX),
         })?;
     let mut evidence_limits = request.limits;
     evidence_limits.max_evidence_bytes = evidence_limits.max_evidence_bytes.min(
@@ -206,10 +206,10 @@ where
             .map_err(duration_limit)?;
         validate_execution(case, &execution, request.limits, live.timeout, &deadline)?;
         add_execution_stats(&mut stats, &execution.stats, case.index)?;
-        if stats.bytes > request.limits.max_total_bytes as u64 {
+        if stats.bytes > u64::try_from(request.limits.max_total_bytes).unwrap_or(u64::MAX) {
             return Err(FuzzError::ByteLimit {
                 actual: stats.bytes,
-                limit: request.limits.max_total_bytes as u64,
+                limit: u64::try_from(request.limits.max_total_bytes).unwrap_or(u64::MAX),
             });
         }
         let had_response = !execution.responses.is_empty();
@@ -248,9 +248,9 @@ where
             .elapsed
             .checked_add(scheduled_delay)
             .ok_or(FuzzError::StatisticsOverflow {
-                case_index: request
-                    .first_case
-                    .saturating_add(request.cases.saturating_sub(1) as u64),
+                case_index: request.first_case.saturating_add(
+                    u64::try_from(request.cases.saturating_sub(1)).unwrap_or(u64::MAX),
+                ),
             })?;
     deadline.check().map_err(duration_limit)?;
 

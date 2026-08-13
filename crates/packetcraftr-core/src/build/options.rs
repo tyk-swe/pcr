@@ -6,9 +6,9 @@ use std::net::IpAddr;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
-use super::super::super::Packet;
-use super::super::super::diagnostic::Diagnostic;
-use super::super::super::layout::PacketLayout;
+use crate::Packet;
+use crate::diagnostic::Diagnostic;
+use crate::layout::PacketLayout;
 
 pub const DEFAULT_MAX_PACKET_SIZE: usize = 16 * 1024 * 1024;
 pub const DEFAULT_MAX_LAYERS: usize = 64;

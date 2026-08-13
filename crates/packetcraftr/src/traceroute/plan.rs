@@ -21,7 +21,8 @@ pub(super) fn build_batches(
     let mut batches = Vec::with_capacity(request.hop_count());
     let mut sequence = 0_u64;
     for hop_limit in request.first_hop..=request.max_hops {
-        let mut probes = Vec::with_capacity(request.probes_per_hop as usize);
+        let mut probes =
+            Vec::with_capacity(usize::try_from(request.probes_per_hop).unwrap_or(usize::MAX));
         for attempt in 1..=request.probes_per_hop {
             let destination_port = match request.strategy {
                 TracerouteStrategy::Udp => Some(
@@ -75,12 +76,15 @@ pub(super) fn worst_case_duration(
             actual: Duration::MAX,
             limit: request.limits.max_duration,
         })?;
-    let delay = rate_delay(request.probes_per_hop as usize, request.probes_per_second)?
-        .checked_mul(hops.saturating_sub(1))
-        .ok_or(TracerouteError::DurationLimit {
-            actual: Duration::MAX,
-            limit: request.limits.max_duration,
-        })?;
+    let delay = rate_delay(
+        usize::try_from(request.probes_per_hop).unwrap_or(usize::MAX),
+        request.probes_per_second,
+    )?
+    .checked_mul(hops.saturating_sub(1))
+    .ok_or(TracerouteError::DurationLimit {
+        actual: Duration::MAX,
+        limit: request.limits.max_duration,
+    })?;
     exchange
         .checked_add(delay)
         .ok_or(TracerouteError::DurationLimit {

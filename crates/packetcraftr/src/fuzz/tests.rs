@@ -122,7 +122,7 @@ impl Executor for RebuildingExecutor {
             stats: Stats {
                 packets_attempted: 1,
                 packets_completed: 1,
-                bytes: sent.bytes_sent() as u64,
+                bytes: u64::try_from(sent.bytes_sent()).unwrap(),
                 ..Stats::default()
             },
             sent,
@@ -150,7 +150,7 @@ impl Executor for RouteMaterializingExecutor {
             stats: Stats {
                 packets_attempted: 1,
                 packets_completed: 1,
-                bytes: sent.bytes_sent() as u64,
+                bytes: u64::try_from(sent.bytes_sent()).unwrap(),
                 ..Stats::default()
             },
             sent,
@@ -176,7 +176,7 @@ impl Executor for SubstitutingFuzzExecutor {
             stats: Stats {
                 packets_attempted: 1,
                 packets_completed: 1,
-                bytes: sent.bytes_sent() as u64,
+                bytes: u64::try_from(sent.bytes_sent()).unwrap(),
                 ..Stats::default()
             },
             sent,

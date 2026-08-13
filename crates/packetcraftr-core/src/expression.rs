@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Compact packet expressions.
+
 use std::collections::BTreeMap;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
@@ -8,9 +10,13 @@ use std::str::FromStr;
 use bytes::Bytes;
 use thiserror::Error;
 
-use super::super::Packet;
-use super::super::field::{FieldValue, parse_mac};
-use super::super::registry::{CodecError, ProtocolRegistry};
+use crate::Packet;
+use crate::field::{FieldValue, parse_mac};
+use crate::registry::{CodecError, ProtocolRegistry};
+
+pub use ExpressionError as Error;
+pub use ExpressionOptions as Options;
+pub use parse_packet_expression as parse;
 
 pub const DEFAULT_MAX_EXPRESSION_BYTES: usize = 1024 * 1024;
 /// Absolute recursive list nesting accepted by the expression parser.
@@ -55,7 +61,7 @@ impl Default for ExpressionOptions {
     fn default() -> Self {
         Self {
             max_bytes: DEFAULT_MAX_EXPRESSION_BYTES,
-            max_layers: super::super::build::DEFAULT_MAX_LAYERS,
+            max_layers: crate::build::DEFAULT_MAX_LAYERS,
             max_nesting: MAX_EXPRESSION_NESTING,
         }
     }
@@ -396,7 +402,7 @@ fn strip_hex_prefix(input: &str) -> Option<&str> {
 }
 
 pub fn decode_hex(input: &str) -> Result<Bytes, CodecError> {
-    let protocol = super::super::layer::ProtocolId::new("raw");
+    let protocol = crate::layer::ProtocolId::new("raw");
     let compact = strip_hex_prefix(input)
         .unwrap_or(input)
         .chars()

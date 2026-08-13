@@ -1,19 +1,28 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Extension contract for packet codecs.
+
 use std::collections::BTreeMap;
 use std::fmt;
 use std::net::IpAddr;
 
 use thiserror::Error;
 
-use super::super::Packet;
-use super::super::build::{BuildContext, BuildMode};
-use super::super::diagnostic::Diagnostic;
-use super::super::field::FieldValue;
-use super::super::layer::{FieldError, Layer, LayerSchema, ProtocolId};
-use super::super::layout::FieldLayout;
-use super::super::registry::{Discriminator, ProtocolRegistry};
+use crate::Packet;
+use crate::build::{BuildContext, BuildMode};
+use crate::diagnostic::Diagnostic;
+use crate::field::FieldValue;
+use crate::layer::{FieldError, Layer, LayerSchema, ProtocolId};
+use crate::layout::FieldLayout;
+use crate::registry::{Discriminator, ProtocolRegistry};
+
+pub use CodecError as Error;
+pub use DecodedLayerValue as Decoded;
+pub use EncodedLayer as Encoded;
+pub use LayerCodec as Codec;
+pub use LayerDecodeContext as DecodeContext;
+pub use LayerEncodeContext as EncodeContext;
 
 #[derive(Debug, Error)]
 #[non_exhaustive]

@@ -4,10 +4,10 @@
 use crate::frame::Frame;
 use bytes::Bytes;
 
-use super::super::super::Packet;
-use super::super::super::build::{DEFAULT_MAX_LAYERS, DEFAULT_MAX_PACKET_SIZE};
-use super::super::super::diagnostic::Diagnostic;
-use super::super::super::layout::PacketLayout;
+use crate::Packet;
+use crate::build::{DEFAULT_MAX_LAYERS, DEFAULT_MAX_PACKET_SIZE};
+use crate::diagnostic::Diagnostic;
+use crate::layout::PacketLayout;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DecodeOptions {

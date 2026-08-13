@@ -78,7 +78,7 @@ impl Default for ScanLimits {
 impl ScanLimits {
     pub fn validate(self) -> std::result::Result<Self, ScanError> {
         for (field, value, maximum) in [
-            ("max_ports", self.max_ports, u16::MAX as usize + 1),
+            ("max_ports", self.max_ports, usize::from(u16::MAX) + 1),
             ("max_probes", self.max_probes, MAX_SCAN_PROBES),
             ("batch_size", self.batch_size, MAX_SCAN_PROBES),
             (
@@ -95,7 +95,7 @@ impl ScanLimits {
             if value == 0 || value > maximum {
                 return Err(ScanError::InvalidLimit {
                     field,
-                    value: value as u64,
+                    value: u64::try_from(value).unwrap_or(u64::MAX),
                     reason: format!("must be within 1..={maximum}"),
                 });
             }
@@ -103,14 +103,14 @@ impl ScanLimits {
         if self.batch_size > self.max_probes {
             return Err(ScanError::InvalidLimit {
                 field: "batch_size",
-                value: self.batch_size as u64,
+                value: u64::try_from(self.batch_size).unwrap_or(u64::MAX),
                 reason: "cannot exceed max_probes".to_owned(),
             });
         }
         if self.batch_size > self.max_evidence_frames {
             return Err(ScanError::InvalidLimit {
                 field: "batch_size",
-                value: self.batch_size as u64,
+                value: u64::try_from(self.batch_size).unwrap_or(u64::MAX),
                 reason:
                     "cannot exceed max_evidence_frames because every probe may receive a response"
                         .to_owned(),
@@ -119,7 +119,7 @@ impl ScanLimits {
         if self.max_undecoded > self.max_evidence_frames {
             return Err(ScanError::InvalidLimit {
                 field: "max_undecoded",
-                value: self.max_undecoded as u64,
+                value: u64::try_from(self.max_undecoded).unwrap_or(u64::MAX),
                 reason: "cannot exceed max_evidence_frames".to_owned(),
             });
         }
@@ -198,7 +198,7 @@ impl ScanRequest {
         if ports.len() > self.limits.max_ports {
             return Err(ScanError::InvalidLimit {
                 field: "ports",
-                value: ports.len() as u64,
+                value: u64::try_from(ports.len()).unwrap_or(u64::MAX),
                 reason: format!("exceeds max_ports={}", self.limits.max_ports),
             });
         }

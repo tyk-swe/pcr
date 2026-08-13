@@ -75,7 +75,8 @@ where
             .map_err(|source| ClientError::Template {
                 message: source.to_string(),
             })?;
-        self.policy.authorize_operation(expansion_len as u64, 0)?;
+        self.policy
+            .authorize_operation(u64::try_from(expansion_len).unwrap_or(u64::MAX), 0)?;
         if expansion_len == 0 {
             return Err(ClientError::Template {
                 message: "template expanded to no packets".to_owned(),
@@ -87,7 +88,7 @@ where
                 .map_err(|source| ClientError::Template {
                     message: source.to_string(),
                 })?;
-        let packet_count = expansion_len as u64;
+        let packet_count = u64::try_from(expansion_len).unwrap_or(u64::MAX);
         let builder = Builder::new(Arc::clone(&self.registry));
         let routes = ExchangeRouteProvider::new(&self.routes);
         let mut planned_packets: Vec<PlannedExchangePacket> = Vec::with_capacity(expansion_len);
@@ -125,7 +126,7 @@ where
             self.authorize_built(&preliminary, options.send.allow_permissive_live)?;
             self.authorize_final_wire(&preliminary, &plan)?;
             total_bytes = total_bytes
-                .checked_add(preliminary.bytes.len() as u64)
+                .checked_add(u64::try_from(preliminary.bytes.len()).unwrap_or(u64::MAX))
                 .ok_or(TrafficPolicyError::ByteLimit {
                     actual: u64::MAX,
                     limit: self.policy.max_bytes_per_operation,

@@ -1,10 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::super::super::Packet;
-use super::super::super::registry::{CodecError, ProtocolRegistry};
 use super::error::DocumentError;
 use super::types::{LayerDocument, PACKET_DOCUMENT_SCHEMA_V1, PacketDocument};
+use crate::Packet;
+use crate::registry::{CodecError, ProtocolRegistry};
 
 impl PacketDocument {
     pub fn from_packet(packet: &Packet) -> Self {

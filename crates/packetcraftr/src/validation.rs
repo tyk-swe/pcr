@@ -36,7 +36,7 @@ pub(super) fn validate_mtu(built: &BuiltPacket, mtu: u32) -> Result<(), ClientEr
             .checked_sub(start)
     });
     if let Some(actual) = network_length
-        && actual > mtu as usize
+        && actual > usize::try_from(mtu).unwrap_or(usize::MAX)
     {
         return Err(ClientError::PacketExceedsMtu { actual, mtu });
     }

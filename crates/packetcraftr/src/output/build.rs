@@ -37,7 +37,7 @@ impl Result {
         (
             Self {
                 bytes_hex: compact_hex(&bytes),
-                length: bytes.len() as u64,
+                length: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
                 packet: PacketDocument::from_packet(&packet),
                 layout,
                 requires_live_opt_in,

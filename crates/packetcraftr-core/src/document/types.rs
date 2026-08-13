@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::super::super::field::FieldValue;
+use crate::field::FieldValue;
 
 pub const PACKET_DOCUMENT_SCHEMA_V1: &str = "packetcraftr.packet/v1";
 pub const DEFAULT_MAX_DOCUMENT_BYTES: usize = 16 * 1024 * 1024;

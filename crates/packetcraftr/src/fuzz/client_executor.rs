@@ -35,7 +35,7 @@ impl FuzzAuthorizer for PolicyAuthorizer<'_> {
         requires_malformed_live: bool,
     ) -> Result<(), BoundaryError> {
         self.policy.validate().map_err(BoundaryError::from_error)?;
-        let packet_count = packets.len() as u64;
+        let packet_count = u64::try_from(packets.len()).unwrap_or(u64::MAX);
         self.policy
             .authorize_operation(packet_count, maximum_wire_bytes)
             .map_err(BoundaryError::from_error)?;

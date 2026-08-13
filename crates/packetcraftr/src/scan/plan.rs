@@ -55,7 +55,7 @@ pub(super) fn worst_case_duration(
 ) -> Result<Duration, ScanError> {
     let batches_per_attempt = endpoints_per_address.div_ceil(request.limits.batch_size);
     let batch_count = address_count
-        .checked_mul(request.attempts as usize)
+        .checked_mul(usize::try_from(request.attempts).unwrap_or(usize::MAX))
         .and_then(|count| count.checked_mul(batches_per_attempt))
         .ok_or(ScanError::DurationLimit {
             actual: Duration::MAX,

@@ -4,8 +4,7 @@
 use thiserror::Error;
 
 use crate::frame::FrameError as CaptureError;
-
-use super::super::super::layer::{FieldError, ProtocolId};
+use crate::layer::{FieldError, ProtocolId};
 
 #[derive(Debug, Error)]
 #[non_exhaustive]

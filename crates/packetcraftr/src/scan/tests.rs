@@ -171,7 +171,7 @@ impl ScanExecutor for TimeoutExecutor {
                 }
             }
             let receipt = crate::evidence::test_sent_packet(packet);
-            bytes += receipt.bytes_sent() as u64;
+            bytes += u64::try_from(receipt.bytes_sent()).unwrap();
             sent.push(receipt);
         }
         if let Some(index) = self.invalid_sent_index {
@@ -185,8 +185,8 @@ impl ScanExecutor for TimeoutExecutor {
             undecoded: Vec::new(),
             diagnostics: Vec::new(),
             stats: Stats {
-                packets_attempted: batch.probes.len() as u64,
-                packets_completed: batch.probes.len() as u64,
+                packets_attempted: u64::try_from(batch.probes.len()).unwrap(),
+                packets_completed: u64::try_from(batch.probes.len()).unwrap(),
                 bytes,
                 elapsed: Duration::from_millis(1),
                 capture: packetcraftr_netio::capture::Statistics::default(),

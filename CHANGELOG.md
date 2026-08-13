@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** Scan output now exposes address-bearing `endpoints` with an
+  optional port, replacing the `ports` collection, ICMP port-zero sentinel,
+  and evidence-derived address in aggregate and streaming output.
+- **Breaking:** Offline fuzz limits now contain only campaign-generation
+  bounds. Live evidence bounds moved to `packetcraftr::fuzz::LiveLimits`, the
+  CLI has an independent `--max-packet-bytes` option, and live-only fuzz
+  options require `--live`.
+- Shared wire and captured-frame output records now retain only exact bytes and
+  serialize hexadecimal lazily. JSON and hexadecimal output stream to stdout,
+  text hexadecimal no longer allocates a second temporary representation, and
+  exchange text summaries bypass decoded machine-output construction.
 - **Breaking:** Offline TCP and IP-fragment reassembly keys now require a
   compact capture-scope identity created by the exact scope interner.
 - **Breaking:** Consolidated the workspace from six crates to four.

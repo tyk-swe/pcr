@@ -20,8 +20,6 @@ pub enum FuzzError {
     },
     #[error("fuzz live timeout {value:?} is invalid; maximum is {maximum:?}")]
     InvalidTimeout { value: Duration, maximum: Duration },
-    #[error("fuzz retained/wire bytes {actual} exceed the configured limit of {limit}")]
-    ByteLimit { actual: u64, limit: u64 },
     #[error("permissive or malformed fuzz cases require an explicit live opt-in")]
     MalformedLiveOptInRequired,
     #[error("fuzz worst-case duration {actual:?} exceeds the configured limit of {limit:?}")]
@@ -52,7 +50,6 @@ impl FuzzError {
             Self::Campaign(_)
             | Self::InvalidLimit { .. }
             | Self::InvalidTimeout { .. }
-            | Self::ByteLimit { .. }
             | Self::MalformedLiveOptInRequired
             | Self::DurationLimit { .. }
             | Self::Authorization(_) => None,
@@ -69,7 +66,7 @@ impl Classified for FuzzError {
                 Kind::Cli,
                 Some("use finite non-zero rate, timeout, evidence, and duration limits"),
             ),
-            Self::ByteLimit { .. } | Self::DurationLimit { .. } => Classification::new(
+            Self::DurationLimit { .. } => Classification::new(
                 "policy.fuzz_resource_limit",
                 Kind::Policy,
                 Some("reduce cases, packet sizes, timeout, or rate delay"),

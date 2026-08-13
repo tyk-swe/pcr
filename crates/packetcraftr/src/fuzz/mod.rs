@@ -27,6 +27,6 @@ pub use boundary::{
 };
 pub use client_executor::PolicyAuthorizer;
 pub use error::FuzzError as Error;
-pub use request::LiveOptions;
+pub use request::{LiveLimits, LiveOptions};
 pub use result::{Case, CaseOutcome, Mode, Result, Stats};
 pub use run::run;

@@ -39,6 +39,7 @@ pub(super) fn run(arguments: FuzzArgs, output: output::contract::Format) -> Resu
         timeout_ms,
         rate,
         max_cases,
+        max_packet_bytes,
         max_total_bytes,
         max_field_bytes,
         max_list_items,
@@ -56,7 +57,6 @@ pub(super) fn run(arguments: FuzzArgs, output: output::contract::Format) -> Resu
                 .map_err(|source| CliError::new(2, source.to_string()))
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let queue_limits = limits.into_limits();
     let request = core::fuzz::Request {
         seed,
         first_case,
@@ -65,28 +65,31 @@ pub(super) fn run(arguments: FuzzArgs, output: output::contract::Format) -> Resu
         targets,
         build: core::build::Options {
             mode: mode.into(),
-            max_packet_size: queue_limits.snap_length,
+            max_packet_size: max_packet_bytes,
             ..core::build::Options::default()
         },
         limits: core::fuzz::Limits {
             max_cases,
-            max_packet_bytes: queue_limits.snap_length,
+            max_packet_bytes,
             max_total_bytes,
             max_field_bytes,
             max_list_items,
             max_shrink_steps,
-            max_evidence_frames: queue_limits.max_frames,
-            max_evidence_bytes: queue_limits.max_bytes,
             max_duration: Duration::from_millis(max_duration_ms),
         },
     };
     request.validate().map_err(CliError::classified)?;
     let prepared_live = if live {
+        let queue_limits = limits.into_limits();
         let live_options = packetcraftr::fuzz::LiveOptions {
             timeout: Duration::from_millis(timeout_ms),
             cases_per_second: rate,
             destination,
             allow_malformed_live,
+            limits: packetcraftr::fuzz::LiveLimits {
+                max_evidence_frames: queue_limits.max_frames,
+                max_evidence_bytes: queue_limits.max_bytes,
+            },
         }
         .validate()
         .map_err(fuzz_cli_error)?;

@@ -42,33 +42,57 @@ fn endpoint(address: IpAddr, responded: bool) -> scan::Endpoint {
 }
 
 #[test]
-fn scan_output_preserves_portless_family_evidence_and_absence() {
+fn scan_output_preserves_endpoint_identity_and_port_absence() {
     let ipv4 = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
     let ipv6 = IpAddr::V6(Ipv6Addr::LOCALHOST);
+    let evidence_free = scan::Endpoint {
+        address: ipv4,
+        transport: scan::Transport::Tcp,
+        port: Some(443),
+        classification: scan::Classification::Unknown,
+        evidence: Vec::new(),
+    };
+    let port_zero = scan::Endpoint {
+        port: Some(0),
+        ..evidence_free.clone()
+    };
     let (output, _, _) = scan_output::Result::try_from_scan(scan::Result {
         target: "router.example".to_owned(),
         resolved_addresses: vec![ipv4, ipv6],
-        endpoints: vec![endpoint(ipv4, true), endpoint(ipv6, false)],
+        endpoints: vec![
+            endpoint(ipv4, true),
+            endpoint(ipv6, false),
+            evidence_free,
+            port_zero,
+        ],
         undecoded: Vec::new(),
         diagnostics: Vec::new(),
         stats: Stats::default(),
     })
     .expect("in-range evidence converts");
 
-    assert_eq!(output.ports[0].port, 0);
-    assert_eq!(output.ports[0].evidence[0].protocol, "icmpv4");
-    assert_eq!(output.ports[1].evidence[0].protocol, "icmpv6");
+    assert_eq!(output.endpoints[0].address, ipv4);
+    assert_eq!(output.endpoints[0].port, None);
+    assert_eq!(output.endpoints[0].evidence[0].protocol, "icmpv4");
+    assert_eq!(output.endpoints[1].address, ipv6);
+    assert_eq!(output.endpoints[1].port, None);
+    assert_eq!(output.endpoints[1].evidence[0].protocol, "icmpv6");
     assert_eq!(
-        output.ports[0].classification,
+        output.endpoints[0].classification,
         scan_output::Classification::Open
     );
     assert_eq!(
-        output.ports[1].classification,
+        output.endpoints[1].classification,
         scan_output::Classification::Timeout
     );
+    assert_eq!(output.endpoints[2].address, ipv4);
+    assert_eq!(output.endpoints[2].port, Some(443));
+    assert!(output.endpoints[2].evidence.is_empty());
 
     let json = serde_json::to_value(&output).expect("scan output serializes");
-    let timeout = &json["ports"][1]["evidence"][0];
+    assert!(json["endpoints"][0].get("port").is_none());
+    assert_eq!(json["endpoints"][3]["port"], 0);
+    let timeout = &json["endpoints"][1]["evidence"][0];
     for absent in [
         "destination_port",
         "responder",
@@ -78,4 +102,22 @@ fn scan_output_preserves_portless_family_evidence_and_absence() {
     ] {
         assert!(timeout.get(absent).is_none(), "{absent} must be omitted");
     }
+
+    let event = serde_json::to_value(scan_output::Event::Endpoint {
+        target: output.target,
+        endpoint: output.endpoints[2].clone(),
+    })
+    .expect("endpoint event serializes without evidence");
+    assert_eq!(event["event"], "endpoint");
+    assert_eq!(event["endpoint"]["address"], ipv4.to_string());
+    assert!(event.get("resolved_address").is_none());
+
+    let schema: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../schemas/packetcraftr.output.v1.schema.json"
+    ))
+    .expect("output schema must be valid JSON");
+    assert_eq!(
+        schema["$defs"]["scanEndpoint"]["properties"]["port"]["minimum"],
+        0
+    );
 }

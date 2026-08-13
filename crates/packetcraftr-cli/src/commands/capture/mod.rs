@@ -118,7 +118,7 @@ pub(super) fn run(
                 |frame, _| {
                     let frame = output::capture::Frame::try_from_frame(frame)
                         .map_err(CliError::classified)?;
-                    write_plain_line(format_args!("{}", frame.bytes_hex))
+                    write_plain_line(format_args!("{}", frame.bytes_hex()))
                 },
             )?;
             render_diagnostics_stderr(&outcome.diagnostics)

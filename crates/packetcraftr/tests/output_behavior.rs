@@ -216,8 +216,11 @@ fn frame_output_preserves_time_direction_lengths_and_exact_bytes() {
 
     let wire = Wire::new(vec![0, 1, 0xfe, 0xff]);
     assert_eq!(wire.bytes(), &[0, 1, 0xfe, 0xff]);
-    assert_eq!(wire.bytes_hex, "0001feff");
+    assert_eq!(wire.bytes_hex().to_string(), "0001feff");
     assert_eq!(wire.length, 4);
+    let wire_json = serde_json::to_value(&wire).expect("wire serializes");
+    assert_eq!(wire_json["bytes_hex"], "0001feff");
+    assert_eq!(wire_json["length"], 4);
 
     for (capture_direction, output_direction) in [
         (CaptureDirection::Inbound, "inbound"),
@@ -243,7 +246,11 @@ fn frame_output_preserves_time_direction_lengths_and_exact_bytes() {
             serde_json::to_value(&captured).expect("captured frame serializes")["direction"],
             output_direction,
         );
-        assert_eq!(captured.bytes_hex, "010203");
+        assert_eq!(captured.bytes_hex().to_string(), "010203");
+        assert_eq!(
+            serde_json::to_value(&captured).expect("captured frame serializes")["bytes_hex"],
+            "010203"
+        );
     }
 }
 

@@ -1796,7 +1796,7 @@
       "required": [
         "target",
         "resolved_addresses",
-        "ports",
+        "endpoints",
         "undecoded"
       ],
       "properties": {
@@ -1809,10 +1809,10 @@
             "$ref": "#/$defs/ipAddress"
           }
         },
-        "ports": {
+        "endpoints": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/scanPort"
+            "$ref": "#/$defs/scanEndpoint"
           }
         },
         "undecoded": {
@@ -2246,21 +2246,17 @@
           "required": [
             "event",
             "target",
-            "resolved_address",
-            "port"
+            "endpoint"
           ],
           "properties": {
             "event": {
-              "const": "port"
+              "const": "endpoint"
             },
             "target": {
               "type": "string"
             },
-            "resolved_address": {
-              "$ref": "#/$defs/ipAddress"
-            },
-            "port": {
-              "$ref": "#/$defs/scanPort"
+            "endpoint": {
+              "$ref": "#/$defs/scanEndpoint"
             }
           },
           "additionalProperties": false
@@ -3345,19 +3341,17 @@
       },
       "additionalProperties": false
     },
-    "scanPort": {
+    "scanEndpoint": {
       "type": "object",
       "required": [
-        "port",
+        "address",
         "transport",
         "classification",
         "evidence"
       ],
       "properties": {
-        "port": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 65535
+        "address": {
+          "$ref": "#/$defs/ipAddress"
         },
         "transport": {
           "type": "string",
@@ -3366,6 +3360,11 @@
             "udp",
             "icmp"
           ]
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
         },
         "classification": {
           "type": "string",

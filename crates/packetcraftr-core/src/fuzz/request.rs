@@ -11,9 +11,9 @@ use crate::build::{DEFAULT_MAX_PACKET_SIZE, Options as BuildOptions};
 
 use super::error::FuzzError;
 use super::{
-    DEFAULT_CASES, DEFAULT_MAX_CASES, DEFAULT_MAX_EVIDENCE_FRAMES, DEFAULT_MAX_FIELD_BYTES,
-    DEFAULT_MAX_LIST_ITEMS, DEFAULT_MAX_SHRINK_STEPS, DEFAULT_MAX_TOTAL_BYTES, MAX_CASES,
-    MAX_DURATION, MAX_FIELD_BYTES, MAX_LIST_ITEMS, MAX_SHRINK_STEPS, MAX_STRATEGIES,
+    DEFAULT_CASES, DEFAULT_MAX_CASES, DEFAULT_MAX_FIELD_BYTES, DEFAULT_MAX_LIST_ITEMS,
+    DEFAULT_MAX_SHRINK_STEPS, DEFAULT_MAX_TOTAL_BYTES, MAX_CASES, MAX_DURATION, MAX_FIELD_BYTES,
+    MAX_LIST_ITEMS, MAX_SHRINK_STEPS, MAX_STRATEGIES,
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -91,8 +91,6 @@ pub struct FuzzLimits {
     pub max_field_bytes: usize,
     pub max_list_items: usize,
     pub max_shrink_steps: usize,
-    pub max_evidence_frames: usize,
-    pub max_evidence_bytes: usize,
     pub max_duration: Duration,
 }
 
@@ -105,8 +103,6 @@ impl Default for FuzzLimits {
             max_field_bytes: DEFAULT_MAX_FIELD_BYTES,
             max_list_items: DEFAULT_MAX_LIST_ITEMS,
             max_shrink_steps: DEFAULT_MAX_SHRINK_STEPS,
-            max_evidence_frames: DEFAULT_MAX_EVIDENCE_FRAMES,
-            max_evidence_bytes: DEFAULT_MAX_TOTAL_BYTES,
             max_duration: MAX_DURATION,
         }
     }
@@ -129,16 +125,6 @@ impl FuzzLimits {
             ("max_field_bytes", self.max_field_bytes, MAX_FIELD_BYTES),
             ("max_list_items", self.max_list_items, MAX_LIST_ITEMS),
             ("max_shrink_steps", self.max_shrink_steps, MAX_SHRINK_STEPS),
-            (
-                "max_evidence_frames",
-                self.max_evidence_frames,
-                DEFAULT_MAX_EVIDENCE_FRAMES,
-            ),
-            (
-                "max_evidence_bytes",
-                self.max_evidence_bytes,
-                DEFAULT_MAX_TOTAL_BYTES,
-            ),
         ] {
             if value == 0 || value > maximum {
                 return Err(FuzzError::InvalidLimit {
@@ -152,13 +138,6 @@ impl FuzzLimits {
             return Err(FuzzError::InvalidLimit {
                 field: "max_packet_bytes",
                 value: self.max_packet_bytes as u64,
-                reason: "cannot exceed max_total_bytes".to_owned(),
-            });
-        }
-        if self.max_evidence_bytes > self.max_total_bytes {
-            return Err(FuzzError::InvalidLimit {
-                field: "max_evidence_bytes",
-                value: self.max_evidence_bytes as u64,
                 reason: "cannot exceed max_total_bytes".to_owned(),
             });
         }

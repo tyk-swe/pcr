@@ -6,14 +6,13 @@ use std::time::Duration;
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::diagnostic::{Diagnostic, push_diagnostic_once};
 use packetcraftr_core::frame::Frame;
-use packetcraftr_core::fuzz::Limits;
 
 use crate::probe::evidence::EvidenceBudget;
 
 use super::MAX_DURATION;
 use super::boundary::FuzzCaseExecution;
 use super::error::{FuzzError, duration_limit};
-use super::request::LiveOptions;
+use super::request::{LiveLimits, LiveOptions};
 use super::result::{Case, Stats};
 
 pub(super) fn worst_case_duration(live: LiveOptions, cases: usize) -> Result<Duration, FuzzError> {
@@ -47,7 +46,7 @@ pub(super) fn rate_delay(rate: Option<u32>) -> Result<Duration, FuzzError> {
 pub(super) fn validate_execution(
     case: &Case,
     execution: &FuzzCaseExecution,
-    limits: Limits,
+    max_packet_bytes: usize,
     _timeout: Duration,
     deadline: &Deadline,
 ) -> Result<(), FuzzError> {
@@ -63,13 +62,13 @@ pub(super) fn validate_execution(
             message: "sent receipt and byte statistics disagree".to_owned(),
         });
     }
-    if execution.sent.built().bytes.len() > limits.max_packet_bytes {
+    if execution.sent.built().bytes.len() > max_packet_bytes {
         return Err(FuzzError::InvalidEvidence {
             case_index: case.index,
             message: format!(
                 "executor built {} bytes, exceeding max_packet_bytes={}",
                 execution.sent.built().bytes.len(),
-                limits.max_packet_bytes
+                max_packet_bytes
             ),
         });
     }
@@ -123,7 +122,7 @@ pub(super) fn add_execution_stats(
     Ok(())
 }
 
-fn retain_fuzz_evidence(budget: &mut EvidenceBudget, frame: &Frame, limits: Limits) -> bool {
+fn retain_fuzz_evidence(budget: &mut EvidenceBudget, frame: &Frame, limits: LiveLimits) -> bool {
     budget
         .retain(frame, limits.max_evidence_frames, limits.max_evidence_bytes)
         .is_ok()
@@ -138,7 +137,7 @@ pub(super) struct ExecutionEvidence {
 pub(super) fn retain_evidence(
     case: &mut Case,
     evidence: ExecutionEvidence,
-    limits: Limits,
+    limits: LiveLimits,
     budget: &mut EvidenceBudget,
     diagnostics: &mut Vec<Diagnostic>,
     deadline: &Deadline,

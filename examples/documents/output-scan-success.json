@@ -8,10 +8,11 @@
     "resolved_addresses": [
       "192.168.56.10"
     ],
-    "ports": [
+    "endpoints": [
       {
-        "port": 443,
+        "address": "192.168.56.10",
         "transport": "tcp",
+        "port": 443,
         "classification": "timeout",
         "evidence": [
           {

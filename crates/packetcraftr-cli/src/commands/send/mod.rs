@@ -67,7 +67,7 @@ pub(super) fn run(arguments: SendArgs, output: output::contract::Format) -> Resu
             emit_aggregate_with_stats(output::contract::Command::Send, result, diagnostics, stats)
         }
         output::contract::Format::Hex => {
-            write_plain_line(format_args!("{}", result.frame.bytes_hex))
+            write_plain_line(format_args!("{}", result.frame.bytes_hex()))
         }
         output::contract::Format::Raw => write_raw(result.frame.bytes()),
         output::contract::Format::Pcap | output::contract::Format::Pcapng => {

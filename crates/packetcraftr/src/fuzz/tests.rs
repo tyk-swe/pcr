@@ -20,7 +20,36 @@ use crate::clock::Clock;
 use crate::{BoundaryError, Stats};
 
 use super::execution::add_execution_stats;
-use super::{Authorizer, Execution, ExecutionCase, Executor, LiveOptions, Stats as FuzzStats, run};
+use super::{
+    Authorizer, Execution, ExecutionCase, Executor, LiveLimits, LiveOptions, Stats as FuzzStats,
+    run,
+};
+
+#[test]
+fn live_evidence_limits_are_validated_outside_the_offline_campaign() {
+    LiveOptions::default()
+        .validate()
+        .expect("default live limits");
+
+    for limits in [
+        LiveLimits {
+            max_evidence_frames: 0,
+            ..LiveLimits::default()
+        },
+        LiveLimits {
+            max_evidence_bytes: 0,
+            ..LiveLimits::default()
+        },
+    ] {
+        let error = LiveOptions {
+            limits,
+            ..LiveOptions::default()
+        }
+        .validate()
+        .expect_err("zero live evidence limit must fail");
+        assert!(matches!(error, super::Error::InvalidLimit { .. }));
+    }
+}
 
 #[test]
 fn execution_statistics_aggregation_is_complete_and_atomic() {

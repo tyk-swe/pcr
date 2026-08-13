@@ -20,24 +20,19 @@ pub(super) fn render_scan_text(
         result.target,
         comma_separated(&result.resolved_addresses)
     ))?;
-    for port in &result.ports {
-        let destination = port
-            .evidence
-            .first()
-            .map(|evidence| evidence.destination)
-            .ok_or_else(|| CliError::new(70, "scan endpoint has no attempt evidence"))?;
-        let endpoint = if port.transport == "icmp" {
+    for endpoint in &result.endpoints {
+        let endpoint_name = if endpoint.transport == "icmp" {
             "icmp".to_owned()
         } else {
-            format!("{}/{}", port.transport, port.port)
+            format!("{}/{}", endpoint.transport, optional_display(endpoint.port))
         };
         write_stdout_line(format_args!(
             "{} {} classification={}",
-            destination,
-            endpoint,
-            scan_classification_name(port.classification)
+            endpoint.address,
+            endpoint_name,
+            scan_classification_name(endpoint.classification)
         ))?;
-        for evidence in &port.evidence {
+        for evidence in &endpoint.evidence {
             write_stdout_line(format_args!(
                 "  attempt={} status={} classification={} sent={} received={} responder={} latency={} reason={}",
                 evidence.attempt,
@@ -59,7 +54,7 @@ pub(super) fn render_scan_text(
     }
     write_stdout_line(format_args!(
         "scanned {} endpoint(s) with {} completed probe(s), {} byte(s)",
-        result.ports.len(),
+        result.endpoints.len(),
         stats.packets_completed,
         stats.bytes
     ))?;
@@ -92,25 +87,17 @@ pub(super) fn render_scan_stream(
     let output::scan::Result {
         target,
         resolved_addresses,
-        ports,
+        endpoints,
         undecoded,
     } = result;
     let mut sequence = 0_u64;
-    for port in ports {
-        let resolved_address = port
-            .evidence
-            .first()
-            .map(|evidence| evidence.destination)
-            .ok_or_else(|| {
-                CliError::new(70, "scan endpoint has no attempt evidence").at_sequence(sequence)
-            })?;
+    for endpoint in endpoints {
         emit_stream_record(
             output::contract::Command::Scan,
             &mut sequence,
-            output::scan::Event::Port {
+            output::scan::Event::Endpoint {
                 target: target.clone(),
-                resolved_address,
-                port,
+                endpoint,
             },
         )?;
     }

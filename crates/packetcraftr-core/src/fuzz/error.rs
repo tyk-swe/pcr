@@ -48,7 +48,7 @@ impl Classified for FuzzError {
                 "cli.fuzz_limit",
                 Kind::Cli,
                 Some(
-                    "use valid layer.field targets and finite non-zero case, byte, rate, timeout, evidence, and duration limits",
+                    "use valid layer.field targets and finite non-zero case, byte, field, list, shrink, and duration limits",
                 ),
             ),
             Self::InvalidBasePacket { .. } => Classification::new(

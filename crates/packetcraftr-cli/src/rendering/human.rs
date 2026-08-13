@@ -40,12 +40,11 @@ pub(crate) fn write_stdout_line(arguments: std::fmt::Arguments<'_>) -> Result<()
 }
 
 pub(crate) fn write_plain_line(arguments: std::fmt::Arguments<'_>) -> Result<(), CliError> {
-    write_machine_line(&terminal_safe(&arguments.to_string()))
-}
-
-pub(crate) fn write_machine_line(rendered: &str) -> Result<(), CliError> {
     let mut stdout = io::stdout().lock();
-    write_terminated(&mut stdout, rendered, true)
+    stdout
+        .write_fmt(arguments)
+        .and_then(|()| stdout.write_all(b"\n"))
+        .and_then(|()| stdout.flush())
         .map_err(|source| CliError::new(5, format!("write stdout failed: {source}")))
 }
 

@@ -341,6 +341,54 @@ fn offline_fuzz_is_bounded_reproducible_and_reports_rejections() {
 }
 
 #[test]
+fn offline_fuzz_rejects_live_only_options_and_has_an_independent_packet_limit() {
+    let base = ["fuzz", "--packet", "raw(text=hi)", "--cases", "1"];
+    for live_only in [
+        &["--allow-malformed-live"][..],
+        &["--destination", "127.0.0.1"],
+        &["--timeout-ms", "1"],
+        &["--rate", "1"],
+        &["--interface", "1"],
+        &["--source", "127.0.0.1"],
+        &["--link-mode", "layer3"],
+        &["--max-queue-frames", "1"],
+        &["--max-captured-bytes", "64"],
+        &["--snap-length", "64"],
+        &["--overflow-policy", "drop-newest"],
+        &["--allow-public-destinations"],
+        &["--allow-permissive-packets"],
+        &["--max-packets", "1"],
+        &["--max-bytes", "64"],
+    ] {
+        let arguments = base
+            .iter()
+            .copied()
+            .chain(live_only.iter().copied())
+            .collect::<Vec<_>>();
+        let output = run(&arguments);
+        assert_eq!(output.status.code(), Some(2), "{arguments:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("--live"),
+            "{arguments:?}: {:?}",
+            output.stderr
+        );
+    }
+
+    let offline = run(&[
+        "--output",
+        "json",
+        "fuzz",
+        "--packet",
+        "raw(text=hi)",
+        "--cases",
+        "1",
+        "--max-packet-bytes",
+        "64",
+    ]);
+    assert!(offline.status.success(), "{:?}", offline.stderr);
+}
+
+#[test]
 fn packet_documents_stdin_and_file_inputs_cover_offline_input_paths() {
     let documents = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/documents");
     for document in ["packet-ipv4-udp.json", "packet-raw.yaml"] {

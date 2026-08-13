@@ -78,7 +78,6 @@ fn fuzz_bounded_resource_rejection_precedes_unbounded_case_growth() {
                 max_packet_bytes: 64,
                 max_total_bytes: 64,
                 max_field_bytes: 32,
-                max_evidence_bytes: 64,
                 ..FuzzLimits::default()
             },
             ..FuzzRequest::default()

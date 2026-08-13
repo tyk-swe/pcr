@@ -16,7 +16,7 @@ use packetcraftr_core::{
 
 use super::contract::Error;
 use super::envelope::Diagnostic;
-use super::hex::compact_hex;
+use super::hex::CompactHex;
 
 /// Canonical signed Unix timestamp used by output records, including pre-epoch captures.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -84,11 +84,9 @@ impl Timestamp {
 }
 
 /// Exact complete-frame bytes used by raw/hex/capture renderers.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Wire {
-    #[serde(skip)]
     bytes: Bytes,
-    pub bytes_hex: String,
     pub length: u64,
 }
 
@@ -96,7 +94,6 @@ impl Wire {
     pub fn new(bytes: impl Into<Bytes>) -> Self {
         let bytes = bytes.into();
         Self {
-            bytes_hex: compact_hex(&bytes),
             length: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
             bytes,
         }
@@ -104,6 +101,31 @@ impl Wire {
 
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
+    }
+
+    /// Formats the exact bytes as compact lowercase hexadecimal without
+    /// retaining a second owned representation.
+    pub fn bytes_hex(&self) -> impl std::fmt::Display + '_ {
+        CompactHex(&self.bytes)
+    }
+}
+
+impl Serialize for Wire {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        #[derive(Serialize)]
+        struct Output<'a> {
+            bytes_hex: CompactHex<'a>,
+            length: u64,
+        }
+
+        Output {
+            bytes_hex: CompactHex(&self.bytes),
+            length: self.length,
+        }
+        .serialize(serializer)
     }
 }
 
@@ -126,21 +148,16 @@ impl From<packetcraftr_core::frame::Direction> for Direction {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Captured {
-    #[serde(skip)]
     bytes: Bytes,
     /// Capture time, omitted when the source record does not provide one.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub timestamp: Option<Timestamp>,
     pub captured_length: u32,
     pub original_length: u32,
     pub link_type: u32,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub interface: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub direction: Option<Direction>,
-    pub bytes_hex: String,
 }
 
 impl Captured {
@@ -152,7 +169,6 @@ impl Captured {
             link_type: frame.link_type.0,
             interface: frame.interface,
             direction: frame.direction.map(Into::into),
-            bytes_hex: compact_hex(frame.bytes()),
             bytes: frame.bytes().clone(),
         })
     }
@@ -163,6 +179,44 @@ impl Captured {
 
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
+    }
+
+    /// Formats the exact bytes as compact lowercase hexadecimal without
+    /// retaining a second owned representation.
+    pub fn bytes_hex(&self) -> impl std::fmt::Display + '_ {
+        CompactHex(&self.bytes)
+    }
+}
+
+impl Serialize for Captured {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        #[derive(Serialize)]
+        struct Output<'a> {
+            #[serde(skip_serializing_if = "Option::is_none")]
+            timestamp: Option<Timestamp>,
+            captured_length: u32,
+            original_length: u32,
+            link_type: u32,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            interface: Option<u32>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            direction: Option<Direction>,
+            bytes_hex: CompactHex<'a>,
+        }
+
+        Output {
+            timestamp: self.timestamp,
+            captured_length: self.captured_length,
+            original_length: self.original_length,
+            link_type: self.link_type,
+            interface: self.interface,
+            direction: self.direction,
+            bytes_hex: CompactHex(&self.bytes),
+        }
+        .serialize(serializer)
     }
 }
 

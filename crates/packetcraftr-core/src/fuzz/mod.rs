@@ -24,8 +24,7 @@ pub const MAX_DURATION: Duration = Duration::from_secs(3_600);
 pub const MAX_STRATEGIES: usize = 4;
 pub const MAX_TARGET_FIELDS: usize = 4_096;
 
-const DEFAULT_MAX_TOTAL_BYTES: usize = 256 * 1024 * 1024;
-const DEFAULT_MAX_EVIDENCE_FRAMES: usize = 4_096;
+pub const DEFAULT_MAX_TOTAL_BYTES: usize = 256 * 1024 * 1024;
 const SPLITMIX_INCREMENT: u64 = 0x9e37_79b9_7f4a_7c15;
 const CASE_DOMAIN: u64 = 0xd1b5_4a32_d192_ed03;
 

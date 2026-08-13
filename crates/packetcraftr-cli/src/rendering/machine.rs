@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::fmt;
+use std::io::{self, Write};
 
 use packetcraftr::{core, output};
 use serde::Serialize;
 
 use super::super::errors::CliError;
-use super::human::write_machine_line;
 
 pub(crate) fn render_optional<T>(value: Option<T>, render: impl FnOnce(T) -> String) -> String {
     value.map_or_else(|| "none".to_owned(), render)
@@ -29,16 +29,22 @@ where
         .join(",")
 }
 
-pub(crate) fn spaced_hex(bytes: &[u8]) -> String {
-    let mut output = String::with_capacity(bytes.len().saturating_mul(3));
-    for (index, byte) in bytes.iter().enumerate() {
-        use std::fmt::Write as _;
-        if index != 0 {
-            output.push(' ');
+pub(crate) fn spaced_hex(bytes: &[u8]) -> impl fmt::Display + '_ {
+    SpacedHex(bytes)
+}
+
+struct SpacedHex<'a>(&'a [u8]);
+
+impl fmt::Display for SpacedHex<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (index, byte) in self.0.iter().enumerate() {
+            if index != 0 {
+                formatter.write_str(" ")?;
+            }
+            write!(formatter, "{byte:02x}")?;
         }
-        let _ = write!(output, "{byte:02x}");
+        Ok(())
     }
-    output
 }
 
 pub(crate) fn captured_frame_text(frame: &output::capture::Frame) -> impl fmt::Display + '_ {
@@ -75,15 +81,34 @@ pub(crate) fn output_timestamp_text(timestamp: output::capture::Timestamp) -> St
 }
 
 pub(crate) fn emit_json(value: &impl Serialize) -> Result<(), CliError> {
-    let rendered = serde_json::to_string_pretty(value)
-        .map_err(|source| CliError::new(70, format!("serialize output failed: {source}")))?;
-    write_machine_line(&rendered)
+    emit_serialized(value, true)
 }
 
 pub(crate) fn emit_json_compact(value: &impl Serialize) -> Result<(), CliError> {
-    let rendered = serde_json::to_string(value)
-        .map_err(|source| CliError::new(70, format!("serialize output failed: {source}")))?;
-    write_machine_line(&rendered)
+    emit_serialized(value, false)
+}
+
+fn emit_serialized(value: &impl Serialize, pretty: bool) -> Result<(), CliError> {
+    let stdout = io::stdout().lock();
+    let mut writer = io::BufWriter::with_capacity(64 * 1024, stdout);
+    let result = if pretty {
+        serde_json::to_writer_pretty(&mut writer, value)
+    } else {
+        serde_json::to_writer(&mut writer, value)
+    };
+    result.map_err(json_error)?;
+    writer
+        .write_all(b"\n")
+        .and_then(|()| writer.flush())
+        .map_err(|source| CliError::new(5, format!("write stdout failed: {source}")))
+}
+
+fn json_error(source: serde_json::Error) -> CliError {
+    if source.is_io() {
+        CliError::new(5, format!("write stdout failed: {source}"))
+    } else {
+        CliError::new(70, format!("serialize output failed: {source}"))
+    }
 }
 
 pub(crate) fn emit_aggregate<T: Serialize>(
@@ -118,7 +143,7 @@ mod tests {
             (&[0][..], "00"),
             (&[0, 10, 171, 255][..], "00 0a ab ff"),
         ] {
-            assert_eq!(spaced_hex(bytes), expected);
+            assert_eq!(spaced_hex(bytes).to_string(), expected);
         }
     }
 

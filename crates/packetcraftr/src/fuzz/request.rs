@@ -6,7 +6,51 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use packetcraftr_netio::capture::{DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES};
+
 use super::{MAX_RATE, error::FuzzError};
+
+/// Bounds exact response evidence retained by a live fuzz campaign.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LiveLimits {
+    pub max_evidence_frames: usize,
+    pub max_evidence_bytes: usize,
+}
+
+impl Default for LiveLimits {
+    fn default() -> Self {
+        Self {
+            max_evidence_frames: DEFAULT_CAPTURE_QUEUE_FRAMES,
+            max_evidence_bytes: DEFAULT_CAPTURE_QUEUE_BYTES,
+        }
+    }
+}
+
+impl LiveLimits {
+    pub fn validate(self) -> Result<Self, FuzzError> {
+        for (field, value, maximum) in [
+            (
+                "max_evidence_frames",
+                self.max_evidence_frames,
+                DEFAULT_CAPTURE_QUEUE_FRAMES,
+            ),
+            (
+                "max_evidence_bytes",
+                self.max_evidence_bytes,
+                DEFAULT_CAPTURE_QUEUE_BYTES,
+            ),
+        ] {
+            if value == 0 || value > maximum {
+                return Err(FuzzError::InvalidLimit {
+                    field,
+                    value: u64::try_from(value).unwrap_or(u64::MAX),
+                    reason: format!("must be within 1..={maximum}"),
+                });
+            }
+        }
+        Ok(self)
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LiveOptions {
@@ -15,6 +59,7 @@ pub struct LiveOptions {
     pub destination: Option<IpAddr>,
     /// Independent call-site opt-in for a permissive/malformed live frame.
     pub allow_malformed_live: bool,
+    pub limits: LiveLimits,
 }
 
 impl Default for LiveOptions {
@@ -24,12 +69,14 @@ impl Default for LiveOptions {
             cases_per_second: None,
             destination: None,
             allow_malformed_live: false,
+            limits: LiveLimits::default(),
         }
     }
 }
 
 impl LiveOptions {
     pub fn validate(self) -> Result<Self, FuzzError> {
+        self.limits.validate()?;
         if self.timeout.is_zero() || self.timeout > packetcraftr_netio::capture::MAX_TIMEOUT {
             return Err(FuzzError::InvalidTimeout {
                 value: self.timeout,

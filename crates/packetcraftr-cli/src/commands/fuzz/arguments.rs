@@ -4,7 +4,7 @@
 use std::net::IpAddr;
 
 use clap::{Args, ValueEnum};
-use packetcraftr::{core, netio as net};
+use packetcraftr::core;
 
 use crate::command_options::{
     CaptureLimitArgs, CliBuildMode, FuzzPolicyArgs, RecipeArgs, RouteSelectionArgs,
@@ -36,9 +36,21 @@ impl From<CliFuzzStrategy> for core::fuzz::Strategy {
 
 #[derive(Debug, Args)]
 #[command(
-    mut_arg("interface", |arg| arg.help("Interface name or numeric index used as an exact live route constraint")),
-    mut_arg("source", |arg| arg.help("Interface-owned source preference used only for live route selection")),
-    mut_arg("link_mode", |arg| arg.help("Automatic, Layer 2, or raw Layer 3 live transmission intent"))
+    mut_arg("interface", |arg| arg.help("Interface name or numeric index used as an exact live route constraint").requires("live")),
+    mut_arg("source", |arg| arg.help("Interface-owned source preference used only for live route selection").requires("live")),
+    mut_arg("link_mode", |arg| arg.help("Automatic, Layer 2, or raw Layer 3 live transmission intent").requires("live")),
+    mut_arg("allow_malformed_live", |arg| arg.requires("live")),
+    mut_arg("destination", |arg| arg.requires("live")),
+    mut_arg("timeout_ms", |arg| arg.requires("live")),
+    mut_arg("rate", |arg| arg.requires("live")),
+    mut_arg("max_queue_frames", |arg| arg.requires("live")),
+    mut_arg("max_captured_bytes", |arg| arg.requires("live")),
+    mut_arg("snap_length", |arg| arg.requires("live")),
+    mut_arg("overflow_policy", |arg| arg.requires("live")),
+    mut_arg("allow_public_destinations", |arg| arg.requires("live")),
+    mut_arg("allow_permissive_packets", |arg| arg.requires("live")),
+    mut_arg("max_packets", |arg| arg.requires("live")),
+    mut_arg("max_bytes", |arg| arg.requires("live"))
 )]
 pub(crate) struct FuzzArgs {
     #[command(flatten)]
@@ -84,8 +96,11 @@ pub(crate) struct FuzzArgs {
     /// Maximum cases accepted by this operation.
     #[arg(long, default_value_t = core::fuzz::DEFAULT_MAX_CASES)]
     pub(crate) max_cases: usize,
-    /// Maximum aggregate retained case data and live wire bytes.
-    #[arg(long, default_value_t = net::capture::Limits::default().max_bytes)]
+    /// Maximum bytes in one generated packet.
+    #[arg(long, default_value_t = core::build::DEFAULT_MAX_PACKET_SIZE)]
+    pub(crate) max_packet_bytes: usize,
+    /// Maximum aggregate retained generated case data.
+    #[arg(long, default_value_t = core::fuzz::DEFAULT_MAX_TOTAL_BYTES)]
     pub(crate) max_total_bytes: usize,
     /// Maximum bytes allocated for one generated field value.
     #[arg(long, default_value_t = core::fuzz::DEFAULT_MAX_FIELD_BYTES)]

@@ -87,21 +87,26 @@ pub(super) fn run(
         return write_capture_file(output, frames);
     }
 
+    if output == output::contract::Format::Text {
+        let mut diagnostics = result.diagnostics.clone();
+        for sent in &result.sent {
+            diagnostics.extend(sent.built().diagnostics.clone());
+        }
+        write_stdout_line(format_args!(
+            "sent={} responses={} unanswered={} unsolicited={} undecoded={} bytes={}",
+            result.sent.len(),
+            result.responses.len(),
+            result.unanswered.len(),
+            result.unsolicited.len(),
+            result.undecoded.len(),
+            result.stats.bytes
+        ))?;
+        return render_diagnostics_text(&diagnostics);
+    }
+
     let (result, diagnostics, stats) =
         output::exchange::Result::try_from_exchange(result).map_err(CliError::classified)?;
     match output {
-        output::contract::Format::Text => {
-            write_stdout_line(format_args!(
-                "sent={} responses={} unanswered={} unsolicited={} undecoded={} bytes={}",
-                result.sent.len(),
-                result.responses.len(),
-                result.unanswered.len(),
-                result.unsolicited.len(),
-                result.undecoded.len(),
-                stats.bytes
-            ))?;
-            render_diagnostics_text(&diagnostics)
-        }
         output::contract::Format::Json => emit_aggregate_with_stats(
             output::contract::Command::Exchange,
             result,
@@ -109,7 +114,7 @@ pub(super) fn run(
             stats,
         ),
         output::contract::Format::Ndjson => render_exchange_stream(result, diagnostics, stats),
-        _ => unreachable!("exchange format is checked before command dispatch"),
+        _ => unreachable!("exchange non-machine formats return before output conversion"),
     }
 }
 

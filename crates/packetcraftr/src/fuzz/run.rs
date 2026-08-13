@@ -59,7 +59,6 @@ where
     let campaign =
         packet_fuzz::Campaign::prepare(request, packet, Arc::clone(&registry), &mut deadline)?;
     let built_case_count = campaign.built_case_count();
-    let retained_byte_count = campaign.retained_byte_count();
     let mut cases = campaign
         .into_cases()
         .into_iter()
@@ -88,17 +87,12 @@ where
         total
             .checked_add(u64::try_from(built.bytes.len()).unwrap_or(u64::MAX))
             .and_then(|value| value.checked_add(overhead))
-            .ok_or(FuzzError::ByteLimit {
-                actual: u64::MAX,
-                limit: u64::try_from(request.limits.max_total_bytes).unwrap_or(u64::MAX),
+            .ok_or(FuzzError::StatisticsOverflow {
+                case_index: request.first_case.saturating_add(
+                    u64::try_from(request.cases.saturating_sub(1)).unwrap_or(u64::MAX),
+                ),
             })
     })?;
-    if maximum_wire_bytes > u64::try_from(request.limits.max_total_bytes).unwrap_or(u64::MAX) {
-        return Err(FuzzError::ByteLimit {
-            actual: maximum_wire_bytes,
-            limit: u64::try_from(request.limits.max_total_bytes).unwrap_or(u64::MAX),
-        });
-    }
     let requires_malformed_live = cases.iter().any(|case| {
         case.built
             .as_ref()
@@ -133,18 +127,6 @@ where
         cases_built: built_case_count,
         ..Stats::default()
     };
-    let retained_byte_count =
-        usize::try_from(retained_byte_count).map_err(|_| FuzzError::ByteLimit {
-            actual: retained_byte_count,
-            limit: u64::try_from(request.limits.max_total_bytes).unwrap_or(u64::MAX),
-        })?;
-    let mut evidence_limits = request.limits;
-    evidence_limits.max_evidence_bytes = evidence_limits.max_evidence_bytes.min(
-        request
-            .limits
-            .max_total_bytes
-            .saturating_sub(retained_byte_count),
-    );
     let mut evidence = EvidenceBudget::default();
     let mut operation_diagnostics = Vec::new();
     let mut scheduled_delay = Duration::ZERO;
@@ -204,14 +186,14 @@ where
         deadline
             .account(execution.stats.elapsed)
             .map_err(duration_limit)?;
-        validate_execution(case, &execution, request.limits, live.timeout, &deadline)?;
+        validate_execution(
+            case,
+            &execution,
+            request.limits.max_packet_bytes,
+            live.timeout,
+            &deadline,
+        )?;
         add_execution_stats(&mut stats, &execution.stats, case.index)?;
-        if stats.bytes > u64::try_from(request.limits.max_total_bytes).unwrap_or(u64::MAX) {
-            return Err(FuzzError::ByteLimit {
-                actual: stats.bytes,
-                limit: u64::try_from(request.limits.max_total_bytes).unwrap_or(u64::MAX),
-            });
-        }
         let had_response = !execution.responses.is_empty();
         case.diagnostics = execution.sent.built().diagnostics.clone();
         case.decoded = dissect_built(
@@ -231,7 +213,7 @@ where
                 unmatched: execution.unmatched,
                 undecoded: execution.undecoded,
             },
-            evidence_limits,
+            live.limits,
             &mut evidence,
             &mut operation_diagnostics,
             &deadline,

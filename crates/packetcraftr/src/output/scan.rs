@@ -82,9 +82,11 @@ pub struct Evidence {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Port {
-    pub port: u16,
+pub struct Endpoint {
+    pub address: IpAddr,
     pub transport: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
     pub classification: Classification,
     pub evidence: Vec<Evidence>,
 }
@@ -94,7 +96,7 @@ pub struct Port {
 pub struct Result {
     pub target: String,
     pub resolved_addresses: Vec<IpAddr>,
-    pub ports: Vec<Port>,
+    pub endpoints: Vec<Endpoint>,
     pub undecoded: Vec<Captured>,
 }
 
@@ -110,7 +112,7 @@ impl Result {
             diagnostics,
             stats,
         } = result;
-        let port_outputs = endpoints
+        let endpoint_outputs = endpoints
             .into_iter()
             .map(|endpoint| {
                 let evidence_outputs = endpoint
@@ -144,11 +146,10 @@ impl Result {
                         })
                     })
                     .collect::<std::result::Result<Vec<_>, Error>>()?;
-                Ok(Port {
-                    // Port zero is the versioned sentinel for a portless ICMP
-                    // endpoint; destination_port remains absent in evidence.
-                    port: endpoint.port.unwrap_or(0),
+                Ok(Endpoint {
+                    address: endpoint.address,
                     transport: endpoint.transport.to_string(),
+                    port: endpoint.port,
                     classification: endpoint.classification.into(),
                     evidence: evidence_outputs,
                 })
@@ -158,7 +159,7 @@ impl Result {
             Self {
                 target,
                 resolved_addresses,
-                ports: port_outputs,
+                endpoints: endpoint_outputs,
                 undecoded: Captured::try_from_frames(undecoded)?,
             },
             diagnostics,
@@ -171,10 +172,9 @@ impl Result {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum Event {
-    Port {
+    Endpoint {
         target: String,
-        resolved_address: IpAddr,
-        port: Port,
+        endpoint: Endpoint,
     },
     Undecoded {
         frame: Captured,

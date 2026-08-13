@@ -5,12 +5,12 @@
   "sequence": 0,
   "status": "success",
   "result": {
-    "event": "port",
+    "event": "endpoint",
     "target": "192.168.56.10",
-    "resolved_address": "192.168.56.10",
-    "port": {
-      "port": 443,
+    "endpoint": {
+      "address": "192.168.56.10",
       "transport": "tcp",
+      "port": 443,
       "classification": "timeout",
       "evidence": [
         {

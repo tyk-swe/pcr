@@ -35,7 +35,7 @@ pub(super) fn render_read_record(
             )),
         },
         output::contract::Format::Hex => {
-            write_plain_line(format_args!("{}", result.frame.bytes_hex))
+            write_plain_line(format_args!("{}", result.frame.bytes_hex()))
         }
         output::contract::Format::Ndjson => emit_stream(
             output::contract::Command::Read,

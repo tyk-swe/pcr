@@ -17,7 +17,7 @@ use self::arguments::ScanArgs;
 use crate::errors::CliError;
 use crate::rendering::emit_aggregate_with_stats;
 use crate::system::{
-    DeferredInterface, default_registry_arc, parse_workflow_target,
+    DeferredInterface, default_registry_arc, parse_workflow_target, system_client,
     validate_live_interface_selector, workflow_exchange_options,
 };
 
@@ -86,8 +86,7 @@ pub(super) fn run(arguments: ScanArgs, output: output::contract::Format) -> Resu
     )?;
 
     let mut executor = CliScanExecutor {
-        registry: Arc::clone(&registry),
-        policy: policy.clone(),
+        client: system_client(Arc::clone(&registry), policy.clone()),
         exchange,
         interface: DeferredInterface::new(route.interface),
     };

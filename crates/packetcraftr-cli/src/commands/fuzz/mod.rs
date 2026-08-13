@@ -17,7 +17,7 @@ use crate::errors::CliError;
 use crate::input::read_recipe;
 use crate::rendering::emit_aggregate_with_stats;
 use crate::system::{
-    DeferredInterface, default_registry_arc, validate_live_interface_selector,
+    DeferredInterface, default_registry_arc, system_client, validate_live_interface_selector,
     workflow_exchange_options,
 };
 
@@ -118,8 +118,7 @@ pub(super) fn run(arguments: FuzzArgs, output: output::contract::Format) -> Resu
     let (result, diagnostics, stats) = if let Some((live_options, policy, exchange)) = prepared_live
     {
         let mut executor = CliFuzzExecutor {
-            registry: Arc::clone(&registry),
-            policy: policy.clone(),
+            client: system_client(Arc::clone(&registry), policy.clone()),
             exchange,
             interface: DeferredInterface::new(route.interface),
         };

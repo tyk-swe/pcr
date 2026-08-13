@@ -72,7 +72,7 @@ pub fn decode_dns_response(
     if flags & DNS_FLAG_RESPONSE == 0 {
         return Err(DnsWireError::NotResponse);
     }
-    let opcode = ((flags & DNS_OPCODE_MASK) >> 11) as u8;
+    let opcode = u8::try_from((flags & DNS_OPCODE_MASK) >> 11).unwrap_or_default();
     if opcode != 0 {
         return Err(DnsWireError::UnsupportedOpcode { opcode });
     }

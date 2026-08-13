@@ -195,17 +195,13 @@ fn decode_rdata(
 }
 
 fn decode_edns(class: u16, ttl: u32, rdata: &[u8]) -> Result<DnsEdns, DnsWireError> {
-    let extended_response_code = (ttl >> 24) as u8;
-    let version = ((ttl >> 16) & 0xff) as u8;
+    let ttl_bytes = ttl.to_be_bytes();
+    let extended_response_code = ttl_bytes[0];
+    let version = ttl_bytes[1];
     if version != 0 {
         return Err(DnsWireError::UnsupportedEdnsVersion { version });
     }
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "an OPT record packs the extended rcode and version in the high half of the TTL \
-                  field; the low 16 bits are the flags this reads"
-    )]
-    let flags = ttl as u16;
+    let flags = u16::from_be_bytes([ttl_bytes[2], ttl_bytes[3]]);
     let mut options = Vec::new();
     let mut cursor = 0usize;
     while cursor < rdata.len() {

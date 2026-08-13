@@ -7,8 +7,8 @@ use std::fmt;
 use serde::Deserialize;
 use serde::de::{self, DeserializeSeed, MapAccess, SeqAccess, Visitor};
 
-use super::super::super::field::FieldValue;
 use super::types::{LAYER_LIMIT_SENTINEL, LayerDocument, PacketDocument};
+use crate::field::FieldValue;
 
 #[derive(Deserialize)]
 #[serde(field_identifier, rename_all = "snake_case")]

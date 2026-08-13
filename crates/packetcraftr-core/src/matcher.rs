@@ -1,10 +1,15 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Response-correlation extension contracts.
+
 use std::fmt;
 use std::net::IpAddr;
 
-use super::super::Packet;
+use crate::Packet;
+
+pub use MatchResult as Result;
+pub use ResponseMatcher as Matcher;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MatchResult {

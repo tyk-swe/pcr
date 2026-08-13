@@ -55,7 +55,7 @@ struct TrustedReceiptExecutor;
 impl DnsExecutor for TrustedReceiptExecutor {
     fn execute(&mut self, exchange: &DnsExchange) -> Result<DnsExchangeExecution, BoundaryError> {
         let sent = crate::evidence::test_sent_packet(exchange.probe.packet());
-        let bytes = sent.bytes_sent() as u64;
+        let bytes = u64::try_from(sent.bytes_sent()).unwrap();
         Ok(DnsExchangeExecution {
             permit: exchange.permit,
             sent,

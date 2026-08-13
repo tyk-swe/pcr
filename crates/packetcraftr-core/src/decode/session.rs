@@ -14,7 +14,6 @@ use crate::frame::Frame;
 use crate::layer::ProtocolId;
 use crate::layout::{ByteRange, LayerLayout, PacketLayout};
 use crate::registry::{Discriminator, LayerDecodeContext, ProtocolRegistry};
-use crate::semantics::BuiltinProtocol;
 
 use super::error::DecodeError;
 use super::fallback::{
@@ -353,8 +352,12 @@ impl<'registry> DecodeSession<'registry> {
     ) -> Result<(), DecodeError> {
         let Some(required) = child.filter(|protocol| {
             !matches!(
-                BuiltinProtocol::from_id(protocol),
-                Some(BuiltinProtocol::Raw | BuiltinProtocol::Malformed | BuiltinProtocol::Padding)
+                crate::semantics::BuiltinProtocol::from_id(protocol),
+                Some(
+                    crate::semantics::BuiltinProtocol::Raw
+                        | crate::semantics::BuiltinProtocol::Malformed
+                        | crate::semantics::BuiltinProtocol::Padding
+                )
             )
         }) else {
             return Ok(());

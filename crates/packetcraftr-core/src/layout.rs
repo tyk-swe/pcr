@@ -1,9 +1,16 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Byte-level packet layouts.
+
 use serde::{Deserialize, Serialize};
 
-use super::super::layer::ProtocolId;
+use crate::layer::ProtocolId;
+
+pub use ByteRange as Range;
+pub use FieldLayout as Field;
+pub use LayerLayout as Layer;
+pub use PacketLayout as Packet;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ByteRange {

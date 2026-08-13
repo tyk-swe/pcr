@@ -430,6 +430,7 @@ mod tests {
         ));
     }
 
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
     fn interface_lookup_requires_the_complete_stable_identity() {
         let available = interface();

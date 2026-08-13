@@ -43,7 +43,7 @@ impl TryFrom<SystemTime> for Timestamp {
 impl Timestamp {
     pub(crate) fn from_pre_epoch_duration(duration: Duration) -> Result<Self, Error> {
         if duration.subsec_nanos() == 0 {
-            let unix_seconds = if duration.as_secs() == i64::MAX as u64 + 1 {
+            let unix_seconds = if duration.as_secs() == u64::try_from(i64::MAX).unwrap() + 1 {
                 i64::MIN
             } else {
                 i64::try_from(duration.as_secs())
@@ -57,14 +57,14 @@ impl Timestamp {
             })
         } else {
             let seconds = duration.as_secs();
-            if seconds > i64::MAX as u64 {
+            if seconds > u64::try_from(i64::MAX).unwrap() {
                 return Err(Error::TimestampOutOfRange);
             }
             // A fractional instant before the epoch is represented with
             // floor seconds. `i64::MAX` seconds plus a fraction therefore
             // maps to `(i64::MIN, positive nanos)`, which is still inside the
             // v1 signed-seconds range.
-            let unix_seconds = if seconds == i64::MAX as u64 {
+            let unix_seconds = if seconds == u64::try_from(i64::MAX).unwrap() {
                 i64::MIN
             } else {
                 #[expect(
@@ -97,7 +97,7 @@ impl Wire {
         let bytes = bytes.into();
         Self {
             bytes_hex: compact_hex(&bytes),
-            length: bytes.len() as u64,
+            length: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
             bytes,
         }
     }

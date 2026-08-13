@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unchanged. Unlike `packetcraftr-live`, `packetcraftr` enables
   `native-interfaces` by default; direct consumers that need the former
   portable footprint must set `default-features = false` when migrating.
+- Flattened the public `packetcraftr-core` build, codec, decode, diagnostic,
+  document, expression, field, layout, and matcher module paths, and exposed
+  `protocol::ChecksumAccumulator` for shared incremental Internet checksums.
 - Reorganized packet decoding, fragment reassembly, route planning, and live
   exchange correlation around explicit phase and state owners. That internal
   reorganization did not change serialized output contracts or runtime

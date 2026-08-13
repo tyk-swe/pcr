@@ -136,7 +136,8 @@ impl Frame {
             interface: evidence.transmission().interface.clone().into(),
             link_mode: evidence.link_mode.into(),
             scheduled_delay: evidence.scheduled_delay,
-            bytes_sent: evidence.transmission().report.bytes_sent() as u64,
+            bytes_sent: u64::try_from(evidence.transmission().report.bytes_sent())
+                .unwrap_or(u64::MAX),
             frame: Captured::try_from_frame(evidence.frame)?,
             transmitted: true,
         })

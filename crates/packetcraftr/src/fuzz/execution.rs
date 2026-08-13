@@ -57,7 +57,7 @@ pub(super) fn validate_execution(
             message: "successful live execution must account for exactly one attempted and completed packet".to_owned(),
         });
     }
-    if execution.stats.bytes != execution.sent.bytes_sent() as u64 {
+    if execution.stats.bytes != u64::try_from(execution.sent.bytes_sent()).unwrap_or(u64::MAX) {
         return Err(FuzzError::InvalidEvidence {
             case_index: case.index,
             message: "sent receipt and byte statistics disagree".to_owned(),

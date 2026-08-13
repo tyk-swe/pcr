@@ -78,7 +78,11 @@ where
         };
         let capture_interface = frame
             .interface
-            .and_then(|interface| reader.interfaces().get(interface as usize))
+            .and_then(|interface| {
+                reader
+                    .interfaces()
+                    .get(usize::try_from(interface).unwrap_or(usize::MAX))
+            })
             .or_else(|| {
                 (reader.format() == Format::Pcap)
                     .then(|| reader.interfaces().first())

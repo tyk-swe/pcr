@@ -37,7 +37,7 @@ impl Result {
         (
             Self {
                 bytes_hex: compact_hex(&original),
-                length: original.len() as u64,
+                length: u64::try_from(original.len()).unwrap_or(u64::MAX),
                 link_type: frame.link_type.0,
                 packet: PacketDocument::from_packet(&packet),
                 layout,

@@ -120,7 +120,7 @@ pub(crate) fn validate_sent_byte_accounting(
     let actual = sent
         .iter()
         .try_fold(0_u64, |total, sent| {
-            total.checked_add(sent.bytes_sent() as u64)
+            total.checked_add(u64::try_from(sent.bytes_sent()).unwrap_or(u64::MAX))
         })
         .ok_or(ExchangeEvidenceError::SentByteCountOverflow)?;
     if reported != actual {
@@ -263,8 +263,9 @@ where
         batch.timeout,
     )?;
     validate_capture_statistics_evidence(execution.stats.capture)?;
-    if execution.stats.packets_attempted != batch.probes.len() as u64
-        || execution.stats.packets_completed != batch.probes.len() as u64
+    if execution.stats.packets_attempted != u64::try_from(batch.probes.len()).unwrap_or(u64::MAX)
+        || execution.stats.packets_completed
+            != u64::try_from(batch.probes.len()).unwrap_or(u64::MAX)
     {
         return Err(ExchangeEvidenceError::IncompleteStatistics);
     }

@@ -40,7 +40,7 @@ pub(super) fn interface_route(requested: &InterfaceId) -> Result<RouteDecision, 
     interface_decision(find_interface(&interfaces()?, requested)?)
 }
 
-fn os_error(operation: &'static str, error: impl std::fmt::Display) -> NativeRouteError {
+pub(super) fn os_error(operation: &'static str, error: impl std::fmt::Display) -> NativeRouteError {
     NativeRouteError::OperatingSystem {
         operation,
         message: error.to_string(),

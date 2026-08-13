@@ -6,13 +6,13 @@ use std::fmt;
 use serde::Deserialize;
 use serde::de::{self, DeserializeSeed};
 
-use super::super::super::field::FieldValue;
 use super::error::DocumentError;
 use super::types::{
     DEFAULT_MAX_DOCUMENT_NESTING, DOCUMENT_BASE_CONTAINER_DEPTH, DocumentFormat,
     LAYER_LIMIT_SENTINEL, MAX_DOCUMENT_NESTING, PacketDocument,
 };
 use super::visitor::PacketDocumentSeed;
+use crate::field::FieldValue;
 
 impl PacketDocument {
     /// Parses one bounded JSON or YAML document with the stable default layer
@@ -26,7 +26,7 @@ impl PacketDocument {
             input,
             format,
             max_bytes,
-            super::super::super::build::DEFAULT_MAX_LAYERS,
+            crate::build::DEFAULT_MAX_LAYERS,
             DEFAULT_MAX_DOCUMENT_NESTING,
         )
     }
@@ -43,7 +43,7 @@ impl PacketDocument {
             input,
             format,
             max_bytes,
-            super::super::super::build::DEFAULT_MAX_LAYERS,
+            crate::build::DEFAULT_MAX_LAYERS,
             max_nesting,
         )
     }

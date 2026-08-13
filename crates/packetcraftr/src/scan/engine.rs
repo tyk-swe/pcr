@@ -72,7 +72,9 @@ where
     let total_probes = addresses
         .len()
         .checked_mul(endpoints_per_address)
-        .and_then(|value| value.checked_mul(request.attempts as usize))
+        .and_then(|value| {
+            value.checked_mul(usize::try_from(request.attempts).unwrap_or(usize::MAX))
+        })
         .ok_or(ScanError::InvalidLimit {
             field: "probes",
             value: u64::MAX,
@@ -81,7 +83,7 @@ where
     if total_probes > request.limits.max_probes {
         return Err(ScanError::InvalidLimit {
             field: "probes",
-            value: total_probes as u64,
+            value: u64::try_from(total_probes).unwrap_or(u64::MAX),
             reason: format!("exceeds max_probes={}", request.limits.max_probes),
         });
     }
@@ -91,7 +93,8 @@ where
         } else {
             IPV6_PROBE_BYTES
         };
-        let address_probes = (endpoints_per_address as u64)
+        let address_probes = u64::try_from(endpoints_per_address)
+            .unwrap_or(u64::MAX)
             .checked_mul(u64::from(request.attempts))
             .ok_or(ScanError::InvalidLimit {
                 field: "wire_bytes",
@@ -123,7 +126,7 @@ where
     }
     approve_operation(
         authorizer,
-        total_probes as u64,
+        u64::try_from(total_probes).unwrap_or(u64::MAX),
         maximum_bytes,
         &deadline,
         scan_duration_error,
@@ -145,7 +148,9 @@ where
                 transport: request.transport,
                 port: *port,
                 classification: ScanClassification::Timeout,
-                evidence: Vec::with_capacity(request.attempts as usize),
+                evidence: Vec::with_capacity(
+                    usize::try_from(request.attempts).unwrap_or(usize::MAX),
+                ),
             })
         })
         .collect::<Vec<_>>();
@@ -164,7 +169,8 @@ where
     let config = ProbeRunConfig {
         probes_per_second: request.probes_per_second,
         duration_limit: request.limits.max_duration,
-        final_statistics_sequence: total_probes.saturating_sub(1) as u64,
+        final_statistics_sequence: u64::try_from(total_probes.saturating_sub(1))
+            .unwrap_or(u64::MAX),
     };
     let mut lifecycle = ScanProbeLifecycle {
         executor,

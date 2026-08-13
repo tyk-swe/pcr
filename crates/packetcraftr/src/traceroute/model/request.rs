@@ -89,7 +89,7 @@ impl TracerouteLimits {
             if value == 0 || value > maximum {
                 return Err(TracerouteError::InvalidLimit {
                     field,
-                    value: value as u64,
+                    value: u64::try_from(value).unwrap_or(u64::MAX),
                     reason: format!("must be within 1..={maximum}"),
                 });
             }
@@ -97,7 +97,7 @@ impl TracerouteLimits {
         if self.max_undecoded > self.max_evidence_frames {
             return Err(TracerouteError::InvalidLimit {
                 field: "max_undecoded",
-                value: self.max_undecoded as u64,
+                value: u64::try_from(self.max_undecoded).unwrap_or(u64::MAX),
                 reason: "cannot exceed max_evidence_frames".to_owned(),
             });
         }
@@ -151,7 +151,9 @@ impl TracerouteRequest {
                 reason: format!("must be within 1..={MAX_TRACEROUTE_PROBES_PER_HOP}"),
             });
         }
-        if self.probes_per_hop as usize > self.limits.max_evidence_frames {
+        if usize::try_from(self.probes_per_hop).unwrap_or(usize::MAX)
+            > self.limits.max_evidence_frames
+        {
             return Err(TracerouteError::InvalidLimit {
                 field: "probes_per_hop",
                 value: u64::from(self.probes_per_hop),
@@ -206,7 +208,7 @@ impl TracerouteRequest {
         &self,
     ) -> std::result::Result<usize, TracerouteError> {
         self.hop_count()
-            .checked_mul(self.probes_per_hop as usize)
+            .checked_mul(usize::try_from(self.probes_per_hop).unwrap_or(usize::MAX))
             .ok_or(TracerouteError::InvalidLimit {
                 field: "probes",
                 value: u64::MAX,

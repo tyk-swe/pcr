@@ -136,7 +136,10 @@ impl ReplayLimits {
         for (field, value) in [
             ("max_frames", self.max_frames),
             ("max_bytes", self.max_bytes),
-            ("max_frame_bytes", self.max_frame_bytes as u64),
+            (
+                "max_frame_bytes",
+                u64::try_from(self.max_frame_bytes).unwrap_or(u64::MAX),
+            ),
         ] {
             if value == 0 {
                 return Err(ReplayError::InvalidLimit {
@@ -146,10 +149,10 @@ impl ReplayLimits {
                 });
             }
         }
-        if self.max_frame_bytes as u64 > self.max_bytes {
+        if u64::try_from(self.max_frame_bytes).unwrap_or(u64::MAX) > self.max_bytes {
             return Err(ReplayError::InvalidLimit {
                 field: "max_frame_bytes",
-                value: self.max_frame_bytes as u64,
+                value: u64::try_from(self.max_frame_bytes).unwrap_or(u64::MAX),
                 reason: "cannot exceed max_bytes",
             });
         }

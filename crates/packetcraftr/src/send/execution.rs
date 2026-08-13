@@ -45,8 +45,10 @@ where
         validate_mtu(&preliminary, plan.route.mtu)?;
         self.authorize_built(&preliminary, options.allow_permissive_live)?;
         self.authorize_final_wire(&preliminary, &plan)?;
-        self.policy
-            .authorize_operation(1, preliminary.bytes.len() as u64)?;
+        self.policy.authorize_operation(
+            1,
+            u64::try_from(preliminary.bytes.len()).unwrap_or(u64::MAX),
+        )?;
         let preliminary_len = preliminary.bytes.len();
         let route = materialize(plan, &self.neighbors)?;
         let link_changed = materialize_link_fields(&mut packet_to_send, &route)?;
@@ -61,7 +63,7 @@ where
             self.authorize_built(&built, options.allow_permissive_live)?;
             self.authorize_final_wire(&built, &route.plan)?;
             self.policy
-                .authorize_operation(1, built.bytes.len() as u64)?;
+                .authorize_operation(1, u64::try_from(built.bytes.len()).unwrap_or(u64::MAX))?;
             built
         } else {
             preliminary
@@ -78,7 +80,7 @@ where
             stats: Stats {
                 packets_attempted: 1,
                 packets_completed: 1,
-                bytes: bytes_sent as u64,
+                bytes: u64::try_from(bytes_sent).unwrap_or(u64::MAX),
                 elapsed: started.elapsed(),
                 capture: Statistics::default(),
             },

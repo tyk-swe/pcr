@@ -21,14 +21,16 @@ pub(crate) fn checksum_parts(parts: &[&[u8]]) -> u16 {
     accumulator.finish()
 }
 
-#[derive(Default)]
-struct ChecksumAccumulator {
+/// Accumulates 16-bit Internet Checksum (RFC 1071) over contiguous or chunked byte slices.
+#[derive(Debug, Clone, Default)]
+pub struct ChecksumAccumulator {
     sum: u64,
     pending_high_byte: Option<u8>,
 }
 
 impl ChecksumAccumulator {
-    fn add(&mut self, bytes: &[u8]) {
+    /// Adds byte slice to the checksum accumulator.
+    pub fn add(&mut self, bytes: &[u8]) {
         let mut bytes = bytes;
         if let Some(high) = self.pending_high_byte {
             let Some((&low, remaining)) = bytes.split_first() else {
@@ -45,7 +47,8 @@ impl ChecksumAccumulator {
         self.pending_high_byte = chunks.remainder().first().copied();
     }
 
-    fn finish(self) -> u16 {
+    /// Finalizes and returns the 16-bit Internet Checksum.
+    pub fn finish(self) -> u16 {
         let sum = self.sum
             + self
                 .pending_high_byte

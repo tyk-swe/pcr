@@ -99,7 +99,7 @@ where
         transaction_id: request.transaction_id,
         outcome: DnsOutcome::Timeout,
         response: None,
-        attempts: Vec::with_capacity(request.attempts as usize),
+        attempts: Vec::with_capacity(usize::try_from(request.attempts).unwrap_or(usize::MAX)),
         undecoded: Vec::new(),
         diagnostics: Vec::new(),
         stats: Stats::default(),
@@ -144,7 +144,7 @@ where
                 result.resolved_addresses.push(*address);
             }
         }
-        let address_index = (attempt as usize - 1) % addresses.len();
+        let address_index = (usize::try_from(attempt).unwrap_or(1) - 1) % addresses.len();
         let server_address = addresses[address_index];
         let source_port = dns_source_port(request.source_port, attempt);
         let probe = DnsProbe {

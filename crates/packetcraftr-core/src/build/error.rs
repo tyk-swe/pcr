@@ -3,8 +3,8 @@
 
 use thiserror::Error;
 
-use super::super::super::layer::{FieldError, ProtocolId};
-use super::super::super::registry::CodecError;
+use crate::layer::{FieldError, ProtocolId};
+use crate::registry::CodecError;
 
 #[derive(Debug, Error)]
 #[non_exhaustive]

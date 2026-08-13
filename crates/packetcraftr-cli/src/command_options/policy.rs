@@ -34,7 +34,10 @@ struct TrafficBudgetArgs {
     #[arg(long, default_value_t = 10_000)]
     max_packets: u64,
     /// Maximum wire bytes authorized for one operation.
-    #[arg(long, default_value_t = net::capture::Limits::default().max_bytes as u64)]
+    #[arg(
+        long,
+        default_value_t = u64::try_from(net::capture::Limits::default().max_bytes).expect("default max bytes fits u64")
+    )]
     max_bytes: u64,
 }
 

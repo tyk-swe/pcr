@@ -55,7 +55,7 @@ impl ExchangeCommandResult {
             .into_iter()
             .map(|response| {
                 Ok(ExchangeResponseOutput {
-                    request_index: response.request_index as u64,
+                    request_index: u64::try_from(response.request_index).unwrap_or(u64::MAX),
                     response: Decoded::try_from_decoded(response.response)?,
                     latency: response.latency,
                 })
@@ -69,7 +69,10 @@ impl ExchangeCommandResult {
             Self {
                 sent: sent_frames,
                 responses: response_outputs,
-                unanswered: unanswered.into_iter().map(|index| index as u64).collect(),
+                unanswered: unanswered
+                    .into_iter()
+                    .map(|index| u64::try_from(index).unwrap_or(u64::MAX))
+                    .collect(),
                 unsolicited: unsolicited_outputs,
                 undecoded: Captured::try_from_frames(undecoded)?,
             },

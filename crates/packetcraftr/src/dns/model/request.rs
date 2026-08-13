@@ -135,7 +135,7 @@ impl DnsLimits {
             if value == 0 || value > maximum {
                 return Err(DnsError::InvalidLimit {
                     field,
-                    value: value as u64,
+                    value: u64::try_from(value).unwrap_or(u64::MAX),
                     reason: format!("must be within 1..={maximum}"),
                 });
             }
@@ -143,14 +143,14 @@ impl DnsLimits {
         if self.max_rejected_records > self.max_records {
             return Err(DnsError::InvalidLimit {
                 field: "max_rejected_records",
-                value: self.max_rejected_records as u64,
+                value: u64::try_from(self.max_rejected_records).unwrap_or(u64::MAX),
                 reason: "cannot exceed max_records".to_owned(),
             });
         }
         if self.max_undecoded > self.max_evidence_frames {
             return Err(DnsError::InvalidLimit {
                 field: "max_undecoded",
-                value: self.max_undecoded as u64,
+                value: u64::try_from(self.max_undecoded).unwrap_or(u64::MAX),
                 reason: "cannot exceed max_evidence_frames".to_owned(),
             });
         }

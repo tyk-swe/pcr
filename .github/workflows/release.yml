@@ -174,7 +174,6 @@ jobs:
     timeout-minutes: 30
     env:
       ARCHIVE_BASENAME: packetcraftr-v${{ needs.preflight.outputs.version }}-${{ matrix.target.triple }}-${{ matrix.variant.name }}
-      SCCACHE_GHA_ENABLED: "true"
       TARGET: ${{ matrix.target.triple }}
       VARIANT: ${{ matrix.variant.name }}
       VERSION: ${{ needs.preflight.outputs.version }}
@@ -182,9 +181,6 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ needs.preflight.outputs.release_sha }}
-      - uses: mozilla-actions/sccache-action@fd02668681acd5f960e1372061bee5e3e987195c # v0.0.11
-        with:
-          version: v0.17.0
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |

@@ -57,10 +57,10 @@ archive and `SHA256SUMS`, verify the checksum, then place `packetcraftr` (or
 - `pcap-free` archives include routing and raw Layer 3 without a
   libpcap/Npcap dependency.
 
-To build from source, install the pinned Rust 1.97.1 toolchain and a compatible
-`sccache` executable (0.17.0 is tested). Rust 1.96 is the MSRV. Linux builds
-require clang and lld; all-feature builds also require libpcap development
-files such as `libpcap-dev`.
+To build from source, install the pinned Rust 1.97.1 toolchain. Rust 1.96 is the
+MSRV. The project does not configure a compiler wrapper or linker, so Cargo and
+the Rust toolchain use their platform defaults. All-feature Linux builds also
+require libpcap development files such as `libpcap-dev`.
 
 ```console
 cargo build --locked --release -p packetcraftr-cli

@@ -10,9 +10,6 @@ on:
 permissions:
   contents: read
 
-env:
-  SCCACHE_GHA_ENABLED: "true"
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -57,13 +54,10 @@ jobs:
       - uses: actions/checkout@v7
       - name: Install Linux native dependencies
         if: matrix.native_packages
-        run: sudo apt-get update && sudo apt-get install --yes clang lld libpcap-dev
+        run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.97.1
-      - uses: mozilla-actions/sccache-action@v0.0.11
-        with:
-          version: v0.17.0
       - uses: taiki-e/install-action@v2
         with:
           tool: nextest@0.9.143
@@ -93,9 +87,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.97.1
-      - uses: mozilla-actions/sccache-action@v0.0.11
-        with:
-          version: v0.17.0
       - name: Check all native features
         run: cargo check --locked --workspace --all-targets --all-features
 
@@ -105,14 +96,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Install Linux native dependencies
-        run: sudo apt-get update && sudo apt-get install --yes clang lld libpcap-dev
+        run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.97.1
           components: clippy,rustfmt
-      - uses: mozilla-actions/sccache-action@v0.0.11
-        with:
-          version: v0.17.0
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-deny
@@ -143,12 +131,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Install Linux native dependencies
-        run: sudo apt-get update && sudo apt-get install --yes clang lld libpcap-dev
+        run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.96.0
-      - uses: mozilla-actions/sccache-action@v0.0.11
-        with:
-          version: v0.17.0
       - name: Check workspace
         run: cargo check --locked --workspace --all-targets ${{ matrix.cargo_args }}

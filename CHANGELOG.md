@@ -65,8 +65,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Packet Blocks do not carry time. Timestamp-dependent filters, offline
   analysis, original/scaled replay timing, and capture writers diagnose missing
   time; immediate/fixed-rate replay and structured frame output support it.
-- Source, CI, and release builds now use sccache; source builds require a
-  compatible `sccache` executable on `PATH`.
+- Source, CI, and release builds now use Cargo and Rust toolchain platform
+  defaults without a project-level compiler wrapper or linker override.
 - **Breaking:** Removed the generic `Packet::mutate_fixed_width_layer` escape
   hatch. All public mutable layer access now invalidates cached encoded
   payload lengths; decoded packets populate those lengths from their layer

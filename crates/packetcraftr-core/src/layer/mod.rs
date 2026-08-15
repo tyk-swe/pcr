@@ -14,5 +14,6 @@ pub use model::{
 pub use model::{malformed_layout, padding_layout, raw_layout};
 #[doc(hidden)]
 pub use reflection::{
-    ReflectiveField, ReflectiveFieldError, reflect_get, reflect_set, reflective_layer,
+    ReflectiveField, ReflectiveFieldError, reflect_get, reflect_set, reflect_set_bounded,
+    reflective_layer,
 };

@@ -287,40 +287,26 @@ fn parse_quoted(input: &str) -> Result<String, ExpressionError> {
 }
 
 fn split_assignment(input: &str) -> Result<Option<(&str, &str)>, ExpressionError> {
-    let mut quoted = false;
-    let mut escaped = false;
-    let mut depth = 0usize;
-    for (offset, character) in input.char_indices() {
-        if escaped {
-            escaped = false;
-            continue;
+    let mut assignment = None;
+    match scan_top_level(input, true, |offset, character| {
+        if character == '=' {
+            assignment = Some(offset);
+            return Err(());
         }
-        if quoted && character == '\\' {
-            escaped = true;
-            continue;
+        Ok(())
+    }) {
+        ScanOutcome::Complete | ScanOutcome::Structural(ScanFailure::Unterminated) => Ok(None),
+        ScanOutcome::Callback(()) => {
+            let offset = assignment.expect("the callback records the assignment offset");
+            Ok(Some((&input[..offset], &input[offset + 1..])))
         }
-        if character == '"' {
-            quoted = !quoted;
-            continue;
-        }
-        if quoted {
-            continue;
-        }
-        match character {
-            '[' | '(' => depth += 1,
-            ']' | ')' => {
-                depth = depth
-                    .checked_sub(1)
-                    .ok_or_else(|| ExpressionError::Syntax {
-                        offset,
-                        message: "unbalanced delimiter".to_owned(),
-                    })?;
-            }
-            '=' if depth == 0 => return Ok(Some((&input[..offset], &input[offset + 1..]))),
-            _ => {}
+        ScanOutcome::Structural(ScanFailure::Unbalanced { offset, .. }) => {
+            Err(ExpressionError::Syntax {
+                offset,
+                message: "unbalanced delimiter".to_owned(),
+            })
         }
     }
-    Ok(None)
 }
 
 fn split_top_level_bounded(
@@ -330,6 +316,70 @@ fn split_top_level_bounded(
 ) -> Result<Vec<&str>, ExpressionError> {
     let mut result = Vec::new();
     let mut start = 0usize;
+    match scan_top_level(input, false, |offset, character| {
+        if character != delimiter {
+            return Ok(());
+        }
+        if let Some(maximum) =
+            maximum_parts.filter(|maximum| result.len() >= maximum.saturating_sub(1))
+        {
+            return Err(ExpressionError::LayerLimit { limit: maximum });
+        }
+        result.push(&input[start..offset]);
+        start = offset + character.len_utf8();
+        Ok(())
+    }) {
+        ScanOutcome::Complete => {}
+        ScanOutcome::Callback(error) => return Err(error),
+        ScanOutcome::Structural(ScanFailure::Unbalanced { offset, character }) => {
+            return Err(ExpressionError::Syntax {
+                offset,
+                message: format!("unexpected '{character}'"),
+            });
+        }
+        ScanOutcome::Structural(ScanFailure::Unterminated) => {
+            return Err(ExpressionError::Syntax {
+                offset: input.len(),
+                message: "unterminated quote or delimiter".to_owned(),
+            });
+        }
+    }
+    if let Some(maximum) = maximum_parts.filter(|maximum| result.len() >= *maximum) {
+        return Err(ExpressionError::LayerLimit { limit: maximum });
+    }
+    result.push(&input[start..]);
+    Ok(result)
+}
+
+/// How the shared delimiter scanner ended.
+enum ScanOutcome<E> {
+    /// The whole input was scanned without a callback error.
+    Complete,
+    /// A quote or bracket was left open, or a bracket closed without one.
+    Structural(ScanFailure),
+    /// The callback stopped the scan early.
+    Callback(E),
+}
+
+/// A structural failure found by [`scan_top_level`].
+enum ScanFailure {
+    /// A closing bracket appeared without a matching opener.
+    Unbalanced { offset: usize, character: char },
+    /// A quote or bracket was still open at the end of the input.
+    Unterminated,
+}
+
+/// Walks `input` tracking quotes, escapes, and bracket nesting, invoking
+/// `on_char` for every character at the top level.
+///
+/// `merge_brackets` treats `(`/`[` and `)`/`]` as one shared depth, matching
+/// the assignment scanner's historical behavior; the split scanner keeps the
+/// depths separate so a mismatched bracket reports the offending character.
+fn scan_top_level<E>(
+    input: &str,
+    merge_brackets: bool,
+    mut on_char: impl FnMut(usize, char) -> Result<(), E>,
+) -> ScanOutcome<E> {
     let mut quoted = false;
     let mut escaped = false;
     let mut paren_depth = 0usize;
@@ -350,49 +400,47 @@ fn split_top_level_bounded(
         if quoted {
             continue;
         }
+        let unbalanced = |character| ScanFailure::Unbalanced { offset, character };
         match character {
             '(' => paren_depth += 1,
             ')' => {
-                paren_depth =
-                    paren_depth
-                        .checked_sub(1)
-                        .ok_or_else(|| ExpressionError::Syntax {
-                            offset,
-                            message: "unexpected ')'".to_owned(),
-                        })?;
+                let Some(depth) = paren_depth.checked_sub(1) else {
+                    return ScanOutcome::Structural(unbalanced(character));
+                };
+                paren_depth = depth;
             }
-            '[' => list_depth += 1,
-            ']' => {
-                list_depth = list_depth
-                    .checked_sub(1)
-                    .ok_or_else(|| ExpressionError::Syntax {
-                        offset,
-                        message: "unexpected ']'".to_owned(),
-                    })?;
-            }
-            _ if character == delimiter && paren_depth == 0 && list_depth == 0 => {
-                if let Some(maximum) =
-                    maximum_parts.filter(|maximum| result.len() >= maximum.saturating_sub(1))
-                {
-                    return Err(ExpressionError::LayerLimit { limit: maximum });
+            '[' => {
+                if merge_brackets {
+                    paren_depth += 1;
+                } else {
+                    list_depth += 1;
                 }
-                result.push(&input[start..offset]);
-                start = offset + character.len_utf8();
             }
-            _ => {}
+            ']' => {
+                let depth = if merge_brackets {
+                    &mut paren_depth
+                } else {
+                    &mut list_depth
+                };
+                let Some(remaining) = depth.checked_sub(1) else {
+                    return ScanOutcome::Structural(unbalanced(character));
+                };
+                *depth = remaining;
+            }
+            _ => {
+                if paren_depth == 0
+                    && list_depth == 0
+                    && let Err(error) = on_char(offset, character)
+                {
+                    return ScanOutcome::Callback(error);
+                }
+            }
         }
     }
     if quoted || paren_depth != 0 || list_depth != 0 {
-        return Err(ExpressionError::Syntax {
-            offset: input.len(),
-            message: "unterminated quote or delimiter".to_owned(),
-        });
+        return ScanOutcome::Structural(ScanFailure::Unterminated);
     }
-    if let Some(maximum) = maximum_parts.filter(|maximum| result.len() >= *maximum) {
-        return Err(ExpressionError::LayerLimit { limit: maximum });
-    }
-    result.push(&input[start..]);
-    Ok(result)
+    ScanOutcome::Complete
 }
 
 fn strip_hex_prefix(input: &str) -> Option<&str> {

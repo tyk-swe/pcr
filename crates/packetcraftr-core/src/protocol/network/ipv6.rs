@@ -12,15 +12,15 @@ use crate::{
         LayerEncodeContext,
     },
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflect_get, reflective_layer},
+    layer::{Layer, ProtocolId, reflective_layer},
     registry::Discriminator,
 };
 
 use super::super::common::{
     ValueExpectation, aliased_fields, expected_discriminator, invalid, make_layer,
-    network_from_addresses, out_of_range, payload_without_padding, protocol, resolve_u8,
-    resolve_u16, strict_or_diagnostic, truncated, validate_auto_raw_discriminator,
-    validate_ipv6_routing_child, validate_raw_child_discriminator, wrong_layer, wrong_type,
+    network_from_addresses, payload_without_padding, protocol, resolve_u8, resolve_u16,
+    strict_or_diagnostic, truncated, validate_auto_raw_discriminator, validate_ipv6_routing_child,
+    validate_raw_child_discriminator, wrong_layer,
 };
 
 use super::encode::{is_ipv6_extension_layer, is_outer_network_layer};
@@ -56,7 +56,7 @@ reflective_layer! {
     fn ipv6_schema() => { protocol: protocol("ipv6"), name: "IPv6" }
     impl Ipv6 {
         "traffic_class" => { kind: Unsigned, derived: false, required: false, description: "IPv6 traffic class", reflect: traffic_class, layout: (0, 4) },
-        "flow_label" => { kind: Unsigned, derived: false, required: false, description: "IPv6 flow label", get |layer| Some(reflect_get(&layer.flow_label)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.flow_label = u32::try_from(value).ok().filter(|value| *value <= 0x000f_ffff).ok_or_else(|| out_of_range(ipv6_schema(), name))?; Ok(()) }, _ => Err(wrong_type(ipv6_schema(), name, "unsigned")) }, layout: (0, 4) },
+        "flow_label" => { kind: Unsigned, derived: false, required: false, description: "IPv6 flow label", reflect_bounded: flow_label, 0x000f_ffff_u64, layout: (0, 4) },
         "payload_length" => { kind: Unsigned, derived: true, required: false, description: "IPv6 payload length", reflect: payload_length, layout: (4, 6) },
         "next_header" => { kind: Unsigned, derived: true, required: false, description: "Next-header discriminator", reflect: next_header, layout: (6, 7) },
         "hop_limit" => { kind: Unsigned, derived: false, required: true, description: "Hop limit", reflect: hop_limit, layout: (7, 8) },

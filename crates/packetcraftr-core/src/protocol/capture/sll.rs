@@ -9,14 +9,13 @@ use crate::{
         LayerEncodeContext,
     },
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflect_get, reflective_layer},
+    layer::{Layer, ProtocolId, reflective_layer},
     registry::Discriminator,
 };
 
 use crate::protocol::common::{
-    expected_discriminator_for_value, invalid, make_layer, out_of_range, protocol, resolve_u16,
-    truncated, validate_auto_raw_discriminator, validate_raw_child_discriminator, wrong_layer,
-    wrong_type,
+    expected_discriminator_for_value, invalid, make_layer, protocol, resolve_u16, truncated,
+    validate_auto_raw_discriminator, validate_raw_child_discriminator, wrong_layer,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -69,7 +68,7 @@ reflective_layer! {
         "protocol" => { kind: Unsigned, derived: true, required: false, description: "Protocol discriminator", reflect: protocol, layout: (14, 16) },
         "packet_type" => { kind: Unsigned, derived: false, required: true, description: "Packet direction/type", reflect: packet_type, layout: (0, 2) },
         "arp_hardware_type" => { kind: Unsigned, derived: false, required: true, description: "ARP hardware type", reflect: arp_hardware_type, layout: (2, 4) },
-        "address_length" => { kind: Unsigned, derived: false, required: true, description: "Link address length", get |layer| Some(reflect_get(&layer.address_length)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.address_length = u16::try_from(value).ok().filter(|value| *value <= 8).ok_or_else(|| out_of_range(linux_sll_schema(), name))?; Ok(()) }, _ => Err(wrong_type(linux_sll_schema(), name, "unsigned")) }, layout: (4, 6) },
+        "address_length" => { kind: Unsigned, derived: false, required: true, description: "Link address length", reflect_bounded: address_length, 8_u64, layout: (4, 6) },
         "address" => { kind: Bytes, derived: false, required: false, description: "Eight-byte link address slot", reflect: address, layout: (6, 14) },
     }
     layout pub(crate) fn linux_sll_layout();
@@ -82,7 +81,7 @@ reflective_layer! {
         "packet_type" => { kind: Unsigned, derived: false, required: true, description: "Packet direction/type", reflect: packet_type, layout: (10, 11) },
         "arp_hardware_type" => { kind: Unsigned, derived: false, required: true, description: "ARP hardware type", reflect: arp_hardware_type, layout: (8, 10) },
         "interface_index" => { kind: Unsigned, derived: false, required: false, description: "Interface index", reflect: interface_index, layout: (4, 8) },
-        "address_length" => { kind: Unsigned, derived: false, required: true, description: "Link address length", get |layer| Some(reflect_get(&layer.address_length)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.address_length = u8::try_from(value).ok().filter(|value| *value <= 8).ok_or_else(|| out_of_range(linux_sll2_schema(), name))?; Ok(()) }, _ => Err(wrong_type(linux_sll2_schema(), name, "unsigned")) }, layout: (11, 12) },
+        "address_length" => { kind: Unsigned, derived: false, required: true, description: "Link address length", reflect_bounded: address_length, 8_u64, layout: (11, 12) },
         "address" => { kind: Bytes, derived: false, required: false, description: "Eight-byte link address slot", reflect: address, layout: (12, 20) },
     }
     layout pub(crate) fn linux_sll2_layout();

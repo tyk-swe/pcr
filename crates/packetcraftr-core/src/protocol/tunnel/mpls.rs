@@ -9,13 +9,13 @@ use crate::{
         LayerEncodeContext,
     },
     field::FieldValue,
-    layer::{Layer, ProtocolId, reflect_get, reflective_layer},
+    layer::{Layer, ProtocolId, reflective_layer},
     registry::Discriminator,
 };
 
 use super::super::common::{
-    ensure_encode_budget, invalid, make_layer, out_of_range, protocol, strict_or_diagnostic,
-    truncated, wrong_layer, wrong_type,
+    ensure_encode_budget, invalid, make_layer, protocol, strict_or_diagnostic, truncated,
+    wrong_layer,
 };
 
 const MPLS_LEN: usize = 4;
@@ -62,8 +62,8 @@ impl Default for Mpls {
 reflective_layer! {
     fn mpls_schema() => { protocol: protocol("mpls"), name: "MPLS" }
     impl Mpls {
-        "label" => { kind: Unsigned, derived: false, required: true, description: "20-bit MPLS label", get |layer| Some(FieldValue::from(layer.label)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.label = u32::try_from(value).ok().filter(|value| *value <= LABEL_MAX).ok_or_else(|| out_of_range(mpls_schema(), name))?; Ok(()) }, _ => Err(wrong_type(mpls_schema(), name, "unsigned")) }, layout: (0, 3) },
-        "traffic_class" => { kind: Unsigned, derived: false, required: false, description: "3-bit traffic class, historically the EXP bits", get |layer| Some(reflect_get(&layer.traffic_class)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.traffic_class = u8::try_from(value).ok().filter(|value| *value <= 7).ok_or_else(|| out_of_range(mpls_schema(), name))?; Ok(()) }, _ => Err(wrong_type(mpls_schema(), name, "unsigned")) }, layout: (2, 3) },
+        "label" => { kind: Unsigned, derived: false, required: true, description: "20-bit MPLS label", reflect_bounded: label, LABEL_MAX, layout: (0, 3) },
+        "traffic_class" => { kind: Unsigned, derived: false, required: false, description: "3-bit traffic class, historically the EXP bits", reflect_bounded: traffic_class, 7_u64, layout: (2, 3) },
         "bottom_of_stack" => { kind: Bool, derived: false, required: false, description: "S bit: this entry is the bottom of the label stack", reflect: bottom_of_stack, layout: (2, 3) },
         "ttl" => { kind: Unsigned, derived: false, required: false, description: "Time to live", reflect: ttl, layout: (3, 4) }
     }

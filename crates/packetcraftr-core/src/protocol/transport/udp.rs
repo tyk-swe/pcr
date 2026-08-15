@@ -19,9 +19,9 @@ use crate::{
 };
 
 use super::super::common::{
-    ValueExpectation, aliased_fields, invalid, make_layer, out_of_range, payload_without_padding,
-    protocol, resolve_u16, strict_or_diagnostic, transport_checksum, transport_checksum_parts,
-    truncated, wrong_layer, wrong_type,
+    ValueExpectation, aliased_fields, invalid, make_layer, payload_without_padding, protocol,
+    resolve_u16, strict_or_diagnostic, transport_checksum, transport_checksum_parts, truncated,
+    wrong_layer,
 };
 use super::super::network::encode_network;
 
@@ -89,29 +89,13 @@ reflective_layer! {
         "source_port" => {
             kind: Unsigned, derived: false, required: true,
             description: "UDP source port",
-            get |layer| Some(layer.source_port.into()),
-            set |layer, value, name| match value {
-                FieldValue::Unsigned(value) => {
-                    layer.source_port = u16::try_from(value)
-                        .map_err(|_| out_of_range(udp_schema(), name))?;
-                    Ok(())
-                }
-                _ => Err(wrong_type(udp_schema(), name, "unsigned")),
-            },
+            reflect: source_port,
             layout: (0, 2)
         },
         "destination_port" => {
             kind: Unsigned, derived: false, required: true,
             description: "UDP destination port",
-            get |layer| Some(layer.destination_port.into()),
-            set |layer, value, name| match value {
-                FieldValue::Unsigned(value) => {
-                    layer.destination_port = u16::try_from(value)
-                        .map_err(|_| out_of_range(udp_schema(), name))?;
-                    Ok(())
-                }
-                _ => Err(wrong_type(udp_schema(), name, "unsigned")),
-            },
+            reflect: destination_port,
             layout: (2, 4)
         },
         "length" => {

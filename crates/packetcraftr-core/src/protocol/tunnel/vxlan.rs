@@ -15,8 +15,8 @@ use crate::{
 };
 
 use super::super::common::{
-    ensure_encode_budget, invalid, make_layer, out_of_range, protocol, strict_or_diagnostic,
-    truncated, validate_raw_child_discriminator, wrong_layer, wrong_type,
+    ensure_encode_budget, invalid, make_layer, protocol, strict_or_diagnostic, truncated,
+    validate_raw_child_discriminator, wrong_layer,
 };
 
 const VXLAN_LEN: usize = 8;
@@ -56,8 +56,8 @@ reflective_layer! {
     fn vxlan_schema() => { protocol: protocol("vxlan"), name: "VXLAN" }
     impl Vxlan {
         "flags" => { kind: Unsigned, derived: false, required: true, description: "VXLAN flag byte; only the VNI-valid bit 0x08 is defined", reflect: flags, layout: (0, 1) },
-        "reserved1" => { kind: Unsigned, derived: false, required: false, description: "Reserved 24 bits between the flags and the VNI", get |layer| Some(FieldValue::from(layer.reserved1)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.reserved1 = u32::try_from(value).ok().filter(|value| *value <= VNI_MAX).ok_or_else(|| out_of_range(vxlan_schema(), name))?; Ok(()) }, _ => Err(wrong_type(vxlan_schema(), name, "unsigned")) }, layout: (1, 4) },
-        "vni" => { kind: Unsigned, derived: false, required: true, description: "24-bit VXLAN network identifier", get |layer| Some(FieldValue::from(layer.vni)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.vni = u32::try_from(value).ok().filter(|value| *value <= VNI_MAX).ok_or_else(|| out_of_range(vxlan_schema(), name))?; Ok(()) }, _ => Err(wrong_type(vxlan_schema(), name, "unsigned")) }, layout: (4, 7) },
+        "reserved1" => { kind: Unsigned, derived: false, required: false, description: "Reserved 24 bits between the flags and the VNI", reflect_bounded: reserved1, VNI_MAX, layout: (1, 4) },
+        "vni" => { kind: Unsigned, derived: false, required: true, description: "24-bit VXLAN network identifier", reflect_bounded: vni, VNI_MAX, layout: (4, 7) },
         "reserved2" => { kind: Unsigned, derived: false, required: false, description: "Reserved byte after the VNI", reflect: reserved2, layout: (7, 8) }
     }
     layout pub(crate) fn vxlan_layout();

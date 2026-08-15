@@ -29,6 +29,7 @@ macro_rules! reflective_layer {
                     required: $required:literal,
                     description: $description:literal,
                     $(reflect: $member:ident)?
+                    $(reflect_bounded: $bounded_member:ident, $maximum:tt)?
                     $(
                         get |$getter:ident| $get:expr_2021,
                         set |$setter:ident, $value:ident, $field_name:ident| $set:expr_2021
@@ -83,6 +84,7 @@ macro_rules! reflective_layer {
                         $field $(| $alias)* => $crate::reflective_layer!(
                             @get self;
                             $(reflect $member)?
+                            $(reflect_bounded $bounded_member)?
                             $(explicit $getter => $get)?
                         ),
                     )*
@@ -100,6 +102,7 @@ macro_rules! reflective_layer {
                         $field $(| $alias)* => $crate::reflective_layer!(
                             @set self, value, name, $schema;
                             $(reflect $member)?
+                            $(reflect_bounded $bounded_member, $maximum)?
                             $(explicit $setter, $value, $field_name => $set)?
                         ),
                     )*
@@ -139,15 +142,29 @@ macro_rules! reflective_layer {
     (@get $layer:expr; reflect $member:ident) => {
         Some($crate::layer::reflect_get(&$layer.$member))
     };
-    (@get $layer:expr; explicit $getter:ident => $get:expr) => {{
+    (@get $layer:expr; reflect_bounded $member:ident) => {
+        Some($crate::layer::reflect_get(&$layer.$member))
+    };
+    (@get $layer:expr; explicit $getter:ident => $get:expr_2021) => {{
         let $getter = $layer;
         $get
     }};
     (@set $layer:expr, $value:expr, $name:expr, $schema:ident; reflect $member:ident) => {
         $crate::layer::reflect_set(&mut $layer.$member, $schema(), $name, $value)
     };
+    (@set $layer:expr, $value:expr, $name:expr, $schema:ident;
+        reflect_bounded $member:ident, $maximum:tt
+    ) => {
+        $crate::layer::reflect_set_bounded(
+            &mut $layer.$member,
+            $schema(),
+            $name,
+            $value,
+            u64::from($maximum),
+        )
+    };
     (@set $layer:expr, $input:expr, $name:expr, $schema:ident;
-        explicit $setter:ident, $value:ident, $field_name:ident => $set:expr
+        explicit $setter:ident, $value:ident, $field_name:ident => $set:expr_2021
     ) => {{
         let $setter = $layer;
         let $value = $input;
@@ -192,6 +209,26 @@ pub fn reflect_set<T: ReflectiveField>(
                 field: field.to_owned(),
             },
         })
+}
+
+/// Like [`reflect_set`], but additionally rejects unsigned values above a
+/// wire-width maximum before delegating to the field's own conversion.
+pub fn reflect_set_bounded<T: ReflectiveField>(
+    target: &mut T,
+    schema: &'static LayerSchema,
+    field: &str,
+    value: FieldValue,
+    maximum: u64,
+) -> Result<(), FieldError> {
+    if let FieldValue::Unsigned(value) = value
+        && value > maximum
+    {
+        return Err(FieldError::OutOfRange {
+            protocol: schema.protocol.clone(),
+            field: field.to_owned(),
+        });
+    }
+    reflect_set(target, schema, field, value)
 }
 
 macro_rules! unsigned_reflective_field {

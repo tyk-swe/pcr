@@ -15,15 +15,15 @@ use crate::{
     },
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflect_get, reflective_layer},
+    layer::{Layer, ProtocolId, reflective_layer},
     registry::Discriminator,
 };
 
 use super::super::common::{
     ValueExpectation, aliased_fields, checksum, expected_discriminator, invalid, make_layer,
-    network_from_addresses, out_of_range, payload_without_padding, protocol, resolve_u8,
-    resolve_u16, strict_or_diagnostic, truncated, validate_auto_raw_discriminator,
-    validate_raw_child_discriminator, wrong_layer, wrong_type,
+    network_from_addresses, payload_without_padding, protocol, resolve_u8, resolve_u16,
+    strict_or_diagnostic, truncated, validate_auto_raw_discriminator,
+    validate_raw_child_discriminator, wrong_layer,
 };
 
 use super::encode::is_outer_network_layer;
@@ -76,7 +76,7 @@ reflective_layer! {
         "reserved_flag" => { kind: Bool, derived: false, required: false, description: "Reserved IPv4 flag bit", reflect: reserved_flag, layout: (6, 8) },
         "dont_fragment" => { kind: Bool, derived: false, required: false, description: "Don't-fragment flag", reflect: dont_fragment, layout: (6, 8) },
         "more_fragments" => { kind: Bool, derived: false, required: false, description: "More-fragments flag", reflect: more_fragments, layout: (6, 8) },
-        "fragment_offset" => { kind: Unsigned, derived: false, required: false, description: "Fragment offset in eight-byte units", get |layer| Some(reflect_get(&layer.fragment_offset)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.fragment_offset = u16::try_from(value).ok().filter(|value| *value <= 0x1fff).ok_or_else(|| out_of_range(ipv4_schema(), name))?; Ok(()) }, _ => Err(wrong_type(ipv4_schema(), name, "unsigned")) }, layout: (6, 8) },
+        "fragment_offset" => { kind: Unsigned, derived: false, required: false, description: "Fragment offset in eight-byte units", reflect_bounded: fragment_offset, 0x1fff_u64, layout: (6, 8) },
         "ttl" => { kind: Unsigned, derived: false, required: true, description: "Time to live", reflect: ttl, layout: (8, 9) },
         "protocol" => { kind: Unsigned, derived: true, required: false, description: "Next protocol discriminator", reflect: protocol, layout: (9, 10) },
         "checksum" => { kind: Unsigned, derived: true, required: false, description: "IPv4 header checksum", reflect: checksum, layout: (10, 12) },

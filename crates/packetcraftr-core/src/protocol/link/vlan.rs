@@ -11,13 +11,12 @@ use crate::{
         LayerEncodeContext,
     },
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflect_get, reflective_layer},
+    layer::{Layer, ProtocolId, reflective_layer},
 };
 
 use super::super::common::{
-    aliased_fields, invalid, make_layer, out_of_range, payload_without_padding, protocol,
-    resolve_u16, truncated, validate_auto_raw_discriminator, validate_raw_child_discriminator,
-    wrong_layer, wrong_type,
+    aliased_fields, invalid, make_layer, payload_without_padding, protocol, resolve_u16, truncated,
+    validate_auto_raw_discriminator, validate_raw_child_discriminator, wrong_layer,
 };
 use super::ethernet::{link_payload_selection, link_type_expectation, validate_link_length_form};
 
@@ -66,9 +65,9 @@ macro_rules! declare_vlan_layer {
         reflective_layer! {
             fn $schema() => { protocol: protocol($protocol), name: $name }
             impl $ty {
-                "priority" => { kind: Unsigned, derived: false, required: false, description: "IEEE 802.1 priority code point", get |layer| Some(reflect_get(&layer.priority)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.priority = u8::try_from(value).ok().filter(|value| *value <= 7).ok_or_else(|| out_of_range($schema(), name))?; Ok(()) }, _ => Err(wrong_type($schema(), name, "unsigned")) }, layout: (0, 2) },
+                "priority" => { kind: Unsigned, derived: false, required: false, description: "IEEE 802.1 priority code point", reflect_bounded: priority, 7_u64, layout: (0, 2) },
                 "drop_eligible" => { kind: Bool, derived: false, required: false, description: "Drop eligible indicator", reflect: drop_eligible, layout: (0, 2) },
-                "vlan_id" => { kind: Unsigned, derived: false, required: true, description: "VLAN identifier", get |layer| Some(reflect_get(&layer.vlan_id)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.vlan_id = u16::try_from(value).ok().filter(|value| *value <= 4095).ok_or_else(|| out_of_range($schema(), name))?; Ok(()) }, _ => Err(wrong_type($schema(), name, "unsigned")) }, layout: (0, 2) },
+                "vlan_id" => { kind: Unsigned, derived: false, required: true, description: "VLAN identifier", reflect_bounded: vlan_id, 4095_u64, layout: (0, 2) },
                 "ether_type" => { kind: Unsigned, derived: true, required: false, description: "Encapsulated EtherType", reflect: ether_type, layout: (2, 4) },
             }
             layout pub(crate) fn $layout();

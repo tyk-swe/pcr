@@ -14,14 +14,13 @@ use crate::{
     },
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflect_get, reflective_layer},
+    layer::{Layer, ProtocolId, reflective_layer},
     registry::Discriminator,
 };
 
 use super::super::common::{
-    ValueExpectation, aliased_fields, invalid, make_layer, out_of_range, payload_without_padding,
-    protocol, resolve_u16, transport_checksum, transport_checksum_parts, truncated, wrong_layer,
-    wrong_type,
+    ValueExpectation, aliased_fields, invalid, make_layer, payload_without_padding, protocol,
+    resolve_u16, transport_checksum, transport_checksum_parts, truncated, wrong_layer,
 };
 use super::super::network::encode_network;
 
@@ -77,15 +76,9 @@ reflective_layer! {
         "acknowledgment" => { kind: Unsigned, derived: false, required: false, description: "Acknowledgment number",
             reflect: acknowledgment, layout: (8, 12) },
         "reserved_bits" => { kind: Unsigned, derived: false, required: false, description: "Three reserved TCP header bits",
-            get |layer| Some(reflect_get(&layer.reserved_bits)), set |layer, value, name| match value {
-                FieldValue::Unsigned(value) => { layer.reserved_bits = u8::try_from(value).ok().filter(|value| *value <= 7).ok_or_else(|| out_of_range(tcp_schema(), name))?; Ok(()) },
-                _ => Err(wrong_type(tcp_schema(), name, "unsigned")),
-            }, layout: (12, 13) },
+            reflect_bounded: reserved_bits, 7_u64, layout: (12, 13) },
         "flags" => { kind: Unsigned, derived: false, required: true, description: "Nine TCP control flags",
-            get |layer| Some(reflect_get(&layer.flags)), set |layer, value, name| match value {
-                FieldValue::Unsigned(value) => { layer.flags = u16::try_from(value).ok().filter(|value| *value <= 0x01ff).ok_or_else(|| out_of_range(tcp_schema(), name))?; Ok(()) },
-                _ => Err(wrong_type(tcp_schema(), name, "unsigned")),
-            }, layout: (12, 14) },
+            reflect_bounded: flags, 0x01ff_u64, layout: (12, 14) },
         "window" => { kind: Unsigned, derived: false, required: true, description: "Receive window",
             reflect: window, layout: (14, 16) },
         "checksum" => { kind: Unsigned, derived: true, required: false, description: "TCP checksum",

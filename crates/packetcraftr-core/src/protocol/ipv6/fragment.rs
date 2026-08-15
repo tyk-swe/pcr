@@ -9,14 +9,14 @@ use crate::{
         LayerEncodeContext,
     },
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflect_get, reflective_layer},
+    layer::{Layer, ProtocolId, reflective_layer},
     registry::Discriminator,
 };
 
 use crate::protocol::common::{
-    expected_discriminator, invalid, make_layer, out_of_range, payload_without_padding, protocol,
-    resolve_u8, strict_or_diagnostic, truncated, validate_auto_raw_discriminator,
-    validate_ipv6_routing_child, validate_raw_child_discriminator, wrong_layer, wrong_type,
+    expected_discriminator, invalid, make_layer, payload_without_padding, protocol, resolve_u8,
+    strict_or_diagnostic, truncated, validate_auto_raw_discriminator, validate_ipv6_routing_child,
+    validate_raw_child_discriminator, wrong_layer,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -43,7 +43,7 @@ reflective_layer! {
     fn fragment_schema() => { protocol: protocol("ipv6_fragment"), name: "IPv6 Fragment" }
     impl Ipv6Fragment {
         "next_header" => { kind: Unsigned, derived: true, required: false, description: "IPv6 next-header discriminator", reflect: next_header, layout: (0, 1) },
-        "fragment_offset" => { kind: Unsigned, derived: false, required: true, description: "Fragment offset in eight-byte units", get |layer| Some(reflect_get(&layer.fragment_offset)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.fragment_offset = u16::try_from(value).ok().filter(|value| *value <= 0x1fff).ok_or_else(|| out_of_range(fragment_schema(), name))?; Ok(()) }, _ => Err(wrong_type(fragment_schema(), name, "unsigned")) }, layout: (2, 4) },
+        "fragment_offset" => { kind: Unsigned, derived: false, required: true, description: "Fragment offset in eight-byte units", reflect_bounded: fragment_offset, 0x1fff_u64, layout: (2, 4) },
         "more_fragments" => { kind: Bool, derived: false, required: true, description: "More-fragments flag", reflect: more_fragments, layout: (2, 4) },
         "identification" => { kind: Unsigned, derived: false, required: true, description: "Fragment identification", reflect: identification, layout: (4, 8) },
     }

@@ -12,14 +12,14 @@ use crate::{
     },
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflect_get, reflective_layer},
+    layer::{Layer, ProtocolId, reflective_layer},
     registry::Discriminator,
 };
 
 use super::super::common::{
-    ensure_encode_budget, expected_discriminator, invalid, make_layer, out_of_range, protocol,
-    resolve_u16, strict_or_diagnostic, truncated, validate_auto_raw_discriminator,
-    validate_raw_child_discriminator, wrong_layer, wrong_type,
+    ensure_encode_budget, expected_discriminator, invalid, make_layer, protocol, resolve_u16,
+    strict_or_diagnostic, truncated, validate_auto_raw_discriminator,
+    validate_raw_child_discriminator, wrong_layer,
 };
 
 const GENEVE_BASE_LEN: usize = 8;
@@ -72,12 +72,12 @@ impl Default for Geneve {
 reflective_layer! {
     fn geneve_schema() => { protocol: protocol("geneve"), name: "GENEVE" }
     impl Geneve {
-        "version" => { kind: Unsigned, derived: false, required: false, description: "2-bit GENEVE version; only version 0 is defined", get |layer| Some(reflect_get(&layer.version)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.version = u8::try_from(value).ok().filter(|value| *value <= 3).ok_or_else(|| out_of_range(geneve_schema(), name))?; Ok(()) }, _ => Err(wrong_type(geneve_schema(), name, "unsigned")) }, layout: (0, 1) },
+        "version" => { kind: Unsigned, derived: false, required: false, description: "2-bit GENEVE version; only version 0 is defined", reflect_bounded: version, 3_u64, layout: (0, 1) },
         "control" => { kind: Bool, derived: false, required: false, description: "Control-packet O bit", reflect: control, layout: (1, 2) },
         "critical" => { kind: Bool, derived: false, required: false, description: "Critical-options-present C bit", reflect: critical, layout: (1, 2) },
-        "reserved1" => { kind: Unsigned, derived: false, required: false, description: "Reserved 6 bits after the O and C bits", get |layer| Some(reflect_get(&layer.reserved1)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.reserved1 = u8::try_from(value).ok().filter(|value| *value <= 0x3f).ok_or_else(|| out_of_range(geneve_schema(), name))?; Ok(()) }, _ => Err(wrong_type(geneve_schema(), name, "unsigned")) }, layout: (1, 2) },
+        "reserved1" => { kind: Unsigned, derived: false, required: false, description: "Reserved 6 bits after the O and C bits", reflect_bounded: reserved1, 0x3f_u64, layout: (1, 2) },
         "protocol_type" => { kind: Unsigned, derived: true, required: false, description: "EtherType of the encapsulated frame", reflect: protocol_type, layout: (2, 4) },
-        "vni" => { kind: Unsigned, derived: false, required: true, description: "24-bit virtual network identifier", get |layer| Some(FieldValue::from(layer.vni)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.vni = u32::try_from(value).ok().filter(|value| *value <= VNI_MAX).ok_or_else(|| out_of_range(geneve_schema(), name))?; Ok(()) }, _ => Err(wrong_type(geneve_schema(), name, "unsigned")) }, layout: (4, 7) },
+        "vni" => { kind: Unsigned, derived: false, required: true, description: "24-bit virtual network identifier", reflect_bounded: vni, VNI_MAX, layout: (4, 7) },
         "reserved2" => { kind: Unsigned, derived: false, required: false, description: "Reserved byte after the VNI", reflect: reserved2, layout: (7, 8) },
         "options" => { kind: Bytes, derived: false, required: false, description: "Verbatim GENEVE option TLV bytes", reflect: options, layout: (GENEVE_BASE_LEN, options_end) },
     }

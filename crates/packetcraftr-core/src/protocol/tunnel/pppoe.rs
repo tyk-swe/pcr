@@ -10,14 +10,14 @@ use crate::{
     },
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflect_get, reflective_layer},
+    layer::{Layer, ProtocolId, reflective_layer},
     registry::Discriminator,
 };
 
 use super::super::common::{
     ValueExpectation, ensure_encode_budget, expected_discriminator_for_value, invalid, make_layer,
-    out_of_range, payload_without_padding, protocol, resolve_u16, strict_or_diagnostic, truncated,
-    validate_auto_raw_discriminator, validate_raw_child_discriminator, wrong_layer, wrong_type,
+    payload_without_padding, protocol, resolve_u16, strict_or_diagnostic, truncated,
+    validate_auto_raw_discriminator, validate_raw_child_discriminator, wrong_layer,
 };
 
 const PPPOE_LEN: usize = 6;
@@ -62,8 +62,8 @@ impl Default for Pppoe {
 reflective_layer! {
     fn pppoe_schema() => { protocol: protocol("pppoe"), name: "PPPoE" }
     impl Pppoe {
-        "version" => { kind: Unsigned, derived: false, required: false, description: "4-bit PPPoE version; only version 1 is defined", get |layer| Some(reflect_get(&layer.version)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.version = u8::try_from(value).ok().filter(|value| *value <= 0xf).ok_or_else(|| out_of_range(pppoe_schema(), name))?; Ok(()) }, _ => Err(wrong_type(pppoe_schema(), name, "unsigned")) }, layout: (0, 1) },
-        "type" => { kind: Unsigned, derived: false, required: false, description: "4-bit PPPoE type; only type 1 is defined", get |layer| Some(reflect_get(&layer.kind)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.kind = u8::try_from(value).ok().filter(|value| *value <= 0xf).ok_or_else(|| out_of_range(pppoe_schema(), name))?; Ok(()) }, _ => Err(wrong_type(pppoe_schema(), name, "unsigned")) }, layout: (0, 1) },
+        "version" => { kind: Unsigned, derived: false, required: false, description: "4-bit PPPoE version; only version 1 is defined", reflect_bounded: version, 0xf_u64, layout: (0, 1) },
+        "type" => { kind: Unsigned, derived: false, required: false, description: "4-bit PPPoE type; only type 1 is defined", reflect_bounded: kind, 0xf_u64, layout: (0, 1) },
         "code" => { kind: Unsigned, derived: false, required: false, description: "Stage code: zero for session data, a discovery code otherwise", reflect: code, layout: (1, 2) },
         "session_id" => { kind: Unsigned, derived: false, required: true, description: "Session identifier assigned during discovery", reflect: session_id, layout: (2, 4) },
         "length" => { kind: Unsigned, derived: true, required: false, description: "Payload length excluding the header", reflect: length, layout: (4, 6) },

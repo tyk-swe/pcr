@@ -12,7 +12,7 @@ use crate::{
     },
     diagnostic::Diagnostic,
     field::FieldValue,
-    layer::{Layer, ProtocolId, reflect_get, reflective_layer},
+    layer::{Layer, ProtocolId, reflect_get, reflect_set_bounded, reflective_layer},
     registry::Discriminator,
 };
 
@@ -89,12 +89,12 @@ impl Default for Erspan {
 reflective_layer! {
     fn erspan_schema() => { protocol: protocol("erspan"), name: "ERSPAN" }
     impl Erspan {
-        "version" => { kind: Unsigned, derived: false, required: true, description: "Header version: 1 is Type II, 2 is Type III", get |layer| Some(reflect_get(&layer.version)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.version = u8::try_from(value).ok().filter(|value| *value <= 0xf).ok_or_else(|| out_of_range(erspan_schema(), name))?; if layer.version == 2 && layer.type3.is_none() { layer.type3 = Some(ErspanType3::default()); } Ok(()) }, _ => Err(wrong_type(erspan_schema(), name, "unsigned")) }, layout: (0, 2) },
-        "vlan" => { kind: Unsigned, derived: false, required: false, description: "VLAN of the mirrored frame", get |layer| Some(reflect_get(&layer.vlan)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.vlan = u16::try_from(value).ok().filter(|value| *value <= 0xfff).ok_or_else(|| out_of_range(erspan_schema(), name))?; Ok(()) }, _ => Err(wrong_type(erspan_schema(), name, "unsigned")) }, layout: (0, 2) },
-        "cos" => { kind: Unsigned, derived: false, required: false, description: "Class of service of the mirrored frame", get |layer| Some(reflect_get(&layer.cos)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.cos = u8::try_from(value).ok().filter(|value| *value <= 7).ok_or_else(|| out_of_range(erspan_schema(), name))?; Ok(()) }, _ => Err(wrong_type(erspan_schema(), name, "unsigned")) }, layout: (2, 4) },
-        "encapsulation" => { kind: Unsigned, derived: false, required: false, description: "Type II trunk encapsulation; Type III bad/short frame bits", get |layer| Some(reflect_get(&layer.encapsulation)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.encapsulation = u8::try_from(value).ok().filter(|value| *value <= 3).ok_or_else(|| out_of_range(erspan_schema(), name))?; Ok(()) }, _ => Err(wrong_type(erspan_schema(), name, "unsigned")) }, layout: (2, 4) },
+        "version" => { kind: Unsigned, derived: false, required: true, description: "Header version: 1 is Type II, 2 is Type III", get |layer| Some(reflect_get(&layer.version)), set |layer, value, name| { reflect_set_bounded(&mut layer.version, erspan_schema(), name, value, 0xf_u64)?; if layer.version == 2 && layer.type3.is_none() { layer.type3 = Some(ErspanType3::default()); } Ok(()) }, layout: (0, 2) },
+        "vlan" => { kind: Unsigned, derived: false, required: false, description: "VLAN of the mirrored frame", reflect_bounded: vlan, 0xfff_u64, layout: (0, 2) },
+        "cos" => { kind: Unsigned, derived: false, required: false, description: "Class of service of the mirrored frame", reflect_bounded: cos, 7_u64, layout: (2, 4) },
+        "encapsulation" => { kind: Unsigned, derived: false, required: false, description: "Type II trunk encapsulation; Type III bad/short frame bits", reflect_bounded: encapsulation, 3_u64, layout: (2, 4) },
         "truncated" => { kind: Bool, derived: false, required: false, description: "The mirrored frame was truncated by the session MTU", reflect: truncated, layout: (2, 4) },
-        "session_id" => { kind: Unsigned, derived: false, required: true, description: "10-bit monitoring-session identifier", get |layer| Some(reflect_get(&layer.session_id)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.session_id = u16::try_from(value).ok().filter(|value| *value <= 0x3ff).ok_or_else(|| out_of_range(erspan_schema(), name))?; Ok(()) }, _ => Err(wrong_type(erspan_schema(), name, "unsigned")) }, layout: (2, 4) },
+        "session_id" => { kind: Unsigned, derived: false, required: true, description: "10-bit monitoring-session identifier", reflect_bounded: session_id, 0x3ff_u64, layout: (2, 4) },
         "index_word" => { kind: Unsigned, derived: false, required: false, description: "Type II reserved bits and port index, packed as the final word", reflect: index_word, layout: (4, 8) },
         "timestamp" => { kind: Unsigned, derived: false, required: false, description: "Type III wire-format timestamp", get |layer| layer.type3.as_ref().map(|type3| FieldValue::from(type3.timestamp)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.type3.get_or_insert_with(ErspanType3::default).timestamp = u32::try_from(value).map_err(|_| out_of_range(erspan_schema(), name))?; Ok(()) }, _ => Err(wrong_type(erspan_schema(), name, "unsigned")) } },
         "sgt" => { kind: Unsigned, derived: false, required: false, description: "Type III security group tag", get |layer| layer.type3.as_ref().map(|type3| FieldValue::from(type3.sgt)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.type3.get_or_insert_with(ErspanType3::default).sgt = u16::try_from(value).map_err(|_| out_of_range(erspan_schema(), name))?; Ok(()) }, _ => Err(wrong_type(erspan_schema(), name, "unsigned")) } },

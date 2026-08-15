@@ -16,9 +16,9 @@ use crate::{
 };
 
 use super::super::common::{
-    ValueExpectation, ensure_encode_budget, invalid, make_layer, out_of_range, protocol,
-    resolve_u16, strict_or_diagnostic, truncated, validate_auto_raw_discriminator,
-    validate_raw_child_discriminator, validate_typed_child_discriminator, wrong_layer, wrong_type,
+    ValueExpectation, ensure_encode_budget, invalid, make_layer, protocol, resolve_u16,
+    strict_or_diagnostic, truncated, validate_auto_raw_discriminator,
+    validate_raw_child_discriminator, validate_typed_child_discriminator, wrong_layer,
 };
 
 /// Synthetic discriminator selecting IEEE 802.2 LLC framing. An EtherType at
@@ -240,7 +240,7 @@ impl Default for Snap {
 reflective_layer! {
     fn snap_schema() => { protocol: protocol("snap"), name: "SNAP" }
     impl Snap {
-        "oui" => { kind: Unsigned, derived: false, required: true, description: "Organizationally unique identifier; zero selects the EtherType space", get |layer| Some(FieldValue::from(layer.oui)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.oui = u32::try_from(value).ok().filter(|value| *value <= OUI_MAX).ok_or_else(|| out_of_range(snap_schema(), name))?; Ok(()) }, _ => Err(wrong_type(snap_schema(), name, "unsigned")) }, layout: (0, 3) },
+        "oui" => { kind: Unsigned, derived: false, required: true, description: "Organizationally unique identifier; zero selects the EtherType space", reflect_bounded: oui, OUI_MAX, layout: (0, 3) },
         "protocol_id" => { kind: Unsigned, derived: true, required: false, description: "Protocol identifier within the OUI's numbering", reflect: protocol_id, layout: (3, 5) },
     }
     layout pub(crate) fn snap_layout();

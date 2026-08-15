@@ -8,12 +8,12 @@ use std::ops::Range;
 use bytes::Bytes;
 
 use crate::Packet;
-use crate::codec::{DecodedLayerValue, LayerCodec};
+use crate::codec::{CodecError, DecodedLayerValue, LayerCodec, LayerDecodeContext};
 use crate::diagnostic::Diagnostic;
 use crate::frame::Frame;
 use crate::layer::ProtocolId;
 use crate::layout::{ByteRange, LayerLayout, PacketLayout};
-use crate::registry::{Discriminator, LayerDecodeContext, ProtocolRegistry};
+use crate::registry::{Discriminator, ProtocolRegistry};
 
 use super::error::DecodeError;
 use super::fallback::{
@@ -128,7 +128,7 @@ impl<'registry> DecodeSession<'registry> {
         codec: &dyn LayerCodec,
         cursor: &DecodeCursor,
         allow_link_padding: bool,
-    ) -> Result<DecodedLayerValue, crate::registry::CodecError> {
+    ) -> Result<DecodedLayerValue, CodecError> {
         codec.decode(
             &self.original[cursor.bytes.clone()],
             &LayerDecodeContext {

@@ -70,8 +70,8 @@ impl ReassemblyDispatch {
         if pushable && let Some(segment) = segment {
             let acknowledgment = transports(&decoded.packet)
                 .tcp
-                .filter(|(_, _, tcp, _)| tcp.flags & Tcp::ACK != 0)
-                .map(|(_, _, tcp, _)| tcp.acknowledgment);
+                .filter(|transport| transport.layer.flags & Tcp::ACK != 0)
+                .map(|transport| transport.layer.acknowledgment);
             let flow = segment.flow.clone();
             let pure_syn = segment.syn && acknowledgment.is_none() && segment.payload.is_empty();
 

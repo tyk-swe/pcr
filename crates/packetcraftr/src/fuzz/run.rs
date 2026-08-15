@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::fmt::Display;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -88,9 +89,7 @@ where
             .checked_add(u64::try_from(built.bytes.len()).unwrap_or(u64::MAX))
             .and_then(|value| value.checked_add(overhead))
             .ok_or(FuzzError::StatisticsOverflow {
-                case_index: request.first_case.saturating_add(
-                    u64::try_from(request.cases.saturating_sub(1)).unwrap_or(u64::MAX),
-                ),
+                case_index: last_case_index(request),
             })
     })?;
     let requires_malformed_live = cases.iter().any(|case| {
@@ -230,9 +229,7 @@ where
             .elapsed
             .checked_add(scheduled_delay)
             .ok_or(FuzzError::StatisticsOverflow {
-                case_index: request.first_case.saturating_add(
-                    u64::try_from(request.cases.saturating_sub(1)).unwrap_or(u64::MAX),
-                ),
+                case_index: last_case_index(request),
             })?;
     deadline.check().map_err(duration_limit)?;
 
@@ -253,28 +250,34 @@ fn expected_live_build(
     execution: &FuzzCaseExecution,
 ) -> std::result::Result<BuiltPacket, String> {
     let route = execution.sent.route();
-    materialize_network_fields(&mut packet, &route.plan).map_err(|source| source.to_string())?;
-    materialize_link_structure(&mut packet, &route.plan).map_err(|source| source.to_string())?;
+    stringify(materialize_network_fields(&mut packet, &route.plan))?;
+    stringify(materialize_link_structure(&mut packet, &route.plan))?;
 
     let context = build_context(&route.plan);
     let builder = Builder::new(Arc::clone(registry));
     let mut preliminary = build_packet(&builder, packet.clone(), context.clone(), request)?;
     let preliminary_len = preliminary.bytes.len();
 
-    if materialize_link_fields(&mut packet, route).map_err(|source| source.to_string())? {
+    if stringify(materialize_link_fields(&mut packet, route))? {
         if patch_builtin_ethernet(registry, &mut preliminary, &packet) {
-            require_fixed_width_link_materialization(preliminary_len, preliminary.bytes.len())
-                .map_err(|source| source.to_string())?;
+            stringify(require_fixed_width_link_materialization(
+                preliminary_len,
+                preliminary.bytes.len(),
+            ))?;
             return Ok(preliminary);
         }
         let materialized = build_packet(&builder, packet, context, request)?;
-        require_fixed_width_link_materialization(preliminary_len, materialized.bytes.len())
-            .map_err(|source| source.to_string())?;
+        stringify(require_fixed_width_link_materialization(
+            preliminary_len,
+            materialized.bytes.len(),
+        ))?;
         return Ok(materialized);
     }
 
-    require_fixed_width_link_materialization(preliminary_len, preliminary.bytes.len())
-        .map_err(|source| source.to_string())?;
+    stringify(require_fixed_width_link_materialization(
+        preliminary_len,
+        preliminary.bytes.len(),
+    ))?;
     Ok(preliminary)
 }
 
@@ -284,7 +287,15 @@ fn build_packet(
     context: BuildContext,
     request: &packet_fuzz::Request,
 ) -> std::result::Result<BuiltPacket, String> {
-    builder
-        .build(packet, context, request.build.clone())
-        .map_err(|source| source.to_string())
+    stringify(builder.build(packet, context, request.build.clone()))
+}
+
+fn last_case_index(request: &packet_fuzz::Request) -> u64 {
+    request
+        .first_case
+        .saturating_add(u64::try_from(request.cases.saturating_sub(1)).unwrap_or(u64::MAX))
+}
+
+fn stringify<T, E: Display>(result: std::result::Result<T, E>) -> std::result::Result<T, String> {
+    result.map_err(|source| source.to_string())
 }

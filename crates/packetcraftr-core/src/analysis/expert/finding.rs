@@ -29,15 +29,15 @@ pub(super) fn from_diagnostics(
         tcp: record
             .tcp_stream
             .zip(transports.tcp.as_ref())
-            .map(|(stream, (layer, _, _, _))| IndexedTransport {
-                layer: *layer,
+            .map(|(stream, transport)| IndexedTransport {
+                layer: transport.index,
                 stream: tcp_stream_ref(stream),
             }),
         udp: record
             .udp_stream
             .zip(transports.udp.as_ref())
-            .map(|(stream, (layer, _, _))| IndexedTransport {
-                layer: *layer,
+            .map(|(stream, transport)| IndexedTransport {
+                layer: transport.index,
                 stream: udp_stream_ref(stream),
             }),
         outermost: transports.outermost,

@@ -149,7 +149,7 @@ impl FollowCollector {
         if record.tcp_stream != Some(self.selector.index) {
             return Vec::new();
         }
-        let Some((_, _, tcp, _)) = transports(&record.decoded.packet).tcp else {
+        let Some(transport) = transports(&record.decoded.packet).tcp else {
             return Vec::new();
         };
         let Some(flow) = record.tcp_flow else {
@@ -164,8 +164,13 @@ impl FollowCollector {
             .clone()
             .expect("client flow was established");
 
-        self.dedup
-            .observe_syn(flow, &client, tcp, client_evicted, server_evicted);
+        self.dedup.observe_syn(
+            flow,
+            &client,
+            transport.layer,
+            client_evicted,
+            server_evicted,
+        );
         self.summary.frames += 1;
         let mut chunks = Vec::new();
         for event in record.tcp_events {
@@ -203,7 +208,7 @@ impl FollowCollector {
         if record.udp_stream != Some(self.selector.index) {
             return Vec::new();
         }
-        let Some((index, _, _)) = transports(&record.decoded.packet).udp else {
+        let Some(transport) = transports(&record.decoded.packet).udp else {
             return Vec::new();
         };
         let Some(flow) = record.udp_flow else {
@@ -225,7 +230,7 @@ impl FollowCollector {
         };
         // Every datagram is one chunk, an empty one included: the frame and
         // direction are part of the conversation's shape.
-        let bytes = transport_payload(record.decoded, index);
+        let bytes = transport_payload(record.decoded, transport.index);
         self.tally(direction, bytes.len());
         vec![Chunk {
             direction,

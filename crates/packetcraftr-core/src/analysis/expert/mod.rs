@@ -116,9 +116,9 @@ impl ExpertCollector {
         let frame_transports = transports(&record.decoded.packet);
         let mut findings = finding::from_diagnostics(record, &frame_transports);
         self.reconcile_tcp_evictions(record.tcp_events);
-        if let (Some((index, _, tcp, _)), Some(flow)) = (frame_transports.tcp, record.tcp_flow) {
-            let payload_len = transport_payload(record.decoded, index).len();
-            self.observe_tcp(record, flow, tcp, payload_len, &mut findings);
+        if let (Some(transport), Some(flow)) = (frame_transports.tcp, record.tcp_flow) {
+            let payload_len = transport_payload(record.decoded, transport.index).len();
+            self.observe_tcp(record, flow, transport.layer, payload_len, &mut findings);
         }
 
         for finding in &findings {

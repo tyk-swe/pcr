@@ -5,7 +5,6 @@
 
 mod core;
 
-pub(crate) use super::codec::{CodecError, LayerDecodeContext, LayerEncodeContext};
 pub use core::{
     Discriminator, FilterFieldBinding, ProtocolRegistry as Registry, RegistryBuilder as Builder,
     RegistryError as Error,

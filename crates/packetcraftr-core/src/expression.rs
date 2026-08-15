@@ -11,8 +11,9 @@ use bytes::Bytes;
 use thiserror::Error;
 
 use crate::Packet;
+use crate::codec::CodecError;
 use crate::field::{FieldValue, parse_mac};
-use crate::registry::{CodecError, ProtocolRegistry};
+use crate::registry::ProtocolRegistry;
 
 pub use ExpressionError as Error;
 pub use ExpressionOptions as Options;
@@ -287,24 +288,18 @@ fn parse_quoted(input: &str) -> Result<String, ExpressionError> {
 }
 
 fn split_assignment(input: &str) -> Result<Option<(&str, &str)>, ExpressionError> {
-    let mut assignment = None;
-    match scan_top_level(input, true, |offset, character| {
-        if character == '=' {
-            assignment = Some(offset);
-            return Err(());
-        }
-        Ok(())
-    }) {
-        ScanOutcome::Complete | ScanOutcome::Structural(ScanFailure::Unterminated) => Ok(None),
-        ScanOutcome::Callback(()) => {
-            let offset = assignment.expect("the callback records the assignment offset");
-            Ok(Some((&input[..offset], &input[offset + 1..])))
-        }
-        ScanOutcome::Structural(ScanFailure::Unbalanced { offset, .. }) => {
-            Err(ExpressionError::Syntax {
-                offset,
-                message: "unbalanced delimiter".to_owned(),
-            })
+    let mut scanner = TopLevelScanner::merging_brackets(input);
+    loop {
+        match scanner.next_top_level() {
+            Ok(Some((offset, '='))) => return Ok(Some((&input[..offset], &input[offset + 1..]))),
+            Ok(Some(_)) => {}
+            Ok(None) | Err(ScanFailure::Unterminated) => return Ok(None),
+            Err(ScanFailure::Unbalanced { offset, .. }) => {
+                return Err(ExpressionError::Syntax {
+                    offset,
+                    message: "unbalanced delimiter".to_owned(),
+                });
+            }
         }
     }
 }
@@ -316,9 +311,24 @@ fn split_top_level_bounded(
 ) -> Result<Vec<&str>, ExpressionError> {
     let mut result = Vec::new();
     let mut start = 0usize;
-    match scan_top_level(input, false, |offset, character| {
+    let mut scanner = TopLevelScanner::new(input);
+    while let Some((offset, character)) = match scanner.next_top_level() {
+        Ok(next) => next,
+        Err(ScanFailure::Unbalanced { offset, character }) => {
+            return Err(ExpressionError::Syntax {
+                offset,
+                message: format!("unexpected '{character}'"),
+            });
+        }
+        Err(ScanFailure::Unterminated) => {
+            return Err(ExpressionError::Syntax {
+                offset: input.len(),
+                message: "unterminated quote or delimiter".to_owned(),
+            });
+        }
+    } {
         if character != delimiter {
-            return Ok(());
+            continue;
         }
         if let Some(maximum) =
             maximum_parts.filter(|maximum| result.len() >= maximum.saturating_sub(1))
@@ -327,22 +337,6 @@ fn split_top_level_bounded(
         }
         result.push(&input[start..offset]);
         start = offset + character.len_utf8();
-        Ok(())
-    }) {
-        ScanOutcome::Complete => {}
-        ScanOutcome::Callback(error) => return Err(error),
-        ScanOutcome::Structural(ScanFailure::Unbalanced { offset, character }) => {
-            return Err(ExpressionError::Syntax {
-                offset,
-                message: format!("unexpected '{character}'"),
-            });
-        }
-        ScanOutcome::Structural(ScanFailure::Unterminated) => {
-            return Err(ExpressionError::Syntax {
-                offset: input.len(),
-                message: "unterminated quote or delimiter".to_owned(),
-            });
-        }
     }
     if let Some(maximum) = maximum_parts.filter(|maximum| result.len() >= *maximum) {
         return Err(ExpressionError::LayerLimit { limit: maximum });
@@ -351,96 +345,103 @@ fn split_top_level_bounded(
     Ok(result)
 }
 
-/// How the shared delimiter scanner ended.
-enum ScanOutcome<E> {
-    /// The whole input was scanned without a callback error.
-    Complete,
-    /// A quote or bracket was left open, or a bracket closed without one.
-    Structural(ScanFailure),
-    /// The callback stopped the scan early.
-    Callback(E),
+/// Walks input while tracking quotes, escapes, and bracket nesting.
+///
+/// `merge_brackets` treats `(`/`[` and `)`/`]` as one shared depth, matching
+/// the assignment scanner's historical behavior; the splitter keeps the depths
+/// separate so a mismatched bracket reports the offending character.
+struct TopLevelScanner<'a> {
+    chars: std::str::CharIndices<'a>,
+    quoted: bool,
+    escaped: bool,
+    paren_depth: usize,
+    list_depth: usize,
+    merge_brackets: bool,
 }
 
-/// A structural failure found by [`scan_top_level`].
+impl<'a> TopLevelScanner<'a> {
+    fn new(input: &'a str) -> Self {
+        Self {
+            chars: input.char_indices(),
+            quoted: false,
+            escaped: false,
+            paren_depth: 0,
+            list_depth: 0,
+            merge_brackets: false,
+        }
+    }
+
+    fn merging_brackets(input: &'a str) -> Self {
+        Self {
+            merge_brackets: true,
+            ..Self::new(input)
+        }
+    }
+
+    fn next_top_level(&mut self) -> Result<Option<(usize, char)>, ScanFailure> {
+        for (offset, character) in self.chars.by_ref() {
+            if self.escaped {
+                self.escaped = false;
+                continue;
+            }
+            if self.quoted && character == '\\' {
+                self.escaped = true;
+                continue;
+            }
+            if character == '"' {
+                self.quoted = !self.quoted;
+                continue;
+            }
+            if self.quoted {
+                continue;
+            }
+            let unbalanced = |character| ScanFailure::Unbalanced { offset, character };
+            match character {
+                '(' => self.paren_depth += 1,
+                ')' => {
+                    let Some(depth) = self.paren_depth.checked_sub(1) else {
+                        return Err(unbalanced(character));
+                    };
+                    self.paren_depth = depth;
+                }
+                '[' => {
+                    if self.merge_brackets {
+                        self.paren_depth += 1;
+                    } else {
+                        self.list_depth += 1;
+                    }
+                }
+                ']' => {
+                    let depth = if self.merge_brackets {
+                        &mut self.paren_depth
+                    } else {
+                        &mut self.list_depth
+                    };
+                    let Some(remaining) = depth.checked_sub(1) else {
+                        return Err(unbalanced(character));
+                    };
+                    *depth = remaining;
+                }
+                _ if self.paren_depth == 0 && self.list_depth == 0 => {
+                    return Ok(Some((offset, character)));
+                }
+                _ => {}
+            }
+        }
+        if self.quoted || self.paren_depth != 0 || self.list_depth != 0 {
+            Err(ScanFailure::Unterminated)
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+/// A structural failure found by [`TopLevelScanner`].
 enum ScanFailure {
     /// A closing bracket appeared without a matching opener.
     Unbalanced { offset: usize, character: char },
     /// A quote or bracket was still open at the end of the input.
     Unterminated,
-}
-
-/// Walks `input` tracking quotes, escapes, and bracket nesting, invoking
-/// `on_char` for every character at the top level.
-///
-/// `merge_brackets` treats `(`/`[` and `)`/`]` as one shared depth, matching
-/// the assignment scanner's historical behavior; the split scanner keeps the
-/// depths separate so a mismatched bracket reports the offending character.
-fn scan_top_level<E>(
-    input: &str,
-    merge_brackets: bool,
-    mut on_char: impl FnMut(usize, char) -> Result<(), E>,
-) -> ScanOutcome<E> {
-    let mut quoted = false;
-    let mut escaped = false;
-    let mut paren_depth = 0usize;
-    let mut list_depth = 0usize;
-    for (offset, character) in input.char_indices() {
-        if escaped {
-            escaped = false;
-            continue;
-        }
-        if quoted && character == '\\' {
-            escaped = true;
-            continue;
-        }
-        if character == '"' {
-            quoted = !quoted;
-            continue;
-        }
-        if quoted {
-            continue;
-        }
-        let unbalanced = |character| ScanFailure::Unbalanced { offset, character };
-        match character {
-            '(' => paren_depth += 1,
-            ')' => {
-                let Some(depth) = paren_depth.checked_sub(1) else {
-                    return ScanOutcome::Structural(unbalanced(character));
-                };
-                paren_depth = depth;
-            }
-            '[' => {
-                if merge_brackets {
-                    paren_depth += 1;
-                } else {
-                    list_depth += 1;
-                }
-            }
-            ']' => {
-                let depth = if merge_brackets {
-                    &mut paren_depth
-                } else {
-                    &mut list_depth
-                };
-                let Some(remaining) = depth.checked_sub(1) else {
-                    return ScanOutcome::Structural(unbalanced(character));
-                };
-                *depth = remaining;
-            }
-            _ => {
-                if paren_depth == 0
-                    && list_depth == 0
-                    && let Err(error) = on_char(offset, character)
-                {
-                    return ScanOutcome::Callback(error);
-                }
-            }
-        }
-    }
-    if quoted || paren_depth != 0 || list_depth != 0 {
-        return ScanOutcome::Structural(ScanFailure::Unterminated);
-    }
-    ScanOutcome::Complete
 }
 
 fn strip_hex_prefix(input: &str) -> Option<&str> {

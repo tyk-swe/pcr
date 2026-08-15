@@ -3,7 +3,7 @@
 
 use thiserror::Error;
 
-use crate::registry::CodecError;
+use crate::codec::CodecError;
 
 #[derive(Debug, Error)]
 #[non_exhaustive]

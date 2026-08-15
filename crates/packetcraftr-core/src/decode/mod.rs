@@ -15,6 +15,9 @@ use crate::registry::ProtocolRegistry;
 use fallback::raw_decoded_frame;
 use session::DecodeSession;
 
+/// Synthetic link type used when decoding bytes from an explicit root protocol.
+const SYNTHETIC_LINK_TYPE: LinkType = LinkType(u32::MAX);
+
 mod error;
 mod fallback;
 mod options;
@@ -24,6 +27,7 @@ mod traversal;
 pub use error::DecodeError;
 pub use options::{DecodeOptions, DecodedPacket};
 
+// Compatibility aliases retained for existing callers.
 pub use Dissector as Decoder;
 pub use error::DecodeError as Error;
 pub use options::{DecodeOptions as Options, DecodedPacket as Result};
@@ -78,7 +82,11 @@ impl Dissector {
                 limit: options.max_packet_size,
             });
         }
-        let frame = Frame::new(std::time::SystemTime::UNIX_EPOCH, LinkType(u32::MAX), bytes)?;
+        let frame = Frame::new(
+            std::time::SystemTime::UNIX_EPOCH,
+            SYNTHETIC_LINK_TYPE,
+            bytes,
+        )?;
         if options.max_layers == 0 {
             return Err(DecodeError::LayerLimit { limit: 0 });
         }

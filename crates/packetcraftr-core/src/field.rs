@@ -9,7 +9,7 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
-pub use crate::layer::model::{FieldError as Error, FieldSchema as Schema};
+pub use crate::layer::{FieldError as Error, FieldSchema as Schema};
 pub use FieldKind as Kind;
 pub use FieldValue as Value;
 pub use WireValue as Wire;

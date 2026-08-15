@@ -18,6 +18,8 @@ use super::contract::Error;
 use super::envelope::Diagnostic;
 use super::hex::CompactHex;
 
+const MAX_SIGNED_SECONDS: u64 = i64::MAX as u64;
+
 /// Canonical signed Unix timestamp used by output records, including pre-epoch captures.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct Timestamp {
@@ -43,7 +45,7 @@ impl TryFrom<SystemTime> for Timestamp {
 impl Timestamp {
     pub(crate) fn from_pre_epoch_duration(duration: Duration) -> Result<Self, Error> {
         if duration.subsec_nanos() == 0 {
-            let unix_seconds = if duration.as_secs() == u64::try_from(i64::MAX).unwrap() + 1 {
+            let unix_seconds = if duration.as_secs() == MAX_SIGNED_SECONDS + 1 {
                 i64::MIN
             } else {
                 i64::try_from(duration.as_secs())
@@ -57,14 +59,14 @@ impl Timestamp {
             })
         } else {
             let seconds = duration.as_secs();
-            if seconds > u64::try_from(i64::MAX).unwrap() {
+            if seconds > MAX_SIGNED_SECONDS {
                 return Err(Error::TimestampOutOfRange);
             }
             // A fractional instant before the epoch is represented with
             // floor seconds. `i64::MAX` seconds plus a fraction therefore
             // maps to `(i64::MIN, positive nanos)`, which is still inside the
             // v1 signed-seconds range.
-            let unix_seconds = if seconds == u64::try_from(i64::MAX).unwrap() {
+            let unix_seconds = if seconds == MAX_SIGNED_SECONDS {
                 i64::MIN
             } else {
                 #[expect(

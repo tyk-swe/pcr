@@ -6,9 +6,10 @@
 use std::sync::Arc;
 
 use crate::Packet;
+use crate::codec::LayerEncodeContext;
 use crate::layer::{MalformedLayer, Padding};
 use crate::layout::{ByteRange, LayerLayout, PacketLayout};
-use crate::registry::{LayerEncodeContext, ProtocolRegistry};
+use crate::registry::ProtocolRegistry;
 use crate::semantics::BuiltinProtocol;
 
 use buffer::PacketBuffer;
@@ -23,6 +24,7 @@ pub use options::{
     BuildContext, BuildMode, BuildOptions, BuiltPacket, DEFAULT_MAX_LAYERS, DEFAULT_MAX_PACKET_SIZE,
 };
 
+// Compatibility aliases retained for existing callers.
 pub use error::BuildError as Error;
 pub use options::{
     BuildContext as Context, BuildMode as Mode, BuildOptions as Options, BuiltPacket as Result,

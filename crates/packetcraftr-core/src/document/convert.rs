@@ -4,7 +4,8 @@
 use super::error::DocumentError;
 use super::types::{LayerDocument, PACKET_DOCUMENT_SCHEMA_V1, PacketDocument};
 use crate::Packet;
-use crate::registry::{CodecError, ProtocolRegistry};
+use crate::codec::CodecError;
+use crate::registry::ProtocolRegistry;
 
 impl PacketDocument {
     pub fn from_packet(packet: &Packet) -> Self {

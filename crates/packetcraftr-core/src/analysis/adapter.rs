@@ -26,12 +26,25 @@ use crate::analysis::scope::{EncapsulationIdentifier, ScopeError, ScopeInterner}
 /// separately because an encapsulated frame legitimately belongs to both a
 /// UDP conversation (the tunnel) and a TCP conversation (the payload).
 pub(crate) struct Transports<'a> {
-    pub(crate) tcp: Option<(usize, FlowKey, &'a Tcp, Vec<EncapsulationIdentifier>)>,
-    pub(crate) udp: Option<(usize, FlowKey, Vec<EncapsulationIdentifier>)>,
+    pub(crate) tcp: Option<TcpTransport<'a>>,
+    pub(crate) udp: Option<UdpTransport>,
     /// Index of the outermost transport layer of either kind. In a
     /// same-transport tunnel this differs from the retained innermost
     /// occurrence, marking headers whose conversation carries no index.
     pub(crate) outermost: Option<usize>,
+}
+
+pub(crate) struct TcpTransport<'a> {
+    pub(crate) index: usize,
+    pub(crate) flow: FlowKey,
+    pub(crate) layer: &'a Tcp,
+    pub(crate) encapsulation: Vec<EncapsulationIdentifier>,
+}
+
+pub(crate) struct UdpTransport {
+    pub(crate) index: usize,
+    pub(crate) flow: FlowKey,
+    pub(crate) encapsulation: Vec<EncapsulationIdentifier>,
 }
 
 pub(crate) fn transports(packet: &Packet) -> Transports<'_> {
@@ -109,12 +122,12 @@ pub(crate) fn transports(packet: &Packet) -> Transports<'_> {
                     destination: network.destination,
                     destination_port: tcp.destination_port,
                 };
-                found.tcp = Some((
+                found.tcp = Some(TcpTransport {
                     index,
-                    flow.clone(),
-                    tcp,
-                    path_without(&path, network.path_index),
-                ));
+                    flow,
+                    layer: tcp,
+                    encapsulation: path_without(&path, network.path_index),
+                });
             }
         } else if let Some(udp) = layer.as_any().downcast_ref::<Udp>()
             && let Some(network) = &network
@@ -126,7 +139,11 @@ pub(crate) fn transports(packet: &Packet) -> Transports<'_> {
                 destination: network.destination,
                 destination_port: udp.destination_port,
             };
-            found.udp = Some((index, flow.clone(), path_without(&path, network.path_index)));
+            found.udp = Some(UdpTransport {
+                index,
+                flow,
+                encapsulation: path_without(&path, network.path_index),
+            });
         }
     }
     found
@@ -191,17 +208,20 @@ pub(crate) fn tcp_segment(
     decoded: &DecodedPacket,
     scopes: &mut ScopeInterner,
 ) -> Result<Option<Segment>, ScopeError> {
-    let Some((index, flow, tcp, encapsulation)) = transports(&decoded.packet).tcp else {
+    let Some(transport) = transports(&decoded.packet).tcp else {
         return Ok(None);
     };
-    let scope = scopes.intern(decoded.frame.interface, encapsulation)?;
+    let scope = scopes.intern(decoded.frame.interface, transport.encapsulation)?;
     Ok(Some(Segment {
-        flow: ScopedFlowKey { scope, flow },
-        sequence: tcp.sequence,
-        payload: transport_payload(decoded, index),
-        syn: tcp.flags & Tcp::SYN != 0,
-        fin: tcp.flags & Tcp::FIN != 0,
-        rst: tcp.flags & Tcp::RST != 0,
+        flow: ScopedFlowKey {
+            scope,
+            flow: transport.flow,
+        },
+        sequence: transport.layer.sequence,
+        payload: transport_payload(decoded, transport.index),
+        syn: transport.layer.flags & Tcp::SYN != 0,
+        fin: transport.layer.flags & Tcp::FIN != 0,
+        rst: transport.layer.flags & Tcp::RST != 0,
     }))
 }
 
@@ -210,9 +230,12 @@ pub(crate) fn udp_flow(
     decoded: &DecodedPacket,
     scopes: &mut ScopeInterner,
 ) -> Result<Option<ScopedFlowKey>, ScopeError> {
-    let Some((_, flow, encapsulation)) = transports(&decoded.packet).udp else {
+    let Some(transport) = transports(&decoded.packet).udp else {
         return Ok(None);
     };
-    let scope = scopes.intern(decoded.frame.interface, encapsulation)?;
-    Ok(Some(ScopedFlowKey { scope, flow }))
+    let scope = scopes.intern(decoded.frame.interface, transport.encapsulation)?;
+    Ok(Some(ScopedFlowKey {
+        scope,
+        flow: transport.flow,
+    }))
 }

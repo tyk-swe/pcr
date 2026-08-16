@@ -17,13 +17,6 @@ use crate::layer::{FieldError, Layer, LayerSchema, ProtocolId};
 use crate::layout::FieldLayout;
 use crate::registry::{Discriminator, ProtocolRegistry};
 
-pub use CodecError as Error;
-pub use DecodedLayerValue as Decoded;
-pub use EncodedLayer as Encoded;
-pub use LayerCodec as Codec;
-pub use LayerDecodeContext as DecodeContext;
-pub use LayerEncodeContext as EncodeContext;
-
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum CodecError {

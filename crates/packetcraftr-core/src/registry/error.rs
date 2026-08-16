@@ -3,7 +3,7 @@
 
 use thiserror::Error;
 
-use super::super::super::layer::ProtocolId;
+use crate::layer::ProtocolId;
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 #[non_exhaustive]

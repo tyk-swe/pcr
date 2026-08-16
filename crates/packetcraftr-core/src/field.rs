@@ -1,18 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Reflective field schemas and values.
+//! Reflective field kinds and values.
 
 use std::fmt;
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
-
-pub use crate::layer::{FieldError as Error, FieldSchema as Schema};
-pub use FieldKind as Kind;
-pub use FieldValue as Value;
-pub use WireValue as Wire;
 
 /// A value whose wire representation may be derived, exact, or deliberately raw.
 ///

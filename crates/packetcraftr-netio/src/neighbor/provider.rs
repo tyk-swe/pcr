@@ -8,15 +8,14 @@ use bytes::Bytes;
 
 use crate::{
     capture::{
-        CaptureOverflowPolicy, CaptureProvider, CaptureQueueLimits, CaptureSession, CapturedFrame,
-        Statistics, SystemCaptureProvider,
+        self, CaptureOverflowPolicy, CaptureProvider, CaptureQueueLimits, CaptureSession,
+        CapturedFrame, Statistics,
     },
     link::{Capability, MacAddress, Mode},
     route::{
-        DestinationScope, MaterializedRoute, NeighborError, NeighborRequest, NeighborResolution,
-        NeighborResolver, PlannedRoute, RouteDecision, RouteSelectionReason,
+        DestinationScope, MaterializedRoute, PlannedRoute, RouteDecision, RouteSelectionReason,
     },
-    transmit::{Layer2Frame, Layer2Io, SystemLayer2Io},
+    transmit::{self, Layer2Frame, Layer2Io},
 };
 
 use super::cache::{NeighborCache, NeighborCacheKey, NeighborExchangeOutcome};
@@ -27,6 +26,10 @@ use super::evidence::{
 };
 use super::options::NeighborResolutionOptions;
 use super::wire::{build_request_frame, match_neighbor_response};
+use super::{
+    Error as NeighborError, Request as NeighborRequest, Resolution as NeighborResolution,
+    Resolver as NeighborResolver,
+};
 
 /// Injectable active resolver; production uses `System*` providers.
 #[derive(Debug)]
@@ -82,7 +85,8 @@ where
     }
 }
 
-pub type SystemNeighborResolver = ActiveNeighborResolver<SystemLayer2Io, SystemCaptureProvider>;
+pub type SystemNeighborResolver =
+    ActiveNeighborResolver<transmit::SystemLayer2, capture::SystemProvider>;
 
 impl<L, C> NeighborResolver for ActiveNeighborResolver<L, C>
 where

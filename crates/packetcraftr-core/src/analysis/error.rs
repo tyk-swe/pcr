@@ -9,7 +9,7 @@ use thiserror::Error;
 use crate::analysis::pcap::Error as CaptureError;
 use crate::analysis::reassembly::tcp::Error as TcpError;
 use crate::analysis::scope::ScopeError;
-use crate::decode::Error as DecodeError;
+use crate::decode::DecodeError;
 use crate::error::{Classification, Classified, Kind};
 use crate::filter::Error as FilterError;
 
@@ -64,7 +64,7 @@ pub enum AnalysisError {
     Sink {
         number: u64,
         #[source]
-        source: crate::analysis::BoundaryError,
+        source: crate::error::BoundaryError,
     },
 }
 

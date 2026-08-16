@@ -27,7 +27,11 @@ where
         timeout: std::time::Duration,
         max_template_packets: usize,
         destination: std::net::IpAddr,
-        mut matches_request: impl FnMut(usize, &Packet, &packetcraftr_core::decode::Result) -> bool,
+        mut matches_request: impl FnMut(
+            usize,
+            &Packet,
+            &packetcraftr_core::decode::DecodedPacket,
+        ) -> bool,
     ) -> Result<crate::exchange::Result, crate::BoundaryError> {
         let mut options = self.options.clone();
         options.timeout = timeout;

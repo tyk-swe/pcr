@@ -29,8 +29,11 @@ fn constructible_defaults_either_build_standalone_or_require_declared_context() 
         let mut packet = Packet::new();
         packet.push_boxed(layer);
 
-        let Ok(built) = builder.build(packet, build::Context::default(), build::Options::default())
-        else {
+        let Ok(built) = builder.build(
+            packet,
+            build::BuildContext::default(),
+            build::BuildOptions::default(),
+        ) else {
             rejected.push(support.protocol);
             continue;
         };
@@ -55,7 +58,7 @@ fn constructible_defaults_either_build_standalone_or_require_declared_context() 
 fn exact_round_trip_builtins_decode_their_own_default_wire_image() {
     let registry = Arc::new(builtin::registry().expect("built-in registry should be valid"));
     let builder = build::Builder::new(Arc::clone(&registry));
-    let decoder = decode::Decoder::new(Arc::clone(&registry));
+    let decoder = decode::Dissector::new(Arc::clone(&registry));
     let mut rejected = Vec::new();
     let mut round_trip_count = 0_usize;
 
@@ -70,8 +73,11 @@ fn exact_round_trip_builtins_decode_their_own_default_wire_image() {
         packet.push_boxed(codec.make_layer(&BTreeMap::new()).unwrap_or_else(|error| {
             panic!("{} default construction failed: {error}", support.protocol)
         }));
-        let Ok(first) = builder.build(packet, build::Context::default(), build::Options::default())
-        else {
+        let Ok(first) = builder.build(
+            packet,
+            build::BuildContext::default(),
+            build::BuildOptions::default(),
+        ) else {
             rejected.push(support.protocol);
             continue;
         };
@@ -80,14 +86,14 @@ fn exact_round_trip_builtins_decode_their_own_default_wire_image() {
             .decode_with_root(
                 first.bytes.clone(),
                 support.protocol.into(),
-                decode::Options::default(),
+                decode::DecodeOptions::default(),
             )
             .unwrap_or_else(|error| panic!("{} default decode failed: {error}", support.protocol));
         let rebuilt = builder
             .build(
                 decoded.packet,
-                build::Context::default(),
-                build::Options::default(),
+                build::BuildContext::default(),
+                build::BuildOptions::default(),
             )
             .unwrap_or_else(|error| panic!("{} decoded rebuild failed: {error}", support.protocol));
         assert_eq!(rebuilt.bytes, first.bytes, "{}", support.protocol);

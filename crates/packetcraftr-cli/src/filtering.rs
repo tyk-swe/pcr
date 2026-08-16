@@ -67,7 +67,7 @@ pub(crate) fn compile(
 ///
 /// Undissectable frames are errors rather than silent mismatches.
 pub(crate) struct FrameSelector {
-    decoder: core::decode::Decoder,
+    decoder: core::decode::Dissector,
     filter: Filter,
     max_frame_bytes: usize,
 }
@@ -75,7 +75,7 @@ pub(crate) struct FrameSelector {
 impl FrameSelector {
     pub(crate) fn new(registry: Arc<Registry>, filter: Filter, max_frame_bytes: usize) -> Self {
         Self {
-            decoder: core::decode::Decoder::new(registry),
+            decoder: core::decode::Dissector::new(registry),
             filter,
             max_frame_bytes,
         }
@@ -87,9 +87,9 @@ impl FrameSelector {
             .decoder
             .decode(
                 frame.clone(),
-                core::decode::Options {
+                core::decode::DecodeOptions {
                     max_packet_size: self.max_frame_bytes,
-                    ..core::decode::Options::default()
+                    ..core::decode::DecodeOptions::default()
                 },
             )
             .map_err(|source| CliError::new(3, source.to_string()))?;

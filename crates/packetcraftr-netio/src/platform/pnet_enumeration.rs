@@ -6,9 +6,8 @@
 #![forbid(unsafe_code)]
 
 use crate::{
-    interface::{InterfaceAddress, InterfaceFlags, InterfaceInfo},
+    interface::{Id as InterfaceId, InterfaceAddress, InterfaceFlags, InterfaceInfo},
     link::{Capability, MacAddress},
-    route::InterfaceId,
 };
 use packetcraftr_core::frame::LinkType;
 

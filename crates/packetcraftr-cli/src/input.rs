@@ -77,8 +77,12 @@ pub(super) fn read_recipe(
 }
 
 fn parse_expression(input: &str, registry: &core::registry::Registry) -> Result<Packet, CliError> {
-    core::expression::parse(input, registry, core::expression::Options::default())
-        .map_err(|source| CliError::new(2, source.to_string()))
+    core::expression::parse_packet_expression(
+        input,
+        registry,
+        core::expression::ExpressionOptions::default(),
+    )
+    .map_err(|source| CliError::new(2, source.to_string()))
 }
 
 fn document_format_from_path(path: &Path) -> Option<core::document::Format> {

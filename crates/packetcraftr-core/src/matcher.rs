@@ -8,9 +8,6 @@ use std::net::IpAddr;
 
 use crate::Packet;
 
-pub use MatchResult as Result;
-pub use ResponseMatcher as Matcher;
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MatchResult {
     pub matched: bool,

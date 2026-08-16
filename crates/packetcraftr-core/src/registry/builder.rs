@@ -4,11 +4,11 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
-use super::super::super::codec::LayerCodec;
-use super::super::super::layer::ProtocolId;
-use super::super::super::matcher::ResponseMatcher;
 use super::binding::{ChildBinding, Discriminator, FilterFieldBinding};
 use super::error::RegistryError;
+use crate::codec::LayerCodec;
+use crate::layer::ProtocolId;
+use crate::matcher::ResponseMatcher;
 
 #[derive(Default)]
 pub struct RegistryBuilder {

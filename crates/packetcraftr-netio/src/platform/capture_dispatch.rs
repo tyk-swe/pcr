@@ -70,7 +70,7 @@ pub(crate) fn system_capture(
     any(target_os = "linux", target_os = "macos", windows)
 ))]
 fn validate_resolver_free_capture_filter(
-    interface: &crate::route::InterfaceId,
+    interface: &crate::interface::Id,
     source: &str,
 ) -> Result<(), LiveIoError> {
     if capture_filter_has_symbolic_operand(source) {
@@ -296,9 +296,11 @@ mod tests {
 
     use super::*;
     use crate::{
-        interface::{Address as InterfaceAddress, Flags as InterfaceFlags, Info as InterfaceInfo},
+        interface::{
+            Address as InterfaceAddress, Flags as InterfaceFlags, Id as InterfaceId,
+            Info as InterfaceInfo,
+        },
         link::Capability,
-        route::InterfaceId,
     };
 
     #[test]

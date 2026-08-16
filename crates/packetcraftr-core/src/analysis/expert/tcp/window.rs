@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use crate::diagnostic::Severity as DiagnosticSeverity;
+use crate::diagnostic::DiagnosticSeverity;
 
 use super::super::finding::new as new_finding;
 use super::super::observation::TcpObservation;

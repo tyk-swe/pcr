@@ -12,9 +12,9 @@ use self::{
     worker::with_netlink,
 };
 use crate::{
-    interface::InterfaceInfo,
+    interface::{Id as InterfaceId, InterfaceInfo},
     route::{
-        InterfaceId, NativeRouteError, RouteDecision, find_interface, interface_decision,
+        NativeRouteError, RouteDecision, find_interface, interface_decision,
         validate_preferred_source_family,
     },
 };

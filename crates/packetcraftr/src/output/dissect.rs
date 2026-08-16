@@ -7,8 +7,8 @@ use bytes::Bytes;
 use serde::Serialize;
 
 use packetcraftr_core::{
-    decode::Result as DecodedPacket, diagnostic::Diagnostic, document::Packet as PacketDocument,
-    layout::Packet as PacketLayout,
+    decode::DecodedPacket, diagnostic::Diagnostic, document::Packet as PacketDocument,
+    layout::PacketLayout,
 };
 
 use super::hex::compact_hex;

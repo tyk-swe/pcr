@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use crate::analysis::pcap::{Error as CaptureError, Reader};
 use crate::budget::Deadline;
-use crate::decode::{Decoder, Options as DecodeOptions, Result as DecodedPacket};
+use crate::decode::{DecodeOptions, DecodedPacket, Dissector};
 use crate::filter::Context as FilterContext;
 use crate::registry::Registry;
 
@@ -77,12 +77,12 @@ pub fn run<R, F>(
 ) -> Result<AnalysisSummary, AnalysisError>
 where
     R: Read,
-    F: FnMut(FrameRecord<'_>) -> Result<(), crate::analysis::BoundaryError>,
+    F: FnMut(FrameRecord<'_>) -> Result<(), crate::error::BoundaryError>,
 {
     options.limits.validate()?;
     let limits = &options.limits;
     let deadline = Deadline::new(limits.max_duration);
-    let decoder = Decoder::new(registry);
+    let decoder = Dissector::new(registry);
     let mut tcp_streams = StreamIndex::default();
     let mut udp_streams = StreamIndex::default();
     let mut scopes = ScopeInterner::new();

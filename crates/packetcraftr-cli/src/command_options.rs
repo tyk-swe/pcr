@@ -11,6 +11,7 @@ pub(crate) use policy::{
 };
 pub(crate) use recipe::{CliBuildMode, RecipeArgs};
 pub(crate) use route::{CliLinkMode, RouteArgs, RouteSelectionArgs};
+pub(crate) use send::SendArgs;
 
 mod address_family;
 mod capture_limits;
@@ -18,3 +19,4 @@ mod offline_limits;
 mod policy;
 mod recipe;
 mod route;
+mod send;

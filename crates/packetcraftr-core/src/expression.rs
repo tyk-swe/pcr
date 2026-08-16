@@ -15,10 +15,6 @@ use crate::codec::CodecError;
 use crate::field::{FieldValue, parse_mac};
 use crate::registry::ProtocolRegistry;
 
-pub use ExpressionError as Error;
-pub use ExpressionOptions as Options;
-pub use parse_packet_expression as parse;
-
 pub const DEFAULT_MAX_EXPRESSION_BYTES: usize = 1024 * 1024;
 /// Absolute recursive list nesting accepted by the expression parser.
 pub const MAX_EXPRESSION_NESTING: usize = 64;

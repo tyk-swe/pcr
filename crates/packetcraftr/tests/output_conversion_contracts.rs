@@ -20,7 +20,7 @@ use packetcraftr::core::analysis::stats::{
     ConversationStat, EndpointStat, IoBucketStat, PortStat, ProtocolStat, StatsReport,
     TransportKind,
 };
-use packetcraftr::core::diagnostic::{Diagnostic, Severity as DiagnosticSeverity};
+use packetcraftr::core::diagnostic::{Diagnostic, DiagnosticSeverity};
 use packetcraftr::core::frame::{Direction as CaptureDirection, Frame, LinkType};
 use packetcraftr::core::layer::Raw;
 use packetcraftr::core::protocol::{builtin, network::Ipv4, transport::Udp};
@@ -29,7 +29,10 @@ use packetcraftr::output::{build as build_output, dissect as dissect_output};
 use packetcraftr::output::{expert, follow, read, stats};
 use serde_json::Value;
 
-fn built_udp_packet() -> (Arc<packetcraftr::core::registry::Registry>, build::Result) {
+fn built_udp_packet() -> (
+    Arc<packetcraftr::core::registry::Registry>,
+    build::BuiltPacket,
+) {
     let registry = Arc::new(builtin::registry().expect("built-ins must register"));
     let mut packet = Packet::new();
     packet.push(Ipv4 {
@@ -44,7 +47,11 @@ fn built_udp_packet() -> (Arc<packetcraftr::core::registry::Registry>, build::Re
     });
     packet.push(Raw::new(b"payload".to_vec()));
     let built = build::Builder::new(Arc::clone(&registry))
-        .build(packet, build::Context::default(), build::Options::default())
+        .build(
+            packet,
+            build::BuildContext::default(),
+            build::BuildOptions::default(),
+        )
         .expect("representative packet must build");
     (registry, built)
 }
@@ -81,8 +88,8 @@ fn packet_output_adapters_preserve_wire_data_and_separate_diagnostics() {
         .expect("built bytes form a capture frame");
     frame.interface = Some(3);
     frame.direction = Some(CaptureDirection::Inbound);
-    let mut decoded = decode::Decoder::new(registry)
-        .decode(frame.clone(), decode::Options::default())
+    let mut decoded = decode::Dissector::new(registry)
+        .decode(frame.clone(), decode::DecodeOptions::default())
         .expect("built packet must dissect");
     decoded
         .diagnostics

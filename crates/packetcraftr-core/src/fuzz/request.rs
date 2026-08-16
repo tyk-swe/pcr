@@ -7,7 +7,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::build::{DEFAULT_MAX_PACKET_SIZE, Options as BuildOptions};
+use crate::build::{BuildOptions, DEFAULT_MAX_PACKET_SIZE};
 
 use super::error::FuzzError;
 use super::{

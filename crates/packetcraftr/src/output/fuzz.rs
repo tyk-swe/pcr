@@ -112,8 +112,8 @@ pub struct Mutation {
     pub protocol: String,
     pub field: String,
     pub strategy: Strategy,
-    pub original: packetcraftr_core::field::Value,
-    pub value: packetcraftr_core::field::Value,
+    pub original: packetcraftr_core::field::FieldValue,
+    pub value: packetcraftr_core::field::FieldValue,
 }
 
 impl From<packet_fuzz::Mutation> for Mutation {
@@ -143,7 +143,7 @@ pub struct Case {
     pub seed: u64,
     pub mutation: Mutation,
     pub reproduction: Reproduction,
-    pub shrink_values: Vec<packetcraftr_core::field::Value>,
+    pub shrink_values: Vec<packetcraftr_core::field::FieldValue>,
     pub recipe: PacketDocument,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub frame: Option<Wire>,

@@ -49,8 +49,8 @@ pub(crate) enum Command {
     #[command(after_long_help = plan::arguments::AFTER_LONG_HELP)]
     Plan(plan::arguments::PlanArgs),
     /// Transmit a packet under traffic policy.
-    #[command(after_long_help = send::arguments::AFTER_LONG_HELP)]
-    Send(send::arguments::SendArgs),
+    #[command(after_long_help = send::AFTER_LONG_HELP)]
+    Send(send::SendArgs),
     /// Capture-ready request/response exchange.
     #[command(after_long_help = exchange::arguments::AFTER_LONG_HELP)]
     Exchange(exchange::arguments::ExchangeArgs),

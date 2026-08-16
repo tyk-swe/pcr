@@ -5,7 +5,7 @@ mod execution;
 mod request;
 mod result;
 
-pub use execution::{DnsExchange, DnsExchangeExecution, DnsExecutor, DnsMatchedResponse, DnsProbe};
+pub use execution::{DnsExchange, DnsExchangeExecution, DnsExecutor, DnsProbe};
 pub use request::{DnsLimits, DnsQueryType, DnsRequest};
 pub use result::{
     DnsAttemptEvidence, DnsEdns, DnsEdnsOption, DnsName, DnsOutcome,

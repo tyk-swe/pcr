@@ -45,11 +45,11 @@ pub(super) fn run(
         (None, None) => read_stdin_bounded(core::document::DEFAULT_MAX_DOCUMENT_BYTES)?,
         (Some(_), Some(_)) => unreachable!("clap enforces conflicts"),
     };
-    let decoded = core::decode::Decoder::new(registry)
+    let decoded = core::decode::Dissector::new(registry)
         .decode(
             Frame::new(SystemTime::now(), LinkType(arguments.link_type), bytes)
                 .map_err(|source| CliError::new(3, source.to_string()))?,
-            core::decode::Options::default(),
+            core::decode::DecodeOptions::default(),
         )
         .map_err(|source| CliError::new(3, source.to_string()))?;
     // The filter selects emission, not validity: a frame it rejects emits

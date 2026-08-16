@@ -5,7 +5,10 @@
 
 use crate::{
     link::MacAddress,
-    route::{MAX_NEIGHBOR_VLAN_TAGS, NeighborVlanKind, NeighborVlanTag},
+    neighbor::{
+        MAX_VLAN_TAGS as MAX_NEIGHBOR_VLAN_TAGS, VlanKind as NeighborVlanKind,
+        VlanTag as NeighborVlanTag,
+    },
 };
 
 pub(super) const HEADER_LENGTH: usize = 14;

@@ -14,8 +14,8 @@ use packetcraftr_core::protocol::{
 };
 use packetcraftr_core::{
     Packet,
-    decode::Result as DecodedPacket,
-    diagnostic::Severity as DiagnosticSeverity,
+    decode::DecodedPacket,
+    diagnostic::DiagnosticSeverity,
     registry::Registry,
     semantics::{self, BuiltinProtocol},
 };

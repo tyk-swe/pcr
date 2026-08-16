@@ -6,9 +6,9 @@
 use std::time::Instant;
 
 use packetcraftr_core::{
-    decode::Result as DecodedPacket,
-    diagnostic::{Diagnostic, Severity as DiagnosticSeverity, push_diagnostic_once},
-    matcher::Result as MatchResult,
+    decode::DecodedPacket,
+    diagnostic::{Diagnostic, DiagnosticSeverity, push_diagnostic_once},
+    matcher::MatchResult,
     registry::Registry,
 };
 use packetcraftr_netio::capture::{Captured, RecordIdentity};

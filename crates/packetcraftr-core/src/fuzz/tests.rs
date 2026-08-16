@@ -7,7 +7,7 @@ use std::sync::Arc;
 use crate::protocol::{builtin::registry as default_registry, network::Ipv4, transport::Udp};
 use crate::{
     Packet,
-    build::{Mode as BuildMode, Options as BuildOptions},
+    build::{BuildMode, BuildOptions},
     layer::Raw,
     registry::ProtocolRegistry,
 };

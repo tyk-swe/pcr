@@ -6,7 +6,7 @@
 use std::net::IpAddr;
 
 use crate::Packet;
-use crate::decode::Result as DecodedPacket;
+use crate::decode::DecodedPacket;
 use crate::layer::Padding;
 use crate::protocol::gre::Gre;
 use crate::protocol::link::{Vlan, Vlan8021ad};

@@ -9,10 +9,8 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 
 use bytes::Bytes;
 
-use crate::{
-    link::MacAddress,
-    route::{NeighborError, NeighborRequest},
-};
+use super::{Error as NeighborError, Request as NeighborRequest};
+use crate::link::MacAddress;
 use packetcraftr_core::frame::{Frame, LinkType};
 
 mod arp;
@@ -38,10 +36,12 @@ use self::{
     },
 };
 #[cfg(test)]
-use crate::{
-    checksum::compute_parts as checksum,
-    route::{MAX_NEIGHBOR_VLAN_TAGS, NeighborVlanKind, NeighborVlanTag},
+use super::{
+    MAX_VLAN_TAGS as MAX_NEIGHBOR_VLAN_TAGS, VlanKind as NeighborVlanKind,
+    VlanTag as NeighborVlanTag,
 };
+#[cfg(test)]
+use crate::checksum::compute_parts as checksum;
 
 pub(super) fn build_request_frame(
     request: &NeighborRequest,
@@ -122,7 +122,7 @@ mod tests {
     use std::time::SystemTime;
 
     use super::*;
-    use crate::route::InterfaceId;
+    use crate::interface::Id as InterfaceId;
 
     fn request(source: IpAddr, target: IpAddr) -> NeighborRequest {
         NeighborRequest {

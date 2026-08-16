@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::diagnostic::Severity as DiagnosticSeverity;
+use crate::diagnostic::DiagnosticSeverity;
 
 use crate::analysis::adapter::Transports;
 use crate::analysis::pipeline::FrameRecord;

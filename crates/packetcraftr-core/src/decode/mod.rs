@@ -27,11 +27,6 @@ mod traversal;
 pub use error::DecodeError;
 pub use options::{DecodeOptions, DecodedPacket};
 
-// Compatibility aliases retained for existing callers.
-pub use Dissector as Decoder;
-pub use error::DecodeError as Error;
-pub use options::{DecodeOptions as Options, DecodedPacket as Result};
-
 #[derive(Clone, Debug)]
 pub struct Dissector {
     registry: Arc<ProtocolRegistry>,

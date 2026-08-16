@@ -8,7 +8,7 @@ use std::time::Instant;
 
 use packetcraftr_core::{
     Packet,
-    build::{Builder, Context as BuildContext, Result as BuiltPacket},
+    build::{BuildContext, Builder, BuiltPacket},
     template::Template as PacketTemplate,
 };
 use packetcraftr_netio::{

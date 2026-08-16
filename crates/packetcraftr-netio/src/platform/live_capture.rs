@@ -10,7 +10,7 @@ use std::time::{Instant, SystemTime};
 
 use bytes::Bytes;
 
-use crate::{Error as LiveIoError, route::InterfaceId};
+use crate::{Error as LiveIoError, interface::Id as InterfaceId};
 use packetcraftr_core::frame::LinkType;
 
 pub(super) use session::NativeCaptureSession;

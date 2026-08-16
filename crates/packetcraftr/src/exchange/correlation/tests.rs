@@ -6,7 +6,7 @@
 use bytes::Bytes;
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::{Packet, layer::Raw};
-use packetcraftr_core::{decode::Decoder, protocol::builtin::registry as default_registry};
+use packetcraftr_core::{decode::Dissector, protocol::builtin::registry as default_registry};
 use packetcraftr_netio::capture::Captured;
 use packetcraftr_netio::transmit::Submission;
 use std::{sync::Arc, time::Duration};
@@ -26,7 +26,7 @@ fn decoded_evidence(bytes: &'static [u8]) -> DecodedPacket {
         packet: Packet::new(),
         original: frame.bytes().clone(),
         frame,
-        layout: packetcraftr_core::layout::Packet::default(),
+        layout: packetcraftr_core::layout::PacketLayout::default(),
         diagnostics: Vec::new(),
     }
 }
@@ -223,7 +223,7 @@ fn duplicated_ingress_record_cannot_enter_several_evidence_categories() {
         Instant::now(),
     );
     let registry = Arc::new(default_registry().expect("built-in registry"));
-    let dissector = Decoder::new(Arc::clone(&registry));
+    let dissector = Dissector::new(Arc::clone(&registry));
     let options = ExchangeOptions::default();
     let mut accumulator = ExchangeAccumulator::new(0);
     let context = ExchangeProcessContext {
@@ -262,7 +262,7 @@ fn duplicate_tracking_is_bounded_to_retained_evidence() {
         Instant::now(),
     );
     let registry = Arc::new(default_registry().expect("built-in registry"));
-    let dissector = Decoder::new(Arc::clone(&registry));
+    let dissector = Dissector::new(Arc::clone(&registry));
     let options = ExchangeOptions {
         max_unsolicited: 1,
         ..ExchangeOptions::default()

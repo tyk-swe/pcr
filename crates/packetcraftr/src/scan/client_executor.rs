@@ -3,7 +3,7 @@
 
 use crate::BoundaryError;
 use crate::ExchangeExecutor;
-use packetcraftr_core::{field::Value as FieldValue, template::Template as PacketTemplate};
+use packetcraftr_core::{field::FieldValue, template::Template as PacketTemplate};
 use packetcraftr_netio::{
     capture::Provider as CaptureProvider, neighbor::Resolver as NeighborResolver,
     route::Provider as RouteProvider, transmit::Sender as PacketIo,

@@ -3,10 +3,16 @@
 
 //! Deterministic protocol registration.
 
-mod core;
+mod binding;
+mod builder;
+mod error;
+mod lookup;
+mod validation;
 
-pub use core::{
-    Discriminator, FilterFieldBinding, ProtocolRegistry as Registry, RegistryBuilder as Builder,
-    RegistryError as Error,
-};
-pub(crate) use core::{ProtocolRegistry, RegistryBuilder, RegistryError};
+pub use binding::{Discriminator, FilterFieldBinding};
+pub use builder::RegistryBuilder as Builder;
+pub(crate) use builder::RegistryBuilder;
+pub use error::RegistryError as Error;
+pub(crate) use error::RegistryError;
+pub use lookup::ProtocolRegistry as Registry;
+pub(crate) use lookup::ProtocolRegistry;

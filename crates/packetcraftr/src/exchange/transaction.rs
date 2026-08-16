@@ -6,7 +6,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use packetcraftr_core::{decode::Decoder as Dissector, registry::Registry};
+use packetcraftr_core::{decode::Dissector, registry::Registry};
 use packetcraftr_netio::{
     Error as LiveIoError,
     capture::{Limits as CaptureQueueLimits, Session},

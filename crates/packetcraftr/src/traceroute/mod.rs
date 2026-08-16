@@ -36,7 +36,6 @@ mod probe;
 #[cfg(test)]
 mod tests;
 
-pub use crate::target::PolicyAuthorizer;
 pub use classification::{
     TracerouteResponseClassification as ResponseClassification,
     classify_traceroute_response as classify_response,
@@ -46,8 +45,7 @@ pub use error::TracerouteError as Error;
 pub use model::{
     TracerouteBatch as Batch, TracerouteBatchExecution as Execution,
     TracerouteCompletion as Completion, TracerouteExecutor as Executor, TracerouteHopResult as Hop,
-    TracerouteLimits as Limits, TracerouteMatchedResponse as MatchedResponse,
-    TracerouteProbe as Probe, TracerouteProbeEvidence as ProbeEvidence,
+    TracerouteLimits as Limits, TracerouteProbe as Probe, TracerouteProbeEvidence as ProbeEvidence,
     TracerouteProbeStatus as ProbeStatus, TracerouteRequest as Request,
     TracerouteResponseKind as ResponseKind, TracerouteResult as Result,
     TracerouteStrategy as Strategy, TracerouteUndecodedEvidence as UndecodedEvidence,

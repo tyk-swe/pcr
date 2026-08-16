@@ -6,7 +6,8 @@
 use std::collections::HashMap;
 use std::net::IpAddr;
 
-use super::{AnalysisError, ScopedFlowKey};
+use super::AnalysisError;
+use super::reassembly::tcp::ScopedFlowKey;
 use crate::analysis::scope::ScopeId;
 
 /// One conversation, with its two endpoints in a direction-neutral order.

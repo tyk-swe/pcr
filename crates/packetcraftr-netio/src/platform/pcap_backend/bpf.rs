@@ -12,7 +12,7 @@ use std::{
 
 use pcap::{Activated, Capture};
 
-use crate::{Error as LiveIoError, route::InterfaceId};
+use crate::{Error as LiveIoError, interface::Id as InterfaceId};
 
 #[link(name = "pcap")]
 unsafe extern "C" {

@@ -10,9 +10,7 @@ use packetcraftr_core::protocol::{
     network::{Ipv4, Ipv6},
     transport::Udp,
 };
-use packetcraftr_core::{
-    Packet, decode::Result as DecodedPacket, diagnostic::Diagnostic, layer::Raw,
-};
+use packetcraftr_core::{Packet, decode::DecodedPacket, diagnostic::Diagnostic, layer::Raw};
 
 use crate::Stats;
 use crate::probe::nonzero_ipv4_identification;
@@ -79,13 +77,11 @@ pub struct DnsExchange {
     pub(crate) permit: crate::evidence::ExecutionPermit,
 }
 
-pub use crate::exchange::Response as DnsMatchedResponse;
-
 #[derive(Clone, Debug)]
 pub struct DnsExchangeExecution {
     pub(crate) permit: crate::evidence::ExecutionPermit,
     pub(crate) sent: crate::SentPacket,
-    pub(crate) responses: Vec<DnsMatchedResponse>,
+    pub(crate) responses: Vec<crate::exchange::Response>,
     pub(crate) unsolicited: Vec<DecodedPacket>,
     pub(crate) undecoded: Vec<Frame>,
     pub(crate) diagnostics: Vec<Diagnostic>,

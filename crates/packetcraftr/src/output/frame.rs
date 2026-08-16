@@ -10,8 +10,7 @@ use serde::Serialize;
 
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::{
-    decode::Result as DecodedPacket, document::Packet as PacketDocument,
-    layout::Packet as PacketLayout,
+    decode::DecodedPacket, document::Packet as PacketDocument, layout::PacketLayout,
 };
 
 use super::contract::Error;

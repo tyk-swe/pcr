@@ -7,7 +7,7 @@ use std::iter::Peekable;
 use std::slice::Iter;
 use std::time::Duration;
 
-use packetcraftr_core::decode::Result as DecodedPacket;
+use packetcraftr_core::decode::DecodedPacket;
 
 use crate::exchange::Response;
 

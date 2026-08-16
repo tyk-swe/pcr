@@ -8,7 +8,7 @@ use serde::Serialize;
 use packetcraftr_core::analysis::expert::{
     ExpertSummary, Finding as AnalysisFinding, StreamTransport as AnalysisStreamTransport,
 };
-use packetcraftr_core::diagnostic::Severity as DiagnosticSeverity;
+use packetcraftr_core::diagnostic::DiagnosticSeverity;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]

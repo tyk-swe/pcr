@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
-use packetcraftr_core::build::{Builder, Options as BuildOptions};
+use packetcraftr_core::build::{BuildOptions, Builder};
 use packetcraftr_core::error::Classified;
 use packetcraftr_core::fuzz as packet_fuzz;
 use packetcraftr_core::protocol::{

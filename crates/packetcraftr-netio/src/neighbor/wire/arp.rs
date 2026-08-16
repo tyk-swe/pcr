@@ -8,7 +8,7 @@ use std::net::Ipv4Addr;
 use bytes::Bytes;
 
 use super::ethernet::{self, View};
-use crate::{link::MacAddress, route::NeighborRequest};
+use crate::{link::MacAddress, neighbor::Request as NeighborRequest};
 
 pub(super) const PAYLOAD_LENGTH: usize = 28;
 

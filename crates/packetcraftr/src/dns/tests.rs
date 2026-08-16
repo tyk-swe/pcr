@@ -6,7 +6,7 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::time::Duration;
 
 use packetcraftr_core::protocol::builtin::registry as default_registry;
-use packetcraftr_core::{Packet, decode::Result as DecodedPacket, frame::Frame, frame::LinkType};
+use packetcraftr_core::{Packet, decode::DecodedPacket, frame::Frame, frame::LinkType};
 
 use crate::clock::Clock;
 use crate::target::{Authorized, Authorizer, Family, Target};
@@ -86,7 +86,7 @@ impl DnsExecutor for InvalidResponseIndexExecutor {
                 packet: Packet::new(),
                 original: frame.bytes().clone(),
                 frame,
-                layout: packetcraftr_core::layout::Packet::default(),
+                layout: packetcraftr_core::layout::PacketLayout::default(),
                 diagnostics: Vec::new(),
             },
             latency: Duration::ZERO,

@@ -9,7 +9,7 @@ use std::net::IpAddr;
 
 use packetcraftr_core::{
     Packet,
-    field::Value as FieldValue,
+    field::FieldValue,
     semantics::{self, BuiltinProtocol},
 };
 

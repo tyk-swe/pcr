@@ -5,7 +5,8 @@
 
 use serde::Serialize;
 
-use packetcraftr_core::field;
+use packetcraftr_core::field::FieldKind as CoreFieldKind;
+use packetcraftr_core::layer::FieldSchema;
 use packetcraftr_core::protocol::support;
 
 /// Capability summary for one built-in protocol.
@@ -69,18 +70,18 @@ impl FieldKind {
     }
 }
 
-impl From<field::Kind> for FieldKind {
-    fn from(value: field::Kind) -> Self {
+impl From<CoreFieldKind> for FieldKind {
+    fn from(value: CoreFieldKind) -> Self {
         match value {
-            field::Kind::Bool => Self::Bool,
-            field::Kind::Unsigned => Self::Unsigned,
-            field::Kind::Signed => Self::Signed,
-            field::Kind::Text => Self::Text,
-            field::Kind::Bytes => Self::Bytes,
-            field::Kind::Ipv4 => Self::Ipv4,
-            field::Kind::Ipv6 => Self::Ipv6,
-            field::Kind::Mac => Self::Mac,
-            field::Kind::List => Self::List,
+            CoreFieldKind::Bool => Self::Bool,
+            CoreFieldKind::Unsigned => Self::Unsigned,
+            CoreFieldKind::Signed => Self::Signed,
+            CoreFieldKind::Text => Self::Text,
+            CoreFieldKind::Bytes => Self::Bytes,
+            CoreFieldKind::Ipv4 => Self::Ipv4,
+            CoreFieldKind::Ipv6 => Self::Ipv6,
+            CoreFieldKind::Mac => Self::Mac,
+            CoreFieldKind::List => Self::List,
             // v1 pins this value set; new kinds require a schema revision and explicit arm.
             _ => unreachable!("field kind {value:?} has no v1 output representation"),
         }
@@ -97,8 +98,8 @@ pub struct Field {
     pub description: String,
 }
 
-impl From<&field::Schema> for Field {
-    fn from(value: &field::Schema) -> Self {
+impl From<&FieldSchema> for Field {
+    fn from(value: &FieldSchema) -> Self {
         Self {
             name: value.name.to_owned(),
             kind: value.kind.into(),

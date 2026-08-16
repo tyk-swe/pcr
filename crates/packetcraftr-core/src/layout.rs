@@ -7,11 +7,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::layer::ProtocolId;
 
-pub use ByteRange as Range;
-pub use FieldLayout as Field;
-pub use LayerLayout as Layer;
-pub use PacketLayout as Packet;
-
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ByteRange {
     pub start: usize,

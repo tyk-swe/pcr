@@ -71,7 +71,7 @@ pub(super) fn run(arguments: ReadArgs, output: output::contract::Format) -> Resu
             )?),
             None => None,
         };
-        Some((core::decode::Decoder::new(registry), compiled))
+        Some((core::decode::Dissector::new(registry), compiled))
     } else {
         None
     };

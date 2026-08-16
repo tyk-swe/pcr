@@ -57,7 +57,7 @@ macro_rules! builtin_protocol_catalog {
 }
 
 #[doc(hidden)]
-pub use builtin_protocol_catalog;
+pub(crate) use builtin_protocol_catalog;
 
 macro_rules! define_builtin_protocol {
     ($(

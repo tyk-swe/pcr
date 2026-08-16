@@ -11,7 +11,7 @@ use super::expiry::ExpiryIndex;
 use state::TcpFlowState;
 
 mod contract;
-pub use contract::*;
+pub use contract::{Error, Event, FlowKey, ScopedFlowKey, Segment};
 mod engine;
 mod pending;
 mod state;

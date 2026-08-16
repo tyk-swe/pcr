@@ -34,7 +34,7 @@ pub(crate) fn workflow_exchange_options(
         max_capture_queue_frames: limits.max_frames,
         max_captured_bytes: limits.max_bytes,
         capture_overflow_policy: limits.overflow_policy,
-        decode: core::decode::Options::default(),
+        decode: core::decode::DecodeOptions::default(),
     };
     options.decode.max_packet_size = limits.snap_length;
     options.validate().map_err(CliError::classified)?;

@@ -22,11 +22,11 @@ use super::{
 use crate::{
     Error as LiveIoError,
     capture::CaptureQueueLimits,
+    interface::Id as InterfaceId,
     platform::live_capture::{
         CaptureInterrupt, NativeCaptureEvent, NativeCaptureParts, NativeCaptureSource,
         NativeCaptureStatistics, NativeCapturedPacket, monotonic_packet_time, system_time,
     },
-    route::InterfaceId,
 };
 
 pub(super) fn open_capture(

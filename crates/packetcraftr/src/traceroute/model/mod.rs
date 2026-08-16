@@ -6,8 +6,7 @@ mod request;
 mod result;
 
 pub use execution::{
-    TracerouteBatch, TracerouteBatchExecution, TracerouteExecutor, TracerouteMatchedResponse,
-    TracerouteProbe,
+    TracerouteBatch, TracerouteBatchExecution, TracerouteExecutor, TracerouteProbe,
 };
 pub use request::{TracerouteLimits, TracerouteRequest, TracerouteStrategy};
 pub use result::{

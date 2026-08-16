@@ -4,7 +4,7 @@
 //! Unsolicited and undecodable frame retention under aggregate bounds.
 
 use packetcraftr_core::frame::Frame;
-use packetcraftr_core::{decode::Result as DecodedPacket, diagnostic::push_diagnostic_once};
+use packetcraftr_core::{decode::DecodedPacket, diagnostic::push_diagnostic_once};
 use packetcraftr_netio::capture::RecordIdentity;
 
 use super::accumulator::{ExchangeAccumulator, UnsolicitedEvidence};

@@ -24,9 +24,9 @@ use windows::Win32::{
 };
 
 use crate::{
-    interface::{InterfaceAddress, InterfaceFlags, InterfaceInfo},
+    interface::{Id as InterfaceId, InterfaceAddress, InterfaceFlags, InterfaceInfo},
     link::{Capability, MacAddress},
-    route::{InterfaceId, NativeRouteError},
+    route::NativeRouteError,
 };
 use packetcraftr_core::frame::LinkType;
 

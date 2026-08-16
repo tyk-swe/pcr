@@ -5,7 +5,7 @@ use std::net::IpAddr;
 
 use thiserror::Error;
 
-use packetcraftr_core::build::{Error as BuildError, Options as BuildOptions};
+use packetcraftr_core::build::{BuildError, BuildOptions};
 use packetcraftr_core::error::{Classification, Classified, Kind};
 use packetcraftr_netio::{
     Error as LiveIoError,

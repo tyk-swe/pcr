@@ -16,7 +16,7 @@ use packetcraftr_core::analysis::expert::{
     ExpertCollector, ExpertSummary, Finding, StreamRef, StreamTransport,
 };
 use packetcraftr_core::analysis::{Options, run};
-use packetcraftr_core::diagnostic::Severity as DiagnosticSeverity;
+use packetcraftr_core::diagnostic::DiagnosticSeverity;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::protocol::transport::Tcp;
 use packetcraftr_core::registry::Registry;

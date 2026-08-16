@@ -77,7 +77,3 @@ impl SendCommandResult {
         ))
     }
 }
-
-pub use MaterializedRouteOutput as MaterializedRoute;
-pub use NeighborEvidenceOutput as NeighborEvidence;
-pub use SendCommandResult as Result;

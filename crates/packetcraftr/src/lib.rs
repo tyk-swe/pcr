@@ -17,8 +17,8 @@
 //! packet.push(Raw::new(vec![0xde, 0xad, 0xbe, 0xef]));
 //! let built = build::Builder::new(registry).build(
 //!     packet,
-//!     build::Context::default(),
-//!     build::Options::default(),
+//!     build::BuildContext::default(),
+//!     build::BuildOptions::default(),
 //! )?;
 //! assert_eq!(built.bytes.as_ref(), &[0xde, 0xad, 0xbe, 0xef]);
 //! # Ok::<(), Box<dyn std::error::Error>>(())

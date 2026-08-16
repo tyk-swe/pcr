@@ -23,7 +23,6 @@ impl TracerouteProbe {
 }
 
 pub type TracerouteBatch = crate::probe::runner::Batch<TracerouteProbe>;
-pub use crate::exchange::Response as TracerouteMatchedResponse;
 pub use crate::probe::runner::BatchExecution as TracerouteBatchExecution;
 
 pub trait TracerouteExecutor {

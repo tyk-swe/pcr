@@ -129,12 +129,12 @@ pub enum DiagnosticSeverity {
     Error,
 }
 
-impl From<packetcraftr_core::diagnostic::Severity> for DiagnosticSeverity {
-    fn from(value: packetcraftr_core::diagnostic::Severity) -> Self {
+impl From<packetcraftr_core::diagnostic::DiagnosticSeverity> for DiagnosticSeverity {
+    fn from(value: packetcraftr_core::diagnostic::DiagnosticSeverity) -> Self {
         match value {
-            packetcraftr_core::diagnostic::Severity::Info => Self::Info,
-            packetcraftr_core::diagnostic::Severity::Warning => Self::Warning,
-            packetcraftr_core::diagnostic::Severity::Error => Self::Error,
+            packetcraftr_core::diagnostic::DiagnosticSeverity::Info => Self::Info,
+            packetcraftr_core::diagnostic::DiagnosticSeverity::Warning => Self::Warning,
+            packetcraftr_core::diagnostic::DiagnosticSeverity::Error => Self::Error,
         }
     }
 }
@@ -146,8 +146,8 @@ pub struct DiagnosticRange {
     pub end: usize,
 }
 
-impl From<packetcraftr_core::layout::Range> for DiagnosticRange {
-    fn from(value: packetcraftr_core::layout::Range) -> Self {
+impl From<packetcraftr_core::layout::ByteRange> for DiagnosticRange {
+    fn from(value: packetcraftr_core::layout::ByteRange) -> Self {
         Self {
             start: value.start,
             end: value.end,

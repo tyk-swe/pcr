@@ -24,12 +24,6 @@ pub use options::{
     BuildContext, BuildMode, BuildOptions, BuiltPacket, DEFAULT_MAX_LAYERS, DEFAULT_MAX_PACKET_SIZE,
 };
 
-// Compatibility aliases retained for existing callers.
-pub use error::BuildError as Error;
-pub use options::{
-    BuildContext as Context, BuildMode as Mode, BuildOptions as Options, BuiltPacket as Result,
-};
-
 #[derive(Clone, Debug)]
 pub struct Builder {
     registry: Arc<ProtocolRegistry>,

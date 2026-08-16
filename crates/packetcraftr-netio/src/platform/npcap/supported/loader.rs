@@ -35,7 +35,7 @@ use super::{
     },
     error::{error_buffer_message, interface_conversion_error},
 };
-use crate::{Error as LiveIoError, route::InterfaceId};
+use crate::{Error as LiveIoError, interface::Id as InterfaceId};
 
 pub(super) struct NpcapApi {
     // Keeps the DLL loaded while function pointers are used.

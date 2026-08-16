@@ -37,6 +37,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Flattened the public `packetcraftr-core` build, codec, decode, diagnostic,
   document, expression, field, layout, and matcher module paths, and exposed
   `protocol::ChecksumAccumulator` for shared incremental Internet checksums.
+- **Breaking:** Removed duplicate short aliases from the flattened core API.
+  Use `build::{BuildError, BuildContext, BuildMode, BuildOptions, BuiltPacket}`,
+  `decode::{Dissector, DecodeError, DecodeOptions, DecodedPacket}`, the
+  descriptive `codec`, `diagnostic`, `expression`, `field`, `layout`, and
+  `matcher` names, `layer::{FieldError, FieldSchema}` instead of the former
+  `field` aliases, and the root `reflective_layer!` and
+  `builtin_protocol_catalog!` macro paths.
+- **Breaking:** Removed redundant short aliases for descriptive command-output
+  models. Use `output::plan::PlanCommandResult`,
+  `output::routes::RoutesCommandResult`,
+  `output::send::{SendCommandResult, MaterializedRouteOutput,
+  NeighborEvidenceOutput}`, and
+  `output::exchange::{ExchangeCommandResult, ExchangeResponseOutput,
+  ExchangeStreamCommandResult}`. DNS, scan, and traceroute now use the
+  canonical `target::PolicyAuthorizer` and `exchange::Response` paths. Output-v1
+  documents are unchanged.
 - Reorganized packet decoding, fragment reassembly, route planning, and live
   exchange correlation around explicit phase and state owners. That internal
   reorganization did not change serialized output contracts or runtime

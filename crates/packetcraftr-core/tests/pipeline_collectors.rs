@@ -22,7 +22,7 @@ use packetcraftr_core::analysis::pcap::{Reader, Writer};
 use packetcraftr_core::analysis::reassembly::tcp;
 use packetcraftr_core::analysis::stats::{StatsCollector, TransportKind};
 use packetcraftr_core::analysis::{Error, Limits, Options, run};
-use packetcraftr_core::build::{Builder, Context as BuildContext, Options as BuildOptions};
+use packetcraftr_core::build::{BuildContext, BuildOptions, Builder};
 use packetcraftr_core::error::{BoundaryError, Classified, Kind};
 use packetcraftr_core::filter::{Filter, Options as FilterOptions};
 use packetcraftr_core::frame::{Frame, LinkType};

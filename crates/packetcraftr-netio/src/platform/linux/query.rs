@@ -22,11 +22,10 @@ use rtnetlink::{
 
 use super::os_error;
 use crate::{
-    interface::{InterfaceAddress, InterfaceFlags, InterfaceInfo},
+    interface::{Id as InterfaceId, InterfaceAddress, InterfaceFlags, InterfaceInfo},
     link::{Capability, MacAddress},
     route::{
-        InterfaceId, NativeRouteError, NativeRouteSnapshot, RouteDecision, RouteSelectionReason,
-        finish_route,
+        NativeRouteError, NativeRouteSnapshot, RouteDecision, RouteSelectionReason, finish_route,
     },
 };
 use packetcraftr_core::frame::LinkType;

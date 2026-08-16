@@ -8,7 +8,7 @@ use std::net::Ipv6Addr;
 use bytes::Bytes;
 
 use super::ethernet::{self, View};
-use crate::{checksum, link::MacAddress, route::NeighborRequest};
+use crate::{checksum, link::MacAddress, neighbor::Request as NeighborRequest};
 
 pub(super) const IPV6_HEADER_LENGTH: usize = 40;
 pub(super) const SOLICITATION_LENGTH: usize = 32;

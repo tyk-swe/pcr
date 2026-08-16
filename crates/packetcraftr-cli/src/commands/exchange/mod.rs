@@ -15,7 +15,7 @@ use super::super::rendering::{
     write_capture_file, write_stdout_line,
 };
 use super::super::system::{default_registry_arc, prepare_route_request, system_client};
-use super::send::arguments::SendArgs;
+use crate::command_options::SendArgs;
 
 pub(super) fn run(
     arguments: ExchangeArgs,
@@ -54,9 +54,9 @@ pub(super) fn run(
     options.send = packetcraftr::send::Options {
         destination: request.destination,
         plan: request.options,
-        build: core::build::Options {
+        build: core::build::BuildOptions {
             mode: mode.into(),
-            ..core::build::Options::default()
+            ..core::build::BuildOptions::default()
         },
         allow_permissive_live,
     };
@@ -105,7 +105,8 @@ pub(super) fn run(
     }
 
     let (result, diagnostics, stats) =
-        output::exchange::Result::try_from_exchange(result).map_err(CliError::classified)?;
+        output::exchange::ExchangeCommandResult::try_from_exchange(result)
+            .map_err(CliError::classified)?;
     match output {
         output::contract::Format::Json => emit_aggregate_with_stats(
             output::contract::Command::Exchange,
@@ -119,11 +120,11 @@ pub(super) fn run(
 }
 
 fn render_exchange_stream(
-    result: output::exchange::Result,
+    result: output::exchange::ExchangeCommandResult,
     diagnostics: Vec<core::diagnostic::Diagnostic>,
     stats: output::envelope::Stats,
 ) -> Result<(), CliError> {
-    let output::exchange::Result {
+    let output::exchange::ExchangeCommandResult {
         sent,
         responses,
         unanswered,
@@ -137,7 +138,7 @@ fn render_exchange_stream(
         emit_stream_record(
             output::contract::Command::Exchange,
             &mut sequence,
-            output::exchange::Event::Sent {
+            output::exchange::ExchangeStreamCommandResult::Sent {
                 request_index,
                 frame,
             },
@@ -147,7 +148,7 @@ fn render_exchange_stream(
         emit_stream_record(
             output::contract::Command::Exchange,
             &mut sequence,
-            output::exchange::Event::Response {
+            output::exchange::ExchangeStreamCommandResult::Response {
                 request_index: response.request_index,
                 response: response.response,
                 latency: response.latency,
@@ -158,7 +159,7 @@ fn render_exchange_stream(
         emit_stream_record(
             output::contract::Command::Exchange,
             &mut sequence,
-            output::exchange::Event::Unanswered {
+            output::exchange::ExchangeStreamCommandResult::Unanswered {
                 request_index: *request_index,
             },
         )?;
@@ -167,20 +168,20 @@ fn render_exchange_stream(
         emit_stream_record(
             output::contract::Command::Exchange,
             &mut sequence,
-            output::exchange::Event::Unsolicited { frame },
+            output::exchange::ExchangeStreamCommandResult::Unsolicited { frame },
         )?;
     }
     for frame in undecoded {
         emit_stream_record(
             output::contract::Command::Exchange,
             &mut sequence,
-            output::exchange::Event::Undecoded { frame },
+            output::exchange::ExchangeStreamCommandResult::Undecoded { frame },
         )?;
     }
     emit_stream_with_stats(
         output::contract::Command::Exchange,
         sequence,
-        output::exchange::Event::Complete { unanswered },
+        output::exchange::ExchangeStreamCommandResult::Complete { unanswered },
         diagnostics,
         stats,
     )

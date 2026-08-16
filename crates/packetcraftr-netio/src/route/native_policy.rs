@@ -6,11 +6,11 @@
 use std::net::{IpAddr, Ipv4Addr};
 
 use crate::{
-    interface::{InterfaceAddress, InterfaceInfo},
+    interface::{Id as InterfaceId, InterfaceAddress, InterfaceInfo},
     platform::validate_native_interface,
 };
 
-use super::{DestinationScope, InterfaceId, NativeRouteError, RouteDecision, RouteSelectionReason};
+use super::{DestinationScope, NativeRouteError, RouteDecision, RouteSelectionReason};
 
 pub(crate) struct NativeRouteSnapshot {
     pub interface: InterfaceInfo,

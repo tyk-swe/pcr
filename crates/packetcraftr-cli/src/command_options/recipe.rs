@@ -24,7 +24,7 @@ pub(crate) enum CliBuildMode {
     Permissive,
 }
 
-impl From<CliBuildMode> for core::build::Mode {
+impl From<CliBuildMode> for core::build::BuildMode {
     fn from(value: CliBuildMode) -> Self {
         match value {
             CliBuildMode::Strict => Self::Strict,

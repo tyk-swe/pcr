@@ -8,7 +8,7 @@ use std::{collections::HashSet, time::Instant};
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::{
     Packet,
-    decode::{Decoder as Dissector, Result as DecodedPacket},
+    decode::{DecodedPacket, Dissector},
     registry::Registry,
 };
 use packetcraftr_netio::capture::RecordIdentity;

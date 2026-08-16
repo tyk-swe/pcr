@@ -25,7 +25,6 @@ impl ScanProbe {
 }
 
 pub type ScanBatch = crate::probe::runner::Batch<ScanProbe>;
-pub use crate::exchange::Response as ScanMatchedResponse;
 pub use crate::probe::runner::BatchExecution as ScanBatchExecution;
 
 pub trait ScanExecutor {

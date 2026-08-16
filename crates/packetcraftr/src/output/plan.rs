@@ -18,5 +18,3 @@ pub use crate::output::network::{
 pub struct PlanCommandResult {
     pub route: PlannedRouteOutput,
 }
-
-pub use PlanCommandResult as Result;

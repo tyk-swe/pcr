@@ -15,7 +15,10 @@ use crate::analysis::pipeline::FrameRecord;
 use crate::analysis::reassembly::tcp::ScopedFlowKey;
 
 mod report;
-pub use report::*;
+pub use report::{
+    ConversationStat, EndpointStat, IoBucketStat, PortStat, ProtocolStat, StatsReport,
+    TransportKind,
+};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct Tally {

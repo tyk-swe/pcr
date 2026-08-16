@@ -7,8 +7,8 @@ use bytes::Bytes;
 use packetcraftr_core::protocol::application::Dns;
 use packetcraftr_core::{
     Packet,
-    decode::Result as DecodedPacket,
-    diagnostic::Severity as DiagnosticSeverity,
+    decode::DecodedPacket,
+    diagnostic::DiagnosticSeverity,
     layer::{Malformed as MalformedLayer, Raw},
     registry::Registry,
 };

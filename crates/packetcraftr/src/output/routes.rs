@@ -13,5 +13,3 @@ use crate::output::network::RouteDecisionOutput;
 pub struct RoutesCommandResult {
     pub routes: Vec<RouteDecisionOutput>,
 }
-
-pub use RoutesCommandResult as Result;

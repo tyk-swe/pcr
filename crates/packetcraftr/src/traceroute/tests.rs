@@ -20,7 +20,7 @@ use packetcraftr_core::protocol::{
     transport::Udp,
 };
 use packetcraftr_core::{
-    Packet, decode::Result as DecodedPacket, diagnostic::Diagnostic, layout::Packet as PacketLayout,
+    Packet, decode::DecodedPacket, diagnostic::Diagnostic, layout::PacketLayout,
 };
 
 use super::DEFAULT_TRACEROUTE_UDP_PORT;
@@ -29,8 +29,8 @@ use super::engine::traceroute;
 use super::error::TracerouteError;
 use super::model::{
     TracerouteBatch, TracerouteBatchExecution, TracerouteCompletion, TracerouteExecutor,
-    TracerouteLimits, TracerouteMatchedResponse, TracerouteProbe, TracerouteProbeStatus,
-    TracerouteRequest, TracerouteResponseKind, TracerouteStrategy,
+    TracerouteLimits, TracerouteProbe, TracerouteProbeStatus, TracerouteRequest,
+    TracerouteResponseKind, TracerouteStrategy,
 };
 use super::probe::probe_packet;
 use crate::clock::Clock;
@@ -240,7 +240,7 @@ impl TracerouteExecutor for MixedHopExecutor {
         Ok(TracerouteBatchExecution {
             permit: batch.permit,
             sent,
-            responses: vec![TracerouteMatchedResponse {
+            responses: vec![crate::exchange::Response {
                 request_index: 0,
                 response: responder,
                 latency: Duration::from_millis(1),

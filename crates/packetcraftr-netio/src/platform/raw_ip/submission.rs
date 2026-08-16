@@ -24,7 +24,7 @@ use windows::Win32::Networking::WinSock::{
 
 use super::preparation::{IpFamily, PreparedRawIp};
 use crate::Error as LiveIoError;
-use crate::route::InterfaceId;
+use crate::interface::Id as InterfaceId;
 
 const IPPROTO_RAW: i32 = 255;
 

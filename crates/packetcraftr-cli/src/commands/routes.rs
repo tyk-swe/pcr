@@ -34,7 +34,7 @@ pub(super) fn run(output: output::contract::Format) -> Result<(), CliError> {
     }
     routes.sort_by_key(|route| (route.interface.index, route.interface.name.clone()));
     routes.dedup_by(|left, right| left.interface == right.interface);
-    let result = output::routes::Result {
+    let result = output::routes::RoutesCommandResult {
         routes: routes.into_iter().map(Into::into).collect(),
     };
     match output {

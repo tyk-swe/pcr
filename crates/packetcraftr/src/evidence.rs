@@ -4,7 +4,7 @@
 //! Bounded diagnostic and capture-evidence retention for client operations.
 
 use packetcraftr_core::{
-    build::Result as BuiltPacket,
+    build::BuiltPacket,
     diagnostic::{Diagnostic, push_diagnostic_once},
     frame::{Frame, LinkType},
 };
@@ -118,12 +118,12 @@ pub(crate) fn test_sent_packet_with_report(
 fn test_built_packet(packet: packetcraftr_core::Packet) -> BuiltPacket {
     use std::sync::Arc;
 
-    use packetcraftr_core::build::{Builder, Context, Options};
+    use packetcraftr_core::build::{BuildContext, BuildOptions, Builder};
 
     Builder::new(Arc::new(
         packetcraftr_core::protocol::builtin::registry().expect("built-in registry"),
     ))
-    .build(packet, Context::default(), Options::default())
+    .build(packet, BuildContext::default(), BuildOptions::default())
     .expect("sent-packet fixture must build")
 }
 

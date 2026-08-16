@@ -7,7 +7,10 @@
 
 use std::net::IpAddr;
 
-use crate::route::{InterfaceId, NativeRouteError, RouteDecision};
+use crate::{
+    interface::Id as InterfaceId,
+    route::{NativeRouteError, RouteDecision},
+};
 
 #[cfg(all(feature = "native-route", target_os = "linux"))]
 use super::linux as native;

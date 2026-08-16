@@ -8,15 +8,16 @@ use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
 use packetcraftr_core::codec::{
-    Codec, DecodeContext, Decoded, EncodeContext, Encoded, Error as CodecError,
+    CodecError, DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext,
 };
-use packetcraftr_core::diagnostic::{Diagnostic, Severity, push_diagnostic_once};
-use packetcraftr_core::field::{Error as FieldError, Value as FieldValue, Wire as WireValue};
+use packetcraftr_core::diagnostic::{Diagnostic, DiagnosticSeverity, push_diagnostic_once};
+use packetcraftr_core::field::{FieldValue, WireValue};
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::{
-    Id as ProtocolId, Layer, Malformed, Padding, Raw, malformed_layout, padding_layout, raw_layout,
+    FieldError, Id as ProtocolId, Layer, Malformed, Padding, Raw, malformed_layout, padding_layout,
+    raw_layout,
 };
-use packetcraftr_core::layout::{Field, Range};
+use packetcraftr_core::layout::{ByteRange, FieldLayout};
 use packetcraftr_core::registry::{
     Builder as RegistryBuilder, Discriminator, Error as RegistryError,
 };
@@ -152,7 +153,7 @@ reflective_layer! {
 #[derive(Clone, Copy, Debug)]
 struct ProbeCodec;
 
-impl Codec for ProbeCodec {
+impl LayerCodec for ProbeCodec {
     fn protocol_id(&self) -> ProtocolId {
         "probe".into()
     }
@@ -165,8 +166,8 @@ impl Codec for ProbeCodec {
         &self,
         layer: &dyn Layer,
         _payload: &[u8],
-        _context: &EncodeContext<'_>,
-    ) -> Result<Encoded, CodecError> {
+        _context: &LayerEncodeContext<'_>,
+    ) -> Result<EncodedLayer, CodecError> {
         let probe =
             layer
                 .as_any()
@@ -175,7 +176,7 @@ impl Codec for ProbeCodec {
                     expected: "probe".into(),
                     actual: layer.protocol_id().clone(),
                 })?;
-        let mut encoded = Encoded::header(vec![probe.value], Box::new(probe.clone()));
+        let mut encoded = EncodedLayer::header(vec![probe.value], Box::new(probe.clone()));
         encoded.fields = probe_layout();
         encoded
             .diagnostics
@@ -183,7 +184,11 @@ impl Codec for ProbeCodec {
         Ok(encoded)
     }
 
-    fn decode(&self, input: &[u8], _context: &DecodeContext<'_>) -> Result<Decoded, CodecError> {
+    fn decode(
+        &self,
+        input: &[u8],
+        _context: &LayerDecodeContext<'_>,
+    ) -> Result<DecodedLayerValue, CodecError> {
         let Some(value) = input.first().copied() else {
             return Err(CodecError::Truncated {
                 protocol: "probe".into(),
@@ -192,7 +197,7 @@ impl Codec for ProbeCodec {
             });
         };
         let payload_len = input.len() - 1;
-        Ok(Decoded {
+        Ok(DecodedLayerValue {
             layer: Box::new(Probe {
                 value,
                 ..Probe::default()
@@ -225,7 +230,7 @@ impl Codec for ProbeCodec {
 #[derive(Clone, Copy, Debug)]
 struct ChildCodec;
 
-impl Codec for ChildCodec {
+impl LayerCodec for ChildCodec {
     fn protocol_id(&self) -> ProtocolId {
         "child".into()
     }
@@ -234,8 +239,8 @@ impl Codec for ChildCodec {
         &self,
         layer: &dyn Layer,
         _payload: &[u8],
-        _context: &EncodeContext<'_>,
-    ) -> Result<Encoded, CodecError> {
+        _context: &LayerEncodeContext<'_>,
+    ) -> Result<EncodedLayer, CodecError> {
         let child =
             layer
                 .as_any()
@@ -244,12 +249,16 @@ impl Codec for ChildCodec {
                     expected: "child".into(),
                     actual: layer.protocol_id().clone(),
                 })?;
-        let mut encoded = Encoded::header(vec![child.value], Box::new(child.clone()));
+        let mut encoded = EncodedLayer::header(vec![child.value], Box::new(child.clone()));
         encoded.fields = child_layout();
         Ok(encoded)
     }
 
-    fn decode(&self, input: &[u8], _context: &DecodeContext<'_>) -> Result<Decoded, CodecError> {
+    fn decode(
+        &self,
+        input: &[u8],
+        _context: &LayerDecodeContext<'_>,
+    ) -> Result<DecodedLayerValue, CodecError> {
         let value = input
             .first()
             .copied()
@@ -258,7 +267,7 @@ impl Codec for ChildCodec {
                 needed: 1,
                 available: 0,
             })?;
-        let mut decoded = Decoded::terminal(Box::new(Child { value }), 1);
+        let mut decoded = DecodedLayerValue::terminal(Box::new(Child { value }), 1);
         decoded.fields = child_layout();
         Ok(decoded)
     }
@@ -482,14 +491,14 @@ fn reflected_fields_cover_supported_types_and_fail_closed() {
         .expect("all required getters produce values");
     assert_eq!(
         probe_layout(),
-        vec![Field {
+        vec![FieldLayout {
             name: "value".to_owned(),
-            range: Range::new(0, 1)
+            range: ByteRange::new(0, 1)
         }]
     );
-    assert_eq!(raw_layout(3)[0].range, Range::new(0, 3));
-    assert_eq!(padding_layout(2)[0].range, Range::new(0, 2));
-    assert_eq!(malformed_layout(4)[0].range, Range::new(0, 4));
+    assert_eq!(raw_layout(3)[0].range, ByteRange::new(0, 3));
+    assert_eq!(padding_layout(2)[0].range, ByteRange::new(0, 2));
+    assert_eq!(malformed_layout(4)[0].range, ByteRange::new(0, 4));
 }
 
 #[test]
@@ -566,10 +575,10 @@ fn field_values_raw_layers_and_diagnostics_have_stable_views() {
     push_diagnostic_once(&mut diagnostics, Diagnostic::error("once", "duplicate"));
     push_diagnostic_once(&mut diagnostics, Diagnostic::warning("other", "kept"));
     assert_eq!(diagnostics.len(), 2);
-    assert_eq!(diagnostics[0].severity, Severity::Info);
+    assert_eq!(diagnostics[0].severity, DiagnosticSeverity::Info);
     assert_eq!(diagnostics[0].layer, Some(2));
     assert_eq!(diagnostics[0].field.as_deref(), Some("value"));
-    assert_eq!(diagnostics[1].severity, Severity::Warning);
+    assert_eq!(diagnostics[1].severity, DiagnosticSeverity::Warning);
 }
 
 #[test]
@@ -642,14 +651,21 @@ fn expressions_and_documents_round_trip_and_enforce_resource_bounds() {
         "ipv4=192.0.2.1,ipv6=2001:db8::1,mac=00-11-22-33-44-55,",
         "token=ignored,wire=auto)"
     );
-    let error = expression::parse(expression, &registry, expression::Options::default())
-        .expect_err("incompatible custom byte fields should be rejected by the codec");
-    assert!(matches!(error, expression::Error::Layer { layer: 0, .. }));
+    let error = expression::parse_packet_expression(
+        expression,
+        &registry,
+        expression::ExpressionOptions::default(),
+    )
+    .expect_err("incompatible custom byte fields should be rejected by the codec");
+    assert!(matches!(
+        error,
+        expression::ExpressionError::Layer { layer: 0, .. }
+    ));
 
-    let packet = expression::parse(
+    let packet = expression::parse_packet_expression(
         "probe(value=42,enabled=true,label=hello,ipv4=192.0.2.1,ipv6=2001:db8::1,mac=00:11:22:33:44:55,wire=auto)",
         &registry,
-        expression::Options::default(),
+        expression::ExpressionOptions::default(),
     )
     .expect("valid expression");
     let probe = packet.get::<Probe>().expect("probe layer");
@@ -665,42 +681,47 @@ fn expressions_and_documents_round_trip_and_enforce_resource_bounds() {
     assert!(expression::decode_hex("zz").is_err());
     for source in ["", "probe(", "/probe", "probe(value=1,value=2)", "unknown"] {
         assert!(
-            expression::parse(source, &registry, expression::Options::default()).is_err(),
+            expression::parse_packet_expression(
+                source,
+                &registry,
+                expression::ExpressionOptions::default()
+            )
+            .is_err(),
             "{source}"
         );
     }
     assert!(matches!(
-        expression::parse(
+        expression::parse_packet_expression(
             "probe",
             &registry,
-            expression::Options {
+            expression::ExpressionOptions {
                 max_bytes: 4,
-                ..expression::Options::default()
+                ..expression::ExpressionOptions::default()
             },
         ),
-        Err(expression::Error::SizeLimit { .. })
+        Err(expression::ExpressionError::SizeLimit { .. })
     ));
     assert!(matches!(
-        expression::parse(
+        expression::parse_packet_expression(
             "probe/probe",
             &registry,
-            expression::Options {
+            expression::ExpressionOptions {
                 max_layers: 1,
-                ..expression::Options::default()
+                ..expression::ExpressionOptions::default()
             },
         ),
-        Err(expression::Error::LayerLimit { limit: 1 })
+        Err(expression::ExpressionError::LayerLimit { limit: 1 })
     ));
     assert!(matches!(
-        expression::parse(
+        expression::parse_packet_expression(
             "probe",
             &registry,
-            expression::Options {
+            expression::ExpressionOptions {
                 max_nesting: expression::MAX_EXPRESSION_NESTING + 1,
-                ..expression::Options::default()
+                ..expression::ExpressionOptions::default()
             },
         ),
-        Err(expression::Error::InvalidNestingLimit { .. })
+        Err(expression::ExpressionError::InvalidNestingLimit { .. })
     ));
 
     let document = document::Packet::from_packet(&packet);
@@ -788,23 +809,27 @@ fn registry_build_decode_and_error_paths_are_bounded() {
     packet.push(Child { value: 4 });
     let builder = build::Builder::new(Arc::clone(&registry));
     let built = builder
-        .build(packet, build::Context::default(), build::Options::default())
+        .build(
+            packet,
+            build::BuildContext::default(),
+            build::BuildOptions::default(),
+        )
         .expect("bound packet builds");
     assert_eq!(built.bytes.as_ref(), &[9, 4]);
     assert_eq!(built.layout.layers.len(), 2);
     assert_eq!(
         built.layout.layer(1).expect("child layout").range,
-        Range::new(1, 2)
+        ByteRange::new(1, 2)
     );
     assert_eq!(built.packet.encoded_payload_length(0), Some(1));
     assert_eq!(built.packet.encoded_payload_length(1), Some(0));
     assert_eq!(built.diagnostics[0].layer, Some(0));
 
-    let decoded = decode::Decoder::new(Arc::clone(&registry))
+    let decoded = decode::Dissector::new(Arc::clone(&registry))
         .decode_with_root(
             built.bytes.clone(),
             "probe".into(),
-            decode::Options::default(),
+            decode::DecodeOptions::default(),
         )
         .expect("bound packet decodes");
     assert_eq!(decoded.packet.len(), 2);
@@ -848,16 +873,16 @@ fn registry_build_decode_and_error_paths_are_bounded() {
     )
     .expect("frame");
     assert_eq!(
-        decode::Decoder::new(Arc::clone(&registry))
-            .decode(frame, decode::Options::default())
+        decode::Dissector::new(Arc::clone(&registry))
+            .decode(frame, decode::DecodeOptions::default())
             .expect("root lookup")
             .packet
             .len(),
         2
     );
     let unsupported = Frame::new(SystemTime::UNIX_EPOCH, LinkType(778), vec![1, 2]).expect("frame");
-    let raw = decode::Decoder::new(Arc::clone(&registry))
-        .decode(unsupported, decode::Options::default())
+    let raw = decode::Dissector::new(Arc::clone(&registry))
+        .decode(unsupported, decode::DecodeOptions::default())
         .expect("unsupported roots become raw packets");
     assert_eq!(
         raw.packet.get::<Raw>().map(|raw| raw.bytes.as_ref()),
@@ -865,30 +890,30 @@ fn registry_build_decode_and_error_paths_are_bounded() {
     );
     assert_eq!(raw.packet.encoded_payload_length(0), Some(0));
     assert_eq!(raw.layout.layers.len(), 1);
-    assert_eq!(raw.layout.layers[0].range, Range::new(0, 2));
+    assert_eq!(raw.layout.layers[0].range, ByteRange::new(0, 2));
     assert_eq!(raw.layout.layers[0].fields, raw_layout(2));
     assert_eq!(raw.diagnostics[0].code, "decode.unsupported_link_type");
 
     assert!(matches!(
         builder.build(
             Packet::new(),
-            build::Context::default(),
-            build::Options::default()
+            build::BuildContext::default(),
+            build::BuildOptions::default()
         ),
-        Err(build::Error::EmptyPacket)
+        Err(build::BuildError::EmptyPacket)
     ));
     let mut one = Packet::new();
     one.push(Probe::default());
     assert!(matches!(
         builder.build(
             one.clone(),
-            build::Context::default(),
-            build::Options {
+            build::BuildContext::default(),
+            build::BuildOptions {
                 max_layers: 0,
-                ..build::Options::default()
+                ..build::BuildOptions::default()
             },
         ),
-        Err(build::Error::LayerLimit {
+        Err(build::BuildError::LayerLimit {
             actual: 1,
             limit: 0
         })
@@ -896,46 +921,50 @@ fn registry_build_decode_and_error_paths_are_bounded() {
     assert!(matches!(
         builder.build(
             one,
-            build::Context::default(),
-            build::Options {
+            build::BuildContext::default(),
+            build::BuildOptions {
                 max_packet_size: 0,
-                ..build::Options::default()
+                ..build::BuildOptions::default()
             },
         ),
-        Err(build::Error::PacketSizeLimit { .. })
+        Err(build::BuildError::PacketSizeLimit { .. })
     ));
     assert!(matches!(
-        decode::Decoder::new(Arc::clone(&registry)).decode_with_root(
+        decode::Dissector::new(Arc::clone(&registry)).decode_with_root(
             vec![1],
             "probe".into(),
-            decode::Options {
+            decode::DecodeOptions {
                 max_layers: 0,
-                ..decode::Options::default()
+                ..decode::DecodeOptions::default()
             },
         ),
-        Err(decode::Error::LayerLimit { limit: 0 })
+        Err(decode::DecodeError::LayerLimit { limit: 0 })
     ));
     assert!(matches!(
-        decode::Decoder::new(Arc::clone(&registry)).decode_with_root(
+        decode::Dissector::new(Arc::clone(&registry)).decode_with_root(
             vec![1, 2],
             "probe".into(),
-            decode::Options {
+            decode::DecodeOptions {
                 max_packet_size: 1,
-                ..decode::Options::default()
+                ..decode::DecodeOptions::default()
             },
         ),
-        Err(decode::Error::PacketSizeLimit { .. })
+        Err(decode::DecodeError::PacketSizeLimit { .. })
     ));
     assert!(matches!(
-        decode::Decoder::new(Arc::clone(&registry)).decode_with_root(
+        decode::Dissector::new(Arc::clone(&registry)).decode_with_root(
             vec![1],
             "missing".into(),
-            decode::Options::default(),
+            decode::DecodeOptions::default(),
         ),
-        Err(decode::Error::MissingRootCodec { .. })
+        Err(decode::DecodeError::MissingRootCodec { .. })
     ));
-    let malformed = decode::Decoder::new(registry)
-        .decode_with_root(Vec::<u8>::new(), "probe".into(), decode::Options::default())
+    let malformed = decode::Dissector::new(registry)
+        .decode_with_root(
+            Vec::<u8>::new(),
+            "probe".into(),
+            decode::DecodeOptions::default(),
+        )
         .expect("codec errors are preserved as malformed layers");
     assert!(malformed.packet.get::<Malformed>().is_some());
     assert_eq!(malformed.diagnostics[0].code, "decode.malformed_layer");

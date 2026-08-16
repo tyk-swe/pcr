@@ -3,7 +3,7 @@
 
 //! Packet layer models and reflection.
 
-pub(crate) mod model;
+mod model;
 mod reflection;
 
 pub use model::{FieldError, FieldSchema};
@@ -13,8 +13,8 @@ pub use model::{
 pub(crate) use model::{LayerSchema, MalformedLayer, ProtocolId};
 #[doc(hidden)]
 pub use model::{malformed_layout, padding_layout, raw_layout};
+pub(crate) use reflection::reflective_layer;
 #[doc(hidden)]
 pub use reflection::{
     ReflectiveField, ReflectiveFieldError, reflect_get, reflect_set, reflect_set_bounded,
-    reflective_layer,
 };

@@ -90,7 +90,7 @@ pub(super) fn run(arguments: DnsArgs, output: output::contract::Format) -> Resul
                 interface: None,
                 preferred_source: route.source,
             },
-            build: core::build::Options::default(),
+            build: core::build::BuildOptions::default(),
             allow_permissive_live: false,
         },
         request.timeout,
@@ -104,7 +104,7 @@ pub(super) fn run(arguments: DnsArgs, output: output::contract::Format) -> Resul
         interface: DeferredInterface::new(route.interface),
     };
     let resolver = packetcraftr::target::SystemResolver;
-    let mut authorizer = packetcraftr::dns::PolicyAuthorizer::new(&policy, &resolver);
+    let mut authorizer = packetcraftr::target::PolicyAuthorizer::new(&policy, &resolver);
     let mut clock = packetcraftr::clock::SystemClock;
     let result = packetcraftr::dns::run(
         &request,

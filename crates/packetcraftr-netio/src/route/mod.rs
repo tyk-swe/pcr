@@ -4,15 +4,15 @@
 #![forbid(unsafe_code)]
 
 mod error;
-pub(crate) mod intent;
+mod intent;
 pub(crate) mod materialize;
-pub(crate) mod models;
+mod models;
 #[cfg(all(
     feature = "native-route",
     any(target_os = "linux", target_os = "macos", windows)
 ))]
-pub(crate) mod native_policy;
-pub(crate) mod planner;
+mod native_policy;
+mod planner;
 mod provider;
 
 pub use error::PlanError as Error;
@@ -24,15 +24,10 @@ pub use models::{
 pub use planner::plan;
 pub use provider::{NativeRouteError as SystemError, SystemRouteProvider as SystemProvider};
 
-pub(crate) use materialize::{MaterializedRoute, NeighborError, NeighborResolver};
+pub(crate) use materialize::MaterializedRoute;
 pub(crate) use models::{DestinationScope, PlannedRoute, RouteDecision, RouteSelectionReason};
 pub(crate) use provider::NativeRouteError;
 
-pub(crate) use crate::interface::Id as InterfaceId;
-pub(crate) use crate::neighbor::{
-    MAX_VLAN_TAGS as MAX_NEIGHBOR_VLAN_TAGS, Request as NeighborRequest,
-    Resolution as NeighborResolution, VlanKind as NeighborVlanKind, VlanTag as NeighborVlanTag,
-};
 #[cfg(all(
     feature = "native-route",
     any(target_os = "linux", target_os = "macos")

@@ -20,7 +20,7 @@ pub(super) fn run(arguments: PlanArgs, output: output::contract::Format) -> Resu
     let route = client
         .plan(&request.packet, request.destination, &request.options)
         .map_err(CliError::classified)?;
-    let result = output::plan::Result {
+    let result = output::plan::PlanCommandResult {
         route: route.into(),
     };
     match output {

@@ -6,8 +6,9 @@
 #![forbid(unsafe_code)]
 
 use crate::{
-    Error as LiveIoError, interface::InterfaceInfo,
-    platform::interface_dispatch::system_interfaces, route::InterfaceId,
+    Error as LiveIoError,
+    interface::{Id as InterfaceId, InterfaceInfo},
+    platform::interface_dispatch::system_interfaces,
 };
 
 pub(super) fn validate_current_interface_identity(

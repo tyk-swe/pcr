@@ -13,9 +13,9 @@ pub(super) fn next_frame_number(value: u64, sequence: u64) -> Result<u64, crate:
 
 /// Decode bounds use the accepted per-frame capture limit, not the smaller
 /// dissector default.
-pub(super) fn decode_options(max_frame_bytes: usize) -> core::decode::Options {
-    core::decode::Options {
+pub(super) fn decode_options(max_frame_bytes: usize) -> core::decode::DecodeOptions {
+    core::decode::DecodeOptions {
         max_packet_size: max_frame_bytes,
-        ..core::decode::Options::default()
+        ..core::decode::DecodeOptions::default()
     }
 }

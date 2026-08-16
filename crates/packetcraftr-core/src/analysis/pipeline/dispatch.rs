@@ -6,7 +6,7 @@
 use std::collections::HashSet;
 use std::time::SystemTime;
 
-use crate::decode::Result as DecodedPacket;
+use crate::decode::DecodedPacket;
 use crate::protocol::transport::Tcp;
 use bytes::Bytes;
 

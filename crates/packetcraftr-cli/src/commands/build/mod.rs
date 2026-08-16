@@ -20,10 +20,10 @@ pub(super) fn run(arguments: BuildArgs, output: output::contract::Format) -> Res
     let built = core::build::Builder::new(registry)
         .build(
             packet,
-            core::build::Context::default(),
-            core::build::Options {
+            core::build::BuildContext::default(),
+            core::build::BuildOptions {
                 mode: arguments.mode.into(),
-                ..core::build::Options::default()
+                ..core::build::BuildOptions::default()
             },
         )
         .map_err(|source| CliError::new(3, source.to_string()))?;

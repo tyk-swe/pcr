@@ -94,22 +94,47 @@ fn packet_documents_enforce_byte_layer_and_duplicate_key_limits() {
 }
 
 #[test]
-fn test_m2_reexports_and_aliases() {
+fn descriptive_core_api_paths_are_available() {
     use packetcraftr_core::{
-        codec,
-        diagnostic::{Diagnostic, Severity},
-        field::FieldValue,
-        layer::Id as ProtocolId,
+        build::{BuildContext, BuildError, BuildMode, BuildOptions, BuiltPacket},
+        codec::{
+            CodecError, DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext,
+            LayerEncodeContext,
+        },
+        decode::{DecodeError, DecodeOptions, DecodedPacket, Dissector},
+        diagnostic::{Diagnostic, DiagnosticSeverity},
+        expression::{ExpressionError, ExpressionOptions, parse_packet_expression},
+        field::{FieldKind, FieldValue, WireValue},
+        layer::{FieldError, FieldSchema, Id as ProtocolId},
         layout::{ByteRange, FieldLayout, LayerLayout, PacketLayout},
+        matcher::{MatchResult, ResponseMatcher},
+        registry::Registry,
     };
 
-    let err: Option<codec::Error> = None;
-    assert!(err.is_none());
-    let _decoded_alias: Option<codec::Decoded> = None;
-    let _encoded_alias: Option<codec::Encoded> = None;
+    let _build_context = BuildContext::default();
+    let _build_mode = BuildMode::Strict;
+    let _build_options = BuildOptions::default();
+    let _build_error: Option<BuildError> = None;
+    let _built_packet: Option<BuiltPacket> = None;
+    let _dissector: Option<Dissector> = None;
+    let _decode_options = DecodeOptions::default();
+    let _decode_error: Option<DecodeError> = None;
+    let _decoded_packet: Option<DecodedPacket> = None;
+    let _codec_error: Option<CodecError> = None;
+    let _decoded_layer: Option<DecodedLayerValue> = None;
+    let _encoded_layer: Option<EncodedLayer> = None;
+    let _codec: Option<&dyn LayerCodec> = None;
+    let _decode_context: Option<LayerDecodeContext<'_>> = None;
+    let _encode_context: Option<LayerEncodeContext<'_>> = None;
+    let _field_error: Option<FieldError> = None;
+    let _field_schema: Option<&FieldSchema> = None;
+    let _matcher: Option<&dyn ResponseMatcher> = None;
+    let parse: fn(&str, &Registry, ExpressionOptions) -> Result<Packet, ExpressionError> =
+        parse_packet_expression;
+    let _ = parse;
 
     let diag = Diagnostic::warning("W001", "test warning").at_layer(0);
-    assert_eq!(diag.severity, Severity::Warning);
+    assert_eq!(diag.severity, DiagnosticSeverity::Warning);
 
     let br = ByteRange::new(0, 14);
     let fl = FieldLayout {
@@ -127,6 +152,9 @@ fn test_m2_reexports_and_aliases() {
 
     let fval = FieldValue::Unsigned(80);
     assert!(matches!(fval, FieldValue::Unsigned(80)));
+    assert_eq!(FieldKind::Unsigned, FieldKind::Unsigned);
+    assert!(matches!(WireValue::<u16>::Auto, WireValue::Auto));
+    assert!(!MatchResult::no_match().matched);
 }
 
 #[test]
@@ -227,7 +255,7 @@ fn test_m2_dissector_fuzz_resilience() {
 #[test]
 fn test_m2_expression_parser_and_filter_stress() {
     use packetcraftr_core::{
-        expression::{Options as ExpressionOptions, parse as parse_expression},
+        expression::{ExpressionOptions, parse_packet_expression},
         filter::{Filter, Options as FilterOptions},
         protocol::builtin::registry as default_registry,
     };
@@ -241,7 +269,7 @@ fn test_m2_expression_parser_and_filter_stress() {
     ];
 
     for expr_str in valid_expressions {
-        let parsed = parse_expression(expr_str, &reg, ExpressionOptions::default());
+        let parsed = parse_packet_expression(expr_str, &reg, ExpressionOptions::default());
         assert!(
             parsed.is_ok(),
             "Failed to parse valid expression: {}",
@@ -256,7 +284,7 @@ fn test_m2_expression_parser_and_filter_stress() {
     ];
 
     for expr_str in invalid_expressions {
-        let parsed = parse_expression(expr_str, &reg, ExpressionOptions::default());
+        let parsed = parse_packet_expression(expr_str, &reg, ExpressionOptions::default());
         assert!(
             parsed.is_err(),
             "Invalid expression should fail to parse: {}",

@@ -63,10 +63,10 @@ pub(super) fn run(arguments: FuzzArgs, output: output::contract::Format) -> Resu
         cases,
         strategies: strategies.into_iter().map(Into::into).collect(),
         targets,
-        build: core::build::Options {
+        build: core::build::BuildOptions {
             mode: mode.into(),
             max_packet_size: max_packet_bytes,
-            ..core::build::Options::default()
+            ..core::build::BuildOptions::default()
         },
         limits: core::fuzz::Limits {
             max_cases,

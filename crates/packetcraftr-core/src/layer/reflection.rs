@@ -43,11 +43,11 @@ macro_rules! reflective_layer {
         fn $schema() -> &'static $crate::layer::Schema {
             static SCHEMA: std::sync::OnceLock<$crate::layer::Schema> =
                 std::sync::OnceLock::new();
-            static FIELDS: &[$crate::field::Schema] = &[
+            static FIELDS: &[$crate::layer::FieldSchema] = &[
                 $(
-                    $crate::field::Schema {
+                    $crate::layer::FieldSchema {
                         name: $field,
-                        kind: $crate::field::Kind::$kind,
+                        kind: $crate::field::FieldKind::$kind,
                         derived: $derived,
                         required: $required,
                         description: $description,
@@ -78,7 +78,7 @@ macro_rules! reflective_layer {
                 self
             }
 
-            fn field(&self, name: &str) -> Option<$crate::field::Value> {
+            fn field(&self, name: &str) -> Option<$crate::field::FieldValue> {
                 match name {
                     $(
                         $field $(| $alias)* => $crate::reflective_layer!(
@@ -95,8 +95,8 @@ macro_rules! reflective_layer {
             fn set_field(
                 &mut self,
                 name: &str,
-                value: $crate::field::Value,
-            ) -> Result<(), $crate::field::Error> {
+                value: $crate::field::FieldValue,
+            ) -> Result<(), $crate::layer::FieldError> {
                 match name {
                     $(
                         $field $(| $alias)* => $crate::reflective_layer!(
@@ -106,7 +106,7 @@ macro_rules! reflective_layer {
                             $(explicit $setter, $value, $field_name => $set)?
                         ),
                     )*
-                    _ => Err($crate::field::Error::UnknownField {
+                    _ => Err($crate::layer::FieldError::UnknownField {
                         protocol: $schema().protocol.clone(),
                         field: name.to_owned(),
                     }),
@@ -116,7 +116,7 @@ macro_rules! reflective_layer {
         }
 
         $vis fn $layout($($layout_arg: $layout_ty),*)
-            -> Vec<$crate::layout::Field>
+            -> Vec<$crate::layout::FieldLayout>
         {
             let mut fields: Vec<_> = vec![
                 $(
@@ -134,9 +134,9 @@ macro_rules! reflective_layer {
         None
     };
     (@layout $field:literal, $start:expr, $end:expr) => {
-        Some($crate::layout::Field {
+        Some($crate::layout::FieldLayout {
             name: $field.to_owned(),
-            range: $crate::layout::Range::new($start, $end),
+            range: $crate::layout::ByteRange::new($start, $end),
         })
     };
     (@get $layer:expr; reflect $member:ident) => {
@@ -174,7 +174,7 @@ macro_rules! reflective_layer {
 }
 
 #[doc(hidden)]
-pub use reflective_layer;
+pub(crate) use reflective_layer;
 
 pub enum ReflectiveFieldError {
     WrongType(&'static str),

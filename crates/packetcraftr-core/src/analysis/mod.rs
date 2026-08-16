@@ -17,9 +17,6 @@
 //! so they remain stable across commands. Reassembly consumes only matched
 //! frames, keeping a filtered run scoped to the selected conversations.
 
-pub(crate) use crate::error::BoundaryError;
-pub(crate) use reassembly::tcp::ScopedFlowKey;
-
 mod adapter;
 mod conversation_index;
 mod error;

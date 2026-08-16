@@ -3,7 +3,7 @@
 
 //! MTU validation for exact built packets.
 
-use packetcraftr_core::{build::Result as BuiltPacket, layer::Padding, semantics::BuiltinProtocol};
+use packetcraftr_core::{build::BuiltPacket, layer::Padding, semantics::BuiltinProtocol};
 
 use super::send::ClientError;
 
@@ -52,8 +52,8 @@ mod tests {
     use packetcraftr_core::protocol::{link::Ethernet, network::Ipv4, transport::Udp};
     use packetcraftr_core::{
         Packet,
-        build::{Builder, Context, Options},
-        field::Wire as WireValue,
+        build::{BuildContext, BuildOptions, Builder},
+        field::WireValue,
         layer::{Padding, Raw},
     };
     use packetcraftr_netio::Error as LiveIoError;
@@ -100,7 +100,7 @@ mod tests {
         Builder::new(Arc::new(
             packetcraftr_core::protocol::builtin::registry().expect("built-in registry"),
         ))
-        .build(packet, Context::default(), Options::default())
+        .build(packet, BuildContext::default(), BuildOptions::default())
         .expect("fixture packet builds")
     }
 

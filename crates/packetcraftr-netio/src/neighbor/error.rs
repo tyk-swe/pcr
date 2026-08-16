@@ -7,10 +7,8 @@
 
 use std::net::IpAddr;
 
-use crate::{
-    Error as LiveIoError,
-    route::{InterfaceId, NeighborError},
-};
+use super::{Error as NeighborError, Request as NeighborRequest};
+use crate::{Error as LiveIoError, interface::Id as InterfaceId};
 
 pub(super) fn resolution_error(
     interface: &InterfaceId,
@@ -25,7 +23,7 @@ pub(super) fn resolution_error(
 }
 
 pub(super) fn map_io_error(
-    request: &crate::route::NeighborRequest,
+    request: &NeighborRequest,
     operation: &'static str,
     error: LiveIoError,
 ) -> NeighborError {

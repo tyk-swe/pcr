@@ -5,7 +5,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use crate::diagnostic::Severity as DiagnosticSeverity;
+use crate::diagnostic::DiagnosticSeverity;
 use crate::protocol::transport::Tcp;
 
 use crate::analysis::adapter::{transport_payload, transports};

@@ -13,7 +13,9 @@ use plan::{FragmentPlan, datagram_memory_charge_parts};
 
 mod commit;
 mod contract;
-pub use contract::*;
+pub use contract::{
+    Datagram, DatagramKey, Error, Event, Fragment, OverlapPolicy, ScopedDatagramKey,
+};
 mod plan;
 
 #[derive(Debug)]

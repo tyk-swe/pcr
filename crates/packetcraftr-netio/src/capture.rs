@@ -15,7 +15,7 @@ use packetcraftr_core::frame::{DEFAULT_SIZE_LIMIT, Frame as CaptureFrame};
 pub(crate) use self::{
     Captured as CapturedFrame, Limits as CaptureQueueLimits,
     OverflowPolicy as CaptureOverflowPolicy, Provider as CaptureProvider,
-    Session as CaptureSession, SystemProvider as SystemCaptureProvider,
+    Session as CaptureSession,
 };
 /// Aggregate backend capture-queue capacity used by default.
 pub const DEFAULT_CAPTURE_QUEUE_FRAMES: usize = 4_096;

@@ -8,9 +8,8 @@ use packetcraftr::core::error::{Classified, Kind};
 use packetcraftr::core::frame::{Direction as CaptureDirection, Frame, LinkType};
 use packetcraftr::core::protocol::support::BUILTIN_PROTOCOLS;
 use packetcraftr::core::{
-    diagnostic::Diagnostic,
-    field::{Kind as PacketFieldKind, Schema},
-    layout::Range as ByteRange,
+    diagnostic::Diagnostic, field::FieldKind as PacketFieldKind, layer::FieldSchema,
+    layout::ByteRange,
 };
 use packetcraftr::netio::{
     interface::Id as InterfaceId,
@@ -279,7 +278,7 @@ fn protocol_output_converts_every_field_kind_and_manifest_capability() {
         );
     }
 
-    let schema = Schema {
+    let schema = FieldSchema {
         name: "field_name",
         kind: PacketFieldKind::Unsigned,
         derived: true,

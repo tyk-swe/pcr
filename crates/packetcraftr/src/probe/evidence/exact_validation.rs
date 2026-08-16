@@ -8,7 +8,7 @@ use std::time::Duration;
 use crate::SentPacket;
 use crate::probe::runner::{Batch, BatchExecution};
 use packetcraftr_core::frame::Frame;
-use packetcraftr_core::{Packet, decode::Result as DecodedPacket};
+use packetcraftr_core::{Packet, decode::DecodedPacket};
 use packetcraftr_netio::capture::Statistics;
 
 use super::budget::{checked_frame_bytes, checked_frame_count};

@@ -36,7 +36,6 @@ mod probe;
 #[cfg(test)]
 mod tests;
 
-pub use crate::target::PolicyAuthorizer;
 pub use classification::{
     ScanResponseClassification as ResponseClassification,
     classify_scan_response as classify_response,
@@ -46,7 +45,6 @@ pub use error::ScanError as Error;
 pub use model::{
     ScanBatch as Batch, ScanBatchExecution as Execution, ScanClassification as Classification,
     ScanEndpointResult as Endpoint, ScanExecutor as Executor, ScanLimits as Limits,
-    ScanMatchedResponse as MatchedResponse, ScanProbe as Probe, ScanProbeEvidence as ProbeEvidence,
-    ScanProbeStatus as ProbeStatus, ScanRequest as Request, ScanResult as Result,
-    ScanTransport as Transport,
+    ScanProbe as Probe, ScanProbeEvidence as ProbeEvidence, ScanProbeStatus as ProbeStatus,
+    ScanRequest as Request, ScanResult as Result, ScanTransport as Transport,
 };

@@ -12,10 +12,8 @@ use std::time::Instant;
 
 use super::error::invalid_configuration;
 use super::options::NeighborResolutionOptions;
-use crate::{
-    link::MacAddress,
-    route::{InterfaceId, NeighborError, NeighborRequest, NeighborVlanTag},
-};
+use super::{Error as NeighborError, Request as NeighborRequest, VlanTag as NeighborVlanTag};
+use crate::{interface::Id as InterfaceId, link::MacAddress};
 use packetcraftr_core::frame::{Frame, LinkType};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -118,7 +116,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::route::{InterfaceId, NeighborVlanKind};
+    use crate::{interface::Id as InterfaceId, neighbor::VlanKind as NeighborVlanKind};
 
     fn request(target: IpAddr) -> NeighborRequest {
         NeighborRequest {

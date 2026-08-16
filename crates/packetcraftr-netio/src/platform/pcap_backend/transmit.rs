@@ -10,7 +10,7 @@ use pcap::{Capture, Error as PcapError};
 use super::capture::map_open_error;
 use crate::{
     Error as LiveIoError,
-    route::InterfaceId,
+    interface::Id as InterfaceId,
     transmit::{IoSendReport, Layer2Frame, Submission},
 };
 

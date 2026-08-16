@@ -9,7 +9,7 @@ use std::time::SystemTime;
 use bytes::Bytes;
 use packetcraftr_core::Packet;
 use packetcraftr_core::analysis::pcap::{Reader, Writer};
-use packetcraftr_core::build::{Builder, Context as BuildContext, Options as BuildOptions};
+use packetcraftr_core::build::{BuildContext, BuildOptions, Builder};
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::Raw;
 use packetcraftr_core::protocol::builtin;

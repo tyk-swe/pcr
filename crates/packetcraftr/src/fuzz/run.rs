@@ -8,8 +8,8 @@ use std::time::Duration;
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::{
     Packet,
-    build::{Builder, Context as BuildContext, Result as BuiltPacket},
-    decode::Decoder as Dissector,
+    build::{BuildContext, Builder, BuiltPacket},
+    decode::Dissector,
     fuzz as packet_fuzz,
     registry::Registry,
 };

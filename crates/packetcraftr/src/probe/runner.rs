@@ -8,7 +8,7 @@ use std::time::Duration;
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::frame::Frame;
-use packetcraftr_core::{decode::Result as DecodedPacket, diagnostic::Diagnostic};
+use packetcraftr_core::{decode::DecodedPacket, diagnostic::Diagnostic};
 
 use crate::clock::{Clock, check_deadline, rate_delay};
 use crate::{SentPacket, Stats};

@@ -12,7 +12,7 @@ use super::abi::{
     PCAP_ERROR_NO_SUCH_DEVICE, PCAP_ERROR_PERM_DENIED, PCAP_ERROR_PROMISC_PERM_DENIED,
     PCAP_ERROR_RFMON_NOTSUP,
 };
-use crate::{Error as LiveIoError, route::InterfaceId};
+use crate::{Error as LiveIoError, interface::Id as InterfaceId};
 
 pub(super) fn map_activation_error(
     interface: &InterfaceId,

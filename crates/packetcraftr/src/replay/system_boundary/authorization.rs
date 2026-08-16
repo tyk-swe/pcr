@@ -8,8 +8,8 @@ use std::sync::Arc;
 use packetcraftr_core::error::{Classification, Kind};
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::{
-    build::{Builder, Context as BuildContext, Mode as BuildMode, Options as BuildOptions},
-    decode::{Decoder, Options as DecodeOptions},
+    build::{BuildContext, BuildMode, BuildOptions, Builder},
+    decode::{DecodeOptions, Dissector},
     registry::Registry,
 };
 use packetcraftr_netio::link::Mode as LinkMode;
@@ -92,7 +92,7 @@ impl SystemAuthorizer {
                 )
             })?;
         }
-        let decoded = Decoder::new(Arc::clone(&self.registry))
+        let decoded = Dissector::new(Arc::clone(&self.registry))
             .decode(frame.clone(), DecodeOptions::default())
             .map_err(|source| {
                 BoundaryError::with_source(

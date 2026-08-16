@@ -7,7 +7,7 @@ use crate::Stats;
 use crate::probe::runner::{Batch, BatchExecution};
 use bytes::Bytes;
 use packetcraftr_core::frame::{Frame, LinkType};
-use packetcraftr_core::{Packet, decode::Result as DecodedPacket, layer::Raw, layout};
+use packetcraftr_core::{Packet, decode::DecodedPacket, layer::Raw, layout::PacketLayout};
 
 use super::exact_validation::validate_decoded_frame;
 use super::{
@@ -155,7 +155,7 @@ fn evidence_exact_frame_validation_preserves_failure_context() {
         packet: Packet::new(),
         original: Bytes::from_static(&[2]),
         frame,
-        layout: layout::Packet::default(),
+        layout: PacketLayout::default(),
         diagnostics: Vec::new(),
     };
     assert_eq!(
@@ -241,7 +241,7 @@ fn decoded_at(offset: Duration, bytes: &'static [u8]) -> DecodedPacket {
         packet: Packet::new(),
         original: frame.bytes().clone(),
         frame,
-        layout: layout::Packet::default(),
+        layout: PacketLayout::default(),
         diagnostics: Vec::new(),
     }
 }
@@ -252,7 +252,7 @@ fn decoded_without_timestamp(bytes: &'static [u8]) -> DecodedPacket {
         packet: Packet::new(),
         original: frame.bytes().clone(),
         frame,
-        layout: layout::Packet::default(),
+        layout: PacketLayout::default(),
         diagnostics: Vec::new(),
     }
 }

@@ -4,13 +4,13 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use super::super::super::codec::LayerCodec;
-use super::super::super::field::FieldKind;
-use super::super::super::layer::{LayerSchema, ProtocolId};
 use super::binding::{FilterFieldBinding, ReverseBinding};
 use super::builder::RegistryBuilder;
 use super::error::RegistryError;
 use super::lookup::ProtocolRegistry;
+use crate::codec::LayerCodec;
+use crate::field::FieldKind;
+use crate::layer::{LayerSchema, ProtocolId};
 
 impl RegistryBuilder {
     /// Finalizes the registry, resolving every binding it was given.

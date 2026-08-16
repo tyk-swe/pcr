@@ -1,7 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-pub(super) mod arguments;
+mod arguments;
+
+pub(super) use crate::command_options::SendArgs;
+pub(super) use arguments::AFTER_LONG_HELP;
 
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -14,7 +17,6 @@ use packetcraftr::{
     netio as net, output,
 };
 
-use self::arguments::SendArgs;
 use super::super::errors::CliError;
 use super::super::rendering::{
     emit_aggregate_with_stats, render_diagnostics_text, write_capture_file, write_plain_line,
@@ -38,9 +40,9 @@ pub(super) fn run(arguments: SendArgs, output: output::contract::Format) -> Resu
             packetcraftr::send::Options {
                 destination: request.destination,
                 plan: request.options,
-                build: core::build::Options {
+                build: core::build::BuildOptions {
                     mode: mode.into(),
-                    ..core::build::Options::default()
+                    ..core::build::BuildOptions::default()
                 },
                 allow_permissive_live,
             },
@@ -51,7 +53,7 @@ pub(super) fn run(arguments: SendArgs, output: output::contract::Format) -> Resu
         report.sent.route().plan.route.link_type,
     )?;
     let (result, diagnostics, stats) =
-        output::send::Result::try_from_report(report).map_err(CliError::classified)?;
+        output::send::SendCommandResult::try_from_report(report).map_err(CliError::classified)?;
     match output {
         output::contract::Format::Text => {
             write_stdout_line(format_args!(

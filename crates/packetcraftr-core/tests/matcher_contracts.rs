@@ -91,7 +91,7 @@ fn init_chunk(chunk_type: u8, initiate_tag: u32) -> Bytes {
     Bytes::from(chunk)
 }
 
-fn build_probe(network: NetworkVersion, transport: ProbeTransport) -> build::Result {
+fn build_probe(network: NetworkVersion, transport: ProbeTransport) -> build::BuiltPacket {
     let mut packet = match network {
         NetworkVersion::V4 => ipv4_envelope(IPV4_CLIENT, IPV4_SERVER),
         NetworkVersion::V6 => ipv6_envelope(IPV6_CLIENT, IPV6_SERVER),
@@ -136,9 +136,13 @@ fn build_probe(network: NetworkVersion, transport: ProbeTransport) -> build::Res
     build_packet(packet)
 }
 
-fn build_packet(packet: Packet) -> build::Result {
+fn build_packet(packet: Packet) -> build::BuiltPacket {
     build::Builder::new(registry())
-        .build(packet, build::Context::default(), build::Options::default())
+        .build(
+            packet,
+            build::BuildContext::default(),
+            build::BuildOptions::default(),
+        )
         .expect("packet fixture must build")
 }
 

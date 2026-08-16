@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::{
-    decode::{Options as DecodeOptions, Result as DecodedPacket},
+    decode::{DecodeOptions, DecodedPacket},
     template::DEFAULT_MAX_TEMPLATE_PACKETS,
 };
 use packetcraftr_netio::capture::{

@@ -10,8 +10,8 @@ use bytes::Bytes;
 use packetcraftr_core::protocol::link::Ethernet;
 use packetcraftr_core::{
     Packet,
-    build::{Context as BuildContext, Result as BuiltPacket},
-    field::Value as FieldValue,
+    build::{BuildContext, BuiltPacket},
+    field::FieldValue,
     registry::Registry,
     semantics::{self, BuiltinProtocol},
 };
@@ -331,7 +331,7 @@ pub(super) fn require_fixed_width_link_materialization(
 mod tests {
     use std::{net::Ipv4Addr, sync::Arc};
 
-    use packetcraftr_core::field::Wire as WireValue;
+    use packetcraftr_core::field::WireValue;
     use packetcraftr_core::layer::{Padding, Raw};
     use packetcraftr_core::protocol::{application::Dns, builtin, network::Ipv4, transport::Tcp};
 
@@ -351,7 +351,7 @@ mod tests {
             .build(
                 packet,
                 BuildContext::default(),
-                packetcraftr_core::build::Options::default(),
+                packetcraftr_core::build::BuildOptions::default(),
             )
             .expect("preliminary packet");
         assert_eq!(preliminary.packet.encoded_payload_length(0), Some(2));
@@ -366,7 +366,7 @@ mod tests {
             .build(
                 materialized.clone(),
                 BuildContext::default(),
-                packetcraftr_core::build::Options::default(),
+                packetcraftr_core::build::BuildOptions::default(),
             )
             .expect("materialized packet");
 
@@ -408,9 +408,9 @@ mod tests {
             ..Tcp::default()
         });
         packet.push(Dns::from_wire(query.clone()).expect("valid DNS query"));
-        let options = packetcraftr_core::build::Options {
-            mode: packetcraftr_core::build::Mode::Permissive,
-            ..packetcraftr_core::build::Options::default()
+        let options = packetcraftr_core::build::BuildOptions {
+            mode: packetcraftr_core::build::BuildMode::Permissive,
+            ..packetcraftr_core::build::BuildOptions::default()
         };
         let mut preliminary = builder
             .build(packet.clone(), BuildContext::default(), options.clone())
@@ -485,9 +485,9 @@ mod tests {
         });
         packet.push(Raw::new(Bytes::from_static(&[0xde, 0xad])));
         packet.push(Padding::after_layer(Bytes::from_static(&[0xbe]), 3));
-        let options = packetcraftr_core::build::Options {
-            mode: packetcraftr_core::build::Mode::Permissive,
-            ..packetcraftr_core::build::Options::default()
+        let options = packetcraftr_core::build::BuildOptions {
+            mode: packetcraftr_core::build::BuildMode::Permissive,
+            ..packetcraftr_core::build::BuildOptions::default()
         };
         let mut preliminary = builder
             .build(packet.clone(), BuildContext::default(), options.clone())

@@ -19,7 +19,7 @@ use packetcraftr_core::protocol::{
     transport::Tcp,
 };
 use packetcraftr_core::{
-    Packet, decode::Result as DecodedPacket, diagnostic::Diagnostic, layout::Packet as PacketLayout,
+    Packet, decode::DecodedPacket, diagnostic::Diagnostic, layout::PacketLayout,
 };
 
 use super::classification::classify_scan_response;

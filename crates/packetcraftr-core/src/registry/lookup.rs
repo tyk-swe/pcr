@@ -5,11 +5,11 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 use std::sync::Arc;
 
-use super::super::super::codec::LayerCodec;
-use super::super::super::layer::{LayerSchema, ProtocolId};
-use super::super::super::matcher::ResponseMatcher;
 use super::binding::{ChildBinding, Discriminator, FilterFieldBinding, ReverseBinding};
 use super::builder::RegistryBuilder;
+use crate::codec::LayerCodec;
+use crate::layer::{LayerSchema, ProtocolId};
+use crate::matcher::ResponseMatcher;
 
 #[derive(Clone, Default)]
 pub struct ProtocolRegistry {

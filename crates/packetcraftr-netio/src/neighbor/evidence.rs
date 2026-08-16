@@ -10,10 +10,10 @@ use bytes::Bytes;
 use super::error::{map_io_error, resolution_error};
 use super::options::NeighborResolutionOptions;
 use super::wire::is_unicast_mac;
-use crate::{
-    route::{MAX_NEIGHBOR_VLAN_TAGS, NeighborError, NeighborRequest},
-    transmit::IoSendReport,
+use super::{
+    Error as NeighborError, MAX_VLAN_TAGS as MAX_NEIGHBOR_VLAN_TAGS, Request as NeighborRequest,
 };
+use crate::transmit::IoSendReport;
 use packetcraftr_core::frame::{Frame, LinkType};
 
 #[cfg(test)]
@@ -147,8 +147,11 @@ mod tests {
     use std::time::{Duration, SystemTime};
 
     use super::*;
-    use crate::link::MacAddress;
-    use crate::route::{InterfaceId, NeighborVlanKind, NeighborVlanTag};
+    use crate::{
+        interface::Id as InterfaceId,
+        link::MacAddress,
+        neighbor::{VlanKind as NeighborVlanKind, VlanTag as NeighborVlanTag},
+    };
 
     fn request() -> NeighborRequest {
         NeighborRequest {

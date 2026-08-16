@@ -9,7 +9,7 @@ use super::live_capture::NativeCaptureParts;
 use crate::{
     Error as LiveIoError,
     capture::CaptureQueueLimits,
-    route::InterfaceId,
+    interface::Id as InterfaceId,
     transmit::{IoSendReport, Layer2Frame},
 };
 

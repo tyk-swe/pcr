@@ -7,8 +7,8 @@ use std::sync::{Arc, OnceLock};
 
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::{
-    build::Result as BuiltPacket,
-    decode::{Decoder as Dissector, Options as DecodeOptions},
+    build::BuiltPacket,
+    decode::{DecodeOptions, Dissector},
     registry::Registry,
 };
 use packetcraftr_netio::{

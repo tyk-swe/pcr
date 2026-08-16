@@ -111,6 +111,7 @@ impl From<InterfaceId> for RouteInterfaceOutput {
 pub enum RouteSelectionOutput {
     Local,
     OnLink,
+    Broadcast,
     Gateway,
     InterfaceOnly,
 }
@@ -120,6 +121,7 @@ impl From<packetcraftr_netio::route::SelectionReason> for RouteSelectionOutput {
         match value {
             packetcraftr_netio::route::SelectionReason::Local => Self::Local,
             packetcraftr_netio::route::SelectionReason::OnLink => Self::OnLink,
+            packetcraftr_netio::route::SelectionReason::Broadcast => Self::Broadcast,
             packetcraftr_netio::route::SelectionReason::Gateway => Self::Gateway,
             packetcraftr_netio::route::SelectionReason::InterfaceOnly => Self::InterfaceOnly,
         }

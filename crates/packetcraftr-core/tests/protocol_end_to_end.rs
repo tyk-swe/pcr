@@ -24,7 +24,7 @@ use packetcraftr_core::protocol::transport::{Sctp, Tcp, Udp};
 use packetcraftr_core::protocol::tunnel::{
     Ah, Erspan, Esp, Geneve, L2tpv3, Mpls, Ppp, Pppoe, Vxlan,
 };
-use packetcraftr_core::{Packet, build, decode};
+use packetcraftr_core::{Packet, build, decode, expression};
 
 fn registry() -> Arc<packetcraftr_core::registry::Registry> {
     Arc::new(builtin::registry().expect("built-in registry should be valid"))
@@ -64,6 +64,267 @@ fn ipv6(source: &str, destination: &str) -> Ipv6 {
         destination: destination.parse().expect("destination address"),
         ..Ipv6::default()
     }
+}
+
+fn ipv4_source_route(option: u8, pointer: u8, addresses: &[Ipv4Addr]) -> Bytes {
+    let length = 3usize
+        .checked_add(addresses.len().checked_mul(4).expect("route length fits"))
+        .expect("route length fits");
+    let mut bytes = Vec::with_capacity(length);
+    bytes.push(option);
+    bytes.push(u8::try_from(length).expect("IPv4 option length fits u8"));
+    bytes.push(pointer);
+    for address in addresses {
+        bytes.extend_from_slice(&address.octets());
+    }
+    Bytes::from(bytes)
+}
+
+fn source_routed_ipv4(option: u8, pointer: u8, addresses: &[Ipv4Addr]) -> Ipv4 {
+    Ipv4 {
+        source: Ipv4Addr::new(192, 0, 2, 10),
+        destination: Ipv4Addr::new(203, 0, 113, 10),
+        options: ipv4_source_route(option, pointer, addresses),
+        ..Ipv4::default()
+    }
+}
+
+fn known_tcp() -> Tcp {
+    Tcp {
+        source_port: 12_345,
+        destination_port: 80,
+        sequence: 1,
+        window: 0xfaf0,
+        ..Tcp::default()
+    }
+}
+
+fn known_udp() -> Udp {
+    Udp {
+        source_port: 12_345,
+        destination_port: 53,
+        ..Udp::default()
+    }
+}
+
+#[test]
+fn ipv4_source_route_decode_accepts_known_transport_checksums() {
+    let vectors = [
+        (
+            "tcp",
+            "decode.tcp_checksum",
+            "47000030123400004006cc3bc000020acb00710a830704cb007114003039005000000001000000005002faf086480000",
+        ),
+        (
+            "udp",
+            "decode.udp_checksum",
+            "4700002c123500004011cc33c000020acb00710a830704cb00711400303900350010902a5043522d4c535252",
+        ),
+    ];
+
+    for (transport, checksum_code, vector) in vectors {
+        let bytes = expression::decode_hex(vector).expect("known vector is valid hex");
+        let frame = Frame::new(SystemTime::UNIX_EPOCH, LinkType::RAW, bytes)
+            .expect("known DLT_RAW vector is a valid frame");
+        let decoded = decode::Decoder::new(registry())
+            .decode(frame, decode::Options::default())
+            .expect("known DLT_RAW vector decodes");
+
+        assert!(
+            !decoded
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == checksum_code),
+            "{transport} checksum diagnostics: {:?}",
+            decoded.diagnostics
+        );
+    }
+}
+
+#[test]
+fn ipv4_source_route_encode_matches_known_transport_checksums() {
+    let registry = registry();
+    let builder = build::Builder::new(Arc::clone(&registry));
+    let final_destination = Ipv4Addr::new(203, 0, 113, 20);
+
+    let mut tcp_packet = Packet::new();
+    tcp_packet.push(Ipv4 {
+        identification: 0x1234,
+        ..source_routed_ipv4(131, 4, &[final_destination])
+    });
+    tcp_packet.push(known_tcp());
+    let tcp = builder
+        .build(
+            tcp_packet,
+            build::Context::default(),
+            build::Options::default(),
+        )
+        .expect("known TCP source-route packet builds");
+    assert_eq!(
+        tcp.packet
+            .get::<Tcp>()
+            .and_then(|tcp| tcp.checksum.exact())
+            .copied(),
+        Some(0x8648)
+    );
+
+    let mut udp_packet = Packet::new();
+    udp_packet.push(Ipv4 {
+        identification: 0x1235,
+        ..source_routed_ipv4(131, 4, &[final_destination])
+    });
+    udp_packet.push(known_udp());
+    udp_packet.push(Raw::new(b"PCR-LSRR".to_vec()));
+    let udp = builder
+        .build(
+            udp_packet,
+            build::Context::default(),
+            build::Options {
+                mode: build::Mode::Permissive,
+                ..build::Options::default()
+            },
+        )
+        .expect("known UDP source-route packet builds");
+    assert_eq!(
+        udp.packet
+            .get::<Udp>()
+            .and_then(|udp| udp.checksum.exact())
+            .copied(),
+        Some(0x902a)
+    );
+}
+
+#[test]
+fn ipv4_source_route_transport_checksums_cover_route_states_and_nearest_envelope() {
+    let registry = registry();
+    let builder = build::Builder::new(Arc::clone(&registry));
+    let first_remaining = Ipv4Addr::new(203, 0, 113, 20);
+    let final_destination = Ipv4Addr::new(203, 0, 113, 30);
+
+    let mut tcp_multiple_lsrr = Packet::new();
+    tcp_multiple_lsrr.push(source_routed_ipv4(
+        131,
+        4,
+        &[first_remaining, final_destination],
+    ));
+    tcp_multiple_lsrr.push(known_tcp());
+    let tcp_multiple_lsrr = builder
+        .build(
+            tcp_multiple_lsrr,
+            build::Context::default(),
+            build::Options::default(),
+        )
+        .expect("TCP LSRR with multiple remaining addresses builds");
+    assert_eq!(
+        tcp_multiple_lsrr
+            .packet
+            .get::<Tcp>()
+            .and_then(|tcp| tcp.checksum.exact())
+            .copied(),
+        Some(0x863e)
+    );
+
+    let mut udp_multiple_ssrr = Packet::new();
+    udp_multiple_ssrr.push(source_routed_ipv4(
+        137,
+        4,
+        &[first_remaining, final_destination],
+    ));
+    udp_multiple_ssrr.push(known_udp());
+    udp_multiple_ssrr.push(Raw::new(b"PCR-LSRR".to_vec()));
+    let udp_multiple_ssrr = builder
+        .build(
+            udp_multiple_ssrr,
+            build::Context::default(),
+            build::Options {
+                mode: build::Mode::Permissive,
+                ..build::Options::default()
+            },
+        )
+        .expect("UDP SSRR with multiple remaining addresses builds");
+    assert_eq!(
+        udp_multiple_ssrr
+            .packet
+            .get::<Udp>()
+            .and_then(|udp| udp.checksum.exact())
+            .copied(),
+        Some(0x9020)
+    );
+
+    let mut tcp_completed_ssrr = Packet::new();
+    tcp_completed_ssrr.push(source_routed_ipv4(137, 8, &[first_remaining]));
+    tcp_completed_ssrr.push(known_tcp());
+    let tcp_completed_ssrr = builder
+        .build(
+            tcp_completed_ssrr,
+            build::Context::default(),
+            build::Options::default(),
+        )
+        .expect("TCP completed SSRR builds");
+    assert_eq!(
+        tcp_completed_ssrr
+            .packet
+            .get::<Tcp>()
+            .and_then(|tcp| tcp.checksum.exact())
+            .copied(),
+        Some(0x8652)
+    );
+
+    let mut udp_completed_lsrr = Packet::new();
+    udp_completed_lsrr.push(source_routed_ipv4(131, 8, &[first_remaining]));
+    udp_completed_lsrr.push(known_udp());
+    udp_completed_lsrr.push(Raw::new(b"PCR-LSRR".to_vec()));
+    let udp_completed_lsrr = builder
+        .build(
+            udp_completed_lsrr,
+            build::Context::default(),
+            build::Options {
+                mode: build::Mode::Permissive,
+                ..build::Options::default()
+            },
+        )
+        .expect("UDP completed LSRR builds");
+    assert_eq!(
+        udp_completed_lsrr
+            .packet
+            .get::<Udp>()
+            .and_then(|udp| udp.checksum.exact())
+            .copied(),
+        Some(0x9034)
+    );
+
+    let mut nested = Packet::new();
+    nested.push(Ipv4 {
+        source: Ipv4Addr::new(10, 0, 0, 1),
+        destination: Ipv4Addr::new(10, 0, 0, 2),
+        options: ipv4_source_route(131, 4, &[Ipv4Addr::new(10, 0, 0, 9)]),
+        ..Ipv4::default()
+    });
+    nested.push(source_routed_ipv4(137, 8, &[first_remaining]));
+    nested.push(known_tcp());
+    let nested = builder
+        .build(nested, build::Context::default(), build::Options::default())
+        .expect("nested IPv4 source-route packet builds");
+    assert_eq!(
+        nested
+            .packet
+            .get::<Tcp>()
+            .and_then(|tcp| tcp.checksum.exact())
+            .copied(),
+        Some(0x8652),
+        "the completed nearest IPv4 route must beat the outer remaining route"
+    );
+    let decoded = decode::Decoder::new(registry)
+        .decode_with_root(nested.bytes, "ipv4".into(), decode::Options::default())
+        .expect("nested IPv4 source-route packet decodes");
+    assert!(
+        !decoded
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "decode.tcp_checksum"),
+        "nested TCP checksum diagnostics: {:?}",
+        decoded.diagnostics
+    );
 }
 
 #[test]

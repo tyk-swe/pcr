@@ -57,6 +57,12 @@ fn current_schema_and_published_examples_use_output_v1() {
         schema["$defs"]["baseEnvelope"]["properties"]["schema"]["const"],
         SCHEMA_V1
     );
+    assert!(
+        schema["$defs"]["routeDecision"]["properties"]["selection_reason"]["enum"]
+            .as_array()
+            .expect("route selection reasons are an enum")
+            .contains(&Value::String("broadcast".to_owned()))
+    );
 
     for document in [
         include_str!("../../../examples/documents/output-build-success.json"),

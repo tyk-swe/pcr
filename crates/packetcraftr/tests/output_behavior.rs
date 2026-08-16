@@ -397,6 +397,7 @@ fn interface_and_route_outputs_are_stable_and_sorted() {
     for (reason, expected) in [
         (SelectionReason::Local, RouteSelectionOutput::Local),
         (SelectionReason::OnLink, RouteSelectionOutput::OnLink),
+        (SelectionReason::Broadcast, RouteSelectionOutput::Broadcast),
         (SelectionReason::Gateway, RouteSelectionOutput::Gateway),
         (
             SelectionReason::InterfaceOnly,
@@ -405,6 +406,10 @@ fn interface_and_route_outputs_are_stable_and_sorted() {
     ] {
         assert_eq!(RouteSelectionOutput::from(reason), expected);
     }
+    assert_eq!(
+        serde_json::to_value(RouteSelectionOutput::Broadcast).expect("route reason serializes"),
+        json!("broadcast")
+    );
     for (kind, expected) in [
         (VlanKind::Ieee8021Q, RouteVlanKindOutput::Ieee8021Q),
         (VlanKind::Ieee8021Ad, RouteVlanKindOutput::Ieee8021Ad),

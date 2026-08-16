@@ -8,6 +8,7 @@ use std::net::IpAddr;
 use crate::{
     codec::{CodecError, LayerEncodeContext, NetworkEnvelope},
     layer::Layer,
+    semantics::ipv4_source_route_destination,
 };
 
 use super::super::common::{invalid, network_from_addresses};
@@ -42,7 +43,13 @@ pub(crate) fn encode_network(
                 Some(IpAddr::V4(destination)) if inherit_destination => destination,
                 _ => ipv4.destination,
             };
-            return Ok(network_from_addresses(source.into(), destination.into()));
+            let pseudo_header_destination =
+                ipv4_source_route_destination(destination, &ipv4.options)
+                    .map_err(|error| invalid("ipv4", error.to_string()))?;
+            return Ok(network_from_addresses(
+                source.into(),
+                pseudo_header_destination.into(),
+            ));
         }
         if let Some(ipv6) = layer.as_any().downcast_ref::<Ipv6>() {
             let inherit_context = is_outer_network_layer(context.packet, index);

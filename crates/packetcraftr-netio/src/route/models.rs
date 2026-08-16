@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr};
 
 use serde::{Deserialize, Serialize};
 
@@ -29,6 +29,7 @@ pub enum DestinationScope {
 pub enum RouteSelectionReason {
     Local,
     OnLink,
+    Broadcast,
     Gateway,
     InterfaceOnly,
 }
@@ -47,6 +48,15 @@ pub struct RouteDecision {
     pub mtu: u32,
     pub capability: Capability,
     pub link_type: LinkType,
+}
+
+impl RouteDecision {
+    pub(crate) fn is_ipv4_broadcast(&self, destination: Option<IpAddr>) -> bool {
+        self.next_hop.is_none()
+            && matches!(destination, Some(IpAddr::V4(address)) if
+                address == Ipv4Addr::BROADCAST
+                    || self.selection_reason == RouteSelectionReason::Broadcast)
+    }
 }
 
 pub trait RouteProvider: Send + Sync {

@@ -137,6 +137,40 @@ fn duplicate_acknowledgments_require_outstanding_payload_and_keep_order() {
 }
 
 #[test]
+fn duplicate_acknowledgment_requires_captured_reverse_payload() {
+    let segments: Vec<(TcpSpec, &[u8])> = vec![
+        (client(1_000, 2_000, Tcp::ACK, 8_192), b""),
+        (client(1_000, 2_000, Tcp::ACK, 8_192), b""),
+    ];
+
+    assert_expert(&segments, Vec::new(), 0, 0, 0);
+}
+
+#[test]
+fn unreportable_duplicate_acknowledgments_do_not_advance_the_count() {
+    let segments: Vec<(TcpSpec, &[u8])> = vec![
+        (client(1_000, 2_000, Tcp::ACK, 8_192), b""),
+        (client(1_000, 2_000, Tcp::ACK, 8_192), b""),
+        (client(1_000, 2_000, Tcp::ACK, 8_192), b""),
+        (server(2_000, 1_000, Tcp::ACK, 8_192), b"x"),
+        (client(1_000, 2_000, Tcp::ACK, 8_192), b""),
+    ];
+
+    assert_expert(
+        &segments,
+        vec![finding(
+            DiagnosticSeverity::Warning,
+            "tcp.duplicate_ack",
+            5,
+            "192.0.2.1:40000 repeats acknowledgment 2000 (duplicate #1)",
+        )],
+        0,
+        1,
+        0,
+    );
+}
+
+#[test]
 fn keep_alive_and_zero_window_probe_shapes_remain_distinct() {
     let segments: Vec<(TcpSpec, &[u8])> = vec![
         (client(100, 0, Tcp::SYN, 100), b""),

@@ -33,6 +33,25 @@ pub(super) struct Deduplicator {
 }
 
 impl Deduplicator {
+    pub(super) fn mark_evicted(&mut self, flow: &FlowKey, client: &FlowKey) {
+        let (delivered, syn_base, closed) = if flow == client {
+            (
+                &mut self.client_delivered,
+                &mut self.client_syn_base,
+                &mut self.client_closed,
+            )
+        } else {
+            (
+                &mut self.server_delivered,
+                &mut self.server_syn_base,
+                &mut self.server_closed,
+            )
+        };
+        *delivered = None;
+        *syn_base = None;
+        *closed = false;
+    }
+
     pub(super) fn mark_closed(&mut self, flow: &FlowKey, client: &FlowKey) {
         let closed = if flow == client {
             &mut self.client_closed
@@ -42,35 +61,26 @@ impl Deduplicator {
         *closed = true;
     }
 
-    pub(super) fn observe_syn(
-        &mut self,
-        flow: &FlowKey,
-        client: &FlowKey,
-        tcp: &Tcp,
-        client_evicted: bool,
-        server_evicted: bool,
-    ) {
+    pub(super) fn observe_syn(&mut self, flow: &FlowKey, client: &FlowKey, tcp: &Tcp) {
         if tcp.flags & Tcp::SYN != 0 {
             let first = tcp.sequence.wrapping_add(1);
-            let (recorded, closed, evicted) = if flow == client {
+            let (recorded, closed, delivered) = if flow == client {
                 (
                     &mut self.client_syn_base,
-                    self.client_closed,
-                    client_evicted,
+                    &mut self.client_closed,
+                    &mut self.client_delivered,
                 )
             } else {
                 (
                     &mut self.server_syn_base,
-                    self.server_closed,
-                    server_evicted,
+                    &mut self.server_closed,
+                    &mut self.server_delivered,
                 )
             };
-            if *recorded != Some(first) || closed || evicted {
+            if *recorded != Some(first) || *closed {
                 *recorded = Some(first);
-                self.client_delivered = None;
-                self.server_delivered = None;
-                self.client_closed = false;
-                self.server_closed = false;
+                *delivered = None;
+                *closed = false;
             }
         }
     }

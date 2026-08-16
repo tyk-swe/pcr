@@ -2924,6 +2924,7 @@
           "enum": [
             "local",
             "on_link",
+            "broadcast",
             "gateway",
             "interface_only"
           ]

@@ -11,6 +11,19 @@ pub(super) struct ParsedIpv4SourceRoutes {
     pub(super) remaining: Vec<Ipv4Addr>,
 }
 
+impl ParsedIpv4SourceRoutes {
+    pub(super) fn final_destination(&self, header_destination: Ipv4Addr) -> Ipv4Addr {
+        self.remaining.last().copied().unwrap_or(header_destination)
+    }
+}
+
+pub(crate) fn ipv4_source_route_destination(
+    header_destination: Ipv4Addr,
+    options: &[u8],
+) -> Result<Ipv4Addr, SemanticError> {
+    Ok(parse_ipv4_source_routes(options)?.final_destination(header_destination))
+}
+
 pub(super) fn parse_ipv4_source_routes(
     options: &[u8],
 ) -> Result<ParsedIpv4SourceRoutes, SemanticError> {

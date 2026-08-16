@@ -78,6 +78,7 @@ pub(in crate::platform) fn route(
             index: output_index,
         })?;
     let local = response.header.rtm_flags & libc::RTF_LOCAL != 0;
+    let broadcast = response.header.rtm_flags & libc::RTF_BROADCAST != 0;
     let next_hop = response.gateway.filter(|address| !address.is_unspecified());
     finish_route(
         destination,
@@ -93,6 +94,8 @@ pub(in crate::platform) fn route(
                 .then_some(response.header.rtm_rmx.rmx_mtu),
             selection_reason: if local {
                 RouteSelectionReason::Local
+            } else if broadcast {
+                RouteSelectionReason::Broadcast
             } else if next_hop.is_some() {
                 RouteSelectionReason::Gateway
             } else {

@@ -17,6 +17,7 @@ use crate::{
     field::{FieldValue, WireValue},
     layer::{Layer, ProtocolId, reflective_layer},
     registry::Discriminator,
+    semantics::ipv4_source_route_destination,
 };
 
 use super::super::common::{
@@ -308,6 +309,9 @@ impl LayerCodec for Ipv4Codec {
         let next = input[9];
         let source = Ipv4Addr::new(input[12], input[13], input[14], input[15]);
         let destination = Ipv4Addr::new(input[16], input[17], input[18], input[19]);
+        let options = &input[20..header_len];
+        let pseudo_header_destination = ipv4_source_route_destination(destination, options)
+            .map_err(|error| invalid("ipv4", error.to_string()))?;
         let mut diagnostics = Vec::new();
         if context.verify_checksums && checksum(&input[..header_len]) != 0 {
             diagnostics.push(
@@ -340,7 +344,7 @@ impl LayerCodec for Ipv4Codec {
                 checksum: WireValue::Exact(u16::from_be_bytes([input[10], input[11]])),
                 source,
                 destination,
-                options: Bytes::copy_from_slice(&input[20..header_len]),
+                options: Bytes::copy_from_slice(options),
             }),
             consumed: header_len,
             payload_len,
@@ -352,7 +356,10 @@ impl LayerCodec for Ipv4Codec {
             fields: ipv4_layout(header_len),
             diagnostics,
             stop: payload_len == 0,
-            network: Some(network_from_addresses(source.into(), destination.into())),
+            network: Some(network_from_addresses(
+                source.into(),
+                pseudo_header_destination.into(),
+            )),
         })
     }
 

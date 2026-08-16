@@ -32,10 +32,18 @@ pub fn plan<P: RouteProvider>(
     validate_route_contract(&route, options)?;
     let mode = select_link_mode(&intent, &route, options.link_mode)?;
     let sources = select_sources(&intent, &route)?;
-    let link = select_link(packet, &intent, &route, mode, sources.neighbor)?;
+    let ipv4_broadcast = route.is_ipv4_broadcast(intent.lookup_destination);
+    let link = select_link(
+        packet,
+        &intent,
+        &route,
+        mode,
+        sources.neighbor,
+        ipv4_broadcast,
+    )?;
 
     Ok(PlannedRoute {
-        neighbor_target: if mode == Mode::Layer2 {
+        neighbor_target: if mode == Mode::Layer2 && !ipv4_broadcast {
             intent
                 .lookup_destination
                 .map(|destination| route.next_hop.unwrap_or(destination))
@@ -324,12 +332,14 @@ fn select_link(
     route: &RouteDecision,
     mode: Mode,
     neighbor_source: Option<IpAddr>,
+    ipv4_broadcast: bool,
 ) -> Result<SelectedLink, PlanError> {
     let explicit_destination_mac = outer_ethernet_mac(packet, semantics::DESTINATION);
     let explicit_source_mac = outer_ethernet_mac(packet, semantics::SOURCE);
     let (arp_source_mac, arp_destination_mac) = arp_link_macs(packet);
     let destination_mac = explicit_destination_mac
         .or(arp_destination_mac)
+        .or_else(|| ipv4_broadcast.then_some(MacAddress([0xff; 6])))
         .or_else(|| intent.lookup_destination.and_then(multicast_mac));
     if mode == Mode::Layer2 && destination_mac.is_none() {
         let Some(lookup_destination) = intent.lookup_destination else {

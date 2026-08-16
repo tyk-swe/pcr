@@ -30,28 +30,29 @@ pub(super) fn observe_duplicate(
     } = *observation;
 
     if ack && payload_len == 0 && !keep_alive && !syn && !fin && !rst {
-        let outstanding = flows.get(reverse).is_none_or(|peer| {
+        let outstanding = flows.get(reverse).is_some_and(|peer| {
             peer.payload_next.is_some_and(|next| {
                 let delta = next.wrapping_sub(tcp.acknowledgment);
                 delta > 0 && delta < 0x8000_0000
             })
         });
         let sent = flows.entry(flow.clone()).or_default();
-        if sent.acknowledgment == Some(tcp.acknowledgment) && sent.window == Some(tcp.window) {
+        if outstanding
+            && sent.acknowledgment == Some(tcp.acknowledgment)
+            && sent.window == Some(tcp.window)
+        {
             sent.duplicate_acks += 1;
             let count = sent.duplicate_acks;
-            if outstanding {
-                findings.push(new_finding(
-                    DiagnosticSeverity::Warning,
-                    "tcp.duplicate_ack",
-                    number,
-                    stream,
-                    format!(
-                        "{}:{} repeats acknowledgment {} (duplicate #{count})",
-                        flow.flow.source, flow.flow.source_port, tcp.acknowledgment
-                    ),
-                ));
-            }
+            findings.push(new_finding(
+                DiagnosticSeverity::Warning,
+                "tcp.duplicate_ack",
+                number,
+                stream,
+                format!(
+                    "{}:{} repeats acknowledgment {} (duplicate #{count})",
+                    flow.flow.source, flow.flow.source_port, tcp.acknowledgment
+                ),
+            ));
         } else {
             sent.duplicate_acks = 0;
         }

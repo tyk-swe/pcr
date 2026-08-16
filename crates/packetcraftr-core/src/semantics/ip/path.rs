@@ -110,6 +110,10 @@ pub(super) fn ip_path_at(
                 ));
             }
         };
+        let IpAddr::V4(header_destination_v4) = header_destination else {
+            unreachable!("IPv4 field extraction returned a different family");
+        };
+        let final_destination = IpAddr::V4(source_route.final_destination(header_destination_v4));
         let declared_route_destinations = source_route
             .declared
             .into_iter()
@@ -117,10 +121,6 @@ pub(super) fn ip_path_at(
             .collect::<Vec<_>>();
         let mut visited_destinations = vec![header_destination];
         visited_destinations.extend(source_route.remaining.into_iter().map(IpAddr::V4));
-        let final_destination = visited_destinations
-            .last()
-            .copied()
-            .expect("IPv4 header destination is always present");
         return Ok(IpPath {
             source,
             header_destination,

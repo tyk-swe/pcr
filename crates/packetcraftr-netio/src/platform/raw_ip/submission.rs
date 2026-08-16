@@ -12,7 +12,7 @@ use std::num::NonZeroU32;
 use std::os::windows::io::AsRawSocket;
 use std::{
     io,
-    net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV6},
+    net::{IpAddr, SocketAddr, SocketAddrV6},
 };
 
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
@@ -34,6 +34,40 @@ pub(super) struct RawSocketError {
     pub(super) source: io::Error,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RawSocketOption {
+    Ipv4HeaderIncluded,
+    Ipv4Broadcast,
+    Ipv6HeaderIncluded,
+}
+
+impl RawSocketOption {
+    fn operation(self) -> &'static str {
+        match self {
+            Self::Ipv4HeaderIncluded => "enabling IPv4 header inclusion",
+            Self::Ipv4Broadcast => "enabling IPv4 broadcast permission",
+            Self::Ipv6HeaderIncluded => "enabling IPv6 header inclusion",
+        }
+    }
+}
+
+fn configure_socket_options(
+    family: IpFamily,
+    mut apply: impl FnMut(RawSocketOption) -> io::Result<()>,
+) -> Result<(), RawSocketError> {
+    let options: &[RawSocketOption] = match family {
+        IpFamily::V4 => &[
+            RawSocketOption::Ipv4HeaderIncluded,
+            RawSocketOption::Ipv4Broadcast,
+        ],
+        IpFamily::V6 => &[RawSocketOption::Ipv6HeaderIncluded],
+    };
+    for option in options {
+        apply(*option).map_err(|source| raw_error(option.operation(), source))?;
+    }
+    Ok(())
+}
+
 pub(super) fn send(packet: &PreparedRawIp) -> Result<usize, RawSocketError> {
     let domain = match packet.family {
         IpFamily::V4 => Domain::IPV4,
@@ -41,21 +75,13 @@ pub(super) fn send(packet: &PreparedRawIp) -> Result<usize, RawSocketError> {
     };
     let socket = Socket::new(domain, Type::RAW, Some(Protocol::from(IPPROTO_RAW)))
         .map_err(|source| raw_error("opening a raw IP socket", source))?;
-    match packet.family {
-        IpFamily::V4 => socket
-            .set_header_included_v4(true)
-            .map_err(|source| raw_error("enabling IPv4 header inclusion", source))?,
-        IpFamily::V6 => socket
-            .set_header_included_v6(true)
-            .map_err(|source| raw_error("enabling IPv6 header inclusion", source))?,
-    }
+    configure_socket_options(packet.family, |option| match option {
+        RawSocketOption::Ipv4HeaderIncluded => socket.set_header_included_v4(true),
+        RawSocketOption::Ipv4Broadcast => socket.set_broadcast(true),
+        RawSocketOption::Ipv6HeaderIncluded => socket.set_header_included_v6(true),
+    })?;
 
     bind_interface(&socket, packet)?;
-    if packet.destination == IpAddr::V4(Ipv4Addr::BROADCAST) {
-        socket
-            .set_broadcast(true)
-            .map_err(|source| raw_error("enabling IPv4 broadcast", source))?;
-    }
     socket
         .send_to(
             &packet.submission,
@@ -179,9 +205,99 @@ pub(super) fn map_raw_error(interface: &InterfaceId, error: RawSocketError) -> L
 
 #[cfg(test)]
 mod tests {
-    use std::net::Ipv6Addr;
+    use std::net::{Ipv4Addr, Ipv6Addr};
 
     use super::*;
+
+    #[test]
+    fn raw_socket_option_policy_enables_broadcast_for_every_ipv4_socket_before_send() {
+        #[derive(Debug, PartialEq, Eq)]
+        enum Operation {
+            Option(RawSocketOption),
+            Send,
+        }
+
+        let cases = [
+            (
+                "unicast IPv4",
+                IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
+                vec![
+                    Operation::Option(RawSocketOption::Ipv4HeaderIncluded),
+                    Operation::Option(RawSocketOption::Ipv4Broadcast),
+                    Operation::Send,
+                ],
+            ),
+            (
+                "limited IPv4 broadcast",
+                IpAddr::V4(Ipv4Addr::BROADCAST),
+                vec![
+                    Operation::Option(RawSocketOption::Ipv4HeaderIncluded),
+                    Operation::Option(RawSocketOption::Ipv4Broadcast),
+                    Operation::Send,
+                ],
+            ),
+            (
+                "subnet-directed IPv4 broadcast",
+                IpAddr::V4(Ipv4Addr::new(10, 23, 0, 255)),
+                vec![
+                    Operation::Option(RawSocketOption::Ipv4HeaderIncluded),
+                    Operation::Option(RawSocketOption::Ipv4Broadcast),
+                    Operation::Send,
+                ],
+            ),
+            (
+                "IPv6",
+                IpAddr::V6(Ipv6Addr::LOCALHOST),
+                vec![
+                    Operation::Option(RawSocketOption::Ipv6HeaderIncluded),
+                    Operation::Send,
+                ],
+            ),
+        ];
+
+        for (name, destination, expected) in cases {
+            let family = if destination.is_ipv4() {
+                IpFamily::V4
+            } else {
+                IpFamily::V6
+            };
+            let mut operations = Vec::new();
+            configure_socket_options(family, |option| {
+                operations.push(Operation::Option(option));
+                Ok(())
+            })
+            .expect("fixture socket options succeed");
+            operations.push(Operation::Send);
+            assert_eq!(operations, expected, "{name}");
+        }
+    }
+
+    #[test]
+    fn raw_socket_option_failure_preserves_the_failed_operation() {
+        let mut attempted = Vec::new();
+        let error = configure_socket_options(IpFamily::V4, |option| {
+            attempted.push(option);
+            if option == RawSocketOption::Ipv4Broadcast {
+                Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "fixture option failure",
+                ))
+            } else {
+                Ok(())
+            }
+        })
+        .expect_err("broadcast option failure is returned");
+
+        assert_eq!(
+            attempted,
+            [
+                RawSocketOption::Ipv4HeaderIncluded,
+                RawSocketOption::Ipv4Broadcast,
+            ]
+        );
+        assert_eq!(error.operation, "enabling IPv4 broadcast permission");
+        assert_eq!(error.source.kind(), io::ErrorKind::PermissionDenied);
+    }
 
     #[test]
     fn socket_address_scopes_only_ipv6_link_local_and_multicast_destinations() {

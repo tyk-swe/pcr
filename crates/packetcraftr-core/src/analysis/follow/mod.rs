@@ -121,8 +121,6 @@ impl FollowCollector {
         // direction's generation, whose delivery edge would otherwise trim
         // a successor that reuses earlier sequence numbers; a clean close
         // evicts nothing, so closing-segment deduplication stays armed.
-        let mut client_evicted = false;
-        let mut server_evicted = false;
         if let Some(client) = self.client_flow.clone() {
             for event in record.tcp_events {
                 match event {
@@ -131,11 +129,7 @@ impl FollowCollector {
                         pending_bytes,
                     } if *flow == client || *flow == client.reverse() => {
                         self.summary.undelivered_bytes += *pending_bytes as u64;
-                        if *flow == client {
-                            client_evicted = true;
-                        } else {
-                            server_evicted = true;
-                        }
+                        self.dedup.mark_evicted(flow, &client);
                     }
                     TcpEvent::Closed { flow, reset: false }
                         if *flow == client || *flow == client.reverse() =>
@@ -164,13 +158,7 @@ impl FollowCollector {
             .clone()
             .expect("client flow was established");
 
-        self.dedup.observe_syn(
-            flow,
-            &client,
-            transport.layer,
-            client_evicted,
-            server_evicted,
-        );
+        self.dedup.observe_syn(flow, &client, transport.layer);
         self.summary.frames += 1;
         let mut chunks = Vec::new();
         for event in record.tcp_events {

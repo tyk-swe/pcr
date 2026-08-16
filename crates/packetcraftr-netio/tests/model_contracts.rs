@@ -10,7 +10,10 @@ use std::sync::{
 use std::time::{Duration, Instant, SystemTime};
 
 use bytes::Bytes;
-use packetcraftr_core::protocol::{link::Ethernet, network::Ipv4};
+use packetcraftr_core::protocol::{
+    link::Ethernet,
+    network::{Ipv4, Ipv6},
+};
 use packetcraftr_core::{Packet, layer::Raw};
 use packetcraftr_core::{
     error::{Classified, Kind},
@@ -453,6 +456,206 @@ fn route_model_helpers_cover_neighbor_and_vlan_contracts() {
     plan.mode = Mode::Layer3;
     plan.lookup_destination = Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9)));
     assert!(!plan.needs_neighbor_resolution());
+}
+
+#[test]
+fn planner_uses_ethernet_broadcast_without_a_neighbor_for_limited_ipv4_broadcast() {
+    let destination = Ipv4Addr::BROADCAST;
+    let mut packet = Packet::new();
+    packet.push(Ipv4 {
+        source: Ipv4Addr::new(10, 23, 0, 2),
+        destination,
+        ..Ipv4::default()
+    });
+    packet.push(Raw::new(vec![1_u8]));
+    let mut route = decision(Capability::Layer2And3);
+    route.selected_address = Some(IpAddr::V4(Ipv4Addr::new(10, 23, 0, 2)));
+    route.next_hop = None;
+    route.selection_reason = SelectionReason::OnLink;
+
+    let plan = plan_route(
+        &packet,
+        None,
+        &Options {
+            link_mode: Mode::Layer2,
+            ..Options::default()
+        },
+        &routes(Ok(route)),
+    )
+    .expect("limited IPv4 broadcast plans on Layer 2");
+
+    assert_eq!(plan.destination_mac, Some(MacAddress([0xff; 6])));
+    assert_eq!(plan.neighbor_target, None);
+    assert!(!plan.needs_neighbor_resolution());
+}
+
+#[test]
+fn planner_keeps_broadcast_multicast_explicit_and_gateway_link_semantics_distinct() {
+    let source = Ipv4Addr::new(10, 23, 0, 2);
+    let directed_broadcast = Ipv4Addr::new(10, 23, 0, 255);
+    let mut directed_packet = Packet::new();
+    directed_packet.push(Ipv4 {
+        source,
+        destination: directed_broadcast,
+        ..Ipv4::default()
+    });
+    directed_packet.push(Raw::new(vec![1_u8]));
+    let mut directed_route = decision(Capability::Layer2And3);
+    directed_route.selected_address = Some(IpAddr::V4(source));
+    directed_route.next_hop = None;
+    directed_route.selection_reason = SelectionReason::Broadcast;
+    let directed = plan_route(
+        &directed_packet,
+        None,
+        &Options {
+            link_mode: Mode::Layer2,
+            ..Options::default()
+        },
+        &routes(Ok(directed_route)),
+    )
+    .expect("subnet-directed broadcast plans");
+    assert_eq!(directed.destination_mac, Some(MacAddress([0xff; 6])));
+    assert_eq!(directed.neighbor_target, None);
+    assert!(!directed.needs_neighbor_resolution());
+
+    let unicast_destination = Ipv4Addr::new(10, 23, 0, 9);
+    let mut unicast_packet = directed_packet.clone();
+    unicast_packet
+        .get_mut::<Ipv4>()
+        .expect("IPv4 packet")
+        .destination = unicast_destination;
+    let mut unicast_route = decision(Capability::Layer2And3);
+    unicast_route.selected_address = Some(IpAddr::V4(source));
+    unicast_route.next_hop = None;
+    unicast_route.selection_reason = SelectionReason::OnLink;
+    let unicast = plan_route(
+        &unicast_packet,
+        None,
+        &Options {
+            link_mode: Mode::Layer2,
+            ..Options::default()
+        },
+        &routes(Ok(unicast_route)),
+    )
+    .expect("ordinary on-link unicast plans");
+    assert_eq!(unicast.destination_mac, None);
+    assert_eq!(
+        unicast.neighbor_target,
+        Some(IpAddr::V4(unicast_destination))
+    );
+    assert!(unicast.needs_neighbor_resolution());
+
+    let ipv4_multicast = Ipv4Addr::new(224, 0, 0, 1);
+    let mut ipv4_multicast_packet = directed_packet.clone();
+    ipv4_multicast_packet
+        .get_mut::<Ipv4>()
+        .expect("IPv4 packet")
+        .destination = ipv4_multicast;
+    let mut ipv4_multicast_route = decision(Capability::Layer2And3);
+    ipv4_multicast_route.selected_address = Some(IpAddr::V4(source));
+    ipv4_multicast_route.next_hop = None;
+    ipv4_multicast_route.selection_reason = SelectionReason::OnLink;
+    let ipv4_multicast_plan = plan_route(
+        &ipv4_multicast_packet,
+        None,
+        &Options {
+            link_mode: Mode::Layer2,
+            ..Options::default()
+        },
+        &routes(Ok(ipv4_multicast_route)),
+    )
+    .expect("IPv4 multicast plans");
+    assert_eq!(
+        ipv4_multicast_plan.destination_mac,
+        Some(MacAddress([0x01, 0x00, 0x5e, 0, 0, 1]))
+    );
+    assert_eq!(
+        ipv4_multicast_plan.neighbor_target,
+        Some(IpAddr::V4(ipv4_multicast))
+    );
+    assert!(!ipv4_multicast_plan.needs_neighbor_resolution());
+
+    let ipv6_source: Ipv6Addr = "2001:db8::2".parse().expect("IPv6 source");
+    let ipv6_multicast: Ipv6Addr = "ff02::1".parse().expect("IPv6 multicast");
+    let mut ipv6_multicast_packet = Packet::new();
+    ipv6_multicast_packet.push(Ipv6 {
+        source: ipv6_source,
+        destination: ipv6_multicast,
+        ..Ipv6::default()
+    });
+    ipv6_multicast_packet.push(Raw::new(vec![1_u8]));
+    let mut ipv6_multicast_route = decision(Capability::Layer2And3);
+    ipv6_multicast_route.selected_address = Some(IpAddr::V6(ipv6_source));
+    ipv6_multicast_route.next_hop = None;
+    ipv6_multicast_route.selection_reason = SelectionReason::OnLink;
+    ipv6_multicast_route.destination_scope = Scope::Multicast;
+    let ipv6_multicast_plan = plan_route(
+        &ipv6_multicast_packet,
+        None,
+        &Options {
+            link_mode: Mode::Layer2,
+            ..Options::default()
+        },
+        &routes(Ok(ipv6_multicast_route)),
+    )
+    .expect("IPv6 multicast plans");
+    assert_eq!(
+        ipv6_multicast_plan.destination_mac,
+        Some(MacAddress([0x33, 0x33, 0, 0, 0, 1]))
+    );
+    assert_eq!(
+        ipv6_multicast_plan.neighbor_target,
+        Some(IpAddr::V6(ipv6_multicast))
+    );
+    assert!(!ipv6_multicast_plan.needs_neighbor_resolution());
+
+    let explicit_mac = MacAddress([0x02, 0, 0, 0, 0, 99]);
+    let mut explicit_packet = Packet::new();
+    explicit_packet.push(Ethernet {
+        destination: explicit_mac.0,
+        ..Ethernet::default()
+    });
+    explicit_packet.push(Ipv4 {
+        source,
+        destination: directed_broadcast,
+        ..Ipv4::default()
+    });
+    explicit_packet.push(Raw::new(vec![1_u8]));
+    let mut explicit_route = decision(Capability::Layer2And3);
+    explicit_route.selected_address = Some(IpAddr::V4(source));
+    explicit_route.next_hop = None;
+    explicit_route.selection_reason = SelectionReason::Broadcast;
+    let explicit = plan_route(
+        &explicit_packet,
+        None,
+        &Options {
+            link_mode: Mode::Layer2,
+            ..Options::default()
+        },
+        &routes(Ok(explicit_route)),
+    )
+    .expect("explicit broadcast envelope plans");
+    assert_eq!(explicit.destination_mac, Some(explicit_mac));
+    assert_eq!(explicit.neighbor_target, None);
+
+    let gateway = IpAddr::V4(Ipv4Addr::new(10, 23, 0, 1));
+    let mut gateway_route = decision(Capability::Layer2And3);
+    gateway_route.selected_address = Some(IpAddr::V4(source));
+    gateway_route.next_hop = Some(gateway);
+    gateway_route.selection_reason = SelectionReason::Gateway;
+    let gateway_plan = plan_route(
+        &directed_packet,
+        None,
+        &Options {
+            link_mode: Mode::Layer2,
+            ..Options::default()
+        },
+        &routes(Ok(gateway_route)),
+    )
+    .expect("gateway unicast plans");
+    assert_eq!(gateway_plan.destination_mac, None);
+    assert_eq!(gateway_plan.neighbor_target, Some(gateway));
+    assert!(gateway_plan.needs_neighbor_resolution());
 }
 
 #[test]

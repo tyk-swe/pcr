@@ -3,7 +3,7 @@
 
 //! Pure policy for validating and normalizing native route snapshots.
 
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr};
 
 use crate::{
     interface::{InterfaceAddress, InterfaceInfo},
@@ -91,7 +91,13 @@ pub(crate) fn finish_route(
         RouteSelectionReason::Local | RouteSelectionReason::InterfaceOnly => {
             snapshot.selection_reason
         }
+        RouteSelectionReason::Broadcast if snapshot.next_hop.is_none() => {
+            RouteSelectionReason::Broadcast
+        }
         _ if snapshot.next_hop.is_some() => RouteSelectionReason::Gateway,
+        _ if is_interface_broadcast(destination, &snapshot.interface) => {
+            RouteSelectionReason::Broadcast
+        }
         _ => RouteSelectionReason::OnLink,
     };
 
@@ -107,6 +113,27 @@ pub(crate) fn finish_route(
         capability: snapshot.interface.capability,
         link_type: snapshot.interface.link_type,
     })
+}
+
+fn is_interface_broadcast(destination: IpAddr, interface: &InterfaceInfo) -> bool {
+    let IpAddr::V4(destination) = destination else {
+        return false;
+    };
+    if destination == std::net::Ipv4Addr::BROADCAST {
+        return true;
+    }
+    interface.flags.broadcast
+        && interface.addresses.iter().any(|assigned| {
+            let IpAddr::V4(address) = assigned.address else {
+                return false;
+            };
+            if assigned.prefix_length > 30 {
+                return false;
+            }
+            let host_bits = u32::BITS - u32::from(assigned.prefix_length);
+            let host_mask = u32::MAX >> (u32::BITS - host_bits);
+            Ipv4Addr::from(u32::from(address) | host_mask) == destination
+        })
 }
 
 pub(crate) fn interface_decision(
@@ -380,6 +407,32 @@ mod tests {
         assert_eq!(decision.destination_scope, DestinationScope::Private);
         assert_eq!(decision.mtu, 1_400);
         assert_eq!(decision.interface, interface().id);
+    }
+
+    #[test]
+    fn finish_route_preserves_and_infers_ipv4_broadcast_routes_without_overriding_gateways() {
+        let destination = v4(10, 2, 3, 255);
+
+        let mut native_broadcast = snapshot();
+        native_broadcast.next_hop = None;
+        native_broadcast.selection_reason = RouteSelectionReason::Broadcast;
+        let preserved = finish_route(destination, None, None, native_broadcast)
+            .expect("native broadcast route is valid");
+        assert_eq!(preserved.selection_reason, RouteSelectionReason::Broadcast);
+
+        let mut inferred_broadcast = snapshot();
+        inferred_broadcast.next_hop = None;
+        inferred_broadcast.interface.flags.broadcast = true;
+        let inferred = finish_route(destination, None, None, inferred_broadcast)
+            .expect("interface-prefix broadcast is valid");
+        assert_eq!(inferred.selection_reason, RouteSelectionReason::Broadcast);
+
+        let mut gateway = snapshot();
+        gateway.selection_reason = RouteSelectionReason::Broadcast;
+        let gateway =
+            finish_route(destination, None, None, gateway).expect("gateway route remains valid");
+        assert_eq!(gateway.selection_reason, RouteSelectionReason::Gateway);
+        assert!(gateway.next_hop.is_some());
     }
 
     #[test]

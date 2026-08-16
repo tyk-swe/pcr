@@ -80,6 +80,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Kept TCP follow delivery edges aligned with directional reassembly
+  generations, preventing Fast Open payload retransmissions from being emitted
+  twice while still resetting deduplication for four-tuple reuse.
+- Required captured reverse-direction outstanding payload before reporting TCP
+  duplicate acknowledgments, without advancing duplicate counts for
+  unreportable repeats.
+- Used the ultimate remaining IPv4 LSRR or SSRR destination for TCP and UDP
+  pseudo-header checksums during encoding and decoding.
+- Enabled IPv4 broadcast permission on every raw IPv4 socket before
+  transmission, including sockets used for subnet-directed broadcasts.
+- **Breaking:** Preserved limited and subnet-directed IPv4 broadcast routes
+  through native selection and Layer-2 planning, emitting the Ethernet
+  broadcast MAC without neighbor resolution and exposing `broadcast` as a
+  route selection reason.
 - Indexed offline TCP and IP-fragment expiry deadlines so dense captures no
   longer scan every resident reassembly flow for each pushable segment.
 - Kept conversation indexing, follow/statistics/expert analysis, TCP

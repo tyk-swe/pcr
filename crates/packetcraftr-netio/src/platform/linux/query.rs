@@ -98,17 +98,8 @@ pub(super) async fn query_route(
                 .map_or_else(|| format!("index-{output_index}"), |hint| hint.name.clone()),
             index: output_index,
         })?;
-    let selection_reason = match reply.header.kind {
-        RouteType::Local => RouteSelectionReason::Local,
-        RouteType::Unicast | RouteType::Broadcast | RouteType::Anycast => {
-            if next_hop.is_some() {
-                RouteSelectionReason::Gateway
-            } else {
-                RouteSelectionReason::OnLink
-            }
-        }
-        _ => return Err(NativeRouteError::RouteNotFound { destination }),
-    };
+    let selection_reason = route_selection_reason(&reply.header.kind, next_hop.is_some())
+        .ok_or(NativeRouteError::RouteNotFound { destination })?;
     finish_route(
         destination,
         interface_hint.as_ref(),
@@ -121,6 +112,21 @@ pub(super) async fn query_route(
             selection_reason,
         },
     )
+}
+
+fn route_selection_reason(kind: &RouteType, has_next_hop: bool) -> Option<RouteSelectionReason> {
+    match kind {
+        RouteType::Local => Some(RouteSelectionReason::Local),
+        RouteType::Broadcast => Some(RouteSelectionReason::Broadcast),
+        RouteType::Unicast | RouteType::Anycast => Some({
+            if has_next_hop {
+                RouteSelectionReason::Gateway
+            } else {
+                RouteSelectionReason::OnLink
+            }
+        }),
+        _ => None,
+    }
 }
 
 pub(super) async fn query_interfaces(
@@ -267,5 +273,26 @@ fn route_address(address: &RouteAddress) -> Option<IpAddr> {
         RouteAddress::Inet(address) => Some(IpAddr::V4(*address)),
         RouteAddress::Inet6(address) => Some(IpAddr::V6(*address)),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn linux_route_type_preserves_broadcast_before_native_normalization() {
+        assert_eq!(
+            route_selection_reason(&RouteType::Broadcast, false),
+            Some(RouteSelectionReason::Broadcast)
+        );
+        assert_eq!(
+            route_selection_reason(&RouteType::Unicast, false),
+            Some(RouteSelectionReason::OnLink)
+        );
+        assert_eq!(
+            route_selection_reason(&RouteType::Unicast, true),
+            Some(RouteSelectionReason::Gateway)
+        );
     }
 }

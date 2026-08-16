@@ -324,6 +324,31 @@ mod tests {
     }
 
     #[test]
+    fn materialize_makes_no_resolver_request_for_ipv4_broadcast() {
+        let mut plan = unresolved_plan();
+        plan.lookup_destination = Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 255)));
+        plan.final_destination = plan.lookup_destination;
+        plan.visited_destinations = vec![plan.lookup_destination.expect("broadcast destination")];
+        plan.route.next_hop = None;
+        plan.route.selection_reason = RouteSelectionReason::Broadcast;
+        plan.neighbor_target = None;
+        plan.destination_mac = Some(MacAddress([0xff; 6]));
+        let resolver = RecordingResolver::default();
+
+        let materialized = materialize(plan.clone(), &resolver).expect("broadcast plan");
+
+        assert_eq!(materialized.plan, plan);
+        assert_eq!(materialized.neighbor_resolution, None);
+        assert!(
+            resolver
+                .requests
+                .lock()
+                .expect("request recorder lock")
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn materialize_rejects_each_missing_layer2_input_before_resolution() {
         type InvalidCase = (fn(&mut PlannedRoute), NeighborError);
         let cases: [InvalidCase; 4] = [

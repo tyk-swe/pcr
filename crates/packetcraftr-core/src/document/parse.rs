@@ -11,7 +11,7 @@ use super::types::{
     DEFAULT_MAX_DOCUMENT_NESTING, DOCUMENT_BASE_CONTAINER_DEPTH, Format, LAYER_LIMIT_SENTINEL,
     MAX_DOCUMENT_NESTING, Packet,
 };
-use super::visitor::PacketDocumentSeed;
+use super::visitor::PacketSeed;
 use crate::field::FieldValue;
 
 impl Packet {
@@ -66,7 +66,7 @@ impl Packet {
                 maximum: MAX_DOCUMENT_NESTING,
             });
         }
-        let seed = PacketDocumentSeed { max_layers };
+        let seed = PacketSeed { max_layers };
         let document = match format {
             Format::Json => {
                 validate_json_container_depth(input, max_nesting)?;

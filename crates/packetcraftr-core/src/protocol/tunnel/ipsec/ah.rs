@@ -6,13 +6,10 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use crate::{
-    codec::{
-        DecodedLayerValue, EncodedLayer, Error as CodecError, LayerCodec, LayerDecodeContext,
-        LayerEncodeContext,
-    },
+    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
-    layer::{Id as ProtocolId, Layer, reflective_layer},
+    layer::{Layer, reflective_layer},
     registry::Discriminator,
     semantics::BuiltinProtocol,
 };
@@ -96,7 +93,7 @@ reflective_layer! {
 pub(crate) struct AhCodec;
 
 impl LayerCodec for AhCodec {
-    fn protocol_id(&self) -> ProtocolId {
+    fn protocol_id(&self) -> crate::layer::Id {
         protocol("ah")
     }
 
@@ -105,7 +102,7 @@ impl LayerCodec for AhCodec {
         layer: &dyn Layer,
         _payload: &[u8],
         context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, CodecError> {
+    ) -> Result<EncodedLayer, crate::codec::Error> {
         let layer = layer
             .as_any()
             .downcast_ref::<Ah>()
@@ -190,7 +187,7 @@ impl LayerCodec for AhCodec {
         &self,
         input: &[u8],
         context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, CodecError> {
+    ) -> Result<DecodedLayerValue, crate::codec::Error> {
         if input.len() < AH_FIXED_LEN {
             return Err(truncated("ah", AH_FIXED_LEN, input.len()));
         }
@@ -266,7 +263,7 @@ impl LayerCodec for AhCodec {
     fn make_layer(
         &self,
         fields: &BTreeMap<String, FieldValue>,
-    ) -> Result<Box<dyn Layer>, CodecError> {
+    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Ah::default(), fields)
     }
 }
@@ -275,7 +272,7 @@ fn validate_context(
     layer: &Ah,
     header_len: usize,
     context: &LayerEncodeContext<'_>,
-) -> Result<(Option<bool>, Vec<Diagnostic>), CodecError> {
+) -> Result<(Option<bool>, Vec<Diagnostic>), crate::codec::Error> {
     let mut diagnostics = Vec::new();
     if layer.spi == 0 {
         strict_or_diagnostic(

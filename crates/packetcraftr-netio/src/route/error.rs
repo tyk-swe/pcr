@@ -7,10 +7,7 @@ use std::net::IpAddr;
 
 use thiserror::Error;
 
-use packetcraftr_core::{
-    error::{Classification, Classified, Kind},
-    layer::Id as ProtocolId,
-};
+use packetcraftr_core::error::{Classification, Classified, Kind};
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -47,7 +44,9 @@ pub enum Error {
     #[error("explicit Layer 3 mode cannot carry Ethernet or VLAN layers")]
     EthernetInLayer3,
     #[error("capture-only link header {protocol} cannot be used for live transmission")]
-    OfflineOnlyLinkHeader { protocol: ProtocolId },
+    OfflineOnlyLinkHeader {
+        protocol: packetcraftr_core::layer::Id,
+    },
     #[error("selected interface does not support Layer 2 transmission")]
     Layer2Unsupported,
     #[error("selected interface does not support Layer 3 transmission")]

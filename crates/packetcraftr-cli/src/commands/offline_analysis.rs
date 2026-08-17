@@ -11,7 +11,7 @@ use packetcraftr::{
     core::{filter::Filter, registry::Registry},
 };
 
-use super::super::command_options::OfflineAnalysisLimitsArgs;
+use super::super::command_options::OfflineLimitsArgs;
 use super::super::errors::CliError;
 use super::super::filtering::{self, Capabilities};
 use super::super::input::validate_capture_stream_limits;
@@ -27,7 +27,7 @@ pub(super) struct Prepared {
 /// Validates capture bounds, prepares registry/filter state, then validates
 /// analysis bounds.
 pub(super) fn prepare(
-    limits: OfflineAnalysisLimitsArgs,
+    limits: OfflineLimitsArgs,
     filter_source: Option<&str>,
 ) -> Result<Prepared, CliError> {
     let capture = limits.capture;

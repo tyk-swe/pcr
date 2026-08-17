@@ -10,18 +10,19 @@ use bytes::Bytes;
 use packetcraftr_core::protocol::link::Ethernet;
 use packetcraftr_core::{
     Packet,
-    build::{BuiltPacket, Context as BuildContext},
+    build::BuiltPacket,
     field::FieldValue,
     registry::Registry,
     semantics::{self, BuiltinProtocol},
 };
-use packetcraftr_netio::route::{Materialized as MaterializedRoute, Plan as PlannedRoute};
 
 use super::target::Family;
 use crate::Error;
 
-pub(super) fn build_context(plan: &PlannedRoute) -> BuildContext {
-    BuildContext {
+pub(super) fn build_context(
+    plan: &packetcraftr_netio::route::Plan,
+) -> packetcraftr_core::build::Context {
+    packetcraftr_core::build::Context {
         source: plan.packet_source,
         destination: plan.final_destination,
     }
@@ -29,7 +30,7 @@ pub(super) fn build_context(plan: &PlannedRoute) -> BuildContext {
 
 pub(super) fn materialize_link_structure(
     packet: &mut Packet,
-    plan: &PlannedRoute,
+    plan: &packetcraftr_netio::route::Plan,
 ) -> Result<(), Error> {
     if !plan.synthesized_ethernet
         || semantics::outer_layers(packet)
@@ -49,7 +50,7 @@ pub(super) fn materialize_link_structure(
 
 pub(super) fn materialize_network_fields(
     packet: &mut Packet,
-    plan: &PlannedRoute,
+    plan: &packetcraftr_netio::route::Plan,
 ) -> Result<(), Error> {
     let Some((index, protocol)) =
         semantics::outer_layers(packet)
@@ -125,7 +126,7 @@ pub(super) fn materialize_network_fields(
 
 pub(super) fn materialize_link_fields(
     packet: &mut Packet,
-    route: &MaterializedRoute,
+    route: &packetcraftr_netio::route::Materialized,
 ) -> Result<bool, Error> {
     if route.plan.mode != packetcraftr_netio::link::Mode::Layer2 {
         return Ok(false);
@@ -349,7 +350,7 @@ mod tests {
         let mut preliminary = builder
             .build(
                 packet,
-                BuildContext::default(),
+                packetcraftr_core::build::Context::default(),
                 packetcraftr_core::build::Options::default(),
             )
             .expect("preliminary packet");
@@ -364,7 +365,7 @@ mod tests {
         let expected = builder
             .build(
                 materialized.clone(),
-                BuildContext::default(),
+                packetcraftr_core::build::Context::default(),
                 packetcraftr_core::build::Options::default(),
             )
             .expect("materialized packet");
@@ -412,7 +413,11 @@ mod tests {
             ..packetcraftr_core::build::Options::default()
         };
         let mut preliminary = builder
-            .build(packet.clone(), BuildContext::default(), options.clone())
+            .build(
+                packet.clone(),
+                packetcraftr_core::build::Context::default(),
+                options.clone(),
+            )
             .expect("permissive TCP/DNS packet");
         assert_eq!(
             preliminary.packet.encoded_payload_length(2),
@@ -439,7 +444,11 @@ mod tests {
         );
 
         let rebuilt = builder
-            .build(materialized, BuildContext::default(), options)
+            .build(
+                materialized,
+                packetcraftr_core::build::Context::default(),
+                options,
+            )
             .expect("fallback rebuild");
         assert_eq!(rebuilt.packet.encoded_payload_length(2), Some(query.len()));
         let payload_len = u32::try_from(query.len()).expect("query length fits u32");
@@ -489,7 +498,11 @@ mod tests {
             ..packetcraftr_core::build::Options::default()
         };
         let mut preliminary = builder
-            .build(packet.clone(), BuildContext::default(), options.clone())
+            .build(
+                packet.clone(),
+                packetcraftr_core::build::Context::default(),
+                options.clone(),
+            )
             .expect("permissive TCP padding packet");
         assert_eq!(preliminary.packet.encoded_payload_length(2), Some(3));
 
@@ -504,7 +517,11 @@ mod tests {
             &materialized
         ));
         let rebuilt = builder
-            .build(materialized, BuildContext::default(), options)
+            .build(
+                materialized,
+                packetcraftr_core::build::Context::default(),
+                options,
+            )
             .expect("fallback rebuild");
         assert_eq!(rebuilt.packet.encoded_payload_length(2), Some(3));
         let mut response = Packet::new();

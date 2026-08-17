@@ -9,10 +9,7 @@ use std::time::Duration;
 
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::frame::Frame;
-use packetcraftr_core::{
-    diagnostic::{Diagnostic, push_once as push_diagnostic_once},
-    registry::Registry,
-};
+use packetcraftr_core::{diagnostic::Diagnostic, registry::Registry};
 
 use crate::BoundaryError;
 use crate::clock::Clock;
@@ -57,7 +54,7 @@ where
         final_statistics_sequence: u64::try_from(approved.total_probes.saturating_sub(1))
             .unwrap_or(u64::MAX),
     };
-    let mut lifecycle = ScanProbeLifecycle {
+    let mut lifecycle = Lifecycle {
         executor,
         registry,
         limits: request.limits,
@@ -239,14 +236,14 @@ struct ScanOutput {
     diagnostics: Vec<Diagnostic>,
 }
 
-struct ScanProbeLifecycle<'a, E> {
+struct Lifecycle<'a, E> {
     executor: &'a mut E,
     registry: &'a Registry,
     limits: Limits,
     output: &'a mut ScanOutput,
 }
 
-impl<E: Executor> ProbeLifecycle<Batch> for ScanProbeLifecycle<'_, E> {
+impl<E: Executor> ProbeLifecycle<Batch> for Lifecycle<'_, E> {
     type Execution = super::model::Execution;
     type Output = ();
     type Error = Error;
@@ -333,7 +330,7 @@ fn process_batch(
         });
     }
     for diagnostic in batch_diagnostics {
-        push_diagnostic_once(&mut output.diagnostics, diagnostic);
+        packetcraftr_core::diagnostic::push_once(&mut output.diagnostics, diagnostic);
     }
     enforce_deadline(deadline)?;
     let mut response_selector = ResponseSelector::new(&mut responses);

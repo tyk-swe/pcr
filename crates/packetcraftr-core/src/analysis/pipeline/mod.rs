@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use crate::analysis::pcap::{Error as CaptureError, Reader};
 use crate::budget::Deadline;
-use crate::decode::{DecodedPacket, Dissector, Options as DecodeOptions};
+use crate::decode::{DecodedPacket, Dissector};
 use crate::filter::Context as FilterContext;
 use crate::registry::Registry;
 
@@ -102,9 +102,9 @@ where
         let decoded = decoder
             .decode(
                 frame,
-                DecodeOptions {
+                crate::decode::Options {
                     max_packet_size: limits.max_frame_bytes,
-                    ..DecodeOptions::default()
+                    ..crate::decode::Options::default()
                 },
             )
             .map_err(|source| Error::Decode { number, source })?;

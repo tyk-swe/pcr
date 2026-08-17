@@ -7,9 +7,7 @@ use serde::Serialize;
 
 use packetcraftr_core::analysis::expert::{
     Finding as AnalysisFinding, StreamTransport as AnalysisStreamTransport,
-    Summary as ExpertSummary,
 };
-use packetcraftr_core::diagnostic::Severity as DiagnosticSeverity;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -19,12 +17,12 @@ pub enum Severity {
     Error,
 }
 
-impl From<DiagnosticSeverity> for Severity {
-    fn from(value: DiagnosticSeverity) -> Self {
+impl From<packetcraftr_core::diagnostic::Severity> for Severity {
+    fn from(value: packetcraftr_core::diagnostic::Severity) -> Self {
         match value {
-            DiagnosticSeverity::Info => Self::Info,
-            DiagnosticSeverity::Warning => Self::Warning,
-            DiagnosticSeverity::Error => Self::Error,
+            packetcraftr_core::diagnostic::Severity::Info => Self::Info,
+            packetcraftr_core::diagnostic::Severity::Warning => Self::Warning,
+            packetcraftr_core::diagnostic::Severity::Error => Self::Error,
         }
     }
 }
@@ -104,7 +102,7 @@ pub struct Result {
 
 impl Result {
     pub fn from_summary(
-        summary: ExpertSummary,
+        summary: packetcraftr_core::analysis::expert::Summary,
         frames_read: u64,
         frames_matched: u64,
         findings: Vec<Finding>,

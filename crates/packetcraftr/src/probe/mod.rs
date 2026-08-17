@@ -15,7 +15,6 @@ use packetcraftr_core::protocol::{
 use packetcraftr_core::{
     Packet,
     decode::DecodedPacket,
-    diagnostic::Severity as DiagnosticSeverity,
     registry::Registry,
     semantics::{self, BuiltinProtocol},
 };
@@ -104,7 +103,8 @@ pub(crate) fn observe(
     response: &DecodedPacket,
 ) -> Option<Observation> {
     if response.diagnostics.iter().any(|diagnostic| {
-        diagnostic.code.contains("checksum") && diagnostic.severity != DiagnosticSeverity::Info
+        diagnostic.code.contains("checksum")
+            && diagnostic.severity != packetcraftr_core::diagnostic::Severity::Info
     }) {
         return None;
     }

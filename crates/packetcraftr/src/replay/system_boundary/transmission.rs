@@ -5,6 +5,7 @@
 
 use packetcraftr_core::codec::NetworkEnvelope;
 use packetcraftr_core::frame::Frame;
+use packetcraftr_netio::route::Provider;
 use packetcraftr_netio::{
     Error as LiveIoError,
     interface::Id as InterfaceId,
@@ -13,11 +14,6 @@ use packetcraftr_netio::{
         SystemProvider as SystemInterfaceProvider,
     },
     link::{Capability as LinkCapability, Mode as LinkMode},
-    route::{
-        Decision as RouteDecision, Materialized as MaterializedRoute, Plan as PlannedRoute,
-        Provider as RouteProvider, Scope as DestinationScope,
-        SelectionReason as RouteSelectionReason, SystemProvider as SystemRouteProvider,
-    },
     transmit::{
         Dispatch as DispatchPacketIo, Frame as TransmissionFrame, Sender as PacketIo,
         SystemLayer2 as SystemLayer2Io, SystemLayer3 as SystemLayer3Io,
@@ -115,17 +111,17 @@ impl SystemTransmitter {
         interface: &InterfaceInfo,
         mode: LinkMode,
         frame: &Frame,
-    ) -> Result<MaterializedRoute, LiveIoError> {
+    ) -> Result<packetcraftr_netio::route::Materialized, LiveIoError> {
         let plan = match mode {
-            LinkMode::Layer2 => PlannedRoute {
-                decision: RouteDecision {
+            LinkMode::Layer2 => packetcraftr_netio::route::Plan {
+                decision: packetcraftr_netio::route::Decision {
                     interface: interface.id.clone(),
                     source_mac: interface.mac_address,
                     selected_source: interface.addresses.first().map(|value| value.address),
                     preferred_source: None,
                     next_hop: None,
-                    selection_reason: RouteSelectionReason::InterfaceOnly,
-                    destination_scope: DestinationScope::Link,
+                    selection_reason: packetcraftr_netio::route::SelectionReason::InterfaceOnly,
+                    destination_scope: packetcraftr_netio::route::Scope::Link,
                     mtu: interface.mtu.unwrap_or(u32::MAX),
                     capability: interface.capability,
                     link_type: interface.link_type,
@@ -151,7 +147,7 @@ impl SystemTransmitter {
                     .ok_or_else(|| LiveIoError::InvalidTransmissionFrame {
                         message: "frame was not validated before replay transmission".to_owned(),
                     })?;
-                let route = SystemRouteProvider
+                let route = packetcraftr_netio::route::SystemProvider
                     .lookup_with_preferences(network.destination, Some(&interface.id), None)
                     .map_err(map_replay_route_error)?;
                 if route.interface != interface.id {
@@ -175,7 +171,7 @@ impl SystemTransmitter {
                     });
                 }
                 let source_mac = route.source_mac;
-                PlannedRoute {
+                packetcraftr_netio::route::Plan {
                     decision: route,
                     mode,
                     lookup_destination: Some(network.destination),
@@ -192,7 +188,7 @@ impl SystemTransmitter {
             }
             LinkMode::Auto => return Err(LiveIoError::UnresolvedLinkMode),
         };
-        Ok(MaterializedRoute {
+        Ok(packetcraftr_netio::route::Materialized {
             plan,
             neighbor_resolution: None,
         })

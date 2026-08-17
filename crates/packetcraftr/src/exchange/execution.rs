@@ -5,38 +5,34 @@
 
 use std::sync::Arc;
 
-use packetcraftr_core::template::Template as PacketTemplate;
-use packetcraftr_netio::{
-    capture::Provider as CaptureProvider, neighbor::Resolver as NeighborResolver,
-    route::Provider as RouteProvider, transmit::Sender as PacketIo,
-};
+use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Sender as PacketIo};
 
 use crate::Client;
 use crate::Error;
-use crate::exchange::{Options as ExchangeOptions, Result as ExchangeResult};
+
 use crate::exchange::{Prepared, Transaction, WorkflowResponseMatcher};
 use crate::planning::ensure_preparation_deadline;
 
 impl<R, N, I> Client<R, N, I>
 where
-    R: RouteProvider,
-    N: NeighborResolver,
+    R: packetcraftr_netio::route::Provider,
+    N: packetcraftr_netio::neighbor::Resolver,
     I: PacketIo + CaptureProvider,
 {
     pub fn exchange(
         &self,
-        template: &PacketTemplate,
-        options: ExchangeOptions,
-    ) -> Result<ExchangeResult, Error> {
+        template: &packetcraftr_core::template::Template,
+        options: crate::exchange::Options,
+    ) -> Result<crate::exchange::Result, Error> {
         self.exchange_internal(template, options, None)
     }
 
     pub(crate) fn exchange_internal(
         &self,
-        template: &PacketTemplate,
-        options: ExchangeOptions,
+        template: &packetcraftr_core::template::Template,
+        options: crate::exchange::Options,
         workflow_matcher: Option<&mut WorkflowResponseMatcher<'_>>,
-    ) -> Result<ExchangeResult, Error> {
+    ) -> Result<crate::exchange::Result, Error> {
         let prepared = self.prepare_exchange(template, options)?;
         let transaction = self.arm_capture(prepared)?;
         transaction.execute(&self.io, workflow_matcher)

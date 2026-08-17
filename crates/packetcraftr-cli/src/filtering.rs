@@ -8,7 +8,7 @@ use packetcraftr::{
     core::frame::Frame,
     core::{
         self,
-        filter::{Context, Error as FilterError, Filter, Options as FilterOptions},
+        filter::{Context, Filter},
         registry::Registry,
     },
 };
@@ -44,7 +44,12 @@ pub(crate) fn compile(
     registry: &Registry,
     capabilities: Capabilities,
 ) -> Result<Filter, CliError> {
-    let filter = Filter::compile(source, registry, FilterOptions::default()).map_err(cli_error)?;
+    let filter = Filter::compile(
+        source,
+        registry,
+        packetcraftr::core::filter::Options::default(),
+    )
+    .map_err(cli_error)?;
     if filter.requirements().stream_index && !capabilities.stream_index {
         return Err(CliError::from_classification(
             Classification::new(
@@ -105,23 +110,27 @@ impl FrameSelector {
 }
 
 /// Converts a filter compilation failure into the CLI error taxonomy.
-fn cli_error(error: FilterError) -> CliError {
+fn cli_error(error: packetcraftr::core::filter::Error) -> CliError {
     let remediation = match &error {
-        FilterError::UnknownField { .. } | FilterError::UnresolvableProtocol { .. } => {
+        packetcraftr::core::filter::Error::UnknownField { .. }
+        | packetcraftr::core::filter::Error::UnresolvableProtocol { .. } => {
             "run `packetcraftr protocols <PROTOCOL>` to list the fields a protocol exposes"
         }
-        FilterError::IncompatibleLiteral { .. } | FilterError::OrderedPrefixComparison { .. } => {
+        packetcraftr::core::filter::Error::IncompatibleLiteral { .. }
+        | packetcraftr::core::filter::Error::OrderedPrefixComparison { .. } => {
             "compare the field against a value of its own type"
         }
-        FilterError::UnsliceableField { .. } => {
+        packetcraftr::core::filter::Error::UnsliceableField { .. } => {
             "slice only fields that hold bytes, such as an address or a byte string"
         }
-        FilterError::SizeLimit { .. }
-        | FilterError::NestingLimit { .. }
-        | FilterError::TermLimit { .. }
-        | FilterError::SetMemberLimit { .. }
-        | FilterError::InvalidNestingLimit { .. } => "simplify the filter to fit the stable bounds",
-        // Covers `Empty` and `Syntax`, and — because `FilterError` is
+        packetcraftr::core::filter::Error::SizeLimit { .. }
+        | packetcraftr::core::filter::Error::NestingLimit { .. }
+        | packetcraftr::core::filter::Error::TermLimit { .. }
+        | packetcraftr::core::filter::Error::SetMemberLimit { .. }
+        | packetcraftr::core::filter::Error::InvalidNestingLimit { .. } => {
+            "simplify the filter to fit the stable bounds"
+        }
+        // Covers `Empty` and `Syntax`, and — because `filter::Error` is
         // non-exhaustive — any variant added later.
         _ => "check the filter syntax; see `packetcraftr read --help` for examples",
     };

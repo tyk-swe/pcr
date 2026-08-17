@@ -10,18 +10,16 @@ use bytes::Bytes;
 use super::error::{map_io_error, resolution_error};
 use super::options::Options;
 use super::wire::is_unicast_mac;
-use super::{
-    Error as NeighborError, MAX_VLAN_TAGS as MAX_NEIGHBOR_VLAN_TAGS, Request as NeighborRequest,
-};
+use super::{MAX_VLAN_TAGS as MAX_NEIGHBOR_VLAN_TAGS, Request as NeighborRequest};
 use crate::transmit::IoSendReport;
 use packetcraftr_core::frame::{Frame, LinkType};
 
 #[cfg(test)]
 use crate::Error as LiveIoError;
 
-pub(super) fn validate_request(request: &NeighborRequest) -> Result<(), NeighborError> {
+pub(super) fn validate_request(request: &NeighborRequest) -> Result<(), crate::neighbor::Error> {
     if request.interface_source.is_ipv4() != request.target.is_ipv4() {
-        return Err(NeighborError::InvalidRequest {
+        return Err(crate::neighbor::Error::InvalidRequest {
             message: format!(
                 "source {} and target {} use different address families",
                 request.interface_source, request.target
@@ -29,7 +27,7 @@ pub(super) fn validate_request(request: &NeighborRequest) -> Result<(), Neighbor
         });
     }
     if request.interface_source.is_unspecified() || request.interface_source.is_multicast() {
-        return Err(NeighborError::InvalidRequest {
+        return Err(crate::neighbor::Error::InvalidRequest {
             message: format!(
                 "interface source {} is not a usable unicast address",
                 request.interface_source
@@ -37,12 +35,12 @@ pub(super) fn validate_request(request: &NeighborRequest) -> Result<(), Neighbor
         });
     }
     if request.target.is_unspecified() || request.target.is_multicast() {
-        return Err(NeighborError::InvalidRequest {
+        return Err(crate::neighbor::Error::InvalidRequest {
             message: format!("target {} is not a unicast neighbor", request.target),
         });
     }
     if request.link_type != LinkType::ETHERNET {
-        return Err(NeighborError::InvalidRequest {
+        return Err(crate::neighbor::Error::InvalidRequest {
             message: format!(
                 "link type {} does not support Ethernet ARP/NDP",
                 request.link_type.0
@@ -50,7 +48,7 @@ pub(super) fn validate_request(request: &NeighborRequest) -> Result<(), Neighbor
         });
     }
     if !is_unicast_mac(request.interface_mac) {
-        return Err(NeighborError::InvalidRequest {
+        return Err(crate::neighbor::Error::InvalidRequest {
             message: format!(
                 "interface MAC {} is not an individual unicast address",
                 request.interface_mac
@@ -58,18 +56,18 @@ pub(super) fn validate_request(request: &NeighborRequest) -> Result<(), Neighbor
         });
     }
     if request.mtu == 0 {
-        return Err(NeighborError::InvalidRequest {
+        return Err(crate::neighbor::Error::InvalidRequest {
             message: "interface MTU is zero".to_owned(),
         });
     }
     if request.vlan_tags.len() > MAX_NEIGHBOR_VLAN_TAGS {
-        return Err(NeighborError::InvalidRequest {
+        return Err(crate::neighbor::Error::InvalidRequest {
             message: format!("VLAN stack exceeds {MAX_NEIGHBOR_VLAN_TAGS} discovery tags"),
         });
     }
     for tag in &request.vlan_tags {
         if tag.priority > 7 || tag.vlan_id > 4095 {
-            return Err(NeighborError::InvalidRequest {
+            return Err(crate::neighbor::Error::InvalidRequest {
                 message: "VLAN priority or identifier is outside its wire range".to_owned(),
             });
         }
@@ -81,7 +79,7 @@ pub(super) fn validate_captured_frame(
     request: &NeighborRequest,
     frame: &Frame,
     snap_length: usize,
-) -> Result<(), NeighborError> {
+) -> Result<(), crate::neighbor::Error> {
     if frame.bytes().len() > snap_length {
         return Err(resolution_error(
             &request.interface,
@@ -99,7 +97,7 @@ pub(super) fn validate_neighbor_send(
     request: &NeighborRequest,
     expected: &Bytes,
     report: &IoSendReport,
-) -> Result<(), NeighborError> {
+) -> Result<(), crate::neighbor::Error> {
     report
         .validate_exact(expected)
         .map_err(|source| map_io_error(request, "validating discovery send evidence", source))
@@ -248,7 +246,7 @@ mod tests {
         for invalid in cases {
             assert!(matches!(
                 validate_request(&invalid),
-                Err(NeighborError::InvalidRequest { .. })
+                Err(crate::neighbor::Error::InvalidRequest { .. })
             ));
         }
     }
@@ -259,7 +257,7 @@ mod tests {
         assert!(validate_captured_frame(&request, &frame(&[1, 2]), 2).is_ok());
         assert!(matches!(
             validate_captured_frame(&request, &frame(&[1, 2, 3]), 2),
-            Err(NeighborError::Resolution { .. })
+            Err(crate::neighbor::Error::Resolution { .. })
         ));
 
         let expected = Bytes::from_static(&[1, 2, 3]);
@@ -277,7 +275,7 @@ mod tests {
                 &expected,
                 &IoSendReport::committed(2, expected.clone())
             ),
-            Err(NeighborError::Io {
+            Err(crate::neighbor::Error::Io {
                 source: LiveIoError::PartialSend { .. },
                 ..
             })
@@ -288,7 +286,7 @@ mod tests {
                 &expected,
                 &IoSendReport::committed(3, Bytes::from_static(&[3, 2, 1]))
             ),
-            Err(NeighborError::Io {
+            Err(crate::neighbor::Error::Io {
                 source: LiveIoError::InvalidSendEvidence { .. },
                 ..
             })

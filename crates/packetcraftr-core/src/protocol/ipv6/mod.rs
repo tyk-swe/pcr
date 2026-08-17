@@ -8,7 +8,7 @@ mod options;
 mod srh;
 
 pub use fragment::Fragment;
-pub(crate) use fragment::Ipv6FragmentCodec;
+pub(crate) use fragment::FragmentCodec;
 pub use options::{DestinationOptions, HopByHop};
 pub(crate) use options::{DestinationOptionsCodec, HopByHopCodec};
 pub use srh::SegmentRoutingHeader;

@@ -10,7 +10,6 @@ use packetcraftr_core::{
 use packetcraftr_netio::{
     Error as LiveIoError,
     link::Mode as LinkMode,
-    route::Materialized as MaterializedRoute,
     transmit::{Report as TransmissionReport, Timing as TransmissionTiming},
 };
 
@@ -77,7 +76,7 @@ impl Budget {
 #[derive(Clone, Debug)]
 pub struct SentPacket {
     built: BuiltPacket,
-    route: MaterializedRoute,
+    route: packetcraftr_netio::route::Materialized,
     report: TransmissionReport,
     frame: Frame,
 }
@@ -85,7 +84,7 @@ pub struct SentPacket {
 impl SentPacket {
     pub(crate) fn try_new(
         built: BuiltPacket,
-        route: MaterializedRoute,
+        route: packetcraftr_netio::route::Materialized,
         report: TransmissionReport,
     ) -> Result<Self, LiveIoError> {
         report.validate_exact(&built.bytes)?;
@@ -114,7 +113,7 @@ impl SentPacket {
         &self.built
     }
 
-    pub fn route(&self) -> &MaterializedRoute {
+    pub fn route(&self) -> &packetcraftr_netio::route::Materialized {
         &self.route
     }
 
@@ -168,15 +167,12 @@ fn test_built_packet(packet: packetcraftr_core::Packet) -> BuiltPacket {
 }
 
 #[cfg(test)]
-fn test_materialized_route() -> MaterializedRoute {
+fn test_materialized_route() -> packetcraftr_netio::route::Materialized {
     use packetcraftr_core::frame::LinkType;
     use packetcraftr_netio::{
         interface::Id as InterfaceId,
         link::{Capability, Mode},
-        route::{
-            Decision, Materialized, Plan, Scope as DestinationScope,
-            SelectionReason as RouteSelectionReason,
-        },
+        route::{Decision, Materialized, Plan},
     };
 
     Materialized {
@@ -190,8 +186,8 @@ fn test_materialized_route() -> MaterializedRoute {
                 selected_source: None,
                 preferred_source: None,
                 next_hop: None,
-                selection_reason: RouteSelectionReason::InterfaceOnly,
-                destination_scope: DestinationScope::Link,
+                selection_reason: packetcraftr_netio::route::SelectionReason::InterfaceOnly,
+                destination_scope: packetcraftr_netio::route::Scope::Link,
                 mtu: u32::MAX,
                 capability: Capability::Layer3,
                 link_type: LinkType::RAW,

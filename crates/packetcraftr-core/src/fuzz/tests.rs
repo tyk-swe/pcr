@@ -4,7 +4,7 @@
 use std::net::Ipv4Addr;
 use std::sync::Arc;
 
-use crate::protocol::{builtin::registry as default_registry, network::Ipv4, transport::Udp};
+use crate::protocol::{network::Ipv4, transport::Udp};
 use crate::{
     Packet,
     build::{Mode, Options},
@@ -19,7 +19,7 @@ use super::result::CaseOutcome;
 use super::run::run as fuzz;
 
 fn fuzz_protocol_registry() -> Arc<Registry> {
-    Arc::new(default_registry().expect("built-in protocol registry"))
+    Arc::new(crate::protocol::builtin::registry().expect("built-in protocol registry"))
 }
 
 fn udp_fuzz_packet() -> Packet {

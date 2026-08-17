@@ -3,19 +3,19 @@
 
 //! Unsolicited and undecodable frame retention under aggregate bounds.
 
+use packetcraftr_core::decode::DecodedPacket;
 use packetcraftr_core::frame::Frame;
-use packetcraftr_core::{decode::DecodedPacket, diagnostic::push_once as push_diagnostic_once};
 use packetcraftr_netio::capture::RecordIdentity;
 
 use super::accumulator::{Accumulator, UnsolicitedEvidence};
-use super::contract::Options as ExchangeOptions;
+
 use crate::evidence::BudgetError;
 
 impl Accumulator {
     pub(super) fn reserve_decoded_evidence(
         &mut self,
         additional: usize,
-        options: &ExchangeOptions,
+        options: &super::contract::Options,
     ) -> bool {
         let error = match self.evidence_budget.reserve(
             additional,
@@ -49,7 +49,7 @@ impl Accumulator {
                 ),
             ),
         };
-        push_diagnostic_once(
+        packetcraftr_core::diagnostic::push_once(
             &mut self.diagnostics,
             packetcraftr_core::diagnostic::Diagnostic::warning(code, message),
         );
@@ -60,11 +60,11 @@ impl Accumulator {
         &mut self,
         identity: RecordIdentity,
         decoded: DecodedPacket,
-        options: &ExchangeOptions,
+        options: &super::contract::Options,
         freshness: Option<super::accumulator::UnsolicitedFreshness>,
     ) {
         if self.unsolicited.len() + self.undecoded.len() >= options.max_unmatched_frames {
-            push_diagnostic_once(
+            packetcraftr_core::diagnostic::push_once(
                 &mut self.diagnostics,
                 packetcraftr_core::diagnostic::Diagnostic::warning(
                     "exchange.unsolicited_limit",
@@ -87,10 +87,10 @@ impl Accumulator {
         &mut self,
         identity: RecordIdentity,
         frame: Frame,
-        options: &ExchangeOptions,
+        options: &super::contract::Options,
     ) {
         if self.unsolicited.len() + self.undecoded.len() >= options.max_unmatched_frames {
-            push_diagnostic_once(
+            packetcraftr_core::diagnostic::push_once(
                 &mut self.diagnostics,
                 packetcraftr_core::diagnostic::Diagnostic::warning(
                     "exchange.unsolicited_limit",

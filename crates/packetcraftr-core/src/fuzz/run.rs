@@ -8,8 +8,6 @@ use crate::{Packet, field::FieldKind, registry::Registry};
 
 use super::error::Error;
 use super::mutation::prepare;
-use super::request::{Request as FuzzRequest, Target as FuzzTarget};
-use super::result::{Case as FuzzCase, Result as FuzzResult, Stats as FuzzStats};
 
 /// A completely prepared and bounded deterministic mutation campaign.
 ///
@@ -17,7 +15,7 @@ use super::result::{Case as FuzzCase, Result as FuzzResult, Stats as FuzzStats};
 /// these exact cases; preparation never performs networking or capture I/O.
 #[derive(Clone, Debug)]
 pub struct Campaign {
-    pub(super) cases: Vec<FuzzCase>,
+    pub(super) cases: Vec<super::result::Case>,
     pub(super) built_case_count: u64,
     pub(super) built_byte_count: u64,
     pub(super) retained_byte_count: u64,
@@ -25,7 +23,7 @@ pub struct Campaign {
 
 impl Campaign {
     pub fn prepare(
-        request: &FuzzRequest,
+        request: &super::request::Request,
         packet: Packet,
         registry: Arc<Registry>,
         deadline: &mut Deadline,
@@ -34,7 +32,7 @@ impl Campaign {
         prepare(request, packet, registry, deadline)
     }
 
-    pub fn cases(&self) -> &[FuzzCase] {
+    pub fn cases(&self) -> &[super::result::Case] {
         &self.cases
     }
 
@@ -50,37 +48,37 @@ impl Campaign {
         self.retained_byte_count
     }
 
-    pub fn into_cases(self) -> Vec<FuzzCase> {
+    pub fn into_cases(self) -> Vec<super::result::Case> {
         self.cases
     }
 }
 
 pub fn run(
-    request: &FuzzRequest,
+    request: &super::request::Request,
     packet: Packet,
     registry: Arc<Registry>,
-) -> Result<FuzzResult, Error> {
+) -> Result<super::result::Result, Error> {
     let mut deadline = Deadline::new(request.limits.max_duration);
     let campaign = Campaign::prepare(request, packet, registry, &mut deadline)?;
-    Ok(FuzzResult {
+    Ok(super::result::Result {
         seed: request.seed,
         first_case: request.first_case,
         cases: campaign.cases,
         diagnostics: Vec::new(),
-        stats: FuzzStats {
+        stats: super::result::Stats {
             cases_generated: request.cases as u64,
             cases_built: campaign.built_case_count,
             packets_attempted: request.cases as u64,
             packets_completed: campaign.built_case_count,
             bytes: campaign.built_byte_count,
-            ..FuzzStats::default()
+            ..super::result::Stats::default()
         },
     })
 }
 
 #[derive(Clone)]
 pub(super) struct ResolvedField {
-    pub(super) target: FuzzTarget,
+    pub(super) target: super::request::Target,
     pub(super) protocol: String,
     pub(super) kind: FieldKind,
     pub(super) is_derived: bool,

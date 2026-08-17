@@ -48,7 +48,7 @@ History follows Conventional Commits: `fix(reassembly): handle stream timeout`. 
 
 ## Security & Live Operations
 
-Use live networking only on explicitly authorized systems. Preserve `TrafficPolicy`, authorization checks, finite budgets, and the separation between offline and live workflow entry points. Consult `README.md` for safety gates and `SECURITY.md` for vulnerability reporting.
+Use live networking only on explicitly authorized systems. Preserve `policy::Policy`, authorization checks, finite budgets, and the separation between offline and live workflow entry points. Consult `README.md` for safety gates and `SECURITY.md` for vulnerability reporting.
 
 ## Tool preference
 

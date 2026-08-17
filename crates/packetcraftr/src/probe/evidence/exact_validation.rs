@@ -33,7 +33,7 @@ pub(crate) enum ExchangeEvidenceError {
         expected: usize,
         receipts: usize,
     },
-    MatchedResponseOutsideBatch,
+    ResponseOutsideBatch,
     CapturedFrameCountOverflow,
     CapturedFrameLimitExceeded {
         actual: usize,
@@ -58,7 +58,7 @@ pub(crate) enum ExchangeEvidenceError {
     InvalidMatchedResponse {
         message: String,
     },
-    MatchedResponseAfterTimeout {
+    ResponseAfterTimeout {
         latency: Duration,
         timeout: Duration,
     },
@@ -139,7 +139,7 @@ pub(crate) fn validate_response_frames_and_deadlines(
             .map_err(|message| ExchangeEvidenceError::InvalidMatchedResponse { message })?;
         validate_frame_timestamp(&response.response.frame, "matched response")?;
         if response.latency > timeout {
-            return Err(ExchangeEvidenceError::MatchedResponseAfterTimeout {
+            return Err(ExchangeEvidenceError::ResponseAfterTimeout {
                 latency: response.latency,
                 timeout,
             });
@@ -179,7 +179,7 @@ pub(crate) fn format_exchange_evidence_error(
         ExchangeEvidenceError::SentCardinality { expected, receipts } => {
             format!("expected {expected} sent receipts, received {receipts}")
         }
-        ExchangeEvidenceError::MatchedResponseOutsideBatch => {
+        ExchangeEvidenceError::ResponseOutsideBatch => {
             format!("matched response references a request outside the {batch_kind}")
         }
         ExchangeEvidenceError::CapturedFrameCountOverflow => {
@@ -209,7 +209,7 @@ pub(crate) fn format_exchange_evidence_error(
         ExchangeEvidenceError::TimestampUnavailable { evidence } => {
             format!("executor returned {evidence} without a timestamp")
         }
-        ExchangeEvidenceError::MatchedResponseAfterTimeout { latency, timeout } => {
+        ExchangeEvidenceError::ResponseAfterTimeout { latency, timeout } => {
             format!("matched response latency {latency:?} exceeds timeout {timeout:?}")
         }
         ExchangeEvidenceError::IncompleteStatistics => {
@@ -239,7 +239,7 @@ where
         .iter()
         .any(|response| response.request_index >= batch.probes.len())
     {
-        return Err(ExchangeEvidenceError::MatchedResponseOutsideBatch);
+        return Err(ExchangeEvidenceError::ResponseOutsideBatch);
     }
 
     validate_aggregate_evidence_limits(

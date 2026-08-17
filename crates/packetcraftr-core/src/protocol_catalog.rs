@@ -3,7 +3,7 @@
 
 //! Runtime-neutral built-in protocol identities and capability metadata.
 
-use super::layer::{Id as ProtocolId, Layer};
+use super::layer::Layer;
 
 /// Authoritative built-in protocol identity and capability catalog.
 ///
@@ -31,7 +31,7 @@ macro_rules! builtin_protocol_catalog {
             Ipv4 { canonical: "ipv4", aliases: ["ip", "ip4"], constructible: true, matcher: none, codec: Ipv4Codec }
             Ipv6 { canonical: "ipv6", aliases: ["ip6"], constructible: true, matcher: none, codec: Ipv6Codec }
             Ipv6DestinationOptions { canonical: "ipv6_destination_options", aliases: ["destopts", "destination_options"], constructible: true, matcher: none, codec: DestinationOptionsCodec }
-            Ipv6Fragment { canonical: "ipv6_fragment", aliases: ["fragment6", "frag6"], constructible: true, matcher: none, codec: Ipv6FragmentCodec }
+            Ipv6Fragment { canonical: "ipv6_fragment", aliases: ["fragment6", "frag6"], constructible: true, matcher: none, codec: FragmentCodec }
             Ipv6HopByHop { canonical: "ipv6_hop_by_hop", aliases: ["hop", "hopopts", "hbh"], constructible: true, matcher: none, codec: HopByHopCodec }
             Ipv6Srh { canonical: "ipv6_srh", aliases: ["srh", "segment_routing"], constructible: true, matcher: none, codec: SegmentRoutingHeaderCodec }
             L2tpv3 { canonical: "l2tpv3", aliases: [], constructible: true, matcher: none, codec: L2tpv3Codec }
@@ -106,7 +106,7 @@ macro_rules! define_builtin_protocol {
                 None
             }
 
-            pub fn from_id(protocol: &ProtocolId) -> Option<Self> {
+            pub fn from_id(protocol: &super::layer::Id) -> Option<Self> {
                 Self::from_name(protocol.as_str())
             }
 

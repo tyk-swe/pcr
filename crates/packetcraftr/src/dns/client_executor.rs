@@ -4,11 +4,8 @@
 use crate::BoundaryError;
 use crate::ExchangeExecutor;
 use crate::probe::{self, Transport as ProbeTransport};
-use packetcraftr_core::template::Template as PacketTemplate;
-use packetcraftr_netio::{
-    capture::Provider as CaptureProvider, neighbor::Resolver as NeighborResolver,
-    route::Provider as RouteProvider, transmit::Sender as PacketIo,
-};
+
+use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Sender as PacketIo};
 
 use super::model::{Exchange, Execution, Executor};
 
@@ -16,8 +13,8 @@ use super::model::{Exchange, Execution, Executor};
 /// lifecycle.
 impl<R, N, I> Executor for ExchangeExecutor<'_, R, N, I>
 where
-    R: RouteProvider,
-    N: NeighborResolver,
+    R: packetcraftr_netio::route::Provider,
+    N: packetcraftr_netio::neighbor::Resolver,
     I: PacketIo + CaptureProvider,
 {
     fn execute(&mut self, exchange: &Exchange) -> Result<Execution, BoundaryError> {
@@ -41,7 +38,7 @@ where
             ..self.options.clone()
         };
         let result = ExchangeExecutor::new(self.client, options).exchange_for_workflow(
-            &PacketTemplate::new(exchange.probe.packet()),
+            &packetcraftr_core::template::Template::new(exchange.probe.packet()),
             exchange.timeout,
             1,
             exchange.probe.server_address,

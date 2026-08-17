@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::layer::Id as ProtocolId;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Discriminator(pub u64);
 
@@ -17,7 +15,7 @@ pub struct Discriminator(pub u64);
 pub enum FilterFieldBinding {
     /// An alternate spelling of one reflective field.
     Direct {
-        protocol: ProtocolId,
+        protocol: crate::layer::Id,
         field: &'static str,
     },
     /// One sub-value of a packed unsigned field, such as a single TCP flag.
@@ -25,7 +23,7 @@ pub enum FilterFieldBinding {
     /// The field value is masked and then shifted right, so a single flag bit
     /// compares against `0` and `1` rather than its raw positional weight.
     Bits {
-        protocol: ProtocolId,
+        protocol: crate::layer::Id,
         field: &'static str,
         mask: u64,
         shift: u32,
@@ -34,14 +32,14 @@ pub enum FilterFieldBinding {
     /// may appear as either endpoint. A comparison holds when **any** listed
     /// field satisfies it.
     Either {
-        protocol: ProtocolId,
+        protocol: crate::layer::Id,
         fields: &'static [&'static str],
     },
 }
 
 impl FilterFieldBinding {
     /// The protocol whose layers this path reads.
-    pub fn protocol(&self) -> &ProtocolId {
+    pub fn protocol(&self) -> &crate::layer::Id {
         match self {
             Self::Direct { protocol, .. }
             | Self::Bits { protocol, .. }
@@ -60,7 +58,7 @@ impl FilterFieldBinding {
 
 #[derive(Clone, Debug)]
 pub(super) struct ChildBinding {
-    pub(super) child: ProtocolId,
+    pub(super) child: crate::layer::Id,
     pub(super) priority: i32,
 }
 

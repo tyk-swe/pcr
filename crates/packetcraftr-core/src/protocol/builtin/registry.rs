@@ -14,9 +14,7 @@ use capture_link::{BsdLoopCodec, BsdNullCodec, LinuxSll2Codec, LinuxSllCodec};
 use gre::GreCodec;
 use icmp::{Icmpv4Codec, Icmpv6Codec};
 use ip::{IgmpCodec, Ipv4Codec, Ipv6Codec, RawIpCodec};
-use ipv6_ext::{
-    DestinationOptionsCodec, HopByHopCodec, Ipv6FragmentCodec, SegmentRoutingHeaderCodec,
-};
+use ipv6_ext::{DestinationOptionsCodec, FragmentCodec, HopByHopCodec, SegmentRoutingHeaderCodec};
 use link::{ArpCodec, EthernetCodec, LlcCodec, SnapCodec, Vlan8021adCodec, VlanCodec};
 use raw::{MalformedCodec, PaddingCodec, RawCodec};
 use transport::{SctpCodec, TcpCodec, UdpCodec};
@@ -25,16 +23,13 @@ use tunnel::{
     VxlanCodec,
 };
 
-use crate::{
-    registry::{Builder as RegistryBuilder, Error as RegistryError, Registry as ProtocolRegistry},
-    semantics::{BuiltinProtocol, builtin_protocol_catalog},
-};
+use crate::semantics::{BuiltinProtocol, builtin_protocol_catalog};
 
 use application::DnsCodec;
 
 mod registration;
 
-fn register_catalog(builder: &mut RegistryBuilder) -> Result<(), RegistryError> {
+fn register_catalog(builder: &mut crate::registry::Builder) -> Result<(), crate::registry::Error> {
     macro_rules! register_matcher {
         ($variant:ident, none) => {};
         ($variant:ident, reverse_flow) => {
@@ -79,8 +74,8 @@ fn register_catalog(builder: &mut RegistryBuilder) -> Result<(), RegistryError> 
 }
 
 /// Build the default immutable registry without global mutable registration.
-pub fn registry() -> Result<ProtocolRegistry, RegistryError> {
-    let mut builder = ProtocolRegistry::builder();
+pub fn registry() -> Result<crate::registry::Registry, crate::registry::Error> {
+    let mut builder = crate::registry::Registry::builder();
     register_catalog(&mut builder)?;
     registration::register(&mut builder)?;
     builder.build()

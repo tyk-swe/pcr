@@ -8,11 +8,7 @@ use std::net::IpAddr;
 
 use serde::Serialize;
 
-use packetcraftr_netio::{
-    interface::{Flags as DomainFlags, Id as DomainInterfaceId, Info as DomainInterface},
-    link::{Capability as LinkCapability, Mode as LinkMode},
-    route::{Decision as RouteDecision, Plan as PlannedRoute},
-};
+use packetcraftr_netio::link::{Capability as LinkCapability, Mode as LinkMode};
 
 /// Stable interface shape used by both the text and JSON renderers.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
@@ -24,8 +20,8 @@ pub struct Flags {
     pub multicast: bool,
 }
 
-impl From<DomainFlags> for Flags {
-    fn from(value: DomainFlags) -> Self {
+impl From<packetcraftr_netio::interface::Flags> for Flags {
+    fn from(value: packetcraftr_netio::interface::Flags) -> Self {
         Self {
             up: value.up,
             broadcast: value.broadcast,
@@ -71,8 +67,8 @@ pub struct Interface {
     pub link_type: u32,
 }
 
-impl From<DomainInterface> for Interface {
-    fn from(interface: DomainInterface) -> Self {
+impl From<packetcraftr_netio::interface::Info> for Interface {
+    fn from(interface: packetcraftr_netio::interface::Info) -> Self {
         Self {
             name: interface.id.name,
             index: interface.id.index,
@@ -98,8 +94,8 @@ pub struct InterfaceId {
     pub index: u32,
 }
 
-impl From<DomainInterfaceId> for InterfaceId {
-    fn from(value: DomainInterfaceId) -> Self {
+impl From<packetcraftr_netio::interface::Id> for InterfaceId {
+    fn from(value: packetcraftr_netio::interface::Id) -> Self {
         Self {
             name: value.name,
             index: value.index,
@@ -245,8 +241,8 @@ pub struct Decision {
     pub link_type: u32,
 }
 
-impl From<RouteDecision> for Decision {
-    fn from(value: RouteDecision) -> Self {
+impl From<packetcraftr_netio::route::Decision> for Decision {
+    fn from(value: packetcraftr_netio::route::Decision) -> Self {
         Self {
             interface: value.interface.into(),
             source_mac: value.source_mac.map(Into::into),
@@ -282,8 +278,8 @@ pub struct Plan {
     pub synthesized_ethernet: bool,
 }
 
-impl From<PlannedRoute> for Plan {
-    fn from(value: PlannedRoute) -> Self {
+impl From<packetcraftr_netio::route::Plan> for Plan {
+    fn from(value: packetcraftr_netio::route::Plan) -> Self {
         Self {
             decision: value.decision.into(),
             mode: value.mode.into(),

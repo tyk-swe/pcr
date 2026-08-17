@@ -3,7 +3,7 @@
 
 //! Network-envelope and link-padding scope for decode traversal.
 
-use crate::{codec::NetworkEnvelope, layer::Id as ProtocolId, semantics::BuiltinProtocol};
+use crate::{codec::NetworkEnvelope, semantics::BuiltinProtocol};
 
 pub(super) struct TraversalScope {
     allow_trailing_padding: bool,
@@ -11,7 +11,7 @@ pub(super) struct TraversalScope {
 }
 
 impl TraversalScope {
-    pub(super) fn new(root: &ProtocolId) -> Self {
+    pub(super) fn new(root: &crate::layer::Id) -> Self {
         Self {
             allow_trailing_padding: link_scope_allows_padding(BuiltinProtocol::from_id(root)),
             network: None,
@@ -32,7 +32,11 @@ impl TraversalScope {
         }
     }
 
-    pub(super) fn enter_child(&mut self, parent: &ProtocolId, child: Option<&ProtocolId>) {
+    pub(super) fn enter_child(
+        &mut self,
+        parent: &crate::layer::Id,
+        child: Option<&crate::layer::Id>,
+    ) {
         if BuiltinProtocol::from_id(parent).is_some_and(BuiltinProtocol::is_encapsulation_boundary)
         {
             self.network = None;

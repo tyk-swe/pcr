@@ -8,11 +8,8 @@ use std::time::Duration;
 
 use crate::BoundaryError;
 use crate::ExchangeExecutor;
-use packetcraftr_core::{Packet, template::Template as PacketTemplate};
-use packetcraftr_netio::{
-    capture::Provider as CaptureProvider, neighbor::Resolver as NeighborResolver,
-    route::Provider as RouteProvider, transmit::Sender as PacketIo,
-};
+use packetcraftr_core::Packet;
+use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Sender as PacketIo};
 
 use super::boundary::{Authorizer, Execution, ExecutionCase, Executor};
 
@@ -62,8 +59,8 @@ impl Authorizer for PolicyAuthorizer<'_> {
 /// exchange lifecycle.
 impl<R, N, I> Executor for ExchangeExecutor<'_, R, N, I>
 where
-    R: RouteProvider,
-    N: NeighborResolver,
+    R: packetcraftr_netio::route::Provider,
+    N: packetcraftr_netio::neighbor::Resolver,
     I: PacketIo + CaptureProvider,
 {
     fn execute(
@@ -76,7 +73,10 @@ where
         options.max_template_packets = 1;
         let exchange = self
             .client
-            .exchange(&PacketTemplate::new(case.packet.clone()), options)
+            .exchange(
+                &packetcraftr_core::template::Template::new(case.packet.clone()),
+                options,
+            )
             .map_err(BoundaryError::from_error)?;
         let crate::exchange::Result {
             mut sent,

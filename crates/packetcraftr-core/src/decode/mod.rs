@@ -9,7 +9,7 @@ use bytes::Bytes;
 
 use crate::diagnostic::Diagnostic;
 use crate::frame::{Frame, LinkType};
-use crate::layer::Id as ProtocolId;
+
 use crate::registry::Registry;
 
 use fallback::raw_decoded_frame;
@@ -67,7 +67,7 @@ impl Dissector {
     pub fn decode_with_root(
         &self,
         bytes: impl Into<Bytes>,
-        root: ProtocolId,
+        root: crate::layer::Id,
         options: Options,
     ) -> std::result::Result<DecodedPacket, Error> {
         let bytes = bytes.into();
@@ -91,7 +91,7 @@ impl Dissector {
     fn decode_from_root(
         &self,
         frame: Frame,
-        root: ProtocolId,
+        root: crate::layer::Id,
         options: Options,
     ) -> std::result::Result<DecodedPacket, Error> {
         DecodeSession::new(&self.registry, frame, root, options).run()

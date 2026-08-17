@@ -8,7 +8,6 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use crate::traceroute::Result as TracerouteResult;
 use packetcraftr_core::diagnostic::Diagnostic;
 
 use super::contract::Error;
@@ -124,9 +123,9 @@ pub struct Result {
 
 impl Result {
     pub fn try_from_traceroute(
-        result: TracerouteResult,
+        result: crate::traceroute::Result,
     ) -> std::result::Result<(Self, Vec<Diagnostic>, Stats), Error> {
-        let TracerouteResult {
+        let crate::traceroute::Result {
             target,
             resolved_addresses,
             destination,

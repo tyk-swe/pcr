@@ -10,7 +10,7 @@ use crate::budget::Deadline;
 use crate::error::{Classification, Kind};
 use crate::{
     Packet,
-    build::{Builder, Context as BuildContext},
+    build::Builder,
     decode::Dissector,
     field::{FieldKind, FieldValue},
     registry::Registry,
@@ -19,19 +19,13 @@ use crate::{
 use super::super::MAX_TARGET_FIELDS;
 use super::super::error::{Error, duration_limit};
 use super::super::execution::case_seed;
-use super::super::request::{
-    Limits as FuzzLimits, Request as FuzzRequest, Strategy as FuzzStrategy, Target as FuzzTarget,
-};
-use super::super::result::{
-    Case as FuzzCase, CaseFailure as FuzzCaseFailure, CaseOutcome as FuzzCaseOutcome,
-    Mutation as FuzzMutation,
-};
+
 use super::super::run::{Campaign, ResolvedField};
 use super::decode::dissect_built;
 use super::value::{bounded_value_size, index_from, mutation_value, shrink_values};
 
 pub(in crate::fuzz) fn prepare(
-    request: &FuzzRequest,
+    request: &super::super::request::Request,
     packet: Packet,
     registry: Arc<Registry>,
     deadline: &mut Deadline,
@@ -84,19 +78,19 @@ struct Counters {
 }
 
 struct CaseInputs<'a> {
-    request: &'a FuzzRequest,
+    request: &'a super::super::request::Request,
     packet: &'a Packet,
     fields: &'a [ResolvedField],
-    compatible_mutations: &'a [(FuzzStrategy, usize)],
+    compatible_mutations: &'a [(super::super::request::Strategy, usize)],
     builder: &'a Builder,
     dissector: &'a Dissector,
 }
 
 fn prepare_cases(
-    request: &FuzzRequest,
+    request: &super::super::request::Request,
     packet: &Packet,
     fields: &[ResolvedField],
-    compatible_mutations: &[(FuzzStrategy, usize)],
+    compatible_mutations: &[(super::super::request::Strategy, usize)],
     builder: &Builder,
     dissector: &Dissector,
     deadline: &Deadline,
@@ -127,7 +121,7 @@ fn prepare_case(
     inputs: &CaseInputs<'_>,
     offset: usize,
     counters: &mut Counters,
-) -> Result<FuzzCase, Error> {
+) -> Result<super::super::result::Case, Error> {
     let request = inputs.request;
     let compatible_mutations = inputs.compatible_mutations;
     let total_byte_limit = request.limits.max_total_bytes as u64;
@@ -154,7 +148,7 @@ fn prepare_case(
         strategy_round,
         request.limits,
     );
-    let mutation = FuzzMutation {
+    let mutation = super::super::result::Mutation {
         layer: field.target.layer,
         protocol: field.protocol.clone(),
         field: field.target.field.clone(),
@@ -193,11 +187,11 @@ fn prepare_case(
 fn new_case(
     index: u64,
     seed: u64,
-    mutation: FuzzMutation,
+    mutation: super::super::result::Mutation,
     shrink_values: Vec<FieldValue>,
     recipe: Packet,
-) -> FuzzCase {
-    FuzzCase {
+) -> super::super::result::Case {
+    super::super::result::Case {
         index,
         seed,
         mutation,
@@ -205,14 +199,14 @@ fn new_case(
         recipe,
         built: None,
         decoded: None,
-        outcome: FuzzCaseOutcome::Rejected,
+        outcome: super::super::result::CaseOutcome::Rejected,
         error: None,
         diagnostics: Vec::new(),
     }
 }
 
-fn mutation_failure(source: impl std::fmt::Display) -> FuzzCaseFailure {
-    FuzzCaseFailure::new(
+fn mutation_failure(source: impl std::fmt::Display) -> super::super::result::CaseFailure {
+    super::super::result::CaseFailure::new(
         format!("mutation was rejected: {source}"),
         Classification::new(
             "packet.fuzz_mutation",
@@ -226,8 +220,8 @@ fn mutation_failure(source: impl std::fmt::Display) -> FuzzCaseFailure {
 }
 
 fn build_case(
-    case: &mut FuzzCase,
-    request: &FuzzRequest,
+    case: &mut super::super::result::Case,
+    request: &super::super::request::Request,
     builder: &Builder,
     dissector: &Dissector,
     counters: &mut Counters,
@@ -235,7 +229,7 @@ fn build_case(
 ) -> Result<(), Error> {
     match builder.build(
         case.recipe.clone(),
-        BuildContext::default(),
+        crate::build::Context::default(),
         request.build.clone(),
     ) {
         Ok(built) => {
@@ -262,12 +256,12 @@ fn build_case(
                 )?;
             }
             case.built = Some(built);
-            case.outcome = FuzzCaseOutcome::Built;
+            case.outcome = super::super::result::CaseOutcome::Built;
             counters.built_cases += 1;
             counters.built_bytes = next_built_bytes;
         }
         Err(source) => {
-            case.error = Some(FuzzCaseFailure::new(
+            case.error = Some(super::super::result::CaseFailure::new(
                 format!("mutated packet was rejected: {source}"),
                 Classification::new(
                     "packet.fuzz_build",
@@ -311,10 +305,10 @@ fn validate_base_shape(packet: &Packet, max_layers: usize) -> Result<(), Error> 
 }
 
 fn retained_case_value_bytes(
-    mutation: &FuzzMutation,
+    mutation: &super::super::result::Mutation,
     shrink_values: &[FieldValue],
     recipe: &Packet,
-    limits: FuzzLimits,
+    limits: super::super::request::Limits,
 ) -> Result<u64, Error> {
     let limit = limits.max_total_bytes as u64;
     let mut total = (mutation.protocol.len() as u64)
@@ -338,7 +332,10 @@ fn retained_case_value_bytes(
         .ok_or(byte_limit(u64::MAX, limit))
 }
 
-fn packet_reflected_value_bytes(packet: &Packet, limits: FuzzLimits) -> Result<u64, Error> {
+fn packet_reflected_value_bytes(
+    packet: &Packet,
+    limits: super::super::request::Limits,
+) -> Result<u64, Error> {
     let mut total = 0_u64;
     let limit = limits.max_total_bytes as u64;
     for layer in packet.iter() {
@@ -374,7 +371,10 @@ fn byte_limit(actual: u64, limit: u64) -> Error {
     Error::ByteLimit { actual, limit }
 }
 
-fn resolve_fields(packet: &Packet, requested: &[FuzzTarget]) -> Result<Vec<ResolvedField>, Error> {
+fn resolve_fields(
+    packet: &Packet,
+    requested: &[super::super::request::Target],
+) -> Result<Vec<ResolvedField>, Error> {
     if requested.is_empty() {
         let mut fields = Vec::new();
         for (layer_index, layer) in packet.iter().enumerate() {
@@ -390,7 +390,7 @@ fn resolve_fields(packet: &Packet, requested: &[FuzzTarget]) -> Result<Vec<Resol
                     });
                 }
                 fields.push(ResolvedField {
-                    target: FuzzTarget {
+                    target: super::super::request::Target {
                         layer: layer_index,
                         field: field.name.to_owned(),
                     },
@@ -453,10 +453,10 @@ fn resolve_fields(packet: &Packet, requested: &[FuzzTarget]) -> Result<Vec<Resol
     Ok(fields)
 }
 
-fn strategy_compatible(strategy: FuzzStrategy, field: &ResolvedField) -> bool {
+fn strategy_compatible(strategy: super::super::request::Strategy, field: &ResolvedField) -> bool {
     match strategy {
-        FuzzStrategy::Boundary | FuzzStrategy::Random => true,
-        FuzzStrategy::BitFlip => field.kind == FieldKind::Bytes,
-        FuzzStrategy::Malformed => field.is_derived,
+        super::super::request::Strategy::Boundary | super::super::request::Strategy::Random => true,
+        super::super::request::Strategy::BitFlip => field.kind == FieldKind::Bytes,
+        super::super::request::Strategy::Malformed => field.is_derived,
     }
 }

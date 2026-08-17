@@ -10,17 +10,15 @@ use bytes::Bytes;
 use packetcraftr::core::Packet;
 use packetcraftr::core::analysis::expert::{
     Finding as AnalysisFinding, StreamRef, StreamTransport as AnalysisStreamTransport,
-    Summary as ExpertSummary,
 };
 use packetcraftr::core::analysis::follow::{
-    Chunk as AnalysisChunk, Direction as AnalysisDirection, Summary as FollowSummary,
+    Chunk as AnalysisChunk, Direction as AnalysisDirection,
 };
 use packetcraftr::core::analysis::reassembly::tcp::FlowKey;
 use packetcraftr::core::analysis::stats::{
-    ConversationStat, EndpointStat, IoBucketStat, PortStat, ProtocolStat, Report as StatsReport,
-    TransportKind,
+    ConversationStat, EndpointStat, IoBucketStat, PortStat, ProtocolStat, TransportKind,
 };
-use packetcraftr::core::diagnostic::{Diagnostic, Severity as DiagnosticSeverity};
+use packetcraftr::core::diagnostic::Diagnostic;
 use packetcraftr::core::frame::{Direction as CaptureDirection, Frame, LinkType};
 use packetcraftr::core::layer::Raw;
 use packetcraftr::core::protocol::{builtin, network::Ipv4, transport::Udp};
@@ -121,10 +119,10 @@ fn packet_output_adapters_preserve_wire_data_and_separate_diagnostics() {
     );
 }
 
-fn representative_stats_report() -> StatsReport {
+fn representative_stats_report() -> packetcraftr::core::analysis::stats::Report {
     let first = UNIX_EPOCH + Duration::from_secs(5);
     let last = first + Duration::from_millis(3_250);
-    StatsReport {
+    packetcraftr::core::analysis::stats::Report {
         interval: Duration::from_secs(2),
         frames: 7,
         bytes: 321,
@@ -313,7 +311,7 @@ fn stats_io_output_preserves_interval_and_buckets() {
 fn expert_output_preserves_finding_severity_streams_and_code_order() {
     let findings: Vec<expert::Finding> = [
         AnalysisFinding {
-            severity: DiagnosticSeverity::Error,
+            severity: packetcraftr::core::diagnostic::Severity::Error,
             code: "tcp.reset".to_owned(),
             number: 8,
             stream: Some(StreamRef {
@@ -323,7 +321,7 @@ fn expert_output_preserves_finding_severity_streams_and_code_order() {
             message: "connection reset".to_owned(),
         },
         AnalysisFinding {
-            severity: DiagnosticSeverity::Warning,
+            severity: packetcraftr::core::diagnostic::Severity::Warning,
             code: "udp.gap".to_owned(),
             number: 9,
             stream: Some(StreamRef {
@@ -333,7 +331,7 @@ fn expert_output_preserves_finding_severity_streams_and_code_order() {
             message: "datagram gap".to_owned(),
         },
         AnalysisFinding {
-            severity: DiagnosticSeverity::Info,
+            severity: packetcraftr::core::diagnostic::Severity::Info,
             code: "capture.note".to_owned(),
             number: 10,
             stream: None,
@@ -344,7 +342,7 @@ fn expert_output_preserves_finding_severity_streams_and_code_order() {
     .map(Into::into)
     .collect();
     let expert_result = expert::Result::from_summary(
-        ExpertSummary {
+        packetcraftr::core::analysis::expert::Summary {
             findings: 3,
             errors: 1,
             warnings: 1,
@@ -394,7 +392,7 @@ fn follow_output_preserves_flow_directions_bytes_and_missing_endpoints() {
     let followed = follow::Result::from_summary(
         expert::StreamTransport::Tcp,
         2,
-        FollowSummary {
+        packetcraftr::core::analysis::follow::Summary {
             client_flow: Some(flow),
             frames: 2,
             client_bytes: 2,
@@ -414,7 +412,7 @@ fn follow_output_preserves_flow_directions_bytes_and_missing_endpoints() {
     let empty = follow::Result::from_summary(
         expert::StreamTransport::Udp,
         99,
-        FollowSummary::default(),
+        packetcraftr::core::analysis::follow::Summary::default(),
         Vec::new(),
     );
     assert!(empty.client.is_none() && empty.server.is_none());

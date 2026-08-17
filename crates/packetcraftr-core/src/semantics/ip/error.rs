@@ -3,8 +3,6 @@
 
 use std::fmt;
 
-use super::super::ProtocolId;
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Error {
     message: String,
@@ -17,7 +15,11 @@ impl Error {
         }
     }
 
-    pub(super) fn field(protocol: &ProtocolId, field: &str, reason: impl fmt::Display) -> Self {
+    pub(super) fn field(
+        protocol: &crate::layer::Id,
+        field: &str,
+        reason: impl fmt::Display,
+    ) -> Self {
         Self::new(format!("field {field} on layer {protocol} {reason}"))
     }
 }

@@ -4,13 +4,10 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    codec::{
-        DecodedLayerValue, EncodedLayer, Error as CodecError, LayerCodec, LayerDecodeContext,
-        LayerEncodeContext,
-    },
+    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
-    layer::{Id as ProtocolId, Layer, reflective_layer},
+    layer::{Layer, reflective_layer},
     registry::Discriminator,
 };
 
@@ -75,7 +72,7 @@ reflective_layer! {
 pub(crate) struct PppoeCodec;
 
 impl LayerCodec for PppoeCodec {
-    fn protocol_id(&self) -> ProtocolId {
+    fn protocol_id(&self) -> crate::layer::Id {
         protocol("pppoe")
     }
 
@@ -84,7 +81,7 @@ impl LayerCodec for PppoeCodec {
         layer: &dyn Layer,
         payload: &[u8],
         context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, CodecError> {
+    ) -> Result<EncodedLayer, crate::codec::Error> {
         let layer = layer
             .as_any()
             .downcast_ref::<Pppoe>()
@@ -127,7 +124,7 @@ impl LayerCodec for PppoeCodec {
         &self,
         input: &[u8],
         context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, CodecError> {
+    ) -> Result<DecodedLayerValue, crate::codec::Error> {
         if input.len() < PPPOE_LEN {
             return Err(truncated("pppoe", PPPOE_LEN, input.len()));
         }
@@ -201,7 +198,7 @@ impl LayerCodec for PppoeCodec {
     fn make_layer(
         &self,
         fields: &BTreeMap<String, FieldValue>,
-    ) -> Result<Box<dyn Layer>, CodecError> {
+    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Pppoe::default(), fields)
     }
 }
@@ -209,7 +206,7 @@ impl LayerCodec for PppoeCodec {
 fn validate_stage(
     layer: &Pppoe,
     context: &LayerEncodeContext<'_>,
-) -> Result<Vec<Diagnostic>, CodecError> {
+) -> Result<Vec<Diagnostic>, crate::codec::Error> {
     let mut diagnostics = Vec::new();
     if layer.version != 1 || layer.type_code != 1 {
         strict_or_diagnostic(
@@ -253,7 +250,7 @@ fn validate_parent_stage(
     layer: &Pppoe,
     context: &LayerEncodeContext<'_>,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Result<(), CodecError> {
+) -> Result<(), crate::codec::Error> {
     let expected_ether_type = if layer.code == 0 { 0x8864 } else { 0x8863 };
     let parent_ether_type = context
         .index
@@ -313,7 +310,7 @@ reflective_layer! {
 pub(crate) struct PppCodec;
 
 impl LayerCodec for PppCodec {
-    fn protocol_id(&self) -> ProtocolId {
+    fn protocol_id(&self) -> crate::layer::Id {
         protocol("ppp")
     }
 
@@ -322,7 +319,7 @@ impl LayerCodec for PppCodec {
         layer: &dyn Layer,
         _payload: &[u8],
         context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, CodecError> {
+    ) -> Result<EncodedLayer, crate::codec::Error> {
         let layer = layer
             .as_any()
             .downcast_ref::<Ppp>()
@@ -367,7 +364,7 @@ impl LayerCodec for PppCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, CodecError> {
+    ) -> Result<DecodedLayerValue, crate::codec::Error> {
         if input.len() < PPP_LEN {
             return Err(truncated("ppp", PPP_LEN, input.len()));
         }
@@ -397,7 +394,7 @@ impl LayerCodec for PppCodec {
     fn make_layer(
         &self,
         fields: &BTreeMap<String, FieldValue>,
-    ) -> Result<Box<dyn Layer>, CodecError> {
+    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Ppp::default(), fields)
     }
 }

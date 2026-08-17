@@ -21,7 +21,6 @@ use crate::materialize::{
 };
 use crate::mtu::validate_mtu;
 use crate::planning::ensure_preparation_deadline;
-use crate::policy::Error as PolicyError;
 
 use super::contract::Options;
 use super::route_cache::CachedProvider;
@@ -148,7 +147,7 @@ where
             self.authorize_final_wire(&preliminary, &plan)?;
             total_bytes = total_bytes
                 .checked_add(u64::try_from(preliminary.bytes.len()).unwrap_or(u64::MAX))
-                .ok_or(PolicyError::ByteLimit {
+                .ok_or(crate::policy::Error::ByteLimit {
                     actual: u64::MAX,
                     limit: self.policy.max_bytes_per_operation,
                 })?;

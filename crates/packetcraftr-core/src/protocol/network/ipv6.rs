@@ -7,13 +7,10 @@ use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv6Addr};
 
 use crate::{
-    codec::{
-        DecodedLayerValue, EncodedLayer, Error as CodecError, LayerCodec, LayerDecodeContext,
-        LayerEncodeContext,
-    },
+    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
-    layer::{Id as ProtocolId, Layer, reflective_layer},
+    layer::{Layer, reflective_layer},
     registry::Discriminator,
 };
 
@@ -71,7 +68,7 @@ reflective_layer! {
 pub(crate) struct Ipv6Codec;
 
 impl LayerCodec for Ipv6Codec {
-    fn protocol_id(&self) -> ProtocolId {
+    fn protocol_id(&self) -> crate::layer::Id {
         protocol("ipv6")
     }
     fn encode(
@@ -79,7 +76,7 @@ impl LayerCodec for Ipv6Codec {
         layer: &dyn Layer,
         payload: &[u8],
         context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, CodecError> {
+    ) -> Result<EncodedLayer, crate::codec::Error> {
         let layer = layer
             .as_any()
             .downcast_ref::<Ipv6>()
@@ -148,7 +145,7 @@ impl LayerCodec for Ipv6Codec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, CodecError> {
+    ) -> Result<DecodedLayerValue, crate::codec::Error> {
         if input.len() < IPV6_LEN {
             return Err(truncated("ipv6", IPV6_LEN, input.len()));
         }
@@ -166,7 +163,7 @@ impl LayerCodec for Ipv6Codec {
         // the dissector will classify them as link padding or a malformed
         // trailer according to the enclosing link context.
         if payload_length == 0 && input.len() > IPV6_LEN && input[6] == 0 {
-            return Err(CodecError::Unsupported {
+            return Err(crate::codec::Error::Unsupported {
                 protocol: protocol("ipv6"),
                 message: "IPv6 jumbogram payload requires a Hop-by-Hop Jumbo Payload option"
                     .to_string(),
@@ -209,7 +206,7 @@ impl LayerCodec for Ipv6Codec {
     fn make_layer(
         &self,
         fields: &BTreeMap<String, FieldValue>,
-    ) -> Result<Box<dyn Layer>, CodecError> {
+    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(
             Ipv6::default(),
             &aliased_fields("ipv6", fields, &[("src", "source"), ("dst", "destination")])?,
@@ -220,7 +217,7 @@ impl LayerCodec for Ipv6Codec {
 fn resolve_addresses(
     layer: &Ipv6,
     context: &LayerEncodeContext<'_>,
-) -> Result<(Ipv6Addr, Ipv6Addr, Vec<Diagnostic>), CodecError> {
+) -> Result<(Ipv6Addr, Ipv6Addr, Vec<Diagnostic>), crate::codec::Error> {
     let inherit = is_outer_network_layer(context.packet, context.index);
     let source = match context.build_context.source {
         Some(IpAddr::V6(source)) if inherit && layer.source.is_unspecified() => source,

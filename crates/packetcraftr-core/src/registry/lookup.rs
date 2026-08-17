@@ -8,19 +8,20 @@ use std::sync::Arc;
 use super::binding::{ChildBinding, Discriminator, FilterFieldBinding, ReverseBinding};
 use super::builder::Builder;
 use crate::codec::LayerCodec;
-use crate::layer::{Id as ProtocolId, Schema as LayerSchema};
+
 use crate::matcher::ResponseMatcher;
 
 #[derive(Clone, Default)]
 pub struct Registry {
-    pub(super) codecs: BTreeMap<ProtocolId, Arc<dyn LayerCodec>>,
-    pub(super) builtin_codecs: BTreeSet<ProtocolId>,
-    pub(super) aliases: HashMap<String, ProtocolId>,
-    pub(super) roots: HashMap<u32, ProtocolId>,
-    pub(super) bindings: HashMap<ProtocolId, HashMap<Discriminator, Vec<ChildBinding>>>,
-    pub(super) reverse_bindings: HashMap<ProtocolId, HashMap<ProtocolId, Vec<ReverseBinding>>>,
-    pub(super) matchers: BTreeMap<ProtocolId, Arc<dyn ResponseMatcher>>,
-    pub(super) schemas: BTreeMap<ProtocolId, &'static LayerSchema>,
+    pub(super) codecs: BTreeMap<crate::layer::Id, Arc<dyn LayerCodec>>,
+    pub(super) builtin_codecs: BTreeSet<crate::layer::Id>,
+    pub(super) aliases: HashMap<String, crate::layer::Id>,
+    pub(super) roots: HashMap<u32, crate::layer::Id>,
+    pub(super) bindings: HashMap<crate::layer::Id, HashMap<Discriminator, Vec<ChildBinding>>>,
+    pub(super) reverse_bindings:
+        HashMap<crate::layer::Id, HashMap<crate::layer::Id, Vec<ReverseBinding>>>,
+    pub(super) matchers: BTreeMap<crate::layer::Id, Arc<dyn ResponseMatcher>>,
+    pub(super) schemas: BTreeMap<crate::layer::Id, &'static crate::layer::Schema>,
     pub(super) filter_fields: BTreeMap<String, FilterFieldBinding>,
 }
 
@@ -45,7 +46,7 @@ impl Registry {
 
     pub fn codec<Q>(&self, protocol: &Q) -> Option<&Arc<dyn LayerCodec>>
     where
-        ProtocolId: std::borrow::Borrow<Q>,
+        crate::layer::Id: std::borrow::Borrow<Q>,
         Q: Ord + ?Sized,
     {
         self.codecs.get(protocol)
@@ -59,30 +60,34 @@ impl Registry {
 
     pub fn is_builtin_codec<Q>(&self, protocol: &Q) -> bool
     where
-        ProtocolId: std::borrow::Borrow<Q>,
+        crate::layer::Id: std::borrow::Borrow<Q>,
         Q: Ord + ?Sized,
     {
         self.builtin_codecs.contains(protocol)
     }
 
-    pub fn protocol_named(&self, name: &str) -> Option<&ProtocolId> {
+    pub fn protocol_named(&self, name: &str) -> Option<&crate::layer::Id> {
         self.aliases.get(&name.trim().to_ascii_lowercase())
     }
 
-    pub fn root_for_link_type(&self, link_type: u32) -> Option<&ProtocolId> {
+    pub fn root_for_link_type(&self, link_type: u32) -> Option<&crate::layer::Id> {
         self.roots.get(&link_type)
     }
 
     /// All registered numeric capture roots. Iterator order is unspecified.
-    pub fn link_type_roots(&self) -> impl ExactSizeIterator<Item = (u32, &ProtocolId)> {
+    pub fn link_type_roots(&self) -> impl ExactSizeIterator<Item = (u32, &crate::layer::Id)> {
         self.roots
             .iter()
             .map(|(link_type, protocol)| (*link_type, protocol))
     }
 
-    pub fn child_for<Q>(&self, parent: &Q, discriminator: Discriminator) -> Option<&ProtocolId>
+    pub fn child_for<Q>(
+        &self,
+        parent: &Q,
+        discriminator: Discriminator,
+    ) -> Option<&crate::layer::Id>
     where
-        ProtocolId: std::borrow::Borrow<Q>,
+        crate::layer::Id: std::borrow::Borrow<Q>,
         Q: Eq + std::hash::Hash + ?Sized,
     {
         self.bindings
@@ -94,7 +99,7 @@ impl Registry {
 
     pub fn discriminator_for<P, C>(&self, parent: &P, child: &C) -> Option<Discriminator>
     where
-        ProtocolId: std::borrow::Borrow<P> + std::borrow::Borrow<C>,
+        crate::layer::Id: std::borrow::Borrow<P> + std::borrow::Borrow<C>,
         P: Eq + std::hash::Hash + ?Sized,
         C: Eq + std::hash::Hash + ?Sized,
     {
@@ -107,13 +112,13 @@ impl Registry {
 
     pub fn matcher<Q>(&self, protocol: &Q) -> Option<&Arc<dyn ResponseMatcher>>
     where
-        ProtocolId: std::borrow::Borrow<Q>,
+        crate::layer::Id: std::borrow::Borrow<Q>,
         Q: Ord + ?Sized,
     {
         self.matchers.get(protocol)
     }
 
-    pub fn protocols(&self) -> impl ExactSizeIterator<Item = &ProtocolId> {
+    pub fn protocols(&self) -> impl ExactSizeIterator<Item = &crate::layer::Id> {
         self.codecs.keys()
     }
 
@@ -122,9 +127,9 @@ impl Registry {
     /// Schemas are captured once, when the registry is built, through each
     /// codec's schema-publication hook. Decode-only codecs may publish a
     /// schema even when they cannot construct a layer.
-    pub fn schema<Q>(&self, protocol: &Q) -> Option<&'static LayerSchema>
+    pub fn schema<Q>(&self, protocol: &Q) -> Option<&'static crate::layer::Schema>
     where
-        ProtocolId: std::borrow::Borrow<Q>,
+        crate::layer::Id: std::borrow::Borrow<Q>,
         Q: Ord + ?Sized,
     {
         self.schemas.get(protocol).copied()

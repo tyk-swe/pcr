@@ -12,19 +12,15 @@ use common::{
     CLIENT, SERVER, TcpSpec, client_tcp, reader, registry, server_tcp, tcp_frame, udp_frame,
 };
 use packetcraftr_core::Packet;
-use packetcraftr_core::analysis::expert::{
-    Collector as ExpertCollector, Finding, StreamRef, StreamTransport, Summary as ExpertSummary,
-};
-use packetcraftr_core::analysis::follow::{
-    Collector as FollowCollector, Direction as FollowDirection, Selector,
-};
+use packetcraftr_core::analysis::expert::{Finding, StreamRef, StreamTransport};
+use packetcraftr_core::analysis::follow::{Direction as FollowDirection, Selector};
 use packetcraftr_core::analysis::pcap::{Reader, Writer};
 use packetcraftr_core::analysis::reassembly::tcp;
-use packetcraftr_core::analysis::stats::{Collector as StatsCollector, TransportKind};
+use packetcraftr_core::analysis::stats::TransportKind;
 use packetcraftr_core::analysis::{Error, Limits, Options, run};
-use packetcraftr_core::build::{Builder, Context as BuildContext, Options as BuildOptions};
+use packetcraftr_core::build::Builder;
 use packetcraftr_core::error::BoundaryError;
-use packetcraftr_core::filter::{Filter, Options as FilterOptions};
+use packetcraftr_core::filter::Filter;
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::protocol::gre::Gre;
 use packetcraftr_core::protocol::link::Ethernet;
@@ -61,7 +57,11 @@ fn build_ipv4_frame(
     packet: Packet,
 ) -> Frame {
     let built = Builder::new(Arc::clone(registry))
-        .build(packet, BuildContext::default(), BuildOptions::default())
+        .build(
+            packet,
+            packetcraftr_core::build::Context::default(),
+            packetcraftr_core::build::Options::default(),
+        )
         .expect("tunnel fixture must build");
     Frame::new(timestamp, LinkType::IPV4, built.bytes).expect("tunnel fixture frame must be valid")
 }
@@ -126,29 +126,34 @@ fn gre_tcp_frame(
 
 #[test]
 fn expert_public_models_and_collector_keep_their_contracts() {
-    type Finish = fn(ExpertCollector, &[tcp::Event], u64) -> (Vec<Finding>, ExpertSummary);
+    type Finish = fn(
+        packetcraftr_core::analysis::expert::Collector,
+        &[tcp::Event],
+        u64,
+    ) -> (Vec<Finding>, packetcraftr_core::analysis::expert::Summary);
 
     fn assert_model<T: Clone + std::fmt::Debug + Eq>() {}
     fn assert_collector<T: Default + std::fmt::Debug>() {}
     fn observe<'record>(
-        collector: &mut ExpertCollector,
+        collector: &mut packetcraftr_core::analysis::expert::Collector,
         record: &packetcraftr_core::analysis::FrameRecord<'record>,
     ) -> Vec<Finding> {
         collector.observe(record)
     }
 
     assert_model::<Finding>();
-    assert_model::<ExpertSummary>();
+    assert_model::<packetcraftr_core::analysis::expert::Summary>();
     assert_model::<StreamRef>();
     assert_model::<StreamTransport>();
-    assert_collector::<ExpertCollector>();
+    assert_collector::<packetcraftr_core::analysis::expert::Collector>();
 
-    let _: fn() -> ExpertCollector = ExpertCollector::new;
+    let _: fn() -> packetcraftr_core::analysis::expert::Collector =
+        packetcraftr_core::analysis::expert::Collector::new;
     let _: for<'record> fn(
-        &mut ExpertCollector,
+        &mut packetcraftr_core::analysis::expert::Collector,
         &packetcraftr_core::analysis::FrameRecord<'record>,
     ) -> Vec<Finding> = observe;
-    let _: Finish = ExpertCollector::finish;
+    let _: Finish = packetcraftr_core::analysis::expert::Collector::finish;
 }
 
 #[test]
@@ -225,7 +230,7 @@ fn pipeline_assigns_stable_indices_before_filtering() {
     let filter = Filter::compile(
         "tcp.stream == 1",
         registry.as_ref(),
-        FilterOptions::default(),
+        packetcraftr_core::filter::Options::default(),
     )
     .expect("stream filter compiles");
     let mut capture = reader(&frames);
@@ -500,7 +505,8 @@ fn stats_collect_all_tables_with_directional_and_time_accounting() {
         .sum::<u64>();
     let tcp_bytes = u64::from(frames[0].captured_length()) + u64::from(frames[1].captured_length());
     let mut capture = reader(&frames);
-    let mut collector = StatsCollector::new(Duration::from_secs(1)).expect("valid interval");
+    let mut collector = packetcraftr_core::analysis::stats::Collector::new(Duration::from_secs(1))
+        .expect("valid interval");
     let summary = run(
         &mut capture,
         Arc::clone(&registry),
@@ -572,14 +578,14 @@ fn stats_collect_all_tables_with_directional_and_time_accounting() {
 #[test]
 fn stats_reject_zero_interval_and_empty_report_is_well_formed() {
     assert!(matches!(
-        StatsCollector::new(Duration::ZERO),
+        packetcraftr_core::analysis::stats::Collector::new(Duration::ZERO),
         Err(Error::InvalidLimit {
             field: "interval",
             value: 0,
             ..
         })
     ));
-    let report = StatsCollector::new(Duration::from_millis(250))
+    let report = packetcraftr_core::analysis::stats::Collector::new(Duration::from_millis(250))
         .expect("valid interval")
         .finish();
     assert_eq!(report.frames, 0);
@@ -616,7 +622,7 @@ fn tcp_follow_delivers_gap_fill_in_order_and_classifies_both_directions() {
         ),
     ];
     let mut capture = reader(&frames);
-    let mut collector = FollowCollector::new(Selector {
+    let mut collector = packetcraftr_core::analysis::follow::Collector::new(Selector {
         transport: StreamTransport::Tcp,
         index: 0,
     });
@@ -687,7 +693,7 @@ fn tcp_follow_deduplicates_fast_open_data_across_directional_close() {
         ),
     ];
     let mut capture = reader(&frames);
-    let mut collector = FollowCollector::new(Selector {
+    let mut collector = packetcraftr_core::analysis::follow::Collector::new(Selector {
         transport: StreamTransport::Tcp,
         index: 0,
     });
@@ -740,7 +746,7 @@ fn tcp_follow_starts_a_fresh_delivery_generation_for_four_tuple_reuse() {
         ),
     ];
     let mut capture = reader(&frames);
-    let mut collector = FollowCollector::new(Selector {
+    let mut collector = packetcraftr_core::analysis::follow::Collector::new(Selector {
         transport: StreamTransport::Tcp,
         index: 0,
     });
@@ -797,7 +803,7 @@ fn udp_follow_emits_empty_and_nonempty_datagrams_and_ignores_other_streams() {
         ),
     ];
     let mut capture = reader(&frames);
-    let mut collector = FollowCollector::new(Selector {
+    let mut collector = packetcraftr_core::analysis::follow::Collector::new(Selector {
         transport: StreamTransport::Udp,
         index: 0,
     });
@@ -822,7 +828,7 @@ fn udp_follow_emits_empty_and_nonempty_datagrams_and_ignores_other_streams() {
     assert_eq!(summary.client_bytes, 5);
     assert_eq!(summary.server_bytes, 6);
 
-    let empty = FollowCollector::new(Selector {
+    let empty = packetcraftr_core::analysis::follow::Collector::new(Selector {
         transport: StreamTransport::Udp,
         index: 99,
     })
@@ -845,7 +851,7 @@ fn tcp_follow_reports_bytes_stranded_behind_a_gap_at_end() {
         ),
     ];
     let mut capture = reader(&frames);
-    let mut collector = FollowCollector::new(Selector {
+    let mut collector = packetcraftr_core::analysis::follow::Collector::new(Selector {
         transport: StreamTransport::Tcp,
         index: 0,
     });

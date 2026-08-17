@@ -6,20 +6,17 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use crate::{
-    codec::{
-        DecodedLayerValue, EncodedLayer, Error as CodecError, LayerCodec, LayerDecodeContext,
-        LayerEncodeContext,
-    },
+    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::Diagnostic,
     field::FieldValue,
-    layer::{Id as ProtocolId, Layer, Malformed, Padding, Raw},
+    layer::{Layer, Malformed, Padding, Raw},
 };
 
 use super::common::{ensure_encode_budget, invalid, make_layer, protocol, wrong_layer};
 
 /// Parses hexadecimal raw bytes with optional `0x`, whitespace, colon, or dash separators.
-pub fn parse_hex(input: &str) -> Result<Bytes, CodecError> {
-    let protocol = ProtocolId::new("raw");
+pub fn parse_hex(input: &str) -> Result<Bytes, crate::codec::Error> {
+    let protocol = crate::layer::Id::new("raw");
     let compact = input
         .strip_prefix("0x")
         .or_else(|| input.strip_prefix("0X"))
@@ -30,7 +27,7 @@ pub fn parse_hex(input: &str) -> Result<Bytes, CodecError> {
         })
         .collect::<String>();
     if compact.len() % 2 != 0 {
-        return Err(CodecError::Invalid {
+        return Err(crate::codec::Error::Invalid {
             protocol,
             message: "hex value must contain an even number of digits".to_owned(),
         });
@@ -38,11 +35,11 @@ pub fn parse_hex(input: &str) -> Result<Bytes, CodecError> {
     let digits = compact.as_bytes();
     let mut bytes = Vec::with_capacity(digits.len() / 2);
     for offset in (0..digits.len()).step_by(2) {
-        let high = hex_nibble(digits[offset]).ok_or_else(|| CodecError::Invalid {
+        let high = hex_nibble(digits[offset]).ok_or_else(|| crate::codec::Error::Invalid {
             protocol: protocol.clone(),
             message: format!("invalid hex at byte {offset}"),
         })?;
-        let low = hex_nibble(digits[offset + 1]).ok_or_else(|| CodecError::Invalid {
+        let low = hex_nibble(digits[offset + 1]).ok_or_else(|| crate::codec::Error::Invalid {
             protocol: protocol.clone(),
             message: format!("invalid hex at byte {}", offset + 1),
         })?;
@@ -64,7 +61,7 @@ fn hex_nibble(value: u8) -> Option<u8> {
 pub(super) struct RawCodec;
 
 impl LayerCodec for RawCodec {
-    fn protocol_id(&self) -> ProtocolId {
+    fn protocol_id(&self) -> crate::layer::Id {
         protocol("raw")
     }
 
@@ -73,7 +70,7 @@ impl LayerCodec for RawCodec {
         layer: &dyn Layer,
         _payload: &[u8],
         context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, CodecError> {
+    ) -> Result<EncodedLayer, crate::codec::Error> {
         let layer = layer
             .as_any()
             .downcast_ref::<Raw>()
@@ -88,7 +85,7 @@ impl LayerCodec for RawCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, CodecError> {
+    ) -> Result<DecodedLayerValue, crate::codec::Error> {
         let mut decoded = DecodedLayerValue::terminal(
             Box::new(Raw::new(Bytes::copy_from_slice(input))),
             input.len(),
@@ -100,7 +97,7 @@ impl LayerCodec for RawCodec {
     fn make_layer(
         &self,
         fields: &BTreeMap<String, FieldValue>,
-    ) -> Result<Box<dyn Layer>, CodecError> {
+    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Raw::default(), &raw_fields(fields, "raw")?)
     }
 }
@@ -112,7 +109,7 @@ pub(super) struct PaddingCodec;
 pub(super) struct MalformedCodec;
 
 impl LayerCodec for MalformedCodec {
-    fn protocol_id(&self) -> ProtocolId {
+    fn protocol_id(&self) -> crate::layer::Id {
         protocol("malformed")
     }
 
@@ -121,7 +118,7 @@ impl LayerCodec for MalformedCodec {
         layer: &dyn Layer,
         _payload: &[u8],
         context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, CodecError> {
+    ) -> Result<EncodedLayer, crate::codec::Error> {
         let layer = layer
             .as_any()
             .downcast_ref::<Malformed>()
@@ -140,7 +137,7 @@ impl LayerCodec for MalformedCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, CodecError> {
+    ) -> Result<DecodedLayerValue, crate::codec::Error> {
         let mut decoded = DecodedLayerValue::terminal(
             Box::new(Malformed::new(
                 None,
@@ -156,7 +153,7 @@ impl LayerCodec for MalformedCodec {
     fn make_layer(
         &self,
         fields: &BTreeMap<String, FieldValue>,
-    ) -> Result<Box<dyn Layer>, CodecError> {
+    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         let mut layer = Malformed::new(None, Bytes::new(), "explicit malformed bytes");
         for (name, value) in fields {
             layer.set_field(name, value.clone())?;
@@ -166,7 +163,7 @@ impl LayerCodec for MalformedCodec {
 }
 
 impl LayerCodec for PaddingCodec {
-    fn protocol_id(&self) -> ProtocolId {
+    fn protocol_id(&self) -> crate::layer::Id {
         protocol("padding")
     }
 
@@ -175,7 +172,7 @@ impl LayerCodec for PaddingCodec {
         layer: &dyn Layer,
         _payload: &[u8],
         context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, CodecError> {
+    ) -> Result<EncodedLayer, crate::codec::Error> {
         let layer = layer
             .as_any()
             .downcast_ref::<Padding>()
@@ -190,7 +187,7 @@ impl LayerCodec for PaddingCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, CodecError> {
+    ) -> Result<DecodedLayerValue, crate::codec::Error> {
         let mut decoded = DecodedLayerValue::terminal(
             Box::new(Padding::new(Bytes::copy_from_slice(input))),
             input.len(),
@@ -202,7 +199,7 @@ impl LayerCodec for PaddingCodec {
     fn make_layer(
         &self,
         fields: &BTreeMap<String, FieldValue>,
-    ) -> Result<Box<dyn Layer>, CodecError> {
+    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Padding::default(), &raw_fields(fields, "padding")?)
     }
 }
@@ -210,7 +207,7 @@ impl LayerCodec for PaddingCodec {
 fn raw_fields(
     fields: &BTreeMap<String, FieldValue>,
     name: &str,
-) -> Result<BTreeMap<String, FieldValue>, CodecError> {
+) -> Result<BTreeMap<String, FieldValue>, crate::codec::Error> {
     let mut normalized = fields.clone();
     let derived = match normalized.remove("hex") {
         Some(value) => {

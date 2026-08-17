@@ -5,8 +5,6 @@
 
 use bytes::Bytes;
 
-use super::super::error::WireError as DnsWireError;
-use super::super::model::QueryType as DnsQueryType;
 use super::super::{DNS_CLASS_IN, DNS_FLAG_RECURSION_DESIRED, DNS_HEADER_BYTES};
 use super::name::{canonical_query_name, encode_name};
 
@@ -14,10 +12,10 @@ use super::name::{canonical_query_name, encode_name};
 /// effects.
 pub fn encode_query(
     query_name: &str,
-    query_type: DnsQueryType,
+    query_type: super::super::model::QueryType,
     transaction_id: u16,
     recursion_desired: bool,
-) -> Result<Bytes, DnsWireError> {
+) -> Result<Bytes, super::super::error::WireError> {
     let query_name = canonical_query_name(query_name)?;
     let mut message = Vec::with_capacity(DNS_HEADER_BYTES + query_name.len() + 5);
     message.extend_from_slice(&transaction_id.to_be_bytes());

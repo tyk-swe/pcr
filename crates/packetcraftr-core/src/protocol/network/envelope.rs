@@ -6,7 +6,7 @@
 use std::net::IpAddr;
 
 use crate::{
-    codec::{Error as CodecError, LayerEncodeContext, NetworkEnvelope},
+    codec::{LayerEncodeContext, NetworkEnvelope},
     layer::Layer,
     semantics::ipv4_source_route_destination,
 };
@@ -26,7 +26,7 @@ pub(super) fn is_ipv6_extension_layer(layer: &dyn Layer) -> bool {
 
 pub(crate) fn resolve_envelope(
     context: &LayerEncodeContext<'_>,
-) -> Result<NetworkEnvelope, CodecError> {
+) -> Result<NetworkEnvelope, crate::codec::Error> {
     for index in (0..context.index).rev() {
         let Some(layer) = context.packet.layer(index) else {
             continue;

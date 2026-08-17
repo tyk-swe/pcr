@@ -3,8 +3,6 @@
 
 use thiserror::Error;
 
-use super::super::layer::Id as ProtocolId;
-
 /// Why a display filter could not be compiled or evaluated.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -50,5 +48,8 @@ pub enum Error {
         literal: String,
     },
     #[error("protocol {protocol} has no reflective schema, so {path} cannot be resolved")]
-    UnresolvableProtocol { path: String, protocol: ProtocolId },
+    UnresolvableProtocol {
+        path: String,
+        protocol: super::super::layer::Id,
+    },
 }

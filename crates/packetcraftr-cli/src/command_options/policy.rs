@@ -54,7 +54,7 @@ pub(crate) struct SendPolicyArgs {
 }
 
 #[derive(Clone, Debug, Args)]
-pub(crate) struct HostnameTrafficPolicyArgs {
+pub(crate) struct HostnamePolicyArgs {
     #[command(flatten)]
     public_destination: PublicDestinationArgs,
     #[command(flatten)]
@@ -100,7 +100,7 @@ impl SendPolicyArgs {
     }
 }
 
-impl HostnameTrafficPolicyArgs {
+impl HostnamePolicyArgs {
     pub(crate) fn into_policy(self) -> packetcraftr::policy::Policy {
         let mut policy = packetcraftr::policy::Policy::default();
         self.public_destination.apply_to(&mut policy);

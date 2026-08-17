@@ -7,17 +7,15 @@ use crate::frame::{Frame, LinkType};
 use crate::{
     Packet,
     build::BuiltPacket,
-    decode::{DecodedPacket, Dissector, Options as DecodeOptions},
+    decode::{DecodedPacket, Dissector},
     diagnostic::Diagnostic,
     semantics::BuiltinProtocol,
 };
 
-use super::super::request::Limits as FuzzLimits;
-
 pub(in crate::fuzz) fn dissect_built(
     dissector: &Dissector,
     built: &BuiltPacket,
-    limits: FuzzLimits,
+    limits: super::super::request::Limits,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<DecodedPacket> {
     let Some(link_type) = packet_link_type(&built.packet) else {
@@ -39,9 +37,9 @@ pub(in crate::fuzz) fn dissect_built(
     };
     match dissector.decode(
         frame,
-        DecodeOptions {
+        crate::decode::Options {
             max_packet_size: limits.max_packet_bytes,
-            ..DecodeOptions::default()
+            ..crate::decode::Options::default()
         },
     ) {
         Ok(decoded) => {

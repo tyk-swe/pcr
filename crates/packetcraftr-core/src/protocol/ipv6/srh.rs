@@ -8,11 +8,11 @@ use bytes::Bytes;
 
 use crate::{
     codec::{
-        DecodedLayerValue, EncodedLayer, Error as CodecError, LayerCodec, LayerDecodeContext,
-        LayerEncodeContext, NetworkEnvelope,
+        DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext,
+        NetworkEnvelope,
     },
     field::{FieldValue, WireValue},
-    layer::{Id as ProtocolId, Layer, reflective_layer},
+    layer::{Layer, reflective_layer},
     registry::Discriminator,
 };
 
@@ -67,7 +67,7 @@ reflective_layer! {
 pub(crate) struct SegmentRoutingHeaderCodec;
 
 impl LayerCodec for SegmentRoutingHeaderCodec {
-    fn protocol_id(&self) -> ProtocolId {
+    fn protocol_id(&self) -> crate::layer::Id {
         protocol("ipv6_srh")
     }
 
@@ -76,7 +76,7 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
         layer: &dyn Layer,
         _payload: &[u8],
         context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, CodecError> {
+    ) -> Result<EncodedLayer, crate::codec::Error> {
         let layer = layer
             .as_any()
             .downcast_ref::<SegmentRoutingHeader>()
@@ -168,18 +168,18 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
         &self,
         input: &[u8],
         context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, CodecError> {
+    ) -> Result<DecodedLayerValue, crate::codec::Error> {
         if input.len() < 8 {
             return Err(truncated("ipv6_srh", 8, input.len()));
         }
         if input[2] == 0 {
-            return Err(CodecError::Unsupported {
+            return Err(crate::codec::Error::Unsupported {
                 protocol: protocol("ipv6_srh"),
                 message: "IPv6 routing type 0 is prohibited".to_owned(),
             });
         }
         if input[2] != 4 {
-            return Err(CodecError::Unsupported {
+            return Err(crate::codec::Error::Unsupported {
                 protocol: protocol("ipv6_srh"),
                 message: format!("unsupported routing type {}", input[2]),
             });
@@ -242,7 +242,7 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
     fn make_layer(
         &self,
         fields: &BTreeMap<String, FieldValue>,
-    ) -> Result<Box<dyn Layer>, CodecError> {
+    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(
             SegmentRoutingHeader::default(),
             &aliased_fields("ipv6_srh", fields, &[("segs", "segments")])?,
@@ -250,7 +250,7 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
     }
 }
 
-fn srh_lengths(layer: &SegmentRoutingHeader) -> Result<(usize, usize), CodecError> {
+fn srh_lengths(layer: &SegmentRoutingHeader) -> Result<(usize, usize), crate::codec::Error> {
     let segments_end = layer
         .segments
         .len()

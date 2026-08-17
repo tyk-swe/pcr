@@ -3,8 +3,6 @@
 
 use thiserror::Error;
 
-use crate::codec::Error as CodecError;
-
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum Error {
@@ -37,7 +35,7 @@ pub enum Error {
         layer: usize,
         protocol: String,
         #[source]
-        source: CodecError,
+        source: crate::codec::Error,
     },
     #[error("could not serialize {format} packet document: {message}")]
     Serialize {

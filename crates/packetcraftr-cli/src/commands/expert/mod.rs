@@ -4,7 +4,6 @@
 pub(super) mod arguments;
 mod rendering;
 
-use packetcraftr::core::diagnostic::Severity as DiagnosticSeverity;
 use packetcraftr::{analysis, output};
 
 use self::arguments::{Args, Severity};
@@ -18,9 +17,9 @@ fn matches_selector(
     codes: &[String],
 ) -> bool {
     let finding_rank = match finding.severity {
-        DiagnosticSeverity::Info => 1,
-        DiagnosticSeverity::Warning => 2,
-        DiagnosticSeverity::Error => 3,
+        packetcraftr::core::diagnostic::Severity::Info => 1,
+        packetcraftr::core::diagnostic::Severity::Warning => 2,
+        packetcraftr::core::diagnostic::Severity::Error => 3,
     };
     if finding_rank < min_severity.rank() {
         return false;

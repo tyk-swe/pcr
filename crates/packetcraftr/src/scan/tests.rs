@@ -8,13 +8,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, UNIX_EPOCH};
 
-use crate::policy::Policy as TrafficPolicy;
 use crate::target::{Error as TargetError, Resolver};
 use bytes::Bytes;
 use packetcraftr_core::error::{Classification as ErrorClassification, Kind};
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::protocol::{
-    builtin::registry as default_registry,
     network::{Ipv4, Ipv6},
     transport::Tcp,
 };
@@ -33,11 +31,11 @@ use crate::clock::Clock;
 use crate::target::{Authorized, Authorizer, PolicyAuthorizer, Target};
 use crate::{BoundaryError, Stats, target::Family};
 
-fn private_scan_policy() -> TrafficPolicy {
-    TrafficPolicy {
+fn private_scan_policy() -> crate::policy::Policy {
+    crate::policy::Policy {
         max_packets_per_operation: 1_000,
         max_bytes_per_operation: 1_000_000,
-        ..TrafficPolicy::default()
+        ..crate::policy::Policy::default()
     }
 }
 
@@ -255,7 +253,7 @@ fn decoded(packet: Packet, diagnostics: Vec<Diagnostic>) -> DecodedPacket {
 
 #[test]
 fn scan_batching_attempts_rate_and_timeout_evidence_are_deterministic() {
-    let registry = default_registry().unwrap();
+    let registry = packetcraftr_core::protocol::builtin::registry().unwrap();
     let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
     let mut request = tcp_scan_request(Target::Address(address));
     request.ports = vec![80, 81, 82, 83];
@@ -312,7 +310,7 @@ fn scan_hostname_policy_denial_precedes_resolution_and_execution() {
     let error = run(
         &tcp_scan_request(Target::Hostname("lab.example".parse().unwrap())),
         &mut authorizer,
-        &default_registry().unwrap(),
+        &packetcraftr_core::protocol::builtin::registry().unwrap(),
         &mut executor,
         &mut NoopClock,
     )
@@ -345,7 +343,7 @@ fn scan_authorizes_mixed_resolution_answers_before_family_filtering() {
     let error = run(
         &request,
         &mut authorizer,
-        &default_registry().unwrap(),
+        &packetcraftr_core::protocol::builtin::registry().unwrap(),
         &mut executor,
         &mut NoopClock,
     )
@@ -362,7 +360,7 @@ fn scan_authorizes_mixed_resolution_answers_before_family_filtering() {
 
 #[test]
 fn scan_tcp_correlation_requires_integrity_and_classifies_valid_replies() {
-    let registry = default_registry().unwrap();
+    let registry = packetcraftr_core::protocol::builtin::registry().unwrap();
     let local = Ipv4Addr::new(10, 0, 0, 1);
     let remote = Ipv4Addr::new(10, 0, 0, 2);
     let request = tcp_packet(local, remote, 50_000, 443, Tcp::SYN);
@@ -411,7 +409,7 @@ fn scan_late_unsolicited_response_remains_a_timeout() {
         &mut AddressListAuthorizer {
             addresses: vec![address],
         },
-        &default_registry().unwrap(),
+        &packetcraftr_core::protocol::builtin::registry().unwrap(),
         &mut LateResponseExecutor(TimeoutExecutor::default()),
         &mut NoopClock,
     )
@@ -431,7 +429,7 @@ fn scan_invalid_sent_evidence_reports_the_exact_probe_sequence() {
         &mut AddressListAuthorizer {
             addresses: vec![address],
         },
-        &default_registry().unwrap(),
+        &packetcraftr_core::protocol::builtin::registry().unwrap(),
         &mut TimeoutExecutor {
             invalid_sent_index: Some(1),
             ..TimeoutExecutor::default()

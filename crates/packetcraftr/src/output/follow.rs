@@ -7,9 +7,7 @@ use std::net::IpAddr;
 
 use serde::Serialize;
 
-use packetcraftr_core::analysis::follow::{
-    Chunk as AnalysisChunk, Direction as AnalysisDirection, Summary as FollowSummary,
-};
+use packetcraftr_core::analysis::follow::{Chunk as AnalysisChunk, Direction as AnalysisDirection};
 
 use super::expert::StreamTransport;
 use super::hex::compact_hex;
@@ -80,7 +78,7 @@ impl Result {
     pub fn from_summary(
         transport: StreamTransport,
         stream: u64,
-        summary: FollowSummary,
+        summary: packetcraftr_core::analysis::follow::Summary,
         chunks: Vec<Chunk>,
     ) -> Self {
         let endpoint = |address: IpAddr, port: u16| Endpoint { address, port };

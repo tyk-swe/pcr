@@ -7,12 +7,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
-use packetcraftr_core::build::{Builder, Options as BuildOptions};
+use packetcraftr_core::build::Builder;
 use packetcraftr_core::error::Classified;
 use packetcraftr_core::fuzz as packet_fuzz;
-use packetcraftr_core::protocol::{
-    builtin::registry as default_registry, network::Ipv4, transport::Udp,
-};
+use packetcraftr_core::protocol::{network::Ipv4, transport::Udp};
 use packetcraftr_core::{Packet, layer::Raw};
 use packetcraftr_netio::{capture::Statistics as CaptureStatistics, transmit::Submission};
 
@@ -269,7 +267,7 @@ fn route_materialized_sent_packet(
         .build(
             packet,
             crate::materialize::build_context(&route.plan),
-            BuildOptions::default(),
+            packetcraftr_core::build::Options::default(),
         )
         .expect("materialized sent packet should build");
     let report = Submission::start().complete(built.bytes.len(), built.bytes.clone());
@@ -281,10 +279,7 @@ fn route_materializing_route() -> packetcraftr_netio::route::Materialized {
     use packetcraftr_netio::{
         interface::Id as InterfaceId,
         link::{Capability, Mode},
-        route::{
-            Decision, Materialized, Plan, Scope as DestinationScope,
-            SelectionReason as RouteSelectionReason,
-        },
+        route::{Decision, Materialized, Plan},
     };
 
     let source = Ipv4Addr::new(192, 0, 2, 10);
@@ -300,8 +295,8 @@ fn route_materializing_route() -> packetcraftr_netio::route::Materialized {
                 selected_source: Some(IpAddr::V4(source)),
                 preferred_source: None,
                 next_hop: None,
-                selection_reason: RouteSelectionReason::Gateway,
-                destination_scope: DestinationScope::Global,
+                selection_reason: packetcraftr_netio::route::SelectionReason::Gateway,
+                destination_scope: packetcraftr_netio::route::Scope::Global,
                 mtu: u32::MAX,
                 capability: Capability::Layer3,
                 link_type: LinkType::RAW,
@@ -324,7 +319,8 @@ fn route_materializing_route() -> packetcraftr_netio::route::Materialized {
 
 #[test]
 fn live_execution_uses_the_identical_packet_campaign() {
-    let registry = Arc::new(default_registry().expect("built-in registry"));
+    let registry =
+        Arc::new(packetcraftr_core::protocol::builtin::registry().expect("built-in registry"));
     let request = packet_fuzz::Request {
         seed: 0x5eed,
         cases: 8,
@@ -365,7 +361,8 @@ fn live_execution_uses_the_identical_packet_campaign() {
 
 #[test]
 fn live_fuzz_accepts_route_materialized_case() {
-    let registry = Arc::new(default_registry().expect("built-in registry"));
+    let registry =
+        Arc::new(packetcraftr_core::protocol::builtin::registry().expect("built-in registry"));
     let request = packet_fuzz::Request {
         cases: 1,
         strategies: vec![packet_fuzz::Strategy::BitFlip],
@@ -405,7 +402,8 @@ fn live_fuzz_accepts_route_materialized_case() {
 
 #[test]
 fn live_fuzz_rejects_substituted_authorized_case() {
-    let registry = Arc::new(default_registry().expect("built-in registry"));
+    let registry =
+        Arc::new(packetcraftr_core::protocol::builtin::registry().expect("built-in registry"));
     let request = packet_fuzz::Request {
         cases: 1,
         strategies: vec![packet_fuzz::Strategy::BitFlip],

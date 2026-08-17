@@ -8,10 +8,8 @@ use std::fmt;
 use serde::Serialize;
 
 use crate::fuzz as live_fuzz;
+use packetcraftr_core::diagnostic::Diagnostic as PacketDiagnostic;
 use packetcraftr_core::fuzz as packet_fuzz;
-use packetcraftr_core::{
-    diagnostic::Diagnostic as PacketDiagnostic, document::Packet as PacketDocument,
-};
 
 use super::contract::Error as ContractError;
 use super::envelope::{Diagnostic, Error as OutputError, Stats};
@@ -134,11 +132,11 @@ pub struct Case {
     pub mutation: Mutation,
     pub reproduction: Reproduction,
     pub shrink_values: Vec<packetcraftr_core::field::FieldValue>,
-    pub recipe: PacketDocument,
+    pub recipe: packetcraftr_core::document::Packet,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub frame: Option<Wire>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub decoded: Option<PacketDocument>,
+    pub decoded: Option<packetcraftr_core::document::Packet>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub requires_live_opt_in: Option<bool>,
     pub outcome: Outcome,
@@ -278,7 +276,7 @@ fn convert_case(
     let requires_live_opt_in = built.as_ref().map(|built| built.requires_live_opt_in);
     let decoded = decoded
         .as_ref()
-        .map(|decoded| PacketDocument::from_packet(&decoded.packet));
+        .map(|decoded| packetcraftr_core::document::Packet::from_packet(&decoded.packet));
     Ok(Case {
         index,
         seed,
@@ -289,7 +287,7 @@ fn convert_case(
             case_seed: seed,
         },
         shrink_values,
-        recipe: PacketDocument::from_packet(&recipe),
+        recipe: packetcraftr_core::document::Packet::from_packet(&recipe),
         frame,
         decoded,
         requires_live_opt_in,

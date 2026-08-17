@@ -6,13 +6,10 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use crate::{
-    codec::{
-        DecodedLayerValue, EncodedLayer, Error as CodecError, LayerCodec, LayerDecodeContext,
-        LayerEncodeContext,
-    },
+    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
-    layer::{Id as ProtocolId, Layer, reflective_layer},
+    layer::{Layer, reflective_layer},
     registry::Discriminator,
 };
 
@@ -118,7 +115,7 @@ fn parse_option_chain(options: &[u8]) -> Option<OptionChain> {
 pub(crate) struct GeneveCodec;
 
 impl LayerCodec for GeneveCodec {
-    fn protocol_id(&self) -> ProtocolId {
+    fn protocol_id(&self) -> crate::layer::Id {
         protocol("geneve")
     }
 
@@ -127,7 +124,7 @@ impl LayerCodec for GeneveCodec {
         layer: &dyn Layer,
         _payload: &[u8],
         context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, CodecError> {
+    ) -> Result<EncodedLayer, crate::codec::Error> {
         let layer = layer
             .as_any()
             .downcast_ref::<Geneve>()
@@ -186,13 +183,13 @@ impl LayerCodec for GeneveCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, CodecError> {
+    ) -> Result<DecodedLayerValue, crate::codec::Error> {
         if input.len() < GENEVE_BASE_LEN {
             return Err(truncated("geneve", GENEVE_BASE_LEN, input.len()));
         }
         let version = input[0] >> 6;
         if version != 0 {
-            return Err(CodecError::Unsupported {
+            return Err(crate::codec::Error::Unsupported {
                 protocol: protocol("geneve"),
                 message: format!("GENEVE version {version} is not supported"),
             });
@@ -276,7 +273,7 @@ impl LayerCodec for GeneveCodec {
     fn make_layer(
         &self,
         fields: &BTreeMap<String, FieldValue>,
-    ) -> Result<Box<dyn Layer>, CodecError> {
+    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Geneve::default(), fields)
     }
 }
@@ -284,7 +281,7 @@ impl LayerCodec for GeneveCodec {
 fn validate_geneve(
     layer: &Geneve,
     context: &LayerEncodeContext<'_>,
-) -> Result<(usize, Vec<Diagnostic>), CodecError> {
+) -> Result<(usize, Vec<Diagnostic>), crate::codec::Error> {
     let header_len = GENEVE_BASE_LEN
         .checked_add(layer.options.len())
         .ok_or_else(|| invalid("geneve", "option length overflow"))?;
@@ -341,7 +338,7 @@ fn validate_option_chain(
     chain: OptionChain,
     context: &LayerEncodeContext<'_>,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Result<(), CodecError> {
+) -> Result<(), crate::codec::Error> {
     if chain.critical != layer.critical {
         strict_or_diagnostic(
             "geneve",

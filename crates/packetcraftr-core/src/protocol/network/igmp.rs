@@ -6,13 +6,10 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use crate::{
-    codec::{
-        DecodedLayerValue, EncodedLayer, Error as CodecError, LayerCodec, LayerDecodeContext,
-        LayerEncodeContext,
-    },
+    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
-    layer::{Id as ProtocolId, Layer, reflective_layer},
+    layer::{Layer, reflective_layer},
 };
 
 use super::super::common::{
@@ -77,7 +74,7 @@ reflective_layer! {
 pub(crate) struct IgmpCodec;
 
 impl LayerCodec for IgmpCodec {
-    fn protocol_id(&self) -> ProtocolId {
+    fn protocol_id(&self) -> crate::layer::Id {
         protocol("igmp")
     }
 
@@ -86,7 +83,7 @@ impl LayerCodec for IgmpCodec {
         layer: &dyn Layer,
         payload: &[u8],
         context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, CodecError> {
+    ) -> Result<EncodedLayer, crate::codec::Error> {
         let layer = layer
             .as_any()
             .downcast_ref::<Igmp>()
@@ -133,7 +130,7 @@ impl LayerCodec for IgmpCodec {
         &self,
         input: &[u8],
         context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, CodecError> {
+    ) -> Result<DecodedLayerValue, crate::codec::Error> {
         if input.len() < IGMP_MIN_LEN {
             return Err(truncated("igmp", IGMP_MIN_LEN, input.len()));
         }
@@ -164,7 +161,7 @@ impl LayerCodec for IgmpCodec {
     fn make_layer(
         &self,
         fields: &BTreeMap<String, FieldValue>,
-    ) -> Result<Box<dyn Layer>, CodecError> {
+    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Igmp::default(), fields)
     }
 }

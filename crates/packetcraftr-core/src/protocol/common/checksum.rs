@@ -5,7 +5,7 @@
 
 use std::net::IpAddr;
 
-use crate::codec::{Error as CodecError, NetworkEnvelope};
+use crate::codec::NetworkEnvelope;
 
 use super::errors::invalid;
 
@@ -72,7 +72,7 @@ pub(crate) fn transport_checksum(
     network: NetworkEnvelope,
     protocol_number: u8,
     segment: &[u8],
-) -> Result<u16, CodecError> {
+) -> Result<u16, crate::codec::Error> {
     transport_checksum_parts(network, protocol_number, &[segment])
 }
 
@@ -81,7 +81,7 @@ pub(crate) fn transport_checksum_parts(
     network: NetworkEnvelope,
     protocol_number: u8,
     parts: &[&[u8]],
-) -> Result<u16, CodecError> {
+) -> Result<u16, crate::codec::Error> {
     let transport_length = parts
         .iter()
         .try_fold(0_usize, |total, part| total.checked_add(part.len()))

@@ -6,13 +6,10 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use crate::{
-    codec::{
-        DecodedLayerValue, EncodedLayer, Error as CodecError, LayerCodec, LayerDecodeContext,
-        LayerEncodeContext,
-    },
+    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::Diagnostic,
     field::FieldValue,
-    layer::{Id as ProtocolId, Layer, reflect_get, reflect_set_bounded, reflective_layer},
+    layer::{Layer, reflect_get, reflect_set_bounded, reflective_layer},
     registry::Discriminator,
 };
 
@@ -108,7 +105,7 @@ reflective_layer! {
 pub(crate) struct ErspanCodec;
 
 impl LayerCodec for ErspanCodec {
-    fn protocol_id(&self) -> ProtocolId {
+    fn protocol_id(&self) -> crate::layer::Id {
         protocol("erspan")
     }
 
@@ -117,7 +114,7 @@ impl LayerCodec for ErspanCodec {
         layer: &dyn Layer,
         _payload: &[u8],
         context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, CodecError> {
+    ) -> Result<EncodedLayer, crate::codec::Error> {
         let layer = layer
             .as_any()
             .downcast_ref::<Erspan>()
@@ -156,7 +153,7 @@ impl LayerCodec for ErspanCodec {
         &self,
         input: &[u8],
         context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, CodecError> {
+    ) -> Result<DecodedLayerValue, crate::codec::Error> {
         if input.len() < ERSPAN_II_LEN {
             return Err(truncated("erspan", ERSPAN_II_LEN, input.len()));
         }
@@ -177,7 +174,7 @@ impl LayerCodec for ErspanCodec {
                 }
             }
             other => {
-                return Err(CodecError::Unsupported {
+                return Err(crate::codec::Error::Unsupported {
                     protocol: protocol("erspan"),
                     message: format!("ERSPAN version {other} is not supported"),
                 });
@@ -250,12 +247,15 @@ impl LayerCodec for ErspanCodec {
     fn make_layer(
         &self,
         fields: &BTreeMap<String, FieldValue>,
-    ) -> Result<Box<dyn Layer>, CodecError> {
+    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Erspan::default(), fields)
     }
 }
 
-fn validate_shape(layer: &Erspan, context: &LayerEncodeContext<'_>) -> Result<usize, CodecError> {
+fn validate_shape(
+    layer: &Erspan,
+    context: &LayerEncodeContext<'_>,
+) -> Result<usize, crate::codec::Error> {
     let header_len = match layer.version {
         1 => ERSPAN_II_LEN,
         2 => {
@@ -312,7 +312,7 @@ fn validate_shape(layer: &Erspan, context: &LayerEncodeContext<'_>) -> Result<us
 fn validate_parent(
     layer: &Erspan,
     context: &LayerEncodeContext<'_>,
-) -> Result<Vec<Diagnostic>, CodecError> {
+) -> Result<Vec<Diagnostic>, crate::codec::Error> {
     let mut diagnostics = Vec::new();
     if layer.version == 2 && layer.index_word != 0 {
         strict_or_diagnostic(

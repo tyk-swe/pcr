@@ -5,10 +5,7 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::Mutex;
 
-use packetcraftr_netio::{
-    interface::Id as InterfaceId,
-    route::{Decision as RouteDecision, Provider as RouteProvider},
-};
+use packetcraftr_netio::interface::Id as InterfaceId;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum LookupKey {
@@ -26,10 +23,10 @@ enum LookupKey {
 /// operating-system route snapshot beyond that operation.
 pub(super) struct CachedProvider<'a, R> {
     inner: &'a R,
-    decisions: Mutex<HashMap<LookupKey, Option<RouteDecision>>>,
+    decisions: Mutex<HashMap<LookupKey, Option<packetcraftr_netio::route::Decision>>>,
 }
 
-impl<'a, R: RouteProvider> CachedProvider<'a, R> {
+impl<'a, R: packetcraftr_netio::route::Provider> CachedProvider<'a, R> {
     pub(super) fn new(inner: &'a R) -> Self {
         Self {
             inner,
@@ -40,8 +37,8 @@ impl<'a, R: RouteProvider> CachedProvider<'a, R> {
     fn get_or_lookup(
         &self,
         key: LookupKey,
-        lookup: impl FnOnce() -> Result<Option<RouteDecision>, R::Error>,
-    ) -> Result<Option<RouteDecision>, R::Error> {
+        lookup: impl FnOnce() -> Result<Option<packetcraftr_netio::route::Decision>, R::Error>,
+    ) -> Result<Option<packetcraftr_netio::route::Decision>, R::Error> {
         let cached = self
             .decisions
             .lock()
@@ -61,7 +58,9 @@ impl<'a, R: RouteProvider> CachedProvider<'a, R> {
     }
 }
 
-impl<R: RouteProvider> RouteProvider for CachedProvider<'_, R> {
+impl<R: packetcraftr_netio::route::Provider> packetcraftr_netio::route::Provider
+    for CachedProvider<'_, R>
+{
     type Error = R::Error;
 
     fn lookup_with_preferences(
@@ -69,7 +68,7 @@ impl<R: RouteProvider> RouteProvider for CachedProvider<'_, R> {
         destination: IpAddr,
         interface_hint: Option<&InterfaceId>,
         preferred_source: Option<IpAddr>,
-    ) -> Result<RouteDecision, Self::Error> {
+    ) -> Result<packetcraftr_netio::route::Decision, Self::Error> {
         let key = LookupKey::LookupWithPreferences {
             destination,
             interface_hint: interface_hint.cloned(),
@@ -87,7 +86,7 @@ impl<R: RouteProvider> RouteProvider for CachedProvider<'_, R> {
     fn lookup_interface(
         &self,
         interface: &InterfaceId,
-    ) -> Result<Option<RouteDecision>, Self::Error> {
+    ) -> Result<Option<packetcraftr_netio::route::Decision>, Self::Error> {
         let key = LookupKey::Interface {
             interface: interface.clone(),
         };
@@ -109,7 +108,7 @@ mod tests {
     use packetcraftr_core::error::{Classification, Kind};
     use packetcraftr_core::frame::LinkType;
     use packetcraftr_netio::link::{Capability, MacAddress};
-    use packetcraftr_netio::route::{Scope, SelectionReason};
+    use packetcraftr_netio::route::{Provider, Scope, SelectionReason};
 
     #[derive(Clone, Copy, Debug)]
     struct FixtureError;
@@ -126,11 +125,11 @@ mod tests {
         lookups: AtomicUsize,
         interfaces: AtomicUsize,
         fail: AtomicBool,
-        interface_result: Option<RouteDecision>,
+        interface_result: Option<packetcraftr_netio::route::Decision>,
     }
 
     impl CountingProvider {
-        fn new(interface_result: Option<RouteDecision>) -> Self {
+        fn new(interface_result: Option<packetcraftr_netio::route::Decision>) -> Self {
             Self {
                 lookups: AtomicUsize::new(0),
                 interfaces: AtomicUsize::new(0),
@@ -140,7 +139,7 @@ mod tests {
         }
     }
 
-    impl RouteProvider for CountingProvider {
+    impl packetcraftr_netio::route::Provider for CountingProvider {
         type Error = FixtureError;
 
         fn lookup_with_preferences(
@@ -148,7 +147,7 @@ mod tests {
             destination: IpAddr,
             interface_hint: Option<&InterfaceId>,
             preferred_source: Option<IpAddr>,
-        ) -> Result<RouteDecision, Self::Error> {
+        ) -> Result<packetcraftr_netio::route::Decision, Self::Error> {
             self.lookups.fetch_add(1, Ordering::SeqCst);
             if self.fail.load(Ordering::SeqCst) {
                 return Err(FixtureError);
@@ -163,7 +162,7 @@ mod tests {
         fn lookup_interface(
             &self,
             _interface: &InterfaceId,
-        ) -> Result<Option<RouteDecision>, Self::Error> {
+        ) -> Result<Option<packetcraftr_netio::route::Decision>, Self::Error> {
             self.interfaces.fetch_add(1, Ordering::SeqCst);
             if self.fail.load(Ordering::SeqCst) {
                 Err(FixtureError)
@@ -184,8 +183,8 @@ mod tests {
         }
     }
 
-    fn decision() -> RouteDecision {
-        RouteDecision {
+    fn decision() -> packetcraftr_netio::route::Decision {
+        packetcraftr_netio::route::Decision {
             interface: interface(),
             source_mac: Some(MacAddress([0x02, 0, 0, 0, 0, 1])),
             selected_source: Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))),

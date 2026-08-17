@@ -3,16 +3,13 @@
 
 //! Shared codec error and protocol-identifier constructors.
 
-use crate::{
-    codec::Error as CodecError,
-    layer::{FieldError, Id as ProtocolId, Layer, Malformed, Schema as LayerSchema},
-};
+use crate::layer::{FieldError, Layer, Malformed};
 
-pub(crate) fn protocol(name: &str) -> ProtocolId {
-    ProtocolId::new(name)
+pub(crate) fn protocol(name: &str) -> crate::layer::Id {
+    crate::layer::Id::new(name)
 }
 
-pub(crate) fn binding_protocol(layer: &dyn Layer) -> &ProtocolId {
+pub(crate) fn binding_protocol(layer: &dyn Layer) -> &crate::layer::Id {
     layer
         .as_any()
         .downcast_ref::<Malformed>()
@@ -20,30 +17,30 @@ pub(crate) fn binding_protocol(layer: &dyn Layer) -> &ProtocolId {
         .unwrap_or_else(|| layer.protocol_id())
 }
 
-pub(crate) fn wrong_layer(expected: &str, actual: &dyn Layer) -> CodecError {
-    CodecError::WrongLayer {
+pub(crate) fn wrong_layer(expected: &str, actual: &dyn Layer) -> crate::codec::Error {
+    crate::codec::Error::WrongLayer {
         expected: protocol(expected),
         actual: actual.protocol_id().clone(),
     }
 }
 
-pub(crate) fn truncated(name: &str, needed: usize, available: usize) -> CodecError {
-    CodecError::Truncated {
+pub(crate) fn truncated(name: &str, needed: usize, available: usize) -> crate::codec::Error {
+    crate::codec::Error::Truncated {
         protocol: protocol(name),
         needed,
         available,
     }
 }
 
-pub(crate) fn invalid(name: &str, message: impl Into<String>) -> CodecError {
-    CodecError::Invalid {
+pub(crate) fn invalid(name: &str, message: impl Into<String>) -> crate::codec::Error {
+    crate::codec::Error::Invalid {
         protocol: protocol(name),
         message: message.into(),
     }
 }
 
 pub(crate) fn wrong_type(
-    schema: &'static LayerSchema,
+    schema: &'static crate::layer::Schema,
     field: &str,
     expected: &'static str,
 ) -> FieldError {
@@ -54,7 +51,7 @@ pub(crate) fn wrong_type(
     }
 }
 
-pub(crate) fn out_of_range(schema: &'static LayerSchema, field: &str) -> FieldError {
+pub(crate) fn out_of_range(schema: &'static crate::layer::Schema, field: &str) -> FieldError {
     FieldError::OutOfRange {
         protocol: schema.protocol.clone(),
         field: field.to_owned(),

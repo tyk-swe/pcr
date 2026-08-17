@@ -1,7 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::super::layer::Id as ProtocolId;
 use super::lexer::CompareOperator;
 use super::literal::Literal;
 use super::path::FieldRef;
@@ -11,7 +10,7 @@ use super::path::FieldRef;
 pub(super) enum Predicate {
     /// A bare protocol name: does the packet carry such a layer at all?
     LayerPresent {
-        protocol: ProtocolId,
+        protocol: super::super::layer::Id,
         occurrence: Option<usize>,
     },
     /// A bare field path. For a flag this reads the flag's value; for every

@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use packetcraftr_core::budget::Deadline;
-use packetcraftr_core::diagnostic::{Diagnostic, push_once as push_diagnostic_once};
+use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::frame::Frame;
 
 use crate::evidence::Budget;
@@ -172,7 +172,7 @@ pub(super) fn retain_evidence(
         }
     }
     if omitted {
-        push_diagnostic_once(
+        packetcraftr_core::diagnostic::push_once(
             diagnostics,
             Diagnostic::warning(
                 "fuzz.evidence_limit",

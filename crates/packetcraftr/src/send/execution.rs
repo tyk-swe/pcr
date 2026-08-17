@@ -7,8 +7,7 @@ use std::time::Instant;
 use packetcraftr_core::{Packet, build::Builder};
 use packetcraftr_netio::{
     capture::Statistics,
-    neighbor::Resolver as NeighborResolver,
-    route::{Provider as RouteProvider, materialize},
+    route::materialize,
     transmit::{Frame as TransmissionFrame, Sender as PacketIo},
 };
 
@@ -24,8 +23,8 @@ use crate::send::{Options, Report};
 
 impl<R, N, I> Client<R, N, I>
 where
-    R: RouteProvider,
-    N: NeighborResolver,
+    R: packetcraftr_netio::route::Provider,
+    N: packetcraftr_netio::neighbor::Resolver,
     I: PacketIo,
 {
     pub fn send(&self, packet: Packet, options: Options) -> Result<Report, Error> {

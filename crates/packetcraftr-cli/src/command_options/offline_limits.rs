@@ -23,7 +23,7 @@ pub(crate) struct OfflineCaptureLimitsArgs {
 
 /// Capture and analysis bounds shared by stats, expert, and follow.
 #[derive(Clone, Copy, Debug, Args)]
-pub(crate) struct OfflineAnalysisLimitsArgs {
+pub(crate) struct OfflineLimitsArgs {
     #[command(flatten)]
     pub(crate) capture: OfflineCaptureLimitsArgs,
     /// Maximum distinct conversations tracked per transport.

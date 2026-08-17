@@ -5,21 +5,20 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use super::binding::{FilterFieldBinding, ReverseBinding};
-use super::builder::Builder as RegistryBuilder;
+
 use super::error::Error;
-use super::lookup::Registry as ProtocolRegistry;
+
 use crate::codec::LayerCodec;
 use crate::field::FieldKind;
-use crate::layer::{Id as ProtocolId, Schema as LayerSchema};
 
-impl RegistryBuilder {
+impl super::builder::Builder {
     /// Finalizes the registry, resolving every binding it was given.
     ///
     /// # Panics
     ///
     /// Panics only if the builder corrupts a binding table; registration errors return
     /// [`Error`](crate::registry::Error).
-    pub fn build(mut self) -> Result<ProtocolRegistry, Error> {
+    pub fn build(mut self) -> Result<super::lookup::Registry, Error> {
         for protocol in self.roots.values() {
             if !self.codecs.contains_key(protocol) {
                 return Err(Error::UnknownProtocol {
@@ -27,8 +26,10 @@ impl RegistryBuilder {
                 });
             }
         }
-        let mut reverse_bindings: HashMap<ProtocolId, HashMap<ProtocolId, Vec<ReverseBinding>>> =
-            HashMap::new();
+        let mut reverse_bindings: HashMap<
+            crate::layer::Id,
+            HashMap<crate::layer::Id, Vec<ReverseBinding>>,
+        > = HashMap::new();
         for (parent, discriminators) in &mut self.bindings {
             if !self.codecs.contains_key(parent) {
                 return Err(Error::UnknownProtocol {
@@ -90,7 +91,7 @@ impl RegistryBuilder {
             validate_filter_field(path, binding, &self.codecs, &schemas)?;
             reject_canonical_filter_path(path, &self.aliases, &schemas)?;
         }
-        Ok(ProtocolRegistry {
+        Ok(super::lookup::Registry {
             codecs: self.codecs,
             builtin_codecs: self.builtin_codecs,
             aliases: self.aliases,
@@ -114,8 +115,8 @@ impl RegistryBuilder {
 /// `tcp.flags`, which is not an alias and therefore never collides.
 fn reject_canonical_filter_path(
     path: &str,
-    aliases: &HashMap<String, ProtocolId>,
-    schemas: &BTreeMap<ProtocolId, &'static LayerSchema>,
+    aliases: &HashMap<String, crate::layer::Id>,
+    schemas: &BTreeMap<crate::layer::Id, &'static crate::layer::Schema>,
 ) -> Result<(), Error> {
     let Some((prefix, field)) = path.rsplit_once('.') else {
         return Ok(());
@@ -147,8 +148,8 @@ fn reject_canonical_filter_path(
 fn validate_filter_field(
     path: &str,
     binding: &FilterFieldBinding,
-    codecs: &BTreeMap<ProtocolId, Arc<dyn LayerCodec>>,
-    schemas: &BTreeMap<ProtocolId, &'static LayerSchema>,
+    codecs: &BTreeMap<crate::layer::Id, Arc<dyn LayerCodec>>,
+    schemas: &BTreeMap<crate::layer::Id, &'static crate::layer::Schema>,
 ) -> Result<(), Error> {
     let protocol = binding.protocol();
     if !codecs.contains_key(protocol) {

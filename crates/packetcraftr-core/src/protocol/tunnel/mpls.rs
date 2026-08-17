@@ -4,12 +4,9 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    codec::{
-        DecodedLayerValue, EncodedLayer, Error as CodecError, LayerCodec, LayerDecodeContext,
-        LayerEncodeContext,
-    },
+    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     field::FieldValue,
-    layer::{Id as ProtocolId, Layer, reflective_layer},
+    layer::{Layer, reflective_layer},
     registry::Discriminator,
 };
 
@@ -74,7 +71,7 @@ reflective_layer! {
 pub(crate) struct MplsCodec;
 
 impl LayerCodec for MplsCodec {
-    fn protocol_id(&self) -> ProtocolId {
+    fn protocol_id(&self) -> crate::layer::Id {
         protocol("mpls")
     }
 
@@ -83,7 +80,7 @@ impl LayerCodec for MplsCodec {
         layer: &dyn Layer,
         _payload: &[u8],
         context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, CodecError> {
+    ) -> Result<EncodedLayer, crate::codec::Error> {
         let layer = layer
             .as_any()
             .downcast_ref::<Mpls>()
@@ -138,7 +135,7 @@ impl LayerCodec for MplsCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, CodecError> {
+    ) -> Result<DecodedLayerValue, crate::codec::Error> {
         if input.len() < MPLS_LEN {
             return Err(truncated("mpls", MPLS_LEN, input.len()));
         }
@@ -178,7 +175,7 @@ impl LayerCodec for MplsCodec {
     fn make_layer(
         &self,
         fields: &BTreeMap<String, FieldValue>,
-    ) -> Result<Box<dyn Layer>, CodecError> {
+    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Mpls::default(), fields)
     }
 }

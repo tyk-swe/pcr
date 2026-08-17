@@ -12,14 +12,15 @@ use crate::{
             PPPOE_SESSION,
         },
     },
-    registry::{Builder as RegistryBuilder, Error as RegistryError},
     semantics::BuiltinProtocol,
 };
 
 type Child = (u64, BuiltinProtocol, i32);
 type Binding = (BuiltinProtocol, u64, BuiltinProtocol, i32);
 
-pub(super) fn register(builder: &mut RegistryBuilder) -> Result<(), RegistryError> {
+pub(super) fn register(
+    builder: &mut crate::registry::Builder,
+) -> Result<(), crate::registry::Error> {
     register_link(builder)?;
     register_ip(builder)?;
     register_tunnels(builder)?;
@@ -40,7 +41,7 @@ pub(super) fn register(builder: &mut RegistryBuilder) -> Result<(), RegistryErro
     crate::protocol::builtin::filter::register_filter_fields(builder)
 }
 
-fn register_link(builder: &mut RegistryBuilder) -> Result<(), RegistryError> {
+fn register_link(builder: &mut crate::registry::Builder) -> Result<(), crate::registry::Error> {
     for root in BUILTIN_CAPTURE_ROOTS {
         builder.bind_link_type(root.link_type, root.protocol)?;
     }
@@ -88,7 +89,7 @@ fn register_link(builder: &mut RegistryBuilder) -> Result<(), RegistryError> {
     Ok(())
 }
 
-fn register_ip(builder: &mut RegistryBuilder) -> Result<(), RegistryError> {
+fn register_ip(builder: &mut crate::registry::Builder) -> Result<(), crate::registry::Error> {
     bind_ip_children(builder, BuiltinProtocol::Ipv4, 1)?;
     bind_ip_children(builder, BuiltinProtocol::RawIp, 1)?;
     bind_ipv6_children(builder, BuiltinProtocol::Ipv6)?;
@@ -119,7 +120,7 @@ fn register_ip(builder: &mut RegistryBuilder) -> Result<(), RegistryError> {
     bind_ipv6_extensions(builder, BuiltinProtocol::Ah)
 }
 
-fn register_tunnels(builder: &mut RegistryBuilder) -> Result<(), RegistryError> {
+fn register_tunnels(builder: &mut crate::registry::Builder) -> Result<(), crate::registry::Error> {
     bind_all(
         builder,
         &[
@@ -191,9 +192,9 @@ fn register_tunnels(builder: &mut RegistryBuilder) -> Result<(), RegistryError> 
 }
 
 fn bind_common_ip_children(
-    builder: &mut RegistryBuilder,
+    builder: &mut crate::registry::Builder,
     parent: BuiltinProtocol,
-) -> Result<(), RegistryError> {
+) -> Result<(), crate::registry::Error> {
     bind_children(
         builder,
         parent,
@@ -213,9 +214,9 @@ fn bind_common_ip_children(
 }
 
 fn bind_ipv6_children(
-    builder: &mut RegistryBuilder,
+    builder: &mut crate::registry::Builder,
     parent: BuiltinProtocol,
-) -> Result<(), RegistryError> {
+) -> Result<(), crate::registry::Error> {
     bind_common_ip_children(builder, parent)?;
     bind_children(
         builder,
@@ -228,9 +229,9 @@ fn bind_ipv6_children(
 }
 
 fn bind_ipv6_extensions(
-    builder: &mut RegistryBuilder,
+    builder: &mut crate::registry::Builder,
     parent: BuiltinProtocol,
-) -> Result<(), RegistryError> {
+) -> Result<(), crate::registry::Error> {
     if parent == BuiltinProtocol::Ipv6 {
         bind_children(builder, parent, &[(0, BuiltinProtocol::Ipv6HopByHop, 100)])?;
     }
@@ -246,9 +247,9 @@ fn bind_ipv6_extensions(
 }
 
 fn bind_link_children(
-    builder: &mut RegistryBuilder,
+    builder: &mut crate::registry::Builder,
     parent: BuiltinProtocol,
-) -> Result<(), RegistryError> {
+) -> Result<(), crate::registry::Error> {
     bind_children(
         builder,
         parent,
@@ -268,10 +269,10 @@ fn bind_link_children(
 }
 
 fn bind_ip_children(
-    builder: &mut RegistryBuilder,
+    builder: &mut crate::registry::Builder,
     parent: BuiltinProtocol,
     icmp_number: u64,
-) -> Result<(), RegistryError> {
+) -> Result<(), crate::registry::Error> {
     bind_common_ip_children(builder, parent)?;
     bind_children(
         builder,
@@ -284,17 +285,20 @@ fn bind_ip_children(
 }
 
 fn bind_children(
-    builder: &mut RegistryBuilder,
+    builder: &mut crate::registry::Builder,
     parent: BuiltinProtocol,
     children: &[Child],
-) -> Result<(), RegistryError> {
+) -> Result<(), crate::registry::Error> {
     for &(discriminator, child, priority) in children {
         builder.bind(parent.as_str(), discriminator, child.as_str(), priority)?;
     }
     Ok(())
 }
 
-fn bind_all(builder: &mut RegistryBuilder, bindings: &[Binding]) -> Result<(), RegistryError> {
+fn bind_all(
+    builder: &mut crate::registry::Builder,
+    bindings: &[Binding],
+) -> Result<(), crate::registry::Error> {
     for &(parent, discriminator, child, priority) in bindings {
         builder.bind(parent.as_str(), discriminator, child.as_str(), priority)?;
     }

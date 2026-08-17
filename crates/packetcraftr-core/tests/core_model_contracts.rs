@@ -8,7 +8,7 @@ use std::time::{Duration, SystemTime};
 use packetcraftr_core::{
     budget::Deadline,
     error::{BoundaryError, Classification, Classified, Kind},
-    frame::{Direction, Error as FrameError, Frame, LinkType},
+    frame::{Direction, Frame, LinkType},
 };
 
 #[derive(Debug)]
@@ -124,7 +124,7 @@ fn frame_lengths_fail_closed_during_construction_and_deserialization() {
             2,
             2,
             vec![0_u8],
-            FrameError::CapturedLengthMismatch {
+            packetcraftr_core::frame::Error::CapturedLengthMismatch {
                 declared: 2,
                 actual: 1,
             },
@@ -133,7 +133,7 @@ fn frame_lengths_fail_closed_during_construction_and_deserialization() {
             2,
             1,
             vec![0_u8, 1],
-            FrameError::OriginalLengthTooSmall {
+            packetcraftr_core::frame::Error::OriginalLengthTooSmall {
                 captured: 2,
                 original: 1,
             },

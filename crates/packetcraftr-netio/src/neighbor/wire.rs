@@ -9,7 +9,7 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 
 use bytes::Bytes;
 
-use super::{Error as NeighborError, Request as NeighborRequest};
+use super::Request as NeighborRequest;
 use crate::link::MacAddress;
 use packetcraftr_core::frame::{Frame, LinkType};
 
@@ -45,11 +45,11 @@ use crate::checksum::compute_parts as checksum;
 
 pub(super) fn build_request_frame(
     request: &NeighborRequest,
-) -> Result<(Bytes, MacAddress), NeighborError> {
+) -> Result<(Bytes, MacAddress), crate::neighbor::Error> {
     match (request.interface_source, request.target) {
         (IpAddr::V4(source), IpAddr::V4(target)) => {
             if arp::PAYLOAD_LENGTH > request.mtu as usize {
-                return Err(NeighborError::InvalidRequest {
+                return Err(crate::neighbor::Error::InvalidRequest {
                     message: format!(
                         "ARP request is {} bytes but route MTU is {}",
                         arp::PAYLOAD_LENGTH,
@@ -65,7 +65,7 @@ pub(super) fn build_request_frame(
             let destination = ndp::ipv6_multicast_mac(ipv6_destination);
             let packet_length = ndp::IPV6_HEADER_LENGTH + ndp::SOLICITATION_LENGTH;
             if packet_length > request.mtu as usize {
-                return Err(NeighborError::InvalidRequest {
+                return Err(crate::neighbor::Error::InvalidRequest {
                     message: format!(
                         "IPv6 neighbor solicitation is {packet_length} bytes but route MTU is {}",
                         request.mtu
@@ -77,7 +77,7 @@ pub(super) fn build_request_frame(
                 destination,
             ))
         }
-        _ => Err(NeighborError::InvalidRequest {
+        _ => Err(crate::neighbor::Error::InvalidRequest {
             message: "source and target address families differ".to_owned(),
         }),
     }
@@ -223,7 +223,7 @@ mod tests {
         ipv4.mtu = u32::try_from(ARP_PAYLOAD_LENGTH - 1).expect("fixed ARP length fits u32");
         assert!(matches!(
             build_request_frame(&ipv4),
-            Err(NeighborError::InvalidRequest { .. })
+            Err(crate::neighbor::Error::InvalidRequest { .. })
         ));
 
         let mut ipv6 = request(
@@ -234,7 +234,7 @@ mod tests {
             .expect("fixed NDP length fits u32");
         assert!(matches!(
             build_request_frame(&ipv6),
-            Err(NeighborError::InvalidRequest { .. })
+            Err(crate::neighbor::Error::InvalidRequest { .. })
         ));
 
         let mixed = request(
@@ -243,7 +243,7 @@ mod tests {
         );
         assert!(matches!(
             build_request_frame(&mixed),
-            Err(NeighborError::InvalidRequest { .. })
+            Err(crate::neighbor::Error::InvalidRequest { .. })
         ));
     }
 

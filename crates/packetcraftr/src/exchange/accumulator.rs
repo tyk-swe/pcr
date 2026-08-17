@@ -13,9 +13,6 @@ use packetcraftr_core::{
 };
 use packetcraftr_netio::capture::RecordIdentity;
 
-use super::contract::{
-    Options as ExchangeOptions, Response as MatchedResponse, Result as ExchangeResult,
-};
 use super::preparation::PreparedPacket;
 use crate::Stats;
 use crate::evidence::Budget;
@@ -35,7 +32,7 @@ pub(crate) type WorkflowResponseMatcher<'a> =
     dyn FnMut(usize, &Packet, &DecodedPacket) -> bool + 'a;
 
 pub(crate) struct Accumulator {
-    pub(crate) responses: Vec<MatchedResponse>,
+    pub(crate) responses: Vec<super::contract::Response>,
     pub(super) unsolicited: Vec<UnsolicitedEvidence>,
     pub(crate) undecoded: Vec<Frame>,
     pub(crate) diagnostics: Vec<packetcraftr_core::diagnostic::Diagnostic>,
@@ -53,7 +50,7 @@ pub(crate) struct ProcessContext<'a> {
     pub(crate) prepared: &'a [PreparedPacket],
     pub(crate) sent: &'a [crate::SentPacket],
     pub(crate) deadline: Instant,
-    pub(crate) options: &'a ExchangeOptions,
+    pub(crate) options: &'a super::contract::Options,
 }
 
 #[derive(Clone, Copy)]
@@ -99,8 +96,8 @@ impl Accumulator {
         sent: Vec<crate::SentPacket>,
         unanswered: Vec<usize>,
         stats: Stats,
-    ) -> ExchangeResult {
-        ExchangeResult {
+    ) -> super::contract::Result {
+        super::contract::Result {
             sent,
             responses: self.responses,
             unanswered,

@@ -7,17 +7,17 @@ use std::sync::Arc;
 use super::binding::{ChildBinding, Discriminator, FilterFieldBinding};
 use super::error::Error;
 use crate::codec::LayerCodec;
-use crate::layer::Id as ProtocolId;
+
 use crate::matcher::ResponseMatcher;
 
 #[derive(Default)]
 pub struct Builder {
-    pub(super) codecs: BTreeMap<ProtocolId, Arc<dyn LayerCodec>>,
-    pub(super) builtin_codecs: BTreeSet<ProtocolId>,
-    pub(super) aliases: HashMap<String, ProtocolId>,
-    pub(super) roots: HashMap<u32, ProtocolId>,
-    pub(super) bindings: HashMap<ProtocolId, HashMap<Discriminator, Vec<ChildBinding>>>,
-    pub(super) matchers: BTreeMap<ProtocolId, Arc<dyn ResponseMatcher>>,
+    pub(super) codecs: BTreeMap<crate::layer::Id, Arc<dyn LayerCodec>>,
+    pub(super) builtin_codecs: BTreeSet<crate::layer::Id>,
+    pub(super) aliases: HashMap<String, crate::layer::Id>,
+    pub(super) roots: HashMap<u32, crate::layer::Id>,
+    pub(super) bindings: HashMap<crate::layer::Id, HashMap<Discriminator, Vec<ChildBinding>>>,
+    pub(super) matchers: BTreeMap<crate::layer::Id, Arc<dyn ResponseMatcher>>,
     pub(super) filter_fields: BTreeMap<String, FilterFieldBinding>,
 }
 
@@ -83,7 +83,7 @@ impl Builder {
     pub fn bind_link_type(
         &mut self,
         link_type: u32,
-        root: impl Into<ProtocolId>,
+        root: impl Into<crate::layer::Id>,
     ) -> Result<&mut Self, Error> {
         if self.roots.contains_key(&link_type) {
             return Err(Error::DuplicateLinkType { link_type });
@@ -94,9 +94,9 @@ impl Builder {
 
     pub fn bind(
         &mut self,
-        parent: impl Into<ProtocolId>,
+        parent: impl Into<crate::layer::Id>,
         discriminator: u64,
-        child: impl Into<ProtocolId>,
+        child: impl Into<crate::layer::Id>,
         priority: i32,
     ) -> Result<&mut Self, Error> {
         let parent = parent.into();
@@ -125,7 +125,7 @@ impl Builder {
 
     pub fn register_matcher<M>(
         &mut self,
-        protocol: impl Into<ProtocolId>,
+        protocol: impl Into<crate::layer::Id>,
         matcher: M,
     ) -> Result<&mut Self, Error>
     where

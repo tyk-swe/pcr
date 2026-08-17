@@ -6,10 +6,7 @@
 use bytes::Bytes;
 use serde::Serialize;
 
-use packetcraftr_core::{
-    decode::DecodedPacket, diagnostic::Diagnostic, document::Packet as PacketDocument,
-    layout::PacketLayout,
-};
+use packetcraftr_core::{decode::DecodedPacket, diagnostic::Diagnostic, layout::PacketLayout};
 
 use super::hex::compact_hex;
 
@@ -21,7 +18,7 @@ pub struct Result {
     pub bytes_hex: String,
     pub length: u64,
     pub link_type: u32,
-    pub packet: PacketDocument,
+    pub packet: packetcraftr_core::document::Packet,
     pub layout: PacketLayout,
 }
 
@@ -39,7 +36,7 @@ impl Result {
                 bytes_hex: compact_hex(&original),
                 length: u64::try_from(original.len()).unwrap_or(u64::MAX),
                 link_type: frame.link_type.0,
-                packet: PacketDocument::from_packet(&packet),
+                packet: packetcraftr_core::document::Packet::from_packet(&packet),
                 layout,
                 bytes: original,
             },

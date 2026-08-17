@@ -3,13 +3,11 @@
 
 //! Capture shutdown composition and fail-closed result/statistics validation.
 
-use packetcraftr_core::diagnostic::push_once as push_diagnostic_once;
 use packetcraftr_netio::{
     Error as LiveIoError,
     capture::{OverflowPolicy, Session, Statistics},
 };
 
-use super::Result as ExchangeResult;
 use super::transaction::Transaction;
 use crate::Error;
 use crate::Stats;
@@ -25,7 +23,7 @@ impl<C: Session> Transaction<C> {
         }
     }
 
-    pub(super) fn finalize_exchange(mut self) -> Result<ExchangeResult, Error> {
+    pub(super) fn finalize_exchange(mut self) -> Result<super::Result, Error> {
         let capture_statistics = self.capture.inner.statistics().validate()?;
         self.apply_capture_loss_policy(capture_statistics)?;
         let unanswered = self
@@ -58,7 +56,7 @@ impl<C: Session> Transaction<C> {
                 .expect("lossy capture statistics must produce a typed error")
                 .into());
         }
-        push_diagnostic_once(
+        packetcraftr_core::diagnostic::push_once(
             &mut self.captured.diagnostics,
             packetcraftr_core::diagnostic::Diagnostic::warning(
                 "capture.evidence_incomplete",

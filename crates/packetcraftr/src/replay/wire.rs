@@ -6,11 +6,9 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use packetcraftr_core::codec::NetworkEnvelope;
 use packetcraftr_core::error::Kind;
 use packetcraftr_core::frame::{Frame, LinkType};
+use packetcraftr_netio::route::Provider;
 use packetcraftr_netio::{
-    Error as LiveIoError,
-    link::Mode as LinkMode,
-    route::{Provider as RouteProvider, SystemProvider as SystemRouteProvider},
-    transmit::Report as IoSendReport,
+    Error as LiveIoError, link::Mode as LinkMode, transmit::Report as IoSendReport,
 };
 
 use super::error::Error;
@@ -18,7 +16,7 @@ use super::error::Error;
 pub(super) fn map_replay_route_error(
     source: packetcraftr_netio::route::SystemError,
 ) -> LiveIoError {
-    let classification = SystemRouteProvider.classify_error(&source);
+    let classification = packetcraftr_netio::route::SystemProvider.classify_error(&source);
     match classification.kind {
         Kind::Capability => LiveIoError::Unsupported {
             message: source.to_string(),

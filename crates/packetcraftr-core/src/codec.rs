@@ -10,7 +10,7 @@ use std::net::IpAddr;
 use thiserror::Error;
 
 use crate::Packet;
-use crate::build::{Context as BuildContext, Mode as BuildMode};
+
 use crate::diagnostic::Diagnostic;
 use crate::field::FieldValue;
 use crate::layer::{FieldError, Id, Layer, Schema};
@@ -41,8 +41,8 @@ pub enum Error {
 pub struct LayerEncodeContext<'a> {
     pub packet: &'a Packet,
     pub index: usize,
-    pub build_context: &'a BuildContext,
-    pub mode: BuildMode,
+    pub build_context: &'a crate::build::Context,
+    pub mode: crate::build::Mode,
     pub registry: &'a Registry,
     pub child: Option<&'a dyn Layer>,
     /// Maximum additional bytes this layer may contribute without exceeding

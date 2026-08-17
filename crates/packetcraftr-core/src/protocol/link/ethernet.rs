@@ -6,13 +6,10 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    codec::{
-        DecodedLayerValue, EncodedLayer, Error as CodecError, LayerCodec, LayerDecodeContext,
-        LayerEncodeContext,
-    },
+    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
-    layer::{Id as ProtocolId, Layer, reflective_layer},
+    layer::{Layer, reflective_layer},
     registry::Discriminator,
 };
 
@@ -35,7 +32,7 @@ pub(super) fn link_payload_selection(
     ether_type: u16,
     available: usize,
     header_len: usize,
-) -> Result<(usize, Vec<Discriminator>), CodecError> {
+) -> Result<(usize, Vec<Discriminator>), crate::codec::Error> {
     if ether_type >= 0x0600 {
         return Ok((available, vec![Discriminator(u64::from(ether_type))]));
     }
@@ -66,7 +63,7 @@ pub(super) fn link_type_expectation(
     context: &LayerEncodeContext<'_>,
     value: &WireValue<u16>,
     covered_payload_len: usize,
-) -> Result<ValueExpectation<u16>, CodecError> {
+) -> Result<ValueExpectation<u16>, crate::codec::Error> {
     if context
         .child
         .is_some_and(|child| binding_protocol(child).as_str() == "llc")
@@ -105,7 +102,7 @@ pub(super) fn validate_link_length_form(
     covered_payload_len: usize,
     context: &LayerEncodeContext<'_>,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Result<(), CodecError> {
+) -> Result<(), crate::codec::Error> {
     if ether_type > MAX_FRAME_LENGTH
         || (ether_type == 0 && covered_payload_len == 0)
         || context
@@ -157,7 +154,7 @@ reflective_layer! {
 pub(crate) struct EthernetCodec;
 
 impl LayerCodec for EthernetCodec {
-    fn protocol_id(&self) -> ProtocolId {
+    fn protocol_id(&self) -> crate::layer::Id {
         protocol("ethernet")
     }
 
@@ -166,7 +163,7 @@ impl LayerCodec for EthernetCodec {
         layer: &dyn Layer,
         payload: &[u8],
         context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, CodecError> {
+    ) -> Result<EncodedLayer, crate::codec::Error> {
         let layer = layer
             .as_any()
             .downcast_ref::<Ethernet>()
@@ -226,7 +223,7 @@ impl LayerCodec for EthernetCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, CodecError> {
+    ) -> Result<DecodedLayerValue, crate::codec::Error> {
         if input.len() < ETHERNET_LEN {
             return Err(truncated("ethernet", ETHERNET_LEN, input.len()));
         }
@@ -260,7 +257,7 @@ impl LayerCodec for EthernetCodec {
     fn make_layer(
         &self,
         fields: &BTreeMap<String, FieldValue>,
-    ) -> Result<Box<dyn Layer>, CodecError> {
+    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(
             Ethernet::default(),
             &aliased_fields(

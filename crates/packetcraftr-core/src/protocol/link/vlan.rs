@@ -6,12 +6,9 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    codec::{
-        DecodedLayerValue, EncodedLayer, Error as CodecError, LayerCodec, LayerDecodeContext,
-        LayerEncodeContext,
-    },
+    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     field::{FieldValue, WireValue},
-    layer::{Id as ProtocolId, Layer, reflective_layer},
+    layer::{Layer, reflective_layer},
 };
 
 use super::super::common::{
@@ -104,7 +101,7 @@ fn encode_vlan<L>(
     context: &LayerEncodeContext<'_>,
     layout: fn() -> Vec<crate::layout::FieldLayout>,
     materialize: impl FnOnce(WireValue<u16>) -> L,
-) -> Result<EncodedLayer, CodecError>
+) -> Result<EncodedLayer, crate::codec::Error>
 where
     L: Layer + Clone + 'static,
 {
@@ -161,7 +158,7 @@ fn decode_vlan(
     input: &[u8],
     layout: fn() -> Vec<crate::layout::FieldLayout>,
     layer: impl FnOnce(u8, bool, u16, WireValue<u16>) -> Box<dyn Layer>,
-) -> Result<DecodedLayerValue, CodecError> {
+) -> Result<DecodedLayerValue, crate::codec::Error> {
     if input.len() < VLAN_LEN {
         return Err(truncated(name, VLAN_LEN, input.len()));
     }
@@ -187,7 +184,7 @@ fn decode_vlan(
 }
 
 impl LayerCodec for VlanCodec {
-    fn protocol_id(&self) -> ProtocolId {
+    fn protocol_id(&self) -> crate::layer::Id {
         protocol("vlan")
     }
 
@@ -196,7 +193,7 @@ impl LayerCodec for VlanCodec {
         layer: &dyn Layer,
         payload: &[u8],
         context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, CodecError> {
+    ) -> Result<EncodedLayer, crate::codec::Error> {
         let layer = layer
             .as_any()
             .downcast_ref::<Vlan>()
@@ -223,7 +220,7 @@ impl LayerCodec for VlanCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, CodecError> {
+    ) -> Result<DecodedLayerValue, crate::codec::Error> {
         decode_vlan(
             "vlan",
             input,
@@ -242,7 +239,7 @@ impl LayerCodec for VlanCodec {
     fn make_layer(
         &self,
         fields: &BTreeMap<String, FieldValue>,
-    ) -> Result<Box<dyn Layer>, CodecError> {
+    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(
             Vlan::default(),
             &aliased_fields(
@@ -259,7 +256,7 @@ impl LayerCodec for VlanCodec {
 }
 
 impl LayerCodec for Vlan8021adCodec {
-    fn protocol_id(&self) -> ProtocolId {
+    fn protocol_id(&self) -> crate::layer::Id {
         protocol("vlan8021ad")
     }
 
@@ -268,7 +265,7 @@ impl LayerCodec for Vlan8021adCodec {
         layer: &dyn Layer,
         payload: &[u8],
         context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, CodecError> {
+    ) -> Result<EncodedLayer, crate::codec::Error> {
         let layer = layer
             .as_any()
             .downcast_ref::<Vlan8021ad>()
@@ -295,7 +292,7 @@ impl LayerCodec for Vlan8021adCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, CodecError> {
+    ) -> Result<DecodedLayerValue, crate::codec::Error> {
         decode_vlan(
             "vlan8021ad",
             input,
@@ -314,7 +311,7 @@ impl LayerCodec for Vlan8021adCodec {
     fn make_layer(
         &self,
         fields: &BTreeMap<String, FieldValue>,
-    ) -> Result<Box<dyn Layer>, CodecError> {
+    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(
             Vlan8021ad::default(),
             &aliased_fields(

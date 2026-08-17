@@ -6,12 +6,7 @@ use std::time::Instant;
 
 use packetcraftr_core::{Packet, semantics::BuiltinProtocol};
 use packetcraftr_netio::{
-    Error as LiveIoError,
-    neighbor::Resolver as NeighborResolver,
-    route::{
-        Options as PlanOptions, Plan as PlannedRoute, Provider as RouteProvider, plan as plan_route,
-    },
-    transmit::Sender as PacketIo,
+    Error as LiveIoError, route::plan as plan_route, transmit::Sender as PacketIo,
 };
 
 use crate::Client;
@@ -30,8 +25,8 @@ pub(crate) fn ensure_preparation_deadline(deadline: Instant) -> Result<(), Error
 
 impl<R, N, I> Client<R, N, I>
 where
-    R: RouteProvider,
-    N: NeighborResolver,
+    R: packetcraftr_netio::route::Provider,
+    N: packetcraftr_netio::neighbor::Resolver,
     I: PacketIo,
 {
     /// planning. A denied hostname never reaches `resolver`; if any resolved
@@ -41,8 +36,8 @@ where
         packet: &Packet,
         target: &Target,
         resolver: &H,
-        options: &PlanOptions,
-    ) -> Result<(Authorized, PlannedRoute), Error> {
+        options: &packetcraftr_netio::route::Options,
+    ) -> Result<(Authorized, packetcraftr_netio::route::Plan), Error> {
         let resolved = self.policy.resolve_target(target, resolver)?;
         let packet_ip_version = packet
             .iter()
@@ -68,19 +63,19 @@ where
         &self,
         packet: &Packet,
         destination: Option<IpAddr>,
-        options: &PlanOptions,
-    ) -> Result<PlannedRoute, Error> {
+        options: &packetcraftr_netio::route::Options,
+    ) -> Result<packetcraftr_netio::route::Plan, Error> {
         self.plan_with_provider(packet, destination, options, &self.routes, None)
     }
 
-    pub(crate) fn plan_with_provider<P: RouteProvider>(
+    pub(crate) fn plan_with_provider<P: packetcraftr_netio::route::Provider>(
         &self,
         packet: &Packet,
         destination: Option<IpAddr>,
-        options: &PlanOptions,
+        options: &packetcraftr_netio::route::Options,
         provider: &P,
         deadline: Option<Instant>,
-    ) -> Result<PlannedRoute, Error> {
+    ) -> Result<packetcraftr_netio::route::Plan, Error> {
         if let Some(destination) = destination {
             self.policy.authorize_destination(destination)?;
         }

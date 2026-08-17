@@ -3,11 +3,8 @@
 
 use thiserror::Error as ThisError;
 
-use packetcraftr_core::build::Error as BuildError;
 use packetcraftr_core::error::{Classification, Classified, Kind};
-use packetcraftr_netio::{
-    Error as LiveIoError, neighbor::Error as NeighborError, route::Error as RouteError,
-};
+use packetcraftr_netio::Error as LiveIoError;
 
 use crate::{policy, target};
 
@@ -17,11 +14,11 @@ pub enum Error {
     #[error(transparent)]
     Target(#[from] target::Error),
     #[error(transparent)]
-    Plan(#[from] RouteError),
+    Plan(#[from] packetcraftr_netio::route::Error),
     #[error(transparent)]
-    Neighbor(#[from] NeighborError),
+    Neighbor(#[from] packetcraftr_netio::neighbor::Error),
     #[error(transparent)]
-    Build(#[from] BuildError),
+    Build(#[from] packetcraftr_core::build::Error),
     #[error(transparent)]
     Policy(#[from] policy::Error),
     #[error("permissively built packets require allow_permissive_live")]

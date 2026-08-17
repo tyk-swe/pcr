@@ -8,28 +8,28 @@ use std::ops::Range;
 use bytes::Bytes;
 
 use crate::Packet;
-use crate::codec::{DecodedLayerValue, Error as CodecError, LayerCodec, LayerDecodeContext};
+use crate::codec::{DecodedLayerValue, LayerCodec, LayerDecodeContext};
 use crate::diagnostic::Diagnostic;
 use crate::frame::Frame;
-use crate::layer::Id as ProtocolId;
+
 use crate::layout::{ByteRange, LayerLayout, PacketLayout};
-use crate::registry::{Discriminator, Registry as ProtocolRegistry};
+use crate::registry::Discriminator;
 
 use super::error::Error;
 use super::fallback::{
     append_malformed, append_missing_required_layer, append_padding, append_raw, slice_original,
 };
-use super::options::{DecodedPacket, Options as DecodeOptions};
+use super::options::DecodedPacket;
 use super::traversal::TraversalScope;
 
 struct DecodeCursor {
-    protocol: ProtocolId,
+    protocol: crate::layer::Id,
     discriminator: Option<Discriminator>,
     bytes: Range<usize>,
 }
 
 struct ChildSelection {
-    protocol: Option<ProtocolId>,
+    protocol: Option<crate::layer::Id>,
     discriminator: Option<Discriminator>,
 }
 
@@ -41,17 +41,17 @@ struct TrailingBytes {
 
 struct ValidatedLayer {
     decoded: DecodedLayerValue,
-    protocol: ProtocolId,
+    protocol: crate::layer::Id,
     layer_end: usize,
     payload_end: usize,
 }
 
 pub(super) struct DecodeSession<'registry> {
-    registry: &'registry ProtocolRegistry,
-    root: ProtocolId,
+    registry: &'registry crate::registry::Registry,
+    root: crate::layer::Id,
     frame: Frame,
     original: Bytes,
-    options: DecodeOptions,
+    options: super::options::Options,
     packet: Packet,
     layouts: Vec<LayerLayout>,
     diagnostics: Vec<Diagnostic>,
@@ -61,10 +61,10 @@ pub(super) struct DecodeSession<'registry> {
 
 impl<'registry> DecodeSession<'registry> {
     pub(super) fn new(
-        registry: &'registry ProtocolRegistry,
+        registry: &'registry crate::registry::Registry,
         frame: Frame,
-        root: ProtocolId,
-        options: DecodeOptions,
+        root: crate::layer::Id,
+        options: super::options::Options,
     ) -> Self {
         let original = frame.bytes().clone();
         let traversal = TraversalScope::new(&root);
@@ -128,7 +128,7 @@ impl<'registry> DecodeSession<'registry> {
         codec: &dyn LayerCodec,
         cursor: &DecodeCursor,
         allow_link_padding: bool,
-    ) -> Result<DecodedLayerValue, CodecError> {
+    ) -> Result<DecodedLayerValue, crate::codec::Error> {
         codec.decode(
             &self.original[cursor.bytes.clone()],
             &LayerDecodeContext {
@@ -346,8 +346,8 @@ impl<'registry> DecodeSession<'registry> {
     fn preserve_missing_required_child(
         &mut self,
         parent_index: usize,
-        parent: &ProtocolId,
-        child: Option<ProtocolId>,
+        parent: &crate::layer::Id,
+        child: Option<crate::layer::Id>,
         offset: usize,
     ) -> Result<(), Error> {
         let Some(required) = child.filter(|protocol| {
@@ -374,7 +374,7 @@ impl<'registry> DecodeSession<'registry> {
     fn preserve_terminal_payload(
         &mut self,
         parent_index: usize,
-        protocol: &ProtocolId,
+        protocol: &crate::layer::Id,
         offset: usize,
         payload_len: usize,
     ) -> Result<(), Error> {
@@ -399,7 +399,7 @@ impl<'registry> DecodeSession<'registry> {
 
     fn preserve_unknown_child(
         &mut self,
-        parent: &ProtocolId,
+        parent: &crate::layer::Id,
         offset: usize,
         payload_len: usize,
     ) -> Result<(), Error> {

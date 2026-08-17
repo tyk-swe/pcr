@@ -7,13 +7,10 @@ use std::collections::BTreeMap;
 use std::net::IpAddr;
 
 use crate::{
-    codec::{
-        DecodedLayerValue, EncodedLayer, Error as CodecError, LayerCodec, LayerDecodeContext,
-        LayerEncodeContext,
-    },
+    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
-    layer::{Id as ProtocolId, Layer, reflective_layer},
+    layer::{Layer, reflective_layer},
     registry::Discriminator,
     semantics::BuiltinProtocol,
 };
@@ -118,7 +115,7 @@ reflective_layer! {
 pub(crate) struct UdpCodec;
 
 impl LayerCodec for UdpCodec {
-    fn protocol_id(&self) -> ProtocolId {
+    fn protocol_id(&self) -> crate::layer::Id {
         protocol("udp")
     }
 
@@ -127,7 +124,7 @@ impl LayerCodec for UdpCodec {
         layer: &dyn Layer,
         payload: &[u8],
         context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, CodecError> {
+    ) -> Result<EncodedLayer, crate::codec::Error> {
         let layer = layer
             .as_any()
             .downcast_ref::<Udp>()
@@ -187,7 +184,7 @@ impl LayerCodec for UdpCodec {
         &self,
         input: &[u8],
         context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, CodecError> {
+    ) -> Result<DecodedLayerValue, crate::codec::Error> {
         if input.len() < UDP_LEN {
             return Err(truncated("udp", UDP_LEN, input.len()));
         }
@@ -254,7 +251,7 @@ impl LayerCodec for UdpCodec {
     fn make_layer(
         &self,
         fields: &BTreeMap<String, FieldValue>,
-    ) -> Result<Box<dyn Layer>, CodecError> {
+    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(
             Udp::default(),
             &aliased_fields(
@@ -270,7 +267,7 @@ fn validate_child_selection(
     layer: &Udp,
     payload: &[u8],
     context: &LayerEncodeContext<'_>,
-) -> Result<Vec<Diagnostic>, CodecError> {
+) -> Result<Vec<Diagnostic>, crate::codec::Error> {
     let mut diagnostics = Vec::new();
     let Some(child) = context.child else {
         return Ok(diagnostics);

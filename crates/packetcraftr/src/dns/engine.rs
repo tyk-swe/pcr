@@ -8,7 +8,7 @@ use std::time::{Duration, SystemTime};
 use bytes::Bytes;
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::frame::Frame;
-use packetcraftr_core::{diagnostic::push_once as push_diagnostic_once, registry::Registry};
+use packetcraftr_core::registry::Registry;
 
 use crate::Stats;
 use crate::clock::Clock;
@@ -310,7 +310,7 @@ impl<A: Authorizer, E: Executor, C: Clock> Operation<'_, A, E, C> {
                 attempt: probe.attempt,
             })?;
         for diagnostic in execution.diagnostics.drain(..) {
-            push_diagnostic_once(&mut self.result.diagnostics, diagnostic);
+            packetcraftr_core::diagnostic::push_once(&mut self.result.diagnostics, diagnostic);
         }
         Ok(execution)
     }

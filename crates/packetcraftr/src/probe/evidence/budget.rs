@@ -3,7 +3,7 @@
 
 //! Checked evidence accounting and bounded diagnostic emission.
 
-use packetcraftr_core::diagnostic::{Diagnostic, push_once as push_diagnostic_once};
+use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::frame::Frame;
 
 use crate::evidence::{Budget, BudgetError};
@@ -49,7 +49,7 @@ pub(crate) fn retain_evidence(
             descriptor.display_name
         ),
     };
-    push_diagnostic_once(
+    packetcraftr_core::diagnostic::push_once(
         diagnostics,
         Diagnostic::warning(
             format!("{}.evidence_limit", descriptor.code_namespace),
@@ -64,7 +64,7 @@ pub(crate) fn push_undecoded_limit_diagnostic(
     descriptor: EvidenceDiagnosticDescriptor,
     limit: usize,
 ) {
-    push_diagnostic_once(
+    packetcraftr_core::diagnostic::push_once(
         diagnostics,
         Diagnostic::warning(
             format!("{}.undecoded_limit", descriptor.code_namespace),

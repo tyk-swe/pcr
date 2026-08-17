@@ -5,7 +5,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use bytes::Bytes;
 use packetcraftr_core::field::WireValue;
-use packetcraftr_core::layer::{Id as ProtocolId, Malformed, Raw};
+use packetcraftr_core::layer::{Malformed, Raw};
 use packetcraftr_core::protocol::ipv6::{Fragment, SegmentRoutingHeader};
 use packetcraftr_core::protocol::link::{Arp, Vlan, Vlan8021ad};
 use packetcraftr_core::protocol::network::{Ipv4, Ipv6};
@@ -25,7 +25,7 @@ struct RouteMimic {
 
 reflective_layer! {
     fn route_mimic_schema() => {
-        protocol: ProtocolId::new("route_mimic"),
+        protocol: packetcraftr_core::layer::Id::new("route_mimic"),
         name: "Untrusted Route Mimic"
     }
     impl RouteMimic {
@@ -338,7 +338,7 @@ fn ambiguous_live_route_state_is_rejected_at_the_trust_boundary() {
         (ipv6_fragment, "non-atomic ipv6_fragment fragment"),
         (
             [Malformed::new(
-                Some(ProtocolId::new("ipv4")),
+                Some(packetcraftr_core::layer::Id::new("ipv4")),
                 Bytes::new(),
                 "short header",
             )]
@@ -366,7 +366,7 @@ fn ambiguous_live_route_state_is_rejected_at_the_trust_boundary() {
     }
 
     let harmless: Packet = [Malformed::new(
-        Some(ProtocolId::new("tcp")),
+        Some(packetcraftr_core::layer::Id::new("tcp")),
         Bytes::new(),
         "short segment",
     )]

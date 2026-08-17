@@ -3,7 +3,6 @@
 
 //! Output contracts for the `exchange` command.
 
-use crate::exchange::Result as ExchangeResult;
 use packetcraftr_core::diagnostic::Diagnostic;
 use serde::Serialize;
 use std::time::Duration;
@@ -31,9 +30,9 @@ pub struct Result {
 
 impl Result {
     pub fn try_from_exchange(
-        result: ExchangeResult,
+        result: crate::exchange::Result,
     ) -> std::result::Result<(Self, Vec<Diagnostic>, Stats), Error> {
-        let ExchangeResult {
+        let crate::exchange::Result {
             sent,
             responses,
             unanswered,

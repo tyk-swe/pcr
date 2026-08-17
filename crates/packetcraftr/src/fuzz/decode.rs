@@ -7,7 +7,7 @@ use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::{
     Packet,
     build::BuiltPacket,
-    decode::{DecodedPacket, Dissector, Options as DecodeOptions},
+    decode::{DecodedPacket, Dissector},
     diagnostic::Diagnostic,
     semantics::BuiltinProtocol,
 };
@@ -39,9 +39,9 @@ pub(in crate::fuzz) fn dissect_built(
     };
     match dissector.decode(
         frame,
-        DecodeOptions {
+        packetcraftr_core::decode::Options {
             max_packet_size: limits.max_packet_bytes,
-            ..DecodeOptions::default()
+            ..packetcraftr_core::decode::Options::default()
         },
     ) {
         Ok(decoded) => {

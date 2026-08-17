@@ -12,7 +12,7 @@ use std::time::Instant;
 
 use super::error::invalid_options;
 use super::options::Options;
-use super::{Error as NeighborError, Request as NeighborRequest, VlanTag as NeighborVlanTag};
+use super::{Request as NeighborRequest, VlanTag as NeighborVlanTag};
 use crate::{interface::Id as InterfaceId, link::MacAddress};
 use packetcraftr_core::frame::{Frame, LinkType};
 
@@ -65,11 +65,17 @@ impl NeighborCache {
         }
     }
 
-    pub(super) fn get(&self, key: &NeighborCacheKey) -> Result<Option<MacAddress>, NeighborError> {
+    pub(super) fn get(
+        &self,
+        key: &NeighborCacheKey,
+    ) -> Result<Option<MacAddress>, crate::neighbor::Error> {
         let now = Instant::now();
-        let mut cache = self.entries.lock().map_err(|_| NeighborError::State {
-            message: "neighbor cache mutex was poisoned".to_owned(),
-        })?;
+        let mut cache = self
+            .entries
+            .lock()
+            .map_err(|_| crate::neighbor::Error::State {
+                message: "neighbor cache mutex was poisoned".to_owned(),
+            })?;
         cache.retain(|_, entry| entry.expires_at > now);
         Ok(cache.get(key).map(|entry| entry.mac_address))
     }
@@ -79,14 +85,17 @@ impl NeighborCache {
         mac_address: MacAddress,
         key: NeighborCacheKey,
         options: &Options,
-    ) -> Result<(), NeighborError> {
+    ) -> Result<(), crate::neighbor::Error> {
         let now = Instant::now();
         let expires_at = now
             .checked_add(options.cache_ttl)
             .ok_or_else(|| invalid_options("cache deadline overflowed".to_owned()))?;
-        let mut cache = self.entries.lock().map_err(|_| NeighborError::State {
-            message: "neighbor cache mutex was poisoned".to_owned(),
-        })?;
+        let mut cache = self
+            .entries
+            .lock()
+            .map_err(|_| crate::neighbor::Error::State {
+                message: "neighbor cache mutex was poisoned".to_owned(),
+            })?;
         cache.retain(|_, entry| entry.expires_at > now);
         if !cache.contains_key(&key)
             && cache.len() >= options.max_cache_entries
@@ -219,7 +228,7 @@ mod tests {
                 key,
                 &options(1, Duration::MAX),
             ),
-            Err(NeighborError::InvalidOptions { .. })
+            Err(crate::neighbor::Error::InvalidOptions { .. })
         ));
     }
 
@@ -234,14 +243,17 @@ mod tests {
         .join();
 
         let key = NeighborCacheKey::from(&request(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2))));
-        assert!(matches!(cache.get(&key), Err(NeighborError::State { .. })));
+        assert!(matches!(
+            cache.get(&key),
+            Err(crate::neighbor::Error::State { .. })
+        ));
         assert!(matches!(
             cache.insert(
                 MacAddress([0x02, 0, 0, 0, 0, 2]),
                 key,
                 &options(1, Duration::from_secs(1)),
             ),
-            Err(NeighborError::State { .. })
+            Err(crate::neighbor::Error::State { .. })
         ));
     }
 }

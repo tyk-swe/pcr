@@ -4,13 +4,10 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    codec::{
-        DecodedLayerValue, EncodedLayer, Error as CodecError, LayerCodec, LayerDecodeContext,
-        LayerEncodeContext,
-    },
+    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
-    layer::{Id as ProtocolId, Layer, reflect_get, reflect_set, reflective_layer},
+    layer::{Layer, reflect_get, reflect_set, reflective_layer},
     registry::Discriminator,
 };
 
@@ -75,7 +72,7 @@ reflective_layer! {
 pub(crate) struct GreCodec;
 
 impl LayerCodec for GreCodec {
-    fn protocol_id(&self) -> ProtocolId {
+    fn protocol_id(&self) -> crate::layer::Id {
         protocol("gre")
     }
 
@@ -84,7 +81,7 @@ impl LayerCodec for GreCodec {
         layer: &dyn Layer,
         payload: &[u8],
         context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, CodecError> {
+    ) -> Result<EncodedLayer, crate::codec::Error> {
         let layer = layer
             .as_any()
             .downcast_ref::<Gre>()
@@ -167,26 +164,26 @@ impl LayerCodec for GreCodec {
         &self,
         input: &[u8],
         context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, CodecError> {
+    ) -> Result<DecodedLayerValue, crate::codec::Error> {
         if input.len() < GRE_BASE_LEN {
             return Err(truncated("gre", GRE_BASE_LEN, input.len()));
         }
         let flags = u16::from_be_bytes([input[0], input[1]]);
         let version = flags & VERSION_MASK;
         if version != 0 {
-            return Err(CodecError::Unsupported {
+            return Err(crate::codec::Error::Unsupported {
                 protocol: protocol("gre"),
                 message: format!("GRE version {version} is not supported"),
             });
         }
         if flags & ROUTING_PRESENT != 0 {
-            return Err(CodecError::Unsupported {
+            return Err(crate::codec::Error::Unsupported {
                 protocol: protocol("gre"),
                 message: "GRE routing fields are not supported".to_owned(),
             });
         }
         if flags & MUST_DISCARD_FLAGS != 0 {
-            return Err(CodecError::Unsupported {
+            return Err(crate::codec::Error::Unsupported {
                 protocol: protocol("gre"),
                 message: format!(
                     "must-discard GRE flags are non-zero (0x{:04x})",
@@ -238,7 +235,7 @@ impl LayerCodec for GreCodec {
     fn make_layer(
         &self,
         fields: &BTreeMap<String, FieldValue>,
-    ) -> Result<Box<dyn Layer>, CodecError> {
+    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Gre::default(), fields)
     }
 }
@@ -272,7 +269,7 @@ fn encode_prefix(layer: &Gre, protocol_type: u16, header_len: usize) -> Vec<u8> 
 
 type DecodedOptions = (usize, Option<WireValue<u16>>, Option<u32>, Option<u32>);
 
-fn decode_options(input: &[u8], flags: u16) -> Result<DecodedOptions, CodecError> {
+fn decode_options(input: &[u8], flags: u16) -> Result<DecodedOptions, crate::codec::Error> {
     let checksum_present = flags & CHECKSUM_PRESENT != 0;
     let key_present = flags & KEY_PRESENT != 0;
     let sequence_present = flags & SEQUENCE_PRESENT != 0;

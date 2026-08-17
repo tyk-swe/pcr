@@ -3,8 +3,7 @@
 
 use thiserror::Error;
 
-use crate::frame::Error as FrameError;
-use crate::layer::{FieldError, Id as ProtocolId};
+use crate::layer::FieldError;
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -14,22 +13,22 @@ pub enum Error {
     #[error("decoded layer count reached configured limit {limit}")]
     LayerLimit { limit: usize },
     #[error("no codec is registered for root protocol {protocol}")]
-    MissingRootCodec { protocol: ProtocolId },
+    MissingRootCodec { protocol: crate::layer::Id },
     #[error("codec for {protocol} returned an invalid cursor range")]
-    InvalidCodecCursor { protocol: ProtocolId },
+    InvalidCodecCursor { protocol: crate::layer::Id },
     #[error("codec for {protocol} returned an invalid field layout")]
-    InvalidCodecLayout { protocol: ProtocolId },
+    InvalidCodecLayout { protocol: crate::layer::Id },
     #[error("codec for {protocol} returned layer {actual}")]
     CodecLayerMismatch {
-        protocol: ProtocolId,
-        actual: ProtocolId,
+        protocol: crate::layer::Id,
+        actual: crate::layer::Id,
     },
     #[error("codec for {protocol} returned a layer that violates its reflective schema: {source}")]
     InvalidLayer {
-        protocol: ProtocolId,
+        protocol: crate::layer::Id,
         #[source]
         source: FieldError,
     },
     #[error("invalid frame: {0}")]
-    InvalidFrame(#[from] FrameError),
+    InvalidFrame(#[from] crate::frame::Error),
 }

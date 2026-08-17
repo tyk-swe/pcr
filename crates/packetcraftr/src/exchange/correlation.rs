@@ -6,10 +6,7 @@
 use std::time::Instant;
 
 use packetcraftr_core::{
-    decode::DecodedPacket,
-    diagnostic::{Diagnostic, Severity as DiagnosticSeverity, push_once as push_diagnostic_once},
-    frame::Frame,
-    matcher::MatchResult,
+    decode::DecodedPacket, diagnostic::Diagnostic, frame::Frame, matcher::MatchResult,
     registry::Registry,
 };
 use packetcraftr_netio::{
@@ -176,7 +173,7 @@ impl Accumulator {
                     self.retain_undecoded(identity, raw_frame, context.options);
                     return Err(ProcessOutcome::CorrelationDeadlineExpired);
                 }
-                push_diagnostic_once(
+                packetcraftr_core::diagnostic::push_once(
                     &mut self.diagnostics,
                     Diagnostic::warning(
                         "exchange.decode_error",
@@ -197,13 +194,14 @@ impl Accumulator {
         context: ProcessContext<'_>,
     ) -> ProcessOutcome {
         let integrity_failure = decoded.diagnostics.iter().any(|diagnostic| {
-            diagnostic.code.contains("checksum") && diagnostic.severity != DiagnosticSeverity::Info
+            diagnostic.code.contains("checksum")
+                && diagnostic.severity != packetcraftr_core::diagnostic::Severity::Info
         });
         if Instant::now() >= context.deadline {
             return self.expire_decoded(identity, decoded, context.options);
         }
         if integrity_failure {
-            push_diagnostic_once(
+            packetcraftr_core::diagnostic::push_once(
                 &mut self.diagnostics,
                 Diagnostic::warning(
                     "exchange.integrity_rejected",
@@ -220,7 +218,7 @@ impl Accumulator {
         }
 
         if received_at.is_none() {
-            push_diagnostic_once(
+            packetcraftr_core::diagnostic::push_once(
                 &mut self.diagnostics,
                 Diagnostic::warning(
                     "capture.ingress_time_unavailable",
@@ -255,7 +253,7 @@ impl Accumulator {
     ) -> ProcessOutcome {
         match attribution {
             Attribution::Ambiguous => {
-                push_diagnostic_once(
+                packetcraftr_core::diagnostic::push_once(
                     &mut self.diagnostics,
                     Diagnostic::warning(
                         "exchange.ambiguous_attribution",
@@ -275,7 +273,7 @@ impl Accumulator {
                     return self.expire_decoded(identity, decoded, context.options);
                 }
                 if self.responses.len() >= context.options.max_responses {
-                    push_diagnostic_once(
+                    packetcraftr_core::diagnostic::push_once(
                         &mut self.diagnostics,
                         Diagnostic::warning(
                             "exchange.response_limit",
@@ -307,7 +305,7 @@ impl Accumulator {
             }
             Attribution::None => {
                 if context.sent.len() < context.prepared.len() {
-                    push_diagnostic_once(
+                    packetcraftr_core::diagnostic::push_once(
                         &mut self.diagnostics,
                         Diagnostic::info(
                             "exchange.pre_send_frame",
@@ -388,7 +386,7 @@ impl Accumulator {
                 Attribution::Unique(request_index) => request_index,
                 attribution => {
                     if attribution == Attribution::Ambiguous {
-                        push_diagnostic_once(
+                        packetcraftr_core::diagnostic::push_once(
                             &mut self.diagnostics,
                             Diagnostic::warning(
                                 "exchange.ambiguous_attribution",
@@ -437,7 +435,7 @@ impl Accumulator {
         if self.responses.len() < max_responses {
             return false;
         }
-        push_diagnostic_once(
+        packetcraftr_core::diagnostic::push_once(
             &mut self.diagnostics,
             Diagnostic::warning(
                 "exchange.response_limit",
@@ -451,7 +449,7 @@ impl Accumulator {
 
     fn mark_correlation_deadline_expired(&mut self) {
         self.correlation_deadline_expired = true;
-        push_diagnostic_once(
+        packetcraftr_core::diagnostic::push_once(
             &mut self.diagnostics,
             Diagnostic::warning(
                 "exchange.correlation_deadline",

@@ -3,9 +3,8 @@
 
 //! Output contract for the `send` command.
 
-use crate::send::Report as SendReport;
 use packetcraftr_core::diagnostic::Diagnostic;
-use packetcraftr_netio::route::Materialized as DomainMaterializedRoute;
+
 use serde::Serialize;
 
 use crate::output::contract::Error;
@@ -33,7 +32,9 @@ pub struct NeighborEvidence {
 }
 
 impl MaterializedRoute {
-    pub fn try_from_route(route: DomainMaterializedRoute) -> std::result::Result<Self, Error> {
+    pub fn try_from_route(
+        route: packetcraftr_netio::route::Materialized,
+    ) -> std::result::Result<Self, Error> {
         let neighbor = route
             .neighbor_resolution
             .map(|resolution| {
@@ -63,9 +64,9 @@ pub struct Result {
 
 impl Result {
     pub fn try_from_report(
-        report: SendReport,
+        report: crate::send::Report,
     ) -> std::result::Result<(Self, Vec<Diagnostic>, Stats), Error> {
-        let SendReport { sent, stats } = report;
+        let crate::send::Report { sent, stats } = report;
         Ok((
             Self {
                 frame: Wire::new(sent.wire_bytes().clone()),

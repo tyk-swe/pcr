@@ -52,7 +52,7 @@ mod tests {
     use packetcraftr_core::protocol::{link::Ethernet, network::Ipv4, transport::Udp};
     use packetcraftr_core::{
         Packet,
-        build::{Builder, Context as BuildContext, Options as BuildOptions},
+        build::Builder,
         field::WireValue,
         layer::{Padding, Raw},
     };
@@ -100,7 +100,11 @@ mod tests {
         Builder::new(Arc::new(
             packetcraftr_core::protocol::builtin::registry().expect("built-in registry"),
         ))
-        .build(packet, BuildContext::default(), BuildOptions::default())
+        .build(
+            packet,
+            packetcraftr_core::build::Context::default(),
+            packetcraftr_core::build::Options::default(),
+        )
         .expect("fixture packet builds")
     }
 

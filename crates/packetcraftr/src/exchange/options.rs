@@ -7,10 +7,10 @@ use std::time::Instant;
 
 use packetcraftr_netio::capture::Limits as CaptureQueueLimits;
 
-use super::{MAX_EXCHANGE_TIMEOUT, Options as ExchangeOptions};
+use super::MAX_EXCHANGE_TIMEOUT;
 use crate::Error;
 
-impl ExchangeOptions {
+impl super::Options {
     /// Validates finite options and retention bounds before live providers run.
     pub fn validate(&self) -> Result<CaptureQueueLimits, Error> {
         if self.timeout > MAX_EXCHANGE_TIMEOUT {

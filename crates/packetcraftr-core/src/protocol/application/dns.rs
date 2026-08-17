@@ -9,12 +9,9 @@ use std::fmt::Write as _;
 use bytes::Bytes;
 
 use crate::{
-    codec::{
-        DecodedLayerValue, EncodedLayer, Error as CodecError, LayerCodec, LayerDecodeContext,
-        LayerEncodeContext,
-    },
+    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     field::FieldValue,
-    layer::{FieldError, Id as ProtocolId, Layer, reflective_layer},
+    layer::{FieldError, Layer, reflective_layer},
 };
 
 use super::super::common::{ensure_encode_budget, invalid, protocol, truncated, wrong_layer};
@@ -50,7 +47,7 @@ pub struct Dns {
 
 impl Dns {
     /// Parses a DNS message without interpreting resource records.
-    pub fn from_wire(wire: impl Into<Bytes>) -> Result<Self, CodecError> {
+    pub fn from_wire(wire: impl Into<Bytes>) -> Result<Self, crate::codec::Error> {
         let wire = wire.into();
         let input = wire.as_ref();
         let header = input
@@ -103,7 +100,7 @@ impl Dns {
         &self.wire
     }
 
-    fn validate_wire_consistency(&self) -> Result<(), CodecError> {
+    fn validate_wire_consistency(&self) -> Result<(), crate::codec::Error> {
         let parsed = Self::from_wire(self.wire.clone())?;
         if parsed == *self {
             Ok(())
@@ -116,7 +113,7 @@ impl Dns {
     }
 }
 
-fn read_u16(input: &[u8], cursor: &mut usize) -> Result<u16, CodecError> {
+fn read_u16(input: &[u8], cursor: &mut usize) -> Result<u16, crate::codec::Error> {
     let bytes = take(input, *cursor, 2)?;
     *cursor = checked_end(*cursor, 2)?;
     Ok(u16::from_be_bytes([bytes[0], bytes[1]]))
@@ -128,7 +125,7 @@ struct ParsedQuestions {
     qclasses: Vec<u16>,
 }
 
-fn parse_questions(input: &[u8], count: usize) -> Result<ParsedQuestions, CodecError> {
+fn parse_questions(input: &[u8], count: usize) -> Result<ParsedQuestions, crate::codec::Error> {
     let mut cursor = DNS_HEADER_LEN;
     let mut qnames = Vec::with_capacity(count);
     let mut qtypes = Vec::with_capacity(count);
@@ -147,22 +144,22 @@ fn parse_questions(input: &[u8], count: usize) -> Result<ParsedQuestions, CodecE
     })
 }
 
-fn checked_end(offset: usize, length: usize) -> Result<usize, CodecError> {
+fn checked_end(offset: usize, length: usize) -> Result<usize, crate::codec::Error> {
     offset
         .checked_add(length)
-        .ok_or(CodecError::LengthOverflow {
+        .ok_or(crate::codec::Error::LengthOverflow {
             protocol: protocol("dns"),
         })
 }
 
-fn take(input: &[u8], offset: usize, length: usize) -> Result<&[u8], CodecError> {
+fn take(input: &[u8], offset: usize, length: usize) -> Result<&[u8], crate::codec::Error> {
     let end = checked_end(offset, length)?;
     input
         .get(offset..end)
         .ok_or_else(|| truncated("dns", end, input.len()))
 }
 
-fn parse_name(input: &[u8], start: usize) -> Result<(usize, String), CodecError> {
+fn parse_name(input: &[u8], start: usize) -> Result<(usize, String), crate::codec::Error> {
     let mut cursor = start;
     let mut resume = None;
     let mut labels = Vec::new();
@@ -224,12 +221,11 @@ fn parse_name(input: &[u8], start: usize) -> Result<(usize, String), CodecError>
                     ));
                 }
                 let label = take(input, cursor, label_len)?;
-                expanded_len =
-                    expanded_len
-                        .checked_add(label_len + 1)
-                        .ok_or(CodecError::LengthOverflow {
-                            protocol: protocol("dns"),
-                        })?;
+                expanded_len = expanded_len.checked_add(label_len + 1).ok_or(
+                    crate::codec::Error::LengthOverflow {
+                        protocol: protocol("dns"),
+                    },
+                )?;
                 if expanded_len > MAX_EXPANDED_NAME_LEN {
                     return Err(invalid(
                         "dns",
@@ -310,7 +306,7 @@ reflective_layer! {
 pub(crate) struct DnsCodec;
 
 impl LayerCodec for DnsCodec {
-    fn protocol_id(&self) -> ProtocolId {
+    fn protocol_id(&self) -> crate::layer::Id {
         protocol("dns")
     }
 
@@ -323,7 +319,7 @@ impl LayerCodec for DnsCodec {
         layer: &dyn Layer,
         payload: &[u8],
         context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, CodecError> {
+    ) -> Result<EncodedLayer, crate::codec::Error> {
         let layer = layer
             .as_any()
             .downcast_ref::<Dns>()
@@ -346,7 +342,7 @@ impl LayerCodec for DnsCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, CodecError> {
+    ) -> Result<DecodedLayerValue, crate::codec::Error> {
         let layer = Dns::from_wire(Bytes::copy_from_slice(input))?;
         Ok(DecodedLayerValue {
             layer: Box::new(layer),
@@ -363,8 +359,8 @@ impl LayerCodec for DnsCodec {
     fn make_layer(
         &self,
         _fields: &BTreeMap<String, FieldValue>,
-    ) -> Result<Box<dyn Layer>, CodecError> {
-        Err(CodecError::Unsupported {
+    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        Err(crate::codec::Error::Unsupported {
             protocol: protocol("dns"),
             message: "DNS is dissection-only; construct a query in the DNS workflow".to_owned(),
         })

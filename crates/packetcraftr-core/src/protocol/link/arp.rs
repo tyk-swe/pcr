@@ -11,12 +11,9 @@ use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
 
 use crate::{
-    codec::{
-        DecodedLayerValue, EncodedLayer, Error as CodecError, LayerCodec, LayerDecodeContext,
-        LayerEncodeContext,
-    },
+    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     field::{FieldValue, WireValue},
-    layer::{Id as ProtocolId, Layer, reflective_layer},
+    layer::{Layer, reflective_layer},
 };
 
 use super::super::common::{
@@ -74,7 +71,7 @@ reflective_layer! {
 pub(crate) struct ArpCodec;
 
 impl LayerCodec for ArpCodec {
-    fn protocol_id(&self) -> ProtocolId {
+    fn protocol_id(&self) -> crate::layer::Id {
         protocol("arp")
     }
 
@@ -83,7 +80,7 @@ impl LayerCodec for ArpCodec {
         layer: &dyn Layer,
         _payload: &[u8],
         context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, CodecError> {
+    ) -> Result<EncodedLayer, crate::codec::Error> {
         let layer = layer
             .as_any()
             .downcast_ref::<Arp>()
@@ -95,7 +92,7 @@ impl LayerCodec for ArpCodec {
                 layer.hardware_type, layer.protocol_type
             );
             if context.mode == crate::build::Mode::Strict {
-                return Err(CodecError::Unsupported {
+                return Err(crate::codec::Error::Unsupported {
                     protocol: protocol("arp"),
                     message,
                 });
@@ -147,7 +144,7 @@ impl LayerCodec for ArpCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, CodecError> {
+    ) -> Result<DecodedLayerValue, crate::codec::Error> {
         if input.len() < 8 {
             return Err(truncated("arp", 8, input.len()));
         }
@@ -156,7 +153,7 @@ impl LayerCodec for ArpCodec {
         let hardware_type = u16::from_be_bytes([input[0], input[1]]);
         let protocol_type = u16::from_be_bytes([input[2], input[3]]);
         if hardware_type != 1 || protocol_type != 0x0800 || hardware_len != 6 || protocol_len != 4 {
-            return Err(CodecError::Unsupported {
+            return Err(crate::codec::Error::Unsupported {
                 protocol: protocol("arp"),
                 message: format!(
                     "only Ethernet/IPv4 ARP is typed (htype={hardware_type}, ptype=0x{protocol_type:04x}, hlen={hardware_len}, plen={protocol_len})"
@@ -196,7 +193,7 @@ impl LayerCodec for ArpCodec {
     fn make_layer(
         &self,
         fields: &BTreeMap<String, FieldValue>,
-    ) -> Result<Box<dyn Layer>, CodecError> {
+    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(
             Arp::default(),
             &aliased_fields(

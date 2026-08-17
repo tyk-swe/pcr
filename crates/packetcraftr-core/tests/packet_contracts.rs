@@ -4,7 +4,7 @@
 use packetcraftr_core::{
     Packet, document,
     layer::{Padding, Raw},
-    registry::{Builder, Error as RegistryError},
+    registry::Builder,
 };
 
 #[test]
@@ -40,7 +40,7 @@ fn registry_rejects_conflicting_roots_and_bindings() {
         .expect("first root binding should succeed");
     assert!(matches!(
         builder.bind_link_type(1, "other"),
-        Err(RegistryError::DuplicateLinkType { link_type: 1 })
+        Err(packetcraftr_core::registry::Error::DuplicateLinkType { link_type: 1 })
     ));
 
     let mut builder = Builder::new();
@@ -49,7 +49,7 @@ fn registry_rejects_conflicting_roots_and_bindings() {
         .expect("first child binding should succeed");
     assert!(matches!(
         builder.bind("parent", 7, "second", 10),
-        Err(RegistryError::BindingConflict {
+        Err(packetcraftr_core::registry::Error::BindingConflict {
             discriminator: 7,
             priority: 10,
             ..
@@ -65,7 +65,7 @@ fn unresolved_registry_references_are_rejected_at_finalization() {
         .expect("binding is staged until finalization");
     assert!(matches!(
         builder.build(),
-        Err(RegistryError::UnknownProtocol { protocol }) if protocol.as_str() == "missing"
+        Err(packetcraftr_core::registry::Error::UnknownProtocol { protocol }) if protocol.as_str() == "missing"
     ));
 }
 
@@ -96,16 +96,15 @@ fn packet_documents_enforce_byte_layer_and_duplicate_key_limits() {
 #[test]
 fn scoped_core_api_paths_are_available() {
     use packetcraftr_core::{
-        build::{BuiltPacket, Context, Error as BuildError, Mode, Options as BuildOptions},
+        build::{BuiltPacket, Context, Mode},
         codec::{
-            DecodedLayerValue, EncodedLayer, Error as CodecError, LayerCodec, LayerDecodeContext,
-            LayerEncodeContext,
+            DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext,
         },
-        decode::{DecodedPacket, Dissector, Error as DecodeError, Options as DecodeOptions},
+        decode::{DecodedPacket, Dissector},
         diagnostic::{Diagnostic, Severity},
-        expression::{Error as ExpressionError, Options as ExpressionOptions, parse},
+        expression::parse,
         field::{FieldKind, FieldValue, WireValue},
-        layer::{FieldError, FieldSchema, Id as ProtocolId},
+        layer::{FieldError, FieldSchema},
         layout::{ByteRange, FieldLayout, LayerLayout, PacketLayout},
         matcher::{MatchResult, ResponseMatcher},
         registry::Registry,
@@ -113,14 +112,14 @@ fn scoped_core_api_paths_are_available() {
 
     let _build_context = Context::default();
     let _build_mode = Mode::Strict;
-    let _build_options = BuildOptions::default();
-    let _build_error: Option<BuildError> = None;
+    let _build_options = packetcraftr_core::build::Options::default();
+    let _build_error: Option<packetcraftr_core::build::Error> = None;
     let _built_packet: Option<BuiltPacket> = None;
     let _dissector: Option<Dissector> = None;
-    let _decode_options = DecodeOptions::default();
-    let _decode_error: Option<DecodeError> = None;
+    let _decode_options = packetcraftr_core::decode::Options::default();
+    let _decode_error: Option<packetcraftr_core::decode::Error> = None;
     let _decoded_packet: Option<DecodedPacket> = None;
-    let _codec_error: Option<CodecError> = None;
+    let _codec_error: Option<packetcraftr_core::codec::Error> = None;
     let _decoded_layer: Option<DecodedLayerValue> = None;
     let _encoded_layer: Option<EncodedLayer> = None;
     let _codec: Option<&dyn LayerCodec> = None;
@@ -129,7 +128,11 @@ fn scoped_core_api_paths_are_available() {
     let _field_error: Option<FieldError> = None;
     let _field_schema: Option<&FieldSchema> = None;
     let _matcher: Option<&dyn ResponseMatcher> = None;
-    let parse: fn(&str, &Registry, ExpressionOptions) -> Result<Packet, ExpressionError> = parse;
+    let parse: fn(
+        &str,
+        &Registry,
+        packetcraftr_core::expression::Options,
+    ) -> Result<Packet, packetcraftr_core::expression::Error> = parse;
     let _ = parse;
 
     let diag = Diagnostic::warning("W001", "test warning").at_layer(0);
@@ -142,7 +145,7 @@ fn scoped_core_api_paths_are_available() {
     };
     let ll = LayerLayout {
         index: 0,
-        protocol: ProtocolId::new("ethernet"),
+        protocol: packetcraftr_core::layer::Id::new("ethernet"),
         range: ByteRange::new(0, 14),
         fields: vec![fl],
     };
@@ -160,17 +163,16 @@ fn scoped_core_api_paths_are_available() {
 fn build_and_decode_round_trip() {
     use packetcraftr_core::{
         Packet,
-        build::{Builder, Context, Options as BuildOptions},
-        decode::{Dissector, Options as DecodeOptions},
+        build::{Builder, Context},
+        decode::Dissector,
         field::WireValue,
         frame::{Frame, LinkType},
-        protocol::{
-            builtin::registry as default_registry, link::Ethernet, network::Ipv4, transport::Tcp,
-        },
+        protocol::{link::Ethernet, network::Ipv4, transport::Tcp},
     };
     use std::sync::Arc;
 
-    let reg = Arc::new(default_registry().expect("built-in registry"));
+    let reg =
+        Arc::new(packetcraftr_core::protocol::builtin::registry().expect("built-in registry"));
     let builder = Builder::new(reg.clone());
     let dissector = Dissector::new(reg);
 
@@ -203,14 +205,18 @@ fn build_and_decode_round_trip() {
     packet.push(tcp);
 
     let build_res = builder
-        .build(packet.clone(), Context::default(), BuildOptions::default())
+        .build(
+            packet.clone(),
+            Context::default(),
+            packetcraftr_core::build::Options::default(),
+        )
         .expect("build should succeed");
 
     assert!(!build_res.bytes.is_empty());
 
     let frame = Frame::without_timestamp(LinkType::ETHERNET, build_res.bytes).expect("valid frame");
     let decode_res = dissector
-        .decode(frame, DecodeOptions::default())
+        .decode(frame, packetcraftr_core::decode::Options::default())
         .expect("decode should succeed");
 
     assert_eq!(decode_res.packet.len(), 3);
@@ -220,13 +226,13 @@ fn build_and_decode_round_trip() {
 fn dissector_handles_arbitrary_input() {
     use bytes::Bytes;
     use packetcraftr_core::{
-        decode::{Dissector, Options as DecodeOptions},
+        decode::Dissector,
         frame::{Frame, LinkType},
-        protocol::builtin::registry as default_registry,
     };
     use std::sync::Arc;
 
-    let reg = Arc::new(default_registry().expect("built-in registry"));
+    let reg =
+        Arc::new(packetcraftr_core::protocol::builtin::registry().expect("built-in registry"));
     let dissector = Dissector::new(reg);
 
     let test_cases: Vec<Vec<u8>> = vec![
@@ -242,20 +248,16 @@ fn dissector_handles_arbitrary_input() {
 
     for bytes in test_cases {
         if let Ok(frame) = Frame::without_timestamp(LinkType::ETHERNET, Bytes::from(bytes)) {
-            let _res = dissector.decode(frame, DecodeOptions::default());
+            let _res = dissector.decode(frame, packetcraftr_core::decode::Options::default());
         }
     }
 }
 
 #[test]
 fn expression_and_filter_parsers_validate_inputs() {
-    use packetcraftr_core::{
-        expression::{Options as ExpressionOptions, parse},
-        filter::{Filter, Options as FilterOptions},
-        protocol::builtin::registry as default_registry,
-    };
+    use packetcraftr_core::{expression::parse, filter::Filter};
 
-    let reg = default_registry().expect("built-in registry");
+    let reg = packetcraftr_core::protocol::builtin::registry().expect("built-in registry");
 
     let valid_expressions = vec![
         "ethernet / ipv4(source=192.168.1.1, destination=10.0.0.1) / tcp(destination_port=80)",
@@ -264,7 +266,11 @@ fn expression_and_filter_parsers_validate_inputs() {
     ];
 
     for expr_str in valid_expressions {
-        let parsed = parse(expr_str, &reg, ExpressionOptions::default());
+        let parsed = parse(
+            expr_str,
+            &reg,
+            packetcraftr_core::expression::Options::default(),
+        );
         assert!(
             parsed.is_ok(),
             "Failed to parse valid expression: {}",
@@ -279,7 +285,11 @@ fn expression_and_filter_parsers_validate_inputs() {
     ];
 
     for expr_str in invalid_expressions {
-        let parsed = parse(expr_str, &reg, ExpressionOptions::default());
+        let parsed = parse(
+            expr_str,
+            &reg,
+            packetcraftr_core::expression::Options::default(),
+        );
         assert!(
             parsed.is_err(),
             "Invalid expression should fail to parse: {}",
@@ -295,7 +305,11 @@ fn expression_and_filter_parsers_validate_inputs() {
     ];
 
     for filter_str in valid_filters {
-        let compiled = Filter::compile(filter_str, &reg, FilterOptions::default());
+        let compiled = Filter::compile(
+            filter_str,
+            &reg,
+            packetcraftr_core::filter::Options::default(),
+        );
         assert!(compiled.is_ok(), "Failed to compile filter: {}", filter_str);
     }
 }
@@ -304,23 +318,28 @@ fn expression_and_filter_parsers_validate_inputs() {
 fn builder_enforces_packet_and_layer_limits() {
     use packetcraftr_core::{
         Packet,
-        build::{Builder, Context, Options as BuildOptions},
-        protocol::{builtin::registry as default_registry, link::Ethernet},
+        build::{Builder, Context},
+        protocol::link::Ethernet,
     };
     use std::sync::Arc;
 
-    let reg = Arc::new(default_registry().expect("built-in registry"));
+    let reg =
+        Arc::new(packetcraftr_core::protocol::builtin::registry().expect("built-in registry"));
     let builder = Builder::new(reg);
 
     let empty_packet = Packet::new();
-    let err = builder.build(empty_packet, Context::default(), BuildOptions::default());
+    let err = builder.build(
+        empty_packet,
+        Context::default(),
+        packetcraftr_core::build::Options::default(),
+    );
     assert!(err.is_err());
 
     let mut huge_packet = Packet::new();
     for _ in 0..100 {
         huge_packet.push(Ethernet::default());
     }
-    let opts = BuildOptions {
+    let opts = packetcraftr_core::build::Options {
         max_layers: 10,
         ..Default::default()
     };

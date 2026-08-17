@@ -4,12 +4,9 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    codec::{
-        DecodedLayerValue, EncodedLayer, Error as CodecError, LayerCodec, LayerDecodeContext,
-        LayerEncodeContext,
-    },
+    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     field::{FieldValue, WireValue},
-    layer::{Id as ProtocolId, Layer, reflective_layer},
+    layer::{Layer, reflective_layer},
     registry::Discriminator,
 };
 
@@ -94,7 +91,7 @@ pub(crate) struct LinuxSllCodec;
 pub(crate) struct LinuxSll2Codec;
 
 impl LayerCodec for LinuxSllCodec {
-    fn protocol_id(&self) -> ProtocolId {
+    fn protocol_id(&self) -> crate::layer::Id {
         protocol("linux_sll")
     }
 
@@ -103,7 +100,7 @@ impl LayerCodec for LinuxSllCodec {
         layer: &dyn Layer,
         _payload: &[u8],
         context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, CodecError> {
+    ) -> Result<EncodedLayer, crate::codec::Error> {
         let layer = layer
             .as_any()
             .downcast_ref::<LinuxSll>()
@@ -156,7 +153,7 @@ impl LayerCodec for LinuxSllCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, CodecError> {
+    ) -> Result<DecodedLayerValue, crate::codec::Error> {
         if input.len() < 16 {
             return Err(truncated("linux_sll", 16, input.len()));
         }
@@ -188,13 +185,13 @@ impl LayerCodec for LinuxSllCodec {
     fn make_layer(
         &self,
         fields: &BTreeMap<String, FieldValue>,
-    ) -> Result<Box<dyn Layer>, CodecError> {
+    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(LinuxSll::default(), fields)
     }
 }
 
 impl LayerCodec for LinuxSll2Codec {
-    fn protocol_id(&self) -> ProtocolId {
+    fn protocol_id(&self) -> crate::layer::Id {
         protocol("linux_sll2")
     }
 
@@ -203,7 +200,7 @@ impl LayerCodec for LinuxSll2Codec {
         layer: &dyn Layer,
         _payload: &[u8],
         context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, CodecError> {
+    ) -> Result<EncodedLayer, crate::codec::Error> {
         let layer = layer
             .as_any()
             .downcast_ref::<LinuxSll2>()
@@ -258,7 +255,7 @@ impl LayerCodec for LinuxSll2Codec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, CodecError> {
+    ) -> Result<DecodedLayerValue, crate::codec::Error> {
         if input.len() < 20 {
             return Err(truncated("linux_sll2", 20, input.len()));
         }
@@ -293,7 +290,7 @@ impl LayerCodec for LinuxSll2Codec {
     fn make_layer(
         &self,
         fields: &BTreeMap<String, FieldValue>,
-    ) -> Result<Box<dyn Layer>, CodecError> {
+    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(LinuxSll2::default(), fields)
     }
 }

@@ -7,7 +7,6 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use crate::replay::{FrameEvidence as ReplayFrameEvidence, Summary as ReplaySummary};
 use packetcraftr_netio::{interface::Id as InterfaceId, link::Mode as NetworkLinkMode};
 
 use super::contract::Error;
@@ -101,7 +100,7 @@ pub struct Result {
 
 impl Result {
     pub fn from_summary(
-        summary: ReplaySummary,
+        summary: crate::replay::Summary,
         requested_interface: InterfaceId,
         requested_link_mode: NetworkLinkMode,
         frames: Vec<Frame>,
@@ -134,7 +133,9 @@ pub struct Frame {
 }
 
 impl Frame {
-    pub fn try_from_evidence(evidence: ReplayFrameEvidence) -> std::result::Result<Self, Error> {
+    pub fn try_from_evidence(
+        evidence: crate::replay::FrameEvidence,
+    ) -> std::result::Result<Self, Error> {
         Ok(Self {
             source_index: evidence.source_index,
             interface: evidence.transmission().interface.clone().into(),

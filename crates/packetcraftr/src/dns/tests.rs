@@ -5,7 +5,6 @@ use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr};
 use std::time::Duration;
 
-use packetcraftr_core::protocol::builtin::registry as default_registry;
 use packetcraftr_core::{Packet, decode::DecodedPacket, frame::Frame, frame::LinkType};
 
 use crate::clock::Clock;
@@ -13,11 +12,6 @@ use crate::target::{Authorized, Authorizer, Family, Target};
 use crate::{BoundaryError, Stats};
 
 use super::DEFAULT_DNS_SERVER_PORT;
-use super::engine::run as dns;
-use super::model::{
-    Exchange as DnsExchange, Execution as DnsExchangeExecution, Executor as DnsExecutor,
-    Limits as DnsLimits, QueryType as DnsQueryType, Request as DnsRequest,
-};
 
 #[derive(Default)]
 struct NoopClock;
@@ -53,11 +47,14 @@ impl Authorizer for SingleAddressAuthorizer {
 
 struct TrustedReceiptExecutor;
 
-impl DnsExecutor for TrustedReceiptExecutor {
-    fn execute(&mut self, exchange: &DnsExchange) -> Result<DnsExchangeExecution, BoundaryError> {
+impl super::model::Executor for TrustedReceiptExecutor {
+    fn execute(
+        &mut self,
+        exchange: &super::model::Exchange,
+    ) -> Result<super::model::Execution, BoundaryError> {
         let sent = crate::evidence::test_sent_packet(exchange.probe.packet());
         let bytes = u64::try_from(sent.bytes_sent()).unwrap();
-        Ok(DnsExchangeExecution {
+        Ok(super::model::Execution {
             permit: exchange.permit,
             sent,
             responses: Vec::new(),
@@ -77,8 +74,11 @@ impl DnsExecutor for TrustedReceiptExecutor {
 
 struct InvalidResponseIndexExecutor;
 
-impl DnsExecutor for InvalidResponseIndexExecutor {
-    fn execute(&mut self, exchange: &DnsExchange) -> Result<DnsExchangeExecution, BoundaryError> {
+impl super::model::Executor for InvalidResponseIndexExecutor {
+    fn execute(
+        &mut self,
+        exchange: &super::model::Exchange,
+    ) -> Result<super::model::Execution, BoundaryError> {
         let mut execution = TrustedReceiptExecutor.execute(exchange)?;
         let frame = Frame::without_timestamp(LinkType::RAW, &[0_u8][..]).expect("evidence frame");
         execution.responses.push(crate::exchange::Response {
@@ -96,30 +96,30 @@ impl DnsExecutor for InvalidResponseIndexExecutor {
     }
 }
 
-fn dns_request(address: IpAddr) -> DnsRequest {
-    DnsRequest {
+fn dns_request(address: IpAddr) -> super::model::Request {
+    super::model::Request {
         server: Target::Address(address),
         address_family: Family::Any,
         server_port: DEFAULT_DNS_SERVER_PORT,
         source_port: 49_152,
         query_name: "example.com".to_owned(),
-        query_type: DnsQueryType::A,
+        query_type: super::model::QueryType::A,
         transaction_id: 0x1234,
         recursion_desired: true,
         attempts: 1,
         timeout: Duration::from_millis(1),
         queries_per_second: None,
-        limits: DnsLimits::default(),
+        limits: super::model::Limits::default(),
     }
 }
 
 #[test]
 fn dns_executor_success_uses_trusted_sent_timestamp() {
     let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 53));
-    dns(
+    super::engine::run(
         &dns_request(address),
         &mut SingleAddressAuthorizer { address },
-        &default_registry().expect("built-in registry"),
+        &packetcraftr_core::protocol::builtin::registry().expect("built-in registry"),
         &mut TrustedReceiptExecutor,
         &mut NoopClock,
     )
@@ -129,10 +129,10 @@ fn dns_executor_success_uses_trusted_sent_timestamp() {
 #[test]
 fn dns_executor_rejects_nonzero_response_index() {
     let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 53));
-    let error = dns(
+    let error = super::engine::run(
         &dns_request(address),
         &mut SingleAddressAuthorizer { address },
-        &default_registry().expect("built-in registry"),
+        &packetcraftr_core::protocol::builtin::registry().expect("built-in registry"),
         &mut InvalidResponseIndexExecutor,
         &mut NoopClock,
     )

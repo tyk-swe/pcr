@@ -7,7 +7,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::build::{DEFAULT_MAX_PACKET_SIZE, Options as BuildOptions};
+use crate::build::DEFAULT_MAX_PACKET_SIZE;
 
 use super::error::Error;
 use super::{
@@ -159,7 +159,7 @@ pub struct Request {
     pub strategies: Vec<Strategy>,
     /// Empty means every reflectively readable field in layer/schema order.
     pub targets: Vec<Target>,
-    pub build: BuildOptions,
+    pub build: crate::build::Options,
     pub limits: Limits,
 }
 
@@ -176,7 +176,7 @@ impl Default for Request {
                 Strategy::Malformed,
             ],
             targets: Vec::new(),
-            build: BuildOptions::default(),
+            build: crate::build::Options::default(),
             limits: Limits::default(),
         }
     }

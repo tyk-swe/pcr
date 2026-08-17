@@ -5,7 +5,6 @@
 
 use std::time::{Duration, Instant};
 
-use packetcraftr_core::diagnostic::push_once as push_diagnostic_once;
 use packetcraftr_netio::{Error as LiveIoError, capture::Session};
 
 use super::shutdown::CaptureGuard;
@@ -50,7 +49,7 @@ fn drain_available<C: Session>(
             ProcessOutcome::Continue => {}
         }
     }
-    push_diagnostic_once(
+    packetcraftr_core::diagnostic::push_once(
         &mut captured.diagnostics,
         packetcraftr_core::diagnostic::Diagnostic::warning(
             "exchange.drain_limit",

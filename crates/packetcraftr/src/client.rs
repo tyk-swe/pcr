@@ -5,9 +5,6 @@ use std::sync::Arc;
 
 use packetcraftr_core::registry::Registry;
 use packetcraftr_netio::transmit::Sender as PacketIo;
-use packetcraftr_netio::{
-    neighbor::Resolver as NeighborResolver, route::Provider as RouteProvider,
-};
 
 use crate::policy::Policy;
 
@@ -24,8 +21,8 @@ pub struct Client<R, N, I> {
 
 impl<R, N, I> Client<R, N, I>
 where
-    R: RouteProvider,
-    N: NeighborResolver,
+    R: packetcraftr_netio::route::Provider,
+    N: packetcraftr_netio::neighbor::Resolver,
     I: PacketIo,
 {
     pub fn new(registry: Arc<Registry>, routes: R, neighbors: N, io: I, policy: Policy) -> Self {

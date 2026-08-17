@@ -6,12 +6,9 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use crate::{
-    codec::{
-        DecodedLayerValue, EncodedLayer, Error as CodecError, LayerCodec, LayerDecodeContext,
-        LayerEncodeContext,
-    },
+    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     field::{FieldValue, WireValue},
-    layer::{Id as ProtocolId, Layer, reflective_layer},
+    layer::{Layer, reflective_layer},
     registry::Discriminator,
 };
 
@@ -92,7 +89,7 @@ fn encode_options<L>(
     options: &Bytes,
     layout: fn(usize) -> Vec<crate::layout::FieldLayout>,
     context: &LayerEncodeContext<'_>,
-) -> Result<EncodedLayer, CodecError>
+) -> Result<EncodedLayer, crate::codec::Error>
 where
     L: Layer + Clone + 'static,
 {
@@ -148,7 +145,7 @@ fn decode_options<L>(
     input: &[u8],
     make: impl FnOnce(u8, Bytes) -> L,
     layout: fn(usize) -> Vec<crate::layout::FieldLayout>,
-) -> Result<DecodedLayerValue, CodecError>
+) -> Result<DecodedLayerValue, crate::codec::Error>
 where
     L: Layer + 'static,
 {
@@ -177,7 +174,7 @@ where
 }
 
 impl LayerCodec for HopByHopCodec {
-    fn protocol_id(&self) -> ProtocolId {
+    fn protocol_id(&self) -> crate::layer::Id {
         protocol("ipv6_hop_by_hop")
     }
 
@@ -186,7 +183,7 @@ impl LayerCodec for HopByHopCodec {
         layer: &dyn Layer,
         _payload: &[u8],
         context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, CodecError> {
+    ) -> Result<EncodedLayer, crate::codec::Error> {
         let layer = layer
             .as_any()
             .downcast_ref::<HopByHop>()
@@ -205,7 +202,7 @@ impl LayerCodec for HopByHopCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, CodecError> {
+    ) -> Result<DecodedLayerValue, crate::codec::Error> {
         decode_options(
             "ipv6_hop_by_hop",
             input,
@@ -220,13 +217,13 @@ impl LayerCodec for HopByHopCodec {
     fn make_layer(
         &self,
         fields: &BTreeMap<String, FieldValue>,
-    ) -> Result<Box<dyn Layer>, CodecError> {
+    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(HopByHop::default(), fields)
     }
 }
 
 impl LayerCodec for DestinationOptionsCodec {
-    fn protocol_id(&self) -> ProtocolId {
+    fn protocol_id(&self) -> crate::layer::Id {
         protocol("ipv6_destination_options")
     }
 
@@ -235,7 +232,7 @@ impl LayerCodec for DestinationOptionsCodec {
         layer: &dyn Layer,
         _payload: &[u8],
         context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, CodecError> {
+    ) -> Result<EncodedLayer, crate::codec::Error> {
         let layer = layer
             .as_any()
             .downcast_ref::<DestinationOptions>()
@@ -254,7 +251,7 @@ impl LayerCodec for DestinationOptionsCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, CodecError> {
+    ) -> Result<DecodedLayerValue, crate::codec::Error> {
         decode_options(
             "ipv6_destination_options",
             input,
@@ -269,7 +266,7 @@ impl LayerCodec for DestinationOptionsCodec {
     fn make_layer(
         &self,
         fields: &BTreeMap<String, FieldValue>,
-    ) -> Result<Box<dyn Layer>, CodecError> {
+    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(DestinationOptions::default(), fields)
     }
 }

@@ -4,9 +4,9 @@
 //! Tests for timestamped response correlation and workflow promotion.
 
 use bytes::Bytes;
+use packetcraftr_core::decode::Dissector;
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::{Packet, layer::Raw};
-use packetcraftr_core::{decode::Dissector, protocol::builtin::registry as default_registry};
 use packetcraftr_netio::capture::Captured;
 use packetcraftr_netio::transmit::Submission;
 use std::{sync::Arc, time::Duration};
@@ -211,7 +211,7 @@ fn workflow_matcher_crossing_deadline_expires_and_retains_candidates() {
     assert_eq!(deadline_diagnostics.len(), 1);
     assert_eq!(
         deadline_diagnostics[0].severity,
-        DiagnosticSeverity::Warning
+        packetcraftr_core::diagnostic::Severity::Warning
     );
 }
 
@@ -222,7 +222,8 @@ fn duplicated_ingress_record_cannot_enter_several_evidence_categories() {
             .expect("fixture frame"),
         Instant::now(),
     );
-    let registry = Arc::new(default_registry().expect("built-in registry"));
+    let registry =
+        Arc::new(packetcraftr_core::protocol::builtin::registry().expect("built-in registry"));
     let dissector = Dissector::new(Arc::clone(&registry));
     let options = Options::default();
     let mut accumulator = Accumulator::new(0);
@@ -261,7 +262,8 @@ fn duplicate_tracking_is_bounded_to_retained_evidence() {
             .expect("fixture frame"),
         Instant::now(),
     );
-    let registry = Arc::new(default_registry().expect("built-in registry"));
+    let registry =
+        Arc::new(packetcraftr_core::protocol::builtin::registry().expect("built-in registry"));
     let dissector = Dissector::new(Arc::clone(&registry));
     let options = Options {
         max_unmatched_frames: 1,

@@ -5,7 +5,7 @@
 
 use super::Packet;
 use super::field::FieldValue;
-use super::layer::{Id as ProtocolId, Layer};
+use super::layer::Layer;
 #[doc(hidden)]
 pub use super::protocol_catalog::BuiltinProtocol;
 pub(crate) use super::protocol_catalog::builtin_protocol_catalog;

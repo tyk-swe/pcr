@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use clap::ValueEnum;
 
-use crate::command_options::OfflineAnalysisLimitsArgs;
+use crate::command_options::OfflineLimitsArgs;
 
 pub(crate) const AFTER_LONG_HELP: &str = r#"Following is computed offline over dissected frames; no live capture or transmission is involved.
 
@@ -40,5 +40,5 @@ pub(crate) struct Args {
     #[arg(long, value_enum, default_value_t = Direction::Both)]
     pub(crate) direction: Direction,
     #[command(flatten)]
-    pub(crate) limits: OfflineAnalysisLimitsArgs,
+    pub(crate) limits: OfflineLimitsArgs,
 }

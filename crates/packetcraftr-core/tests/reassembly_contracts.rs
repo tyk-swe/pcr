@@ -10,10 +10,10 @@ use packetcraftr_core::analysis::reassembly::{
     fragment::{self, DatagramKey, Fragment, OverlapPolicy, ScopedDatagramKey},
     tcp::{self, FlowKey, ScopedFlowKey, Segment},
 };
-use packetcraftr_core::analysis::scope::{EncapsulationIdentifier, Interner as ScopeInterner};
+use packetcraftr_core::analysis::scope::EncapsulationIdentifier;
 
 fn scope() -> packetcraftr_core::analysis::scope::ScopeId {
-    ScopeInterner::new()
+    packetcraftr_core::analysis::scope::Interner::new()
         .intern(None, Vec::new())
         .expect("one scope fits")
 }
@@ -83,7 +83,7 @@ fn fragments_complete_in_wire_order_after_out_of_order_arrival() {
 #[test]
 fn fragments_cannot_complete_across_interface_or_tunnel_scopes() {
     let now = Instant::now();
-    let mut scopes = ScopeInterner::new();
+    let mut scopes = packetcraftr_core::analysis::scope::Interner::new();
     let base_scope = scopes.intern(Some(0), Vec::new()).expect("scope fits");
     let other_interface = scopes.intern(Some(1), Vec::new()).expect("scope fits");
     let other_tunnel = scopes

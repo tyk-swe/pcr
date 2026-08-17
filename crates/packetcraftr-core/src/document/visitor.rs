@@ -12,24 +12,24 @@ use crate::field::FieldValue;
 
 #[derive(Deserialize)]
 #[serde(field_identifier, rename_all = "snake_case")]
-pub(super) enum PacketDocumentField {
+pub(super) enum PacketField {
     Schema,
     Layers,
 }
 
 #[derive(Deserialize)]
 #[serde(field_identifier, rename_all = "snake_case")]
-pub(super) enum LayerDocumentField {
+pub(super) enum LayerField {
     Protocol,
     Fields,
 }
 
 #[derive(Clone, Copy)]
-pub(super) struct PacketDocumentSeed {
+pub(super) struct PacketSeed {
     pub(super) max_layers: usize,
 }
 
-impl<'de> DeserializeSeed<'de> for PacketDocumentSeed {
+impl<'de> DeserializeSeed<'de> for PacketSeed {
     type Value = Packet;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
@@ -37,20 +37,20 @@ impl<'de> DeserializeSeed<'de> for PacketDocumentSeed {
         D: serde::Deserializer<'de>,
     {
         deserializer.deserialize_struct(
-            "PacketDocument",
+            "Packet",
             &["schema", "layers"],
-            PacketDocumentVisitor {
+            PacketVisitor {
                 max_layers: self.max_layers,
             },
         )
     }
 }
 
-pub(super) struct PacketDocumentVisitor {
+pub(super) struct PacketVisitor {
     pub(super) max_layers: usize,
 }
 
-impl<'de> Visitor<'de> for PacketDocumentVisitor {
+impl<'de> Visitor<'de> for PacketVisitor {
     type Value = Packet;
 
     fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -63,15 +63,15 @@ impl<'de> Visitor<'de> for PacketDocumentVisitor {
     {
         let mut schema = None;
         let mut layers = None;
-        while let Some(field) = map.next_key::<PacketDocumentField>()? {
+        while let Some(field) = map.next_key::<PacketField>()? {
             match field {
-                PacketDocumentField::Schema => {
+                PacketField::Schema => {
                     if schema.is_some() {
                         return Err(de::Error::duplicate_field("schema"));
                     }
                     schema = Some(map.next_value()?);
                 }
-                PacketDocumentField::Layers => {
+                PacketField::Layers => {
                     if layers.is_some() {
                         return Err(de::Error::duplicate_field("layers"));
                     }
@@ -129,7 +129,7 @@ impl<'de> Visitor<'de> for LayersVisitor {
         }
         let mut layers = Vec::with_capacity(sequence.size_hint().unwrap_or(0).min(self.maximum));
         while layers.len() < self.maximum {
-            let Some(layer) = sequence.next_element_seed(LayerDocumentSeed)? else {
+            let Some(layer) = sequence.next_element_seed(LayerSeed)? else {
                 return Ok(layers);
             };
             layers.push(layer);
@@ -142,26 +142,22 @@ impl<'de> Visitor<'de> for LayersVisitor {
 }
 
 #[derive(Clone, Copy)]
-pub(super) struct LayerDocumentSeed;
+pub(super) struct LayerSeed;
 
-impl<'de> DeserializeSeed<'de> for LayerDocumentSeed {
+impl<'de> DeserializeSeed<'de> for LayerSeed {
     type Value = Layer;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        deserializer.deserialize_struct(
-            "LayerDocument",
-            &["protocol", "fields"],
-            LayerDocumentVisitor,
-        )
+        deserializer.deserialize_struct("Layer", &["protocol", "fields"], LayerVisitor)
     }
 }
 
-pub(super) struct LayerDocumentVisitor;
+pub(super) struct LayerVisitor;
 
-impl<'de> Visitor<'de> for LayerDocumentVisitor {
+impl<'de> Visitor<'de> for LayerVisitor {
     type Value = Layer;
 
     fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -174,15 +170,15 @@ impl<'de> Visitor<'de> for LayerDocumentVisitor {
     {
         let mut protocol = None;
         let mut fields = None;
-        while let Some(field) = map.next_key::<LayerDocumentField>()? {
+        while let Some(field) = map.next_key::<LayerField>()? {
             match field {
-                LayerDocumentField::Protocol => {
+                LayerField::Protocol => {
                     if protocol.is_some() {
                         return Err(de::Error::duplicate_field("protocol"));
                     }
                     protocol = Some(map.next_value()?);
                 }
-                LayerDocumentField::Fields => {
+                LayerField::Fields => {
                     if fields.is_some() {
                         return Err(de::Error::duplicate_field("fields"));
                     }

@@ -26,8 +26,7 @@ use packetcraftr_netio::{
     link::{Capability, MacAddress, Mode},
     neighbor,
     route::{
-        Decision, Error as RouteError, Materialized, Options, Plan, Provider, Scope,
-        SelectionReason, plan as plan_route,
+        Decision, Materialized, Options, Plan, Provider, Scope, SelectionReason, plan as plan_route,
     },
     transmit::{
         Dispatch, Frame, Layer2Frame, Layer2Sender, Layer3Frame, Layer3Sender, Report, Sender,
@@ -756,7 +755,7 @@ fn planner_rejects_invalid_input_before_route_lookup() {
             },
             &provider
         ),
-        Err(RouteError::MissingDestination)
+        Err(packetcraftr_netio::route::Error::MissingDestination)
     ));
     assert_eq!(provider.lookup_calls.load(Ordering::SeqCst), 0);
 
@@ -770,7 +769,7 @@ fn planner_rejects_invalid_input_before_route_lookup() {
             },
             &provider
         ),
-        Err(RouteError::PreferredSourceFamilyMismatch { .. })
+        Err(packetcraftr_netio::route::Error::PreferredSourceFamilyMismatch { .. })
     ));
     assert_eq!(provider.lookup_calls.load(Ordering::SeqCst), 0);
 
@@ -790,7 +789,7 @@ fn planner_rejects_invalid_input_before_route_lookup() {
             },
             &provider
         ),
-        Err(RouteError::EthernetInLayer3)
+        Err(packetcraftr_netio::route::Error::EthernetInLayer3)
     ));
     assert_eq!(provider.lookup_calls.load(Ordering::SeqCst), 0);
 }
@@ -810,7 +809,7 @@ fn planner_maps_provider_failures_and_contract_mismatches() {
     .expect_err("lookup failure must be typed");
     assert!(matches!(
         error,
-        RouteError::RouteLookup {
+        packetcraftr_netio::route::Error::RouteLookup {
             destination: actual,
             failure,
             ..
@@ -833,7 +832,7 @@ fn planner_maps_provider_failures_and_contract_mismatches() {
             },
             &routes(Ok(wrong))
         ),
-        Err(RouteError::InterfaceMismatch { .. })
+        Err(packetcraftr_netio::route::Error::InterfaceMismatch { .. })
     ));
 
     assert!(matches!(
@@ -846,7 +845,7 @@ fn planner_maps_provider_failures_and_contract_mismatches() {
             },
             &routes(Ok(decision(Capability::Layer2AndLayer3)))
         ),
-        Err(RouteError::PreferredSourceNotSelected { .. })
+        Err(packetcraftr_netio::route::Error::PreferredSourceNotSelected { .. })
     ));
 }
 
@@ -885,7 +884,7 @@ fn planner_selects_auto_layer3_for_ip_root_and_enforces_capability() {
             },
             &routes(Ok(decision(Capability::Layer2)))
         ),
-        Err(RouteError::Layer3Unsupported)
+        Err(packetcraftr_netio::route::Error::Layer3Unsupported)
     ));
 
     let mut layer3_only = decision(Capability::Layer3);
@@ -912,7 +911,7 @@ fn planner_selects_auto_layer3_for_ip_root_and_enforces_capability() {
                 interface_calls: Arc::new(AtomicUsize::new(0)),
             }
         ),
-        Err(RouteError::Layer2Unsupported)
+        Err(packetcraftr_netio::route::Error::Layer2Unsupported)
     ));
 }
 

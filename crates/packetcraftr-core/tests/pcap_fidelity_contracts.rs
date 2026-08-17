@@ -9,8 +9,8 @@ use packetcraftr_core::analysis::pcap::{
     CaptureHeader, CaptureRecord, Endianness, Error, Limits, MetadataBlockKind, PacketBlockKind,
     Reader, RecordKind, Writer, rewrite,
 };
+use packetcraftr_core::analysis::run;
 use packetcraftr_core::analysis::stats::Collector;
-use packetcraftr_core::analysis::{Error as AnalysisError, Options as AnalysisOptions, run};
 use packetcraftr_core::protocol::builtin;
 
 fn u16_bytes(endianness: Endianness, value: u16) -> [u8; 2] {
@@ -416,7 +416,7 @@ fn statistics_reject_simple_packet_time_absence_explicitly() {
     let error = run(
         &mut reader,
         registry,
-        &AnalysisOptions::default(),
+        &packetcraftr_core::analysis::Options::default(),
         |record| {
             collector
                 .observe(&record)
@@ -427,6 +427,6 @@ fn statistics_reject_simple_packet_time_absence_explicitly() {
     .expect_err("statistics require capture time");
     assert!(matches!(
         error,
-        AnalysisError::TimestampUnavailable { number: 1 }
+        packetcraftr_core::analysis::Error::TimestampUnavailable { number: 1 }
     ));
 }

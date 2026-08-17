@@ -12,11 +12,9 @@ use common::{
     CLIENT, SERVER, TcpSpec, client_tcp as client, reader, registry, server_tcp as server,
     tcp_frame as frame, udp_frame,
 };
-use packetcraftr_core::analysis::expert::{
-    Collector as ExpertCollector, Finding, StreamRef, StreamTransport, Summary as ExpertSummary,
-};
+use packetcraftr_core::analysis::expert::{Finding, StreamRef, StreamTransport};
 use packetcraftr_core::analysis::{Options, run};
-use packetcraftr_core::diagnostic::Severity as DiagnosticSeverity;
+
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::protocol::transport::Tcp;
 use packetcraftr_core::registry::Registry;
@@ -26,9 +24,12 @@ fn with_window_scale(mut spec: TcpSpec, shift: u8) -> TcpSpec {
     spec
 }
 
-fn analyze_frames(registry: Arc<Registry>, frames: &[Frame]) -> (Vec<Finding>, ExpertSummary) {
+fn analyze_frames(
+    registry: Arc<Registry>,
+    frames: &[Frame],
+) -> (Vec<Finding>, packetcraftr_core::analysis::expert::Summary) {
     let mut capture = reader(frames);
-    let mut collector = ExpertCollector::new();
+    let mut collector = packetcraftr_core::analysis::expert::Collector::new();
     let mut findings = Vec::new();
     let run_summary = run(
         &mut capture,
@@ -49,7 +50,9 @@ fn analyze_frames(registry: Arc<Registry>, frames: &[Frame]) -> (Vec<Finding>, E
     (findings, summary)
 }
 
-fn analyze(segments: &[(TcpSpec, &[u8])]) -> (Vec<Finding>, ExpertSummary) {
+fn analyze(
+    segments: &[(TcpSpec, &[u8])],
+) -> (Vec<Finding>, packetcraftr_core::analysis::expert::Summary) {
     let registry = registry();
     let frames = segments
         .iter()
@@ -63,7 +66,12 @@ fn analyze(segments: &[(TcpSpec, &[u8])]) -> (Vec<Finding>, ExpertSummary) {
     analyze_frames(registry, &frames)
 }
 
-fn finding(severity: DiagnosticSeverity, code: &str, number: u64, message: &str) -> Finding {
+fn finding(
+    severity: packetcraftr_core::diagnostic::Severity,
+    code: &str,
+    number: u64,
+    message: &str,
+) -> Finding {
     Finding {
         severity,
         code: code.to_owned(),
@@ -92,7 +100,7 @@ fn assert_expert(
     }
     assert_eq!(
         summary,
-        ExpertSummary {
+        packetcraftr_core::analysis::expert::Summary {
             findings: u64::try_from(expected.len()).expect("fixture count fits u64"),
             errors,
             warnings,
@@ -118,13 +126,13 @@ fn duplicate_acknowledgments_require_outstanding_payload_and_keep_order() {
         &segments,
         vec![
             finding(
-                DiagnosticSeverity::Warning,
+                packetcraftr_core::diagnostic::Severity::Warning,
                 "tcp.duplicate_ack",
                 5,
                 "198.51.100.2:443 repeats acknowledgment 101 (duplicate #1)",
             ),
             finding(
-                DiagnosticSeverity::Warning,
+                packetcraftr_core::diagnostic::Severity::Warning,
                 "tcp.duplicate_ack",
                 6,
                 "198.51.100.2:443 repeats acknowledgment 101 (duplicate #2)",
@@ -159,7 +167,7 @@ fn unreportable_duplicate_acknowledgments_do_not_advance_the_count() {
     assert_expert(
         &segments,
         vec![finding(
-            DiagnosticSeverity::Warning,
+            packetcraftr_core::diagnostic::Severity::Warning,
             "tcp.duplicate_ack",
             5,
             "192.0.2.1:40000 repeats acknowledgment 2000 (duplicate #1)",
@@ -186,19 +194,19 @@ fn keep_alive_and_zero_window_probe_shapes_remain_distinct() {
         &segments,
         vec![
             finding(
-                DiagnosticSeverity::Info,
+                packetcraftr_core::diagnostic::Severity::Info,
                 "tcp.keep_alive",
                 6,
                 "192.0.2.1:40000 probes the peer",
             ),
             finding(
-                DiagnosticSeverity::Warning,
+                packetcraftr_core::diagnostic::Severity::Warning,
                 "tcp.zero_window",
                 7,
                 "198.51.100.2:443 advertises a zero receive window",
             ),
             finding(
-                DiagnosticSeverity::Info,
+                packetcraftr_core::diagnostic::Severity::Info,
                 "tcp.zero_window_probe",
                 8,
                 "192.0.2.1:40000 probes the peer's zero receive window",
@@ -223,7 +231,7 @@ fn one_byte_keep_alive_suppresses_overlap_retransmission() {
     assert_expert(
         &segments,
         vec![finding(
-            DiagnosticSeverity::Info,
+            packetcraftr_core::diagnostic::Severity::Info,
             "tcp.keep_alive",
             6,
             "192.0.2.1:40000 probes the peer",
@@ -249,25 +257,25 @@ fn gap_retransmission_conflict_and_end_residue_have_exact_attribution() {
         &segments,
         vec![
             finding(
-                DiagnosticSeverity::Warning,
+                packetcraftr_core::diagnostic::Severity::Warning,
                 "tcp.previous_segment_not_captured",
                 5,
                 "192.0.2.1:40000 resumes at sequence 106 before sequence 104 arrived",
             ),
             finding(
-                DiagnosticSeverity::Warning,
+                packetcraftr_core::diagnostic::Severity::Warning,
                 "tcp.retransmission",
                 6,
                 "3 byte(s) at sequence 101 retransmit previously seen data",
             ),
             finding(
-                DiagnosticSeverity::Error,
+                packetcraftr_core::diagnostic::Severity::Error,
                 "tcp.retransmission_conflicting",
                 7,
                 "3 byte(s) at sequence 101 retransmit previously seen data with different content",
             ),
             finding(
-                DiagnosticSeverity::Info,
+                packetcraftr_core::diagnostic::Severity::Info,
                 "tcp.incomplete_at_end",
                 7,
                 "2 byte(s) from 192.0.2.1:40000 were still awaiting missing earlier data when the capture ended",
@@ -292,13 +300,13 @@ fn unscaled_window_full_and_exceeded_findings_are_exact() {
         &segments,
         vec![
             finding(
-                DiagnosticSeverity::Warning,
+                packetcraftr_core::diagnostic::Severity::Warning,
                 "tcp.window_full",
                 4,
                 "192.0.2.1:40000 has filled the peer's 3-byte receive window",
             ),
             finding(
-                DiagnosticSeverity::Warning,
+                packetcraftr_core::diagnostic::Severity::Warning,
                 "tcp.window_exceeded",
                 5,
                 "192.0.2.1:40000 has sent 1 byte(s) beyond the peer's 3-byte receive window",
@@ -327,13 +335,13 @@ fn negotiated_window_scale_applies_only_after_the_syn_window() {
         &segments,
         vec![
             finding(
-                DiagnosticSeverity::Warning,
+                packetcraftr_core::diagnostic::Severity::Warning,
                 "tcp.window_full",
                 5,
                 "192.0.2.1:40000 has filled the peer's 8-byte receive window",
             ),
             finding(
-                DiagnosticSeverity::Warning,
+                packetcraftr_core::diagnostic::Severity::Warning,
                 "tcp.window_exceeded",
                 6,
                 "192.0.2.1:40000 has sent 1 byte(s) beyond the peer's 8-byte receive window",
@@ -358,7 +366,7 @@ fn reordered_window_update_does_not_replace_the_newer_advertisement() {
     assert_expert(
         &segments,
         vec![finding(
-            DiagnosticSeverity::Warning,
+            packetcraftr_core::diagnostic::Severity::Warning,
             "tcp.window_full",
             6,
             "192.0.2.1:40000 has filled the peer's 5-byte receive window",
@@ -397,13 +405,13 @@ fn clean_close_applies_after_gap_fill_and_covers_late_retransmission() {
         &segments,
         vec![
             finding(
-                DiagnosticSeverity::Warning,
+                packetcraftr_core::diagnostic::Severity::Warning,
                 "tcp.previous_segment_not_captured",
                 4,
                 "192.0.2.1:40000 resumes at sequence 104 before sequence 101 arrived",
             ),
             finding(
-                DiagnosticSeverity::Warning,
+                packetcraftr_core::diagnostic::Severity::Warning,
                 "tcp.retransmission",
                 6,
                 "3 byte(s) at sequence 101 retransmit previously seen data",
@@ -462,7 +470,10 @@ fn non_tcp_sweep_retires_expired_expert_generation() {
 
     let (findings, summary) = analyze_frames(registry, &frames);
     assert!(findings.is_empty());
-    assert_eq!(summary, ExpertSummary::default());
+    assert_eq!(
+        summary,
+        packetcraftr_core::analysis::expert::Summary::default()
+    );
 }
 
 #[test]
@@ -476,7 +487,7 @@ fn reset_is_attributed_before_state_is_retired() {
     assert_expert(
         &segments,
         vec![finding(
-            DiagnosticSeverity::Warning,
+            packetcraftr_core::diagnostic::Severity::Warning,
             "tcp.reset",
             4,
             "connection reset by 198.51.100.2:443",
@@ -502,7 +513,7 @@ fn renewed_syn_clears_stale_tuple_window_state() {
     assert_expert(
         &segments,
         vec![finding(
-            DiagnosticSeverity::Warning,
+            packetcraftr_core::diagnostic::Severity::Warning,
             "tcp.zero_window",
             4,
             "198.51.100.2:443 advertises a zero receive window",

@@ -7,8 +7,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::{
-    build::Mode as BuildMode,
-    codec::{Error as CodecError, LayerEncodeContext},
+    codec::LayerEncodeContext,
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
     layer::Layer,
@@ -36,9 +35,9 @@ pub(crate) fn resolve_u8(
     field: &str,
     value: &WireValue<u8>,
     expectation: ValueExpectation<u8>,
-    mode: BuildMode,
+    mode: crate::build::Mode,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Result<(u8, WireValue<u8>), CodecError> {
+) -> Result<(u8, WireValue<u8>), crate::codec::Error> {
     resolve_fixed(
         name,
         field,
@@ -55,9 +54,9 @@ pub(crate) fn resolve_u16(
     field: &str,
     value: &WireValue<u16>,
     expectation: ValueExpectation<u16>,
-    mode: BuildMode,
+    mode: crate::build::Mode,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Result<(u16, WireValue<u16>), CodecError> {
+) -> Result<(u16, WireValue<u16>), crate::codec::Error> {
     resolve_fixed(
         name,
         field,
@@ -74,10 +73,10 @@ pub(crate) fn resolve_fixed<T, const N: usize>(
     field: &str,
     value: &WireValue<T>,
     expectation: ValueExpectation<T>,
-    mode: BuildMode,
+    mode: crate::build::Mode,
     diagnostics: &mut Vec<Diagnostic>,
     decode_raw: impl FnOnce([u8; N]) -> T,
-) -> Result<(T, WireValue<T>), CodecError>
+) -> Result<(T, WireValue<T>), crate::codec::Error>
 where
     T: Copy + fmt::Display + PartialEq,
 {
@@ -89,7 +88,7 @@ where
             Ok((*actual, value.clone()))
         }
         WireValue::Raw(bytes) => {
-            if mode == BuildMode::Strict {
+            if mode == crate::build::Mode::Strict {
                 return Err(invalid(
                     name,
                     format!("raw {field} requires permissive build mode"),
@@ -121,9 +120,9 @@ fn validate_dependent<T>(
     field: &str,
     actual: T,
     expectation: ValueExpectation<T>,
-    mode: BuildMode,
+    mode: crate::build::Mode,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Result<(), CodecError>
+) -> Result<(), crate::codec::Error>
 where
     T: Copy + fmt::Display + PartialEq,
 {
@@ -134,7 +133,7 @@ where
         return Ok(());
     }
     let message = format!("{field} is {actual}, expected {expected}");
-    if mode == BuildMode::Strict {
+    if mode == crate::build::Mode::Strict {
         return Err(invalid(name, message));
     }
     diagnostics
@@ -201,7 +200,7 @@ where
 pub(crate) fn make_layer<L>(
     mut layer: L,
     fields: &BTreeMap<String, FieldValue>,
-) -> Result<Box<dyn Layer>, CodecError>
+) -> Result<Box<dyn Layer>, crate::codec::Error>
 where
     L: Layer + 'static,
 {
@@ -215,7 +214,7 @@ pub(crate) fn aliased_fields(
     name: &str,
     fields: &BTreeMap<String, FieldValue>,
     aliases: &[(&str, &str)],
-) -> Result<BTreeMap<String, FieldValue>, CodecError> {
+) -> Result<BTreeMap<String, FieldValue>, crate::codec::Error> {
     let mut normalized = fields.clone();
     for (alias, canonical) in aliases {
         let Some(value) = normalized.remove(*alias) else {

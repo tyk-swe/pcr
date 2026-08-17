@@ -7,18 +7,18 @@ use crate::{
     Packet,
     diagnostic::Diagnostic,
     field::FieldValue,
-    layer::{Id as ProtocolId, Malformed, Padding, Raw},
+    layer::{Malformed, Padding, Raw},
     registry::Registry,
     semantics::BuiltinProtocol,
 };
 
-use super::{Error, Mode as BuildMode};
+use super::Error;
 
 pub(super) fn validate_bindings(
     registry: &Registry,
     packet: &Packet,
-    protocols: &[ProtocolId],
-    mode: BuildMode,
+    protocols: &[crate::layer::Id],
+    mode: super::Mode,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), Error> {
     debug_assert_eq!(protocols.len(), packet.len());
@@ -34,8 +34,8 @@ pub(super) fn validate_bindings(
 fn validate_adjacent_bindings(
     registry: &Registry,
     packet: &Packet,
-    protocols: &[ProtocolId],
-    mode: BuildMode,
+    protocols: &[crate::layer::Id],
+    mode: super::Mode,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), Error> {
     let mut previous_binding = None;
@@ -63,7 +63,7 @@ fn validate_adjacent_bindings(
         {
             continue;
         }
-        if mode == BuildMode::Strict {
+        if mode == super::Mode::Strict {
             return Err(Error::UnboundLayers {
                 parent: parent.clone(),
                 child: child.clone(),
@@ -82,10 +82,10 @@ fn validate_adjacent_bindings(
 
 fn validate_padding(
     packet: &Packet,
-    protocols: &[ProtocolId],
+    protocols: &[crate::layer::Id],
     index: usize,
     padding: &Padding,
-    mode: BuildMode,
+    mode: super::Mode,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), Error> {
     let Some(outside_layer) = padding.outside_layer else {
@@ -137,7 +137,7 @@ fn validate_padding(
         _ => false,
     };
     if !has_declared_boundary {
-        if mode == BuildMode::Strict {
+        if mode == super::Mode::Strict {
             return Err(Error::InvalidPaddingBoundary {
                 index,
                 outside_layer,
@@ -164,9 +164,9 @@ fn validate_padding(
 }
 
 fn validate_link_padding(
-    protocols: &[ProtocolId],
+    protocols: &[crate::layer::Id],
     index: usize,
-    mode: BuildMode,
+    mode: super::Mode,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), Error> {
     let enclosed_by_link = protocols.iter().take(index).any(|protocol| {
@@ -184,7 +184,7 @@ fn validate_link_padding(
     if enclosed_by_link {
         return Ok(());
     }
-    if mode == BuildMode::Strict {
+    if mode == super::Mode::Strict {
         return Err(Error::PaddingWithoutLinkLayer { index });
     }
     diagnostics.push(

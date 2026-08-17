@@ -3,7 +3,7 @@
 
 use std::io::{self, Read, Write};
 
-use crate::frame::{Error as FrameError, Frame};
+use crate::frame::Frame;
 
 use super::super::error::Error;
 use super::super::model::{Endianness, Format, TimestampResolution};
@@ -51,7 +51,7 @@ pub(in crate::analysis::pcap) fn validate_declared_lengths(
     kind: &'static str,
 ) -> Result<(), Error> {
     if original_length < captured_length {
-        return Err(FrameError::OriginalLengthTooSmall {
+        return Err(crate::frame::Error::OriginalLengthTooSmall {
             captured: captured_length,
             original: original_length,
         }

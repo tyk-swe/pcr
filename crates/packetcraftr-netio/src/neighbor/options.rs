@@ -4,10 +4,7 @@
 use std::time::Duration;
 
 use super::error::invalid_options;
-use crate::{
-    capture::{CaptureOverflowPolicy, CaptureQueueLimits},
-    neighbor::Error as NeighborError,
-};
+use crate::capture::{CaptureOverflowPolicy, CaptureQueueLimits};
 
 const MAX_CONFIGURED_ATTEMPTS: u32 = 10;
 const MAX_CONFIGURED_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -42,7 +39,7 @@ impl Default for Options {
 }
 
 impl Options {
-    pub fn validate(self) -> Result<Self, NeighborError> {
+    pub fn validate(self) -> Result<Self, crate::neighbor::Error> {
         if !(1..=MAX_CONFIGURED_ATTEMPTS).contains(&self.max_attempts) {
             return Err(invalid_options(format!(
                 "max_attempts must be within 1..={MAX_CONFIGURED_ATTEMPTS}"

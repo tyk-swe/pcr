@@ -14,7 +14,7 @@
 //! rejected when the registry is built, precisely so one path can never mean
 //! two things.
 
-use crate::registry::{Builder as RegistryBuilder, Error as RegistryError, FilterFieldBinding};
+use crate::registry::FilterFieldBinding;
 
 type Direct = (&'static str, &'static str, &'static str);
 type Either = (&'static str, &'static str, &'static [&'static str]);
@@ -116,7 +116,9 @@ const EITHER: &[Either] = &[
 ];
 
 /// Registers every conventional spelling for the built-in protocols.
-pub(super) fn register_filter_fields(builder: &mut RegistryBuilder) -> Result<(), RegistryError> {
+pub(super) fn register_filter_fields(
+    builder: &mut crate::registry::Builder,
+) -> Result<(), crate::registry::Error> {
     for &(path, protocol, field) in DIRECT {
         builder.bind_filter_field(
             path,

@@ -3,11 +3,8 @@
 
 use crate::BoundaryError;
 use crate::ExchangeExecutor;
-use packetcraftr_core::{field::FieldValue, template::Template as PacketTemplate};
-use packetcraftr_netio::{
-    capture::Provider as CaptureProvider, neighbor::Resolver as NeighborResolver,
-    route::Provider as RouteProvider, transmit::Sender as PacketIo,
-};
+use packetcraftr_core::field::FieldValue;
+use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Sender as PacketIo};
 
 use super::classification::classify_response;
 use super::model::{Batch, Execution, Executor, Transport};
@@ -16,8 +13,8 @@ use super::model::{Batch, Execution, Executor, Transport};
 /// exchange lifecycle.
 impl<R, N, I> Executor for ExchangeExecutor<'_, R, N, I>
 where
-    R: RouteProvider,
-    N: NeighborResolver,
+    R: packetcraftr_netio::route::Provider,
+    N: packetcraftr_netio::neighbor::Resolver,
     I: PacketIo + CaptureProvider,
 {
     fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
@@ -47,7 +44,7 @@ where
             )));
         }
 
-        let mut template = PacketTemplate::new(first.packet());
+        let mut template = packetcraftr_core::template::Template::new(first.packet());
         if batch.probes.len() > 1 {
             let ports = batch
                 .probes

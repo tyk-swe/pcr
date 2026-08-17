@@ -8,22 +8,16 @@ use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
 use packetcraftr_core::codec::{
-    DecodedLayerValue, EncodedLayer, Error as CodecError, LayerCodec, LayerDecodeContext,
-    LayerEncodeContext,
+    DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext,
 };
-use packetcraftr_core::diagnostic::{
-    Diagnostic, Severity as DiagnosticSeverity, push_once as push_diagnostic_once,
-};
+use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::field::{FieldValue, WireValue};
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::{
-    FieldError, Id as ProtocolId, Layer, Malformed, Padding, Raw, malformed_layout, padding_layout,
-    raw_layout,
+    FieldError, Layer, Malformed, Padding, Raw, malformed_layout, padding_layout, raw_layout,
 };
 use packetcraftr_core::layout::{ByteRange, FieldLayout};
-use packetcraftr_core::registry::{
-    Builder as RegistryBuilder, Discriminator, Error as RegistryError, FilterFieldBinding,
-};
+use packetcraftr_core::registry::{Discriminator, FilterFieldBinding};
 use packetcraftr_core::{Packet, build, decode, document, expression, reflective_layer, template};
 
 include!("common/runtime_fixture.rs");
@@ -57,7 +51,12 @@ fn packet_mutation_reflection_and_boundaries_are_consistent() {
     });
     assert_eq!(packet.len(), 2);
     assert_eq!(packet.get_all::<Probe>().count(), 2);
-    assert_eq!(packet.all_by_protocol(&ProtocolId::new("probe")).count(), 2);
+    assert_eq!(
+        packet
+            .all_by_protocol(&packetcraftr_core::layer::Id::new("probe"))
+            .count(),
+        2
+    );
     assert_eq!(
         packet
             .iter()
@@ -300,24 +299,39 @@ fn field_values_raw_layers_and_diagnostics_have_stable_views() {
         .set_field("reason", "truncated".into())
         .expect("set reason");
     assert_eq!(
-        malformed.intended_protocol.as_ref().map(ProtocolId::as_str),
+        malformed
+            .intended_protocol
+            .as_ref()
+            .map(packetcraftr_core::layer::Id::as_str),
         Some("ipv4")
     );
 
     let mut diagnostics = Vec::new();
-    push_diagnostic_once(
+    packetcraftr_core::diagnostic::push_once(
         &mut diagnostics,
         Diagnostic::info("once", "first")
             .at_layer(2)
             .at_field("value"),
     );
-    push_diagnostic_once(&mut diagnostics, Diagnostic::error("once", "duplicate"));
-    push_diagnostic_once(&mut diagnostics, Diagnostic::warning("other", "kept"));
+    packetcraftr_core::diagnostic::push_once(
+        &mut diagnostics,
+        Diagnostic::error("once", "duplicate"),
+    );
+    packetcraftr_core::diagnostic::push_once(
+        &mut diagnostics,
+        Diagnostic::warning("other", "kept"),
+    );
     assert_eq!(diagnostics.len(), 2);
-    assert_eq!(diagnostics[0].severity, DiagnosticSeverity::Info);
+    assert_eq!(
+        diagnostics[0].severity,
+        packetcraftr_core::diagnostic::Severity::Info
+    );
     assert_eq!(diagnostics[0].layer, Some(2));
     assert_eq!(diagnostics[0].field.as_deref(), Some("value"));
-    assert_eq!(diagnostics[1].severity, DiagnosticSeverity::Warning);
+    assert_eq!(
+        diagnostics[1].severity,
+        packetcraftr_core::diagnostic::Severity::Warning
+    );
 }
 
 #[test]
@@ -508,18 +522,22 @@ fn expressions_and_documents_round_trip_and_enforce_resource_bounds() {
 
 fn assert_registry_queries(registry: &packetcraftr_core::registry::Registry) {
     assert_eq!(
-        registry.protocol_named(" P ").map(ProtocolId::as_str),
+        registry
+            .protocol_named(" P ")
+            .map(packetcraftr_core::layer::Id::as_str),
         Some("probe")
     );
     assert!(registry.codec_named("P").is_some());
     assert_eq!(
-        registry.root_for_link_type(777).map(ProtocolId::as_str),
+        registry
+            .root_for_link_type(777)
+            .map(packetcraftr_core::layer::Id::as_str),
         Some("probe")
     );
     assert_eq!(
         registry
             .child_for("probe", Discriminator(7))
-            .map(ProtocolId::as_str),
+            .map(packetcraftr_core::layer::Id::as_str),
         Some("child")
     );
     assert_eq!(
@@ -717,31 +735,31 @@ fn registry_build_decode_and_error_paths_are_bounded() {
 }
 
 fn assert_registry_binding_conflicts() {
-    let mut duplicate = RegistryBuilder::new();
+    let mut duplicate = packetcraftr_core::registry::Builder::new();
     duplicate.register_codec(ProbeCodec).expect("first codec");
     assert!(matches!(
         duplicate.register_codec(ProbeCodec),
-        Err(RegistryError::DuplicateProtocol { .. })
+        Err(packetcraftr_core::registry::Error::DuplicateProtocol { .. })
     ));
 
-    let mut roots = RegistryBuilder::new();
+    let mut roots = packetcraftr_core::registry::Builder::new();
     roots.bind_link_type(1, "probe").expect("first root");
     assert!(matches!(
         roots.bind_link_type(1, "child"),
-        Err(RegistryError::DuplicateLinkType { link_type: 1 })
+        Err(packetcraftr_core::registry::Error::DuplicateLinkType { link_type: 1 })
     ));
     assert!(matches!(
         roots.build(),
-        Err(RegistryError::UnknownProtocol { .. })
+        Err(packetcraftr_core::registry::Error::UnknownProtocol { .. })
     ));
 
-    let mut bindings = RegistryBuilder::new();
+    let mut bindings = packetcraftr_core::registry::Builder::new();
     bindings.register_codec(ProbeCodec).expect("probe");
     bindings.register_codec(ChildCodec).expect("child");
     bindings.bind("probe", 7, "child", 1).expect("binding");
     assert!(matches!(
         bindings.bind("probe", 7, "probe", 1),
-        Err(RegistryError::BindingConflict {
+        Err(packetcraftr_core::registry::Error::BindingConflict {
             discriminator: 7,
             priority: 1,
             ..
@@ -749,12 +767,12 @@ fn assert_registry_binding_conflicts() {
     ));
     assert!(matches!(
         bindings.bind("probe", 7, "child", 2),
-        Err(RegistryError::BindingConflict { .. })
+        Err(packetcraftr_core::registry::Error::BindingConflict { .. })
     ));
 }
 
 fn assert_filter_field_binding_conflicts() {
-    let mut invalid = RegistryBuilder::new();
+    let mut invalid = packetcraftr_core::registry::Builder::new();
     assert!(matches!(
         invalid.bind_filter_field(
             "empty",
@@ -763,7 +781,7 @@ fn assert_filter_field_binding_conflicts() {
                 fields: &[]
             },
         ),
-        Err(RegistryError::InvalidFilterField { .. })
+        Err(packetcraftr_core::registry::Error::InvalidFilterField { .. })
     ));
     assert!(matches!(
         invalid.bind_filter_field(
@@ -775,7 +793,7 @@ fn assert_filter_field_binding_conflicts() {
                 shift: 0
             },
         ),
-        Err(RegistryError::InvalidFilterField { .. })
+        Err(packetcraftr_core::registry::Error::InvalidFilterField { .. })
     ));
     assert!(matches!(
         invalid.bind_filter_field(
@@ -787,10 +805,10 @@ fn assert_filter_field_binding_conflicts() {
                 shift: 64
             },
         ),
-        Err(RegistryError::InvalidFilterField { .. })
+        Err(packetcraftr_core::registry::Error::InvalidFilterField { .. })
     ));
 
-    let mut canonical = RegistryBuilder::new();
+    let mut canonical = packetcraftr_core::registry::Builder::new();
     canonical.register_codec(ProbeCodec).expect("probe");
     canonical
         .bind_filter_field(
@@ -803,10 +821,10 @@ fn assert_filter_field_binding_conflicts() {
         .expect("staged binding");
     assert!(matches!(
         canonical.build(),
-        Err(RegistryError::DuplicateFilterField { .. })
+        Err(packetcraftr_core::registry::Error::DuplicateFilterField { .. })
     ));
 
-    let mut unknown = RegistryBuilder::new();
+    let mut unknown = packetcraftr_core::registry::Builder::new();
     unknown.register_codec(ProbeCodec).expect("probe");
     unknown
         .bind_filter_field(
@@ -819,10 +837,10 @@ fn assert_filter_field_binding_conflicts() {
         .expect("staged binding");
     assert!(matches!(
         unknown.build(),
-        Err(RegistryError::UnknownFilterField { .. })
+        Err(packetcraftr_core::registry::Error::UnknownFilterField { .. })
     ));
 
-    let mut wrong_kind = RegistryBuilder::new();
+    let mut wrong_kind = packetcraftr_core::registry::Builder::new();
     wrong_kind.register_codec(ProbeCodec).expect("probe");
     wrong_kind
         .bind_filter_field(
@@ -837,7 +855,7 @@ fn assert_filter_field_binding_conflicts() {
         .expect("staged binding");
     assert!(matches!(
         wrong_kind.build(),
-        Err(RegistryError::InvalidFilterField { .. })
+        Err(packetcraftr_core::registry::Error::InvalidFilterField { .. })
     ));
 }
 

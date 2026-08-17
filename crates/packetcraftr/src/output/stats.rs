@@ -9,8 +9,7 @@ use std::time::Duration;
 use serde::Serialize;
 
 use packetcraftr_core::analysis::stats::{
-    ConversationStat, EndpointStat, IoBucketStat, PortStat, ProtocolStat, Report as StatsReport,
-    TransportKind,
+    ConversationStat, EndpointStat, IoBucketStat, PortStat, ProtocolStat, TransportKind,
 };
 
 use super::contract::Error;
@@ -127,7 +126,7 @@ impl Result {
     /// Builds the result for one requested table from a finished report.
     pub fn try_from_report(
         table: Table,
-        report: &StatsReport,
+        report: &packetcraftr_core::analysis::stats::Report,
         frames_read: u64,
     ) -> std::result::Result<Self, Error> {
         let mut result = Self {

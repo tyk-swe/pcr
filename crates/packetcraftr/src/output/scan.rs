@@ -8,7 +8,6 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use crate::scan::Result as ScanResult;
 use packetcraftr_core::diagnostic::Diagnostic;
 
 use super::contract::Error;
@@ -100,9 +99,9 @@ pub struct Result {
 
 impl Result {
     pub fn try_from_scan(
-        result: ScanResult,
+        result: crate::scan::Result,
     ) -> std::result::Result<(Self, Vec<Diagnostic>, Stats), Error> {
-        let ScanResult {
+        let crate::scan::Result {
             target,
             resolved_addresses,
             endpoints,

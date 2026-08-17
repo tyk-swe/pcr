@@ -7,7 +7,6 @@ use thiserror::Error;
 
 use super::model::Format;
 use crate::error::{Classification, Classified, Kind};
-use crate::frame::Error as FrameError;
 
 /// An error while reading or writing an offline capture.
 #[derive(Debug, Error)]
@@ -19,7 +18,7 @@ pub enum Error {
         requested: usize,
     },
     #[error(transparent)]
-    Frame(#[from] FrameError),
+    Frame(#[from] crate::frame::Error),
     #[error("capture I/O failed: {0}")]
     Io(#[from] io::Error),
     #[error("capture input is empty")]

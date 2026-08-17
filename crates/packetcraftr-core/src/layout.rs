@@ -5,8 +5,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::layer::Id as ProtocolId;
-
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ByteRange {
     pub start: usize,
@@ -43,7 +41,7 @@ pub struct FieldLayout {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LayerLayout {
     pub index: usize,
-    pub protocol: ProtocolId,
+    pub protocol: crate::layer::Id,
     pub range: ByteRange,
     pub fields: Vec<FieldLayout>,
 }

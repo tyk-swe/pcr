@@ -8,13 +8,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, UNIX_EPOCH};
 
-use crate::policy::Policy as TrafficPolicy;
 use crate::target::{Error as TargetError, Resolver};
 use bytes::Bytes;
 use packetcraftr_core::error::{Classification, Classified, Kind};
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::protocol::{
-    builtin::registry as default_registry,
     icmp::{Icmpv4, Icmpv6},
     network::{Ipv4, Ipv6},
     transport::Udp,
@@ -249,11 +247,11 @@ impl Executor for MixedHopExecutor {
     }
 }
 
-fn private_traceroute_policy() -> TrafficPolicy {
-    TrafficPolicy {
+fn private_traceroute_policy() -> crate::policy::Policy {
+    crate::policy::Policy {
         max_packets_per_operation: 1_000,
         max_bytes_per_operation: 1_000_000,
-        ..TrafficPolicy::default()
+        ..crate::policy::Policy::default()
     }
 }
 
@@ -374,7 +372,7 @@ fn traceroute_address_ordering_deduplicates_after_family_filtering() {
         &mut AddressListAuthorizer {
             addresses: vec![Ipv6Addr::LOCALHOST.into(), first, first, second, first],
         },
-        &default_registry().unwrap(),
+        &packetcraftr_core::protocol::builtin::registry().unwrap(),
         &mut NoResponseExecutor::default(),
         &mut NoopClock,
     )
@@ -395,7 +393,7 @@ fn traceroute_hostname_policy_precedes_resolution_and_probe_execution() {
     let error = run(
         &udp_traceroute_request(Target::Hostname("lab.example".parse().unwrap())),
         &mut authorizer,
-        &default_registry().unwrap(),
+        &packetcraftr_core::protocol::builtin::registry().unwrap(),
         &mut executor,
         &mut NoopClock,
     )
@@ -413,7 +411,7 @@ fn traceroute_hostname_policy_precedes_resolution_and_probe_execution() {
     let error = run(
         &request,
         &mut authorizer,
-        &default_registry().unwrap(),
+        &packetcraftr_core::protocol::builtin::registry().unwrap(),
         &mut executor,
         &mut NoopClock,
     )
@@ -436,7 +434,7 @@ fn traceroute_udp_port_overflow_is_rejected_before_authorization_or_execution() 
     let error = run(
         &request,
         &mut authorizer,
-        &default_registry().unwrap(),
+        &packetcraftr_core::protocol::builtin::registry().unwrap(),
         &mut CountingRejectExecutor(Arc::clone(&calls)),
         &mut NoopClock,
     )
@@ -449,7 +447,7 @@ fn traceroute_udp_port_overflow_is_rejected_before_authorization_or_execution() 
 
 #[test]
 fn traceroute_ipv4_classification_distinguishes_intermediate_terminal_and_unreachable() {
-    let registry = default_registry().unwrap();
+    let registry = packetcraftr_core::protocol::builtin::registry().unwrap();
     let local = Ipv4Addr::new(10, 0, 0, 1);
     let remote = Ipv4Addr::new(10, 0, 0, 9);
     let router = Ipv4Addr::new(10, 0, 0, 254);
@@ -502,7 +500,7 @@ fn traceroute_ipv4_classification_distinguishes_intermediate_terminal_and_unreac
 
 #[test]
 fn traceroute_ipv6_classification_correlates_intermediate_quote() {
-    let registry = default_registry().unwrap();
+    let registry = packetcraftr_core::protocol::builtin::registry().unwrap();
     let local: Ipv6Addr = "fd00::1".parse().unwrap();
     let remote: Ipv6Addr = "fd00::9".parse().unwrap();
     let router: Ipv6Addr = "fd00::fe".parse().unwrap();
@@ -539,7 +537,7 @@ fn traceroute_stops_after_the_first_terminal_hop() {
     let result = run(
         &request,
         &mut authorizer,
-        &default_registry().unwrap(),
+        &packetcraftr_core::protocol::builtin::registry().unwrap(),
         &mut MixedHopExecutor,
         &mut NoopClock,
     )
@@ -572,7 +570,7 @@ fn traceroute_invalid_sent_evidence_reports_the_exact_probe_sequence() {
         &mut AddressListAuthorizer {
             addresses: vec![address],
         },
-        &default_registry().unwrap(),
+        &packetcraftr_core::protocol::builtin::registry().unwrap(),
         &mut NoResponseExecutor {
             invalid_sent_index: Some(1),
         },

@@ -6,10 +6,6 @@
 use std::fmt;
 use std::net::{Ipv4Addr, Ipv6Addr};
 
-use crate::dns::{
-    Edns as DnsEdns, EdnsOption as DnsEdnsOption, Record as DnsRecord,
-    RecordValue as DnsRecordValue,
-};
 use serde::Serialize;
 
 use super::super::hex::compact_hex;
@@ -111,8 +107,8 @@ pub struct Edns {
     pub options: Vec<EdnsOption>,
 }
 
-impl From<DnsEdns> for Edns {
-    fn from(value: DnsEdns) -> Self {
+impl From<crate::dns::Edns> for Edns {
+    fn from(value: crate::dns::Edns) -> Self {
         Self {
             udp_payload_size: value.udp_payload_size,
             extended_response_code: value.extended_response_code,
@@ -124,8 +120,8 @@ impl From<DnsEdns> for Edns {
     }
 }
 
-impl From<DnsEdnsOption> for EdnsOption {
-    fn from(value: DnsEdnsOption) -> Self {
+impl From<crate::dns::EdnsOption> for EdnsOption {
+    fn from(value: crate::dns::EdnsOption) -> Self {
         Self {
             code: value.code,
             data_hex: compact_hex(&value.data),
@@ -143,27 +139,27 @@ pub struct Record {
 }
 
 impl Record {
-    pub(super) fn from_record(record: DnsRecord) -> Self {
+    pub(super) fn from_record(record: crate::dns::Record) -> Self {
         let data = match record.value {
-            DnsRecordValue::A(address) => RecordData::A { address },
-            DnsRecordValue::Aaaa(address) => RecordData::Aaaa { address },
-            DnsRecordValue::Cname(canonical_name) => RecordData::Cname {
+            crate::dns::RecordValue::A(address) => RecordData::A { address },
+            crate::dns::RecordValue::Aaaa(address) => RecordData::Aaaa { address },
+            crate::dns::RecordValue::Cname(canonical_name) => RecordData::Cname {
                 canonical_name: canonical_name.to_string(),
             },
-            DnsRecordValue::Mx {
+            crate::dns::RecordValue::Mx {
                 preference,
                 exchange,
             } => RecordData::Mx {
                 preference,
                 exchange: exchange.to_string(),
             },
-            DnsRecordValue::Ns(name_server) => RecordData::Ns {
+            crate::dns::RecordValue::Ns(name_server) => RecordData::Ns {
                 name_server: name_server.to_string(),
             },
-            DnsRecordValue::Ptr(pointer) => RecordData::Ptr {
+            crate::dns::RecordValue::Ptr(pointer) => RecordData::Ptr {
                 pointer: pointer.to_string(),
             },
-            DnsRecordValue::Soa {
+            crate::dns::RecordValue::Soa {
                 primary_name_server,
                 responsible_mailbox,
                 serial,
@@ -180,7 +176,7 @@ impl Record {
                 expire,
                 minimum,
             },
-            DnsRecordValue::Srv {
+            crate::dns::RecordValue::Srv {
                 priority,
                 weight,
                 port,
@@ -191,15 +187,15 @@ impl Record {
                 port,
                 target: target.to_string(),
             },
-            DnsRecordValue::Txt(strings) => RecordData::Txt {
+            crate::dns::RecordValue::Txt(strings) => RecordData::Txt {
                 strings: strings
                     .iter()
                     .map(|value| String::from_utf8_lossy(value).into_owned())
                     .collect(),
                 strings_hex: strings.iter().map(|value| compact_hex(value)).collect(),
             },
-            DnsRecordValue::Opt(edns) => RecordData::Opt { edns: edns.into() },
-            DnsRecordValue::Unknown { type_code, rdata } => RecordData::Unknown {
+            crate::dns::RecordValue::Opt(edns) => RecordData::Opt { edns: edns.into() },
+            crate::dns::RecordValue::Unknown { type_code, rdata } => RecordData::Unknown {
                 type_code,
                 rdata_hex: compact_hex(&rdata),
             },

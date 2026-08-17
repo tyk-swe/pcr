@@ -3,7 +3,6 @@
 
 use std::collections::BTreeMap;
 
-use packetcraftr::core::diagnostic::Severity as DiagnosticSeverity;
 use packetcraftr::{analysis, output};
 
 use crate::errors::CliError;
@@ -24,9 +23,9 @@ impl State {
     pub(super) fn count(&mut self, finding: &analysis::expert::Finding) {
         self.findings += 1;
         match finding.severity {
-            DiagnosticSeverity::Error => self.errors += 1,
-            DiagnosticSeverity::Warning => self.warnings += 1,
-            DiagnosticSeverity::Info => self.notes += 1,
+            packetcraftr::core::diagnostic::Severity::Error => self.errors += 1,
+            packetcraftr::core::diagnostic::Severity::Warning => self.warnings += 1,
+            packetcraftr::core::diagnostic::Severity::Info => self.notes += 1,
         }
         *self.codes.entry(finding.code.clone()).or_default() += 1;
     }

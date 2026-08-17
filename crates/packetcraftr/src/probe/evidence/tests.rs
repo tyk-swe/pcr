@@ -4,7 +4,7 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::Stats;
-use crate::probe::runner::{Batch, Execution as BatchExecution};
+use crate::probe::runner::Batch;
 use bytes::Bytes;
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::{Packet, decode::DecodedPacket, layer::Raw, layout::PacketLayout};
@@ -57,7 +57,7 @@ fn batch_execution(
     responses: Vec<crate::exchange::Response>,
     unsolicited: Vec<DecodedPacket>,
     stats: Stats,
-) -> (Batch<()>, BatchExecution) {
+) -> (Batch<()>, crate::probe::runner::Execution) {
     let permit = crate::evidence::ExecutionPermit::new();
     (
         Batch {
@@ -65,7 +65,7 @@ fn batch_execution(
             timeout: Duration::from_secs(1),
             permit,
         },
-        BatchExecution {
+        crate::probe::runner::Execution {
             permit,
             sent,
             responses,

@@ -9,23 +9,29 @@ use crate::field::{FieldKind, FieldValue};
 use bytes::Bytes;
 
 use super::super::execution::SplitMix64;
-use super::super::request::{Limits as FuzzLimits, Strategy as FuzzStrategy};
+
 use super::super::run::ResolvedField;
 
 pub(super) fn mutation_value(
-    strategy: FuzzStrategy,
+    strategy: super::super::request::Strategy,
     field: &ResolvedField,
     original: &FieldValue,
     seed: u64,
     round: u64,
-    limits: FuzzLimits,
+    limits: super::super::request::Limits,
 ) -> FieldValue {
     let mut random = SplitMix64::new(seed ^ round.rotate_left(17));
     match strategy {
-        FuzzStrategy::Boundary => boundary_value(field.kind, original, seed, round, limits),
-        FuzzStrategy::Random => random_value(field.kind, original, &mut random, limits),
-        FuzzStrategy::BitFlip => bit_flip_value(original, &mut random, limits.max_field_bytes),
-        FuzzStrategy::Malformed => {
+        super::super::request::Strategy::Boundary => {
+            boundary_value(field.kind, original, seed, round, limits)
+        }
+        super::super::request::Strategy::Random => {
+            random_value(field.kind, original, &mut random, limits)
+        }
+        super::super::request::Strategy::BitFlip => {
+            bit_flip_value(original, &mut random, limits.max_field_bytes)
+        }
+        super::super::request::Strategy::Malformed => {
             malformed_value(field.kind, original, &mut random, round, limits)
         }
     }
@@ -36,7 +42,7 @@ fn boundary_value(
     original: &FieldValue,
     seed: u64,
     round: u64,
-    limits: FuzzLimits,
+    limits: super::super::request::Limits,
 ) -> FieldValue {
     let selector = seed.wrapping_add(round);
     match kind {
@@ -121,7 +127,7 @@ pub(in crate::fuzz) fn random_value(
     kind: FieldKind,
     original: &FieldValue,
     random: &mut SplitMix64,
-    limits: FuzzLimits,
+    limits: super::super::request::Limits,
 ) -> FieldValue {
     match kind {
         FieldKind::Bool => FieldValue::Bool(random.next_u64() & 1 != 0),
@@ -261,7 +267,7 @@ fn malformed_value(
     original: &FieldValue,
     random: &mut SplitMix64,
     round: u64,
-    limits: FuzzLimits,
+    limits: super::super::request::Limits,
 ) -> FieldValue {
     if kind == FieldKind::Unsigned {
         if round & 1 == 0 {

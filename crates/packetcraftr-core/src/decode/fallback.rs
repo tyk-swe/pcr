@@ -9,7 +9,7 @@ use bytes::Bytes;
 use crate::{
     Packet,
     diagnostic::Diagnostic,
-    layer::{Id as ProtocolId, Malformed, Padding, Raw},
+    layer::{Malformed, Padding, Raw},
     layout::{ByteRange, FieldLayout, LayerLayout, PacketLayout},
     semantics::BuiltinProtocol,
 };
@@ -49,7 +49,7 @@ pub(super) fn append_raw(
 pub(super) fn append_malformed(
     packet: &mut Packet,
     layouts: &mut Vec<LayerLayout>,
-    intended: Option<ProtocolId>,
+    intended: Option<crate::layer::Id>,
     bytes: Bytes,
     reason: String,
     absolute_offset: usize,
@@ -59,7 +59,7 @@ pub(super) fn append_malformed(
     packet.push(Malformed::new(intended, bytes, reason));
     layouts.push(LayerLayout {
         index,
-        protocol: ProtocolId::new(BuiltinProtocol::Malformed.as_str()),
+        protocol: crate::layer::Id::new(BuiltinProtocol::Malformed.as_str()),
         range: ByteRange::new(absolute_offset, end),
         fields: Vec::new(),
     });
@@ -74,7 +74,7 @@ fn bytes_layer_layout(
     let end = absolute_offset.saturating_add(byte_length);
     LayerLayout {
         index,
-        protocol: ProtocolId::new(protocol.as_str()),
+        protocol: crate::layer::Id::new(protocol.as_str()),
         range: ByteRange::new(absolute_offset, end),
         fields: vec![FieldLayout {
             name: "bytes".to_owned(),
@@ -93,7 +93,7 @@ pub(super) fn slice_original(original: &Bytes, offset: usize, length: usize) -> 
 pub(super) fn append_missing_required_layer(
     packet: &mut Packet,
     layouts: &mut Vec<LayerLayout>,
-    intended: ProtocolId,
+    intended: crate::layer::Id,
     absolute_offset: usize,
 ) {
     append_malformed(

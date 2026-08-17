@@ -10,7 +10,7 @@ use std::str::FromStr;
 use thiserror::Error;
 
 use crate::Packet;
-use crate::codec::Error as CodecError;
+
 use crate::field::{FieldValue, parse_mac};
 use crate::registry::Registry;
 
@@ -42,7 +42,7 @@ pub enum Error {
         layer: usize,
         name: String,
         #[source]
-        source: CodecError,
+        source: crate::codec::Error,
     },
 }
 
@@ -103,7 +103,7 @@ pub fn parse(input: &str, registry: &Registry, options: Options) -> Result<Packe
             .map_err(|source| Error::Layer {
                 layer: layer_index,
                 name,
-                source: CodecError::Field(source),
+                source: crate::codec::Error::Field(source),
             })?;
         packet.push_boxed(layer);
     }

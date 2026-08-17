@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
-use packetcraftr_core::filter::{Context as FilterContext, Filter, Options as FilterOptions};
+use packetcraftr_core::filter::{Context as FilterContext, Filter};
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::{Layer, Malformed, Raw};
 use packetcraftr_core::protocol::application::Dns;
@@ -378,8 +378,12 @@ fn assert_negative_filters(registry: &Registry, decoded: &decode::DecodedPacket)
         "frame.interface_id == 5",
         "udp.stream == 4",
     ] {
-        let filter = Filter::compile(source, registry, FilterOptions::default())
-            .expect("valid negative filter");
+        let filter = Filter::compile(
+            source,
+            registry,
+            packetcraftr_core::filter::Options::default(),
+        )
+        .expect("valid negative filter");
         assert!(
             !filter
                 .matches(&FilterContext {
@@ -409,7 +413,12 @@ fn assert_invalid_filters(registry: &Registry) {
         "udp.destination_port in {}",
     ] {
         assert!(
-            Filter::compile(invalid, registry, FilterOptions::default()).is_err(),
+            Filter::compile(
+                invalid,
+                registry,
+                packetcraftr_core::filter::Options::default()
+            )
+            .is_err(),
             "{invalid}"
         );
     }
@@ -417,17 +426,21 @@ fn assert_invalid_filters(registry: &Registry) {
         Filter::compile(
             "ethernet",
             registry,
-            FilterOptions {
+            packetcraftr_core::filter::Options {
                 max_bytes: 2,
-                ..FilterOptions::default()
+                ..packetcraftr_core::filter::Options::default()
             },
         )
         .is_err()
     );
 
     let overflowed_index = format!("ethernet.source[{}] == 00", usize::MAX);
-    let error = Filter::compile(&overflowed_index, registry, FilterOptions::default())
-        .expect_err("a single-byte slice must have a representable exclusive end");
+    let error = Filter::compile(
+        &overflowed_index,
+        registry,
+        packetcraftr_core::filter::Options::default(),
+    )
+    .expect_err("a single-byte slice must have a representable exclusive end");
     assert!(
         error
             .to_string()
@@ -436,9 +449,13 @@ fn assert_invalid_filters(registry: &Registry) {
 }
 
 fn assert_stream_filter_requirements(registry: &Registry) {
-    let tcp_requirements = Filter::compile("tcp.stream == 1", registry, FilterOptions::default())
-        .expect("valid TCP stream filter")
-        .requirements();
+    let tcp_requirements = Filter::compile(
+        "tcp.stream == 1",
+        registry,
+        packetcraftr_core::filter::Options::default(),
+    )
+    .expect("valid TCP stream filter")
+    .requirements();
     assert!(tcp_requirements.stream_index);
     assert!(tcp_requirements.tcp_stream);
     assert!(!tcp_requirements.udp_stream);
@@ -446,7 +463,7 @@ fn assert_stream_filter_requirements(registry: &Registry) {
     let both_requirements = Filter::compile(
         "tcp.stream == 1 || udp.stream == 2",
         registry,
-        FilterOptions::default(),
+        packetcraftr_core::filter::Options::default(),
     )
     .expect("valid mixed stream filter")
     .requirements();
@@ -464,8 +481,12 @@ fn ethernet_ipv4_udp_raw_round_trip_exercises_filter_language() {
         "ethernet.source[0:3] == 06:07:08 && frame.number == 7 && ",
         "frame.time_epoch == 123 && frame.interface_id == 4 && udp.stream == 3"
     );
-    let filter =
-        Filter::compile(source, &registry, FilterOptions::default()).expect("valid filter");
+    let filter = Filter::compile(
+        source,
+        &registry,
+        packetcraftr_core::filter::Options::default(),
+    )
+    .expect("valid filter");
     let requirements = filter.requirements();
     assert!(requirements.stream_index);
     assert!(!requirements.tcp_stream);

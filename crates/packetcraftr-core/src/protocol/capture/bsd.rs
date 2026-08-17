@@ -4,13 +4,10 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    codec::{
-        DecodedLayerValue, EncodedLayer, Error as CodecError, LayerCodec, LayerDecodeContext,
-        LayerEncodeContext,
-    },
+    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::Diagnostic,
     field::FieldValue,
-    layer::{Id as ProtocolId, Layer, reflective_layer},
+    layer::{Layer, reflective_layer},
     registry::Discriminator,
 };
 
@@ -93,7 +90,7 @@ pub(crate) fn validate_family_binding(
     parent: &str,
     family: u32,
     context: &LayerEncodeContext<'_>,
-) -> Result<Vec<Diagnostic>, CodecError> {
+) -> Result<Vec<Diagnostic>, crate::codec::Error> {
     let mut diagnostics = Vec::new();
     validate_raw_child_discriminator(
         parent,
@@ -131,7 +128,7 @@ pub(crate) fn validate_family_binding(
 }
 
 impl LayerCodec for BsdNullCodec {
-    fn protocol_id(&self) -> ProtocolId {
+    fn protocol_id(&self) -> crate::layer::Id {
         protocol("bsd_null")
     }
 
@@ -140,7 +137,7 @@ impl LayerCodec for BsdNullCodec {
         layer: &dyn Layer,
         _payload: &[u8],
         context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, CodecError> {
+    ) -> Result<EncodedLayer, crate::codec::Error> {
         let layer = layer
             .as_any()
             .downcast_ref::<BsdNull>()
@@ -159,20 +156,20 @@ impl LayerCodec for BsdNullCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, CodecError> {
+    ) -> Result<DecodedLayerValue, crate::codec::Error> {
         decode_family(input, FamilyHeader::Null)
     }
 
     fn make_layer(
         &self,
         fields: &BTreeMap<String, FieldValue>,
-    ) -> Result<Box<dyn Layer>, CodecError> {
+    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(BsdNull::default(), fields)
     }
 }
 
 impl LayerCodec for BsdLoopCodec {
-    fn protocol_id(&self) -> ProtocolId {
+    fn protocol_id(&self) -> crate::layer::Id {
         protocol("bsd_loop")
     }
 
@@ -181,7 +178,7 @@ impl LayerCodec for BsdLoopCodec {
         layer: &dyn Layer,
         _payload: &[u8],
         context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, CodecError> {
+    ) -> Result<EncodedLayer, crate::codec::Error> {
         let layer = layer
             .as_any()
             .downcast_ref::<BsdLoop>()
@@ -197,14 +194,14 @@ impl LayerCodec for BsdLoopCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, CodecError> {
+    ) -> Result<DecodedLayerValue, crate::codec::Error> {
         decode_family(input, FamilyHeader::Loop)
     }
 
     fn make_layer(
         &self,
         fields: &BTreeMap<String, FieldValue>,
-    ) -> Result<Box<dyn Layer>, CodecError> {
+    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(BsdLoop::default(), fields)
     }
 }
@@ -212,7 +209,7 @@ impl LayerCodec for BsdLoopCodec {
 pub(crate) fn decode_family(
     input: &[u8],
     header: FamilyHeader,
-) -> Result<DecodedLayerValue, CodecError> {
+) -> Result<DecodedLayerValue, crate::codec::Error> {
     let name = match header {
         FamilyHeader::Null => "bsd_null",
         FamilyHeader::Loop => "bsd_loop",

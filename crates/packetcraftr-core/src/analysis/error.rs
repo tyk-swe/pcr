@@ -8,10 +8,8 @@ use thiserror::Error;
 
 use crate::analysis::pcap::Error as CaptureError;
 use crate::analysis::reassembly::tcp::Error as TcpError;
-use crate::analysis::scope::Error as ScopeError;
-use crate::decode::Error as DecodeError;
+
 use crate::error::{Classification, Classified, Kind};
-use crate::filter::Error as FilterError;
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -32,13 +30,13 @@ pub enum Error {
     Decode {
         number: u64,
         #[source]
-        source: DecodeError,
+        source: crate::decode::Error,
     },
     #[error("display filter failed at frame {number}: {source}")]
     Filter {
         number: u64,
         #[source]
-        source: FilterError,
+        source: crate::filter::Error,
     },
     #[error("conversation table reached the configured limit of {limit} flows at frame {number}")]
     StreamLimit { number: u64, limit: usize },
@@ -46,7 +44,7 @@ pub enum Error {
     Scope {
         number: u64,
         #[source]
-        source: ScopeError,
+        source: crate::analysis::scope::Error,
     },
     #[error("TCP reassembly failed at frame {number}: {source}")]
     Reassembly {
@@ -80,7 +78,7 @@ impl Classified for Error {
             // A frame refused for exceeding the configured per-frame budget
             // is a resource condition, not malformed input.
             Self::Decode {
-                source: DecodeError::PacketSizeLimit { .. },
+                source: crate::decode::Error::PacketSizeLimit { .. },
                 ..
             } => resource_limit(),
             Self::Decode { .. } => Classification::new(
@@ -99,7 +97,7 @@ impl Classified for Error {
                 Some("use timestamped packet blocks for time-dependent offline analysis"),
             ),
             Self::Filter {
-                source: FilterError::TimestampUnavailable,
+                source: crate::filter::Error::TimestampUnavailable,
                 ..
             } => Classification::new(
                 "packet.timestamp_unavailable",

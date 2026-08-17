@@ -5,30 +5,27 @@
 
 use bytes::Bytes;
 
-use super::super::error::WireError as DnsWireError;
-use super::super::model::{Limits as DnsLimits, Name as DnsName};
-
 /// Canonicalizes a bounded ASCII DNS name for wire construction and
 /// case-insensitive correlation. The returned form always has a trailing dot.
-pub fn canonical_query_name(value: &str) -> Result<String, DnsWireError> {
+pub fn canonical_query_name(value: &str) -> Result<String, crate::dns::WireError> {
     if value == "." {
         return Ok(".".to_owned());
     }
     let value = value.strip_suffix('.').unwrap_or(value);
     if value.is_empty() {
-        return Err(DnsWireError::InvalidName {
+        return Err(crate::dns::WireError::InvalidName {
             message: "must not be empty".to_owned(),
         });
     }
     let mut wire_length = 1usize;
     for label in value.split('.') {
         if label.is_empty() {
-            return Err(DnsWireError::InvalidName {
+            return Err(crate::dns::WireError::InvalidName {
                 message: "contains an empty label".to_owned(),
             });
         }
         if label.len() > 63 {
-            return Err(DnsWireError::InvalidName {
+            return Err(crate::dns::WireError::InvalidName {
                 message: "contains a label longer than 63 bytes".to_owned(),
             });
         }
@@ -36,28 +33,28 @@ pub fn canonical_query_name(value: &str) -> Result<String, DnsWireError> {
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'*'))
         {
-            return Err(DnsWireError::InvalidName {
+            return Err(crate::dns::WireError::InvalidName {
                 message: "labels must use ASCII letters, digits, hyphens, underscores, or wildcard asterisks"
                     .to_owned(),
             });
         }
         wire_length = wire_length
             .checked_add(label.len() + 1)
-            .ok_or(DnsWireError::NameTooLong)?;
+            .ok_or(crate::dns::WireError::NameTooLong)?;
     }
     if wire_length > 255 {
-        return Err(DnsWireError::NameTooLong);
+        return Err(crate::dns::WireError::NameTooLong);
     }
     Ok(format!("{}.", value.to_ascii_lowercase()))
 }
 
-pub(super) fn encode_name(name: &str, output: &mut Vec<u8>) -> Result<(), DnsWireError> {
+pub(super) fn encode_name(name: &str, output: &mut Vec<u8>) -> Result<(), crate::dns::WireError> {
     if name == "." {
         output.push(0);
         return Ok(());
     }
     for label in name.trim_end_matches('.').split('.') {
-        output.push(u8::try_from(label.len()).map_err(|_| DnsWireError::NameTooLong)?);
+        output.push(u8::try_from(label.len()).map_err(|_| crate::dns::WireError::NameTooLong)?);
         output.extend_from_slice(label.as_bytes());
     }
     output.push(0);
@@ -67,8 +64,8 @@ pub(super) fn encode_name(name: &str, output: &mut Vec<u8>) -> Result<(), DnsWir
 pub(super) fn decode_name(
     message: &[u8],
     offset: usize,
-    limits: DnsLimits,
-) -> Result<(DnsName, usize), DnsWireError> {
+    limits: crate::dns::Limits,
+) -> Result<(crate::dns::Name, usize), crate::dns::WireError> {
     let mut cursor = offset;
     let mut resume = None;
     let mut labels = Vec::new();
@@ -76,38 +73,40 @@ pub(super) fn decode_name(
     let mut pointer_count = 0usize;
     let mut wire_length = 1usize;
     loop {
-        let length = *message.get(cursor).ok_or(DnsWireError::TruncatedField {
-            field: "name label length",
-            offset: cursor,
-        })?;
+        let length = *message
+            .get(cursor)
+            .ok_or(crate::dns::WireError::TruncatedField {
+                field: "name label length",
+                offset: cursor,
+            })?;
         if length & 0xc0 == 0xc0 {
             let second = *message
                 .get(cursor + 1)
-                .ok_or(DnsWireError::TruncatedPointer { offset: cursor })?;
+                .ok_or(crate::dns::WireError::TruncatedPointer { offset: cursor })?;
             let pointer = usize::from((u16::from(length & 0x3f) << 8) | u16::from(second));
             if pointer >= message.len() {
-                return Err(DnsWireError::PointerOutOfBounds {
+                return Err(crate::dns::WireError::PointerOutOfBounds {
                     pointer,
                     length: message.len(),
                 });
             }
             if pointer == cursor {
-                return Err(DnsWireError::PointerLoop { offset: pointer });
+                return Err(crate::dns::WireError::PointerLoop { offset: pointer });
             }
             if pointer > cursor {
-                return Err(DnsWireError::ForwardPointer {
+                return Err(crate::dns::WireError::ForwardPointer {
                     offset: cursor,
                     pointer,
                 });
             }
             pointer_count += 1;
             if pointer_count > limits.max_name_pointers {
-                return Err(DnsWireError::PointerLimit {
+                return Err(crate::dns::WireError::PointerLimit {
                     limit: limits.max_name_pointers,
                 });
             }
             if visited.contains(&pointer) {
-                return Err(DnsWireError::PointerLoop { offset: pointer });
+                return Err(crate::dns::WireError::PointerLoop { offset: pointer });
             }
             visited.push(pointer);
             resume.get_or_insert(cursor + 2);
@@ -115,31 +114,31 @@ pub(super) fn decode_name(
             continue;
         }
         if length & 0xc0 != 0 {
-            return Err(DnsWireError::ReservedLabelLength { offset: cursor });
+            return Err(crate::dns::WireError::ReservedLabelLength { offset: cursor });
         }
         cursor += 1;
         if length == 0 {
             let next = resume.unwrap_or(cursor);
-            return Ok((DnsName { labels }, next));
+            return Ok((crate::dns::Name { labels }, next));
         }
         let length = usize::from(length);
         if length > 63 {
-            return Err(DnsWireError::LabelTooLong {
+            return Err(crate::dns::WireError::LabelTooLong {
                 offset: cursor - 1,
                 actual: length,
             });
         }
         let label = message.get(cursor..cursor.saturating_add(length)).ok_or(
-            DnsWireError::TruncatedField {
+            crate::dns::WireError::TruncatedField {
                 field: "name label",
                 offset: cursor,
             },
         )?;
         wire_length = wire_length
             .checked_add(length + 1)
-            .ok_or(DnsWireError::NameTooLong)?;
+            .ok_or(crate::dns::WireError::NameTooLong)?;
         if wire_length > 255 {
-            return Err(DnsWireError::NameTooLong);
+            return Err(crate::dns::WireError::NameTooLong);
         }
         labels.push(Bytes::copy_from_slice(label));
         cursor += length;
@@ -153,12 +152,12 @@ mod tests {
     #[test]
     fn compressed_names_reject_self_and_forward_pointers() {
         assert!(matches!(
-            decode_name(&[0xc0, 0], 0, DnsLimits::default()),
-            Err(DnsWireError::PointerLoop { offset: 0 })
+            decode_name(&[0xc0, 0], 0, crate::dns::Limits::default()),
+            Err(crate::dns::WireError::PointerLoop { offset: 0 })
         ));
         assert!(matches!(
-            decode_name(&[0xc0, 2, 0], 0, DnsLimits::default()),
-            Err(DnsWireError::ForwardPointer {
+            decode_name(&[0xc0, 2, 0], 0, crate::dns::Limits::default()),
+            Err(crate::dns::WireError::ForwardPointer {
                 offset: 0,
                 pointer: 2
             })

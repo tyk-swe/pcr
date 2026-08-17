@@ -114,7 +114,7 @@ pub(super) fn validate_dns_execution(
 fn map_dns_evidence_error(attempt: u32, error: ExchangeEvidenceError) -> Error {
     let message = match error {
         ExchangeEvidenceError::SentCardinality { .. }
-        | ExchangeEvidenceError::MatchedResponseOutsideBatch
+        | ExchangeEvidenceError::ResponseOutsideBatch
         | ExchangeEvidenceError::SentPacketMismatch { .. }
         | ExchangeEvidenceError::IncompleteStatistics => {
             unreachable!("DNS validation does not produce batch-only evidence errors")

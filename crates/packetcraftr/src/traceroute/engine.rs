@@ -7,10 +7,7 @@ use std::net::IpAddr;
 use std::time::Duration;
 
 use packetcraftr_core::budget::Deadline;
-use packetcraftr_core::{
-    diagnostic::{Diagnostic, push_once as push_diagnostic_once},
-    registry::Registry,
-};
+use packetcraftr_core::{diagnostic::Diagnostic, registry::Registry};
 
 use crate::clock::Clock;
 use crate::evidence::Budget;
@@ -57,7 +54,7 @@ where
         final_statistics_sequence: u64::try_from(approved.total_probes.saturating_sub(1))
             .unwrap_or(u64::MAX),
     };
-    let mut lifecycle = TracerouteProbeLifecycle {
+    let mut lifecycle = Lifecycle {
         executor,
         registry,
         limits: request.limits,
@@ -197,7 +194,7 @@ struct TracerouteEvidenceState<'a> {
     diagnostics: &'a mut Vec<Diagnostic>,
 }
 
-struct TracerouteProbeLifecycle<'a, E> {
+struct Lifecycle<'a, E> {
     executor: &'a mut E,
     registry: &'a Registry,
     limits: Limits,
@@ -206,7 +203,7 @@ struct TracerouteProbeLifecycle<'a, E> {
     diagnostics: &'a mut Vec<Diagnostic>,
 }
 
-impl<E: Executor> ProbeLifecycle<Batch> for TracerouteProbeLifecycle<'_, E> {
+impl<E: Executor> ProbeLifecycle<Batch> for Lifecycle<'_, E> {
     type Execution = Execution;
     type Output = Hop;
     type Error = Error;
@@ -298,7 +295,7 @@ fn process_batch(
         });
     }
     for diagnostic in batch_diagnostics {
-        push_diagnostic_once(evidence.diagnostics, diagnostic);
+        packetcraftr_core::diagnostic::push_once(evidence.diagnostics, diagnostic);
     }
     enforce_deadline(deadline)?;
     let mut response_selector = ResponseSelector::new(&mut responses);

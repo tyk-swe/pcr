@@ -4,14 +4,10 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    build::Mode as BuildMode,
-    codec::{
-        DecodedLayerValue, EncodedLayer, Error as CodecError, LayerCodec, LayerDecodeContext,
-        LayerEncodeContext,
-    },
+    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
-    layer::{Id as ProtocolId, Layer, reflective_layer},
+    layer::{Layer, reflective_layer},
     registry::Discriminator,
 };
 
@@ -75,7 +71,7 @@ reflective_layer! {
 pub(crate) struct SctpCodec;
 
 impl LayerCodec for SctpCodec {
-    fn protocol_id(&self) -> ProtocolId {
+    fn protocol_id(&self) -> crate::layer::Id {
         protocol("sctp")
     }
 
@@ -84,7 +80,7 @@ impl LayerCodec for SctpCodec {
         layer: &dyn Layer,
         payload: &[u8],
         context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, CodecError> {
+    ) -> Result<EncodedLayer, crate::codec::Error> {
         let layer = layer
             .as_any()
             .downcast_ref::<Sctp>()
@@ -100,7 +96,7 @@ impl LayerCodec for SctpCodec {
 
         let covered_payload = payload_without_padding("sctp", payload, context)?;
         if let Err(message) = validate_chunks(covered_payload, true) {
-            if context.mode == BuildMode::Strict {
+            if context.mode == crate::build::Mode::Strict {
                 return Err(invalid("sctp", message));
             }
             diagnostics.push(Diagnostic::warning("build.sctp_chunks", message));
@@ -137,7 +133,7 @@ impl LayerCodec for SctpCodec {
         &self,
         input: &[u8],
         context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, CodecError> {
+    ) -> Result<DecodedLayerValue, crate::codec::Error> {
         if input.len() < SCTP_HEADER_LEN {
             return Err(truncated("sctp", SCTP_HEADER_LEN, input.len()));
         }
@@ -185,7 +181,7 @@ impl LayerCodec for SctpCodec {
     fn make_layer(
         &self,
         fields: &BTreeMap<String, FieldValue>,
-    ) -> Result<Box<dyn Layer>, CodecError> {
+    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(
             Sctp::default(),
             &aliased_fields(
@@ -206,12 +202,12 @@ fn validate_port(
     port: u16,
     context: &LayerEncodeContext<'_>,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Result<(), CodecError> {
+) -> Result<(), crate::codec::Error> {
     if port != 0 {
         return Ok(());
     }
     let message = format!("{} must not be zero", field.replace('_', " "));
-    if context.mode == BuildMode::Strict {
+    if context.mode == crate::build::Mode::Strict {
         return Err(invalid("sctp", message));
     }
     diagnostics.push(Diagnostic::warning("build.sctp_zero_port", message).at_field(field));

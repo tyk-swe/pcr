@@ -7,7 +7,7 @@ use clap::ValueEnum;
 use packetcraftr::core;
 
 use crate::command_options::{
-    AddressFamily, CaptureLimitsArgs, HostnameTrafficPolicyArgs, RouteSelectionArgs,
+    AddressFamily, CaptureLimitsArgs, HostnamePolicyArgs, RouteSelectionArgs,
 };
 
 pub(crate) const AFTER_LONG_HELP: &str = r#"Examples:
@@ -121,7 +121,7 @@ pub(crate) struct Args {
     #[command(flatten)]
     pub(crate) limits: CaptureLimitsArgs,
     #[command(flatten)]
-    pub(crate) policy: HostnameTrafficPolicyArgs,
+    pub(crate) policy: HostnamePolicyArgs,
 }
 
 #[cfg(test)]

@@ -16,10 +16,10 @@ use packetcraftr_core::analysis::reassembly::{
         ScopedFlowKey, Segment,
     },
 };
-use packetcraftr_core::analysis::scope::{Interner as ScopeInterner, ScopeId};
+use packetcraftr_core::analysis::scope::ScopeId;
 
 fn scope() -> ScopeId {
-    ScopeInterner::new()
+    packetcraftr_core::analysis::scope::Interner::new()
         .intern(None, Vec::new())
         .expect("one scope fits")
 }

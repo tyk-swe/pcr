@@ -6,13 +6,10 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use crate::{
-    codec::{
-        DecodedLayerValue, EncodedLayer, Error as CodecError, LayerCodec, LayerDecodeContext,
-        LayerEncodeContext,
-    },
+    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
-    layer::{Id as ProtocolId, Layer, reflective_layer},
+    layer::{Layer, reflective_layer},
 };
 
 use super::super::common::{
@@ -104,7 +101,7 @@ icmp_reflection!(Icmpv6, icmpv6_schema, "icmpv6", "ICMPv6", icmpv6_layout);
 pub(crate) struct Icmpv4Codec;
 
 impl LayerCodec for Icmpv4Codec {
-    fn protocol_id(&self) -> ProtocolId {
+    fn protocol_id(&self) -> crate::layer::Id {
         protocol("icmpv4")
     }
 
@@ -113,7 +110,7 @@ impl LayerCodec for Icmpv4Codec {
         layer: &dyn Layer,
         payload: &[u8],
         context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, CodecError> {
+    ) -> Result<EncodedLayer, crate::codec::Error> {
         let layer = layer
             .as_any()
             .downcast_ref::<Icmpv4>()
@@ -152,7 +149,7 @@ impl LayerCodec for Icmpv4Codec {
         &self,
         input: &[u8],
         context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, CodecError> {
+    ) -> Result<DecodedLayerValue, crate::codec::Error> {
         if input.len() < ICMP_MIN_LEN {
             return Err(truncated("icmpv4", ICMP_MIN_LEN, input.len()));
         }
@@ -183,7 +180,7 @@ impl LayerCodec for Icmpv4Codec {
     fn make_layer(
         &self,
         fields: &BTreeMap<String, FieldValue>,
-    ) -> Result<Box<dyn Layer>, CodecError> {
+    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Icmpv4::default(), fields)
     }
 }
@@ -192,7 +189,7 @@ impl LayerCodec for Icmpv4Codec {
 pub(crate) struct Icmpv6Codec;
 
 impl LayerCodec for Icmpv6Codec {
-    fn protocol_id(&self) -> ProtocolId {
+    fn protocol_id(&self) -> crate::layer::Id {
         protocol("icmpv6")
     }
 
@@ -201,7 +198,7 @@ impl LayerCodec for Icmpv6Codec {
         layer: &dyn Layer,
         payload: &[u8],
         context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, CodecError> {
+    ) -> Result<EncodedLayer, crate::codec::Error> {
         let layer = layer
             .as_any()
             .downcast_ref::<Icmpv6>()
@@ -241,7 +238,7 @@ impl LayerCodec for Icmpv6Codec {
         &self,
         input: &[u8],
         context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, CodecError> {
+    ) -> Result<DecodedLayerValue, crate::codec::Error> {
         if input.len() < ICMP_MIN_LEN {
             return Err(truncated("icmpv6", ICMP_MIN_LEN, input.len()));
         }
@@ -275,7 +272,7 @@ impl LayerCodec for Icmpv6Codec {
     fn make_layer(
         &self,
         fields: &BTreeMap<String, FieldValue>,
-    ) -> Result<Box<dyn Layer>, CodecError> {
+    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Icmpv6::default(), fields)
     }
 }

@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr_core::{Packet, template::Template as PacketTemplate};
+use packetcraftr_core::Packet;
 
 /// Shared client and exchange options for live workflow executors.
 pub struct ExchangeExecutor<'a, R, N, I> {
@@ -23,7 +23,7 @@ where
 {
     pub(crate) fn exchange_for_workflow(
         &self,
-        template: &PacketTemplate,
+        template: &packetcraftr_core::template::Template,
         timeout: std::time::Duration,
         max_template_packets: usize,
         destination: std::net::IpAddr,

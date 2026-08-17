@@ -16,7 +16,7 @@ use crate::protocol::tunnel::{Ah, Erspan, Geneve, L2tpv3, Mpls, Pppoe, Vxlan};
 use bytes::Bytes;
 
 use crate::analysis::reassembly::tcp::{FlowKey, ScopedFlowKey, Segment};
-use crate::analysis::scope::{EncapsulationIdentifier, Error as ScopeError, Interner};
+use crate::analysis::scope::{EncapsulationIdentifier, Interner};
 
 /// The innermost transport of each kind in a decoded stack.
 ///
@@ -207,7 +207,7 @@ pub(crate) fn transport_payload(decoded: &DecodedPacket, transport_index: usize)
 pub(crate) fn tcp_segment(
     decoded: &DecodedPacket,
     scopes: &mut Interner,
-) -> Result<Option<Segment>, ScopeError> {
+) -> Result<Option<Segment>, crate::analysis::scope::Error> {
     let Some(transport) = transports(&decoded.packet).tcp else {
         return Ok(None);
     };
@@ -229,7 +229,7 @@ pub(crate) fn tcp_segment(
 pub(crate) fn udp_flow(
     decoded: &DecodedPacket,
     scopes: &mut Interner,
-) -> Result<Option<ScopedFlowKey>, ScopeError> {
+) -> Result<Option<ScopedFlowKey>, crate::analysis::scope::Error> {
     let Some(transport) = transports(&decoded.packet).udp else {
         return Ok(None);
     };

@@ -9,13 +9,10 @@ use std::net::{IpAddr, Ipv4Addr};
 use bytes::Bytes;
 
 use crate::{
-    codec::{
-        DecodedLayerValue, EncodedLayer, Error as CodecError, LayerCodec, LayerDecodeContext,
-        LayerEncodeContext,
-    },
+    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
-    layer::{Id as ProtocolId, Layer, reflective_layer},
+    layer::{Layer, reflective_layer},
     registry::Discriminator,
     semantics::ipv4_source_route_destination,
 };
@@ -92,7 +89,7 @@ reflective_layer! {
 pub(crate) struct Ipv4Codec;
 
 impl LayerCodec for Ipv4Codec {
-    fn protocol_id(&self) -> ProtocolId {
+    fn protocol_id(&self) -> crate::layer::Id {
         protocol("ipv4")
     }
 
@@ -101,7 +98,7 @@ impl LayerCodec for Ipv4Codec {
         layer: &dyn Layer,
         payload: &[u8],
         context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, CodecError> {
+    ) -> Result<EncodedLayer, crate::codec::Error> {
         let layer = layer
             .as_any()
             .downcast_ref::<Ipv4>()
@@ -195,7 +192,7 @@ impl LayerCodec for Ipv4Codec {
         &self,
         input: &[u8],
         context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, CodecError> {
+    ) -> Result<DecodedLayerValue, crate::codec::Error> {
         if input.len() < IPV4_MIN_LEN {
             return Err(truncated("ipv4", IPV4_MIN_LEN, input.len()));
         }
@@ -287,7 +284,7 @@ impl LayerCodec for Ipv4Codec {
     fn make_layer(
         &self,
         fields: &BTreeMap<String, FieldValue>,
-    ) -> Result<Box<dyn Layer>, CodecError> {
+    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(
             Ipv4::default(),
             &aliased_fields("ipv4", fields, &[("src", "source"), ("dst", "destination")])?,
@@ -314,7 +311,7 @@ fn prepare_payload(
     layer: &Ipv4,
     payload: &[u8],
     context: &LayerEncodeContext<'_>,
-) -> Result<(Vec<u8>, usize, Vec<Diagnostic>), CodecError> {
+) -> Result<(Vec<u8>, usize, Vec<Diagnostic>), crate::codec::Error> {
     if layer.fragment_offset > 0x1fff {
         return Err(invalid("ipv4", "fragment offset exceeds 13 bits"));
     }

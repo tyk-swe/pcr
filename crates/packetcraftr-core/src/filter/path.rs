@@ -4,7 +4,7 @@
 //! Field-path models, registry resolution, and byte-slice validation.
 
 use super::super::field::FieldKind;
-use super::super::layer::Id as ProtocolId;
+
 use super::super::registry::{FilterFieldBinding, Registry};
 use super::error::Error;
 use super::eval;
@@ -49,7 +49,7 @@ pub(super) enum StreamTransport {
 #[derive(Clone, Debug)]
 pub(super) enum FieldSource {
     Layer {
-        protocol: ProtocolId,
+        protocol: super::super::layer::Id,
         occurrence: Option<usize>,
         access: FieldAccess,
     },
@@ -121,7 +121,7 @@ impl FieldRef {
 pub(super) enum Resolved {
     /// A protocol name with no field, testing whether such a layer is present.
     Layer {
-        protocol: ProtocolId,
+        protocol: super::super::layer::Id,
         occurrence: Option<usize>,
     },
     Field(FieldRef),
@@ -193,7 +193,7 @@ fn access_from_binding(binding: &FilterFieldBinding) -> FieldAccess {
 
 fn specs_for(
     registry: &Registry,
-    protocol: &ProtocolId,
+    protocol: &super::super::layer::Id,
     fields: &[&'static str],
     path: &str,
 ) -> Result<Vec<FieldSpec>, Error> {

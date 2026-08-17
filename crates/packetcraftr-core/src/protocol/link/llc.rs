@@ -6,12 +6,9 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use crate::{
-    codec::{
-        DecodedLayerValue, EncodedLayer, Error as CodecError, LayerCodec, LayerDecodeContext,
-        LayerEncodeContext,
-    },
+    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     field::{FieldValue, WireValue},
-    layer::{Id as ProtocolId, Layer, reflective_layer},
+    layer::{Layer, reflective_layer},
     registry::Discriminator,
 };
 
@@ -85,7 +82,7 @@ reflective_layer! {
 pub(crate) struct LlcCodec;
 
 impl LayerCodec for LlcCodec {
-    fn protocol_id(&self) -> ProtocolId {
+    fn protocol_id(&self) -> crate::layer::Id {
         protocol("llc")
     }
 
@@ -94,7 +91,7 @@ impl LayerCodec for LlcCodec {
         layer: &dyn Layer,
         _payload: &[u8],
         context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, CodecError> {
+    ) -> Result<EncodedLayer, crate::codec::Error> {
         let layer = layer
             .as_any()
             .downcast_ref::<Llc>()
@@ -163,7 +160,7 @@ impl LayerCodec for LlcCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, CodecError> {
+    ) -> Result<DecodedLayerValue, crate::codec::Error> {
         if input.len() < LLC_MIN_LEN {
             return Err(truncated("llc", LLC_MIN_LEN, input.len()));
         }
@@ -211,7 +208,7 @@ impl LayerCodec for LlcCodec {
     fn make_layer(
         &self,
         fields: &BTreeMap<String, FieldValue>,
-    ) -> Result<Box<dyn Layer>, CodecError> {
+    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Llc::default(), fields)
     }
 }
@@ -261,7 +258,7 @@ pub(crate) fn snap_discriminator(oui: u32, protocol_id: u16) -> u64 {
 pub(crate) struct SnapCodec;
 
 impl LayerCodec for SnapCodec {
-    fn protocol_id(&self) -> ProtocolId {
+    fn protocol_id(&self) -> crate::layer::Id {
         protocol("snap")
     }
 
@@ -270,7 +267,7 @@ impl LayerCodec for SnapCodec {
         layer: &dyn Layer,
         _payload: &[u8],
         context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, CodecError> {
+    ) -> Result<EncodedLayer, crate::codec::Error> {
         let layer = layer
             .as_any()
             .downcast_ref::<Snap>()
@@ -348,7 +345,7 @@ impl LayerCodec for SnapCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, CodecError> {
+    ) -> Result<DecodedLayerValue, crate::codec::Error> {
         if input.len() < SNAP_LEN {
             return Err(truncated("snap", SNAP_LEN, input.len()));
         }
@@ -373,7 +370,7 @@ impl LayerCodec for SnapCodec {
     fn make_layer(
         &self,
         fields: &BTreeMap<String, FieldValue>,
-    ) -> Result<Box<dyn Layer>, CodecError> {
+    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Snap::default(), fields)
     }
 }

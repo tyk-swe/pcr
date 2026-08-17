@@ -9,9 +9,7 @@ use bytes::Bytes;
 use serde::Serialize;
 
 use packetcraftr_core::frame::Frame;
-use packetcraftr_core::{
-    decode::DecodedPacket, document::Packet as PacketDocument, layout::PacketLayout,
-};
+use packetcraftr_core::{decode::DecodedPacket, layout::PacketLayout};
 
 use super::contract::Error;
 use super::envelope::Diagnostic;
@@ -225,7 +223,7 @@ impl Serialize for Captured {
 /// it twice.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Stack {
-    pub packet: PacketDocument,
+    pub packet: packetcraftr_core::document::Packet,
     pub layout: PacketLayout,
     pub diagnostics: Vec<Diagnostic>,
 }
@@ -233,7 +231,7 @@ pub struct Stack {
 impl Stack {
     pub fn from_decoded(decoded: &DecodedPacket) -> Self {
         Self {
-            packet: PacketDocument::from_packet(&decoded.packet),
+            packet: packetcraftr_core::document::Packet::from_packet(&decoded.packet),
             layout: decoded.layout.clone(),
             diagnostics: decoded
                 .diagnostics
@@ -249,7 +247,7 @@ impl Stack {
 #[derive(Clone, Debug, Serialize)]
 pub struct Decoded {
     pub frame: Captured,
-    pub packet: PacketDocument,
+    pub packet: packetcraftr_core::document::Packet,
     pub layout: PacketLayout,
     pub diagnostics: Vec<Diagnostic>,
 }
@@ -265,7 +263,7 @@ impl Decoded {
         } = decoded;
         Ok(Self {
             frame: Captured::try_from_frame(frame)?,
-            packet: PacketDocument::from_packet(&packet),
+            packet: packetcraftr_core::document::Packet::from_packet(&packet),
             layout,
             diagnostics: diagnostics.into_iter().map(Into::into).collect(),
         })

@@ -4,12 +4,9 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    codec::{
-        DecodedLayerValue, EncodedLayer, Error as CodecError, LayerCodec, LayerDecodeContext,
-        LayerEncodeContext,
-    },
+    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     field::{FieldValue, WireValue},
-    layer::{Id as ProtocolId, Layer, reflective_layer},
+    layer::{Layer, reflective_layer},
     registry::Discriminator,
 };
 
@@ -51,10 +48,10 @@ reflective_layer! {
 }
 
 #[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct Ipv6FragmentCodec;
+pub(crate) struct FragmentCodec;
 
-impl LayerCodec for Ipv6FragmentCodec {
-    fn protocol_id(&self) -> ProtocolId {
+impl LayerCodec for FragmentCodec {
+    fn protocol_id(&self) -> crate::layer::Id {
         protocol("ipv6_fragment")
     }
 
@@ -63,7 +60,7 @@ impl LayerCodec for Ipv6FragmentCodec {
         layer: &dyn Layer,
         payload: &[u8],
         context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, CodecError> {
+    ) -> Result<EncodedLayer, crate::codec::Error> {
         let layer = layer
             .as_any()
             .downcast_ref::<Fragment>()
@@ -148,7 +145,7 @@ impl LayerCodec for Ipv6FragmentCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, CodecError> {
+    ) -> Result<DecodedLayerValue, crate::codec::Error> {
         if input.len() < 8 {
             return Err(truncated("ipv6_fragment", 8, input.len()));
         }
@@ -182,7 +179,7 @@ impl LayerCodec for Ipv6FragmentCodec {
     fn make_layer(
         &self,
         fields: &BTreeMap<String, FieldValue>,
-    ) -> Result<Box<dyn Layer>, CodecError> {
+    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Fragment::default(), fields)
     }
 }

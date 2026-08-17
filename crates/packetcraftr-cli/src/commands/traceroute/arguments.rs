@@ -5,7 +5,7 @@ use clap::ValueEnum;
 use packetcraftr::core;
 
 use crate::command_options::{
-    AddressFamily, CaptureLimitsArgs, HostnameTrafficPolicyArgs, RouteSelectionArgs,
+    AddressFamily, CaptureLimitsArgs, HostnamePolicyArgs, RouteSelectionArgs,
 };
 
 pub(crate) const LONG_ABOUT: &str = "Run bounded, policy-gated traceroute probes. UDP starts at --port and increments the destination port for every probe; TCP keeps --port fixed. Each hop sends its attempts as one burst and shares one --timeout-ms response window. Traceroute supports text, JSON, and NDJSON output. Public destinations and hostname resolution require their respective explicit policy options.";
@@ -75,5 +75,5 @@ pub(crate) struct Args {
     #[command(flatten)]
     pub(crate) limits: CaptureLimitsArgs,
     #[command(flatten)]
-    pub(crate) policy: HostnameTrafficPolicyArgs,
+    pub(crate) policy: HostnamePolicyArgs,
 }

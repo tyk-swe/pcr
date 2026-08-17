@@ -4,7 +4,7 @@
 use std::fmt;
 
 use super::field::FieldValue;
-use super::layer::{Id as ProtocolId, Layer};
+use super::layer::Layer;
 
 mod boundary;
 mod equality;
@@ -162,7 +162,7 @@ impl Packet {
             .filter_map(|layer| layer.as_any().downcast_ref::<T>())
     }
 
-    pub fn by_protocol(&self, protocol: &ProtocolId) -> Option<&dyn Layer> {
+    pub fn by_protocol(&self, protocol: &super::layer::Id) -> Option<&dyn Layer> {
         self.layers
             .iter()
             .map(Box::as_ref)
@@ -174,7 +174,7 @@ impl Packet {
     /// Obtaining mutable layer access invalidates cached encoded payload
     /// lengths before the reference is returned. A failed protocol lookup
     /// does not change the packet.
-    pub fn by_protocol_mut(&mut self, protocol: &ProtocolId) -> Option<&mut dyn Layer> {
+    pub fn by_protocol_mut(&mut self, protocol: &super::layer::Id) -> Option<&mut dyn Layer> {
         let index = self
             .layers
             .iter()
@@ -185,7 +185,7 @@ impl Packet {
 
     pub fn all_by_protocol<'a>(
         &'a self,
-        protocol: &'a ProtocolId,
+        protocol: &'a super::layer::Id,
     ) -> impl Iterator<Item = &'a dyn Layer> + 'a {
         self.layers
             .iter()
@@ -217,7 +217,7 @@ impl Packet {
     /// before the field mutation is attempted.
     pub fn edit(
         &mut self,
-        protocol: &ProtocolId,
+        protocol: &super::layer::Id,
         field: &str,
         value: FieldValue,
     ) -> Result<(), Error> {

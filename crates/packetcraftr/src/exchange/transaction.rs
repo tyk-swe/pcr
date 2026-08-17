@@ -15,7 +15,7 @@ use packetcraftr_netio::{
 
 use super::CaptureGuard;
 use super::{Accumulator, PreparedPacket, WorkflowResponseMatcher};
-use super::{Options as ExchangeOptions, Result as ExchangeResult};
+
 use crate::Error;
 
 /// Mutable live-operation state, created after capture is armed.
@@ -25,7 +25,7 @@ pub(crate) struct Transaction<C: Session> {
     pub(super) started: Instant,
     pub(super) deadline: Instant,
     pub(super) capture_limits: CaptureQueueLimits,
-    pub(super) options: ExchangeOptions,
+    pub(super) options: super::Options,
     pub(super) prepared: Vec<PreparedPacket>,
     pub(super) packet_count: u64,
     pub(super) total_bytes: u64,
@@ -61,7 +61,7 @@ impl<C: Session> Transaction<C> {
         mut self,
         io: &I,
         mut workflow_matcher: Option<&mut WorkflowResponseMatcher<'_>>,
-    ) -> Result<ExchangeResult, Error> {
+    ) -> Result<super::Result, Error> {
         let operation = self.run(io, &mut workflow_matcher);
         if let Err(operation) = operation {
             return Err(self.fail_after_shutdown(operation));

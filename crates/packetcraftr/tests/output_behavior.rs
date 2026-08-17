@@ -23,11 +23,6 @@ use packetcraftr::output::{
     envelope::{Aggregate, Error as OutputError, Stats, Stream},
     frame::{Captured, Timestamp, Wire},
     interfaces,
-    network::{
-        Capability as InterfaceCapabilityOutput, MacAddress as RouteMacAddressOutput,
-        Mode as RouteModeOutput, Plan as PlannedRouteOutput, Scope as RouteScopeOutput,
-        SelectionReason as RouteSelectionOutput, VlanKind as RouteVlanKindOutput,
-    },
     protocols::{Detail, Field, FieldKind, Summary},
 };
 use serde_json::json;
@@ -373,57 +368,106 @@ fn interface_outputs_are_stable_and_sorted() {
 #[test]
 fn interface_capability_outputs_are_stable() {
     for (capability, expected) in [
-        (Capability::Layer2, InterfaceCapabilityOutput::Layer2),
-        (Capability::Layer3, InterfaceCapabilityOutput::Layer3),
+        (
+            Capability::Layer2,
+            packetcraftr::output::network::Capability::Layer2,
+        ),
+        (
+            Capability::Layer3,
+            packetcraftr::output::network::Capability::Layer3,
+        ),
         (
             Capability::Layer2AndLayer3,
-            InterfaceCapabilityOutput::Layer2AndLayer3,
+            packetcraftr::output::network::Capability::Layer2AndLayer3,
         ),
     ] {
-        assert_eq!(InterfaceCapabilityOutput::from(capability), expected);
+        assert_eq!(
+            packetcraftr::output::network::Capability::from(capability),
+            expected
+        );
     }
 }
 
 #[test]
 fn route_enum_outputs_are_stable() {
     for (mode, expected) in [
-        (LinkMode::Auto, RouteModeOutput::Auto),
-        (LinkMode::Layer2, RouteModeOutput::Layer2),
-        (LinkMode::Layer3, RouteModeOutput::Layer3),
-    ] {
-        assert_eq!(RouteModeOutput::from(mode), expected);
-    }
-    for (scope, expected) in [
-        (Scope::Host, RouteScopeOutput::Host),
-        (Scope::Link, RouteScopeOutput::Link),
-        (Scope::Private, RouteScopeOutput::Private),
-        (Scope::Global, RouteScopeOutput::Global),
-        (Scope::Multicast, RouteScopeOutput::Multicast),
-        (Scope::Unspecified, RouteScopeOutput::Unspecified),
-    ] {
-        assert_eq!(RouteScopeOutput::from(scope), expected);
-    }
-    for (reason, expected) in [
-        (SelectionReason::Local, RouteSelectionOutput::Local),
-        (SelectionReason::OnLink, RouteSelectionOutput::OnLink),
-        (SelectionReason::Broadcast, RouteSelectionOutput::Broadcast),
-        (SelectionReason::Gateway, RouteSelectionOutput::Gateway),
+        (LinkMode::Auto, packetcraftr::output::network::Mode::Auto),
         (
-            SelectionReason::InterfaceOnly,
-            RouteSelectionOutput::InterfaceOnly,
+            LinkMode::Layer2,
+            packetcraftr::output::network::Mode::Layer2,
+        ),
+        (
+            LinkMode::Layer3,
+            packetcraftr::output::network::Mode::Layer3,
         ),
     ] {
-        assert_eq!(RouteSelectionOutput::from(reason), expected);
+        assert_eq!(packetcraftr::output::network::Mode::from(mode), expected);
+    }
+    for (scope, expected) in [
+        (Scope::Host, packetcraftr::output::network::Scope::Host),
+        (Scope::Link, packetcraftr::output::network::Scope::Link),
+        (
+            Scope::Private,
+            packetcraftr::output::network::Scope::Private,
+        ),
+        (Scope::Global, packetcraftr::output::network::Scope::Global),
+        (
+            Scope::Multicast,
+            packetcraftr::output::network::Scope::Multicast,
+        ),
+        (
+            Scope::Unspecified,
+            packetcraftr::output::network::Scope::Unspecified,
+        ),
+    ] {
+        assert_eq!(packetcraftr::output::network::Scope::from(scope), expected);
+    }
+    for (reason, expected) in [
+        (
+            SelectionReason::Local,
+            packetcraftr::output::network::SelectionReason::Local,
+        ),
+        (
+            SelectionReason::OnLink,
+            packetcraftr::output::network::SelectionReason::OnLink,
+        ),
+        (
+            SelectionReason::Broadcast,
+            packetcraftr::output::network::SelectionReason::Broadcast,
+        ),
+        (
+            SelectionReason::Gateway,
+            packetcraftr::output::network::SelectionReason::Gateway,
+        ),
+        (
+            SelectionReason::InterfaceOnly,
+            packetcraftr::output::network::SelectionReason::InterfaceOnly,
+        ),
+    ] {
+        assert_eq!(
+            packetcraftr::output::network::SelectionReason::from(reason),
+            expected
+        );
     }
     assert_eq!(
-        serde_json::to_value(RouteSelectionOutput::Broadcast).expect("route reason serializes"),
+        serde_json::to_value(packetcraftr::output::network::SelectionReason::Broadcast)
+            .expect("route reason serializes"),
         json!("broadcast")
     );
     for (kind, expected) in [
-        (VlanKind::Ieee8021Q, RouteVlanKindOutput::Ieee8021Q),
-        (VlanKind::Ieee8021Ad, RouteVlanKindOutput::Ieee8021Ad),
+        (
+            VlanKind::Ieee8021Q,
+            packetcraftr::output::network::VlanKind::Ieee8021Q,
+        ),
+        (
+            VlanKind::Ieee8021Ad,
+            packetcraftr::output::network::VlanKind::Ieee8021Ad,
+        ),
     ] {
-        assert_eq!(RouteVlanKindOutput::from(kind), expected);
+        assert_eq!(
+            packetcraftr::output::network::VlanKind::from(kind),
+            expected
+        );
     }
 }
 
@@ -470,15 +514,16 @@ fn planned_route_output_preserves_link_metadata() {
     let source_mac = MacAddress([0, 1, 2, 3, 4, 5]);
     let destination_mac = MacAddress([6, 7, 8, 9, 10, 11]);
     assert_eq!(
-        RouteMacAddressOutput::from(source_mac).to_string(),
+        packetcraftr::output::network::MacAddress::from(source_mac).to_string(),
         "00:01:02:03:04:05"
     );
 
-    let output = PlannedRouteOutput::from(planned_route(source_mac, destination_mac));
+    let output =
+        packetcraftr::output::network::Plan::from(planned_route(source_mac, destination_mac));
     assert_eq!(output.decision.interface.name, "eth0");
     assert_eq!(
         output.destination_mac,
-        Some(RouteMacAddressOutput(destination_mac.0))
+        Some(packetcraftr::output::network::MacAddress(destination_mac.0))
     );
     assert_eq!(output.neighbor_vlan_tags[0].vlan_id, 42);
     assert!(output.synthesized_ethernet);

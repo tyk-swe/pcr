@@ -6,18 +6,11 @@
 use std::sync::{Arc, OnceLock};
 
 use packetcraftr_core::frame::{Frame, LinkType};
-use packetcraftr_core::{
-    build::BuiltPacket,
-    decode::{Dissector, Options as DecodeOptions},
-    registry::Registry,
-};
-use packetcraftr_netio::{
-    Error as LiveIoError, link::Mode as LinkMode, route::Plan as PlannedRoute,
-};
+use packetcraftr_core::{build::BuiltPacket, decode::Dissector, registry::Registry};
+use packetcraftr_netio::{Error as LiveIoError, link::Mode as LinkMode};
 
 use crate::Client;
 use crate::Error;
-use crate::policy::Error as PolicyError;
 
 impl<R, N, I> Client<R, N, I> {
     pub(crate) fn authorize_built(
@@ -31,7 +24,7 @@ impl<R, N, I> Client<R, N, I> {
                 return Err(Error::PermissiveLiveOptInRequired);
             }
             if !self.policy.allow_permissive_packets {
-                return Err(PolicyError::PermissivePacket.into());
+                return Err(crate::policy::Error::PermissivePacket.into());
             }
         }
         Ok(())
@@ -40,7 +33,7 @@ impl<R, N, I> Client<R, N, I> {
     pub(crate) fn authorize_final_wire(
         &self,
         built: &BuiltPacket,
-        route: &PlannedRoute,
+        route: &packetcraftr_netio::route::Plan,
     ) -> Result<(), Error> {
         let link_type = match route.mode {
             LinkMode::Layer2 => route.decision.link_type,
@@ -55,11 +48,11 @@ impl<R, N, I> Client<R, N, I> {
                     .map_err(|error| error.to_string())
             })
             .as_ref()
-            .map_err(|reason| PolicyError::InvalidPacketSemantics {
+            .map_err(|reason| crate::policy::Error::InvalidPacketSemantics {
                 reason: reason.clone(),
             })?;
         if registry.root_for_link_type(link_type.0).is_none() {
-            return Err(PolicyError::InvalidPacketSemantics {
+            return Err(crate::policy::Error::InvalidPacketSemantics {
                 reason: format!(
                     "final-wire authorization does not support link type {}",
                     link_type.0
@@ -72,12 +65,12 @@ impl<R, N, I> Client<R, N, I> {
             link_type,
             built.bytes.clone(),
         )
-        .map_err(|error| PolicyError::InvalidPacketSemantics {
+        .map_err(|error| crate::policy::Error::InvalidPacketSemantics {
             reason: error.to_string(),
         })?;
         let decoded = Dissector::new(Arc::clone(registry))
-            .decode(frame, DecodeOptions::default())
-            .map_err(|error| PolicyError::InvalidPacketSemantics {
+            .decode(frame, packetcraftr_core::decode::Options::default())
+            .map_err(|error| crate::policy::Error::InvalidPacketSemantics {
                 reason: error.to_string(),
             })?;
         self.policy.authorize_packet_destinations(&decoded.packet)?;

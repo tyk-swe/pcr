@@ -4,11 +4,7 @@
 //! Child-discriminator, strictness, and encode-budget validation.
 
 use crate::{
-    build::Mode as BuildMode,
-    codec::{Error as CodecError, LayerEncodeContext},
-    diagnostic::Diagnostic,
-    field::WireValue,
-    registry::Discriminator,
+    codec::LayerEncodeContext, diagnostic::Diagnostic, field::WireValue, registry::Discriminator,
 };
 
 use super::errors::{binding_protocol, invalid, protocol};
@@ -18,7 +14,7 @@ pub(crate) fn validate_ipv6_routing_child(
     next_header: u8,
     context: &LayerEncodeContext<'_>,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Result<(), CodecError> {
+) -> Result<(), crate::codec::Error> {
     let raw_routing_header = next_header == 43
         && context
             .child
@@ -27,8 +23,8 @@ pub(crate) fn validate_ipv6_routing_child(
         return Ok(());
     }
     let message = "IPv6 routing headers must use the typed SRH layer; routing type 0 and unsupported generic routing headers are prohibited";
-    if context.mode == BuildMode::Strict {
-        return Err(CodecError::Unsupported {
+    if context.mode == crate::build::Mode::Strict {
+        return Err(crate::codec::Error::Unsupported {
             protocol: protocol(name),
             message: message.to_owned(),
         });
@@ -47,7 +43,7 @@ pub(crate) fn validate_raw_child_discriminator(
     discriminator: u64,
     context: &LayerEncodeContext<'_>,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Result<(), CodecError> {
+) -> Result<(), crate::codec::Error> {
     let Some(bound) = context
         .registry
         .child_for(parent, Discriminator(discriminator))
@@ -70,7 +66,7 @@ pub(crate) fn validate_raw_child_discriminator(
         .is_none_or(|child| child.protocol_id().as_str() == "padding");
     // A malformed binding also represents a known terminal discriminator
     // (IPv6 No Next Header). It is valid with no protocol payload, while any
-    // actual bytes must be represented by MalformedLayer rather than Raw.
+    // actual bytes must be represented by Malformed rather than Raw.
     if bound.as_str() == "malformed" && absent_payload {
         return Ok(());
     }
@@ -83,7 +79,7 @@ pub(crate) fn validate_raw_child_discriminator(
             "discriminator {discriminator} selects registered layer {bound}, but that layer is absent"
         ),
     };
-    if context.mode == BuildMode::Strict {
+    if context.mode == crate::build::Mode::Strict {
         return Err(invalid(parent, message));
     }
     let code = if context
@@ -109,7 +105,7 @@ pub(crate) fn validate_typed_child_discriminator(
     discriminator: u64,
     context: &LayerEncodeContext<'_>,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Result<(), CodecError> {
+) -> Result<(), crate::codec::Error> {
     let Some(child) = context.child else {
         return Ok(());
     };
@@ -145,7 +141,7 @@ pub(crate) fn validate_auto_raw_discriminator<T>(
     value: &WireValue<T>,
     context: &LayerEncodeContext<'_>,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Result<(), CodecError> {
+) -> Result<(), crate::codec::Error> {
     if !matches!(value, WireValue::Auto)
         || context
             .child
@@ -156,7 +152,7 @@ pub(crate) fn validate_auto_raw_discriminator<T>(
     let message = format!(
         "Auto {field} cannot infer wire intent from Raw; supply an explicit unknown discriminator"
     );
-    if context.mode == BuildMode::Strict {
+    if context.mode == crate::build::Mode::Strict {
         return Err(invalid(name, message));
     }
     diagnostics.push(Diagnostic::warning("build.auto_raw_discriminator", message).at_field(field));
@@ -170,9 +166,9 @@ pub(crate) fn strict_or_diagnostic(
     message: impl Into<String>,
     context: &LayerEncodeContext<'_>,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Result<(), CodecError> {
+) -> Result<(), crate::codec::Error> {
     let message = message.into();
-    if context.mode == BuildMode::Strict {
+    if context.mode == crate::build::Mode::Strict {
         return Err(invalid(name, message));
     }
     diagnostics.push(Diagnostic::warning(code, message).at_field(field));
@@ -183,7 +179,7 @@ pub(crate) fn ensure_encode_budget(
     name: &str,
     contribution: usize,
     context: &LayerEncodeContext<'_>,
-) -> Result<(), CodecError> {
+) -> Result<(), crate::codec::Error> {
     if contribution > context.remaining_packet_bytes {
         return Err(invalid(
             name,

@@ -6,34 +6,31 @@
 #![forbid(unsafe_code)]
 
 use crate::link::Mode;
-use crate::neighbor::{
-    Error as NeighborError, Request as NeighborRequest, Resolution as NeighborResolution,
-    Resolver as NeighborResolver,
-};
+use crate::neighbor::{Request as NeighborRequest, Resolution as NeighborResolution};
 
 use super::models::Plan;
 
 /// Materialize a planned route, invoking neighbor resolution when required.
-pub fn materialize<N: NeighborResolver>(
+pub fn materialize<N: crate::neighbor::Resolver>(
     mut plan: Plan,
     resolver: &N,
-) -> Result<Materialized, NeighborError> {
+) -> Result<Materialized, crate::neighbor::Error> {
     let mut neighbor_resolution = None;
     if plan.needs_neighbor_resolution() {
-        let target = plan
-            .neighbor_target
-            .ok_or_else(|| NeighborError::MissingNeighborTarget {
-                interface: plan.decision.interface.name.clone(),
-            })?;
-        let source = plan
-            .neighbor_source
-            .ok_or_else(|| NeighborError::MissingNeighborSource {
-                interface: plan.decision.interface.name.clone(),
-            })?;
+        let target =
+            plan.neighbor_target
+                .ok_or_else(|| crate::neighbor::Error::MissingNeighborTarget {
+                    interface: plan.decision.interface.name.clone(),
+                })?;
+        let source =
+            plan.neighbor_source
+                .ok_or_else(|| crate::neighbor::Error::MissingNeighborSource {
+                    interface: plan.decision.interface.name.clone(),
+                })?;
         let interface_mac =
             plan.decision
                 .source_mac
-                .ok_or_else(|| NeighborError::MissingSourceMac {
+                .ok_or_else(|| crate::neighbor::Error::MissingSourceMac {
                     interface: plan.decision.interface.name.clone(),
                 })?;
         let resolution = resolver.resolve(&NeighborRequest {
@@ -49,7 +46,7 @@ pub fn materialize<N: NeighborResolver>(
         neighbor_resolution = Some(resolution);
     }
     if plan.mode == Mode::Layer2 && plan.source_mac.is_none() {
-        return Err(NeighborError::MissingSourceMac {
+        return Err(crate::neighbor::Error::MissingSourceMac {
             interface: plan.decision.interface.name.clone(),
         });
     }
@@ -131,8 +128,11 @@ mod tests {
         requests: Mutex<Vec<NeighborRequest>>,
     }
 
-    impl NeighborResolver for RecordingResolver {
-        fn resolve(&self, request: &NeighborRequest) -> Result<NeighborResolution, NeighborError> {
+    impl crate::neighbor::Resolver for RecordingResolver {
+        fn resolve(
+            &self,
+            request: &NeighborRequest,
+        ) -> Result<NeighborResolution, crate::neighbor::Error> {
             self.requests
                 .lock()
                 .expect("request recorder lock")
@@ -224,23 +224,23 @@ mod tests {
 
     #[test]
     fn materialize_rejects_each_missing_layer2_input_before_resolution() {
-        type InvalidCase = (fn(&mut Plan), NeighborError);
+        type InvalidCase = (fn(&mut Plan), crate::neighbor::Error);
         let cases: [InvalidCase; 4] = [
             (
                 |plan| plan.neighbor_target = None,
-                NeighborError::MissingNeighborTarget {
+                crate::neighbor::Error::MissingNeighborTarget {
                     interface: "fixture0".to_owned(),
                 },
             ),
             (
                 |plan| plan.neighbor_source = None,
-                NeighborError::MissingNeighborSource {
+                crate::neighbor::Error::MissingNeighborSource {
                     interface: "fixture0".to_owned(),
                 },
             ),
             (
                 |plan| plan.decision.source_mac = None,
-                NeighborError::MissingSourceMac {
+                crate::neighbor::Error::MissingSourceMac {
                     interface: "fixture0".to_owned(),
                 },
             ),
@@ -249,7 +249,7 @@ mod tests {
                     plan.destination_mac = Some(RESOLVED_MAC);
                     plan.source_mac = None;
                 },
-                NeighborError::MissingSourceMac {
+                crate::neighbor::Error::MissingSourceMac {
                     interface: "fixture0".to_owned(),
                 },
             ),

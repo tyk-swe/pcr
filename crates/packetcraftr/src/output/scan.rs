@@ -13,9 +13,7 @@ use packetcraftr_core::diagnostic::Diagnostic;
 
 use super::contract::Error;
 use super::envelope::Stats;
-use super::frame::Captured;
-
-pub use super::frame::{Captured as Frame, Timestamp};
+use super::frame::{Captured, Timestamp};
 
 /// Output-v1 scan classification.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]

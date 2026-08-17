@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::layer::ProtocolId;
+use crate::layer::Id as ProtocolId;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ByteRange {

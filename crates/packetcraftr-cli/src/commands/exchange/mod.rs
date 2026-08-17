@@ -2,30 +2,25 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 pub(super) mod arguments;
+mod rendering;
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use packetcraftr::{core, output};
 
-use self::arguments::ExchangeArgs;
+use self::arguments::Args;
 use super::super::errors::CliError;
-use super::super::rendering::{
-    emit_aggregate_with_stats, emit_stream_record, emit_stream_with_stats, render_diagnostics_text,
-    write_capture_file, write_stdout_line,
-};
-use super::super::system::{default_registry_arc, prepare_route_request, system_client};
+use super::super::system::{client, prepare_route};
+use super::registry;
 use crate::command_options::SendArgs;
 
-pub(super) fn run(
-    arguments: ExchangeArgs,
-    output: output::contract::Format,
-) -> Result<(), CliError> {
-    let ExchangeArgs {
+pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
+    let Args {
         send,
         timeout_ms,
         max_responses,
-        max_unsolicited,
+        max_unmatched_frames,
         limits,
     } = arguments;
     let SendArgs {
@@ -39,7 +34,7 @@ pub(super) fn run(
         timeout: Duration::from_millis(timeout_ms),
         max_template_packets: 1,
         max_responses,
-        max_unsolicited,
+        max_unmatched_frames,
         max_capture_queue_frames: limits.max_frames,
         max_captured_bytes: limits.max_bytes,
         capture_overflow_policy: limits.overflow_policy,
@@ -49,140 +44,29 @@ pub(super) fn run(
     // Validate before packet parsing can trigger hostname/interface work.
     options.validate().map_err(CliError::classified)?;
 
-    let registry = default_registry_arc()?;
-    let request = prepare_route_request(route, policy.into_policy(), &registry)?;
+    let registry = registry()?;
+    let request = prepare_route(route, policy.into_policy(), &registry)?;
     options.send = packetcraftr::send::Options {
         destination: request.destination,
         plan: request.options,
-        build: core::build::BuildOptions {
+        build: core::build::Options {
             mode: mode.into(),
-            ..core::build::BuildOptions::default()
+            ..core::build::Options::default()
         },
         allow_permissive_live,
     };
-    let client = system_client(Arc::clone(&registry), request.policy);
+    let client = client(Arc::clone(&registry), request.policy);
     let result = client
         .exchange(&core::template::Template::new(request.packet), options)
         .map_err(CliError::classified)?;
 
-    if matches!(
-        output,
-        output::contract::Format::Pcap | output::contract::Format::Pcapng
-    ) {
-        let frames = result
-            .sent
-            .iter()
-            .map(|sent| sent.frame().clone())
-            .chain(
-                result
-                    .responses
-                    .iter()
-                    .map(|response| response.response.frame.clone()),
-            )
-            .chain(result.unsolicited.iter().map(|packet| packet.frame.clone()))
-            .chain(result.undecoded.iter().cloned())
-            .collect::<Vec<_>>();
-        let mut frames = frames;
-        frames.sort_by_key(|frame| frame.timestamp);
-        return write_capture_file(output, frames);
-    }
-
-    if output == output::contract::Format::Text {
-        let mut diagnostics = result.diagnostics.clone();
-        for sent in &result.sent {
-            diagnostics.extend(sent.built().diagnostics.clone());
+    match format {
+        output::contract::Format::Text => rendering::render_text(&result),
+        output::contract::Format::Json => rendering::render_aggregate(result),
+        output::contract::Format::Ndjson => rendering::render_stream(result),
+        output::contract::Format::Pcap | output::contract::Format::PcapNg => {
+            rendering::render_capture(&result, format)
         }
-        write_stdout_line(format_args!(
-            "sent={} responses={} unanswered={} unsolicited={} undecoded={} bytes={}",
-            result.sent.len(),
-            result.responses.len(),
-            result.unanswered.len(),
-            result.unsolicited.len(),
-            result.undecoded.len(),
-            result.stats.bytes
-        ))?;
-        return render_diagnostics_text(&diagnostics);
+        _ => unreachable!("exchange format is checked before command dispatch"),
     }
-
-    let (result, diagnostics, stats) =
-        output::exchange::ExchangeCommandResult::try_from_exchange(result)
-            .map_err(CliError::classified)?;
-    match output {
-        output::contract::Format::Json => emit_aggregate_with_stats(
-            output::contract::Command::Exchange,
-            result,
-            diagnostics,
-            stats,
-        ),
-        output::contract::Format::Ndjson => render_exchange_stream(result, diagnostics, stats),
-        _ => unreachable!("exchange non-machine formats return before output conversion"),
-    }
-}
-
-fn render_exchange_stream(
-    result: output::exchange::ExchangeCommandResult,
-    diagnostics: Vec<core::diagnostic::Diagnostic>,
-    stats: output::envelope::Stats,
-) -> Result<(), CliError> {
-    let output::exchange::ExchangeCommandResult {
-        sent,
-        responses,
-        unanswered,
-        unsolicited,
-        undecoded,
-    } = result;
-    let mut sequence = 0_u64;
-    for (request_index, frame) in sent.into_iter().enumerate() {
-        let request_index = u64::try_from(request_index)
-            .map_err(|_| CliError::classified(output::contract::Error::SequenceOverflow))?;
-        emit_stream_record(
-            output::contract::Command::Exchange,
-            &mut sequence,
-            output::exchange::ExchangeStreamCommandResult::Sent {
-                request_index,
-                frame,
-            },
-        )?;
-    }
-    for response in responses {
-        emit_stream_record(
-            output::contract::Command::Exchange,
-            &mut sequence,
-            output::exchange::ExchangeStreamCommandResult::Response {
-                request_index: response.request_index,
-                response: response.response,
-                latency: response.latency,
-            },
-        )?;
-    }
-    for request_index in &unanswered {
-        emit_stream_record(
-            output::contract::Command::Exchange,
-            &mut sequence,
-            output::exchange::ExchangeStreamCommandResult::Unanswered {
-                request_index: *request_index,
-            },
-        )?;
-    }
-    for frame in unsolicited {
-        emit_stream_record(
-            output::contract::Command::Exchange,
-            &mut sequence,
-            output::exchange::ExchangeStreamCommandResult::Unsolicited { frame },
-        )?;
-    }
-    for frame in undecoded {
-        emit_stream_record(
-            output::contract::Command::Exchange,
-            &mut sequence,
-            output::exchange::ExchangeStreamCommandResult::Undecoded { frame },
-        )?;
-    }
-    emit_stream_with_stats(
-        output::contract::Command::Exchange,
-        sequence,
-        output::exchange::ExchangeStreamCommandResult::Complete { unanswered },
-        diagnostics,
-        stats,
-    )
 }

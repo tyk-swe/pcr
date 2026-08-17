@@ -6,7 +6,7 @@
 use std::time::Duration;
 
 use crate::SentPacket;
-use crate::probe::runner::{Batch, BatchExecution};
+use crate::probe::runner::{Batch, Execution};
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::{Packet, decode::DecodedPacket};
 use packetcraftr_netio::capture::Statistics;
@@ -220,7 +220,7 @@ pub(crate) fn format_exchange_evidence_error(
 
 pub(crate) fn validate_batch_exchange_evidence<P, F>(
     batch: &Batch<P>,
-    execution: &BatchExecution,
+    execution: &Execution,
     max_captured_frames: usize,
     max_captured_bytes: usize,
     mut sent_packet_matches: F,

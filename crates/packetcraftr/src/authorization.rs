@@ -8,7 +8,7 @@ use std::sync::{Arc, OnceLock};
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::{
     build::BuiltPacket,
-    decode::{DecodeOptions, Dissector},
+    decode::{Dissector, Options as DecodeOptions},
     registry::Registry,
 };
 use packetcraftr_netio::{
@@ -16,22 +16,22 @@ use packetcraftr_netio::{
 };
 
 use crate::Client;
-use crate::policy::TrafficPolicyError;
-use crate::send::ClientError;
+use crate::Error;
+use crate::policy::Error as PolicyError;
 
 impl<R, N, I> Client<R, N, I> {
     pub(crate) fn authorize_built(
         &self,
         built: &BuiltPacket,
         allow_permissive_live: bool,
-    ) -> Result<(), ClientError> {
+    ) -> Result<(), Error> {
         self.policy.authorize_packet_destinations(&built.packet)?;
         if built.requires_live_opt_in {
             if !allow_permissive_live {
-                return Err(ClientError::PermissiveLiveOptInRequired);
+                return Err(Error::PermissiveLiveOptInRequired);
             }
             if !self.policy.allow_permissive_packets {
-                return Err(TrafficPolicyError::PermissivePacket.into());
+                return Err(PolicyError::PermissivePacket.into());
             }
         }
         Ok(())
@@ -41,9 +41,9 @@ impl<R, N, I> Client<R, N, I> {
         &self,
         built: &BuiltPacket,
         route: &PlannedRoute,
-    ) -> Result<(), ClientError> {
+    ) -> Result<(), Error> {
         let link_type = match route.mode {
-            LinkMode::Layer2 => route.route.link_type,
+            LinkMode::Layer2 => route.decision.link_type,
             LinkMode::Layer3 => LinkType::RAW,
             LinkMode::Auto => return Err(LiveIoError::UnresolvedLinkMode.into()),
         };
@@ -55,11 +55,11 @@ impl<R, N, I> Client<R, N, I> {
                     .map_err(|error| error.to_string())
             })
             .as_ref()
-            .map_err(|reason| TrafficPolicyError::InvalidPacketSemantics {
+            .map_err(|reason| PolicyError::InvalidPacketSemantics {
                 reason: reason.clone(),
             })?;
         if registry.root_for_link_type(link_type.0).is_none() {
-            return Err(TrafficPolicyError::InvalidPacketSemantics {
+            return Err(PolicyError::InvalidPacketSemantics {
                 reason: format!(
                     "final-wire authorization does not support link type {}",
                     link_type.0
@@ -72,12 +72,12 @@ impl<R, N, I> Client<R, N, I> {
             link_type,
             built.bytes.clone(),
         )
-        .map_err(|error| TrafficPolicyError::InvalidPacketSemantics {
+        .map_err(|error| PolicyError::InvalidPacketSemantics {
             reason: error.to_string(),
         })?;
         let decoded = Dissector::new(Arc::clone(registry))
             .decode(frame, DecodeOptions::default())
-            .map_err(|error| TrafficPolicyError::InvalidPacketSemantics {
+            .map_err(|error| PolicyError::InvalidPacketSemantics {
                 reason: error.to_string(),
             })?;
         self.policy.authorize_packet_destinations(&decoded.packet)?;

@@ -8,7 +8,7 @@ use std::net::IpAddr;
 use serde::Serialize;
 
 use packetcraftr_core::analysis::follow::{
-    Chunk as AnalysisChunk, Direction as AnalysisDirection, FollowSummary,
+    Chunk as AnalysisChunk, Direction as AnalysisDirection, Summary as FollowSummary,
 };
 
 use super::expert::StreamTransport;

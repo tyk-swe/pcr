@@ -5,12 +5,25 @@ use packetcraftr::{core, output};
 
 use crate::errors::CliError;
 use crate::rendering::{
-    captured_frame_text, comma_separated, emit_stream_record, emit_stream_with_stats,
+    captured_frame_text, comma_separated, emit_aggregate_with_stats, emit_next, emit_with_stats,
     optional_display, output_timestamp_text, render_diagnostics_text, render_optional,
     write_stdout_line,
 };
 
-pub(super) fn render_traceroute_text(
+pub(super) fn render_aggregate(
+    result: output::traceroute::Result,
+    diagnostics: Vec<core::diagnostic::Diagnostic>,
+    stats: output::envelope::Stats,
+) -> Result<(), CliError> {
+    emit_aggregate_with_stats(
+        output::contract::Command::Traceroute,
+        result,
+        diagnostics,
+        stats,
+    )
+}
+
+pub(super) fn render_text(
     result: output::traceroute::Result,
     diagnostics: Vec<core::diagnostic::Diagnostic>,
     stats: output::envelope::Stats,
@@ -30,10 +43,10 @@ pub(super) fn render_traceroute_text(
                 "  sequence={} attempt={} status={} response={} sent={} received={} responder={} latency={} port={} reason={}",
                 probe.sequence,
                 probe.attempt,
-                trace_probe_status_name(probe.status),
+                probe_status_name(probe.status),
                 probe
                     .response_kind
-                    .map(trace_response_kind_name)
+                    .map(response_kind_name)
                     .unwrap_or("none"),
                 output_timestamp_text(probe.sent_at),
                 render_optional(probe.received_at, output_timestamp_text),
@@ -56,7 +69,7 @@ pub(super) fn render_traceroute_text(
     }
     write_stdout_line(format_args!(
         "trace completion={} hops={} probes={} bytes={}",
-        trace_completion_name(result.completion),
+        completion_name(result.completion),
         result.hops.len(),
         stats.packets_completed,
         stats.bytes
@@ -64,14 +77,14 @@ pub(super) fn render_traceroute_text(
     render_diagnostics_text(&diagnostics)
 }
 
-pub(super) fn trace_probe_status_name(value: output::traceroute::ProbeStatus) -> &'static str {
+fn probe_status_name(value: output::traceroute::ProbeStatus) -> &'static str {
     match value {
         output::traceroute::ProbeStatus::Response => "response",
         output::traceroute::ProbeStatus::Timeout => "timeout",
     }
 }
 
-pub(super) fn trace_response_kind_name(value: output::traceroute::ResponseKind) -> &'static str {
+fn response_kind_name(value: output::traceroute::ResponseKind) -> &'static str {
     match value {
         output::traceroute::ResponseKind::Intermediate => "intermediate",
         output::traceroute::ResponseKind::DestinationReached => "destination_reached",
@@ -79,7 +92,7 @@ pub(super) fn trace_response_kind_name(value: output::traceroute::ResponseKind) 
     }
 }
 
-pub(super) fn trace_completion_name(value: output::traceroute::Completion) -> &'static str {
+fn completion_name(value: output::traceroute::Completion) -> &'static str {
     match value {
         output::traceroute::Completion::DestinationReached => "destination_reached",
         output::traceroute::Completion::Unreachable => "unreachable",
@@ -88,7 +101,7 @@ pub(super) fn trace_completion_name(value: output::traceroute::Completion) -> &'
     }
 }
 
-pub(super) fn render_traceroute_stream(
+pub(super) fn render_stream(
     result: output::traceroute::Result,
     diagnostics: Vec<core::diagnostic::Diagnostic>,
     stats: output::envelope::Stats,
@@ -105,7 +118,7 @@ pub(super) fn render_traceroute_stream(
     } = result;
     let mut sequence = 0_u64;
     for hop in hops {
-        emit_stream_record(
+        emit_next(
             output::contract::Command::Traceroute,
             &mut sequence,
             output::traceroute::Event::Hop {
@@ -116,7 +129,7 @@ pub(super) fn render_traceroute_stream(
         )?;
     }
     for evidence in undecoded {
-        emit_stream_record(
+        emit_next(
             output::contract::Command::Traceroute,
             &mut sequence,
             output::traceroute::Event::Undecoded {
@@ -125,7 +138,7 @@ pub(super) fn render_traceroute_stream(
             },
         )?;
     }
-    emit_stream_with_stats(
+    emit_with_stats(
         output::contract::Command::Traceroute,
         sequence,
         output::traceroute::Event::Complete {

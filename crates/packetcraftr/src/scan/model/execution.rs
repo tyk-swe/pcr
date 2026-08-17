@@ -4,18 +4,18 @@ use std::net::IpAddr;
 
 use packetcraftr_core::Packet;
 
-use super::request::ScanTransport;
+use super::request::Transport;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ScanProbe {
+pub struct Probe {
     pub sequence: u64,
     pub address: IpAddr,
-    pub transport: ScanTransport,
+    pub transport: Transport,
     pub port: Option<u16>,
     pub attempt: u32,
 }
 
-impl ScanProbe {
+impl Probe {
     /// Builds the portable IPv4/IPv6 TCP, UDP, or ICMP probe represented by
     /// this already-authorized plan. Route-dependent fields remain unspecified
     /// for the high-level client to materialize.
@@ -24,12 +24,9 @@ impl ScanProbe {
     }
 }
 
-pub type ScanBatch = crate::probe::runner::Batch<ScanProbe>;
-pub use crate::probe::runner::BatchExecution as ScanBatchExecution;
+pub type Batch = crate::probe::runner::Batch<Probe>;
+pub use crate::probe::runner::Execution;
 
-pub trait ScanExecutor {
-    fn execute(
-        &mut self,
-        batch: &ScanBatch,
-    ) -> std::result::Result<ScanBatchExecution, crate::BoundaryError>;
+pub trait Executor {
+    fn execute(&mut self, batch: &Batch) -> std::result::Result<Execution, crate::BoundaryError>;
 }

@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::super::layer::ProtocolId;
+use super::super::layer::Id as ProtocolId;
 use super::lexer::CompareOperator;
 use super::literal::Literal;
 use super::path::FieldRef;

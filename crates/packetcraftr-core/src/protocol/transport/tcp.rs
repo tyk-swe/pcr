@@ -9,12 +9,12 @@ use bytes::Bytes;
 
 use crate::{
     codec::{
-        CodecError, DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext,
+        DecodedLayerValue, EncodedLayer, Error as CodecError, LayerCodec, LayerDecodeContext,
         LayerEncodeContext,
     },
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflective_layer},
+    layer::{Id as ProtocolId, Layer, reflective_layer},
     registry::Discriminator,
 };
 
@@ -22,7 +22,7 @@ use super::super::common::{
     ValueExpectation, aliased_fields, invalid, make_layer, payload_without_padding, protocol,
     resolve_u16, transport_checksum, transport_checksum_parts, truncated, wrong_layer,
 };
-use super::super::network::encode_network;
+use super::super::network::resolve_envelope;
 
 const TCP_MIN_LEN: usize = 20;
 
@@ -121,7 +121,7 @@ impl LayerCodec for TcpCodec {
         let mut diagnostics = Vec::new();
         if layer.reserved_bits != 0 {
             let message = "reserved TCP header bits are non-zero";
-            if context.mode == crate::build::BuildMode::Strict {
+            if context.mode == crate::build::Mode::Strict {
                 return Err(invalid("tcp", message));
             }
             diagnostics.push(
@@ -161,7 +161,7 @@ impl LayerCodec for TcpCodec {
         prefix[18..20].copy_from_slice(&layer.urgent_pointer.to_be_bytes());
         prefix[20..].copy_from_slice(&options);
         let covered_payload = payload_without_padding("tcp", payload, context)?;
-        let network = encode_network(context)?;
+        let network = resolve_envelope(context)?;
         let checksum_expected = transport_checksum_parts(network, 6, &[&prefix, covered_payload])?;
         let (checksum, materialized_checksum) = resolve_u16(
             "tcp",

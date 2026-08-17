@@ -3,21 +3,10 @@
 
 //! Checked evidence accounting and bounded diagnostic emission.
 
-use packetcraftr_core::diagnostic::{Diagnostic, push_diagnostic_once};
+use packetcraftr_core::diagnostic::{Diagnostic, push_once as push_diagnostic_once};
 use packetcraftr_core::frame::Frame;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum EvidenceBudgetError {
-    FrameCountOverflow,
-    ByteCountOverflow,
-    LimitExceeded,
-}
-
-#[derive(Default)]
-pub(crate) struct EvidenceBudget {
-    pub(super) retained_frame_count: usize,
-    pub(super) retained_byte_count: usize,
-}
+use crate::evidence::{Budget, BudgetError};
 
 #[derive(Clone, Copy)]
 pub(crate) struct EvidenceDiagnosticDescriptor {
@@ -34,52 +23,28 @@ impl EvidenceDiagnosticDescriptor {
     }
 }
 
-impl EvidenceBudget {
-    pub(crate) fn retain(
-        &mut self,
-        frame: &Frame,
-        max_frames: usize,
-        max_bytes: usize,
-    ) -> Result<(), EvidenceBudgetError> {
-        let next_frame_count = self
-            .retained_frame_count
-            .checked_add(1)
-            .ok_or(EvidenceBudgetError::FrameCountOverflow)?;
-        let next_byte_count = self
-            .retained_byte_count
-            .checked_add(frame.bytes().len())
-            .ok_or(EvidenceBudgetError::ByteCountOverflow)?;
-        if next_frame_count > max_frames || next_byte_count > max_bytes {
-            return Err(EvidenceBudgetError::LimitExceeded);
-        }
-        self.retained_frame_count = next_frame_count;
-        self.retained_byte_count = next_byte_count;
-        Ok(())
-    }
-}
-
 pub(crate) fn retain_evidence(
-    budget: &mut EvidenceBudget,
+    budget: &mut Budget,
     frame: &Frame,
     descriptor: EvidenceDiagnosticDescriptor,
     max_frames: usize,
     max_bytes: usize,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> bool {
-    let error = match budget.retain(frame, max_frames, max_bytes) {
+    let error = match budget.reserve(frame.bytes().len(), max_frames, max_bytes) {
         Ok(()) => return true,
         Err(error) => error,
     };
     let message = match error {
-        EvidenceBudgetError::FrameCountOverflow => format!(
+        BudgetError::FrameCountOverflow => format!(
             "{} evidence frame accounting overflowed; later frames were omitted",
             descriptor.display_name
         ),
-        EvidenceBudgetError::ByteCountOverflow => format!(
+        BudgetError::ByteCountOverflow => format!(
             "{} evidence byte accounting overflowed; later frames were omitted",
             descriptor.display_name
         ),
-        EvidenceBudgetError::LimitExceeded => format!(
+        BudgetError::FrameLimit | BudgetError::ByteLimit => format!(
             "{} evidence exceeded {max_frames} frame(s) or {max_bytes} byte(s); later exact frames were omitted",
             descriptor.display_name
         ),
@@ -122,7 +87,7 @@ pub(crate) fn retain_undecoded_frames<T, E>(
     frames: Vec<Frame>,
     output: &mut Vec<T>,
     max_undecoded: usize,
-    budget: &mut EvidenceBudget,
+    budget: &mut Budget,
     descriptor: EvidenceDiagnosticDescriptor,
     max_evidence_frames: usize,
     max_evidence_bytes: usize,

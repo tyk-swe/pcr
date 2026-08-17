@@ -13,95 +13,26 @@ use std::time::Duration;
 
 use packetcraftr::{core, netio as net, output};
 
-use self::arguments::DnsArgs;
+use self::arguments::Args;
+use super::registry;
 use crate::errors::CliError;
-use crate::rendering::emit_aggregate_with_stats;
-use crate::system::{
-    DeferredInterface, default_registry_arc, parse_workflow_target, system_client,
-    validate_live_interface_selector, workflow_exchange_options,
-};
+use crate::input::parse_target;
+use crate::system::{DeferredInterface, client, exchange, validate_selector};
 
-use conversion::{generated_dns_source_port, generated_dns_transaction_id};
-use execution::CliDnsExecutor;
-use rendering::{render_dns_stream, render_dns_text};
+use execution::Executor;
 
-pub(super) fn run(arguments: DnsArgs, output: output::contract::Format) -> Result<(), CliError> {
-    let DnsArgs {
-        server,
-        name,
-        query_type,
-        family,
-        port,
-        transaction_id,
-        source_port,
-        no_recursion,
-        attempts,
-        timeout_ms,
-        rate,
-        max_duration_ms,
-        max_message_bytes,
-        max_records,
-        max_name_pointers,
-        max_txt_strings,
-        max_txt_bytes,
-        max_rejected_records,
-        max_undecoded,
-        route,
-        limits,
-        policy,
-    } = arguments;
-    let server = parse_workflow_target(server)?;
-    let queue_limits = limits.into_limits();
-    let request = packetcraftr::dns::Request {
-        server,
-        address_family: family.into(),
-        server_port: port,
-        source_port: source_port.unwrap_or_else(generated_dns_source_port),
-        query_name: name,
-        query_type: query_type.into(),
-        transaction_id: transaction_id.unwrap_or_else(generated_dns_transaction_id),
-        recursion_desired: !no_recursion,
-        attempts,
-        timeout: Duration::from_millis(timeout_ms),
-        queries_per_second: rate,
-        limits: packetcraftr::dns::Limits {
-            max_message_bytes,
-            max_records,
-            max_name_pointers,
-            max_txt_strings,
-            max_txt_bytes,
-            max_rejected_records,
-            max_evidence_frames: queue_limits.max_frames,
-            max_evidence_bytes: queue_limits.max_bytes,
-            max_undecoded,
-            max_duration: Duration::from_millis(max_duration_ms),
-        },
-    };
-    let policy = policy.into_policy();
+pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
+    let queue_limits = arguments.limits.clone().into_limits();
+    let request = prepare_request(&arguments, queue_limits)?;
+    let policy = arguments.policy.clone().into_policy();
     policy.validate().map_err(CliError::classified)?;
-    validate_live_interface_selector("dns", route.interface.as_deref())?;
-
-    let registry = default_registry_arc()?;
-    let exchange = workflow_exchange_options(
-        packetcraftr::send::Options {
-            destination: None,
-            plan: net::route::Options {
-                link_mode: route.link_mode.into(),
-                interface: None,
-                preferred_source: route.source,
-            },
-            build: core::build::BuildOptions::default(),
-            allow_permissive_live: false,
-        },
-        request.timeout,
-        1,
-        queue_limits,
-    )?;
-
-    let mut executor = CliDnsExecutor {
-        client: system_client(Arc::clone(&registry), policy.clone()),
+    validate_selector(arguments.route.interface.as_deref()).map(|_| ())?;
+    let registry = registry()?;
+    let exchange = prepare_exchange(&arguments, &request, queue_limits)?;
+    let mut executor = Executor {
+        client: client(Arc::clone(&registry), policy.clone()),
         exchange,
-        interface: DeferredInterface::new(route.interface),
+        interface: DeferredInterface::new(arguments.route.interface),
     };
     let resolver = packetcraftr::target::SystemResolver;
     let mut authorizer = packetcraftr::target::PolicyAuthorizer::new(&policy, &resolver);
@@ -113,20 +44,76 @@ pub(super) fn run(arguments: DnsArgs, output: output::contract::Format) -> Resul
         &mut executor,
         &mut clock,
     )
-    .map_err(dns_cli_error)?;
+    .map_err(classified_error)?;
     let (result, diagnostics, stats) =
         output::dns::Result::try_from_dns(result).map_err(CliError::classified)?;
-    match output {
-        output::contract::Format::Text => render_dns_text(result, diagnostics, stats),
-        output::contract::Format::Json => {
-            emit_aggregate_with_stats(output::contract::Command::Dns, result, diagnostics, stats)
-        }
-        output::contract::Format::Ndjson => render_dns_stream(result, diagnostics, stats),
+    match format {
+        output::contract::Format::Text => rendering::render_text(result, diagnostics, stats),
+        output::contract::Format::Json => rendering::render_aggregate(result, diagnostics, stats),
+        output::contract::Format::Ndjson => rendering::render_stream(result, diagnostics, stats),
         _ => unreachable!("dns format is checked before command dispatch"),
     }
 }
 
-pub(crate) fn dns_cli_error(error: packetcraftr::dns::Error) -> CliError {
+fn prepare_request(
+    arguments: &Args,
+    queue_limits: net::capture::Limits,
+) -> Result<packetcraftr::dns::Request, CliError> {
+    let request = packetcraftr::dns::Request {
+        server: parse_target(arguments.server.clone())?,
+        address_family: arguments.family.into(),
+        server_port: arguments.port,
+        source_port: arguments
+            .source_port
+            .unwrap_or_else(conversion::source_port),
+        query_name: arguments.name.clone(),
+        query_type: arguments.query_type.into(),
+        transaction_id: arguments
+            .transaction_id
+            .unwrap_or_else(conversion::transaction_id),
+        recursion_desired: !arguments.no_recursion,
+        attempts: arguments.attempts,
+        timeout: Duration::from_millis(arguments.timeout_ms),
+        queries_per_second: arguments.rate,
+        limits: packetcraftr::dns::Limits {
+            max_message_bytes: arguments.max_message_bytes,
+            max_records: arguments.max_records,
+            max_name_pointers: arguments.max_name_pointers,
+            max_txt_strings: arguments.max_txt_strings,
+            max_txt_bytes: arguments.max_txt_bytes,
+            max_rejected_records: arguments.max_rejected_records,
+            max_evidence_frames: queue_limits.max_frames,
+            max_evidence_bytes: queue_limits.max_bytes,
+            max_undecoded: arguments.max_undecoded,
+            max_duration: Duration::from_millis(arguments.max_duration_ms),
+        },
+    };
+    Ok(request)
+}
+
+fn prepare_exchange(
+    arguments: &Args,
+    request: &packetcraftr::dns::Request,
+    queue_limits: net::capture::Limits,
+) -> Result<packetcraftr::exchange::Options, CliError> {
+    exchange::options(
+        packetcraftr::send::Options {
+            destination: None,
+            plan: net::route::Options {
+                link_mode: arguments.route.link_mode.into(),
+                interface: None,
+                preferred_source: arguments.route.source,
+            },
+            build: core::build::Options::default(),
+            allow_permissive_live: false,
+        },
+        request.timeout,
+        1,
+        queue_limits,
+    )
+}
+
+pub(crate) fn classified_error(error: packetcraftr::dns::Error) -> CliError {
     let sequence = error.sequence();
     CliError::classified_at_optional_sequence(error, sequence)
 }

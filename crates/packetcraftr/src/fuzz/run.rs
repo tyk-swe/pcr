@@ -8,27 +8,28 @@ use std::time::Duration;
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::{
     Packet,
-    build::{BuildContext, Builder, BuiltPacket},
+    build::{Builder, BuiltPacket, Context as BuildContext},
     decode::Dissector,
+    diagnostic::Diagnostic,
     fuzz as packet_fuzz,
     registry::Registry,
 };
 
 use crate::clock::Clock;
+use crate::evidence::Budget;
 use crate::materialize::{
     build_context, materialize_link_fields, materialize_link_structure, materialize_network_fields,
     patch_builtin_ethernet, require_fixed_width_link_materialization,
 };
-use crate::probe::evidence::EvidenceBudget;
 
-use super::boundary::{FuzzAuthorizer, FuzzCaseExecution, FuzzExecutionCase, FuzzExecutor};
-use super::error::{FuzzError, duration_limit};
+use super::boundary::{Authorizer, Execution, ExecutionCase, Executor};
+use super::error::{Error, duration_limit};
 use super::execution::{
     ExecutionEvidence, add_execution_stats, rate_delay, retain_evidence, validate_execution,
     worst_case_duration,
 };
 use super::request::LiveOptions;
-use super::result::{Case, CaseOutcome, Mode, Result, Stats};
+use super::result::{Case, CaseOutcome, Result, Stats};
 use super::{
     SYNTHESIZED_ETHERNET_BYTES,
     decode::{dissect_built, has_link_root},
@@ -39,7 +40,7 @@ use super::{
 /// # Panics
 ///
 /// Panics only if an internally selected case was never built; input errors return
-/// [`FuzzError`].
+/// [`Error`].
 pub fn run<A, E, C>(
     request: &packet_fuzz::Request,
     live: LiveOptions,
@@ -48,19 +49,62 @@ pub fn run<A, E, C>(
     authorizer: &mut A,
     executor: &mut E,
     clock: &mut C,
-) -> std::result::Result<Result, FuzzError>
+) -> std::result::Result<Result, Error>
 where
-    A: FuzzAuthorizer,
-    E: FuzzExecutor,
+    A: Authorizer,
+    E: Executor,
     C: Clock,
 {
     let live = live.validate()?;
     let mut deadline = Deadline::new(request.limits.max_duration);
     let live_dissector = Dissector::new(Arc::clone(&registry));
-    let campaign =
-        packet_fuzz::Campaign::prepare(request, packet, Arc::clone(&registry), &mut deadline)?;
+    let prepared = prepare_campaign(request, live, packet, &registry, &mut deadline)?;
+    authorize_campaign(&prepared, live, authorizer)?;
+    deadline.check().map_err(duration_limit)?;
+
+    let PreparedCampaign {
+        cases,
+        built_indices,
+        built_case_count,
+        ..
+    } = prepared;
+    ExecutionPhase {
+        request,
+        live,
+        registry,
+        live_dissector,
+        deadline,
+        cases,
+        stats: Stats {
+            cases_generated: u64::try_from(request.cases).unwrap_or(u64::MAX),
+            cases_built: built_case_count,
+            ..Stats::default()
+        },
+        evidence: Budget::default(),
+        diagnostics: Vec::new(),
+        scheduled_delay: Duration::ZERO,
+    }
+    .execute(built_indices, executor, clock)
+}
+
+struct PreparedCampaign {
+    cases: Vec<Case>,
+    built_indices: Vec<usize>,
+    built_case_count: u64,
+    maximum_wire_bytes: u64,
+    requires_malformed_live: bool,
+}
+
+fn prepare_campaign(
+    request: &packet_fuzz::Request,
+    live: LiveOptions,
+    packet: Packet,
+    registry: &Arc<Registry>,
+    deadline: &mut Deadline,
+) -> std::result::Result<PreparedCampaign, Error> {
+    let campaign = packet_fuzz::Campaign::prepare(request, packet, Arc::clone(registry), deadline)?;
     let built_case_count = campaign.built_case_count();
-    let mut cases = campaign
+    let cases = campaign
         .into_cases()
         .into_iter()
         .map(Case::from)
@@ -75,8 +119,30 @@ where
     deadline
         .check_additional(worst_case)
         .map_err(duration_limit)?;
+    let maximum_wire_bytes = maximum_wire_bytes(request, &cases)?;
+    let requires_malformed_live = cases.iter().any(|case| {
+        case.built
+            .as_ref()
+            .is_some_and(|built| built.requires_live_opt_in)
+    });
+    if requires_malformed_live && !live.allow_malformed_live {
+        return Err(Error::MalformedLiveOptInRequired);
+    }
 
-    let maximum_wire_bytes = cases.iter().try_fold(0_u64, |total, case| {
+    Ok(PreparedCampaign {
+        cases,
+        built_indices,
+        built_case_count,
+        maximum_wire_bytes,
+        requires_malformed_live,
+    })
+}
+
+fn maximum_wire_bytes(
+    request: &packet_fuzz::Request,
+    cases: &[Case],
+) -> std::result::Result<u64, Error> {
+    cases.iter().try_fold(0_u64, |total, case| {
         let Some(built) = &case.built else {
             return Ok(total);
         };
@@ -88,22 +154,25 @@ where
         total
             .checked_add(u64::try_from(built.bytes.len()).unwrap_or(u64::MAX))
             .and_then(|value| value.checked_add(overhead))
-            .ok_or(FuzzError::StatisticsOverflow {
+            .ok_or(Error::StatisticsOverflow {
                 case_index: last_case_index(request),
             })
-    })?;
-    let requires_malformed_live = cases.iter().any(|case| {
-        case.built
-            .as_ref()
-            .is_some_and(|built| built.requires_live_opt_in)
-    });
-    if requires_malformed_live && !live.allow_malformed_live {
-        return Err(FuzzError::MalformedLiveOptInRequired);
-    }
-    let packets = built_indices
+    })
+}
+
+fn authorize_campaign<A>(
+    prepared: &PreparedCampaign,
+    live: LiveOptions,
+    authorizer: &mut A,
+) -> std::result::Result<(), Error>
+where
+    A: Authorizer,
+{
+    let packets = prepared
+        .built_indices
         .iter()
         .map(|index| {
-            cases[*index]
+            prepared.cases[*index]
                 .built
                 .as_ref()
                 .expect("selected built case")
@@ -115,93 +184,143 @@ where
         authorizer.authorize_operation(
             &packets,
             live.destination,
-            maximum_wire_bytes,
-            requires_malformed_live,
+            prepared.maximum_wire_bytes,
+            prepared.requires_malformed_live,
         )?;
     }
-    deadline.check().map_err(duration_limit)?;
+    Ok(())
+}
 
-    let mut stats = Stats {
-        cases_generated: u64::try_from(request.cases).unwrap_or(u64::MAX),
-        cases_built: built_case_count,
-        ..Stats::default()
-    };
-    let mut evidence = EvidenceBudget::default();
-    let mut operation_diagnostics = Vec::new();
-    let mut scheduled_delay = Duration::ZERO;
-    for (ordinal, case_index) in built_indices.into_iter().enumerate() {
-        let case = &mut cases[case_index];
-        if ordinal != 0 {
-            let delay = rate_delay(live.cases_per_second)?;
-            let prospective_scheduled_delay =
-                scheduled_delay
-                    .checked_add(delay)
-                    .ok_or(FuzzError::DurationLimit {
-                        actual: Duration::MAX,
-                        limit: request.limits.max_duration,
-                    })?;
-            deadline.start_accounting(delay).map_err(duration_limit)?;
-            clock.sleep(delay).map_err(|source| FuzzError::Clock {
-                case_index: case.index,
-                message: source.to_string(),
-            })?;
-            deadline.account(delay).map_err(duration_limit)?;
-            scheduled_delay = prospective_scheduled_delay;
+struct ExecutionPhase<'a> {
+    request: &'a packet_fuzz::Request,
+    live: LiveOptions,
+    registry: Arc<Registry>,
+    live_dissector: Dissector,
+    deadline: Deadline,
+    cases: Vec<Case>,
+    stats: Stats,
+    evidence: Budget,
+    diagnostics: Vec<Diagnostic>,
+    scheduled_delay: Duration,
+}
+
+impl ExecutionPhase<'_> {
+    fn execute<E, C>(
+        mut self,
+        built_indices: Vec<usize>,
+        executor: &mut E,
+        clock: &mut C,
+    ) -> std::result::Result<Result, Error>
+    where
+        E: Executor,
+        C: Clock,
+    {
+        for (ordinal, case_index) in built_indices.into_iter().enumerate() {
+            let sequence = self.cases[case_index].index;
+            self.pace(ordinal, sequence, clock)?;
+            self.deadline.check().map_err(duration_limit)?;
+            self.execute_case(case_index, executor)?;
         }
-        deadline.check().map_err(duration_limit)?;
-        let execution_case = FuzzExecutionCase {
+        self.finish()
+    }
+
+    fn pace<C>(
+        &mut self,
+        ordinal: usize,
+        case_index: u64,
+        clock: &mut C,
+    ) -> std::result::Result<(), Error>
+    where
+        C: Clock,
+    {
+        if ordinal == 0 {
+            return Ok(());
+        }
+        let delay = rate_delay(self.live.cases_per_second)?;
+        let prospective_scheduled_delay =
+            self.scheduled_delay
+                .checked_add(delay)
+                .ok_or(Error::DurationLimit {
+                    actual: Duration::MAX,
+                    limit: self.request.limits.max_duration,
+                })?;
+        self.deadline
+            .start_accounting(delay)
+            .map_err(duration_limit)?;
+        clock.sleep(delay).map_err(|source| Error::Clock {
+            case_index,
+            message: source.to_string(),
+        })?;
+        self.deadline.account(delay).map_err(duration_limit)?;
+        self.scheduled_delay = prospective_scheduled_delay;
+        Ok(())
+    }
+
+    fn execute_case<E>(
+        &mut self,
+        case_index: usize,
+        executor: &mut E,
+    ) -> std::result::Result<(), Error>
+    where
+        E: Executor,
+    {
+        let case = &mut self.cases[case_index];
+        let execution_case = ExecutionCase {
             permit: crate::evidence::ExecutionPermit::new(),
             packet: case.recipe.clone(),
         };
-        deadline
+        self.deadline
             .start_accounting(Duration::ZERO)
             .map_err(duration_limit)?;
         let execution = executor
-            .execute(&execution_case, live.timeout)
-            .map_err(|source| FuzzError::Execution {
+            .execute(&execution_case, self.live.timeout)
+            .map_err(|source| Error::Execution {
                 case_index: case.index,
                 source,
             })?;
         if execution.permit != execution_case.permit {
-            return Err(FuzzError::InvalidEvidence {
+            return Err(Error::InvalidEvidence {
                 case_index: case.index,
                 message: "executor returned evidence for a different execution permit".to_owned(),
             });
         }
-        let expected_live_build =
-            expected_live_build(request, case.recipe.clone(), &registry, &execution).map_err(
-                |message| FuzzError::InvalidEvidence {
-                    case_index: case.index,
-                    message,
-                },
-            )?;
+        let expected_live_build = expected_live_build(
+            self.request,
+            case.recipe.clone(),
+            &self.registry,
+            &execution,
+        )
+        .map_err(|message| Error::InvalidEvidence {
+            case_index: case.index,
+            message,
+        })?;
         if execution.sent.wire_bytes() != &expected_live_build.bytes {
-            return Err(FuzzError::InvalidEvidence {
+            return Err(Error::InvalidEvidence {
                 case_index: case.index,
                 message: "executor substituted bytes for the route-materialized case".to_owned(),
             });
         }
-        deadline.check().map_err(duration_limit)?;
-        deadline
+        self.deadline.check().map_err(duration_limit)?;
+        self.deadline
             .account(execution.stats.elapsed)
             .map_err(duration_limit)?;
         validate_execution(
             case,
             &execution,
-            request.limits.max_packet_bytes,
-            live.timeout,
-            &deadline,
+            self.request.limits.max_packet_bytes,
+            self.live.timeout,
+            &self.deadline,
         )?;
-        add_execution_stats(&mut stats, &execution.stats, case.index)?;
+        add_execution_stats(&mut self.stats, &execution.stats, case.index)?;
         let had_response = !execution.responses.is_empty();
         case.diagnostics = execution.sent.built().diagnostics.clone();
         case.decoded = dissect_built(
-            &live_dissector,
+            &self.live_dissector,
             execution.sent.built(),
-            request.limits,
+            self.request.limits,
             &mut case.diagnostics,
         );
-        deadline.check().map_err(duration_limit)?;
+        self.deadline.check().map_err(duration_limit)?;
         case.built = Some(execution.sent.built().clone());
         case.sent = Some(execution.sent.frame().clone());
         case.diagnostics.extend(execution.diagnostics);
@@ -212,42 +331,43 @@ where
                 unmatched: execution.unmatched,
                 undecoded: execution.undecoded,
             },
-            live.limits,
-            &mut evidence,
-            &mut operation_diagnostics,
-            &deadline,
+            self.live.limits,
+            &mut self.evidence,
+            &mut self.diagnostics,
+            &self.deadline,
         )?;
         case.outcome = if had_response {
             CaseOutcome::Response
         } else {
             CaseOutcome::Timeout
         };
-        deadline.check().map_err(duration_limit)?;
+        self.deadline.check().map_err(duration_limit)?;
+        Ok(())
     }
-    stats.elapsed =
-        stats
-            .elapsed
-            .checked_add(scheduled_delay)
-            .ok_or(FuzzError::StatisticsOverflow {
-                case_index: last_case_index(request),
-            })?;
-    deadline.check().map_err(duration_limit)?;
 
-    Ok(Result {
-        mode: Mode::Live,
-        seed: request.seed,
-        first_case: request.first_case,
-        cases,
-        diagnostics: operation_diagnostics,
-        stats,
-    })
+    fn finish(mut self) -> std::result::Result<Result, Error> {
+        self.stats.elapsed = self.stats.elapsed.checked_add(self.scheduled_delay).ok_or(
+            Error::StatisticsOverflow {
+                case_index: last_case_index(self.request),
+            },
+        )?;
+        self.deadline.check().map_err(duration_limit)?;
+
+        Ok(Result {
+            seed: self.request.seed,
+            first_case: self.request.first_case,
+            cases: self.cases,
+            diagnostics: self.diagnostics,
+            stats: self.stats,
+        })
+    }
 }
 
 fn expected_live_build(
     request: &packet_fuzz::Request,
     mut packet: Packet,
     registry: &Arc<Registry>,
-    execution: &FuzzCaseExecution,
+    execution: &Execution,
 ) -> std::result::Result<BuiltPacket, String> {
     let route = execution.sent.route();
     stringify(materialize_network_fields(&mut packet, &route.plan))?;

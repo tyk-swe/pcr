@@ -7,10 +7,7 @@ use serde::Serialize;
 
 use packetcraftr_netio::interface::Info;
 
-pub use crate::output::network::{
-    InterfaceCapabilityOutput as Capability, InterfaceFlagsOutput as Flags,
-    InterfaceOutput as Interface,
-};
+use crate::output::network::Interface;
 
 /// Aggregate result of `interfaces`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

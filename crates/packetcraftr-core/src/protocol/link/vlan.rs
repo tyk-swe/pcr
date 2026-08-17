@@ -7,11 +7,11 @@ use std::collections::BTreeMap;
 
 use crate::{
     codec::{
-        CodecError, DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext,
+        DecodedLayerValue, EncodedLayer, Error as CodecError, LayerCodec, LayerDecodeContext,
         LayerEncodeContext,
     },
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflective_layer},
+    layer::{Id as ProtocolId, Layer, reflective_layer},
 };
 
 use super::super::common::{

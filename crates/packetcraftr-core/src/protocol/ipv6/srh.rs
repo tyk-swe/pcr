@@ -8,11 +8,11 @@ use bytes::Bytes;
 
 use crate::{
     codec::{
-        CodecError, DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext,
+        DecodedLayerValue, EncodedLayer, Error as CodecError, LayerCodec, LayerDecodeContext,
         LayerEncodeContext, NetworkEnvelope,
     },
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflective_layer},
+    layer::{Id as ProtocolId, Layer, reflective_layer},
     registry::Discriminator,
 };
 
@@ -123,7 +123,7 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
         if segments_left > expected_last {
             let message =
                 format!("segments_left is {segments_left}, exceeding last_entry {expected_last}");
-            if context.mode == crate::build::BuildMode::Strict {
+            if context.mode == crate::build::Mode::Strict {
                 return Err(invalid("ipv6_srh", message));
             }
             diagnostics.push(
@@ -139,18 +139,7 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
             context.mode,
             &mut diagnostics,
         )?;
-        let segments_end = layer
-            .segments
-            .len()
-            .checked_mul(16)
-            .and_then(|length| length.checked_add(8))
-            .ok_or_else(|| invalid("ipv6_srh", "SRH segment-list length overflow"))?;
-        let unpadded_len = segments_end
-            .checked_add(layer.tlvs.len())
-            .ok_or_else(|| invalid("ipv6_srh", "SRH TLV length overflow"))?;
-        let header_len = unpadded_len
-            .checked_add((8 - unpadded_len % 8) % 8)
-            .ok_or_else(|| invalid("ipv6_srh", "SRH padding overflow"))?;
+        let (segments_end, header_len) = srh_lengths(layer)?;
         let hdr_ext_len = u8::try_from(header_len / 8 - 1)
             .map_err(|_| invalid("ipv6_srh", "SRH length cannot be represented"))?;
         let mut prefix = Vec::with_capacity(header_len);
@@ -259,4 +248,20 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
             &aliased_fields("ipv6_srh", fields, &[("segs", "segments")])?,
         )
     }
+}
+
+fn srh_lengths(layer: &SegmentRoutingHeader) -> Result<(usize, usize), CodecError> {
+    let segments_end = layer
+        .segments
+        .len()
+        .checked_mul(16)
+        .and_then(|length| length.checked_add(8))
+        .ok_or_else(|| invalid("ipv6_srh", "SRH segment-list length overflow"))?;
+    let unpadded_len = segments_end
+        .checked_add(layer.tlvs.len())
+        .ok_or_else(|| invalid("ipv6_srh", "SRH TLV length overflow"))?;
+    let header_len = unpadded_len
+        .checked_add((8 - unpadded_len % 8) % 8)
+        .ok_or_else(|| invalid("ipv6_srh", "SRH padding overflow"))?;
+    Ok((segments_end, header_len))
 }

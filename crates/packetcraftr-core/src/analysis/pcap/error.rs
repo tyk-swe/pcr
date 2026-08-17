@@ -7,7 +7,7 @@ use thiserror::Error;
 
 use super::model::Format;
 use crate::error::{Classification, Classified, Kind};
-use crate::frame::FrameError;
+use crate::frame::Error as FrameError;
 
 /// An error while reading or writing an offline capture.
 #[derive(Debug, Error)]

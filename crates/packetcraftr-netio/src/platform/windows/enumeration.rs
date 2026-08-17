@@ -16,16 +16,16 @@ use windows::Win32::NetworkManagement::IpHelper::{
 use windows::Win32::Networking::WinSock::AF_UNSPEC;
 
 use super::adapter::{BufferBounds, WindowsAdapter, parse_adapters};
-use crate::{interface::InterfaceInfo, route::NativeRouteError};
+use crate::{interface::InterfaceInfo, route::SystemError};
 
-pub(in crate::platform) fn interfaces() -> Result<Vec<InterfaceInfo>, NativeRouteError> {
+pub(in crate::platform) fn interfaces() -> Result<Vec<InterfaceInfo>, SystemError> {
     Ok(adapter_snapshots()?
         .into_iter()
         .map(|adapter| adapter.interface)
         .collect())
 }
 
-pub(super) fn adapter_snapshots() -> Result<Vec<WindowsAdapter>, NativeRouteError> {
+pub(super) fn adapter_snapshots() -> Result<Vec<WindowsAdapter>, SystemError> {
     const FLAGS: GET_ADAPTERS_ADDRESSES_FLAGS = GET_ADAPTERS_ADDRESSES_FLAGS(
         GAA_FLAG_INCLUDE_PREFIX.0
             | GAA_FLAG_SKIP_ANYCAST.0
@@ -50,7 +50,7 @@ pub(super) fn adapter_snapshots() -> Result<Vec<WindowsAdapter>, NativeRouteErro
             .and_then(|bytes| bytes.checked_add(align_of::<usize>() - 1))
             .map(|bytes| bytes / align_of::<usize>())
             .filter(|words| *words != 0)
-            .ok_or_else(|| NativeRouteError::InvalidResponse {
+            .ok_or_else(|| SystemError::InvalidResponse {
                 message: "Windows reported an invalid adapter buffer size".to_owned(),
             })?;
         // A usize vector supplies alignment at least as strict as every IP
@@ -76,18 +76,17 @@ pub(super) fn adapter_snapshots() -> Result<Vec<WindowsAdapter>, NativeRouteErro
         if result != NO_ERROR.0 {
             return Err(win32_error("GetAdaptersAddresses", WIN32_ERROR(result)));
         }
-        let initialized =
-            usize::try_from(supplied).map_err(|_| NativeRouteError::InvalidResponse {
-                message: "Windows returned an unrepresentable adapter buffer length".to_owned(),
-            })?;
+        let initialized = usize::try_from(supplied).map_err(|_| SystemError::InvalidResponse {
+            message: "Windows returned an unrepresentable adapter buffer length".to_owned(),
+        })?;
         let allocated = storage
             .len()
             .checked_mul(size_of::<usize>())
-            .ok_or_else(|| NativeRouteError::InvalidResponse {
+            .ok_or_else(|| SystemError::InvalidResponse {
                 message: "Windows adapter buffer size overflowed".to_owned(),
             })?;
         if initialized == 0 || initialized > allocated {
-            return Err(NativeRouteError::InvalidResponse {
+            return Err(SystemError::InvalidResponse {
                 message: format!(
                     "Windows initialized {initialized} bytes of a {allocated}-byte adapter buffer"
                 ),
@@ -96,14 +95,14 @@ pub(super) fn adapter_snapshots() -> Result<Vec<WindowsAdapter>, NativeRouteErro
         let bounds = BufferBounds::new(storage.as_ptr().cast(), initialized)?;
         return parse_adapters(head, bounds);
     }
-    Err(NativeRouteError::OperatingSystem {
+    Err(SystemError::OperatingSystem {
         operation: "GetAdaptersAddresses",
         message: "adapter list changed during four consecutive reads".to_owned(),
     })
 }
 
-pub(super) fn win32_error(operation: &'static str, error: WIN32_ERROR) -> NativeRouteError {
-    NativeRouteError::OperatingSystem {
+pub(super) fn win32_error(operation: &'static str, error: WIN32_ERROR) -> SystemError {
+    SystemError::OperatingSystem {
         operation,
         message: format!(
             "{} (Win32 error {})",

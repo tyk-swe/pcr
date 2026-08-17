@@ -6,15 +6,15 @@ use std::net::IpAddr;
 use packetcraftr_core::{Packet, semantics};
 
 use super::super::address::is_public;
-use super::super::target::{Authorized, Error, Hostname, Resolver, Target};
-use super::contract::{MAX_RESOLVED_ADDRESSES, TrafficPolicy, TrafficPolicyError};
+use super::super::target::{Authorized, Error as TargetError, Hostname, Resolver, Target};
+use super::contract::{Error, MAX_RESOLVED_ADDRESSES, Policy};
 
-impl TrafficPolicy {
+impl Policy {
     /// Validates policy configuration before resolver, route, capture, or
     /// transmission providers are invoked.
-    pub fn validate(&self) -> Result<(), Error> {
+    pub fn validate(&self) -> Result<(), TargetError> {
         if !(1..=MAX_RESOLVED_ADDRESSES).contains(&self.max_resolved_addresses) {
-            return Err(Error::InvalidAddressLimit {
+            return Err(TargetError::InvalidAddressLimit {
                 value: self.max_resolved_addresses,
                 maximum: MAX_RESOLVED_ADDRESSES,
             });
@@ -23,9 +23,9 @@ impl TrafficPolicy {
     }
 
     /// Authorizes one already-resolved or packet-declared destination.
-    pub fn authorize_destination(&self, destination: IpAddr) -> Result<(), TrafficPolicyError> {
+    pub fn authorize_destination(&self, destination: IpAddr) -> Result<(), Error> {
         if !self.allow_public_destinations && is_public(destination) {
-            return Err(TrafficPolicyError::PublicDestination { destination });
+            return Err(Error::PublicDestination { destination });
         }
         Ok(())
     }
@@ -35,19 +35,15 @@ impl TrafficPolicy {
     /// Authorization seam used by the bounded workflows. Not part of the
     /// documented API.
     #[doc(hidden)]
-    pub fn authorize_operation(
-        &self,
-        packets: u64,
-        wire_bytes: u64,
-    ) -> Result<(), TrafficPolicyError> {
+    pub fn authorize_operation(&self, packets: u64, wire_bytes: u64) -> Result<(), Error> {
         if packets > self.max_packets_per_operation {
-            return Err(TrafficPolicyError::PacketLimit {
+            return Err(Error::PacketLimit {
                 actual: packets,
                 limit: self.max_packets_per_operation,
             });
         }
         if wire_bytes > self.max_bytes_per_operation {
-            return Err(TrafficPolicyError::ByteLimit {
+            return Err(Error::ByteLimit {
                 actual: wire_bytes,
                 limit: self.max_bytes_per_operation,
             });
@@ -55,9 +51,9 @@ impl TrafficPolicy {
         Ok(())
     }
 
-    fn authorize_hostname(&self, hostname: &Hostname) -> Result<(), TrafficPolicyError> {
+    fn authorize_hostname(&self, hostname: &Hostname) -> Result<(), Error> {
         if !self.allow_hostname_resolution {
-            return Err(TrafficPolicyError::HostnameResolution {
+            return Err(Error::HostnameResolution {
                 hostname: hostname.to_string(),
             });
         }
@@ -66,9 +62,9 @@ impl TrafficPolicy {
 
     /// Authorizes every route-bearing address declared by a packet before
     /// route, capture, neighbor, or transmission providers can observe it.
-    pub fn authorize_packet_destinations(&self, packet: &Packet) -> Result<(), TrafficPolicyError> {
+    pub fn authorize_packet_destinations(&self, packet: &Packet) -> Result<(), Error> {
         let destinations = semantics::live_destinations(packet).map_err(|source| {
-            TrafficPolicyError::InvalidPacketSemantics {
+            Error::InvalidPacketSemantics {
                 reason: source.to_string(),
             }
         })?;
@@ -86,7 +82,7 @@ impl TrafficPolicy {
         &self,
         target: &Target,
         resolver: &R,
-    ) -> Result<Authorized, Error> {
+    ) -> Result<Authorized, TargetError> {
         self.validate()?;
         let addresses = match target {
             Target::Address(address) => vec![*address],
@@ -102,7 +98,7 @@ impl TrafficPolicy {
                         continue;
                     }
                     if addresses.len() >= self.max_resolved_addresses {
-                        return Err(Error::AddressLimit {
+                        return Err(TargetError::AddressLimit {
                             hostname: hostname.to_string(),
                             limit: self.max_resolved_addresses,
                         });
@@ -110,7 +106,7 @@ impl TrafficPolicy {
                     addresses.push(address);
                 }
                 if addresses.is_empty() {
-                    return Err(Error::NoAddresses {
+                    return Err(TargetError::NoAddresses {
                         hostname: hostname.to_string(),
                     });
                 }

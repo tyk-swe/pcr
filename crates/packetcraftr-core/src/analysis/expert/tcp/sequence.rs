@@ -3,7 +3,8 @@
 
 use std::collections::HashMap;
 
-use crate::diagnostic::DiagnosticSeverity;
+use crate::diagnostic::Severity;
+use crate::protocol::transport::Tcp;
 
 use super::super::finding::new as new_finding;
 use super::super::observation::TcpObservation;
@@ -44,9 +45,9 @@ pub(super) fn reconcile_events(
         }
         findings.push(new_finding(
             if *conflicting {
-                DiagnosticSeverity::Error
+                Severity::Error
             } else {
-                DiagnosticSeverity::Warning
+                Severity::Warning
             },
             if *conflicting {
                 "tcp.retransmission_conflicting"
@@ -140,7 +141,7 @@ pub(super) fn observe(
     let keep_alive = probe_shape && !peer_zero_window;
     if keep_alive {
         findings.push(new_finding(
-            DiagnosticSeverity::Info,
+            Severity::Info,
             "tcp.keep_alive",
             number,
             stream,
@@ -164,7 +165,7 @@ pub(super) fn observe(
             .wrapping_add(u32::try_from(payload_len).unwrap_or(u32::MAX));
         if payload_next.wrapping_sub(end) < 0x8000_0000 {
             findings.push(new_finding(
-                DiagnosticSeverity::Warning,
+                Severity::Warning,
                 "tcp.retransmission",
                 number,
                 stream,
@@ -184,7 +185,7 @@ pub(super) fn observe(
         && tcp.sequence.wrapping_sub(next) < 0x8000_0000
     {
         findings.push(new_finding(
-            DiagnosticSeverity::Warning,
+            Severity::Warning,
             "tcp.previous_segment_not_captured",
             number,
             stream,
@@ -194,28 +195,38 @@ pub(super) fn observe(
             ),
         ));
     }
-    if !keep_alive && (payload_len > 0 || syn || fin) {
-        let advance =
-            u32::try_from(payload_len).unwrap_or(u32::MAX) + u32::from(syn) + u32::from(fin);
-        let end = tcp.sequence.wrapping_add(advance);
-        sent.next_sequence = Some(match sent.next_sequence {
-            // Sequence numbers use serial arithmetic across wraparound.
-            Some(next) if end.wrapping_sub(next) >= 0x8000_0000 => next,
-            _ => end,
-        });
-        if payload_len > 0 {
-            let payload_end = tcp
-                .sequence
-                .wrapping_add(u32::from(syn))
-                .wrapping_add(u32::try_from(payload_len).unwrap_or(u32::MAX));
-            sent.payload_next = Some(match sent.payload_next {
-                Some(next) if payload_end.wrapping_sub(next) >= 0x8000_0000 => next,
-                _ => payload_end,
-            });
-        }
-    }
+    update_next_sequences(sent, tcp, payload_len, syn, fin, keep_alive);
 
     keep_alive
+}
+
+fn update_next_sequences(
+    sent: &mut DirectionState,
+    tcp: &Tcp,
+    payload_len: usize,
+    syn: bool,
+    fin: bool,
+    keep_alive: bool,
+) {
+    if keep_alive || (payload_len == 0 && !syn && !fin) {
+        return;
+    }
+    let advance = u32::try_from(payload_len).unwrap_or(u32::MAX) + u32::from(syn) + u32::from(fin);
+    let end = tcp.sequence.wrapping_add(advance);
+    sent.next_sequence = Some(match sent.next_sequence {
+        Some(next) if end.wrapping_sub(next) >= 0x8000_0000 => next,
+        _ => end,
+    });
+    if payload_len > 0 {
+        let payload_end = tcp
+            .sequence
+            .wrapping_add(u32::from(syn))
+            .wrapping_add(u32::try_from(payload_len).unwrap_or(u32::MAX));
+        sent.payload_next = Some(match sent.payload_next {
+            Some(next) if payload_end.wrapping_sub(next) >= 0x8000_0000 => next,
+            _ => payload_end,
+        });
+    }
 }
 
 pub(super) fn record_clean_closures(
@@ -249,7 +260,7 @@ pub(super) fn finish(
                 return None;
             }
             Some(new_finding(
-                DiagnosticSeverity::Info,
+                Severity::Info,
                 "tcp.incomplete_at_end",
                 end_number,
                 streams

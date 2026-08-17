@@ -6,10 +6,10 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use packetcraftr_core::analysis::pcap::{
-    CaptureHeader, Endianness, Error, Limits, MetadataBlockKind, PacketBlockKind, Reader,
-    RecordKind, Writer, rewrite,
+    CaptureHeader, CaptureRecord, Endianness, Error, Limits, MetadataBlockKind, PacketBlockKind,
+    Reader, RecordKind, Writer, rewrite,
 };
-use packetcraftr_core::analysis::stats::StatsCollector;
+use packetcraftr_core::analysis::stats::Collector;
 use packetcraftr_core::analysis::{Error as AnalysisError, Options as AnalysisOptions, run};
 use packetcraftr_core::protocol::builtin;
 
@@ -231,6 +231,20 @@ fn pcapng_records_options_sections_and_packet_kinds_are_preserved() {
         records.push(record);
     }
 
+    assert_interface_records(&records);
+    assert_packet_records(&records);
+    assert_metadata_records(&records);
+
+    let mut rewritten_reader = Reader::new(Cursor::new(input.clone())).expect("pcapng reopens");
+    let (output, report) = rewrite(&mut rewritten_reader, Vec::new(), Limits::default())
+        .expect("all validated records rewrite");
+    assert_eq!(output, input);
+    assert_eq!(report.frames, 4);
+    assert_eq!(report.interfaces, 2);
+    assert_eq!(report.metadata_records, 8);
+}
+
+fn assert_interface_records(records: &[CaptureRecord]) {
     let idbs: Vec<_> = records
         .iter()
         .filter_map(|record| match &record.kind {
@@ -255,7 +269,9 @@ fn pcapng_records_options_sections_and_packet_kinds_are_preserved() {
             );
         }
     }
+}
 
+fn assert_packet_records(records: &[CaptureRecord]) {
     let packets: Vec<_> = records
         .iter()
         .filter(|record| matches!(record.kind, RecordKind::Packet { .. }))
@@ -318,7 +334,9 @@ fn pcapng_records_options_sections_and_packet_kinds_are_preserved() {
         packets[3].frame().and_then(|frame| frame.interface),
         Some(1)
     );
+}
 
+fn assert_metadata_records(records: &[CaptureRecord]) {
     assert!(records.iter().any(|record| matches!(record.kind, RecordKind::Metadata(MetadataBlockKind::Section(ref section)) if section.index == 1 && section.endianness == Endianness::Big)));
     assert!(records.iter().any(|record| matches!(
         record.kind,
@@ -352,14 +370,6 @@ fn pcapng_records_options_sections_and_packet_kinds_are_preserved() {
             block_type: 0x1234_5678
         })
     )));
-
-    let mut rewritten_reader = Reader::new(Cursor::new(input.clone())).expect("pcapng reopens");
-    let (output, report) = rewrite(&mut rewritten_reader, Vec::new(), Limits::default())
-        .expect("all validated records rewrite");
-    assert_eq!(output, input);
-    assert_eq!(report.frames, 4);
-    assert_eq!(report.interfaces, 2);
-    assert_eq!(report.metadata_records, 8);
 }
 
 #[test]
@@ -401,8 +411,8 @@ fn statistics_reject_simple_packet_time_absence_explicitly() {
     input.extend_from_slice(&simple_packet(Endianness::Little));
     let mut reader = Reader::new(Cursor::new(input)).expect("pcapng opens");
     let registry = Arc::new(builtin::registry().expect("built-in registry initializes"));
-    let mut collector = StatsCollector::new(std::time::Duration::from_secs(1))
-        .expect("statistics interval is valid");
+    let mut collector =
+        Collector::new(std::time::Duration::from_secs(1)).expect("statistics interval is valid");
     let error = run(
         &mut reader,
         registry,

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use packetcraftr_netio::capture::{DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES};
 
-use super::{MAX_RATE, error::FuzzError};
+use super::{MAX_RATE, error::Error};
 
 /// Bounds exact response evidence retained by a live fuzz campaign.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -27,7 +27,7 @@ impl Default for LiveLimits {
 }
 
 impl LiveLimits {
-    pub fn validate(self) -> Result<Self, FuzzError> {
+    pub fn validate(self) -> Result<Self, Error> {
         for (field, value, maximum) in [
             (
                 "max_evidence_frames",
@@ -41,7 +41,7 @@ impl LiveLimits {
             ),
         ] {
             if value == 0 || value > maximum {
-                return Err(FuzzError::InvalidLimit {
+                return Err(Error::InvalidLimit {
                     field,
                     value: u64::try_from(value).unwrap_or(u64::MAX),
                     reason: format!("must be within 1..={maximum}"),
@@ -75,10 +75,10 @@ impl Default for LiveOptions {
 }
 
 impl LiveOptions {
-    pub fn validate(self) -> Result<Self, FuzzError> {
+    pub fn validate(self) -> Result<Self, Error> {
         self.limits.validate()?;
         if self.timeout.is_zero() || self.timeout > packetcraftr_netio::capture::MAX_TIMEOUT {
-            return Err(FuzzError::InvalidTimeout {
+            return Err(Error::InvalidTimeout {
                 value: self.timeout,
                 maximum: packetcraftr_netio::capture::MAX_TIMEOUT,
             });
@@ -86,7 +86,7 @@ impl LiveOptions {
         if let Some(rate) = self.cases_per_second
             && (rate == 0 || rate > MAX_RATE)
         {
-            return Err(FuzzError::InvalidLimit {
+            return Err(Error::InvalidLimit {
                 field: "cases_per_second",
                 value: u64::from(rate),
                 reason: format!("must be within 1..={MAX_RATE}"),

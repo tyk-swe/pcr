@@ -5,7 +5,6 @@
 
 use packetcraftr_core::{
     build::BuiltPacket,
-    diagnostic::{Diagnostic, push_diagnostic_once},
     frame::{Frame, LinkType},
 };
 use packetcraftr_netio::{
@@ -32,6 +31,47 @@ impl ExecutionPermit {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum BudgetError {
+    FrameCountOverflow,
+    FrameLimit,
+    ByteCountOverflow,
+    ByteLimit,
+}
+
+#[derive(Default)]
+pub(crate) struct Budget {
+    retained_frames: usize,
+    retained_bytes: usize,
+}
+
+impl Budget {
+    pub(crate) fn reserve(
+        &mut self,
+        additional_bytes: usize,
+        max_frames: usize,
+        max_bytes: usize,
+    ) -> Result<(), BudgetError> {
+        let next_frames = self
+            .retained_frames
+            .checked_add(1)
+            .ok_or(BudgetError::FrameCountOverflow)?;
+        if next_frames > max_frames {
+            return Err(BudgetError::FrameLimit);
+        }
+        let next_bytes = self
+            .retained_bytes
+            .checked_add(additional_bytes)
+            .ok_or(BudgetError::ByteCountOverflow)?;
+        if next_bytes > max_bytes {
+            return Err(BudgetError::ByteLimit);
+        }
+        self.retained_frames = next_frames;
+        self.retained_bytes = next_bytes;
+        Ok(())
+    }
+}
+
 /// Opaque evidence tying a semantic build and route to the exact bytes and
 /// timing accepted by one transmission provider call.
 #[derive(Clone, Debug)]
@@ -50,7 +90,7 @@ impl SentPacket {
     ) -> Result<Self, LiveIoError> {
         report.validate_exact(&built.bytes)?;
         let link_type = match route.plan.mode {
-            LinkMode::Layer2 => route.plan.route.link_type,
+            LinkMode::Layer2 => route.plan.decision.link_type,
             LinkMode::Layer3 => LinkType::RAW,
             LinkMode::Auto => return Err(LiveIoError::UnresolvedLinkMode),
         };
@@ -118,12 +158,12 @@ pub(crate) fn test_sent_packet_with_report(
 fn test_built_packet(packet: packetcraftr_core::Packet) -> BuiltPacket {
     use std::sync::Arc;
 
-    use packetcraftr_core::build::{BuildContext, BuildOptions, Builder};
+    use packetcraftr_core::build::{Builder, Context, Options};
 
     Builder::new(Arc::new(
         packetcraftr_core::protocol::builtin::registry().expect("built-in registry"),
     ))
-    .build(packet, BuildContext::default(), BuildOptions::default())
+    .build(packet, Context::default(), Options::default())
     .expect("sent-packet fixture must build")
 }
 
@@ -141,13 +181,13 @@ fn test_materialized_route() -> MaterializedRoute {
 
     Materialized {
         plan: Plan {
-            route: Decision {
+            decision: Decision {
                 interface: InterfaceId {
                     name: "fixture0".to_owned(),
                     index: 1,
                 },
                 source_mac: None,
-                selected_address: None,
+                selected_source: None,
                 preferred_source: None,
                 next_hop: None,
                 selection_reason: RouteSelectionReason::InterfaceOnly,
@@ -170,63 +210,6 @@ fn test_materialized_route() -> MaterializedRoute {
         },
         neighbor_resolution: None,
     }
-}
-
-pub(super) fn reserve_capture_evidence(
-    retained_frames: &mut usize,
-    retained_bytes: &mut usize,
-    additional: usize,
-    frame_limit: usize,
-    byte_limit: usize,
-    diagnostics: &mut Vec<Diagnostic>,
-) -> bool {
-    let Some(frame_total) = retained_frames.checked_add(1) else {
-        push_diagnostic_once(
-            diagnostics,
-            Diagnostic::warning(
-                "exchange.capture_frame_limit",
-                "retained capture frame accounting overflowed; frame was not retained",
-            ),
-        );
-        return false;
-    };
-    if frame_total > frame_limit {
-        push_diagnostic_once(
-            diagnostics,
-            Diagnostic::warning(
-                "exchange.capture_frame_limit",
-                format!(
-                    "aggregate retained capture frame limit {frame_limit} reached; later frames were not retained"
-                ),
-            ),
-        );
-        return false;
-    }
-    let Some(byte_total) = retained_bytes.checked_add(additional) else {
-        push_diagnostic_once(
-            diagnostics,
-            Diagnostic::warning(
-                "exchange.capture_byte_limit",
-                "retained capture byte accounting overflowed; frame was not retained",
-            ),
-        );
-        return false;
-    };
-    if byte_total > byte_limit {
-        push_diagnostic_once(
-            diagnostics,
-            Diagnostic::warning(
-                "exchange.capture_byte_limit",
-                format!(
-                    "retained capture byte limit {byte_limit} reached; later frames were not retained"
-                ),
-            ),
-        );
-        return false;
-    }
-    *retained_frames = frame_total;
-    *retained_bytes = byte_total;
-    true
 }
 
 #[cfg(test)]
@@ -254,88 +237,51 @@ mod tests {
 
     #[test]
     fn reservation_commits_both_counters_only_when_every_bound_fits() {
-        let mut frames = 1;
-        let mut bytes = 10;
-        let mut diagnostics = Vec::new();
-        assert!(reserve_capture_evidence(
-            &mut frames,
-            &mut bytes,
-            5,
-            2,
-            15,
-            &mut diagnostics,
-        ));
-        assert_eq!((frames, bytes), (2, 15));
-        assert!(diagnostics.is_empty());
+        let mut budget = Budget {
+            retained_frames: 1,
+            retained_bytes: 10,
+        };
+        assert_eq!(budget.reserve(5, 2, 15), Ok(()));
+        assert_eq!((budget.retained_frames, budget.retained_bytes), (2, 15));
     }
 
     #[test]
-    fn frame_limit_and_overflow_leave_counters_untouched_and_deduplicate_diagnostics() {
-        let mut frames = 1;
-        let mut bytes = 3;
-        let mut diagnostics = Vec::new();
-        assert!(!reserve_capture_evidence(
-            &mut frames,
-            &mut bytes,
-            1,
-            1,
-            10,
-            &mut diagnostics,
-        ));
-        assert!(!reserve_capture_evidence(
-            &mut frames,
-            &mut bytes,
-            1,
-            1,
-            10,
-            &mut diagnostics,
-        ));
-        assert_eq!((frames, bytes), (1, 3));
-        assert_eq!(diagnostics.len(), 1);
-        assert_eq!(diagnostics[0].code, "exchange.capture_frame_limit");
+    fn frame_limit_and_overflow_leave_counters_untouched() {
+        let mut budget = Budget {
+            retained_frames: 1,
+            retained_bytes: 3,
+        };
+        assert_eq!(budget.reserve(1, 1, 10), Err(BudgetError::FrameLimit));
+        assert_eq!((budget.retained_frames, budget.retained_bytes), (1, 3));
 
-        frames = usize::MAX;
-        diagnostics.clear();
-        assert!(!reserve_capture_evidence(
-            &mut frames,
-            &mut bytes,
-            1,
-            usize::MAX,
-            10,
-            &mut diagnostics,
-        ));
-        assert_eq!(frames, usize::MAX);
-        assert_eq!(bytes, 3);
-        assert_eq!(diagnostics[0].code, "exchange.capture_frame_limit");
+        budget.retained_frames = usize::MAX;
+        assert_eq!(
+            budget.reserve(1, usize::MAX, 10),
+            Err(BudgetError::FrameCountOverflow)
+        );
+        assert_eq!(
+            (budget.retained_frames, budget.retained_bytes),
+            (usize::MAX, 3)
+        );
     }
 
     #[test]
     fn byte_limit_and_overflow_leave_counters_untouched() {
-        let mut frames = 1;
-        let mut bytes = 9;
-        let mut diagnostics = Vec::new();
-        assert!(!reserve_capture_evidence(
-            &mut frames,
-            &mut bytes,
-            2,
-            10,
-            10,
-            &mut diagnostics,
-        ));
-        assert_eq!((frames, bytes), (1, 9));
-        assert_eq!(diagnostics[0].code, "exchange.capture_byte_limit");
+        let mut budget = Budget {
+            retained_frames: 1,
+            retained_bytes: 9,
+        };
+        assert_eq!(budget.reserve(2, 10, 10), Err(BudgetError::ByteLimit));
+        assert_eq!((budget.retained_frames, budget.retained_bytes), (1, 9));
 
-        bytes = usize::MAX;
-        diagnostics.clear();
-        assert!(!reserve_capture_evidence(
-            &mut frames,
-            &mut bytes,
-            1,
-            10,
-            usize::MAX,
-            &mut diagnostics,
-        ));
-        assert_eq!((frames, bytes), (1, usize::MAX));
-        assert_eq!(diagnostics[0].code, "exchange.capture_byte_limit");
+        budget.retained_bytes = usize::MAX;
+        assert_eq!(
+            budget.reserve(1, 10, usize::MAX),
+            Err(BudgetError::ByteCountOverflow)
+        );
+        assert_eq!(
+            (budget.retained_frames, budget.retained_bytes),
+            (1, usize::MAX)
+        );
     }
 }

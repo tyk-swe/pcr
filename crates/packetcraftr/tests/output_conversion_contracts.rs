@@ -9,18 +9,18 @@ use std::time::{Duration, UNIX_EPOCH};
 use bytes::Bytes;
 use packetcraftr::core::Packet;
 use packetcraftr::core::analysis::expert::{
-    ExpertSummary, Finding as AnalysisFinding, StreamRef,
-    StreamTransport as AnalysisStreamTransport,
+    Finding as AnalysisFinding, StreamRef, StreamTransport as AnalysisStreamTransport,
+    Summary as ExpertSummary,
 };
 use packetcraftr::core::analysis::follow::{
-    Chunk as AnalysisChunk, Direction as AnalysisDirection, FollowSummary,
+    Chunk as AnalysisChunk, Direction as AnalysisDirection, Summary as FollowSummary,
 };
 use packetcraftr::core::analysis::reassembly::tcp::FlowKey;
 use packetcraftr::core::analysis::stats::{
-    ConversationStat, EndpointStat, IoBucketStat, PortStat, ProtocolStat, StatsReport,
+    ConversationStat, EndpointStat, IoBucketStat, PortStat, ProtocolStat, Report as StatsReport,
     TransportKind,
 };
-use packetcraftr::core::diagnostic::{Diagnostic, DiagnosticSeverity};
+use packetcraftr::core::diagnostic::{Diagnostic, Severity as DiagnosticSeverity};
 use packetcraftr::core::frame::{Direction as CaptureDirection, Frame, LinkType};
 use packetcraftr::core::layer::Raw;
 use packetcraftr::core::protocol::{builtin, network::Ipv4, transport::Udp};
@@ -47,11 +47,7 @@ fn built_udp_packet() -> (
     });
     packet.push(Raw::new(b"payload".to_vec()));
     let built = build::Builder::new(Arc::clone(&registry))
-        .build(
-            packet,
-            build::BuildContext::default(),
-            build::BuildOptions::default(),
-        )
+        .build(packet, build::Context::default(), build::Options::default())
         .expect("representative packet must build");
     (registry, built)
 }
@@ -89,7 +85,7 @@ fn packet_output_adapters_preserve_wire_data_and_separate_diagnostics() {
     frame.interface = Some(3);
     frame.direction = Some(CaptureDirection::Inbound);
     let mut decoded = decode::Dissector::new(registry)
-        .decode(frame.clone(), decode::DecodeOptions::default())
+        .decode(frame.clone(), decode::Options::default())
         .expect("built packet must dissect");
     decoded
         .diagnostics
@@ -208,7 +204,11 @@ fn stats_output_selects_exactly_one_requested_table() {
             );
         }
     }
+}
 
+#[test]
+fn stats_conversation_output_preserves_source_fields() {
+    let report = representative_stats_report();
     let conversations = stats::Result::try_from_report(stats::Table::Conversations, &report, 9)
         .expect("conversation report converts")
         .conversations
@@ -235,7 +235,11 @@ fn stats_output_selects_exactly_one_requested_table() {
         (4, 201)
     );
     assert_eq!(conversation.duration, Duration::from_millis(3_250));
+}
 
+#[test]
+fn stats_endpoint_output_preserves_source_fields() {
+    let report = representative_stats_report();
     let endpoints = stats::Result::try_from_report(stats::Table::Endpoints, &report, 9)
         .expect("endpoint report converts")
         .endpoints
@@ -250,7 +254,11 @@ fn stats_output_selects_exactly_one_requested_table() {
         ),
         (IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)), 3, 120, 4, 201)
     );
+}
 
+#[test]
+fn stats_protocol_output_preserves_source_fields() {
+    let report = representative_stats_report();
     let protocols = stats::Result::try_from_report(stats::Table::Protocols, &report, 9)
         .expect("protocol report converts")
         .protocols
@@ -263,7 +271,11 @@ fn stats_output_selects_exactly_one_requested_table() {
         ),
         ("ipv4", 7, 321)
     );
+}
 
+#[test]
+fn stats_port_output_preserves_source_fields() {
+    let report = representative_stats_report();
     let ports = stats::Result::try_from_report(stats::Table::Ports, &report, 9)
         .expect("port report converts")
         .ports
@@ -277,7 +289,11 @@ fn stats_output_selects_exactly_one_requested_table() {
         ),
         (stats::Transport::Udp, 53, 2, 80)
     );
+}
 
+#[test]
+fn stats_io_output_preserves_interval_and_buckets() {
+    let report = representative_stats_report();
     let io = stats::Result::try_from_report(stats::Table::Io, &report, 9)
         .expect("I/O report converts")
         .io

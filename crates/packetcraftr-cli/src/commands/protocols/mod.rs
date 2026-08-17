@@ -9,15 +9,12 @@ use packetcraftr::{
     output,
 };
 
-use self::arguments::ProtocolsArgs;
+use self::arguments::Args;
 use super::super::errors::CliError;
 use super::super::rendering::{emit_aggregate, write_stdout_line};
-use super::super::system::default_registry_arc;
+use super::registry;
 
-pub(super) fn run(
-    arguments: ProtocolsArgs,
-    format: output::contract::Format,
-) -> Result<(), CliError> {
+pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
     match arguments.protocol {
         Some(name) => describe_protocol(&name, format),
         None => list_protocols(format),
@@ -65,7 +62,7 @@ fn describe_protocol(name: &str, format: output::contract::Format) -> Result<(),
                     .any(|alias| alias.eq_ignore_ascii_case(name))
         })
         .ok_or_else(|| unknown_protocol(name))?;
-    let registry = default_registry_arc()?;
+    let registry = registry()?;
     let fields = registry
         .schema(support.protocol)
         .map(|schema| {

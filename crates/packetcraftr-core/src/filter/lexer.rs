@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::error::FilterError;
+use super::error::Error;
 
 /// Comparison operators accepted by the display-filter grammar.
 ///
@@ -55,8 +55,8 @@ fn is_word_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b':' | b'/' | b'#' | b'-')
 }
 
-fn syntax(offset: usize, message: impl Into<String>) -> FilterError {
-    FilterError::Syntax {
+fn syntax(offset: usize, message: impl Into<String>) -> Error {
+    Error::Syntax {
         offset,
         message: message.into(),
     }
@@ -67,7 +67,7 @@ fn syntax(offset: usize, message: impl Into<String>) -> FilterError {
 /// Operates on bytes rather than characters: every token character is ASCII,
 /// and any non-ASCII byte can only appear inside a quoted string, where it is
 /// copied through untouched.
-pub(super) fn tokenize(source: &str) -> Result<Vec<Spanned>, FilterError> {
+pub(super) fn tokenize(source: &str) -> Result<Vec<Spanned>, Error> {
     let bytes = source.as_bytes();
     let mut tokens = Vec::new();
     let mut index = 0;
@@ -79,25 +79,15 @@ pub(super) fn tokenize(source: &str) -> Result<Vec<Spanned>, FilterError> {
             continue;
         }
         let token = match byte {
-            b'(' => {
+            b'(' | b')' | b'{' | b'}' | b',' => {
                 index += 1;
-                Token::LeftParen
-            }
-            b')' => {
-                index += 1;
-                Token::RightParen
-            }
-            b'{' => {
-                index += 1;
-                Token::LeftBrace
-            }
-            b'}' => {
-                index += 1;
-                Token::RightBrace
-            }
-            b',' => {
-                index += 1;
-                Token::Comma
+                match byte {
+                    b'(' => Token::LeftParen,
+                    b')' => Token::RightParen,
+                    b'{' => Token::LeftBrace,
+                    b'}' => Token::RightBrace,
+                    _ => Token::Comma,
+                }
             }
             b'[' => {
                 let (contents, next) = read_slice(bytes, index)?;
@@ -193,7 +183,7 @@ fn keyword(word: &str) -> Option<Token> {
 
 /// Reads a `[..]` suffix, returning its contents and the index after the `]`.
 /// Slice contents are parsed later, once the field it applies to is known.
-fn read_slice(bytes: &[u8], open: usize) -> Result<(String, usize), FilterError> {
+fn read_slice(bytes: &[u8], open: usize) -> Result<(String, usize), Error> {
     let start = open + 1;
     let mut index = start;
     while index < bytes.len() && bytes[index] != b']' {
@@ -211,7 +201,7 @@ fn read_slice(bytes: &[u8], open: usize) -> Result<(String, usize), FilterError>
 }
 
 /// Reads a double-quoted string, honouring `\\` and `\"` escapes.
-fn read_quoted(source: &str, open: usize) -> Result<(String, usize), FilterError> {
+fn read_quoted(source: &str, open: usize) -> Result<(String, usize), Error> {
     let bytes = source.as_bytes();
     let mut contents = Vec::new();
     let mut index = open + 1;

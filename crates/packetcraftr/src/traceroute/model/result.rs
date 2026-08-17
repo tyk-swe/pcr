@@ -10,24 +10,24 @@ use packetcraftr_core::frame::Frame;
 
 use crate::Stats;
 
-use super::request::TracerouteStrategy;
+use super::request::Strategy;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TracerouteProbeStatus {
+pub enum ProbeStatus {
     Response,
     Timeout,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TracerouteResponseKind {
+pub enum ResponseKind {
     Intermediate,
     DestinationReached,
     Unreachable,
 }
 
-impl TracerouteResponseKind {
+impl ResponseKind {
     pub(in crate::traceroute) const fn rank(self) -> u8 {
         match self {
             Self::Intermediate => 1,
@@ -39,7 +39,7 @@ impl TracerouteResponseKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TracerouteCompletion {
+pub enum Completion {
     DestinationReached,
     Unreachable,
     MaximumHops,
@@ -47,15 +47,15 @@ pub enum TracerouteCompletion {
 }
 
 #[derive(Clone, Debug)]
-pub struct TracerouteProbeEvidence {
+pub struct ProbeEvidence {
     pub sequence: u64,
     pub hop_limit: u8,
     pub attempt: u32,
     pub destination: IpAddr,
-    pub strategy: TracerouteStrategy,
+    pub strategy: Strategy,
     pub destination_port: Option<u16>,
-    pub status: TracerouteProbeStatus,
-    pub response_kind: Option<TracerouteResponseKind>,
+    pub status: ProbeStatus,
+    pub response_kind: Option<ResponseKind>,
     pub responder: Option<IpAddr>,
     pub sent_at: SystemTime,
     pub received_at: Option<SystemTime>,
@@ -65,27 +65,27 @@ pub struct TracerouteProbeEvidence {
 }
 
 #[derive(Clone, Debug)]
-pub struct TracerouteHopResult {
+pub struct Hop {
     pub hop_limit: u8,
-    pub probes: Vec<TracerouteProbeEvidence>,
+    pub probes: Vec<ProbeEvidence>,
 }
 
 #[derive(Clone, Debug)]
-pub struct TracerouteUndecodedEvidence {
+pub struct UndecodedEvidence {
     pub hop_limit: u8,
     pub frame: Frame,
 }
 
 #[derive(Clone, Debug)]
-pub struct TracerouteResult {
+pub struct Result {
     pub target: String,
     pub resolved_addresses: Vec<IpAddr>,
     pub destination: IpAddr,
-    pub strategy: TracerouteStrategy,
+    pub strategy: Strategy,
     pub destination_port: Option<u16>,
-    pub hops: Vec<TracerouteHopResult>,
-    pub undecoded: Vec<TracerouteUndecodedEvidence>,
-    pub completion: TracerouteCompletion,
+    pub hops: Vec<Hop>,
+    pub undecoded: Vec<UndecodedEvidence>,
+    pub completion: Completion,
     pub diagnostics: Vec<Diagnostic>,
     pub stats: Stats,
 }

@@ -10,6 +10,5 @@
 mod manifest;
 
 pub use manifest::{
-    BUILTIN_CAPTURE_ROOTS, BUILTIN_PROTOCOLS, CaptureRootByteOrder as CaptureByteOrder,
-    CaptureRootSupport as CaptureRoot, ProtocolSupport as Protocol,
+    BUILTIN_CAPTURE_ROOTS, BUILTIN_PROTOCOLS, CaptureByteOrder, CaptureRoot, Protocol,
 };

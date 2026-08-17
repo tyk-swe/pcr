@@ -70,30 +70,7 @@ impl FragmentMergePlan {
 
 impl Reassembler {
     pub(super) fn plan_fragment(&self, fragment: &Fragment) -> Result<FragmentPlan, Error> {
-        if fragment.bytes.is_empty() {
-            return Err(Error::EmptyFragment);
-        }
-        if fragment.more_fragments && !fragment.bytes.len().is_multiple_of(8) {
-            return Err(Error::UnalignedNonFinalFragment {
-                length: fragment.bytes.len(),
-            });
-        }
-        if !fragment.offset.is_multiple_of(8) {
-            return Err(Error::UnalignedFragmentOffset {
-                offset: fragment.offset,
-            });
-        }
-
-        let end = fragment
-            .offset
-            .checked_add(u32::try_from(fragment.bytes.len()).map_err(|_| Error::OffsetOverflow)?)
-            .ok_or(Error::OffsetOverflow)?;
-        if usize::try_from(end).map_or(true, |end| end > self.limits.max_bytes_per_flow) {
-            return Err(Error::FlowByteLimit {
-                limit: self.limits.max_bytes_per_flow,
-            });
-        }
-
+        let end = self.validate_fragment_shape(fragment)?;
         let existing_state = self.flows.get(&fragment.key);
         if existing_state.is_none() && !fragment.more_fragments && fragment.offset == 0 {
             if self.limits.max_fragments_per_datagram == 0 {
@@ -112,40 +89,13 @@ impl Reassembler {
         let previous_fragment_count = existing_state.map_or(0, |state| state.fragment_count);
         let existing_final_length = existing_state.and_then(|state| state.final_length);
 
-        if previous_fragment_count >= self.limits.max_fragments_per_datagram {
-            return Err(Error::FragmentLimit {
-                limit: self.limits.max_fragments_per_datagram,
-            });
-        }
-        if let Some(final_length) = existing_final_length
-            && end > final_length
-        {
-            return Err(Error::BeyondFinalLength { final_length });
-        }
-        if !fragment.more_fragments {
-            match existing_final_length {
-                Some(existing_length) if existing_length != end => {
-                    return Err(Error::ConflictingFinalLength {
-                        existing_length,
-                        new_length: end,
-                    });
-                }
-                _ => {
-                    let prior_fragment_extends_past_end = existing_state.is_some_and(|state| {
-                        state
-                            .segments
-                            .last_key_value()
-                            .is_some_and(|(offset, bytes)| {
-                                u64::from(*offset) + bytes.len() as u64 > u64::from(end)
-                            })
-                    });
-                    if prior_fragment_extends_past_end {
-                        return Err(Error::BeyondFinalLength { final_length: end });
-                    }
-                }
-            }
-        }
-
+        self.validate_final_length(
+            existing_state,
+            existing_final_length,
+            end,
+            fragment.more_fragments,
+            previous_fragment_count,
+        )?;
         let merge = match existing_state {
             Some(state) => plan_fragment_merge(
                 &state.segments,
@@ -169,6 +119,78 @@ impl Reassembler {
             merge,
             accounting,
         }))
+    }
+
+    fn validate_fragment_shape(&self, fragment: &Fragment) -> Result<u32, Error> {
+        if fragment.bytes.is_empty() {
+            return Err(Error::EmptyFragment);
+        }
+        if fragment.more_fragments && !fragment.bytes.len().is_multiple_of(8) {
+            return Err(Error::UnalignedNonFinalFragment {
+                length: fragment.bytes.len(),
+            });
+        }
+        if !fragment.offset.is_multiple_of(8) {
+            return Err(Error::UnalignedFragmentOffset {
+                offset: fragment.offset,
+            });
+        }
+
+        let end = fragment
+            .offset
+            .checked_add(u32::try_from(fragment.bytes.len()).map_err(|_| Error::OffsetOverflow)?)
+            .ok_or(Error::OffsetOverflow)?;
+        if usize::try_from(end).map_or(true, |end| end > self.limits.max_bytes_per_flow) {
+            return Err(Error::FlowByteLimit {
+                limit: self.limits.max_bytes_per_flow,
+            });
+        }
+        Ok(end)
+    }
+
+    fn validate_final_length(
+        &self,
+        existing_state: Option<&super::DatagramState>,
+        existing_final_length: Option<u32>,
+        end: u32,
+        more_fragments: bool,
+        previous_fragment_count: usize,
+    ) -> Result<(), Error> {
+        if previous_fragment_count >= self.limits.max_fragments_per_datagram {
+            return Err(Error::FragmentLimit {
+                limit: self.limits.max_fragments_per_datagram,
+            });
+        }
+        if let Some(final_length) = existing_final_length
+            && end > final_length
+        {
+            return Err(Error::BeyondFinalLength { final_length });
+        }
+        if !more_fragments {
+            match existing_final_length {
+                Some(existing_length) if existing_length != end => {
+                    return Err(Error::ConflictingFinalLength {
+                        existing_length,
+                        new_length: end,
+                    });
+                }
+                _ => {
+                    let prior_fragment_extends_past_end = existing_state.is_some_and(|state| {
+                        state
+                            .segments
+                            .last_key_value()
+                            .is_some_and(|(offset, bytes)| {
+                                u64::from(*offset) + bytes.len() as u64 > u64::from(end)
+                            })
+                    });
+                    if prior_fragment_extends_past_end {
+                        return Err(Error::BeyondFinalLength { final_length: end });
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 
     fn plan_fragment_accounting(

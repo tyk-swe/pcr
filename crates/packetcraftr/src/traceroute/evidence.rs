@@ -5,15 +5,15 @@
 
 use crate::probe::evidence::{format_exchange_evidence_error, validate_batch_exchange_evidence};
 
-use super::error::TracerouteError;
-use super::model::{TracerouteBatch, TracerouteBatchExecution, TracerouteLimits};
+use super::error::Error;
+use super::model::{Batch, Execution, Limits};
 use super::probe::sent_traceroute_probe_matches;
 
 pub(super) fn validate_execution(
-    batch: &TracerouteBatch,
-    execution: &TracerouteBatchExecution,
-    limits: TracerouteLimits,
-) -> Result<(), TracerouteError> {
+    batch: &Batch,
+    execution: &Execution,
+    limits: Limits,
+) -> Result<(), Error> {
     validate_batch_exchange_evidence(
         batch,
         execution,
@@ -21,7 +21,7 @@ pub(super) fn validate_execution(
         limits.max_evidence_bytes,
         sent_traceroute_probe_matches,
     )
-    .map_err(|error| TracerouteError::InvalidEvidence {
+    .map_err(|error| Error::InvalidEvidence {
         sequence: error
             .request_index()
             .map_or(batch.probes[0].sequence, |index| {

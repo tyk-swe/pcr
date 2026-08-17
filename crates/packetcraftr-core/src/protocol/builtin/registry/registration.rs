@@ -12,7 +12,7 @@ use crate::{
             PPPOE_SESSION,
         },
     },
-    registry::{RegistryBuilder, RegistryError},
+    registry::{Builder as RegistryBuilder, Error as RegistryError},
     semantics::BuiltinProtocol,
 };
 

@@ -1,11 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use clap::{Args, ValueEnum};
+use clap::ValueEnum;
 use packetcraftr::core;
 
 use crate::command_options::{
-    CaptureLimitArgs, CliAddressFamily, HostnameTrafficPolicyArgs, RouteSelectionArgs,
+    AddressFamily, CaptureLimitsArgs, HostnameTrafficPolicyArgs, RouteSelectionArgs,
 };
 
 pub(crate) const LONG_ABOUT: &str = "Run bounded, policy-gated traceroute probes. UDP starts at --port and increments the destination port for every probe; TCP keeps --port fixed. Each hop sends its attempts as one burst and shares one --timeout-ms response window. Traceroute supports text, JSON, and NDJSON output. Public destinations and hostname resolution require their respective explicit policy options.";
@@ -15,34 +15,34 @@ pub(crate) const AFTER_LONG_HELP: &str = r#"Examples:
   packetcraftr --output ndjson traceroute example.test --allow-hostname-resolution"#;
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
-pub(crate) enum CliTracerouteStrategy {
+pub(crate) enum Strategy {
     #[default]
     Udp,
     Icmp,
     Tcp,
 }
 
-impl From<CliTracerouteStrategy> for packetcraftr::traceroute::Strategy {
-    fn from(value: CliTracerouteStrategy) -> Self {
+impl From<Strategy> for packetcraftr::traceroute::Strategy {
+    fn from(value: Strategy) -> Self {
         match value {
-            CliTracerouteStrategy::Udp => Self::Udp,
-            CliTracerouteStrategy::Icmp => Self::Icmp,
-            CliTracerouteStrategy::Tcp => Self::Tcp,
+            Strategy::Udp => Self::Udp,
+            Strategy::Icmp => Self::Icmp,
+            Strategy::Tcp => Self::Tcp,
         }
     }
 }
 
-#[derive(Debug, Args)]
-pub(crate) struct TracerouteArgs {
+#[derive(Debug, clap::Args)]
+pub(crate) struct Args {
     /// Explicit IP address or hostname to trace.
     #[arg(value_name = "ADDRESS_OR_HOSTNAME")]
     pub(crate) target: String,
     /// UDP, ICMP echo, or TCP SYN probes.
-    #[arg(long, value_enum, default_value_t = CliTracerouteStrategy::Udp)]
-    pub(crate) strategy: CliTracerouteStrategy,
+    #[arg(long, value_enum, default_value_t = Strategy::Udp)]
+    pub(crate) strategy: Strategy,
     /// Select the first authorized address or only one IP family.
-    #[arg(long, value_enum, default_value_t = CliAddressFamily::Any)]
-    pub(crate) family: CliAddressFamily,
+    #[arg(long, value_enum, default_value_t = AddressFamily::Any)]
+    pub(crate) family: AddressFamily,
     /// Non-zero UDP base port (incremented per probe) or fixed TCP destination port.
     #[arg(long)]
     pub(crate) port: Option<u16>,
@@ -73,7 +73,7 @@ pub(crate) struct TracerouteArgs {
     #[command(flatten)]
     pub(crate) route: RouteSelectionArgs,
     #[command(flatten)]
-    pub(crate) limits: CaptureLimitArgs,
+    pub(crate) limits: CaptureLimitsArgs,
     #[command(flatten)]
     pub(crate) policy: HostnameTrafficPolicyArgs,
 }

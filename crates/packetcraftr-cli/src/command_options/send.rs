@@ -3,15 +3,15 @@
 
 use clap::Args;
 
-use super::{CliBuildMode, RouteArgs, SendPolicyArgs};
+use super::{BuildMode, RouteArgs, SendPolicyArgs};
 
 #[derive(Debug, Args)]
 pub(crate) struct SendArgs {
     #[command(flatten)]
     pub(crate) route: RouteArgs,
     /// Strict or permissive packet construction.
-    #[arg(long, value_enum, default_value_t = CliBuildMode::Strict)]
-    pub(crate) mode: CliBuildMode,
+    #[arg(long, value_enum, default_value_t = BuildMode::Strict)]
+    pub(crate) mode: BuildMode,
     /// Per-operation opt-in required for a permissively built live frame.
     #[arg(long)]
     pub(crate) allow_permissive_live: bool,

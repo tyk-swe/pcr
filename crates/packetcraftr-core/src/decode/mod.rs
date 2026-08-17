@@ -9,8 +9,8 @@ use bytes::Bytes;
 
 use crate::diagnostic::Diagnostic;
 use crate::frame::{Frame, LinkType};
-use crate::layer::ProtocolId;
-use crate::registry::ProtocolRegistry;
+use crate::layer::Id as ProtocolId;
+use crate::registry::Registry;
 
 use fallback::raw_decoded_frame;
 use session::DecodeSession;
@@ -24,29 +24,29 @@ mod options;
 mod session;
 mod traversal;
 
-pub use error::DecodeError;
-pub use options::{DecodeOptions, DecodedPacket};
+pub use error::Error;
+pub use options::{DecodedPacket, Options};
 
 #[derive(Clone, Debug)]
 pub struct Dissector {
-    registry: Arc<ProtocolRegistry>,
+    registry: Arc<Registry>,
 }
 
 impl Dissector {
-    pub fn new(registry: Arc<ProtocolRegistry>) -> Self {
+    pub fn new(registry: Arc<Registry>) -> Self {
         Self { registry }
     }
 
     pub fn decode(
         &self,
         frame: Frame,
-        options: DecodeOptions,
-    ) -> std::result::Result<DecodedPacket, DecodeError> {
+        options: Options,
+    ) -> std::result::Result<DecodedPacket, Error> {
         if options.max_layers == 0 {
-            return Err(DecodeError::LayerLimit { limit: 0 });
+            return Err(Error::LayerLimit { limit: 0 });
         }
         if frame.bytes().len() > options.max_packet_size {
-            return Err(DecodeError::PacketSizeLimit {
+            return Err(Error::PacketSizeLimit {
                 actual: frame.bytes().len(),
                 limit: options.max_packet_size,
             });
@@ -68,11 +68,11 @@ impl Dissector {
         &self,
         bytes: impl Into<Bytes>,
         root: ProtocolId,
-        options: DecodeOptions,
-    ) -> std::result::Result<DecodedPacket, DecodeError> {
+        options: Options,
+    ) -> std::result::Result<DecodedPacket, Error> {
         let bytes = bytes.into();
         if bytes.len() > options.max_packet_size {
-            return Err(DecodeError::PacketSizeLimit {
+            return Err(Error::PacketSizeLimit {
                 actual: bytes.len(),
                 limit: options.max_packet_size,
             });
@@ -83,7 +83,7 @@ impl Dissector {
             bytes,
         )?;
         if options.max_layers == 0 {
-            return Err(DecodeError::LayerLimit { limit: 0 });
+            return Err(Error::LayerLimit { limit: 0 });
         }
         self.decode_from_root(frame, root, options)
     }
@@ -92,8 +92,8 @@ impl Dissector {
         &self,
         frame: Frame,
         root: ProtocolId,
-        options: DecodeOptions,
-    ) -> std::result::Result<DecodedPacket, DecodeError> {
+        options: Options,
+    ) -> std::result::Result<DecodedPacket, Error> {
         DecodeSession::new(&self.registry, frame, root, options).run()
     }
 }

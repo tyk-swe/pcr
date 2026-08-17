@@ -13,26 +13,26 @@ use crate::probe::evidence::{
     validate_sent_byte_accounting,
 };
 
-use super::error::DnsError;
-use super::model::{DnsExchangeExecution, DnsLimits, DnsProbe};
+use super::error::Error;
+use super::model::{Execution, Limits, Probe};
 use super::wire::dns_payload;
 
 pub(super) fn validate_dns_execution(
-    probe: &DnsProbe,
-    execution: &DnsExchangeExecution,
-    limits: DnsLimits,
+    probe: &Probe,
+    execution: &Execution,
+    limits: Limits,
     timeout: Duration,
-) -> Result<(), DnsError> {
+) -> Result<(), Error> {
     let attempt = probe.attempt;
     let sent_packet = &execution.sent.built().packet;
     let Some(network) = dns_network_envelope(sent_packet) else {
-        return Err(DnsError::InvalidEvidence {
+        return Err(Error::InvalidEvidence {
             attempt,
             message: "sent packet has no IPv4 or IPv6 tuple".to_owned(),
         });
     };
     let Some(ports) = dns_udp_ports(sent_packet) else {
-        return Err(DnsError::InvalidEvidence {
+        return Err(Error::InvalidEvidence {
             attempt,
             message: "sent packet has no complete UDP tuple".to_owned(),
         });
@@ -70,14 +70,14 @@ pub(super) fn validate_dns_execution(
         || ports.source != probe.source_port
         || ports.destination != probe.server_port
     {
-        return Err(DnsError::InvalidEvidence {
+        return Err(Error::InvalidEvidence {
             attempt,
             message: "sent packet does not preserve the authorized server, UDP ports, and exact DNS query"
                 .to_owned(),
         });
     }
     if execution.stats.packets_attempted != 1 || execution.stats.packets_completed != 1 {
-        return Err(DnsError::InvalidEvidence {
+        return Err(Error::InvalidEvidence {
             attempt,
             message: "successful exchange statistics must account for exactly one DNS query"
                 .to_owned(),
@@ -88,7 +88,7 @@ pub(super) fn validate_dns_execution(
         .iter()
         .any(|response| response.request_index != 0)
     {
-        return Err(DnsError::InvalidEvidence {
+        return Err(Error::InvalidEvidence {
             attempt,
             message: "single-query DNS exchange returned a response for an unknown request index"
                 .to_owned(),
@@ -111,7 +111,7 @@ pub(super) fn validate_dns_execution(
     Ok(())
 }
 
-fn map_dns_evidence_error(attempt: u32, error: ExchangeEvidenceError) -> DnsError {
+fn map_dns_evidence_error(attempt: u32, error: ExchangeEvidenceError) -> Error {
     let message = match error {
         ExchangeEvidenceError::SentCardinality { .. }
         | ExchangeEvidenceError::MatchedResponseOutsideBatch
@@ -121,7 +121,7 @@ fn map_dns_evidence_error(attempt: u32, error: ExchangeEvidenceError) -> DnsErro
         }
         error => format_exchange_evidence_error(error, "DNS exchange", "DNS"),
     };
-    DnsError::InvalidEvidence { attempt, message }
+    Error::InvalidEvidence { attempt, message }
 }
 
 fn dns_network_envelope(packet: &Packet) -> Option<NetworkEnvelope> {

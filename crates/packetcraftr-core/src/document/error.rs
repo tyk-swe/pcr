@@ -3,11 +3,11 @@
 
 use thiserror::Error;
 
-use crate::codec::CodecError;
+use crate::codec::Error as CodecError;
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
-pub enum DocumentError {
+pub enum Error {
     #[error("packet document has {actual} bytes, exceeding limit {limit}")]
     SizeLimit { actual: usize, limit: usize },
     #[error("could not parse {format} packet document: {message}")]

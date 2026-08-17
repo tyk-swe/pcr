@@ -3,11 +3,12 @@
 
 use std::net::IpAddr;
 
-use clap::{Args, ValueEnum};
+use clap::ValueEnum;
 use packetcraftr::core;
 
 use crate::command_options::{
-    CaptureLimitArgs, CliBuildMode, FuzzPolicyArgs, RecipeArgs, RouteSelectionArgs,
+    BuildMode, CaptureLimitsArgs, PermissivePacketArgs, PublicDestinationArgs, RecipeArgs,
+    RouteSelectionArgs, TrafficBudgetArgs,
 };
 
 pub(crate) const AFTER_LONG_HELP: &str = r#"Examples:
@@ -15,7 +16,7 @@ pub(crate) const AFTER_LONG_HELP: &str = r#"Examples:
   packetcraftr fuzz --packet-file packet.json --seed 7 --first-case 42 --cases 1"#;
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
-pub(crate) enum CliFuzzStrategy {
+pub(crate) enum Strategy {
     #[default]
     Boundary,
     Random,
@@ -23,18 +24,18 @@ pub(crate) enum CliFuzzStrategy {
     Malformed,
 }
 
-impl From<CliFuzzStrategy> for core::fuzz::Strategy {
-    fn from(value: CliFuzzStrategy) -> Self {
+impl From<Strategy> for core::fuzz::Strategy {
+    fn from(value: Strategy) -> Self {
         match value {
-            CliFuzzStrategy::Boundary => Self::Boundary,
-            CliFuzzStrategy::Random => Self::Random,
-            CliFuzzStrategy::BitFlip => Self::BitFlip,
-            CliFuzzStrategy::Malformed => Self::Malformed,
+            Strategy::Boundary => Self::Boundary,
+            Strategy::Random => Self::Random,
+            Strategy::BitFlip => Self::BitFlip,
+            Strategy::Malformed => Self::Malformed,
         }
     }
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, clap::Args)]
 #[command(
     mut_arg("interface", |arg| arg.help("Interface name or numeric index used as an exact live route constraint").requires("live")),
     mut_arg("source", |arg| arg.help("Interface-owned source preference used only for live route selection").requires("live")),
@@ -52,7 +53,7 @@ impl From<CliFuzzStrategy> for core::fuzz::Strategy {
     mut_arg("max_packets", |arg| arg.requires("live")),
     mut_arg("max_bytes", |arg| arg.requires("live"))
 )]
-pub(crate) struct FuzzArgs {
+pub(crate) struct Args {
     #[command(flatten)]
     pub(crate) recipe: RecipeArgs,
     /// Stable operation seed used to derive each case independently.
@@ -71,13 +72,13 @@ pub(crate) struct FuzzArgs {
         value_delimiter = ',',
         default_value = "boundary,random,bit-flip,malformed"
     )]
-    pub(crate) strategies: Vec<CliFuzzStrategy>,
+    pub(crate) strategies: Vec<Strategy>,
     /// Restrict mutation to repeated LAYER.FIELD targets; defaults to all fields.
     #[arg(long = "field", value_delimiter = ',')]
     pub(crate) fields: Vec<String>,
     /// Strict or permissive packet construction for generated cases.
-    #[arg(long, value_enum, default_value_t = CliBuildMode::Strict)]
-    pub(crate) mode: CliBuildMode,
+    #[arg(long, value_enum, default_value_t = BuildMode::Strict)]
+    pub(crate) mode: BuildMode,
     /// Explicitly enable route, capture, and transmission; offline is the default.
     #[arg(long)]
     pub(crate) live: bool,
@@ -117,7 +118,27 @@ pub(crate) struct FuzzArgs {
     #[command(flatten)]
     pub(crate) route: RouteSelectionArgs,
     #[command(flatten)]
-    pub(crate) limits: CaptureLimitArgs,
+    pub(crate) limits: CaptureLimitsArgs,
     #[command(flatten)]
-    pub(crate) policy: FuzzPolicyArgs,
+    pub(crate) policy: PolicyArgs,
+}
+
+#[derive(Clone, Debug, clap::Args)]
+pub(crate) struct PolicyArgs {
+    #[command(flatten)]
+    public_destination: PublicDestinationArgs,
+    #[command(flatten)]
+    permissive_packet: PermissivePacketArgs,
+    #[command(flatten)]
+    budgets: TrafficBudgetArgs,
+}
+
+impl PolicyArgs {
+    pub(crate) fn into_policy(self) -> packetcraftr::policy::Policy {
+        let mut policy = packetcraftr::policy::Policy::default();
+        self.public_destination.apply_to(&mut policy);
+        self.permissive_packet.apply_to(&mut policy);
+        self.budgets.apply_to(&mut policy);
+        policy
+    }
 }

@@ -9,7 +9,7 @@ use packetcraftr_netio::{
     neighbor::Resolver as NeighborResolver, route::Provider as RouteProvider,
 };
 
-use crate::policy::TrafficPolicy;
+use crate::policy::Policy;
 
 /// High-level composition of packet construction, passive route planning,
 /// explicit neighbor materialization, policy, and packet I/O.
@@ -19,7 +19,7 @@ pub struct Client<R, N, I> {
     pub(crate) routes: R,
     pub(crate) neighbors: N,
     pub(crate) io: I,
-    pub(crate) policy: TrafficPolicy,
+    pub(crate) policy: Policy,
 }
 
 impl<R, N, I> Client<R, N, I>
@@ -28,13 +28,7 @@ where
     N: NeighborResolver,
     I: PacketIo,
 {
-    pub fn new(
-        registry: Arc<Registry>,
-        routes: R,
-        neighbors: N,
-        io: I,
-        policy: TrafficPolicy,
-    ) -> Self {
+    pub fn new(registry: Arc<Registry>, routes: R, neighbors: N, io: I, policy: Policy) -> Self {
         Self {
             registry,
             routes,

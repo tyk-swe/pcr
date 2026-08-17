@@ -46,7 +46,7 @@ impl Provider for CountingRoutes {
 struct NeverNeighbors;
 
 impl neighbor::Resolver for NeverNeighbors {
-    fn resolve_request(
+    fn resolve(
         &self,
         _request: &neighbor::Request,
     ) -> Result<neighbor::Resolution, neighbor::Error> {

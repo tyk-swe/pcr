@@ -7,13 +7,12 @@ use std::collections::BTreeMap;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
 
-use bytes::Bytes;
 use thiserror::Error;
 
 use crate::Packet;
-use crate::codec::CodecError;
+use crate::codec::Error as CodecError;
 use crate::field::{FieldValue, parse_mac};
-use crate::registry::ProtocolRegistry;
+use crate::registry::Registry;
 
 pub const DEFAULT_MAX_EXPRESSION_BYTES: usize = 1024 * 1024;
 /// Absolute recursive list nesting accepted by the expression parser.
@@ -21,7 +20,7 @@ pub const MAX_EXPRESSION_NESTING: usize = 64;
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
-pub enum ExpressionError {
+pub enum Error {
     #[error("packet expression is empty")]
     Empty,
     #[error("packet expression has {actual} bytes, exceeding limit {limit}")]
@@ -48,13 +47,13 @@ pub enum ExpressionError {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ExpressionOptions {
+pub struct Options {
     pub max_bytes: usize,
     pub max_layers: usize,
     pub max_nesting: usize,
 }
 
-impl Default for ExpressionOptions {
+impl Default for Options {
     fn default() -> Self {
         Self {
             max_bytes: DEFAULT_MAX_EXPRESSION_BYTES,
@@ -64,22 +63,18 @@ impl Default for ExpressionOptions {
     }
 }
 
-pub fn parse_packet_expression(
-    input: &str,
-    registry: &ProtocolRegistry,
-    options: ExpressionOptions,
-) -> Result<Packet, ExpressionError> {
+pub fn parse(input: &str, registry: &Registry, options: Options) -> Result<Packet, Error> {
     if input.trim().is_empty() {
-        return Err(ExpressionError::Empty);
+        return Err(Error::Empty);
     }
     if input.len() > options.max_bytes {
-        return Err(ExpressionError::SizeLimit {
+        return Err(Error::SizeLimit {
             actual: input.len(),
             limit: options.max_bytes,
         });
     }
     if options.max_nesting > MAX_EXPRESSION_NESTING {
-        return Err(ExpressionError::InvalidNestingLimit {
+        return Err(Error::InvalidNestingLimit {
             value: options.max_nesting,
             maximum: MAX_EXPRESSION_NESTING,
         });
@@ -92,23 +87,20 @@ pub fn parse_packet_expression(
     let mut packet = Packet::with_capacity(segments.len());
     for (layer_index, segment) in segments.into_iter().enumerate() {
         let (name, fields) = parse_layer(segment, layer_index, options.max_nesting)?;
-        let codec =
-            registry
-                .codec_named(&name)
-                .ok_or_else(|| ExpressionError::UnknownProtocol {
-                    layer: layer_index,
-                    name: name.clone(),
-                })?;
-        let layer = codec
-            .make_layer(&fields)
-            .map_err(|source| ExpressionError::Layer {
+        let codec = registry
+            .codec_named(&name)
+            .ok_or_else(|| Error::UnknownProtocol {
                 layer: layer_index,
                 name: name.clone(),
-                source,
             })?;
+        let layer = codec.make_layer(&fields).map_err(|source| Error::Layer {
+            layer: layer_index,
+            name: name.clone(),
+            source,
+        })?;
         layer
             .validate_required_fields()
-            .map_err(|source| ExpressionError::Layer {
+            .map_err(|source| Error::Layer {
                 layer: layer_index,
                 name,
                 source: CodecError::Field(source),
@@ -122,10 +114,10 @@ fn parse_layer(
     segment: &str,
     layer: usize,
     max_nesting: usize,
-) -> Result<(String, BTreeMap<String, FieldValue>), ExpressionError> {
+) -> Result<(String, BTreeMap<String, FieldValue>), Error> {
     let segment = segment.trim();
     if segment.is_empty() {
-        return Err(ExpressionError::Syntax {
+        return Err(Error::Syntax {
             offset: 0,
             message: "empty layer".to_owned(),
         });
@@ -134,14 +126,14 @@ fn parse_layer(
         return Ok((segment.to_ascii_lowercase(), BTreeMap::new()));
     };
     if !segment.ends_with(')') {
-        return Err(ExpressionError::Syntax {
+        return Err(Error::Syntax {
             offset: open,
             message: "layer arguments must end with ')'".to_owned(),
         });
     }
     let name = segment[..open].trim().to_ascii_lowercase();
     if name.is_empty() {
-        return Err(ExpressionError::Syntax {
+        return Err(Error::Syntax {
             offset: 0,
             message: "missing protocol name".to_owned(),
         });
@@ -153,33 +145,29 @@ fn parse_layer(
     }
     for argument in split_top_level_bounded(arguments, ',', None)? {
         let Some((field, raw_value)) = split_assignment(argument)? else {
-            return Err(ExpressionError::Syntax {
+            return Err(Error::Syntax {
                 offset: 0,
                 message: format!("expected field=value, got {argument}"),
             });
         };
         let field = field.trim().to_ascii_lowercase();
         if field.is_empty() {
-            return Err(ExpressionError::Syntax {
+            return Err(Error::Syntax {
                 offset: 0,
                 message: "empty field name".to_owned(),
             });
         }
         let value = parse_value_bounded(raw_value.trim(), 0, max_nesting)?;
         if fields.insert(field.clone(), value).is_some() {
-            return Err(ExpressionError::DuplicateField { layer, field });
+            return Err(Error::DuplicateField { layer, field });
         }
     }
     Ok((name, fields))
 }
 
-fn parse_value_bounded(
-    input: &str,
-    depth: usize,
-    max_nesting: usize,
-) -> Result<FieldValue, ExpressionError> {
+fn parse_value_bounded(input: &str, depth: usize, max_nesting: usize) -> Result<FieldValue, Error> {
     if input.is_empty() {
-        return Err(ExpressionError::Syntax {
+        return Err(Error::Syntax {
             offset: 0,
             message: "missing field value".to_owned(),
         });
@@ -189,10 +177,10 @@ fn parse_value_bounded(
     }
     if input.starts_with('[') {
         if depth >= max_nesting {
-            return Err(ExpressionError::NestingLimit { limit: max_nesting });
+            return Err(Error::NestingLimit { limit: max_nesting });
         }
         if !input.ends_with(']') {
-            return Err(ExpressionError::Syntax {
+            return Err(Error::Syntax {
                 offset: 0,
                 message: "unterminated list".to_owned(),
             });
@@ -220,7 +208,7 @@ fn parse_value_bounded(
         return Ok(FieldValue::Ipv6(value));
     }
     if let Some(value) = strip_hex_prefix(input) {
-        let parsed = u64::from_str_radix(value, 16).map_err(|_| ExpressionError::Syntax {
+        let parsed = u64::from_str_radix(value, 16).map_err(|_| Error::Syntax {
             offset: 0,
             message: format!("invalid hexadecimal integer {input}"),
         })?;
@@ -238,9 +226,9 @@ fn parse_value_bounded(
     Ok(FieldValue::Text(input.to_owned()))
 }
 
-fn parse_quoted(input: &str) -> Result<String, ExpressionError> {
+fn parse_quoted(input: &str) -> Result<String, Error> {
     if input.len() < 2 || !input.ends_with('"') {
-        return Err(ExpressionError::Syntax {
+        return Err(Error::Syntax {
             offset: 0,
             message: "unterminated quoted string".to_owned(),
         });
@@ -256,7 +244,7 @@ fn parse_quoted(input: &str) -> Result<String, ExpressionError> {
                 '"' => '"',
                 '\\' => '\\',
                 other => {
-                    return Err(ExpressionError::Syntax {
+                    return Err(Error::Syntax {
                         offset: offset + 1,
                         message: format!("unsupported escape `\\{other}`"),
                     });
@@ -266,7 +254,7 @@ fn parse_quoted(input: &str) -> Result<String, ExpressionError> {
         } else if character == '\\' {
             escaped = true;
         } else if character == '"' {
-            return Err(ExpressionError::Syntax {
+            return Err(Error::Syntax {
                 offset: offset + 1,
                 message: "unescaped quote in quoted string".to_owned(),
             });
@@ -275,7 +263,7 @@ fn parse_quoted(input: &str) -> Result<String, ExpressionError> {
         }
     }
     if escaped {
-        return Err(ExpressionError::Syntax {
+        return Err(Error::Syntax {
             offset: input.len() - 1,
             message: "trailing escape".to_owned(),
         });
@@ -283,7 +271,7 @@ fn parse_quoted(input: &str) -> Result<String, ExpressionError> {
     Ok(output)
 }
 
-fn split_assignment(input: &str) -> Result<Option<(&str, &str)>, ExpressionError> {
+fn split_assignment(input: &str) -> Result<Option<(&str, &str)>, Error> {
     let mut scanner = TopLevelScanner::merging_brackets(input);
     loop {
         match scanner.next_top_level() {
@@ -291,7 +279,7 @@ fn split_assignment(input: &str) -> Result<Option<(&str, &str)>, ExpressionError
             Ok(Some(_)) => {}
             Ok(None) | Err(ScanFailure::Unterminated) => return Ok(None),
             Err(ScanFailure::Unbalanced { offset, .. }) => {
-                return Err(ExpressionError::Syntax {
+                return Err(Error::Syntax {
                     offset,
                     message: "unbalanced delimiter".to_owned(),
                 });
@@ -304,20 +292,20 @@ fn split_top_level_bounded(
     input: &str,
     delimiter: char,
     maximum_parts: Option<usize>,
-) -> Result<Vec<&str>, ExpressionError> {
+) -> Result<Vec<&str>, Error> {
     let mut result = Vec::new();
     let mut start = 0usize;
     let mut scanner = TopLevelScanner::new(input);
     while let Some((offset, character)) = match scanner.next_top_level() {
         Ok(next) => next,
         Err(ScanFailure::Unbalanced { offset, character }) => {
-            return Err(ExpressionError::Syntax {
+            return Err(Error::Syntax {
                 offset,
                 message: format!("unexpected '{character}'"),
             });
         }
         Err(ScanFailure::Unterminated) => {
-            return Err(ExpressionError::Syntax {
+            return Err(Error::Syntax {
                 offset: input.len(),
                 message: "unterminated quote or delimiter".to_owned(),
             });
@@ -329,13 +317,13 @@ fn split_top_level_bounded(
         if let Some(maximum) =
             maximum_parts.filter(|maximum| result.len() >= maximum.saturating_sub(1))
         {
-            return Err(ExpressionError::LayerLimit { limit: maximum });
+            return Err(Error::LayerLimit { limit: maximum });
         }
         result.push(&input[start..offset]);
         start = offset + character.len_utf8();
     }
     if let Some(maximum) = maximum_parts.filter(|maximum| result.len() >= *maximum) {
-        return Err(ExpressionError::LayerLimit { limit: maximum });
+        return Err(Error::LayerLimit { limit: maximum });
     }
     result.push(&input[start..]);
     Ok(result)
@@ -444,44 +432,4 @@ fn strip_hex_prefix(input: &str) -> Option<&str> {
     input
         .strip_prefix("0x")
         .or_else(|| input.strip_prefix("0X"))
-}
-
-pub fn decode_hex(input: &str) -> Result<Bytes, CodecError> {
-    let protocol = crate::layer::ProtocolId::new("raw");
-    let compact = strip_hex_prefix(input)
-        .unwrap_or(input)
-        .chars()
-        .filter(|character| {
-            !character.is_ascii_whitespace() && *character != ':' && *character != '-'
-        })
-        .collect::<String>();
-    if compact.len() % 2 != 0 {
-        return Err(CodecError::Invalid {
-            protocol,
-            message: "hex value must contain an even number of digits".to_owned(),
-        });
-    }
-    let digits = compact.as_bytes();
-    let mut bytes = Vec::with_capacity(digits.len() / 2);
-    for offset in (0..digits.len()).step_by(2) {
-        let high = hex_nibble(digits[offset]).ok_or_else(|| CodecError::Invalid {
-            protocol: protocol.clone(),
-            message: format!("invalid hex at byte {offset}"),
-        })?;
-        let low = hex_nibble(digits[offset + 1]).ok_or_else(|| CodecError::Invalid {
-            protocol: protocol.clone(),
-            message: format!("invalid hex at byte {}", offset + 1),
-        })?;
-        bytes.push((high << 4) | low);
-    }
-    Ok(Bytes::from(bytes))
-}
-
-fn hex_nibble(value: u8) -> Option<u8> {
-    match value {
-        b'0'..=b'9' => Some(value - b'0'),
-        b'a'..=b'f' => Some(value - b'a' + 10),
-        b'A'..=b'F' => Some(value - b'A' + 10),
-        _ => None,
-    }
 }

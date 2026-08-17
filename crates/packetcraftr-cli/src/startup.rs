@@ -8,7 +8,7 @@ use std::process::ExitCode;
 use clap::Parser;
 use packetcraftr::output;
 
-use self::context::startup_context_from_env;
+use self::context::from_env;
 use super::cli::Cli;
 use super::errors::CliError;
 use super::rendering::{
@@ -16,9 +16,9 @@ use super::rendering::{
     terminal_document,
 };
 
-pub(crate) fn run_entrypoint() -> ExitCode {
-    let startup = startup_context_from_env();
-    startup.color.write_global();
+pub(crate) fn run() -> ExitCode {
+    let context = from_env();
+    context.color.write_global();
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
         Err(error) => {
@@ -26,19 +26,19 @@ pub(crate) fn run_entrypoint() -> ExitCode {
             let raw_message = error.to_string();
             let message = terminal_document(&raw_message);
             if error.use_stderr()
-                && let Some(output) = startup.machine_format
+                && let Some(format) = context.format
             {
                 let error = CliError::new(code, message);
-                let emitted = match output {
+                let emitted = match format {
                     output::contract::Format::Json => {
                         emit_json(&output::envelope::AggregateError::error(
-                            startup.command,
+                            context.command,
                             error.output_error(),
                         ))
                     }
                     output::contract::Format::Ndjson => {
                         emit_json_compact(&output::envelope::StreamError::error(
-                            startup.command,
+                            context.command,
                             0,
                             error.output_error(),
                         ))
@@ -65,12 +65,12 @@ pub(crate) fn run_entrypoint() -> ExitCode {
         }
     };
     cli.color.write_global();
-    let output = output::contract::Format::from(cli.output);
-    let command = cli.command.name();
-    match cli.command.run(output) {
+    let format = output::contract::Format::from(cli.format);
+    let command = cli.command.kind();
+    match cli.command.run(format) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            let emitted = match output {
+            let emitted = match format {
                 output::contract::Format::Json => emit_json(
                     &output::envelope::AggregateError::error(Some(command), error.output_error()),
                 ),
@@ -85,7 +85,7 @@ pub(crate) fn run_entrypoint() -> ExitCode {
             };
             if let Err(write_error) = emitted {
                 if matches!(
-                    output,
+                    format,
                     output::contract::Format::Json | output::contract::Format::Ndjson
                 ) {
                     let _ = emit_stderr_error(&write_error.message);

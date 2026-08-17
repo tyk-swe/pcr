@@ -11,7 +11,7 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
-pub enum ReplayError {
+pub enum Error {
     #[error("invalid replay limit {field}={value}: {reason}")]
     InvalidLimit {
         field: &'static str,
@@ -108,7 +108,7 @@ pub enum ReplayError {
     Output { sequence: u64, message: String },
 }
 
-impl ReplayError {
+impl Error {
     pub fn output(sequence: u64, message: impl Into<String>) -> Self {
         Self::Output {
             sequence,
@@ -138,7 +138,7 @@ impl ReplayError {
     }
 }
 
-impl Classified for ReplayError {
+impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
             Self::InvalidLimit { .. }

@@ -7,16 +7,58 @@ use bytes::Bytes;
 
 use crate::{
     codec::{
-        CodecError, DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext,
+        DecodedLayerValue, EncodedLayer, Error as CodecError, LayerCodec, LayerDecodeContext,
         LayerEncodeContext,
     },
     diagnostic::Diagnostic,
-    expression::decode_hex,
     field::FieldValue,
-    layer::{Layer, MalformedLayer, Padding, ProtocolId, Raw},
+    layer::{Id as ProtocolId, Layer, Malformed, Padding, Raw},
 };
 
 use super::common::{ensure_encode_budget, invalid, make_layer, protocol, wrong_layer};
+
+/// Parses hexadecimal raw bytes with optional `0x`, whitespace, colon, or dash separators.
+pub fn parse_hex(input: &str) -> Result<Bytes, CodecError> {
+    let protocol = ProtocolId::new("raw");
+    let compact = input
+        .strip_prefix("0x")
+        .or_else(|| input.strip_prefix("0X"))
+        .unwrap_or(input)
+        .chars()
+        .filter(|character| {
+            !character.is_ascii_whitespace() && *character != ':' && *character != '-'
+        })
+        .collect::<String>();
+    if compact.len() % 2 != 0 {
+        return Err(CodecError::Invalid {
+            protocol,
+            message: "hex value must contain an even number of digits".to_owned(),
+        });
+    }
+    let digits = compact.as_bytes();
+    let mut bytes = Vec::with_capacity(digits.len() / 2);
+    for offset in (0..digits.len()).step_by(2) {
+        let high = hex_nibble(digits[offset]).ok_or_else(|| CodecError::Invalid {
+            protocol: protocol.clone(),
+            message: format!("invalid hex at byte {offset}"),
+        })?;
+        let low = hex_nibble(digits[offset + 1]).ok_or_else(|| CodecError::Invalid {
+            protocol: protocol.clone(),
+            message: format!("invalid hex at byte {}", offset + 1),
+        })?;
+        bytes.push((high << 4) | low);
+    }
+    Ok(Bytes::from(bytes))
+}
+
+fn hex_nibble(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        b'A'..=b'F' => Some(value - b'A' + 10),
+        _ => None,
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct RawCodec;
@@ -82,7 +124,7 @@ impl LayerCodec for MalformedCodec {
     ) -> Result<EncodedLayer, CodecError> {
         let layer = layer
             .as_any()
-            .downcast_ref::<MalformedLayer>()
+            .downcast_ref::<Malformed>()
             .ok_or_else(|| wrong_layer("malformed", layer))?;
         ensure_encode_budget("malformed", layer.bytes.len(), context)?;
         let mut encoded = EncodedLayer::header(layer.bytes.to_vec(), Box::new(layer.clone()));
@@ -100,7 +142,7 @@ impl LayerCodec for MalformedCodec {
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, CodecError> {
         let mut decoded = DecodedLayerValue::terminal(
-            Box::new(MalformedLayer::new(
+            Box::new(Malformed::new(
                 None,
                 Bytes::copy_from_slice(input),
                 "explicit malformed root",
@@ -115,7 +157,7 @@ impl LayerCodec for MalformedCodec {
         &self,
         fields: &BTreeMap<String, FieldValue>,
     ) -> Result<Box<dyn Layer>, CodecError> {
-        let mut layer = MalformedLayer::new(None, Bytes::new(), "explicit malformed bytes");
+        let mut layer = Malformed::new(None, Bytes::new(), "explicit malformed bytes");
         for (name, value) in fields {
             layer.set_field(name, value.clone())?;
         }
@@ -175,7 +217,7 @@ fn raw_fields(
             let FieldValue::Text(value) = value else {
                 return Err(invalid(name, "hex must be a quoted hexadecimal string"));
             };
-            Some(FieldValue::Bytes(decode_hex(&value)?))
+            Some(FieldValue::Bytes(parse_hex(&value)?))
         }
         None => match normalized.remove("text") {
             Some(value) => {

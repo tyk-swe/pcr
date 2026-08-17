@@ -3,9 +3,9 @@
 
 use std::path::PathBuf;
 
-use clap::{Args, ValueEnum};
+use clap::ValueEnum;
 
-use crate::command_options::OfflineAnalysisLimits;
+use crate::command_options::OfflineAnalysisLimitsArgs;
 
 pub(crate) const AFTER_LONG_HELP: &str = r#"Following is computed offline over dissected frames; no live capture or transmission is involved.
 
@@ -19,7 +19,7 @@ Examples:
 
 /// How a followed conversation's chunks are narrowed by sender.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
-pub(crate) enum CliFollowDirection {
+pub(crate) enum Direction {
     /// Both directions, interleaved in delivery order.
     Both,
     /// Only bytes the client — the conversation's first captured sender — sent.
@@ -28,8 +28,8 @@ pub(crate) enum CliFollowDirection {
     Server,
 }
 
-#[derive(Debug, Args)]
-pub(crate) struct FollowArgs {
+#[derive(Debug, clap::Args)]
+pub(crate) struct Args {
     /// Classic PCAP or PCAPNG input path.
     pub(crate) path: PathBuf,
     /// Conversation to follow, as `tcp:INDEX` or `udp:INDEX`, using the
@@ -37,8 +37,8 @@ pub(crate) struct FollowArgs {
     #[arg(long, value_name = "TRANSPORT:INDEX")]
     pub(crate) stream: String,
     /// Which sender's bytes to emit.
-    #[arg(long, value_enum, default_value_t = CliFollowDirection::Both)]
-    pub(crate) direction: CliFollowDirection,
+    #[arg(long, value_enum, default_value_t = Direction::Both)]
+    pub(crate) direction: Direction,
     #[command(flatten)]
-    pub(crate) limits: OfflineAnalysisLimits,
+    pub(crate) limits: OfflineAnalysisLimitsArgs,
 }

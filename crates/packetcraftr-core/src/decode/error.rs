@@ -3,12 +3,12 @@
 
 use thiserror::Error;
 
-use crate::frame::FrameError as CaptureError;
-use crate::layer::{FieldError, ProtocolId};
+use crate::frame::Error as FrameError;
+use crate::layer::{FieldError, Id as ProtocolId};
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
-pub enum DecodeError {
+pub enum Error {
     #[error("captured packet size {actual} exceeds configured limit {limit}")]
     PacketSizeLimit { actual: usize, limit: usize },
     #[error("decoded layer count reached configured limit {limit}")]
@@ -30,6 +30,6 @@ pub enum DecodeError {
         #[source]
         source: FieldError,
     },
-    #[error("invalid capture record: {0}")]
-    InvalidCaptureRecord(#[from] CaptureError),
+    #[error("invalid frame: {0}")]
+    InvalidFrame(#[from] FrameError),
 }

@@ -7,7 +7,6 @@
 
 #![forbid(unsafe_code)]
 
-mod capture_output;
 mod cli;
 mod command_options;
 mod commands;
@@ -19,5 +18,5 @@ mod startup;
 mod system;
 
 fn main() -> std::process::ExitCode {
-    startup::run_entrypoint()
+    startup::run()
 }

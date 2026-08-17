@@ -94,137 +94,110 @@ pub enum Error {
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
-            Self::Unsupported { .. } => Classification::new(
+            Self::Unsupported { .. } => classified(
                 "capability.unsupported",
                 Kind::Capability,
-                Some(
-                    "enable and configure the requested native capability; PacketcraftR will not change transmission modes automatically",
-                ),
+                "enable and configure the requested native capability; PacketcraftR will not change transmission modes automatically",
             ),
-            Self::MissingDependency { .. } => Classification::new(
+            Self::MissingDependency { .. } => classified(
                 "capability.missing_dependency",
                 Kind::Capability,
-                Some(
-                    "install the named native dependency from its trusted platform source and retry",
-                ),
+                "install the named native dependency from its trusted platform source and retry",
             ),
-            Self::Privilege { .. } => Classification::new(
+            Self::Privilege { .. } => classified(
                 "capability.privilege",
                 Kind::Capability,
-                Some(
-                    "grant the minimum raw-socket or capture permission required by the selected platform adapter",
-                ),
+                "grant the minimum raw-socket or capture permission required by the selected platform adapter",
             ),
-            Self::InterfaceDiscovery { .. } => Classification::new(
+            Self::InterfaceDiscovery { .. } => classified(
                 "io.interface_discovery",
                 Kind::Io,
-                Some(
-                    "inspect the operating-system interface state and retry with an available interface",
-                ),
+                "inspect the operating-system interface state and retry with an available interface",
             ),
-            Self::Device { .. } => Classification::new(
+            Self::Device { .. } => classified(
                 "io.device",
                 Kind::Io,
-                Some("select an existing, enabled interface that supports the requested link mode"),
+                "select an existing, enabled interface that supports the requested link mode",
             ),
-            Self::Send { .. } => Classification::new(
+            Self::Send { .. } => classified(
                 "io.send",
                 Kind::Io,
-                Some(
-                    "inspect the selected route, interface state, and platform socket restrictions before retrying",
-                ),
+                "inspect the selected route, interface state, and platform socket restrictions before retrying",
             ),
-            Self::PartialSend { .. } => Classification::new(
+            Self::PartialSend { .. } => classified(
                 "io.partial_send",
                 Kind::Io,
-                Some(
-                    "treat the operation as incomplete; do not retry without accounting for the attempted transmission",
-                ),
+                "treat the operation as incomplete; do not retry without accounting for the attempted transmission",
             ),
-            Self::Capture { .. } => Classification::new(
+            Self::Capture { .. } => classified(
                 "io.capture",
                 Kind::Io,
-                Some(
-                    "inspect the capture device state and native backend diagnostic before retrying",
-                ),
+                "inspect the capture device state and native backend diagnostic before retrying",
             ),
-            Self::InvalidCaptureFilter { .. } => Classification::new(
+            Self::InvalidCaptureFilter { .. } => classified_cli(
                 "cli.capture_filter",
-                Kind::Cli,
-                Some("use a valid libpcap/Npcap BPF capture-filter expression"),
+                "use a valid libpcap/Npcap BPF capture-filter expression",
             ),
-            Self::CaptureFilterInstallation { .. } => Classification::new(
+            Self::CaptureFilterInstallation { .. } => classified(
                 "io.capture_filter",
                 Kind::Io,
-                Some(
-                    "inspect the selected interface and native backend diagnostic before retrying",
-                ),
+                "inspect the selected interface and native backend diagnostic before retrying",
             ),
-            Self::CaptureReadiness { .. } => Classification::new(
+            Self::CaptureReadiness { .. } => classified(
                 "io.capture_readiness",
                 Kind::Io,
-                Some(
-                    "fix capture startup before transmitting; capture-before-send readiness cannot be bypassed",
-                ),
+                "fix capture startup before transmitting; capture-before-send readiness cannot be bypassed",
             ),
-            Self::DeadlineExceeded { .. } => Classification::new(
+            Self::DeadlineExceeded { .. } => classified(
                 "io.deadline_exceeded",
                 Kind::Io,
-                Some(
-                    "increase the finite operation timeout or reduce readiness, send, and capture work",
-                ),
+                "increase the finite operation timeout or reduce readiness, send, and capture work",
             ),
-            Self::CaptureQueueOverflow { .. } => Classification::new(
+            Self::CaptureQueueOverflow { .. } => classified(
                 "io.capture_overflow",
                 Kind::Io,
-                Some(
-                    "treat the capture as incomplete or explicitly select a lossy overflow policy with visible statistics",
-                ),
+                "treat the capture as incomplete or explicitly select a lossy overflow policy with visible statistics",
             ),
-            Self::CaptureEvidenceLoss { .. } => Classification::new(
+            Self::CaptureEvidenceLoss { .. } => classified(
                 "io.capture_evidence_loss",
                 Kind::Io,
-                Some(
-                    "treat the capture as incomplete; inspect receiver-drop counters and reduce native capture pressure before retrying",
-                ),
+                "treat the capture as incomplete; inspect receiver-drop counters and reduce native capture pressure before retrying",
             ),
-            Self::InvalidCaptureQueueLimit { .. } => Classification::new(
+            Self::InvalidCaptureQueueLimit { .. } => classified_cli(
                 "cli.capture_limit",
-                Kind::Cli,
-                Some(
-                    "use non-zero capture limits whose snap length fits the aggregate byte ceiling",
-                ),
+                "use non-zero capture limits whose snap length fits the aggregate byte ceiling",
             ),
-            Self::InvalidCaptureTimeout { .. } => Classification::new(
+            Self::InvalidCaptureTimeout { .. } => classified_cli(
                 "cli.capture_timeout",
-                Kind::Cli,
-                Some("use a finite capture wait no longer than the documented one-hour maximum"),
+                "use a finite capture wait no longer than the documented one-hour maximum",
             ),
-            Self::InvalidTransmissionFrame { .. } => Classification::new(
+            Self::InvalidTransmissionFrame { .. } => classified(
                 "packet.transmission_frame",
                 Kind::Packet,
-                Some(
-                    "rebuild a complete route-consistent IP datagram without fields the native kernel would rewrite",
-                ),
+                "rebuild a complete route-consistent IP datagram without fields the native kernel would rewrite",
             ),
-            Self::Encapsulation { .. } => Classification::new(
+            Self::Encapsulation { .. } => classified(
                 "packet.encapsulation",
                 Kind::Packet,
-                Some(
-                    "supply a complete link-layer envelope compatible with the materialized Layer 2 route",
-                ),
+                "supply a complete link-layer envelope compatible with the materialized Layer 2 route",
             ),
             Self::TransmissionModeMismatch { .. }
             | Self::UnresolvedLinkMode
             | Self::InvalidSendReport { .. }
             | Self::InvalidSendEvidence { .. }
-            | Self::InvalidCaptureStatistics { .. } => Classification::new(
+            | Self::InvalidCaptureStatistics { .. } => classified(
                 "internal.live_io_invariant",
                 Kind::Internal,
-                Some(
-                    "report the inconsistent provider result; do not reinterpret it as a successful operation",
-                ),
+                "report the inconsistent provider result; do not reinterpret it as a successful operation",
             ),
         }
     }
+}
+
+fn classified(code: &'static str, kind: Kind, remediation: &'static str) -> Classification {
+    Classification::new(code, kind, Some(remediation))
+}
+
+fn classified_cli(code: &'static str, remediation: &'static str) -> Classification {
+    classified(code, Kind::Cli, remediation)
 }

@@ -9,23 +9,18 @@ use packetcraftr_netio::{
     route::Provider as RouteProvider, transmit::Sender as PacketIo,
 };
 
-use super::classification::classify_traceroute_response;
-use super::model::{
-    TracerouteBatch, TracerouteBatchExecution, TracerouteExecutor, TracerouteStrategy,
-};
+use super::classification::classify_response;
+use super::model::{Batch, Execution, Executor, Strategy};
 
 /// Executes homogeneous traceroute hop batches through the client's
 /// capture-ready exchange lifecycle.
-impl<R, N, I> TracerouteExecutor for ExchangeExecutor<'_, R, N, I>
+impl<R, N, I> Executor for ExchangeExecutor<'_, R, N, I>
 where
     R: RouteProvider,
     N: NeighborResolver,
     I: PacketIo + CaptureProvider,
 {
-    fn execute(
-        &mut self,
-        batch: &TracerouteBatch,
-    ) -> Result<TracerouteBatchExecution, BoundaryError> {
+    fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
         let first = batch.probes.first().ok_or_else(|| {
             invalid_client_execution("traceroute executor received an empty hop batch")
         })?;
@@ -33,8 +28,8 @@ where
             .probes
             .iter()
             .any(|probe| !match (probe.strategy, probe.destination_port) {
-                (TracerouteStrategy::Udp | TracerouteStrategy::Tcp, Some(port)) => port != 0,
-                (TracerouteStrategy::Icmp, None) => true,
+                (Strategy::Udp | Strategy::Tcp, Some(port)) => port != 0,
+                (Strategy::Icmp, None) => true,
                 _ => false,
             })
         {
@@ -46,7 +41,7 @@ where
             probe.address != first.address
                 || probe.strategy != first.strategy
                 || probe.hop_limit != first.hop_limit
-                || (probe.strategy == TracerouteStrategy::Tcp
+                || (probe.strategy == Strategy::Tcp
                     && probe.destination_port != first.destination_port)
         }) {
             return Err(invalid_client_execution(
@@ -62,9 +57,9 @@ where
         }
 
         let varying_field = match first.strategy {
-            TracerouteStrategy::Udp => "destination_port",
-            TracerouteStrategy::Tcp => "sequence",
-            TracerouteStrategy::Icmp => "body",
+            Strategy::Udp => "destination_port",
+            Strategy::Tcp => "sequence",
+            Strategy::Icmp => "body",
         };
         let mut template = PacketTemplate::new(first.packet());
         if batch.probes.len() > 1 {
@@ -95,17 +90,12 @@ where
             first.address,
             |request_index, sent, response| {
                 batch.probes.get(request_index).is_some_and(|probe| {
-                    classify_traceroute_response(
-                        self.client.registry(),
-                        probe.strategy,
-                        sent,
-                        response,
-                    )
-                    .is_some()
+                    classify_response(self.client.registry(), probe.strategy, sent, response)
+                        .is_some()
                 })
             },
         )?;
-        let execution = TracerouteBatchExecution::from_exchange(batch.permit, exchange);
+        let execution = Execution::from_exchange(batch.permit, exchange);
         Ok(execution)
     }
 }

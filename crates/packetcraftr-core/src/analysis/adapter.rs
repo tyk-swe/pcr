@@ -16,7 +16,7 @@ use crate::protocol::tunnel::{Ah, Erspan, Geneve, L2tpv3, Mpls, Pppoe, Vxlan};
 use bytes::Bytes;
 
 use crate::analysis::reassembly::tcp::{FlowKey, ScopedFlowKey, Segment};
-use crate::analysis::scope::{EncapsulationIdentifier, ScopeError, ScopeInterner};
+use crate::analysis::scope::{EncapsulationIdentifier, Error as ScopeError, Interner};
 
 /// The innermost transport of each kind in a decoded stack.
 ///
@@ -206,7 +206,7 @@ pub(crate) fn transport_payload(decoded: &DecodedPacket, transport_index: usize)
 /// because an empty SYN, FIN, or RST still carries stream state.
 pub(crate) fn tcp_segment(
     decoded: &DecodedPacket,
-    scopes: &mut ScopeInterner,
+    scopes: &mut Interner,
 ) -> Result<Option<Segment>, ScopeError> {
     let Some(transport) = transports(&decoded.packet).tcp else {
         return Ok(None);
@@ -228,7 +228,7 @@ pub(crate) fn tcp_segment(
 /// Maps a decoded stack onto the innermost UDP flow, when there is one.
 pub(crate) fn udp_flow(
     decoded: &DecodedPacket,
-    scopes: &mut ScopeInterner,
+    scopes: &mut Interner,
 ) -> Result<Option<ScopedFlowKey>, ScopeError> {
     let Some(transport) = transports(&decoded.packet).udp else {
         return Ok(None);

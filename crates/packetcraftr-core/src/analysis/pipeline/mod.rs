@@ -9,21 +9,21 @@ use std::sync::Arc;
 
 use crate::analysis::pcap::{Error as CaptureError, Reader};
 use crate::budget::Deadline;
-use crate::decode::{DecodeOptions, DecodedPacket, Dissector};
+use crate::decode::{DecodedPacket, Dissector, Options as DecodeOptions};
 use crate::filter::Context as FilterContext;
 use crate::registry::Registry;
 
-use crate::analysis::AnalysisError;
+use crate::analysis::Error;
 use crate::analysis::adapter::{tcp_segment, udp_flow};
 use crate::analysis::conversation_index::StreamIndex;
 use crate::analysis::reassembly::tcp::{Event as TcpEvent, ScopedFlowKey};
-use crate::analysis::scope::ScopeInterner;
+use crate::analysis::scope::Interner;
 
 mod clock;
 mod dispatch;
 mod limits;
 
-pub use limits::{AnalysisLimits, AnalysisOptions};
+pub use limits::{Limits, Options};
 
 use clock::CaptureClock;
 use dispatch::ReassemblyDispatch;
@@ -50,7 +50,7 @@ pub struct FrameRecord<'a> {
 
 /// Terminal counters and residue for a completed analysis run.
 #[derive(Clone, Debug)]
-pub struct AnalysisSummary {
+pub struct Summary {
     pub frames_read: u64,
     pub frames_matched: u64,
     /// Data still buffered when the capture ended, flushed flow by flow.
@@ -72,9 +72,9 @@ pub struct AnalysisSummary {
 pub fn run<R, F>(
     reader: &mut Reader<R>,
     registry: Arc<Registry>,
-    options: &AnalysisOptions<'_>,
+    options: &Options<'_>,
     mut sink: F,
-) -> Result<AnalysisSummary, AnalysisError>
+) -> Result<Summary, Error>
 where
     R: Read,
     F: FnMut(FrameRecord<'_>) -> Result<(), crate::error::BoundaryError>,
@@ -85,7 +85,7 @@ where
     let decoder = Dissector::new(registry);
     let mut tcp_streams = StreamIndex::default();
     let mut udp_streams = StreamIndex::default();
-    let mut scopes = ScopeInterner::new();
+    let mut scopes = Interner::new();
     let mut reassembly_dispatch = ReassemblyDispatch::new(options.tcp_events, limits.max_flows);
     let mut clock = CaptureClock::new();
 
@@ -94,43 +94,11 @@ where
     let mut bytes_read = 0_u64;
     loop {
         enforce_deadline(&deadline, limits)?;
-        let number = frames_read.checked_add(1).ok_or(AnalysisError::Capture {
-            number: frames_read,
-            source: CaptureError::FrameLimitExceeded {
-                actual: u64::MAX,
-                limit: limits.max_frames,
-            },
-        })?;
-        let Some(frame) = reader
-            .next_frame()
-            .map_err(|source| AnalysisError::Capture { number, source })?
+        let Some((number, frame, timestamp)) =
+            next_frame(reader, &mut frames_read, &mut bytes_read, limits)?
         else {
             break;
         };
-        frames_read = number;
-        if frames_read > limits.max_frames {
-            return Err(AnalysisError::Capture {
-                number,
-                source: CaptureError::FrameLimitExceeded {
-                    actual: frames_read,
-                    limit: limits.max_frames,
-                },
-            });
-        }
-        bytes_read = bytes_read
-            .checked_add(u64::from(frame.captured_length()))
-            .filter(|bytes| *bytes <= limits.max_bytes)
-            .ok_or(AnalysisError::Capture {
-                number,
-                source: CaptureError::StreamByteLimitExceeded {
-                    actual: bytes_read.saturating_add(u64::from(frame.captured_length())),
-                    limit: limits.max_bytes,
-                },
-            })?;
-
-        let timestamp = frame
-            .timestamp
-            .ok_or(AnalysisError::TimestampUnavailable { number })?;
         let decoded = decoder
             .decode(
                 frame,
@@ -139,17 +107,17 @@ where
                     ..DecodeOptions::default()
                 },
             )
-            .map_err(|source| AnalysisError::Decode { number, source })?;
+            .map_err(|source| Error::Decode { number, source })?;
 
         // Assign stream IDs before filtering to keep them stable across runs.
-        let segment = tcp_segment(&decoded, &mut scopes)
-            .map_err(|source| AnalysisError::Scope { number, source })?;
+        let segment =
+            tcp_segment(&decoded, &mut scopes).map_err(|source| Error::Scope { number, source })?;
         let tcp_stream = match &segment {
             Some(segment) => Some(tcp_streams.assign(&segment.flow, number, limits.max_flows)?),
             None => None,
         };
-        let udp_flow = udp_flow(&decoded, &mut scopes)
-            .map_err(|source| AnalysisError::Scope { number, source })?;
+        let udp_flow =
+            udp_flow(&decoded, &mut scopes).map_err(|source| Error::Scope { number, source })?;
         let udp_stream = match &udp_flow {
             Some(flow) => Some(udp_streams.assign(flow, number, limits.max_flows)?),
             None => None,
@@ -163,7 +131,7 @@ where
                     tcp_stream,
                     udp_stream,
                 })
-                .map_err(|source| AnalysisError::Filter { number, source })?
+                .map_err(|source| Error::Filter { number, source })?
         {
             continue;
         }
@@ -188,22 +156,66 @@ where
             udp_flow: udp_flow.as_ref(),
             tcp_events: &tcp_events,
         })
-        .map_err(|source| AnalysisError::Sink { number, source })?;
+        .map_err(|source| Error::Sink { number, source })?;
     }
 
     enforce_deadline(&deadline, limits)?;
-    Ok(AnalysisSummary {
+    Ok(Summary {
         frames_read,
         frames_matched,
         trailing_tcp_events: reassembly_dispatch.flush(),
     })
 }
 
-fn enforce_deadline(deadline: &Deadline, limits: &AnalysisLimits) -> Result<(), AnalysisError> {
-    deadline
-        .check()
-        .map_err(|error| AnalysisError::DurationLimit {
-            actual: error.actual,
-            limit: limits.max_duration,
-        })
+fn next_frame<R: Read>(
+    reader: &mut Reader<R>,
+    frames_read: &mut u64,
+    bytes_read: &mut u64,
+    limits: &Limits,
+) -> Result<Option<(u64, crate::frame::Frame, std::time::SystemTime)>, Error> {
+    let number = frames_read.checked_add(1).ok_or(Error::Capture {
+        number: *frames_read,
+        source: CaptureError::FrameLimitExceeded {
+            actual: u64::MAX,
+            limit: limits.max_frames,
+        },
+    })?;
+    let Some(frame) = reader
+        .next_frame()
+        .map_err(|source| Error::Capture { number, source })?
+    else {
+        return Ok(None);
+    };
+    *frames_read = number;
+    if number > limits.max_frames {
+        return Err(Error::Capture {
+            number,
+            source: CaptureError::FrameLimitExceeded {
+                actual: number,
+                limit: limits.max_frames,
+            },
+        });
+    }
+    let captured = u64::from(frame.captured_length());
+    *bytes_read = bytes_read
+        .checked_add(captured)
+        .filter(|bytes| *bytes <= limits.max_bytes)
+        .ok_or(Error::Capture {
+            number,
+            source: CaptureError::StreamByteLimitExceeded {
+                actual: bytes_read.saturating_add(captured),
+                limit: limits.max_bytes,
+            },
+        })?;
+    let timestamp = frame
+        .timestamp
+        .ok_or(Error::TimestampUnavailable { number })?;
+    Ok(Some((number, frame, timestamp)))
+}
+
+fn enforce_deadline(deadline: &Deadline, limits: &Limits) -> Result<(), Error> {
+    deadline.check().map_err(|error| Error::DurationLimit {
+        actual: error.actual,
+        limit: limits.max_duration,
+    })
 }

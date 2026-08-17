@@ -5,16 +5,12 @@
 //! elsewhere.
 
 mod client;
+pub(crate) mod exchange;
 mod interface;
 mod route;
-mod target;
 
-pub(crate) use interface::{
-    DeferredInterface, validate_interface_selector, validate_live_interface_selector,
-};
+pub(crate) use interface::{DeferredInterface, validate_selector};
 
-pub(crate) use route::{prepare_route_request, workflow_exchange_options};
+pub(crate) use route::prepare_route;
 
-pub(crate) use client::{SystemClient, default_registry_arc, system_client};
-
-pub(crate) use target::parse_workflow_target;
+pub(crate) use client::{Client, client};

@@ -11,20 +11,19 @@ use serde::Serialize;
 use crate::output::contract::Error;
 use crate::output::envelope::{CaptureStats, Stats};
 use crate::output::frame::Captured;
-use crate::output::network::PlannedRouteOutput;
-
-pub use crate::output::frame::{Captured as Frame, Wire};
+use crate::output::frame::Wire;
+use crate::output::network::Plan;
 
 /// Serializable route materialization evidence retained by send-like commands.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct MaterializedRouteOutput {
-    pub plan: PlannedRouteOutput,
+pub struct MaterializedRoute {
+    pub plan: Plan,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub neighbor: Option<NeighborEvidenceOutput>,
+    pub neighbor: Option<NeighborEvidence>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct NeighborEvidenceOutput {
+pub struct NeighborEvidence {
     pub mac_address: String,
     pub attempts: u32,
     pub cache_hit: bool,
@@ -33,12 +32,12 @@ pub struct NeighborEvidenceOutput {
     pub capture_statistics: CaptureStats,
 }
 
-impl MaterializedRouteOutput {
+impl MaterializedRoute {
     pub fn try_from_route(route: DomainMaterializedRoute) -> std::result::Result<Self, Error> {
         let neighbor = route
             .neighbor_resolution
             .map(|resolution| {
-                Ok(NeighborEvidenceOutput {
+                Ok(NeighborEvidence {
                     mac_address: resolution.mac_address.to_string(),
                     attempts: resolution.attempts,
                     cache_hit: resolution.cache_hit,
@@ -57,12 +56,12 @@ impl MaterializedRouteOutput {
 
 /// Aggregate result of `send`; operation statistics live in the envelope.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct SendCommandResult {
+pub struct Result {
     pub frame: Wire,
-    pub route: MaterializedRouteOutput,
+    pub route: MaterializedRoute,
 }
 
-impl SendCommandResult {
+impl Result {
     pub fn try_from_report(
         report: SendReport,
     ) -> std::result::Result<(Self, Vec<Diagnostic>, Stats), Error> {
@@ -70,7 +69,7 @@ impl SendCommandResult {
         Ok((
             Self {
                 frame: Wire::new(sent.wire_bytes().clone()),
-                route: MaterializedRouteOutput::try_from_route(sent.route().clone())?,
+                route: MaterializedRoute::try_from_route(sent.route().clone())?,
             },
             sent.built().diagnostics.clone(),
             stats.into(),

@@ -4,7 +4,7 @@
 //! Link-padding-aware payload narrowing.
 
 use crate::{
-    codec::{CodecError, LayerEncodeContext},
+    codec::{Error as CodecError, LayerEncodeContext},
     layer::Padding,
 };
 

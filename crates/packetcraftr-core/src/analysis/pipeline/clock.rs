@@ -5,7 +5,7 @@
 
 use std::time::{Duration, Instant, SystemTime};
 
-use crate::analysis::AnalysisError;
+use crate::analysis::Error;
 
 /// Maps capture timestamps onto the monotonic instants reassembly expects.
 ///
@@ -42,17 +42,13 @@ impl CaptureClock {
     /// Returns a monotonic instant for `timestamp`: never earlier than any
     /// instant already returned, so a capture whose timestamps run backwards
     /// cannot rewind idle accounting and expire still-active state early.
-    pub(super) fn at(
-        &mut self,
-        timestamp: SystemTime,
-        number: u64,
-    ) -> Result<Instant, AnalysisError> {
+    pub(super) fn at(&mut self, timestamp: SystemTime, number: u64) -> Result<Instant, Error> {
         let origin = *self.origin.get_or_insert(timestamp);
         let offset = timestamp.duration_since(origin).unwrap_or(Duration::ZERO);
         self.latest = self
             .base
             .checked_add(offset)
-            .ok_or(AnalysisError::TimestampRange { number })?
+            .ok_or(Error::TimestampRange { number })?
             .max(self.latest);
         Ok(self.latest)
     }

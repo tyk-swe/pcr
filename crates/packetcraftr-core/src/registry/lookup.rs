@@ -6,13 +6,13 @@ use std::fmt;
 use std::sync::Arc;
 
 use super::binding::{ChildBinding, Discriminator, FilterFieldBinding, ReverseBinding};
-use super::builder::RegistryBuilder;
+use super::builder::Builder;
 use crate::codec::LayerCodec;
-use crate::layer::{LayerSchema, ProtocolId};
+use crate::layer::{Id as ProtocolId, Schema as LayerSchema};
 use crate::matcher::ResponseMatcher;
 
 #[derive(Clone, Default)]
-pub struct ProtocolRegistry {
+pub struct Registry {
     pub(super) codecs: BTreeMap<ProtocolId, Arc<dyn LayerCodec>>,
     pub(super) builtin_codecs: BTreeSet<ProtocolId>,
     pub(super) aliases: HashMap<String, ProtocolId>,
@@ -24,10 +24,10 @@ pub struct ProtocolRegistry {
     pub(super) filter_fields: BTreeMap<String, FilterFieldBinding>,
 }
 
-impl fmt::Debug for ProtocolRegistry {
+impl fmt::Debug for Registry {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("ProtocolRegistry")
+            .debug_struct("Registry")
             .field("protocols", &self.codecs.keys().collect::<Vec<_>>())
             .field("link_types", &self.roots)
             .field(
@@ -38,9 +38,9 @@ impl fmt::Debug for ProtocolRegistry {
     }
 }
 
-impl ProtocolRegistry {
-    pub fn builder() -> RegistryBuilder {
-        RegistryBuilder::new()
+impl Registry {
+    pub fn builder() -> Builder {
+        Builder::new()
     }
 
     pub fn codec<Q>(&self, protocol: &Q) -> Option<&Arc<dyn LayerCodec>>

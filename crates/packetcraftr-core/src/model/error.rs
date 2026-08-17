@@ -3,11 +3,11 @@
 
 use thiserror::Error;
 
-use super::super::layer::{FieldError, ProtocolId};
+use super::super::layer::{FieldError, Id as ProtocolId};
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum PacketError {
+pub enum Error {
     #[error("layer index {index} is outside packet length {len}")]
     IndexOutOfBounds { index: usize, len: usize },
     #[error("packet has no layer with protocol id {protocol}")]

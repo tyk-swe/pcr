@@ -14,15 +14,14 @@ use self::{
 use crate::{
     interface::{Id as InterfaceId, InterfaceInfo},
     route::{
-        NativeRouteError, RouteDecision, find_interface, interface_decision,
-        validate_preferred_source_family,
+        Decision, SystemError, find_interface, interface_decision, validate_preferred_source_family,
     },
 };
 
 mod query;
 mod worker;
 
-pub(super) fn interfaces() -> Result<Vec<InterfaceInfo>, NativeRouteError> {
+pub(super) fn interfaces() -> Result<Vec<InterfaceInfo>, SystemError> {
     with_netlink(|handle| async move { query_interfaces(&handle).await })
 }
 
@@ -30,18 +29,18 @@ pub(super) fn route(
     destination: IpAddr,
     interface_hint: Option<&InterfaceId>,
     preferred_source: Option<IpAddr>,
-) -> Result<RouteDecision, NativeRouteError> {
+) -> Result<Decision, SystemError> {
     validate_preferred_source_family(destination, preferred_source)?;
     let interface_hint = interface_hint.cloned();
     with_netlink(move |handle| query_route(handle, destination, interface_hint, preferred_source))
 }
 
-pub(super) fn interface_route(requested: &InterfaceId) -> Result<RouteDecision, NativeRouteError> {
+pub(super) fn interface_route(requested: &InterfaceId) -> Result<Decision, SystemError> {
     interface_decision(find_interface(&interfaces()?, requested)?)
 }
 
-pub(super) fn os_error(operation: &'static str, error: impl std::fmt::Display) -> NativeRouteError {
-    NativeRouteError::OperatingSystem {
+pub(super) fn os_error(operation: &'static str, error: impl std::fmt::Display) -> SystemError {
+    SystemError::OperatingSystem {
         operation,
         message: error.to_string(),
     }

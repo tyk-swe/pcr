@@ -37,26 +37,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Flattened the public `packetcraftr-core` build, codec, decode, diagnostic,
   document, expression, field, layout, and matcher module paths, and exposed
   `protocol::ChecksumAccumulator` for shared incremental Internet checksums.
-- **Breaking:** Removed duplicate short aliases from the flattened core API.
-  Use `build::{BuildError, BuildContext, BuildMode, BuildOptions, BuiltPacket}`,
-  `decode::{Dissector, DecodeError, DecodeOptions, DecodedPacket}`, the
-  descriptive `codec`, `diagnostic`, `expression`, `field`, `layout`, and
-  `matcher` names, `layer::{FieldError, FieldSchema}` instead of the former
-  `field` aliases, and the root `reflective_layer!` and
-  `builtin_protocol_catalog!` macro paths.
-- **Breaking:** Removed redundant short aliases for descriptive command-output
-  models. Use `output::plan::PlanCommandResult`,
-  `output::routes::RoutesCommandResult`,
-  `output::send::{SendCommandResult, MaterializedRouteOutput,
-  NeighborEvidenceOutput}`, and
-  `output::exchange::{ExchangeCommandResult, ExchangeResponseOutput,
-  ExchangeStreamCommandResult}`. DNS, scan, and traceroute now use the
-  canonical `target::PolicyAuthorizer` and `exchange::Response` paths. Output-v1
-  documents are unchanged.
+- **Breaking:** Rust APIs now use their module as context instead of repeating
+  it in type names or exposing alias facades. Canonical examples include
+  `build::{Error, Context, Mode, Options, BuiltPacket}`,
+  `decode::{Dissector, Error, Options, DecodedPacket}`, `registry::Registry`,
+  `document::Packet`, and the scoped `dns::{Error, Request, Result}` family.
+  The former domain-prefixed definitions have no compatibility aliases.
+- **Breaking:** Route and neighbor contracts now live under their actual
+  owners as `route::{Error, Options, Plan, Decision, Provider}` and
+  `neighbor::{Error, Options, Resolver}`. Route Rust fields use
+  `selected_source` and `decision`, while output-v1 retains the existing
+  `selected_address` and `route` keys.
+- **Breaking:** Command output modules now expose concise `Result` and `Event`
+  models, with shared frame and network representations under public
+  `output::frame` and `output::network` owners. Output-v1 documents are
+  unchanged.
 - Reorganized packet decoding, fragment reassembly, route planning, and live
   exchange correlation around explicit phase and state owners. That internal
   reorganization did not change serialized output contracts or runtime
   behavior.
+- Split oversized builders, codecs, reassembly planners, workflow engines, CLI
+  orchestration, and integration tests at concrete phase boundaries.
 - Added checked, all-or-nothing capture-statistics aggregation through
   `packetcraftr_netio::capture::Statistics::checked_add`.
 - **Breaking:** Removed the undocumented `Client::exchange_for_workflow` seam;
@@ -96,6 +97,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Corrected the DNS text summary label from `response_name` to
+  `response_code_name`.
 - Kept TCP follow delivery edges aligned with directional reassembly
   generations, preventing Fast Open payload retransmissions from being emitted
   twice while still resetting deduplication for four-tuple reuse.

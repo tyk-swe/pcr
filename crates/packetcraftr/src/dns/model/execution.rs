@@ -16,21 +16,21 @@ use crate::Stats;
 use crate::probe::nonzero_ipv4_identification;
 
 use super::super::DEFAULT_DNS_SERVER_PORT;
-use super::request::DnsQueryType;
+use super::request::QueryType;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DnsProbe {
+pub struct Probe {
     pub attempt: u32,
     pub server_address: IpAddr,
     pub server_port: u16,
     pub source_port: u16,
     pub transaction_id: u16,
     pub query_name: String,
-    pub query_type: DnsQueryType,
+    pub query_type: QueryType,
     pub query: Bytes,
 }
 
-impl DnsProbe {
+impl Probe {
     pub fn packet(&self) -> Packet {
         let mut packet = Packet::new();
         match self.server_address {
@@ -70,15 +70,15 @@ impl DnsProbe {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DnsExchange {
-    pub probe: DnsProbe,
+pub struct Exchange {
+    pub probe: Probe,
     pub timeout: Duration,
     pub max_responses: usize,
     pub(crate) permit: crate::evidence::ExecutionPermit,
 }
 
 #[derive(Clone, Debug)]
-pub struct DnsExchangeExecution {
+pub struct Execution {
     pub(crate) permit: crate::evidence::ExecutionPermit,
     pub(crate) sent: crate::SentPacket,
     pub(crate) responses: Vec<crate::exchange::Response>,
@@ -88,9 +88,9 @@ pub struct DnsExchangeExecution {
     pub(crate) stats: Stats,
 }
 
-pub trait DnsExecutor {
+pub trait Executor {
     fn execute(
         &mut self,
-        exchange: &DnsExchange,
-    ) -> std::result::Result<DnsExchangeExecution, crate::BoundaryError>;
+        exchange: &Exchange,
+    ) -> std::result::Result<Execution, crate::BoundaryError>;
 }

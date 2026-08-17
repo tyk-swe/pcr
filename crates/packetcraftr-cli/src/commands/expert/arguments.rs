@@ -3,9 +3,9 @@
 
 use std::path::PathBuf;
 
-use clap::{ArgAction, Args, ValueEnum};
+use clap::{ArgAction, ValueEnum};
 
-use crate::command_options::OfflineAnalysisLimits;
+use crate::command_options::OfflineAnalysisLimitsArgs;
 
 pub(crate) const AFTER_LONG_HELP: &str = r#"Expert analysis is computed offline over dissected frames; no live capture or transmission is involved.
 
@@ -21,13 +21,13 @@ Examples:
 /// Minimum finding severity selector for `expert`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 #[value(rename_all = "snake_case")]
-pub(crate) enum CliExpertSeverity {
+pub(crate) enum Severity {
     Info,
     Warning,
     Error,
 }
 
-impl CliExpertSeverity {
+impl Severity {
     pub(crate) const fn rank(self) -> u8 {
         match self {
             Self::Info => 1,
@@ -37,8 +37,8 @@ impl CliExpertSeverity {
     }
 }
 
-#[derive(Debug, Args)]
-pub(crate) struct ExpertArgs {
+#[derive(Debug, clap::Args)]
+pub(crate) struct Args {
     /// Classic PCAP or PCAPNG input path.
     pub(crate) path: PathBuf,
     /// Keep only frames matching a display filter; stream indices stay
@@ -46,11 +46,11 @@ pub(crate) struct ExpertArgs {
     #[arg(long, value_name = "EXPR")]
     pub(crate) filter: Option<String>,
     /// Minimum finding severity to include in output.
-    #[arg(long, value_enum, default_value_t = CliExpertSeverity::Info)]
-    pub(crate) min_severity: CliExpertSeverity,
+    #[arg(long, value_enum, default_value_t = Severity::Info)]
+    pub(crate) min_severity: Severity,
     /// Keep only findings matching an exact code; repeatable.
     #[arg(long = "code", value_name = "CODE", action = ArgAction::Append)]
     pub(crate) codes: Vec<String>,
     #[command(flatten)]
-    pub(crate) limits: OfflineAnalysisLimits,
+    pub(crate) limits: OfflineAnalysisLimitsArgs,
 }

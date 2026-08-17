@@ -10,39 +10,33 @@ use crate::{
     Packet, build::BuiltPacket, decode::DecodedPacket, diagnostic::Diagnostic, field::FieldValue,
 };
 
-use super::request::FuzzStrategy;
+use super::request::Strategy;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum FuzzMode {
-    Offline,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FuzzCaseOutcome {
+pub enum CaseOutcome {
     Built,
     Rejected,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct FuzzMutation {
+pub struct Mutation {
     pub layer: usize,
     pub protocol: String,
     pub field: String,
-    pub strategy: FuzzStrategy,
+    pub strategy: Strategy,
     pub original: FieldValue,
     pub value: FieldValue,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FuzzCaseFailure {
+pub struct CaseFailure {
     message: String,
     classification: Classification,
     causes: Vec<String>,
 }
 
-impl FuzzCaseFailure {
+impl CaseFailure {
     pub fn new(
         message: impl Into<String>,
         classification: Classification,
@@ -60,13 +54,13 @@ impl FuzzCaseFailure {
     }
 }
 
-impl fmt::Display for FuzzCaseFailure {
+impl fmt::Display for CaseFailure {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(&self.message)
     }
 }
 
-impl Classified for FuzzCaseFailure {
+impl Classified for CaseFailure {
     fn classification(&self) -> Classification {
         self.classification
     }
@@ -77,21 +71,21 @@ impl Classified for FuzzCaseFailure {
 }
 
 #[derive(Clone, Debug)]
-pub struct FuzzCase {
+pub struct Case {
     pub index: u64,
     pub seed: u64,
-    pub mutation: FuzzMutation,
+    pub mutation: Mutation,
     pub shrink_values: Vec<FieldValue>,
     pub recipe: Packet,
     pub built: Option<BuiltPacket>,
     pub decoded: Option<DecodedPacket>,
-    pub outcome: FuzzCaseOutcome,
-    pub error: Option<FuzzCaseFailure>,
+    pub outcome: CaseOutcome,
+    pub error: Option<CaseFailure>,
     pub diagnostics: Vec<Diagnostic>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FuzzStats {
+pub struct Stats {
     pub cases_generated: u64,
     pub cases_built: u64,
     pub packets_attempted: u64,
@@ -101,10 +95,10 @@ pub struct FuzzStats {
 }
 
 #[derive(Clone, Debug)]
-pub struct FuzzResult {
+pub struct Result {
     pub seed: u64,
     pub first_case: u64,
-    pub cases: Vec<FuzzCase>,
+    pub cases: Vec<Case>,
     pub diagnostics: Vec<Diagnostic>,
-    pub stats: FuzzStats,
+    pub stats: Stats,
 }

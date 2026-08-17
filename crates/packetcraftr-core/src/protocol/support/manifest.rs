@@ -7,7 +7,7 @@ use crate::semantics::{BuiltinProtocol, builtin_protocol_catalog};
 
 /// One built-in codec row in the stable protocol contract.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ProtocolSupport {
+pub struct Protocol {
     pub protocol: &'static str,
     pub aliases: &'static [&'static str],
     pub build: bool,
@@ -19,7 +19,7 @@ pub struct ProtocolSupport {
 
 /// Byte-order rule applied by a registered capture root.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CaptureRootByteOrder {
+pub enum CaptureByteOrder {
     /// A captured host-order field is detected and preserved as little or big endian.
     CapturedHost,
     /// Multi-byte header fields use network byte order.
@@ -30,10 +30,10 @@ pub enum CaptureRootByteOrder {
 
 /// One numeric DLT/LINKTYPE binding in the default registry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct CaptureRootSupport {
+pub struct CaptureRoot {
     pub link_type: u32,
     pub protocol: &'static str,
-    pub byte_order: CaptureRootByteOrder,
+    pub byte_order: CaptureByteOrder,
     pub exact_round_trip: bool,
 }
 
@@ -49,8 +49,8 @@ macro_rules! define_protocol_support {
     )*) => {
         /// Every codec registered by [`crate::protocol::builtin::registry`], in
         /// stable manifest order.
-        pub const BUILTIN_PROTOCOLS: &[ProtocolSupport] = &[$(
-            ProtocolSupport {
+        pub const BUILTIN_PROTOCOLS: &[Protocol] = &[$(
+            Protocol {
                 protocol: $canonical,
                 aliases: &[$($alias),*],
                 build: $constructible,
@@ -72,9 +72,9 @@ builtin_protocol_catalog!(define_protocol_support);
 const fn capture_root(
     link_type: u32,
     protocol: BuiltinProtocol,
-    byte_order: CaptureRootByteOrder,
-) -> CaptureRootSupport {
-    CaptureRootSupport {
+    byte_order: CaptureByteOrder,
+) -> CaptureRoot {
+    CaptureRoot {
         link_type,
         protocol: protocol.as_str(),
         byte_order,
@@ -86,50 +86,50 @@ const fn capture_root(
 ///
 /// Capture topology remains separate from identity metadata, but every edge is
 /// typed so a protocol rename cannot silently leave a string binding behind.
-pub const BUILTIN_CAPTURE_ROOTS: &[CaptureRootSupport] = &[
+pub const BUILTIN_CAPTURE_ROOTS: &[CaptureRoot] = &[
     capture_root(
         crate::frame::LinkType::NULL.0,
         BuiltinProtocol::BsdNull,
-        CaptureRootByteOrder::CapturedHost,
+        CaptureByteOrder::CapturedHost,
     ),
     capture_root(
         crate::frame::LinkType::ETHERNET.0,
         BuiltinProtocol::Ethernet,
-        CaptureRootByteOrder::ProtocolDefined,
+        CaptureByteOrder::ProtocolDefined,
     ),
     capture_root(
         crate::frame::LinkType::BSD_RAW.0,
         BuiltinProtocol::RawIp,
-        CaptureRootByteOrder::ProtocolDefined,
+        CaptureByteOrder::ProtocolDefined,
     ),
     capture_root(
         crate::frame::LinkType::RAW.0,
         BuiltinProtocol::RawIp,
-        CaptureRootByteOrder::ProtocolDefined,
+        CaptureByteOrder::ProtocolDefined,
     ),
     capture_root(
         crate::frame::LinkType::LOOP.0,
         BuiltinProtocol::BsdLoop,
-        CaptureRootByteOrder::Network,
+        CaptureByteOrder::Network,
     ),
     capture_root(
         crate::frame::LinkType::LINUX_SLL.0,
         BuiltinProtocol::LinuxSll,
-        CaptureRootByteOrder::Network,
+        CaptureByteOrder::Network,
     ),
     capture_root(
         crate::frame::LinkType::IPV4.0,
         BuiltinProtocol::Ipv4,
-        CaptureRootByteOrder::ProtocolDefined,
+        CaptureByteOrder::ProtocolDefined,
     ),
     capture_root(
         crate::frame::LinkType::IPV6.0,
         BuiltinProtocol::Ipv6,
-        CaptureRootByteOrder::ProtocolDefined,
+        CaptureByteOrder::ProtocolDefined,
     ),
     capture_root(
         crate::frame::LinkType::LINUX_SLL2.0,
         BuiltinProtocol::LinuxSll2,
-        CaptureRootByteOrder::Network,
+        CaptureByteOrder::Network,
     ),
 ];

@@ -12,11 +12,11 @@ use std::net::Ipv4Addr;
 
 use crate::{
     codec::{
-        CodecError, DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext,
+        DecodedLayerValue, EncodedLayer, Error as CodecError, LayerCodec, LayerDecodeContext,
         LayerEncodeContext,
     },
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflective_layer},
+    layer::{Id as ProtocolId, Layer, reflective_layer},
 };
 
 use super::super::common::{
@@ -94,7 +94,7 @@ impl LayerCodec for ArpCodec {
                 "typed ARP requires Ethernet/IPv4 types (htype={}, ptype=0x{:04x})",
                 layer.hardware_type, layer.protocol_type
             );
-            if context.mode == crate::build::BuildMode::Strict {
+            if context.mode == crate::build::Mode::Strict {
                 return Err(CodecError::Unsupported {
                     protocol: protocol("arp"),
                     message,

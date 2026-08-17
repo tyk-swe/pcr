@@ -7,12 +7,12 @@ use bytes::Bytes;
 
 use crate::{
     codec::{
-        CodecError, DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext,
+        DecodedLayerValue, EncodedLayer, Error as CodecError, LayerCodec, LayerDecodeContext,
         LayerEncodeContext,
     },
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflective_layer},
+    layer::{Id as ProtocolId, Layer, reflective_layer},
     registry::Discriminator,
     semantics::BuiltinProtocol,
 };
@@ -127,68 +127,7 @@ impl LayerCodec for AhCodec {
         )]
         let expected_payload_length = (header_len / 4 - 2) as u8;
 
-        let mut diagnostics = Vec::new();
-        if layer.spi == 0 {
-            strict_or_diagnostic(
-                "ah",
-                "build.ah_spi",
-                "spi",
-                "SPI zero is reserved and must not appear on the wire",
-                context,
-                &mut diagnostics,
-            )?;
-        }
-        if layer.reserved != 0 {
-            strict_or_diagnostic(
-                "ah",
-                "build.ah_reserved",
-                "reserved",
-                "the AH reserved field must be zero on transmission",
-                context,
-                &mut diagnostics,
-            )?;
-        }
-        // RFC 4302 aligns the header to its address family: 4 octets under
-        // IPv4 and 8 under IPv6, the extension-header unit.
-        let under_ipv6 = context
-            .packet
-            .iter()
-            .take(context.index)
-            .rev()
-            .find_map(|parent| match BuiltinProtocol::of(parent) {
-                Some(BuiltinProtocol::Ipv4) => Some(false),
-                // A preceding AH takes its family from whatever encloses it.
-                Some(BuiltinProtocol::Ah) => None,
-                Some(parent) if parent == BuiltinProtocol::Ipv6 || parent.is_ipv6_extension() => {
-                    Some(true)
-                }
-                _ => None,
-            });
-        if under_ipv6 == Some(true) && !header_len.is_multiple_of(8) {
-            strict_or_diagnostic(
-                "ah",
-                "build.ah_alignment",
-                "icv",
-                "an IPv6 AH header must be a multiple of 8 octets",
-                context,
-                &mut diagnostics,
-            )?;
-        }
-        if let Some(child) = context.child
-            && ah_family_mismatch(under_ipv6, child.protocol_id().as_str())
-        {
-            strict_or_diagnostic(
-                "ah",
-                "build.ah_family",
-                "next_header",
-                format!(
-                    "{} does not belong to the enclosing address family",
-                    child.protocol_id()
-                ),
-                context,
-                &mut diagnostics,
-            )?;
-        }
+        let (under_ipv6, mut diagnostics) = validate_context(layer, header_len, context)?;
         validate_auto_raw_discriminator(
             "ah",
             "next_header",
@@ -330,4 +269,69 @@ impl LayerCodec for AhCodec {
     ) -> Result<Box<dyn Layer>, CodecError> {
         make_layer(Ah::default(), fields)
     }
+}
+
+fn validate_context(
+    layer: &Ah,
+    header_len: usize,
+    context: &LayerEncodeContext<'_>,
+) -> Result<(Option<bool>, Vec<Diagnostic>), CodecError> {
+    let mut diagnostics = Vec::new();
+    if layer.spi == 0 {
+        strict_or_diagnostic(
+            "ah",
+            "build.ah_spi",
+            "spi",
+            "SPI zero is reserved and must not appear on the wire",
+            context,
+            &mut diagnostics,
+        )?;
+    }
+    if layer.reserved != 0 {
+        strict_or_diagnostic(
+            "ah",
+            "build.ah_reserved",
+            "reserved",
+            "the AH reserved field must be zero on transmission",
+            context,
+            &mut diagnostics,
+        )?;
+    }
+    let under_ipv6 =
+        context.packet.iter().take(context.index).rev().find_map(
+            |parent| match BuiltinProtocol::of(parent) {
+                Some(BuiltinProtocol::Ipv4) => Some(false),
+                Some(BuiltinProtocol::Ah) => None,
+                Some(parent) if parent == BuiltinProtocol::Ipv6 || parent.is_ipv6_extension() => {
+                    Some(true)
+                }
+                _ => None,
+            },
+        );
+    if under_ipv6 == Some(true) && !header_len.is_multiple_of(8) {
+        strict_or_diagnostic(
+            "ah",
+            "build.ah_alignment",
+            "icv",
+            "an IPv6 AH header must be a multiple of 8 octets",
+            context,
+            &mut diagnostics,
+        )?;
+    }
+    if let Some(child) = context.child
+        && ah_family_mismatch(under_ipv6, child.protocol_id().as_str())
+    {
+        strict_or_diagnostic(
+            "ah",
+            "build.ah_family",
+            "next_header",
+            format!(
+                "{} does not belong to the enclosing address family",
+                child.protocol_id()
+            ),
+            context,
+            &mut diagnostics,
+        )?;
+    }
+    Ok((under_ipv6, diagnostics))
 }

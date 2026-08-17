@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, UNIX_EPOCH};
 
 use crate::policy::Policy as TrafficPolicy;
-use crate::target::{Error, Resolver};
+use crate::target::{Error as TargetError, Resolver};
 use bytes::Bytes;
 use packetcraftr_core::error::{Classification, Classified, Kind};
 use packetcraftr_core::frame::{Frame, LinkType};
@@ -24,23 +24,22 @@ use packetcraftr_core::{
 };
 
 use super::DEFAULT_TRACEROUTE_UDP_PORT;
-use super::classification::classify_traceroute_response;
-use super::engine::traceroute;
-use super::error::TracerouteError;
+use super::classification::classify_response;
+use super::engine::run;
+use super::error::Error;
 use super::model::{
-    TracerouteBatch, TracerouteBatchExecution, TracerouteCompletion, TracerouteExecutor,
-    TracerouteLimits, TracerouteProbe, TracerouteProbeStatus, TracerouteRequest,
-    TracerouteResponseKind, TracerouteStrategy,
+    Batch, Completion, Execution, Executor, Limits, Probe, ProbeStatus, Request, ResponseKind,
+    Strategy,
 };
 use super::probe::probe_packet;
 use crate::clock::Clock;
 use crate::target::{Authorized, Authorizer, PolicyAuthorizer, Target};
 use crate::{BoundaryError, Stats, target::Family};
 
-fn udp_traceroute_request(target: Target) -> TracerouteRequest {
-    TracerouteRequest {
+fn udp_traceroute_request(target: Target) -> Request {
+    Request {
         target,
-        strategy: TracerouteStrategy::Udp,
+        strategy: Strategy::Udp,
         address_family: Family::Any,
         destination_port: Some(DEFAULT_TRACEROUTE_UDP_PORT),
         first_hop: 1,
@@ -48,7 +47,7 @@ fn udp_traceroute_request(target: Target) -> TracerouteRequest {
         probes_per_hop: 2,
         timeout: Duration::from_millis(10),
         probes_per_second: None,
-        limits: TracerouteLimits::default(),
+        limits: Limits::default(),
     }
 }
 
@@ -126,7 +125,7 @@ impl Resolver for ScriptedResolver {
         &self,
         _hostname: &crate::target::Hostname,
         _limit: usize,
-    ) -> Result<Vec<IpAddr>, Error> {
+    ) -> Result<Vec<IpAddr>, TargetError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         Ok(self
             .answers
@@ -139,11 +138,8 @@ impl Resolver for ScriptedResolver {
 
 struct CountingRejectExecutor(Arc<AtomicUsize>);
 
-impl TracerouteExecutor for CountingRejectExecutor {
-    fn execute(
-        &mut self,
-        _batch: &TracerouteBatch,
-    ) -> Result<TracerouteBatchExecution, BoundaryError> {
+impl Executor for CountingRejectExecutor {
+    fn execute(&mut self, _batch: &Batch) -> Result<Execution, BoundaryError> {
         self.0.fetch_add(1, Ordering::SeqCst);
         Err(BoundaryError::new(
             "stop after authorization",
@@ -158,11 +154,8 @@ struct NoResponseExecutor {
     invalid_sent_index: Option<usize>,
 }
 
-impl TracerouteExecutor for NoResponseExecutor {
-    fn execute(
-        &mut self,
-        batch: &TracerouteBatch,
-    ) -> Result<TracerouteBatchExecution, BoundaryError> {
+impl Executor for NoResponseExecutor {
+    fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
         let mut sent = Vec::new();
         let mut bytes = 0_u64;
         for probe in &batch.probes {
@@ -178,7 +171,7 @@ impl TracerouteExecutor for NoResponseExecutor {
             sent[index] = sent[0].clone();
         }
         let count = u64::try_from(batch.probes.len()).expect("test batch fits u64");
-        Ok(TracerouteBatchExecution {
+        Ok(Execution {
             permit: batch.permit,
             sent,
             responses: Vec::new(),
@@ -198,11 +191,8 @@ impl TracerouteExecutor for NoResponseExecutor {
 
 struct MixedHopExecutor;
 
-impl TracerouteExecutor for MixedHopExecutor {
-    fn execute(
-        &mut self,
-        batch: &TracerouteBatch,
-    ) -> Result<TracerouteBatchExecution, BoundaryError> {
+impl Executor for MixedHopExecutor {
+    fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
         let local = Ipv4Addr::new(10, 0, 0, 1);
         let remote = Ipv4Addr::new(10, 0, 0, 9);
         let router = Ipv4Addr::new(10, 0, 0, 254);
@@ -237,7 +227,7 @@ impl TracerouteExecutor for MixedHopExecutor {
             )
         };
         let count = u64::try_from(batch.probes.len()).expect("test batch fits u64");
-        Ok(TracerouteBatchExecution {
+        Ok(Execution {
             permit: batch.permit,
             sent,
             responses: vec![crate::exchange::Response {
@@ -379,7 +369,7 @@ fn traceroute_address_ordering_deduplicates_after_family_filtering() {
     request.address_family = Family::Ipv4;
     request.max_hops = 1;
     request.probes_per_hop = 1;
-    let result = traceroute(
+    let result = run(
         &request,
         &mut AddressListAuthorizer {
             addresses: vec![Ipv6Addr::LOCALHOST.into(), first, first, second, first],
@@ -402,7 +392,7 @@ fn traceroute_hostname_policy_precedes_resolution_and_probe_execution() {
     let mut executor = CountingRejectExecutor(Arc::clone(&calls));
     let policy = private_traceroute_policy();
     let mut authorizer = PolicyAuthorizer::new(&policy, &resolver);
-    let error = traceroute(
+    let error = run(
         &udp_traceroute_request(Target::Hostname("lab.example".parse().unwrap())),
         &mut authorizer,
         &default_registry().unwrap(),
@@ -420,7 +410,7 @@ fn traceroute_hostname_policy_precedes_resolution_and_probe_execution() {
     let mut request = udp_traceroute_request(Target::Hostname("mixed.example".parse().unwrap()));
     request.address_family = Family::Ipv6;
     let mut authorizer = PolicyAuthorizer::new(&policy, &resolver);
-    let error = traceroute(
+    let error = run(
         &request,
         &mut authorizer,
         &default_registry().unwrap(),
@@ -443,7 +433,7 @@ fn traceroute_udp_port_overflow_is_rejected_before_authorization_or_execution() 
         operations: Vec::new(),
     };
     let calls = Arc::new(AtomicUsize::new(0));
-    let error = traceroute(
+    let error = run(
         &request,
         &mut authorizer,
         &default_registry().unwrap(),
@@ -452,7 +442,7 @@ fn traceroute_udp_port_overflow_is_rejected_before_authorization_or_execution() 
     )
     .unwrap_err();
 
-    assert!(matches!(error, TracerouteError::InvalidPort { .. }));
+    assert!(matches!(error, Error::InvalidPort { .. }));
     assert!(authorizer.operations.is_empty());
     assert_eq!(calls.load(Ordering::SeqCst), 0);
 }
@@ -463,10 +453,10 @@ fn traceroute_ipv4_classification_distinguishes_intermediate_terminal_and_unreac
     let local = Ipv4Addr::new(10, 0, 0, 1);
     let remote = Ipv4Addr::new(10, 0, 0, 9);
     let router = Ipv4Addr::new(10, 0, 0, 254);
-    let mut probe = TracerouteProbe {
+    let mut probe = Probe {
         sequence: 0,
         address: IpAddr::V4(remote),
-        strategy: TracerouteStrategy::Udp,
+        strategy: Strategy::Udp,
         destination_port: Some(DEFAULT_TRACEROUTE_UDP_PORT),
         hop_limit: 1,
         attempt: 1,
@@ -476,37 +466,37 @@ fn traceroute_ipv4_classification_distinguishes_intermediate_terminal_and_unreac
     let quote = ipv4_udp_quote(&probe);
 
     assert_eq!(
-        classify_traceroute_response(
+        classify_response(
             &registry,
-            TracerouteStrategy::Udp,
+            Strategy::Udp,
             &probe,
             &icmpv4_error(router, local, 11, 0, quote.clone(), 2, Vec::new()),
         )
         .unwrap()
         .kind,
-        TracerouteResponseKind::Intermediate
+        ResponseKind::Intermediate
     );
     assert_eq!(
-        classify_traceroute_response(
+        classify_response(
             &registry,
-            TracerouteStrategy::Udp,
+            Strategy::Udp,
             &probe,
             &icmpv4_error(remote, local, 3, 3, quote.clone(), 2, Vec::new()),
         )
         .unwrap()
         .kind,
-        TracerouteResponseKind::DestinationReached
+        ResponseKind::DestinationReached
     );
     assert_eq!(
-        classify_traceroute_response(
+        classify_response(
             &registry,
-            TracerouteStrategy::Udp,
+            Strategy::Udp,
             &probe,
             &icmpv4_error(router, local, 3, 1, quote, 2, Vec::new()),
         )
         .unwrap()
         .kind,
-        TracerouteResponseKind::Unreachable
+        ResponseKind::Unreachable
     );
 }
 
@@ -516,10 +506,10 @@ fn traceroute_ipv6_classification_correlates_intermediate_quote() {
     let local: Ipv6Addr = "fd00::1".parse().unwrap();
     let remote: Ipv6Addr = "fd00::9".parse().unwrap();
     let router: Ipv6Addr = "fd00::fe".parse().unwrap();
-    let mut probe = TracerouteProbe {
+    let mut probe = Probe {
         sequence: 9,
         address: IpAddr::V6(remote),
-        strategy: TracerouteStrategy::Udp,
+        strategy: Strategy::Udp,
         destination_port: Some(DEFAULT_TRACEROUTE_UDP_PORT + 9),
         hop_limit: 4,
         attempt: 1,
@@ -529,10 +519,10 @@ fn traceroute_ipv6_classification_correlates_intermediate_quote() {
     let response = icmpv6_error(router, local, 3, 0, ipv6_udp_quote(&probe));
 
     assert_eq!(
-        classify_traceroute_response(&registry, TracerouteStrategy::Udp, &probe, &response,)
+        classify_response(&registry, Strategy::Udp, &probe, &response,)
             .unwrap()
             .kind,
-        TracerouteResponseKind::Intermediate
+        ResponseKind::Intermediate
     );
 }
 
@@ -546,7 +536,7 @@ fn traceroute_stops_after_the_first_terminal_hop() {
         address: destination,
         operations: Vec::new(),
     };
-    let result = traceroute(
+    let result = run(
         &request,
         &mut authorizer,
         &default_registry().unwrap(),
@@ -555,26 +545,20 @@ fn traceroute_stops_after_the_first_terminal_hop() {
     )
     .unwrap();
 
-    assert_eq!(result.completion, TracerouteCompletion::DestinationReached);
+    assert_eq!(result.completion, Completion::DestinationReached);
     assert_eq!(result.hops.len(), 2);
     assert_eq!(result.hops[0].probes.len(), 2);
     assert_eq!(result.hops[1].probes.len(), 2);
     assert_eq!(
         result.hops[0].probes[0].response_kind,
-        Some(TracerouteResponseKind::Intermediate)
+        Some(ResponseKind::Intermediate)
     );
-    assert_eq!(
-        result.hops[0].probes[1].status,
-        TracerouteProbeStatus::Timeout
-    );
+    assert_eq!(result.hops[0].probes[1].status, ProbeStatus::Timeout);
     assert_eq!(
         result.hops[1].probes[0].response_kind,
-        Some(TracerouteResponseKind::DestinationReached)
+        Some(ResponseKind::DestinationReached)
     );
-    assert_eq!(
-        result.hops[1].probes[1].status,
-        TracerouteProbeStatus::Timeout
-    );
+    assert_eq!(result.hops[1].probes[1].status, ProbeStatus::Timeout);
     assert_eq!(result.stats.packets_completed, 4);
     assert_eq!(authorizer.operations, vec![(16, 16 * 74)]);
 }
@@ -583,7 +567,7 @@ fn traceroute_stops_after_the_first_terminal_hop() {
 fn traceroute_invalid_sent_evidence_reports_the_exact_probe_sequence() {
     let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
     let request = udp_traceroute_request(Target::Address(address));
-    let error = traceroute(
+    let error = run(
         &request,
         &mut AddressListAuthorizer {
             addresses: vec![address],
@@ -598,7 +582,7 @@ fn traceroute_invalid_sent_evidence_reports_the_exact_probe_sequence() {
 
     assert!(matches!(
         error,
-        TracerouteError::InvalidEvidence { sequence: 1, message }
+        Error::InvalidEvidence { sequence: 1, message }
             if message
                 == "sent packet does not preserve the traceroute destination and probe identity"
     ));

@@ -47,11 +47,11 @@ impl fmt::Display for SpacedHex<'_> {
     }
 }
 
-pub(crate) fn captured_frame_text(frame: &output::capture::Frame) -> impl fmt::Display + '_ {
+pub(crate) fn captured_frame_text(frame: &output::frame::Captured) -> impl fmt::Display + '_ {
     CapturedFrameText(frame)
 }
 
-struct CapturedFrameText<'a>(&'a output::capture::Frame);
+struct CapturedFrameText<'a>(&'a output::frame::Captured);
 
 impl fmt::Display for CapturedFrameText<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -67,7 +67,7 @@ impl fmt::Display for CapturedFrameText<'_> {
     }
 }
 
-pub(crate) fn output_timestamp_text(timestamp: output::capture::Timestamp) -> String {
+pub(crate) fn output_timestamp_text(timestamp: output::frame::Timestamp) -> String {
     if timestamp.unix_seconds >= 0 || timestamp.nanoseconds == 0 {
         return format!("{}.{:09}", timestamp.unix_seconds, timestamp.nanoseconds);
     }
@@ -157,7 +157,7 @@ mod tests {
         ];
 
         for ((unix_seconds, nanoseconds), expected) in cases {
-            let timestamp = output::capture::Timestamp {
+            let timestamp = output::frame::Timestamp {
                 unix_seconds,
                 nanoseconds,
             };

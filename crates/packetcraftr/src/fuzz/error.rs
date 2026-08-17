@@ -9,7 +9,7 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
-pub enum FuzzError {
+pub enum Error {
     #[error(transparent)]
     Campaign(#[from] packetcraftr_core::fuzz::Error),
     #[error("invalid fuzz limit {field}={value}: {reason}")]
@@ -40,7 +40,7 @@ pub enum FuzzError {
     StatisticsOverflow { case_index: u64 },
 }
 
-impl FuzzError {
+impl Error {
     pub fn sequence(&self) -> Option<u64> {
         match self {
             Self::Execution { case_index, .. }
@@ -57,7 +57,7 @@ impl FuzzError {
     }
 }
 
-impl Classified for FuzzError {
+impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
             Self::Campaign(error) => error.classification(),
@@ -101,8 +101,8 @@ impl Classified for FuzzError {
     }
 }
 
-pub(super) fn duration_limit(error: DeadlineExceeded) -> FuzzError {
-    FuzzError::DurationLimit {
+pub(super) fn duration_limit(error: DeadlineExceeded) -> Error {
+    Error::DurationLimit {
         actual: error.actual,
         limit: error.limit,
     }

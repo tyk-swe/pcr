@@ -8,52 +8,52 @@ use packetcraftr_core::{Packet, decode::DecodedPacket, registry::Registry};
 
 use crate::probe::{self, Correlation};
 
-use super::model::{TracerouteResponseKind, TracerouteStrategy};
+use super::model::{ResponseKind, Strategy};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct TracerouteResponseClassification {
-    pub kind: TracerouteResponseKind,
+pub struct ResponseClassification {
+    pub kind: ResponseKind,
     pub responder: IpAddr,
     pub reason: &'static str,
 }
 
 /// Pure traceroute classifier. Corrupt, unrelated, pre-probe, and
 /// protocol-inconsistent traffic returns `None` and cannot advance the trace.
-pub fn classify_traceroute_response(
+pub fn classify_response(
     registry: &Registry,
-    strategy: TracerouteStrategy,
+    strategy: Strategy,
     request: &Packet,
     response: &DecodedPacket,
-) -> Option<TracerouteResponseClassification> {
+) -> Option<ResponseClassification> {
     let observation = probe::observe(registry, strategy.probe_transport(), request, response)?;
     let destination = packet_destination(request, strategy)?;
     let kind = match observation.correlation {
-        Correlation::TimeExceeded => TracerouteResponseKind::Intermediate,
+        Correlation::TimeExceeded => ResponseKind::Intermediate,
         correlation if correlation.is_direct_reply() => {
             if observation.responder != destination {
                 return None;
             }
-            TracerouteResponseKind::DestinationReached
+            ResponseKind::DestinationReached
         }
         Correlation::PortUnreachable
-            if strategy == TracerouteStrategy::Udp && observation.responder == destination =>
+            if strategy == Strategy::Udp && observation.responder == destination =>
         {
-            TracerouteResponseKind::DestinationReached
+            ResponseKind::DestinationReached
         }
-        _ => TracerouteResponseKind::Unreachable,
+        _ => ResponseKind::Unreachable,
     };
-    Some(TracerouteResponseClassification {
+    Some(ResponseClassification {
         kind,
         responder: observation.responder,
         reason: observation.reason,
     })
 }
 
-fn packet_destination(packet: &Packet, strategy: TracerouteStrategy) -> Option<IpAddr> {
+fn packet_destination(packet: &Packet, strategy: Strategy) -> Option<IpAddr> {
     let transport = match strategy {
-        TracerouteStrategy::Tcp => Some(BuiltinProtocol::Tcp),
-        TracerouteStrategy::Udp => Some(BuiltinProtocol::Udp),
-        TracerouteStrategy::Icmp => None,
+        Strategy::Tcp => Some(BuiltinProtocol::Tcp),
+        Strategy::Udp => Some(BuiltinProtocol::Udp),
+        Strategy::Icmp => None,
     };
     let transport_index = packet.iter().position(|layer| match transport {
         Some(transport) => BuiltinProtocol::of(layer) == Some(transport),

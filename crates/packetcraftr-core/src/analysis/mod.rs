@@ -28,9 +28,5 @@ pub mod reassembly;
 pub mod scope;
 pub mod stats;
 
-pub use error::AnalysisError as Error;
-use error::AnalysisError;
-pub use pipeline::{
-    AnalysisLimits as Limits, AnalysisOptions as Options, AnalysisSummary as Summary, FrameRecord,
-    run,
-};
+pub use error::Error;
+pub use pipeline::{FrameRecord, Limits, Options, Summary, run};

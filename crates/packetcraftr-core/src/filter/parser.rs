@@ -4,9 +4,9 @@
 //! Bounded parsing and postfix-program compilation for display filters.
 
 use super::super::field::FieldKind;
-use super::super::registry::ProtocolRegistry;
+use super::super::registry::Registry;
 use super::ast::{Op, Predicate};
-use super::error::FilterError;
+use super::error::Error;
 use super::lexer::{CompareOperator, Spanned, Token, tokenize};
 use super::literal::{self, Literal};
 use super::path::{self, FieldRef, FieldSource, FrameField, Resolved, StreamTransport};
@@ -21,14 +21,14 @@ pub const MAX_FILTER_SET_MEMBERS: usize = 1024;
 
 /// Bounds applied while compiling a display filter.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FilterOptions {
+pub struct Options {
     pub max_bytes: usize,
     pub max_nesting: usize,
     pub max_terms: usize,
     pub max_set_members: usize,
 }
 
-impl Default for FilterOptions {
+impl Default for Options {
     fn default() -> Self {
         Self {
             max_bytes: DEFAULT_MAX_FILTER_BYTES,
@@ -91,6 +91,19 @@ pub(super) struct Compiled {
     pub(super) requirements: Requirements,
 }
 
+struct Compiler<'a> {
+    tokens: &'a [Spanned],
+    registry: &'a Registry,
+    options: &'a Options,
+    program: Vec<Op>,
+    operators: Vec<Pending>,
+    requirements: Requirements,
+    expect_operand: bool,
+    depth: usize,
+    terms: usize,
+    index: usize,
+}
+
 /// Compiles a display filter into postfix form.
 ///
 /// Uses an explicit operand/operator stack rather than recursive descent, so
@@ -98,88 +111,119 @@ pub(super) struct Compiled {
 /// configured nesting bound then caps the operator stack itself.
 pub(super) fn compile(
     source: &str,
-    registry: &ProtocolRegistry,
-    options: &FilterOptions,
-) -> Result<Compiled, FilterError> {
-    // Reject oversized input before scanning it.
+    registry: &Registry,
+    options: &Options,
+) -> Result<Compiled, Error> {
+    validate_options(source, options)?;
+    let tokens = tokenize(source)?;
+    Compiler::new(&tokens, registry, options).compile(source.len())
+}
+
+fn validate_options(source: &str, options: &Options) -> Result<(), Error> {
     if source.len() > options.max_bytes {
-        return Err(FilterError::SizeLimit {
+        return Err(Error::SizeLimit {
             actual: source.len(),
             limit: options.max_bytes,
         });
     }
     if source.trim().is_empty() {
-        return Err(FilterError::Empty);
+        return Err(Error::Empty);
     }
     if options.max_nesting > MAX_FILTER_NESTING {
-        return Err(FilterError::InvalidNestingLimit {
+        return Err(Error::InvalidNestingLimit {
             value: options.max_nesting,
             maximum: MAX_FILTER_NESTING,
         });
     }
     if options.max_terms > MAX_FILTER_TERMS {
-        return Err(FilterError::InvalidTermLimit {
+        return Err(Error::InvalidTermLimit {
             value: options.max_terms,
             maximum: MAX_FILTER_TERMS,
         });
     }
     if options.max_set_members > MAX_FILTER_SET_MEMBERS {
-        return Err(FilterError::InvalidSetMemberLimit {
+        return Err(Error::InvalidSetMemberLimit {
             value: options.max_set_members,
             maximum: MAX_FILTER_SET_MEMBERS,
         });
     }
+    Ok(())
+}
 
-    let tokens = tokenize(source)?;
-    let mut program = Vec::new();
-    let mut operators: Vec<Pending> = Vec::new();
-    let mut requirements = Requirements::default();
-    let mut expect_operand = true;
-    let mut depth = 0_usize;
-    let mut terms = 0_usize;
-    let mut index = 0_usize;
+impl<'a> Compiler<'a> {
+    fn new(tokens: &'a [Spanned], registry: &'a Registry, options: &'a Options) -> Self {
+        Self {
+            tokens,
+            registry,
+            options,
+            program: Vec::new(),
+            operators: Vec::new(),
+            requirements: Requirements::default(),
+            expect_operand: true,
+            depth: 0,
+            terms: 0,
+            index: 0,
+        }
+    }
 
-    while index < tokens.len() {
-        let Spanned { token, offset } = &tokens[index];
-        let offset = *offset;
-        if expect_operand {
-            match token {
-                Token::LeftParen => {
-                    depth += 1;
-                    if depth > options.max_nesting {
-                        return Err(FilterError::NestingLimit {
-                            limit: options.max_nesting,
-                        });
-                    }
-                    operators.push(Pending::LeftParen);
-                    index += 1;
-                }
-                Token::Not => {
-                    operators.push(Pending::Operator(Op::Not));
-                    index += 1;
-                }
-                Token::Word(_) => {
-                    terms += 1;
-                    if terms > options.max_terms {
-                        return Err(FilterError::TermLimit {
-                            limit: options.max_terms,
-                        });
-                    }
-                    let (predicate, next) =
-                        parse_predicate(&tokens, index, registry, options, &mut requirements)?;
-                    program.push(Op::Leaf(predicate));
-                    index = next;
-                    expect_operand = false;
-                }
-                other => {
-                    return Err(FilterError::Syntax {
-                        offset,
-                        message: format!("expected a field or `(`, found {}", describe(other)),
+    fn compile(mut self, source_len: usize) -> Result<Compiled, Error> {
+        while self.index < self.tokens.len() {
+            if self.expect_operand {
+                self.consume_operand()?;
+            } else {
+                self.consume_operator()?;
+            }
+        }
+        self.finish(source_len)
+    }
+
+    fn consume_operand(&mut self) -> Result<(), Error> {
+        let Spanned { token, offset } = &self.tokens[self.index];
+        match token {
+            Token::LeftParen => {
+                self.depth += 1;
+                if self.depth > self.options.max_nesting {
+                    return Err(Error::NestingLimit {
+                        limit: self.options.max_nesting,
                     });
                 }
+                self.operators.push(Pending::LeftParen);
+                self.index += 1;
             }
-            continue;
+            Token::Not => {
+                self.operators.push(Pending::Operator(Op::Not));
+                self.index += 1;
+            }
+            Token::Word(_) => {
+                self.terms += 1;
+                if self.terms > self.options.max_terms {
+                    return Err(Error::TermLimit {
+                        limit: self.options.max_terms,
+                    });
+                }
+                let (predicate, next) = parse_predicate(
+                    self.tokens,
+                    self.index,
+                    self.registry,
+                    self.options,
+                    &mut self.requirements,
+                )?;
+                self.program.push(Op::Leaf(predicate));
+                self.index = next;
+                self.expect_operand = false;
+            }
+            other => {
+                return Err(Error::Syntax {
+                    offset: *offset,
+                    message: format!("expected a field or `(`, found {}", describe(other)),
+                });
+            }
         }
+        Ok(())
+    }
+
+    fn consume_operator(&mut self) -> Result<(), Error> {
+        let Spanned { token, offset } = &self.tokens[self.index];
         match token {
             Token::And | Token::Or => {
                 let incoming = if matches!(token, Token::And) {
@@ -187,71 +231,74 @@ pub(super) fn compile(
                 } else {
                     Op::Or
                 };
-                while let Some(Pending::Operator(top)) = operators.last() {
+                while let Some(Pending::Operator(top)) = self.operators.last() {
                     if precedence(top) < precedence(&incoming) {
                         break;
                     }
-                    let Some(Pending::Operator(op)) = operators.pop() else {
+                    let Some(Pending::Operator(op)) = self.operators.pop() else {
                         break;
                     };
-                    program.push(op);
+                    self.program.push(op);
                 }
-                operators.push(Pending::Operator(incoming));
-                expect_operand = true;
-                index += 1;
+                self.operators.push(Pending::Operator(incoming));
+                self.expect_operand = true;
+                self.index += 1;
             }
             Token::RightParen => {
-                if depth == 0 {
-                    return Err(FilterError::Syntax {
-                        offset,
+                if self.depth == 0 {
+                    return Err(Error::Syntax {
+                        offset: *offset,
                         message: "unmatched `)`".to_owned(),
                     });
                 }
                 loop {
-                    match operators.pop() {
-                        Some(Pending::Operator(op)) => program.push(op),
+                    match self.operators.pop() {
+                        Some(Pending::Operator(op)) => self.program.push(op),
                         Some(Pending::LeftParen) => break,
                         None => {
-                            return Err(FilterError::Syntax {
-                                offset,
+                            return Err(Error::Syntax {
+                                offset: *offset,
                                 message: "unmatched `)`".to_owned(),
                             });
                         }
                     }
                 }
-                depth -= 1;
-                index += 1;
+                self.depth -= 1;
+                self.index += 1;
             }
             other => {
-                return Err(FilterError::Syntax {
-                    offset,
+                return Err(Error::Syntax {
+                    offset: *offset,
                     message: format!("expected `&&`, `||`, or `)`, found {}", describe(other)),
                 });
             }
         }
+        Ok(())
     }
 
-    if expect_operand {
-        return Err(FilterError::Syntax {
-            offset: source.len(),
-            message: "display filter ends where a field was expected".to_owned(),
-        });
-    }
-    while let Some(pending) = operators.pop() {
-        match pending {
-            Pending::Operator(op) => program.push(op),
-            Pending::LeftParen => {
-                return Err(FilterError::Syntax {
-                    offset: source.len(),
-                    message: "unmatched `(`".to_owned(),
-                });
+    fn finish(mut self, source_len: usize) -> Result<Compiled, Error> {
+        if self.expect_operand {
+            return Err(Error::Syntax {
+                offset: source_len,
+                message: "display filter ends where a field was expected".to_owned(),
+            });
+        }
+        while let Some(pending) = self.operators.pop() {
+            match pending {
+                Pending::Operator(op) => self.program.push(op),
+                Pending::LeftParen => {
+                    return Err(Error::Syntax {
+                        offset: source_len,
+                        message: "unmatched `(`".to_owned(),
+                    });
+                }
             }
         }
+        Ok(Compiled {
+            program: self.program,
+            requirements: self.requirements,
+        })
     }
-    Ok(Compiled {
-        program,
-        requirements,
-    })
 }
 
 /// Parses one comparison, membership test, or presence test.
@@ -260,22 +307,44 @@ pub(super) fn compile(
 fn parse_predicate(
     tokens: &[Spanned],
     start: usize,
-    registry: &ProtocolRegistry,
-    options: &FilterOptions,
+    registry: &Registry,
+    options: &Options,
     requirements: &mut Requirements,
-) -> Result<(Predicate, usize), FilterError> {
+) -> Result<(Predicate, usize), Error> {
+    let (mut field, mut index) = match parse_subject(tokens, start, registry)? {
+        Subject::Field { field, index } => (field, index),
+        Subject::Predicate(predicate, index) => return Ok((predicate, index)),
+    };
+    if let Some(Spanned {
+        token: Token::Slice(contents),
+        offset,
+    }) = tokens.get(index)
+    {
+        path::attach_slice(&mut field, contents, *offset)?;
+        index += 1;
+    }
+    record_requirements(&field, requirements);
+    parse_field_predicate(tokens, index, field, options)
+}
+
+enum Subject {
+    Field { field: FieldRef, index: usize },
+    Predicate(Predicate, usize),
+}
+
+fn parse_subject(tokens: &[Spanned], start: usize, registry: &Registry) -> Result<Subject, Error> {
     let Spanned { token, offset } = &tokens[start];
     let offset = *offset;
     let Token::Word(word) = token else {
-        return Err(FilterError::Syntax {
+        return Err(Error::Syntax {
             offset,
             message: "expected a field path".to_owned(),
         });
     };
     let resolved = path::resolve(word, registry, offset)?;
-    let mut index = start + 1;
+    let index = start + 1;
 
-    let mut field = match resolved {
+    let field = match resolved {
         Resolved::Layer {
             protocol,
             occurrence,
@@ -286,7 +355,7 @@ fn parse_predicate(
                 offset: slice_offset,
             }) = tokens.get(index)
             {
-                return Err(FilterError::UnsliceableField {
+                return Err(Error::UnsliceableField {
                     offset: *slice_offset,
                     path: word.clone(),
                 });
@@ -296,12 +365,12 @@ fn parse_predicate(
                 offset: operator_offset,
             }) = tokens.get(index)
             {
-                return Err(FilterError::Syntax {
+                return Err(Error::Syntax {
                     offset: *operator_offset,
                     message: format!("`{word}` names a layer, not a field, so it has no value"),
                 });
             }
-            return Ok((
+            return Ok(Subject::Predicate(
                 Predicate::LayerPresent {
                     protocol,
                     occurrence,
@@ -311,22 +380,24 @@ fn parse_predicate(
         }
         Resolved::Field(field) => field,
     };
+    Ok(Subject::Field { field, index })
+}
 
-    if let Some(Spanned {
-        token: Token::Slice(contents),
-        offset: slice_offset,
-    }) = tokens.get(index)
-    {
-        path::attach_slice(&mut field, contents, *slice_offset)?;
-        index += 1;
-    }
+fn record_requirements(field: &FieldRef, requirements: &mut Requirements) {
     if let FieldSource::Stream(transport) = &field.source {
         requirements.require_stream(*transport);
     }
     if matches!(field.source, FieldSource::Frame(FrameField::TimeEpoch)) {
         requirements.timestamp = true;
     }
+}
 
+fn parse_field_predicate(
+    tokens: &[Spanned],
+    index: usize,
+    field: FieldRef,
+    options: &Options,
+) -> Result<(Predicate, usize), Error> {
     match tokens.get(index) {
         Some(Spanned {
             token: Token::Compare(operator),
@@ -338,7 +409,7 @@ fn parse_predicate(
             if value.is_prefix()
                 && !matches!(operator, CompareOperator::Equal | CompareOperator::NotEqual)
             {
-                return Err(FilterError::OrderedPrefixComparison {
+                return Err(Error::OrderedPrefixComparison {
                     offset: *operator_offset,
                     path: field.path,
                     literal: value.to_string(),
@@ -377,11 +448,11 @@ fn parse_membership(
     tokens: &[Spanned],
     start: usize,
     field: FieldRef,
-    options: &FilterOptions,
+    options: &Options,
     offset: usize,
-) -> Result<(Predicate, usize), FilterError> {
+) -> Result<(Predicate, usize), Error> {
     let Some(first) = tokens.get(start) else {
-        return Err(FilterError::Syntax {
+        return Err(Error::Syntax {
             offset,
             message: "`in` needs a value or a `{ .. }` set".to_owned(),
         });
@@ -402,7 +473,7 @@ fn parse_membership(
     let mut values = Vec::new();
     loop {
         let Some(current) = tokens.get(index) else {
-            return Err(FilterError::Syntax {
+            return Err(Error::Syntax {
                 offset,
                 message: "unterminated set, expected `}`".to_owned(),
             });
@@ -413,7 +484,7 @@ fn parse_membership(
         }
         if !values.is_empty() {
             if !matches!(current.token, Token::Comma) {
-                return Err(FilterError::Syntax {
+                return Err(Error::Syntax {
                     offset: current.offset,
                     message: "expected `,` or `}` in a set".to_owned(),
                 });
@@ -425,14 +496,14 @@ fn parse_membership(
         check_literal(&field, &value, member_offset)?;
         values.push(value);
         if values.len() > options.max_set_members {
-            return Err(FilterError::SetMemberLimit {
+            return Err(Error::SetMemberLimit {
                 limit: options.max_set_members,
             });
         }
         index = next;
     }
     if values.is_empty() {
-        return Err(FilterError::Syntax {
+        return Err(Error::Syntax {
             offset,
             message: "a set needs at least one member".to_owned(),
         });
@@ -444,9 +515,9 @@ fn parse_literal(
     tokens: &[Spanned],
     index: usize,
     operator_offset: usize,
-) -> Result<(Literal, usize), FilterError> {
+) -> Result<(Literal, usize), Error> {
     let Some(Spanned { token, offset }) = tokens.get(index) else {
-        return Err(FilterError::Syntax {
+        return Err(Error::Syntax {
             offset: operator_offset,
             message: "expected a value".to_owned(),
         });
@@ -457,7 +528,7 @@ fn parse_literal(
             // Remaining unquoted words are text literals.
             .unwrap_or_else(|| Literal::Text(word.clone())),
         other => {
-            return Err(FilterError::Syntax {
+            return Err(Error::Syntax {
                 offset: *offset,
                 message: format!("expected a value, found {}", describe(other)),
             });
@@ -467,12 +538,12 @@ fn parse_literal(
 }
 
 /// Rejects a literal that no value of the field's declared kinds could match.
-fn check_literal(field: &FieldRef, value: &Literal, offset: usize) -> Result<(), FilterError> {
-    if field.kinds.is_empty() {
+fn check_literal(field: &FieldRef, value: &Literal, offset: usize) -> Result<(), Error> {
+    if field.specs.is_empty() {
         return Ok(());
     }
     if field
-        .kinds
+        .specs
         .iter()
         .any(|spec| literal::compatible(*spec, value))
     {
@@ -486,15 +557,15 @@ fn check_literal(field: &FieldRef, value: &Literal, offset: usize) -> Result<(),
 ///
 /// Without this, a mistyped `contains` compiles and then filters out every
 /// packet, which reads as "no matches" rather than as the mistake it is.
-fn check_searchable(field: &FieldRef, needle: &Literal, offset: usize) -> Result<(), FilterError> {
+fn check_searchable(field: &FieldRef, needle: &Literal, offset: usize) -> Result<(), Error> {
     if !literal::searchable_needle(needle) {
         return Err(incompatible(field, needle, offset));
     }
-    if field.kinds.is_empty() {
+    if field.specs.is_empty() {
         return Ok(());
     }
     if field
-        .kinds
+        .specs
         .iter()
         .any(|spec| literal::searchable(spec.kind))
     {
@@ -503,13 +574,13 @@ fn check_searchable(field: &FieldRef, needle: &Literal, offset: usize) -> Result
     Err(incompatible(field, needle, offset))
 }
 
-fn incompatible(field: &FieldRef, value: &Literal, offset: usize) -> FilterError {
-    FilterError::IncompatibleLiteral {
+fn incompatible(field: &FieldRef, value: &Literal, offset: usize) -> Error {
+    Error::IncompatibleLiteral {
         offset,
         path: field.path.clone(),
         kind: literal::kind_name(
             field
-                .kinds
+                .specs
                 .first()
                 .map_or(FieldKind::Bytes, |spec| spec.kind),
         ),

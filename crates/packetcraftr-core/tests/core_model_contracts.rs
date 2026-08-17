@@ -8,7 +8,7 @@ use std::time::{Duration, SystemTime};
 use packetcraftr_core::{
     budget::Deadline,
     error::{BoundaryError, Classification, Classified, Kind},
-    frame::{Direction, Frame, FrameError, LinkType},
+    frame::{Direction, Error as FrameError, Frame, LinkType},
 };
 
 #[derive(Debug)]

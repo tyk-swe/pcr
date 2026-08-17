@@ -3,11 +3,11 @@
 
 use std::str::FromStr;
 
-use clap::{Args, ValueEnum};
+use clap::ValueEnum;
 use packetcraftr::core;
 
 use crate::command_options::{
-    CaptureLimitArgs, CliAddressFamily, HostnameTrafficPolicyArgs, RouteSelectionArgs,
+    AddressFamily, CaptureLimitsArgs, HostnameTrafficPolicyArgs, RouteSelectionArgs,
 };
 
 pub(crate) const AFTER_LONG_HELP: &str = r#"Examples:
@@ -24,12 +24,12 @@ Port syntax:
 
 /// One CLI `--ports` token: a u16 port or inclusive `START-END` range.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum CliScanPortSpec {
+pub(crate) enum PortSpec {
     Single(u16),
     RangeInclusive { start: u16, end: u16 },
 }
 
-impl FromStr for CliScanPortSpec {
+impl FromStr for PortSpec {
     type Err = String;
 
     fn from_str(token: &str) -> Result<Self, Self::Err> {
@@ -60,38 +60,38 @@ fn parse_port(token: &str) -> Result<u16, String> {
 }
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
-pub(crate) enum CliScanTransport {
+pub(crate) enum Transport {
     #[default]
     Tcp,
     Udp,
     Icmp,
 }
 
-impl From<CliScanTransport> for packetcraftr::scan::Transport {
-    fn from(value: CliScanTransport) -> Self {
+impl From<Transport> for packetcraftr::scan::Transport {
+    fn from(value: Transport) -> Self {
         match value {
-            CliScanTransport::Tcp => Self::Tcp,
-            CliScanTransport::Udp => Self::Udp,
-            CliScanTransport::Icmp => Self::Icmp,
+            Transport::Tcp => Self::Tcp,
+            Transport::Udp => Self::Udp,
+            Transport::Icmp => Self::Icmp,
         }
     }
 }
 
-#[derive(Debug, Args)]
-pub(crate) struct ScanArgs {
+#[derive(Debug, clap::Args)]
+pub(crate) struct Args {
     /// Explicit IP address or hostname to scan.
     #[arg(value_name = "ADDRESS_OR_HOSTNAME")]
     pub(crate) target: String,
     /// TCP SYN, UDP, or ICMP echo probes.
-    #[arg(long, value_enum, default_value_t = CliScanTransport::Tcp)]
-    pub(crate) transport: CliScanTransport,
+    #[arg(long, value_enum, default_value_t = Transport::Tcp)]
+    pub(crate) transport: Transport,
     /// Select all authorized addresses or only one IP family.
-    #[arg(long, value_enum, default_value_t = CliAddressFamily::Any)]
-    pub(crate) family: CliAddressFamily,
+    #[arg(long, value_enum, default_value_t = AddressFamily::Any)]
+    pub(crate) family: AddressFamily,
     /// Comma-separated TCP/UDP destination ports or inclusive START-END ranges;
     /// omitted for ICMP.
     #[arg(long, value_delimiter = ',', num_args = 1..)]
-    pub(crate) ports: Vec<CliScanPortSpec>,
+    pub(crate) ports: Vec<PortSpec>,
     /// Number of bounded attempts per selected endpoint.
     #[arg(long, default_value_t = 1)]
     pub(crate) attempts: u32,
@@ -119,7 +119,7 @@ pub(crate) struct ScanArgs {
     #[command(flatten)]
     pub(crate) route: RouteSelectionArgs,
     #[command(flatten)]
-    pub(crate) limits: CaptureLimitArgs,
+    pub(crate) limits: CaptureLimitsArgs,
     #[command(flatten)]
     pub(crate) policy: HostnameTrafficPolicyArgs,
 }
@@ -131,15 +131,12 @@ mod tests {
     #[test]
     fn port_specs_parse_single_ports_and_inclusive_ranges() {
         let cases = [
-            ("0", CliScanPortSpec::Single(0)),
-            ("65535", CliScanPortSpec::Single(u16::MAX)),
-            (
-                "80-82",
-                CliScanPortSpec::RangeInclusive { start: 80, end: 82 },
-            ),
+            ("0", PortSpec::Single(0)),
+            ("65535", PortSpec::Single(u16::MAX)),
+            ("80-82", PortSpec::RangeInclusive { start: 80, end: 82 }),
             (
                 "443-443",
-                CliScanPortSpec::RangeInclusive {
+                PortSpec::RangeInclusive {
                     start: 443,
                     end: 443,
                 },
@@ -147,7 +144,7 @@ mod tests {
         ];
 
         for (input, expected) in cases {
-            assert_eq!(input.parse::<CliScanPortSpec>(), Ok(expected), "{input}");
+            assert_eq!(input.parse::<PortSpec>(), Ok(expected), "{input}");
         }
     }
 
@@ -155,7 +152,7 @@ mod tests {
     fn port_specs_reject_missing_reversed_and_non_u16_endpoints() {
         for input in ["", "65536", "-80", "80-", "82-80", "1-2-3", " 80"] {
             assert!(
-                input.parse::<CliScanPortSpec>().is_err(),
+                input.parse::<PortSpec>().is_err(),
                 "{input:?} must not parse",
             );
         }

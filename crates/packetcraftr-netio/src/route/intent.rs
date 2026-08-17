@@ -13,7 +13,7 @@ use packetcraftr_core::{
     semantics::{self, BuiltinProtocol},
 };
 
-use super::error::PlanError;
+use super::error::Error;
 use crate::link::MacAddress;
 use crate::neighbor::{
     MAX_VLAN_TAGS as MAX_NEIGHBOR_VLAN_TAGS, VlanKind as NeighborVlanKind,
@@ -39,15 +39,13 @@ pub(super) fn outer_ethernet_mac(packet: &Packet, field: &str) -> Option<MacAddr
         })
 }
 
-pub(super) fn extract_neighbor_vlan_tags(
-    packet: &Packet,
-) -> Result<Vec<NeighborVlanTag>, PlanError> {
+pub(super) fn extract_neighbor_vlan_tags(packet: &Packet) -> Result<Vec<NeighborVlanTag>, Error> {
     let metadata =
-        semantics::vlan_metadata(packet).map_err(|source| PlanError::InvalidNeighborVlan {
+        semantics::vlan_metadata(packet).map_err(|source| Error::InvalidNeighborVlan {
             message: source.to_string(),
         })?;
     if metadata.len() > MAX_NEIGHBOR_VLAN_TAGS {
-        return Err(PlanError::InvalidNeighborVlan {
+        return Err(Error::InvalidNeighborVlan {
             message: format!("more than {MAX_NEIGHBOR_VLAN_TAGS} VLAN headers are not supported"),
         });
     }

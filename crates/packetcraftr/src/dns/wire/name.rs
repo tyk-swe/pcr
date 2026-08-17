@@ -5,8 +5,8 @@
 
 use bytes::Bytes;
 
-use super::super::error::DnsWireError;
-use super::super::model::{DnsLimits, DnsName};
+use super::super::error::WireError as DnsWireError;
+use super::super::model::{Limits as DnsLimits, Name as DnsName};
 
 /// Canonicalizes a bounded ASCII DNS name for wire construction and
 /// case-insensitive correlation. The returned form always has a trailing dot.

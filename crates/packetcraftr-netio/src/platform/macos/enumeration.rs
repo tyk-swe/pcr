@@ -15,11 +15,11 @@ use super::parser::sockaddr_ip;
 use crate::{
     interface::{Id as InterfaceId, InterfaceAddress, InterfaceFlags, InterfaceInfo},
     link::{Capability, MacAddress},
-    route::NativeRouteError,
+    route::SystemError,
 };
 use packetcraftr_core::frame::LinkType;
 
-pub(in crate::platform) fn interfaces() -> Result<Vec<InterfaceInfo>, NativeRouteError> {
+pub(in crate::platform) fn interfaces() -> Result<Vec<InterfaceInfo>, SystemError> {
     let mut head = ptr::null_mut();
     // SAFETY: `head` is a valid output pointer and a successful call owns a
     // linked list that remains valid until the matching `freeifaddrs` below.
@@ -90,7 +90,7 @@ pub(in crate::platform) fn interfaces() -> Result<Vec<InterfaceInfo>, NativeRout
                             }
                             interface.mac_address = link_address(entry.ifa_addr, length);
                             if interface.mac_address.is_some() && !interface.flags.loopback {
-                                interface.capability = Capability::Layer2And3;
+                                interface.capability = Capability::Layer2AndLayer3;
                                 interface.link_type = LinkType::ETHERNET;
                             }
                         }
@@ -196,12 +196,12 @@ fn link_address(address: *const libc::sockaddr, length: usize) -> Option<MacAddr
     Some(MacAddress(bytes))
 }
 
-fn last_os_error(operation: &'static str) -> NativeRouteError {
+fn last_os_error(operation: &'static str) -> SystemError {
     os_error(operation, std::io::Error::last_os_error())
 }
 
-pub(super) fn os_error(operation: &'static str, error: impl std::fmt::Display) -> NativeRouteError {
-    NativeRouteError::OperatingSystem {
+pub(super) fn os_error(operation: &'static str, error: impl std::fmt::Display) -> SystemError {
+    SystemError::OperatingSystem {
         operation,
         message: error.to_string(),
     }

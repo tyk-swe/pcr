@@ -44,7 +44,7 @@ pub enum Direction {
 /// A frame construction or metadata invariant failure.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum FrameError {
+pub enum Error {
     #[error("captured frame contains {actual} bytes, exceeding the u32 capture-record limit")]
     CapturedLengthTooLarge { actual: usize },
     #[error("frame captured length says {declared} bytes but contains {actual}")]
@@ -74,7 +74,7 @@ impl Frame {
         timestamp: SystemTime,
         link_type: LinkType,
         bytes: impl Into<Bytes>,
-    ) -> Result<Self, FrameError> {
+    ) -> Result<Self, Error> {
         Self::with_inferred_lengths(Some(timestamp), link_type, bytes)
     }
 
@@ -84,7 +84,7 @@ impl Frame {
         captured_length: u32,
         original_length: u32,
         bytes: impl Into<Bytes>,
-    ) -> Result<Self, FrameError> {
+    ) -> Result<Self, Error> {
         Self::try_with_optional_timestamp(
             Some(timestamp),
             link_type,
@@ -95,10 +95,7 @@ impl Frame {
     }
 
     /// Constructs a frame whose source record does not provide a timestamp.
-    pub fn without_timestamp(
-        link_type: LinkType,
-        bytes: impl Into<Bytes>,
-    ) -> Result<Self, FrameError> {
+    pub fn without_timestamp(link_type: LinkType, bytes: impl Into<Bytes>) -> Result<Self, Error> {
         Self::with_inferred_lengths(None, link_type, bytes)
     }
 
@@ -106,12 +103,11 @@ impl Frame {
         timestamp: Option<SystemTime>,
         link_type: LinkType,
         bytes: impl Into<Bytes>,
-    ) -> Result<Self, FrameError> {
+    ) -> Result<Self, Error> {
         let bytes = bytes.into();
-        let length =
-            u32::try_from(bytes.len()).map_err(|_| FrameError::CapturedLengthTooLarge {
-                actual: bytes.len(),
-            })?;
+        let length = u32::try_from(bytes.len()).map_err(|_| Error::CapturedLengthTooLarge {
+            actual: bytes.len(),
+        })?;
         Self::try_with_optional_timestamp(timestamp, link_type, length, length, bytes)
     }
 
@@ -122,16 +118,16 @@ impl Frame {
         captured_length: u32,
         original_length: u32,
         bytes: impl Into<Bytes>,
-    ) -> Result<Self, FrameError> {
+    ) -> Result<Self, Error> {
         let bytes = bytes.into();
         if bytes.len() != captured_length as usize {
-            return Err(FrameError::CapturedLengthMismatch {
+            return Err(Error::CapturedLengthMismatch {
                 declared: captured_length,
                 actual: bytes.len(),
             });
         }
         if original_length < captured_length {
-            return Err(FrameError::OriginalLengthTooSmall {
+            return Err(Error::OriginalLengthTooSmall {
                 captured: captured_length,
                 original: original_length,
             });

@@ -9,7 +9,7 @@ use std::net::IpAddr;
 
 use crate::{
     interface::Id as InterfaceId,
-    route::{NativeRouteError, RouteDecision},
+    route::{Decision, SystemError},
 };
 
 #[cfg(all(feature = "native-route", target_os = "linux"))]
@@ -29,7 +29,7 @@ pub(crate) fn system_route(
     destination: IpAddr,
     interface_hint: Option<&InterfaceId>,
     preferred_source: Option<IpAddr>,
-) -> Result<RouteDecision, NativeRouteError> {
+) -> Result<Decision, SystemError> {
     native::route(destination, interface_hint, preferred_source)
 }
 
@@ -41,8 +41,8 @@ pub(crate) fn system_route(
     _destination: IpAddr,
     _interface_hint: Option<&InterfaceId>,
     _preferred_source: Option<IpAddr>,
-) -> Result<RouteDecision, NativeRouteError> {
-    Err(NativeRouteError::Unsupported {
+) -> Result<Decision, SystemError> {
+    Err(SystemError::Unsupported {
         message: "native route selection is unsupported on this target".to_owned(),
     })
 }
@@ -52,8 +52,8 @@ pub(crate) fn system_route(
     _destination: IpAddr,
     _interface_hint: Option<&InterfaceId>,
     _preferred_source: Option<IpAddr>,
-) -> Result<RouteDecision, NativeRouteError> {
-    Err(NativeRouteError::Unsupported {
+) -> Result<Decision, SystemError> {
+    Err(SystemError::Unsupported {
         message: "enable the native-route feature for passive operating-system route selection"
             .to_owned(),
     })
@@ -63,9 +63,7 @@ pub(crate) fn system_route(
     feature = "native-route",
     any(target_os = "linux", target_os = "macos", windows)
 ))]
-pub(crate) fn system_interface_route(
-    interface: &InterfaceId,
-) -> Result<RouteDecision, NativeRouteError> {
+pub(crate) fn system_interface_route(interface: &InterfaceId) -> Result<Decision, SystemError> {
     native::interface_route(interface)
 }
 
@@ -73,19 +71,15 @@ pub(crate) fn system_interface_route(
     feature = "native-route",
     not(any(target_os = "linux", target_os = "macos", windows))
 ))]
-pub(crate) fn system_interface_route(
-    _interface: &InterfaceId,
-) -> Result<RouteDecision, NativeRouteError> {
-    Err(NativeRouteError::Unsupported {
+pub(crate) fn system_interface_route(_interface: &InterfaceId) -> Result<Decision, SystemError> {
+    Err(SystemError::Unsupported {
         message: "native interface selection is unsupported on this target".to_owned(),
     })
 }
 
 #[cfg(not(feature = "native-route"))]
-pub(crate) fn system_interface_route(
-    _interface: &InterfaceId,
-) -> Result<RouteDecision, NativeRouteError> {
-    Err(NativeRouteError::Unsupported {
+pub(crate) fn system_interface_route(_interface: &InterfaceId) -> Result<Decision, SystemError> {
+    Err(SystemError::Unsupported {
         message: "enable the native-route feature for passive operating-system interface selection"
             .to_owned(),
     })

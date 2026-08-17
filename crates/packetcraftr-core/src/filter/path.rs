@@ -4,9 +4,9 @@
 //! Field-path models, registry resolution, and byte-slice validation.
 
 use super::super::field::FieldKind;
-use super::super::layer::ProtocolId;
-use super::super::registry::{FilterFieldBinding, ProtocolRegistry};
-use super::error::FilterError;
+use super::super::layer::Id as ProtocolId;
+use super::super::registry::{FilterFieldBinding, Registry};
+use super::error::Error;
 use super::eval;
 
 /// Per-frame values that no protocol layer carries.
@@ -92,7 +92,7 @@ pub(super) struct FieldRef {
     pub(super) slice: Option<ByteSlice>,
     /// What every field this path may read declares, for compile-time literal
     /// checking. Empty when nothing is knowable in advance.
-    pub(super) kinds: Vec<FieldSpec>,
+    pub(super) specs: Vec<FieldSpec>,
     /// The path exactly as typed, retained for diagnostics.
     pub(super) path: String,
 }
@@ -112,7 +112,7 @@ impl FieldRef {
         {
             return true;
         }
-        !self.kinds.is_empty() && self.kinds.iter().all(|spec| spec.kind == FieldKind::Bool)
+        !self.specs.is_empty() && self.specs.iter().all(|spec| spec.kind == FieldKind::Bool)
     }
 }
 
@@ -132,14 +132,14 @@ pub(super) enum Resolved {
 /// The selector binds to the protocol, so `ipv4#2.source` selects the second
 /// IPv4 layer and `tcp#1.flags.syn` the first TCP layer. Occurrences are
 /// 1-based and counted outermost first, matching layer order in the packet.
-fn split_occurrence(path: &str, offset: usize) -> Result<(String, Option<usize>), FilterError> {
+fn split_occurrence(path: &str, offset: usize) -> Result<(String, Option<usize>), Error> {
     let Some(marker) = path.find('#') else {
         return Ok((path.to_owned(), None));
     };
     // Only the first segment may carry a selector; a later `#` is a typo.
     let first_dot = path.find('.').unwrap_or(path.len());
     if marker > first_dot {
-        return Err(FilterError::Syntax {
+        return Err(Error::Syntax {
             offset,
             message: "a layer occurrence must follow the protocol, as in `ipv4#2.source`"
                 .to_owned(),
@@ -149,12 +149,12 @@ fn split_occurrence(path: &str, offset: usize) -> Result<(String, Option<usize>)
         .find('.')
         .map_or(path.len(), |index| marker + 1 + index);
     let digits = &path[marker + 1..end];
-    let occurrence: usize = digits.parse().map_err(|_| FilterError::Syntax {
+    let occurrence: usize = digits.parse().map_err(|_| Error::Syntax {
         offset,
         message: format!("layer occurrence `{digits}` is not a number"),
     })?;
     if occurrence == 0 {
-        return Err(FilterError::Syntax {
+        return Err(Error::Syntax {
             offset,
             message: "layer occurrences start at 1".to_owned(),
         });
@@ -191,32 +191,32 @@ fn access_from_binding(binding: &FilterFieldBinding) -> FieldAccess {
     }
 }
 
-fn kinds_for(
-    registry: &ProtocolRegistry,
+fn specs_for(
+    registry: &Registry,
     protocol: &ProtocolId,
     fields: &[&'static str],
     path: &str,
-) -> Result<Vec<FieldSpec>, FilterError> {
+) -> Result<Vec<FieldSpec>, Error> {
     let Some(schema) = registry.schema(protocol) else {
         // Decode-only schemas are unknown until runtime; defer static type checks.
         return Ok(Vec::new());
     };
-    let mut kinds = Vec::with_capacity(fields.len());
+    let mut specs = Vec::with_capacity(fields.len());
     for field in fields {
         let declared = schema
             .fields
             .iter()
             .find(|entry| entry.name == *field)
-            .ok_or_else(|| FilterError::UnresolvableProtocol {
+            .ok_or_else(|| Error::UnresolvableProtocol {
                 path: path.to_owned(),
                 protocol: protocol.clone(),
             })?;
-        kinds.push(FieldSpec {
+        specs.push(FieldSpec {
             kind: declared.kind,
             derived: declared.derived,
         });
     }
-    Ok(kinds)
+    Ok(specs)
 }
 
 /// Resolves a typed path against the registry.
@@ -224,65 +224,19 @@ fn kinds_for(
 /// Resolution order is fixed so a spelling always means one thing: reserved
 /// synthetic names, then registered filter spellings, then canonical
 /// `<protocol-or-alias>.<field>` paths, then a bare protocol name.
-pub(super) fn resolve(
-    path: &str,
-    registry: &ProtocolRegistry,
-    offset: usize,
-) -> Result<Resolved, FilterError> {
+pub(super) fn resolve(path: &str, registry: &Registry, offset: usize) -> Result<Resolved, Error> {
     let (stripped, occurrence) = split_occurrence(path, offset)?;
-    let unknown = || FilterError::UnknownField {
+    let unknown = || Error::UnknownField {
         offset,
         path: path.to_owned(),
     };
-
-    // Reject occurrences on synthetic fields rather than silently ignoring them.
-    let reject_occurrence = |synthetic: &str| -> Result<(), FilterError> {
-        match occurrence {
-            None => Ok(()),
-            Some(_) => Err(FilterError::Syntax {
-                offset,
-                message: format!(
-                    "`{synthetic}` is not a protocol layer, so it has no occurrences to select"
-                ),
-            }),
-        }
-    };
-
-    if let Some((head, tail)) = stripped.split_once('.') {
-        if head == "frame" {
-            let field = frame_field(tail).ok_or_else(unknown)?;
-            reject_occurrence(head)?;
-            return Ok(Resolved::Field(FieldRef {
-                source: FieldSource::Frame(field),
-                slice: None,
-                kinds: vec![FieldSpec::synthetic(if field == FrameField::TimeEpoch {
-                    FieldKind::Signed
-                } else {
-                    FieldKind::Unsigned
-                })],
-                path: path.to_owned(),
-            }));
-        }
-        // Stream fields are caller-assigned, not registry-defined header fields.
-        if tail == "stream" && matches!(head, "tcp" | "udp") {
-            reject_occurrence(&stripped)?;
-            let transport = if head == "tcp" {
-                StreamTransport::Tcp
-            } else {
-                StreamTransport::Udp
-            };
-            return Ok(Resolved::Field(FieldRef {
-                source: FieldSource::Stream(transport),
-                slice: None,
-                kinds: vec![FieldSpec::synthetic(FieldKind::Unsigned)],
-                path: path.to_owned(),
-            }));
-        }
+    if let Some(resolved) = resolve_synthetic(&stripped, path, occurrence, offset)? {
+        return Ok(resolved);
     }
 
     if let Some(binding) = registry.filter_field(&stripped) {
         let protocol = binding.protocol().clone();
-        let kinds = kinds_for(registry, &protocol, binding.fields(), path)?;
+        let specs = specs_for(registry, &protocol, binding.fields(), path)?;
         return Ok(Resolved::Field(FieldRef {
             source: FieldSource::Layer {
                 protocol,
@@ -290,20 +244,19 @@ pub(super) fn resolve(
                 access: access_from_binding(binding),
             },
             slice: None,
-            kinds,
+            specs,
             path: path.to_owned(),
         }));
     }
 
     if let Some((head, tail)) = stripped.split_once('.') {
         let protocol = registry.protocol_named(head).ok_or_else(unknown)?.clone();
-        let schema =
-            registry
-                .schema(&protocol)
-                .ok_or_else(|| FilterError::UnresolvableProtocol {
-                    path: path.to_owned(),
-                    protocol: protocol.clone(),
-                })?;
+        let schema = registry
+            .schema(&protocol)
+            .ok_or_else(|| Error::UnresolvableProtocol {
+                path: path.to_owned(),
+                protocol: protocol.clone(),
+            })?;
         let declared = schema
             .fields
             .iter()
@@ -316,7 +269,7 @@ pub(super) fn resolve(
                 access: FieldAccess::Direct(declared.name),
             },
             slice: None,
-            kinds: vec![FieldSpec {
+            specs: vec![FieldSpec {
                 kind: declared.kind,
                 derived: declared.derived,
             }],
@@ -331,6 +284,60 @@ pub(super) fn resolve(
     })
 }
 
+fn resolve_synthetic(
+    stripped: &str,
+    path: &str,
+    occurrence: Option<usize>,
+    offset: usize,
+) -> Result<Option<Resolved>, Error> {
+    let Some((head, tail)) = stripped.split_once('.') else {
+        return Ok(None);
+    };
+    let reject_occurrence = |synthetic: &str| {
+        occurrence.map_or(Ok(()), |_| {
+            Err(Error::Syntax {
+                offset,
+                message: format!(
+                    "`{synthetic}` is not a protocol layer, so it has no occurrences to select"
+                ),
+            })
+        })
+    };
+    if head == "frame" {
+        let field = frame_field(tail).ok_or_else(|| Error::UnknownField {
+            offset,
+            path: path.to_owned(),
+        })?;
+        reject_occurrence(head)?;
+        let kind = if field == FrameField::TimeEpoch {
+            FieldKind::Signed
+        } else {
+            FieldKind::Unsigned
+        };
+        return Ok(Some(Resolved::Field(FieldRef {
+            source: FieldSource::Frame(field),
+            slice: None,
+            specs: vec![FieldSpec::synthetic(kind)],
+            path: path.to_owned(),
+        })));
+    }
+    if tail != "stream" || !matches!(head, "tcp" | "udp") {
+        return Ok(None);
+    }
+    reject_occurrence(stripped)?;
+    let transport = if head == "tcp" {
+        StreamTransport::Tcp
+    } else {
+        StreamTransport::Udp
+    };
+    Ok(Some(Resolved::Field(FieldRef {
+        source: FieldSource::Stream(transport),
+        slice: None,
+        specs: vec![FieldSpec::synthetic(FieldKind::Unsigned)],
+        path: path.to_owned(),
+    })))
+}
+
 /// Parses a `[start:end]` suffix and attaches it to an already-resolved field.
 ///
 /// Slicing reads a field as raw bytes, so the result is compared as bytes
@@ -339,9 +346,9 @@ pub(super) fn attach_slice(
     field: &mut FieldRef,
     contents: &str,
     offset: usize,
-) -> Result<(), FilterError> {
-    let syntax = |message: String| FilterError::Syntax { offset, message };
-    let bound = |text: &str| -> Result<usize, FilterError> {
+) -> Result<(), Error> {
+    let syntax = |message: String| Error::Syntax { offset, message };
+    let bound = |text: &str| -> Result<usize, Error> {
         text.trim()
             .parse::<usize>()
             .map_err(|_| syntax(format!("byte slice bound `{text}` is not a number")))
@@ -381,7 +388,7 @@ pub(super) fn attach_slice(
             slice.start
         )));
     }
-    let unsliceable = || FilterError::UnsliceableField {
+    let unsliceable = || Error::UnsliceableField {
         offset,
         path: field.path.clone(),
     };
@@ -389,9 +396,9 @@ pub(super) fn attach_slice(
         return Err(unsliceable());
     }
     // Reject known non-byte fields; defer unknown decode-only schemas.
-    if !field.kinds.is_empty()
+    if !field.specs.is_empty()
         && !field
-            .kinds
+            .specs
             .iter()
             .any(|spec| eval::byte_addressable(spec.kind))
     {
@@ -399,6 +406,6 @@ pub(super) fn attach_slice(
     }
     field.slice = Some(slice);
     // A slice projects the field to bytes.
-    field.kinds = vec![FieldSpec::synthetic(FieldKind::Bytes)];
+    field.specs = vec![FieldSpec::synthetic(FieldKind::Bytes)];
     Ok(())
 }

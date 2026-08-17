@@ -7,8 +7,6 @@ use serde::Serialize;
 
 use super::frame::Captured;
 
-pub use super::frame::{Captured as Frame, Direction, Timestamp};
-
 /// One NDJSON event produced by `capture`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "event", rename_all = "snake_case")]

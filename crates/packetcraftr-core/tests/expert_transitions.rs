@@ -13,10 +13,10 @@ use common::{
     tcp_frame as frame, udp_frame,
 };
 use packetcraftr_core::analysis::expert::{
-    ExpertCollector, ExpertSummary, Finding, StreamRef, StreamTransport,
+    Collector as ExpertCollector, Finding, StreamRef, StreamTransport, Summary as ExpertSummary,
 };
 use packetcraftr_core::analysis::{Options, run};
-use packetcraftr_core::diagnostic::DiagnosticSeverity;
+use packetcraftr_core::diagnostic::Severity as DiagnosticSeverity;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::protocol::transport::Tcp;
 use packetcraftr_core::registry::Registry;

@@ -7,24 +7,23 @@ use std::sync::Arc;
 
 use packetcraftr::output;
 
-use self::arguments::PlanArgs;
+use self::arguments::Args;
 use super::super::errors::CliError;
 use super::super::rendering::{emit_aggregate, optional_display, write_stdout_line};
-use super::super::system::{default_registry_arc, prepare_route_request, system_client};
+use super::super::system::{client, prepare_route};
+use super::registry;
 
-pub(super) fn run(arguments: PlanArgs, output: output::contract::Format) -> Result<(), CliError> {
-    let PlanArgs { route, policy } = arguments;
-    let registry = default_registry_arc()?;
-    let request = prepare_route_request(route, policy.into_policy(), &registry)?;
-    let client = system_client(Arc::clone(&registry), request.policy);
+pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
+    let Args { route, policy } = arguments;
+    let registry = registry()?;
+    let request = prepare_route(route, policy.into_policy(), &registry)?;
+    let client = client(Arc::clone(&registry), request.policy);
     let route = client
         .plan(&request.packet, request.destination, &request.options)
         .map_err(CliError::classified)?;
-    let result = output::plan::PlanCommandResult {
-        route: route.into(),
-    };
-    match output {
-        output::contract::Format::Text => render_planned_route(&result.route),
+    let result = output::plan::Result { plan: route.into() };
+    match format {
+        output::contract::Format::Text => render_text(&result.plan),
         output::contract::Format::Json => {
             emit_aggregate(output::contract::Command::Plan, result, Vec::new())
         }
@@ -32,21 +31,21 @@ pub(super) fn run(arguments: PlanArgs, output: output::contract::Format) -> Resu
     }
 }
 
-fn render_planned_route(route: &output::plan::Plan) -> Result<(), CliError> {
+fn render_text(route: &output::network::Plan) -> Result<(), CliError> {
     write_stdout_line(format_args!(
         "interface={} index={} mode={:?} mtu={} link_type={}",
-        route.route.interface.name,
-        route.route.interface.index,
+        route.decision.interface.name,
+        route.decision.interface.index,
         route.mode,
-        route.route.mtu,
-        route.route.link_type
+        route.decision.mtu,
+        route.decision.link_type
     ))?;
     write_stdout_line(format_args!(
         "lookup_destination={} final_destination={} source={} next_hop={} destination_mac={}",
         optional_display(route.lookup_destination),
         optional_display(route.final_destination),
         optional_display(route.packet_source),
-        optional_display(route.route.next_hop),
+        optional_display(route.decision.next_hop),
         route
             .destination_mac
             .map(|value| value.to_string())

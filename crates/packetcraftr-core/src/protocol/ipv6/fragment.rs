@@ -5,11 +5,11 @@ use std::collections::BTreeMap;
 
 use crate::{
     codec::{
-        CodecError, DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext,
+        DecodedLayerValue, EncodedLayer, Error as CodecError, LayerCodec, LayerDecodeContext,
         LayerEncodeContext,
     },
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflective_layer},
+    layer::{Id as ProtocolId, Layer, reflective_layer},
     registry::Discriminator,
 };
 
@@ -20,7 +20,7 @@ use crate::protocol::common::{
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Ipv6Fragment {
+pub struct Fragment {
     pub next_header: WireValue<u8>,
     /// Offset in eight-byte units, as encoded on the wire.
     pub fragment_offset: u16,
@@ -28,7 +28,7 @@ pub struct Ipv6Fragment {
     pub identification: u32,
 }
 
-impl Default for Ipv6Fragment {
+impl Default for Fragment {
     fn default() -> Self {
         Self {
             next_header: WireValue::Auto,
@@ -41,7 +41,7 @@ impl Default for Ipv6Fragment {
 
 reflective_layer! {
     fn fragment_schema() => { protocol: protocol("ipv6_fragment"), name: "IPv6 Fragment" }
-    impl Ipv6Fragment {
+    impl Fragment {
         "next_header" => { kind: Unsigned, derived: true, required: false, description: "IPv6 next-header discriminator", reflect: next_header, layout: (0, 1) },
         "fragment_offset" => { kind: Unsigned, derived: false, required: true, description: "Fragment offset in eight-byte units", reflect_bounded: fragment_offset, 0x1fff_u64, layout: (2, 4) },
         "more_fragments" => { kind: Bool, derived: false, required: true, description: "More-fragments flag", reflect: more_fragments, layout: (2, 4) },
@@ -66,7 +66,7 @@ impl LayerCodec for Ipv6FragmentCodec {
     ) -> Result<EncodedLayer, CodecError> {
         let layer = layer
             .as_any()
-            .downcast_ref::<Ipv6Fragment>()
+            .downcast_ref::<Fragment>()
             .ok_or_else(|| wrong_layer("ipv6_fragment", layer))?;
         if layer.fragment_offset > 0x1fff {
             return Err(invalid("ipv6_fragment", "fragment offset exceeds 13 bits"));
@@ -158,7 +158,7 @@ impl LayerCodec for Ipv6FragmentCodec {
         }
         let fragment_offset = offset_flags >> 3;
         Ok(DecodedLayerValue {
-            layer: Box::new(Ipv6Fragment {
+            layer: Box::new(Fragment {
                 next_header: WireValue::Exact(input[0]),
                 fragment_offset,
                 more_fragments: offset_flags & 1 != 0,
@@ -183,6 +183,6 @@ impl LayerCodec for Ipv6FragmentCodec {
         &self,
         fields: &BTreeMap<String, FieldValue>,
     ) -> Result<Box<dyn Layer>, CodecError> {
-        make_layer(Ipv6Fragment::default(), fields)
+        make_layer(Fragment::default(), fields)
     }
 }

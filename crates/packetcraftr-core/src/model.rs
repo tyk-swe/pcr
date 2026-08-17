@@ -4,13 +4,13 @@
 use std::fmt;
 
 use super::field::FieldValue;
-use super::layer::{Layer, ProtocolId};
+use super::layer::{Id as ProtocolId, Layer};
 
 mod boundary;
 mod equality;
 mod error;
 
-pub use error::PacketError;
+pub use error::Error;
 
 /// Exactly one ordered, arbitrary wire stack.
 ///
@@ -74,7 +74,7 @@ impl Packet {
         self
     }
 
-    pub fn insert<L>(&mut self, index: usize, layer: L) -> Result<&mut Self, PacketError>
+    pub fn insert<L>(&mut self, index: usize, layer: L) -> Result<&mut Self, Error>
     where
         L: Layer + 'static,
     {
@@ -85,9 +85,9 @@ impl Packet {
         &mut self,
         index: usize,
         layer: Box<dyn Layer>,
-    ) -> Result<&mut Self, PacketError> {
+    ) -> Result<&mut Self, Error> {
         if index > self.layers.len() {
-            return Err(PacketError::IndexOutOfBounds {
+            return Err(Error::IndexOutOfBounds {
                 index,
                 len: self.layers.len(),
             });
@@ -98,15 +98,15 @@ impl Packet {
         Ok(self)
     }
 
-    pub fn remove(&mut self, index: usize) -> Result<Box<dyn Layer>, PacketError> {
+    pub fn remove(&mut self, index: usize) -> Result<Box<dyn Layer>, Error> {
         if index >= self.layers.len() {
-            return Err(PacketError::IndexOutOfBounds {
+            return Err(Error::IndexOutOfBounds {
                 index,
                 len: self.layers.len(),
             });
         }
         if boundary::check_padding_boundary_removal(&self.layers, index) {
-            return Err(PacketError::PaddingBoundaryRemoval { index });
+            return Err(Error::PaddingBoundaryRemoval { index });
         }
         let removed = self.layers.remove(index);
         boundary::shift_padding_for_remove(&mut self.layers, index);
@@ -114,7 +114,7 @@ impl Packet {
         Ok(removed)
     }
 
-    pub fn replace<L>(&mut self, index: usize, layer: L) -> Result<Box<dyn Layer>, PacketError>
+    pub fn replace<L>(&mut self, index: usize, layer: L) -> Result<Box<dyn Layer>, Error>
     where
         L: Layer + 'static,
     {
@@ -125,12 +125,12 @@ impl Packet {
         &mut self,
         index: usize,
         mut layer: Box<dyn Layer>,
-    ) -> Result<Box<dyn Layer>, PacketError> {
+    ) -> Result<Box<dyn Layer>, Error> {
         let len = self.layers.len();
         let slot = self
             .layers
             .get_mut(index)
-            .ok_or(PacketError::IndexOutOfBounds { index, len })?;
+            .ok_or(Error::IndexOutOfBounds { index, len })?;
         std::mem::swap(slot, &mut layer);
         self.invalidate_encoded_payload_lengths();
         Ok(layer)
@@ -220,12 +220,12 @@ impl Packet {
         protocol: &ProtocolId,
         field: &str,
         value: FieldValue,
-    ) -> Result<(), PacketError> {
-        let layer =
-            self.by_protocol_mut(protocol)
-                .ok_or_else(|| PacketError::ProtocolNotFound {
-                    protocol: protocol.clone(),
-                })?;
+    ) -> Result<(), Error> {
+        let layer = self
+            .by_protocol_mut(protocol)
+            .ok_or_else(|| Error::ProtocolNotFound {
+                protocol: protocol.clone(),
+            })?;
         layer.set_field(field, value)?;
         Ok(())
     }

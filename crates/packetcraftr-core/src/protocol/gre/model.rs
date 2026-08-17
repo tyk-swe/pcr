@@ -5,12 +5,12 @@ use std::collections::BTreeMap;
 
 use crate::{
     codec::{
-        CodecError, DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext,
+        DecodedLayerValue, EncodedLayer, Error as CodecError, LayerCodec, LayerDecodeContext,
         LayerEncodeContext,
     },
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
+    layer::{Id as ProtocolId, Layer, reflect_get, reflect_set, reflective_layer},
     registry::Discriminator,
 };
 
@@ -133,29 +133,7 @@ impl LayerCodec for GreCodec {
             &mut diagnostics,
         )?;
 
-        let flags = if layer.checksum.is_some() {
-            CHECKSUM_PRESENT
-        } else {
-            0
-        } | if layer.key.is_some() { KEY_PRESENT } else { 0 }
-            | if layer.sequence.is_some() {
-                SEQUENCE_PRESENT
-            } else {
-                0
-            }
-            | (u16::from(layer.reserved_bits) << 3);
-        let mut prefix = Vec::with_capacity(header_len);
-        prefix.extend_from_slice(&flags.to_be_bytes());
-        prefix.extend_from_slice(&protocol_type.to_be_bytes());
-        if layer.checksum.is_some() {
-            prefix.extend_from_slice(&[0; GRE_OPTION_LEN]);
-        }
-        if let Some(key) = layer.key {
-            prefix.extend_from_slice(&key.to_be_bytes());
-        }
-        if let Some(sequence) = layer.sequence {
-            prefix.extend_from_slice(&sequence.to_be_bytes());
-        }
+        let mut prefix = encode_prefix(layer, protocol_type, header_len);
 
         let materialized_checksum = if let Some(checksum_value) = &layer.checksum {
             let expected = checksum_parts(&[&prefix, covered_payload]);
@@ -217,48 +195,8 @@ impl LayerCodec for GreCodec {
             });
         }
 
-        let checksum_present = flags & CHECKSUM_PRESENT != 0;
-        let key_present = flags & KEY_PRESENT != 0;
-        let sequence_present = flags & SEQUENCE_PRESENT != 0;
-        let header_len = gre_header_len(checksum_present, key_present, sequence_present);
-        if input.len() < header_len {
-            return Err(truncated("gre", header_len, input.len()));
-        }
-
         let protocol_type = u16::from_be_bytes([input[2], input[3]]);
-        let mut cursor = GRE_BASE_LEN;
-        let checksum_value = if checksum_present {
-            let value = u16::from_be_bytes([input[cursor], input[cursor + 1]]);
-            if input[cursor + 2] != 0 || input[cursor + 3] != 0 {
-                return Err(invalid("gre", "reserved1 field is non-zero"));
-            }
-            cursor += GRE_OPTION_LEN;
-            Some(WireValue::Exact(value))
-        } else {
-            None
-        };
-        let key = if key_present {
-            let value = u32::from_be_bytes([
-                input[cursor],
-                input[cursor + 1],
-                input[cursor + 2],
-                input[cursor + 3],
-            ]);
-            cursor += GRE_OPTION_LEN;
-            Some(value)
-        } else {
-            None
-        };
-        let sequence = if sequence_present {
-            Some(u32::from_be_bytes([
-                input[cursor],
-                input[cursor + 1],
-                input[cursor + 2],
-                input[cursor + 3],
-            ]))
-        } else {
-            None
-        };
+        let (header_len, checksum_value, key, sequence) = decode_options(input, flags)?;
 
         let mut diagnostics = Vec::new();
         let reserved_bits = ((flags & IGNORED_RESERVED_FLAGS) >> 3) as u8;
@@ -271,7 +209,7 @@ impl LayerCodec for GreCodec {
                 .at_field("reserved_bits"),
             );
         }
-        if checksum_present && context.verify_checksums && checksum(input) != 0 {
+        if checksum_value.is_some() && context.verify_checksums && checksum(input) != 0 {
             diagnostics.push(
                 Diagnostic::warning("decode.gre_checksum", "GRE checksum mismatch")
                     .at_field("checksum"),
@@ -303,6 +241,77 @@ impl LayerCodec for GreCodec {
     ) -> Result<Box<dyn Layer>, CodecError> {
         make_layer(Gre::default(), fields)
     }
+}
+
+fn encode_prefix(layer: &Gre, protocol_type: u16, header_len: usize) -> Vec<u8> {
+    let flags = if layer.checksum.is_some() {
+        CHECKSUM_PRESENT
+    } else {
+        0
+    } | if layer.key.is_some() { KEY_PRESENT } else { 0 }
+        | if layer.sequence.is_some() {
+            SEQUENCE_PRESENT
+        } else {
+            0
+        }
+        | (u16::from(layer.reserved_bits) << 3);
+    let mut prefix = Vec::with_capacity(header_len);
+    prefix.extend_from_slice(&flags.to_be_bytes());
+    prefix.extend_from_slice(&protocol_type.to_be_bytes());
+    if layer.checksum.is_some() {
+        prefix.extend_from_slice(&[0; GRE_OPTION_LEN]);
+    }
+    if let Some(key) = layer.key {
+        prefix.extend_from_slice(&key.to_be_bytes());
+    }
+    if let Some(sequence) = layer.sequence {
+        prefix.extend_from_slice(&sequence.to_be_bytes());
+    }
+    prefix
+}
+
+type DecodedOptions = (usize, Option<WireValue<u16>>, Option<u32>, Option<u32>);
+
+fn decode_options(input: &[u8], flags: u16) -> Result<DecodedOptions, CodecError> {
+    let checksum_present = flags & CHECKSUM_PRESENT != 0;
+    let key_present = flags & KEY_PRESENT != 0;
+    let sequence_present = flags & SEQUENCE_PRESENT != 0;
+    let header_len = gre_header_len(checksum_present, key_present, sequence_present);
+    if input.len() < header_len {
+        return Err(truncated("gre", header_len, input.len()));
+    }
+    let mut cursor = GRE_BASE_LEN;
+    let checksum_value = if checksum_present {
+        let value = u16::from_be_bytes([input[cursor], input[cursor + 1]]);
+        if input[cursor + 2] != 0 || input[cursor + 3] != 0 {
+            return Err(invalid("gre", "reserved1 field is non-zero"));
+        }
+        cursor += GRE_OPTION_LEN;
+        Some(WireValue::Exact(value))
+    } else {
+        None
+    };
+    let key = if key_present {
+        let value = u32::from_be_bytes([
+            input[cursor],
+            input[cursor + 1],
+            input[cursor + 2],
+            input[cursor + 3],
+        ]);
+        cursor += GRE_OPTION_LEN;
+        Some(value)
+    } else {
+        None
+    };
+    let sequence = sequence_present.then(|| {
+        u32::from_be_bytes([
+            input[cursor],
+            input[cursor + 1],
+            input[cursor + 2],
+            input[cursor + 3],
+        ])
+    });
+    Ok((header_len, checksum_value, key, sequence))
 }
 
 fn gre_layout(layer: &Gre) -> Vec<crate::layout::FieldLayout> {

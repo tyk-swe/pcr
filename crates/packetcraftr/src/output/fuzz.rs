@@ -15,9 +15,7 @@ use packetcraftr_core::{
 
 use super::contract::Error as ContractError;
 use super::envelope::{Diagnostic, Error as OutputError, Stats};
-use super::frame::Captured;
-
-pub use super::frame::{Captured as Frame, Wire};
+use super::frame::{Captured, Wire};
 
 /// Output-v1 fuzz execution mode.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -25,14 +23,6 @@ pub use super::frame::{Captured as Frame, Wire};
 pub enum Mode {
     Offline,
     Live,
-}
-
-impl From<crate::fuzz::Mode> for Mode {
-    fn from(value: crate::fuzz::Mode) -> Self {
-        match value {
-            crate::fuzz::Mode::Live => Self::Live,
-        }
-    }
 }
 
 /// Output-v1 fuzz case outcome.
@@ -219,7 +209,6 @@ impl Result {
         result: live_fuzz::Result,
     ) -> std::result::Result<(Self, Vec<PacketDiagnostic>, Stats), ContractError> {
         let live_fuzz::Result {
-            mode,
             seed,
             first_case,
             cases,
@@ -252,7 +241,7 @@ impl Result {
             Self {
                 seed,
                 first_case,
-                mode: mode.into(),
+                mode: Mode::Live,
                 cases_generated: stats.cases_generated,
                 cases_built: stats.cases_built,
                 cases_rejected: stats.cases_generated.saturating_sub(stats.cases_built),

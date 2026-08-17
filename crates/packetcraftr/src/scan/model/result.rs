@@ -10,11 +10,11 @@ use packetcraftr_core::frame::Frame;
 
 use crate::Stats;
 
-use super::request::ScanTransport;
+use super::request::Transport;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ScanClassification {
+pub enum Classification {
     Open,
     Closed,
     Filtered,
@@ -23,7 +23,7 @@ pub enum ScanClassification {
     Timeout,
 }
 
-impl ScanClassification {
+impl Classification {
     pub(in crate::scan) fn rank(self) -> u8 {
         match self {
             Self::Open => 6,
@@ -38,16 +38,16 @@ impl ScanClassification {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ScanProbeStatus {
+pub enum ProbeStatus {
     Response,
     Timeout,
 }
 
 #[derive(Clone, Debug)]
-pub struct ScanProbeEvidence {
+pub struct ProbeEvidence {
     pub attempt: u32,
-    pub status: ScanProbeStatus,
-    pub classification: ScanClassification,
+    pub status: ProbeStatus,
+    pub classification: Classification,
     pub responder: Option<IpAddr>,
     pub sent_at: SystemTime,
     pub received_at: Option<SystemTime>,
@@ -57,19 +57,19 @@ pub struct ScanProbeEvidence {
 }
 
 #[derive(Clone, Debug)]
-pub struct ScanEndpointResult {
+pub struct Endpoint {
     pub address: IpAddr,
-    pub transport: ScanTransport,
+    pub transport: Transport,
     pub port: Option<u16>,
-    pub classification: ScanClassification,
-    pub evidence: Vec<ScanProbeEvidence>,
+    pub classification: Classification,
+    pub evidence: Vec<ProbeEvidence>,
 }
 
 #[derive(Clone, Debug)]
-pub struct ScanResult {
+pub struct Result {
     pub target: String,
     pub resolved_addresses: Vec<IpAddr>,
-    pub endpoints: Vec<ScanEndpointResult>,
+    pub endpoints: Vec<Endpoint>,
     pub undecoded: Vec<Frame>,
     pub diagnostics: Vec<Diagnostic>,
     pub stats: Stats,

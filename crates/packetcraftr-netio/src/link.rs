@@ -12,16 +12,17 @@ use serde::{Deserialize, Serialize};
 pub enum Capability {
     Layer2,
     Layer3,
-    Layer2And3,
+    #[serde(rename = "layer2_and3")]
+    Layer2AndLayer3,
 }
 
 impl Capability {
     pub(crate) fn supports_layer2(self) -> bool {
-        matches!(self, Self::Layer2 | Self::Layer2And3)
+        matches!(self, Self::Layer2 | Self::Layer2AndLayer3)
     }
 
     pub(crate) fn supports_layer3(self) -> bool {
-        matches!(self, Self::Layer3 | Self::Layer2And3)
+        matches!(self, Self::Layer3 | Self::Layer2AndLayer3)
     }
 }
 

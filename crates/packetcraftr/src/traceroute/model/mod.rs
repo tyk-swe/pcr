@@ -5,11 +5,8 @@ mod execution;
 mod request;
 mod result;
 
-pub use execution::{
-    TracerouteBatch, TracerouteBatchExecution, TracerouteExecutor, TracerouteProbe,
-};
-pub use request::{TracerouteLimits, TracerouteRequest, TracerouteStrategy};
+pub use execution::{Batch, Execution, Executor, Probe};
+pub use request::{Limits, Request, Strategy};
 pub use result::{
-    TracerouteCompletion, TracerouteHopResult, TracerouteProbeEvidence, TracerouteProbeStatus,
-    TracerouteResponseKind, TracerouteResult, TracerouteUndecodedEvidence,
+    Completion, Hop, ProbeEvidence, ProbeStatus, ResponseKind, Result, UndecodedEvidence,
 };

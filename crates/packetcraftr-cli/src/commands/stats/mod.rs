@@ -8,31 +8,25 @@ use std::time::Duration;
 
 use packetcraftr::{analysis, output};
 
-use self::arguments::{CliStatsTable, StatsArgs};
+use self::arguments::{Args, Table};
 use super::super::errors::CliError;
+use super::super::input::open_capture;
 use super::super::rendering::{emit_aggregate, write_stdout_line};
-use super::offline_analysis::{
-    PreparedOfflineAnalysis, open_offline_reader, prepare_offline_analysis,
-};
+use super::offline_analysis::{Prepared, prepare};
 
-pub(super) fn run(arguments: StatsArgs, output: output::contract::Format) -> Result<(), CliError> {
-    // The format contract is enforced before any input is read, so asking
-    // for an unsupported encoding never pays for a full analysis pass.
-    output::contract::Command::Stats
-        .require_format(output)
-        .map_err(CliError::classified)?;
+pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
     // Stats assigns conversation indices, so stream-aware filters like
     // `tcp.stream == 7` are supported here.
-    let PreparedOfflineAnalysis {
+    let Prepared {
         registry,
         filter,
         limits,
-    } = prepare_offline_analysis(arguments.limits, arguments.filter.as_deref())?;
+    } = prepare(arguments.limits, arguments.filter.as_deref())?;
     let mut collector =
-        analysis::stats::StatsCollector::new(Duration::from_millis(arguments.interval_ms))
+        analysis::stats::Collector::new(Duration::from_millis(arguments.interval_ms))
             .map_err(CliError::classified)?;
 
-    let mut reader = open_offline_reader(&arguments.path, arguments.limits.capture)?;
+    let mut reader = open_capture(&arguments.path, arguments.limits.capture)?;
 
     let options = analysis::Options {
         filter: filter.as_ref(),
@@ -48,11 +42,11 @@ pub(super) fn run(arguments: StatsArgs, output: output::contract::Format) -> Res
     .map_err(CliError::classified)?;
     let report = collector.finish();
 
-    match output {
+    match format {
         output::contract::Format::Text => render_text(arguments.table, &report, &summary),
         output::contract::Format::Json => {
             let result = output::stats::Result::try_from_report(
-                stats_table(arguments.table),
+                table(arguments.table),
                 &report,
                 summary.frames_read,
             )
@@ -63,19 +57,19 @@ pub(super) fn run(arguments: StatsArgs, output: output::contract::Format) -> Res
     }
 }
 
-fn stats_table(table: CliStatsTable) -> output::stats::Table {
+fn table(table: Table) -> output::stats::Table {
     match table {
-        CliStatsTable::Conversations => output::stats::Table::Conversations,
-        CliStatsTable::Endpoints => output::stats::Table::Endpoints,
-        CliStatsTable::Protocols => output::stats::Table::Protocols,
-        CliStatsTable::Ports => output::stats::Table::Ports,
-        CliStatsTable::Io => output::stats::Table::Io,
+        Table::Conversations => output::stats::Table::Conversations,
+        Table::Endpoints => output::stats::Table::Endpoints,
+        Table::Protocols => output::stats::Table::Protocols,
+        Table::Ports => output::stats::Table::Ports,
+        Table::Io => output::stats::Table::Io,
     }
 }
 
 fn render_text(
-    table: CliStatsTable,
-    report: &analysis::stats::StatsReport,
+    table: Table,
+    report: &analysis::stats::Report,
     summary: &analysis::Summary,
 ) -> Result<(), CliError> {
     write_stdout_line(format_args!(
@@ -83,7 +77,7 @@ fn render_text(
         report.frames, summary.frames_read, report.bytes
     ))?;
     match table {
-        CliStatsTable::Conversations => {
+        Table::Conversations => {
             for row in &report.conversations {
                 write_stdout_line(format_args!(
                     "{} stream {}: {} <-> {} frames {} ({} fwd / {} rev) bytes {} ({} fwd / {} rev) duration {:?}",
@@ -101,7 +95,7 @@ fn render_text(
                 ))?;
             }
         }
-        CliStatsTable::Endpoints => {
+        Table::Endpoints => {
             for row in &report.endpoints {
                 write_stdout_line(format_args!(
                     "{}: tx {} frame(s) {} byte(s), rx {} frame(s) {} byte(s)",
@@ -109,7 +103,7 @@ fn render_text(
                 ))?;
             }
         }
-        CliStatsTable::Protocols => {
+        Table::Protocols => {
             for row in &report.protocols {
                 write_stdout_line(format_args!(
                     "{}: frames {} ({:.1}%) bytes {}",
@@ -120,7 +114,7 @@ fn render_text(
                 ))?;
             }
         }
-        CliStatsTable::Ports => {
+        Table::Ports => {
             for row in &report.ports {
                 write_stdout_line(format_args!(
                     "{} {}: frames {} bytes {}",
@@ -131,7 +125,7 @@ fn render_text(
                 ))?;
             }
         }
-        CliStatsTable::Io => {
+        Table::Io => {
             for row in &report.io {
                 write_stdout_line(format_args!(
                     "+{:?}: frames {} bytes {}",

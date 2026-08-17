@@ -10,17 +10,17 @@ use packetcraftr_netio::{
     route::Provider as RouteProvider, transmit::Sender as PacketIo,
 };
 
-use super::model::{DnsExchange, DnsExchangeExecution, DnsExecutor};
+use super::model::{Exchange, Execution, Executor};
 
 /// Executes one DNS query through the client's capture-ready exchange
 /// lifecycle.
-impl<R, N, I> DnsExecutor for ExchangeExecutor<'_, R, N, I>
+impl<R, N, I> Executor for ExchangeExecutor<'_, R, N, I>
 where
     R: RouteProvider,
     N: NeighborResolver,
     I: PacketIo + CaptureProvider,
 {
-    fn execute(&mut self, exchange: &DnsExchange) -> Result<DnsExchangeExecution, BoundaryError> {
+    fn execute(&mut self, exchange: &Exchange) -> Result<Execution, BoundaryError> {
         if exchange.max_responses == 0 {
             return Err(invalid_client_execution(
                 "DNS exchange must retain at least one response",
@@ -34,7 +34,10 @@ where
         }
         let options = crate::exchange::Options {
             max_responses: exchange.max_responses,
-            max_unsolicited: self.options.max_unsolicited.min(exchange.max_responses),
+            max_unmatched_frames: self
+                .options
+                .max_unmatched_frames
+                .min(exchange.max_responses),
             ..self.options.clone()
         };
         let result = ExchangeExecutor::new(self.client, options).exchange_for_workflow(
@@ -66,7 +69,7 @@ where
                 "single-query DNS exchange returned a response for an unknown request index",
             ));
         }
-        Ok(DnsExchangeExecution {
+        Ok(Execution {
             permit: exchange.permit,
             sent: sent.pop().expect("validated one sent packet"),
             responses,

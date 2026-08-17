@@ -21,12 +21,9 @@ mod run;
 #[cfg(test)]
 mod tests;
 
-pub use boundary::{
-    FuzzAuthorizer as Authorizer, FuzzCaseExecution as Execution,
-    FuzzExecutionCase as ExecutionCase, FuzzExecutor as Executor,
-};
+pub use boundary::{Authorizer, Execution, ExecutionCase, Executor};
 pub use client_executor::PolicyAuthorizer;
-pub use error::FuzzError as Error;
+pub use error::Error;
 pub use request::{LiveLimits, LiveOptions};
-pub use result::{Case, CaseOutcome, Mode, Result, Stats};
+pub use result::{Case, CaseOutcome, Result, Stats};
 pub use run::run;

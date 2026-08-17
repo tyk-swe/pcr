@@ -128,7 +128,8 @@ pub enum Format {
     Hex,
     Raw,
     Pcap,
-    Pcapng,
+    #[serde(rename = "pcapng")]
+    PcapNg,
 }
 
 impl Format {
@@ -140,7 +141,7 @@ impl Format {
             Self::Hex => "hex",
             Self::Raw => "raw",
             Self::Pcap => "pcap",
-            Self::Pcapng => "pcapng",
+            Self::PcapNg => "pcapng",
         }
     }
 }
@@ -167,28 +168,28 @@ const SEND_FORMATS: &[Format] = &[
     Format::Hex,
     Format::Raw,
     Format::Pcap,
-    Format::Pcapng,
+    Format::PcapNg,
 ];
 const EXCHANGE_FORMATS: &[Format] = &[
     Format::Text,
     Format::Json,
     Format::Ndjson,
     Format::Pcap,
-    Format::Pcapng,
+    Format::PcapNg,
 ];
 const CAPTURE_FORMATS: &[Format] = &[
     Format::Text,
     Format::Ndjson,
     Format::Hex,
     Format::Pcap,
-    Format::Pcapng,
+    Format::PcapNg,
 ];
 const REPLAY_FORMATS: &[Format] = &[
     Format::Text,
     Format::Json,
     Format::Ndjson,
     Format::Pcap,
-    Format::Pcapng,
+    Format::PcapNg,
 ];
 const TOOL_FORMATS: &[Format] = &[Format::Text, Format::Json, Format::Ndjson];
 const FOLLOW_FORMATS: &[Format] = &[

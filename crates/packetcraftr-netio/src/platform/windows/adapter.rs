@@ -26,7 +26,7 @@ use windows::Win32::{
 use crate::{
     interface::{Id as InterfaceId, InterfaceAddress, InterfaceFlags, InterfaceInfo},
     link::{Capability, MacAddress},
-    route::NativeRouteError,
+    route::SystemError,
 };
 use packetcraftr_core::frame::LinkType;
 
@@ -48,11 +48,11 @@ pub(super) struct BufferBounds {
 }
 
 impl BufferBounds {
-    pub(super) fn new(start: *const u8, length: usize) -> Result<Self, NativeRouteError> {
+    pub(super) fn new(start: *const u8, length: usize) -> Result<Self, SystemError> {
         let start = start as usize;
         let end = start
             .checked_add(length)
-            .ok_or_else(|| NativeRouteError::InvalidResponse {
+            .ok_or_else(|| SystemError::InvalidResponse {
                 message: "Windows adapter buffer address range overflowed".to_owned(),
             })?;
         Ok(Self { start, end })
@@ -91,7 +91,7 @@ pub(super) fn adapter_index_for(adapter: &WindowsAdapter, destination: IpAddr) -
 pub(super) fn find_windows_adapter(
     adapters: &[WindowsAdapter],
     requested: &InterfaceId,
-) -> Result<WindowsAdapter, NativeRouteError> {
+) -> Result<WindowsAdapter, SystemError> {
     if let Some(adapter) = adapters.iter().find(|adapter| {
         adapter.interface.id.name == requested.name
             && matches!(
@@ -109,14 +109,14 @@ pub(super) fn find_windows_adapter(
             || requested.index == adapter.ipv4_index
             || requested.index == adapter.ipv6_index
     }) {
-        return Err(NativeRouteError::InterfaceMismatch {
+        return Err(SystemError::InterfaceMismatch {
             requested: requested.name.clone(),
             requested_index: requested.index,
             actual: actual.interface.id.name.clone(),
             actual_index: actual.interface.id.index,
         });
     }
-    Err(NativeRouteError::InterfaceNotFound {
+    Err(SystemError::InterfaceNotFound {
         name: requested.name.clone(),
         index: requested.index,
     })
@@ -125,7 +125,7 @@ pub(super) fn find_windows_adapter(
 pub(super) fn parse_adapters(
     head: *mut IP_ADAPTER_ADDRESSES_LH,
     bounds: BufferBounds,
-) -> Result<Vec<WindowsAdapter>, NativeRouteError> {
+) -> Result<Vec<WindowsAdapter>, SystemError> {
     let mut interfaces = Vec::new();
     let mut current = head;
     for _ in 0..4096 {
@@ -133,7 +133,7 @@ pub(super) fn parse_adapters(
             return Ok(interfaces);
         }
         if !bounds.contains(current) {
-            return Err(NativeRouteError::InvalidResponse {
+            return Err(SystemError::InvalidResponse {
                 message: "Windows adapter list contained an out-of-buffer or misaligned node"
                     .to_owned(),
             });
@@ -186,7 +186,7 @@ pub(super) fn parse_adapters(
                     },
                     mtu: (adapter.Mtu != 0).then_some(adapter.Mtu),
                     capability: if ethernet {
-                        Capability::Layer2And3
+                        Capability::Layer2AndLayer3
                     } else {
                         Capability::Layer3
                     },
@@ -206,7 +206,7 @@ pub(super) fn parse_adapters(
         }
         current = adapter.Next;
     }
-    Err(NativeRouteError::InvalidResponse {
+    Err(SystemError::InvalidResponse {
         message: "Windows adapter list exceeded its traversal bound".to_owned(),
     })
 }
@@ -214,14 +214,14 @@ pub(super) fn parse_adapters(
 fn parse_unicast_addresses(
     mut current: *mut IP_ADAPTER_UNICAST_ADDRESS_LH,
     bounds: BufferBounds,
-) -> Result<Vec<InterfaceAddress>, NativeRouteError> {
+) -> Result<Vec<InterfaceAddress>, SystemError> {
     let mut addresses = Vec::new();
     for _ in 0..16_384 {
         if current.is_null() {
             return Ok(addresses);
         }
         if !bounds.contains(current) {
-            return Err(NativeRouteError::InvalidResponse {
+            return Err(SystemError::InvalidResponse {
                 message:
                     "Windows unicast-address list contained an out-of-buffer or misaligned node"
                         .to_owned(),
@@ -233,7 +233,7 @@ fn parse_unicast_addresses(
         if let Some(address) = socket_address_ip(&unicast.Address, bounds)? {
             let maximum_prefix = if address.is_ipv4() { 32 } else { 128 };
             if unicast.OnLinkPrefixLength > maximum_prefix {
-                return Err(NativeRouteError::InvalidResponse {
+                return Err(SystemError::InvalidResponse {
                     message: format!(
                         "Windows returned invalid prefix length {} for {address}",
                         unicast.OnLinkPrefixLength
@@ -250,7 +250,7 @@ fn parse_unicast_addresses(
         }
         current = unicast.Next;
     }
-    Err(NativeRouteError::InvalidResponse {
+    Err(SystemError::InvalidResponse {
         message: "Windows unicast-address list exceeded its traversal bound".to_owned(),
     })
 }
@@ -258,7 +258,7 @@ fn parse_unicast_addresses(
 fn wide_string(
     value: windows::core::PWSTR,
     bounds: BufferBounds,
-) -> Result<Option<String>, NativeRouteError> {
+) -> Result<Option<String>, SystemError> {
     if value.is_null() {
         return Ok(None);
     }
@@ -266,7 +266,7 @@ fn wide_string(
     if !(pointer as usize).is_multiple_of(align_of::<u16>())
         || !bounds.contains_bytes(pointer.cast(), 2)
     {
-        return Err(NativeRouteError::InvalidResponse {
+        return Err(SystemError::InvalidResponse {
             message: "Windows adapter string pointed outside its response buffer".to_owned(),
         });
     }
@@ -274,32 +274,33 @@ fn wide_string(
     // SAFETY: the checked pointer is aligned and `available` ends at the
     // response buffer boundary. We search only this initialized range.
     let units = unsafe { std::slice::from_raw_parts(pointer, available) };
-    let length = units.iter().position(|unit| *unit == 0).ok_or_else(|| {
-        NativeRouteError::InvalidResponse {
-            message: "Windows adapter string was not terminated within its response buffer"
-                .to_owned(),
-        }
-    })?;
+    let length =
+        units
+            .iter()
+            .position(|unit| *unit == 0)
+            .ok_or_else(|| SystemError::InvalidResponse {
+                message: "Windows adapter string was not terminated within its response buffer"
+                    .to_owned(),
+            })?;
     Ok(String::from_utf16(&units[..length]).ok())
 }
 
 fn socket_address_ip(
     address: &windows::Win32::Networking::WinSock::SOCKET_ADDRESS,
     bounds: BufferBounds,
-) -> Result<Option<IpAddr>, NativeRouteError> {
+) -> Result<Option<IpAddr>, SystemError> {
     if address.lpSockaddr.is_null() {
         return Ok(None);
     }
-    let length = usize::try_from(address.iSockaddrLength).map_err(|_| {
-        NativeRouteError::InvalidResponse {
+    let length =
+        usize::try_from(address.iSockaddrLength).map_err(|_| SystemError::InvalidResponse {
             message: "Windows returned a negative socket-address length".to_owned(),
-        }
-    })?;
+        })?;
     if length < size_of::<ADDRESS_FAMILY>() {
         return Ok(None);
     }
     if !bounds.contains_bytes(address.lpSockaddr.cast(), length) {
-        return Err(NativeRouteError::InvalidResponse {
+        return Err(SystemError::InvalidResponse {
             message: "Windows socket address extended outside its response buffer".to_owned(),
         });
     }
@@ -309,7 +310,7 @@ fn socket_address_ip(
     match family {
         AF_INET if length >= size_of::<SOCKADDR_IN>() => {
             if !bounds.contains(address.lpSockaddr.cast::<SOCKADDR_IN>()) {
-                return Err(NativeRouteError::InvalidResponse {
+                return Err(SystemError::InvalidResponse {
                     message: "Windows returned a misaligned IPv4 socket address".to_owned(),
                 });
             }
@@ -322,7 +323,7 @@ fn socket_address_ip(
         }
         AF_INET6 if length >= size_of::<SOCKADDR_IN6>() => {
             if !bounds.contains(address.lpSockaddr.cast::<SOCKADDR_IN6>()) {
-                return Err(NativeRouteError::InvalidResponse {
+                return Err(SystemError::InvalidResponse {
                     message: "Windows returned a misaligned IPv6 socket address".to_owned(),
                 });
             }

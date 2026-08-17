@@ -1,17 +1,16 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::error::Error;
 use std::fmt;
 
 use super::super::ProtocolId;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SemanticError {
+pub struct Error {
     message: String,
 }
 
-impl SemanticError {
+impl Error {
     pub(super) fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
@@ -23,10 +22,10 @@ impl SemanticError {
     }
 }
 
-impl fmt::Display for SemanticError {
+impl fmt::Display for Error {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(&self.message)
     }
 }
 
-impl Error for SemanticError {}
+impl std::error::Error for Error {}

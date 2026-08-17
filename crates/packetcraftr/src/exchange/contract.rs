@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::{
-    decode::{DecodeOptions, DecodedPacket},
+    decode::{DecodedPacket, Options as DecodeOptions},
     template::DEFAULT_MAX_TEMPLATE_PACKETS,
 };
 use packetcraftr_netio::capture::{
@@ -15,17 +15,18 @@ use packetcraftr_netio::capture::{
 };
 
 use super::super::Stats;
-use super::super::send::SendOptions;
+use super::super::send::Options as SendOptions;
 
-pub const DEFAULT_MAX_UNSOLICITED_FRAMES: usize = DEFAULT_CAPTURE_QUEUE_FRAMES;
+pub const DEFAULT_MAX_UNMATCHED_FRAMES: usize = DEFAULT_CAPTURE_QUEUE_FRAMES;
+pub const DEFAULT_MAX_RESPONSES: usize = DEFAULT_CAPTURE_QUEUE_FRAMES;
 pub const MAX_EXCHANGE_TIMEOUT: Duration = packetcraftr_netio::capture::MAX_TIMEOUT;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ExchangeOptions {
+pub struct Options {
     pub send: SendOptions,
     pub timeout: Duration,
     pub max_template_packets: usize,
-    pub max_unsolicited: usize,
+    pub max_unmatched_frames: usize,
     pub max_responses: usize,
     /// One aggregate backend queue bound shared by matched, unsolicited, and
     /// undecodable capture traffic.
@@ -35,14 +36,14 @@ pub struct ExchangeOptions {
     pub decode: DecodeOptions,
 }
 
-impl Default for ExchangeOptions {
+impl Default for Options {
     fn default() -> Self {
         Self {
             send: SendOptions::default(),
             timeout: Duration::from_secs(3),
             max_template_packets: DEFAULT_MAX_TEMPLATE_PACKETS,
-            max_unsolicited: DEFAULT_MAX_UNSOLICITED_FRAMES,
-            max_responses: DEFAULT_MAX_UNSOLICITED_FRAMES,
+            max_unmatched_frames: DEFAULT_MAX_UNMATCHED_FRAMES,
+            max_responses: DEFAULT_MAX_RESPONSES,
             max_capture_queue_frames: DEFAULT_CAPTURE_QUEUE_FRAMES,
             max_captured_bytes: DEFAULT_CAPTURE_QUEUE_BYTES,
             capture_overflow_policy: OverflowPolicy::Fail,
@@ -52,17 +53,17 @@ impl Default for ExchangeOptions {
 }
 
 #[derive(Clone, Debug)]
-pub struct MatchedResponse {
+pub struct Response {
     pub request_index: usize,
     pub response: DecodedPacket,
     pub latency: Duration,
 }
 
 #[derive(Clone, Debug)]
-pub struct ExchangeResult {
+pub struct Result {
     /// Trusted receipts for exact provider-accepted transmissions.
     pub sent: Vec<crate::SentPacket>,
-    pub responses: Vec<MatchedResponse>,
+    pub responses: Vec<Response>,
     pub unanswered: Vec<usize>,
     pub unsolicited: Vec<DecodedPacket>,
     /// Captured records whose bytes could not be decoded under the configured

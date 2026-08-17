@@ -13,7 +13,7 @@ use packetcraftr_core::frame::LinkType;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum DestinationScope {
+pub enum Scope {
     Host,
     Link,
     Private,
@@ -23,10 +23,10 @@ pub enum DestinationScope {
 }
 
 /// Why the operating system selected a route. The concrete next hop remains
-/// in `RouteDecision::next_hop`; this enum is stable across native APIs.
+/// in [`Decision::next_hop`]; this enum is stable across native APIs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum RouteSelectionReason {
+pub enum SelectionReason {
     Local,
     OnLink,
     Broadcast,
@@ -35,31 +35,32 @@ pub enum RouteSelectionReason {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RouteDecision {
+pub struct Decision {
     pub interface: InterfaceId,
     /// Interface-owned source MAC used for Layer 2 materialization.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_mac: Option<MacAddress>,
-    pub selected_address: Option<IpAddr>,
+    #[serde(rename = "selected_address")]
+    pub selected_source: Option<IpAddr>,
     pub preferred_source: Option<IpAddr>,
     pub next_hop: Option<IpAddr>,
-    pub selection_reason: RouteSelectionReason,
-    pub destination_scope: DestinationScope,
+    pub selection_reason: SelectionReason,
+    pub destination_scope: Scope,
     pub mtu: u32,
     pub capability: Capability,
     pub link_type: LinkType,
 }
 
-impl RouteDecision {
+impl Decision {
     pub(crate) fn is_ipv4_broadcast(&self, destination: Option<IpAddr>) -> bool {
         self.next_hop.is_none()
             && matches!(destination, Some(IpAddr::V4(address)) if
                 address == Ipv4Addr::BROADCAST
-                    || self.selection_reason == RouteSelectionReason::Broadcast)
+                    || self.selection_reason == SelectionReason::Broadcast)
     }
 }
 
-pub trait RouteProvider: Send + Sync {
+pub trait Provider: Send + Sync {
     type Error: std::error::Error + Send + Sync + 'static;
 
     /// Passively selects a consistent per-exchange route snapshot without neighbor traffic.
@@ -69,14 +70,11 @@ pub trait RouteProvider: Send + Sync {
         destination: IpAddr,
         interface_hint: Option<&InterfaceId>,
         preferred_source: Option<IpAddr>,
-    ) -> Result<RouteDecision, Self::Error>;
+    ) -> Result<Decision, Self::Error>;
 
     /// Passively selects an interface for destination-free packets without default-route IP
     /// lookup or neighbor traffic. Defaults to `None` for IP-only providers.
-    fn lookup_interface(
-        &self,
-        _interface: &InterfaceId,
-    ) -> Result<Option<RouteDecision>, Self::Error> {
+    fn lookup_interface(&self, _interface: &InterfaceId) -> Result<Option<Decision>, Self::Error> {
         Ok(None)
     }
 
@@ -96,7 +94,7 @@ pub trait RouteProvider: Send + Sync {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct PlanOptions {
+pub struct Options {
     pub link_mode: Mode,
     pub interface: Option<InterfaceId>,
     /// Interface-owned source that constrains route selection without rewriting packet source.
@@ -104,8 +102,9 @@ pub struct PlanOptions {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PlannedRoute {
-    pub route: RouteDecision,
+pub struct Plan {
+    #[serde(rename = "route")]
+    pub decision: Decision,
     pub mode: Mode,
     /// Route lookup destination. For an SRH this is the first visited segment.
     /// Destination-free Layer 2 frames have no lookup destination.
@@ -128,7 +127,7 @@ pub struct PlannedRoute {
     pub synthesized_ethernet: bool,
 }
 
-impl PlannedRoute {
+impl Plan {
     pub fn needs_neighbor_resolution(&self) -> bool {
         self.mode == Mode::Layer2
             && self.destination_mac.is_none()

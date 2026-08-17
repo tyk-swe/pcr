@@ -8,7 +8,7 @@ use packetcraftr_core::{
     semantics::{self, BuiltinProtocol},
 };
 
-use super::error::PlanError;
+use super::error::Error;
 use super::intent::{
     arp_link_macs, extract_neighbor_vlan_tags, multicast_mac, outer_ethernet_mac,
     packet_has_link_layer_intent,
@@ -18,15 +18,15 @@ use crate::{
     neighbor::VlanTag as NeighborVlanTag,
 };
 
-use super::models::{PlanOptions, PlannedRoute, RouteDecision, RouteProvider};
+use super::models::{Decision, Options, Plan, Provider};
 
 /// Passively selects route, source, and link without ARP/NDP, capture, or transmission.
-pub fn plan<P: RouteProvider>(
+pub fn plan<P: Provider>(
     packet: &Packet,
     destination: Option<IpAddr>,
-    options: &PlanOptions,
+    options: &Options,
     provider: &P,
-) -> Result<PlannedRoute, PlanError> {
+) -> Result<Plan, Error> {
     let intent = PacketIntent::from_packet(packet, destination, options)?;
     let route = lookup_route(&intent, options, provider)?;
     validate_route_contract(&route, options)?;
@@ -42,7 +42,7 @@ pub fn plan<P: RouteProvider>(
         ipv4_broadcast,
     )?;
 
-    Ok(PlannedRoute {
+    Ok(Plan {
         neighbor_target: if mode == Mode::Layer2 && !ipv4_broadcast {
             intent
                 .lookup_destination
@@ -54,7 +54,7 @@ pub fn plan<P: RouteProvider>(
         source_mac: link.source_mac,
         neighbor_vlan_tags: link.neighbor_vlan_tags,
         synthesized_ethernet: link.synthesized_ethernet,
-        route,
+        decision: route,
         mode,
         lookup_destination: intent.lookup_destination,
         final_destination: intent.final_destination,
@@ -83,13 +83,13 @@ impl PacketIntent {
     fn from_packet(
         packet: &Packet,
         destination: Option<IpAddr>,
-        options: &PlanOptions,
-    ) -> Result<Self, PlanError> {
+        options: &Options,
+    ) -> Result<Self, Error> {
         reject_offline_link_header(packet)?;
 
         let has_link_layer = packet_has_link_layer_intent(packet);
         if options.link_mode == Mode::Layer3 && has_link_layer {
-            return Err(PlanError::EthernetInLayer3);
+            return Err(Error::EthernetInLayer3);
         }
 
         let outer_ip_protocol = semantics::outer_layers(packet).find_map(|layer| {
@@ -99,15 +99,15 @@ impl PacketIntent {
         let ip_path = semantics::outer_ip_path(packet).map_err(|source| {
             let message = source.to_string();
             match outer_ip_protocol {
-                Some(BuiltinProtocol::Ipv4) => PlanError::InvalidSourceRouting { message },
-                _ => PlanError::InvalidSegmentRouting { message },
+                Some(BuiltinProtocol::Ipv4) => Error::InvalidSourceRouting { message },
+                _ => Error::InvalidSegmentRouting { message },
             }
         })?;
         if ip_path.as_ref().is_some_and(|path| {
             matches!(path.header_destination, IpAddr::V4(destination) if destination.is_unspecified())
                 && !path.declared_route_destinations.is_empty()
         }) {
-            return Err(PlanError::InvalidSourceRouting {
+            return Err(Error::InvalidSourceRouting {
                 message: "the IPv4 header destination must name the active LSRR/SSRR hop"
                     .to_owned(),
             });
@@ -138,13 +138,13 @@ impl PacketIntent {
             (options.preferred_source, lookup_destination)
             && preferred_source.is_ipv4() != lookup_destination.is_ipv4()
         {
-            return Err(PlanError::PreferredSourceFamilyMismatch {
+            return Err(Error::PreferredSourceFamilyMismatch {
                 preferred_source,
                 destination: lookup_destination,
             });
         }
         if final_destination.is_none() && (has_ip || options.link_mode == Mode::Layer3) {
-            return Err(PlanError::MissingDestination);
+            return Err(Error::MissingDestination);
         }
 
         let explicit_source = ip_path
@@ -177,7 +177,7 @@ impl PacketIntent {
     }
 }
 
-fn reject_offline_link_header(packet: &Packet) -> Result<(), PlanError> {
+fn reject_offline_link_header(packet: &Packet) -> Result<(), Error> {
     if let Some(protocol) = semantics::outer_layers(packet).find_map(|layer| {
         matches!(
             BuiltinProtocol::of(layer),
@@ -190,17 +190,17 @@ fn reject_offline_link_header(packet: &Packet) -> Result<(), PlanError> {
         )
         .then(|| layer.protocol_id().clone())
     }) {
-        return Err(PlanError::OfflineOnlyLinkHeader { protocol });
+        return Err(Error::OfflineOnlyLinkHeader { protocol });
     }
 
     Ok(())
 }
 
-fn lookup_route<P: RouteProvider>(
+fn lookup_route<P: Provider>(
     intent: &PacketIntent,
-    options: &PlanOptions,
+    options: &Options,
     provider: &P,
-) -> Result<RouteDecision, PlanError> {
+) -> Result<Decision, Error> {
     Ok(match intent.lookup_destination {
         Some(lookup_destination) => provider
             .lookup_with_preferences(
@@ -208,7 +208,7 @@ fn lookup_route<P: RouteProvider>(
                 options.interface.as_ref(),
                 options.preferred_source,
             )
-            .map_err(|source| PlanError::RouteLookup {
+            .map_err(|source| Error::RouteLookup {
                 destination: lookup_destination,
                 failure: provider.classify_error(&source),
                 message: source.to_string(),
@@ -217,26 +217,26 @@ fn lookup_route<P: RouteProvider>(
             let interface = options
                 .interface
                 .as_ref()
-                .ok_or(PlanError::MissingLayer2Interface)?;
+                .ok_or(Error::MissingLayer2Interface)?;
             provider
                 .lookup_interface(interface)
-                .map_err(|source| PlanError::InterfaceLookup {
+                .map_err(|source| Error::InterfaceLookup {
                     interface: interface.name.clone(),
                     failure: provider.classify_error(&source),
                     message: source.to_string(),
                 })?
-                .ok_or_else(|| PlanError::InterfaceLookupUnsupported {
+                .ok_or_else(|| Error::InterfaceLookupUnsupported {
                     interface: interface.name.clone(),
                 })?
         }
     })
 }
 
-fn validate_route_contract(route: &RouteDecision, options: &PlanOptions) -> Result<(), PlanError> {
+fn validate_route_contract(route: &Decision, options: &Options) -> Result<(), Error> {
     if let Some(requested) = &options.interface
         && route.interface != *requested
     {
-        return Err(PlanError::InterfaceMismatch {
+        return Err(Error::InterfaceMismatch {
             requested: requested.name.clone(),
             requested_index: requested.index,
             selected: route.interface.name.clone(),
@@ -244,12 +244,12 @@ fn validate_route_contract(route: &RouteDecision, options: &PlanOptions) -> Resu
         });
     }
     if let Some(requested) = options.preferred_source
-        && route.selected_address != Some(requested)
+        && route.selected_source != Some(requested)
         && route.preferred_source != Some(requested)
     {
-        return Err(PlanError::PreferredSourceNotSelected {
+        return Err(Error::PreferredSourceNotSelected {
             requested,
-            selected: route.selected_address.or(route.preferred_source),
+            selected: route.selected_source.or(route.preferred_source),
         });
     }
 
@@ -258,9 +258,9 @@ fn validate_route_contract(route: &RouteDecision, options: &PlanOptions) -> Resu
 
 fn select_link_mode(
     intent: &PacketIntent,
-    route: &RouteDecision,
+    route: &Decision,
     requested: Mode,
-) -> Result<Mode, PlanError> {
+) -> Result<Mode, Error> {
     let mode = match requested {
         Mode::Layer3 => Mode::Layer3,
         Mode::Layer2 => Mode::Layer2,
@@ -269,10 +269,10 @@ fn select_link_mode(
         Mode::Auto => Mode::Layer2,
     };
     if mode == Mode::Layer2 && !route.capability.supports_layer2() {
-        return Err(PlanError::Layer2Unsupported);
+        return Err(Error::Layer2Unsupported);
     }
     if mode == Mode::Layer3 && !route.capability.supports_layer3() {
-        return Err(PlanError::Layer3Unsupported);
+        return Err(Error::Layer3Unsupported);
     }
 
     Ok(mode)
@@ -283,31 +283,28 @@ struct SelectedSources {
     neighbor: Option<IpAddr>,
 }
 
-fn select_sources(
-    intent: &PacketIntent,
-    route: &RouteDecision,
-) -> Result<SelectedSources, PlanError> {
+fn select_sources(intent: &PacketIntent, route: &Decision) -> Result<SelectedSources, Error> {
     let packet = if intent.has_ip {
         intent
             .explicit_source
             .or(route.preferred_source)
-            .or(route.selected_address)
+            .or(route.selected_source)
     } else {
         None
     };
     if let (Some(source), Some(final_destination)) = (packet, intent.final_destination)
         && source.is_ipv4() != final_destination.is_ipv4()
     {
-        return Err(PlanError::SourceFamilyMismatch {
+        return Err(Error::SourceFamilyMismatch {
             destination: final_destination,
         });
     }
     if intent.has_ip && packet.is_none() {
-        return Err(PlanError::MissingPacketSource);
+        return Err(Error::MissingPacketSource);
     }
     let neighbor = intent.lookup_destination.and_then(|lookup_destination| {
         route
-            .selected_address
+            .selected_source
             .filter(|source| source.is_ipv4() == lookup_destination.is_ipv4())
             .or_else(|| {
                 route
@@ -329,11 +326,11 @@ struct SelectedLink {
 fn select_link(
     packet: &Packet,
     intent: &PacketIntent,
-    route: &RouteDecision,
+    route: &Decision,
     mode: Mode,
     neighbor_source: Option<IpAddr>,
     ipv4_broadcast: bool,
-) -> Result<SelectedLink, PlanError> {
+) -> Result<SelectedLink, Error> {
     let explicit_destination_mac = outer_ethernet_mac(packet, semantics::DESTINATION);
     let explicit_source_mac = outer_ethernet_mac(packet, semantics::SOURCE);
     let (arp_source_mac, arp_destination_mac) = arp_link_macs(packet);
@@ -343,10 +340,10 @@ fn select_link(
         .or_else(|| intent.lookup_destination.and_then(multicast_mac));
     if mode == Mode::Layer2 && destination_mac.is_none() {
         let Some(lookup_destination) = intent.lookup_destination else {
-            return Err(PlanError::MissingLayer2DestinationMac);
+            return Err(Error::MissingLayer2DestinationMac);
         };
         if neighbor_source.is_none() && !lookup_destination.is_multicast() {
-            return Err(PlanError::MissingNeighborSource);
+            return Err(Error::MissingNeighborSource);
         }
     }
     let source_mac = explicit_source_mac.or(arp_source_mac).or(route.source_mac);

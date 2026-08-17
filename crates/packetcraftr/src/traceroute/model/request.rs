@@ -11,22 +11,22 @@ use crate::probe::Transport as ProbeTransport;
 use crate::target::Family;
 use crate::target::Target;
 
-use super::super::error::TracerouteError;
+use super::super::error::Error;
 use super::super::{
-    DEFAULT_MAX_UNDECODED_TRACEROUTE_FRAMES, MAX_TRACEROUTE_DURATION, MAX_TRACEROUTE_PROBES_PER_HOP,
+    DEFAULT_MAX_UNDECODED_TRACEROUTE_FRAMES, MAX_TRACEROUTE_DURATION, MAX_TRACEROUTE_PROBES,
+    MAX_TRACEROUTE_PROBES_PER_HOP, MAX_TRACEROUTE_RATE,
 };
-use crate::scan::{MAX_SCAN_PROBES, MAX_SCAN_RATE};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TracerouteStrategy {
+pub enum Strategy {
     #[default]
     Udp,
     Icmp,
     Tcp,
 }
 
-impl TracerouteStrategy {
+impl Strategy {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Udp => "udp",
@@ -44,14 +44,14 @@ impl TracerouteStrategy {
     }
 }
 
-impl fmt::Display for TracerouteStrategy {
+impl fmt::Display for Strategy {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(self.as_str())
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TracerouteLimits {
+pub struct Limits {
     pub max_probes: usize,
     pub max_duration: Duration,
     pub max_evidence_frames: usize,
@@ -59,7 +59,7 @@ pub struct TracerouteLimits {
     pub max_undecoded: usize,
 }
 
-impl Default for TracerouteLimits {
+impl Default for Limits {
     fn default() -> Self {
         Self {
             max_probes: packetcraftr_core::template::DEFAULT_MAX_TEMPLATE_PACKETS,
@@ -71,10 +71,10 @@ impl Default for TracerouteLimits {
     }
 }
 
-impl TracerouteLimits {
-    pub fn validate(self) -> std::result::Result<Self, TracerouteError> {
+impl Limits {
+    pub fn validate(self) -> std::result::Result<Self, Error> {
         for (field, value, maximum) in [
-            ("max_probes", self.max_probes, MAX_SCAN_PROBES),
+            ("max_probes", self.max_probes, MAX_TRACEROUTE_PROBES),
             (
                 "max_evidence_frames",
                 self.max_evidence_frames,
@@ -87,7 +87,7 @@ impl TracerouteLimits {
             ),
         ] {
             if value == 0 || value > maximum {
-                return Err(TracerouteError::InvalidLimit {
+                return Err(Error::InvalidLimit {
                     field,
                     value: u64::try_from(value).unwrap_or(u64::MAX),
                     reason: format!("must be within 1..={maximum}"),
@@ -95,14 +95,14 @@ impl TracerouteLimits {
             }
         }
         if self.max_undecoded > self.max_evidence_frames {
-            return Err(TracerouteError::InvalidLimit {
+            return Err(Error::InvalidLimit {
                 field: "max_undecoded",
                 value: u64::try_from(self.max_undecoded).unwrap_or(u64::MAX),
                 reason: "cannot exceed max_evidence_frames".to_owned(),
             });
         }
         if self.max_duration.is_zero() || self.max_duration > MAX_TRACEROUTE_DURATION {
-            return Err(TracerouteError::InvalidDuration {
+            return Err(Error::InvalidDuration {
                 value: self.max_duration,
                 maximum: MAX_TRACEROUTE_DURATION,
             });
@@ -112,9 +112,9 @@ impl TracerouteLimits {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TracerouteRequest {
+pub struct Request {
     pub target: Target,
-    pub strategy: TracerouteStrategy,
+    pub strategy: Strategy,
     pub address_family: Family,
     /// UDP base destination port or fixed TCP destination port. ICMP requires
     /// this to be absent.
@@ -124,28 +124,28 @@ pub struct TracerouteRequest {
     pub probes_per_hop: u32,
     pub timeout: Duration,
     pub probes_per_second: Option<u32>,
-    pub limits: TracerouteLimits,
+    pub limits: Limits,
 }
 
-impl TracerouteRequest {
-    pub fn validate(&self) -> std::result::Result<(), TracerouteError> {
+impl Request {
+    pub fn validate(&self) -> std::result::Result<(), Error> {
         self.limits.validate()?;
         if self.first_hop == 0 {
-            return Err(TracerouteError::InvalidLimit {
+            return Err(Error::InvalidLimit {
                 field: "first_hop",
                 value: 0,
                 reason: "must be within 1..=255".to_owned(),
             });
         }
         if self.max_hops < self.first_hop {
-            return Err(TracerouteError::InvalidLimit {
+            return Err(Error::InvalidLimit {
                 field: "max_hops",
                 value: u64::from(self.max_hops),
                 reason: format!("must be at least first_hop={}", self.first_hop),
             });
         }
         if !(1..=MAX_TRACEROUTE_PROBES_PER_HOP).contains(&self.probes_per_hop) {
-            return Err(TracerouteError::InvalidLimit {
+            return Err(Error::InvalidLimit {
                 field: "probes_per_hop",
                 value: u64::from(self.probes_per_hop),
                 reason: format!("must be within 1..={MAX_TRACEROUTE_PROBES_PER_HOP}"),
@@ -154,7 +154,7 @@ impl TracerouteRequest {
         if usize::try_from(self.probes_per_hop).unwrap_or(usize::MAX)
             > self.limits.max_evidence_frames
         {
-            return Err(TracerouteError::InvalidLimit {
+            return Err(Error::InvalidLimit {
                 field: "probes_per_hop",
                 value: u64::from(self.probes_per_hop),
                 reason: format!(
@@ -164,34 +164,34 @@ impl TracerouteRequest {
             });
         }
         if self.timeout.is_zero() || self.timeout > packetcraftr_netio::capture::MAX_TIMEOUT {
-            return Err(TracerouteError::InvalidTimeout {
+            return Err(Error::InvalidTimeout {
                 value: self.timeout,
                 maximum: packetcraftr_netio::capture::MAX_TIMEOUT,
             });
         }
         if let Some(rate) = self.probes_per_second
-            && (rate == 0 || rate > MAX_SCAN_RATE)
+            && (rate == 0 || rate > MAX_TRACEROUTE_RATE)
         {
-            return Err(TracerouteError::InvalidLimit {
+            return Err(Error::InvalidLimit {
                 field: "probes_per_second",
                 value: u64::from(rate),
-                reason: format!("must be within 1..={MAX_SCAN_RATE}"),
+                reason: format!("must be within 1..={MAX_TRACEROUTE_RATE}"),
             });
         }
         match (self.strategy, self.destination_port) {
-            (TracerouteStrategy::Udp | TracerouteStrategy::Tcp, None) => {
-                return Err(TracerouteError::InvalidPort {
+            (Strategy::Udp | Strategy::Tcp, None) => {
+                return Err(Error::InvalidPort {
                     message: "UDP and TCP traceroute require a destination port".to_owned(),
                 });
             }
-            (TracerouteStrategy::Udp | TracerouteStrategy::Tcp, Some(0)) => {
-                return Err(TracerouteError::InvalidPort {
+            (Strategy::Udp | Strategy::Tcp, Some(0)) => {
+                return Err(Error::InvalidPort {
                     message: "UDP and TCP traceroute require a non-zero destination port"
                         .to_owned(),
                 });
             }
-            (TracerouteStrategy::Icmp, Some(_)) => {
-                return Err(TracerouteError::InvalidPort {
+            (Strategy::Icmp, Some(_)) => {
+                return Err(Error::InvalidPort {
                     message: "ICMP traceroute is portless".to_owned(),
                 });
             }
@@ -204,12 +204,10 @@ impl TracerouteRequest {
         usize::from(self.max_hops - self.first_hop) + 1
     }
 
-    pub(in crate::traceroute) fn total_probe_count(
-        &self,
-    ) -> std::result::Result<usize, TracerouteError> {
+    pub(in crate::traceroute) fn total_probe_count(&self) -> std::result::Result<usize, Error> {
         self.hop_count()
             .checked_mul(usize::try_from(self.probes_per_hop).unwrap_or(usize::MAX))
-            .ok_or(TracerouteError::InvalidLimit {
+            .ok_or(Error::InvalidLimit {
                 field: "probes",
                 value: u64::MAX,
                 reason: "probe-count arithmetic overflowed".to_owned(),

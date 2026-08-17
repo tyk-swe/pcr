@@ -15,6 +15,8 @@ pub const DEFAULT_TRACEROUTE_UDP_PORT: u16 = 33_434;
 pub const DEFAULT_TRACEROUTE_TCP_PORT: u16 = 80;
 pub const DEFAULT_MAX_UNDECODED_TRACEROUTE_FRAMES: usize = 64;
 pub const MAX_TRACEROUTE_PROBES_PER_HOP: u32 = 32;
+pub const MAX_TRACEROUTE_PROBES: usize = 100_000;
+pub const MAX_TRACEROUTE_RATE: u32 = 1_000_000;
 pub const MAX_TRACEROUTE_DURATION: Duration = packetcraftr_netio::capture::MAX_TIMEOUT;
 
 // A generated probe is no larger than Ethernet + IPv6 + TCP without options.
@@ -36,17 +38,10 @@ mod probe;
 #[cfg(test)]
 mod tests;
 
-pub use classification::{
-    TracerouteResponseClassification as ResponseClassification,
-    classify_traceroute_response as classify_response,
-};
-pub use engine::traceroute as run;
-pub use error::TracerouteError as Error;
+pub use classification::{ResponseClassification, classify_response};
+pub use engine::run;
+pub use error::Error;
 pub use model::{
-    TracerouteBatch as Batch, TracerouteBatchExecution as Execution,
-    TracerouteCompletion as Completion, TracerouteExecutor as Executor, TracerouteHopResult as Hop,
-    TracerouteLimits as Limits, TracerouteProbe as Probe, TracerouteProbeEvidence as ProbeEvidence,
-    TracerouteProbeStatus as ProbeStatus, TracerouteRequest as Request,
-    TracerouteResponseKind as ResponseKind, TracerouteResult as Result,
-    TracerouteStrategy as Strategy, TracerouteUndecodedEvidence as UndecodedEvidence,
+    Batch, Completion, Execution, Executor, Hop, Limits, Probe, ProbeEvidence, ProbeStatus,
+    Request, ResponseKind, Result, Strategy, UndecodedEvidence,
 };

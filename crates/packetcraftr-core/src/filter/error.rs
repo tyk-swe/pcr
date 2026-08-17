@@ -3,12 +3,12 @@
 
 use thiserror::Error;
 
-use super::super::layer::ProtocolId;
+use super::super::layer::Id as ProtocolId;
 
 /// Why a display filter could not be compiled or evaluated.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum FilterError {
+pub enum Error {
     #[error("display filter requires frame.time_epoch, but the frame has no timestamp")]
     TimestampUnavailable,
     #[error("display filter is empty")]

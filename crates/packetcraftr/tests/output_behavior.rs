@@ -21,16 +21,14 @@ use packetcraftr::netio::{
 use packetcraftr::output::{
     contract::{Command, Error as ContractError, Format},
     envelope::{Aggregate, Error as OutputError, Stats, Stream},
+    frame::{Captured, Timestamp, Wire},
     interfaces,
-    plan::{
+    network::{
         Capability as InterfaceCapabilityOutput, MacAddress as RouteMacAddressOutput,
         Mode as RouteModeOutput, Plan as PlannedRouteOutput, Scope as RouteScopeOutput,
         SelectionReason as RouteSelectionOutput, VlanKind as RouteVlanKindOutput,
     },
     protocols::{Detail, Field, FieldKind, Summary},
-    read::Frame as Captured,
-    send::Wire,
-    stats::Timestamp,
 };
 use serde_json::json;
 
@@ -63,7 +61,7 @@ fn command_format_matrix_display_and_errors_cover_the_full_vocabulary() {
         Format::Hex,
         Format::Raw,
         Format::Pcap,
-        Format::Pcapng,
+        Format::PcapNg,
     ];
 
     assert_eq!(Command::ALL.len(), expected_commands.len());
@@ -305,8 +303,7 @@ fn protocol_output_converts_every_field_kind_and_manifest_capability() {
     assert_eq!(detail.fields, vec![field]);
 }
 
-#[test]
-fn interface_and_route_outputs_are_stable_and_sorted() {
+fn interface_fixture() -> Vec<Info> {
     let flags = Flags {
         up: true,
         broadcast: true,
@@ -333,7 +330,7 @@ fn interface_and_route_outputs_are_stable_and_sorted() {
         ],
         flags,
         mtu: Some(1_500),
-        capability: Capability::Layer2And3,
+        capability: Capability::Layer2AndLayer3,
         link_type: LinkType::ETHERNET,
     };
     let first = Info {
@@ -355,7 +352,13 @@ fn interface_and_route_outputs_are_stable_and_sorted() {
         capability: Capability::Layer3,
         link_type: LinkType::NULL,
     };
-    let output = interfaces::Result::new(vec![second, first]);
+
+    vec![second, first]
+}
+
+#[test]
+fn interface_outputs_are_stable_and_sorted() {
+    let output = interfaces::Result::new(interface_fixture());
     assert_eq!(output.interfaces[0].name, "lo");
     assert_eq!(
         output.interfaces[1].addresses,
@@ -365,17 +368,24 @@ fn interface_and_route_outputs_are_stable_and_sorted() {
         output.interfaces[1].mac.as_deref(),
         Some("00:01:02:03:04:05")
     );
+}
 
+#[test]
+fn interface_capability_outputs_are_stable() {
     for (capability, expected) in [
         (Capability::Layer2, InterfaceCapabilityOutput::Layer2),
         (Capability::Layer3, InterfaceCapabilityOutput::Layer3),
         (
-            Capability::Layer2And3,
-            InterfaceCapabilityOutput::Layer2And3,
+            Capability::Layer2AndLayer3,
+            InterfaceCapabilityOutput::Layer2AndLayer3,
         ),
     ] {
         assert_eq!(InterfaceCapabilityOutput::from(capability), expected);
     }
+}
+
+#[test]
+fn route_enum_outputs_are_stable() {
     for (mode, expected) in [
         (LinkMode::Auto, RouteModeOutput::Auto),
         (LinkMode::Layer2, RouteModeOutput::Layer2),
@@ -415,30 +425,27 @@ fn interface_and_route_outputs_are_stable_and_sorted() {
     ] {
         assert_eq!(RouteVlanKindOutput::from(kind), expected);
     }
+}
 
-    let source_mac = MacAddress([0, 1, 2, 3, 4, 5]);
-    let destination_mac = MacAddress([6, 7, 8, 9, 10, 11]);
-    assert_eq!(
-        RouteMacAddressOutput::from(source_mac).to_string(),
-        "00:01:02:03:04:05"
-    );
+fn planned_route(source_mac: MacAddress, destination_mac: MacAddress) -> Plan {
     let route = Decision {
         interface: InterfaceId {
             name: "eth0".to_owned(),
             index: 3,
         },
         source_mac: Some(source_mac),
-        selected_address: Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1))),
+        selected_source: Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1))),
         preferred_source: None,
         next_hop: Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 254))),
         selection_reason: SelectionReason::Gateway,
         destination_scope: Scope::Private,
         mtu: 1_500,
-        capability: Capability::Layer2And3,
+        capability: Capability::Layer2AndLayer3,
         link_type: LinkType::ETHERNET,
     };
-    let planned = Plan {
-        route,
+
+    Plan {
+        decision: route,
         mode: LinkMode::Layer2,
         lookup_destination: Some(IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2))),
         final_destination: Some(IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2))),
@@ -455,9 +462,20 @@ fn interface_and_route_outputs_are_stable_and_sorted() {
             vlan_id: 42,
         }],
         synthesized_ethernet: true,
-    };
-    let output = PlannedRouteOutput::from(planned);
-    assert_eq!(output.route.interface.name, "eth0");
+    }
+}
+
+#[test]
+fn planned_route_output_preserves_link_metadata() {
+    let source_mac = MacAddress([0, 1, 2, 3, 4, 5]);
+    let destination_mac = MacAddress([6, 7, 8, 9, 10, 11]);
+    assert_eq!(
+        RouteMacAddressOutput::from(source_mac).to_string(),
+        "00:01:02:03:04:05"
+    );
+
+    let output = PlannedRouteOutput::from(planned_route(source_mac, destination_mac));
+    assert_eq!(output.decision.interface.name, "eth0");
     assert_eq!(
         output.destination_mac,
         Some(RouteMacAddressOutput(destination_mac.0))

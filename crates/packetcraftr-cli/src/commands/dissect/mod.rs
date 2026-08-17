@@ -13,20 +13,17 @@ use packetcraftr::{
     output,
 };
 
-use self::arguments::DissectArgs;
+use self::arguments::Args;
 use super::super::errors::CliError;
 use super::super::filtering::{self, Capabilities};
 use super::super::input::{read_bounded_file, read_stdin_bounded};
 use super::super::rendering::{
     emit_aggregate, render_diagnostics_text, write_plain_line, write_raw, write_stdout_line,
 };
-use super::super::system::default_registry_arc;
+use super::registry;
 
-pub(super) fn run(
-    arguments: DissectArgs,
-    output: output::contract::Format,
-) -> Result<(), CliError> {
-    let registry = default_registry_arc()?;
+pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
+    let registry = registry()?;
     // A bad filter fails before any input is read, so it cannot leave the
     // command waiting on standard input for frame bytes it would never use.
     let filter = match arguments.filter.as_deref() {
@@ -38,7 +35,7 @@ pub(super) fn run(
         None => None,
     };
     let bytes = match (arguments.hex, arguments.file) {
-        (Some(value), None) => core::expression::decode_hex(&value)
+        (Some(value), None) => core::protocol::raw::parse_hex(&value)
             .map_err(|source| CliError::new(2, source.to_string()))?
             .to_vec(),
         (None, Some(path)) => read_bounded_file(&path, core::document::DEFAULT_MAX_DOCUMENT_BYTES)?,
@@ -49,7 +46,7 @@ pub(super) fn run(
         .decode(
             Frame::new(SystemTime::now(), LinkType(arguments.link_type), bytes)
                 .map_err(|source| CliError::new(3, source.to_string()))?,
-            core::decode::DecodeOptions::default(),
+            core::decode::Options::default(),
         )
         .map_err(|source| CliError::new(3, source.to_string()))?;
     // The filter selects emission, not validity: a frame it rejects emits
@@ -67,7 +64,7 @@ pub(super) fn run(
         None => true,
     };
     let (result, diagnostics) = output::dissect::Result::from_decoded(decoded);
-    match output {
+    match format {
         output::contract::Format::Text => {
             if !kept {
                 return Ok(());

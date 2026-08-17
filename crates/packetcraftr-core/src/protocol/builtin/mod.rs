@@ -11,4 +11,4 @@
 mod filter;
 mod registry;
 
-pub use registry::default_registry as registry;
+pub use registry::registry;

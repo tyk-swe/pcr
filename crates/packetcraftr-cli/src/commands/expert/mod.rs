@@ -2,43 +2,19 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 pub(super) mod arguments;
+mod rendering;
 
-use std::collections::BTreeMap;
-
-use packetcraftr::core::diagnostic::DiagnosticSeverity;
+use packetcraftr::core::diagnostic::Severity as DiagnosticSeverity;
 use packetcraftr::{analysis, output};
 
-use self::arguments::{CliExpertSeverity, ExpertArgs};
+use self::arguments::{Args, Severity};
 use super::super::errors::CliError;
-use super::super::rendering::{emit_aggregate, emit_stream, emit_stream_record, write_stdout_line};
-use super::offline_analysis::{
-    PreparedOfflineAnalysis, open_offline_reader, prepare_offline_analysis,
-};
-
-#[derive(Debug, Default)]
-struct SelectedExpertSummary {
-    findings: u64,
-    errors: u64,
-    warnings: u64,
-    notes: u64,
-    codes: BTreeMap<String, u64>,
-}
-
-impl SelectedExpertSummary {
-    fn count(&mut self, finding: &analysis::expert::Finding) {
-        self.findings += 1;
-        match finding.severity {
-            DiagnosticSeverity::Error => self.errors += 1,
-            DiagnosticSeverity::Warning => self.warnings += 1,
-            DiagnosticSeverity::Info => self.notes += 1,
-        }
-        *self.codes.entry(finding.code.clone()).or_default() += 1;
-    }
-}
+use super::super::input::open_capture;
+use super::offline_analysis::{Prepared, prepare};
 
 fn matches_selector(
     finding: &analysis::expert::Finding,
-    min_severity: CliExpertSeverity,
+    min_severity: Severity,
     codes: &[String],
 ) -> bool {
     let finding_rank = match finding.severity {
@@ -55,16 +31,13 @@ fn matches_selector(
     true
 }
 
-pub(super) fn run(arguments: ExpertArgs, output: output::contract::Format) -> Result<(), CliError> {
-    output::contract::Command::Expert
-        .require_format(output)
-        .map_err(CliError::classified)?;
-    let PreparedOfflineAnalysis {
+pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
+    let Prepared {
         registry,
         filter,
         limits,
-    } = prepare_offline_analysis(arguments.limits, arguments.filter.as_deref())?;
-    let mut reader = open_offline_reader(&arguments.path, arguments.limits.capture)?;
+    } = prepare(arguments.limits, arguments.filter.as_deref())?;
+    let mut reader = open_capture(&arguments.path, arguments.limits.capture)?;
 
     let options = analysis::Options {
         filter: filter.as_ref(),
@@ -72,15 +45,13 @@ pub(super) fn run(arguments: ExpertArgs, output: output::contract::Format) -> Re
         tcp_events: true,
         limits,
     };
-    let mut collector = analysis::expert::ExpertCollector::new();
-    let mut selected_summary = SelectedExpertSummary::default();
-    let mut sequence = 0_u64;
-    let mut retained: Vec<output::expert::Finding> = Vec::new();
+    let mut collector = analysis::expert::Collector::new();
+    let mut state = rendering::State::default();
     let outcome = analysis::run(&mut reader, registry, &options, |record| {
         for finding in collector.observe(&record) {
             if matches_selector(&finding, arguments.min_severity, &arguments.codes) {
-                selected_summary.count(&finding);
-                emit_finding(output, finding.into(), &mut sequence, &mut retained)
+                state.count(&finding);
+                rendering::render_record(format, finding.into(), &mut state)
                     .map_err(CliError::into_boundary_error)?;
             }
         }
@@ -90,8 +61,8 @@ pub(super) fn run(arguments: ExpertArgs, output: output::contract::Format) -> Re
         let error = CliError::classified(error);
         // Streamed records are numbered by emission, not by capture frame,
         // so a terminal stream error continues that numbering.
-        if matches!(output, output::contract::Format::Ndjson) {
-            error.at_sequence(sequence)
+        if matches!(format, output::contract::Format::Ndjson) {
+            error.at_sequence(state.sequence)
         } else {
             error
         }
@@ -100,96 +71,15 @@ pub(super) fn run(arguments: ExpertArgs, output: output::contract::Format) -> Re
         collector.finish(&summary.trailing_tcp_events, summary.frames_read);
     for finding in trailing {
         if matches_selector(&finding, arguments.min_severity, &arguments.codes) {
-            selected_summary.count(&finding);
-            emit_finding(output, finding.into(), &mut sequence, &mut retained)?;
+            state.count(&finding);
+            rendering::render_record(format, finding.into(), &mut state)?;
         }
     }
 
-    match output {
-        output::contract::Format::Text => write_stdout_line(format_args!(
-            "found {} finding(s) ({} error(s), {} warning(s), {} note(s)) in {} of {} frame(s)",
-            selected_summary.findings,
-            selected_summary.errors,
-            selected_summary.warnings,
-            selected_summary.notes,
-            summary.frames_matched,
-            summary.frames_read,
-        )),
-        output::contract::Format::Json => emit_aggregate(
-            output::contract::Command::Expert,
-            output::expert::Result {
-                frames_read: summary.frames_read,
-                frames_matched: summary.frames_matched,
-                errors: selected_summary.errors,
-                warnings: selected_summary.warnings,
-                notes: selected_summary.notes,
-                codes: selected_summary
-                    .codes
-                    .into_iter()
-                    .map(|(code, findings)| output::expert::CodeCount { code, findings })
-                    .collect(),
-                findings: retained,
-            },
-            Vec::new(),
-        ),
-        output::contract::Format::Ndjson => {
-            // Every finding was already streamed; the terminal record
-            // carries only the totals.
-            emit_stream(
-                output::contract::Command::Expert,
-                sequence,
-                output::expert::Result {
-                    frames_read: summary.frames_read,
-                    frames_matched: summary.frames_matched,
-                    errors: selected_summary.errors,
-                    warnings: selected_summary.warnings,
-                    notes: selected_summary.notes,
-                    codes: selected_summary
-                        .codes
-                        .into_iter()
-                        .map(|(code, findings)| output::expert::CodeCount { code, findings })
-                        .collect(),
-                    findings: Vec::new(),
-                },
-                Vec::new(),
-            )
-        }
-        _ => unreachable!("the format contract admits only text, json, and ndjson"),
-    }
-}
-
-/// Streams or retains one finding, depending on the output format.
-fn emit_finding(
-    output: output::contract::Format,
-    finding: output::expert::Finding,
-    sequence: &mut u64,
-    retained: &mut Vec<output::expert::Finding>,
-) -> Result<(), CliError> {
-    match output {
-        output::contract::Format::Text => {
-            match (finding.transport, finding.stream) {
-                (Some(transport), Some(stream)) => write_stdout_line(format_args!(
-                    "#{} {:?} {} ({} stream {stream}): {}",
-                    finding.frame,
-                    finding.severity,
-                    finding.code,
-                    transport.as_str(),
-                    finding.message
-                ))?,
-                _ => write_stdout_line(format_args!(
-                    "#{} {:?} {}: {}",
-                    finding.frame, finding.severity, finding.code, finding.message
-                ))?,
-            }
-            Ok(())
-        }
-        output::contract::Format::Json => {
-            retained.push(finding);
-            Ok(())
-        }
-        output::contract::Format::Ndjson => {
-            emit_stream_record(output::contract::Command::Expert, sequence, finding)
-        }
+    match format {
+        output::contract::Format::Text => rendering::render_text(&summary, &state),
+        output::contract::Format::Json => rendering::render_aggregate(&summary, state),
+        output::contract::Format::Ndjson => rendering::render_stream(&summary, state),
         _ => unreachable!("the format contract admits only text, json, and ndjson"),
     }
 }

@@ -8,11 +8,12 @@ use std::net::{IpAddr, Ipv6Addr};
 
 use crate::{
     codec::{
-        CodecError, DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext,
+        DecodedLayerValue, EncodedLayer, Error as CodecError, LayerCodec, LayerDecodeContext,
         LayerEncodeContext,
     },
+    diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflective_layer},
+    layer::{Id as ProtocolId, Layer, reflective_layer},
     registry::Discriminator,
 };
 
@@ -23,7 +24,7 @@ use super::super::common::{
     validate_raw_child_discriminator, wrong_layer,
 };
 
-use super::encode::{is_ipv6_extension_layer, is_outer_network_layer};
+use super::envelope::{is_ipv6_extension_layer, is_outer_network_layer};
 
 const IPV6_LEN: usize = 40;
 
@@ -86,58 +87,7 @@ impl LayerCodec for Ipv6Codec {
         if layer.flow_label > 0x000f_ffff {
             return Err(invalid("ipv6", "flow label exceeds 20 bits"));
         }
-        let inherit_context = is_outer_network_layer(context.packet, context.index);
-        let inherit_source = inherit_context && layer.source.is_unspecified();
-        let source = match context.build_context.source {
-            Some(IpAddr::V6(source)) if inherit_source => source,
-            _ => layer.source,
-        };
-        let srh_active = context
-            .packet
-            .iter()
-            .skip(context.index + 1)
-            // Only the contiguous IPv6 extension chain belongs to this
-            // envelope. A routing header beyond a transport, opaque payload,
-            // or nested network header belongs to another protocol scope.
-            .take_while(|candidate| is_ipv6_extension_layer(*candidate))
-            .find_map(|candidate| {
-                let srh = candidate
-                    .as_any()
-                    .downcast_ref::<super::super::ipv6::SegmentRoutingHeader>()?;
-                let last = srh.segments.len().checked_sub(1)?;
-                let segments_left = match srh.segments_left {
-                    WireValue::Auto => last,
-                    WireValue::Exact(value) => usize::from(value).min(last),
-                    WireValue::Raw(_) => return None,
-                };
-                srh.segments.get(last - segments_left).copied()
-            });
-        let mut diagnostics = Vec::new();
-        if let Some(active) = srh_active
-            && !layer.destination.is_unspecified()
-            && layer.destination != active
-        {
-            strict_or_diagnostic(
-                "ipv6",
-                "build.srh_outer_destination",
-                "destination",
-                format!(
-                    "outer destination {} does not match active SRH segment {active}",
-                    layer.destination
-                ),
-                context,
-                &mut diagnostics,
-            )?;
-        }
-        let destination = match (
-            layer.destination.is_unspecified(),
-            srh_active,
-            context.build_context.destination,
-        ) {
-            (true, Some(active), _) => active,
-            (true, None, Some(IpAddr::V6(destination))) if inherit_context => destination,
-            _ => layer.destination,
-        };
+        let (source, destination, mut diagnostics) = resolve_addresses(layer, context)?;
         let covered_payload = payload_without_padding("ipv6", payload, context)?;
         let expected_length = u16::try_from(covered_payload.len())
             .map_err(|_| invalid("ipv6", "jumbograms are not supported"))?;
@@ -265,4 +215,59 @@ impl LayerCodec for Ipv6Codec {
             &aliased_fields("ipv6", fields, &[("src", "source"), ("dst", "destination")])?,
         )
     }
+}
+
+fn resolve_addresses(
+    layer: &Ipv6,
+    context: &LayerEncodeContext<'_>,
+) -> Result<(Ipv6Addr, Ipv6Addr, Vec<Diagnostic>), CodecError> {
+    let inherit = is_outer_network_layer(context.packet, context.index);
+    let source = match context.build_context.source {
+        Some(IpAddr::V6(source)) if inherit && layer.source.is_unspecified() => source,
+        _ => layer.source,
+    };
+    let active_segment = context
+        .packet
+        .iter()
+        .skip(context.index + 1)
+        .take_while(|candidate| is_ipv6_extension_layer(*candidate))
+        .find_map(|candidate| {
+            let routing = candidate
+                .as_any()
+                .downcast_ref::<super::super::ipv6::SegmentRoutingHeader>()?;
+            let last = routing.segments.len().checked_sub(1)?;
+            let segments_left = match routing.segments_left {
+                WireValue::Auto => last,
+                WireValue::Exact(value) => usize::from(value).min(last),
+                WireValue::Raw(_) => return None,
+            };
+            routing.segments.get(last - segments_left).copied()
+        });
+    let mut diagnostics = Vec::new();
+    if let Some(active) = active_segment
+        && !layer.destination.is_unspecified()
+        && layer.destination != active
+    {
+        strict_or_diagnostic(
+            "ipv6",
+            "build.srh_outer_destination",
+            "destination",
+            format!(
+                "outer destination {} does not match active SRH segment {active}",
+                layer.destination
+            ),
+            context,
+            &mut diagnostics,
+        )?;
+    }
+    let destination = match (
+        layer.destination.is_unspecified(),
+        active_segment,
+        context.build_context.destination,
+    ) {
+        (true, Some(active), _) => active,
+        (true, None, Some(IpAddr::V6(destination))) if inherit => destination,
+        _ => layer.destination,
+    };
+    Ok((source, destination, diagnostics))
 }

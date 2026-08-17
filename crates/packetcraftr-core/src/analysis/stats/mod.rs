@@ -9,15 +9,14 @@ use std::time::{Duration, SystemTime};
 
 use crate::protocol::network::{Ipv4, Ipv6};
 
-use crate::analysis::AnalysisError;
+use crate::analysis::Error;
 use crate::analysis::conversation_index::CanonicalFlow;
 use crate::analysis::pipeline::FrameRecord;
 use crate::analysis::reassembly::tcp::ScopedFlowKey;
 
 mod report;
 pub use report::{
-    ConversationStat, EndpointStat, IoBucketStat, PortStat, ProtocolStat, StatsReport,
-    TransportKind,
+    ConversationStat, EndpointStat, IoBucketStat, PortStat, ProtocolStat, Report, TransportKind,
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -60,7 +59,7 @@ struct EndpointTally {
 /// conversations are additionally bounded by the pipeline's flow budget,
 /// which fails closed before this collector would see a new index.
 #[derive(Debug)]
-pub struct StatsCollector {
+pub struct Collector {
     interval: Duration,
     frames: u64,
     bytes: u64,
@@ -74,11 +73,11 @@ pub struct StatsCollector {
     io: BTreeMap<u64, Tally>,
 }
 
-impl StatsCollector {
+impl Collector {
     /// Creates a collector with the given I/O bucket width.
-    pub fn new(interval: Duration) -> Result<Self, AnalysisError> {
+    pub fn new(interval: Duration) -> Result<Self, Error> {
         if interval.is_zero() {
-            return Err(AnalysisError::InvalidLimit {
+            return Err(Error::InvalidLimit {
                 field: "interval",
                 value: 0,
                 reason: "must be non-zero",
@@ -100,16 +99,15 @@ impl StatsCollector {
     }
 
     /// Folds one matched frame into every table.
-    pub fn observe(&mut self, record: &FrameRecord<'_>) -> Result<(), AnalysisError> {
+    pub fn observe(&mut self, record: &FrameRecord<'_>) -> Result<(), Error> {
         let bytes = u64::from(record.decoded.frame.captured_length());
-        let timestamp =
-            record
-                .decoded
-                .frame
-                .timestamp
-                .ok_or(AnalysisError::TimestampUnavailable {
-                    number: record.number,
-                })?;
+        let timestamp = record
+            .decoded
+            .frame
+            .timestamp
+            .ok_or(Error::TimestampUnavailable {
+                number: record.number,
+            })?;
         self.frames += 1;
         self.bytes += bytes;
         self.observe_time(timestamp, bytes);
@@ -137,10 +135,10 @@ impl StatsCollector {
 
         // Use pipeline-assigned stream IDs for stable conversation and port stats.
         if let (Some(stream), Some(flow)) = (record.tcp_stream, record.tcp_flow) {
-            self.conversation(TransportKind::Tcp, stream, flow, bytes, timestamp);
+            self.record_conversation(TransportKind::Tcp, stream, flow, bytes, timestamp);
         }
         if let (Some(stream), Some(flow)) = (record.udp_stream, record.udp_flow) {
-            self.conversation(TransportKind::Udp, stream, flow, bytes, timestamp);
+            self.record_conversation(TransportKind::Udp, stream, flow, bytes, timestamp);
         }
         Ok(())
     }
@@ -165,7 +163,7 @@ impl StatsCollector {
             .add(bytes);
     }
 
-    fn conversation(
+    fn record_conversation(
         &mut self,
         transport: TransportKind,
         stream: u64,
@@ -205,7 +203,7 @@ impl StatsCollector {
     }
 
     /// Finishes the pass and produces every table in its stable order.
-    pub fn finish(self) -> StatsReport {
+    pub fn finish(self) -> Report {
         let mut protocols = self
             .protocols
             .into_iter()
@@ -278,7 +276,7 @@ impl StatsCollector {
             })
             .collect();
 
-        StatsReport {
+        Report {
             interval,
             frames: self.frames,
             bytes: self.bytes,

@@ -36,15 +36,10 @@ mod probe;
 #[cfg(test)]
 mod tests;
 
-pub use classification::{
-    ScanResponseClassification as ResponseClassification,
-    classify_scan_response as classify_response,
-};
-pub use engine::scan as run;
-pub use error::ScanError as Error;
+pub use classification::{ResponseClassification, classify_response};
+pub use engine::run;
+pub use error::Error;
 pub use model::{
-    ScanBatch as Batch, ScanBatchExecution as Execution, ScanClassification as Classification,
-    ScanEndpointResult as Endpoint, ScanExecutor as Executor, ScanLimits as Limits,
-    ScanProbe as Probe, ScanProbeEvidence as ProbeEvidence, ScanProbeStatus as ProbeStatus,
-    ScanRequest as Request, ScanResult as Result, ScanTransport as Transport,
+    Batch, Classification, Endpoint, Execution, Executor, Limits, Probe, ProbeEvidence,
+    ProbeStatus, Request, Result, Transport,
 };

@@ -14,7 +14,7 @@ use packetcraftr_netio::{
     route::Provider as RouteProvider, transmit::Sender as PacketIo,
 };
 
-use super::boundary::{FuzzAuthorizer, FuzzCaseExecution, FuzzExecutionCase, FuzzExecutor};
+use super::boundary::{Authorizer, Execution, ExecutionCase, Executor};
 
 pub struct PolicyAuthorizer<'a> {
     policy: &'a crate::policy::Policy,
@@ -26,7 +26,7 @@ impl<'a> PolicyAuthorizer<'a> {
     }
 }
 
-impl FuzzAuthorizer for PolicyAuthorizer<'_> {
+impl Authorizer for PolicyAuthorizer<'_> {
     fn authorize_operation(
         &mut self,
         packets: &[Packet],
@@ -60,7 +60,7 @@ impl FuzzAuthorizer for PolicyAuthorizer<'_> {
 
 /// Executes one generated fuzz case through the client's capture-ready
 /// exchange lifecycle.
-impl<R, N, I> FuzzExecutor for ExchangeExecutor<'_, R, N, I>
+impl<R, N, I> Executor for ExchangeExecutor<'_, R, N, I>
 where
     R: RouteProvider,
     N: NeighborResolver,
@@ -68,9 +68,9 @@ where
 {
     fn execute(
         &mut self,
-        case: &FuzzExecutionCase,
+        case: &ExecutionCase,
         timeout: Duration,
-    ) -> Result<FuzzCaseExecution, BoundaryError> {
+    ) -> Result<Execution, BoundaryError> {
         let mut options = self.options.clone();
         options.timeout = timeout;
         options.max_template_packets = 1;
@@ -94,7 +94,7 @@ where
             )));
         }
         let sent = sent.pop().expect("validated one sent fuzz packet");
-        Ok(FuzzCaseExecution {
+        Ok(Execution {
             permit: case.permit,
             sent,
             responses: responses

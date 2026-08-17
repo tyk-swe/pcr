@@ -18,21 +18,21 @@ pub(super) const DOCUMENT_BASE_CONTAINER_DEPTH: usize = 6;
 pub(super) const LAYER_LIMIT_SENTINEL: &str = "$__packetcraftr_document_layer_limit";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DocumentFormat {
+pub enum Format {
     Json,
     Yaml,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct PacketDocument {
+pub struct Packet {
     pub schema: String,
-    pub layers: Vec<LayerDocument>,
+    pub layers: Vec<Layer>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct LayerDocument {
+pub struct Layer {
     pub protocol: String,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub fields: BTreeMap<String, FieldValue>,

@@ -17,7 +17,7 @@ use crate::{
 const READ_TIMEOUT_MILLIS: i32 = 50;
 
 pub(crate) fn send_layer2(frame: Layer2Frame<'_>) -> Result<IoSendReport, LiveIoError> {
-    let interface = &frame.route().plan.route.interface;
+    let interface = &frame.route().plan.decision.interface;
     i32::try_from(frame.bytes().len()).map_err(|_| LiveIoError::InvalidTransmissionFrame {
         message: format!(
             "Layer 2 frame length {} exceeds the libpcap signed-length limit",

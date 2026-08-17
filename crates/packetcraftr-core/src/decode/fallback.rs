@@ -9,7 +9,7 @@ use bytes::Bytes;
 use crate::{
     Packet,
     diagnostic::Diagnostic,
-    layer::{MalformedLayer, Padding, ProtocolId, Raw},
+    layer::{Id as ProtocolId, Malformed, Padding, Raw},
     layout::{ByteRange, FieldLayout, LayerLayout, PacketLayout},
     semantics::BuiltinProtocol,
 };
@@ -56,7 +56,7 @@ pub(super) fn append_malformed(
 ) {
     let index = packet.len();
     let end = absolute_offset.saturating_add(bytes.len());
-    packet.push(MalformedLayer::new(intended, bytes, reason));
+    packet.push(Malformed::new(intended, bytes, reason));
     layouts.push(LayerLayout {
         index,
         protocol: ProtocolId::new(BuiltinProtocol::Malformed.as_str()),

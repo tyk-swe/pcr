@@ -15,9 +15,9 @@ use super::reflection::reflective_layer;
 /// An open, stable identifier for a protocol layer or codec.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct ProtocolId(String);
+pub struct Id(String);
 
-impl ProtocolId {
+impl Id {
     pub fn new(value: impl Into<String>) -> Self {
         Self(value.into())
     }
@@ -27,31 +27,31 @@ impl ProtocolId {
     }
 }
 
-impl AsRef<str> for ProtocolId {
+impl AsRef<str> for Id {
     fn as_ref(&self) -> &str {
         self.as_str()
     }
 }
 
-impl Borrow<str> for ProtocolId {
+impl Borrow<str> for Id {
     fn borrow(&self) -> &str {
         self.as_str()
     }
 }
 
-impl From<&str> for ProtocolId {
+impl From<&str> for Id {
     fn from(value: &str) -> Self {
         Self::new(value)
     }
 }
 
-impl From<String> for ProtocolId {
+impl From<String> for Id {
     fn from(value: String) -> Self {
         Self::new(value)
     }
 }
 
-impl fmt::Display for ProtocolId {
+impl fmt::Display for Id {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(&self.0)
     }
@@ -79,9 +79,9 @@ pub struct FieldSchema {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct LayerSchema {
+pub struct Schema {
     /// Stable protocol identifier.
-    pub protocol: ProtocolId,
+    pub protocol: Id,
     /// Human-readable protocol name.
     pub name: &'static str,
     /// Ordered reflective fields.
@@ -92,24 +92,24 @@ pub struct LayerSchema {
 #[non_exhaustive]
 pub enum FieldError {
     #[error("layer {protocol} has no field named {field}")]
-    UnknownField { protocol: ProtocolId, field: String },
+    UnknownField { protocol: Id, field: String },
     #[error("field {field} on layer {protocol} expected {expected}")]
     WrongType {
-        protocol: ProtocolId,
+        protocol: Id,
         field: String,
         expected: &'static str,
     },
     #[error("field {field} on layer {protocol} is outside the allowed range")]
-    OutOfRange { protocol: ProtocolId, field: String },
+    OutOfRange { protocol: Id, field: String },
     #[error("field {field} on layer {protocol} cannot be edited reflectively")]
-    ReadOnly { protocol: ProtocolId, field: String },
+    ReadOnly { protocol: Id, field: String },
     #[error("required field {field} is absent from layer {protocol} after defaults")]
-    MissingRequired { protocol: ProtocolId, field: String },
+    MissingRequired { protocol: Id, field: String },
 }
 
 /// Object-safe packet layer interface used by built-in and external protocols.
 pub trait Layer: Any + Send + Sync + fmt::Debug {
-    fn schema(&self) -> &'static LayerSchema;
+    fn schema(&self) -> &'static Schema;
     fn clone_box(&self) -> Box<dyn Layer>;
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
@@ -131,7 +131,7 @@ pub trait Layer: Any + Send + Sync + fmt::Debug {
     }
 
     /// Returns the stable protocol identifier stored by this layer's schema.
-    fn protocol_id(&self) -> &ProtocolId {
+    fn protocol_id(&self) -> &Id {
         &self.schema().protocol
     }
 }
@@ -156,7 +156,7 @@ impl Raw {
 }
 
 reflective_layer! {
-    fn raw_schema() => { protocol: ProtocolId::new("raw"), name: "Raw" }
+    fn raw_schema() => { protocol: Id::new("raw"), name: "Raw" }
     impl Raw {
         "bytes" => {
             kind: Bytes, derived: false, required: false,
@@ -193,7 +193,7 @@ impl Padding {
 }
 
 reflective_layer! {
-    fn padding_schema() => { protocol: ProtocolId::new("padding"), name: "Padding" }
+    fn padding_schema() => { protocol: Id::new("padding"), name: "Padding" }
     impl Padding {
         "bytes" => {
             kind: Bytes, derived: false, required: false,
@@ -222,15 +222,15 @@ reflective_layer! {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct MalformedLayer {
-    pub intended_protocol: Option<ProtocolId>,
+pub struct Malformed {
+    pub intended_protocol: Option<Id>,
     pub bytes: Bytes,
     pub reason: String,
 }
 
-impl MalformedLayer {
+impl Malformed {
     pub fn new(
-        intended_protocol: Option<ProtocolId>,
+        intended_protocol: Option<Id>,
         bytes: impl Into<Bytes>,
         reason: impl Into<String>,
     ) -> Self {
@@ -243,14 +243,14 @@ impl MalformedLayer {
 }
 
 reflective_layer! {
-    fn malformed_schema() => { protocol: ProtocolId::new("malformed"), name: "Malformed" }
-    impl MalformedLayer {
+    fn malformed_schema() => { protocol: Id::new("malformed"), name: "Malformed" }
+    impl Malformed {
         "protocol" => {
             kind: Text, derived: false, required: false,
             description: "Intended protocol identifier",
             get |layer| layer.intended_protocol.as_ref().map(|value| FieldValue::Text(value.to_string())),
             set |layer, value, name| match value {
-                FieldValue::Text(value) => { layer.intended_protocol = Some(ProtocolId::new(value)); Ok(()) }
+                FieldValue::Text(value) => { layer.intended_protocol = Some(Id::new(value)); Ok(()) }
                 _ => Err(FieldError::WrongType { protocol: malformed_schema().protocol.clone(), field: name.to_owned(), expected: "text" }),
             }
         },

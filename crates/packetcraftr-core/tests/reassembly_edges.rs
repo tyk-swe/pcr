@@ -16,7 +16,7 @@ use packetcraftr_core::analysis::reassembly::{
         ScopedFlowKey, Segment,
     },
 };
-use packetcraftr_core::analysis::scope::{ScopeId, ScopeInterner};
+use packetcraftr_core::analysis::scope::{Interner as ScopeInterner, ScopeId};
 
 fn scope() -> ScopeId {
     ScopeInterner::new()

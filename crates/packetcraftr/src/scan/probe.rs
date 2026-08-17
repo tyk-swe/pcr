@@ -15,7 +15,7 @@ use packetcraftr_core::{Packet, semantics::BuiltinProtocol};
 
 use crate::probe::{nonzero_ipv4_identification, packet_shape_matches};
 
-use super::model::{ScanProbe, ScanTransport};
+use super::model::{Probe, Transport};
 
 const SCAN_UDP_SOURCE_PORT_BASE: u16 = 49_152;
 
@@ -32,7 +32,7 @@ fn scan_udp_source_port(attempt: u32) -> u16 {
               probe carries; sent_scan_probe_matches applies the same reduction when comparing, \
               so even a wrapped counter still matches"
 )]
-pub(super) fn probe_packet(probe: &ScanProbe) -> Packet {
+pub(super) fn probe_packet(probe: &Probe) -> Packet {
     let mut packet = Packet::new();
     match probe.address {
         IpAddr::V4(destination) => {
@@ -51,17 +51,17 @@ pub(super) fn probe_packet(probe: &ScanProbe) -> Packet {
         }
     }
     match probe.transport {
-        ScanTransport::Tcp => packet.push(Tcp {
+        Transport::Tcp => packet.push(Tcp {
             destination_port: probe.port.expect("validated TCP scan port"),
             sequence: probe.sequence as u32,
             ..Tcp::default()
         }),
-        ScanTransport::Udp => packet.push(Udp {
+        Transport::Udp => packet.push(Udp {
             source_port: scan_udp_source_port(probe.attempt),
             destination_port: probe.port.expect("validated UDP scan port"),
             ..Udp::default()
         }),
-        ScanTransport::Icmp => match probe.address {
+        Transport::Icmp => match probe.address {
             IpAddr::V4(_) => packet.push(Icmpv4 {
                 body: icmp_identity(probe.sequence),
                 ..Icmpv4::default()
@@ -90,17 +90,17 @@ fn icmp_identity(sequence: u64) -> Bytes {
     reason = "the observed packet is compared against the same reduction probe_packet applied, \
               so the narrowing is symmetric on both sides of the comparison"
 )]
-pub(super) fn sent_scan_probe_matches(probe: &ScanProbe, sent: &Packet) -> bool {
+pub(super) fn sent_scan_probe_matches(probe: &Probe, sent: &Packet) -> bool {
     let network_protocol = if probe.address.is_ipv4() {
         BuiltinProtocol::Ipv4
     } else {
         BuiltinProtocol::Ipv6
     };
     let transport_protocol = match probe.transport {
-        ScanTransport::Tcp => BuiltinProtocol::Tcp,
-        ScanTransport::Udp => BuiltinProtocol::Udp,
-        ScanTransport::Icmp if probe.address.is_ipv4() => BuiltinProtocol::Icmpv4,
-        ScanTransport::Icmp => BuiltinProtocol::Icmpv6,
+        Transport::Tcp => BuiltinProtocol::Tcp,
+        Transport::Udp => BuiltinProtocol::Udp,
+        Transport::Icmp if probe.address.is_ipv4() => BuiltinProtocol::Icmpv4,
+        Transport::Icmp => BuiltinProtocol::Icmpv6,
     };
     if !packet_shape_matches(sent, &[network_protocol, transport_protocol]) {
         return false;
@@ -131,16 +131,16 @@ pub(super) fn sent_scan_probe_matches(probe: &ScanProbe, sent: &Packet) -> bool 
         return false;
     }
     match probe.transport {
-        ScanTransport::Tcp => sent.get::<Tcp>().is_some_and(|tcp| {
+        Transport::Tcp => sent.get::<Tcp>().is_some_and(|tcp| {
             tcp.destination_port == probe.port.expect("validated TCP scan port")
                 && tcp.sequence == probe.sequence as u32
                 && tcp.flags == Tcp::SYN
         }),
-        ScanTransport::Udp => sent.get::<Udp>().is_some_and(|udp| {
+        Transport::Udp => sent.get::<Udp>().is_some_and(|udp| {
             udp.source_port == scan_udp_source_port(probe.attempt)
                 && udp.destination_port == probe.port.expect("validated UDP scan port")
         }),
-        ScanTransport::Icmp => match probe.address {
+        Transport::Icmp => match probe.address {
             IpAddr::V4(_) => sent.get::<Icmpv4>().is_some_and(|icmp| {
                 icmp.icmp_type == 8 && icmp.code == 0 && icmp.body == icmp_identity(probe.sequence)
             }),

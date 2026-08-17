@@ -5,14 +5,14 @@
 
 use bytes::Bytes;
 
-use super::super::error::DnsWireError;
-use super::super::model::DnsQueryType;
+use super::super::error::WireError as DnsWireError;
+use super::super::model::QueryType as DnsQueryType;
 use super::super::{DNS_CLASS_IN, DNS_FLAG_RECURSION_DESIRED, DNS_HEADER_BYTES};
 use super::name::{canonical_query_name, encode_name};
 
 /// Constructs one standard IN-class DNS query without resolver or I/O side
 /// effects.
-pub fn encode_dns_query(
+pub fn encode_query(
     query_name: &str,
     query_type: DnsQueryType,
     transaction_id: u16,

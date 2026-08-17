@@ -7,8 +7,8 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::{
-    build::BuildMode,
-    codec::{CodecError, LayerEncodeContext},
+    build::Mode as BuildMode,
+    codec::{Error as CodecError, LayerEncodeContext},
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
     layer::Layer,

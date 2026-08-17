@@ -9,7 +9,7 @@ use crate::field::{FieldKind, FieldValue};
 use bytes::Bytes;
 
 use super::super::execution::SplitMix64;
-use super::super::request::{FuzzLimits, FuzzStrategy};
+use super::super::request::{Limits as FuzzLimits, Strategy as FuzzStrategy};
 use super::super::run::ResolvedField;
 
 pub(super) fn mutation_value(

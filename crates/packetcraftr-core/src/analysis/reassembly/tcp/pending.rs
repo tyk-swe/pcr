@@ -17,16 +17,6 @@ use accounting::{PushAccountingInput, plan_push_accounting};
 mod accounting;
 pub(super) mod commit;
 
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "validate_limits rejects max_bytes_per_flow >= TCP_SERIAL_HALF_SPACE (2^31), so \
-              next_offset never reaches 2^32"
-)]
-#[expect(
-    clippy::cast_possible_wrap,
-    reason = "reinterpreting the wrapped 32-bit difference as i32 is the sequence-unwrapping \
-              step described below, not an accident"
-)]
 pub(super) fn plan_push(
     limits: &Limits,
     state: &TcpFlowState,
@@ -35,46 +25,110 @@ pub(super) fn plan_push(
     aggregate_base_memory_charge: usize,
     segment: &Segment,
 ) -> Result<PushPlan, Error> {
-    let payload_sequence = segment.sequence.wrapping_add(u32::from(segment.syn));
-
-    // Unwrap the 32-bit sequence number around the current receive
-    // cursor. TCP windows are bounded well below the signed half-space,
-    // so this remains unambiguous across the 4 GiB wrap boundary and
-    // treats packets preceding the capture base as old data rather than a
-    // multi-gigabyte forward gap.
-    let expected_sequence = state.base_sequence.wrapping_add(state.next_offset as u32);
-    let signed_delta = i64::from(payload_sequence.wrapping_sub(expected_sequence) as i32);
-    let absolute = i128::from(state.next_offset) + i128::from(signed_delta);
-    let original_payload_len = segment.payload.len() as i128;
-    let incoming_fin_offset = if segment.fin {
-        let absolute_fin =
-            absolute
-                .checked_add(original_payload_len)
-                .ok_or(Error::FlowByteLimit {
-                    limit: limits.max_bytes_per_flow,
-                })?;
-        u64::try_from(absolute_fin).ok()
+    let incoming = normalize_payload(limits, state, segment)?;
+    let mut planned = plan_merge_and_accounting(
+        limits,
+        state,
+        state_is_accounted,
+        aggregate_base_bytes,
+        aggregate_base_memory_charge,
+        segment,
+        &incoming,
+    )?;
+    materialize_pending_merge(
+        &state.pending,
+        incoming.offset,
+        incoming.payload,
+        &mut planned.merge,
+    )?
+    .ok_or(Error::FlowByteLimit {
+        limit: limits.max_bytes_per_flow,
+    })?;
+    let history_replacement = prepare_emitted_history(
+        state,
+        planned.initial_history_capacity,
+        planned.history_allocation,
+    )?;
+    let direct_payload = if planned.merge.direct_output {
+        let end = incoming
+            .payload_start
+            .checked_add(incoming.payload.len())
+            .ok_or(Error::FlowByteLimit {
+                limit: limits.max_bytes_per_flow,
+            })?;
+        Some(incoming.payload_start..end)
     } else {
         None
     };
-    let mut payload = segment.payload.as_ref();
-    let mut retransmitted = 0usize;
-    let mut conflicting = false;
+    Ok(PushPlan {
+        payload_sequence: incoming.sequence,
+        incoming_fin_offset: incoming.fin_offset,
+        retransmitted: incoming.retransmitted,
+        conflicting: incoming.conflicting,
+        merge: planned.merge,
+        direct_payload,
+        pending_bytes: planned.pending_bytes,
+        initial_history_capacity: planned.initial_history_capacity,
+        history_replacement,
+        closed: planned.closed,
+        aggregate_bytes: planned.aggregate_bytes,
+        aggregate_memory_charge: planned.aggregate_memory_charge,
+    })
+}
+
+struct IncomingPayload<'a> {
+    sequence: u32,
+    fin_offset: Option<u64>,
+    payload: &'a [u8],
+    payload_start: usize,
+    offset: u64,
+    remaining_end: u64,
+    retransmitted: usize,
+    conflicting: bool,
+}
+
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "validate_limits rejects max_bytes_per_flow >= TCP_SERIAL_HALF_SPACE (2^31), so \
+              next_offset never reaches 2^32"
+)]
+#[expect(
+    clippy::cast_possible_wrap,
+    reason = "reinterpreting the wrapped 32-bit difference as i32 is the sequence-unwrapping step"
+)]
+fn normalize_payload<'a>(
+    limits: &Limits,
+    state: &TcpFlowState,
+    segment: &'a Segment,
+) -> Result<IncomingPayload<'a>, Error> {
+    let sequence = segment.sequence.wrapping_add(u32::from(segment.syn));
+    let expected = state.base_sequence.wrapping_add(state.next_offset as u32);
+    let delta = i64::from(sequence.wrapping_sub(expected) as i32);
+    let absolute = i128::from(state.next_offset) + i128::from(delta);
+    let fin_offset = if segment.fin {
+        absolute
+            .checked_add(segment.payload.len() as i128)
+            .and_then(|offset| u64::try_from(offset).ok())
+    } else {
+        None
+    };
     let before_base = if absolute < 0 {
-        usize::try_from((-absolute).min(payload.len() as i128)).unwrap_or(payload.len())
+        usize::try_from((-absolute).min(segment.payload.len() as i128))
+            .unwrap_or(segment.payload.len())
     } else {
         0
     };
+    let mut payload = &segment.payload[before_base..];
     let mut payload_start = before_base;
-    retransmitted += before_base;
-    payload = &payload[before_base..];
+    let mut retransmitted = before_base;
+    let mut conflicting = false;
     let mut offset = u64::try_from(absolute.max(0)).map_err(|_| Error::FlowByteLimit {
         limit: limits.max_bytes_per_flow,
     })?;
     if offset < state.next_offset {
         let consumed = usize::try_from((state.next_offset - offset).min(payload.len() as u64))
             .unwrap_or(payload.len());
-        conflicting |= emitted_history_conflicts(state, offset, &payload[..consumed]);
+        conflicting = emitted_history_conflicts(state, offset, &payload[..consumed]);
         retransmitted += consumed;
         payload_start = payload_start
             .checked_add(consumed)
@@ -84,7 +138,26 @@ pub(super) fn plan_push(
         payload = &payload[consumed..];
         offset = state.next_offset;
     }
+    let remaining_end = validate_sequence_bounds(limits, state, offset, payload, fin_offset)?;
+    Ok(IncomingPayload {
+        sequence,
+        fin_offset,
+        payload,
+        payload_start,
+        offset,
+        remaining_end,
+        retransmitted,
+        conflicting,
+    })
+}
 
+fn validate_sequence_bounds(
+    limits: &Limits,
+    state: &TcpFlowState,
+    offset: u64,
+    payload: &[u8],
+    fin_offset: Option<u64>,
+) -> Result<u64, Error> {
     let window_end = state
         .next_offset
         .checked_add(limits.max_bytes_per_flow as u64)
@@ -97,82 +170,86 @@ pub(super) fn plan_push(
             limit: limits.max_bytes_per_flow,
         })?;
     if let Some(final_offset) = state.fin_offset {
-        if incoming_fin_offset.is_some_and(|fin_offset| fin_offset != final_offset) {
+        if fin_offset.is_some_and(|incoming| incoming != final_offset) {
             return Err(Error::ConflictingFinalSequence {
                 existing_offset: final_offset,
-                new_offset: incoming_fin_offset.expect("checked as present"),
+                new_offset: fin_offset.expect("checked as present"),
             });
         }
         if remaining_end > final_offset {
             return Err(Error::BeyondFinalSequence { final_offset });
         }
     }
-    if let Some(fin_offset) = incoming_fin_offset
-        && state.next_offset > fin_offset
+    if let Some(final_offset) = fin_offset
+        && state.next_offset > final_offset
     {
-        return Err(Error::BeyondFinalSequence {
-            final_offset: fin_offset,
-        });
+        return Err(Error::BeyondFinalSequence { final_offset });
     }
     if offset > window_end || remaining_end > window_end {
         return Err(Error::FlowByteLimit {
             limit: limits.max_bytes_per_flow,
         });
     }
+    Ok(remaining_end)
+}
 
-    let (old_retained_bytes, old_memory_charge) = if state_is_accounted {
-        (
-            retained_bytes(state).ok_or(Error::AggregateByteLimit {
-                limit: limits.max_aggregate_bytes,
-            })?,
-            flow_memory_charge(state).ok_or(Error::AggregateByteLimit {
-                limit: limits.max_aggregate_bytes,
-            })?,
-        )
-    } else {
-        (0, 0)
+struct PlannedMerge {
+    merge: PendingMergePlan,
+    pending_bytes: usize,
+    initial_history_capacity: usize,
+    history_allocation: usize,
+    closed: bool,
+    aggregate_bytes: usize,
+    aggregate_memory_charge: usize,
+}
+
+fn plan_merge_and_accounting(
+    limits: &Limits,
+    state: &TcpFlowState,
+    state_is_accounted: bool,
+    aggregate_base_bytes: usize,
+    aggregate_base_memory_charge: usize,
+    segment: &Segment,
+    incoming: &IncomingPayload<'_>,
+) -> Result<PlannedMerge, Error> {
+    let accounting_error = || Error::AggregateByteLimit {
+        limit: limits.max_aggregate_bytes,
     };
-    let mut merge = plan_pending_merge(&state.pending, offset, payload, state.next_offset).ok_or(
-        Error::FlowByteLimit {
+    let old_retained_bytes = if state_is_accounted {
+        retained_bytes(state).ok_or_else(accounting_error)?
+    } else {
+        0
+    };
+    let old_memory_charge = if state_is_accounted {
+        flow_memory_charge(state).ok_or_else(accounting_error)?
+    } else {
+        0
+    };
+    let merge = plan_pending_merge(
+        &state.pending,
+        incoming.offset,
+        incoming.payload,
+        state.next_offset,
+    )
+    .ok_or(Error::FlowByteLimit {
+        limit: limits.max_bytes_per_flow,
+    })?;
+    let pending_bytes = state
+        .pending_bytes
+        .checked_add(merge.added_bytes)
+        .filter(|bytes| *bytes <= limits.max_bytes_per_flow)
+        .ok_or(Error::FlowByteLimit {
             limit: limits.max_bytes_per_flow,
-        },
-    )?;
-    let pending_bytes =
-        state
-            .pending_bytes
-            .checked_add(merge.added_bytes)
-            .ok_or(Error::FlowByteLimit {
-                limit: limits.max_bytes_per_flow,
-            })?;
-    if pending_bytes > limits.max_bytes_per_flow {
-        return Err(Error::FlowByteLimit {
-            limit: limits.max_bytes_per_flow,
-        });
-    }
-    if let Some(fin_offset) = incoming_fin_offset
-        && (state
-            .pending
-            .last_key_value()
-            .is_some_and(|(start, bytes)| {
-                start
-                    .checked_add(bytes.len() as u64)
-                    .is_none_or(|end| end > fin_offset)
-            })
-            || remaining_end > fin_offset)
-    {
-        return Err(Error::BeyondFinalSequence {
-            final_offset: fin_offset,
-        });
-    }
+        })?;
+    validate_pending_final_offset(state, incoming)?;
     let final_next_offset = state
         .next_offset
         .checked_add(merge.emitted_segment_bytes as u64)
         .ok_or(Error::FlowByteLimit {
             limit: limits.max_bytes_per_flow,
         })?;
-    let final_fin_offset = state.fin_offset.or(incoming_fin_offset);
-    let closed =
-        segment.rst || final_fin_offset.is_some_and(|fin_offset| final_next_offset >= fin_offset);
+    let final_fin_offset = state.fin_offset.or(incoming.fin_offset);
+    let closed = segment.rst || final_fin_offset.is_some_and(|offset| final_next_offset >= offset);
     let accounting = plan_push_accounting(PushAccountingInput {
         limits,
         state,
@@ -185,43 +262,37 @@ pub(super) fn plan_push(
         aggregate_base_memory_charge,
         retains_flow_state: !closed,
     })?;
-    let initial_history_capacity = accounting.initial_history_capacity;
-    let history_allocation = accounting.history_allocation;
-
-    materialize_pending_merge(&state.pending, offset, payload, &mut merge)?.ok_or(
-        Error::FlowByteLimit {
-            limit: limits.max_bytes_per_flow,
-        },
-    )?;
-    let history_replacement =
-        prepare_emitted_history(state, initial_history_capacity, history_allocation)?;
-    let direct_payload = if merge.direct_output {
-        let end = payload_start
-            .checked_add(payload.len())
-            .ok_or(Error::FlowByteLimit {
-                limit: limits.max_bytes_per_flow,
-            })?;
-        Some(payload_start..end)
-    } else {
-        None
-    };
-
     let (aggregate_bytes, aggregate_memory_charge) =
         accounting.final_aggregates(closed, limits.max_aggregate_bytes)?;
-    Ok(PushPlan {
-        payload_sequence,
-        incoming_fin_offset,
-        retransmitted,
-        conflicting,
+    Ok(PlannedMerge {
         merge,
-        direct_payload,
         pending_bytes,
-        initial_history_capacity,
-        history_replacement,
+        initial_history_capacity: accounting.initial_history_capacity,
+        history_allocation: accounting.history_allocation,
         closed,
         aggregate_bytes,
         aggregate_memory_charge,
     })
+}
+
+fn validate_pending_final_offset(
+    state: &TcpFlowState,
+    incoming: &IncomingPayload<'_>,
+) -> Result<(), Error> {
+    if let Some(final_offset) = incoming.fin_offset
+        && (state
+            .pending
+            .last_key_value()
+            .is_some_and(|(start, bytes)| {
+                start
+                    .checked_add(bytes.len() as u64)
+                    .is_none_or(|end| end > final_offset)
+            })
+            || incoming.remaining_end > final_offset)
+    {
+        return Err(Error::BeyondFinalSequence { final_offset });
+    }
+    Ok(())
 }
 
 #[derive(Debug)]

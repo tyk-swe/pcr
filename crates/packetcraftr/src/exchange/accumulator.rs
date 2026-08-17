@@ -13,9 +13,12 @@ use packetcraftr_core::{
 };
 use packetcraftr_netio::capture::RecordIdentity;
 
-use super::contract::{ExchangeOptions, ExchangeResult, MatchedResponse};
-use super::preparation::PreparedExchangePacket;
+use super::contract::{
+    Options as ExchangeOptions, Response as MatchedResponse, Result as ExchangeResult,
+};
+use super::preparation::PreparedPacket;
 use crate::Stats;
+use crate::evidence::Budget;
 
 #[derive(Clone, Copy)]
 pub(super) struct UnsolicitedFreshness {
@@ -31,13 +34,12 @@ pub(super) struct UnsolicitedEvidence {
 pub(crate) type WorkflowResponseMatcher<'a> =
     dyn FnMut(usize, &Packet, &DecodedPacket) -> bool + 'a;
 
-pub(crate) struct ExchangeAccumulator {
+pub(crate) struct Accumulator {
     pub(crate) responses: Vec<MatchedResponse>,
     pub(super) unsolicited: Vec<UnsolicitedEvidence>,
     pub(crate) undecoded: Vec<Frame>,
     pub(crate) diagnostics: Vec<packetcraftr_core::diagnostic::Diagnostic>,
-    pub(super) retained_frames: usize,
-    pub(super) retained_bytes: usize,
+    pub(super) evidence_budget: Budget,
     pub(crate) response_counts: Vec<usize>,
     pub(super) correlation_deadline_expired: bool,
     pub(super) workflow_examined_unsolicited: usize,
@@ -45,10 +47,10 @@ pub(crate) struct ExchangeAccumulator {
 }
 
 #[derive(Clone, Copy)]
-pub(crate) struct ExchangeProcessContext<'a> {
+pub(crate) struct ProcessContext<'a> {
     pub(crate) registry: &'a Registry,
     pub(crate) dissector: &'a Dissector,
-    pub(crate) prepared: &'a [PreparedExchangePacket],
+    pub(crate) prepared: &'a [PreparedPacket],
     pub(crate) sent: &'a [crate::SentPacket],
     pub(crate) deadline: Instant,
     pub(crate) options: &'a ExchangeOptions,
@@ -56,28 +58,27 @@ pub(crate) struct ExchangeProcessContext<'a> {
 
 #[derive(Clone, Copy)]
 pub(crate) struct WorkflowPromotionContext<'a> {
-    pub(crate) prepared: &'a [PreparedExchangePacket],
+    pub(crate) prepared: &'a [PreparedPacket],
     pub(crate) sent: &'a [crate::SentPacket],
     pub(crate) deadline: Instant,
     pub(crate) max_responses: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ExchangeProcessOutcome {
+pub(crate) enum ProcessOutcome {
     Continue,
     CorrelationDeadlineExpired,
     DuplicateRecordIdentity,
 }
 
-impl ExchangeAccumulator {
+impl Accumulator {
     pub(crate) fn new(requests: usize) -> Self {
         Self {
             responses: Vec::new(),
             unsolicited: Vec::new(),
             undecoded: Vec::new(),
             diagnostics: Vec::new(),
-            retained_frames: 0,
-            retained_bytes: 0,
+            evidence_budget: Budget::default(),
             response_counts: vec![0; requests],
             correlation_deadline_expired: false,
             workflow_examined_unsolicited: 0,

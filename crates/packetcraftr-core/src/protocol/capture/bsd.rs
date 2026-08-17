@@ -5,12 +5,12 @@ use std::collections::BTreeMap;
 
 use crate::{
     codec::{
-        CodecError, DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext,
+        DecodedLayerValue, EncodedLayer, Error as CodecError, LayerCodec, LayerDecodeContext,
         LayerEncodeContext,
     },
     diagnostic::Diagnostic,
     field::FieldValue,
-    layer::{Layer, ProtocolId, reflective_layer},
+    layer::{Id as ProtocolId, Layer, reflective_layer},
     registry::Discriminator,
 };
 
@@ -20,7 +20,7 @@ use crate::protocol::common::{
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum CaptureByteOrder {
+pub enum ByteOrder {
     #[default]
     Little,
     Big,
@@ -29,14 +29,14 @@ pub enum CaptureByteOrder {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BsdNull {
     pub family: u32,
-    pub byte_order: CaptureByteOrder,
+    pub byte_order: ByteOrder,
 }
 
 impl Default for BsdNull {
     fn default() -> Self {
         Self {
             family: 2,
-            byte_order: CaptureByteOrder::Little,
+            byte_order: ByteOrder::Little,
         }
     }
 }
@@ -64,7 +64,7 @@ reflective_layer! {
     fn null_schema() => { protocol: protocol("bsd_null"), name: "BSD NULL" }
     impl BsdNull {
         "family" => { kind: Unsigned, derived: false, required: true, description: "Address-family discriminator", reflect: family, layout: (0, 4) },
-        "byte_order" => { kind: Text, derived: false, required: true, description: "Host byte order used by the captured NULL header", get |layer| Some(FieldValue::Text(match layer.byte_order { CaptureByteOrder::Little => "little", CaptureByteOrder::Big => "big" }.to_owned())), set |layer, value, name| match value { FieldValue::Text(value) if value.eq_ignore_ascii_case("little") => { layer.byte_order = CaptureByteOrder::Little; Ok(()) }, FieldValue::Text(value) if value.eq_ignore_ascii_case("big") => { layer.byte_order = CaptureByteOrder::Big; Ok(()) }, FieldValue::Text(_) => Err(out_of_range(null_schema(), name)), _ => Err(wrong_type(null_schema(), name, "text")) }, layout: (0, 4) }
+        "byte_order" => { kind: Text, derived: false, required: true, description: "Host byte order used by the captured NULL header", get |layer| Some(FieldValue::Text(match layer.byte_order { ByteOrder::Little => "little", ByteOrder::Big => "big" }.to_owned())), set |layer, value, name| match value { FieldValue::Text(value) if value.eq_ignore_ascii_case("little") => { layer.byte_order = ByteOrder::Little; Ok(()) }, FieldValue::Text(value) if value.eq_ignore_ascii_case("big") => { layer.byte_order = ByteOrder::Big; Ok(()) }, FieldValue::Text(_) => Err(out_of_range(null_schema(), name)), _ => Err(wrong_type(null_schema(), name, "text")) }, layout: (0, 4) }
     }
     layout pub(crate) fn null_layout();
 }
@@ -122,7 +122,7 @@ pub(crate) fn validate_family_binding(
         child.protocol_id(),
         expected.0
     );
-    if context.mode == crate::build::BuildMode::Strict {
+    if context.mode == crate::build::Mode::Strict {
         return Err(invalid(parent, message));
     }
     diagnostics
@@ -146,8 +146,8 @@ impl LayerCodec for BsdNullCodec {
             .downcast_ref::<BsdNull>()
             .ok_or_else(|| wrong_layer("bsd_null", layer))?;
         let prefix = match layer.byte_order {
-            CaptureByteOrder::Little => layer.family.to_le_bytes(),
-            CaptureByteOrder::Big => layer.family.to_be_bytes(),
+            ByteOrder::Little => layer.family.to_le_bytes(),
+            ByteOrder::Big => layer.family.to_be_bytes(),
         };
         let mut encoded = EncodedLayer::header(prefix.to_vec(), Box::new(layer.clone()));
         encoded.fields = null_layout();
@@ -224,11 +224,11 @@ pub(crate) fn decode_family(
     let big = u32::from_be_bytes(bytes);
     let little = u32::from_le_bytes(bytes);
     let (family, byte_order) = match header {
-        FamilyHeader::Loop => (big, CaptureByteOrder::Big),
+        FamilyHeader::Loop => (big, ByteOrder::Big),
         FamilyHeader::Null if matches!(little, 2 | 10 | 24 | 28 | 30) => {
-            (little, CaptureByteOrder::Little)
+            (little, ByteOrder::Little)
         }
-        FamilyHeader::Null => (big, CaptureByteOrder::Big),
+        FamilyHeader::Null => (big, ByteOrder::Big),
     };
     let layer: Box<dyn Layer> = match header {
         FamilyHeader::Loop => Box::new(BsdLoop { family }),

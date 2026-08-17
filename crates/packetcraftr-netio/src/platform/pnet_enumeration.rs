@@ -44,7 +44,7 @@ pub(super) fn interfaces() -> Vec<InterfaceInfo> {
                 flags,
                 mtu: None,
                 capability: if ethernet {
-                    Capability::Layer2And3
+                    Capability::Layer2AndLayer3
                 } else {
                     Capability::Layer3
                 },

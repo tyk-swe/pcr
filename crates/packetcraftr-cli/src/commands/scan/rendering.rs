@@ -5,12 +5,20 @@ use packetcraftr::{core, output};
 
 use crate::errors::CliError;
 use crate::rendering::{
-    captured_frame_text, comma_separated, emit_stream_record, emit_stream_with_stats,
+    captured_frame_text, comma_separated, emit_aggregate_with_stats, emit_next, emit_with_stats,
     optional_display, output_timestamp_text, render_diagnostics_text, render_optional,
     write_stdout_line,
 };
 
-pub(super) fn render_scan_text(
+pub(super) fn render_aggregate(
+    result: output::scan::Result,
+    diagnostics: Vec<core::diagnostic::Diagnostic>,
+    stats: output::envelope::Stats,
+) -> Result<(), CliError> {
+    emit_aggregate_with_stats(output::contract::Command::Scan, result, diagnostics, stats)
+}
+
+pub(super) fn render_text(
     result: output::scan::Result,
     diagnostics: Vec<core::diagnostic::Diagnostic>,
     stats: output::envelope::Stats,
@@ -30,14 +38,14 @@ pub(super) fn render_scan_text(
             "{} {} classification={}",
             endpoint.address,
             endpoint_name,
-            scan_classification_name(endpoint.classification)
+            classification_name(endpoint.classification)
         ))?;
         for evidence in &endpoint.evidence {
             write_stdout_line(format_args!(
                 "  attempt={} status={} classification={} sent={} received={} responder={} latency={} reason={}",
                 evidence.attempt,
-                scan_probe_status_name(evidence.status),
-                scan_classification_name(evidence.classification),
+                probe_status_name(evidence.status),
+                classification_name(evidence.classification),
                 output_timestamp_text(evidence.sent_at),
                 render_optional(evidence.received_at, output_timestamp_text),
                 optional_display(evidence.responder),
@@ -61,7 +69,7 @@ pub(super) fn render_scan_text(
     render_diagnostics_text(&diagnostics)
 }
 
-pub(super) fn scan_classification_name(value: output::scan::Classification) -> &'static str {
+fn classification_name(value: output::scan::Classification) -> &'static str {
     match value {
         output::scan::Classification::Open => "open",
         output::scan::Classification::Closed => "closed",
@@ -72,14 +80,14 @@ pub(super) fn scan_classification_name(value: output::scan::Classification) -> &
     }
 }
 
-pub(super) fn scan_probe_status_name(value: output::scan::ProbeStatus) -> &'static str {
+fn probe_status_name(value: output::scan::ProbeStatus) -> &'static str {
     match value {
         output::scan::ProbeStatus::Response => "response",
         output::scan::ProbeStatus::Timeout => "timeout",
     }
 }
 
-pub(super) fn render_scan_stream(
+pub(super) fn render_stream(
     result: output::scan::Result,
     diagnostics: Vec<core::diagnostic::Diagnostic>,
     stats: output::envelope::Stats,
@@ -92,7 +100,7 @@ pub(super) fn render_scan_stream(
     } = result;
     let mut sequence = 0_u64;
     for endpoint in endpoints {
-        emit_stream_record(
+        emit_next(
             output::contract::Command::Scan,
             &mut sequence,
             output::scan::Event::Endpoint {
@@ -102,13 +110,13 @@ pub(super) fn render_scan_stream(
         )?;
     }
     for frame in undecoded {
-        emit_stream_record(
+        emit_next(
             output::contract::Command::Scan,
             &mut sequence,
             output::scan::Event::Undecoded { frame },
         )?;
     }
-    emit_stream_with_stats(
+    emit_with_stats(
         output::contract::Command::Scan,
         sequence,
         output::scan::Event::Complete {

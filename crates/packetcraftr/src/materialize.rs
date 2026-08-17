@@ -10,15 +10,15 @@ use bytes::Bytes;
 use packetcraftr_core::protocol::link::Ethernet;
 use packetcraftr_core::{
     Packet,
-    build::{BuildContext, BuiltPacket},
+    build::{BuiltPacket, Context as BuildContext},
     field::FieldValue,
     registry::Registry,
     semantics::{self, BuiltinProtocol},
 };
 use packetcraftr_netio::route::{Materialized as MaterializedRoute, Plan as PlannedRoute};
 
-use super::send::ClientError;
 use super::target::Family;
+use crate::Error;
 
 pub(super) fn build_context(plan: &PlannedRoute) -> BuildContext {
     BuildContext {
@@ -30,7 +30,7 @@ pub(super) fn build_context(plan: &PlannedRoute) -> BuildContext {
 pub(super) fn materialize_link_structure(
     packet: &mut Packet,
     plan: &PlannedRoute,
-) -> Result<(), ClientError> {
+) -> Result<(), Error> {
     if !plan.synthesized_ethernet
         || semantics::outer_layers(packet)
             .any(|layer| BuiltinProtocol::of(layer) == Some(BuiltinProtocol::Ethernet))
@@ -39,7 +39,7 @@ pub(super) fn materialize_link_structure(
     }
     packet
         .insert(0, Ethernet::default())
-        .map_err(|source| ClientError::PacketMaterialization {
+        .map_err(|source| Error::PacketMaterialization {
             layer: 0,
             field: BuiltinProtocol::Ethernet.as_str(),
             message: source.to_string(),
@@ -50,7 +50,7 @@ pub(super) fn materialize_link_structure(
 pub(super) fn materialize_network_fields(
     packet: &mut Packet,
     plan: &PlannedRoute,
-) -> Result<(), ClientError> {
+) -> Result<(), Error> {
     let Some((index, protocol)) =
         semantics::outer_layers(packet)
             .enumerate()
@@ -79,7 +79,7 @@ pub(super) fn materialize_network_fields(
             (Family::Ipv4, Some(IpAddr::V4(value))) => FieldValue::Ipv4(value),
             (Family::Ipv6, Some(IpAddr::V6(value))) => FieldValue::Ipv6(value),
             _ => {
-                return Err(ClientError::PacketMaterialization {
+                return Err(Error::PacketMaterialization {
                     layer: index,
                     field: "source",
                     message: "route source family does not match the packet layer".to_owned(),
@@ -88,7 +88,7 @@ pub(super) fn materialize_network_fields(
         };
         layer
             .set_field("source", value)
-            .map_err(|source| ClientError::PacketMaterialization {
+            .map_err(|source| Error::PacketMaterialization {
                 layer: index,
                 field: "source",
                 message: source.to_string(),
@@ -105,20 +105,20 @@ pub(super) fn materialize_network_fields(
             (Family::Ipv4, Some(IpAddr::V4(value))) => FieldValue::Ipv4(value),
             (Family::Ipv6, Some(IpAddr::V6(value))) => FieldValue::Ipv6(value),
             _ => {
-                return Err(ClientError::PacketMaterialization {
+                return Err(Error::PacketMaterialization {
                     layer: index,
                     field: "destination",
                     message: "route destination family does not match the packet layer".to_owned(),
                 });
             }
         };
-        layer.set_field("destination", value).map_err(|source| {
-            ClientError::PacketMaterialization {
+        layer
+            .set_field("destination", value)
+            .map_err(|source| Error::PacketMaterialization {
                 layer: index,
                 field: "destination",
                 message: source.to_string(),
-            }
-        })?;
+            })?;
     }
     Ok(())
 }
@@ -126,7 +126,7 @@ pub(super) fn materialize_network_fields(
 pub(super) fn materialize_link_fields(
     packet: &mut Packet,
     route: &MaterializedRoute,
-) -> Result<bool, ClientError> {
+) -> Result<bool, Error> {
     if route.plan.mode != packetcraftr_netio::link::Mode::Layer2 {
         return Ok(false);
     }
@@ -143,18 +143,17 @@ pub(super) fn materialize_link_fields(
         layer.field("source"),
         Some(FieldValue::Mac(value)) if value == [0; 6]
     ) {
-        let source_mac =
-            route
-                .plan
-                .source_mac
-                .ok_or_else(|| ClientError::PacketMaterialization {
-                    layer: index,
-                    field: "source",
-                    message: "route has no interface-owned source MAC".to_owned(),
-                })?;
+        let source_mac = route
+            .plan
+            .source_mac
+            .ok_or_else(|| Error::PacketMaterialization {
+                layer: index,
+                field: "source",
+                message: "route has no interface-owned source MAC".to_owned(),
+            })?;
         layer
             .set_field("source", FieldValue::Mac(source_mac.0))
-            .map_err(|source| ClientError::PacketMaterialization {
+            .map_err(|source| Error::PacketMaterialization {
                 layer: index,
                 field: "source",
                 message: source.to_string(),
@@ -169,14 +168,14 @@ pub(super) fn materialize_link_fields(
             route
                 .plan
                 .destination_mac
-                .ok_or_else(|| ClientError::PacketMaterialization {
+                .ok_or_else(|| Error::PacketMaterialization {
                     layer: index,
                     field: "destination",
                     message: "route has no resolved destination MAC".to_owned(),
                 })?;
         layer
             .set_field("destination", FieldValue::Mac(destination_mac.0))
-            .map_err(|source| ClientError::PacketMaterialization {
+            .map_err(|source| Error::PacketMaterialization {
                 layer: index,
                 field: "destination",
                 message: source.to_string(),
@@ -312,11 +311,11 @@ fn tcp_payload_length_cache_required(packet: &Packet) -> bool {
 pub(super) fn require_fixed_width_link_materialization(
     preliminary_len: usize,
     materialized_len: usize,
-) -> Result<(), ClientError> {
+) -> Result<(), Error> {
     if materialized_len != preliminary_len {
         // A full materialization rebuild must retain the planned frame shape;
         // transmission accounting and authorization are based on it.
-        return Err(ClientError::PacketMaterialization {
+        return Err(Error::PacketMaterialization {
             layer: 0,
             field: BuiltinProtocol::Ethernet.as_str(),
             message: format!(
@@ -351,7 +350,7 @@ mod tests {
             .build(
                 packet,
                 BuildContext::default(),
-                packetcraftr_core::build::BuildOptions::default(),
+                packetcraftr_core::build::Options::default(),
             )
             .expect("preliminary packet");
         assert_eq!(preliminary.packet.encoded_payload_length(0), Some(2));
@@ -366,7 +365,7 @@ mod tests {
             .build(
                 materialized.clone(),
                 BuildContext::default(),
-                packetcraftr_core::build::BuildOptions::default(),
+                packetcraftr_core::build::Options::default(),
             )
             .expect("materialized packet");
 
@@ -408,9 +407,9 @@ mod tests {
             ..Tcp::default()
         });
         packet.push(Dns::from_wire(query.clone()).expect("valid DNS query"));
-        let options = packetcraftr_core::build::BuildOptions {
-            mode: packetcraftr_core::build::BuildMode::Permissive,
-            ..packetcraftr_core::build::BuildOptions::default()
+        let options = packetcraftr_core::build::Options {
+            mode: packetcraftr_core::build::Mode::Permissive,
+            ..packetcraftr_core::build::Options::default()
         };
         let mut preliminary = builder
             .build(packet.clone(), BuildContext::default(), options.clone())
@@ -485,9 +484,9 @@ mod tests {
         });
         packet.push(Raw::new(Bytes::from_static(&[0xde, 0xad])));
         packet.push(Padding::after_layer(Bytes::from_static(&[0xbe]), 3));
-        let options = packetcraftr_core::build::BuildOptions {
-            mode: packetcraftr_core::build::BuildMode::Permissive,
-            ..packetcraftr_core::build::BuildOptions::default()
+        let options = packetcraftr_core::build::Options {
+            mode: packetcraftr_core::build::Mode::Permissive,
+            ..packetcraftr_core::build::Options::default()
         };
         let mut preliminary = builder
             .build(packet.clone(), BuildContext::default(), options.clone())

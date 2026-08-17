@@ -10,39 +10,30 @@ use std::net::IpAddr;
 use thiserror::Error;
 
 use crate::Packet;
-use crate::build::{BuildContext, BuildMode};
+use crate::build::{Context as BuildContext, Mode as BuildMode};
 use crate::diagnostic::Diagnostic;
 use crate::field::FieldValue;
-use crate::layer::{FieldError, Layer, LayerSchema, ProtocolId};
+use crate::layer::{FieldError, Id, Layer, Schema};
 use crate::layout::FieldLayout;
-use crate::registry::{Discriminator, ProtocolRegistry};
+use crate::registry::{Discriminator, Registry};
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
-pub enum CodecError {
+pub enum Error {
     #[error("codec expected layer {expected}, got {actual}")]
-    WrongLayer {
-        expected: ProtocolId,
-        actual: ProtocolId,
-    },
+    WrongLayer { expected: Id, actual: Id },
     #[error("truncated {protocol} layer: need at least {needed} bytes, got {available}")]
     Truncated {
-        protocol: ProtocolId,
+        protocol: Id,
         needed: usize,
         available: usize,
     },
     #[error("invalid {protocol} layer: {message}")]
-    Invalid {
-        protocol: ProtocolId,
-        message: String,
-    },
+    Invalid { protocol: Id, message: String },
     #[error("unsupported {protocol} construct: {message}")]
-    Unsupported {
-        protocol: ProtocolId,
-        message: String,
-    },
+    Unsupported { protocol: Id, message: String },
     #[error("packet length arithmetic overflow while processing {protocol}")]
-    LengthOverflow { protocol: ProtocolId },
+    LengthOverflow { protocol: Id },
     #[error(transparent)]
     Field(#[from] FieldError),
 }
@@ -52,7 +43,7 @@ pub struct LayerEncodeContext<'a> {
     pub index: usize,
     pub build_context: &'a BuildContext,
     pub mode: BuildMode,
-    pub registry: &'a ProtocolRegistry,
+    pub registry: &'a Registry,
     pub child: Option<&'a dyn Layer>,
     /// Maximum additional bytes this layer may contribute without exceeding
     /// the operation's configured packet-size limit. External codecs should
@@ -81,7 +72,7 @@ impl EncodedLayer {
 }
 
 pub struct LayerDecodeContext<'a> {
-    pub registry: &'a ProtocolRegistry,
+    pub registry: &'a Registry,
     pub layer_index: usize,
     pub absolute_offset: usize,
     pub verify_checksums: bool,
@@ -133,12 +124,12 @@ impl DecodedLayerValue {
 
 /// Encoder, bounded decoder, and expression factory for one protocol.
 pub trait LayerCodec: Send + Sync + fmt::Debug {
-    fn protocol_id(&self) -> ProtocolId;
+    fn protocol_id(&self) -> Id;
 
     /// Whether a decoded layer protocol is a valid result for this codec.
     /// Most codecs return their own protocol. A decode-only multiplexing root
     /// may explicitly admit the concrete protocols it selects.
-    fn accepts_decoded_protocol(&self, protocol: &ProtocolId) -> bool {
+    fn accepts_decoded_protocol(&self, protocol: &Id) -> bool {
         *protocol == self.protocol_id()
     }
 
@@ -148,7 +139,7 @@ pub trait LayerCodec: Send + Sync + fmt::Debug {
 
     /// Publishes the reflective schema without requiring a constructible
     /// layer. The default keeps existing codecs on their factory-based path.
-    fn published_schema(&self) -> Option<&'static LayerSchema> {
+    fn published_schema(&self) -> Option<&'static Schema> {
         let fields = BTreeMap::new();
         self.make_layer(&fields).ok().map(|layer| layer.schema())
     }
@@ -158,21 +149,18 @@ pub trait LayerCodec: Send + Sync + fmt::Debug {
         layer: &dyn Layer,
         payload: &[u8],
         context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, CodecError>;
+    ) -> Result<EncodedLayer, Error>;
 
     fn decode(
         &self,
         input: &[u8],
         context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, CodecError>;
+    ) -> Result<DecodedLayerValue, Error>;
 
     /// Constructs one layer from caller-supplied reflective fields.
     ///
     /// Implementations may fill omitted fields with defaults. The returned
     /// layer must satisfy [`Layer::validate_required_fields`]; the public
     /// expression/document paths and the builder enforce that invariant.
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, FieldValue>,
-    ) -> Result<Box<dyn Layer>, CodecError>;
+    fn make_layer(&self, fields: &BTreeMap<String, FieldValue>) -> Result<Box<dyn Layer>, Error>;
 }

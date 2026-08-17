@@ -8,7 +8,7 @@ use std::time::{Instant, SystemTime};
 
 use super::Error;
 use super::link::Mode;
-use super::route::MaterializedRoute;
+use super::route::Materialized;
 
 pub(crate) use self::{
     Frame as TransmissionFrame, Layer2Sender as Layer2Io, Report as IoSendReport,
@@ -19,11 +19,11 @@ pub(crate) use self::{
 #[derive(Clone, Copy, Debug)]
 pub struct Layer2Frame<'a> {
     bytes: &'a Bytes,
-    route: &'a MaterializedRoute,
+    route: &'a Materialized,
 }
 
 impl<'a> Layer2Frame<'a> {
-    pub fn try_new(bytes: &'a Bytes, route: &'a MaterializedRoute) -> Result<Self, Error> {
+    pub fn try_new(bytes: &'a Bytes, route: &'a Materialized) -> Result<Self, Error> {
         require_link_mode(route, Mode::Layer2)?;
         Ok(Self { bytes, route })
     }
@@ -32,7 +32,7 @@ impl<'a> Layer2Frame<'a> {
         self.bytes
     }
 
-    pub fn route(self) -> &'a MaterializedRoute {
+    pub fn route(self) -> &'a Materialized {
         self.route
     }
 }
@@ -41,11 +41,11 @@ impl<'a> Layer2Frame<'a> {
 #[derive(Clone, Copy, Debug)]
 pub struct Layer3Frame<'a> {
     bytes: &'a Bytes,
-    route: &'a MaterializedRoute,
+    route: &'a Materialized,
 }
 
 impl<'a> Layer3Frame<'a> {
-    pub fn try_new(bytes: &'a Bytes, route: &'a MaterializedRoute) -> Result<Self, Error> {
+    pub fn try_new(bytes: &'a Bytes, route: &'a Materialized) -> Result<Self, Error> {
         require_link_mode(route, Mode::Layer3)?;
         Ok(Self { bytes, route })
     }
@@ -54,7 +54,7 @@ impl<'a> Layer3Frame<'a> {
         self.bytes
     }
 
-    pub fn route(self) -> &'a MaterializedRoute {
+    pub fn route(self) -> &'a Materialized {
         self.route
     }
 }
@@ -68,7 +68,7 @@ pub enum Frame<'a> {
 
 impl<'a> Frame<'a> {
     /// Selects the typed provider boundary from the already-materialized route.
-    pub fn try_new(bytes: &'a Bytes, route: &'a MaterializedRoute) -> Result<Self, Error> {
+    pub fn try_new(bytes: &'a Bytes, route: &'a Materialized) -> Result<Self, Error> {
         match route.plan.mode {
             Mode::Layer2 => Layer2Frame::try_new(bytes, route).map(Self::Layer2),
             Mode::Layer3 => Layer3Frame::try_new(bytes, route).map(Self::Layer3),
@@ -83,7 +83,7 @@ impl<'a> Frame<'a> {
         }
     }
 
-    pub fn route(self) -> &'a MaterializedRoute {
+    pub fn route(self) -> &'a Materialized {
         match self {
             Self::Layer2(frame) => frame.route(),
             Self::Layer3(frame) => frame.route(),
@@ -91,7 +91,7 @@ impl<'a> Frame<'a> {
     }
 }
 
-fn require_link_mode(route: &MaterializedRoute, expected: Mode) -> Result<(), Error> {
+fn require_link_mode(route: &Materialized, expected: Mode) -> Result<(), Error> {
     let actual = route.plan.mode;
     if actual == expected {
         Ok(())

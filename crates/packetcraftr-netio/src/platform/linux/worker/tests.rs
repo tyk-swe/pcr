@@ -53,7 +53,7 @@ fn shutdown_timeout_preserves_netlink_ownership_for_retry() {
 
     assert!(matches!(
         worker.shutdown(),
-        Err(NativeRouteError::OperatingSystem {
+        Err(SystemError::OperatingSystem {
             operation: "shut down netlink worker",
             ..
         })
@@ -88,7 +88,7 @@ fn netlink_worker_panic_is_terminal_and_cached() {
     assert_eq!(first, second);
     assert_eq!(
         first,
-        NativeRouteError::InvalidResponse {
+        SystemError::InvalidResponse {
             message: "Linux netlink worker panicked".to_owned()
         }
     );
@@ -120,7 +120,7 @@ fn startup_timeout_transfers_spawned_worker_to_reaper() {
     );
     assert!(matches!(
         result,
-        Err(NativeRouteError::OperatingSystem {
+        Err(SystemError::OperatingSystem {
             operation: "initialize netlink",
             ..
         })
@@ -142,7 +142,7 @@ fn thread_local_replacement_transfers_old_worker() {
         assert!(slot.replace(worker).is_none());
         assert!(matches!(
             retire_cached_worker(&mut slot),
-            Err(NativeRouteError::OperatingSystem {
+            Err(SystemError::OperatingSystem {
                 operation: "shut down netlink worker",
                 ..
             })
@@ -172,13 +172,13 @@ fn broken_channel_transfers_still_running_worker() {
     let worker_error = slot
         .as_ref()
         .expect("worker should exist")
-        .execute(|_handle| async { Ok::<(), NativeRouteError>(()) })
+        .execute(|_handle| async { Ok::<(), SystemError>(()) })
         .expect_err("closed command channel must be a worker error");
     assert!(matches!(worker_error, NetlinkExecutionError::Worker(_)));
 
     assert!(matches!(
         retire_cached_worker(&mut slot),
-        Err(NativeRouteError::OperatingSystem {
+        Err(SystemError::OperatingSystem {
             operation: "shut down netlink worker",
             ..
         })
@@ -198,7 +198,7 @@ fn setup_failure_joins_worker_before_returning() {
     let (setup_sender, setup_receiver) = mpsc::sync_channel(1);
     let (finished_sender, finished_receiver) = mpsc::channel();
     setup_sender
-        .send(Err(NativeRouteError::InvalidResponse {
+        .send(Err(SystemError::InvalidResponse {
             message: "fake setup failure".to_owned(),
         }))
         .expect("send fake setup failure");
@@ -216,7 +216,7 @@ fn setup_failure_joins_worker_before_returning() {
     );
     assert!(matches!(
         result,
-        Err(NativeRouteError::InvalidResponse { message })
+        Err(SystemError::InvalidResponse { message })
             if message == "fake setup failure"
     ));
     finished_receiver

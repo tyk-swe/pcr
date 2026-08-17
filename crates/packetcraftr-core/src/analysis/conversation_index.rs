@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::net::IpAddr;
 
-use super::AnalysisError;
+use super::Error;
 use super::reassembly::tcp::ScopedFlowKey;
 use crate::analysis::scope::ScopeId;
 
@@ -63,13 +63,13 @@ impl StreamIndex {
         flow: &ScopedFlowKey,
         number: u64,
         max_flows: usize,
-    ) -> Result<u64, AnalysisError> {
+    ) -> Result<u64, Error> {
         let canonical = CanonicalFlow::from_flow(flow);
         if let Some(index) = self.assignments.get(&canonical) {
             return Ok(*index);
         }
         if self.assignments.len() >= max_flows {
-            return Err(AnalysisError::StreamLimit {
+            return Err(Error::StreamLimit {
                 number,
                 limit: max_flows,
             });
@@ -86,10 +86,10 @@ mod tests {
 
     use super::*;
     use crate::analysis::reassembly::tcp::FlowKey;
-    use crate::analysis::scope::ScopeInterner;
+    use crate::analysis::scope::Interner;
 
     fn flow(source_port: u16, destination_port: u16) -> ScopedFlowKey {
-        let scope = ScopeInterner::new()
+        let scope = Interner::new()
             .intern(None, Vec::new())
             .expect("empty scope fits");
         ScopedFlowKey {
@@ -117,7 +117,7 @@ mod tests {
         );
         assert!(matches!(
             index.assign(&flow(10_001, 443), 3, 1),
-            Err(AnalysisError::StreamLimit {
+            Err(Error::StreamLimit {
                 number: 3,
                 limit: 1
             })

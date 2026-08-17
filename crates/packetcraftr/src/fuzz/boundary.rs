@@ -7,13 +7,13 @@ use packetcraftr_core::frame::Frame;
 use packetcraftr_core::{Packet, diagnostic::Diagnostic};
 
 #[derive(Clone, Debug)]
-pub struct FuzzExecutionCase {
+pub struct ExecutionCase {
     pub(crate) permit: crate::evidence::ExecutionPermit,
     pub(crate) packet: Packet,
 }
 
 #[derive(Clone, Debug)]
-pub struct FuzzCaseExecution {
+pub struct Execution {
     pub(crate) permit: crate::evidence::ExecutionPermit,
     pub(crate) sent: crate::SentPacket,
     pub(crate) responses: Vec<Frame>,
@@ -23,7 +23,7 @@ pub struct FuzzCaseExecution {
     pub(crate) stats: crate::Stats,
 }
 
-pub trait FuzzAuthorizer {
+pub trait Authorizer {
     /// Authorize the complete packet set, optional route destination, and
     /// conservative maximum wire-byte budget before route or capture effects.
     fn authorize_operation(
@@ -35,10 +35,10 @@ pub trait FuzzAuthorizer {
     ) -> std::result::Result<(), crate::BoundaryError>;
 }
 
-pub trait FuzzExecutor {
+pub trait Executor {
     fn execute(
         &mut self,
-        case: &FuzzExecutionCase,
+        case: &ExecutionCase,
         timeout: Duration,
-    ) -> std::result::Result<FuzzCaseExecution, crate::BoundaryError>;
+    ) -> std::result::Result<Execution, crate::BoundaryError>;
 }

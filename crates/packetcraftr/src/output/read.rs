@@ -10,7 +10,7 @@ use serde::Serialize;
 use super::contract::Error;
 use super::frame::Captured;
 
-pub use super::frame::{Captured as Frame, Stack};
+use super::frame::Stack;
 
 /// One streamed result of `read`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

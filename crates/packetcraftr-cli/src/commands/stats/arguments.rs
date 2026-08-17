@@ -3,9 +3,9 @@
 
 use std::path::PathBuf;
 
-use clap::{Args, ValueEnum};
+use clap::ValueEnum;
 
-use crate::command_options::OfflineAnalysisLimits;
+use crate::command_options::OfflineAnalysisLimitsArgs;
 
 pub(crate) const AFTER_LONG_HELP: &str = r#"Statistics are computed offline over dissected frames; no live capture or transmission is involved.
 
@@ -17,7 +17,7 @@ Examples:
   packetcraftr --output json stats capture.pcapng --table io --interval-ms 100"#;
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
-pub(crate) enum CliStatsTable {
+pub(crate) enum Table {
     Conversations,
     Endpoints,
     Protocols,
@@ -25,13 +25,13 @@ pub(crate) enum CliStatsTable {
     Io,
 }
 
-#[derive(Debug, Args)]
-pub(crate) struct StatsArgs {
+#[derive(Debug, clap::Args)]
+pub(crate) struct Args {
     /// Classic PCAP or PCAPNG input path.
     pub(crate) path: PathBuf,
     /// Statistics table to compute and report.
-    #[arg(long, value_enum, default_value_t = CliStatsTable::Conversations)]
-    pub(crate) table: CliStatsTable,
+    #[arg(long, value_enum, default_value_t = Table::Conversations)]
+    pub(crate) table: Table,
     /// Keep only frames matching a display filter; stream indices stay
     /// capture-global.
     #[arg(long, value_name = "EXPR")]
@@ -40,5 +40,5 @@ pub(crate) struct StatsArgs {
     #[arg(long, default_value_t = 1_000)]
     pub(crate) interval_ms: u64,
     #[command(flatten)]
-    pub(crate) limits: OfflineAnalysisLimits,
+    pub(crate) limits: OfflineAnalysisLimitsArgs,
 }

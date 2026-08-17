@@ -10,116 +10,120 @@ use std::time::Duration;
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::{
-    diagnostic::{Diagnostic, push_diagnostic_once},
+    diagnostic::{Diagnostic, push_once as push_diagnostic_once},
     registry::Registry,
 };
 
 use crate::BoundaryError;
 use crate::clock::Clock;
-use crate::probe::evidence::{
-    EvidenceBudget, ResponseSelector, retain_evidence, retain_undecoded_frames,
-};
+use crate::evidence::Budget;
+use crate::probe::evidence::{ResponseSelector, retain_evidence, retain_undecoded_frames};
 use crate::probe::runner::{ProbeBatch, ProbeLifecycle, ProbeRunConfig, run_batches};
 use crate::target::{Authorizer, approve_operation, resolve_selected};
 
-use super::classification::classify_scan_response;
-use super::error::ScanError;
+use super::classification::classify_response;
+use super::error::Error;
 use super::evidence::validate_exchange_evidence;
 use super::model::{
-    ScanBatch, ScanBatchExecution, ScanClassification, ScanEndpointResult, ScanExecutor,
-    ScanLimits, ScanProbeEvidence, ScanProbeStatus, ScanRequest, ScanResult, ScanTransport,
+    Batch, Classification, Endpoint, Execution, Executor, Limits, ProbeEvidence, ProbeStatus,
+    Request, Result, Transport,
 };
 use super::plan::{build_batches, worst_case_duration};
 use super::{IPV4_PROBE_BYTES, IPV6_PROBE_BYTES, SCAN_EVIDENCE_DIAGNOSTICS};
 
-/// Resolves and authorizes all targets before constructing probes, enforces operation
-/// limits, executes batches, and classifies only checksum-valid correlated responses.
-pub fn scan<A, E, C>(
-    request: &ScanRequest,
+/// Validates the request, authorizes every resolved target and the complete
+/// operation budget before constructing probes, then executes and classifies
+/// checksum-valid correlated responses.
+pub fn run<A, E, C>(
+    request: &Request,
     authorizer: &mut A,
     registry: &Registry,
     executor: &mut E,
     clock: &mut C,
-) -> Result<ScanResult, ScanError>
+) -> std::result::Result<Result, Error>
 where
     A: Authorizer,
-    E: ScanExecutor,
+    E: Executor,
     C: Clock,
 {
     let mut deadline = Deadline::new(request.limits.max_duration);
+    let approved = approve_scan(request, authorizer, &deadline)?;
+    let batches = build_batches(request, &approved.addresses, &approved.endpoint_ports)?;
+    enforce_deadline(&deadline)?;
+    let mut output = initial_output(request, &approved.addresses, &approved.endpoint_ports);
+    let config = ProbeRunConfig {
+        probes_per_second: request.probes_per_second,
+        duration_limit: request.limits.max_duration,
+        final_statistics_sequence: u64::try_from(approved.total_probes.saturating_sub(1))
+            .unwrap_or(u64::MAX),
+    };
+    let mut lifecycle = ScanProbeLifecycle {
+        executor,
+        registry,
+        limits: request.limits,
+        output: &mut output,
+    };
+    let run = run_batches(&batches, config, &mut deadline, clock, &mut lifecycle)?;
+
+    Ok(Result {
+        target: approved.declared_target,
+        resolved_addresses: approved.addresses,
+        endpoints: output.endpoints,
+        undecoded: output.undecoded,
+        diagnostics: output.diagnostics,
+        stats: run.stats,
+    })
+}
+
+struct ApprovedScan {
+    declared_target: String,
+    addresses: Vec<IpAddr>,
+    endpoint_ports: Vec<Option<u16>>,
+    total_probes: usize,
+}
+
+fn approve_scan<A: Authorizer>(
+    request: &Request,
+    authorizer: &mut A,
+    deadline: &Deadline,
+) -> std::result::Result<ApprovedScan, Error> {
     let ports = request.validate()?;
-    // Implementations must perform declared-target authorization before DNS
-    // and authorize every answer before anything below constructs a ScanProbe.
+    // Implementations must authorize the declared target before DNS and every
+    // answer before anything below constructs a probe.
     let resolved = resolve_selected(
         authorizer,
         &request.target,
         request.address_family,
-        &deadline,
+        deadline,
         scan_duration_error,
     )?;
-    let addresses = resolved.addresses;
-    if addresses.is_empty() {
-        return Err(ScanError::Family {
+    if resolved.addresses.is_empty() {
+        return Err(Error::Family {
             family: request.address_family.label(),
         });
     }
 
-    let endpoints_per_address = if request.transport == ScanTransport::Icmp {
+    let endpoints_per_address = if request.transport == Transport::Icmp {
         1
     } else {
         ports.len()
     };
-    let total_probes = addresses
-        .len()
-        .checked_mul(endpoints_per_address)
-        .and_then(|value| {
-            value.checked_mul(usize::try_from(request.attempts).unwrap_or(usize::MAX))
-        })
-        .ok_or(ScanError::InvalidLimit {
-            field: "probes",
-            value: u64::MAX,
-            reason: "probe-count arithmetic overflowed".to_owned(),
-        })?;
+    let total_probes = probe_count(
+        resolved.addresses.len(),
+        endpoints_per_address,
+        request.attempts,
+    )?;
     if total_probes > request.limits.max_probes {
-        return Err(ScanError::InvalidLimit {
+        return Err(Error::InvalidLimit {
             field: "probes",
             value: u64::try_from(total_probes).unwrap_or(u64::MAX),
             reason: format!("exceeds max_probes={}", request.limits.max_probes),
         });
     }
-    let maximum_bytes = addresses.iter().try_fold(0_u64, |total, address| {
-        let per_probe = if address.is_ipv4() {
-            IPV4_PROBE_BYTES
-        } else {
-            IPV6_PROBE_BYTES
-        };
-        let address_probes = u64::try_from(endpoints_per_address)
-            .unwrap_or(u64::MAX)
-            .checked_mul(u64::from(request.attempts))
-            .ok_or(ScanError::InvalidLimit {
-                field: "wire_bytes",
-                value: u64::MAX,
-                reason: "wire-byte accounting overflowed".to_owned(),
-            })?;
-        let address_bytes =
-            per_probe
-                .checked_mul(address_probes)
-                .ok_or(ScanError::InvalidLimit {
-                    field: "wire_bytes",
-                    value: u64::MAX,
-                    reason: "wire-byte accounting overflowed".to_owned(),
-                })?;
-        total
-            .checked_add(address_bytes)
-            .ok_or(ScanError::InvalidLimit {
-                field: "wire_bytes",
-                value: u64::MAX,
-                reason: "wire-byte accounting overflowed".to_owned(),
-            })
-    })?;
-    let worst_case = worst_case_duration(request, addresses.len(), endpoints_per_address)?;
+    let maximum_bytes = maximum_wire_bytes(&resolved.addresses, endpoints_per_address, request)?;
+    let worst_case = worst_case_duration(request, resolved.addresses.len(), endpoints_per_address)?;
     if worst_case > request.limits.max_duration {
-        return Err(ScanError::DurationLimit {
+        return Err(Error::DurationLimit {
             actual: worst_case,
             limit: request.limits.max_duration,
         });
@@ -128,26 +132,85 @@ where
         authorizer,
         u64::try_from(total_probes).unwrap_or(u64::MAX),
         maximum_bytes,
-        &deadline,
+        deadline,
         scan_duration_error,
     )?;
 
-    let endpoint_ports = if request.transport == ScanTransport::Icmp {
+    let endpoint_ports = if request.transport == Transport::Icmp {
         vec![None]
     } else {
-        ports.iter().copied().map(Some).collect()
+        ports.into_iter().map(Some).collect()
     };
-    let batches = build_batches(request, &addresses, &endpoint_ports)?;
-    enforce_deadline(&deadline)?;
+    Ok(ApprovedScan {
+        declared_target: resolved.declared,
+        addresses: resolved.addresses,
+        endpoint_ports,
+        total_probes,
+    })
+}
 
+fn probe_count(
+    address_count: usize,
+    endpoints_per_address: usize,
+    attempts: u32,
+) -> std::result::Result<usize, Error> {
+    address_count
+        .checked_mul(endpoints_per_address)
+        .and_then(|value| value.checked_mul(usize::try_from(attempts).unwrap_or(usize::MAX)))
+        .ok_or(Error::InvalidLimit {
+            field: "probes",
+            value: u64::MAX,
+            reason: "probe-count arithmetic overflowed".to_owned(),
+        })
+}
+
+fn maximum_wire_bytes(
+    addresses: &[IpAddr],
+    endpoints_per_address: usize,
+    request: &Request,
+) -> std::result::Result<u64, Error> {
+    addresses.iter().try_fold(0_u64, |total, address| {
+        let per_probe = if address.is_ipv4() {
+            IPV4_PROBE_BYTES
+        } else {
+            IPV6_PROBE_BYTES
+        };
+        let address_probes = u64::try_from(endpoints_per_address)
+            .unwrap_or(u64::MAX)
+            .checked_mul(u64::from(request.attempts))
+            .ok_or(Error::InvalidLimit {
+                field: "wire_bytes",
+                value: u64::MAX,
+                reason: "wire-byte accounting overflowed".to_owned(),
+            })?;
+        let address_bytes = per_probe
+            .checked_mul(address_probes)
+            .ok_or(Error::InvalidLimit {
+                field: "wire_bytes",
+                value: u64::MAX,
+                reason: "wire-byte accounting overflowed".to_owned(),
+            })?;
+        total.checked_add(address_bytes).ok_or(Error::InvalidLimit {
+            field: "wire_bytes",
+            value: u64::MAX,
+            reason: "wire-byte accounting overflowed".to_owned(),
+        })
+    })
+}
+
+fn initial_output(
+    request: &Request,
+    addresses: &[IpAddr],
+    endpoint_ports: &[Option<u16>],
+) -> ScanOutput {
     let endpoints = addresses
         .iter()
         .flat_map(|address| {
-            endpoint_ports.iter().map(move |port| ScanEndpointResult {
+            endpoint_ports.iter().map(move |port| Endpoint {
                 address: *address,
                 transport: request.transport,
                 port: *port,
-                classification: ScanClassification::Timeout,
+                classification: Classification::Timeout,
                 evidence: Vec::with_capacity(
                     usize::try_from(request.attempts).unwrap_or(usize::MAX),
                 ),
@@ -159,40 +222,18 @@ where
         .enumerate()
         .map(|(index, endpoint)| ((endpoint.address, endpoint.port), index))
         .collect::<HashMap<_, _>>();
-    let mut output = ScanOutput {
-        evidence_budget: EvidenceBudget::default(),
+    ScanOutput {
+        evidence_budget: Budget::default(),
         endpoints,
         endpoint_indices,
         undecoded: Vec::new(),
         diagnostics: Vec::new(),
-    };
-    let config = ProbeRunConfig {
-        probes_per_second: request.probes_per_second,
-        duration_limit: request.limits.max_duration,
-        final_statistics_sequence: u64::try_from(total_probes.saturating_sub(1))
-            .unwrap_or(u64::MAX),
-    };
-    let mut lifecycle = ScanProbeLifecycle {
-        executor,
-        registry,
-        limits: request.limits,
-        output: &mut output,
-    };
-    let run = run_batches(&batches, config, &mut deadline, clock, &mut lifecycle)?;
-
-    Ok(ScanResult {
-        target: resolved.declared,
-        resolved_addresses: addresses,
-        endpoints: output.endpoints,
-        undecoded: output.undecoded,
-        diagnostics: output.diagnostics,
-        stats: run.stats,
-    })
+    }
 }
 
 struct ScanOutput {
-    evidence_budget: EvidenceBudget,
-    endpoints: Vec<ScanEndpointResult>,
+    evidence_budget: Budget,
+    endpoints: Vec<Endpoint>,
     endpoint_indices: HashMap<(IpAddr, Option<u16>), usize>,
     undecoded: Vec<Frame>,
     diagnostics: Vec<Diagnostic>,
@@ -201,33 +242,33 @@ struct ScanOutput {
 struct ScanProbeLifecycle<'a, E> {
     executor: &'a mut E,
     registry: &'a Registry,
-    limits: ScanLimits,
+    limits: Limits,
     output: &'a mut ScanOutput,
 }
 
-impl<E: ScanExecutor> ProbeLifecycle<ScanBatch> for ScanProbeLifecycle<'_, E> {
-    type Execution = ScanBatchExecution;
+impl<E: Executor> ProbeLifecycle<Batch> for ScanProbeLifecycle<'_, E> {
+    type Execution = super::model::Execution;
     type Output = ();
-    type Error = ScanError;
+    type Error = Error;
 
-    fn execute(&mut self, batch: &ScanBatch) -> Result<Self::Execution, BoundaryError> {
+    fn execute(&mut self, batch: &Batch) -> std::result::Result<Self::Execution, BoundaryError> {
         self.executor.execute(batch)
     }
 
     fn validate(
         &mut self,
-        batch: &ScanBatch,
+        batch: &Batch,
         execution: &Self::Execution,
-    ) -> Result<(), Self::Error> {
+    ) -> std::result::Result<(), Self::Error> {
         validate_exchange_evidence(batch, execution, self.limits)
     }
 
     fn process(
         &mut self,
-        batch: &ScanBatch,
+        batch: &Batch,
         execution: Self::Execution,
         deadline: &Deadline,
-    ) -> Result<Self::Output, Self::Error> {
+    ) -> std::result::Result<Self::Output, Self::Error> {
         process_batch(
             batch,
             execution,
@@ -247,7 +288,7 @@ impl<E: ScanExecutor> ProbeLifecycle<ScanBatch> for ScanProbeLifecycle<'_, E> {
     }
 
     fn rate_error(rate: Option<u32>) -> Self::Error {
-        ScanError::InvalidLimit {
+        Error::InvalidLimit {
             field: "probes_per_second",
             value: u64::from(rate.unwrap_or_default()),
             reason: "rate-delay arithmetic overflowed".to_owned(),
@@ -255,28 +296,28 @@ impl<E: ScanExecutor> ProbeLifecycle<ScanBatch> for ScanProbeLifecycle<'_, E> {
     }
 
     fn clock_error(sequence: u64, message: String) -> Self::Error {
-        ScanError::Clock { sequence, message }
+        Error::Clock { sequence, message }
     }
 
     fn execution_error(sequence: u64, source: BoundaryError) -> Self::Error {
-        ScanError::Execution { sequence, source }
+        Error::Execution { sequence, source }
     }
 
     fn statistics_error(sequence: u64) -> Self::Error {
-        ScanError::StatisticsOverflow { sequence }
+        Error::StatisticsOverflow { sequence }
     }
 }
 
 fn process_batch(
-    batch: &ScanBatch,
-    exchange: ScanBatchExecution,
+    batch: &Batch,
+    exchange: Execution,
     registry: &Registry,
-    limits: ScanLimits,
+    limits: Limits,
     output: &mut ScanOutput,
     deadline: &Deadline,
-) -> Result<(), ScanError> {
+) -> std::result::Result<(), Error> {
     enforce_deadline(deadline)?;
-    let ScanBatchExecution {
+    let Execution {
         permit,
         sent,
         mut responses,
@@ -286,7 +327,7 @@ fn process_batch(
         stats: _,
     } = exchange;
     if permit != batch.permit {
-        return Err(ScanError::InvalidEvidence {
+        return Err(Error::InvalidEvidence {
             sequence: batch.sequence(),
             message: "executor returned evidence for a different execution permit".to_owned(),
         });
@@ -303,9 +344,7 @@ fn process_batch(
         let best = response_selector.select(
             request_index,
             batch.timeout,
-            |response| {
-                classify_scan_response(registry, probe.transport, &sent.built().packet, response)
-            },
+            |response| classify_response(registry, probe.transport, &sent.built().packet, response),
             |observation| observation.classification.rank(),
             |observation| observation.responder,
             || enforce_deadline(deadline),
@@ -332,9 +371,9 @@ fn process_batch(
             if candidate.observation.classification.rank() > endpoint.classification.rank() {
                 endpoint.classification = candidate.observation.classification;
             }
-            ScanProbeEvidence {
+            ProbeEvidence {
                 attempt: probe.attempt,
-                status: ScanProbeStatus::Response,
+                status: ProbeStatus::Response,
                 classification: candidate.observation.classification,
                 responder: Some(candidate.observation.responder),
                 sent_at,
@@ -344,10 +383,10 @@ fn process_batch(
                 reason: candidate.observation.reason.to_owned(),
             }
         } else {
-            ScanProbeEvidence {
+            ProbeEvidence {
                 attempt: probe.attempt,
-                status: ScanProbeStatus::Timeout,
-                classification: ScanClassification::Timeout,
+                status: ProbeStatus::Timeout,
+                classification: Classification::Timeout,
                 responder: None,
                 sent_at,
                 received_at: None,
@@ -376,15 +415,15 @@ fn process_batch(
     Ok(())
 }
 
-fn enforce_deadline(deadline: &Deadline) -> Result<(), ScanError> {
+fn enforce_deadline(deadline: &Deadline) -> std::result::Result<(), Error> {
     crate::clock::check_deadline(deadline, scan_duration_error)
 }
 
-fn scan_duration_error(actual: Duration, limit: Duration) -> ScanError {
-    ScanError::DurationLimit { actual, limit }
+fn scan_duration_error(actual: Duration, limit: Duration) -> Error {
+    Error::DurationLimit { actual, limit }
 }
 
-impl ProbeBatch for ScanBatch {
+impl ProbeBatch for Batch {
     fn sequence(&self) -> u64 {
         self.probes[0].sequence
     }

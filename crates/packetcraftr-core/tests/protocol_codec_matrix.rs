@@ -29,11 +29,8 @@ fn constructible_defaults_either_build_standalone_or_require_declared_context() 
         let mut packet = Packet::new();
         packet.push_boxed(layer);
 
-        let Ok(built) = builder.build(
-            packet,
-            build::BuildContext::default(),
-            build::BuildOptions::default(),
-        ) else {
+        let Ok(built) = builder.build(packet, build::Context::default(), build::Options::default())
+        else {
             rejected.push(support.protocol);
             continue;
         };
@@ -73,11 +70,8 @@ fn exact_round_trip_builtins_decode_their_own_default_wire_image() {
         packet.push_boxed(codec.make_layer(&BTreeMap::new()).unwrap_or_else(|error| {
             panic!("{} default construction failed: {error}", support.protocol)
         }));
-        let Ok(first) = builder.build(
-            packet,
-            build::BuildContext::default(),
-            build::BuildOptions::default(),
-        ) else {
+        let Ok(first) = builder.build(packet, build::Context::default(), build::Options::default())
+        else {
             rejected.push(support.protocol);
             continue;
         };
@@ -86,14 +80,14 @@ fn exact_round_trip_builtins_decode_their_own_default_wire_image() {
             .decode_with_root(
                 first.bytes.clone(),
                 support.protocol.into(),
-                decode::DecodeOptions::default(),
+                decode::Options::default(),
             )
             .unwrap_or_else(|error| panic!("{} default decode failed: {error}", support.protocol));
         let rebuilt = builder
             .build(
                 decoded.packet,
-                build::BuildContext::default(),
-                build::BuildOptions::default(),
+                build::Context::default(),
+                build::Options::default(),
             )
             .unwrap_or_else(|error| panic!("{} decoded rebuild failed: {error}", support.protocol));
         assert_eq!(rebuilt.bytes, first.bytes, "{}", support.protocol);

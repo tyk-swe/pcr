@@ -26,7 +26,7 @@ use tunnel::{
 };
 
 use crate::{
-    registry::{ProtocolRegistry, RegistryBuilder, RegistryError},
+    registry::{Builder as RegistryBuilder, Error as RegistryError, Registry as ProtocolRegistry},
     semantics::{BuiltinProtocol, builtin_protocol_catalog},
 };
 
@@ -79,7 +79,7 @@ fn register_catalog(builder: &mut RegistryBuilder) -> Result<(), RegistryError> 
 }
 
 /// Build the default immutable registry without global mutable registration.
-pub fn default_registry() -> Result<ProtocolRegistry, RegistryError> {
+pub fn registry() -> Result<ProtocolRegistry, RegistryError> {
     let mut builder = ProtocolRegistry::builder();
     register_catalog(&mut builder)?;
     registration::register(&mut builder)?;

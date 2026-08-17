@@ -3,12 +3,12 @@
 
 use std::collections::HashMap;
 
-use crate::diagnostic::DiagnosticSeverity;
+use crate::diagnostic::Severity;
 
 use super::finding::new as new_finding;
 use super::generation;
 use super::observation::TcpObservation;
-use super::{ExpertCollector, Finding, FlowKey, FrameRecord, Tcp, TcpEvent};
+use super::{Collector, Finding, FlowKey, FrameRecord, Tcp, TcpEvent};
 
 mod acknowledgment;
 mod sequence;
@@ -32,7 +32,7 @@ pub(super) struct DirectionState {
     pub(super) closed: bool,
 }
 
-impl ExpertCollector {
+impl Collector {
     pub(super) fn reconcile_tcp_evictions(&mut self, events: &[TcpEvent]) {
         for event in events {
             if let TcpEvent::Evicted { flow, .. } = event
@@ -58,7 +58,7 @@ impl ExpertCollector {
 
         if observation.rst {
             findings.push(new_finding(
-                DiagnosticSeverity::Warning,
+                Severity::Warning,
                 "tcp.reset",
                 observation.number,
                 observation.stream,

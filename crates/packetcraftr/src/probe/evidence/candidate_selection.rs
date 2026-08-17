@@ -25,15 +25,15 @@ pub(crate) struct ResponseCandidate<'a, O> {
     pub(crate) latency: Duration,
 }
 
-pub(crate) fn select_response_candidate<'a, O, K: Ord>(
+pub(crate) fn update_best_candidate<'a, O, K: Ord>(
     best: &mut Option<ResponseCandidate<'a, O>>,
     candidate: ResponseCandidate<'a, O>,
     timeout: Duration,
     rank: impl Fn(&O) -> u8,
     tie_break_key: impl Fn(&O) -> K,
-) -> bool {
+) {
     if !response_within_deadline(candidate.latency, timeout) {
-        return false;
+        return;
     }
     let candidate_precedes = best.as_ref().is_none_or(|current| {
         let candidate_rank = rank(&candidate.observation);
@@ -57,7 +57,6 @@ pub(crate) fn select_response_candidate<'a, O, K: Ord>(
     if candidate_precedes {
         *best = Some(candidate);
     }
-    candidate_precedes
 }
 
 /// Stable, linear-time response grouping shared by every bounded probe batch.
@@ -94,8 +93,8 @@ impl<'a> ResponseSelector<'a> {
                 .matched
                 .next()
                 .expect("peeked matched response must remain available");
-            if let Some(observation) = classify(&response.response)
-                && select_response_candidate(
+            if let Some(observation) = classify(&response.response) {
+                update_best_candidate(
                     &mut best,
                     ResponseCandidate {
                         observation,
@@ -105,8 +104,8 @@ impl<'a> ResponseSelector<'a> {
                     timeout,
                     &rank,
                     &tie_break_key,
-                )
-            {}
+                );
+            }
             check_deadline()?;
         }
         Ok(best)

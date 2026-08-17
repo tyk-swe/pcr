@@ -24,9 +24,7 @@ use super::os_error;
 use crate::{
     interface::{Id as InterfaceId, InterfaceAddress, InterfaceFlags, InterfaceInfo},
     link::{Capability, MacAddress},
-    route::{
-        NativeRouteError, NativeRouteSnapshot, RouteDecision, RouteSelectionReason, finish_route,
-    },
+    route::{Decision, NativeRouteSnapshot, SelectionReason, SystemError, finish_route},
 };
 use packetcraftr_core::frame::LinkType;
 
@@ -35,24 +33,24 @@ pub(super) async fn query_route(
     destination: IpAddr,
     interface_hint: Option<InterfaceId>,
     preferred_source: Option<IpAddr>,
-) -> Result<RouteDecision, NativeRouteError> {
+) -> Result<Decision, SystemError> {
     let message = route_request(destination, interface_hint.as_ref(), preferred_source);
     let mut replies = handle.route().get(message).execute();
     let reply = replies
         .try_next()
         .await
         .map_err(|error| os_error("RTM_GETROUTE", error))?
-        .ok_or(NativeRouteError::RouteNotFound { destination })?;
+        .ok_or(SystemError::RouteNotFound { destination })?;
 
     let mut output_index = None;
-    let mut selected_address = None;
+    let mut selected_source = None;
     let mut next_hop = None;
     let mut route_mtu = None;
     let mut multipath = None;
     for attribute in &reply.attributes {
         match attribute {
             RouteAttribute::Oif(index) => output_index = Some(*index),
-            RouteAttribute::PrefSource(address) => selected_address = route_address(address),
+            RouteAttribute::PrefSource(address) => selected_source = route_address(address),
             RouteAttribute::Gateway(address) => next_hop = route_address(address),
             RouteAttribute::Metrics(metrics) => {
                 route_mtu = metrics.iter().find_map(|metric| match metric {
@@ -84,28 +82,28 @@ pub(super) async fn query_route(
     }
     let output_index = output_index
         .or_else(|| interface_hint.as_ref().map(|interface| interface.index))
-        .ok_or_else(|| NativeRouteError::InvalidResponse {
+        .ok_or_else(|| SystemError::InvalidResponse {
             message: "Linux route response omitted its output interface".to_owned(),
         })?;
     let interfaces = query_interfaces(&handle).await?;
     let interface = interfaces
         .into_iter()
         .find(|interface| interface.id.index == output_index)
-        .ok_or_else(|| NativeRouteError::InterfaceNotFound {
+        .ok_or_else(|| SystemError::InterfaceNotFound {
             name: interface_hint
                 .as_ref()
                 .map_or_else(|| format!("index-{output_index}"), |hint| hint.name.clone()),
             index: output_index,
         })?;
     let selection_reason = route_selection_reason(&reply.header.kind, next_hop.is_some())
-        .ok_or(NativeRouteError::RouteNotFound { destination })?;
+        .ok_or(SystemError::RouteNotFound { destination })?;
     finish_route(
         destination,
         interface_hint.as_ref(),
         preferred_source,
         NativeRouteSnapshot {
             interface,
-            selected_address,
+            selected_source,
             next_hop: next_hop.filter(|address| !address.is_unspecified()),
             route_mtu,
             selection_reason,
@@ -113,24 +111,28 @@ pub(super) async fn query_route(
     )
 }
 
-fn route_selection_reason(kind: &RouteType, has_next_hop: bool) -> Option<RouteSelectionReason> {
+fn route_selection_reason(kind: &RouteType, has_next_hop: bool) -> Option<SelectionReason> {
     match kind {
-        RouteType::Local => Some(RouteSelectionReason::Local),
-        RouteType::Broadcast => Some(RouteSelectionReason::Broadcast),
+        RouteType::Local => Some(SelectionReason::Local),
+        RouteType::Broadcast => Some(SelectionReason::Broadcast),
         RouteType::Unicast | RouteType::Anycast => Some({
             if has_next_hop {
-                RouteSelectionReason::Gateway
+                SelectionReason::Gateway
             } else {
-                RouteSelectionReason::OnLink
+                SelectionReason::OnLink
             }
         }),
         _ => None,
     }
 }
 
-pub(super) async fn query_interfaces(
-    handle: &Handle,
-) -> Result<Vec<InterfaceInfo>, NativeRouteError> {
+pub(super) async fn query_interfaces(handle: &Handle) -> Result<Vec<InterfaceInfo>, SystemError> {
+    let mut interfaces = query_links(handle).await?;
+    query_addresses(handle, &mut interfaces).await?;
+    Ok(interfaces.into_values().collect())
+}
+
+async fn query_links(handle: &Handle) -> Result<BTreeMap<u32, InterfaceInfo>, SystemError> {
     let mut links = handle.link().get().execute();
     let mut interfaces = BTreeMap::new();
     while let Some(message) = links
@@ -155,7 +157,7 @@ pub(super) async fn query_interfaces(
                 _ => {}
             }
         }
-        let name = name.ok_or_else(|| NativeRouteError::InvalidResponse {
+        let name = name.ok_or_else(|| SystemError::InvalidResponse {
             message: format!("Linux link {} has no interface name", message.header.index),
         })?;
         let loopback = message.header.flags.contains(LinkFlags::Loopback)
@@ -180,7 +182,7 @@ pub(super) async fn query_interfaces(
                 },
                 mtu,
                 capability: if ethernet && mac_address.is_some() {
-                    Capability::Layer2And3
+                    Capability::Layer2AndLayer3
                 } else {
                     Capability::Layer3
                 },
@@ -192,7 +194,13 @@ pub(super) async fn query_interfaces(
             },
         );
     }
+    Ok(interfaces)
+}
 
+async fn query_addresses(
+    handle: &Handle,
+    interfaces: &mut BTreeMap<u32, InterfaceInfo>,
+) -> Result<(), SystemError> {
     let mut addresses = handle.address().get().execute();
     while let Some(message) = addresses
         .try_next()
@@ -228,7 +236,7 @@ pub(super) async fn query_interfaces(
             }
         }
     }
-    Ok(interfaces.into_values().collect())
+    Ok(())
 }
 
 #[expect(
@@ -283,15 +291,15 @@ mod tests {
     fn linux_route_type_preserves_broadcast_before_native_normalization() {
         assert_eq!(
             route_selection_reason(&RouteType::Broadcast, false),
-            Some(RouteSelectionReason::Broadcast)
+            Some(SelectionReason::Broadcast)
         );
         assert_eq!(
             route_selection_reason(&RouteType::Unicast, false),
-            Some(RouteSelectionReason::OnLink)
+            Some(SelectionReason::OnLink)
         );
         assert_eq!(
             route_selection_reason(&RouteType::Unicast, true),
-            Some(RouteSelectionReason::Gateway)
+            Some(SelectionReason::Gateway)
         );
     }
 }

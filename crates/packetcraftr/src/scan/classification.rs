@@ -7,41 +7,39 @@ use packetcraftr_core::{Packet, decode::DecodedPacket, registry::Registry};
 
 use crate::probe::Correlation;
 
-use super::model::{ScanClassification, ScanTransport};
+use super::model::{Classification, Transport};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ScanResponseClassification {
-    pub classification: ScanClassification,
+pub struct ResponseClassification {
+    pub classification: Classification,
     pub responder: IpAddr,
     pub reason: &'static str,
-    pub(super) correlation: Correlation,
 }
 
 /// Classifies a valid correlated response; corrupt, unrelated, or inconsistent
 /// responses return `None`.
-pub fn classify_scan_response(
+pub fn classify_response(
     registry: &Registry,
-    transport: ScanTransport,
+    transport: Transport,
     request: &Packet,
     response: &DecodedPacket,
-) -> Option<ScanResponseClassification> {
+) -> Option<ResponseClassification> {
     let observation =
         crate::probe::observe(registry, transport.probe_transport(), request, response)?;
     let classification = match observation.correlation {
-        Correlation::TcpReset | Correlation::PortUnreachable => ScanClassification::Closed,
+        Correlation::TcpReset | Correlation::PortUnreachable => Classification::Closed,
         Correlation::TcpSynAck | Correlation::UdpReply | Correlation::IcmpReply => {
-            ScanClassification::Open
+            Classification::Open
         }
-        Correlation::TcpOther => ScanClassification::Unknown,
+        Correlation::TcpOther => Classification::Unknown,
         Correlation::TimeExceeded | Correlation::AdministrativelyProhibited => {
-            ScanClassification::Filtered
+            Classification::Filtered
         }
-        Correlation::DestinationUnreachable => ScanClassification::Unreachable,
+        Correlation::DestinationUnreachable => Classification::Unreachable,
     };
-    Some(ScanResponseClassification {
+    Some(ResponseClassification {
         classification,
         responder: observation.responder,
         reason: observation.reason,
-        correlation: observation.correlation,
     })
 }

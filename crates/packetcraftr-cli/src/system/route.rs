@@ -2,50 +2,26 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::net::IpAddr;
-use std::time::Duration;
 
 use packetcraftr::{core, core::Packet, netio as net};
 
 use super::super::command_options::RouteArgs;
 use super::super::errors::CliError;
 use super::super::input::read_recipe;
-use super::interface::resolve_interface;
-use super::target::resolve_live_destination;
+use super::interface;
 
-pub(crate) struct PreparedRouteRequest {
+pub(crate) struct Prepared {
     pub(crate) packet: Packet,
     pub(crate) destination: Option<IpAddr>,
     pub(crate) options: net::route::Options,
     pub(crate) policy: packetcraftr::policy::Policy,
 }
 
-pub(crate) fn workflow_exchange_options(
-    send: packetcraftr::send::Options,
-    timeout: Duration,
-    max_template_packets: usize,
-    limits: net::capture::Limits,
-) -> Result<packetcraftr::exchange::Options, CliError> {
-    let mut options = packetcraftr::exchange::Options {
-        send,
-        timeout,
-        max_template_packets,
-        max_unsolicited: limits.max_frames,
-        max_responses: limits.max_frames,
-        max_capture_queue_frames: limits.max_frames,
-        max_captured_bytes: limits.max_bytes,
-        capture_overflow_policy: limits.overflow_policy,
-        decode: core::decode::DecodeOptions::default(),
-    };
-    options.decode.max_packet_size = limits.snap_length;
-    options.validate().map_err(CliError::classified)?;
-    Ok(options)
-}
-
-pub(crate) fn prepare_route_request(
+pub(crate) fn prepare_route(
     arguments: RouteArgs,
     policy: packetcraftr::policy::Policy,
     registry: &core::registry::Registry,
-) -> Result<PreparedRouteRequest, CliError> {
+) -> Result<Prepared, CliError> {
     let RouteArgs {
         recipe,
         destination,
@@ -57,9 +33,9 @@ pub(crate) fn prepare_route_request(
     policy
         .authorize_packet_destinations(&packet)
         .map_err(CliError::classified)?;
-    let destination = resolve_live_destination(destination, &packet, &policy)?;
-    let interface = resolve_interface(route.interface, &net::interface::SystemProvider)?;
-    Ok(PreparedRouteRequest {
+    let destination = resolve_destination(destination, &packet, &policy)?;
+    let interface = interface::resolve(route.interface, &net::interface::SystemProvider)?;
+    Ok(Prepared {
         packet,
         destination,
         options: net::route::Options {
@@ -69,4 +45,38 @@ pub(crate) fn prepare_route_request(
         },
         policy,
     })
+}
+
+fn resolve_destination(
+    destination: Option<String>,
+    packet: &Packet,
+    policy: &packetcraftr::policy::Policy,
+) -> Result<Option<IpAddr>, CliError> {
+    let Some(destination) = destination else {
+        return Ok(None);
+    };
+    let target = destination
+        .parse::<packetcraftr::target::Target>()
+        .map_err(CliError::classified)?;
+    let resolved = policy
+        .resolve_target(&target, &packetcraftr::target::SystemResolver)
+        .map_err(CliError::classified)?;
+    let ip_version = packet
+        .iter()
+        .find_map(|layer| match layer.protocol_id().as_str() {
+            "ipv4" => Some(packetcraftr::target::Family::Ipv4),
+            "ipv6" => Some(packetcraftr::target::Family::Ipv6),
+            _ => None,
+        });
+    match ip_version {
+        Some(version) => resolved
+            .address_for_family(version)
+            .map(Some)
+            .ok_or_else(|| {
+                CliError::classified(packetcraftr::target::Error::AddressFamilyUnavailable {
+                    family: version.label(),
+                })
+            }),
+        None => Ok(Some(resolved.selected_address())),
+    }
 }

@@ -5,12 +5,5 @@
 
 mod record;
 mod result;
-pub use crate::output::frame::{Captured as Frame, Timestamp};
-pub use record::{
-    DnsEdnsOptionOutput as EdnsOption, DnsEdnsOutput as Edns, DnsRecordData as RecordData,
-    DnsRecordOutput as Record, DnsRejectedRecordOutput as RejectedRecord, DnsSection as Section,
-};
-pub use result::{
-    DnsAttemptOutput as Attempt, DnsCommandResult as Result, DnsOutcome as AttemptStatus,
-    DnsOutcome as Outcome, DnsStreamCommandResult as Event, DnsUndecodedOutput as Undecoded,
-};
+pub use record::{Edns, EdnsOption, Record, RecordData, RejectedRecord, Section};
+pub use result::{Attempt, Event, Outcome, Result, Undecoded};

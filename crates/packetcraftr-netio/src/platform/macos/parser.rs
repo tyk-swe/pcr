@@ -10,7 +10,7 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
 };
 
-use crate::route::NativeRouteError;
+use crate::route::SystemError;
 
 pub(super) fn sockaddr_ip(bytes: &[u8]) -> Option<IpAddr> {
     // Darwin sockaddr stores `sa_family` after its leading length byte.
@@ -36,7 +36,7 @@ pub(super) fn sockaddr_ip(bytes: &[u8]) -> Option<IpAddr> {
 pub(super) fn parse_route_addresses(
     bytes: &[u8],
     mask: libc::c_int,
-) -> Result<[Option<IpAddr>; libc::RTAX_MAX as usize], NativeRouteError> {
+) -> Result<[Option<IpAddr>; libc::RTAX_MAX as usize], SystemError> {
     let mut output = [None; libc::RTAX_MAX as usize];
     let address_slots = output.len();
     let mut offset = 0;
@@ -45,13 +45,13 @@ pub(super) fn parse_route_addresses(
             continue;
         }
         let Some(&length_byte) = bytes.get(offset) else {
-            return Err(NativeRouteError::InvalidResponse {
+            return Err(SystemError::InvalidResponse {
                 message: "macOS route response truncated its sockaddr list".to_owned(),
             });
         };
         let length = usize::from(length_byte);
         if length < 2 {
-            return Err(NativeRouteError::InvalidResponse {
+            return Err(SystemError::InvalidResponse {
                 message: format!(
                     "macOS route response sockaddr index {index} is too short for sa_family: length={length}"
                 ),
@@ -59,12 +59,12 @@ pub(super) fn parse_route_addresses(
         }
         let stride = roundup(length);
         let Some(address_end) = offset.checked_add(length) else {
-            return Err(NativeRouteError::InvalidResponse {
+            return Err(SystemError::InvalidResponse {
                 message: "macOS route response sockaddr length overflowed".to_owned(),
             });
         };
         if address_end > bytes.len() {
-            return Err(NativeRouteError::InvalidResponse {
+            return Err(SystemError::InvalidResponse {
                 message: format!(
                     "macOS route response truncated sockaddr index {index}: offset={offset} length={length} bytes={}",
                     bytes.len()
@@ -78,7 +78,7 @@ pub(super) fn parse_route_addresses(
             // Darwin may omit the unused alignment trailer after the final sockaddr.
             _ if !has_later_address && address_end == bytes.len() => address_end,
             _ => {
-                return Err(NativeRouteError::InvalidResponse {
+                return Err(SystemError::InvalidResponse {
                     message: format!(
                         "macOS route response contained an invalid sockaddr at index {index}: offset={offset} length={length} stride={stride} bytes={}",
                         bytes.len()

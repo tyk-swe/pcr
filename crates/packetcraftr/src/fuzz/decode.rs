@@ -7,7 +7,7 @@ use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::{
     Packet,
     build::BuiltPacket,
-    decode::{DecodeOptions, DecodedPacket, Dissector},
+    decode::{DecodedPacket, Dissector, Options as DecodeOptions},
     diagnostic::Diagnostic,
     semantics::BuiltinProtocol,
 };

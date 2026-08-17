@@ -10,11 +10,11 @@ pub(super) const AFTER_LONG_HELP: &str = r#"Examples:
   packetcraftr interfaces
   packetcraftr --output json interfaces"#;
 
-pub(super) fn run(output: output::contract::Format) -> Result<(), CliError> {
+pub(super) fn run(format: output::contract::Format) -> Result<(), CliError> {
     let interfaces = net::interface::Provider::interfaces(&net::interface::SystemProvider)
         .map_err(CliError::classified)?;
     let result = output::interfaces::Result::new(interfaces);
-    match output {
+    match format {
         output::contract::Format::Text => {
             for interface in result.interfaces {
                 write_stdout_line(format_args!(

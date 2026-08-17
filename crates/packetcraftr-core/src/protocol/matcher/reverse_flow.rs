@@ -10,8 +10,8 @@ use crate::{
 };
 
 use super::{
-    QuotedProbeTransport, quoted_icmp_error_kind, response_source, reversed_protocol_layers,
-    sctp::sctp_initiate_tag, unsigned_field,
+    QuotedProbeTransport, ReversedProtocolLayers, quoted_icmp_error_kind, response_source,
+    reversed_protocol_layers, sctp::sctp_initiate_tag, unsigned_field,
 };
 
 #[derive(Clone, Debug)]
@@ -50,95 +50,8 @@ impl ResponseMatcher for ReverseFlowMatcher {
             return MatchResult::no_match();
         };
         match self.protocol {
-            BuiltinProtocol::Tcp => {
-                for layers in &layers {
-                    let request_layer_index = layers.request_index;
-                    let request_layer = layers.request;
-                    let response_layer = layers.response;
-                    let Some(request_flags) = unsigned_field::<u16>(request_layer, "flags") else {
-                        return MatchResult::no_match();
-                    };
-                    let Some(request_sequence) = unsigned_field::<u32>(request_layer, "sequence")
-                    else {
-                        return MatchResult::no_match();
-                    };
-                    let Some(response_flags) = unsigned_field::<u16>(response_layer, "flags")
-                    else {
-                        return MatchResult::no_match();
-                    };
-                    let Some(request_payload_length) =
-                        tcp_payload_length(request, request_layer_index)
-                    else {
-                        return MatchResult::no_match();
-                    };
-                    let expected_acknowledgment = request_sequence
-                        .wrapping_add(request_payload_length)
-                        .wrapping_add(u32::from(request_flags & Tcp::SYN != 0))
-                        .wrapping_add(u32::from(request_flags & Tcp::FIN != 0));
-                    let has_ack = response_flags & Tcp::ACK != 0;
-                    let has_rst = response_flags & Tcp::RST != 0;
-                    if has_ack {
-                        let Some(response_acknowledgment) =
-                            unsigned_field::<u32>(response_layer, "acknowledgment")
-                        else {
-                            return MatchResult::no_match();
-                        };
-                        if response_acknowledgment != expected_acknowledgment {
-                            return MatchResult::no_match();
-                        }
-                    } else if has_rst && request_flags & Tcp::ACK != 0 {
-                        let Some(request_acknowledgment) =
-                            unsigned_field::<u32>(request_layer, "acknowledgment")
-                        else {
-                            return MatchResult::no_match();
-                        };
-                        let Some(response_sequence) =
-                            unsigned_field::<u32>(response_layer, "sequence")
-                        else {
-                            return MatchResult::no_match();
-                        };
-                        if response_sequence != request_acknowledgment {
-                            return MatchResult::no_match();
-                        }
-                    } else {
-                        return MatchResult::no_match();
-                    }
-                    if has_rst && response_flags & Tcp::SYN != 0 {
-                        return MatchResult::no_match();
-                    }
-                }
-                MatchResult::matched(200, "reverse TCP tuples and sequence state")
-            }
-            BuiltinProtocol::Sctp => {
-                for layers in &layers {
-                    let request_layer_index = layers.request_index;
-                    let request_layer = layers.request;
-                    let response_layer_index = layers.response_index;
-                    let response_layer = layers.response;
-                    if request_layer
-                        .field("verification_tag")
-                        .and_then(|value| value.as_u64())
-                        != Some(0)
-                    {
-                        return MatchResult::no_match();
-                    }
-                    let Some((request_initiate_tag, _)) =
-                        sctp_initiate_tag(request, request_layer_index, 1)
-                    else {
-                        return MatchResult::no_match();
-                    };
-                    if request_initiate_tag == 0
-                        || sctp_initiate_tag(response, response_layer_index, 2).is_none()
-                        || response_layer
-                            .field("verification_tag")
-                            .and_then(|value| value.as_u64())
-                            != Some(u64::from(request_initiate_tag))
-                    {
-                        return MatchResult::no_match();
-                    }
-                }
-                MatchResult::matched(200, "reverse SCTP tuples and INIT verification tags")
-            }
+            BuiltinProtocol::Tcp => match_tcp(request, &layers),
+            BuiltinProtocol::Sctp => match_sctp(request, response, &layers),
             _ => MatchResult::matched(
                 100,
                 format!("all reverse {} tuples", self.protocol.as_str()),
@@ -149,6 +62,91 @@ impl ResponseMatcher for ReverseFlowMatcher {
     fn responder(&self, _request: &Packet, response: &Packet) -> Option<std::net::IpAddr> {
         response_source(response, self.protocol)
     }
+}
+
+fn match_tcp(request: &Packet, layers: &[ReversedProtocolLayers<'_, '_>]) -> MatchResult {
+    for layers in layers {
+        let request_layer = layers.request;
+        let response_layer = layers.response;
+        let Some(request_flags) = unsigned_field::<u16>(request_layer, "flags") else {
+            return MatchResult::no_match();
+        };
+        let Some(request_sequence) = unsigned_field::<u32>(request_layer, "sequence") else {
+            return MatchResult::no_match();
+        };
+        let Some(response_flags) = unsigned_field::<u16>(response_layer, "flags") else {
+            return MatchResult::no_match();
+        };
+        let Some(request_payload_length) = tcp_payload_length(request, layers.request_index) else {
+            return MatchResult::no_match();
+        };
+        let expected_acknowledgment = request_sequence
+            .wrapping_add(request_payload_length)
+            .wrapping_add(u32::from(request_flags & Tcp::SYN != 0))
+            .wrapping_add(u32::from(request_flags & Tcp::FIN != 0));
+        let has_ack = response_flags & Tcp::ACK != 0;
+        let has_rst = response_flags & Tcp::RST != 0;
+        if has_ack {
+            let Some(response_acknowledgment) =
+                unsigned_field::<u32>(response_layer, "acknowledgment")
+            else {
+                return MatchResult::no_match();
+            };
+            if response_acknowledgment != expected_acknowledgment {
+                return MatchResult::no_match();
+            }
+        } else if has_rst && request_flags & Tcp::ACK != 0 {
+            let Some(request_acknowledgment) =
+                unsigned_field::<u32>(request_layer, "acknowledgment")
+            else {
+                return MatchResult::no_match();
+            };
+            let Some(response_sequence) = unsigned_field::<u32>(response_layer, "sequence") else {
+                return MatchResult::no_match();
+            };
+            if response_sequence != request_acknowledgment {
+                return MatchResult::no_match();
+            }
+        } else {
+            return MatchResult::no_match();
+        }
+        if has_rst && response_flags & Tcp::SYN != 0 {
+            return MatchResult::no_match();
+        }
+    }
+    MatchResult::matched(200, "reverse TCP tuples and sequence state")
+}
+
+fn match_sctp(
+    request: &Packet,
+    response: &Packet,
+    layers: &[ReversedProtocolLayers<'_, '_>],
+) -> MatchResult {
+    for layers in layers {
+        if layers
+            .request
+            .field("verification_tag")
+            .and_then(|value| value.as_u64())
+            != Some(0)
+        {
+            return MatchResult::no_match();
+        }
+        let Some((request_initiate_tag, _)) = sctp_initiate_tag(request, layers.request_index, 1)
+        else {
+            return MatchResult::no_match();
+        };
+        if request_initiate_tag == 0
+            || sctp_initiate_tag(response, layers.response_index, 2).is_none()
+            || layers
+                .response
+                .field("verification_tag")
+                .and_then(|value| value.as_u64())
+                != Some(u64::from(request_initiate_tag))
+        {
+            return MatchResult::no_match();
+        }
+    }
+    MatchResult::matched(200, "reverse SCTP tuples and INIT verification tags")
 }
 
 fn tcp_payload_length(packet: &Packet, tcp_layer_index: usize) -> Option<u32> {

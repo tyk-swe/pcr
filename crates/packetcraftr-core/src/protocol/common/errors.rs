@@ -4,8 +4,8 @@
 //! Shared codec error and protocol-identifier constructors.
 
 use crate::{
-    codec::CodecError,
-    layer::{FieldError, Layer, LayerSchema, MalformedLayer, ProtocolId},
+    codec::Error as CodecError,
+    layer::{FieldError, Id as ProtocolId, Layer, Malformed, Schema as LayerSchema},
 };
 
 pub(crate) fn protocol(name: &str) -> ProtocolId {
@@ -15,7 +15,7 @@ pub(crate) fn protocol(name: &str) -> ProtocolId {
 pub(crate) fn binding_protocol(layer: &dyn Layer) -> &ProtocolId {
     layer
         .as_any()
-        .downcast_ref::<MalformedLayer>()
+        .downcast_ref::<Malformed>()
         .and_then(|layer| layer.intended_protocol.as_ref())
         .unwrap_or_else(|| layer.protocol_id())
 }

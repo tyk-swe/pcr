@@ -3,7 +3,7 @@
 
 use std::io::{self, Read, Write};
 
-use crate::frame::{Frame, FrameError};
+use crate::frame::{Error as FrameError, Frame};
 
 use super::super::error::Error;
 use super::super::model::{Endianness, Format, TimestampResolution};

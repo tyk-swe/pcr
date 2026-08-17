@@ -10,13 +10,13 @@ use crate::diagnostic::Diagnostic;
 use crate::layout::PacketLayout;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DecodeOptions {
+pub struct Options {
     pub max_layers: usize,
     pub max_packet_size: usize,
     pub verify_checksums: bool,
 }
 
-impl Default for DecodeOptions {
+impl Default for Options {
     fn default() -> Self {
         Self {
             max_layers: DEFAULT_MAX_LAYERS,

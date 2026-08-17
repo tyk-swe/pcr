@@ -5,19 +5,19 @@ use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
 use std::time::SystemTime;
 
-pub(super) fn generated_dns_transaction_id() -> u16 {
-    let bytes = generated_dns_entropy().to_le_bytes();
+pub(super) fn transaction_id() -> u16 {
+    let bytes = entropy().to_le_bytes();
     u16::from_le_bytes([bytes[0], bytes[1]])
 }
 
-pub(super) fn generated_dns_source_port() -> u16 {
+pub(super) fn source_port() -> u16 {
     const WIDTH: u16 = u16::MAX - packetcraftr::dns::DNS_EPHEMERAL_SOURCE_PORT_BASE + 1;
-    let offset = u16::try_from(generated_dns_entropy() % u64::from(WIDTH))
+    let offset = u16::try_from(entropy() % u64::from(WIDTH))
         .expect("ephemeral source-port offset is bounded to u16");
     packetcraftr::dns::DNS_EPHEMERAL_SOURCE_PORT_BASE + offset
 }
 
-fn generated_dns_entropy() -> u64 {
+fn entropy() -> u64 {
     let time = SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()

@@ -23,7 +23,7 @@ pub struct Batch<P> {
 
 /// Common executor evidence returned by homogeneous probe batches.
 #[derive(Clone, Debug)]
-pub struct BatchExecution {
+pub struct Execution {
     pub(crate) permit: crate::evidence::ExecutionPermit,
     pub(crate) sent: Vec<SentPacket>,
     pub(crate) responses: Vec<crate::exchange::Response>,
@@ -33,7 +33,7 @@ pub struct BatchExecution {
     pub(crate) stats: Stats,
 }
 
-impl BatchExecution {
+impl Execution {
     pub(crate) fn from_exchange(
         permit: crate::evidence::ExecutionPermit,
         result: crate::exchange::Result,
@@ -68,7 +68,7 @@ pub(crate) trait ProbeExecution {
     fn stats(&self) -> &Stats;
 }
 
-impl ProbeExecution for BatchExecution {
+impl ProbeExecution for Execution {
     fn stats(&self) -> &Stats {
         &self.stats
     }
@@ -164,7 +164,7 @@ where
         lifecycle.validate(batch, &execution)?;
         check_deadline(deadline, L::duration_error)?;
         stats
-            .checked_add(execution.stats())
+            .checked_add_assign(execution.stats())
             .ok_or_else(|| L::statistics_error(sequence))?;
         let output = lifecycle.process(batch, execution, deadline)?;
         let stop = L::should_stop(&output);

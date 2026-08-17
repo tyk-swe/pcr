@@ -1,11 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::super::registry::ProtocolRegistry;
+use super::super::registry::Registry;
 use super::ast::Op;
-use super::error::FilterError;
+use super::error::Error;
 use super::eval::{self, Context};
-use super::parser::{self, FilterOptions, Requirements};
+use super::parser::{self, Options, Requirements};
 
 /// A compiled display filter.
 ///
@@ -20,11 +20,7 @@ pub struct Filter {
 
 impl Filter {
     /// Compiles a display filter against a protocol registry.
-    pub fn compile(
-        source: &str,
-        registry: &ProtocolRegistry,
-        options: FilterOptions,
-    ) -> Result<Self, FilterError> {
+    pub fn compile(source: &str, registry: &Registry, options: Options) -> Result<Self, Error> {
         let compiled = parser::compile(source, registry, &options)?;
         Ok(Self {
             program: compiled.program,
@@ -42,9 +38,9 @@ impl Filter {
     }
 
     /// Whether one packet satisfies this filter.
-    pub fn matches(&self, context: &Context<'_>) -> Result<bool, FilterError> {
+    pub fn matches(&self, context: &Context<'_>) -> Result<bool, Error> {
         if self.requirements.timestamp && context.decoded.frame.timestamp.is_none() {
-            return Err(FilterError::TimestampUnavailable);
+            return Err(Error::TimestampUnavailable);
         }
         Ok(eval::evaluate(&self.program, context))
     }

@@ -12,7 +12,7 @@ use packetcraftr_netio::capture::{DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_Q
 use crate::target::Family;
 use crate::target::Target;
 
-use super::super::error::ScanError;
+use super::super::error::Error;
 use super::super::{
     DEFAULT_MAX_SCAN_PORTS, DEFAULT_MAX_UNDECODED_SCAN_FRAMES, DEFAULT_SCAN_BATCH_SIZE,
     MAX_SCAN_ATTEMPTS, MAX_SCAN_DURATION, MAX_SCAN_PROBES, MAX_SCAN_RATE,
@@ -20,13 +20,13 @@ use super::super::{
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ScanTransport {
+pub enum Transport {
     Tcp,
     Udp,
     Icmp,
 }
 
-impl ScanTransport {
+impl Transport {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Tcp => "tcp",
@@ -44,14 +44,14 @@ impl ScanTransport {
     }
 }
 
-impl fmt::Display for ScanTransport {
+impl fmt::Display for Transport {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(self.as_str())
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ScanLimits {
+pub struct Limits {
     pub max_ports: usize,
     pub max_probes: usize,
     pub batch_size: usize,
@@ -61,7 +61,7 @@ pub struct ScanLimits {
     pub max_undecoded: usize,
 }
 
-impl Default for ScanLimits {
+impl Default for Limits {
     fn default() -> Self {
         Self {
             max_ports: DEFAULT_MAX_SCAN_PORTS,
@@ -75,8 +75,8 @@ impl Default for ScanLimits {
     }
 }
 
-impl ScanLimits {
-    pub fn validate(self) -> std::result::Result<Self, ScanError> {
+impl Limits {
+    pub fn validate(self) -> std::result::Result<Self, Error> {
         for (field, value, maximum) in [
             ("max_ports", self.max_ports, usize::from(u16::MAX) + 1),
             ("max_probes", self.max_probes, MAX_SCAN_PROBES),
@@ -93,7 +93,7 @@ impl ScanLimits {
             ),
         ] {
             if value == 0 || value > maximum {
-                return Err(ScanError::InvalidLimit {
+                return Err(Error::InvalidLimit {
                     field,
                     value: u64::try_from(value).unwrap_or(u64::MAX),
                     reason: format!("must be within 1..={maximum}"),
@@ -101,14 +101,14 @@ impl ScanLimits {
             }
         }
         if self.batch_size > self.max_probes {
-            return Err(ScanError::InvalidLimit {
+            return Err(Error::InvalidLimit {
                 field: "batch_size",
                 value: u64::try_from(self.batch_size).unwrap_or(u64::MAX),
                 reason: "cannot exceed max_probes".to_owned(),
             });
         }
         if self.batch_size > self.max_evidence_frames {
-            return Err(ScanError::InvalidLimit {
+            return Err(Error::InvalidLimit {
                 field: "batch_size",
                 value: u64::try_from(self.batch_size).unwrap_or(u64::MAX),
                 reason:
@@ -117,14 +117,14 @@ impl ScanLimits {
             });
         }
         if self.max_undecoded > self.max_evidence_frames {
-            return Err(ScanError::InvalidLimit {
+            return Err(Error::InvalidLimit {
                 field: "max_undecoded",
                 value: u64::try_from(self.max_undecoded).unwrap_or(u64::MAX),
                 reason: "cannot exceed max_evidence_frames".to_owned(),
             });
         }
         if self.max_duration.is_zero() || self.max_duration > MAX_SCAN_DURATION {
-            return Err(ScanError::InvalidDuration {
+            return Err(Error::InvalidDuration {
                 value: self.max_duration,
                 maximum: MAX_SCAN_DURATION,
             });
@@ -134,9 +134,9 @@ impl ScanLimits {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ScanRequest {
+pub struct Request {
     pub target: Target,
-    pub transport: ScanTransport,
+    pub transport: Transport,
     pub address_family: Family,
     /// TCP or UDP destination ports. ICMP scans require this to be empty and
     /// produce one portless endpoint per selected address.
@@ -146,21 +146,21 @@ pub struct ScanRequest {
     /// Maximum average probe rate. Batches are deliberate bursts and the
     /// clock spaces their start times by the preceding batch's probe count.
     pub probes_per_second: Option<u32>,
-    pub limits: ScanLimits,
+    pub limits: Limits,
 }
 
-impl ScanRequest {
-    pub(in crate::scan) fn validate(&self) -> std::result::Result<Vec<u16>, ScanError> {
+impl Request {
+    pub(in crate::scan) fn validate(&self) -> std::result::Result<Vec<u16>, Error> {
         self.limits.validate()?;
         if !(1..=MAX_SCAN_ATTEMPTS).contains(&self.attempts) {
-            return Err(ScanError::InvalidLimit {
+            return Err(Error::InvalidLimit {
                 field: "attempts",
                 value: u64::from(self.attempts),
                 reason: format!("must be within 1..={MAX_SCAN_ATTEMPTS}"),
             });
         }
         if self.timeout.is_zero() || self.timeout > packetcraftr_netio::capture::MAX_TIMEOUT {
-            return Err(ScanError::InvalidTimeout {
+            return Err(Error::InvalidTimeout {
                 value: self.timeout,
                 maximum: packetcraftr_netio::capture::MAX_TIMEOUT,
             });
@@ -168,20 +168,20 @@ impl ScanRequest {
         if let Some(rate) = self.probes_per_second
             && (rate == 0 || rate > MAX_SCAN_RATE)
         {
-            return Err(ScanError::InvalidLimit {
+            return Err(Error::InvalidLimit {
                 field: "probes_per_second",
                 value: u64::from(rate),
                 reason: format!("must be within 1..={MAX_SCAN_RATE}"),
             });
         }
         match self.transport {
-            ScanTransport::Tcp | ScanTransport::Udp if self.ports.is_empty() => {
-                return Err(ScanError::InvalidPorts {
+            Transport::Tcp | Transport::Udp if self.ports.is_empty() => {
+                return Err(Error::InvalidPorts {
                     message: "TCP and UDP scans require at least one destination port".to_owned(),
                 });
             }
-            ScanTransport::Icmp if !self.ports.is_empty() => {
-                return Err(ScanError::InvalidPorts {
+            Transport::Icmp if !self.ports.is_empty() => {
+                return Err(Error::InvalidPorts {
                     message: "ICMP scans are portless and do not accept destination ports"
                         .to_owned(),
                 });
@@ -196,7 +196,7 @@ impl ScanRequest {
             }
         }
         if ports.len() > self.limits.max_ports {
-            return Err(ScanError::InvalidLimit {
+            return Err(Error::InvalidLimit {
                 field: "ports",
                 value: u64::try_from(ports.len()).unwrap_or(u64::MAX),
                 reason: format!("exceeds max_ports={}", self.limits.max_ports),

@@ -7,22 +7,21 @@ use serde::{Deserialize, Serialize};
 
 use packetcraftr_netio::capture::{DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES};
 
-use crate::scan::MAX_SCAN_RATE;
 use crate::target::Family;
 use crate::target::Target;
 
-use super::super::error::DnsError;
+use super::super::error::Error;
 use super::super::wire::canonical_query_name;
 use super::super::{
     DEFAULT_MAX_DNS_NAME_POINTERS, DEFAULT_MAX_DNS_RECORDS, DEFAULT_MAX_DNS_TXT_BYTES,
     DEFAULT_MAX_DNS_TXT_STRINGS, DEFAULT_MAX_REJECTED_DNS_RECORDS,
     DEFAULT_MAX_UNDECODED_DNS_FRAMES, MAX_DNS_ATTEMPTS, MAX_DNS_DURATION, MAX_DNS_MESSAGE_BYTES,
-    MAX_DNS_NAME_POINTERS, MAX_DNS_RECORDS,
+    MAX_DNS_NAME_POINTERS, MAX_DNS_RATE, MAX_DNS_RECORDS,
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum DnsQueryType {
+pub enum QueryType {
     #[default]
     A,
     Aaaa,
@@ -36,7 +35,7 @@ pub enum DnsQueryType {
     Any,
 }
 
-impl DnsQueryType {
+impl QueryType {
     pub const fn code(self) -> u16 {
         match self {
             Self::A => 1,
@@ -68,14 +67,14 @@ impl DnsQueryType {
     }
 }
 
-impl fmt::Display for DnsQueryType {
+impl fmt::Display for QueryType {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(self.as_str())
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DnsLimits {
+pub struct Limits {
     pub max_message_bytes: usize,
     pub max_records: usize,
     pub max_name_pointers: usize,
@@ -88,7 +87,7 @@ pub struct DnsLimits {
     pub max_duration: Duration,
 }
 
-impl Default for DnsLimits {
+impl Default for Limits {
     fn default() -> Self {
         Self {
             max_message_bytes: MAX_DNS_MESSAGE_BYTES,
@@ -105,8 +104,8 @@ impl Default for DnsLimits {
     }
 }
 
-impl DnsLimits {
-    pub fn validate(self) -> std::result::Result<Self, DnsError> {
+impl Limits {
+    pub fn validate(self) -> std::result::Result<Self, Error> {
         for (field, value, maximum) in [
             (
                 "max_message_bytes",
@@ -133,7 +132,7 @@ impl DnsLimits {
             ),
         ] {
             if value == 0 || value > maximum {
-                return Err(DnsError::InvalidLimit {
+                return Err(Error::InvalidLimit {
                     field,
                     value: u64::try_from(value).unwrap_or(u64::MAX),
                     reason: format!("must be within 1..={maximum}"),
@@ -141,21 +140,21 @@ impl DnsLimits {
             }
         }
         if self.max_rejected_records > self.max_records {
-            return Err(DnsError::InvalidLimit {
+            return Err(Error::InvalidLimit {
                 field: "max_rejected_records",
                 value: u64::try_from(self.max_rejected_records).unwrap_or(u64::MAX),
                 reason: "cannot exceed max_records".to_owned(),
             });
         }
         if self.max_undecoded > self.max_evidence_frames {
-            return Err(DnsError::InvalidLimit {
+            return Err(Error::InvalidLimit {
                 field: "max_undecoded",
                 value: u64::try_from(self.max_undecoded).unwrap_or(u64::MAX),
                 reason: "cannot exceed max_evidence_frames".to_owned(),
             });
         }
         if self.max_duration.is_zero() || self.max_duration > MAX_DNS_DURATION {
-            return Err(DnsError::InvalidDuration {
+            return Err(Error::InvalidDuration {
                 value: self.max_duration,
                 maximum: MAX_DNS_DURATION,
             });
@@ -165,52 +164,52 @@ impl DnsLimits {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DnsRequest {
+pub struct Request {
     pub server: Target,
     pub address_family: Family,
     pub server_port: u16,
     pub source_port: u16,
     pub query_name: String,
-    pub query_type: DnsQueryType,
+    pub query_type: QueryType,
     pub transaction_id: u16,
     pub recursion_desired: bool,
     pub attempts: u32,
     pub timeout: Duration,
     pub queries_per_second: Option<u32>,
-    pub limits: DnsLimits,
+    pub limits: Limits,
 }
 
-impl DnsRequest {
-    pub fn validate(&self) -> std::result::Result<String, DnsError> {
+impl Request {
+    pub fn validate(&self) -> std::result::Result<String, Error> {
         self.limits.validate()?;
         if self.server_port == 0 {
-            return Err(DnsError::InvalidPort);
+            return Err(Error::InvalidPort);
         }
         if self.source_port == 0 {
-            return Err(DnsError::InvalidSourcePort);
+            return Err(Error::InvalidSourcePort);
         }
         if !(1..=MAX_DNS_ATTEMPTS).contains(&self.attempts) {
-            return Err(DnsError::InvalidLimit {
+            return Err(Error::InvalidLimit {
                 field: "attempts",
                 value: u64::from(self.attempts),
                 reason: format!("must be within 1..={MAX_DNS_ATTEMPTS}"),
             });
         }
         if self.timeout.is_zero() || self.timeout > packetcraftr_netio::capture::MAX_TIMEOUT {
-            return Err(DnsError::InvalidTimeout {
+            return Err(Error::InvalidTimeout {
                 value: self.timeout,
                 maximum: packetcraftr_netio::capture::MAX_TIMEOUT,
             });
         }
         if let Some(rate) = self.queries_per_second
-            && (rate == 0 || rate > MAX_SCAN_RATE)
+            && (rate == 0 || rate > MAX_DNS_RATE)
         {
-            return Err(DnsError::InvalidLimit {
+            return Err(Error::InvalidLimit {
                 field: "queries_per_second",
                 value: u64::from(rate),
-                reason: format!("must be within 1..={MAX_SCAN_RATE}"),
+                reason: format!("must be within 1..={MAX_DNS_RATE}"),
             });
         }
-        canonical_query_name(&self.query_name).map_err(DnsError::Query)
+        canonical_query_name(&self.query_name).map_err(Error::Query)
     }
 }

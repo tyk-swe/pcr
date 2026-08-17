@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::layer::ProtocolId;
+use crate::layer::Id as ProtocolId;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Discriminator(pub u64);
@@ -9,7 +9,7 @@ pub struct Discriminator(pub u64);
 /// How one display-filter path resolves onto reflective layer fields.
 ///
 /// Canonical `<protocol>.<field>` paths need no binding: the filter compiler
-/// resolves them directly against [`crate::registry::ProtocolRegistry::schema`]. Bindings exist
+/// resolves them directly against [`crate::registry::Registry::schema`]. Bindings exist
 /// so a protocol can additionally publish the conventional spellings operators
 /// already type, and so a packed field can be addressed one flag at a time.
 #[derive(Clone, Debug, PartialEq, Eq)]

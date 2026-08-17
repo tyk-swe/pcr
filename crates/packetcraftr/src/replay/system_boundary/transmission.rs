@@ -24,7 +24,7 @@ use packetcraftr_netio::{
     },
 };
 
-use super::super::model::{ReplayTransmission, ReplayTransmitter};
+use super::super::model::{Transmission, Transmitter};
 use super::super::wire::{map_replay_route_error, replay_network_envelope};
 
 /// Production replay transmitter backed by the system interface, route, and
@@ -82,11 +82,11 @@ impl SystemTransmitter {
         let supported = match mode {
             LinkMode::Layer2 => matches!(
                 selected.capability,
-                LinkCapability::Layer2 | LinkCapability::Layer2And3
+                LinkCapability::Layer2 | LinkCapability::Layer2AndLayer3
             ),
             LinkMode::Layer3 => matches!(
                 selected.capability,
-                LinkCapability::Layer3 | LinkCapability::Layer2And3
+                LinkCapability::Layer3 | LinkCapability::Layer2AndLayer3
             ),
             LinkMode::Auto => false,
         };
@@ -118,10 +118,10 @@ impl SystemTransmitter {
     ) -> Result<MaterializedRoute, LiveIoError> {
         let plan = match mode {
             LinkMode::Layer2 => PlannedRoute {
-                route: RouteDecision {
+                decision: RouteDecision {
                     interface: interface.id.clone(),
                     source_mac: interface.mac_address,
-                    selected_address: interface.addresses.first().map(|value| value.address),
+                    selected_source: interface.addresses.first().map(|value| value.address),
                     preferred_source: None,
                     next_hop: None,
                     selection_reason: RouteSelectionReason::InterfaceOnly,
@@ -165,7 +165,7 @@ impl SystemTransmitter {
                 }
                 if !matches!(
                     route.capability,
-                    LinkCapability::Layer3 | LinkCapability::Layer2And3
+                    LinkCapability::Layer3 | LinkCapability::Layer2AndLayer3
                 ) {
                     return Err(LiveIoError::Unsupported {
                         message: format!(
@@ -176,7 +176,7 @@ impl SystemTransmitter {
                 }
                 let source_mac = route.source_mac;
                 PlannedRoute {
-                    route,
+                    decision: route,
                     mode,
                     lookup_destination: Some(network.destination),
                     final_destination: Some(network.destination),
@@ -211,7 +211,7 @@ impl Default for SystemTransmitter {
     }
 }
 
-impl ReplayTransmitter for SystemTransmitter {
+impl Transmitter for SystemTransmitter {
     fn validate_interface(
         &mut self,
         interface: &InterfaceId,
@@ -226,7 +226,7 @@ impl ReplayTransmitter for SystemTransmitter {
         interface: &InterfaceId,
         mode: LinkMode,
         frame: &Frame,
-    ) -> Result<ReplayTransmission, LiveIoError> {
+    ) -> Result<Transmission, LiveIoError> {
         let selected = self
             .validated_interface
             .as_ref()
@@ -240,7 +240,7 @@ impl ReplayTransmitter for SystemTransmitter {
         let report = self
             .packet_io
             .send(TransmissionFrame::try_new(frame.bytes(), &route)?)?;
-        Ok(ReplayTransmission {
+        Ok(Transmission {
             interface: selected.id,
             report,
         })

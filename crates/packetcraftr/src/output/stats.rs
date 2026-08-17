@@ -9,12 +9,12 @@ use std::time::Duration;
 use serde::Serialize;
 
 use packetcraftr_core::analysis::stats::{
-    ConversationStat, EndpointStat, IoBucketStat, PortStat, ProtocolStat, StatsReport,
+    ConversationStat, EndpointStat, IoBucketStat, PortStat, ProtocolStat, Report as StatsReport,
     TransportKind,
 };
 
 use super::contract::Error;
-pub use super::frame::Timestamp;
+use super::frame::Timestamp;
 
 /// Which statistics table a result carries.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]

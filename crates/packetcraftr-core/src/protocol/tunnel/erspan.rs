@@ -7,12 +7,12 @@ use bytes::Bytes;
 
 use crate::{
     codec::{
-        CodecError, DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext,
+        DecodedLayerValue, EncodedLayer, Error as CodecError, LayerCodec, LayerDecodeContext,
         LayerEncodeContext,
     },
     diagnostic::Diagnostic,
     field::FieldValue,
-    layer::{Layer, ProtocolId, reflect_get, reflect_set_bounded, reflective_layer},
+    layer::{Id as ProtocolId, Layer, reflect_get, reflect_set_bounded, reflective_layer},
     registry::Discriminator,
 };
 
@@ -122,126 +122,8 @@ impl LayerCodec for ErspanCodec {
             .as_any()
             .downcast_ref::<Erspan>()
             .ok_or_else(|| wrong_layer("erspan", layer))?;
-        let header_len = match layer.version {
-            1 => ERSPAN_II_LEN,
-            2 => {
-                let subheader_len = layer
-                    .type3
-                    .as_ref()
-                    .and_then(|type3| type3.subheader.as_ref())
-                    .map_or(0, Bytes::len);
-                ERSPAN_III_LEN + subheader_len
-            }
-            other => {
-                return Err(invalid(
-                    "erspan",
-                    format!("version {other} is not a known ERSPAN header type"),
-                ));
-            }
-        };
-        ensure_encode_budget("erspan", header_len, context)?;
-        if layer.vlan > 0xfff
-            || layer.cos > 7
-            || layer.encapsulation > 3
-            || layer.session_id > 0x3ff
-        {
-            return Err(invalid("erspan", "field exceeds its wire range"));
-        }
-
-        let mut diagnostics = Vec::new();
-        if (layer.version == 2) != layer.type3.is_some() {
-            return Err(invalid(
-                "erspan",
-                "Type III fields are present exactly when the version is 2",
-            ));
-        }
-        if let Some(type3) = &layer.type3 {
-            match (&type3.subheader, type3.flags & SUBHEADER_FLAG != 0) {
-                (Some(subheader), true) if subheader.len() != SUBHEADER_LEN => {
-                    return Err(invalid(
-                        "erspan",
-                        format!("the optional subheader is exactly {SUBHEADER_LEN} bytes"),
-                    ));
-                }
-                (Some(_), false) => {
-                    return Err(invalid(
-                        "erspan",
-                        "a subheader requires the flag word's O bit",
-                    ));
-                }
-                (None, true) => {
-                    return Err(invalid(
-                        "erspan",
-                        "the flag word's O bit requires the 8-byte subheader",
-                    ));
-                }
-                _ => {}
-            }
-        }
-        if layer.version == 2 && layer.index_word != 0 {
-            strict_or_diagnostic(
-                "erspan",
-                "build.erspan_index",
-                "index_word",
-                "the index word belongs to Type II headers only",
-                context,
-                &mut diagnostics,
-            )?;
-        }
-        // The GRE protocol type names the header type; a build whose parent
-        // names the other type would not dissect back into this layer.
-        let expected_protocol_type = if layer.version == 1 {
-            TYPE_II_PROTOCOL
-        } else {
-            TYPE_III_PROTOCOL
-        };
-        let parent_protocol_type = context
-            .index
-            .checked_sub(1)
-            .and_then(|index| context.packet.layer(index))
-            .and_then(|parent| parent.field("protocol_type"));
-        let protocol_type_disagrees = match &parent_protocol_type {
-            Some(FieldValue::Unsigned(value @ (TYPE_II_PROTOCOL | TYPE_III_PROTOCOL))) => {
-                *value != expected_protocol_type
-            }
-            // Auto reflects as text and materializes the preferred Type II
-            // protocol type, so Type III needs an explicit 0x22eb.
-            Some(FieldValue::Text(_)) => layer.version != 1,
-            _ => false,
-        };
-        if protocol_type_disagrees {
-            strict_or_diagnostic(
-                "erspan",
-                "build.erspan_type",
-                "version",
-                format!(
-                    "version {} requires the enclosing GRE protocol type 0x{expected_protocol_type:04x}",
-                    layer.version
-                ),
-                context,
-                &mut diagnostics,
-            )?;
-        }
-        // Type II encapsulation prescribes the GRE sequence number; without
-        // it the header is one the receiving session would discard.
-        if layer.version == 1
-            && let Some(parent) = context
-                .index
-                .checked_sub(1)
-                .and_then(|index| context.packet.layer(index))
-            && parent.protocol_id().as_str() == "gre"
-            && parent.field("sequence").is_none()
-        {
-            strict_or_diagnostic(
-                "erspan",
-                "build.erspan_sequence",
-                "version",
-                "Type II encapsulation requires the GRE sequence field",
-                context,
-                &mut diagnostics,
-            )?;
-        }
-        validate_raw_child_discriminator("erspan", 0, context, &mut diagnostics)?;
+        let header_len = validate_shape(layer, context)?;
+        let diagnostics = validate_parent(layer, context)?;
 
         let mut prefix = Vec::with_capacity(header_len);
         let first = (u16::from(layer.version) << 12) | layer.vlan;
@@ -371,6 +253,122 @@ impl LayerCodec for ErspanCodec {
     ) -> Result<Box<dyn Layer>, CodecError> {
         make_layer(Erspan::default(), fields)
     }
+}
+
+fn validate_shape(layer: &Erspan, context: &LayerEncodeContext<'_>) -> Result<usize, CodecError> {
+    let header_len = match layer.version {
+        1 => ERSPAN_II_LEN,
+        2 => {
+            let subheader_len = layer
+                .type3
+                .as_ref()
+                .and_then(|type3| type3.subheader.as_ref())
+                .map_or(0, Bytes::len);
+            ERSPAN_III_LEN + subheader_len
+        }
+        other => {
+            return Err(invalid(
+                "erspan",
+                format!("version {other} is not a known ERSPAN header type"),
+            ));
+        }
+    };
+    ensure_encode_budget("erspan", header_len, context)?;
+    if layer.vlan > 0xfff || layer.cos > 7 || layer.encapsulation > 3 || layer.session_id > 0x3ff {
+        return Err(invalid("erspan", "field exceeds its wire range"));
+    }
+    if (layer.version == 2) != layer.type3.is_some() {
+        return Err(invalid(
+            "erspan",
+            "Type III fields are present exactly when the version is 2",
+        ));
+    }
+    if let Some(type3) = &layer.type3 {
+        match (&type3.subheader, type3.flags & SUBHEADER_FLAG != 0) {
+            (Some(subheader), true) if subheader.len() != SUBHEADER_LEN => {
+                return Err(invalid(
+                    "erspan",
+                    format!("the optional subheader is exactly {SUBHEADER_LEN} bytes"),
+                ));
+            }
+            (Some(_), false) => {
+                return Err(invalid(
+                    "erspan",
+                    "a subheader requires the flag word's O bit",
+                ));
+            }
+            (None, true) => {
+                return Err(invalid(
+                    "erspan",
+                    "the flag word's O bit requires the 8-byte subheader",
+                ));
+            }
+            _ => {}
+        }
+    }
+    Ok(header_len)
+}
+
+fn validate_parent(
+    layer: &Erspan,
+    context: &LayerEncodeContext<'_>,
+) -> Result<Vec<Diagnostic>, CodecError> {
+    let mut diagnostics = Vec::new();
+    if layer.version == 2 && layer.index_word != 0 {
+        strict_or_diagnostic(
+            "erspan",
+            "build.erspan_index",
+            "index_word",
+            "the index word belongs to Type II headers only",
+            context,
+            &mut diagnostics,
+        )?;
+    }
+    let expected_protocol_type = if layer.version == 1 {
+        TYPE_II_PROTOCOL
+    } else {
+        TYPE_III_PROTOCOL
+    };
+    let parent = context
+        .index
+        .checked_sub(1)
+        .and_then(|index| context.packet.layer(index));
+    let protocol_type_disagrees = match parent.and_then(|layer| layer.field("protocol_type")) {
+        Some(FieldValue::Unsigned(value @ (TYPE_II_PROTOCOL | TYPE_III_PROTOCOL))) => {
+            value != expected_protocol_type
+        }
+        Some(FieldValue::Text(_)) => layer.version != 1,
+        _ => false,
+    };
+    if protocol_type_disagrees {
+        strict_or_diagnostic(
+            "erspan",
+            "build.erspan_type",
+            "version",
+            format!(
+                "version {} requires the enclosing GRE protocol type 0x{expected_protocol_type:04x}",
+                layer.version
+            ),
+            context,
+            &mut diagnostics,
+        )?;
+    }
+    if layer.version == 1
+        && parent.is_some_and(|parent| {
+            parent.protocol_id().as_str() == "gre" && parent.field("sequence").is_none()
+        })
+    {
+        strict_or_diagnostic(
+            "erspan",
+            "build.erspan_sequence",
+            "version",
+            "Type II encapsulation requires the GRE sequence field",
+            context,
+            &mut diagnostics,
+        )?;
+    }
+    validate_raw_child_discriminator("erspan", 0, context, &mut diagnostics)?;
+    Ok(diagnostics)
 }
 
 fn erspan_layout(layer: &Erspan) -> Vec<crate::layout::FieldLayout> {

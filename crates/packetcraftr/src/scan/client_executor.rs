@@ -9,18 +9,18 @@ use packetcraftr_netio::{
     route::Provider as RouteProvider, transmit::Sender as PacketIo,
 };
 
-use super::classification::classify_scan_response;
-use super::model::{ScanBatch, ScanBatchExecution, ScanExecutor, ScanTransport};
+use super::classification::classify_response;
+use super::model::{Batch, Execution, Executor, Transport};
 
 /// Executes homogeneous scan batches through the client's capture-ready
 /// exchange lifecycle.
-impl<R, N, I> ScanExecutor for ExchangeExecutor<'_, R, N, I>
+impl<R, N, I> Executor for ExchangeExecutor<'_, R, N, I>
 where
     R: RouteProvider,
     N: NeighborResolver,
     I: PacketIo + CaptureProvider,
 {
-    fn execute(&mut self, batch: &ScanBatch) -> Result<ScanBatchExecution, BoundaryError> {
+    fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
         let first = batch
             .probes
             .first()
@@ -34,7 +34,7 @@ where
                 "scan executor batches must share address, transport, and attempt",
             ));
         }
-        if first.transport == ScanTransport::Icmp && batch.probes.len() != 1 {
+        if first.transport == Transport::Icmp && batch.probes.len() != 1 {
             return Err(invalid_client_execution(
                 "ICMP batches must contain exactly one uniquely identified echo probe",
             ));
@@ -72,12 +72,12 @@ where
             first.address,
             |request_index, sent, response| {
                 batch.probes.get(request_index).is_some_and(|probe| {
-                    classify_scan_response(self.client.registry(), probe.transport, sent, response)
+                    classify_response(self.client.registry(), probe.transport, sent, response)
                         .is_some()
                 })
             },
         )?;
-        Ok(ScanBatchExecution::from_exchange(batch.permit, exchange))
+        Ok(Execution::from_exchange(batch.permit, exchange))
     }
 }
 

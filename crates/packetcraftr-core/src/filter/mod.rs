@@ -56,10 +56,10 @@ mod model;
 mod parser;
 mod path;
 
-pub use error::FilterError as Error;
+pub use error::Error;
 pub use eval::Context;
 pub use model::Filter;
 pub use parser::{
-    DEFAULT_MAX_FILTER_BYTES, FilterOptions as Options, MAX_FILTER_NESTING, MAX_FILTER_SET_MEMBERS,
-    MAX_FILTER_TERMS, Requirements,
+    DEFAULT_MAX_FILTER_BYTES, MAX_FILTER_NESTING, MAX_FILTER_SET_MEMBERS, MAX_FILTER_TERMS,
+    Options, Requirements,
 };

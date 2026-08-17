@@ -11,10 +11,10 @@ use packetcraftr_netio::{
     transmit::{Frame as TransmissionFrame, Sender as PacketIo},
 };
 
-use super::transaction::ExchangeTransaction;
-use super::{ExchangeProcessOutcome, WorkflowResponseMatcher};
+use super::transaction::Transaction;
+use super::{ProcessOutcome, WorkflowResponseMatcher};
 
-impl<C: Session> ExchangeTransaction<C> {
+impl<C: Session> Transaction<C> {
     pub(super) fn send_requests<I: PacketIo>(
         &mut self,
         io: &I,
@@ -22,8 +22,7 @@ impl<C: Session> ExchangeTransaction<C> {
     ) -> Result<(), LiveIoError> {
         for send_index in 0..self.prepared.len() {
             self.drain(Some(self.deadline))?;
-            if self.promote_workflow(workflow_matcher)
-                == ExchangeProcessOutcome::CorrelationDeadlineExpired
+            if self.promote_workflow(workflow_matcher) == ProcessOutcome::CorrelationDeadlineExpired
             {
                 return Err(LiveIoError::DeadlineExceeded {
                     operation: "correlating workflow responses before all requests were sent",
@@ -35,8 +34,7 @@ impl<C: Session> ExchangeTransaction<C> {
 
             let more_requests = send_index + 1 < self.prepared.len();
             self.drain(more_requests.then_some(self.deadline))?;
-            if self.promote_workflow(workflow_matcher)
-                == ExchangeProcessOutcome::CorrelationDeadlineExpired
+            if self.promote_workflow(workflow_matcher) == ProcessOutcome::CorrelationDeadlineExpired
             {
                 if more_requests {
                     return Err(LiveIoError::DeadlineExceeded {

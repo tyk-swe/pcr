@@ -47,7 +47,7 @@ impl Provider for NoRoutes {
 struct NoNeighbors;
 
 impl neighbor::Resolver for NoNeighbors {
-    fn resolve_request(
+    fn resolve(
         &self,
         _request: &neighbor::Request,
     ) -> Result<neighbor::Resolution, neighbor::Error> {
@@ -277,13 +277,13 @@ fn exchange_options_validate_all_aggregate_bounds() {
             ..defaults.clone()
         },
         exchange::Options {
-            max_unsolicited: defaults.max_capture_queue_frames + 1,
+            max_unmatched_frames: defaults.max_capture_queue_frames + 1,
             ..defaults.clone()
         },
         exchange::Options {
             max_capture_queue_frames: 0,
             max_responses: 0,
-            max_unsolicited: 0,
+            max_unmatched_frames: 0,
             ..defaults.clone()
         },
         exchange::Options {
@@ -313,7 +313,7 @@ fn stats_checked_add_is_complete_and_atomic_on_overflow() {
         },
     };
     let increment = total.clone();
-    assert_eq!(total.checked_add(&increment), Some(()));
+    assert_eq!(total.checked_add_assign(&increment), Some(()));
     assert_eq!(total.packets_attempted, 2);
     assert_eq!(total.packets_completed, 2);
     assert_eq!(total.bytes, 20);
@@ -326,7 +326,7 @@ fn stats_checked_add_is_complete_and_atomic_on_overflow() {
         bytes: u64::MAX,
         ..Stats::default()
     };
-    assert_eq!(total.checked_add(&overflow), None);
+    assert_eq!(total.checked_add_assign(&overflow), None);
     assert_eq!(total, before);
 
     let overflow = Stats {
@@ -336,7 +336,7 @@ fn stats_checked_add_is_complete_and_atomic_on_overflow() {
         },
         ..Stats::default()
     };
-    assert_eq!(total.checked_add(&overflow), None);
+    assert_eq!(total.checked_add_assign(&overflow), None);
     assert_eq!(total, before);
 
     let mut elapsed = Stats {
@@ -345,7 +345,7 @@ fn stats_checked_add_is_complete_and_atomic_on_overflow() {
     };
     let before = elapsed.clone();
     assert_eq!(
-        elapsed.checked_add(&Stats {
+        elapsed.checked_add_assign(&Stats {
             elapsed: Duration::from_nanos(1),
             ..Stats::default()
         }),

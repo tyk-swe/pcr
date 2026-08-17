@@ -296,13 +296,13 @@ mod tests {
 
     use super::*;
     use crate::analysis::reassembly::tcp::FlowKey;
-    use crate::analysis::scope::ScopeInterner;
+    use crate::analysis::scope::Interner;
 
     const IDLE_FLOW_COUNT: usize = 8_000;
     const ACTIVE_SEGMENT_COUNT: u32 = 100_000;
 
     fn test_flow(source_port: u16) -> ScopedFlowKey {
-        let scope = ScopeInterner::new()
+        let scope = Interner::new()
             .intern(None, Vec::new())
             .expect("empty scope fits");
         ScopedFlowKey {

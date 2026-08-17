@@ -3,8 +3,6 @@
 
 use std::path::PathBuf;
 
-use clap::Args;
-
 pub(crate) const AFTER_LONG_HELP: &str = r#"When neither --hex nor --file is supplied, raw frame bytes are read from standard input.
 
 With --filter, the dissection is emitted only when the frame matches; a frame that does not match emits nothing and the command still succeeds.
@@ -14,8 +12,8 @@ Examples:
   packetcraftr --output json dissect --file frame.bin --link-type 1
   packetcraftr dissect --file frame.bin --filter 'icmpv4 && ip.dst == 198.51.100.2'"#;
 
-#[derive(Debug, Args)]
-pub(crate) struct DissectArgs {
+#[derive(Debug, clap::Args)]
+pub(crate) struct Args {
     /// Whole-frame hexadecimal bytes.
     #[arg(long, conflicts_with = "file")]
     pub(crate) hex: Option<String>,

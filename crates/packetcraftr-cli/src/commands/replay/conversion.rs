@@ -3,15 +3,13 @@
 
 use packetcraftr::netio as net;
 
-use super::arguments::{CliReplayTiming, ReplayArgs};
+use super::arguments::{Args, Timing};
 use crate::errors::CliError;
-use crate::system::validate_interface_selector;
+use crate::system::validate_selector;
 
-pub(super) fn replay_timing(
-    arguments: &ReplayArgs,
-) -> Result<packetcraftr::replay::Timing, CliError> {
+pub(super) fn timing(arguments: &Args) -> Result<packetcraftr::replay::Timing, CliError> {
     let timing = if let Some(rate) = arguments.rate {
-        if matches!(arguments.timing, CliReplayTiming::Immediate) {
+        if matches!(arguments.timing, Timing::Immediate) {
             return Err(CliError::new(
                 2,
                 "--rate cannot be combined with --timing immediate",
@@ -19,7 +17,7 @@ pub(super) fn replay_timing(
         }
         packetcraftr::replay::Timing::FixedRate(rate)
     } else if let Some(speed) = arguments.speed {
-        if matches!(arguments.timing, CliReplayTiming::Immediate) {
+        if matches!(arguments.timing, Timing::Immediate) {
             return Err(CliError::new(
                 2,
                 "--speed cannot be combined with --timing immediate",
@@ -28,15 +26,15 @@ pub(super) fn replay_timing(
         packetcraftr::replay::Timing::Scaled(1.0 / speed)
     } else {
         match arguments.timing {
-            CliReplayTiming::Original => packetcraftr::replay::Timing::Original,
-            CliReplayTiming::Immediate => packetcraftr::replay::Timing::Immediate,
+            Timing::Original => packetcraftr::replay::Timing::Original,
+            Timing::Immediate => packetcraftr::replay::Timing::Immediate,
         }
     };
     timing.validate().map_err(CliError::classified)
 }
 
-pub(super) fn requested_replay_interface(selector: &str) -> Result<net::interface::Id, CliError> {
-    match validate_interface_selector("replay", Some(selector))? {
+pub(super) fn interface(selector: &str) -> Result<net::interface::Id, CliError> {
+    match validate_selector(Some(selector))? {
         Some(index) => Ok(net::interface::Id {
             name: String::new(),
             index,

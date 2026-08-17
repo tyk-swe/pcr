@@ -92,7 +92,7 @@ pub struct IoBucketStat {
 
 /// Everything one statistics pass computed.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct StatsReport {
+pub struct Report {
     /// I/O bucket width the series was computed with.
     pub interval: Duration,
     /// Matched frames and their captured bytes.

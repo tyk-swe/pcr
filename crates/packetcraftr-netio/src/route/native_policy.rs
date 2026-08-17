@@ -10,14 +10,14 @@ use crate::{
     platform::validate_native_interface,
 };
 
-use super::{DestinationScope, NativeRouteError, RouteDecision, RouteSelectionReason};
+use super::{Decision, Scope, SelectionReason, SystemError};
 
 pub(crate) struct NativeRouteSnapshot {
     pub interface: InterfaceInfo,
-    pub selected_address: Option<IpAddr>,
+    pub selected_source: Option<IpAddr>,
     pub next_hop: Option<IpAddr>,
     pub route_mtu: Option<u32>,
-    pub selection_reason: RouteSelectionReason,
+    pub selection_reason: SelectionReason,
 }
 
 pub(crate) fn finish_route(
@@ -25,8 +25,8 @@ pub(crate) fn finish_route(
     interface_hint: Option<&InterfaceId>,
     preferred_source: Option<IpAddr>,
     snapshot: NativeRouteSnapshot,
-) -> Result<RouteDecision, NativeRouteError> {
-    validate_native_interface(&snapshot.interface)?;
+) -> Result<Decision, SystemError> {
+    validate_interface(&snapshot.interface)?;
     if let Some(hint) = interface_hint {
         validate_interface_hint(hint, &snapshot.interface.id)?;
     }
@@ -35,21 +35,21 @@ pub(crate) fn finish_route(
         .next_hop
         .is_some_and(|next_hop| next_hop.is_ipv4() != destination.is_ipv4())
     {
-        return Err(NativeRouteError::InvalidResponse {
+        return Err(SystemError::InvalidResponse {
             message: "next-hop family differs from destination family".to_owned(),
         });
     }
-    let selected_address = preferred_source
-        .or(snapshot.selected_address)
+    let selected_source = preferred_source
+        .or(snapshot.selected_source)
         .or_else(|| fallback_source(&snapshot.interface.addresses, destination))
-        .ok_or_else(|| NativeRouteError::InvalidResponse {
+        .ok_or_else(|| SystemError::InvalidResponse {
             message: format!(
                 "interface {} has no source address for {destination}",
                 snapshot.interface.id.name
             ),
         })?;
-    if selected_address.is_ipv4() != destination.is_ipv4() {
-        return Err(NativeRouteError::InvalidResponse {
+    if selected_source.is_ipv4() != destination.is_ipv4() {
+        return Err(SystemError::InvalidResponse {
             message: "selected source family differs from destination family".to_owned(),
         });
     }
@@ -57,17 +57,17 @@ pub(crate) fn finish_route(
         .interface
         .addresses
         .iter()
-        .any(|assigned| assigned.address == selected_address)
+        .any(|assigned| assigned.address == selected_source)
     {
         return Err(if let Some(preferred_source) = preferred_source {
-            NativeRouteError::SourceUnavailable {
+            SystemError::SourceUnavailable {
                 preferred_source,
                 interface: snapshot.interface.id.name.clone(),
             }
         } else {
-            NativeRouteError::InvalidResponse {
+            SystemError::InvalidResponse {
                 message: format!(
-                    "selected source {selected_address} is not assigned to interface {}",
+                    "selected source {selected_source} is not assigned to interface {}",
                     snapshot.interface.id.name
                 ),
             }
@@ -79,7 +79,7 @@ pub(crate) fn finish_route(
         (Some(route), Some(interface)) => route.min(interface),
         (Some(mtu), None) | (None, Some(mtu)) => mtu,
         (None, None) => {
-            return Err(NativeRouteError::InvalidResponse {
+            return Err(SystemError::InvalidResponse {
                 message: format!(
                     "interface {} reported no usable MTU",
                     snapshot.interface.id.name
@@ -88,23 +88,17 @@ pub(crate) fn finish_route(
         }
     };
     let selection_reason = match snapshot.selection_reason {
-        RouteSelectionReason::Local | RouteSelectionReason::InterfaceOnly => {
-            snapshot.selection_reason
-        }
-        RouteSelectionReason::Broadcast if snapshot.next_hop.is_none() => {
-            RouteSelectionReason::Broadcast
-        }
-        _ if snapshot.next_hop.is_some() => RouteSelectionReason::Gateway,
-        _ if is_interface_broadcast(destination, &snapshot.interface) => {
-            RouteSelectionReason::Broadcast
-        }
-        _ => RouteSelectionReason::OnLink,
+        SelectionReason::Local | SelectionReason::InterfaceOnly => snapshot.selection_reason,
+        SelectionReason::Broadcast if snapshot.next_hop.is_none() => SelectionReason::Broadcast,
+        _ if snapshot.next_hop.is_some() => SelectionReason::Gateway,
+        _ if is_interface_broadcast(destination, &snapshot.interface) => SelectionReason::Broadcast,
+        _ => SelectionReason::OnLink,
     };
 
-    Ok(RouteDecision {
+    Ok(Decision {
         interface: snapshot.interface.id,
         source_mac: snapshot.interface.mac_address,
-        selected_address: Some(selected_address),
+        selected_source: Some(selected_source),
         preferred_source,
         next_hop: snapshot.next_hop,
         selection_reason,
@@ -136,25 +130,23 @@ fn is_interface_broadcast(destination: IpAddr, interface: &InterfaceInfo) -> boo
         })
 }
 
-pub(crate) fn interface_decision(
-    interface: InterfaceInfo,
-) -> Result<RouteDecision, NativeRouteError> {
-    validate_native_interface(&interface)?;
+pub(crate) fn interface_decision(interface: InterfaceInfo) -> Result<Decision, SystemError> {
+    validate_interface(&interface)?;
     let mtu =
         interface
             .mtu
             .filter(|mtu| *mtu != 0)
-            .ok_or_else(|| NativeRouteError::InvalidResponse {
+            .ok_or_else(|| SystemError::InvalidResponse {
                 message: format!("interface {} reported no usable MTU", interface.id.name),
             })?;
-    Ok(RouteDecision {
+    Ok(Decision {
         interface: interface.id,
         source_mac: interface.mac_address,
-        selected_address: None,
+        selected_source: None,
         preferred_source: None,
         next_hop: None,
-        selection_reason: RouteSelectionReason::InterfaceOnly,
-        destination_scope: DestinationScope::Unspecified,
+        selection_reason: SelectionReason::InterfaceOnly,
+        destination_scope: Scope::Unspecified,
         mtu,
         capability: interface.capability,
         link_type: interface.link_type,
@@ -165,7 +157,7 @@ pub(crate) fn interface_decision(
 pub(crate) fn find_interface(
     interfaces: &[InterfaceInfo],
     requested: &InterfaceId,
-) -> Result<InterfaceInfo, NativeRouteError> {
+) -> Result<InterfaceInfo, SystemError> {
     if let Some(interface) = interfaces
         .iter()
         .find(|interface| interface.id == *requested)
@@ -175,46 +167,46 @@ pub(crate) fn find_interface(
     if let Some(actual) = interfaces.iter().find(|interface| {
         interface.id.name == requested.name || interface.id.index == requested.index
     }) {
-        return Err(NativeRouteError::InterfaceMismatch {
+        return Err(SystemError::InterfaceMismatch {
             requested: requested.name.clone(),
             requested_index: requested.index,
             actual: actual.id.name.clone(),
             actual_index: actual.id.index,
         });
     }
-    Err(NativeRouteError::InterfaceNotFound {
+    Err(SystemError::InterfaceNotFound {
         name: requested.name.clone(),
         index: requested.index,
     })
 }
 
-pub(crate) fn classify_destination(address: IpAddr) -> DestinationScope {
+pub(crate) fn classify_destination(address: IpAddr) -> Scope {
     if address.is_unspecified() {
-        return DestinationScope::Unspecified;
+        return Scope::Unspecified;
     }
     if address.is_multicast() {
-        return DestinationScope::Multicast;
+        return Scope::Multicast;
     }
     if address.is_loopback() {
-        return DestinationScope::Host;
+        return Scope::Host;
     }
     match address {
-        IpAddr::V4(address) if address.is_link_local() => DestinationScope::Link,
-        IpAddr::V6(address) if address.is_unicast_link_local() => DestinationScope::Link,
-        IpAddr::V4(address) if address.is_private() => DestinationScope::Private,
-        IpAddr::V6(address) if address.is_unique_local() => DestinationScope::Private,
-        _ => DestinationScope::Global,
+        IpAddr::V4(address) if address.is_link_local() => Scope::Link,
+        IpAddr::V6(address) if address.is_unicast_link_local() => Scope::Link,
+        IpAddr::V4(address) if address.is_private() => Scope::Private,
+        IpAddr::V6(address) if address.is_unique_local() => Scope::Private,
+        _ => Scope::Global,
     }
 }
 
 pub(crate) fn validate_preferred_source_family(
     destination: IpAddr,
     preferred_source: Option<IpAddr>,
-) -> Result<(), NativeRouteError> {
+) -> Result<(), SystemError> {
     if let Some(source) = preferred_source
         && source.is_ipv4() != destination.is_ipv4()
     {
-        return Err(NativeRouteError::SourceFamilyMismatch {
+        return Err(SystemError::SourceFamilyMismatch {
             preferred_source: source,
             destination,
         });
@@ -225,15 +217,21 @@ pub(crate) fn validate_preferred_source_family(
 fn validate_interface_hint(
     requested: &InterfaceId,
     actual: &InterfaceId,
-) -> Result<(), NativeRouteError> {
+) -> Result<(), SystemError> {
     if requested == actual {
         return Ok(());
     }
-    Err(NativeRouteError::InterfaceMismatch {
+    Err(SystemError::InterfaceMismatch {
         requested: requested.name.clone(),
         requested_index: requested.index,
         actual: actual.name.clone(),
         actual_index: actual.index,
+    })
+}
+
+fn validate_interface(interface: &InterfaceInfo) -> Result<(), SystemError> {
+    validate_native_interface(interface).map_err(|error| SystemError::InvalidResponse {
+        message: error.to_string(),
     })
 }
 
@@ -343,7 +341,7 @@ mod tests {
                 ..InterfaceFlags::default()
             },
             mtu: Some(1_500),
-            capability: Capability::Layer2And3,
+            capability: Capability::Layer2AndLayer3,
             link_type: LinkType::ETHERNET,
         }
     }
@@ -351,42 +349,39 @@ mod tests {
     fn snapshot() -> NativeRouteSnapshot {
         NativeRouteSnapshot {
             interface: interface(),
-            selected_address: None,
+            selected_source: None,
             next_hop: Some(v4(10, 2, 3, 1)),
             route_mtu: Some(1_400),
-            selection_reason: RouteSelectionReason::OnLink,
+            selection_reason: SelectionReason::OnLink,
         }
     }
 
     #[test]
     fn destination_scope_classification_covers_both_address_families() {
         let cases = [
-            (v4(0, 0, 0, 0), DestinationScope::Unspecified),
-            (
-                IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-                DestinationScope::Unspecified,
-            ),
-            (v4(224, 0, 0, 1), DestinationScope::Multicast),
+            (v4(0, 0, 0, 0), Scope::Unspecified),
+            (IpAddr::V6(Ipv6Addr::UNSPECIFIED), Scope::Unspecified),
+            (v4(224, 0, 0, 1), Scope::Multicast),
             (
                 "ff02::1".parse::<IpAddr>().expect("IPv6 multicast"),
-                DestinationScope::Multicast,
+                Scope::Multicast,
             ),
-            (v4(127, 0, 0, 1), DestinationScope::Host),
-            (IpAddr::V6(Ipv6Addr::LOCALHOST), DestinationScope::Host),
-            (v4(169, 254, 1, 2), DestinationScope::Link),
+            (v4(127, 0, 0, 1), Scope::Host),
+            (IpAddr::V6(Ipv6Addr::LOCALHOST), Scope::Host),
+            (v4(169, 254, 1, 2), Scope::Link),
             (
                 "fe80::1".parse::<IpAddr>().expect("IPv6 link local"),
-                DestinationScope::Link,
+                Scope::Link,
             ),
-            (v4(10, 0, 0, 1), DestinationScope::Private),
+            (v4(10, 0, 0, 1), Scope::Private),
             (
                 "fd00::1".parse::<IpAddr>().expect("IPv6 unique local"),
-                DestinationScope::Private,
+                Scope::Private,
             ),
-            (v4(198, 51, 100, 1), DestinationScope::Global),
+            (v4(198, 51, 100, 1), Scope::Global),
             (
                 "2001:db8::1".parse::<IpAddr>().expect("IPv6 global"),
-                DestinationScope::Global,
+                Scope::Global,
             ),
         ];
 
@@ -401,10 +396,10 @@ mod tests {
 
         let decision = finish_route(destination, None, None, snapshot()).expect("valid snapshot");
 
-        assert_eq!(decision.selected_address, Some(v4(10, 2, 3, 4)));
+        assert_eq!(decision.selected_source, Some(v4(10, 2, 3, 4)));
         assert_eq!(decision.next_hop, Some(v4(10, 2, 3, 1)));
-        assert_eq!(decision.selection_reason, RouteSelectionReason::Gateway);
-        assert_eq!(decision.destination_scope, DestinationScope::Private);
+        assert_eq!(decision.selection_reason, SelectionReason::Gateway);
+        assert_eq!(decision.destination_scope, Scope::Private);
         assert_eq!(decision.mtu, 1_400);
         assert_eq!(decision.interface, interface().id);
     }
@@ -415,23 +410,23 @@ mod tests {
 
         let mut native_broadcast = snapshot();
         native_broadcast.next_hop = None;
-        native_broadcast.selection_reason = RouteSelectionReason::Broadcast;
+        native_broadcast.selection_reason = SelectionReason::Broadcast;
         let preserved = finish_route(destination, None, None, native_broadcast)
             .expect("native broadcast route is valid");
-        assert_eq!(preserved.selection_reason, RouteSelectionReason::Broadcast);
+        assert_eq!(preserved.selection_reason, SelectionReason::Broadcast);
 
         let mut inferred_broadcast = snapshot();
         inferred_broadcast.next_hop = None;
         inferred_broadcast.interface.flags.broadcast = true;
         let inferred = finish_route(destination, None, None, inferred_broadcast)
             .expect("interface-prefix broadcast is valid");
-        assert_eq!(inferred.selection_reason, RouteSelectionReason::Broadcast);
+        assert_eq!(inferred.selection_reason, SelectionReason::Broadcast);
 
         let mut gateway = snapshot();
-        gateway.selection_reason = RouteSelectionReason::Broadcast;
+        gateway.selection_reason = SelectionReason::Broadcast;
         let gateway =
             finish_route(destination, None, None, gateway).expect("gateway route remains valid");
-        assert_eq!(gateway.selection_reason, RouteSelectionReason::Gateway);
+        assert_eq!(gateway.selection_reason, SelectionReason::Gateway);
         assert!(gateway.next_hop.is_some());
     }
 
@@ -444,7 +439,7 @@ mod tests {
         };
         assert!(matches!(
             finish_route(destination, Some(&wrong_interface), None, snapshot()),
-            Err(NativeRouteError::InterfaceMismatch { .. })
+            Err(SystemError::InterfaceMismatch { .. })
         ));
         assert!(matches!(
             finish_route(
@@ -453,25 +448,25 @@ mod tests {
                 Some(IpAddr::V6(Ipv6Addr::LOCALHOST)),
                 snapshot()
             ),
-            Err(NativeRouteError::SourceFamilyMismatch { .. })
+            Err(SystemError::SourceFamilyMismatch { .. })
         ));
 
         let mut invalid = snapshot();
         invalid.next_hop = Some(IpAddr::V6(Ipv6Addr::LOCALHOST));
         assert!(matches!(
             finish_route(destination, None, None, invalid),
-            Err(NativeRouteError::InvalidResponse { .. })
+            Err(SystemError::InvalidResponse { .. })
         ));
 
         let mut invalid = snapshot();
-        invalid.selected_address = Some(v4(192, 0, 2, 8));
+        invalid.selected_source = Some(v4(192, 0, 2, 8));
         assert!(matches!(
             finish_route(destination, None, None, invalid),
-            Err(NativeRouteError::InvalidResponse { .. })
+            Err(SystemError::InvalidResponse { .. })
         ));
         assert!(matches!(
             finish_route(destination, None, Some(v4(192, 0, 2, 8)), snapshot()),
-            Err(NativeRouteError::SourceUnavailable { .. })
+            Err(SystemError::SourceUnavailable { .. })
         ));
 
         let mut invalid = snapshot();
@@ -479,7 +474,7 @@ mod tests {
         invalid.interface.mtu = None;
         assert!(matches!(
             finish_route(destination, None, None, invalid),
-            Err(NativeRouteError::InvalidResponse { .. })
+            Err(SystemError::InvalidResponse { .. })
         ));
     }
 
@@ -505,7 +500,7 @@ mod tests {
         ] {
             assert!(matches!(
                 find_interface(std::slice::from_ref(&available), &requested),
-                Err(NativeRouteError::InterfaceMismatch { .. })
+                Err(SystemError::InterfaceMismatch { .. })
             ));
         }
         assert!(matches!(
@@ -516,26 +511,23 @@ mod tests {
                     index: 99,
                 }
             ),
-            Err(NativeRouteError::InterfaceNotFound { .. })
+            Err(SystemError::InterfaceNotFound { .. })
         ));
     }
 
     #[test]
     fn interface_decision_is_destination_free_and_requires_a_nonzero_mtu() {
         let decision = interface_decision(interface()).expect("valid interface snapshot");
-        assert_eq!(decision.selected_address, None);
+        assert_eq!(decision.selected_source, None);
         assert_eq!(decision.next_hop, None);
-        assert_eq!(
-            decision.selection_reason,
-            RouteSelectionReason::InterfaceOnly
-        );
-        assert_eq!(decision.destination_scope, DestinationScope::Unspecified);
+        assert_eq!(decision.selection_reason, SelectionReason::InterfaceOnly);
+        assert_eq!(decision.destination_scope, Scope::Unspecified);
 
         let mut invalid = interface();
         invalid.mtu = Some(0);
         assert!(matches!(
             interface_decision(invalid),
-            Err(NativeRouteError::InvalidResponse { .. })
+            Err(SystemError::InvalidResponse { .. })
         ));
     }
 }

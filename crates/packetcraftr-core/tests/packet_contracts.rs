@@ -94,16 +94,16 @@ fn packet_documents_enforce_byte_layer_and_duplicate_key_limits() {
 }
 
 #[test]
-fn descriptive_core_api_paths_are_available() {
+fn scoped_core_api_paths_are_available() {
     use packetcraftr_core::{
-        build::{BuildContext, BuildError, BuildMode, BuildOptions, BuiltPacket},
+        build::{BuiltPacket, Context, Error as BuildError, Mode, Options as BuildOptions},
         codec::{
-            CodecError, DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext,
+            DecodedLayerValue, EncodedLayer, Error as CodecError, LayerCodec, LayerDecodeContext,
             LayerEncodeContext,
         },
-        decode::{DecodeError, DecodeOptions, DecodedPacket, Dissector},
-        diagnostic::{Diagnostic, DiagnosticSeverity},
-        expression::{ExpressionError, ExpressionOptions, parse_packet_expression},
+        decode::{DecodedPacket, Dissector, Error as DecodeError, Options as DecodeOptions},
+        diagnostic::{Diagnostic, Severity},
+        expression::{Error as ExpressionError, Options as ExpressionOptions, parse},
         field::{FieldKind, FieldValue, WireValue},
         layer::{FieldError, FieldSchema, Id as ProtocolId},
         layout::{ByteRange, FieldLayout, LayerLayout, PacketLayout},
@@ -111,8 +111,8 @@ fn descriptive_core_api_paths_are_available() {
         registry::Registry,
     };
 
-    let _build_context = BuildContext::default();
-    let _build_mode = BuildMode::Strict;
+    let _build_context = Context::default();
+    let _build_mode = Mode::Strict;
     let _build_options = BuildOptions::default();
     let _build_error: Option<BuildError> = None;
     let _built_packet: Option<BuiltPacket> = None;
@@ -129,12 +129,11 @@ fn descriptive_core_api_paths_are_available() {
     let _field_error: Option<FieldError> = None;
     let _field_schema: Option<&FieldSchema> = None;
     let _matcher: Option<&dyn ResponseMatcher> = None;
-    let parse: fn(&str, &Registry, ExpressionOptions) -> Result<Packet, ExpressionError> =
-        parse_packet_expression;
+    let parse: fn(&str, &Registry, ExpressionOptions) -> Result<Packet, ExpressionError> = parse;
     let _ = parse;
 
     let diag = Diagnostic::warning("W001", "test warning").at_layer(0);
-    assert_eq!(diag.severity, DiagnosticSeverity::Warning);
+    assert_eq!(diag.severity, Severity::Warning);
 
     let br = ByteRange::new(0, 14);
     let fl = FieldLayout {
@@ -158,11 +157,11 @@ fn descriptive_core_api_paths_are_available() {
 }
 
 #[test]
-fn test_m2_build_decode_roundtrip_stress() {
+fn build_and_decode_round_trip() {
     use packetcraftr_core::{
         Packet,
-        build::{BuildContext, BuildOptions, Builder},
-        decode::{DecodeOptions, Dissector},
+        build::{Builder, Context, Options as BuildOptions},
+        decode::{Dissector, Options as DecodeOptions},
         field::WireValue,
         frame::{Frame, LinkType},
         protocol::{
@@ -204,11 +203,7 @@ fn test_m2_build_decode_roundtrip_stress() {
     packet.push(tcp);
 
     let build_res = builder
-        .build(
-            packet.clone(),
-            BuildContext::default(),
-            BuildOptions::default(),
-        )
+        .build(packet.clone(), Context::default(), BuildOptions::default())
         .expect("build should succeed");
 
     assert!(!build_res.bytes.is_empty());
@@ -222,10 +217,10 @@ fn test_m2_build_decode_roundtrip_stress() {
 }
 
 #[test]
-fn test_m2_dissector_fuzz_resilience() {
+fn dissector_handles_arbitrary_input() {
     use bytes::Bytes;
     use packetcraftr_core::{
-        decode::{DecodeOptions, Dissector},
+        decode::{Dissector, Options as DecodeOptions},
         frame::{Frame, LinkType},
         protocol::builtin::registry as default_registry,
     };
@@ -253,9 +248,9 @@ fn test_m2_dissector_fuzz_resilience() {
 }
 
 #[test]
-fn test_m2_expression_parser_and_filter_stress() {
+fn expression_and_filter_parsers_validate_inputs() {
     use packetcraftr_core::{
-        expression::{ExpressionOptions, parse_packet_expression},
+        expression::{Options as ExpressionOptions, parse},
         filter::{Filter, Options as FilterOptions},
         protocol::builtin::registry as default_registry,
     };
@@ -269,7 +264,7 @@ fn test_m2_expression_parser_and_filter_stress() {
     ];
 
     for expr_str in valid_expressions {
-        let parsed = parse_packet_expression(expr_str, &reg, ExpressionOptions::default());
+        let parsed = parse(expr_str, &reg, ExpressionOptions::default());
         assert!(
             parsed.is_ok(),
             "Failed to parse valid expression: {}",
@@ -284,7 +279,7 @@ fn test_m2_expression_parser_and_filter_stress() {
     ];
 
     for expr_str in invalid_expressions {
-        let parsed = parse_packet_expression(expr_str, &reg, ExpressionOptions::default());
+        let parsed = parse(expr_str, &reg, ExpressionOptions::default());
         assert!(
             parsed.is_err(),
             "Invalid expression should fail to parse: {}",
@@ -306,10 +301,10 @@ fn test_m2_expression_parser_and_filter_stress() {
 }
 
 #[test]
-fn test_m2_builder_limits_stress() {
+fn builder_enforces_packet_and_layer_limits() {
     use packetcraftr_core::{
         Packet,
-        build::{BuildContext, BuildOptions, Builder},
+        build::{Builder, Context, Options as BuildOptions},
         protocol::{builtin::registry as default_registry, link::Ethernet},
     };
     use std::sync::Arc;
@@ -318,11 +313,7 @@ fn test_m2_builder_limits_stress() {
     let builder = Builder::new(reg);
 
     let empty_packet = Packet::new();
-    let err = builder.build(
-        empty_packet,
-        BuildContext::default(),
-        BuildOptions::default(),
-    );
+    let err = builder.build(empty_packet, Context::default(), BuildOptions::default());
     assert!(err.is_err());
 
     let mut huge_packet = Packet::new();
@@ -333,6 +324,6 @@ fn test_m2_builder_limits_stress() {
         max_layers: 10,
         ..Default::default()
     };
-    let err2 = builder.build(huge_packet, BuildContext::default(), opts);
+    let err2 = builder.build(huge_packet, Context::default(), opts);
     assert!(err2.is_err());
 }

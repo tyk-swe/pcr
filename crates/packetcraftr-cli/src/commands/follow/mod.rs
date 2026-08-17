@@ -2,28 +2,22 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 pub(super) mod arguments;
+mod rendering;
 
 use packetcraftr::{analysis, output};
 
-use self::arguments::{CliFollowDirection, FollowArgs};
+use self::arguments::{Args, Direction};
 use super::super::errors::CliError;
-use super::super::rendering::{
-    emit_aggregate, emit_stderr_message, emit_stream, emit_stream_record, write_raw,
-    write_stdout_line,
-};
-use super::offline_analysis::{
-    PreparedOfflineAnalysis, open_offline_reader, prepare_offline_analysis,
-};
+use super::super::input::open_capture;
+use super::offline_analysis::{Prepared, prepare};
 
 use analysis::expert::StreamTransport;
-use analysis::follow::{Chunk, FollowCollector, Selector};
+use analysis::follow::{Chunk, Collector, Selector};
+use rendering::State;
 
-pub(super) fn run(arguments: FollowArgs, output: output::contract::Format) -> Result<(), CliError> {
-    output::contract::Command::Follow
-        .require_format(output)
-        .map_err(CliError::classified)?;
+pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
     let selector = parse_stream(&arguments.stream)?;
-    if output == output::contract::Format::Raw && arguments.direction == CliFollowDirection::Both {
+    if format == output::contract::Format::Raw && arguments.direction == Direction::Both {
         return Err(CliError::new(
             2,
             "raw output interleaves both directions indistinguishably; \
@@ -41,13 +35,13 @@ pub(super) fn run(arguments: FollowArgs, output: output::contract::Format) -> Re
         },
         selector.index
     );
-    let PreparedOfflineAnalysis {
+    let Prepared {
         registry,
         filter,
         limits,
-    } = prepare_offline_analysis(arguments.limits, Some(&source))?;
+    } = prepare(arguments.limits, Some(&source))?;
     let filter = filter.expect("follow always prepares a stream filter");
-    let mut reader = open_offline_reader(&arguments.path, arguments.limits.capture)?;
+    let mut reader = open_capture(&arguments.path, arguments.limits.capture)?;
 
     let options = analysis::Options {
         filter: Some(&filter),
@@ -55,16 +49,15 @@ pub(super) fn run(arguments: FollowArgs, output: output::contract::Format) -> Re
         tcp_events: selector.transport == StreamTransport::Tcp,
         limits,
     };
-    let mut collector = FollowCollector::new(selector);
+    let mut collector = Collector::new(selector);
     let direction = arguments.direction;
-    let mut sequence = 0_u64;
-    let mut retained: Vec<output::follow::Chunk> = Vec::new();
+    let mut state = State::default();
     let run_summary = analysis::run(&mut reader, registry, &options, |record| {
         for chunk in collector.observe(&record) {
             if !direction_matches(direction, &chunk) {
                 continue;
             }
-            emit_chunk(output, chunk, &mut sequence, &mut retained)
+            rendering::render_record(format, chunk, &mut state)
                 .map_err(CliError::into_boundary_error)?;
         }
         Ok(())
@@ -73,139 +66,30 @@ pub(super) fn run(arguments: FollowArgs, output: output::contract::Format) -> Re
         let error = CliError::classified(error);
         // Streamed records are numbered by emission, not by capture frame,
         // so a terminal stream error continues that numbering.
-        if matches!(output, output::contract::Format::Ndjson) {
-            error.at_sequence(sequence)
+        if matches!(format, output::contract::Format::Ndjson) {
+            error.at_sequence(state.sequence)
         } else {
             error
         }
     })?;
     let summary = collector.finish(&run_summary.trailing_tcp_events);
 
-    match output {
-        output::contract::Format::Text => {
-            let transport = transport_name(selector.transport);
-            match &summary.client_flow {
-                Some(flow) => write_stdout_line(format_args!(
-                    "followed {transport} stream {}: client {}:{} sent {} byte(s), \
-                     server {}:{} sent {} byte(s), {} byte(s) undelivered in {} frame(s)",
-                    selector.index,
-                    flow.source,
-                    flow.source_port,
-                    summary.client_bytes,
-                    flow.destination,
-                    flow.destination_port,
-                    summary.server_bytes,
-                    summary.undelivered_bytes,
-                    summary.frames,
-                )),
-                None => write_stdout_line(format_args!(
-                    "followed {transport} stream {}: no frames",
-                    selector.index
-                )),
-            }
-        }
-        output::contract::Format::Json => emit_aggregate(
-            output::contract::Command::Follow,
-            output::follow::Result::from_summary(
-                selector.transport.into(),
-                selector.index,
-                summary,
-                retained,
-            ),
-            Vec::new(),
-        ),
-        output::contract::Format::Ndjson => {
-            // Every direction-selected chunk was already streamed; the
-            // terminal record carries only the totals and an empty chunk
-            // list, so NDJSON does not retain payloads.
-            emit_stream(
-                output::contract::Command::Follow,
-                sequence,
-                output::follow::Result::from_summary(
-                    selector.transport.into(),
-                    selector.index,
-                    summary,
-                    Vec::new(),
-                ),
-                Vec::new(),
-            )
-        }
+    match format {
+        output::contract::Format::Text => rendering::render_text(selector, &summary),
+        output::contract::Format::Json => rendering::render_aggregate(selector, summary, state),
+        output::contract::Format::Ndjson => rendering::render_stream(selector, summary, state),
         output::contract::Format::Hex | output::contract::Format::Raw => {
-            // Standard output stays pure payload, so incompleteness is
-            // reported out of band rather than silently swallowed.
-            if summary.undelivered_bytes > 0 {
-                emit_stderr_message(&format!(
-                    "warning: {} byte(s) were captured but stranded behind \
-                     missing segments and are not part of this output",
-                    summary.undelivered_bytes
-                ))?;
-            }
-            Ok(())
+            rendering::render_payload_warning(&summary)
         }
         _ => unreachable!("the format contract admits only text, json, ndjson, hex, and raw"),
     }
 }
 
-/// Streams or retains one chunk, depending on the output format.
-fn emit_chunk(
-    output: output::contract::Format,
-    chunk: Chunk,
-    sequence: &mut u64,
-    retained: &mut Vec<output::follow::Chunk>,
-) -> Result<(), CliError> {
-    match output {
-        output::contract::Format::Text => write_stdout_line(format_args!(
-            "{} #{} {}",
-            direction_marker(&chunk),
-            chunk.number,
-            chunk.bytes.escape_ascii()
-        )),
-        output::contract::Format::Hex => {
-            let rendered = output::follow::Chunk::from(chunk.clone());
-            write_stdout_line(format_args!(
-                "{} #{} {}",
-                direction_marker(&chunk),
-                rendered.frame,
-                rendered.bytes_hex
-            ))
-        }
-        output::contract::Format::Raw => write_raw(&chunk.bytes),
-        output::contract::Format::Json => {
-            retained.push(chunk.into());
-            Ok(())
-        }
-        output::contract::Format::Ndjson => emit_stream_record(
-            output::contract::Command::Follow,
-            sequence,
-            output::follow::Chunk::from(chunk),
-        ),
-        _ => unreachable!("the format contract admits only text, json, ndjson, hex, and raw"),
-    }
-}
-
-fn direction_matches(direction: CliFollowDirection, chunk: &Chunk) -> bool {
+fn direction_matches(direction: Direction, chunk: &Chunk) -> bool {
     match direction {
-        CliFollowDirection::Both => true,
-        CliFollowDirection::Client => {
-            chunk.direction == analysis::follow::Direction::ClientToServer
-        }
-        CliFollowDirection::Server => {
-            chunk.direction == analysis::follow::Direction::ServerToClient
-        }
-    }
-}
-
-fn direction_marker(chunk: &Chunk) -> &'static str {
-    match chunk.direction {
-        analysis::follow::Direction::ClientToServer => ">",
-        analysis::follow::Direction::ServerToClient => "<",
-    }
-}
-
-fn transport_name(transport: StreamTransport) -> &'static str {
-    match transport {
-        StreamTransport::Tcp => "tcp",
-        StreamTransport::Udp => "udp",
+        Direction::Both => true,
+        Direction::Client => chunk.direction == analysis::follow::Direction::ClientToServer,
+        Direction::Server => chunk.direction == analysis::follow::Direction::ServerToClient,
     }
 }
 

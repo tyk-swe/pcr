@@ -6,18 +6,19 @@ use std::io::{self, IsTerminal, Read};
 use std::path::Path;
 
 use packetcraftr::{
+    analysis::pcap::{Reader, ReaderOptions},
     core::error::{Classification, Kind},
     core::{self, Packet},
 };
 
-use super::command_options::RecipeArgs;
+use super::command_options::{OfflineCaptureLimitsArgs, RecipeArgs};
 use super::errors::CliError;
 
 pub(super) fn read_recipe(
     arguments: RecipeArgs,
     registry: &core::registry::Registry,
 ) -> Result<Packet, CliError> {
-    let stdin = read_nonterminal_stdin_bounded(core::document::DEFAULT_MAX_DOCUMENT_BYTES)?;
+    let stdin = read_redirected_stdin(core::document::DEFAULT_MAX_DOCUMENT_BYTES)?;
     let RecipeArgs {
         packet,
         packet_file,
@@ -77,12 +78,8 @@ pub(super) fn read_recipe(
 }
 
 fn parse_expression(input: &str, registry: &core::registry::Registry) -> Result<Packet, CliError> {
-    core::expression::parse_packet_expression(
-        input,
-        registry,
-        core::expression::ExpressionOptions::default(),
-    )
-    .map_err(|source| CliError::new(2, source.to_string()))
+    core::expression::parse(input, registry, core::expression::Options::default())
+        .map_err(|source| CliError::new(2, source.to_string()))
 }
 
 fn document_format_from_path(path: &Path) -> Option<core::document::Format> {
@@ -93,27 +90,50 @@ fn document_format_from_path(path: &Path) -> Option<core::document::Format> {
     }
 }
 
-pub(super) fn read_bounded_file(path: &Path, maximum: usize) -> Result<Vec<u8>, CliError> {
+pub(super) fn read_bounded_file(path: &Path, max_bytes: usize) -> Result<Vec<u8>, CliError> {
     let file = File::open(path)
         .map_err(|source| CliError::new(2, format!("open {} failed: {source}", path.display())))?;
-    read_bounded(file, maximum)
+    read_bounded(file, max_bytes)
 }
 
-pub(super) fn read_stdin_bounded(maximum: usize) -> Result<Vec<u8>, CliError> {
-    read_bounded(io::stdin().lock(), maximum)
+pub(super) fn read_stdin_bounded(max_bytes: usize) -> Result<Vec<u8>, CliError> {
+    read_bounded(io::stdin().lock(), max_bytes)
 }
 
-fn read_nonterminal_stdin_bounded(maximum: usize) -> Result<Option<Vec<u8>>, CliError> {
+fn read_redirected_stdin(max_bytes: usize) -> Result<Option<Vec<u8>>, CliError> {
     let stdin = io::stdin();
     if stdin.is_terminal() {
         return Ok(None);
     }
-    let bytes = read_bounded_allow_empty(stdin.lock(), maximum)?;
+    let bytes = read_bounded_allow_empty(stdin.lock(), max_bytes)?;
     Ok((!bytes.is_empty()).then_some(bytes))
 }
 
-fn read_bounded(reader: impl Read, maximum: usize) -> Result<Vec<u8>, CliError> {
-    let bytes = read_bounded_allow_empty(reader, maximum)?;
+pub(super) fn parse_target(target: String) -> Result<packetcraftr::target::Target, CliError> {
+    target
+        .parse::<packetcraftr::target::Target>()
+        .map_err(CliError::classified)
+}
+
+pub(super) fn open_capture(
+    path: &Path,
+    limits: OfflineCaptureLimitsArgs,
+) -> Result<Reader<File>, CliError> {
+    let file = File::open(path)
+        .map_err(|source| CliError::new(5, format!("open {} failed: {source}", path.display())))?;
+    Reader::with_options(
+        file,
+        ReaderOptions {
+            max_size: limits.max_frame_bytes,
+            max_interfaces_per_section: limits.max_interfaces,
+            ..ReaderOptions::default()
+        },
+    )
+    .map_err(CliError::classified)
+}
+
+fn read_bounded(reader: impl Read, max_bytes: usize) -> Result<Vec<u8>, CliError> {
+    let bytes = read_bounded_allow_empty(reader, max_bytes)?;
     if bytes.is_empty() {
         return Err(CliError::new(
             2,
@@ -123,11 +143,8 @@ fn read_bounded(reader: impl Read, maximum: usize) -> Result<Vec<u8>, CliError> 
     Ok(bytes)
 }
 
-pub(super) fn read_bounded_allow_empty(
-    reader: impl Read,
-    maximum: usize,
-) -> Result<Vec<u8>, CliError> {
-    let read_limit = maximum
+fn read_bounded_allow_empty(reader: impl Read, max_bytes: usize) -> Result<Vec<u8>, CliError> {
+    let read_limit = max_bytes
         .checked_add(1)
         .and_then(|value| u64::try_from(value).ok())
         .ok_or_else(|| CliError::new(70, "packet input byte limit cannot be represented"))?;
@@ -136,10 +153,10 @@ pub(super) fn read_bounded_allow_empty(
         .take(read_limit)
         .read_to_end(&mut bytes)
         .map_err(|source| CliError::new(2, format!("read packet input failed: {source}")))?;
-    if bytes.len() > maximum {
+    if bytes.len() > max_bytes {
         return Err(CliError::new(
             2,
-            format!("packet input exceeds {maximum} byte limit"),
+            format!("packet input exceeds {max_bytes} byte limit"),
         ));
     }
     Ok(bytes)

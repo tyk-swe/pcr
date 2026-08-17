@@ -6,22 +6,18 @@ use std::fmt;
 use serde::Deserialize;
 use serde::de::{self, DeserializeSeed};
 
-use super::error::DocumentError;
+use super::error::Error;
 use super::types::{
-    DEFAULT_MAX_DOCUMENT_NESTING, DOCUMENT_BASE_CONTAINER_DEPTH, DocumentFormat,
-    LAYER_LIMIT_SENTINEL, MAX_DOCUMENT_NESTING, PacketDocument,
+    DEFAULT_MAX_DOCUMENT_NESTING, DOCUMENT_BASE_CONTAINER_DEPTH, Format, LAYER_LIMIT_SENTINEL,
+    MAX_DOCUMENT_NESTING, Packet,
 };
 use super::visitor::PacketDocumentSeed;
 use crate::field::FieldValue;
 
-impl PacketDocument {
+impl Packet {
     /// Parses one bounded JSON or YAML document with the stable default layer
     /// and nesting ceilings.
-    pub fn parse(
-        input: &str,
-        format: DocumentFormat,
-        max_bytes: usize,
-    ) -> Result<Self, DocumentError> {
+    pub fn parse(input: &str, format: Format, max_bytes: usize) -> Result<Self, Error> {
         Self::parse_with_resource_limits(
             input,
             format,
@@ -33,12 +29,12 @@ impl PacketDocument {
 
     /// Parses one document with a caller-selected nesting ceiling and the
     /// stable default layer ceiling.
-    pub fn parse_with_limits(
+    pub fn parse_with_nesting_limit(
         input: &str,
-        format: DocumentFormat,
+        format: Format,
         max_bytes: usize,
         max_nesting: usize,
-    ) -> Result<Self, DocumentError> {
+    ) -> Result<Self, Error> {
         Self::parse_with_resource_limits(
             input,
             format,
@@ -52,19 +48,19 @@ impl PacketDocument {
     /// limits during lexical/streaming deserialization.
     pub fn parse_with_resource_limits(
         input: &str,
-        format: DocumentFormat,
+        format: Format,
         max_bytes: usize,
         max_layers: usize,
         max_nesting: usize,
-    ) -> Result<Self, DocumentError> {
+    ) -> Result<Self, Error> {
         if input.len() > max_bytes {
-            return Err(DocumentError::SizeLimit {
+            return Err(Error::SizeLimit {
                 actual: input.len(),
                 limit: max_bytes,
             });
         }
         if max_nesting > MAX_DOCUMENT_NESTING {
-            return Err(DocumentError::InvalidLimit {
+            return Err(Error::InvalidLimit {
                 field: "max_nesting",
                 value: max_nesting,
                 maximum: MAX_DOCUMENT_NESTING,
@@ -72,7 +68,7 @@ impl PacketDocument {
         }
         let seed = PacketDocumentSeed { max_layers };
         let document = match format {
-            DocumentFormat::Json => {
+            Format::Json => {
                 validate_json_container_depth(input, max_nesting)?;
                 let mut deserializer = serde_json::Deserializer::from_str(input);
                 deserializer.disable_recursion_limit();
@@ -84,7 +80,7 @@ impl PacketDocument {
                     .map_err(|source| map_document_parse_error("JSON", source, max_layers))?;
                 document
             }
-            DocumentFormat::Yaml => {
+            Format::Yaml => {
                 let collection_limit = max_bytes.max(1);
                 let config = noyalib::ParserConfig::new()
                     .max_depth(document_container_depth(max_nesting))
@@ -105,7 +101,7 @@ impl PacketDocument {
                     .map_err(|source| map_yaml_parse_error(source, max_layers, max_nesting))?;
                 match de::IgnoredAny::deserialize(&mut deserializer) {
                     Ok(_) => {
-                        return Err(DocumentError::Parse {
+                        return Err(Error::Parse {
                             format: "YAML",
                             message: "multiple YAML documents are not supported".to_owned(),
                         });
@@ -127,7 +123,7 @@ fn document_container_depth(max_nesting: usize) -> usize {
     DOCUMENT_BASE_CONTAINER_DEPTH.saturating_add(max_nesting.saturating_mul(2))
 }
 
-fn validate_json_container_depth(input: &str, max_nesting: usize) -> Result<(), DocumentError> {
+fn validate_json_container_depth(input: &str, max_nesting: usize) -> Result<(), Error> {
     let maximum = document_container_depth(max_nesting);
     let bytes = input.as_bytes();
     let mut depth = 0_usize;
@@ -147,7 +143,7 @@ fn validate_json_container_depth(input: &str, max_nesting: usize) -> Result<(), 
             b'{' | b'[' => {
                 depth = depth.saturating_add(1);
                 if depth > maximum {
-                    return Err(DocumentError::NestingLimit { limit: max_nesting });
+                    return Err(Error::NestingLimit { limit: max_nesting });
                 }
             }
             b'}' | b']' => depth = depth.saturating_sub(1),
@@ -162,28 +158,24 @@ fn map_document_parse_error(
     format: &'static str,
     source: impl fmt::Display,
     max_layers: usize,
-) -> DocumentError {
+) -> Error {
     let message = source.to_string();
     if message.contains(LAYER_LIMIT_SENTINEL) {
-        DocumentError::LayerLimit { limit: max_layers }
+        Error::LayerLimit { limit: max_layers }
     } else {
-        DocumentError::Parse { format, message }
+        Error::Parse { format, message }
     }
 }
 
-fn map_yaml_parse_error(
-    source: noyalib::Error,
-    max_layers: usize,
-    max_nesting: usize,
-) -> DocumentError {
+fn map_yaml_parse_error(source: noyalib::Error, max_layers: usize, max_nesting: usize) -> Error {
     if matches!(source, noyalib::Error::RecursionLimitExceeded { .. }) {
-        DocumentError::NestingLimit { limit: max_nesting }
+        Error::NestingLimit { limit: max_nesting }
     } else {
         map_document_parse_error("YAML", source, max_layers)
     }
 }
 
-fn validate_value_nesting(document: &PacketDocument, maximum: usize) -> Result<(), DocumentError> {
+fn validate_value_nesting(document: &Packet, maximum: usize) -> Result<(), Error> {
     let mut pending = document
         .layers
         .iter()
@@ -194,7 +186,7 @@ fn validate_value_nesting(document: &PacketDocument, maximum: usize) -> Result<(
             continue;
         };
         if depth >= maximum {
-            return Err(DocumentError::NestingLimit { limit: maximum });
+            return Err(Error::NestingLimit { limit: maximum });
         }
         pending.extend(values.iter().map(|value| (value, depth + 1)));
     }

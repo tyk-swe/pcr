@@ -3,7 +3,7 @@
 
 //! Fixed-width bounded reads used by DNS decoding stages.
 
-use super::super::super::error::DnsWireError;
+use super::super::super::error::WireError as DnsWireError;
 
 pub(super) fn read_u16(
     message: &[u8],

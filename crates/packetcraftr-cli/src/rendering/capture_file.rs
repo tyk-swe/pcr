@@ -9,13 +9,13 @@ use packetcraftr::{
     output,
 };
 
-use super::super::capture_output::CaptureOutput;
 use super::super::errors::CliError;
+use super::CaptureWriter;
 
-pub(crate) fn capture_file_format(output: output::contract::Format) -> Result<Format, CliError> {
-    match output {
+pub(crate) fn capture_file_format(format: output::contract::Format) -> Result<Format, CliError> {
+    match format {
         output::contract::Format::Pcap => Ok(Format::Pcap),
-        output::contract::Format::Pcapng => Ok(Format::PcapNg),
+        output::contract::Format::PcapNg => Ok(Format::PcapNg),
         _ => Err(CliError::new(
             70,
             "capture-file renderer received a non-capture format",
@@ -24,17 +24,17 @@ pub(crate) fn capture_file_format(output: output::contract::Format) -> Result<Fo
 }
 
 pub(crate) fn write_capture_file(
-    output: output::contract::Format,
+    format: output::contract::Format,
     frames: impl IntoIterator<Item = Frame>,
 ) -> Result<(), CliError> {
-    write_raw(&encode_capture_file(output, frames)?)
+    write_raw(&encode(format, frames)?)
 }
 
-pub(crate) fn encode_capture_file(
-    output: output::contract::Format,
+fn encode(
+    format: output::contract::Format,
     frames: impl IntoIterator<Item = Frame>,
 ) -> Result<Vec<u8>, CliError> {
-    let format = capture_file_format(output)?;
+    let format = capture_file_format(format)?;
     let mut frames = frames.into_iter();
     let first = frames.next().ok_or_else(|| {
         CliError::new(
@@ -47,13 +47,13 @@ pub(crate) fn encode_capture_file(
         Format::PcapNg => Writer::pcapng(Vec::new()),
     }
     .map_err(|source| CliError::new(5, format!("initialize capture output failed: {source}")))?;
-    let mut output = CaptureOutput::link_mapped(writer);
+    let mut output = CaptureWriter::for_link_types(writer);
     for mut frame in std::iter::once(first).chain(frames) {
         output.add_link_type(frame.link_type).map_err(|source| {
             CliError::new(5, format!("initialize capture interface failed: {source}"))
         })?;
         // Classic PCAP cannot carry an interface ID; PCAPNG uses the
-        // lifecycle's stable per-link-type mapping.
+        // stable per-link-type mapping.
         if format == Format::Pcap {
             frame.interface = None;
         }

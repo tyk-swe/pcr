@@ -4,30 +4,27 @@ use std::net::IpAddr;
 
 use packetcraftr_core::Packet;
 
-use super::request::TracerouteStrategy;
+use super::request::Strategy;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TracerouteProbe {
+pub struct Probe {
     pub sequence: u64,
     pub address: IpAddr,
-    pub strategy: TracerouteStrategy,
+    pub strategy: Strategy,
     pub destination_port: Option<u16>,
     pub hop_limit: u8,
     pub attempt: u32,
 }
 
-impl TracerouteProbe {
+impl Probe {
     pub fn packet(&self) -> Packet {
         super::super::probe::probe_packet(self)
     }
 }
 
-pub type TracerouteBatch = crate::probe::runner::Batch<TracerouteProbe>;
-pub use crate::probe::runner::BatchExecution as TracerouteBatchExecution;
+pub type Batch = crate::probe::runner::Batch<Probe>;
+pub use crate::probe::runner::Execution;
 
-pub trait TracerouteExecutor {
-    fn execute(
-        &mut self,
-        batch: &TracerouteBatch,
-    ) -> std::result::Result<TracerouteBatchExecution, crate::BoundaryError>;
+pub trait Executor {
+    fn execute(&mut self, batch: &Batch) -> std::result::Result<Execution, crate::BoundaryError>;
 }

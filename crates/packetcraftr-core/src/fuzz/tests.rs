@@ -7,18 +7,18 @@ use std::sync::Arc;
 use crate::protocol::{builtin::registry as default_registry, network::Ipv4, transport::Udp};
 use crate::{
     Packet,
-    build::{BuildMode, BuildOptions},
+    build::{Mode, Options},
     layer::Raw,
-    registry::ProtocolRegistry,
+    registry::Registry,
 };
 use bytes::Bytes;
 
-use super::error::FuzzError;
-use super::request::{FuzzLimits, FuzzRequest, FuzzStrategy};
-use super::result::FuzzCaseOutcome;
+use super::error::Error;
+use super::request::{Limits, Request, Strategy};
+use super::result::CaseOutcome;
 use super::run::run as fuzz;
 
-fn fuzz_protocol_registry() -> Arc<ProtocolRegistry> {
+fn fuzz_protocol_registry() -> Arc<Registry> {
     Arc::new(default_registry().expect("built-in protocol registry"))
 }
 
@@ -41,10 +41,10 @@ fn udp_fuzz_packet() -> Packet {
 
 #[test]
 fn fuzz_same_seed_and_configuration_produce_identical_cases_and_bytes() {
-    let request = FuzzRequest {
+    let request = Request {
         seed: 0x1234_5678,
         cases: 32,
-        ..FuzzRequest::default()
+        ..Request::default()
     };
     let first = fuzz(&request, udp_fuzz_packet(), fuzz_protocol_registry()).unwrap();
     let second = fuzz(&request, udp_fuzz_packet(), fuzz_protocol_registry()).unwrap();
@@ -65,40 +65,40 @@ fn fuzz_same_seed_and_configuration_produce_identical_cases_and_bytes() {
 #[test]
 fn fuzz_bounded_resource_rejection_precedes_unbounded_case_growth() {
     let error = fuzz(
-        &FuzzRequest {
+        &Request {
             cases: 2,
-            strategies: vec![FuzzStrategy::BitFlip],
+            strategies: vec![Strategy::BitFlip],
             targets: vec!["2.bytes".parse().unwrap()],
-            build: BuildOptions {
+            build: Options {
                 max_packet_size: 64,
-                ..BuildOptions::default()
+                ..Options::default()
             },
-            limits: FuzzLimits {
+            limits: Limits {
                 max_cases: 2,
                 max_packet_bytes: 64,
                 max_total_bytes: 64,
                 max_field_bytes: 32,
-                ..FuzzLimits::default()
+                ..Limits::default()
             },
-            ..FuzzRequest::default()
+            ..Request::default()
         },
         udp_fuzz_packet(),
         fuzz_protocol_registry(),
     )
     .unwrap_err();
-    assert!(matches!(error, FuzzError::ByteLimit { .. }));
+    assert!(matches!(error, Error::ByteLimit { .. }));
 }
 
 #[test]
 fn fuzz_malformed_derived_fields_are_strictly_rejected_and_permissively_built() {
     let base = udp_fuzz_packet();
     let strict = fuzz(
-        &FuzzRequest {
+        &Request {
             seed: 1,
             cases: 8,
-            strategies: vec![FuzzStrategy::Malformed],
+            strategies: vec![Strategy::Malformed],
             targets: vec!["1.length".parse().unwrap()],
-            ..FuzzRequest::default()
+            ..Request::default()
         },
         base.clone(),
         fuzz_protocol_registry(),
@@ -108,20 +108,20 @@ fn fuzz_malformed_derived_fields_are_strictly_rejected_and_permissively_built() 
         strict
             .cases
             .iter()
-            .any(|case| case.outcome == FuzzCaseOutcome::Rejected)
+            .any(|case| case.outcome == CaseOutcome::Rejected)
     );
 
     let permissive = fuzz(
-        &FuzzRequest {
+        &Request {
             seed: 1,
             cases: 8,
-            strategies: vec![FuzzStrategy::Malformed],
+            strategies: vec![Strategy::Malformed],
             targets: vec!["1.length".parse().unwrap()],
-            build: BuildOptions {
-                mode: BuildMode::Permissive,
-                ..BuildOptions::default()
+            build: Options {
+                mode: Mode::Permissive,
+                ..Options::default()
             },
-            ..FuzzRequest::default()
+            ..Request::default()
         },
         base,
         fuzz_protocol_registry(),

@@ -51,6 +51,16 @@ fn record(type_code: u16, rdata: Vec<u8>) -> WireRecord {
     }
 }
 
+fn opt_record() -> WireRecord {
+    WireRecord {
+        owner: name("."),
+        type_code: 41,
+        class: 1_232,
+        ttl: 0,
+        rdata: Vec::new(),
+    }
+}
+
 fn push_record(message: &mut Vec<u8>, record: &WireRecord) {
     message.extend_from_slice(&record.owner);
     message.extend_from_slice(&record.type_code.to_be_bytes());
@@ -100,7 +110,7 @@ fn decode(message: &[u8], query_name: &str, query_type: QueryType) -> dns::Valid
 }
 
 #[test]
-fn public_decode_aliases_keep_their_function_contracts() {
+fn public_decode_functions_share_their_contract() {
     type Decode =
         fn(&[u8], &str, QueryType, u16, Limits) -> Result<dns::ValidatedResponse, WireError>;
 
@@ -560,14 +570,8 @@ fn edns_metadata_extends_response_code_and_retains_options() {
 }
 
 #[test]
-fn invalid_edns_placement_version_duplication_and_option_lengths_are_rejected() {
-    let opt = WireRecord {
-        owner: name("."),
-        type_code: 41,
-        class: 1_232,
-        ttl: 0,
-        rdata: Vec::new(),
-    };
+fn duplicate_edns_records_are_rejected() {
+    let opt = opt_record();
     let duplicate = response(
         "example.test.",
         QueryType::A,
@@ -586,7 +590,11 @@ fn invalid_edns_placement_version_duplication_and_option_lengths_are_rejected() 
         ),
         Err(WireError::DuplicateEdns)
     ));
+}
 
+#[test]
+fn misplaced_edns_records_are_rejected() {
+    let opt = opt_record();
     let answer_opt = response(
         "example.test.",
         QueryType::A,
@@ -606,7 +614,7 @@ fn invalid_edns_placement_version_duplication_and_option_lengths_are_rejected() 
         Err(WireError::InvalidEdns { .. })
     ));
 
-    let mut non_root = opt.clone();
+    let mut non_root = opt;
     non_root.owner = compressed_owner();
     let non_root = response(
         "example.test.",
@@ -626,8 +634,11 @@ fn invalid_edns_placement_version_duplication_and_option_lengths_are_rejected() 
         ),
         Err(WireError::InvalidEdns { .. })
     ));
+}
 
-    let mut version = opt.clone();
+#[test]
+fn unsupported_edns_versions_and_invalid_option_lengths_are_rejected() {
+    let mut version = opt_record();
     version.ttl = 1 << 16;
     let version = response(
         "example.test.",
@@ -648,7 +659,7 @@ fn invalid_edns_placement_version_duplication_and_option_lengths_are_rejected() 
         Err(WireError::UnsupportedEdnsVersion { version: 1 })
     ));
 
-    let mut bad_option = opt;
+    let mut bad_option = opt_record();
     bad_option.rdata = vec![0, 1, 0, 2, 0xff];
     let bad_option = response(
         "example.test.",

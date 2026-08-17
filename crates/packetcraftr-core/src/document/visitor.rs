@@ -7,7 +7,7 @@ use std::fmt;
 use serde::Deserialize;
 use serde::de::{self, DeserializeSeed, MapAccess, SeqAccess, Visitor};
 
-use super::types::{LAYER_LIMIT_SENTINEL, LayerDocument, PacketDocument};
+use super::types::{LAYER_LIMIT_SENTINEL, Layer, Packet};
 use crate::field::FieldValue;
 
 #[derive(Deserialize)]
@@ -30,7 +30,7 @@ pub(super) struct PacketDocumentSeed {
 }
 
 impl<'de> DeserializeSeed<'de> for PacketDocumentSeed {
-    type Value = PacketDocument;
+    type Value = Packet;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
     where
@@ -51,7 +51,7 @@ pub(super) struct PacketDocumentVisitor {
 }
 
 impl<'de> Visitor<'de> for PacketDocumentVisitor {
-    type Value = PacketDocument;
+    type Value = Packet;
 
     fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("a packet document object")
@@ -81,7 +81,7 @@ impl<'de> Visitor<'de> for PacketDocumentVisitor {
                 }
             }
         }
-        Ok(PacketDocument {
+        Ok(Packet {
             schema: schema.ok_or_else(|| de::Error::missing_field("schema"))?,
             layers: layers.ok_or_else(|| de::Error::missing_field("layers"))?,
         })
@@ -94,7 +94,7 @@ pub(super) struct LayersSeed {
 }
 
 impl<'de> DeserializeSeed<'de> for LayersSeed {
-    type Value = Vec<LayerDocument>;
+    type Value = Vec<Layer>;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
     where
@@ -111,7 +111,7 @@ pub(super) struct LayersVisitor {
 }
 
 impl<'de> Visitor<'de> for LayersVisitor {
-    type Value = Vec<LayerDocument>;
+    type Value = Vec<Layer>;
 
     fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(formatter, "at most {} packet layers", self.maximum)
@@ -145,7 +145,7 @@ impl<'de> Visitor<'de> for LayersVisitor {
 pub(super) struct LayerDocumentSeed;
 
 impl<'de> DeserializeSeed<'de> for LayerDocumentSeed {
-    type Value = LayerDocument;
+    type Value = Layer;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
     where
@@ -162,7 +162,7 @@ impl<'de> DeserializeSeed<'de> for LayerDocumentSeed {
 pub(super) struct LayerDocumentVisitor;
 
 impl<'de> Visitor<'de> for LayerDocumentVisitor {
-    type Value = LayerDocument;
+    type Value = Layer;
 
     fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("a packet layer object")
@@ -190,7 +190,7 @@ impl<'de> Visitor<'de> for LayerDocumentVisitor {
                 }
             }
         }
-        Ok(LayerDocument {
+        Ok(Layer {
             protocol: protocol.ok_or_else(|| de::Error::missing_field("protocol"))?,
             fields: fields.unwrap_or_default(),
         })

@@ -1,10 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use clap::{Args, ValueEnum};
+use clap::ValueEnum;
 
 use crate::command_options::{
-    CaptureLimitArgs, CliAddressFamily, HostnameTrafficPolicyArgs, RouteSelectionArgs,
+    AddressFamily, CaptureLimitsArgs, HostnameTrafficPolicyArgs, RouteSelectionArgs,
 };
 
 pub(crate) const AFTER_LONG_HELP: &str = r#"Examples:
@@ -12,7 +12,7 @@ pub(crate) const AFTER_LONG_HELP: &str = r#"Examples:
   packetcraftr --output json dns 192.0.2.53 _service._tcp.example.test --type srv"#;
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
-pub(crate) enum CliDnsQueryType {
+pub(crate) enum QueryType {
     #[default]
     A,
     Aaaa,
@@ -26,25 +26,25 @@ pub(crate) enum CliDnsQueryType {
     Any,
 }
 
-impl From<CliDnsQueryType> for packetcraftr::dns::QueryType {
-    fn from(value: CliDnsQueryType) -> Self {
+impl From<QueryType> for packetcraftr::dns::QueryType {
+    fn from(value: QueryType) -> Self {
         match value {
-            CliDnsQueryType::A => Self::A,
-            CliDnsQueryType::Aaaa => Self::Aaaa,
-            CliDnsQueryType::Cname => Self::Cname,
-            CliDnsQueryType::Mx => Self::Mx,
-            CliDnsQueryType::Ns => Self::Ns,
-            CliDnsQueryType::Ptr => Self::Ptr,
-            CliDnsQueryType::Soa => Self::Soa,
-            CliDnsQueryType::Srv => Self::Srv,
-            CliDnsQueryType::Txt => Self::Txt,
-            CliDnsQueryType::Any => Self::Any,
+            QueryType::A => Self::A,
+            QueryType::Aaaa => Self::Aaaa,
+            QueryType::Cname => Self::Cname,
+            QueryType::Mx => Self::Mx,
+            QueryType::Ns => Self::Ns,
+            QueryType::Ptr => Self::Ptr,
+            QueryType::Soa => Self::Soa,
+            QueryType::Srv => Self::Srv,
+            QueryType::Txt => Self::Txt,
+            QueryType::Any => Self::Any,
         }
     }
 }
 
-#[derive(Debug, Args)]
-pub(crate) struct DnsArgs {
+#[derive(Debug, clap::Args)]
+pub(crate) struct Args {
     /// Explicit DNS server IP address or hostname.
     #[arg(value_name = "SERVER")]
     pub(crate) server: String,
@@ -52,11 +52,11 @@ pub(crate) struct DnsArgs {
     #[arg(value_name = "NAME")]
     pub(crate) name: String,
     /// DNS question type.
-    #[arg(long = "type", value_enum, default_value_t = CliDnsQueryType::A)]
-    pub(crate) query_type: CliDnsQueryType,
+    #[arg(long = "type", value_enum, default_value_t = QueryType::A)]
+    pub(crate) query_type: QueryType,
     /// Select the first authorized server address or one IP family.
-    #[arg(long, value_enum, default_value_t = CliAddressFamily::Any)]
-    pub(crate) family: CliAddressFamily,
+    #[arg(long, value_enum, default_value_t = AddressFamily::Any)]
+    pub(crate) family: AddressFamily,
     /// DNS server UDP port.
     #[arg(long, default_value_t = packetcraftr::dns::DEFAULT_DNS_SERVER_PORT)]
     pub(crate) port: u16,
@@ -105,7 +105,7 @@ pub(crate) struct DnsArgs {
     #[command(flatten)]
     pub(crate) route: RouteSelectionArgs,
     #[command(flatten)]
-    pub(crate) limits: CaptureLimitArgs,
+    pub(crate) limits: CaptureLimitsArgs,
     #[command(flatten)]
     pub(crate) policy: HostnameTrafficPolicyArgs,
 }

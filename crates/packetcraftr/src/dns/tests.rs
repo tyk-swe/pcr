@@ -13,9 +13,10 @@ use crate::target::{Authorized, Authorizer, Family, Target};
 use crate::{BoundaryError, Stats};
 
 use super::DEFAULT_DNS_SERVER_PORT;
-use super::engine::dns;
+use super::engine::run as dns;
 use super::model::{
-    DnsExchange, DnsExchangeExecution, DnsExecutor, DnsLimits, DnsQueryType, DnsRequest,
+    Exchange as DnsExchange, Execution as DnsExchangeExecution, Executor as DnsExecutor,
+    Limits as DnsLimits, QueryType as DnsQueryType, Request as DnsRequest,
 };
 
 #[derive(Default)]

@@ -10,7 +10,7 @@ use packetcraftr_core::analysis::reassembly::{
     fragment::{self, DatagramKey, Fragment, OverlapPolicy, ScopedDatagramKey},
     tcp::{self, FlowKey, ScopedFlowKey, Segment},
 };
-use packetcraftr_core::analysis::scope::{EncapsulationIdentifier, ScopeInterner};
+use packetcraftr_core::analysis::scope::{EncapsulationIdentifier, Interner as ScopeInterner};
 
 fn scope() -> packetcraftr_core::analysis::scope::ScopeId {
     ScopeInterner::new()

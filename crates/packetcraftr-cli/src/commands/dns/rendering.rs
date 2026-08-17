@@ -5,12 +5,20 @@ use packetcraftr::{core, output};
 
 use crate::errors::CliError;
 use crate::rendering::{
-    captured_frame_text, comma_separated, emit_stream_record, emit_stream_with_stats,
+    captured_frame_text, comma_separated, emit_aggregate_with_stats, emit_next, emit_with_stats,
     optional_display, output_timestamp_text, render_diagnostics_text, render_optional,
     write_stdout_line,
 };
 
-pub(super) fn render_dns_text(
+pub(super) fn render_aggregate(
+    result: output::dns::Result,
+    diagnostics: Vec<core::diagnostic::Diagnostic>,
+    stats: output::envelope::Stats,
+) -> Result<(), CliError> {
+    emit_aggregate_with_stats(output::contract::Command::Dns, result, diagnostics, stats)
+}
+
+pub(super) fn render_text(
     result: output::dns::Result,
     diagnostics: Vec<core::diagnostic::Diagnostic>,
     stats: output::envelope::Stats,
@@ -24,7 +32,7 @@ pub(super) fn render_dns_text(
         result.query_type,
         result.transaction_id,
         result.transport,
-        dns_outcome_name(result.outcome),
+        outcome_name(result.outcome),
     ))?;
     for attempt in &result.attempts {
         write_stdout_line(format_args!(
@@ -32,7 +40,7 @@ pub(super) fn render_dns_text(
             attempt.attempt,
             attempt.server_address,
             attempt.source_port,
-            dns_outcome_name(attempt.status),
+            outcome_name(attempt.status),
             output_timestamp_text(attempt.sent_at),
             render_optional(attempt.received_at, output_timestamp_text),
             render_optional(attempt.latency, |value| format!("{value:?}")),
@@ -49,7 +57,7 @@ pub(super) fn render_dns_text(
         (output::dns::Section::Additional, &result.additionals),
     ] {
         for record in records {
-            render_dns_record_text(section, record)?;
+            render_record(section, record)?;
         }
     }
     for record in &result.rejected_records {
@@ -66,20 +74,22 @@ pub(super) fn render_dns_text(
         ))?;
     }
     write_stdout_line(format_args!(
-        "dns response_code={} response_name={} authoritative={} truncated={} accepted={} rejected={} queries={} bytes={}",
-        optional_display(result.response_code),
-        result.response_code_name.as_deref().unwrap_or("none"),
-        optional_display(result.authoritative),
-        optional_display(result.truncated),
-        result.answers.len() + result.authorities.len() + result.additionals.len(),
-        result.rejected_record_count,
-        stats.packets_completed,
-        stats.bytes,
+        "{}",
+        response_summary(ResponseSummary {
+            response_code: optional_display(result.response_code),
+            response_code_name: result.response_code_name.as_deref().unwrap_or("none"),
+            authoritative: optional_display(result.authoritative),
+            truncated: optional_display(result.truncated),
+            accepted: result.answers.len() + result.authorities.len() + result.additionals.len(),
+            rejected: result.rejected_record_count,
+            queries: stats.packets_completed,
+            bytes: stats.bytes,
+        })
     ))?;
     render_diagnostics_text(&diagnostics)
 }
 
-fn render_dns_record_text(
+fn render_record(
     section: output::dns::Section,
     record: &output::dns::Record,
 ) -> Result<(), CliError> {
@@ -91,7 +101,7 @@ fn render_dns_record_text(
     ))
 }
 
-pub(super) fn render_dns_stream(
+pub(super) fn render_stream(
     result: output::dns::Result,
     diagnostics: Vec<core::diagnostic::Diagnostic>,
     stats: output::envelope::Stats,
@@ -123,60 +133,23 @@ pub(super) fn render_dns_stream(
         undecoded,
     } = result;
     let mut sequence = 0_u64;
-    for evidence in attempts {
-        emit_stream_record(
-            output::contract::Command::Dns,
-            &mut sequence,
-            output::dns::Event::Attempt {
-                server: server.clone(),
-                server_port,
-                query_name: query_name.clone(),
-                query_type: query_type.clone(),
-                evidence,
-            },
-        )?;
-    }
-    for (section, records) in [
-        (output::dns::Section::Answer, answers),
-        (output::dns::Section::Authority, authorities),
-        (output::dns::Section::Additional, additionals),
-    ] {
-        for record in records {
-            emit_stream_record(
-                output::contract::Command::Dns,
-                &mut sequence,
-                output::dns::Event::Record {
-                    server: server.clone(),
-                    server_port,
-                    query_name: query_name.clone(),
-                    query_type: query_type.clone(),
-                    section,
-                    record,
-                },
-            )?;
-        }
-    }
-    for record in rejected_records {
-        emit_stream_record(
-            output::contract::Command::Dns,
-            &mut sequence,
-            output::dns::Event::Rejected {
-                server: server.clone(),
-                server_port,
-                query_name: query_name.clone(),
-                query_type: query_type.clone(),
-                record,
-            },
-        )?;
-    }
+    let context = StreamContext {
+        server: &server,
+        server_port,
+        query_name: &query_name,
+        query_type: &query_type,
+    };
+    render_attempts(attempts, context, &mut sequence)?;
+    render_records(answers, authorities, additionals, context, &mut sequence)?;
+    render_rejected(rejected_records, context, &mut sequence)?;
     for evidence in undecoded {
-        emit_stream_record(
+        emit_next(
             output::contract::Command::Dns,
             &mut sequence,
             output::dns::Event::Undecoded { evidence },
         )?;
     }
-    emit_stream_with_stats(
+    emit_with_stats(
         output::contract::Command::Dns,
         sequence,
         output::dns::Event::Complete {
@@ -204,7 +177,114 @@ pub(super) fn render_dns_stream(
     )
 }
 
-pub(super) fn dns_outcome_name(value: output::dns::Outcome) -> &'static str {
+#[derive(Clone, Copy)]
+struct StreamContext<'a> {
+    server: &'a str,
+    server_port: u16,
+    query_name: &'a str,
+    query_type: &'a str,
+}
+
+fn render_attempts(
+    attempts: Vec<output::dns::Attempt>,
+    context: StreamContext<'_>,
+    sequence: &mut u64,
+) -> Result<(), CliError> {
+    for evidence in attempts {
+        emit_next(
+            output::contract::Command::Dns,
+            sequence,
+            output::dns::Event::Attempt {
+                server: context.server.to_owned(),
+                server_port: context.server_port,
+                query_name: context.query_name.to_owned(),
+                query_type: context.query_type.to_owned(),
+                evidence,
+            },
+        )?;
+    }
+    Ok(())
+}
+
+fn render_records(
+    answers: Vec<output::dns::Record>,
+    authorities: Vec<output::dns::Record>,
+    additionals: Vec<output::dns::Record>,
+    context: StreamContext<'_>,
+    sequence: &mut u64,
+) -> Result<(), CliError> {
+    for (section, records) in [
+        (output::dns::Section::Answer, answers),
+        (output::dns::Section::Authority, authorities),
+        (output::dns::Section::Additional, additionals),
+    ] {
+        for record in records {
+            emit_next(
+                output::contract::Command::Dns,
+                sequence,
+                output::dns::Event::Record {
+                    server: context.server.to_owned(),
+                    server_port: context.server_port,
+                    query_name: context.query_name.to_owned(),
+                    query_type: context.query_type.to_owned(),
+                    section,
+                    record,
+                },
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn render_rejected(
+    records: Vec<output::dns::RejectedRecord>,
+    context: StreamContext<'_>,
+    sequence: &mut u64,
+) -> Result<(), CliError> {
+    for record in records {
+        emit_next(
+            output::contract::Command::Dns,
+            sequence,
+            output::dns::Event::Rejected {
+                server: context.server.to_owned(),
+                server_port: context.server_port,
+                query_name: context.query_name.to_owned(),
+                query_type: context.query_type.to_owned(),
+                record,
+            },
+        )?;
+    }
+    Ok(())
+}
+
+struct ResponseSummary<'a> {
+    response_code: String,
+    response_code_name: &'a str,
+    authoritative: String,
+    truncated: String,
+    accepted: usize,
+    rejected: usize,
+    queries: u64,
+    bytes: u64,
+}
+
+fn response_summary(summary: ResponseSummary<'_>) -> String {
+    let ResponseSummary {
+        response_code,
+        response_code_name,
+        authoritative,
+        truncated,
+        accepted,
+        rejected,
+        queries,
+        bytes,
+    } = summary;
+    format!(
+        "dns response_code={response_code} response_code_name={response_code_name} authoritative={authoritative} truncated={truncated} accepted={accepted} rejected={rejected} queries={queries} bytes={bytes}"
+    )
+}
+
+fn outcome_name(value: output::dns::Outcome) -> &'static str {
     match value {
         output::dns::Outcome::Response => "response",
         output::dns::Outcome::Truncated => "truncated",
@@ -212,5 +292,27 @@ pub(super) fn dns_outcome_name(value: output::dns::Outcome) -> &'static str {
         output::dns::Outcome::Unrelated => "unrelated",
         output::dns::Outcome::DecodeFailure => "decode_failure",
         output::dns::Outcome::NetworkFailure => "network_failure",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ResponseSummary, response_summary};
+
+    #[test]
+    fn response_summary_uses_the_response_code_name_label() {
+        let summary = response_summary(ResponseSummary {
+            response_code: "0".to_owned(),
+            response_code_name: "NOERROR",
+            authoritative: "true".to_owned(),
+            truncated: "false".to_owned(),
+            accepted: 1,
+            rejected: 0,
+            queries: 1,
+            bytes: 64,
+        });
+
+        assert!(summary.contains("response_code_name=NOERROR"));
+        assert!(!summary.contains(" response_name="));
     }
 }

@@ -37,14 +37,14 @@ Run `packetcraftr <COMMAND> --help` for command-specific options and examples."#
 pub(crate) struct Cli {
     /// Select the output encoding; supported formats are command-specific.
     #[arg(
-        long,
+        long = "output",
         global = true,
         value_enum,
         value_name = "FORMAT",
         help_heading = "Global options",
-        default_value_t = CliOutputFormat::Text
+        default_value_t = Format::Text
     )]
-    pub(crate) output: CliOutputFormat,
+    pub(crate) format: Format,
     /// Control terminal colours in human-facing output.
     #[arg(
         long,
@@ -52,15 +52,15 @@ pub(crate) struct Cli {
         value_enum,
         value_name = "WHEN",
         help_heading = "Global options",
-        default_value_t = CliColorChoice::Auto
+        default_value_t = ColorChoice::Auto
     )]
-    pub(crate) color: CliColorChoice,
+    pub(crate) color: ColorChoice,
     #[command(subcommand)]
     pub(crate) command: Command,
 }
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
-pub(crate) enum CliOutputFormat {
+pub(crate) enum Format {
     #[default]
     Text,
     Json,
@@ -68,31 +68,32 @@ pub(crate) enum CliOutputFormat {
     Hex,
     Raw,
     Pcap,
-    Pcapng,
+    #[value(name = "pcapng")]
+    PcapNg,
 }
 
-impl std::fmt::Display for CliOutputFormat {
+impl std::fmt::Display for Format {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(output::contract::Format::from(*self).as_str())
     }
 }
 
-impl From<CliOutputFormat> for output::contract::Format {
-    fn from(value: CliOutputFormat) -> Self {
+impl From<Format> for output::contract::Format {
+    fn from(value: Format) -> Self {
         match value {
-            CliOutputFormat::Text => Self::Text,
-            CliOutputFormat::Json => Self::Json,
-            CliOutputFormat::Ndjson => Self::Ndjson,
-            CliOutputFormat::Hex => Self::Hex,
-            CliOutputFormat::Raw => Self::Raw,
-            CliOutputFormat::Pcap => Self::Pcap,
-            CliOutputFormat::Pcapng => Self::Pcapng,
+            Format::Text => Self::Text,
+            Format::Json => Self::Json,
+            Format::Ndjson => Self::Ndjson,
+            Format::Hex => Self::Hex,
+            Format::Raw => Self::Raw,
+            Format::Pcap => Self::Pcap,
+            Format::PcapNg => Self::PcapNg,
         }
     }
 }
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
-pub(crate) enum CliColorChoice {
+pub(crate) enum ColorChoice {
     /// Use colour only when the destination supports it.
     #[default]
     Auto,
@@ -102,7 +103,7 @@ pub(crate) enum CliColorChoice {
     Never,
 }
 
-impl std::fmt::Display for CliColorChoice {
+impl std::fmt::Display for ColorChoice {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::Auto => "auto",
@@ -112,7 +113,7 @@ impl std::fmt::Display for CliColorChoice {
     }
 }
 
-impl CliColorChoice {
+impl ColorChoice {
     pub(crate) fn write_global(self) {
         let choice = match self {
             Self::Auto => anstream::ColorChoice::Auto,

@@ -13,11 +13,9 @@ mod options;
 mod provider;
 mod wire;
 
-pub use super::route::materialize::{NeighborError as Error, NeighborResolver as Resolver};
+pub use error::Error;
 pub use model::{Request, Resolution, VlanKind, VlanTag};
-pub use options::NeighborResolutionOptions as Options;
-pub use provider::{
-    ActiveNeighborResolver as ActiveResolver, SystemNeighborResolver as SystemResolver,
-};
+pub use options::Options;
+pub use provider::{ActiveResolver, Resolver, SystemResolver};
 
 pub(crate) use model::MAX_VLAN_TAGS;

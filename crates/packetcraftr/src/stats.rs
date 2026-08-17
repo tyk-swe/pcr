@@ -18,7 +18,7 @@ pub struct Stats {
 impl Stats {
     /// Accumulates `value` into these counters, or leaves them untouched and
     /// returns `None` if any single counter would overflow.
-    pub fn checked_add(&mut self, value: &Self) -> Option<()> {
+    pub fn checked_add_assign(&mut self, value: &Self) -> Option<()> {
         let sum = Self {
             packets_attempted: self
                 .packets_attempted

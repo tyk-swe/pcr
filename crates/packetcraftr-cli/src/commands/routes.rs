@@ -11,7 +11,7 @@ pub(super) const AFTER_LONG_HELP: &str = r#"Examples:
   packetcraftr routes
   packetcraftr --output json routes"#;
 
-pub(super) fn run(output: output::contract::Format) -> Result<(), CliError> {
+pub(super) fn run(format: output::contract::Format) -> Result<(), CliError> {
     let interfaces = net::interface::SystemProvider
         .interfaces()
         .map_err(CliError::classified)?;
@@ -34,17 +34,17 @@ pub(super) fn run(output: output::contract::Format) -> Result<(), CliError> {
     }
     routes.sort_by_key(|route| (route.interface.index, route.interface.name.clone()));
     routes.dedup_by(|left, right| left.interface == right.interface);
-    let result = output::routes::RoutesCommandResult {
+    let result = output::routes::Result {
         routes: routes.into_iter().map(Into::into).collect(),
     };
-    match output {
+    match format {
         output::contract::Format::Text => {
             for route in result.routes {
                 write_stdout_line(format_args!(
                     "{} (index {}): source={} mtu={} capability={:?} link_type={}",
                     route.interface.name,
                     route.interface.index,
-                    optional_display(route.selected_address.or(route.preferred_source)),
+                    optional_display(route.selected_source.or(route.preferred_source)),
                     route.mtu,
                     route.capability,
                     route.link_type

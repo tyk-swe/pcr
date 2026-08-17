@@ -10,12 +10,12 @@ use bytes::Bytes;
 
 use crate::{
     codec::{
-        CodecError, DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext,
+        DecodedLayerValue, EncodedLayer, Error as CodecError, LayerCodec, LayerDecodeContext,
         LayerEncodeContext,
     },
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflective_layer},
+    layer::{Id as ProtocolId, Layer, reflective_layer},
     registry::Discriminator,
     semantics::ipv4_source_route_destination,
 };
@@ -27,7 +27,7 @@ use super::super::common::{
     validate_raw_child_discriminator, wrong_layer,
 };
 
-use super::encode::is_outer_network_layer;
+use super::envelope::is_outer_network_layer;
 
 const IPV4_MIN_LEN: usize = 20;
 
@@ -106,91 +106,12 @@ impl LayerCodec for Ipv4Codec {
             .as_any()
             .downcast_ref::<Ipv4>()
             .ok_or_else(|| wrong_layer("ipv4", layer))?;
-        if layer.fragment_offset > 0x1fff {
-            return Err(invalid("ipv4", "fragment offset exceeds 13 bits"));
-        }
-        if layer.options.len() > 40 {
-            return Err(invalid("ipv4", "options exceed the 40-byte IPv4 limit"));
-        }
-
-        let inherit_context = is_outer_network_layer(context.packet, context.index);
-        let inherit_source = inherit_context && layer.source.is_unspecified();
-        let inherit_destination = inherit_context && layer.destination.is_unspecified();
-        let source = match context.build_context.source {
-            Some(IpAddr::V4(source)) if inherit_source => source,
-            _ => layer.source,
-        };
-        let destination = match context.build_context.destination {
-            Some(IpAddr::V4(destination)) if inherit_destination => destination,
-            _ => layer.destination,
-        };
-
-        let mut diagnostics = Vec::new();
-        if layer.reserved_flag {
-            let message = "reserved IPv4 flag bit is set";
-            if context.mode == crate::build::BuildMode::Strict {
-                return Err(invalid("ipv4", message));
-            }
-            diagnostics.push(
-                Diagnostic::warning("build.ipv4_reserved_flag", message).at_field("reserved_flag"),
-            );
-        }
-        let mut options = layer.options.to_vec();
-        let padding = (4 - (options.len() % 4)) % 4;
-        if padding != 0 {
-            options.resize(options.len() + padding, 0);
-            diagnostics.push(
-                Diagnostic::warning(
-                    "build.ipv4_options_padded",
-                    format!("padded IPv4 options with {padding} zero byte(s)"),
-                )
-                .at_field("options"),
-            );
-        }
+        let (source, destination) = resolve_addresses(layer, context);
+        let (options, covered_payload_len, mut diagnostics) =
+            prepare_payload(layer, payload, context)?;
         let header_len = IPV4_MIN_LEN + options.len();
-        let covered_payload = payload_without_padding("ipv4", payload, context)?;
-        if layer.dont_fragment && (layer.more_fragments || layer.fragment_offset != 0) {
-            strict_or_diagnostic(
-                "ipv4",
-                "build.ipv4_conflicting_fragment_flags",
-                "dont_fragment",
-                "don't-fragment cannot be combined with MF or a non-zero fragment offset",
-                context,
-                &mut diagnostics,
-            )?;
-        }
-        if layer.more_fragments && covered_payload.len() % 8 != 0 {
-            strict_or_diagnostic(
-                "ipv4",
-                "build.ipv4_fragment_alignment",
-                "more_fragments",
-                format!(
-                    "non-final fragment payload length {} is not a multiple of eight bytes",
-                    covered_payload.len()
-                ),
-                context,
-                &mut diagnostics,
-            )?;
-        }
-        if (layer.fragment_offset != 0 || layer.more_fragments)
-            && context.child.is_some_and(|child| {
-                !matches!(
-                    child.protocol_id().as_str(),
-                    "raw" | "padding" | "malformed"
-                )
-            })
-        {
-            strict_or_diagnostic(
-                "ipv4",
-                "build.typed_fragment_payload",
-                "fragment_offset",
-                "fragment payload must be Raw; convert typed fragment payloads to Raw explicitly",
-                context,
-                &mut diagnostics,
-            )?;
-        }
         let total_expected = header_len
-            .checked_add(covered_payload.len())
+            .checked_add(covered_payload_len)
             .and_then(|value| u16::try_from(value).ok())
             .ok_or_else(|| invalid("ipv4", "packet exceeds IPv4 total-length range"))?;
         let (total_length, materialized_total) = resolve_u16(
@@ -372,4 +293,95 @@ impl LayerCodec for Ipv4Codec {
             &aliased_fields("ipv4", fields, &[("src", "source"), ("dst", "destination")])?,
         )
     }
+}
+
+fn resolve_addresses(layer: &Ipv4, context: &LayerEncodeContext<'_>) -> (Ipv4Addr, Ipv4Addr) {
+    let inherit = is_outer_network_layer(context.packet, context.index);
+    let source = match context.build_context.source {
+        Some(IpAddr::V4(source)) if inherit && layer.source.is_unspecified() => source,
+        _ => layer.source,
+    };
+    let destination = match context.build_context.destination {
+        Some(IpAddr::V4(destination)) if inherit && layer.destination.is_unspecified() => {
+            destination
+        }
+        _ => layer.destination,
+    };
+    (source, destination)
+}
+
+fn prepare_payload(
+    layer: &Ipv4,
+    payload: &[u8],
+    context: &LayerEncodeContext<'_>,
+) -> Result<(Vec<u8>, usize, Vec<Diagnostic>), CodecError> {
+    if layer.fragment_offset > 0x1fff {
+        return Err(invalid("ipv4", "fragment offset exceeds 13 bits"));
+    }
+    if layer.options.len() > 40 {
+        return Err(invalid("ipv4", "options exceed the 40-byte IPv4 limit"));
+    }
+    let mut diagnostics = Vec::new();
+    if layer.reserved_flag {
+        let message = "reserved IPv4 flag bit is set";
+        if context.mode == crate::build::Mode::Strict {
+            return Err(invalid("ipv4", message));
+        }
+        diagnostics.push(
+            Diagnostic::warning("build.ipv4_reserved_flag", message).at_field("reserved_flag"),
+        );
+    }
+    let mut options = layer.options.to_vec();
+    let padding = (4 - (options.len() % 4)) % 4;
+    if padding != 0 {
+        options.resize(options.len() + padding, 0);
+        diagnostics.push(
+            Diagnostic::warning(
+                "build.ipv4_options_padded",
+                format!("padded IPv4 options with {padding} zero byte(s)"),
+            )
+            .at_field("options"),
+        );
+    }
+    let covered_payload_len = payload_without_padding("ipv4", payload, context)?.len();
+    if layer.dont_fragment && (layer.more_fragments || layer.fragment_offset != 0) {
+        strict_or_diagnostic(
+            "ipv4",
+            "build.ipv4_conflicting_fragment_flags",
+            "dont_fragment",
+            "don't-fragment cannot be combined with MF or a non-zero fragment offset",
+            context,
+            &mut diagnostics,
+        )?;
+    }
+    if layer.more_fragments && covered_payload_len % 8 != 0 {
+        strict_or_diagnostic(
+            "ipv4",
+            "build.ipv4_fragment_alignment",
+            "more_fragments",
+            format!(
+                "non-final fragment payload length {covered_payload_len} is not a multiple of eight bytes"
+            ),
+            context,
+            &mut diagnostics,
+        )?;
+    }
+    let typed_fragment = (layer.fragment_offset != 0 || layer.more_fragments)
+        && context.child.is_some_and(|child| {
+            !matches!(
+                child.protocol_id().as_str(),
+                "raw" | "padding" | "malformed"
+            )
+        });
+    if typed_fragment {
+        strict_or_diagnostic(
+            "ipv4",
+            "build.typed_fragment_payload",
+            "fragment_offset",
+            "fragment payload must be Raw; convert typed fragment payloads to Raw explicitly",
+            context,
+            &mut diagnostics,
+        )?;
+    }
+    Ok((options, covered_payload_len, diagnostics))
 }

@@ -49,7 +49,7 @@ pub struct Chunk {
 
 /// Terminal accounting for one followed conversation.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct FollowSummary {
+pub struct Summary {
     /// The flow of the conversation's first captured frame: its source is
     /// the client and its destination the server. `None` when the capture
     /// holds no frame of the selected conversation.
@@ -70,18 +70,18 @@ pub struct FollowSummary {
 /// collector still verifies every event's flow, so an unfiltered run stays
 /// correct and merely does more work.
 #[derive(Debug)]
-pub struct FollowCollector {
+pub struct Collector {
     selector: Selector,
-    summary: FollowSummary,
+    summary: Summary,
     client_flow: Option<ScopedFlowKey>,
     dedup: Deduplicator,
 }
 
-impl FollowCollector {
+impl Collector {
     pub fn new(selector: Selector) -> Self {
         Self {
             selector,
-            summary: FollowSummary::default(),
+            summary: Summary::default(),
             client_flow: None,
             dedup: Deduplicator::default(),
         }
@@ -98,7 +98,7 @@ impl FollowCollector {
     /// Finishes the pass, folding in the trailing flush: whatever the
     /// followed conversation still buffered behind missing segments was
     /// captured but never deliverable.
-    pub fn finish(mut self, trailing: &[TcpEvent]) -> FollowSummary {
+    pub fn finish(mut self, trailing: &[TcpEvent]) -> Summary {
         if let Some(client) = self.client_flow.clone() {
             for event in trailing {
                 if let TcpEvent::Evicted {

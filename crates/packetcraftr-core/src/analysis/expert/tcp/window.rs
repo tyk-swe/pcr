@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use crate::diagnostic::DiagnosticSeverity;
+use crate::diagnostic::Severity;
 
 use super::super::finding::new as new_finding;
 use super::super::observation::TcpObservation;
@@ -13,7 +13,7 @@ use super::DirectionState;
 pub(super) fn report_zero(observation: &TcpObservation<'_>, findings: &mut Vec<Finding>) {
     if observation.tcp.window == 0 && !observation.rst {
         findings.push(new_finding(
-            DiagnosticSeverity::Warning,
+            Severity::Warning,
             "tcp.zero_window",
             observation.number,
             observation.stream,
@@ -98,7 +98,7 @@ pub(super) fn analyze_sender(
         if in_flight > 0 {
             if payload_len == 1 && !fin && in_flight == 1 {
                 findings.push(new_finding(
-                    DiagnosticSeverity::Info,
+                    Severity::Info,
                     "tcp.zero_window_probe",
                     number,
                     stream,
@@ -109,7 +109,7 @@ pub(super) fn analyze_sender(
                 ));
             } else {
                 findings.push(new_finding(
-                    DiagnosticSeverity::Warning,
+                    Severity::Warning,
                     "tcp.window_exceeded",
                     number,
                     stream,
@@ -124,7 +124,7 @@ pub(super) fn analyze_sender(
         }
     } else if handshake_seen && u64::from(in_flight) == advertised {
         findings.push(new_finding(
-            DiagnosticSeverity::Warning,
+            Severity::Warning,
             "tcp.window_full",
             number,
             stream,
@@ -135,7 +135,7 @@ pub(super) fn analyze_sender(
         ));
     } else if handshake_seen && u64::from(in_flight) > advertised {
         findings.push(new_finding(
-            DiagnosticSeverity::Warning,
+            Severity::Warning,
             "tcp.window_exceeded",
             number,
             stream,

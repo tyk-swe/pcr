@@ -9,7 +9,7 @@ use crate::layout::ByteRange;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum DiagnosticSeverity {
+pub enum Severity {
     Info,
     Warning,
     Error,
@@ -19,7 +19,7 @@ pub enum DiagnosticSeverity {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Diagnostic {
     pub code: String,
-    pub severity: DiagnosticSeverity,
+    pub severity: Severity,
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub layer: Option<usize>,
@@ -31,22 +31,18 @@ pub struct Diagnostic {
 
 impl Diagnostic {
     pub fn info(code: impl Into<String>, message: impl Into<String>) -> Self {
-        Self::new(DiagnosticSeverity::Info, code, message)
+        Self::new(Severity::Info, code, message)
     }
 
     pub fn warning(code: impl Into<String>, message: impl Into<String>) -> Self {
-        Self::new(DiagnosticSeverity::Warning, code, message)
+        Self::new(Severity::Warning, code, message)
     }
 
     pub fn error(code: impl Into<String>, message: impl Into<String>) -> Self {
-        Self::new(DiagnosticSeverity::Error, code, message)
+        Self::new(Severity::Error, code, message)
     }
 
-    fn new(
-        severity: DiagnosticSeverity,
-        code: impl Into<String>,
-        message: impl Into<String>,
-    ) -> Self {
+    fn new(severity: Severity, code: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
             code: code.into(),
             severity,
@@ -71,7 +67,7 @@ impl Diagnostic {
 }
 
 /// Appends `diagnostic` unless one with the same code is already present.
-pub fn push_diagnostic_once(diagnostics: &mut Vec<Diagnostic>, diagnostic: Diagnostic) {
+pub fn push_once(diagnostics: &mut Vec<Diagnostic>, diagnostic: Diagnostic) {
     if !diagnostics
         .iter()
         .any(|existing| existing.code == diagnostic.code)

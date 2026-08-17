@@ -8,7 +8,7 @@ use thiserror::Error;
 use packetcraftr_core::error::{Classification, Classified, Kind};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TrafficPolicy {
+pub struct Policy {
     pub allow_public_destinations: bool,
     /// Hostname resolution is a separate opt-in because a name has no stable
     /// address scope until after a resolver side effect.
@@ -22,7 +22,7 @@ pub struct TrafficPolicy {
 pub const DEFAULT_MAX_RESOLVED_ADDRESSES: usize = 64;
 pub const MAX_RESOLVED_ADDRESSES: usize = 4_096;
 
-impl Default for TrafficPolicy {
+impl Default for Policy {
     fn default() -> Self {
         Self {
             allow_public_destinations: false,
@@ -37,7 +37,7 @@ impl Default for TrafficPolicy {
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum TrafficPolicyError {
+pub enum Error {
     #[error("traffic policy denies public destination {destination}")]
     PublicDestination { destination: IpAddr },
     #[error("traffic policy cannot authorize packet routing semantics: {reason}")]
@@ -52,7 +52,7 @@ pub enum TrafficPolicyError {
     ByteLimit { actual: u64, limit: u64 },
 }
 
-impl Classified for TrafficPolicyError {
+impl Classified for Error {
     fn classification(&self) -> Classification {
         let (code, remediation) = match self {
             Self::PublicDestination { .. } => (

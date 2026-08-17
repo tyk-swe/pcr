@@ -16,7 +16,7 @@ use packetcraftr_core::{Packet, semantics::BuiltinProtocol};
 use crate::probe::{nonzero_ipv4_identification, packet_shape_matches};
 
 use super::TRACEROUTE_SOURCE_PORT;
-use super::model::{TracerouteProbe, TracerouteStrategy};
+use super::model::{Probe, Strategy};
 
 #[expect(
     clippy::cast_possible_truncation,
@@ -24,7 +24,7 @@ use super::model::{TracerouteProbe, TracerouteStrategy};
               sent_traceroute_probe_matches applies the same reduction when comparing, so even a \
               wrapped counter still matches"
 )]
-pub(super) fn probe_packet(probe: &TracerouteProbe) -> Packet {
+pub(super) fn probe_packet(probe: &Probe) -> Packet {
     let mut packet = Packet::new();
     match probe.address {
         IpAddr::V4(destination) => {
@@ -47,19 +47,19 @@ pub(super) fn probe_packet(probe: &TracerouteProbe) -> Packet {
         }
     }
     match probe.strategy {
-        TracerouteStrategy::Udp => packet.push(Udp {
+        Strategy::Udp => packet.push(Udp {
             source_port: TRACEROUTE_SOURCE_PORT,
             destination_port: probe.destination_port.expect("validated UDP port"),
             ..Udp::default()
         }),
-        TracerouteStrategy::Tcp => packet.push(Tcp {
+        Strategy::Tcp => packet.push(Tcp {
             source_port: TRACEROUTE_SOURCE_PORT,
             destination_port: probe.destination_port.expect("validated TCP port"),
             sequence: probe.sequence as u32,
             flags: Tcp::SYN,
             ..Tcp::default()
         }),
-        TracerouteStrategy::Icmp => match probe.address {
+        Strategy::Icmp => match probe.address {
             IpAddr::V4(_) => packet.push(Icmpv4 {
                 body: traceroute_identity(probe.sequence),
                 ..Icmpv4::default()
@@ -88,17 +88,17 @@ pub(super) fn traceroute_identity(sequence: u64) -> Bytes {
     reason = "the observed packet is compared against the same reduction probe_packet applied, \
               so the narrowing is symmetric on both sides of the comparison"
 )]
-pub(super) fn sent_traceroute_probe_matches(probe: &TracerouteProbe, sent: &Packet) -> bool {
+pub(super) fn sent_traceroute_probe_matches(probe: &Probe, sent: &Packet) -> bool {
     let network_protocol = if probe.address.is_ipv4() {
         BuiltinProtocol::Ipv4
     } else {
         BuiltinProtocol::Ipv6
     };
     let transport_protocol = match probe.strategy {
-        TracerouteStrategy::Tcp => BuiltinProtocol::Tcp,
-        TracerouteStrategy::Udp => BuiltinProtocol::Udp,
-        TracerouteStrategy::Icmp if probe.address.is_ipv4() => BuiltinProtocol::Icmpv4,
-        TracerouteStrategy::Icmp => BuiltinProtocol::Icmpv6,
+        Strategy::Tcp => BuiltinProtocol::Tcp,
+        Strategy::Udp => BuiltinProtocol::Udp,
+        Strategy::Icmp if probe.address.is_ipv4() => BuiltinProtocol::Icmpv4,
+        Strategy::Icmp => BuiltinProtocol::Icmpv6,
     };
     if !packet_shape_matches(sent, &[network_protocol, transport_protocol]) {
         return false;
@@ -134,17 +134,17 @@ pub(super) fn sent_traceroute_probe_matches(probe: &TracerouteProbe, sent: &Pack
         return false;
     }
     match probe.strategy {
-        TracerouteStrategy::Udp => sent.get::<Udp>().is_some_and(|udp| {
+        Strategy::Udp => sent.get::<Udp>().is_some_and(|udp| {
             udp.source_port == TRACEROUTE_SOURCE_PORT
                 && udp.destination_port == probe.destination_port.expect("validated UDP port")
         }),
-        TracerouteStrategy::Tcp => sent.get::<Tcp>().is_some_and(|tcp| {
+        Strategy::Tcp => sent.get::<Tcp>().is_some_and(|tcp| {
             tcp.source_port == TRACEROUTE_SOURCE_PORT
                 && tcp.destination_port == probe.destination_port.expect("validated TCP port")
                 && tcp.sequence == probe.sequence as u32
                 && tcp.flags == Tcp::SYN
         }),
-        TracerouteStrategy::Icmp => match probe.address {
+        Strategy::Icmp => match probe.address {
             IpAddr::V4(_) => sent.get::<Icmpv4>().is_some_and(|icmp| {
                 icmp.icmp_type == 8
                     && icmp.code == 0

@@ -3,7 +3,7 @@
 
 //! Network-envelope and link-padding scope for decode traversal.
 
-use crate::{codec::NetworkEnvelope, layer::ProtocolId, semantics::BuiltinProtocol};
+use crate::{codec::NetworkEnvelope, layer::Id as ProtocolId, semantics::BuiltinProtocol};
 
 pub(super) struct TraversalScope {
     allow_trailing_padding: bool,

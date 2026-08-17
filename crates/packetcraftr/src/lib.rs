@@ -17,8 +17,8 @@
 //! packet.push(Raw::new(vec![0xde, 0xad, 0xbe, 0xef]));
 //! let built = build::Builder::new(registry).build(
 //!     packet,
-//!     build::BuildContext::default(),
-//!     build::BuildOptions::default(),
+//!     build::Context::default(),
+//!     build::Options::default(),
 //! )?;
 //! assert_eq!(built.bytes.as_ref(), &[0xde, 0xad, 0xbe, 0xef]);
 //! # Ok::<(), Box<dyn std::error::Error>>(())
@@ -31,10 +31,12 @@ mod authorization;
 mod client;
 pub mod clock;
 pub mod dns;
+mod error;
 mod evidence;
 pub mod exchange;
 pub mod fuzz;
 mod materialize;
+mod mtu;
 mod planning;
 pub mod policy;
 mod probe;
@@ -44,18 +46,17 @@ pub mod send;
 mod stats;
 pub mod target;
 pub mod traceroute;
-mod validation;
 
 pub mod output;
 
 pub use client::Client;
+pub use error::Error;
 pub use evidence::SentPacket;
 pub use packetcraftr_core as core;
 pub use packetcraftr_core::analysis;
 pub use packetcraftr_core::error::BoundaryError;
 pub use packetcraftr_netio as netio;
 pub use probe::client_executor::ExchangeExecutor;
-pub use send::contract::ClientError as Error;
 pub use stats::Stats;
 
 fn live_timestamp(frame: &packetcraftr_core::frame::Frame) -> std::time::SystemTime {

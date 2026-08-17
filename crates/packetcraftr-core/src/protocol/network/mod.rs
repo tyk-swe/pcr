@@ -3,13 +3,13 @@
 
 //! Network-layer protocol models.
 
-mod encode;
+mod envelope;
 mod igmp;
 mod ipv4;
 mod ipv6;
 mod raw_ip;
 
-pub(crate) use encode::encode_network;
+pub(crate) use envelope::resolve_envelope;
 pub use igmp::Igmp;
 pub(crate) use igmp::IgmpCodec;
 pub use ipv4::Ipv4;

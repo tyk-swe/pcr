@@ -7,12 +7,12 @@ use crate::frame::{Frame, LinkType};
 use crate::{
     Packet,
     build::BuiltPacket,
-    decode::{DecodeOptions, DecodedPacket, Dissector},
+    decode::{DecodedPacket, Dissector, Options as DecodeOptions},
     diagnostic::Diagnostic,
     semantics::BuiltinProtocol,
 };
 
-use super::super::request::FuzzLimits;
+use super::super::request::Limits as FuzzLimits;
 
 pub(in crate::fuzz) fn dissect_built(
     dissector: &Dissector,

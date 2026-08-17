@@ -6,7 +6,7 @@
 mod bsd;
 mod sll;
 
-pub use bsd::{BsdLoop, BsdNull, CaptureByteOrder as ByteOrder};
+pub use bsd::{BsdLoop, BsdNull, ByteOrder};
 pub(crate) use bsd::{BsdLoopCodec, BsdNullCodec};
 pub use sll::{LinuxSll, LinuxSll2};
 pub(crate) use sll::{LinuxSll2Codec, LinuxSllCodec};

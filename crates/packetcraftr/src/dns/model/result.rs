@@ -13,13 +13,13 @@ use packetcraftr_core::frame::Frame;
 use crate::Stats;
 
 use super::super::DNS_TYPE_OPT;
-use super::super::error::DnsWireError;
+use super::super::error::WireError;
 use super::super::wire::response_code_name;
-use super::request::DnsQueryType;
+use super::request::QueryType;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum DnsSection {
+pub enum Section {
     Answer,
     Authority,
     Additional,
@@ -29,11 +29,11 @@ pub enum DnsSection {
 /// equality folds ASCII letters only, and presentation escaping is deferred
 /// to [`fmt::Display`].
 #[derive(Clone, Debug, Eq)]
-pub struct DnsName {
+pub struct Name {
     pub(in crate::dns) labels: Vec<Bytes>,
 }
 
-impl DnsName {
+impl Name {
     pub(in crate::dns) fn root() -> Self {
         Self { labels: Vec::new() }
     }
@@ -51,7 +51,7 @@ impl DnsName {
         }
     }
 
-    pub fn from_labels<I, B>(labels: I) -> std::result::Result<Self, DnsWireError>
+    pub fn from_labels<I, B>(labels: I) -> std::result::Result<Self, WireError>
     where
         I: IntoIterator<Item = B>,
         B: Into<Bytes>,
@@ -60,16 +60,16 @@ impl DnsName {
         let mut wire_length = 1usize;
         for label in &labels {
             if label.is_empty() || label.len() > 63 {
-                return Err(DnsWireError::InvalidName {
+                return Err(WireError::InvalidName {
                     message: "wire labels must contain 1..=63 octets".to_owned(),
                 });
             }
             wire_length = wire_length
                 .checked_add(label.len() + 1)
-                .ok_or(DnsWireError::NameTooLong)?;
+                .ok_or(WireError::NameTooLong)?;
         }
         if wire_length > 255 {
-            return Err(DnsWireError::NameTooLong);
+            return Err(WireError::NameTooLong);
         }
         Ok(Self { labels })
     }
@@ -83,7 +83,7 @@ impl DnsName {
     }
 }
 
-impl PartialEq for DnsName {
+impl PartialEq for Name {
     fn eq(&self, other: &Self) -> bool {
         self.labels.len() == other.labels.len()
             && self
@@ -94,7 +94,7 @@ impl PartialEq for DnsName {
     }
 }
 
-impl fmt::Display for DnsName {
+impl fmt::Display for Name {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.labels.is_empty() {
             return formatter.write_str(".");
@@ -115,7 +115,7 @@ impl fmt::Display for DnsName {
     }
 }
 
-impl Serialize for DnsName {
+impl Serialize for Name {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -125,22 +125,22 @@ impl Serialize for DnsName {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct DnsEdnsOption {
+pub struct EdnsOption {
     pub code: u16,
     pub data: Bytes,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct DnsEdns {
+pub struct Edns {
     pub udp_payload_size: u16,
     pub extended_response_code: u8,
     pub version: u8,
     pub dnssec_ok: bool,
     pub flags: u16,
-    pub options: Vec<DnsEdnsOption>,
+    pub options: Vec<EdnsOption>,
 }
 
-impl fmt::Display for DnsSection {
+impl fmt::Display for Section {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
             Self::Answer => "answer",
@@ -151,19 +151,19 @@ impl fmt::Display for DnsSection {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum DnsRecordValue {
+pub enum RecordValue {
     A(Ipv4Addr),
     Aaaa(Ipv6Addr),
-    Cname(DnsName),
+    Cname(Name),
     Mx {
         preference: u16,
-        exchange: DnsName,
+        exchange: Name,
     },
-    Ns(DnsName),
-    Ptr(DnsName),
+    Ns(Name),
+    Ptr(Name),
     Soa {
-        primary_name_server: DnsName,
-        responsible_mailbox: DnsName,
+        primary_name_server: Name,
+        responsible_mailbox: Name,
         serial: u32,
         refresh: u32,
         retry: u32,
@@ -174,17 +174,17 @@ pub enum DnsRecordValue {
         priority: u16,
         weight: u16,
         port: u16,
-        target: DnsName,
+        target: Name,
     },
     Txt(Vec<Bytes>),
-    Opt(DnsEdns),
+    Opt(Edns),
     Unknown {
         type_code: u16,
         rdata: Bytes,
     },
 }
 
-impl DnsRecordValue {
+impl RecordValue {
     pub const fn type_code(&self) -> u16 {
         match self {
             Self::A(_) => 1,
@@ -217,7 +217,7 @@ impl DnsRecordValue {
         }
     }
 
-    pub(in crate::dns) fn referenced_name(&self) -> Option<&DnsName> {
+    pub(in crate::dns) fn referenced_name(&self) -> Option<&Name> {
         match self {
             Self::Cname(value) | Self::Ns(value) => Some(value),
             Self::Mx { exchange, .. } => Some(exchange),
@@ -234,16 +234,16 @@ impl DnsRecordValue {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DnsRecord {
-    pub owner: DnsName,
+pub struct Record {
+    pub owner: Name,
     pub class: u16,
     pub ttl: u32,
-    pub value: DnsRecordValue,
+    pub value: RecordValue,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct DnsRejectedRecord {
-    pub section: DnsSection,
+pub struct RejectedRecord {
+    pub section: Section,
     pub index: usize,
     pub owner: String,
     pub type_code: u16,
@@ -251,24 +251,24 @@ pub struct DnsRejectedRecord {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ValidatedDnsResponse {
+pub struct ValidatedResponse {
     pub transaction_id: u16,
     pub response_code: u16,
-    pub edns: Option<DnsEdns>,
+    pub edns: Option<Edns>,
     pub authoritative: bool,
     pub truncated: bool,
     pub recursion_desired: bool,
     pub recursion_available: bool,
     pub authenticated_data: bool,
     pub checking_disabled: bool,
-    pub answers: Vec<DnsRecord>,
-    pub authorities: Vec<DnsRecord>,
-    pub additionals: Vec<DnsRecord>,
-    pub rejected_records: Vec<DnsRejectedRecord>,
+    pub answers: Vec<Record>,
+    pub authorities: Vec<Record>,
+    pub additionals: Vec<Record>,
+    pub rejected_records: Vec<RejectedRecord>,
     pub rejected_record_count: usize,
 }
 
-impl ValidatedDnsResponse {
+impl ValidatedResponse {
     pub fn response_code_name(&self) -> &'static str {
         response_code_name(self.response_code)
     }
@@ -276,7 +276,7 @@ impl ValidatedDnsResponse {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum DnsOutcome {
+pub enum Outcome {
     Response,
     Truncated,
     Timeout,
@@ -286,11 +286,11 @@ pub enum DnsOutcome {
 }
 
 #[derive(Clone, Debug)]
-pub struct DnsAttemptEvidence {
+pub struct AttemptEvidence {
     pub attempt: u32,
     pub server_address: IpAddr,
     pub source_port: u16,
-    pub status: DnsOutcome,
+    pub status: Outcome,
     pub sent_at: SystemTime,
     pub received_at: Option<SystemTime>,
     pub latency: Option<Duration>,
@@ -300,23 +300,23 @@ pub struct DnsAttemptEvidence {
 }
 
 #[derive(Clone, Debug)]
-pub struct DnsUndecodedEvidence {
+pub struct UndecodedEvidence {
     pub attempt: u32,
     pub frame: Frame,
 }
 
 #[derive(Clone, Debug)]
-pub struct DnsResult {
+pub struct Result {
     pub server: String,
     pub server_port: u16,
     pub resolved_addresses: Vec<IpAddr>,
     pub query_name: String,
-    pub query_type: DnsQueryType,
+    pub query_type: QueryType,
     pub transaction_id: u16,
-    pub outcome: DnsOutcome,
-    pub response: Option<ValidatedDnsResponse>,
-    pub attempts: Vec<DnsAttemptEvidence>,
-    pub undecoded: Vec<DnsUndecodedEvidence>,
+    pub outcome: Outcome,
+    pub response: Option<ValidatedResponse>,
+    pub attempts: Vec<AttemptEvidence>,
+    pub undecoded: Vec<UndecodedEvidence>,
     pub diagnostics: Vec<Diagnostic>,
     pub stats: Stats,
 }

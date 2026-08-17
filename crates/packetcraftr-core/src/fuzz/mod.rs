@@ -37,13 +37,7 @@ mod run;
 #[cfg(test)]
 mod tests;
 
-pub use error::FuzzError as Error;
-pub use request::{
-    FuzzLimits as Limits, FuzzRequest as Request, FuzzStrategy as Strategy, FuzzTarget as Target,
-    FuzzTargetParseError as TargetParseError,
-};
-pub use result::{
-    FuzzCase as Case, FuzzCaseFailure as CaseFailure, FuzzCaseOutcome as CaseOutcome,
-    FuzzMode as Mode, FuzzMutation as Mutation, FuzzResult as Result, FuzzStats as Stats,
-};
+pub use error::Error;
+pub use request::{Limits, Request, Strategy, Target, TargetParseError};
+pub use result::{Case, CaseFailure, CaseOutcome, Mutation, Result, Stats};
 pub use run::{Campaign, run};

@@ -8,15 +8,15 @@ use packetcraftr_core::protocol::application::Dns;
 use packetcraftr_core::{
     Packet,
     decode::DecodedPacket,
-    diagnostic::DiagnosticSeverity,
+    diagnostic::Severity as DiagnosticSeverity,
     layer::{Malformed as MalformedLayer, Raw},
     registry::Registry,
 };
 
 use crate::probe::{self, Transport as ProbeTransport};
 
-use super::super::model::{DnsLimits, DnsProbe, ValidatedDnsResponse};
-use super::decode::decode_dns_response;
+use super::super::model::{Limits, Probe, ValidatedResponse};
+use super::decode::decode_response;
 use packetcraftr_core::semantics::BuiltinProtocol;
 
 pub const fn response_code_name(code: u16) -> &'static str {
@@ -47,14 +47,14 @@ pub const fn response_code_name(code: u16) -> &'static str {
 /// Classifies a decoded frame against a DNS probe. Invalid correlated frames
 /// are decode failures, never accepted responses.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum DnsResponseClassification {
-    Response(ValidatedDnsResponse),
+pub enum ResponseClassification {
+    Response(ValidatedResponse),
     Unrelated { reason: String },
     DecodeFailure { reason: String },
     NetworkFailure { reason: String },
 }
 
-impl DnsResponseClassification {
+impl ResponseClassification {
     pub(crate) fn rank(&self) -> u8 {
         match self {
             Self::Response(_) => 4,
@@ -65,17 +65,17 @@ impl DnsResponseClassification {
     }
 }
 
-pub fn classify_dns_response(
+pub fn classify_response(
     registry: &Registry,
-    probe: &DnsProbe,
+    probe: &Probe,
     sent: &Packet,
     response: &DecodedPacket,
-    limits: DnsLimits,
-) -> Option<DnsResponseClassification> {
+    limits: Limits,
+) -> Option<ResponseClassification> {
     if let Some(observation) = probe::observe(registry, ProbeTransport::Udp, sent, response)
         && observation.correlation.is_network_failure()
     {
-        return Some(DnsResponseClassification::NetworkFailure {
+        return Some(ResponseClassification::NetworkFailure {
             reason: observation.reason.to_owned(),
         });
     }
@@ -83,28 +83,28 @@ pub fn classify_dns_response(
         if response.diagnostics.iter().any(|diagnostic| {
             diagnostic.code.contains("checksum") && diagnostic.severity != DiagnosticSeverity::Info
         }) {
-            return Some(DnsResponseClassification::DecodeFailure {
+            return Some(ResponseClassification::DecodeFailure {
                 reason: "correlated UDP response has an invalid checksum diagnostic".to_owned(),
             });
         }
         let Some(payload) = dns_payload(&response.packet) else {
-            return Some(DnsResponseClassification::DecodeFailure {
+            return Some(ResponseClassification::DecodeFailure {
                 reason: "correlated UDP response has no complete DNS payload".to_owned(),
             });
         };
         return Some(
-            match decode_dns_response(
+            match decode_response(
                 &payload,
                 &probe.query_name,
                 probe.query_type,
                 probe.transaction_id,
                 limits,
             ) {
-                Ok(validated) => DnsResponseClassification::Response(validated),
-                Err(error) if error.is_unrelated() => DnsResponseClassification::Unrelated {
+                Ok(validated) => ResponseClassification::Response(validated),
+                Err(error) if error.is_unrelated() => ResponseClassification::Unrelated {
                     reason: error.to_string(),
                 },
-                Err(error) => DnsResponseClassification::DecodeFailure {
+                Err(error) => ResponseClassification::DecodeFailure {
                     reason: error.to_string(),
                 },
             },

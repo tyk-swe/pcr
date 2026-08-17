@@ -10,8 +10,8 @@ use std::net::IpAddr;
 use std::sync::Mutex;
 use std::time::Instant;
 
-use super::error::invalid_configuration;
-use super::options::NeighborResolutionOptions;
+use super::error::invalid_options;
+use super::options::Options;
 use super::{Error as NeighborError, Request as NeighborRequest, VlanTag as NeighborVlanTag};
 use crate::{interface::Id as InterfaceId, link::MacAddress};
 use packetcraftr_core::frame::{Frame, LinkType};
@@ -78,12 +78,12 @@ impl NeighborCache {
         &self,
         mac_address: MacAddress,
         key: NeighborCacheKey,
-        options: &NeighborResolutionOptions,
+        options: &Options,
     ) -> Result<(), NeighborError> {
         let now = Instant::now();
         let expires_at = now
             .checked_add(options.cache_ttl)
-            .ok_or_else(|| invalid_configuration("cache deadline overflowed".to_owned()))?;
+            .ok_or_else(|| invalid_options("cache deadline overflowed".to_owned()))?;
         let mut cache = self.entries.lock().map_err(|_| NeighborError::State {
             message: "neighbor cache mutex was poisoned".to_owned(),
         })?;
@@ -141,8 +141,8 @@ mod tests {
         }
     }
 
-    fn options(max_cache_entries: usize, cache_ttl: Duration) -> NeighborResolutionOptions {
-        NeighborResolutionOptions {
+    fn options(max_cache_entries: usize, cache_ttl: Duration) -> Options {
+        Options {
             max_attempts: 1,
             attempt_timeout: Duration::from_secs(1),
             cache_ttl,
@@ -219,7 +219,7 @@ mod tests {
                 key,
                 &options(1, Duration::MAX),
             ),
-            Err(NeighborError::InvalidConfiguration { .. })
+            Err(NeighborError::InvalidOptions { .. })
         ));
     }
 

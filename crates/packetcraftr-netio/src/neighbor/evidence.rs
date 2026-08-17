@@ -8,7 +8,7 @@
 use bytes::Bytes;
 
 use super::error::{map_io_error, resolution_error};
-use super::options::NeighborResolutionOptions;
+use super::options::Options;
 use super::wire::is_unicast_mac;
 use super::{
     Error as NeighborError, MAX_VLAN_TAGS as MAX_NEIGHBOR_VLAN_TAGS, Request as NeighborRequest,
@@ -107,7 +107,7 @@ pub(super) fn validate_neighbor_send(
 
 pub(super) fn retain_evidence(
     frame: Frame,
-    options: &NeighborResolutionOptions,
+    options: &Options,
     captured: &mut Vec<Frame>,
     captured_bytes: &mut usize,
     truncated: &mut bool,
@@ -124,7 +124,7 @@ pub(super) fn retain_evidence(
 
 pub(super) fn retain_matching_evidence(
     frame: Frame,
-    options: &NeighborResolutionOptions,
+    options: &Options,
     captured: &mut Vec<Frame>,
     captured_bytes: &mut usize,
     truncated: &mut bool,
@@ -297,7 +297,7 @@ mod tests {
 
     #[test]
     fn evidence_retention_drops_late_frames_but_matching_retention_evicts_oldest() {
-        let options = NeighborResolutionOptions {
+        let options = Options {
             max_attempts: 1,
             attempt_timeout: Duration::from_secs(1),
             cache_ttl: Duration::from_secs(1),

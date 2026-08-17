@@ -18,17 +18,17 @@ pub(crate) struct RecipeArgs {
 }
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
-pub(crate) enum CliBuildMode {
+pub(crate) enum BuildMode {
     #[default]
     Strict,
     Permissive,
 }
 
-impl From<CliBuildMode> for core::build::BuildMode {
-    fn from(value: CliBuildMode) -> Self {
+impl From<BuildMode> for core::build::Mode {
+    fn from(value: BuildMode) -> Self {
         match value {
-            CliBuildMode::Strict => Self::Strict,
-            CliBuildMode::Permissive => Self::Permissive,
+            BuildMode::Strict => Self::Strict,
+            BuildMode::Permissive => Self::Permissive,
         }
     }
 }

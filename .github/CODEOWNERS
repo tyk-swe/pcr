@@ -17,12 +17,11 @@
 /crates/packetcraftr/src/output/** @tyk-swe @rkdxodud-tyk
 /schemas/** @tyk-swe @rkdxodud-tyk
 /examples/documents/** @tyk-swe @rkdxodud-tyk
-/crates/packetcraftr-core/src/document/model.rs @tyk-swe @rkdxodud-tyk
-/crates/packetcraftr-core/src/field/value.rs @tyk-swe @rkdxodud-tyk
-/crates/packetcraftr-core/src/layout/model.rs @tyk-swe @rkdxodud-tyk
-/crates/packetcraftr-core/src/protocol/**/model.rs @tyk-swe @rkdxodud-tyk
-/crates/packetcraftr-core/src/protocol/network/igmp.rs @tyk-swe @rkdxodud-tyk
-/crates/packetcraftr-core/src/protocol/transport/sctp.rs @tyk-swe @rkdxodud-tyk
+/crates/packetcraftr-core/src/document.rs @tyk-swe @rkdxodud-tyk
+/crates/packetcraftr-core/src/document/** @tyk-swe @rkdxodud-tyk
+/crates/packetcraftr-core/src/field.rs @tyk-swe @rkdxodud-tyk
+/crates/packetcraftr-core/src/layout.rs @tyk-swe @rkdxodud-tyk
+/crates/packetcraftr-core/src/protocol/**/*.rs @tyk-swe @rkdxodud-tyk
 
 /crates/packetcraftr-core/src/protocol_catalog.rs @tyk-swe
 /crates/packetcraftr-core/src/protocol/builtin/registry.rs @tyk-swe

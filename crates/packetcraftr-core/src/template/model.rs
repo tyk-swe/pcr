@@ -17,12 +17,12 @@ struct TemplateAxis {
 }
 
 #[derive(Clone, Debug)]
-pub struct PacketTemplate {
+pub struct Template {
     base: Packet,
     axes: Vec<TemplateAxis>,
 }
 
-impl PacketTemplate {
+impl Template {
     pub fn new(base: Packet) -> Self {
         Self {
             base,
@@ -40,26 +40,26 @@ impl PacketTemplate {
         self
     }
 
-    pub fn expansion_len(&self) -> Result<usize, TemplateError> {
+    pub fn expansion_len(&self) -> Result<usize, Error> {
         if self.axes.is_empty() {
             return Ok(1);
         }
         self.axes.iter().try_fold(1usize, |product, axis| {
             product
                 .checked_mul(axis.values.len())
-                .ok_or(TemplateError::ExpansionOverflow)
+                .ok_or(Error::ExpansionOverflow)
         })
     }
 
-    pub fn expand(&self, maximum: usize) -> Result<PacketTemplateIter<'_>, TemplateError> {
+    pub fn expand(&self, maximum: usize) -> Result<Iter<'_>, Error> {
         let total = self.expansion_len()?;
         if total > maximum {
-            return Err(TemplateError::ExpansionLimit {
+            return Err(Error::ExpansionLimit {
                 requested: total,
                 limit: maximum,
             });
         }
-        Ok(PacketTemplateIter {
+        Ok(Iter {
             template: self,
             next_ordinal: 0,
             total,
@@ -67,14 +67,14 @@ impl PacketTemplate {
     }
 }
 
-pub struct PacketTemplateIter<'a> {
-    template: &'a PacketTemplate,
+pub struct Iter<'a> {
+    template: &'a Template,
     next_ordinal: usize,
     total: usize,
 }
 
-impl Iterator for PacketTemplateIter<'_> {
-    type Item = Result<Packet, TemplateError>;
+impl Iterator for Iter<'_> {
+    type Item = Result<Packet, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.next_ordinal >= self.total {
@@ -93,13 +93,13 @@ impl Iterator for PacketTemplateIter<'_> {
             let index = (ordinal / divisor) % length;
             let value = axis.values[index].clone();
             let Some(layer) = packet.layer_mut(axis.layer) else {
-                return Some(Err(TemplateError::LayerIndex {
+                return Some(Err(Error::LayerIndex {
                     index: axis.layer,
                     len: packet.len(),
                 }));
             };
             if let Err(source) = layer.set_field(&axis.field, value) {
-                return Some(Err(TemplateError::Field {
+                return Some(Err(Error::Field {
                     layer: axis.layer,
                     field: axis.field.clone(),
                     source,
@@ -115,11 +115,11 @@ impl Iterator for PacketTemplateIter<'_> {
     }
 }
 
-impl ExactSizeIterator for PacketTemplateIter<'_> {}
+impl ExactSizeIterator for Iter<'_> {}
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
-pub enum TemplateError {
+pub enum Error {
     #[error("template expansion arithmetic overflow")]
     ExpansionOverflow,
     #[error("template expands to {requested} packets, exceeding limit {limit}")]

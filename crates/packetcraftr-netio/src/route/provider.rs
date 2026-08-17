@@ -9,12 +9,12 @@ use packetcraftr_core::error::{Classification, Classified, Kind};
 
 use crate::interface::Id as InterfaceId;
 
-use super::models::{RouteDecision, RouteProvider};
+use super::models::{Decision, Provider};
 
 /// Errors emitted by the current target's passive route/interface adapter.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum NativeRouteError {
+pub enum SystemError {
     #[error("native route selection is unavailable: {message}")]
     Unsupported { message: String },
     #[error("no route to {destination} was found")]
@@ -54,24 +54,21 @@ pub enum NativeRouteError {
 /// Route provider backed by the adapter selected for the current target and
 /// the explicit `native-route` feature.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct SystemRouteProvider;
+pub struct SystemProvider;
 
-impl RouteProvider for SystemRouteProvider {
-    type Error = NativeRouteError;
+impl Provider for SystemProvider {
+    type Error = SystemError;
 
     fn lookup_with_preferences(
         &self,
         destination: IpAddr,
         interface_hint: Option<&InterfaceId>,
         preferred_source: Option<IpAddr>,
-    ) -> Result<RouteDecision, Self::Error> {
+    ) -> Result<Decision, Self::Error> {
         super::super::platform::system_route(destination, interface_hint, preferred_source)
     }
 
-    fn lookup_interface(
-        &self,
-        interface: &InterfaceId,
-    ) -> Result<Option<RouteDecision>, Self::Error> {
+    fn lookup_interface(&self, interface: &InterfaceId) -> Result<Option<Decision>, Self::Error> {
         super::super::platform::system_interface_route(interface).map(Some)
     }
 
@@ -80,7 +77,7 @@ impl RouteProvider for SystemRouteProvider {
     }
 }
 
-impl Classified for NativeRouteError {
+impl Classified for SystemError {
     fn classification(&self) -> Classification {
         match self {
             Self::Unsupported { .. } => Classification::new(

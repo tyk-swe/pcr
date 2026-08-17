@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 use super::Error;
-use super::route::PlannedRoute;
+use super::route::Plan;
 use packetcraftr_core::frame::{DEFAULT_SIZE_LIMIT, Frame as CaptureFrame};
 
 pub(crate) use self::{
@@ -250,12 +250,12 @@ impl Limits {
 pub trait Provider: Send + Sync {
     type Capture: Session;
 
-    fn arm_capture(&self, route: &PlannedRoute, limits: Limits) -> Result<Self::Capture, Error>;
+    fn arm_capture(&self, route: &Plan, limits: Limits) -> Result<Self::Capture, Error>;
 
     /// Starts capture with native BPF filtering; unsupported providers fail closed.
     fn arm_capture_with_filter(
         &self,
-        _route: &PlannedRoute,
+        _route: &Plan,
         _limits: Limits,
         _filter: &str,
     ) -> Result<Self::Capture, Error> {
@@ -275,13 +275,13 @@ pub struct SystemProvider;
 impl Provider for SystemProvider {
     type Capture = SystemSession;
 
-    fn arm_capture(&self, route: &PlannedRoute, limits: Limits) -> Result<Self::Capture, Error> {
+    fn arm_capture(&self, route: &Plan, limits: Limits) -> Result<Self::Capture, Error> {
         super::platform::system_capture(route, limits, None)
     }
 
     fn arm_capture_with_filter(
         &self,
-        route: &PlannedRoute,
+        route: &Plan,
         limits: Limits,
         filter: &str,
     ) -> Result<Self::Capture, Error> {

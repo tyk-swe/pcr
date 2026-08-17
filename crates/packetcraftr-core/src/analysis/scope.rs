@@ -75,7 +75,7 @@ pub struct FlowScope {
 /// Run-local compact identity of one exact [`FlowScope`].
 ///
 /// All keys offered to one index or reassembler must use IDs issued by the
-/// same [`ScopeInterner`].
+/// same [`Interner`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct ScopeId(u32);
@@ -90,20 +90,20 @@ impl ScopeId {
 /// Failure to allocate another compact scope identity.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum ScopeError {
+pub enum Error {
     #[error("capture scope table exhausted its 32-bit identity space")]
     Capacity,
 }
 
 /// Exact interner for semantic encapsulation paths and capture scopes.
 #[derive(Debug, Default)]
-pub struct ScopeInterner {
+pub struct Interner {
     paths: HashSet<InternedEncapsulationPath>,
     scopes: HashMap<FlowScope, ScopeId>,
     descriptors: Vec<FlowScope>,
 }
 
-impl ScopeInterner {
+impl Interner {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -114,7 +114,7 @@ impl ScopeInterner {
         &mut self,
         interface: Option<GlobalInterfaceId>,
         encapsulation: Vec<EncapsulationIdentifier>,
-    ) -> Result<ScopeId, ScopeError> {
+    ) -> Result<ScopeId, Error> {
         let candidate = InternedEncapsulationPath(Arc::from(encapsulation));
         let encapsulation = match self.paths.get(&candidate) {
             Some(existing) => existing.clone(),
@@ -130,7 +130,7 @@ impl ScopeInterner {
         if let Some(id) = self.scopes.get(&scope) {
             return Ok(*id);
         }
-        let id = ScopeId(u32::try_from(self.descriptors.len()).map_err(|_| ScopeError::Capacity)?);
+        let id = ScopeId(u32::try_from(self.descriptors.len()).map_err(|_| Error::Capacity)?);
         self.scopes.insert(scope.clone(), id);
         self.descriptors.push(scope);
         Ok(id)

@@ -5,10 +5,9 @@ mod execution;
 mod request;
 mod result;
 
-pub use execution::{DnsExchange, DnsExchangeExecution, DnsExecutor, DnsProbe};
-pub use request::{DnsLimits, DnsQueryType, DnsRequest};
+pub use execution::{Exchange, Execution, Executor, Probe};
+pub use request::{Limits, QueryType, Request};
 pub use result::{
-    DnsAttemptEvidence, DnsEdns, DnsEdnsOption, DnsName, DnsOutcome,
-    DnsOutcome as DnsAttemptStatus, DnsRecord, DnsRecordValue, DnsRejectedRecord, DnsResult,
-    DnsSection, DnsUndecodedEvidence, ValidatedDnsResponse,
+    AttemptEvidence, Edns, EdnsOption, Name, Outcome, Record, RecordValue, RejectedRecord, Result,
+    Section, UndecodedEvidence, ValidatedResponse,
 };

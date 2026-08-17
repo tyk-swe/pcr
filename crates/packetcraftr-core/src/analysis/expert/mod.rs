@@ -5,7 +5,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use crate::diagnostic::DiagnosticSeverity;
+use crate::diagnostic::Severity;
 use crate::protocol::transport::Tcp;
 
 use crate::analysis::adapter::{transport_payload, transports};
@@ -59,7 +59,7 @@ const fn udp_stream_ref(index: u64) -> StreamRef {
 /// are folded in as findings of their own code and severity.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Finding {
-    pub severity: DiagnosticSeverity,
+    pub severity: Severity,
     /// Stable machine-readable code, such as `tcp.retransmission`.
     pub code: String,
     /// 1-based capture frame number that revealed the condition.
@@ -71,7 +71,7 @@ pub struct Finding {
 
 /// Per-severity and per-code totals for a completed pass.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct ExpertSummary {
+pub struct Summary {
     pub findings: u64,
     pub errors: u64,
     pub warnings: u64,
@@ -80,13 +80,13 @@ pub struct ExpertSummary {
     pub codes: BTreeMap<String, u64>,
 }
 
-impl ExpertSummary {
+impl Summary {
     fn count(&mut self, finding: &Finding) {
         self.findings += 1;
         match finding.severity {
-            DiagnosticSeverity::Error => self.errors += 1,
-            DiagnosticSeverity::Warning => self.warnings += 1,
-            DiagnosticSeverity::Info => self.notes += 1,
+            Severity::Error => self.errors += 1,
+            Severity::Warning => self.warnings += 1,
+            Severity::Info => self.notes += 1,
         }
         *self.codes.entry(finding.code.clone()).or_default() += 1;
     }
@@ -100,13 +100,13 @@ impl ExpertSummary {
 /// window full, keep-alive, reset — need acknowledgment and window fields
 /// reassembly deliberately does not carry.
 #[derive(Debug, Default)]
-pub struct ExpertCollector {
+pub struct Collector {
     flows: HashMap<FlowKey, DirectionState>,
     streams: HashMap<FlowKey, u64>,
-    summary: ExpertSummary,
+    summary: Summary,
 }
 
-impl ExpertCollector {
+impl Collector {
     pub fn new() -> Self {
         Self::default()
     }
@@ -131,11 +131,7 @@ impl ExpertCollector {
     /// events: a flow flushed with bytes still buffered never healed its
     /// holes, which is evidence the per-frame view cannot carry. Returned
     /// findings are attributed to `end_number`, the last frame read.
-    pub fn finish(
-        mut self,
-        trailing: &[TcpEvent],
-        end_number: u64,
-    ) -> (Vec<Finding>, ExpertSummary) {
+    pub fn finish(mut self, trailing: &[TcpEvent], end_number: u64) -> (Vec<Finding>, Summary) {
         let findings = tcp::finish(&self.streams, trailing, end_number);
         for finding in &findings {
             self.summary.count(finding);

@@ -5,12 +5,12 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use super::binding::{FilterFieldBinding, ReverseBinding};
-use super::builder::RegistryBuilder;
-use super::error::RegistryError;
-use super::lookup::ProtocolRegistry;
+use super::builder::Builder as RegistryBuilder;
+use super::error::Error;
+use super::lookup::Registry as ProtocolRegistry;
 use crate::codec::LayerCodec;
 use crate::field::FieldKind;
-use crate::layer::{LayerSchema, ProtocolId};
+use crate::layer::{Id as ProtocolId, Schema as LayerSchema};
 
 impl RegistryBuilder {
     /// Finalizes the registry, resolving every binding it was given.
@@ -18,11 +18,11 @@ impl RegistryBuilder {
     /// # Panics
     ///
     /// Panics only if the builder corrupts a binding table; registration errors return
-    /// [`RegistryError`].
-    pub fn build(mut self) -> Result<ProtocolRegistry, RegistryError> {
+    /// [`Error`](crate::registry::Error).
+    pub fn build(mut self) -> Result<ProtocolRegistry, Error> {
         for protocol in self.roots.values() {
             if !self.codecs.contains_key(protocol) {
-                return Err(RegistryError::UnknownProtocol {
+                return Err(Error::UnknownProtocol {
                     protocol: protocol.clone(),
                 });
             }
@@ -31,7 +31,7 @@ impl RegistryBuilder {
             HashMap::new();
         for (parent, discriminators) in &mut self.bindings {
             if !self.codecs.contains_key(parent) {
-                return Err(RegistryError::UnknownProtocol {
+                return Err(Error::UnknownProtocol {
                     protocol: parent.clone(),
                 });
             }
@@ -44,7 +44,7 @@ impl RegistryBuilder {
                 });
                 for entry in entries.iter() {
                     if !self.codecs.contains_key(&entry.child) {
-                        return Err(RegistryError::UnknownProtocol {
+                        return Err(Error::UnknownProtocol {
                             protocol: entry.child.clone(),
                         });
                     }
@@ -74,7 +74,7 @@ impl RegistryBuilder {
         }
         for protocol in self.matchers.keys() {
             if !self.codecs.contains_key(protocol) {
-                return Err(RegistryError::UnknownProtocol {
+                return Err(Error::UnknownProtocol {
                     protocol: protocol.clone(),
                 });
             }
@@ -116,7 +116,7 @@ fn reject_canonical_filter_path(
     path: &str,
     aliases: &HashMap<String, ProtocolId>,
     schemas: &BTreeMap<ProtocolId, &'static LayerSchema>,
-) -> Result<(), RegistryError> {
+) -> Result<(), Error> {
     let Some((prefix, field)) = path.rsplit_once('.') else {
         return Ok(());
     };
@@ -131,7 +131,7 @@ fn reject_canonical_filter_path(
         .iter()
         .any(|declared| declared.name.eq_ignore_ascii_case(field))
     {
-        return Err(RegistryError::DuplicateFilterField {
+        return Err(Error::DuplicateFilterField {
             path: path.to_owned(),
             existing: protocol.clone(),
         });
@@ -149,10 +149,10 @@ fn validate_filter_field(
     binding: &FilterFieldBinding,
     codecs: &BTreeMap<ProtocolId, Arc<dyn LayerCodec>>,
     schemas: &BTreeMap<ProtocolId, &'static LayerSchema>,
-) -> Result<(), RegistryError> {
+) -> Result<(), Error> {
     let protocol = binding.protocol();
     if !codecs.contains_key(protocol) {
-        return Err(RegistryError::UnknownProtocol {
+        return Err(Error::UnknownProtocol {
             protocol: protocol.clone(),
         });
     }
@@ -163,7 +163,7 @@ fn validate_filter_field(
     };
     for field in binding.fields() {
         let Some(declared) = schema.fields.iter().find(|entry| entry.name == *field) else {
-            return Err(RegistryError::UnknownFilterField {
+            return Err(Error::UnknownFilterField {
                 path: path.to_owned(),
                 protocol: protocol.clone(),
                 field: (*field).to_owned(),
@@ -172,7 +172,7 @@ fn validate_filter_field(
         if matches!(binding, FilterFieldBinding::Bits { .. })
             && declared.kind != FieldKind::Unsigned
         {
-            return Err(RegistryError::InvalidFilterField {
+            return Err(Error::InvalidFilterField {
                 path: path.to_owned(),
                 reason: format!(
                     "field {field} on layer {protocol} is not unsigned, so it has no bits to select"

@@ -9,7 +9,7 @@ use thiserror::Error;
 
 use packetcraftr_core::error::{Classification, Classified, Kind};
 
-use super::super::policy::TrafficPolicyError;
+use super::super::policy::Error as PolicyError;
 
 /// Validated, canonical ASCII DNS hostname used by live target resolution.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -172,7 +172,7 @@ pub enum Error {
     #[error("resolved target has no {family} address compatible with the packet")]
     AddressFamilyUnavailable { family: &'static str },
     #[error(transparent)]
-    Policy(#[from] TrafficPolicyError),
+    Policy(#[from] PolicyError),
 }
 
 impl Classified for Error {

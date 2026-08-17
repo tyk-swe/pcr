@@ -5,12 +5,12 @@ use std::collections::BTreeMap;
 
 use crate::{
     codec::{
-        CodecError, DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext,
+        DecodedLayerValue, EncodedLayer, Error as CodecError, LayerCodec, LayerDecodeContext,
         LayerEncodeContext,
     },
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflective_layer},
+    layer::{Id as ProtocolId, Layer, reflective_layer},
     registry::Discriminator,
 };
 
@@ -38,7 +38,7 @@ pub struct Pppoe {
     /// 4-bit version; RFC 2516 defines only version 1.
     pub version: u8,
     /// 4-bit type; RFC 2516 defines only type 1.
-    pub kind: u8,
+    pub type_code: u8,
     /// Stage code: zero for session data, a discovery code otherwise.
     pub code: u8,
     /// Session identifier assigned during discovery.
@@ -51,7 +51,7 @@ impl Default for Pppoe {
     fn default() -> Self {
         Self {
             version: 1,
-            kind: 1,
+            type_code: 1,
             code: 0,
             session_id: 0,
             length: WireValue::Auto,
@@ -63,7 +63,7 @@ reflective_layer! {
     fn pppoe_schema() => { protocol: protocol("pppoe"), name: "PPPoE" }
     impl Pppoe {
         "version" => { kind: Unsigned, derived: false, required: false, description: "4-bit PPPoE version; only version 1 is defined", reflect_bounded: version, 0xf_u64, layout: (0, 1) },
-        "type" => { kind: Unsigned, derived: false, required: false, description: "4-bit PPPoE type; only type 1 is defined", reflect_bounded: kind, 0xf_u64, layout: (0, 1) },
+        "type" => { kind: Unsigned, derived: false, required: false, description: "4-bit PPPoE type; only type 1 is defined", reflect_bounded: type_code, 0xf_u64, layout: (0, 1) },
         "code" => { kind: Unsigned, derived: false, required: false, description: "Stage code: zero for session data, a discovery code otherwise", reflect: code, layout: (1, 2) },
         "session_id" => { kind: Unsigned, derived: false, required: true, description: "Session identifier assigned during discovery", reflect: session_id, layout: (2, 4) },
         "length" => { kind: Unsigned, derived: true, required: false, description: "Payload length excluding the header", reflect: length, layout: (4, 6) },
@@ -90,85 +90,14 @@ impl LayerCodec for PppoeCodec {
             .downcast_ref::<Pppoe>()
             .ok_or_else(|| wrong_layer("pppoe", layer))?;
         ensure_encode_budget("pppoe", PPPOE_LEN, context)?;
-        if layer.version > 0xf || layer.kind > 0xf {
+        if layer.version > 0xf || layer.type_code > 0xf {
             return Err(invalid("pppoe", "field exceeds its wire range"));
         }
         let covered_payload = payload_without_padding("pppoe", payload, context)?;
         let expected_length = u16::try_from(covered_payload.len())
             .map_err(|_| invalid("pppoe", "payload exceeds the PPPoE length range"))?;
 
-        let mut diagnostics = Vec::new();
-        if layer.version != 1 || layer.kind != 1 {
-            strict_or_diagnostic(
-                "pppoe",
-                "build.pppoe_version",
-                "version",
-                "RFC 2516 defines only PPPoE version 1, type 1",
-                context,
-                &mut diagnostics,
-            )?;
-        }
-        // The stage code decides how the payload dissects: zero selects a
-        // PPP frame, anything else opaque discovery tags. A disagreeing
-        // child would come back as different layers, and a session header
-        // with no payload at all is missing its mandatory PPP frame — only
-        // discovery packets like PADT are complete without one.
-        let expected_stage = match context.child.map(|child| child.protocol_id().as_str()) {
-            Some("ppp") => Some(0_u8),
-            Some("malformed") => None,
-            _ => Some(1),
-        };
-        if let Some(expected) = expected_stage
-            && (layer.code == 0) != (expected == 0)
-        {
-            strict_or_diagnostic(
-                "pppoe",
-                "build.pppoe_stage",
-                "code",
-                match (expected, context.child.is_some()) {
-                    (0, _) => "a PPP payload requires the zero session-stage code",
-                    (_, true) => "a non-PPP payload requires a non-zero discovery code",
-                    (_, false) => {
-                        "session data must carry a PPP frame; only discovery packets are complete without a payload"
-                    }
-                },
-                context,
-                &mut diagnostics,
-            )?;
-        }
-        // The enclosing EtherType names the stage too. An Auto ether_type
-        // resolves to the session value 0x8864, so a discovery frame must
-        // carry an explicit 0x8863 or it will not dissect as discovery. The
-        // cooked-capture headers spell the same discriminator "protocol".
-        let expected_ether_type = if layer.code == 0 { 0x8864 } else { 0x8863 };
-        let parent_ether_type = context
-            .index
-            .checked_sub(1)
-            .and_then(|index| context.packet.layer(index))
-            .and_then(|parent| {
-                parent
-                    .field("ether_type")
-                    .or_else(|| parent.field("protocol"))
-            });
-        let ether_type_disagrees = match &parent_ether_type {
-            Some(FieldValue::Unsigned(value @ (0x8863 | 0x8864))) => *value != expected_ether_type,
-            // Auto reflects as text and materializes the session EtherType.
-            Some(FieldValue::Text(_)) => layer.code != 0,
-            _ => false,
-        };
-        if ether_type_disagrees {
-            strict_or_diagnostic(
-                "pppoe",
-                "build.pppoe_stage",
-                "code",
-                format!(
-                    "stage code {} requires the enclosing EtherType 0x{expected_ether_type:04x}",
-                    layer.code
-                ),
-                context,
-                &mut diagnostics,
-            )?;
-        }
+        let mut diagnostics = validate_stage(layer, context)?;
         let (length, materialized_length) = resolve_u16(
             "pppoe",
             "length",
@@ -179,7 +108,7 @@ impl LayerCodec for PppoeCodec {
         )?;
 
         let mut prefix = Vec::with_capacity(PPPOE_LEN);
-        prefix.push((layer.version << 4) | layer.kind);
+        prefix.push((layer.version << 4) | layer.type_code);
         prefix.push(layer.code);
         prefix.extend_from_slice(&layer.session_id.to_be_bytes());
         prefix.extend_from_slice(&length.to_be_bytes());
@@ -203,7 +132,7 @@ impl LayerCodec for PppoeCodec {
             return Err(truncated("pppoe", PPPOE_LEN, input.len()));
         }
         let version = input[0] >> 4;
-        let kind = input[0] & 0x0f;
+        let type_code = input[0] & 0x0f;
         let code = input[1];
         let session_id = u16::from_be_bytes([input[2], input[3]]);
         let length_field = u16::from_be_bytes([input[4], input[5]]);
@@ -213,7 +142,7 @@ impl LayerCodec for PppoeCodec {
         }
 
         let mut diagnostics = Vec::new();
-        if version != 1 || kind != 1 {
+        if version != 1 || type_code != 1 {
             diagnostics.push(
                 Diagnostic::warning(
                     "decode.pppoe_version",
@@ -242,7 +171,7 @@ impl LayerCodec for PppoeCodec {
         }
         let layer = Pppoe {
             version,
-            kind,
+            type_code,
             code,
             session_id,
             length: WireValue::Exact(length_field),
@@ -275,6 +204,85 @@ impl LayerCodec for PppoeCodec {
     ) -> Result<Box<dyn Layer>, CodecError> {
         make_layer(Pppoe::default(), fields)
     }
+}
+
+fn validate_stage(
+    layer: &Pppoe,
+    context: &LayerEncodeContext<'_>,
+) -> Result<Vec<Diagnostic>, CodecError> {
+    let mut diagnostics = Vec::new();
+    if layer.version != 1 || layer.type_code != 1 {
+        strict_or_diagnostic(
+            "pppoe",
+            "build.pppoe_version",
+            "version",
+            "RFC 2516 defines only PPPoE version 1, type 1",
+            context,
+            &mut diagnostics,
+        )?;
+    }
+    let expected_stage = match context.child.map(|child| child.protocol_id().as_str()) {
+        Some("ppp") => Some(0_u8),
+        Some("malformed") => None,
+        _ => Some(1),
+    };
+    if let Some(expected) = expected_stage
+        && (layer.code == 0) != (expected == 0)
+    {
+        let message = match (expected, context.child.is_some()) {
+            (0, _) => "a PPP payload requires the zero session-stage code",
+            (_, true) => "a non-PPP payload requires a non-zero discovery code",
+            (_, false) => {
+                "session data must carry a PPP frame; only discovery packets are complete without a payload"
+            }
+        };
+        strict_or_diagnostic(
+            "pppoe",
+            "build.pppoe_stage",
+            "code",
+            message,
+            context,
+            &mut diagnostics,
+        )?;
+    }
+    validate_parent_stage(layer, context, &mut diagnostics)?;
+    Ok(diagnostics)
+}
+
+fn validate_parent_stage(
+    layer: &Pppoe,
+    context: &LayerEncodeContext<'_>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<(), CodecError> {
+    let expected_ether_type = if layer.code == 0 { 0x8864 } else { 0x8863 };
+    let parent_ether_type = context
+        .index
+        .checked_sub(1)
+        .and_then(|index| context.packet.layer(index))
+        .and_then(|parent| {
+            parent
+                .field("ether_type")
+                .or_else(|| parent.field("protocol"))
+        });
+    let disagrees = match &parent_ether_type {
+        Some(FieldValue::Unsigned(value @ (0x8863 | 0x8864))) => *value != expected_ether_type,
+        Some(FieldValue::Text(_)) => layer.code != 0,
+        _ => false,
+    };
+    if disagrees {
+        strict_or_diagnostic(
+            "pppoe",
+            "build.pppoe_stage",
+            "code",
+            format!(
+                "stage code {} requires the enclosing EtherType 0x{expected_ether_type:04x}",
+                layer.code
+            ),
+            context,
+            diagnostics,
+        )?;
+    }
+    Ok(())
 }
 
 /// PPP frame header as carried by PPPoE session data (RFC 1661): the 2-byte

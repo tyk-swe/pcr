@@ -3,8 +3,7 @@
 
 use std::path::PathBuf;
 
-use clap::Args;
-use packetcraftr::analysis::pcap as capture;
+use crate::command_options::OfflineCaptureLimitsArgs;
 
 pub(crate) const AFTER_LONG_HELP: &str = r#"Examples:
   packetcraftr read capture.pcapng --max-frames 100
@@ -15,22 +14,12 @@ pub(crate) const AFTER_LONG_HELP: &str = r#"Examples:
 Capture output validates and rewrites every source record without normalization.
 It requires the output format to match the input and cannot be combined with --filter."#;
 
-#[derive(Debug, Args)]
-pub(crate) struct ReadArgs {
+#[derive(Debug, clap::Args)]
+pub(crate) struct Args {
     /// Classic PCAP or PCAPNG input path.
     pub(crate) path: PathBuf,
-    /// Maximum frames read or copied from the capture stream.
-    #[arg(long, default_value_t = capture::DEFAULT_STREAM_FRAMES)]
-    pub(crate) max_frames: u64,
-    /// Maximum aggregate captured payload bytes read or copied.
-    #[arg(long, default_value_t = capture::DEFAULT_STREAM_BYTES)]
-    pub(crate) max_bytes: u64,
-    /// Maximum bytes accepted from any one captured frame or PCAPNG block.
-    #[arg(long, default_value_t = capture::DEFAULT_SIZE_LIMIT)]
-    pub(crate) max_frame_bytes: usize,
-    /// Maximum PCAPNG interfaces accepted from the input.
-    #[arg(long, default_value_t = capture::DEFAULT_INTERFACE_LIMIT)]
-    pub(crate) max_interfaces: usize,
+    #[command(flatten)]
+    pub(crate) limits: OfflineCaptureLimitsArgs,
     /// Keep only frames matching a display filter; unavailable for capture output.
     #[arg(long, value_name = "EXPR")]
     pub(crate) filter: Option<String>,

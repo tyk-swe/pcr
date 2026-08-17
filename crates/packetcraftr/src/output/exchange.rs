@@ -10,12 +10,10 @@ use std::time::Duration;
 
 use crate::output::contract::Error;
 use crate::output::envelope::Stats;
-use crate::output::frame::{Captured, Decoded};
-
-pub use crate::output::frame::{Captured as Frame, Decoded as DecodedFrame, Wire};
+use crate::output::frame::{Captured, Decoded, Wire};
 
 #[derive(Clone, Debug, Serialize)]
-pub struct ExchangeResponseOutput {
+pub struct Response {
     pub request_index: u64,
     pub response: Decoded,
     pub latency: Duration,
@@ -23,15 +21,15 @@ pub struct ExchangeResponseOutput {
 
 /// Aggregate result of `exchange`; diagnostics and statistics live in the envelope.
 #[derive(Clone, Debug, Serialize)]
-pub struct ExchangeCommandResult {
+pub struct Result {
     pub sent: Vec<Wire>,
-    pub responses: Vec<ExchangeResponseOutput>,
+    pub responses: Vec<Response>,
     pub unanswered: Vec<u64>,
     pub unsolicited: Vec<Decoded>,
     pub undecoded: Vec<Captured>,
 }
 
-impl ExchangeCommandResult {
+impl Result {
     pub fn try_from_exchange(
         result: ExchangeResult,
     ) -> std::result::Result<(Self, Vec<Diagnostic>, Stats), Error> {
@@ -54,7 +52,7 @@ impl ExchangeCommandResult {
         let response_outputs = responses
             .into_iter()
             .map(|response| {
-                Ok(ExchangeResponseOutput {
+                Ok(Response {
                     request_index: u64::try_from(response.request_index).unwrap_or(u64::MAX),
                     response: Decoded::try_from_decoded(response.response)?,
                     latency: response.latency,
@@ -85,7 +83,7 @@ impl ExchangeCommandResult {
 /// One NDJSON event produced by `exchange`.
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
-pub enum ExchangeStreamCommandResult {
+pub enum Event {
     Sent {
         request_index: u64,
         frame: Wire,

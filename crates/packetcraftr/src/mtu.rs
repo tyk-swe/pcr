@@ -5,9 +5,9 @@
 
 use packetcraftr_core::{build::BuiltPacket, layer::Padding, semantics::BuiltinProtocol};
 
-use super::send::ClientError;
+use crate::Error;
 
-pub(super) fn validate_mtu(built: &BuiltPacket, mtu: u32) -> Result<(), ClientError> {
+pub(super) fn validate_mtu(built: &BuiltPacket, mtu: u32) -> Result<(), Error> {
     let network_layer = built.packet.iter().enumerate().find_map(|(index, layer)| {
         BuiltinProtocol::of(layer)
             .is_some_and(BuiltinProtocol::is_ip)
@@ -38,7 +38,7 @@ pub(super) fn validate_mtu(built: &BuiltPacket, mtu: u32) -> Result<(), ClientEr
     if let Some(actual) = network_length
         && actual > usize::try_from(mtu).unwrap_or(usize::MAX)
     {
-        return Err(ClientError::PacketExceedsMtu { actual, mtu });
+        return Err(Error::PacketExceedsMtu { actual, mtu });
     }
     Ok(())
 }
@@ -52,7 +52,7 @@ mod tests {
     use packetcraftr_core::protocol::{link::Ethernet, network::Ipv4, transport::Udp};
     use packetcraftr_core::{
         Packet,
-        build::{BuildContext, BuildOptions, Builder},
+        build::{Builder, Context as BuildContext, Options as BuildOptions},
         field::WireValue,
         layer::{Padding, Raw},
     };
@@ -126,7 +126,7 @@ mod tests {
         assert!(validate_mtu(&built, 32).is_ok());
         assert!(matches!(
             validate_mtu(&built, 31),
-            Err(ClientError::PacketExceedsMtu {
+            Err(Error::PacketExceedsMtu {
                 actual: 32,
                 mtu: 31
             })

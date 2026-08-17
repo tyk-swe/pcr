@@ -6,10 +6,9 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
-use packetcraftr_core::field::FieldValue;
 use packetcraftr_core::filter::{Context as FilterContext, Filter, Options as FilterOptions};
 use packetcraftr_core::frame::{Frame, LinkType};
-use packetcraftr_core::layer::{Layer, Malformed, Padding, Raw};
+use packetcraftr_core::layer::{Layer, Malformed, Raw};
 use packetcraftr_core::protocol::application::Dns;
 use packetcraftr_core::protocol::builtin;
 use packetcraftr_core::protocol::capture::{BsdLoop, BsdNull, LinuxSll, LinuxSll2};
@@ -24,36 +23,29 @@ use packetcraftr_core::protocol::transport::{Sctp, Tcp, Udp};
 use packetcraftr_core::protocol::tunnel::{
     Ah, Erspan, Esp, Geneve, L2tpv3, Mpls, Ppp, Pppoe, Vxlan,
 };
-use packetcraftr_core::{Packet, build, decode, expression};
+use packetcraftr_core::registry::Registry;
+use packetcraftr_core::{Packet, build, decode};
 
-fn registry() -> Arc<packetcraftr_core::registry::Registry> {
-    Arc::new(builtin::registry().expect("built-in registry should be valid"))
+fn registry() -> Arc<Registry> {
+    Arc::new(builtin::registry().expect("built-in registry"))
 }
 
 fn round_trip(packet: Packet, root: &str) -> (build::BuiltPacket, decode::DecodedPacket) {
     let registry = registry();
     let builder = build::Builder::new(Arc::clone(&registry));
     let built = builder
-        .build(
-            packet,
-            build::BuildContext::default(),
-            build::BuildOptions::default(),
-        )
-        .unwrap_or_else(|error| panic!("{root} packet should build: {error}"));
+        .build(packet, build::Context::default(), build::Options::default())
+        .unwrap_or_else(|error| panic!("{root} build: {error}"));
     let decoded = decode::Dissector::new(Arc::clone(&registry))
-        .decode_with_root(
-            built.bytes.clone(),
-            root.into(),
-            decode::DecodeOptions::default(),
-        )
-        .unwrap_or_else(|error| panic!("{root} packet should decode: {error}"));
+        .decode_with_root(built.bytes.clone(), root.into(), decode::Options::default())
+        .unwrap_or_else(|error| panic!("{root} decode: {error}"));
     let rebuilt = builder
         .build(
             decoded.packet.clone(),
-            build::BuildContext::default(),
-            build::BuildOptions::default(),
+            build::Context::default(),
+            build::Options::default(),
         )
-        .unwrap_or_else(|error| panic!("{root} decoded packet should rebuild: {error}"));
+        .unwrap_or_else(|error| panic!("{root} rebuild: {error}"));
     assert_eq!(rebuilt.bytes, built.bytes, "{root} exact round trip");
     (built, decoded)
 }
@@ -131,11 +123,12 @@ fn ipv4_source_route_decode_accepts_known_transport_checksums() {
     ];
 
     for (transport, checksum_code, vector) in vectors {
-        let bytes = expression::decode_hex(vector).expect("known vector is valid hex");
+        let bytes =
+            packetcraftr_core::protocol::raw::parse_hex(vector).expect("known vector is valid hex");
         let frame = Frame::new(SystemTime::UNIX_EPOCH, LinkType::RAW, bytes)
             .expect("known DLT_RAW vector is a valid frame");
         let decoded = decode::Dissector::new(registry())
-            .decode(frame, decode::DecodeOptions::default())
+            .decode(frame, decode::Options::default())
             .expect("known DLT_RAW vector decodes");
 
         assert!(
@@ -164,8 +157,8 @@ fn ipv4_source_route_encode_matches_known_transport_checksums() {
     let tcp = builder
         .build(
             tcp_packet,
-            build::BuildContext::default(),
-            build::BuildOptions::default(),
+            build::Context::default(),
+            build::Options::default(),
         )
         .expect("known TCP source-route packet builds");
     assert_eq!(
@@ -186,10 +179,10 @@ fn ipv4_source_route_encode_matches_known_transport_checksums() {
     let udp = builder
         .build(
             udp_packet,
-            build::BuildContext::default(),
-            build::BuildOptions {
-                mode: build::BuildMode::Permissive,
-                ..build::BuildOptions::default()
+            build::Context::default(),
+            build::Options {
+                mode: build::Mode::Permissive,
+                ..build::Options::default()
             },
         )
         .expect("known UDP source-route packet builds");
@@ -202,13 +195,11 @@ fn ipv4_source_route_encode_matches_known_transport_checksums() {
     );
 }
 
-#[test]
-fn ipv4_source_route_transport_checksums_cover_route_states_and_nearest_envelope() {
-    let registry = registry();
-    let builder = build::Builder::new(Arc::clone(&registry));
-    let first_remaining = Ipv4Addr::new(203, 0, 113, 20);
-    let final_destination = Ipv4Addr::new(203, 0, 113, 30);
-
+fn assert_remaining_source_route_checksums(
+    builder: &build::Builder,
+    first_remaining: Ipv4Addr,
+    final_destination: Ipv4Addr,
+) {
     let mut tcp_multiple_lsrr = Packet::new();
     tcp_multiple_lsrr.push(source_routed_ipv4(
         131,
@@ -219,8 +210,8 @@ fn ipv4_source_route_transport_checksums_cover_route_states_and_nearest_envelope
     let tcp_multiple_lsrr = builder
         .build(
             tcp_multiple_lsrr,
-            build::BuildContext::default(),
-            build::BuildOptions::default(),
+            build::Context::default(),
+            build::Options::default(),
         )
         .expect("TCP LSRR with multiple remaining addresses builds");
     assert_eq!(
@@ -243,10 +234,10 @@ fn ipv4_source_route_transport_checksums_cover_route_states_and_nearest_envelope
     let udp_multiple_ssrr = builder
         .build(
             udp_multiple_ssrr,
-            build::BuildContext::default(),
-            build::BuildOptions {
-                mode: build::BuildMode::Permissive,
-                ..build::BuildOptions::default()
+            build::Context::default(),
+            build::Options {
+                mode: build::Mode::Permissive,
+                ..build::Options::default()
             },
         )
         .expect("UDP SSRR with multiple remaining addresses builds");
@@ -258,15 +249,17 @@ fn ipv4_source_route_transport_checksums_cover_route_states_and_nearest_envelope
             .copied(),
         Some(0x9020)
     );
+}
 
+fn assert_completed_source_route_checksums(builder: &build::Builder, first_remaining: Ipv4Addr) {
     let mut tcp_completed_ssrr = Packet::new();
     tcp_completed_ssrr.push(source_routed_ipv4(137, 8, &[first_remaining]));
     tcp_completed_ssrr.push(known_tcp());
     let tcp_completed_ssrr = builder
         .build(
             tcp_completed_ssrr,
-            build::BuildContext::default(),
-            build::BuildOptions::default(),
+            build::Context::default(),
+            build::Options::default(),
         )
         .expect("TCP completed SSRR builds");
     assert_eq!(
@@ -285,10 +278,10 @@ fn ipv4_source_route_transport_checksums_cover_route_states_and_nearest_envelope
     let udp_completed_lsrr = builder
         .build(
             udp_completed_lsrr,
-            build::BuildContext::default(),
-            build::BuildOptions {
-                mode: build::BuildMode::Permissive,
-                ..build::BuildOptions::default()
+            build::Context::default(),
+            build::Options {
+                mode: build::Mode::Permissive,
+                ..build::Options::default()
             },
         )
         .expect("UDP completed LSRR builds");
@@ -300,6 +293,16 @@ fn ipv4_source_route_transport_checksums_cover_route_states_and_nearest_envelope
             .copied(),
         Some(0x9034)
     );
+}
+
+#[test]
+fn ipv4_source_route_transport_checksums_cover_route_states_and_nearest_envelope() {
+    let registry = registry();
+    let builder = build::Builder::new(Arc::clone(&registry));
+    let first_remaining = Ipv4Addr::new(203, 0, 113, 20);
+    let final_destination = Ipv4Addr::new(203, 0, 113, 30);
+    assert_remaining_source_route_checksums(&builder, first_remaining, final_destination);
+    assert_completed_source_route_checksums(&builder, first_remaining);
 
     let mut nested = Packet::new();
     nested.push(Ipv4 {
@@ -311,11 +314,7 @@ fn ipv4_source_route_transport_checksums_cover_route_states_and_nearest_envelope
     nested.push(source_routed_ipv4(137, 8, &[first_remaining]));
     nested.push(known_tcp());
     let nested = builder
-        .build(
-            nested,
-            build::BuildContext::default(),
-            build::BuildOptions::default(),
-        )
+        .build(nested, build::Context::default(), build::Options::default())
         .expect("nested IPv4 source-route packet builds");
     assert_eq!(
         nested
@@ -327,11 +326,7 @@ fn ipv4_source_route_transport_checksums_cover_route_states_and_nearest_envelope
         "the completed nearest IPv4 route must beat the outer remaining route"
     );
     let decoded = decode::Dissector::new(registry)
-        .decode_with_root(
-            nested.bytes,
-            "ipv4".into(),
-            decode::DecodeOptions::default(),
-        )
+        .decode_with_root(nested.bytes, "ipv4".into(), decode::Options::default())
         .expect("nested IPv4 source-route packet decodes");
     assert!(
         !decoded
@@ -343,8 +338,7 @@ fn ipv4_source_route_transport_checksums_cover_route_states_and_nearest_envelope
     );
 }
 
-#[test]
-fn ethernet_ipv4_udp_raw_round_trip_exercises_filter_language() {
+fn filter_fixture() -> (Arc<Registry>, decode::DecodedPacket) {
     let mut packet = Packet::new();
     packet.push(Ethernet {
         destination: [0, 1, 2, 3, 4, 5],
@@ -372,8 +366,98 @@ fn ethernet_ipv4_udp_raw_round_trip_exercises_filter_language() {
     );
     decoded.frame.timestamp = Some(SystemTime::UNIX_EPOCH + Duration::from_secs(123));
     decoded.frame.interface = Some(4);
+    (registry(), decoded)
+}
 
-    let registry = registry();
+fn assert_negative_filters(registry: &Registry, decoded: &decode::DecodedPacket) {
+    for source in [
+        "tcp",
+        "ipv4#2",
+        "ipv4.destination == 203.0.113.1",
+        "raw.bytes contains \"absent\"",
+        "frame.interface_id == 5",
+        "udp.stream == 4",
+    ] {
+        let filter = Filter::compile(source, registry, FilterOptions::default())
+            .expect("valid negative filter");
+        assert!(
+            !filter
+                .matches(&FilterContext {
+                    decoded,
+                    number: 7,
+                    tcp_stream: None,
+                    udp_stream: Some(3),
+                })
+                .expect("timestamp is available"),
+            "{source}"
+        );
+    }
+}
+
+fn assert_invalid_filters(registry: &Registry) {
+    for invalid in [
+        "",
+        "unknown",
+        "ipv4.unknown == 1",
+        "frame.len[0] == 1",
+        "udp.destination_port contains \"53\"",
+        "udp.destination_port == 192.0.2.1",
+        "ipv4.source > 192.0.2.0/24",
+        "(ethernet",
+        "ethernet &&",
+        "ethernet.source[4:2] == 00:00",
+        "udp.destination_port in {}",
+    ] {
+        assert!(
+            Filter::compile(invalid, registry, FilterOptions::default()).is_err(),
+            "{invalid}"
+        );
+    }
+    assert!(
+        Filter::compile(
+            "ethernet",
+            registry,
+            FilterOptions {
+                max_bytes: 2,
+                ..FilterOptions::default()
+            },
+        )
+        .is_err()
+    );
+
+    let overflowed_index = format!("ethernet.source[{}] == 00", usize::MAX);
+    let error = Filter::compile(&overflowed_index, registry, FilterOptions::default())
+        .expect_err("a single-byte slice must have a representable exclusive end");
+    assert!(
+        error
+            .to_string()
+            .contains("has no representable exclusive end")
+    );
+}
+
+fn assert_stream_filter_requirements(registry: &Registry) {
+    let tcp_requirements = Filter::compile("tcp.stream == 1", registry, FilterOptions::default())
+        .expect("valid TCP stream filter")
+        .requirements();
+    assert!(tcp_requirements.stream_index);
+    assert!(tcp_requirements.tcp_stream);
+    assert!(!tcp_requirements.udp_stream);
+
+    let both_requirements = Filter::compile(
+        "tcp.stream == 1 || udp.stream == 2",
+        registry,
+        FilterOptions::default(),
+    )
+    .expect("valid mixed stream filter")
+    .requirements();
+    assert!(both_requirements.stream_index);
+    assert!(both_requirements.tcp_stream);
+    assert!(both_requirements.udp_stream);
+}
+
+#[test]
+fn ethernet_ipv4_udp_raw_round_trip_exercises_filter_language() {
+    let (registry, mut decoded) = filter_fixture();
     let source = concat!(
         "ethernet && ipv4.source in 192.0.2.0/24 && ",
         "udp.destination_port in {53, 9999} && raw.bytes contains \"filter\" && ",
@@ -408,85 +492,9 @@ fn ethernet_ipv4_udp_raw_round_trip_exercises_filter_language() {
         Err(packetcraftr_core::filter::Error::TimestampUnavailable)
     ));
 
-    for source in [
-        "tcp",
-        "ipv4#2",
-        "ipv4.destination == 203.0.113.1",
-        "raw.bytes contains \"absent\"",
-        "frame.interface_id == 5",
-        "udp.stream == 4",
-    ] {
-        let filter = Filter::compile(source, &registry, FilterOptions::default())
-            .expect("valid negative filter");
-        assert!(
-            !filter
-                .matches(&FilterContext {
-                    decoded: &decoded,
-                    number: 7,
-                    tcp_stream: None,
-                    udp_stream: Some(3),
-                })
-                .expect("timestamp is available"),
-            "{source}"
-        );
-    }
-
-    for invalid in [
-        "",
-        "unknown",
-        "ipv4.unknown == 1",
-        "frame.len[0] == 1",
-        "udp.destination_port contains \"53\"",
-        "udp.destination_port == 192.0.2.1",
-        "ipv4.source > 192.0.2.0/24",
-        "(ethernet",
-        "ethernet &&",
-        "ethernet.source[4:2] == 00:00",
-        "udp.destination_port in {}",
-    ] {
-        assert!(
-            Filter::compile(invalid, &registry, FilterOptions::default()).is_err(),
-            "{invalid}"
-        );
-    }
-    assert!(
-        Filter::compile(
-            "ethernet",
-            &registry,
-            FilterOptions {
-                max_bytes: 2,
-                ..FilterOptions::default()
-            },
-        )
-        .is_err()
-    );
-
-    let tcp_requirements = Filter::compile("tcp.stream == 1", &registry, FilterOptions::default())
-        .expect("valid TCP stream filter")
-        .requirements();
-    assert!(tcp_requirements.stream_index);
-    assert!(tcp_requirements.tcp_stream);
-    assert!(!tcp_requirements.udp_stream);
-
-    let both_requirements = Filter::compile(
-        "tcp.stream == 1 || udp.stream == 2",
-        &registry,
-        FilterOptions::default(),
-    )
-    .expect("valid mixed stream filter")
-    .requirements();
-    assert!(both_requirements.stream_index);
-    assert!(both_requirements.tcp_stream);
-    assert!(both_requirements.udp_stream);
-
-    let overflowed_index = format!("ethernet.source[{}] == 00", usize::MAX);
-    let error = Filter::compile(&overflowed_index, &registry, FilterOptions::default())
-        .expect_err("a single-byte slice must have a representable exclusive end");
-    assert!(
-        error
-            .to_string()
-            .contains("has no representable exclusive end")
-    );
+    assert_negative_filters(&registry, &decoded);
+    assert_invalid_filters(&registry);
+    assert_stream_filter_requirements(&registry);
 }
 
 #[test]
@@ -600,14 +608,13 @@ fn link_capture_and_raw_ip_roots_round_trip() {
         let frame =
             Frame::new(SystemTime::UNIX_EPOCH, link_type, built.bytes.clone()).expect("frame");
         let decoded = decode::Dissector::new(registry())
-            .decode(frame, decode::DecodeOptions::default())
+            .decode(frame, decode::Options::default())
             .expect("raw-IP root should sniff version");
         assert!(decoded.packet.get::<Ipv4>().is_some());
     }
 }
 
-#[test]
-fn overlay_and_security_tunnel_stacks_round_trip() {
+fn assert_overlay_tunnels_round_trip() {
     let mut vxlan = Packet::new();
     vxlan.push(ipv4([192, 0, 2, 1], [192, 0, 2, 2]));
     vxlan.push(Udp {
@@ -664,7 +671,11 @@ fn overlay_and_security_tunnel_stacks_round_trip() {
         Some(7)
     );
     assert!(decoded.packet.get::<Erspan>().is_some());
+}
 
+#[test]
+fn overlay_and_security_tunnel_stacks_round_trip() {
+    assert_overlay_tunnels_round_trip();
     let mut mpls = Packet::new();
     mpls.push(Ethernet::default());
     mpls.push(Mpls {
@@ -778,7 +789,7 @@ fn sctp_dns_and_malformed_inputs_cover_bounded_parsers() {
         ("gre", vec![0; 3]),
     ] {
         let decoded = decoder
-            .decode_with_root(bytes, root.into(), decode::DecodeOptions::default())
+            .decode_with_root(bytes, root.into(), decode::Options::default())
             .unwrap_or_else(|error| panic!("{root} malformed preservation failed: {error}"));
         assert!(decoded.packet.get::<Malformed>().is_some(), "{root}");
         assert_eq!(
@@ -794,7 +805,7 @@ fn typed_child_without_payload_is_preserved_as_malformed() {
     bytes[12..14].copy_from_slice(&0x0800_u16.to_be_bytes());
 
     let decoded = decode::Dissector::new(registry())
-        .decode_with_root(bytes, "ethernet".into(), decode::DecodeOptions::default())
+        .decode_with_root(bytes, "ethernet".into(), decode::Options::default())
         .expect("empty typed child should be preserved");
 
     assert_eq!(decoded.packet.len(), 2);
@@ -820,11 +831,7 @@ fn typed_child_without_payload_is_preserved_as_malformed() {
     );
 }
 
-#[test]
-fn strict_and_permissive_modes_distinguish_noncanonical_wire_requests() {
-    let registry = registry();
-    let builder = build::Builder::new(registry);
-
+fn assert_ipv4_strict_and_permissive_modes(builder: &build::Builder) {
     let mut invalid = Packet::new();
     invalid.push(Ipv4 {
         reserved_flag: true,
@@ -835,18 +842,18 @@ fn strict_and_permissive_modes_distinguish_noncanonical_wire_requests() {
         builder
             .build(
                 invalid.clone(),
-                build::BuildContext::default(),
-                build::BuildOptions::default()
+                build::Context::default(),
+                build::Options::default()
             )
             .is_err()
     );
     let permissive = builder
         .build(
             invalid,
-            build::BuildContext::default(),
-            build::BuildOptions {
-                mode: build::BuildMode::Permissive,
-                ..build::BuildOptions::default()
+            build::Context::default(),
+            build::Options {
+                mode: build::Mode::Permissive,
+                ..build::Options::default()
             },
         )
         .expect("permissive build preserves reserved bit with warning");
@@ -857,7 +864,13 @@ fn strict_and_permissive_modes_distinguish_noncanonical_wire_requests() {
             .iter()
             .any(|diagnostic| diagnostic.code == "build.ipv4_reserved_flag")
     );
+}
 
+#[test]
+fn strict_and_permissive_modes_distinguish_noncanonical_wire_requests() {
+    let registry = registry();
+    let builder = build::Builder::new(registry);
+    assert_ipv4_strict_and_permissive_modes(&builder);
     let mut bad_vxlan = Packet::new();
     bad_vxlan.push(Vxlan {
         flags: 0,
@@ -868,8 +881,8 @@ fn strict_and_permissive_modes_distinguish_noncanonical_wire_requests() {
         builder
             .build(
                 bad_vxlan.clone(),
-                build::BuildContext::default(),
-                build::BuildOptions::default()
+                build::Context::default(),
+                build::Options::default()
             )
             .is_err()
     );
@@ -877,10 +890,10 @@ fn strict_and_permissive_modes_distinguish_noncanonical_wire_requests() {
         builder
             .build(
                 bad_vxlan,
-                build::BuildContext::default(),
-                build::BuildOptions {
-                    mode: build::BuildMode::Permissive,
-                    ..build::BuildOptions::default()
+                build::Context::default(),
+                build::Options {
+                    mode: build::Mode::Permissive,
+                    ..build::Options::default()
                 },
             )
             .is_ok()
@@ -896,8 +909,8 @@ fn strict_and_permissive_modes_distinguish_noncanonical_wire_requests() {
         builder
             .build(
                 bad_geneve,
-                build::BuildContext::default(),
-                build::BuildOptions::default()
+                build::Context::default(),
+                build::Options::default()
             )
             .is_err()
     );
@@ -911,8 +924,8 @@ fn strict_and_permissive_modes_distinguish_noncanonical_wire_requests() {
         builder
             .build(
                 bad_arp.clone(),
-                build::BuildContext::default(),
-                build::BuildOptions::default()
+                build::Context::default(),
+                build::Options::default()
             )
             .is_err()
     );
@@ -920,142 +933,12 @@ fn strict_and_permissive_modes_distinguish_noncanonical_wire_requests() {
         builder
             .build(
                 bad_arp,
-                build::BuildContext::default(),
-                build::BuildOptions {
-                    mode: build::BuildMode::Permissive,
-                    ..build::BuildOptions::default()
+                build::Context::default(),
+                build::Options {
+                    mode: build::Mode::Permissive,
+                    ..build::Options::default()
                 },
             )
             .is_ok()
     );
-}
-
-#[test]
-fn tcp_response_correlation_uses_decoded_payload_after_every_mutation_api() {
-    let registry = registry();
-    let tcp_matcher = registry.matcher("tcp").expect("TCP matcher");
-    let mut response = Packet::new();
-    response.push(ipv4([198, 51, 100, 2], [192, 0, 2, 1]));
-    response.push(Tcp {
-        source_port: 80,
-        destination_port: 40_000,
-        acknowledgment: 104,
-        flags: Tcp::ACK,
-        ..Tcp::default()
-    });
-
-    type Mutator = fn(&mut Packet);
-    let mutators: [(&str, Mutator); 6] = [
-        ("get_mut", |packet| {
-            packet.get_mut::<Raw>().expect("Raw").bytes = Bytes::from_static(&[2, 3, 4]);
-        }),
-        ("by_protocol_mut", |packet| {
-            packet
-                .by_protocol_mut(&"raw".into())
-                .expect("Raw protocol")
-                .set_field("bytes", FieldValue::Bytes(Bytes::from_static(&[2, 3, 4])))
-                .expect("Raw bytes field");
-        }),
-        ("layer_mut", |packet| {
-            packet
-                .layer_mut(2)
-                .expect("Raw layer")
-                .as_any_mut()
-                .downcast_mut::<Raw>()
-                .expect("Raw type")
-                .bytes = Bytes::from_static(&[2, 3, 4]);
-        }),
-        ("edit", |packet| {
-            packet
-                .edit(
-                    &"raw".into(),
-                    "bytes",
-                    FieldValue::Bytes(Bytes::from_static(&[2, 3, 4])),
-                )
-                .expect("Raw edit");
-        }),
-        ("replace", |packet| {
-            packet
-                .replace(2, Raw::new(Bytes::from_static(&[2, 3, 4])))
-                .expect("Raw replacement");
-        }),
-        ("replace_boxed", |packet| {
-            packet
-                .replace_boxed(2, Box::new(Raw::new(Bytes::from_static(&[2, 3, 4]))))
-                .expect("boxed Raw replacement");
-        }),
-    ];
-
-    for (name, mutate) in mutators {
-        let mut request = Packet::new();
-        request.push(ipv4([192, 0, 2, 1], [198, 51, 100, 2]));
-        request.push(Tcp {
-            source_port: 40_000,
-            destination_port: 80,
-            sequence: 100,
-            ..Tcp::default()
-        });
-        request.push(Raw::new(Bytes::from_static(&[1])));
-        let builder = build::Builder::new(Arc::clone(&registry));
-        let built = builder
-            .build(
-                request,
-                build::BuildContext::default(),
-                build::BuildOptions::default(),
-            )
-            .expect("TCP request builds");
-        let mut request = decode::Dissector::new(Arc::clone(&registry))
-            .decode_with_root(built.bytes, "ipv4".into(), decode::DecodeOptions::default())
-            .expect("TCP request decodes")
-            .packet;
-
-        assert_eq!(request.encoded_payload_length(1), Some(1), "{name} setup");
-        mutate(&mut request);
-        assert_eq!(
-            request.encoded_payload_length(1),
-            None,
-            "{name} invalidates"
-        );
-        assert!(
-            tcp_matcher.matches(&request, &response).matched,
-            "{name} must use the new TCP payload length"
-        );
-    }
-}
-
-#[test]
-fn tcp_response_correlation_preserves_syn_fin_and_trailing_padding_rules() {
-    let registry = registry();
-    let matcher = registry.matcher("tcp").expect("TCP matcher");
-    let mut request = Packet::new();
-    request.push(ipv4([192, 0, 2, 1], [198, 51, 100, 2]));
-    request.push(Tcp {
-        source_port: 40_000,
-        destination_port: 80,
-        sequence: 100,
-        flags: Tcp::SYN | Tcp::FIN,
-        ..Tcp::default()
-    });
-    request.push(Raw::new(Bytes::from_static(&[1])));
-    request.push(Padding::after_layer(Bytes::from_static(&[0xaa, 0xbb]), 0));
-
-    let built = build::Builder::new(Arc::clone(&registry))
-        .build(
-            request,
-            build::BuildContext::default(),
-            build::BuildOptions::default(),
-        )
-        .expect("padded TCP request builds");
-    assert_eq!(built.packet.encoded_payload_length(1), Some(3));
-
-    let mut response = Packet::new();
-    response.push(ipv4([198, 51, 100, 2], [192, 0, 2, 1]));
-    response.push(Tcp {
-        source_port: 80,
-        destination_port: 40_000,
-        acknowledgment: 103,
-        flags: Tcp::ACK,
-        ..Tcp::default()
-    });
-    assert!(matcher.matches(&built.packet, &response).matched);
 }

@@ -8,12 +8,12 @@ use std::net::IpAddr;
 
 use crate::{
     codec::{
-        CodecError, DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext,
+        DecodedLayerValue, EncodedLayer, Error as CodecError, LayerCodec, LayerDecodeContext,
         LayerEncodeContext,
     },
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflective_layer},
+    layer::{Id as ProtocolId, Layer, reflective_layer},
     registry::Discriminator,
     semantics::BuiltinProtocol,
 };
@@ -23,7 +23,7 @@ use super::super::common::{
     resolve_u16, strict_or_diagnostic, transport_checksum, transport_checksum_parts, truncated,
     wrong_layer,
 };
-use super::super::network::encode_network;
+use super::super::network::resolve_envelope;
 
 const UDP_LEN: usize = 8;
 const DNS_HEADER_LEN: usize = 12;
@@ -137,50 +137,7 @@ impl LayerCodec for UdpCodec {
             .checked_add(covered_payload.len())
             .and_then(|value| u16::try_from(value).ok())
             .ok_or_else(|| invalid("udp", "datagram exceeds UDP length range"))?;
-        let mut diagnostics = Vec::new();
-        // Dissection normally selects the child from the destination port.
-        // A plausible DNS response instead gives source port 53 precedence.
-        // When that selection disagrees
-        // with the declared child — an encapsulation away from its registered
-        // port, or an opaque payload sitting on one — the built bytes would
-        // not round-trip into the same layers. Padding and malformed children
-        // are byte-preserving pseudo-layers outside the selection, so
-        // dissected captures always rebuild.
-        if let Some(child) = context.child
-            && !matches!(
-                BuiltinProtocol::from_id(child.protocol_id()),
-                Some(BuiltinProtocol::Padding | BuiltinProtocol::Malformed)
-            )
-            && let Some(selected) =
-                child_discriminators(layer.source_port, layer.destination_port, covered_payload)
-                    .into_iter()
-                    .find_map(|discriminator| context.registry.child_for("udp", discriminator))
-            && *selected != *child.protocol_id()
-        {
-            let message = match context
-                .registry
-                .discriminator_for("udp", child.protocol_id().as_str())
-                .filter(|discriminator| discriminator.0 != 0)
-            {
-                Some(registered) => format!(
-                    "{} dissects only from UDP port {}; set that port on one endpoint",
-                    child.protocol_id(),
-                    registered.0
-                ),
-                None => format!(
-                    "these UDP ports dissect the payload as {selected}, not {}; move it off the registered port",
-                    child.protocol_id()
-                ),
-            };
-            strict_or_diagnostic(
-                "udp",
-                "build.udp_encapsulation_port",
-                "destination_port",
-                message,
-                context,
-                &mut diagnostics,
-            )?;
-        }
+        let mut diagnostics = validate_child_selection(layer, covered_payload, context)?;
         let (length, materialized_length) = resolve_u16(
             "udp",
             "length",
@@ -189,7 +146,7 @@ impl LayerCodec for UdpCodec {
             context.mode,
             &mut diagnostics,
         )?;
-        let network = encode_network(context)?;
+        let network = resolve_envelope(context)?;
         let mut header = [0_u8; UDP_LEN];
         header[0..2].copy_from_slice(&layer.source_port.to_be_bytes());
         header[2..4].copy_from_slice(&layer.destination_port.to_be_bytes());
@@ -307,4 +264,54 @@ impl LayerCodec for UdpCodec {
             )?,
         )
     }
+}
+
+fn validate_child_selection(
+    layer: &Udp,
+    payload: &[u8],
+    context: &LayerEncodeContext<'_>,
+) -> Result<Vec<Diagnostic>, CodecError> {
+    let mut diagnostics = Vec::new();
+    let Some(child) = context.child else {
+        return Ok(diagnostics);
+    };
+    if matches!(
+        BuiltinProtocol::from_id(child.protocol_id()),
+        Some(BuiltinProtocol::Padding | BuiltinProtocol::Malformed)
+    ) {
+        return Ok(diagnostics);
+    }
+    let Some(selected) = child_discriminators(layer.source_port, layer.destination_port, payload)
+        .into_iter()
+        .find_map(|discriminator| context.registry.child_for("udp", discriminator))
+    else {
+        return Ok(diagnostics);
+    };
+    if *selected == *child.protocol_id() {
+        return Ok(diagnostics);
+    }
+    let message = match context
+        .registry
+        .discriminator_for("udp", child.protocol_id().as_str())
+        .filter(|discriminator| discriminator.0 != 0)
+    {
+        Some(registered) => format!(
+            "{} dissects only from UDP port {}; set that port on one endpoint",
+            child.protocol_id(),
+            registered.0
+        ),
+        None => format!(
+            "these UDP ports dissect the payload as {selected}, not {}; move it off the registered port",
+            child.protocol_id()
+        ),
+    };
+    strict_or_diagnostic(
+        "udp",
+        "build.udp_encapsulation_port",
+        "destination_port",
+        message,
+        context,
+        &mut diagnostics,
+    )?;
+    Ok(diagnostics)
 }

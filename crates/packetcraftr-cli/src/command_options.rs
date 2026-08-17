@@ -3,14 +3,15 @@
 
 //! Shared Clap groups; command-specific options stay in `commands/<command>/arguments.rs`.
 
-pub(crate) use address_family::CliAddressFamily;
-pub(crate) use capture_limits::CaptureLimitArgs;
-pub(crate) use offline_limits::{OfflineAnalysisLimits, OfflineCaptureLimits};
+pub(crate) use address_family::AddressFamily;
+pub(crate) use capture_limits::CaptureLimitsArgs;
+pub(crate) use offline_limits::{OfflineAnalysisLimitsArgs, OfflineCaptureLimitsArgs};
 pub(crate) use policy::{
-    FuzzPolicyArgs, HostnameTrafficPolicyArgs, PlanPolicyArgs, ReplayPolicyArgs, SendPolicyArgs,
+    HostnameResolutionArgs, HostnameTrafficPolicyArgs, PermissivePacketArgs, PublicDestinationArgs,
+    SendPolicyArgs, TrafficBudgetArgs,
 };
-pub(crate) use recipe::{CliBuildMode, RecipeArgs};
-pub(crate) use route::{CliLinkMode, RouteArgs, RouteSelectionArgs};
+pub(crate) use recipe::{BuildMode, RecipeArgs};
+pub(crate) use route::{LinkMode, RouteArgs, RouteSelectionArgs};
 pub(crate) use send::SendArgs;
 
 mod address_family;

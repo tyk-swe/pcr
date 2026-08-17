@@ -91,7 +91,7 @@ fn capture_inside_submission_interval_is_not_proven_fresh() {
 #[test]
 fn workflow_deadline_expiry_preserves_unsolicited_order_and_discards_freshness() {
     let received_at = Instant::now();
-    let mut accumulator = ExchangeAccumulator::new(0);
+    let mut accumulator = Accumulator::new(0);
     accumulator.unsolicited = vec![
         UnsolicitedEvidence {
             decoded: decoded_evidence(&[1]),
@@ -120,7 +120,7 @@ fn workflow_deadline_expiry_preserves_unsolicited_order_and_discards_freshness()
             },
             &mut matcher,
         ),
-        ExchangeProcessOutcome::CorrelationDeadlineExpired
+        ProcessOutcome::CorrelationDeadlineExpired
     );
     assert!(
         accumulator
@@ -144,11 +144,11 @@ fn workflow_deadline_expiry_preserves_unsolicited_order_and_discards_freshness()
 fn workflow_matcher_crossing_deadline_expires_and_retains_candidates() {
     let received_at = Instant::now();
     let sent = [crate::evidence::test_sent_packet(raw_packet())];
-    let prepared = [PreparedExchangePacket {
+    let prepared = [PreparedPacket {
         built: sent[0].built().clone(),
         route: sent[0].route().clone(),
     }];
-    let mut accumulator = ExchangeAccumulator::new(1);
+    let mut accumulator = Accumulator::new(1);
     accumulator.unsolicited = vec![
         UnsolicitedEvidence {
             decoded: decoded_evidence(&[1]),
@@ -183,7 +183,7 @@ fn workflow_matcher_crossing_deadline_expires_and_retains_candidates() {
             },
             &mut matcher,
         ),
-        ExchangeProcessOutcome::CorrelationDeadlineExpired
+        ProcessOutcome::CorrelationDeadlineExpired
     );
     assert!(matcher_called);
     assert!(accumulator.responses.is_empty());
@@ -224,9 +224,9 @@ fn duplicated_ingress_record_cannot_enter_several_evidence_categories() {
     );
     let registry = Arc::new(default_registry().expect("built-in registry"));
     let dissector = Dissector::new(Arc::clone(&registry));
-    let options = ExchangeOptions::default();
-    let mut accumulator = ExchangeAccumulator::new(0);
-    let context = ExchangeProcessContext {
+    let options = Options::default();
+    let mut accumulator = Accumulator::new(0);
+    let context = ProcessContext {
         registry: &registry,
         dissector: &dissector,
         prepared: &[],
@@ -237,11 +237,11 @@ fn duplicated_ingress_record_cannot_enter_several_evidence_categories() {
 
     assert_eq!(
         accumulator.process(captured.clone(), context),
-        ExchangeProcessOutcome::Continue
+        ProcessOutcome::Continue
     );
     assert_eq!(
         accumulator.process(captured, context),
-        ExchangeProcessOutcome::DuplicateRecordIdentity
+        ProcessOutcome::DuplicateRecordIdentity
     );
     assert_eq!(
         accumulator.responses.len() + accumulator.unsolicited.len() + accumulator.undecoded.len(),
@@ -263,12 +263,12 @@ fn duplicate_tracking_is_bounded_to_retained_evidence() {
     );
     let registry = Arc::new(default_registry().expect("built-in registry"));
     let dissector = Dissector::new(Arc::clone(&registry));
-    let options = ExchangeOptions {
-        max_unsolicited: 1,
-        ..ExchangeOptions::default()
+    let options = Options {
+        max_unmatched_frames: 1,
+        ..Options::default()
     };
-    let mut accumulator = ExchangeAccumulator::new(0);
-    let context = ExchangeProcessContext {
+    let mut accumulator = Accumulator::new(0);
+    let context = ProcessContext {
         registry: &registry,
         dissector: &dissector,
         prepared: &[],
@@ -279,15 +279,15 @@ fn duplicate_tracking_is_bounded_to_retained_evidence() {
 
     assert_eq!(
         accumulator.process(retained, context),
-        ExchangeProcessOutcome::Continue
+        ProcessOutcome::Continue
     );
     assert_eq!(
         accumulator.process(dropped.clone(), context),
-        ExchangeProcessOutcome::Continue
+        ProcessOutcome::Continue
     );
     assert_eq!(
         accumulator.process(dropped, context),
-        ExchangeProcessOutcome::Continue
+        ProcessOutcome::Continue
     );
     assert_eq!(accumulator.retained_record_identities.len(), 1);
     assert_eq!(

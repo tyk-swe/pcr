@@ -18,14 +18,12 @@ mod shutdown;
 mod transaction;
 
 pub(crate) use accumulator::{
-    ExchangeAccumulator, ExchangeProcessContext, ExchangeProcessOutcome, WorkflowPromotionContext,
-    WorkflowResponseMatcher,
+    Accumulator, ProcessContext, ProcessOutcome, WorkflowPromotionContext, WorkflowResponseMatcher,
 };
 pub use contract::{
-    DEFAULT_MAX_UNSOLICITED_FRAMES, ExchangeOptions as Options, ExchangeResult as Result,
-    MAX_EXCHANGE_TIMEOUT, MatchedResponse as Response,
+    DEFAULT_MAX_RESPONSES, DEFAULT_MAX_UNMATCHED_FRAMES, MAX_EXCHANGE_TIMEOUT, Options, Response,
+    Result,
 };
-pub(crate) use contract::{ExchangeOptions, ExchangeResult};
-pub(crate) use preparation::{PreparedExchange, PreparedExchangePacket};
+pub(crate) use preparation::{Prepared, PreparedPacket};
 pub(crate) use shutdown::CaptureGuard;
-pub(crate) use transaction::ExchangeTransaction;
+pub(crate) use transaction::Transaction;

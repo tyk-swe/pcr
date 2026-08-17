@@ -3,7 +3,7 @@
 
 //! Runtime-neutral built-in protocol identities and capability metadata.
 
-use super::layer::{Layer, ProtocolId};
+use super::layer::{Id as ProtocolId, Layer};
 
 /// Authoritative built-in protocol identity and capability catalog.
 ///

@@ -87,9 +87,9 @@ impl FrameSelector {
             .decoder
             .decode(
                 frame.clone(),
-                core::decode::DecodeOptions {
+                core::decode::Options {
                     max_packet_size: self.max_frame_bytes,
-                    ..core::decode::DecodeOptions::default()
+                    ..core::decode::Options::default()
                 },
             )
             .map_err(|source| CliError::new(3, source.to_string()))?;

@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use super::error::invalid_configuration;
+use super::error::invalid_options;
 use crate::{
     capture::{CaptureOverflowPolicy, CaptureQueueLimits},
     neighbor::Error as NeighborError,
@@ -17,7 +17,7 @@ const MIN_NEIGHBOR_SNAPSHOT_LENGTH: usize = 128;
 
 /// Finite work, retention, and cache bounds for active neighbor resolution.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct NeighborResolutionOptions {
+pub struct Options {
     pub max_attempts: u32,
     pub attempt_timeout: Duration,
     pub cache_ttl: Duration,
@@ -27,7 +27,7 @@ pub struct NeighborResolutionOptions {
     pub snap_length: usize,
 }
 
-impl Default for NeighborResolutionOptions {
+impl Default for Options {
     fn default() -> Self {
         Self {
             max_attempts: 3,
@@ -41,30 +41,30 @@ impl Default for NeighborResolutionOptions {
     }
 }
 
-impl NeighborResolutionOptions {
+impl Options {
     pub fn validate(self) -> Result<Self, NeighborError> {
         if !(1..=MAX_CONFIGURED_ATTEMPTS).contains(&self.max_attempts) {
-            return Err(invalid_configuration(format!(
+            return Err(invalid_options(format!(
                 "max_attempts must be within 1..={MAX_CONFIGURED_ATTEMPTS}"
             )));
         }
         if self.attempt_timeout.is_zero() || self.attempt_timeout > MAX_CONFIGURED_ATTEMPT_TIMEOUT {
-            return Err(invalid_configuration(format!(
+            return Err(invalid_options(format!(
                 "attempt_timeout must be within 1ns..={MAX_CONFIGURED_ATTEMPT_TIMEOUT:?}"
             )));
         }
         if self.cache_ttl.is_zero() || self.cache_ttl > MAX_CONFIGURED_CACHE_TTL {
-            return Err(invalid_configuration(format!(
+            return Err(invalid_options(format!(
                 "cache_ttl must be within 1ns..={MAX_CONFIGURED_CACHE_TTL:?}"
             )));
         }
         if !(1..=MAX_CONFIGURED_CACHE_ENTRIES).contains(&self.max_cache_entries) {
-            return Err(invalid_configuration(format!(
+            return Err(invalid_options(format!(
                 "max_cache_entries must be within 1..={MAX_CONFIGURED_CACHE_ENTRIES}"
             )));
         }
         if self.snap_length < MIN_NEIGHBOR_SNAPSHOT_LENGTH {
-            return Err(invalid_configuration(format!(
+            return Err(invalid_options(format!(
                 "snap_length must be at least {MIN_NEIGHBOR_SNAPSHOT_LENGTH} bytes"
             )));
         }
@@ -75,7 +75,7 @@ impl NeighborResolutionOptions {
             overflow_policy: CaptureOverflowPolicy::Fail,
         }
         .validate()
-        .map_err(|error| invalid_configuration(error.to_string()))?;
+        .map_err(|error| invalid_options(error.to_string()))?;
         Ok(self)
     }
 }

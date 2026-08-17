@@ -18,8 +18,8 @@ pub(crate) struct RouteSelectionArgs {
     #[arg(long)]
     pub(crate) source: Option<IpAddr>,
     /// Automatic, Layer 2, or raw Layer 3 transmission intent.
-    #[arg(long, value_enum, default_value_t = CliLinkMode::Auto)]
-    pub(crate) link_mode: CliLinkMode,
+    #[arg(long, value_enum, default_value_t = LinkMode::Auto)]
+    pub(crate) link_mode: LinkMode,
 }
 
 /// Route-selection inputs shared by packet-oriented live commands.
@@ -35,19 +35,19 @@ pub(crate) struct RouteArgs {
 }
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
-pub(crate) enum CliLinkMode {
+pub(crate) enum LinkMode {
     #[default]
     Auto,
     Layer2,
     Layer3,
 }
 
-impl From<CliLinkMode> for net::link::Mode {
-    fn from(value: CliLinkMode) -> Self {
+impl From<LinkMode> for net::link::Mode {
+    fn from(value: LinkMode) -> Self {
         match value {
-            CliLinkMode::Auto => Self::Auto,
-            CliLinkMode::Layer2 => Self::Layer2,
-            CliLinkMode::Layer3 => Self::Layer3,
+            LinkMode::Auto => Self::Auto,
+            LinkMode::Layer2 => Self::Layer2,
+            LinkMode::Layer3 => Self::Layer3,
         }
     }
 }

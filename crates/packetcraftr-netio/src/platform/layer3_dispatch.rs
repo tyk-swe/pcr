@@ -16,7 +16,7 @@ use crate::{
 ))]
 pub(crate) fn system_send_layer3(frame: Layer3Frame<'_>) -> Result<IoSendReport, LiveIoError> {
     super::interface_identity::validate_current_interface_identity(
-        &frame.route().plan.route.interface,
+        &frame.route().plan.decision.interface,
     )?;
     super::raw_ip::send_layer3(frame)
 }

@@ -25,7 +25,7 @@ use super::npcap as layer2_backend;
 ))]
 pub(crate) fn system_send_layer2(frame: Layer2Frame<'_>) -> Result<IoSendReport, LiveIoError> {
     super::interface_identity::validate_current_interface_identity(
-        &frame.route().plan.route.interface,
+        &frame.route().plan.decision.interface,
     )?;
     layer2_backend::send_layer2(frame)
 }

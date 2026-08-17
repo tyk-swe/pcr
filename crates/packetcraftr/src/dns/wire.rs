@@ -3,9 +3,9 @@
 
 //! DNS wire construction, bounded decoding, relevance, and classification.
 
-pub use classification::{DnsResponseClassification, classify_dns_response, response_code_name};
-pub use decode::{decode_dns_response, decode_dns_tcp_frame};
-pub use encode::encode_dns_query;
+pub use classification::{ResponseClassification, classify_response, response_code_name};
+pub use decode::{decode_response, decode_tcp_frame};
+pub use encode::encode_query;
 pub use name::canonical_query_name;
 
 pub(super) use classification::dns_payload;

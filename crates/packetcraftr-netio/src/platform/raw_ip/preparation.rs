@@ -34,22 +34,22 @@ pub(super) struct PreparedRawIp {
 pub(super) fn prepare(frame: Layer3Frame<'_>) -> Result<PreparedRawIp, LiveIoError> {
     let bytes = frame.bytes().clone();
     let plan = &frame.route().plan;
-    if bytes.len() > plan.route.mtu as usize {
+    if bytes.len() > plan.decision.mtu as usize {
         return Err(invalid_frame(format!(
             "{} bytes exceed route MTU {}",
             bytes.len(),
-            plan.route.mtu
+            plan.decision.mtu
         )));
     }
-    if plan.route.interface.name.is_empty() || plan.route.interface.index == 0 {
+    if plan.decision.interface.name.is_empty() || plan.decision.interface.index == 0 {
         return Err(invalid_frame(
             "route-selected interface identity is incomplete".to_owned(),
         ));
     }
     let interface_source = plan
-        .route
-        .selected_address
-        .or(plan.route.preferred_source)
+        .decision
+        .selected_source
+        .or(plan.decision.preferred_source)
         .ok_or_else(|| invalid_frame("route has no interface-owned source address".to_owned()))?;
     let route_destination = plan
         .lookup_destination
@@ -100,7 +100,7 @@ pub(super) fn prepare(frame: Layer3Frame<'_>) -> Result<PreparedRawIp, LiveIoErr
 
     Ok(PreparedRawIp {
         family,
-        interface: plan.route.interface.clone(),
+        interface: plan.decision.interface.clone(),
         interface_source,
         destination,
         submission,

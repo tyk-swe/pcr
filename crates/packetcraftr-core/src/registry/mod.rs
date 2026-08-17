@@ -10,9 +10,6 @@ mod lookup;
 mod validation;
 
 pub use binding::{Discriminator, FilterFieldBinding};
-pub use builder::RegistryBuilder as Builder;
-pub(crate) use builder::RegistryBuilder;
-pub use error::RegistryError as Error;
-pub(crate) use error::RegistryError;
-pub use lookup::ProtocolRegistry as Registry;
-pub(crate) use lookup::ProtocolRegistry;
+pub use builder::Builder;
+pub use error::Error;
+pub use lookup::Registry;

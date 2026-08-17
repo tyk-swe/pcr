@@ -3,11 +3,11 @@
 
 use thiserror::Error;
 
-use crate::layer::ProtocolId;
+use crate::layer::Id as ProtocolId;
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum RegistryError {
+pub enum Error {
     #[error("protocol codec {protocol} is already registered")]
     DuplicateProtocol { protocol: ProtocolId },
     #[error("protocol alias {alias} is already registered for {existing}")]

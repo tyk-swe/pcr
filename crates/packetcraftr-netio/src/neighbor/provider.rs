@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
+use packetcraftr_core::frame::Frame;
 
 use crate::{
     capture::{
@@ -12,35 +13,34 @@ use crate::{
         CapturedFrame, Statistics,
     },
     link::{Capability, MacAddress, Mode},
-    route::{
-        DestinationScope, MaterializedRoute, PlannedRoute, RouteDecision, RouteSelectionReason,
-    },
+    route::{Decision, Materialized, Plan, Scope, SelectionReason},
     transmit::{self, Layer2Frame, Layer2Io},
 };
 
 use super::cache::{NeighborCache, NeighborCacheKey, NeighborExchangeOutcome};
-use super::error::{invalid_configuration, map_io_error};
+use super::error::{invalid_options, map_io_error};
 use super::evidence::{
     retain_evidence, retain_matching_evidence, validate_captured_frame, validate_neighbor_send,
     validate_request,
 };
-use super::options::NeighborResolutionOptions;
+use super::options::Options;
 use super::wire::{build_request_frame, match_neighbor_response};
-use super::{
-    Error as NeighborError, Request as NeighborRequest, Resolution as NeighborResolution,
-    Resolver as NeighborResolver,
-};
+use super::{Error, Request, Resolution};
+
+pub trait Resolver: Send + Sync {
+    fn resolve(&self, request: &Request) -> Result<Resolution, Error>;
+}
 
 /// Injectable active resolver; production uses `System*` providers.
 #[derive(Debug)]
-pub struct ActiveNeighborResolver<L, C> {
+pub struct ActiveResolver<L, C> {
     layer2: L,
     capture: C,
-    options: NeighborResolutionOptions,
+    options: Options,
     cache: Arc<NeighborCache>,
 }
 
-impl<L, C> Clone for ActiveNeighborResolver<L, C>
+impl<L, C> Clone for ActiveResolver<L, C>
 where
     L: Clone,
     C: Clone,
@@ -55,12 +55,8 @@ where
     }
 }
 
-impl<L, C> ActiveNeighborResolver<L, C> {
-    pub fn try_new(
-        layer2: L,
-        capture: C,
-        options: NeighborResolutionOptions,
-    ) -> Result<Self, NeighborError> {
+impl<L, C> ActiveResolver<L, C> {
+    pub fn try_new(layer2: L, capture: C, options: Options) -> Result<Self, Error> {
         Ok(Self {
             layer2,
             capture,
@@ -70,50 +66,39 @@ impl<L, C> ActiveNeighborResolver<L, C> {
     }
 }
 
-impl<L, C> Default for ActiveNeighborResolver<L, C>
+impl<L, C> Default for ActiveResolver<L, C>
 where
     L: Default,
     C: Default,
 {
     fn default() -> Self {
-        Self::try_new(
-            L::default(),
-            C::default(),
-            NeighborResolutionOptions::default(),
-        )
-        .expect("default neighbor resolution options are valid")
+        Self::try_new(L::default(), C::default(), Options::default())
+            .expect("default neighbor resolution options are valid")
     }
 }
 
-pub type SystemNeighborResolver =
-    ActiveNeighborResolver<transmit::SystemLayer2, capture::SystemProvider>;
+pub type SystemResolver = ActiveResolver<transmit::SystemLayer2, capture::SystemProvider>;
 
-impl<L, C> NeighborResolver for ActiveNeighborResolver<L, C>
+impl<L, C> Resolver for ActiveResolver<L, C>
 where
     L: Layer2Io,
     C: CaptureProvider,
 {
-    fn resolve_request(
-        &self,
-        request: &NeighborRequest,
-    ) -> Result<NeighborResolution, NeighborError> {
+    fn resolve(&self, request: &Request) -> Result<Resolution, Error> {
         self.resolve_active(request)
     }
 }
 
-impl<L, C> ActiveNeighborResolver<L, C>
+impl<L, C> ActiveResolver<L, C>
 where
     L: Layer2Io,
     C: CaptureProvider,
 {
-    fn resolve_active(
-        &self,
-        request: &NeighborRequest,
-    ) -> Result<NeighborResolution, NeighborError> {
+    fn resolve_active(&self, request: &Request) -> Result<Resolution, Error> {
         validate_request(request)?;
         let cache_key = NeighborCacheKey::from(request);
         if let Some(mac_address) = self.cache.get(&cache_key)? {
-            return Ok(NeighborResolution {
+            return Ok(Resolution {
                 mac_address,
                 attempts: 0,
                 cache_hit: true,
@@ -125,7 +110,7 @@ where
 
         let (request_bytes, destination_mac) = build_request_frame(request)?;
         let planned_route = discovery_route(request, destination_mac);
-        let materialized_route = MaterializedRoute {
+        let materialized_route = Materialized {
             plan: planned_route.clone(),
             neighbor_resolution: None,
         };
@@ -147,14 +132,14 @@ where
             (Ok(outcome), Ok(())) => outcome,
             (Err(error), Ok(())) => return Err(error),
             (Ok(_), Err(cleanup)) => {
-                return Err(NeighborError::Cleanup {
+                return Err(Error::Cleanup {
                     interface: request.interface.name.clone(),
                     target: request.target,
                     source: cleanup,
                 });
             }
             (Err(operation), Err(cleanup)) => {
-                return Err(NeighborError::OperationAndCleanup {
+                return Err(Error::OperationAndCleanup {
                     interface: request.interface.name.clone(),
                     target: request.target,
                     operation: Box::new(operation),
@@ -174,7 +159,7 @@ where
         }
 
         let Some(mac_address) = outcome.mac_address else {
-            return Err(NeighborError::NotFound {
+            return Err(Error::NotFound {
                 interface: request.interface.name.clone(),
                 target: request.target,
                 attempts: outcome.attempts,
@@ -184,7 +169,7 @@ where
             });
         };
         self.cache.insert(mac_address, cache_key, &self.options)?;
-        Ok(NeighborResolution {
+        Ok(Resolution {
             mac_address,
             attempts: outcome.attempts,
             cache_hit: false,
@@ -196,40 +181,29 @@ where
 
     fn exchange<S: CaptureSession>(
         &self,
-        request: &NeighborRequest,
+        request: &Request,
         request_bytes: &Bytes,
-        route: &MaterializedRoute,
+        route: &Materialized,
         capture: &mut S,
-    ) -> Result<NeighborExchangeOutcome, NeighborError> {
+    ) -> Result<NeighborExchangeOutcome, Error> {
         capture
             .wait_ready(self.options.attempt_timeout)
             .map_err(|error| map_io_error(request, "waiting for capture readiness", error))?;
         let mut captured = Vec::new();
         let mut captured_bytes = 0usize;
         let mut evidence_truncated = false;
-
-        // Pre-request frames are retained as evidence, never as lookup matches.
-        for _ in 0..self.options.max_capture_queue_frames {
-            let Some(captured_frame) = capture
-                .next_captured_frame(Duration::ZERO)
-                .map_err(|error| map_io_error(request, "draining pre-request capture", error))?
-            else {
-                break;
-            };
-            validate_captured_frame(request, &captured_frame.frame, self.options.snap_length)?;
-            retain_evidence(
-                captured_frame.frame,
-                &self.options,
-                &mut captured,
-                &mut captured_bytes,
-                &mut evidence_truncated,
-            );
-        }
+        self.drain_pre_request(
+            request,
+            capture,
+            &mut captured,
+            &mut captured_bytes,
+            &mut evidence_truncated,
+        )?;
 
         for attempt in 1..=self.options.max_attempts {
             let deadline = Instant::now()
                 .checked_add(self.options.attempt_timeout)
-                .ok_or_else(|| invalid_configuration("attempt deadline overflowed".to_owned()))?;
+                .ok_or_else(|| invalid_options("attempt deadline overflowed".to_owned()))?;
             let frame = Layer2Frame::try_new(request_bytes, route)
                 .map_err(|error| map_io_error(request, "constructing discovery frame", error))?;
             let report = self
@@ -295,18 +269,45 @@ where
             evidence_truncated,
         })
     }
+
+    fn drain_pre_request<S: CaptureSession>(
+        &self,
+        request: &Request,
+        capture: &mut S,
+        captured: &mut Vec<Frame>,
+        captured_bytes: &mut usize,
+        evidence_truncated: &mut bool,
+    ) -> Result<(), Error> {
+        for _ in 0..self.options.max_capture_queue_frames {
+            let Some(captured_frame) = capture
+                .next_captured_frame(Duration::ZERO)
+                .map_err(|error| map_io_error(request, "draining pre-request capture", error))?
+            else {
+                break;
+            };
+            validate_captured_frame(request, &captured_frame.frame, self.options.snap_length)?;
+            retain_evidence(
+                captured_frame.frame,
+                &self.options,
+                captured,
+                captured_bytes,
+                evidence_truncated,
+            );
+        }
+        Ok(())
+    }
 }
 
-fn discovery_route(request: &NeighborRequest, destination_mac: MacAddress) -> PlannedRoute {
-    PlannedRoute {
-        route: RouteDecision {
+fn discovery_route(request: &Request, destination_mac: MacAddress) -> Plan {
+    Plan {
+        decision: Decision {
             interface: request.interface.clone(),
             source_mac: Some(request.interface_mac),
-            selected_address: Some(request.interface_source),
+            selected_source: Some(request.interface_source),
             preferred_source: None,
             next_hop: None,
-            selection_reason: RouteSelectionReason::OnLink,
-            destination_scope: DestinationScope::Link,
+            selection_reason: SelectionReason::OnLink,
+            destination_scope: Scope::Link,
             mtu: request.mtu,
             capability: Capability::Layer2,
             link_type: request.link_type,
@@ -361,7 +362,7 @@ mod tests {
 
         fn arm_capture(
             &self,
-            _route: &PlannedRoute,
+            _route: &Plan,
             _limits: CaptureQueueLimits,
         ) -> Result<Self::Capture, LiveIoError> {
             panic!("provider fixture is not used by direct exchange tests")
@@ -397,8 +398,8 @@ mod tests {
         }
     }
 
-    fn request() -> NeighborRequest {
-        NeighborRequest {
+    fn request() -> Request {
+        Request {
             interface: InterfaceId {
                 name: "fixture0".to_owned(),
                 index: 7,
@@ -415,7 +416,7 @@ mod tests {
     #[test]
     fn slow_send_consumes_attempt_timeout_before_capture_wait() {
         let timeouts = Arc::new(Mutex::new(Vec::new()));
-        let options = NeighborResolutionOptions {
+        let options = Options {
             max_attempts: 1,
             attempt_timeout: Duration::from_millis(1),
             cache_ttl: Duration::from_secs(1),
@@ -424,7 +425,7 @@ mod tests {
             max_captured_bytes: 128,
             snap_length: 128,
         };
-        let resolver = ActiveNeighborResolver::try_new(
+        let resolver = ActiveResolver::try_new(
             SlowLayer2 {
                 delay: Duration::from_millis(10),
             },
@@ -435,7 +436,7 @@ mod tests {
         let request = request();
         let (request_bytes, destination_mac) =
             build_request_frame(&request).expect("discovery frame");
-        let route = MaterializedRoute {
+        let route = Materialized {
             plan: discovery_route(&request, destination_mac),
             neighbor_resolution: None,
         };

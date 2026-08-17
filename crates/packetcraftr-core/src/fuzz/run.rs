@@ -6,10 +6,10 @@ use std::sync::Arc;
 use crate::budget::Deadline;
 use crate::{Packet, field::FieldKind, registry::Registry};
 
-use super::error::FuzzError;
+use super::error::Error;
 use super::mutation::prepare;
-use super::request::{FuzzRequest, FuzzTarget};
-use super::result::{FuzzCase, FuzzResult, FuzzStats};
+use super::request::{Request as FuzzRequest, Target as FuzzTarget};
+use super::result::{Case as FuzzCase, Result as FuzzResult, Stats as FuzzStats};
 
 /// A completely prepared and bounded deterministic mutation campaign.
 ///
@@ -29,7 +29,7 @@ impl Campaign {
         packet: Packet,
         registry: Arc<Registry>,
         deadline: &mut Deadline,
-    ) -> Result<Self, FuzzError> {
+    ) -> Result<Self, Error> {
         request.validate()?;
         prepare(request, packet, registry, deadline)
     }
@@ -59,7 +59,7 @@ pub fn run(
     request: &FuzzRequest,
     packet: Packet,
     registry: Arc<Registry>,
-) -> Result<FuzzResult, FuzzError> {
+) -> Result<FuzzResult, Error> {
     let mut deadline = Deadline::new(request.limits.max_duration);
     let campaign = Campaign::prepare(request, packet, registry, &mut deadline)?;
     Ok(FuzzResult {

@@ -35,7 +35,7 @@ impl Provider for PassiveRoutes {
         Ok(Some(Decision {
             interface: interface.clone(),
             source_mac: Some(MacAddress([2, 0, 0, 0, 0, 1])),
-            selected_address: None,
+            selected_source: None,
             preferred_source: None,
             next_hop: None,
             selection_reason: SelectionReason::InterfaceOnly,
@@ -76,7 +76,7 @@ fn destination_free_layer2_planning_uses_only_the_requested_interface() {
     .expect("explicit Layer 2 interface must plan passively");
 
     assert_eq!(provider.interface_calls.load(Ordering::SeqCst), 1);
-    assert_eq!(plan.route.interface, interface);
+    assert_eq!(plan.decision.interface, interface);
     assert_eq!(plan.mode, Mode::Layer2);
     assert_eq!(plan.destination_mac, Some(MacAddress([2, 0, 0, 0, 0, 2])));
     assert!(!plan.needs_neighbor_resolution());

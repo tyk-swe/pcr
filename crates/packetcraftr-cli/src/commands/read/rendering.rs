@@ -5,15 +5,15 @@ use packetcraftr::output;
 
 use crate::errors::CliError;
 use crate::rendering::{
-    captured_frame_text, emit_stream, spaced_hex, write_plain_line, write_stdout_line,
+    captured_frame_text, emit, spaced_hex, write_plain_line, write_stdout_line,
 };
 
-pub(super) fn render_read_record(
+pub(super) fn render_record(
     result: &output::read::Result,
-    output_format: output::contract::Format,
+    format: output::contract::Format,
     sequence: u64,
 ) -> Result<(), CliError> {
-    match output_format {
+    match format {
         output::contract::Format::Text => match &result.decoded {
             None => write_stdout_line(format_args!(
                 "{sequence}: {}",
@@ -37,7 +37,7 @@ pub(super) fn render_read_record(
         output::contract::Format::Hex => {
             write_plain_line(format_args!("{}", result.frame.bytes_hex()))
         }
-        output::contract::Format::Ndjson => emit_stream(
+        output::contract::Format::Ndjson => emit(
             output::contract::Command::Read,
             sequence,
             result,

@@ -10,7 +10,7 @@ use packetcraftr_core::error::{Classification, Classified, Kind};
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
-pub enum TracerouteError {
+pub enum Error {
     #[error("invalid traceroute limit {field}={value}: {reason}")]
     InvalidLimit {
         field: &'static str,
@@ -43,7 +43,7 @@ pub enum TracerouteError {
     StatisticsOverflow { sequence: u64 },
 }
 
-impl TracerouteError {
+impl Error {
     pub fn sequence(&self) -> Option<u64> {
         match self {
             Self::Execution { sequence, .. }
@@ -55,7 +55,7 @@ impl TracerouteError {
     }
 }
 
-impl Classified for TracerouteError {
+impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
             Self::InvalidLimit { .. }

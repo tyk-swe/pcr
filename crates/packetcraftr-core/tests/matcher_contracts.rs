@@ -138,11 +138,7 @@ fn build_probe(network: NetworkVersion, transport: ProbeTransport) -> build::Bui
 
 fn build_packet(packet: Packet) -> build::BuiltPacket {
     build::Builder::new(registry())
-        .build(
-            packet,
-            build::BuildContext::default(),
-            build::BuildOptions::default(),
-        )
+        .build(packet, build::Context::default(), build::Options::default())
         .expect("packet fixture must build")
 }
 

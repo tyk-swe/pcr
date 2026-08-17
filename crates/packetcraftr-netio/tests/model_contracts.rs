@@ -26,7 +26,7 @@ use packetcraftr_netio::{
     link::{Capability, MacAddress, Mode},
     neighbor,
     route::{
-        Decision, Error as PlanError, Materialized, Options, Plan, Provider, Scope,
+        Decision, Error as RouteError, Materialized, Options, Plan, Provider, Scope,
         SelectionReason, plan as plan_route,
     },
     transmit::{
@@ -83,7 +83,7 @@ fn decision(capability: Capability) -> Decision {
     Decision {
         interface: interface(),
         source_mac: Some(MacAddress([0x02, 0, 0, 0, 0, 1])),
-        selected_address: Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))),
+        selected_source: Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))),
         preferred_source: None,
         next_hop: Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))),
         selection_reason: SelectionReason::Gateway,
@@ -105,7 +105,7 @@ fn routes(decision: Result<Decision, RouteFailure>) -> Routes {
 
 fn planned(mode: Mode) -> Plan {
     Plan {
-        route: decision(Capability::Layer2And3),
+        decision: decision(Capability::Layer2AndLayer3),
         mode,
         lookup_destination: Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9))),
         final_destination: Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9))),
@@ -125,6 +125,17 @@ fn materialized(mode: Mode) -> Materialized {
         plan: planned(mode),
         neighbor_resolution: None,
     }
+}
+
+fn ipv4_packet(source: Ipv4Addr, destination: Ipv4Addr) -> Packet {
+    let mut packet = Packet::new();
+    packet.push(Ipv4 {
+        source,
+        destination,
+        ..Ipv4::default()
+    });
+    packet.push(Raw::new(vec![1_u8]));
+    packet
 }
 
 #[test]
@@ -468,8 +479,8 @@ fn planner_uses_ethernet_broadcast_without_a_neighbor_for_limited_ipv4_broadcast
         ..Ipv4::default()
     });
     packet.push(Raw::new(vec![1_u8]));
-    let mut route = decision(Capability::Layer2And3);
-    route.selected_address = Some(IpAddr::V4(Ipv4Addr::new(10, 23, 0, 2)));
+    let mut route = decision(Capability::Layer2AndLayer3);
+    route.selected_source = Some(IpAddr::V4(Ipv4Addr::new(10, 23, 0, 2)));
     route.next_hop = None;
     route.selection_reason = SelectionReason::OnLink;
 
@@ -490,18 +501,12 @@ fn planner_uses_ethernet_broadcast_without_a_neighbor_for_limited_ipv4_broadcast
 }
 
 #[test]
-fn planner_keeps_broadcast_multicast_explicit_and_gateway_link_semantics_distinct() {
+fn planner_distinguishes_directed_broadcast_from_on_link_unicast() {
     let source = Ipv4Addr::new(10, 23, 0, 2);
     let directed_broadcast = Ipv4Addr::new(10, 23, 0, 255);
-    let mut directed_packet = Packet::new();
-    directed_packet.push(Ipv4 {
-        source,
-        destination: directed_broadcast,
-        ..Ipv4::default()
-    });
-    directed_packet.push(Raw::new(vec![1_u8]));
-    let mut directed_route = decision(Capability::Layer2And3);
-    directed_route.selected_address = Some(IpAddr::V4(source));
+    let directed_packet = ipv4_packet(source, directed_broadcast);
+    let mut directed_route = decision(Capability::Layer2AndLayer3);
+    directed_route.selected_source = Some(IpAddr::V4(source));
     directed_route.next_hop = None;
     directed_route.selection_reason = SelectionReason::Broadcast;
     let directed = plan_route(
@@ -524,8 +529,8 @@ fn planner_keeps_broadcast_multicast_explicit_and_gateway_link_semantics_distinc
         .get_mut::<Ipv4>()
         .expect("IPv4 packet")
         .destination = unicast_destination;
-    let mut unicast_route = decision(Capability::Layer2And3);
-    unicast_route.selected_address = Some(IpAddr::V4(source));
+    let mut unicast_route = decision(Capability::Layer2AndLayer3);
+    unicast_route.selected_source = Some(IpAddr::V4(source));
     unicast_route.next_hop = None;
     unicast_route.selection_reason = SelectionReason::OnLink;
     let unicast = plan_route(
@@ -544,15 +549,20 @@ fn planner_keeps_broadcast_multicast_explicit_and_gateway_link_semantics_distinc
         Some(IpAddr::V4(unicast_destination))
     );
     assert!(unicast.needs_neighbor_resolution());
+}
 
+#[test]
+fn planner_maps_ipv4_multicast_to_ethernet_without_neighbor_resolution() {
+    let source = Ipv4Addr::new(10, 23, 0, 2);
+    let directed_packet = ipv4_packet(source, Ipv4Addr::new(10, 23, 0, 255));
     let ipv4_multicast = Ipv4Addr::new(224, 0, 0, 1);
     let mut ipv4_multicast_packet = directed_packet.clone();
     ipv4_multicast_packet
         .get_mut::<Ipv4>()
         .expect("IPv4 packet")
         .destination = ipv4_multicast;
-    let mut ipv4_multicast_route = decision(Capability::Layer2And3);
-    ipv4_multicast_route.selected_address = Some(IpAddr::V4(source));
+    let mut ipv4_multicast_route = decision(Capability::Layer2AndLayer3);
+    ipv4_multicast_route.selected_source = Some(IpAddr::V4(source));
     ipv4_multicast_route.next_hop = None;
     ipv4_multicast_route.selection_reason = SelectionReason::OnLink;
     let ipv4_multicast_plan = plan_route(
@@ -574,7 +584,10 @@ fn planner_keeps_broadcast_multicast_explicit_and_gateway_link_semantics_distinc
         Some(IpAddr::V4(ipv4_multicast))
     );
     assert!(!ipv4_multicast_plan.needs_neighbor_resolution());
+}
 
+#[test]
+fn planner_maps_ipv6_multicast_to_ethernet_without_neighbor_resolution() {
     let ipv6_source: Ipv6Addr = "2001:db8::2".parse().expect("IPv6 source");
     let ipv6_multicast: Ipv6Addr = "ff02::1".parse().expect("IPv6 multicast");
     let mut ipv6_multicast_packet = Packet::new();
@@ -584,8 +597,8 @@ fn planner_keeps_broadcast_multicast_explicit_and_gateway_link_semantics_distinc
         ..Ipv6::default()
     });
     ipv6_multicast_packet.push(Raw::new(vec![1_u8]));
-    let mut ipv6_multicast_route = decision(Capability::Layer2And3);
-    ipv6_multicast_route.selected_address = Some(IpAddr::V6(ipv6_source));
+    let mut ipv6_multicast_route = decision(Capability::Layer2AndLayer3);
+    ipv6_multicast_route.selected_source = Some(IpAddr::V6(ipv6_source));
     ipv6_multicast_route.next_hop = None;
     ipv6_multicast_route.selection_reason = SelectionReason::OnLink;
     ipv6_multicast_route.destination_scope = Scope::Multicast;
@@ -608,7 +621,12 @@ fn planner_keeps_broadcast_multicast_explicit_and_gateway_link_semantics_distinc
         Some(IpAddr::V6(ipv6_multicast))
     );
     assert!(!ipv6_multicast_plan.needs_neighbor_resolution());
+}
 
+#[test]
+fn planner_preserves_explicit_ethernet_destination_for_broadcast() {
+    let source = Ipv4Addr::new(10, 23, 0, 2);
+    let directed_broadcast = Ipv4Addr::new(10, 23, 0, 255);
     let explicit_mac = MacAddress([0x02, 0, 0, 0, 0, 99]);
     let mut explicit_packet = Packet::new();
     explicit_packet.push(Ethernet {
@@ -621,8 +639,8 @@ fn planner_keeps_broadcast_multicast_explicit_and_gateway_link_semantics_distinc
         ..Ipv4::default()
     });
     explicit_packet.push(Raw::new(vec![1_u8]));
-    let mut explicit_route = decision(Capability::Layer2And3);
-    explicit_route.selected_address = Some(IpAddr::V4(source));
+    let mut explicit_route = decision(Capability::Layer2AndLayer3);
+    explicit_route.selected_source = Some(IpAddr::V4(source));
     explicit_route.next_hop = None;
     explicit_route.selection_reason = SelectionReason::Broadcast;
     let explicit = plan_route(
@@ -637,10 +655,15 @@ fn planner_keeps_broadcast_multicast_explicit_and_gateway_link_semantics_distinc
     .expect("explicit broadcast envelope plans");
     assert_eq!(explicit.destination_mac, Some(explicit_mac));
     assert_eq!(explicit.neighbor_target, None);
+}
 
+#[test]
+fn planner_uses_gateway_as_neighbor_for_layer2_delivery() {
+    let source = Ipv4Addr::new(10, 23, 0, 2);
+    let directed_packet = ipv4_packet(source, Ipv4Addr::new(10, 23, 0, 255));
     let gateway = IpAddr::V4(Ipv4Addr::new(10, 23, 0, 1));
-    let mut gateway_route = decision(Capability::Layer2And3);
-    gateway_route.selected_address = Some(IpAddr::V4(source));
+    let mut gateway_route = decision(Capability::Layer2AndLayer3);
+    gateway_route.selected_source = Some(IpAddr::V4(source));
     gateway_route.next_hop = Some(gateway);
     gateway_route.selection_reason = SelectionReason::Gateway;
     let gateway_plan = plan_route(
@@ -659,7 +682,7 @@ fn planner_keeps_broadcast_multicast_explicit_and_gateway_link_semantics_distinc
 }
 
 #[test]
-fn neighbor_options_reject_every_unbounded_configuration() {
+fn neighbor_options_reject_every_unbounded_value() {
     let defaults = neighbor::Options::default();
     assert_eq!(defaults.clone().validate().expect("defaults"), defaults);
 
@@ -709,14 +732,14 @@ fn neighbor_options_reject_every_unbounded_configuration() {
     for options in invalid {
         assert!(matches!(
             options.validate(),
-            Err(neighbor::Error::InvalidConfiguration { .. })
+            Err(neighbor::Error::InvalidOptions { .. })
         ));
     }
 }
 
 #[test]
 fn planner_rejects_invalid_input_before_route_lookup() {
-    let provider = routes(Ok(decision(Capability::Layer2And3)));
+    let provider = routes(Ok(decision(Capability::Layer2AndLayer3)));
     let raw = {
         let mut packet = Packet::new();
         packet.push(Raw::new(vec![1_u8]));
@@ -733,7 +756,7 @@ fn planner_rejects_invalid_input_before_route_lookup() {
             },
             &provider
         ),
-        Err(PlanError::MissingDestination)
+        Err(RouteError::MissingDestination)
     ));
     assert_eq!(provider.lookup_calls.load(Ordering::SeqCst), 0);
 
@@ -747,7 +770,7 @@ fn planner_rejects_invalid_input_before_route_lookup() {
             },
             &provider
         ),
-        Err(PlanError::PreferredSourceFamilyMismatch { .. })
+        Err(RouteError::PreferredSourceFamilyMismatch { .. })
     ));
     assert_eq!(provider.lookup_calls.load(Ordering::SeqCst), 0);
 
@@ -767,7 +790,7 @@ fn planner_rejects_invalid_input_before_route_lookup() {
             },
             &provider
         ),
-        Err(PlanError::EthernetInLayer3)
+        Err(RouteError::EthernetInLayer3)
     ));
     assert_eq!(provider.lookup_calls.load(Ordering::SeqCst), 0);
 }
@@ -787,14 +810,14 @@ fn planner_maps_provider_failures_and_contract_mismatches() {
     .expect_err("lookup failure must be typed");
     assert!(matches!(
         error,
-        PlanError::RouteLookup {
+        RouteError::RouteLookup {
             destination: actual,
             failure,
             ..
         } if actual == destination && failure.code == "io.route"
     ));
 
-    let mut wrong = decision(Capability::Layer2And3);
+    let mut wrong = decision(Capability::Layer2AndLayer3);
     wrong.interface = InterfaceId {
         name: "other0".to_owned(),
         index: 8,
@@ -810,7 +833,7 @@ fn planner_maps_provider_failures_and_contract_mismatches() {
             },
             &routes(Ok(wrong))
         ),
-        Err(PlanError::InterfaceMismatch { .. })
+        Err(RouteError::InterfaceMismatch { .. })
     ));
 
     assert!(matches!(
@@ -821,9 +844,9 @@ fn planner_maps_provider_failures_and_contract_mismatches() {
                 preferred_source: Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 77))),
                 ..Options::default()
             },
-            &routes(Ok(decision(Capability::Layer2And3)))
+            &routes(Ok(decision(Capability::Layer2AndLayer3)))
         ),
-        Err(PlanError::PreferredSourceNotSelected { .. })
+        Err(RouteError::PreferredSourceNotSelected { .. })
     ));
 }
 
@@ -842,7 +865,7 @@ fn planner_selects_auto_layer3_for_ip_root_and_enforces_capability() {
         &packet,
         None,
         &Options::default(),
-        &routes(Ok(decision(Capability::Layer2And3))),
+        &routes(Ok(decision(Capability::Layer2AndLayer3))),
     )
     .expect("IP root with Layer 3 capability must plan");
     assert_eq!(plan.mode, Mode::Layer3);
@@ -862,7 +885,7 @@ fn planner_selects_auto_layer3_for_ip_root_and_enforces_capability() {
             },
             &routes(Ok(decision(Capability::Layer2)))
         ),
-        Err(PlanError::Layer3Unsupported)
+        Err(RouteError::Layer3Unsupported)
     ));
 
     let mut layer3_only = decision(Capability::Layer3);
@@ -889,7 +912,7 @@ fn planner_selects_auto_layer3_for_ip_root_and_enforces_capability() {
                 interface_calls: Arc::new(AtomicUsize::new(0)),
             }
         ),
-        Err(PlanError::Layer2Unsupported)
+        Err(RouteError::Layer2Unsupported)
     ));
 }
 
@@ -904,7 +927,7 @@ impl Provider for DefaultRouteProvider {
         _interface_hint: Option<&InterfaceId>,
         _preferred_source: Option<IpAddr>,
     ) -> Result<Decision, Self::Error> {
-        Ok(decision(Capability::Layer2And3))
+        Ok(decision(Capability::Layer2AndLayer3))
     }
 }
 

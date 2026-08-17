@@ -14,7 +14,7 @@
 //! rejected when the registry is built, precisely so one path can never mean
 //! two things.
 
-use crate::registry::{FilterFieldBinding, RegistryBuilder, RegistryError};
+use crate::registry::{Builder as RegistryBuilder, Error as RegistryError, FilterFieldBinding};
 
 type Direct = (&'static str, &'static str, &'static str);
 type Either = (&'static str, &'static str, &'static [&'static str]);

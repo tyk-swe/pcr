@@ -12,11 +12,10 @@ use packetcraftr_netio::{
 };
 
 use crate::Client;
-use crate::exchange::{
-    ExchangeOptions, ExchangeResult, ExchangeTransaction, PreparedExchange, WorkflowResponseMatcher,
-};
+use crate::Error;
+use crate::exchange::{Options as ExchangeOptions, Result as ExchangeResult};
+use crate::exchange::{Prepared, Transaction, WorkflowResponseMatcher};
 use crate::planning::ensure_preparation_deadline;
-use crate::send::ClientError;
 
 impl<R, N, I> Client<R, N, I>
 where
@@ -28,7 +27,7 @@ where
         &self,
         template: &PacketTemplate,
         options: ExchangeOptions,
-    ) -> Result<ExchangeResult, ClientError> {
+    ) -> Result<ExchangeResult, Error> {
         self.exchange_internal(template, options, None)
     }
 
@@ -37,7 +36,7 @@ where
         template: &PacketTemplate,
         options: ExchangeOptions,
         workflow_matcher: Option<&mut WorkflowResponseMatcher<'_>>,
-    ) -> Result<ExchangeResult, ClientError> {
+    ) -> Result<ExchangeResult, Error> {
         let prepared = self.prepare_exchange(template, options)?;
         let transaction = self.arm_capture(prepared)?;
         transaction.execute(&self.io, workflow_matcher)
@@ -45,8 +44,8 @@ where
 
     fn arm_capture(
         &self,
-        prepared: PreparedExchange,
-    ) -> Result<ExchangeTransaction<<I as CaptureProvider>::Capture>, ClientError> {
+        prepared: Prepared,
+    ) -> Result<Transaction<<I as CaptureProvider>::Capture>, Error> {
         let first_route = &prepared
             .packets
             .first()
@@ -55,7 +54,7 @@ where
             .plan;
         ensure_preparation_deadline(prepared.deadline)?;
         let capture = self.io.arm_capture(first_route, prepared.capture_limits)?;
-        Ok(ExchangeTransaction::new(
+        Ok(Transaction::new(
             Arc::clone(&self.registry),
             capture,
             prepared,

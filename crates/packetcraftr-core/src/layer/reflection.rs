@@ -5,7 +5,7 @@
 
 use bytes::Bytes;
 
-use super::{FieldError, LayerSchema};
+use super::{FieldError, Schema};
 use crate::field::{FieldValue, WireValue, parse_mac};
 
 /// Declares a layer's schema, getter/setter dispatch, and static layout.
@@ -192,7 +192,7 @@ pub fn reflect_get<T: ReflectiveField>(value: &T) -> FieldValue {
 
 pub fn reflect_set<T: ReflectiveField>(
     target: &mut T,
-    schema: &'static LayerSchema,
+    schema: &'static Schema,
     field: &str,
     value: FieldValue,
 ) -> Result<(), FieldError> {
@@ -215,7 +215,7 @@ pub fn reflect_set<T: ReflectiveField>(
 /// wire-width maximum before delegating to the field's own conversion.
 pub fn reflect_set_bounded<T: ReflectiveField>(
     target: &mut T,
-    schema: &'static LayerSchema,
+    schema: &'static Schema,
     field: &str,
     value: FieldValue,
     maximum: u64,

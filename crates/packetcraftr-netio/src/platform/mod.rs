@@ -4,6 +4,11 @@
 //! Crate-private FFI and reviewed-unsafe-code boundary.
 
 mod capture_dispatch;
+#[cfg(all(
+    feature = "native-layer2",
+    any(target_os = "linux", target_os = "macos", windows)
+))]
+mod capture_filter;
 mod interface_dispatch;
 #[cfg(all(
     any(feature = "native-layer2", feature = "native-layer3"),

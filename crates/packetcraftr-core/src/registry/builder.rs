@@ -5,13 +5,13 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
 use super::binding::{ChildBinding, Discriminator, FilterFieldBinding};
-use super::error::RegistryError;
+use super::error::Error;
 use crate::codec::LayerCodec;
-use crate::layer::ProtocolId;
+use crate::layer::Id as ProtocolId;
 use crate::matcher::ResponseMatcher;
 
 #[derive(Default)]
-pub struct RegistryBuilder {
+pub struct Builder {
     pub(super) codecs: BTreeMap<ProtocolId, Arc<dyn LayerCodec>>,
     pub(super) builtin_codecs: BTreeSet<ProtocolId>,
     pub(super) aliases: HashMap<String, ProtocolId>,
@@ -21,12 +21,12 @@ pub struct RegistryBuilder {
     pub(super) filter_fields: BTreeMap<String, FilterFieldBinding>,
 }
 
-impl RegistryBuilder {
+impl Builder {
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn register_codec<C>(&mut self, codec: C) -> Result<&mut Self, RegistryError>
+    pub fn register_codec<C>(&mut self, codec: C) -> Result<&mut Self, Error>
     where
         C: LayerCodec + 'static,
     {
@@ -38,7 +38,7 @@ impl RegistryBuilder {
         &mut self,
         codec: C,
         aliases: &'static [&'static str],
-    ) -> Result<&mut Self, RegistryError>
+    ) -> Result<&mut Self, Error>
     where
         C: LayerCodec + 'static,
     {
@@ -50,10 +50,10 @@ impl RegistryBuilder {
         codec: Arc<dyn LayerCodec>,
         builtin: bool,
         advertised_aliases: &[&str],
-    ) -> Result<&mut Self, RegistryError> {
+    ) -> Result<&mut Self, Error> {
         let protocol = codec.protocol_id();
         if self.codecs.contains_key(&protocol) {
-            return Err(RegistryError::DuplicateProtocol { protocol });
+            return Err(Error::DuplicateProtocol { protocol });
         }
         let mut aliases = Vec::new();
         for alias in std::iter::once(protocol.as_str()).chain(advertised_aliases.iter().copied()) {
@@ -64,7 +64,7 @@ impl RegistryBuilder {
         }
         for alias in &aliases {
             if let Some(existing) = self.aliases.get(alias) {
-                return Err(RegistryError::DuplicateAlias {
+                return Err(Error::DuplicateAlias {
                     alias: alias.clone(),
                     existing: existing.clone(),
                 });
@@ -84,9 +84,9 @@ impl RegistryBuilder {
         &mut self,
         link_type: u32,
         root: impl Into<ProtocolId>,
-    ) -> Result<&mut Self, RegistryError> {
+    ) -> Result<&mut Self, Error> {
         if self.roots.contains_key(&link_type) {
-            return Err(RegistryError::DuplicateLinkType { link_type });
+            return Err(Error::DuplicateLinkType { link_type });
         }
         self.roots.insert(link_type, root.into());
         Ok(self)
@@ -98,7 +98,7 @@ impl RegistryBuilder {
         discriminator: u64,
         child: impl Into<ProtocolId>,
         priority: i32,
-    ) -> Result<&mut Self, RegistryError> {
+    ) -> Result<&mut Self, Error> {
         let parent = parent.into();
         let child = child.into();
         let entries = self
@@ -111,7 +111,7 @@ impl RegistryBuilder {
             (entry.priority == priority && entry.child != child)
                 || (entry.child == child && entry.priority != priority)
         }) {
-            return Err(RegistryError::BindingConflict {
+            return Err(Error::BindingConflict {
                 parent,
                 discriminator,
                 priority,
@@ -127,13 +127,13 @@ impl RegistryBuilder {
         &mut self,
         protocol: impl Into<ProtocolId>,
         matcher: M,
-    ) -> Result<&mut Self, RegistryError>
+    ) -> Result<&mut Self, Error>
     where
         M: ResponseMatcher + 'static,
     {
         let protocol = protocol.into();
         if self.matchers.contains_key(&protocol) {
-            return Err(RegistryError::DuplicateMatcher { protocol });
+            return Err(Error::DuplicateMatcher { protocol });
         }
         self.matchers.insert(protocol, Arc::new(matcher));
         Ok(self)
@@ -149,16 +149,16 @@ impl RegistryBuilder {
         &mut self,
         path: &'static str,
         binding: FilterFieldBinding,
-    ) -> Result<&mut Self, RegistryError> {
+    ) -> Result<&mut Self, Error> {
         let normalized = path.trim().to_ascii_lowercase();
         if let Some(existing) = self.filter_fields.get(&normalized) {
-            return Err(RegistryError::DuplicateFilterField {
+            return Err(Error::DuplicateFilterField {
                 path: normalized,
                 existing: existing.protocol().clone(),
             });
         }
         // Reject structural binding defects at registration.
-        let invalid = |reason: String| RegistryError::InvalidFilterField {
+        let invalid = |reason: String| Error::InvalidFilterField {
             path: normalized.clone(),
             reason,
         };

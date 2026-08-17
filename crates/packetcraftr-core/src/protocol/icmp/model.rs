@@ -7,12 +7,12 @@ use bytes::Bytes;
 
 use crate::{
     codec::{
-        CodecError, DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext,
+        DecodedLayerValue, EncodedLayer, Error as CodecError, LayerCodec, LayerDecodeContext,
         LayerEncodeContext,
     },
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflective_layer},
+    layer::{Id as ProtocolId, Layer, reflective_layer},
 };
 
 use super::super::common::{
@@ -20,7 +20,7 @@ use super::super::common::{
     payload_without_padding, protocol, resolve_u16, transport_checksum, transport_checksum_parts,
     truncated, wrong_layer,
 };
-use super::super::network::encode_network;
+use super::super::network::resolve_envelope;
 
 const ICMP_MIN_LEN: usize = 4;
 
@@ -215,7 +215,7 @@ impl LayerCodec for Icmpv6Codec {
         prefix.extend_from_slice(&[layer.icmp_type, layer.code, 0, 0]);
         prefix.extend_from_slice(&layer.body);
         let expected =
-            transport_checksum_parts(encode_network(context)?, 58, &[&prefix, covered_payload])?;
+            transport_checksum_parts(resolve_envelope(context)?, 58, &[&prefix, covered_payload])?;
         let mut diagnostics = Vec::new();
         let (checksum, materialized_checksum) = resolve_u16(
             "icmpv6",

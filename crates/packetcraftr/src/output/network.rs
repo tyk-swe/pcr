@@ -9,14 +9,14 @@ use std::net::IpAddr;
 use serde::Serialize;
 
 use packetcraftr_netio::{
-    interface::{Flags as InterfaceFlags, Id as InterfaceId, Info as InterfaceInfo},
+    interface::{Flags as DomainFlags, Id as DomainInterfaceId, Info as DomainInterface},
     link::{Capability as LinkCapability, Mode as LinkMode},
     route::{Decision as RouteDecision, Plan as PlannedRoute},
 };
 
 /// Stable interface shape used by both the text and JSON renderers.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
-pub struct InterfaceFlagsOutput {
+pub struct Flags {
     pub up: bool,
     pub broadcast: bool,
     pub loopback: bool,
@@ -24,8 +24,8 @@ pub struct InterfaceFlagsOutput {
     pub multicast: bool,
 }
 
-impl From<InterfaceFlags> for InterfaceFlagsOutput {
-    fn from(value: InterfaceFlags) -> Self {
+impl From<DomainFlags> for Flags {
+    fn from(value: DomainFlags) -> Self {
         Self {
             up: value.up,
             broadcast: value.broadcast,
@@ -38,24 +38,25 @@ impl From<InterfaceFlags> for InterfaceFlagsOutput {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum InterfaceCapabilityOutput {
+pub enum Capability {
     Layer2,
     Layer3,
-    Layer2And3,
+    #[serde(rename = "layer2_and3")]
+    Layer2AndLayer3,
 }
 
-impl From<LinkCapability> for InterfaceCapabilityOutput {
+impl From<LinkCapability> for Capability {
     fn from(value: LinkCapability) -> Self {
         match value {
             LinkCapability::Layer2 => Self::Layer2,
             LinkCapability::Layer3 => Self::Layer3,
-            LinkCapability::Layer2And3 => Self::Layer2And3,
+            LinkCapability::Layer2AndLayer3 => Self::Layer2AndLayer3,
         }
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct InterfaceOutput {
+pub struct Interface {
     pub name: String,
     pub index: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -63,15 +64,15 @@ pub struct InterfaceOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mac: Option<String>,
     pub addresses: Vec<String>,
-    pub flags: InterfaceFlagsOutput,
+    pub flags: Flags,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mtu: Option<u32>,
-    pub capability: InterfaceCapabilityOutput,
+    pub capability: Capability,
     pub link_type: u32,
 }
 
-impl From<InterfaceInfo> for InterfaceOutput {
-    fn from(interface: InterfaceInfo) -> Self {
+impl From<DomainInterface> for Interface {
+    fn from(interface: DomainInterface) -> Self {
         Self {
             name: interface.id.name,
             index: interface.id.index,
@@ -92,13 +93,13 @@ impl From<InterfaceInfo> for InterfaceOutput {
 
 /// Aggregate result of `plan`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct RouteInterfaceOutput {
+pub struct InterfaceId {
     pub name: String,
     pub index: u32,
 }
 
-impl From<InterfaceId> for RouteInterfaceOutput {
-    fn from(value: InterfaceId) -> Self {
+impl From<DomainInterfaceId> for InterfaceId {
+    fn from(value: DomainInterfaceId) -> Self {
         Self {
             name: value.name,
             index: value.index,
@@ -108,7 +109,7 @@ impl From<InterfaceId> for RouteInterfaceOutput {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum RouteSelectionOutput {
+pub enum SelectionReason {
     Local,
     OnLink,
     Broadcast,
@@ -116,7 +117,7 @@ pub enum RouteSelectionOutput {
     InterfaceOnly,
 }
 
-impl From<packetcraftr_netio::route::SelectionReason> for RouteSelectionOutput {
+impl From<packetcraftr_netio::route::SelectionReason> for SelectionReason {
     fn from(value: packetcraftr_netio::route::SelectionReason) -> Self {
         match value {
             packetcraftr_netio::route::SelectionReason::Local => Self::Local,
@@ -130,7 +131,7 @@ impl From<packetcraftr_netio::route::SelectionReason> for RouteSelectionOutput {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum RouteScopeOutput {
+pub enum Scope {
     Host,
     Link,
     Private,
@@ -139,7 +140,7 @@ pub enum RouteScopeOutput {
     Unspecified,
 }
 
-impl From<packetcraftr_netio::route::Scope> for RouteScopeOutput {
+impl From<packetcraftr_netio::route::Scope> for Scope {
     fn from(value: packetcraftr_netio::route::Scope) -> Self {
         match value {
             packetcraftr_netio::route::Scope::Host => Self::Host,
@@ -154,13 +155,13 @@ impl From<packetcraftr_netio::route::Scope> for RouteScopeOutput {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum RouteModeOutput {
+pub enum Mode {
     Auto,
     Layer2,
     Layer3,
 }
 
-impl From<LinkMode> for RouteModeOutput {
+impl From<LinkMode> for Mode {
     fn from(value: LinkMode) -> Self {
         match value {
             LinkMode::Auto => Self::Auto,
@@ -174,15 +175,15 @@ impl From<LinkMode> for RouteModeOutput {
 /// independent from the routing model's representation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(transparent)]
-pub struct RouteMacAddressOutput(pub [u8; 6]);
+pub struct MacAddress(pub [u8; 6]);
 
-impl From<packetcraftr_netio::link::MacAddress> for RouteMacAddressOutput {
+impl From<packetcraftr_netio::link::MacAddress> for MacAddress {
     fn from(value: packetcraftr_netio::link::MacAddress) -> Self {
         Self(value.0)
     }
 }
 
-impl fmt::Display for RouteMacAddressOutput {
+impl fmt::Display for MacAddress {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let value = self.0;
         write!(
@@ -195,12 +196,12 @@ impl fmt::Display for RouteMacAddressOutput {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum RouteVlanKindOutput {
+pub enum VlanKind {
     Ieee8021Q,
     Ieee8021Ad,
 }
 
-impl From<packetcraftr_netio::neighbor::VlanKind> for RouteVlanKindOutput {
+impl From<packetcraftr_netio::neighbor::VlanKind> for VlanKind {
     fn from(value: packetcraftr_netio::neighbor::VlanKind) -> Self {
         match value {
             packetcraftr_netio::neighbor::VlanKind::Ieee8021Q => Self::Ieee8021Q,
@@ -210,14 +211,14 @@ impl From<packetcraftr_netio::neighbor::VlanKind> for RouteVlanKindOutput {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-pub struct RouteVlanTagOutput {
-    pub kind: RouteVlanKindOutput,
+pub struct VlanTag {
+    pub kind: VlanKind,
     pub priority: u8,
     pub drop_eligible: bool,
     pub vlan_id: u16,
 }
 
-impl From<packetcraftr_netio::neighbor::VlanTag> for RouteVlanTagOutput {
+impl From<packetcraftr_netio::neighbor::VlanTag> for VlanTag {
     fn from(value: packetcraftr_netio::neighbor::VlanTag) -> Self {
         Self {
             kind: value.kind.into(),
@@ -229,26 +230,27 @@ impl From<packetcraftr_netio::neighbor::VlanTag> for RouteVlanTagOutput {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct RouteDecisionOutput {
-    pub interface: RouteInterfaceOutput,
+pub struct Decision {
+    pub interface: InterfaceId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source_mac: Option<RouteMacAddressOutput>,
-    pub selected_address: Option<IpAddr>,
+    pub source_mac: Option<MacAddress>,
+    #[serde(rename = "selected_address")]
+    pub selected_source: Option<IpAddr>,
     pub preferred_source: Option<IpAddr>,
     pub next_hop: Option<IpAddr>,
-    pub selection_reason: RouteSelectionOutput,
-    pub destination_scope: RouteScopeOutput,
+    pub selection_reason: SelectionReason,
+    pub destination_scope: Scope,
     pub mtu: u32,
-    pub capability: InterfaceCapabilityOutput,
+    pub capability: Capability,
     pub link_type: u32,
 }
 
-impl From<RouteDecision> for RouteDecisionOutput {
+impl From<RouteDecision> for Decision {
     fn from(value: RouteDecision) -> Self {
         Self {
             interface: value.interface.into(),
             source_mac: value.source_mac.map(Into::into),
-            selected_address: value.selected_address,
+            selected_source: value.selected_source,
             preferred_source: value.preferred_source,
             next_hop: value.next_hop,
             selection_reason: value.selection_reason.into(),
@@ -261,9 +263,10 @@ impl From<RouteDecision> for RouteDecisionOutput {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct PlannedRouteOutput {
-    pub route: RouteDecisionOutput,
-    pub mode: RouteModeOutput,
+pub struct Plan {
+    #[serde(rename = "route")]
+    pub decision: Decision,
+    pub mode: Mode,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lookup_destination: Option<IpAddr>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -272,17 +275,17 @@ pub struct PlannedRouteOutput {
     pub packet_source: Option<IpAddr>,
     pub neighbor_source: Option<IpAddr>,
     pub neighbor_target: Option<IpAddr>,
-    pub destination_mac: Option<RouteMacAddressOutput>,
-    pub source_mac: Option<RouteMacAddressOutput>,
+    pub destination_mac: Option<MacAddress>,
+    pub source_mac: Option<MacAddress>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub neighbor_vlan_tags: Vec<RouteVlanTagOutput>,
+    pub neighbor_vlan_tags: Vec<VlanTag>,
     pub synthesized_ethernet: bool,
 }
 
-impl From<PlannedRoute> for PlannedRouteOutput {
+impl From<PlannedRoute> for Plan {
     fn from(value: PlannedRoute) -> Self {
         Self {
-            route: value.route.into(),
+            decision: value.decision.into(),
             mode: value.mode.into(),
             lookup_destination: value.lookup_destination,
             final_destination: value.final_destination,

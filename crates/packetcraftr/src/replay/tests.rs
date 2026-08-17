@@ -15,27 +15,26 @@ use packetcraftr_netio::{
     transmit::Submission,
 };
 
-use super::engine::{replay_capture, replay_capture_with_selector};
-use super::error::ReplayError;
+use super::engine::{run, run_with_selector};
+use super::error::Error;
 use super::model::{
-    ReplayAuthorizationContext, ReplayAuthorizer, ReplayLimits, ReplayOptions, ReplaySelector,
-    ReplayTiming, ReplayTransmission, ReplayTransmitter,
+    AuthorizationContext, Authorizer, Limits, Options, Selector, Timing, Transmission, Transmitter,
 };
 use super::wire::{replay_link_mode, replay_network_envelope, validate_transmission_evidence};
 use crate::BoundaryError;
-use crate::clock::Clock as WorkflowClock;
+use crate::clock::Clock;
 
 #[derive(Default)]
 struct RecordingAuthorizer {
     calls: usize,
-    contexts: Vec<ReplayAuthorizationContext>,
+    contexts: Vec<AuthorizationContext>,
     deny: bool,
 }
 
-impl ReplayAuthorizer for RecordingAuthorizer {
+impl Authorizer for RecordingAuthorizer {
     fn authorize_operation(
         &mut self,
-        context: ReplayAuthorizationContext,
+        context: AuthorizationContext,
         _frame: &Frame,
         _mode: LinkMode,
     ) -> Result<(), BoundaryError> {
@@ -61,7 +60,7 @@ struct RecordingTransmitter {
     different_interface: bool,
 }
 
-impl ReplayTransmitter for RecordingTransmitter {
+impl Transmitter for RecordingTransmitter {
     fn validate_interface(
         &mut self,
         interface: &InterfaceId,
@@ -77,7 +76,7 @@ impl ReplayTransmitter for RecordingTransmitter {
         interface: &InterfaceId,
         _mode: LinkMode,
         frame: &Frame,
-    ) -> Result<ReplayTransmission, LiveIoError> {
+    ) -> Result<Transmission, LiveIoError> {
         self.transmission_calls += 1;
         let reported_interface = if self.different_interface {
             InterfaceId {
@@ -87,7 +86,7 @@ impl ReplayTransmitter for RecordingTransmitter {
         } else {
             interface.clone()
         };
-        Ok(ReplayTransmission {
+        Ok(Transmission {
             interface: reported_interface,
             report: Submission::start().complete(
                 if self.partial {
@@ -106,7 +105,7 @@ struct RecordingClock {
     delays: Vec<Duration>,
 }
 
-impl WorkflowClock for RecordingClock {
+impl Clock for RecordingClock {
     type Error = Infallible;
 
     fn sleep(&mut self, delay: Duration) -> Result<(), Self::Error> {
@@ -121,7 +120,7 @@ struct RecordingSelector {
     keep: bool,
 }
 
-impl ReplaySelector for RecordingSelector {
+impl Selector for RecordingSelector {
     fn select(&mut self, number: u64, _frame: &Frame) -> Result<bool, BoundaryError> {
         self.numbers.push(number);
         Ok(self.keep && self.skip != Some(number))
@@ -148,28 +147,28 @@ fn capture_reader(link_type: LinkType, frames: &[(Duration, &[u8])]) -> Reader<C
     Reader::new(Cursor::new(writer.into_inner())).expect("capture reader")
 }
 
-fn replay_options(timing: ReplayTiming) -> ReplayOptions {
-    ReplayOptions {
+fn replay_options(timing: Timing) -> Options {
+    Options {
         interface: test_interface(),
         link_mode: LinkMode::Auto,
         timing,
-        limits: ReplayLimits::default(),
+        limits: Limits::default(),
     }
 }
 
 #[test]
 fn replay_timing_validation_rejects_non_finite_and_non_positive_values() {
     for timing in [
-        ReplayTiming::Scaled(f64::NAN),
-        ReplayTiming::Scaled(f64::INFINITY),
-        ReplayTiming::Scaled(-1.0),
-        ReplayTiming::FixedRate(f64::NAN),
-        ReplayTiming::FixedRate(f64::INFINITY),
-        ReplayTiming::FixedRate(0.0),
+        Timing::Scaled(f64::NAN),
+        Timing::Scaled(f64::INFINITY),
+        Timing::Scaled(-1.0),
+        Timing::FixedRate(f64::NAN),
+        Timing::FixedRate(f64::INFINITY),
+        Timing::FixedRate(0.0),
     ] {
         assert!(matches!(
             timing.validate(),
-            Err(ReplayError::InvalidTiming { .. })
+            Err(Error::InvalidTiming { .. })
         ));
     }
 }
@@ -177,27 +176,27 @@ fn replay_timing_validation_rejects_non_finite_and_non_positive_values() {
 #[test]
 fn replay_timing_requires_capture_time_only_for_source_interval_modes() {
     assert_eq!(
-        ReplayTiming::Immediate
+        Timing::Immediate
             .delay_between(None, None, 2)
             .expect("immediate timing is independent of capture time"),
         Duration::ZERO
     );
     assert_eq!(
-        ReplayTiming::FixedRate(2.0)
+        Timing::FixedRate(2.0)
             .delay_between(None, None, 2)
             .expect("fixed timing is independent of capture time"),
         Duration::from_millis(500)
     );
     assert!(matches!(
-        ReplayTiming::Original.delay_between(None, Some(UNIX_EPOCH), 2),
-        Err(ReplayError::TimestampUnavailable {
+        Timing::Original.delay_between(None, Some(UNIX_EPOCH), 2),
+        Err(Error::TimestampUnavailable {
             sequence: 2,
             mode: "original"
         })
     ));
     assert!(matches!(
-        ReplayTiming::Scaled(2.0).delay_between(Some(UNIX_EPOCH), None, 3),
-        Err(ReplayError::TimestampUnavailable {
+        Timing::Scaled(2.0).delay_between(Some(UNIX_EPOCH), None, 3),
+        Err(Error::TimestampUnavailable {
             sequence: 3,
             mode: "scaled"
         })
@@ -245,7 +244,7 @@ fn replay_link_mode_errors_preserve_sequence_and_requested_mode() {
     let error = replay_link_mode(7, LinkType(999), LinkMode::Auto).unwrap_err();
     assert!(matches!(
         error,
-        ReplayError::UnsupportedLinkType {
+        Error::UnsupportedLinkType {
             sequence: 7,
             link_type: 999
         }
@@ -254,7 +253,7 @@ fn replay_link_mode_errors_preserve_sequence_and_requested_mode() {
     let error = replay_link_mode(8, LinkType::ETHERNET, LinkMode::Layer3).unwrap_err();
     assert!(matches!(
         error,
-        ReplayError::LinkModeMismatch {
+        Error::LinkModeMismatch {
             sequence: 8,
             link_type,
             requested: LinkMode::Layer3
@@ -278,10 +277,7 @@ fn replay_transmission_evidence_requires_exact_wire_length_and_bytes() {
         &Submission::start().complete(2, frame.bytes().clone()),
     )
     .unwrap_err();
-    assert!(matches!(
-        partial,
-        ReplayError::Transmission { sequence: 2, .. }
-    ));
+    assert!(matches!(partial, Error::Transmission { sequence: 2, .. }));
 
     let mismatch = validate_transmission_evidence(
         3,
@@ -289,10 +285,7 @@ fn replay_transmission_evidence_requires_exact_wire_length_and_bytes() {
         &Submission::start().complete(3, Bytes::from_static(&[0x45, 1, 3])),
     )
     .unwrap_err();
-    assert!(matches!(
-        mismatch,
-        ReplayError::Transmission { sequence: 3, .. }
-    ));
+    assert!(matches!(mismatch, Error::Transmission { sequence: 3, .. }));
 }
 
 #[test]
@@ -304,9 +297,9 @@ fn replay_authorization_denial_has_no_later_io_side_effects() {
     };
     let mut transmitter = RecordingTransmitter::default();
     let mut clock = RecordingClock::default();
-    let error = replay_capture(
+    let error = run(
         &mut reader,
-        &replay_options(ReplayTiming::Immediate),
+        &replay_options(Timing::Immediate),
         &mut authorizer,
         &mut transmitter,
         &mut clock,
@@ -314,10 +307,7 @@ fn replay_authorization_denial_has_no_later_io_side_effects() {
     )
     .unwrap_err();
 
-    assert!(matches!(
-        error,
-        ReplayError::Authorization { sequence: 0, .. }
-    ));
+    assert!(matches!(error, Error::Authorization { sequence: 0, .. }));
     assert_eq!(authorizer.calls, 1);
     assert_eq!(transmitter.validation_calls, 0);
     assert_eq!(transmitter.transmission_calls, 0);
@@ -343,9 +333,9 @@ fn replay_selector_skips_authorization_and_preserves_transmitted_spacing() {
     let mut transmitter = RecordingTransmitter::default();
     let mut clock = RecordingClock::default();
     let mut emitted = Vec::new();
-    let summary = replay_capture_with_selector(
+    let summary = run_with_selector(
         &mut reader,
-        &replay_options(ReplayTiming::Original),
+        &replay_options(Timing::Original),
         Some(&mut selector),
         &mut authorizer,
         &mut transmitter,
@@ -361,11 +351,11 @@ fn replay_selector_skips_authorization_and_preserves_transmitted_spacing() {
     assert_eq!(
         authorizer.contexts,
         [
-            ReplayAuthorizationContext {
+            AuthorizationContext {
                 packets: 1,
                 wire_bytes: 2,
             },
-            ReplayAuthorizationContext {
+            AuthorizationContext {
                 packets: 2,
                 wire_bytes: 6,
             },
@@ -373,13 +363,13 @@ fn replay_selector_skips_authorization_and_preserves_transmitted_spacing() {
     );
     assert_eq!(transmitter.transmission_calls, 2);
     assert_eq!(clock.delays, [Duration::ZERO, Duration::from_secs(2)]);
-    assert_eq!(summary.frames_attempted, 3);
-    assert_eq!(summary.frames_completed, 2);
-    assert_eq!(summary.bytes_completed, 6);
+    assert_eq!(summary.frames_read, 3);
+    assert_eq!(summary.frames_transmitted, 2);
+    assert_eq!(summary.bytes_transmitted, 6);
     assert_eq!(
         emitted
             .iter()
-            .map(|evidence| evidence.source_sequence)
+            .map(|evidence| evidence.source_index)
             .collect::<Vec<_>>(),
         [0, 2]
     );
@@ -400,11 +390,11 @@ fn replay_selector_skipped_frames_still_consume_the_frame_budget() {
         skip: None,
         keep: false,
     };
-    let mut options = replay_options(ReplayTiming::Immediate);
+    let mut options = replay_options(Timing::Immediate);
     options.limits.max_frames = 2;
     let mut authorizer = RecordingAuthorizer::default();
     let mut transmitter = RecordingTransmitter::default();
-    let error = replay_capture_with_selector(
+    let error = run_with_selector(
         &mut reader,
         &options,
         Some(&mut selector),
@@ -417,7 +407,7 @@ fn replay_selector_skipped_frames_still_consume_the_frame_budget() {
 
     assert!(matches!(
         error,
-        ReplayError::FrameLimit {
+        Error::FrameLimit {
             sequence: 2,
             actual: 3,
             limit: 2,

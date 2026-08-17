@@ -17,13 +17,13 @@ use super::super::hex::compact_hex;
 /// Output-v1 DNS section.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum DnsSection {
+pub enum Section {
     Answer,
     Authority,
     Additional,
 }
 
-impl From<crate::dns::Section> for DnsSection {
+impl From<crate::dns::Section> for Section {
     fn from(value: crate::dns::Section) -> Self {
         match value {
             crate::dns::Section::Answer => Self::Answer,
@@ -33,7 +33,7 @@ impl From<crate::dns::Section> for DnsSection {
     }
 }
 
-impl fmt::Display for DnsSection {
+impl fmt::Display for Section {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
             Self::Answer => "answer",
@@ -46,7 +46,7 @@ impl fmt::Display for DnsSection {
 /// Typed DNS record data; unknown records preserve exact RDATA as hexadecimal.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum DnsRecordData {
+pub enum RecordData {
     A {
         address: Ipv4Addr,
     },
@@ -87,7 +87,7 @@ pub enum DnsRecordData {
         strings_hex: Vec<String>,
     },
     Opt {
-        edns: DnsEdnsOutput,
+        edns: Edns,
     },
     Unknown {
         type_code: u16,
@@ -96,22 +96,22 @@ pub enum DnsRecordData {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct DnsEdnsOptionOutput {
+pub struct EdnsOption {
     pub code: u16,
     pub data_hex: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct DnsEdnsOutput {
+pub struct Edns {
     pub udp_payload_size: u16,
     pub extended_response_code: u8,
     pub version: u8,
     pub dnssec_ok: bool,
     pub flags: u16,
-    pub options: Vec<DnsEdnsOptionOutput>,
+    pub options: Vec<EdnsOption>,
 }
 
-impl From<DnsEdns> for DnsEdnsOutput {
+impl From<DnsEdns> for Edns {
     fn from(value: DnsEdns) -> Self {
         Self {
             udp_payload_size: value.udp_payload_size,
@@ -124,7 +124,7 @@ impl From<DnsEdns> for DnsEdnsOutput {
     }
 }
 
-impl From<DnsEdnsOption> for DnsEdnsOptionOutput {
+impl From<DnsEdnsOption> for EdnsOption {
     fn from(value: DnsEdnsOption) -> Self {
         Self {
             code: value.code,
@@ -134,33 +134,33 @@ impl From<DnsEdnsOption> for DnsEdnsOptionOutput {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct DnsRecordOutput {
+pub struct Record {
     pub owner: String,
     pub class: u16,
     pub ttl: u32,
     #[serde(flatten)]
-    pub data: DnsRecordData,
+    pub data: RecordData,
 }
 
-impl DnsRecordOutput {
+impl Record {
     pub(super) fn from_record(record: DnsRecord) -> Self {
         let data = match record.value {
-            DnsRecordValue::A(address) => DnsRecordData::A { address },
-            DnsRecordValue::Aaaa(address) => DnsRecordData::Aaaa { address },
-            DnsRecordValue::Cname(canonical_name) => DnsRecordData::Cname {
+            DnsRecordValue::A(address) => RecordData::A { address },
+            DnsRecordValue::Aaaa(address) => RecordData::Aaaa { address },
+            DnsRecordValue::Cname(canonical_name) => RecordData::Cname {
                 canonical_name: canonical_name.to_string(),
             },
             DnsRecordValue::Mx {
                 preference,
                 exchange,
-            } => DnsRecordData::Mx {
+            } => RecordData::Mx {
                 preference,
                 exchange: exchange.to_string(),
             },
-            DnsRecordValue::Ns(name_server) => DnsRecordData::Ns {
+            DnsRecordValue::Ns(name_server) => RecordData::Ns {
                 name_server: name_server.to_string(),
             },
-            DnsRecordValue::Ptr(pointer) => DnsRecordData::Ptr {
+            DnsRecordValue::Ptr(pointer) => RecordData::Ptr {
                 pointer: pointer.to_string(),
             },
             DnsRecordValue::Soa {
@@ -171,7 +171,7 @@ impl DnsRecordOutput {
                 retry,
                 expire,
                 minimum,
-            } => DnsRecordData::Soa {
+            } => RecordData::Soa {
                 primary_name_server: primary_name_server.to_string(),
                 responsible_mailbox: responsible_mailbox.to_string(),
                 serial,
@@ -185,21 +185,21 @@ impl DnsRecordOutput {
                 weight,
                 port,
                 target,
-            } => DnsRecordData::Srv {
+            } => RecordData::Srv {
                 priority,
                 weight,
                 port,
                 target: target.to_string(),
             },
-            DnsRecordValue::Txt(strings) => DnsRecordData::Txt {
+            DnsRecordValue::Txt(strings) => RecordData::Txt {
                 strings: strings
                     .iter()
                     .map(|value| String::from_utf8_lossy(value).into_owned())
                     .collect(),
                 strings_hex: strings.iter().map(|value| compact_hex(value)).collect(),
             },
-            DnsRecordValue::Opt(edns) => DnsRecordData::Opt { edns: edns.into() },
-            DnsRecordValue::Unknown { type_code, rdata } => DnsRecordData::Unknown {
+            DnsRecordValue::Opt(edns) => RecordData::Opt { edns: edns.into() },
+            DnsRecordValue::Unknown { type_code, rdata } => RecordData::Unknown {
                 type_code,
                 rdata_hex: compact_hex(&rdata),
             },
@@ -214,8 +214,8 @@ impl DnsRecordOutput {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct DnsRejectedRecordOutput {
-    pub section: DnsSection,
+pub struct RejectedRecord {
+    pub section: Section,
     pub index: usize,
     pub owner: String,
     pub type_code: u16,

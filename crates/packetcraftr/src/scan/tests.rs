@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, UNIX_EPOCH};
 
 use crate::policy::Policy as TrafficPolicy;
-use crate::target::{Error, Resolver};
+use crate::target::{Error as TargetError, Resolver};
 use bytes::Bytes;
 use packetcraftr_core::error::{Classification as ErrorClassification, Kind};
 use packetcraftr_core::frame::{Frame, LinkType};
@@ -22,12 +22,11 @@ use packetcraftr_core::{
     Packet, decode::DecodedPacket, diagnostic::Diagnostic, layout::PacketLayout,
 };
 
-use super::classification::classify_scan_response;
-use super::engine::scan;
-use super::error::ScanError;
+use super::classification::classify_response;
+use super::engine::run;
+use super::error::Error;
 use super::model::{
-    ScanBatch, ScanBatchExecution, ScanClassification, ScanExecutor, ScanLimits, ScanProbeStatus,
-    ScanRequest, ScanTransport,
+    Batch, Classification, Execution, Executor, Limits, ProbeStatus, Request, Transport,
 };
 use super::probe::probe_packet;
 use crate::clock::Clock;
@@ -42,16 +41,16 @@ fn private_scan_policy() -> TrafficPolicy {
     }
 }
 
-fn tcp_scan_request(target: Target) -> ScanRequest {
-    ScanRequest {
+fn tcp_scan_request(target: Target) -> Request {
+    Request {
         target,
-        transport: ScanTransport::Tcp,
+        transport: Transport::Tcp,
         address_family: Family::Any,
         ports: vec![80],
         attempts: 1,
         timeout: Duration::from_millis(1),
         probes_per_second: None,
-        limits: ScanLimits::default(),
+        limits: Limits::default(),
     }
 }
 
@@ -118,7 +117,7 @@ impl Resolver for ScriptedResolver {
         &self,
         _hostname: &crate::target::Hostname,
         _limit: usize,
-    ) -> Result<Vec<IpAddr>, Error> {
+    ) -> Result<Vec<IpAddr>, TargetError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         Ok(self
             .answers
@@ -133,8 +132,8 @@ struct CountingRejectExecutor {
     calls: Arc<AtomicUsize>,
 }
 
-impl ScanExecutor for CountingRejectExecutor {
-    fn execute(&mut self, _batch: &ScanBatch) -> Result<ScanBatchExecution, BoundaryError> {
+impl Executor for CountingRejectExecutor {
+    fn execute(&mut self, _batch: &Batch) -> Result<Execution, BoundaryError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         Err(BoundaryError::new(
             "stop after authorization",
@@ -150,8 +149,8 @@ struct TimeoutExecutor {
     invalid_sent_index: Option<usize>,
 }
 
-impl ScanExecutor for TimeoutExecutor {
-    fn execute(&mut self, batch: &ScanBatch) -> Result<ScanBatchExecution, BoundaryError> {
+impl Executor for TimeoutExecutor {
+    fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
         self.batches.push((
             batch.probes[0].attempt,
             batch.probes.iter().map(|probe| probe.port).collect(),
@@ -177,7 +176,7 @@ impl ScanExecutor for TimeoutExecutor {
         if let Some(index) = self.invalid_sent_index {
             sent[index] = sent[0].clone();
         }
-        Ok(ScanBatchExecution {
+        Ok(Execution {
             permit: batch.permit,
             sent,
             responses: Vec::new(),
@@ -197,8 +196,8 @@ impl ScanExecutor for TimeoutExecutor {
 
 struct LateResponseExecutor(TimeoutExecutor);
 
-impl ScanExecutor for LateResponseExecutor {
-    fn execute(&mut self, batch: &ScanBatch) -> Result<ScanBatchExecution, BoundaryError> {
+impl Executor for LateResponseExecutor {
+    fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
         let mut execution = self.0.execute(batch)?;
         execution.unsolicited.push(decoded(
             tcp_packet(
@@ -266,7 +265,7 @@ fn scan_batching_attempts_rate_and_timeout_evidence_are_deterministic() {
     let mut executor = TimeoutExecutor::default();
     let mut clock = RecordingClock::default();
 
-    let result = scan(
+    let result = run(
         &request,
         &mut AddressListAuthorizer {
             addresses: vec![address],
@@ -289,12 +288,12 @@ fn scan_batching_attempts_rate_and_timeout_evidence_are_deterministic() {
     assert_eq!(clock.0, vec![Duration::from_secs(1); 3]);
     assert_eq!(result.endpoints.len(), 4);
     assert!(result.endpoints.iter().all(|endpoint| {
-        endpoint.classification == ScanClassification::Timeout
+        endpoint.classification == Classification::Timeout
             && endpoint.evidence.len() == 2
             && endpoint
                 .evidence
                 .iter()
-                .all(|evidence| evidence.status == ScanProbeStatus::Timeout)
+                .all(|evidence| evidence.status == ProbeStatus::Timeout)
     }));
     assert_eq!(result.stats.packets_attempted, 8);
     assert_eq!(result.stats.packets_completed, 8);
@@ -310,7 +309,7 @@ fn scan_hostname_policy_denial_precedes_resolution_and_execution() {
     };
     let policy = private_scan_policy();
     let mut authorizer = PolicyAuthorizer::new(&policy, &resolver);
-    let error = scan(
+    let error = run(
         &tcp_scan_request(Target::Hostname("lab.example".parse().unwrap())),
         &mut authorizer,
         &default_registry().unwrap(),
@@ -343,7 +342,7 @@ fn scan_authorizes_mixed_resolution_answers_before_family_filtering() {
     request.address_family = Family::Ipv6;
     let mut authorizer = PolicyAuthorizer::new(&policy, &resolver);
 
-    let error = scan(
+    let error = run(
         &request,
         &mut authorizer,
         &default_registry().unwrap(),
@@ -372,27 +371,27 @@ fn scan_tcp_correlation_requires_integrity_and_classifies_valid_replies() {
         Vec::new(),
     );
     assert_eq!(
-        classify_scan_response(&registry, ScanTransport::Tcp, &request, &syn_ack)
+        classify_response(&registry, Transport::Tcp, &request, &syn_ack)
             .unwrap()
             .classification,
-        ScanClassification::Open
+        Classification::Open
     );
 
     let mut bad_ack = tcp_packet(remote, local, 443, 50_000, Tcp::SYN | Tcp::ACK);
     bad_ack.get_mut::<Tcp>().unwrap().acknowledgment = 99;
     assert!(
-        classify_scan_response(
+        classify_response(
             &registry,
-            ScanTransport::Tcp,
+            Transport::Tcp,
             &request,
             &decoded(bad_ack, Vec::new()),
         )
         .is_none()
     );
     assert!(
-        classify_scan_response(
+        classify_response(
             &registry,
-            ScanTransport::Tcp,
+            Transport::Tcp,
             &request,
             &decoded(
                 tcp_packet(remote, local, 443, 50_000, Tcp::SYN | Tcp::ACK),
@@ -407,7 +406,7 @@ fn scan_tcp_correlation_requires_integrity_and_classifies_valid_replies() {
 fn scan_late_unsolicited_response_remains_a_timeout() {
     let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
     let request = tcp_scan_request(Target::Address(address));
-    let result = scan(
+    let result = run(
         &request,
         &mut AddressListAuthorizer {
             addresses: vec![address],
@@ -418,14 +417,8 @@ fn scan_late_unsolicited_response_remains_a_timeout() {
     )
     .unwrap();
 
-    assert_eq!(
-        result.endpoints[0].classification,
-        ScanClassification::Timeout
-    );
-    assert_eq!(
-        result.endpoints[0].evidence[0].status,
-        ScanProbeStatus::Timeout
-    );
+    assert_eq!(result.endpoints[0].classification, Classification::Timeout);
+    assert_eq!(result.endpoints[0].evidence[0].status, ProbeStatus::Timeout);
 }
 
 #[test]
@@ -433,7 +426,7 @@ fn scan_invalid_sent_evidence_reports_the_exact_probe_sequence() {
     let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
     let mut request = tcp_scan_request(Target::Address(address));
     request.ports = vec![80, 81];
-    let error = scan(
+    let error = run(
         &request,
         &mut AddressListAuthorizer {
             addresses: vec![address],
@@ -449,7 +442,7 @@ fn scan_invalid_sent_evidence_reports_the_exact_probe_sequence() {
 
     assert!(matches!(
         error,
-        ScanError::InvalidEvidence { sequence: 1, message }
+        Error::InvalidEvidence { sequence: 1, message }
             if message == "sent packet does not preserve the scan destination and probe identity"
     ));
 }

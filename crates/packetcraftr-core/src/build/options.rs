@@ -15,29 +15,29 @@ pub const DEFAULT_MAX_LAYERS: usize = 64;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum BuildMode {
+pub enum Mode {
     #[default]
     Strict,
     Permissive,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct BuildContext {
+pub struct Context {
     pub source: Option<IpAddr>,
     pub destination: Option<IpAddr>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct BuildOptions {
-    pub mode: BuildMode,
+pub struct Options {
+    pub mode: Mode,
     pub max_layers: usize,
     pub max_packet_size: usize,
 }
 
-impl Default for BuildOptions {
+impl Default for Options {
     fn default() -> Self {
         Self {
-            mode: BuildMode::Strict,
+            mode: Mode::Strict,
             max_layers: DEFAULT_MAX_LAYERS,
             max_packet_size: DEFAULT_MAX_PACKET_SIZE,
         }

@@ -5,7 +5,7 @@
 
 use bytes::Bytes;
 
-use super::BuildError;
+use super::Error;
 
 #[derive(Debug, Default)]
 pub(super) struct PacketBuffer {
@@ -30,14 +30,14 @@ impl PacketBuffer {
         prefix: &[u8],
         suffix: &[u8],
         maximum: usize,
-    ) -> Result<(), BuildError> {
+    ) -> Result<(), Error> {
         let total = prefix
             .len()
             .checked_add(self.len())
             .and_then(|value| value.checked_add(suffix.len()))
-            .ok_or(BuildError::LengthOverflow)?;
+            .ok_or(Error::LengthOverflow)?;
         if total > maximum {
-            return Err(BuildError::PacketSizeLimit {
+            return Err(Error::PacketSizeLimit {
                 actual: total,
                 limit: maximum,
             });
@@ -46,7 +46,7 @@ impl PacketBuffer {
             let additional = prefix
                 .len()
                 .checked_add(suffix.len())
-                .ok_or(BuildError::LengthOverflow)?;
+                .ok_or(Error::LengthOverflow)?;
             if self.storage.len().saturating_sub(self.len()) >= additional {
                 self.recenter_and_wrap(prefix, suffix, total)?;
             } else {
@@ -68,22 +68,22 @@ impl PacketBuffer {
         prefix: &[u8],
         suffix: &[u8],
         total: usize,
-    ) -> Result<(), BuildError> {
+    ) -> Result<(), Error> {
         let spare = self
             .storage
             .len()
             .checked_sub(total)
-            .ok_or(BuildError::LengthOverflow)?;
+            .ok_or(Error::LengthOverflow)?;
         let start = spare / 2;
         let prefix_end = start
             .checked_add(prefix.len())
-            .ok_or(BuildError::LengthOverflow)?;
+            .ok_or(Error::LengthOverflow)?;
         let payload_end = prefix_end
             .checked_add(self.len())
-            .ok_or(BuildError::LengthOverflow)?;
+            .ok_or(Error::LengthOverflow)?;
         let end = payload_end
             .checked_add(suffix.len())
-            .ok_or(BuildError::LengthOverflow)?;
+            .ok_or(Error::LengthOverflow)?;
         self.storage.copy_within(self.start..self.end, prefix_end);
         self.storage[start..prefix_end].copy_from_slice(prefix);
         self.storage[payload_end..end].copy_from_slice(suffix);
@@ -98,12 +98,12 @@ impl PacketBuffer {
         suffix: &[u8],
         total: usize,
         maximum: usize,
-    ) -> Result<(), BuildError> {
+    ) -> Result<(), Error> {
         let minimum = Self::MINIMUM_CAPACITY.min(maximum);
         let doubled = self.storage.len().checked_mul(2).unwrap_or(maximum);
         let capacity = doubled.max(minimum).max(total).min(maximum);
         if capacity < total {
-            return Err(BuildError::PacketSizeLimit {
+            return Err(Error::PacketSizeLimit {
                 actual: total,
                 limit: maximum,
             });
@@ -118,13 +118,13 @@ impl PacketBuffer {
         };
         let prefix_end = start
             .checked_add(prefix.len())
-            .ok_or(BuildError::LengthOverflow)?;
+            .ok_or(Error::LengthOverflow)?;
         let payload_end = prefix_end
             .checked_add(self.len())
-            .ok_or(BuildError::LengthOverflow)?;
+            .ok_or(Error::LengthOverflow)?;
         let end = payload_end
             .checked_add(suffix.len())
-            .ok_or(BuildError::LengthOverflow)?;
+            .ok_or(Error::LengthOverflow)?;
         storage[start..prefix_end].copy_from_slice(prefix);
         storage[prefix_end..payload_end].copy_from_slice(self.as_slice());
         storage[payload_end..end].copy_from_slice(suffix);
@@ -142,11 +142,11 @@ impl PacketBuffer {
     }
 }
 
-fn allocate_zeroed(capacity: usize) -> Result<Vec<u8>, BuildError> {
+fn allocate_zeroed(capacity: usize) -> Result<Vec<u8>, Error> {
     let mut storage = Vec::new();
     storage
         .try_reserve_exact(capacity)
-        .map_err(|_| BuildError::AllocationFailure {
+        .map_err(|_| Error::AllocationFailure {
             requested: capacity,
         })?;
     storage.resize(capacity, 0);

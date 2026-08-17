@@ -13,13 +13,14 @@ use packetcraftr_netio::{
 };
 
 use crate::Client;
+use crate::Error;
 use crate::Stats;
 use crate::materialize::{
     build_context, materialize_link_fields, materialize_link_structure, materialize_network_fields,
     patch_builtin_ethernet, require_fixed_width_link_materialization,
 };
-use crate::send::{ClientError, SendOptions, SendReport};
-use crate::validation::validate_mtu;
+use crate::mtu::validate_mtu;
+use crate::send::{Options, Report};
 
 impl<R, N, I> Client<R, N, I>
 where
@@ -27,7 +28,7 @@ where
     N: NeighborResolver,
     I: PacketIo,
 {
-    pub fn send(&self, packet: Packet, options: SendOptions) -> Result<SendReport, ClientError> {
+    pub fn send(&self, packet: Packet, options: Options) -> Result<Report, Error> {
         let started = Instant::now();
         self.policy.authorize_operation(1, 0)?;
         let plan = self.plan(&packet, options.destination, &options.plan)?;
@@ -42,7 +43,7 @@ where
             context.clone(),
             options.build.clone(),
         )?;
-        validate_mtu(&preliminary, plan.route.mtu)?;
+        validate_mtu(&preliminary, plan.decision.mtu)?;
         self.authorize_built(&preliminary, options.allow_permissive_live)?;
         self.authorize_final_wire(&preliminary, &plan)?;
         self.policy.authorize_operation(
@@ -75,7 +76,7 @@ where
             .send(TransmissionFrame::try_new(&built.bytes, &route)?)?;
         let sent = crate::SentPacket::try_new(built, route, io_report)?;
         let bytes_sent = sent.bytes_sent();
-        Ok(SendReport {
+        Ok(Report {
             sent,
             stats: Stats {
                 packets_attempted: 1,

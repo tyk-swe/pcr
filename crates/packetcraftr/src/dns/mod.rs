@@ -22,6 +22,7 @@ pub const MAX_DNS_ATTEMPTS: u32 = 32;
 pub const MAX_DNS_MESSAGE_BYTES: usize = u16::MAX as usize;
 pub const MAX_DNS_RECORDS: usize = 4_096;
 pub const MAX_DNS_NAME_POINTERS: usize = 128;
+pub const MAX_DNS_RATE: u32 = 1_000_000;
 pub const MAX_DNS_DURATION: Duration = packetcraftr_netio::capture::MAX_TIMEOUT;
 
 const DNS_EVIDENCE_DIAGNOSTICS: EvidenceDiagnosticDescriptor =
@@ -52,19 +53,14 @@ mod model;
 mod tests;
 mod wire;
 
-pub use engine::dns as run;
-pub use error::{DnsError as Error, DnsWireError as WireError};
+pub use engine::run;
+pub use error::{Error, WireError};
 pub use model::{
-    DnsAttemptEvidence as AttemptEvidence, DnsAttemptStatus as AttemptStatus, DnsEdns as Edns,
-    DnsEdnsOption as EdnsOption, DnsExchange as Exchange, DnsExchangeExecution as Execution,
-    DnsExecutor as Executor, DnsLimits as Limits, DnsName as Name, DnsOutcome as Outcome,
-    DnsProbe as Probe, DnsQueryType as QueryType, DnsRecord as Record,
-    DnsRecordValue as RecordValue, DnsRejectedRecord as RejectedRecord, DnsRequest as Request,
-    DnsResult as Result, DnsSection as Section, DnsUndecodedEvidence as UndecodedEvidence,
-    ValidatedDnsResponse as ValidatedResponse,
+    AttemptEvidence, Edns, EdnsOption, Exchange, Execution, Executor, Limits, Name, Outcome, Probe,
+    QueryType, Record, RecordValue, RejectedRecord, Request, Result, Section, UndecodedEvidence,
+    ValidatedResponse,
 };
 pub use wire::{
-    DnsResponseClassification as ResponseClassification, canonical_query_name,
-    classify_dns_response as classify_response, decode_dns_response as decode_response,
-    decode_dns_tcp_frame as decode_tcp_frame, encode_dns_query as encode_query, response_code_name,
+    ResponseClassification, canonical_query_name, classify_response, decode_response,
+    decode_tcp_frame, encode_query, response_code_name,
 };

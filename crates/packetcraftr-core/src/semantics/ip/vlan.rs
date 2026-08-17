@@ -4,7 +4,7 @@
 //! Directly transmitted VLAN metadata interpretation.
 
 use super::super::{BuiltinProtocol, FieldValue, Packet};
-use super::error::SemanticError;
+use super::error::Error;
 use super::path::{outer_scope_len, required_u8_field};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -22,7 +22,7 @@ pub struct VlanMetadata {
 }
 
 /// Outermost-first VLAN tags on the directly transmitted packet.
-pub fn vlan_metadata(packet: &Packet) -> Result<Vec<VlanMetadata>, SemanticError> {
+pub fn vlan_metadata(packet: &Packet) -> Result<Vec<VlanMetadata>, Error> {
     packet
         .iter()
         .take(outer_scope_len(packet))
@@ -34,7 +34,7 @@ pub fn vlan_metadata(packet: &Packet) -> Result<Vec<VlanMetadata>, SemanticError
         .map(|(layer, kind)| {
             let priority = required_u8_field(layer, "priority")?;
             if priority > 7 {
-                return Err(SemanticError::field(
+                return Err(Error::field(
                     layer.protocol_id(),
                     "priority",
                     "is outside 0..=7",
@@ -43,14 +43,14 @@ pub fn vlan_metadata(packet: &Packet) -> Result<Vec<VlanMetadata>, SemanticError
             let drop_eligible = match layer.field("drop_eligible") {
                 Some(FieldValue::Bool(value)) => value,
                 Some(_) => {
-                    return Err(SemanticError::field(
+                    return Err(Error::field(
                         layer.protocol_id(),
                         "drop_eligible",
                         "is not boolean",
                     ));
                 }
                 None => {
-                    return Err(SemanticError::field(
+                    return Err(Error::field(
                         layer.protocol_id(),
                         "drop_eligible",
                         "is missing",
@@ -62,21 +62,17 @@ pub fn vlan_metadata(packet: &Packet) -> Result<Vec<VlanMetadata>, SemanticError
                     .ok()
                     .filter(|value| *value <= 4095)
                     .ok_or_else(|| {
-                        SemanticError::field(layer.protocol_id(), "vlan_id", "is outside 0..=4095")
+                        Error::field(layer.protocol_id(), "vlan_id", "is outside 0..=4095")
                     })?,
                 Some(_) => {
-                    return Err(SemanticError::field(
+                    return Err(Error::field(
                         layer.protocol_id(),
                         "vlan_id",
                         "is not unsigned",
                     ));
                 }
                 None => {
-                    return Err(SemanticError::field(
-                        layer.protocol_id(),
-                        "vlan_id",
-                        "is missing",
-                    ));
+                    return Err(Error::field(layer.protocol_id(), "vlan_id", "is missing"));
                 }
             };
             Ok(VlanMetadata {

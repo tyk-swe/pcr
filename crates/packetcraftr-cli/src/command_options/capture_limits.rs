@@ -5,7 +5,7 @@ use clap::{Args, ValueEnum};
 use packetcraftr::{analysis::pcap as capture, netio as net};
 
 #[derive(Clone, Debug, Args)]
-pub(crate) struct CaptureLimitArgs {
+pub(crate) struct CaptureLimitsArgs {
     /// Aggregate backend capture-queue frame bound.
     #[arg(long, default_value_t = net::capture::Limits::default().max_frames)]
     max_queue_frames: usize,
@@ -16,29 +16,29 @@ pub(crate) struct CaptureLimitArgs {
     #[arg(long, default_value_t = capture::DEFAULT_SIZE_LIMIT)]
     snap_length: usize,
     /// Backend queue behavior when a configured bound is reached.
-    #[arg(long, value_enum, default_value_t = CliCaptureOverflowPolicy::Fail)]
-    overflow_policy: CliCaptureOverflowPolicy,
+    #[arg(long, value_enum, default_value_t = OverflowPolicy::Fail)]
+    overflow_policy: OverflowPolicy,
 }
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
-pub(crate) enum CliCaptureOverflowPolicy {
+pub(crate) enum OverflowPolicy {
     #[default]
     Fail,
     DropNewest,
     DropOldest,
 }
 
-impl From<CliCaptureOverflowPolicy> for net::capture::OverflowPolicy {
-    fn from(value: CliCaptureOverflowPolicy) -> Self {
+impl From<OverflowPolicy> for net::capture::OverflowPolicy {
+    fn from(value: OverflowPolicy) -> Self {
         match value {
-            CliCaptureOverflowPolicy::Fail => Self::Fail,
-            CliCaptureOverflowPolicy::DropNewest => Self::DropNewest,
-            CliCaptureOverflowPolicy::DropOldest => Self::DropOldest,
+            OverflowPolicy::Fail => Self::Fail,
+            OverflowPolicy::DropNewest => Self::DropNewest,
+            OverflowPolicy::DropOldest => Self::DropOldest,
         }
     }
 }
 
-impl CaptureLimitArgs {
+impl CaptureLimitsArgs {
     pub(crate) fn into_limits(self) -> net::capture::Limits {
         net::capture::Limits {
             max_frames: self.max_queue_frames,

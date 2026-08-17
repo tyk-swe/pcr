@@ -36,8 +36,8 @@ fn ipv4_udp_build_dissect_rebuild_is_exact() {
     let built = builder
         .build(
             representative_packet(),
-            build::BuildContext::default(),
-            build::BuildOptions::default(),
+            build::Context::default(),
+            build::Options::default(),
         )
         .expect("representative packet must build");
 
@@ -56,13 +56,13 @@ fn ipv4_udp_build_dissect_rebuild_is_exact() {
     )
     .expect("frame must be valid");
     let decoded = decode::Dissector::new(Arc::clone(&registry))
-        .decode(frame, decode::DecodeOptions::default())
+        .decode(frame, decode::Options::default())
         .expect("wire vector must dissect");
     let rebuilt = builder
         .build(
             decoded.packet,
-            build::BuildContext::default(),
-            build::BuildOptions::default(),
+            build::Context::default(),
+            build::Options::default(),
         )
         .expect("decoded packet must rebuild");
     assert_eq!(rebuilt.bytes, built.bytes);
@@ -103,9 +103,9 @@ fn dissection_limits_reject_before_parsing() {
     let error = decode::Dissector::new(registry)
         .decode(
             frame,
-            decode::DecodeOptions {
+            decode::Options {
                 max_packet_size: 19,
-                ..decode::DecodeOptions::default()
+                ..decode::Options::default()
             },
         )
         .expect_err("oversized input must be rejected before codec traversal");

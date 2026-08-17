@@ -33,7 +33,7 @@ pub mod ipv6;
 pub mod link;
 mod matcher;
 pub mod network;
-mod raw;
+pub mod raw;
 pub mod support;
 pub mod transport;
 pub mod tunnel;

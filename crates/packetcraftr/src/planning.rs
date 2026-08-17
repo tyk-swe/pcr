@@ -15,10 +15,10 @@ use packetcraftr_netio::{
 };
 
 use crate::Client;
-use crate::send::ClientError;
-use crate::target::{Authorized, Error, Family, Resolver, Target};
+use crate::Error;
+use crate::target::{Authorized, Error as TargetError, Family, Resolver, Target};
 
-pub(crate) fn ensure_preparation_deadline(deadline: Instant) -> Result<(), ClientError> {
+pub(crate) fn ensure_preparation_deadline(deadline: Instant) -> Result<(), Error> {
     if deadline.checked_duration_since(Instant::now()).is_none() {
         return Err(LiveIoError::DeadlineExceeded {
             operation: "preparing the exchange",
@@ -42,7 +42,7 @@ where
         target: &Target,
         resolver: &H,
         options: &PlanOptions,
-    ) -> Result<(Authorized, PlannedRoute), ClientError> {
+    ) -> Result<(Authorized, PlannedRoute), Error> {
         let resolved = self.policy.resolve_target(target, resolver)?;
         let packet_ip_version = packet
             .iter()
@@ -52,13 +52,11 @@ where
                 _ => None,
             });
         let selected = match packet_ip_version {
-            Some(version) => {
-                resolved
-                    .address_for_family(version)
-                    .ok_or(Error::AddressFamilyUnavailable {
-                        family: version.label(),
-                    })?
-            }
+            Some(version) => resolved.address_for_family(version).ok_or(
+                TargetError::AddressFamilyUnavailable {
+                    family: version.label(),
+                },
+            )?,
             None => resolved.selected_address(),
         };
         let plan = self.plan(packet, Some(selected), options)?;
@@ -71,7 +69,7 @@ where
         packet: &Packet,
         destination: Option<IpAddr>,
         options: &PlanOptions,
-    ) -> Result<PlannedRoute, ClientError> {
+    ) -> Result<PlannedRoute, Error> {
         self.plan_with_provider(packet, destination, options, &self.routes, None)
     }
 
@@ -82,7 +80,7 @@ where
         options: &PlanOptions,
         provider: &P,
         deadline: Option<Instant>,
-    ) -> Result<PlannedRoute, ClientError> {
+    ) -> Result<PlannedRoute, Error> {
         if let Some(destination) = destination {
             self.policy.authorize_destination(destination)?;
         }

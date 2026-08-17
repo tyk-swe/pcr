@@ -1,0 +1,270 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Probe {
+    value: u8,
+    enabled: bool,
+    label: String,
+    bytes: Bytes,
+    ipv4: Ipv4Addr,
+    ipv6: Ipv6Addr,
+    mac: [u8; 6],
+    token: [u8; 8],
+    wire: WireValue<u16>,
+}
+
+impl Default for Probe {
+    fn default() -> Self {
+        Self {
+            value: 1,
+            enabled: false,
+            label: "probe".to_owned(),
+            bytes: Bytes::new(),
+            ipv4: Ipv4Addr::UNSPECIFIED,
+            ipv6: Ipv6Addr::UNSPECIFIED,
+            mac: [0; 6],
+            token: [0; 8],
+            wire: WireValue::Auto,
+        }
+    }
+}
+
+reflective_layer! {
+    fn probe_schema() => { protocol: ProtocolId::new("probe"), name: "Probe" }
+    impl Probe {
+        "value" | "probe_value" => {
+            kind: Unsigned, derived: false, required: true,
+            description: "One-byte probe value",
+            reflect: value,
+            layout: (0, 1)
+        },
+        "enabled" => {
+            kind: Bool, derived: false, required: true,
+            description: "Probe flag",
+            get |layer| Some(packetcraftr_core::layer::reflect_get(&layer.enabled)),
+            set |layer, value, name| packetcraftr_core::layer::reflect_set(
+                &mut layer.enabled, probe_schema(), name, value
+            )
+        },
+        "label" => {
+            kind: Text, derived: false, required: true,
+            description: "Probe label",
+            get |layer| Some(packetcraftr_core::layer::reflect_get(&layer.label)),
+            set |layer, value, name| packetcraftr_core::layer::reflect_set(
+                &mut layer.label, probe_schema(), name, value
+            )
+        },
+        "bytes" => {
+            kind: Bytes, derived: false, required: false,
+            description: "Probe bytes",
+            get |layer| Some(packetcraftr_core::layer::reflect_get(&layer.bytes)),
+            set |layer, value, name| packetcraftr_core::layer::reflect_set(
+                &mut layer.bytes, probe_schema(), name, value
+            )
+        },
+        "ipv4" => {
+            kind: Ipv4, derived: false, required: true,
+            description: "Probe IPv4 address",
+            get |layer| Some(packetcraftr_core::layer::reflect_get(&layer.ipv4)),
+            set |layer, value, name| packetcraftr_core::layer::reflect_set(
+                &mut layer.ipv4, probe_schema(), name, value
+            )
+        },
+        "ipv6" => {
+            kind: Ipv6, derived: false, required: true,
+            description: "Probe IPv6 address",
+            get |layer| Some(packetcraftr_core::layer::reflect_get(&layer.ipv6)),
+            set |layer, value, name| packetcraftr_core::layer::reflect_set(
+                &mut layer.ipv6, probe_schema(), name, value
+            )
+        },
+        "mac" => {
+            kind: Mac, derived: false, required: true,
+            description: "Probe MAC address",
+            get |layer| Some(packetcraftr_core::layer::reflect_get(&layer.mac)),
+            set |layer, value, name| packetcraftr_core::layer::reflect_set(
+                &mut layer.mac, probe_schema(), name, value
+            )
+        },
+        "token" => {
+            kind: Bytes, derived: false, required: true,
+            description: "Eight-byte token",
+            get |layer| Some(packetcraftr_core::layer::reflect_get(&layer.token)),
+            set |layer, value, name| packetcraftr_core::layer::reflect_set(
+                &mut layer.token, probe_schema(), name, value
+            )
+        },
+        "wire" => {
+            kind: Unsigned, derived: true, required: true,
+            description: "Derived wire value",
+            get |layer| Some(packetcraftr_core::layer::reflect_get(&layer.wire)),
+            set |layer, value, name| packetcraftr_core::layer::reflect_set(
+                &mut layer.wire, probe_schema(), name, value
+            )
+        }
+    }
+    layout fn probe_layout();
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct Child {
+    value: u8,
+}
+
+reflective_layer! {
+    fn child_schema() => { protocol: ProtocolId::new("child"), name: "Child" }
+    impl Child {
+        "value" => {
+            kind: Unsigned, derived: false, required: true,
+            description: "Child value",
+            get |layer| Some(packetcraftr_core::layer::reflect_get(&layer.value)),
+            set |layer, value, name| packetcraftr_core::layer::reflect_set(
+                &mut layer.value, child_schema(), name, value
+            ),
+            layout: (0, 1)
+        }
+    }
+    layout fn child_layout();
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ProbeCodec;
+
+impl LayerCodec for ProbeCodec {
+    fn protocol_id(&self) -> ProtocolId {
+        "probe".into()
+    }
+
+    fn aliases(&self) -> &'static [&'static str] {
+        &["p"]
+    }
+
+    fn encode(
+        &self,
+        layer: &dyn Layer,
+        _payload: &[u8],
+        _context: &LayerEncodeContext<'_>,
+    ) -> Result<EncodedLayer, CodecError> {
+        let probe = layer
+            .as_any()
+            .downcast_ref::<Probe>()
+            .ok_or_else(|| CodecError::WrongLayer {
+                expected: "probe".into(),
+                actual: layer.protocol_id().clone(),
+            })?;
+        let mut encoded = EncodedLayer::header(vec![probe.value], Box::new(probe.clone()));
+        encoded.fields = probe_layout();
+        encoded
+            .diagnostics
+            .push(Diagnostic::info("probe.encoded", "encoded probe"));
+        Ok(encoded)
+    }
+
+    fn decode(
+        &self,
+        input: &[u8],
+        _context: &LayerDecodeContext<'_>,
+    ) -> Result<DecodedLayerValue, CodecError> {
+        let Some(value) = input.first().copied() else {
+            return Err(CodecError::Truncated {
+                protocol: "probe".into(),
+                needed: 1,
+                available: 0,
+            });
+        };
+        let payload_len = input.len() - 1;
+        Ok(DecodedLayerValue {
+            layer: Box::new(Probe {
+                value,
+                ..Probe::default()
+            }),
+            consumed: 1,
+            payload_len,
+            next: (payload_len != 0)
+                .then_some(Discriminator(7))
+                .into_iter()
+                .collect(),
+            fields: probe_layout(),
+            diagnostics: vec![Diagnostic::warning("probe.decoded", "decoded probe")],
+            stop: payload_len == 0,
+            network: None,
+        })
+    }
+
+    fn make_layer(
+        &self,
+        fields: &BTreeMap<String, FieldValue>,
+    ) -> Result<Box<dyn Layer>, CodecError> {
+        let mut layer = Probe::default();
+        for (name, value) in fields {
+            layer.set_field(name, value.clone())?;
+        }
+        Ok(Box::new(layer))
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ChildCodec;
+
+impl LayerCodec for ChildCodec {
+    fn protocol_id(&self) -> ProtocolId {
+        "child".into()
+    }
+
+    fn encode(
+        &self,
+        layer: &dyn Layer,
+        _payload: &[u8],
+        _context: &LayerEncodeContext<'_>,
+    ) -> Result<EncodedLayer, CodecError> {
+        let child = layer
+            .as_any()
+            .downcast_ref::<Child>()
+            .ok_or_else(|| CodecError::WrongLayer {
+                expected: "child".into(),
+                actual: layer.protocol_id().clone(),
+            })?;
+        let mut encoded = EncodedLayer::header(vec![child.value], Box::new(child.clone()));
+        encoded.fields = child_layout();
+        Ok(encoded)
+    }
+
+    fn decode(
+        &self,
+        input: &[u8],
+        _context: &LayerDecodeContext<'_>,
+    ) -> Result<DecodedLayerValue, CodecError> {
+        let value = input
+            .first()
+            .copied()
+            .ok_or_else(|| CodecError::Truncated {
+                protocol: "child".into(),
+                needed: 1,
+                available: 0,
+            })?;
+        let mut decoded = DecodedLayerValue::terminal(Box::new(Child { value }), 1);
+        decoded.fields = child_layout();
+        Ok(decoded)
+    }
+
+    fn make_layer(
+        &self,
+        fields: &BTreeMap<String, FieldValue>,
+    ) -> Result<Box<dyn Layer>, CodecError> {
+        let mut layer = Child::default();
+        for (name, value) in fields {
+            layer.set_field(name, value.clone())?;
+        }
+        Ok(Box::new(layer))
+    }
+}
+
+fn registry() -> packetcraftr_core::registry::Registry {
+    let mut builder = RegistryBuilder::new();
+    builder.register_codec(ProbeCodec).expect("register probe");
+    builder.register_codec(ChildCodec).expect("register child");
+    builder.bind_link_type(777, "probe").expect("bind root");
+    builder.bind("probe", 7, "child", 10).expect("bind child");
+    builder.build().expect("valid test registry")
+}

@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::diagnostic::DiagnosticSeverity;
+use crate::diagnostic::Severity;
 
 use crate::analysis::adapter::Transports;
 use crate::analysis::pipeline::FrameRecord;
@@ -94,7 +94,7 @@ fn diagnostic_stream(layer: Option<usize>, streams: DiagnosticStreams) -> Option
 }
 
 pub(super) fn new(
-    severity: DiagnosticSeverity,
+    severity: Severity,
     code: impl Into<String>,
     number: u64,
     stream: Option<StreamRef>,

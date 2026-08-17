@@ -4,23 +4,23 @@
 use std::net::IpAddr;
 
 use super::super::{BuiltinProtocol, FieldValue, Packet};
-use super::error::SemanticError;
+use super::error::Error;
 use super::path::{DESTINATION, SEGMENTS, TARGET_PROTOCOL, ip_path_at};
-use crate::layer::MalformedLayer;
+use crate::layer::Malformed;
 
 pub(super) const ROUTE_FIELDS: [&str; 3] = [DESTINATION, SEGMENTS, TARGET_PROTOCOL];
 
 /// Enumerates every address that can affect a live destination. Unknown
 /// protocols cannot opt into route semantics by imitating reflective names.
-pub fn live_destinations(packet: &Packet) -> Result<Vec<IpAddr>, SemanticError> {
+pub fn live_destinations(packet: &Packet) -> Result<Vec<IpAddr>, Error> {
     let mut destinations = Vec::new();
     for (index, layer) in packet.iter().enumerate() {
-        if let Some(malformed) = layer.as_any().downcast_ref::<MalformedLayer>()
+        if let Some(malformed) = layer.as_any().downcast_ref::<Malformed>()
             && let Some(intended) = malformed.intended_protocol.as_ref()
             && BuiltinProtocol::from_name_or_alias(intended.as_str())
                 .is_some_and(malformed_protocol_may_hide_destination)
         {
-            return Err(SemanticError::new(format!(
+            return Err(Error::new(format!(
                 "malformed {} layer may hide a live destination: {}",
                 intended, malformed.reason
             )));
@@ -42,14 +42,14 @@ pub fn live_destinations(packet: &Packet) -> Result<Vec<IpAddr>, SemanticError> 
                     push_if_specified(&mut destinations, IpAddr::V4(value));
                 }
                 Some(_) => {
-                    return Err(SemanticError::field(
+                    return Err(Error::field(
                         layer.protocol_id(),
                         TARGET_PROTOCOL,
                         "is not IPv4",
                     ));
                 }
                 None => {
-                    return Err(SemanticError::field(
+                    return Err(Error::field(
                         layer.protocol_id(),
                         TARGET_PROTOCOL,
                         "is missing",
@@ -66,7 +66,7 @@ pub fn live_destinations(packet: &Packet) -> Result<Vec<IpAddr>, SemanticError> 
                         .any(|schema| schema.name == **field)
                         || layer.field(field).is_some()
                 }) {
-                    return Err(SemanticError::new(format!(
+                    return Err(Error::new(format!(
                         "unknown protocol {} exposes route-bearing field {field}",
                         layer.protocol_id()
                     )));
@@ -121,7 +121,7 @@ fn malformed_protocol_may_hide_destination(protocol: BuiltinProtocol) -> bool {
     }
 }
 
-fn validate_attached_srh(packet: &Packet, srh_index: usize) -> Result<(), SemanticError> {
+fn validate_attached_srh(packet: &Packet, srh_index: usize) -> Result<(), Error> {
     for (network_index, candidate) in packet.iter().enumerate().take(srh_index).rev() {
         match BuiltinProtocol::of(candidate) {
             Some(BuiltinProtocol::Ipv6) => {
@@ -132,7 +132,7 @@ fn validate_attached_srh(packet: &Packet, srh_index: usize) -> Result<(), Semant
             _ => break,
         }
     }
-    Err(SemanticError::new(
+    Err(Error::new(
         "IPv6 SRH is not in a contiguous typed extension chain",
     ))
 }

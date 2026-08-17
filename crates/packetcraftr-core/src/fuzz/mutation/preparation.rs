@@ -10,17 +10,22 @@ use crate::budget::Deadline;
 use crate::error::{Classification, Kind};
 use crate::{
     Packet,
-    build::{BuildContext, Builder},
+    build::{Builder, Context as BuildContext},
     decode::Dissector,
     field::{FieldKind, FieldValue},
     registry::Registry,
 };
 
 use super::super::MAX_TARGET_FIELDS;
-use super::super::error::{FuzzError, duration_limit};
+use super::super::error::{Error, duration_limit};
 use super::super::execution::case_seed;
-use super::super::request::{FuzzLimits, FuzzRequest, FuzzStrategy, FuzzTarget};
-use super::super::result::{FuzzCase, FuzzCaseFailure, FuzzCaseOutcome, FuzzMutation};
+use super::super::request::{
+    Limits as FuzzLimits, Request as FuzzRequest, Strategy as FuzzStrategy, Target as FuzzTarget,
+};
+use super::super::result::{
+    Case as FuzzCase, CaseFailure as FuzzCaseFailure, CaseOutcome as FuzzCaseOutcome,
+    Mutation as FuzzMutation,
+};
 use super::super::run::{Campaign, ResolvedField};
 use super::decode::dissect_built;
 use super::value::{bounded_value_size, index_from, mutation_value, shrink_values};
@@ -30,7 +35,7 @@ pub(in crate::fuzz) fn prepare(
     packet: Packet,
     registry: Arc<Registry>,
     deadline: &mut Deadline,
-) -> Result<Campaign, FuzzError> {
+) -> Result<Campaign, Error> {
     deadline
         .start_accounting(Duration::ZERO)
         .map_err(duration_limit)?;
@@ -38,7 +43,7 @@ pub(in crate::fuzz) fn prepare(
     validate_base_shape(&packet, request.build.max_layers)?;
     packet_reflected_value_bytes(&packet, request.limits)?;
     let fields = resolve_fields(&packet, &request.targets)?;
-    let pairs = request
+    let compatible_mutations = request
         .strategies
         .iter()
         .copied()
@@ -50,140 +55,237 @@ pub(in crate::fuzz) fn prepare(
                 .map(move |(field_index, _)| (strategy, field_index))
         })
         .collect::<Vec<_>>();
-    if pairs.is_empty() {
-        return Err(FuzzError::NoCompatibleTargets);
+    if compatible_mutations.is_empty() {
+        return Err(Error::NoCompatibleTargets);
     }
 
     let builder = Builder::new(Arc::clone(&registry));
     let dissector = Dissector::new(registry);
+    let campaign = prepare_cases(
+        request,
+        &packet,
+        &fields,
+        &compatible_mutations,
+        &builder,
+        &dissector,
+        deadline,
+    )?;
+    deadline
+        .account(started.elapsed())
+        .map_err(duration_limit)?;
+    Ok(campaign)
+}
+
+#[derive(Default)]
+struct Counters {
+    built_cases: u64,
+    built_bytes: u64,
+    retained_bytes: u64,
+}
+
+struct CaseInputs<'a> {
+    request: &'a FuzzRequest,
+    packet: &'a Packet,
+    fields: &'a [ResolvedField],
+    compatible_mutations: &'a [(FuzzStrategy, usize)],
+    builder: &'a Builder,
+    dissector: &'a Dissector,
+}
+
+fn prepare_cases(
+    request: &FuzzRequest,
+    packet: &Packet,
+    fields: &[ResolvedField],
+    compatible_mutations: &[(FuzzStrategy, usize)],
+    builder: &Builder,
+    dissector: &Dissector,
+    deadline: &Deadline,
+) -> Result<Campaign, Error> {
     let mut cases = Vec::with_capacity(request.cases);
-    let mut built_case_count = 0_u64;
-    let mut built_byte_count = 0_u64;
-    let mut retained_bytes = 0_u64;
-    let total_byte_limit = request.limits.max_total_bytes as u64;
+    let mut counters = Counters::default();
+    let inputs = CaseInputs {
+        request,
+        packet,
+        fields,
+        compatible_mutations,
+        builder,
+        dissector,
+    };
     for offset in 0..request.cases {
         deadline.check().map_err(duration_limit)?;
-        let index = request
-            .first_case
-            .checked_add(offset as u64)
-            .ok_or(FuzzError::CaseIndexOverflow)?;
-        let seed = case_seed(request.seed, index);
-        let pair_index = index_from(index, pairs.len());
-        let round = index / pairs.len() as u64;
-        let (strategy, field_index) = pairs[pair_index];
-        let field = &fields[field_index];
-        let mut recipe = packet.clone();
-        let layer = recipe
-            .layer(field.target.layer)
-            .expect("resolved layer must remain present");
-        let original = layer
-            .field(&field.target.field)
-            .expect("resolved field must remain readable");
-        let value = mutation_value(strategy, field, &original, seed, round, request.limits);
-        let mutation = FuzzMutation {
-            layer: field.target.layer,
-            protocol: field.protocol.clone(),
-            field: field.target.field.clone(),
-            strategy,
-            original: original.clone(),
-            value: value.clone(),
-        };
-        let shrink_values = shrink_values(&value, request.limits.max_shrink_steps);
-        let set_result = recipe
-            .layer_mut(field.target.layer)
-            .expect("resolved mutable layer must remain present")
-            .set_field(&field.target.field, value);
-        let case_value_bytes =
-            retained_case_value_bytes(&mutation, &shrink_values, &recipe, request.limits)?;
-        charge_retained_bytes(&mut retained_bytes, case_value_bytes, total_byte_limit)?;
-        let mut case = FuzzCase {
-            index,
-            seed,
-            mutation,
-            shrink_values,
-            recipe,
-            built: None,
-            decoded: None,
-            outcome: FuzzCaseOutcome::Rejected,
-            error: None,
-            diagnostics: Vec::new(),
-        };
-        if let Err(source) = set_result {
+        cases.push(prepare_case(&inputs, offset, &mut counters)?);
+    }
+    Ok(Campaign {
+        cases,
+        built_case_count: counters.built_cases,
+        built_byte_count: counters.built_bytes,
+        retained_byte_count: counters.retained_bytes,
+    })
+}
+
+fn prepare_case(
+    inputs: &CaseInputs<'_>,
+    offset: usize,
+    counters: &mut Counters,
+) -> Result<FuzzCase, Error> {
+    let request = inputs.request;
+    let compatible_mutations = inputs.compatible_mutations;
+    let total_byte_limit = request.limits.max_total_bytes as u64;
+    let index = request
+        .first_case
+        .checked_add(offset as u64)
+        .ok_or(Error::CaseIndexOverflow)?;
+    let seed = case_seed(request.seed, index);
+    let selection_index = index_from(index, compatible_mutations.len());
+    let strategy_round = index / compatible_mutations.len() as u64;
+    let (strategy, field_index) = compatible_mutations[selection_index];
+    let field = &inputs.fields[field_index];
+    let mut recipe = inputs.packet.clone();
+    let original = recipe
+        .layer(field.target.layer)
+        .expect("resolved layer must remain present")
+        .field(&field.target.field)
+        .expect("resolved field must remain readable");
+    let mutated_value = mutation_value(
+        strategy,
+        field,
+        &original,
+        seed,
+        strategy_round,
+        request.limits,
+    );
+    let mutation = FuzzMutation {
+        layer: field.target.layer,
+        protocol: field.protocol.clone(),
+        field: field.target.field.clone(),
+        strategy,
+        original,
+        value: mutated_value.clone(),
+    };
+    let shrink_values = shrink_values(&mutated_value, request.limits.max_shrink_steps);
+    let mutation_result = recipe
+        .layer_mut(field.target.layer)
+        .expect("resolved mutable layer must remain present")
+        .set_field(&field.target.field, mutated_value);
+    let retained_value_bytes =
+        retained_case_value_bytes(&mutation, &shrink_values, &recipe, request.limits)?;
+    charge_retained_bytes(
+        &mut counters.retained_bytes,
+        retained_value_bytes,
+        total_byte_limit,
+    )?;
+    let mut case = new_case(index, seed, mutation, shrink_values, recipe);
+    if let Err(source) = mutation_result {
+        case.error = Some(mutation_failure(source));
+        return Ok(case);
+    }
+    build_case(
+        &mut case,
+        request,
+        inputs.builder,
+        inputs.dissector,
+        counters,
+        total_byte_limit,
+    )?;
+    Ok(case)
+}
+
+fn new_case(
+    index: u64,
+    seed: u64,
+    mutation: FuzzMutation,
+    shrink_values: Vec<FieldValue>,
+    recipe: Packet,
+) -> FuzzCase {
+    FuzzCase {
+        index,
+        seed,
+        mutation,
+        shrink_values,
+        recipe,
+        built: None,
+        decoded: None,
+        outcome: FuzzCaseOutcome::Rejected,
+        error: None,
+        diagnostics: Vec::new(),
+    }
+}
+
+fn mutation_failure(source: impl std::fmt::Display) -> FuzzCaseFailure {
+    FuzzCaseFailure::new(
+        format!("mutation was rejected: {source}"),
+        Classification::new(
+            "packet.fuzz_mutation",
+            Kind::Packet,
+            Some(
+                "select a type/range accepted by the target field or retain the rejected case as fuzz evidence",
+            ),
+        ),
+        Vec::new(),
+    )
+}
+
+fn build_case(
+    case: &mut FuzzCase,
+    request: &FuzzRequest,
+    builder: &Builder,
+    dissector: &Dissector,
+    counters: &mut Counters,
+    total_byte_limit: u64,
+) -> Result<(), Error> {
+    match builder.build(
+        case.recipe.clone(),
+        BuildContext::default(),
+        request.build.clone(),
+    ) {
+        Ok(built) => {
+            let next_built_bytes = counters
+                .built_bytes
+                .checked_add(built.bytes.len() as u64)
+                .ok_or(byte_limit(u64::MAX, total_byte_limit))?;
+            if next_built_bytes > total_byte_limit {
+                return Err(byte_limit(next_built_bytes, total_byte_limit));
+            }
+            charge_retained_bytes(
+                &mut counters.retained_bytes,
+                built.bytes.len() as u64,
+                total_byte_limit,
+            )?;
+            case.diagnostics.extend_from_slice(&built.diagnostics);
+            case.decoded = dissect_built(dissector, &built, request.limits, &mut case.diagnostics);
+            if let Some(decoded) = &case.decoded {
+                let decoded_bytes = packet_reflected_value_bytes(&decoded.packet, request.limits)?;
+                charge_retained_bytes(
+                    &mut counters.retained_bytes,
+                    decoded_bytes,
+                    total_byte_limit,
+                )?;
+            }
+            case.built = Some(built);
+            case.outcome = FuzzCaseOutcome::Built;
+            counters.built_cases += 1;
+            counters.built_bytes = next_built_bytes;
+        }
+        Err(source) => {
             case.error = Some(FuzzCaseFailure::new(
-                format!("mutation was rejected: {source}"),
+                format!("mutated packet was rejected: {source}"),
                 Classification::new(
-                    "packet.fuzz_mutation",
+                    "packet.fuzz_build",
                     Kind::Packet,
                     Some(
-                        "select a type/range accepted by the target field or retain the rejected case as fuzz evidence",
+                        "reproduce the case in permissive offline mode when malformed dependent fields are intentional",
                     ),
                 ),
                 Vec::new(),
             ));
-            cases.push(case);
-            continue;
         }
-
-        match builder.build(
-            case.recipe.clone(),
-            BuildContext::default(),
-            request.build.clone(),
-        ) {
-            Ok(built) => {
-                let next_built_byte_count = built_byte_count
-                    .checked_add(built.bytes.len() as u64)
-                    .ok_or(byte_limit(u64::MAX, total_byte_limit))?;
-                if next_built_byte_count > total_byte_limit {
-                    return Err(byte_limit(next_built_byte_count, total_byte_limit));
-                }
-                charge_retained_bytes(
-                    &mut retained_bytes,
-                    built.bytes.len() as u64,
-                    total_byte_limit,
-                )?;
-                case.diagnostics.extend_from_slice(&built.diagnostics);
-                case.decoded =
-                    dissect_built(&dissector, &built, request.limits, &mut case.diagnostics);
-                if let Some(decoded) = &case.decoded {
-                    let decoded_bytes =
-                        packet_reflected_value_bytes(&decoded.packet, request.limits)?;
-                    charge_retained_bytes(&mut retained_bytes, decoded_bytes, total_byte_limit)?;
-                }
-                case.built = Some(built);
-                case.outcome = FuzzCaseOutcome::Built;
-                built_case_count += 1;
-                built_byte_count = next_built_byte_count;
-            }
-            Err(source) => {
-                case.error = Some(FuzzCaseFailure::new(
-                    format!("mutated packet was rejected: {source}"),
-                    Classification::new(
-                        "packet.fuzz_build",
-                        Kind::Packet,
-                        Some(
-                            "reproduce the case in permissive offline mode when malformed dependent fields are intentional",
-                        ),
-                    ),
-                    Vec::new(),
-                ));
-            }
-        }
-        cases.push(case);
     }
-    deadline
-        .account(started.elapsed())
-        .map_err(duration_limit)?;
-    Ok(Campaign {
-        cases,
-        built_case_count,
-        built_byte_count,
-        retained_byte_count: retained_bytes,
-    })
+    Ok(())
 }
 
-fn validate_base_shape(packet: &Packet, max_layers: usize) -> Result<(), FuzzError> {
+fn validate_base_shape(packet: &Packet, max_layers: usize) -> Result<(), Error> {
     if packet.len() > max_layers {
-        return Err(FuzzError::InvalidBasePacket {
+        return Err(Error::InvalidBasePacket {
             message: format!(
                 "packet has {} layers, exceeding build.max_layers={max_layers}",
                 packet.len()
@@ -194,11 +296,11 @@ fn validate_base_shape(packet: &Packet, max_layers: usize) -> Result<(), FuzzErr
     for layer in packet.iter() {
         fields = fields
             .checked_add(layer.schema().fields.len())
-            .ok_or_else(|| FuzzError::InvalidBasePacket {
+            .ok_or_else(|| Error::InvalidBasePacket {
                 message: "reflected field-count arithmetic overflowed".to_owned(),
             })?;
         if fields > MAX_TARGET_FIELDS {
-            return Err(FuzzError::InvalidBasePacket {
+            return Err(Error::InvalidBasePacket {
                 message: format!(
                     "packet schema exposes {fields} fields, exceeding hard limit {MAX_TARGET_FIELDS}"
                 ),
@@ -213,7 +315,7 @@ fn retained_case_value_bytes(
     shrink_values: &[FieldValue],
     recipe: &Packet,
     limits: FuzzLimits,
-) -> Result<u64, FuzzError> {
+) -> Result<u64, Error> {
     let limit = limits.max_total_bytes as u64;
     let mut total = (mutation.protocol.len() as u64)
         .checked_add(mutation.field.len() as u64)
@@ -236,7 +338,7 @@ fn retained_case_value_bytes(
         .ok_or(byte_limit(u64::MAX, limit))
 }
 
-fn packet_reflected_value_bytes(packet: &Packet, limits: FuzzLimits) -> Result<u64, FuzzError> {
+fn packet_reflected_value_bytes(packet: &Packet, limits: FuzzLimits) -> Result<u64, Error> {
     let mut total = 0_u64;
     let limit = limits.max_total_bytes as u64;
     for layer in packet.iter() {
@@ -257,7 +359,7 @@ fn packet_reflected_value_bytes(packet: &Packet, limits: FuzzLimits) -> Result<u
     Ok(total)
 }
 
-fn charge_retained_bytes(total: &mut u64, value: u64, limit: u64) -> Result<(), FuzzError> {
+fn charge_retained_bytes(total: &mut u64, value: u64, limit: u64) -> Result<(), Error> {
     let next = total
         .checked_add(value)
         .ok_or(byte_limit(u64::MAX, limit))?;
@@ -268,14 +370,11 @@ fn charge_retained_bytes(total: &mut u64, value: u64, limit: u64) -> Result<(), 
     Ok(())
 }
 
-fn byte_limit(actual: u64, limit: u64) -> FuzzError {
-    FuzzError::ByteLimit { actual, limit }
+fn byte_limit(actual: u64, limit: u64) -> Error {
+    Error::ByteLimit { actual, limit }
 }
 
-fn resolve_fields(
-    packet: &Packet,
-    requested: &[FuzzTarget],
-) -> Result<Vec<ResolvedField>, FuzzError> {
+fn resolve_fields(packet: &Packet, requested: &[FuzzTarget]) -> Result<Vec<ResolvedField>, Error> {
     if requested.is_empty() {
         let mut fields = Vec::new();
         for (layer_index, layer) in packet.iter().enumerate() {
@@ -284,7 +383,7 @@ fn resolve_fields(
                     continue;
                 }
                 if fields.len() >= MAX_TARGET_FIELDS {
-                    return Err(FuzzError::InvalidBasePacket {
+                    return Err(Error::InvalidBasePacket {
                         message: format!(
                             "packet exposes more than {MAX_TARGET_FIELDS} reflected fields"
                         ),
@@ -302,13 +401,13 @@ fn resolve_fields(
             }
         }
         if fields.is_empty() {
-            return Err(FuzzError::NoCompatibleTargets);
+            return Err(Error::NoCompatibleTargets);
         }
         return Ok(fields);
     }
 
     if requested.len() > MAX_TARGET_FIELDS {
-        return Err(FuzzError::InvalidBasePacket {
+        return Err(Error::InvalidBasePacket {
             message: format!(
                 "request selects {} fields, exceeding hard limit {MAX_TARGET_FIELDS}",
                 requested.len()
@@ -325,7 +424,7 @@ fn resolve_fields(
         }
         let layer = packet
             .layer(target.layer)
-            .ok_or_else(|| FuzzError::InvalidTarget {
+            .ok_or_else(|| Error::InvalidTarget {
                 target: target.clone(),
                 message: format!("layer index is outside packet length {}", packet.len()),
             })?;
@@ -334,12 +433,12 @@ fn resolve_fields(
             .fields
             .iter()
             .find(|field| field.name == target.field)
-            .ok_or_else(|| FuzzError::InvalidTarget {
+            .ok_or_else(|| Error::InvalidTarget {
                 target: target.clone(),
                 message: format!("layer {} has no such reflected field", layer.protocol_id()),
             })?;
         if layer.field(schema.name).is_none() {
-            return Err(FuzzError::InvalidTarget {
+            return Err(Error::InvalidTarget {
                 target: target.clone(),
                 message: "field is not reflectively readable".to_owned(),
             });

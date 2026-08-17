@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use crate::diagnostic::DiagnosticSeverity;
+use crate::diagnostic::Severity;
 
 use super::super::finding::new as new_finding;
 use super::super::observation::TcpObservation;
@@ -44,7 +44,7 @@ pub(super) fn observe_duplicate(
             sent.duplicate_acks += 1;
             let count = sent.duplicate_acks;
             findings.push(new_finding(
-                DiagnosticSeverity::Warning,
+                Severity::Warning,
                 "tcp.duplicate_ack",
                 number,
                 stream,

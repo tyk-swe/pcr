@@ -11,7 +11,7 @@ use crate::replay::{FrameEvidence as ReplayFrameEvidence, Summary as ReplaySumma
 use packetcraftr_netio::{interface::Id as InterfaceId, link::Mode as NetworkLinkMode};
 
 use super::contract::Error;
-pub use super::frame::Captured;
+use super::frame::Captured;
 
 /// Aggregate or terminal result of `replay`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -89,9 +89,12 @@ pub struct Result {
     pub timing: Timing,
     pub requested_interface: Interface,
     pub requested_link_mode: LinkMode,
-    pub frames_attempted: u64,
-    pub frames_completed: u64,
-    pub bytes_completed: u64,
+    #[serde(rename = "frames_attempted")]
+    pub frames_read: u64,
+    #[serde(rename = "frames_completed")]
+    pub frames_transmitted: u64,
+    #[serde(rename = "bytes_completed")]
+    pub bytes_transmitted: u64,
     pub scheduled_duration: Duration,
     pub frames: Vec<Frame>,
 }
@@ -108,9 +111,9 @@ impl Result {
             timing: summary.timing.into(),
             requested_interface: requested_interface.into(),
             requested_link_mode: requested_link_mode.into(),
-            frames_attempted: summary.frames_attempted,
-            frames_completed: summary.frames_completed,
-            bytes_completed: summary.bytes_completed,
+            frames_read: summary.frames_read,
+            frames_transmitted: summary.frames_transmitted,
+            bytes_transmitted: summary.bytes_transmitted,
             scheduled_duration: summary.scheduled_duration,
             frames,
         }
@@ -120,7 +123,8 @@ impl Result {
 /// One frame record produced by streaming `replay` output.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Frame {
-    pub source_sequence: u64,
+    #[serde(rename = "source_sequence")]
+    pub source_index: u64,
     pub interface: Interface,
     pub link_mode: LinkMode,
     pub scheduled_delay: Duration,
@@ -132,7 +136,7 @@ pub struct Frame {
 impl Frame {
     pub fn try_from_evidence(evidence: ReplayFrameEvidence) -> std::result::Result<Self, Error> {
         Ok(Self {
-            source_sequence: evidence.source_sequence,
+            source_index: evidence.source_index,
             interface: evidence.transmission().interface.clone().into(),
             link_mode: evidence.link_mode.into(),
             scheduled_delay: evidence.scheduled_delay,

@@ -1,9 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use clap::Args;
-
-use crate::command_options::{CaptureLimitArgs, HostnameTrafficPolicyArgs, RouteArgs};
+use crate::command_options::{CaptureLimitsArgs, HostnameTrafficPolicyArgs, RouteArgs};
 
 pub(crate) const AFTER_LONG_HELP: &str = r#"Live capture may require native features, dependencies, and privileges.
 
@@ -22,8 +20,8 @@ Examples:
     --capture-filter 'udp port 53' \
     --filter 'udp.source_port == 53'"#;
 
-#[derive(Debug, Args)]
-pub(crate) struct CaptureArgs {
+#[derive(Debug, clap::Args)]
+pub(crate) struct Args {
     #[command(flatten)]
     pub(crate) route: RouteArgs,
     /// Overall capture window in milliseconds.
@@ -36,7 +34,7 @@ pub(crate) struct CaptureArgs {
     #[arg(long, value_name = "EXPR")]
     pub(crate) filter: Option<String>,
     #[command(flatten)]
-    pub(crate) limits: CaptureLimitArgs,
+    pub(crate) limits: CaptureLimitsArgs,
     #[command(flatten)]
     pub(crate) policy: HostnameTrafficPolicyArgs,
 }

@@ -7,13 +7,13 @@ use thiserror::Error;
 
 use crate::BoundaryError;
 use packetcraftr_core::error::{Classified, Kind};
-// `scan` re-exports `ScanClassification as Classification`, so the shared
-// error taxonomy is aliased here to keep the two names unambiguous.
+// The scan model also exposes `Classification`, so the shared error taxonomy
+// is aliased here to keep the two names unambiguous.
 use packetcraftr_core::error::Classification as ErrorClassification;
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
-pub enum ScanError {
+pub enum Error {
     #[error("invalid scan limit {field}={value}: {reason}")]
     InvalidLimit {
         field: &'static str,
@@ -46,7 +46,7 @@ pub enum ScanError {
     StatisticsOverflow { sequence: u64 },
 }
 
-impl ScanError {
+impl Error {
     pub fn sequence(&self) -> Option<u64> {
         match self {
             Self::Execution { sequence, .. }
@@ -58,7 +58,7 @@ impl ScanError {
     }
 }
 
-impl Classified for ScanError {
+impl Classified for Error {
     fn classification(&self) -> ErrorClassification {
         match self {
             Self::InvalidLimit { .. }

@@ -4,12 +4,14 @@
 //! Machine, capture-file, and human-terminal rendering.
 
 mod capture_file;
+mod capture_writer;
 mod human;
 mod machine;
-mod sequence;
+mod ndjson;
 mod style;
 
 pub(crate) use capture_file::{capture_file_format, write_capture_file, write_raw};
+pub(crate) use capture_writer::CaptureWriter;
 
 pub(crate) use human::{
     emit_stderr_document, emit_stderr_error, emit_stderr_message, emit_stdout_document,
@@ -21,6 +23,6 @@ pub(crate) use machine::{
     emit_json_compact, optional_display, output_timestamp_text, render_optional, spaced_hex,
 };
 
-pub(crate) use sequence::{emit_stream, emit_stream_record, emit_stream_with_stats};
+pub(crate) use ndjson::{emit, emit_next, emit_with_stats};
 
 pub(crate) use style::terminal_document;

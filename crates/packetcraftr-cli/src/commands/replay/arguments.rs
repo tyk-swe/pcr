@@ -3,10 +3,10 @@
 
 use std::path::PathBuf;
 
-use clap::{Args, ValueEnum};
+use clap::ValueEnum;
 use packetcraftr::analysis::pcap as capture;
 
-use crate::command_options::{CliLinkMode, ReplayPolicyArgs};
+use crate::command_options::{LinkMode, PermissivePacketArgs, PublicDestinationArgs};
 
 pub(crate) const AFTER_LONG_HELP: &str = r#"Replay is policy-gated and may require native features, dependencies, and privileges.
 
@@ -18,25 +18,25 @@ Examples:
   packetcraftr replay capture.pcap --interface eth0 --filter 'udp && ip.dst == 10.0.0.2'"#;
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
-pub(crate) enum CliReplayTiming {
+pub(crate) enum Timing {
     #[default]
     Original,
     Immediate,
 }
 
-#[derive(Debug, Args)]
-pub(crate) struct ReplayArgs {
+#[derive(Debug, clap::Args)]
+pub(crate) struct Args {
     /// Classic PCAP or PCAPNG input path.
     pub(crate) path: PathBuf,
     /// Exact interface name or numeric index used for every transmission.
     #[arg(long, value_name = "NAME_OR_INDEX")]
     pub(crate) interface: String,
     /// Automatic, Layer 2, or raw Layer 3 replay intent.
-    #[arg(long, value_enum, default_value_t = CliLinkMode::Auto)]
-    pub(crate) link_mode: CliLinkMode,
+    #[arg(long, value_enum, default_value_t = LinkMode::Auto)]
+    pub(crate) link_mode: LinkMode,
     /// Preserve captured intervals or send immediately.
-    #[arg(long, value_enum, default_value_t = CliReplayTiming::Original)]
-    pub(crate) timing: CliReplayTiming,
+    #[arg(long, value_enum, default_value_t = Timing::Original)]
+    pub(crate) timing: Timing,
     /// Positive multiplier for captured replay speed (2 means twice as fast).
     #[arg(long, conflicts_with = "rate")]
     pub(crate) speed: Option<f64>,
@@ -60,5 +60,30 @@ pub(crate) struct ReplayArgs {
     #[arg(long, value_name = "EXPR")]
     pub(crate) filter: Option<String>,
     #[command(flatten)]
-    pub(crate) policy: ReplayPolicyArgs,
+    pub(crate) policy: PolicyArgs,
+}
+
+#[derive(Clone, Debug, clap::Args)]
+pub(crate) struct PolicyArgs {
+    #[command(flatten)]
+    public_destination: PublicDestinationArgs,
+    #[command(flatten)]
+    permissive_packet: PermissivePacketArgs,
+    /// Maximum packets authorized for one operation.
+    #[arg(long, default_value_t = capture::DEFAULT_STREAM_FRAMES)]
+    max_packets: u64,
+    /// Maximum wire bytes authorized for one operation.
+    #[arg(long, default_value_t = capture::DEFAULT_STREAM_BYTES)]
+    max_bytes: u64,
+}
+
+impl PolicyArgs {
+    pub(crate) fn into_policy(self) -> packetcraftr::policy::Policy {
+        let mut policy = packetcraftr::policy::Policy::default();
+        self.public_destination.apply_to(&mut policy);
+        self.permissive_packet.apply_to(&mut policy);
+        policy.max_packets_per_operation = self.max_packets;
+        policy.max_bytes_per_operation = self.max_bytes;
+        policy
+    }
 }

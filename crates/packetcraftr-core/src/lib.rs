@@ -34,4 +34,4 @@ pub mod registry;
 pub mod semantics;
 pub mod template;
 
-pub use model::{Packet, PacketError as Error};
+pub use model::{Error, Packet};

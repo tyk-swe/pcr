@@ -12,101 +12,32 @@ use std::time::Duration;
 
 use packetcraftr::{core, netio as net, output};
 
-use self::arguments::TracerouteArgs;
+use self::arguments::Args;
+use super::registry;
 use crate::errors::CliError;
-use crate::rendering::emit_aggregate_with_stats;
-use crate::system::{
-    DeferredInterface, default_registry_arc, parse_workflow_target, system_client,
-    validate_live_interface_selector, workflow_exchange_options,
-};
+use crate::input::parse_target;
+use crate::system::{DeferredInterface, client, exchange, validate_selector};
 
-use execution::CliTracerouteExecutor;
-use rendering::{render_traceroute_stream, render_traceroute_text};
+use execution::Executor;
 
-pub(super) fn run(
-    arguments: TracerouteArgs,
-    output: output::contract::Format,
-) -> Result<(), CliError> {
-    let TracerouteArgs {
-        target,
-        strategy,
-        family,
-        port,
-        first_hop,
-        max_hops,
-        attempts,
-        timeout_ms,
-        rate,
-        max_probes,
-        max_duration_ms,
-        max_undecoded,
-        route,
-        limits,
-        policy,
-    } = arguments;
-    let target = parse_workflow_target(target)?;
-    let strategy: packetcraftr::traceroute::Strategy = strategy.into();
-    let destination_port = match strategy {
-        packetcraftr::traceroute::Strategy::Udp => {
-            Some(port.unwrap_or(packetcraftr::traceroute::DEFAULT_TRACEROUTE_UDP_PORT))
-        }
-        packetcraftr::traceroute::Strategy::Tcp => {
-            Some(port.unwrap_or(packetcraftr::traceroute::DEFAULT_TRACEROUTE_TCP_PORT))
-        }
-        packetcraftr::traceroute::Strategy::Icmp => port,
-    };
-    let queue_limits = limits.into_limits();
-    let trace_limits = packetcraftr::traceroute::Limits {
-        max_probes,
-        max_duration: Duration::from_millis(max_duration_ms),
-        max_evidence_frames: queue_limits.max_frames,
-        max_evidence_bytes: queue_limits.max_bytes,
-        max_undecoded,
-    };
-    let request = packetcraftr::traceroute::Request {
-        target,
-        strategy,
-        address_family: family.into(),
-        destination_port,
-        first_hop,
-        max_hops,
-        probes_per_hop: attempts,
-        timeout: Duration::from_millis(timeout_ms),
-        probes_per_second: rate,
-        limits: trace_limits,
-    };
-    request.validate().map_err(traceroute_cli_error)?;
-    let policy = policy.into_policy();
+pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
+    let queue_limits = arguments.limits.clone().into_limits();
+    let request = prepare_request(&arguments, queue_limits)?;
+    let policy = arguments.policy.clone().into_policy();
     policy.validate().map_err(CliError::classified)?;
-    validate_live_interface_selector("traceroute", route.interface.as_deref())?;
-    let max_template_packets = usize::try_from(attempts).map_err(|_| {
+    validate_selector(arguments.route.interface.as_deref()).map(|_| ())?;
+    let max_template_packets = usize::try_from(arguments.attempts).map_err(|_| {
         CliError::new(
             2,
             "traceroute attempt count exceeds the platform size limit",
         )
     })?;
-
-    let registry = default_registry_arc()?;
-    let exchange = workflow_exchange_options(
-        packetcraftr::send::Options {
-            destination: None,
-            plan: net::route::Options {
-                link_mode: route.link_mode.into(),
-                interface: None,
-                preferred_source: route.source,
-            },
-            build: core::build::BuildOptions::default(),
-            allow_permissive_live: false,
-        },
-        request.timeout,
-        max_template_packets,
-        queue_limits,
-    )?;
-
-    let mut executor = CliTracerouteExecutor {
-        client: system_client(Arc::clone(&registry), policy.clone()),
+    let registry = registry()?;
+    let exchange = prepare_exchange(&arguments, &request, queue_limits, max_template_packets)?;
+    let mut executor = Executor {
+        client: client(Arc::clone(&registry), policy.clone()),
         exchange,
-        interface: DeferredInterface::new(route.interface),
+        interface: DeferredInterface::new(arguments.route.interface),
     };
     let resolver = packetcraftr::target::SystemResolver;
     let mut authorizer = packetcraftr::target::PolicyAuthorizer::new(&policy, &resolver);
@@ -118,24 +49,83 @@ pub(super) fn run(
         &mut executor,
         &mut clock,
     )
-    .map_err(traceroute_cli_error)?;
+    .map_err(classified_error)?;
     let (result, diagnostics, stats) =
         output::traceroute::Result::try_from_traceroute(result).map_err(CliError::classified)?;
 
-    match output {
-        output::contract::Format::Text => render_traceroute_text(result, diagnostics, stats),
-        output::contract::Format::Json => emit_aggregate_with_stats(
-            output::contract::Command::Traceroute,
-            result,
-            diagnostics,
-            stats,
-        ),
-        output::contract::Format::Ndjson => render_traceroute_stream(result, diagnostics, stats),
+    match format {
+        output::contract::Format::Text => rendering::render_text(result, diagnostics, stats),
+        output::contract::Format::Json => rendering::render_aggregate(result, diagnostics, stats),
+        output::contract::Format::Ndjson => rendering::render_stream(result, diagnostics, stats),
         _ => unreachable!("traceroute format is checked before command dispatch"),
     }
 }
 
-pub(crate) fn traceroute_cli_error(error: packetcraftr::traceroute::Error) -> CliError {
+fn prepare_request(
+    arguments: &Args,
+    queue_limits: net::capture::Limits,
+) -> Result<packetcraftr::traceroute::Request, CliError> {
+    let strategy: packetcraftr::traceroute::Strategy = arguments.strategy.into();
+    let destination_port = match strategy {
+        packetcraftr::traceroute::Strategy::Udp => Some(
+            arguments
+                .port
+                .unwrap_or(packetcraftr::traceroute::DEFAULT_TRACEROUTE_UDP_PORT),
+        ),
+        packetcraftr::traceroute::Strategy::Tcp => Some(
+            arguments
+                .port
+                .unwrap_or(packetcraftr::traceroute::DEFAULT_TRACEROUTE_TCP_PORT),
+        ),
+        packetcraftr::traceroute::Strategy::Icmp => arguments.port,
+    };
+    let trace_limits = packetcraftr::traceroute::Limits {
+        max_probes: arguments.max_probes,
+        max_duration: Duration::from_millis(arguments.max_duration_ms),
+        max_evidence_frames: queue_limits.max_frames,
+        max_evidence_bytes: queue_limits.max_bytes,
+        max_undecoded: arguments.max_undecoded,
+    };
+    let request = packetcraftr::traceroute::Request {
+        target: parse_target(arguments.target.clone())?,
+        strategy,
+        address_family: arguments.family.into(),
+        destination_port,
+        first_hop: arguments.first_hop,
+        max_hops: arguments.max_hops,
+        probes_per_hop: arguments.attempts,
+        timeout: Duration::from_millis(arguments.timeout_ms),
+        probes_per_second: arguments.rate,
+        limits: trace_limits,
+    };
+    request.validate().map_err(classified_error)?;
+    Ok(request)
+}
+
+fn prepare_exchange(
+    arguments: &Args,
+    request: &packetcraftr::traceroute::Request,
+    queue_limits: net::capture::Limits,
+    max_template_packets: usize,
+) -> Result<packetcraftr::exchange::Options, CliError> {
+    exchange::options(
+        packetcraftr::send::Options {
+            destination: None,
+            plan: net::route::Options {
+                link_mode: arguments.route.link_mode.into(),
+                interface: None,
+                preferred_source: arguments.route.source,
+            },
+            build: core::build::Options::default(),
+            allow_permissive_live: false,
+        },
+        request.timeout,
+        max_template_packets,
+        queue_limits,
+    )
+}
+
+pub(crate) fn classified_error(error: packetcraftr::traceroute::Error) -> CliError {
     let sequence = error.sequence();
     CliError::classified_at_optional_sequence(error, sequence)
 }

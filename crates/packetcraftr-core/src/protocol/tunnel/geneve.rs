@@ -7,12 +7,12 @@ use bytes::Bytes;
 
 use crate::{
     codec::{
-        CodecError, DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext,
+        DecodedLayerValue, EncodedLayer, Error as CodecError, LayerCodec, LayerDecodeContext,
         LayerEncodeContext,
     },
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflective_layer},
+    layer::{Id as ProtocolId, Layer, reflective_layer},
     registry::Discriminator,
 };
 
@@ -132,76 +132,7 @@ impl LayerCodec for GeneveCodec {
             .as_any()
             .downcast_ref::<Geneve>()
             .ok_or_else(|| wrong_layer("geneve", layer))?;
-        let header_len = GENEVE_BASE_LEN
-            .checked_add(layer.options.len())
-            .ok_or_else(|| invalid("geneve", "option length overflow"))?;
-        ensure_encode_budget("geneve", header_len, context)?;
-        if layer.version > 3 || layer.reserved1 > 0x3f || layer.vni > VNI_MAX {
-            return Err(invalid("geneve", "field exceeds its wire range"));
-        }
-        if !layer.options.len().is_multiple_of(4) || layer.options.len() > GENEVE_MAX_OPTIONS_LEN {
-            return Err(invalid(
-                "geneve",
-                format!(
-                    "options must be a multiple of 4 bytes up to {GENEVE_MAX_OPTIONS_LEN}, got {}",
-                    layer.options.len()
-                ),
-            ));
-        }
-
-        let mut diagnostics = Vec::new();
-        if layer.version != 0 {
-            strict_or_diagnostic(
-                "geneve",
-                "build.geneve_version",
-                "version",
-                "RFC 8926 defines only GENEVE version 0",
-                context,
-                &mut diagnostics,
-            )?;
-        }
-        if layer.reserved1 != 0 || layer.reserved2 != 0 {
-            strict_or_diagnostic(
-                "geneve",
-                "build.geneve_reserved",
-                "reserved1",
-                "GENEVE reserved fields must be zero on transmission",
-                context,
-                &mut diagnostics,
-            )?;
-        }
-        match parse_option_chain(&layer.options) {
-            None => strict_or_diagnostic(
-                "geneve",
-                "build.geneve_options",
-                "options",
-                "GENEVE option bytes do not parse as an exact TLV chain",
-                context,
-                &mut diagnostics,
-            )?,
-            Some(chain) => {
-                if chain.critical != layer.critical {
-                    strict_or_diagnostic(
-                        "geneve",
-                        "build.geneve_critical",
-                        "critical",
-                        "the C bit must be set exactly when a critical option is present",
-                        context,
-                        &mut diagnostics,
-                    )?;
-                }
-                if chain.reserved_bits {
-                    strict_or_diagnostic(
-                        "geneve",
-                        "build.geneve_reserved",
-                        "options",
-                        "GENEVE option-header reserved bits must be zero on transmission",
-                        context,
-                        &mut diagnostics,
-                    )?;
-                }
-            }
-        }
+        let (header_len, mut diagnostics) = validate_geneve(layer, context)?;
         validate_auto_raw_discriminator(
             "geneve",
             "protocol_type",
@@ -348,4 +279,88 @@ impl LayerCodec for GeneveCodec {
     ) -> Result<Box<dyn Layer>, CodecError> {
         make_layer(Geneve::default(), fields)
     }
+}
+
+fn validate_geneve(
+    layer: &Geneve,
+    context: &LayerEncodeContext<'_>,
+) -> Result<(usize, Vec<Diagnostic>), CodecError> {
+    let header_len = GENEVE_BASE_LEN
+        .checked_add(layer.options.len())
+        .ok_or_else(|| invalid("geneve", "option length overflow"))?;
+    ensure_encode_budget("geneve", header_len, context)?;
+    if layer.version > 3 || layer.reserved1 > 0x3f || layer.vni > VNI_MAX {
+        return Err(invalid("geneve", "field exceeds its wire range"));
+    }
+    if !layer.options.len().is_multiple_of(4) || layer.options.len() > GENEVE_MAX_OPTIONS_LEN {
+        return Err(invalid(
+            "geneve",
+            format!(
+                "options must be a multiple of 4 bytes up to {GENEVE_MAX_OPTIONS_LEN}, got {}",
+                layer.options.len()
+            ),
+        ));
+    }
+    let mut diagnostics = Vec::new();
+    if layer.version != 0 {
+        strict_or_diagnostic(
+            "geneve",
+            "build.geneve_version",
+            "version",
+            "RFC 8926 defines only GENEVE version 0",
+            context,
+            &mut diagnostics,
+        )?;
+    }
+    if layer.reserved1 != 0 || layer.reserved2 != 0 {
+        strict_or_diagnostic(
+            "geneve",
+            "build.geneve_reserved",
+            "reserved1",
+            "GENEVE reserved fields must be zero on transmission",
+            context,
+            &mut diagnostics,
+        )?;
+    }
+    match parse_option_chain(&layer.options) {
+        None => strict_or_diagnostic(
+            "geneve",
+            "build.geneve_options",
+            "options",
+            "GENEVE option bytes do not parse as an exact TLV chain",
+            context,
+            &mut diagnostics,
+        )?,
+        Some(chain) => validate_option_chain(layer, chain, context, &mut diagnostics)?,
+    }
+    Ok((header_len, diagnostics))
+}
+
+fn validate_option_chain(
+    layer: &Geneve,
+    chain: OptionChain,
+    context: &LayerEncodeContext<'_>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<(), CodecError> {
+    if chain.critical != layer.critical {
+        strict_or_diagnostic(
+            "geneve",
+            "build.geneve_critical",
+            "critical",
+            "the C bit must be set exactly when a critical option is present",
+            context,
+            diagnostics,
+        )?;
+    }
+    if chain.reserved_bits {
+        strict_or_diagnostic(
+            "geneve",
+            "build.geneve_reserved",
+            "options",
+            "GENEVE option-header reserved bits must be zero on transmission",
+            context,
+            diagnostics,
+        )?;
+    }
+    Ok(())
 }

@@ -5,23 +5,23 @@ use std::ffi::{OsStr, OsString};
 
 use packetcraftr::output;
 
-use crate::cli::CliColorChoice;
+use crate::cli::ColorChoice;
 
 #[derive(Clone, Copy, Debug, Default)]
-pub(super) struct StartupContext {
-    pub(super) machine_format: Option<output::contract::Format>,
-    pub(super) color: CliColorChoice,
+pub(super) struct Context {
+    pub(super) format: Option<output::contract::Format>,
+    pub(super) color: ColorChoice,
     pub(super) command: Option<output::contract::Command>,
 }
 
-pub(super) fn startup_context_from_env() -> StartupContext {
+pub(super) fn from_env() -> Context {
     let arguments = std::env::args_os().collect::<Vec<_>>();
-    startup_context(&arguments)
+    parse(&arguments)
 }
 
-fn startup_context(arguments: &[OsString]) -> StartupContext {
-    let mut context = StartupContext::default();
-    let mut saw_output = false;
+fn parse(arguments: &[OsString]) -> Context {
+    let mut context = Context::default();
+    let mut saw_format = false;
     let mut saw_color = false;
     let mut saw_root_positional = false;
     let mut index = 1;
@@ -33,10 +33,9 @@ fn startup_context(arguments: &[OsString]) -> StartupContext {
 
         if argument.as_os_str() == "--output" {
             let value = separate_option_value(arguments, index);
-            if !saw_output {
-                saw_output = true;
-                context.machine_format =
-                    value.and_then(OsStr::to_str).and_then(parse_machine_format);
+            if !saw_format {
+                saw_format = true;
+                context.format = value.and_then(OsStr::to_str).and_then(parse_machine_format);
             }
             index += usize::from(value.is_some()) + 1;
             continue;
@@ -47,7 +46,7 @@ fn startup_context(arguments: &[OsString]) -> StartupContext {
                 saw_color = true;
                 context.color = value
                     .and_then(OsStr::to_str)
-                    .map_or(CliColorChoice::Auto, parse_color_choice);
+                    .map_or(ColorChoice::Auto, parse_color_choice);
             }
             index += usize::from(value.is_some()) + 1;
             continue;
@@ -55,9 +54,9 @@ fn startup_context(arguments: &[OsString]) -> StartupContext {
 
         let argument = argument.to_str();
         if let Some(value) = argument.and_then(|argument| argument.strip_prefix("--output=")) {
-            if !saw_output {
-                saw_output = true;
-                context.machine_format = parse_machine_format(value);
+            if !saw_format {
+                saw_format = true;
+                context.format = parse_machine_format(value);
             }
             index += 1;
             continue;
@@ -102,11 +101,11 @@ fn parse_machine_format(value: &str) -> Option<output::contract::Format> {
     }
 }
 
-fn parse_color_choice(value: &str) -> CliColorChoice {
+fn parse_color_choice(value: &str) -> ColorChoice {
     match value {
-        "always" => CliColorChoice::Always,
-        "never" => CliColorChoice::Never,
-        _ => CliColorChoice::Auto,
+        "always" => ColorChoice::Always,
+        "never" => ColorChoice::Never,
+        _ => ColorChoice::Auto,
     }
 }
 
@@ -183,9 +182,9 @@ mod tests {
                 .iter()
                 .map(OsString::from)
                 .collect::<Vec<_>>();
-            let context = startup_context(&arguments);
+            let context = parse(&arguments);
 
-            assert_eq!(context.machine_format, case.format, "{:?}", case.arguments);
+            assert_eq!(context.format, case.format, "{:?}", case.arguments);
             assert_eq!(
                 context.color.to_string(),
                 case.color,

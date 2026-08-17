@@ -3,8 +3,10 @@
 
 //! Command-line slices that own their arguments, conversion, execution, and rendering.
 
+use std::sync::Arc;
+
 use clap::Subcommand;
-use packetcraftr::output;
+use packetcraftr::{core, output};
 
 use crate::errors::CliError;
 
@@ -32,65 +34,65 @@ mod traceroute;
 pub(crate) enum Command {
     /// Build exact packet bytes from an expression or document.
     #[command(after_long_help = build::arguments::AFTER_LONG_HELP)]
-    Build(build::arguments::BuildArgs),
+    Build(build::arguments::Args),
     /// Decode a frame with bounded, registry-driven dissection.
     #[command(after_long_help = dissect::arguments::AFTER_LONG_HELP)]
-    Dissect(dissect::arguments::DissectArgs),
+    Dissect(dissect::arguments::Args),
     /// List built-in protocols or describe one protocol.
     #[command(after_long_help = protocols::arguments::AFTER_LONG_HELP)]
-    Protocols(protocols::arguments::ProtocolsArgs),
+    Protocols(protocols::arguments::Args),
     /// Stream frames from a classic PCAP or PCAPNG file.
     #[command(after_long_help = read::arguments::AFTER_LONG_HELP)]
-    Read(read::arguments::ReadArgs),
+    Read(read::arguments::Args),
     /// Enumerate local interfaces.
     #[command(after_long_help = interfaces::AFTER_LONG_HELP)]
     Interfaces,
     /// Passively select route, source, MTU, and link mode.
     #[command(after_long_help = plan::arguments::AFTER_LONG_HELP)]
-    Plan(plan::arguments::PlanArgs),
+    Plan(plan::arguments::Args),
     /// Transmit a packet under traffic policy.
     #[command(after_long_help = send::AFTER_LONG_HELP)]
     Send(send::SendArgs),
     /// Capture-ready request/response exchange.
     #[command(after_long_help = exchange::arguments::AFTER_LONG_HELP)]
-    Exchange(exchange::arguments::ExchangeArgs),
+    Exchange(exchange::arguments::Args),
     /// Stream live captured frames.
     #[command(after_long_help = capture::arguments::AFTER_LONG_HELP)]
-    Capture(capture::arguments::CaptureArgs),
+    Capture(capture::arguments::Args),
     /// Report protocol health findings over a capture file.
     #[command(after_long_help = expert::arguments::AFTER_LONG_HELP)]
-    Expert(expert::arguments::ExpertArgs),
+    Expert(expert::arguments::Args),
     /// Extract one conversation's payload from a capture file.
     #[command(after_long_help = follow::arguments::AFTER_LONG_HELP)]
-    Follow(follow::arguments::FollowArgs),
+    Follow(follow::arguments::Args),
     /// Replay a PCAP/PCAPNG stream.
     #[command(after_long_help = replay::arguments::AFTER_LONG_HELP)]
-    Replay(replay::arguments::ReplayArgs),
+    Replay(replay::arguments::Args),
     /// Run a structured network scan.
     #[command(after_long_help = scan::arguments::AFTER_LONG_HELP)]
-    Scan(scan::arguments::ScanArgs),
+    Scan(scan::arguments::Args),
     /// Compute aggregate statistics over a capture file.
     #[command(after_long_help = stats::arguments::AFTER_LONG_HELP)]
-    Stats(stats::arguments::StatsArgs),
+    Stats(stats::arguments::Args),
     /// Run bounded, policy-gated traceroute probes.
     #[command(
         long_about = traceroute::arguments::LONG_ABOUT,
         after_long_help = traceroute::arguments::AFTER_LONG_HELP
     )]
-    Traceroute(traceroute::arguments::TracerouteArgs),
+    Traceroute(traceroute::arguments::Args),
     /// Run a structured DNS operation.
     #[command(after_long_help = dns::arguments::AFTER_LONG_HELP)]
-    Dns(dns::arguments::DnsArgs),
+    Dns(dns::arguments::Args),
     /// Run bounded field-aware packet fuzzing.
     #[command(after_long_help = fuzz::arguments::AFTER_LONG_HELP)]
-    Fuzz(fuzz::arguments::FuzzArgs),
+    Fuzz(fuzz::arguments::Args),
     /// Enumerate passive interface-bound route decisions.
     #[command(after_long_help = routes::AFTER_LONG_HELP)]
     Routes,
 }
 
 impl Command {
-    pub(crate) const fn name(&self) -> output::contract::Command {
+    pub(crate) const fn kind(&self) -> output::contract::Command {
         match self {
             Self::Build(_) => output::contract::Command::Build,
             Self::Dissect(_) => output::contract::Command::Dissect,
@@ -114,7 +116,7 @@ impl Command {
     }
 
     pub(super) fn run(self, format: output::contract::Format) -> Result<(), CliError> {
-        self.name()
+        self.kind()
             .require_format(format)
             .map_err(CliError::classified)?;
         match self {
@@ -138,4 +140,12 @@ impl Command {
             Self::Routes => routes::run(format),
         }
     }
+}
+
+fn registry() -> Result<Arc<core::registry::Registry>, CliError> {
+    core::protocol::builtin::registry()
+        .map(Arc::new)
+        .map_err(|source| {
+            CliError::new(70, format!("built-in registry invariant failed: {source}"))
+        })
 }

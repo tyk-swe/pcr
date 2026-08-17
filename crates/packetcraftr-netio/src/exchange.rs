@@ -5,7 +5,7 @@
 
 use super::Error;
 use super::capture::{CaptureProvider, CaptureQueueLimits};
-use super::route::PlannedRoute;
+use super::route::Plan;
 use super::transmit::{IoSendReport, PacketIo, TransmissionFrame};
 
 impl<S, C> PacketIo for (S, C)
@@ -27,7 +27,7 @@ where
 
     fn arm_capture(
         &self,
-        route: &PlannedRoute,
+        route: &Plan,
         limits: CaptureQueueLimits,
     ) -> Result<Self::Capture, Error> {
         self.1.arm_capture(route, limits)
@@ -35,7 +35,7 @@ where
 
     fn arm_capture_with_filter(
         &self,
-        route: &PlannedRoute,
+        route: &Plan,
         limits: CaptureQueueLimits,
         filter: &str,
     ) -> Result<Self::Capture, Error> {

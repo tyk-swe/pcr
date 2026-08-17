@@ -13,19 +13,16 @@ use std::time::Duration;
 
 use packetcraftr::{core, netio as net, output};
 
-use self::arguments::ScanArgs;
+use self::arguments::Args;
+use super::registry;
 use crate::errors::CliError;
-use crate::rendering::emit_aggregate_with_stats;
-use crate::system::{
-    DeferredInterface, default_registry_arc, parse_workflow_target, system_client,
-    validate_live_interface_selector, workflow_exchange_options,
-};
+use crate::input::parse_target;
+use crate::system::{DeferredInterface, client, exchange, validate_selector};
 
-use execution::CliScanExecutor;
-use rendering::{render_scan_stream, render_scan_text};
+use execution::Executor;
 
-pub(super) fn run(arguments: ScanArgs, output: output::contract::Format) -> Result<(), CliError> {
-    let ScanArgs {
+pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
+    let Args {
         target,
         transport,
         family,
@@ -42,7 +39,7 @@ pub(super) fn run(arguments: ScanArgs, output: output::contract::Format) -> Resu
         limits,
         policy,
     } = arguments;
-    let target = parse_workflow_target(target)?;
+    let target = parse_target(target)?;
     let queue_limits = limits.into_limits();
     let scan_limits = packetcraftr::scan::Limits {
         max_ports,
@@ -53,11 +50,11 @@ pub(super) fn run(arguments: ScanArgs, output: output::contract::Format) -> Resu
         max_evidence_bytes: queue_limits.max_bytes,
         max_undecoded,
     };
-    scan_limits.validate().map_err(scan_cli_error)?;
-    let ports = conversion::expand_port_specs(&ports, max_ports).map_err(scan_cli_error)?;
+    scan_limits.validate().map_err(classified_error)?;
+    let ports = conversion::expand_port_specs(&ports, max_ports).map_err(classified_error)?;
     let policy = policy.into_policy();
     policy.validate().map_err(CliError::classified)?;
-    validate_live_interface_selector("scan", route.interface.as_deref())?;
+    validate_selector(route.interface.as_deref()).map(|_| ())?;
     let request = packetcraftr::scan::Request {
         target,
         transport: transport.into(),
@@ -68,8 +65,8 @@ pub(super) fn run(arguments: ScanArgs, output: output::contract::Format) -> Resu
         probes_per_second: rate,
         limits: scan_limits,
     };
-    let registry = default_registry_arc()?;
-    let exchange = workflow_exchange_options(
+    let registry = registry()?;
+    let exchange = exchange::options(
         packetcraftr::send::Options {
             destination: None,
             plan: net::route::Options {
@@ -77,7 +74,7 @@ pub(super) fn run(arguments: ScanArgs, output: output::contract::Format) -> Resu
                 interface: None,
                 preferred_source: route.source,
             },
-            build: core::build::BuildOptions::default(),
+            build: core::build::Options::default(),
             allow_permissive_live: false,
         },
         request.timeout,
@@ -85,8 +82,8 @@ pub(super) fn run(arguments: ScanArgs, output: output::contract::Format) -> Resu
         queue_limits,
     )?;
 
-    let mut executor = CliScanExecutor {
-        client: system_client(Arc::clone(&registry), policy.clone()),
+    let mut executor = Executor {
+        client: client(Arc::clone(&registry), policy.clone()),
         exchange,
         interface: DeferredInterface::new(route.interface),
     };
@@ -100,21 +97,19 @@ pub(super) fn run(arguments: ScanArgs, output: output::contract::Format) -> Resu
         &mut executor,
         &mut clock,
     )
-    .map_err(scan_cli_error)?;
+    .map_err(classified_error)?;
     let (result, diagnostics, stats) =
         output::scan::Result::try_from_scan(result).map_err(CliError::classified)?;
 
-    match output {
-        output::contract::Format::Text => render_scan_text(result, diagnostics, stats),
-        output::contract::Format::Json => {
-            emit_aggregate_with_stats(output::contract::Command::Scan, result, diagnostics, stats)
-        }
-        output::contract::Format::Ndjson => render_scan_stream(result, diagnostics, stats),
+    match format {
+        output::contract::Format::Text => rendering::render_text(result, diagnostics, stats),
+        output::contract::Format::Json => rendering::render_aggregate(result, diagnostics, stats),
+        output::contract::Format::Ndjson => rendering::render_stream(result, diagnostics, stats),
         _ => unreachable!("scan format is checked before command dispatch"),
     }
 }
 
-pub(crate) fn scan_cli_error(error: packetcraftr::scan::Error) -> CliError {
+pub(crate) fn classified_error(error: packetcraftr::scan::Error) -> CliError {
     let sequence = error.sequence();
     CliError::classified_at_optional_sequence(error, sequence)
 }

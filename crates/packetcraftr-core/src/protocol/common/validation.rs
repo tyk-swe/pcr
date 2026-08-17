@@ -4,8 +4,8 @@
 //! Child-discriminator, strictness, and encode-budget validation.
 
 use crate::{
-    build::BuildMode,
-    codec::{CodecError, LayerEncodeContext},
+    build::Mode as BuildMode,
+    codec::{Error as CodecError, LayerEncodeContext},
     diagnostic::Diagnostic,
     field::WireValue,
     registry::Discriminator,

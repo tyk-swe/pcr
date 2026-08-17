@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 
-use super::arguments::CliScanPortSpec;
+use super::arguments::PortSpec;
 
 /// Expand parsed CLI port specs into the stable, deduplicated `Vec<u16>` used
 /// by `packetcraftr::scan::Request`. Ranges are inclusive and iterated directly.
@@ -16,7 +16,7 @@ use super::arguments::CliScanPortSpec;
 /// `max_ports`; it never fully expands or allocates an oversized range first.
 /// Repeated ports that add no new distinct port do not consume the limit.
 pub(crate) fn expand_port_specs(
-    specs: &[CliScanPortSpec],
+    specs: &[PortSpec],
     max_ports: usize,
 ) -> Result<Vec<u16>, packetcraftr::scan::Error> {
     let limit = u64::try_from(max_ports).expect("max_ports fits u64 after Limits::validate");
@@ -40,8 +40,8 @@ pub(crate) fn expand_port_specs(
     };
     for spec in specs {
         match *spec {
-            CliScanPortSpec::Single(port) => push_distinct(port)?,
-            CliScanPortSpec::RangeInclusive { start, end } => {
+            PortSpec::Single(port) => push_distinct(port)?,
+            PortSpec::RangeInclusive { start, end } => {
                 for port in start..=end {
                     push_distinct(port)?;
                 }
@@ -58,10 +58,10 @@ mod tests {
     #[test]
     fn expansion_is_stable_deduplicated_and_limit_aware() {
         let specs = [
-            CliScanPortSpec::Single(443),
-            CliScanPortSpec::RangeInclusive { start: 80, end: 82 },
-            CliScanPortSpec::Single(80),
-            CliScanPortSpec::RangeInclusive {
+            PortSpec::Single(443),
+            PortSpec::RangeInclusive { start: 80, end: 82 },
+            PortSpec::Single(80),
+            PortSpec::RangeInclusive {
                 start: 81,
                 end: 443,
             },
@@ -73,9 +73,9 @@ mod tests {
         assert_eq!(ports.last(), Some(&442));
 
         let repeated = [
-            CliScanPortSpec::Single(7),
-            CliScanPortSpec::Single(7),
-            CliScanPortSpec::RangeInclusive { start: 7, end: 8 },
+            PortSpec::Single(7),
+            PortSpec::Single(7),
+            PortSpec::RangeInclusive { start: 7, end: 8 },
         ];
         assert_eq!(
             expand_port_specs(&repeated, 2).expect("duplicates do not consume the limit"),
@@ -86,7 +86,7 @@ mod tests {
     #[test]
     fn expansion_stops_at_the_first_distinct_port_over_the_limit() {
         let error = expand_port_specs(
-            &[CliScanPortSpec::RangeInclusive {
+            &[PortSpec::RangeInclusive {
                 start: 1,
                 end: u16::MAX,
             }],

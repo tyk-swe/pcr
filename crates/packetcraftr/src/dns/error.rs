@@ -11,7 +11,7 @@ use packetcraftr_core::error::{Classification, Classified, Kind};
 
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum DnsWireError {
+pub enum WireError {
     #[error("DNS name is invalid: {message}")]
     InvalidName { message: String },
     #[error("DNS message is {actual} bytes; expected at least {minimum}")]
@@ -76,7 +76,7 @@ pub enum DnsWireError {
     TcpFrameLength { declared: usize, actual: usize },
 }
 
-impl DnsWireError {
+impl WireError {
     pub const fn is_unrelated(&self) -> bool {
         matches!(
             self,
@@ -90,7 +90,7 @@ impl DnsWireError {
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
-pub enum DnsError {
+pub enum Error {
     #[error("invalid DNS limit {field}={value}: {reason}")]
     InvalidLimit {
         field: &'static str,
@@ -106,7 +106,7 @@ pub enum DnsError {
     #[error("DNS duration {value:?} is invalid; maximum is {maximum:?}")]
     InvalidDuration { value: Duration, maximum: Duration },
     #[error("DNS query construction failed: {0}")]
-    Query(DnsWireError),
+    Query(WireError),
     #[error("DNS authorization failed: {0}")]
     Authorization(#[from] BoundaryError),
     #[error("resolved DNS server has no {family} address selected")]
@@ -127,7 +127,7 @@ pub enum DnsError {
     StatisticsOverflow { attempt: u32 },
 }
 
-impl From<DeadlineExceeded> for DnsError {
+impl From<DeadlineExceeded> for Error {
     fn from(error: DeadlineExceeded) -> Self {
         Self::DurationLimit {
             actual: error.actual,
@@ -136,7 +136,7 @@ impl From<DeadlineExceeded> for DnsError {
     }
 }
 
-impl DnsError {
+impl Error {
     pub fn sequence(&self) -> Option<u64> {
         match self {
             Self::Execution { attempt, .. }
@@ -148,7 +148,7 @@ impl DnsError {
     }
 }
 
-impl Classified for DnsError {
+impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
             Self::InvalidLimit { .. }

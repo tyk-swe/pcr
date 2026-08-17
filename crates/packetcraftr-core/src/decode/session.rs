@@ -8,18 +8,18 @@ use std::ops::Range;
 use bytes::Bytes;
 
 use crate::Packet;
-use crate::codec::{CodecError, DecodedLayerValue, LayerCodec, LayerDecodeContext};
+use crate::codec::{DecodedLayerValue, Error as CodecError, LayerCodec, LayerDecodeContext};
 use crate::diagnostic::Diagnostic;
 use crate::frame::Frame;
-use crate::layer::ProtocolId;
+use crate::layer::Id as ProtocolId;
 use crate::layout::{ByteRange, LayerLayout, PacketLayout};
-use crate::registry::{Discriminator, ProtocolRegistry};
+use crate::registry::{Discriminator, Registry as ProtocolRegistry};
 
-use super::error::DecodeError;
+use super::error::Error;
 use super::fallback::{
     append_malformed, append_missing_required_layer, append_padding, append_raw, slice_original,
 };
-use super::options::{DecodeOptions, DecodedPacket};
+use super::options::{DecodedPacket, Options as DecodeOptions};
 use super::traversal::TraversalScope;
 
 struct DecodeCursor {
@@ -82,7 +82,7 @@ impl<'registry> DecodeSession<'registry> {
         }
     }
 
-    pub(super) fn run(mut self) -> Result<DecodedPacket, DecodeError> {
+    pub(super) fn run(mut self) -> Result<DecodedPacket, Error> {
         let mut cursor = DecodeCursor {
             protocol: self.root.clone(),
             discriminator: None,
@@ -114,9 +114,9 @@ impl<'registry> DecodeSession<'registry> {
         self.finish()
     }
 
-    fn ensure_layer_capacity(&self) -> Result<(), DecodeError> {
+    fn ensure_layer_capacity(&self) -> Result<(), Error> {
         if self.packet.len() >= self.options.max_layers {
-            return Err(DecodeError::LayerLimit {
+            return Err(Error::LayerLimit {
                 limit: self.options.max_layers,
             });
         }
@@ -143,9 +143,9 @@ impl<'registry> DecodeSession<'registry> {
         )
     }
 
-    fn preserve_missing_codec(&mut self, cursor: &DecodeCursor) -> Result<(), DecodeError> {
+    fn preserve_missing_codec(&mut self, cursor: &DecodeCursor) -> Result<(), Error> {
         if self.packet.is_empty() {
-            return Err(DecodeError::MissingRootCodec {
+            return Err(Error::MissingRootCodec {
                 protocol: cursor.protocol.clone(),
             });
         }
@@ -181,10 +181,10 @@ impl<'registry> DecodeSession<'registry> {
         codec: &dyn LayerCodec,
         cursor: &DecodeCursor,
         mut decoded: DecodedLayerValue,
-    ) -> Result<ValidatedLayer, DecodeError> {
+    ) -> Result<ValidatedLayer, Error> {
         let actual_protocol = decoded.layer.protocol_id().clone();
         if !codec.accepts_decoded_protocol(&actual_protocol) {
-            return Err(DecodeError::CodecLayerMismatch {
+            return Err(Error::CodecLayerMismatch {
                 protocol: cursor.protocol.clone(),
                 actual: actual_protocol,
             });
@@ -192,14 +192,14 @@ impl<'registry> DecodeSession<'registry> {
         decoded
             .layer
             .validate_required_fields()
-            .map_err(|source| DecodeError::InvalidLayer {
+            .map_err(|source| Error::InvalidLayer {
                 protocol: actual_protocol.clone(),
                 source,
             })?;
 
         let input_len = cursor.bytes.len();
         if decoded.consumed > input_len || (!decoded.stop && decoded.consumed == 0) {
-            return Err(DecodeError::InvalidCodecCursor {
+            return Err(Error::InvalidCodecCursor {
                 protocol: cursor.protocol.clone(),
             });
         }
@@ -208,14 +208,14 @@ impl<'registry> DecodeSession<'registry> {
             .checked_add(decoded.payload_len)
             .filter(|end| *end <= input_len)
             .and_then(|end| cursor.bytes.start.checked_add(end))
-            .ok_or_else(|| DecodeError::InvalidCodecCursor {
+            .ok_or_else(|| Error::InvalidCodecCursor {
                 protocol: cursor.protocol.clone(),
             })?;
         let layer_end = cursor
             .bytes
             .start
             .checked_add(decoded.consumed)
-            .ok_or_else(|| DecodeError::InvalidCodecCursor {
+            .ok_or_else(|| Error::InvalidCodecCursor {
                 protocol: cursor.protocol.clone(),
             })?;
 
@@ -224,13 +224,13 @@ impl<'registry> DecodeSession<'registry> {
             .iter()
             .any(|field| field.range.start > field.range.end || field.range.end > decoded.consumed)
         {
-            return Err(DecodeError::InvalidCodecLayout {
+            return Err(Error::InvalidCodecLayout {
                 protocol: cursor.protocol.clone(),
             });
         }
         for field in &mut decoded.fields {
             if !field.range.checked_shift(cursor.bytes.start) {
-                return Err(DecodeError::InvalidCodecLayout {
+                return Err(Error::InvalidCodecLayout {
                     protocol: cursor.protocol.clone(),
                 });
             }
@@ -288,7 +288,7 @@ impl<'registry> DecodeSession<'registry> {
         cursor: DecodeCursor,
         layer: ValidatedLayer,
         child: ChildSelection,
-    ) -> Result<Option<DecodeCursor>, DecodeError> {
+    ) -> Result<Option<DecodeCursor>, Error> {
         let index = self.packet.len();
         let ValidatedLayer {
             decoded,
@@ -349,7 +349,7 @@ impl<'registry> DecodeSession<'registry> {
         parent: &ProtocolId,
         child: Option<ProtocolId>,
         offset: usize,
-    ) -> Result<(), DecodeError> {
+    ) -> Result<(), Error> {
         let Some(required) = child.filter(|protocol| {
             !matches!(
                 crate::semantics::BuiltinProtocol::from_id(protocol),
@@ -377,7 +377,7 @@ impl<'registry> DecodeSession<'registry> {
         protocol: &ProtocolId,
         offset: usize,
         payload_len: usize,
-    ) -> Result<(), DecodeError> {
+    ) -> Result<(), Error> {
         self.ensure_layer_capacity()?;
         append_raw(
             &mut self.packet,
@@ -402,7 +402,7 @@ impl<'registry> DecodeSession<'registry> {
         parent: &ProtocolId,
         offset: usize,
         payload_len: usize,
-    ) -> Result<(), DecodeError> {
+    ) -> Result<(), Error> {
         self.ensure_layer_capacity()?;
         append_raw(
             &mut self.packet,
@@ -417,7 +417,7 @@ impl<'registry> DecodeSession<'registry> {
         Ok(())
     }
 
-    fn finish(mut self) -> Result<DecodedPacket, DecodeError> {
+    fn finish(mut self) -> Result<DecodedPacket, Error> {
         self.trailing.sort_by_key(|trailing| trailing.offset);
         let trailing = std::mem::take(&mut self.trailing);
         for trailing in trailing {

@@ -8,7 +8,7 @@ use std::time::Duration;
 use crate::analysis::pcap::{DEFAULT_SIZE_LIMIT, DEFAULT_STREAM_BYTES, DEFAULT_STREAM_FRAMES};
 use crate::filter::Filter;
 
-use crate::analysis::AnalysisError;
+use crate::analysis::Error;
 
 const DEFAULT_MAX_ANALYSIS_FLOWS: usize = 8_192;
 
@@ -18,7 +18,7 @@ const DEFAULT_MAX_ANALYSIS_FLOWS: usize = 8_192;
 /// or not, so a display filter can never raise how much input one run reads.
 /// The duration budget bounds the run's own processing time.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AnalysisLimits {
+pub struct Limits {
     pub max_frames: u64,
     pub max_bytes: u64,
     pub max_frame_bytes: usize,
@@ -26,7 +26,7 @@ pub struct AnalysisLimits {
     pub max_duration: Duration,
 }
 
-impl Default for AnalysisLimits {
+impl Default for Limits {
     fn default() -> Self {
         Self {
             max_frames: DEFAULT_STREAM_FRAMES,
@@ -38,8 +38,8 @@ impl Default for AnalysisLimits {
     }
 }
 
-impl AnalysisLimits {
-    pub fn validate(&self) -> Result<(), AnalysisError> {
+impl Limits {
+    pub fn validate(&self) -> Result<(), Error> {
         for (field, value) in [
             ("max_frames", self.max_frames),
             ("max_bytes", self.max_bytes),
@@ -47,7 +47,7 @@ impl AnalysisLimits {
             ("max_flows", self.max_flows as u64),
         ] {
             if value == 0 {
-                return Err(AnalysisError::InvalidLimit {
+                return Err(Error::InvalidLimit {
                     field,
                     value,
                     reason: "must be non-zero",
@@ -55,14 +55,14 @@ impl AnalysisLimits {
             }
         }
         if self.max_frame_bytes as u64 > self.max_bytes {
-            return Err(AnalysisError::InvalidLimit {
+            return Err(Error::InvalidLimit {
                 field: "max_frame_bytes",
                 value: self.max_frame_bytes as u64,
                 reason: "cannot exceed max_bytes",
             });
         }
         if self.max_duration.is_zero() {
-            return Err(AnalysisError::InvalidLimit {
+            return Err(Error::InvalidLimit {
                 field: "max_duration",
                 value: 0,
                 reason: "must be non-zero",
@@ -74,7 +74,7 @@ impl AnalysisLimits {
 
 /// What one analysis run computes beyond dispatching matched frames.
 #[derive(Clone, Debug, Default)]
-pub struct AnalysisOptions<'a> {
+pub struct Options<'a> {
     /// Keeps only matching frames; compiled by the caller so filter mistakes
     /// surface before any input is read. Conversation indices are assigned
     /// before the filter runs, so `tcp.stream` and `udp.stream` resolve.
@@ -83,5 +83,5 @@ pub struct AnalysisOptions<'a> {
     /// its events with each record. Costs memory proportional to reordering,
     /// so commands that only count leave it off.
     pub tcp_events: bool,
-    pub limits: AnalysisLimits,
+    pub limits: Limits,
 }

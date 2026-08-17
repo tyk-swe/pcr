@@ -3,22 +3,13 @@
 
 use std::net::IpAddr;
 
-use thiserror::Error;
-
-use packetcraftr_core::build::{BuildError, BuildOptions};
-use packetcraftr_core::error::{Classification, Classified, Kind};
-use packetcraftr_netio::{
-    Error as LiveIoError,
-    neighbor::Error as NeighborError,
-    route::{Error as PlanError, Options as PlanOptions},
-};
+use packetcraftr_core::build::Options as BuildOptions;
+use packetcraftr_netio::route::Options as PlanOptions;
 
 use super::super::Stats;
-use super::super::policy::TrafficPolicyError;
-use super::super::target::Error;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct SendOptions {
+pub struct Options {
     pub destination: Option<IpAddr>,
     pub plan: PlanOptions,
     pub build: BuildOptions,
@@ -27,121 +18,7 @@ pub struct SendOptions {
 }
 
 #[derive(Clone, Debug)]
-pub struct SendReport {
+pub struct Report {
     pub sent: crate::SentPacket,
     pub stats: Stats,
-}
-
-#[derive(Debug, Error)]
-#[non_exhaustive]
-pub enum ClientError {
-    #[error(transparent)]
-    Target(#[from] Error),
-    #[error(transparent)]
-    Plan(#[from] PlanError),
-    #[error(transparent)]
-    Neighbor(#[from] NeighborError),
-    #[error(transparent)]
-    Build(#[from] BuildError),
-    #[error(transparent)]
-    Policy(#[from] TrafficPolicyError),
-    #[error("permissively built packets require allow_permissive_live")]
-    PermissiveLiveOptInRequired,
-    #[error(transparent)]
-    Io(#[from] LiveIoError),
-    #[error("{operation}; capture shutdown also failed: {shutdown}")]
-    OperationAndCaptureShutdown {
-        operation: LiveIoError,
-        shutdown: LiveIoError,
-    },
-    #[error("exchange packets selected different interfaces or link modes")]
-    HeterogeneousExchangeRoute,
-    #[error("packet template expansion failed: {message}")]
-    Template { message: String },
-    #[error("could not materialize {field} on layer {layer}: {message}")]
-    PacketMaterialization {
-        layer: usize,
-        field: &'static str,
-        message: String,
-    },
-    #[error(
-        "network packet length {actual} exceeds route MTU {mtu}; apply an explicit fragmentation transform"
-    )]
-    PacketExceedsMtu { actual: usize, mtu: u32 },
-    #[error("invalid exchange option {field}: {message}")]
-    InvalidExchangeOption {
-        field: &'static str,
-        message: String,
-    },
-}
-
-impl Classified for ClientError {
-    fn classification(&self) -> Classification {
-        match self {
-            Self::Target(error) => error.classification(),
-            Self::Plan(error) => error.classification(),
-            Self::Neighbor(error) => error.classification(),
-            Self::Build(_) => Classification::new(
-                "packet.build",
-                Kind::Packet,
-                Some(
-                    "correct the packet fields or select permissive mode with the required live opt-ins",
-                ),
-            ),
-            Self::Policy(error) => error.classification(),
-            Self::PermissiveLiveOptInRequired => Classification::new(
-                "policy.permissive_live_opt_in",
-                Kind::Policy,
-                Some(
-                    "set the explicit per-operation malformed-live opt-in in addition to policy approval",
-                ),
-            ),
-            Self::Io(error) => error.classification(),
-            Self::OperationAndCaptureShutdown { operation, .. } => operation.classification(),
-            Self::HeterogeneousExchangeRoute => Classification::new(
-                "cli.heterogeneous_exchange_route",
-                Kind::Cli,
-                Some("split the exchange so every packet uses the same interface and link mode"),
-            ),
-            Self::Template { .. } => Classification::new(
-                "packet.template",
-                Kind::Packet,
-                Some("reduce or correct the bounded packet-template expansion"),
-            ),
-            Self::PacketMaterialization { .. } => Classification::new(
-                "packet.materialization",
-                Kind::Packet,
-                Some(
-                    "correct the route-dependent packet fields; post-build shape changes are rejected",
-                ),
-            ),
-            Self::PacketExceedsMtu { .. } => Classification::new(
-                "packet.mtu",
-                Kind::Packet,
-                Some("reduce the network packet or apply an explicit fragmentation transform"),
-            ),
-            Self::InvalidExchangeOption { .. } => Classification::new(
-                "cli.exchange_limit",
-                Kind::Cli,
-                Some(
-                    "use finite exchange timeout and retention limits no larger than the aggregate capture ceiling",
-                ),
-            ),
-        }
-    }
-
-    fn causes(&self) -> Vec<String> {
-        match self {
-            Self::Target(error) => error.causes(),
-            Self::Plan(error) => error.causes(),
-            Self::Neighbor(error) => error.causes(),
-            Self::Policy(error) => error.causes(),
-            Self::Io(error) => error.causes(),
-            Self::OperationAndCaptureShutdown {
-                operation,
-                shutdown,
-            } => vec![operation.to_string(), shutdown.to_string()],
-            _ => Vec::new(),
-        }
-    }
 }

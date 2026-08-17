@@ -4,11 +4,11 @@
 //! Private response-evidence accounting and ordering shared by workflows.
 
 pub(crate) use budget::{
-    EvidenceBudget, EvidenceDiagnosticDescriptor, push_undecoded_limit_diagnostic, retain_evidence,
+    EvidenceDiagnosticDescriptor, push_undecoded_limit_diagnostic, retain_evidence,
     retain_undecoded_frames,
 };
 pub(crate) use candidate_selection::{
-    ResponseCandidate, ResponseSelector, response_within_deadline, select_response_candidate,
+    ResponseCandidate, ResponseSelector, response_within_deadline, update_best_candidate,
 };
 pub(crate) use exact_validation::{
     ExchangeEvidenceError, format_exchange_evidence_error, validate_aggregate_evidence_limits,

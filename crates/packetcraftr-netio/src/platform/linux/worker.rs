@@ -21,16 +21,16 @@ use std::{
 use rtnetlink::{Handle, new_connection};
 
 use super::os_error;
-use crate::route::NativeRouteError;
+use crate::route::SystemError;
 
 const NETLINK_OPERATION_TIMEOUT: Duration = Duration::from_secs(2);
 const NETLINK_RESPONSE_TIMEOUT: Duration = Duration::from_secs(3);
 const NETLINK_REAPER_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
-pub(super) fn with_netlink<F, Fut, T>(operation: F) -> Result<T, NativeRouteError>
+pub(super) fn with_netlink<F, Fut, T>(operation: F) -> Result<T, SystemError>
 where
     F: FnOnce(Handle) -> Fut + Send + 'static,
-    Fut: Future<Output = Result<T, NativeRouteError>> + Send + 'static,
+    Fut: Future<Output = Result<T, SystemError>> + Send + 'static,
     T: Send + 'static,
 {
     with_netlink_for_namespace(current_network_namespace(), operation)
@@ -39,10 +39,10 @@ where
 pub(super) fn with_netlink_for_namespace<F, Fut, T>(
     namespace: Option<NetworkNamespaceId>,
     operation: F,
-) -> Result<T, NativeRouteError>
+) -> Result<T, SystemError>
 where
     F: FnOnce(Handle) -> Fut + Send + 'static,
-    Fut: Future<Output = Result<T, NativeRouteError>> + Send + 'static,
+    Fut: Future<Output = Result<T, SystemError>> + Send + 'static,
     T: Send + 'static,
 {
     match namespace {
@@ -58,10 +58,10 @@ where
 pub(super) fn with_netlink_in_namespace<F, Fut, T>(
     namespace: NetworkNamespaceId,
     operation: F,
-) -> Result<T, NativeRouteError>
+) -> Result<T, SystemError>
 where
     F: FnOnce(Handle) -> Fut + Send + 'static,
-    Fut: Future<Output = Result<T, NativeRouteError>> + Send + 'static,
+    Fut: Future<Output = Result<T, SystemError>> + Send + 'static,
     T: Send + 'static,
 {
     NETLINK_WORKER.with(|worker| {
@@ -108,10 +108,10 @@ pub(super) fn current_network_namespace() -> Option<NetworkNamespaceId> {
     })
 }
 
-fn with_uncached_netlink<F, Fut, T>(operation: F) -> Result<T, NativeRouteError>
+fn with_uncached_netlink<F, Fut, T>(operation: F) -> Result<T, SystemError>
 where
     F: FnOnce(Handle) -> Fut + Send + 'static,
-    Fut: Future<Output = Result<T, NativeRouteError>> + Send + 'static,
+    Fut: Future<Output = Result<T, SystemError>> + Send + 'static,
     T: Send + 'static,
 {
     thread::Builder::new()
@@ -142,7 +142,7 @@ thread_local! {
         const { RefCell::new(None) };
 }
 
-fn retire_cached_worker(worker: &mut Option<NetlinkWorker>) -> Result<(), NativeRouteError> {
+fn retire_cached_worker(worker: &mut Option<NetlinkWorker>) -> Result<(), SystemError> {
     let shutdown_result = worker.as_mut().map(NetlinkWorker::shutdown);
     if let Some(mut worker) = worker.take() {
         worker.transfer_to_reaper();
@@ -150,7 +150,7 @@ fn retire_cached_worker(worker: &mut Option<NetlinkWorker>) -> Result<(), Native
     shutdown_result.unwrap_or(Ok(()))
 }
 
-type ErasedNetlinkResult = Result<Box<dyn Any + Send>, NativeRouteError>;
+type ErasedNetlinkResult = Result<Box<dyn Any + Send>, SystemError>;
 
 type NetlinkFuture = Pin<Box<dyn Future<Output = ErasedNetlinkResult> + Send>>;
 
@@ -169,12 +169,12 @@ pub(super) struct NetlinkWorker {
     pub(super) commands: Sender<NetlinkCommand>,
     pub(super) thread: Option<JoinHandle<()>>,
     shutdown_timeout: Duration,
-    shutdown_result: Option<Result<(), NativeRouteError>>,
+    shutdown_result: Option<Result<(), SystemError>>,
     shutdown_sent: bool,
 }
 
 impl NetlinkWorker {
-    pub(super) fn start(namespace: NetworkNamespaceId) -> Result<Self, NativeRouteError> {
+    pub(super) fn start(namespace: NetworkNamespaceId) -> Result<Self, SystemError> {
         let (commands, command_receiver) = mpsc::channel();
         let (setup_sender, setup_receiver) = mpsc::sync_channel(1);
         let thread = thread::Builder::new()
@@ -194,7 +194,7 @@ impl NetlinkWorker {
     pub(super) fn execute<F, Fut, T>(&self, operation: F) -> Result<T, NetlinkExecutionError>
     where
         F: FnOnce(Handle) -> Fut + Send + 'static,
-        Fut: Future<Output = Result<T, NativeRouteError>> + Send + 'static,
+        Fut: Future<Output = Result<T, SystemError>> + Send + 'static,
         T: Send + 'static,
     {
         let operation = Box::new(move |handle| {
@@ -232,11 +232,11 @@ impl NetlinkWorker {
         })
     }
 
-    pub(super) fn shutdown(&mut self) -> Result<(), NativeRouteError> {
+    pub(super) fn shutdown(&mut self) -> Result<(), SystemError> {
         self.shutdown_with_timeout(self.shutdown_timeout)
     }
 
-    fn shutdown_with_timeout(&mut self, timeout: Duration) -> Result<(), NativeRouteError> {
+    fn shutdown_with_timeout(&mut self, timeout: Duration) -> Result<(), SystemError> {
         if let Some(result) = &self.shutdown_result {
             return result.clone();
         }
@@ -282,10 +282,10 @@ impl Drop for NetlinkWorker {
 fn finish_netlink_start(
     namespace: NetworkNamespaceId,
     commands: Sender<NetlinkCommand>,
-    setup_receiver: Receiver<Result<(), NativeRouteError>>,
+    setup_receiver: Receiver<Result<(), SystemError>>,
     thread: JoinHandle<()>,
     setup_timeout: Duration,
-) -> Result<NetlinkWorker, NativeRouteError> {
+) -> Result<NetlinkWorker, SystemError> {
     finish_netlink_start_with_callback(
         namespace,
         commands,
@@ -300,12 +300,12 @@ fn finish_netlink_start(
 fn finish_netlink_start_with_callback<F>(
     namespace: NetworkNamespaceId,
     commands: Sender<NetlinkCommand>,
-    setup_receiver: Receiver<Result<(), NativeRouteError>>,
+    setup_receiver: Receiver<Result<(), SystemError>>,
     thread: JoinHandle<()>,
     setup_timeout: Duration,
     shutdown_timeout: Duration,
     after_reap: F,
-) -> Result<NetlinkWorker, NativeRouteError>
+) -> Result<NetlinkWorker, SystemError>
 where
     F: FnOnce() + Send + 'static,
 {
@@ -338,10 +338,10 @@ where
 fn finish_failed_netlink_start<F>(
     commands: Sender<NetlinkCommand>,
     thread: JoinHandle<()>,
-    startup_error: NativeRouteError,
+    startup_error: SystemError,
     shutdown_timeout: Duration,
     after_reap: F,
-) -> Result<NetlinkWorker, NativeRouteError>
+) -> Result<NetlinkWorker, SystemError>
 where
     F: FnOnce() + Send + 'static,
 {
@@ -386,14 +386,11 @@ fn transfer_netlink_worker_with_callback<F>(
 
 #[derive(Debug)]
 pub(super) enum NetlinkExecutionError {
-    Operation(NativeRouteError),
-    Worker(NativeRouteError),
+    Operation(SystemError),
+    Worker(SystemError),
 }
 
-fn netlink_worker(
-    commands: Receiver<NetlinkCommand>,
-    setup: SyncSender<Result<(), NativeRouteError>>,
-) {
+fn netlink_worker(commands: Receiver<NetlinkCommand>, setup: SyncSender<Result<(), SystemError>>) {
     let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_io()
         .enable_time()
@@ -439,40 +436,37 @@ fn netlink_worker(
     connection.abort();
 }
 
-async fn await_netlink_operation<F, T>(
-    operation: F,
-    timeout: Duration,
-) -> Result<T, NativeRouteError>
+async fn await_netlink_operation<F, T>(operation: F, timeout: Duration) -> Result<T, SystemError>
 where
-    F: Future<Output = Result<T, NativeRouteError>>,
+    F: Future<Output = Result<T, SystemError>>,
 {
     tokio::time::timeout(timeout, operation)
         .await
         .map_err(|_| netlink_timeout("execute netlink operation"))?
 }
 
-fn netlink_worker_panicked() -> NativeRouteError {
-    NativeRouteError::InvalidResponse {
+fn netlink_worker_panicked() -> SystemError {
+    SystemError::InvalidResponse {
         message: "Linux netlink worker panicked".to_owned(),
     }
 }
 
-fn netlink_channel_error(message: &'static str) -> NativeRouteError {
-    NativeRouteError::InvalidResponse {
+fn netlink_channel_error(message: &'static str) -> SystemError {
+    SystemError::InvalidResponse {
         message: format!("Linux netlink worker {message}"),
     }
 }
 
-fn netlink_timeout(operation: &'static str) -> NativeRouteError {
-    NativeRouteError::OperatingSystem {
+fn netlink_timeout(operation: &'static str) -> SystemError {
+    SystemError::OperatingSystem {
         operation,
         message: "finite operation deadline expired".to_owned(),
     }
 }
 
 enum NetlinkJoinAttempt {
-    Finished(Result<(), NativeRouteError>),
-    TimedOut(NativeRouteError),
+    Finished(Result<(), SystemError>),
+    TimedOut(SystemError),
 }
 
 fn join_netlink_worker(

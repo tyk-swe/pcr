@@ -22,16 +22,17 @@ use super::windows as native;
     all(any(feature = "native-interfaces", feature = "native-route"), windows)
 ))]
 pub(crate) fn system_interfaces() -> Result<Vec<InterfaceInfo>, LiveIoError> {
-    native::interfaces()
-        .and_then(super::interface_validation::validate_native_interfaces)
-        .map_err(|error| match error {
-            crate::route::NativeRouteError::Unsupported { message } => {
-                LiveIoError::Unsupported { message }
-            }
-            error => LiveIoError::InterfaceDiscovery {
-                message: error.to_string(),
-            },
-        })
+    let interfaces = native::interfaces().map_err(|error| match error {
+        crate::route::SystemError::Unsupported { message } => LiveIoError::Unsupported { message },
+        error => LiveIoError::InterfaceDiscovery {
+            message: error.to_string(),
+        },
+    })?;
+    super::interface_validation::validate_native_interfaces(interfaces).map_err(|error| {
+        LiveIoError::InterfaceDiscovery {
+            message: format!("native route response was invalid: {error}"),
+        }
+    })
 }
 
 #[cfg(all(

@@ -14,36 +14,30 @@ use packetcraftr_netio::{
 };
 
 use super::CaptureGuard;
-use super::{
-    ExchangeAccumulator, ExchangeOptions, ExchangeResult, PreparedExchangePacket,
-    WorkflowResponseMatcher,
-};
-use crate::send::ClientError;
+use super::{Accumulator, PreparedPacket, WorkflowResponseMatcher};
+use super::{Options as ExchangeOptions, Result as ExchangeResult};
+use crate::Error;
 
 /// Mutable live-operation state, created after capture is armed.
-pub(crate) struct ExchangeTransaction<C: Session> {
+pub(crate) struct Transaction<C: Session> {
     pub(super) registry: Arc<Registry>,
     pub(super) capture: CaptureGuard<C>,
     pub(super) started: Instant,
     pub(super) deadline: Instant,
     pub(super) capture_limits: CaptureQueueLimits,
     pub(super) options: ExchangeOptions,
-    pub(super) prepared: Vec<PreparedExchangePacket>,
+    pub(super) prepared: Vec<PreparedPacket>,
     pub(super) packet_count: u64,
     pub(super) total_bytes: u64,
     pub(super) sent: Vec<crate::SentPacket>,
     pub(super) completed_sends: u64,
     pub(super) dissector: Dissector,
-    pub(super) captured: ExchangeAccumulator,
+    pub(super) captured: Accumulator,
     pub(super) correlation_stopped: bool,
 }
 
-impl<C: Session> ExchangeTransaction<C> {
-    pub(crate) fn new(
-        registry: Arc<Registry>,
-        capture: C,
-        prepared: super::PreparedExchange,
-    ) -> Self {
+impl<C: Session> Transaction<C> {
+    pub(crate) fn new(registry: Arc<Registry>, capture: C, prepared: super::Prepared) -> Self {
         let request_count = prepared.packets.len();
         Self {
             dissector: Dissector::new(Arc::clone(&registry)),
@@ -58,7 +52,7 @@ impl<C: Session> ExchangeTransaction<C> {
             total_bytes: prepared.total_bytes,
             sent: Vec::with_capacity(request_count),
             completed_sends: 0,
-            captured: ExchangeAccumulator::new(request_count),
+            captured: Accumulator::new(request_count),
             correlation_stopped: false,
         }
     }
@@ -67,7 +61,7 @@ impl<C: Session> ExchangeTransaction<C> {
         mut self,
         io: &I,
         mut workflow_matcher: Option<&mut WorkflowResponseMatcher<'_>>,
-    ) -> Result<ExchangeResult, ClientError> {
+    ) -> Result<ExchangeResult, Error> {
         let operation = self.run(io, &mut workflow_matcher);
         if let Err(operation) = operation {
             return Err(self.fail_after_shutdown(operation));

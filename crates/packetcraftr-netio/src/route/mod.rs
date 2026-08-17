@@ -5,7 +5,7 @@
 
 mod error;
 mod intent;
-pub(crate) mod materialize;
+mod materialize;
 mod models;
 #[cfg(all(
     feature = "native-route",
@@ -15,18 +15,11 @@ mod native_policy;
 mod planner;
 mod provider;
 
-pub use error::PlanError as Error;
-pub use materialize::{MaterializedRoute as Materialized, materialize};
-pub use models::{
-    DestinationScope as Scope, PlanOptions as Options, PlannedRoute as Plan,
-    RouteDecision as Decision, RouteProvider as Provider, RouteSelectionReason as SelectionReason,
-};
+pub use error::Error;
+pub use materialize::{Materialized, materialize};
+pub use models::{Decision, Options, Plan, Provider, Scope, SelectionReason};
 pub use planner::plan;
-pub use provider::{NativeRouteError as SystemError, SystemRouteProvider as SystemProvider};
-
-pub(crate) use materialize::MaterializedRoute;
-pub(crate) use models::{DestinationScope, PlannedRoute, RouteDecision, RouteSelectionReason};
-pub(crate) use provider::NativeRouteError;
+pub use provider::{SystemError, SystemProvider};
 
 #[cfg(all(
     feature = "native-route",

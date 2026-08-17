@@ -5,11 +5,10 @@
 
 use serde::Serialize;
 
-pub use crate::output::network::RouteDecisionOutput as Decision;
-use crate::output::network::RouteDecisionOutput;
+use crate::output::network::Decision;
 
 /// Aggregate result of `routes`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct RoutesCommandResult {
-    pub routes: Vec<RouteDecisionOutput>,
+pub struct Result {
+    pub routes: Vec<Decision>,
 }

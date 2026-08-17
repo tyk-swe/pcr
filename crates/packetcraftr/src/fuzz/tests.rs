@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
-use packetcraftr_core::build::{BuildOptions, Builder};
+use packetcraftr_core::build::{Builder, Options as BuildOptions};
 use packetcraftr_core::error::Classified;
 use packetcraftr_core::fuzz as packet_fuzz;
 use packetcraftr_core::protocol::{
@@ -17,13 +17,10 @@ use packetcraftr_core::{Packet, layer::Raw};
 use packetcraftr_netio::{capture::Statistics as CaptureStatistics, transmit::Submission};
 
 use crate::clock::Clock;
-use crate::{BoundaryError, Stats};
+use crate::{BoundaryError, Stats as ExecutionStats};
 
 use super::execution::add_execution_stats;
-use super::{
-    Authorizer, Execution, ExecutionCase, Executor, LiveLimits, LiveOptions, Stats as FuzzStats,
-    run,
-};
+use super::{Authorizer, Execution, ExecutionCase, Executor, LiveLimits, LiveOptions, Stats, run};
 
 #[test]
 fn live_evidence_limits_are_validated_outside_the_offline_campaign() {
@@ -53,7 +50,7 @@ fn live_evidence_limits_are_validated_outside_the_offline_campaign() {
 
 #[test]
 fn execution_statistics_aggregation_is_complete_and_atomic() {
-    let mut total = FuzzStats {
+    let mut total = Stats {
         cases_generated: 7,
         cases_built: 5,
         packets_attempted: 1,
@@ -69,7 +66,7 @@ fn execution_statistics_aggregation_is_complete_and_atomic() {
     };
     add_execution_stats(
         &mut total,
-        &Stats {
+        &ExecutionStats {
             packets_attempted: 10,
             packets_completed: 20,
             bytes: 30,
@@ -86,7 +83,7 @@ fn execution_statistics_aggregation_is_complete_and_atomic() {
     .expect("bounded statistics");
     assert_eq!(
         total,
-        FuzzStats {
+        Stats {
             cases_generated: 7,
             cases_built: 5,
             packets_attempted: 11,
@@ -105,13 +102,13 @@ fn execution_statistics_aggregation_is_complete_and_atomic() {
     let before = total.clone();
     let error = add_execution_stats(
         &mut total,
-        &Stats {
+        &ExecutionStats {
             packets_attempted: 1,
             capture: CaptureStatistics {
                 receiver_dropped_frames: u64::MAX,
                 ..CaptureStatistics::default()
             },
-            ..Stats::default()
+            ..ExecutionStats::default()
         },
         12,
     )
@@ -148,11 +145,11 @@ impl Executor for RebuildingExecutor {
         let sent = crate::evidence::test_sent_packet(case.packet.clone());
         Ok(Execution {
             permit: case.permit,
-            stats: Stats {
+            stats: ExecutionStats {
                 packets_attempted: 1,
                 packets_completed: 1,
                 bytes: u64::try_from(sent.bytes_sent()).unwrap(),
-                ..Stats::default()
+                ..ExecutionStats::default()
             },
             sent,
             responses: Vec::new(),
@@ -176,11 +173,11 @@ impl Executor for RouteMaterializingExecutor {
         let sent = route_materialized_sent_packet(&self.registry, case.packet.clone());
         Ok(Execution {
             permit: case.permit,
-            stats: Stats {
+            stats: ExecutionStats {
                 packets_attempted: 1,
                 packets_completed: 1,
                 bytes: u64::try_from(sent.bytes_sent()).unwrap(),
-                ..Stats::default()
+                ..ExecutionStats::default()
             },
             sent,
             responses: Vec::new(),
@@ -202,11 +199,11 @@ impl Executor for SubstitutingFuzzExecutor {
         let sent = crate::evidence::test_sent_packet(packet());
         Ok(Execution {
             permit: _case.permit,
-            stats: Stats {
+            stats: ExecutionStats {
                 packets_attempted: 1,
                 packets_completed: 1,
                 bytes: u64::try_from(sent.bytes_sent()).unwrap(),
-                ..Stats::default()
+                ..ExecutionStats::default()
             },
             sent,
             responses: Vec::new(),
@@ -294,13 +291,13 @@ fn route_materializing_route() -> packetcraftr_netio::route::Materialized {
     let destination = Ipv4Addr::new(198, 51, 100, 2);
     Materialized {
         plan: Plan {
-            route: Decision {
+            decision: Decision {
                 interface: InterfaceId {
                     name: "fixture0".to_owned(),
                     index: 1,
                 },
                 source_mac: None,
-                selected_address: Some(IpAddr::V4(source)),
+                selected_source: Some(IpAddr::V4(source)),
                 preferred_source: None,
                 next_hop: None,
                 selection_reason: RouteSelectionReason::Gateway,

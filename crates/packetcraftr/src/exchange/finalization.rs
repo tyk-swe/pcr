@@ -3,29 +3,29 @@
 
 //! Capture shutdown composition and fail-closed result/statistics validation.
 
-use packetcraftr_core::diagnostic::push_diagnostic_once;
+use packetcraftr_core::diagnostic::push_once as push_diagnostic_once;
 use packetcraftr_netio::{
     Error as LiveIoError,
     capture::{OverflowPolicy, Session, Statistics},
 };
 
-use super::ExchangeResult;
-use super::transaction::ExchangeTransaction;
+use super::Result as ExchangeResult;
+use super::transaction::Transaction;
+use crate::Error;
 use crate::Stats;
-use crate::send::ClientError;
 
-impl<C: Session> ExchangeTransaction<C> {
-    pub(super) fn fail_after_shutdown(&mut self, operation: LiveIoError) -> ClientError {
+impl<C: Session> Transaction<C> {
+    pub(super) fn fail_after_shutdown(&mut self, operation: LiveIoError) -> Error {
         match self.capture.shutdown() {
-            Ok(()) => ClientError::Io(operation),
-            Err(shutdown) => ClientError::OperationAndCaptureShutdown {
+            Ok(()) => Error::Io(operation),
+            Err(shutdown) => Error::OperationAndCaptureShutdown {
                 operation,
                 shutdown,
             },
         }
     }
 
-    pub(super) fn finalize_exchange(mut self) -> Result<ExchangeResult, ClientError> {
+    pub(super) fn finalize_exchange(mut self) -> Result<ExchangeResult, Error> {
         let capture_statistics = self.capture.inner.statistics().validate()?;
         self.apply_capture_loss_policy(capture_statistics)?;
         let unanswered = self
@@ -48,7 +48,7 @@ impl<C: Session> ExchangeTransaction<C> {
         ))
     }
 
-    fn apply_capture_loss_policy(&mut self, statistics: Statistics) -> Result<(), ClientError> {
+    fn apply_capture_loss_policy(&mut self, statistics: Statistics) -> Result<(), Error> {
         if !statistics.has_loss() {
             return Ok(());
         }

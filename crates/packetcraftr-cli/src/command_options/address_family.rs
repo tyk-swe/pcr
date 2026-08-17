@@ -5,19 +5,19 @@ use clap::ValueEnum;
 
 /// Address-family selection shared by target-based live workflows.
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
-pub(crate) enum CliAddressFamily {
+pub(crate) enum AddressFamily {
     #[default]
     Any,
     Ipv4,
     Ipv6,
 }
 
-impl From<CliAddressFamily> for packetcraftr::target::Family {
-    fn from(value: CliAddressFamily) -> Self {
+impl From<AddressFamily> for packetcraftr::target::Family {
+    fn from(value: AddressFamily) -> Self {
         match value {
-            CliAddressFamily::Any => Self::Any,
-            CliAddressFamily::Ipv4 => Self::Ipv4,
-            CliAddressFamily::Ipv6 => Self::Ipv6,
+            AddressFamily::Any => Self::Any,
+            AddressFamily::Ipv4 => Self::Ipv4,
+            AddressFamily::Ipv6 => Self::Ipv6,
         }
     }
 }

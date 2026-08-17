@@ -3,25 +3,22 @@
 
 //! Shared, bounded setup for offline analysis commands.
 
-use std::fs::File;
-use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
 use packetcraftr::{
     analysis,
-    analysis::pcap::{Reader, ReaderOptions},
     core::{filter::Filter, registry::Registry},
 };
 
-use super::super::command_options::{OfflineAnalysisLimits, OfflineCaptureLimits};
+use super::super::command_options::OfflineAnalysisLimitsArgs;
 use super::super::errors::CliError;
 use super::super::filtering::{self, Capabilities};
 use super::super::input::validate_capture_stream_limits;
-use super::super::system::default_registry_arc;
+use super::registry;
 
 /// Validated, I/O-free analysis state.
-pub(super) struct PreparedOfflineAnalysis {
+pub(super) struct Prepared {
     pub(super) registry: Arc<Registry>,
     pub(super) filter: Option<Filter>,
     pub(super) limits: analysis::Limits,
@@ -29,10 +26,10 @@ pub(super) struct PreparedOfflineAnalysis {
 
 /// Validates capture bounds, prepares registry/filter state, then validates
 /// analysis bounds.
-pub(super) fn prepare_offline_analysis(
-    limits: OfflineAnalysisLimits,
+pub(super) fn prepare(
+    limits: OfflineAnalysisLimitsArgs,
     filter_source: Option<&str>,
-) -> Result<PreparedOfflineAnalysis, CliError> {
+) -> Result<Prepared, CliError> {
     let capture = limits.capture;
     validate_capture_stream_limits(
         capture.max_frames,
@@ -40,7 +37,7 @@ pub(super) fn prepare_offline_analysis(
         capture.max_frame_bytes,
         capture.max_interfaces,
     )?;
-    let registry = default_registry_arc()?;
+    let registry = registry()?;
     let filter = match filter_source {
         Some(source) => Some(filtering::compile(
             source,
@@ -58,27 +55,9 @@ pub(super) fn prepare_offline_analysis(
     };
     limits.validate().map_err(CliError::classified)?;
 
-    Ok(PreparedOfflineAnalysis {
+    Ok(Prepared {
         registry,
         filter,
         limits,
     })
-}
-
-/// Opens a prepared command's reader without changing validation precedence.
-pub(super) fn open_offline_reader(
-    path: &Path,
-    limits: OfflineCaptureLimits,
-) -> Result<Reader<File>, CliError> {
-    let file = File::open(path)
-        .map_err(|source| CliError::new(5, format!("open {} failed: {source}", path.display())))?;
-    Reader::with_options(
-        file,
-        ReaderOptions {
-            max_size: limits.max_frame_bytes,
-            max_interfaces_per_section: limits.max_interfaces,
-            ..ReaderOptions::default()
-        },
-    )
-    .map_err(CliError::classified)
 }

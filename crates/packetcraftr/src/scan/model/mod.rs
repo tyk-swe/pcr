@@ -5,8 +5,6 @@ mod execution;
 mod request;
 mod result;
 
-pub use execution::{ScanBatch, ScanBatchExecution, ScanExecutor, ScanProbe};
-pub use request::{ScanLimits, ScanRequest, ScanTransport};
-pub use result::{
-    ScanClassification, ScanEndpointResult, ScanProbeEvidence, ScanProbeStatus, ScanResult,
-};
+pub use execution::{Batch, Execution, Executor, Probe};
+pub use request::{Limits, Request, Transport};
+pub use result::{Classification, Endpoint, ProbeEvidence, ProbeStatus, Result};

@@ -5,15 +5,15 @@
 
 use crate::probe::evidence::{format_exchange_evidence_error, validate_batch_exchange_evidence};
 
-use super::error::ScanError;
-use super::model::{ScanBatch, ScanBatchExecution, ScanLimits};
+use super::error::Error;
+use super::model::{Batch, Execution, Limits};
 use super::probe::sent_scan_probe_matches;
 
 pub(super) fn validate_exchange_evidence(
-    batch: &ScanBatch,
-    exchange: &ScanBatchExecution,
-    limits: ScanLimits,
-) -> Result<(), ScanError> {
+    batch: &Batch,
+    exchange: &Execution,
+    limits: Limits,
+) -> Result<(), Error> {
     validate_batch_exchange_evidence(
         batch,
         exchange,
@@ -21,7 +21,7 @@ pub(super) fn validate_exchange_evidence(
         limits.max_evidence_bytes,
         sent_scan_probe_matches,
     )
-    .map_err(|error| ScanError::InvalidEvidence {
+    .map_err(|error| Error::InvalidEvidence {
         sequence: error
             .request_index()
             .map_or(batch.probes[0].sequence, |index| {

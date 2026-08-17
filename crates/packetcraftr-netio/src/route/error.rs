@@ -14,7 +14,7 @@ use packetcraftr_core::{
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
-pub enum PlanError {
+pub enum Error {
     #[error("route lookup for {destination} failed: {message}")]
     RouteLookup {
         destination: IpAddr,
@@ -78,7 +78,7 @@ pub enum PlanError {
     InvalidNeighborVlan { message: String },
 }
 
-impl Classified for PlanError {
+impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
             Self::RouteLookup { failure, .. } | Self::InterfaceLookup { failure, .. } => *failure,

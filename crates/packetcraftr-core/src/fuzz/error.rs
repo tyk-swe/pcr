@@ -8,11 +8,11 @@ use thiserror::Error;
 use crate::budget::DeadlineExceeded;
 use crate::error::{Classification, Classified, Kind};
 
-use super::request::FuzzTarget;
+use super::request::Target;
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
-pub enum FuzzError {
+pub enum Error {
     #[error("invalid fuzz limit {field}={value}: {reason}")]
     InvalidLimit {
         field: &'static str,
@@ -26,7 +26,7 @@ pub enum FuzzError {
     #[error("fuzz duration {value:?} is invalid; maximum is {maximum:?}")]
     InvalidDuration { value: Duration, maximum: Duration },
     #[error("fuzz target {target} is invalid: {message}")]
-    InvalidTarget { target: FuzzTarget, message: String },
+    InvalidTarget { target: Target, message: String },
     #[error("fuzz base packet is invalid: {message}")]
     InvalidBasePacket { message: String },
     #[error("packet has no field compatible with the selected fuzz strategies")]
@@ -37,7 +37,7 @@ pub enum FuzzError {
     DurationLimit { actual: Duration, limit: Duration },
 }
 
-impl Classified for FuzzError {
+impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
             Self::InvalidLimit { .. }
@@ -78,8 +78,8 @@ impl Classified for FuzzError {
     }
 }
 
-pub(super) fn duration_limit(error: DeadlineExceeded) -> FuzzError {
-    FuzzError::DurationLimit {
+pub(super) fn duration_limit(error: DeadlineExceeded) -> Error {
+    Error::DurationLimit {
         actual: error.actual,
         limit: error.limit,
     }

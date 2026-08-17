@@ -13,7 +13,7 @@ use packetcraftr_netio::{
     transmit::Report as IoSendReport,
 };
 
-use super::error::ReplayError;
+use super::error::Error;
 
 pub(super) fn map_replay_route_error(
     source: packetcraftr_netio::route::SystemError,
@@ -85,12 +85,12 @@ pub(super) fn replay_link_mode(
     sequence: u64,
     link_type: LinkType,
     requested: LinkMode,
-) -> Result<LinkMode, ReplayError> {
+) -> Result<LinkMode, Error> {
     let supported = match link_type {
         LinkType::ETHERNET => LinkMode::Layer2,
         LinkType::BSD_RAW | LinkType::RAW | LinkType::IPV4 | LinkType::IPV6 => LinkMode::Layer3,
         _ => {
-            return Err(ReplayError::UnsupportedLinkType {
+            return Err(Error::UnsupportedLinkType {
                 sequence,
                 link_type: link_type.0,
             });
@@ -99,7 +99,7 @@ pub(super) fn replay_link_mode(
     match requested {
         LinkMode::Auto => Ok(supported),
         requested if requested == supported => Ok(requested),
-        requested => Err(ReplayError::LinkModeMismatch {
+        requested => Err(Error::LinkModeMismatch {
             sequence,
             link_type: link_type.0,
             requested,
@@ -111,8 +111,8 @@ pub(super) fn validate_transmission_evidence(
     sequence: u64,
     frame: &Frame,
     report: &IoSendReport,
-) -> Result<(), ReplayError> {
+) -> Result<(), Error> {
     report
         .validate_exact(frame.bytes())
-        .map_err(|source| ReplayError::Transmission { sequence, source })
+        .map_err(|source| Error::Transmission { sequence, source })
 }

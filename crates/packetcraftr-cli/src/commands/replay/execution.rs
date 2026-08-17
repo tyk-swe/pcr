@@ -8,15 +8,15 @@ use packetcraftr::{analysis::pcap::Reader, core::frame::Frame};
 use crate::errors::CliError;
 use crate::filtering::FrameSelector;
 
-use super::replay_cli_error;
+use super::classified_error;
 
 /// Bridges the CLI display filter to replay selection. Rejected frames skip
 /// authorization, delay, and transmission; undecodable frames fail replay.
-pub(super) struct DisplayFilterSelector<'a> {
+pub(super) struct FilterSelector<'a> {
     pub(super) selector: &'a FrameSelector,
 }
 
-impl packetcraftr::replay::Selector for DisplayFilterSelector<'_> {
+impl packetcraftr::replay::Selector for FilterSelector<'_> {
     fn select(&mut self, number: u64, frame: &Frame) -> Result<bool, packetcraftr::BoundaryError> {
         self.selector
             .keep(number, frame)
@@ -24,7 +24,7 @@ impl packetcraftr::replay::Selector for DisplayFilterSelector<'_> {
     }
 }
 
-pub(super) fn execute_replay<F>(
+pub(super) fn run<F>(
     reader: &mut Reader<File>,
     options: &packetcraftr::replay::Options,
     selector: Option<&mut dyn packetcraftr::replay::Selector>,
@@ -45,5 +45,5 @@ where
         clock,
         sink,
     )
-    .map_err(replay_cli_error)
+    .map_err(classified_error)
 }

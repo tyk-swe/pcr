@@ -5,7 +5,7 @@
 
 use std::net::IpAddr;
 
-use crate::codec::{CodecError, NetworkEnvelope};
+use crate::codec::{Error as CodecError, NetworkEnvelope};
 
 use super::errors::invalid;
 

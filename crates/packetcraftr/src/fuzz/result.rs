@@ -10,12 +10,6 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum Mode {
-    Live,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
 pub enum CaseOutcome {
     Built,
     Rejected,
@@ -77,7 +71,6 @@ pub struct Stats {
 
 #[derive(Clone, Debug)]
 pub struct Result {
-    pub mode: Mode,
     pub seed: u64,
     pub first_case: u64,
     pub cases: Vec<Case>,

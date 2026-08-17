@@ -3,12 +3,12 @@
 
 use thiserror::Error;
 
-use crate::codec::CodecError;
-use crate::layer::{FieldError, ProtocolId};
+use crate::codec::Error as CodecError;
+use crate::layer::{FieldError, Id as ProtocolId};
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
-pub enum BuildError {
+pub enum Error {
     #[error("cannot build an empty packet")]
     EmptyPacket,
     #[error("packet has {actual} layers, exceeding configured limit {limit}")]

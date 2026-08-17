@@ -5,22 +5,21 @@
 
 use std::time::{Duration, Instant};
 
-use packetcraftr_core::diagnostic::push_diagnostic_once;
+use packetcraftr_core::diagnostic::push_once as push_diagnostic_once;
 use packetcraftr_netio::{Error as LiveIoError, capture::Session};
 
 use super::shutdown::CaptureGuard;
-use super::transaction::ExchangeTransaction;
+use super::transaction::Transaction;
 use super::{
-    ExchangeAccumulator, ExchangeProcessContext, ExchangeProcessOutcome, WorkflowPromotionContext,
-    WorkflowResponseMatcher,
+    Accumulator, ProcessContext, ProcessOutcome, WorkflowPromotionContext, WorkflowResponseMatcher,
 };
 
 fn drain_available<C: Session>(
     capture: &mut CaptureGuard<C>,
     enforced_deadline: Option<Instant>,
     frame_limit: usize,
-    captured: &mut ExchangeAccumulator,
-    context: ExchangeProcessContext<'_>,
+    captured: &mut Accumulator,
+    context: ProcessContext<'_>,
 ) -> Result<(), LiveIoError> {
     for _ in 0..frame_limit {
         if enforced_deadline
@@ -34,7 +33,7 @@ fn drain_available<C: Session>(
             return Ok(());
         };
         match captured.process(frame, context) {
-            ExchangeProcessOutcome::CorrelationDeadlineExpired => {
+            ProcessOutcome::CorrelationDeadlineExpired => {
                 if enforced_deadline.is_some() {
                     return Err(LiveIoError::DeadlineExceeded {
                         operation: "draining capture before all requests were sent",
@@ -42,13 +41,13 @@ fn drain_available<C: Session>(
                 }
                 return Ok(());
             }
-            ExchangeProcessOutcome::DuplicateRecordIdentity => {
+            ProcessOutcome::DuplicateRecordIdentity => {
                 return Err(LiveIoError::Capture {
                     message: "capture provider returned the same ingress record more than once"
                         .to_owned(),
                 });
             }
-            ExchangeProcessOutcome::Continue => {}
+            ProcessOutcome::Continue => {}
         }
     }
     push_diagnostic_once(
@@ -61,7 +60,7 @@ fn drain_available<C: Session>(
     Ok(())
 }
 
-impl<C: Session> ExchangeTransaction<C> {
+impl<C: Session> Transaction<C> {
     pub(super) fn collect_remaining(
         &mut self,
         workflow_matcher: &mut Option<&mut WorkflowResponseMatcher<'_>>,
@@ -71,7 +70,7 @@ impl<C: Session> ExchangeTransaction<C> {
                 let Some(frame) = self.capture.inner.next_captured_frame(remaining)? else {
                     break;
                 };
-                let context = ExchangeProcessContext {
+                let context = ProcessContext {
                     registry: &self.registry,
                     dissector: &self.dissector,
                     prepared: &self.prepared,
@@ -80,18 +79,18 @@ impl<C: Session> ExchangeTransaction<C> {
                     options: &self.options,
                 };
                 match self.captured.process(frame, context) {
-                    ExchangeProcessOutcome::CorrelationDeadlineExpired => break,
-                    ExchangeProcessOutcome::DuplicateRecordIdentity => {
+                    ProcessOutcome::CorrelationDeadlineExpired => break,
+                    ProcessOutcome::DuplicateRecordIdentity => {
                         return Err(LiveIoError::Capture {
                             message:
                                 "capture provider returned the same ingress record more than once"
                                     .to_owned(),
                         });
                     }
-                    ExchangeProcessOutcome::Continue => {}
+                    ProcessOutcome::Continue => {}
                 }
                 if self.promote_workflow(workflow_matcher)
-                    == ExchangeProcessOutcome::CorrelationDeadlineExpired
+                    == ProcessOutcome::CorrelationDeadlineExpired
                 {
                     break;
                 }
@@ -103,7 +102,7 @@ impl<C: Session> ExchangeTransaction<C> {
     }
 
     pub(super) fn drain(&mut self, enforced_deadline: Option<Instant>) -> Result<(), LiveIoError> {
-        let context = ExchangeProcessContext {
+        let context = ProcessContext {
             registry: &self.registry,
             dissector: &self.dissector,
             prepared: &self.prepared,
@@ -123,9 +122,9 @@ impl<C: Session> ExchangeTransaction<C> {
     pub(super) fn promote_workflow(
         &mut self,
         workflow_matcher: &mut Option<&mut WorkflowResponseMatcher<'_>>,
-    ) -> ExchangeProcessOutcome {
+    ) -> ProcessOutcome {
         let Some(matches_request) = workflow_matcher.as_deref_mut() else {
-            return ExchangeProcessOutcome::Continue;
+            return ProcessOutcome::Continue;
         };
         let context = WorkflowPromotionContext {
             prepared: &self.prepared,

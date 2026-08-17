@@ -19,12 +19,12 @@ use windows::Win32::Networking::WinSock::{
     SOCKADDR_IN6_0, SOCKADDR_INET,
 };
 
-use super::adapter::{adapter_index_for, find_windows_adapter};
+use super::adapter::{WindowsAdapter, adapter_index_for, find_windows_adapter};
 use super::enumeration::{adapter_snapshots, win32_error};
 use crate::{
     interface::Id as InterfaceId,
     route::{
-        NativeRouteError, NativeRouteSnapshot, RouteDecision, RouteSelectionReason, finish_route,
+        Decision, NativeRouteSnapshot, SelectionReason, SystemError, finish_route,
         interface_decision, validate_preferred_source_family,
     },
 };
@@ -33,80 +33,21 @@ pub(in crate::platform) fn route(
     destination: IpAddr,
     interface_hint: Option<&InterfaceId>,
     preferred_source: Option<IpAddr>,
-) -> Result<RouteDecision, NativeRouteError> {
+) -> Result<Decision, SystemError> {
     validate_preferred_source_family(destination, preferred_source)?;
 
     let available = adapter_snapshots()?;
-    let mut constrained_interface = interface_hint
-        .map(|requested| find_windows_adapter(&available, requested))
-        .transpose()?;
-    if let Some(source) = preferred_source {
-        let source_interface = available
-            .iter()
-            .find(|adapter| {
-                adapter
-                    .interface
-                    .addresses
-                    .iter()
-                    .any(|assigned| assigned.address == source)
-            })
-            .cloned()
-            .ok_or_else(|| NativeRouteError::SourceUnavailable {
-                preferred_source: source,
-                interface: interface_hint
-                    .map_or_else(|| "any interface".to_owned(), |hint| hint.name.clone()),
-            })?;
-        if let Some(requested) = &constrained_interface {
-            if requested.ipv4_index != source_interface.ipv4_index
-                || requested.ipv6_index != source_interface.ipv6_index
-            {
-                return Err(NativeRouteError::SourceUnavailable {
-                    preferred_source: source,
-                    interface: requested.interface.id.name.clone(),
-                });
-            }
-        } else {
-            constrained_interface = Some(source_interface);
-        }
-    }
+    let constrained_interface = constrain_interface(&available, interface_hint, preferred_source)?;
+    let BestRoute {
+        row: best_route,
+        source: best_source,
+    } = query_best_route(
+        destination,
+        preferred_source,
+        constrained_interface.as_ref(),
+    )?;
 
-    let interface_index = constrained_interface
-        .as_ref()
-        .map_or(0, |adapter| adapter_index_for(adapter, destination));
-    let destination_address = encode_address(destination, interface_index);
-    let source_address = preferred_source.map(|source| encode_address(source, interface_index));
-    let mut best_route = MIB_IPFORWARD_ROW2::default();
-    let mut best_source = SOCKADDR_INET::default();
-    // SAFETY: all pointers refer to initialized input/output structures for
-    // the duration of this synchronous IP Helper call.
-    let result = unsafe {
-        GetBestRoute2(
-            constrained_interface
-                .as_ref()
-                .map(|adapter| &adapter.luid as *const NET_LUID_LH),
-            interface_index,
-            source_address.as_ref().map(|source| source as *const _),
-            &destination_address,
-            0,
-            &mut best_route,
-            &mut best_source,
-        )
-    };
-    if result != NO_ERROR {
-        if matches!(
-            result,
-            ERROR_NOT_FOUND
-                | ERROR_NO_DATA
-                | ERROR_NETWORK_UNREACHABLE
-                | ERROR_HOST_UNREACHABLE
-                | ERROR_ADDRESS_NOT_ASSOCIATED
-        ) {
-            return Err(NativeRouteError::RouteNotFound { destination });
-        }
-        return Err(win32_error("GetBestRoute2", result));
-    }
-
-    let selected_address =
+    let selected_source =
         sockaddr_inet_ip(&best_source).filter(|address| !address.is_unspecified());
     let output_index = best_route.InterfaceIndex;
     let adapter = available
@@ -114,7 +55,7 @@ pub(in crate::platform) fn route(
         .find(|adapter| adapter_index_for(adapter, destination) == output_index)
         .cloned()
         .or_else(|| {
-            selected_address.and_then(|source| {
+            selected_source.and_then(|source| {
                 available
                     .iter()
                     .find(|adapter| {
@@ -127,7 +68,7 @@ pub(in crate::platform) fn route(
                     .cloned()
             })
         })
-        .ok_or_else(|| NativeRouteError::InterfaceNotFound {
+        .ok_or_else(|| SystemError::InterfaceNotFound {
             name: constrained_interface.as_ref().map_or_else(
                 || format!("index-{output_index}"),
                 |adapter| adapter.interface.id.name.clone(),
@@ -149,23 +90,108 @@ pub(in crate::platform) fn route(
         preferred_source,
         NativeRouteSnapshot {
             interface,
-            selected_address,
+            selected_source,
             next_hop,
             route_mtu: None,
             selection_reason: if best_route.Loopback {
-                RouteSelectionReason::Local
+                SelectionReason::Local
             } else if next_hop.is_some() {
-                RouteSelectionReason::Gateway
+                SelectionReason::Gateway
             } else {
-                RouteSelectionReason::OnLink
+                SelectionReason::OnLink
             },
         },
     )
 }
 
+fn constrain_interface(
+    available: &[WindowsAdapter],
+    interface_hint: Option<&InterfaceId>,
+    preferred_source: Option<IpAddr>,
+) -> Result<Option<WindowsAdapter>, SystemError> {
+    let mut constrained = interface_hint
+        .map(|requested| find_windows_adapter(available, requested))
+        .transpose()?;
+    if let Some(source) = preferred_source {
+        let source_interface = available
+            .iter()
+            .find(|adapter| {
+                adapter
+                    .interface
+                    .addresses
+                    .iter()
+                    .any(|assigned| assigned.address == source)
+            })
+            .cloned()
+            .ok_or_else(|| SystemError::SourceUnavailable {
+                preferred_source: source,
+                interface: interface_hint
+                    .map_or_else(|| "any interface".to_owned(), |hint| hint.name.clone()),
+            })?;
+        if let Some(requested) = &constrained {
+            if requested.ipv4_index != source_interface.ipv4_index
+                || requested.ipv6_index != source_interface.ipv6_index
+            {
+                return Err(SystemError::SourceUnavailable {
+                    preferred_source: source,
+                    interface: requested.interface.id.name.clone(),
+                });
+            }
+        } else {
+            constrained = Some(source_interface);
+        }
+    }
+    Ok(constrained)
+}
+
+struct BestRoute {
+    row: MIB_IPFORWARD_ROW2,
+    source: SOCKADDR_INET,
+}
+
+fn query_best_route(
+    destination: IpAddr,
+    preferred_source: Option<IpAddr>,
+    constrained_interface: Option<&WindowsAdapter>,
+) -> Result<BestRoute, SystemError> {
+    let interface_index =
+        constrained_interface.map_or(0, |adapter| adapter_index_for(adapter, destination));
+    let destination_address = encode_address(destination, interface_index);
+    let source_address = preferred_source.map(|source| encode_address(source, interface_index));
+    let mut row = MIB_IPFORWARD_ROW2::default();
+    let mut source = SOCKADDR_INET::default();
+    // SAFETY: all pointers refer to initialized input/output structures for
+    // the duration of this synchronous IP Helper call.
+    let result = unsafe {
+        GetBestRoute2(
+            constrained_interface.map(|adapter| &adapter.luid as *const NET_LUID_LH),
+            interface_index,
+            source_address.as_ref().map(|source| source as *const _),
+            &destination_address,
+            0,
+            &mut row,
+            &mut source,
+        )
+    };
+    if result != NO_ERROR {
+        if matches!(
+            result,
+            ERROR_NOT_FOUND
+                | ERROR_NO_DATA
+                | ERROR_NETWORK_UNREACHABLE
+                | ERROR_HOST_UNREACHABLE
+                | ERROR_ADDRESS_NOT_ASSOCIATED
+        ) {
+            return Err(SystemError::RouteNotFound { destination });
+        }
+        return Err(win32_error("GetBestRoute2", result));
+    }
+    Ok(BestRoute { row, source })
+}
+
 pub(in crate::platform) fn interface_route(
     requested: &InterfaceId,
-) -> Result<RouteDecision, NativeRouteError> {
+) -> Result<Decision, SystemError> {
     let adapters = adapter_snapshots()?;
     interface_decision(find_windows_adapter(&adapters, requested)?.interface)
 }

@@ -8,14 +8,14 @@ use thiserror::Error;
 
 use crate::analysis::pcap::Error as CaptureError;
 use crate::analysis::reassembly::tcp::Error as TcpError;
-use crate::analysis::scope::ScopeError;
-use crate::decode::DecodeError;
+use crate::analysis::scope::Error as ScopeError;
+use crate::decode::Error as DecodeError;
 use crate::error::{Classification, Classified, Kind};
 use crate::filter::Error as FilterError;
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
-pub enum AnalysisError {
+pub enum Error {
     #[error("invalid analysis limit {field}={value}: {reason}")]
     InvalidLimit {
         field: &'static str,
@@ -68,7 +68,7 @@ pub enum AnalysisError {
     },
 }
 
-impl Classified for AnalysisError {
+impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
             Self::InvalidLimit { .. } => Classification::new(

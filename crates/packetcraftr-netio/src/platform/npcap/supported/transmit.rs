@@ -16,7 +16,7 @@ use crate::{
 };
 
 pub(super) fn send_layer2(frame: Layer2Frame<'_>) -> Result<IoSendReport, LiveIoError> {
-    let interface = &frame.route().plan.route.interface;
+    let interface = &frame.route().plan.decision.interface;
     let length = i32::try_from(frame.bytes().len()).map_err(|_| LiveIoError::Send {
         message: format!(
             "Layer 2 frame for {} exceeds Npcap's signed 32-bit send length",

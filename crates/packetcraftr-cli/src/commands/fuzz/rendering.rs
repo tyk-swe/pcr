@@ -5,18 +5,26 @@ use packetcraftr::{core, output};
 
 use crate::errors::CliError;
 use crate::rendering::{
-    captured_frame_text, emit_stream_record, emit_stream_with_stats, render_diagnostics_text,
-    render_output_diagnostics_text, spaced_hex, write_stdout_line,
+    captured_frame_text, emit_aggregate_with_stats, emit_next, emit_with_stats,
+    render_diagnostics_text, render_output_diagnostics_text, spaced_hex, write_stdout_line,
 };
 
-pub(super) fn render_fuzz_text(
+pub(super) fn render_aggregate(
+    result: output::fuzz::Result,
+    diagnostics: Vec<core::diagnostic::Diagnostic>,
+    stats: output::envelope::Stats,
+) -> Result<(), CliError> {
+    emit_aggregate_with_stats(output::contract::Command::Fuzz, result, diagnostics, stats)
+}
+
+pub(super) fn render_text(
     result: output::fuzz::Result,
     diagnostics: Vec<core::diagnostic::Diagnostic>,
     stats: output::envelope::Stats,
 ) -> Result<(), CliError> {
     write_stdout_line(format_args!(
         "mode={} seed={} first_case={} generated={} built={} rejected={}",
-        fuzz_mode_name(result.mode),
+        mode_name(result.mode),
         result.seed,
         result.first_case,
         result.cases_generated,
@@ -31,7 +39,7 @@ pub(super) fn render_fuzz_text(
             case.mutation.strategy,
             case.mutation.layer,
             case.mutation.field,
-            fuzz_outcome_name(case.outcome),
+            outcome_name(case.outcome),
             case.frame.as_ref().map(|frame| frame.length).unwrap_or(0),
             case.reproduction.operation_seed,
             case.reproduction.case_index,
@@ -75,7 +83,7 @@ pub(super) fn render_fuzz_text(
     render_diagnostics_text(&diagnostics)
 }
 
-pub(super) fn render_fuzz_stream(
+pub(super) fn render_stream(
     result: output::fuzz::Result,
     diagnostics: Vec<core::diagnostic::Diagnostic>,
     stats: output::envelope::Stats,
@@ -91,7 +99,7 @@ pub(super) fn render_fuzz_stream(
     } = result;
     let mut sequence = 0_u64;
     for case in cases {
-        emit_stream_record(
+        emit_next(
             output::contract::Command::Fuzz,
             &mut sequence,
             output::fuzz::Event::Case {
@@ -100,7 +108,7 @@ pub(super) fn render_fuzz_stream(
             },
         )?;
     }
-    emit_stream_with_stats(
+    emit_with_stats(
         output::contract::Command::Fuzz,
         sequence,
         output::fuzz::Event::Complete {
@@ -116,14 +124,14 @@ pub(super) fn render_fuzz_stream(
     )
 }
 
-fn fuzz_mode_name(value: output::fuzz::Mode) -> &'static str {
+fn mode_name(value: output::fuzz::Mode) -> &'static str {
     match value {
         output::fuzz::Mode::Offline => "offline",
         output::fuzz::Mode::Live => "live",
     }
 }
 
-fn fuzz_outcome_name(value: output::fuzz::Outcome) -> &'static str {
+fn outcome_name(value: output::fuzz::Outcome) -> &'static str {
     match value {
         output::fuzz::Outcome::Built => "built",
         output::fuzz::Outcome::Rejected => "rejected",

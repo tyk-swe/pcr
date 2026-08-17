@@ -7,16 +7,12 @@ use std::sync::Arc;
 
 use packetcraftr_core::error::{Classification, Kind};
 use packetcraftr_core::frame::Frame;
-use packetcraftr_core::{
-    build::{BuildContext, BuildMode, BuildOptions, Builder},
-    decode::{DecodeOptions, Dissector},
-    registry::Registry,
-};
-use packetcraftr_netio::link::Mode as LinkMode;
+use packetcraftr_core::{build, decode, registry::Registry};
+use packetcraftr_netio::link::Mode;
 
 use crate::BoundaryError;
 
-use super::super::model::{ReplayAuthorizationContext, ReplayAuthorizer};
+use super::super::model::{AuthorizationContext, Authorizer};
 use super::super::wire::replay_network_envelope;
 
 /// Validates complete capture evidence, applies policy to raw routing destinations
@@ -45,55 +41,40 @@ impl SystemAuthorizer {
     pub(in crate::replay) fn authorize_frame(
         &self,
         frame: &Frame,
-        mode: LinkMode,
+        mode: Mode,
     ) -> Result<(), BoundaryError> {
-        if frame.captured_length() != frame.original_length() {
-            return Err(BoundaryError::new(
-                format!(
-                    "captured frame contains {} of {} original wire bytes",
-                    frame.captured_length(),
-                    frame.original_length()
-                ),
-                Classification::new(
-                    "packet.replay_truncated",
-                    Kind::Packet,
-                    Some(
-                        "replay only complete captured frames whose captured and original lengths match",
-                    ),
-                ),
-                Vec::new(),
-            ));
-        }
+        validate_complete_frame(frame)?;
+        self.validate_link_type(frame)?;
+        validate_network_frame(frame, mode)?;
+        let decoded = self.decode_frame(frame)?;
+        self.policy
+            .authorize_packet_destinations(&decoded.packet)
+            .map_err(BoundaryError::from_error)?;
+        let rebuilt = self.rebuild_frame(&decoded)?;
+        self.validate_rebuild(frame, &rebuilt)
+    }
+
+    fn validate_link_type(&self, frame: &Frame) -> Result<(), BoundaryError> {
         if self
             .registry
             .root_for_link_type(frame.link_type.0)
-            .is_none()
+            .is_some()
         {
-            return Err(BoundaryError::from_error(
-                crate::policy::Error::InvalidPacketSemantics {
-                    reason: format!(
-                        "replay authorization does not support link type {}",
-                        frame.link_type.0
-                    ),
-                },
-            ));
+            return Ok(());
         }
-        if mode == LinkMode::Layer3 {
-            replay_network_envelope(frame).map_err(|source| {
-                BoundaryError::with_source(
-                    source.to_string(),
-                    Classification::new(
-                        "packet.replay_network",
-                        Kind::Packet,
-                        Some("repair the raw IP header or capture link type before live replay"),
-                    ),
-                    Vec::new(),
-                    source,
-                )
-            })?;
-        }
-        let decoded = Dissector::new(Arc::clone(&self.registry))
-            .decode(frame.clone(), DecodeOptions::default())
+        Err(BoundaryError::from_error(
+            crate::policy::Error::InvalidPacketSemantics {
+                reason: format!(
+                    "replay authorization does not support link type {}",
+                    frame.link_type.0
+                ),
+            },
+        ))
+    }
+
+    fn decode_frame(&self, frame: &Frame) -> Result<decode::DecodedPacket, BoundaryError> {
+        decode::Dissector::new(Arc::clone(&self.registry))
+            .decode(frame.clone(), decode::Options::default())
             .map_err(|source| {
                 BoundaryError::with_source(
                     source.to_string(),
@@ -105,17 +86,20 @@ impl SystemAuthorizer {
                     Vec::new(),
                     source,
                 )
-            })?;
-        self.policy
-            .authorize_packet_destinations(&decoded.packet)
-            .map_err(BoundaryError::from_error)?;
-        let rebuilt = Builder::new(Arc::clone(&self.registry))
+            })
+    }
+
+    fn rebuild_frame(
+        &self,
+        decoded: &decode::DecodedPacket,
+    ) -> Result<build::BuiltPacket, BoundaryError> {
+        build::Builder::new(Arc::clone(&self.registry))
             .build(
                 decoded.packet.clone(),
-                BuildContext::default(),
-                BuildOptions {
-                    mode: BuildMode::Permissive,
-                    ..BuildOptions::default()
+                build::Context::default(),
+                build::Options {
+                    mode: build::Mode::Permissive,
+                    ..build::Options::default()
                 },
             )
             .map_err(|source| {
@@ -131,7 +115,14 @@ impl SystemAuthorizer {
                     Vec::new(),
                     source,
                 )
-            })?;
+            })
+    }
+
+    fn validate_rebuild(
+        &self,
+        frame: &Frame,
+        rebuilt: &build::BuiltPacket,
+    ) -> Result<(), BoundaryError> {
         if rebuilt.bytes != frame.bytes() {
             return Err(BoundaryError::new(
                 "captured frame did not reproduce the exact source bytes",
@@ -167,12 +158,50 @@ impl SystemAuthorizer {
     }
 }
 
-impl ReplayAuthorizer for SystemAuthorizer {
+fn validate_complete_frame(frame: &Frame) -> Result<(), BoundaryError> {
+    if frame.captured_length() == frame.original_length() {
+        return Ok(());
+    }
+    Err(BoundaryError::new(
+        format!(
+            "captured frame contains {} of {} original wire bytes",
+            frame.captured_length(),
+            frame.original_length()
+        ),
+        Classification::new(
+            "packet.replay_truncated",
+            Kind::Packet,
+            Some("replay only complete captured frames whose captured and original lengths match"),
+        ),
+        Vec::new(),
+    ))
+}
+
+fn validate_network_frame(frame: &Frame, mode: Mode) -> Result<(), BoundaryError> {
+    if mode != Mode::Layer3 {
+        return Ok(());
+    }
+    replay_network_envelope(frame).map_err(|source| {
+        BoundaryError::with_source(
+            source.to_string(),
+            Classification::new(
+                "packet.replay_network",
+                Kind::Packet,
+                Some("repair the raw IP header or capture link type before live replay"),
+            ),
+            Vec::new(),
+            source,
+        )
+    })?;
+    Ok(())
+}
+
+impl Authorizer for SystemAuthorizer {
     fn authorize_operation(
         &mut self,
-        context: ReplayAuthorizationContext,
+        context: AuthorizationContext,
         frame: &Frame,
-        mode: LinkMode,
+        mode: Mode,
     ) -> Result<(), BoundaryError> {
         self.policy
             .authorize_operation(context.packets, context.wire_bytes)

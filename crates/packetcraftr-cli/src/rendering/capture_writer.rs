@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Private capture-output state shared by CLI commands and renderers.
+//! Capture writer state shared by command renderers.
 
 use std::io::Write;
 
@@ -21,35 +21,35 @@ struct SourceInterfaceMapping {
 }
 
 #[derive(Debug)]
-enum InterfaceLifecycle {
+enum InterfaceMap {
     LinkTypes(Vec<LinkTypeMapping>),
     SourceInterfaces(Vec<SourceInterfaceMapping>),
 }
 
-/// A streaming writer plus its interface-mapping lifecycle.
-pub(crate) struct CaptureOutput<W> {
+/// A streaming writer plus its interface mapping.
+pub(crate) struct CaptureWriter<W> {
     writer: Writer<W>,
-    interfaces: InterfaceLifecycle,
+    interface_map: InterfaceMap,
 }
 
-impl<W: Write> CaptureOutput<W> {
+impl<W: Write> CaptureWriter<W> {
     /// Maps PCAPNG interfaces by link type as generated frames arrive.
-    pub(crate) fn link_mapped(writer: Writer<W>) -> Self {
+    pub(crate) fn for_link_types(writer: Writer<W>) -> Self {
         Self {
             writer,
-            interfaces: InterfaceLifecycle::LinkTypes(Vec::new()),
+            interface_map: InterfaceMap::LinkTypes(Vec::new()),
         }
     }
 
     /// Maps declared interface descriptions into a newly generated capture.
-    pub(crate) fn interface_mapped(writer: Writer<W>) -> Self {
+    pub(crate) fn for_source_interfaces(writer: Writer<W>) -> Self {
         Self {
             writer,
-            interfaces: InterfaceLifecycle::SourceInterfaces(Vec::new()),
+            interface_map: InterfaceMap::SourceInterfaces(Vec::new()),
         }
     }
 
-    pub(crate) fn format(&self) -> Format {
+    fn format(&self) -> Format {
         self.writer.format()
     }
 
@@ -63,9 +63,9 @@ impl<W: Write> CaptureOutput<W> {
         if self.format() == Format::Pcap {
             return Ok(None);
         }
-        let mappings = match &mut self.interfaces {
-            InterfaceLifecycle::LinkTypes(mappings) => mappings,
-            InterfaceLifecycle::SourceInterfaces(_) => {
+        let mappings = match &mut self.interface_map {
+            InterfaceMap::LinkTypes(mappings) => mappings,
+            InterfaceMap::SourceInterfaces(_) => {
                 unreachable!("link types are registered only on link-mapped output")
             }
         };
@@ -108,9 +108,9 @@ impl<W: Write> CaptureOutput<W> {
         if self.format() == Format::Pcap {
             return Ok(None);
         }
-        let mappings = match &mut self.interfaces {
-            InterfaceLifecycle::SourceInterfaces(mappings) => mappings,
-            InterfaceLifecycle::LinkTypes(_) => {
+        let mappings = match &mut self.interface_map {
+            InterfaceMap::SourceInterfaces(mappings) => mappings,
+            InterfaceMap::LinkTypes(_) => {
                 unreachable!("source interfaces are registered only on interface-mapped output")
             }
         };
@@ -182,7 +182,7 @@ mod tests {
     #[test]
     fn pcapng_link_mapping_is_stable() {
         let writer = Writer::pcapng(Vec::new()).expect("PCAPNG writer");
-        let mut output = CaptureOutput::link_mapped(writer);
+        let mut output = CaptureWriter::for_link_types(writer);
 
         assert_eq!(output.add_link_type(LinkType::ETHERNET).unwrap(), Some(0));
         assert_eq!(output.add_link_type(LinkType::ETHERNET).unwrap(), Some(0));
@@ -209,9 +209,27 @@ mod tests {
     }
 
     #[test]
+    fn constructors_select_their_interface_map() {
+        let link_types =
+            CaptureWriter::for_link_types(Writer::pcapng(Vec::new()).expect("PCAPNG writer"));
+        assert!(matches!(
+            link_types.interface_map,
+            InterfaceMap::LinkTypes(_)
+        ));
+
+        let source_interfaces = CaptureWriter::for_source_interfaces(
+            Writer::pcapng(Vec::new()).expect("PCAPNG writer"),
+        );
+        assert!(matches!(
+            source_interfaces.interface_map,
+            InterfaceMap::SourceInterfaces(_)
+        ));
+    }
+
+    #[test]
     fn pcapng_source_mapping_uses_source_identity_not_repeated_descriptions() {
         let writer = Writer::pcapng(Vec::new()).expect("PCAPNG writer");
-        let mut output = CaptureOutput::interface_mapped(writer);
+        let mut output = CaptureWriter::for_source_interfaces(writer);
         output
             .write_source_frame(
                 Some(7),
@@ -250,7 +268,7 @@ mod tests {
     fn classic_pcap_has_no_interface_ids_and_enforces_stream_limits() {
         let writer =
             Writer::new(Vec::new(), Format::Pcap, LinkType::ETHERNET).expect("classic PCAP writer");
-        let mut output = CaptureOutput::link_mapped(writer);
+        let mut output = CaptureWriter::for_link_types(writer);
         output
             .set_stream_limits(Limits {
                 max_frames: 1,

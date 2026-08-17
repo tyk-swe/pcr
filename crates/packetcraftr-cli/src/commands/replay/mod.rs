@@ -9,32 +9,89 @@ mod execution;
 mod rendering;
 
 use std::fs::File;
-use std::io;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use packetcraftr::{
-    analysis::pcap::{Reader, ReaderOptions},
-    output,
-};
+use packetcraftr::{analysis::pcap::Reader, netio as net, output};
 
-use self::arguments::ReplayArgs;
+use self::arguments::Args;
+use super::registry;
+use crate::command_options::OfflineCaptureLimitsArgs;
 use crate::errors::CliError;
 use crate::filtering::{self, Capabilities, FrameSelector};
-use crate::input::validate_capture_stream_limits;
-use crate::rendering::{
-    capture_file_format, emit_aggregate_with_stats, emit_stream_with_stats, write_stdout_line,
-};
-use crate::system::default_registry_arc;
+use crate::input::{open_capture, validate_capture_stream_limits};
 
-use conversion::{replay_timing, requested_replay_interface};
-use execution::{DisplayFilterSelector, execute_replay};
-use rendering::{
-    emit_replay_ndjson_evidence, replay_capture_output, replay_output_frame, replay_stats,
-    write_replay_capture_evidence, write_replay_text_evidence,
-};
+use conversion::{interface, timing};
+use execution::FilterSelector;
 
-pub(super) fn run(arguments: ReplayArgs, output: output::contract::Format) -> Result<(), CliError> {
+struct Prepared {
+    reader: Reader<File>,
+    options: packetcraftr::replay::Options,
+    authorizer: packetcraftr::replay::SystemAuthorizer,
+    transmitter: packetcraftr::replay::SystemTransmitter,
+    clock: packetcraftr::clock::SystemClock,
+    filter: Option<FrameSelector>,
+    requested_interface: net::interface::Id,
+    max_interfaces: usize,
+}
+
+pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
+    let mut prepared = prepare(&arguments)?;
+    let filtered = prepared.filter.is_some();
+    let mut filter = prepared
+        .filter
+        .as_ref()
+        .map(|selector| FilterSelector { selector });
+    let selector = filter
+        .as_mut()
+        .map(|selector| selector as &mut dyn packetcraftr::replay::Selector);
+    match format {
+        output::contract::Format::Text => rendering::render_text(
+            &mut prepared.reader,
+            &prepared.options,
+            selector,
+            &mut prepared.authorizer,
+            &mut prepared.transmitter,
+            &mut prepared.clock,
+            filtered,
+        ),
+        output::contract::Format::Json => rendering::render_aggregate(
+            &mut prepared.reader,
+            &prepared.options,
+            selector,
+            &mut prepared.authorizer,
+            &mut prepared.transmitter,
+            &mut prepared.clock,
+            prepared.requested_interface,
+        ),
+        output::contract::Format::Ndjson => rendering::render_stream(
+            &mut prepared.reader,
+            &prepared.options,
+            selector,
+            &mut prepared.authorizer,
+            &mut prepared.transmitter,
+            &mut prepared.clock,
+            prepared.requested_interface,
+        ),
+        output::contract::Format::Pcap | output::contract::Format::PcapNg => {
+            rendering::render_capture(
+                &mut prepared.reader,
+                &prepared.options,
+                selector,
+                &mut prepared.authorizer,
+                &mut prepared.transmitter,
+                &mut prepared.clock,
+                rendering::CaptureSettings {
+                    format,
+                    max_interfaces: prepared.max_interfaces,
+                },
+            )
+        }
+        _ => unreachable!("replay format is checked before command dispatch"),
+    }
+}
+
+fn prepare(arguments: &Args) -> Result<Prepared, CliError> {
     let policy = arguments.policy.clone().into_policy();
     validate_capture_stream_limits(
         policy.max_packets_per_operation,
@@ -42,22 +99,14 @@ pub(super) fn run(arguments: ReplayArgs, output: output::contract::Format) -> Re
         arguments.max_frame_bytes,
         arguments.max_interfaces,
     )?;
-    let timing = replay_timing(&arguments)?;
-    let registry = default_registry_arc()?;
-    // The filter compiles with the other argument validation, before the
-    // capture is opened and long before any authorization or transmission.
-    let frame_filter = match arguments.filter.as_deref() {
-        Some(source) => {
-            let filter = filtering::compile(source, &registry, Capabilities::frames_only())?;
-            Some(FrameSelector::new(
-                Arc::clone(&registry),
-                filter,
-                arguments.max_frame_bytes,
-            ))
-        }
-        None => None,
-    };
-    let requested_interface = requested_replay_interface(&arguments.interface)?;
+    let timing = timing(arguments)?;
+    let registry = registry()?;
+    let filter = prepare_filter(
+        arguments.filter.as_deref(),
+        &registry,
+        arguments.max_frame_bytes,
+    )?;
+    let requested_interface = interface(&arguments.interface)?;
     policy.validate().map_err(CliError::classified)?;
     let limits = packetcraftr::replay::Limits {
         max_frames: policy.max_packets_per_operation,
@@ -67,139 +116,53 @@ pub(super) fn run(arguments: ReplayArgs, output: output::contract::Format) -> Re
     }
     .validate()
     .map_err(CliError::classified)?;
-    let file = File::open(&arguments.path).map_err(|source| {
-        CliError::new(
-            5,
-            format!("open {} failed: {source}", arguments.path.display()),
-        )
-    })?;
-    let mut reader = Reader::with_options(
-        file,
-        ReaderOptions {
-            max_size: arguments.max_frame_bytes,
-            max_interfaces_per_section: arguments.max_interfaces,
-            ..ReaderOptions::default()
+    let reader = open_capture(
+        &arguments.path,
+        OfflineCaptureLimitsArgs {
+            max_frames: policy.max_packets_per_operation,
+            max_bytes: policy.max_bytes_per_operation,
+            max_frame_bytes: arguments.max_frame_bytes,
+            max_interfaces: arguments.max_interfaces,
         },
-    )
-    .map_err(CliError::classified)?;
-    let mut authorizer =
-        packetcraftr::replay::SystemAuthorizer::new(policy, arguments.allow_malformed_live);
-    let options = packetcraftr::replay::Options {
-        interface: requested_interface.clone(),
-        link_mode: arguments.link_mode.into(),
-        timing,
-        limits,
-    };
-    let mut adapter = frame_filter
-        .as_ref()
-        .map(|selector| DisplayFilterSelector { selector });
-    let selector = adapter
-        .as_mut()
-        .map(|adapter| adapter as &mut dyn packetcraftr::replay::Selector);
-    let mut transmitter = packetcraftr::replay::SystemTransmitter::new();
-    let mut clock = packetcraftr::clock::SystemClock;
-    let started = Instant::now();
-
-    match output {
-        output::contract::Format::Text => {
-            let summary = execute_replay(
-                &mut reader,
-                &options,
-                selector,
-                &mut authorizer,
-                &mut transmitter,
-                &mut clock,
-                write_replay_text_evidence,
-            )?;
-            match &frame_filter {
-                None => write_stdout_line(format_args!(
-                    "replayed {} frame(s), {} byte(s), scheduled delay {:?}",
-                    summary.frames_completed, summary.bytes_completed, summary.scheduled_duration
-                )),
-                Some(_) => write_stdout_line(format_args!(
-                    "replayed {} of {} frame(s), {} byte(s), scheduled delay {:?}",
-                    summary.frames_completed,
-                    summary.frames_attempted,
-                    summary.bytes_completed,
-                    summary.scheduled_duration
-                )),
-            }
-        }
-        output::contract::Format::Json => {
-            let mut frames = Vec::new();
-            let summary = execute_replay(
-                &mut reader,
-                &options,
-                selector,
-                &mut authorizer,
-                &mut transmitter,
-                &mut clock,
-                |evidence| {
-                    frames.push(replay_output_frame(evidence)?);
-                    Ok(())
-                },
-            )?;
-            let stats = replay_stats(&summary, started.elapsed());
-            let result = output::replay::Result::from_summary(
-                summary,
-                requested_interface,
-                options.link_mode,
-                frames,
-            );
-            emit_aggregate_with_stats(output::contract::Command::Replay, result, Vec::new(), stats)
-        }
-        output::contract::Format::Ndjson => {
-            let mut sequence = 0_u64;
-            let summary = execute_replay(
-                &mut reader,
-                &options,
-                selector,
-                &mut authorizer,
-                &mut transmitter,
-                &mut clock,
-                |evidence| emit_replay_ndjson_evidence(&mut sequence, evidence),
-            )?;
-            let stats = replay_stats(&summary, started.elapsed());
-            let result = output::replay::Result::from_summary(
-                summary,
-                requested_interface,
-                options.link_mode,
-                Vec::new(),
-            );
-            emit_stream_with_stats(
-                output::contract::Command::Replay,
-                sequence,
-                result,
-                Vec::new(),
-                stats,
-            )
-        }
-        output::contract::Format::Pcap | output::contract::Format::Pcapng => {
-            let format = capture_file_format(output)?;
-            let stdout = io::stdout();
-            let mut writer = replay_capture_output(
-                &reader,
-                stdout.lock(),
-                format,
-                limits,
-                arguments.max_interfaces,
-            )?;
-            execute_replay(
-                &mut reader,
-                &options,
-                selector,
-                &mut authorizer,
-                &mut transmitter,
-                &mut clock,
-                |evidence| write_replay_capture_evidence(&mut writer, evidence),
-            )?;
-            writer.flush().map_err(CliError::classified)
-        }
-        _ => unreachable!("replay format is checked before command dispatch"),
-    }
+    )?;
+    Ok(Prepared {
+        reader,
+        options: packetcraftr::replay::Options {
+            interface: requested_interface.clone(),
+            link_mode: arguments.link_mode.into(),
+            timing,
+            limits,
+        },
+        authorizer: packetcraftr::replay::SystemAuthorizer::new(
+            policy,
+            arguments.allow_malformed_live,
+        ),
+        transmitter: packetcraftr::replay::SystemTransmitter::new(),
+        clock: packetcraftr::clock::SystemClock,
+        filter,
+        requested_interface,
+        max_interfaces: arguments.max_interfaces,
+    })
 }
 
-pub(crate) fn replay_cli_error(error: packetcraftr::replay::Error) -> CliError {
+fn prepare_filter(
+    source: Option<&str>,
+    registry: &Arc<packetcraftr::core::registry::Registry>,
+    max_frame_bytes: usize,
+) -> Result<Option<FrameSelector>, CliError> {
+    source
+        .map(|source| {
+            let filter = filtering::compile(source, registry, Capabilities::frames_only())?;
+            Ok(FrameSelector::new(
+                Arc::clone(registry),
+                filter,
+                max_frame_bytes,
+            ))
+        })
+        .transpose()
+}
+
+pub(crate) fn classified_error(error: packetcraftr::replay::Error) -> CliError {
     let sequence = error.sequence();
     CliError::classified_at_optional_sequence(error, sequence)
 }

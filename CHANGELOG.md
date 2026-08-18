@@ -97,6 +97,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Corrected `dissect --output json --filter` to emit one complete aggregate
+  document for both matches and no-matches; no-match success now reports
+  `result.matched: false` with `result.dissection: null`.
 - Corrected the DNS text summary label from `response_name` to
   `response_code_name`.
 - Kept TCP follow delivery edges aligned with directional reassembly
@@ -274,7 +277,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   canonical path.
 - Added `--filter <EXPR>` to `packetcraftr dissect`, `capture`, and `replay`,
   completing coverage of every frame-producing command. `dissect` emits only
-  matching frames; no match emits nothing but still succeeds. `capture`
+  matching frames in text, hex, and raw formats; aggregate JSON reports the
+  filter outcome in its success document. `capture`
   filters after receipt, not in the kernel, selecting reported frames without
   narrowing backend capture; rejected frames still consume operation frame and
   byte budgets. `replay` skips non-matches before authorization, so they are

@@ -1,0 +1,11 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "dissect",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "matched": false,
+    "dissection": null
+  },
+  "diagnostics": []
+}

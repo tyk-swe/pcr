@@ -335,7 +335,7 @@
           "const": "dissect"
         },
         "result": {
-          "$ref": "#/$defs/dissectResult"
+          "$ref": "#/$defs/dissectAggregateResult"
         }
       },
       "required": [
@@ -1392,7 +1392,56 @@
       },
       "additionalProperties": false
     },
-    "dissectResult": {
+    "dissectAggregateResult": {
+      "type": "object",
+      "oneOf": [
+        {
+          "properties": {
+            "matched": {
+              "const": true
+            },
+            "dissection": {
+              "$ref": "#/$defs/dissectionResult"
+            }
+          },
+          "required": [
+            "matched",
+            "dissection"
+          ]
+        },
+        {
+          "properties": {
+            "matched": {
+              "const": false
+            },
+            "dissection": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "matched",
+            "dissection"
+          ]
+        }
+      ],
+      "properties": {
+        "matched": {
+          "type": "boolean"
+        },
+        "dissection": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/dissectionResult"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "dissectionResult": {
       "type": "object",
       "required": [
         "bytes_hex",

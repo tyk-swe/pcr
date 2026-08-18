@@ -23,6 +23,7 @@ allow = [
     "ISC",
     "MIT",
     "Unicode-3.0",
+    "Zlib",
 ]
 [bans]
 multiple-versions = "warn"

@@ -87,6 +87,11 @@ colour codes. Streaming commands use NDJSON.
 Structured errors include a stable code, kind, message, and remediation. The v1
 schema and checked-in examples are the contract reference.
 
+`dissect --output json` always emits one aggregate document. Its result contains
+`matched` and `dissection`; a filter no-match is a successful document with
+`matched: false` and `dissection: null`, while a match has `matched: true` and
+the complete dissection.
+
 ## Library layout
 
 Rust users normally depend on the `packetcraftr` facade. It re-exports packet

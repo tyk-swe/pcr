@@ -48,3 +48,18 @@ impl Result {
         &self.bytes
     }
 }
+
+#[derive(Clone, Debug, Serialize)]
+pub struct AggregateResult {
+    matched: bool,
+    dissection: Option<Result>,
+}
+
+impl AggregateResult {
+    pub fn from_filter(matched: bool, dissection: Result) -> Self {
+        Self {
+            matched,
+            dissection: matched.then_some(dissection),
+        }
+    }
+}

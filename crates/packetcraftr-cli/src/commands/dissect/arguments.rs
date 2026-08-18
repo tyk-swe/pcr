@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 pub(crate) const AFTER_LONG_HELP: &str = r#"When neither --hex nor --file is supplied, raw frame bytes are read from standard input.
 
-With --filter, the dissection is emitted only when the frame matches; a frame that does not match emits nothing and the command still succeeds.
+With --filter, text, hex, and raw output emit the dissection only when the frame matches. Aggregate JSON always emits one document: result.matched reports the filter outcome and result.dissection is null only when the frame does not match.
 
 Examples:
   packetcraftr dissect --hex '45000014000000004001f6e7c0000201c6336402'
@@ -23,7 +23,7 @@ pub(crate) struct Args {
     /// Open numeric DLT/link type (defaults to Ethernet/DLT 1).
     #[arg(long, default_value_t = 1)]
     pub(crate) link_type: u32,
-    /// Emit the dissection only when the frame matches a display filter.
+    /// Filter the decoded frame; aggregate JSON reports whether it matched.
     #[arg(long, value_name = "EXPR")]
     pub(crate) filter: Option<String>,
 }

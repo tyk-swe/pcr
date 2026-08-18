@@ -48,6 +48,35 @@ fn decode_hex(value: &str) -> Vec<u8> {
         .collect()
 }
 
+fn parse_single_json(output: &Output) -> Value {
+    assert!(!output.stdout.is_empty(), "JSON output must not be empty");
+    assert!(
+        output.stdout.ends_with(b"\n"),
+        "JSON output must end with a newline"
+    );
+    let mut documents = serde_json::Deserializer::from_slice(&output.stdout).into_iter::<Value>();
+    let value = documents
+        .next()
+        .expect("JSON output must contain one document")
+        .expect("JSON output must parse");
+    assert!(
+        documents.next().is_none(),
+        "JSON output must contain one document"
+    );
+    value
+}
+
+fn assert_matches_published_schema(value: &Value) {
+    let schema: Value = serde_json::from_str(include_str!(
+        "../../../schemas/packetcraftr.output.v1.schema.json"
+    ))
+    .expect("published output schema must parse");
+    let validator = jsonschema::validator_for(&schema).expect("published schema must compile");
+    validator
+        .validate(value)
+        .expect("output document must validate against the published schema");
+}
+
 fn write_capture() -> tempfile::NamedTempFile {
     let mut file = tempfile::NamedTempFile::new().expect("temporary capture must open");
     file.write_all(&[
@@ -410,7 +439,13 @@ fn packet_documents_stdin_and_file_inputs_cover_offline_input_paths() {
         &frame,
     );
     assert!(decoded.status.success(), "{:?}", decoded.stderr);
-    assert_eq!(parse_json(&decoded)["result"]["bytes_hex"], UDP_CLIENT);
+    let decoded_value = parse_single_json(&decoded);
+    assert_matches_published_schema(&decoded_value);
+    assert_eq!(decoded_value["result"]["matched"], true);
+    assert_eq!(
+        decoded_value["result"]["dissection"]["bytes_hex"],
+        UDP_CLIENT
+    );
 
     let filtered = run_with_stdin(
         &[
@@ -425,7 +460,36 @@ fn packet_documents_stdin_and_file_inputs_cover_offline_input_paths() {
         &frame,
     );
     assert!(filtered.status.success(), "{:?}", filtered.stderr);
-    assert!(filtered.stdout.is_empty());
+    let value = parse_single_json(&filtered);
+    assert_matches_published_schema(&value);
+    assert_eq!(value["result"]["matched"], false);
+    assert!(value["result"]["dissection"].is_null());
+
+    let matched = run_with_stdin(
+        &[
+            "--output",
+            "json",
+            "dissect",
+            "--link-type",
+            "228",
+            "--filter",
+            "udp",
+        ],
+        &frame,
+    );
+    assert!(matched.status.success(), "{:?}", matched.stderr);
+    let matched_value = parse_single_json(&matched);
+    assert_matches_published_schema(&matched_value);
+    assert_eq!(matched_value["result"]["matched"], true);
+    assert!(matched_value["result"]["dissection"].is_object());
+
+    let malformed = run(&["--output", "json", "dissect", "--hex", "not-hex"]);
+    assert_eq!(malformed.status.code(), Some(2));
+    let malformed_value = parse_single_json(&malformed);
+    assert_matches_published_schema(&malformed_value);
+    assert_eq!(malformed_value["status"], "error");
+    assert!(malformed_value["error"].is_object());
+    assert!(malformed_value.get("result").is_none());
 
     let mut frame_file = tempfile::NamedTempFile::new().expect("frame file must open");
     frame_file.write_all(&frame).expect("frame file must write");

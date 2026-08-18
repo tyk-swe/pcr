@@ -68,6 +68,9 @@ fn protocols_dissect_and_ndjson_read_are_offline_and_structured() {
         "45000014000000004001f6e7c0000201c6336402",
     ]);
     assert_no_terminal_style(&dissect.stdout);
+    let dissect_value = parse_json(&dissect);
+    assert_eq!(dissect_value["result"]["matched"], true);
+    assert!(dissect_value["result"]["dissection"].is_object());
 
     let mut capture = tempfile::NamedTempFile::new().expect("temporary capture must open");
     capture

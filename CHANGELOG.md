@@ -99,6 +99,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Human-readable runtime errors now include stable classification codes,
+  retained causes, and available remediation guidance.
 - Corrected the DNS text summary label from `response_name` to
   `response_code_name`.
 - Kept TCP follow delivery edges aligned with directional reassembly

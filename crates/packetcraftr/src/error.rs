@@ -21,8 +21,8 @@ pub enum Error {
     Build(#[from] packetcraftr_core::build::Error),
     #[error(transparent)]
     Policy(#[from] policy::Error),
-    #[error("permissively built packets require allow_permissive_live")]
-    PermissiveLiveOptInRequired,
+    #[error("packets requiring live opt-in require confirm_live_opt_in")]
+    LiveOptInRequired,
     #[error(transparent)]
     Io(#[from] LiveIoError),
     #[error("{operation}; capture shutdown also failed: {shutdown}")]
@@ -65,11 +65,11 @@ impl Classified for Error {
                 ),
             ),
             Self::Policy(error) => error.classification(),
-            Self::PermissiveLiveOptInRequired => Classification::new(
-                "policy.permissive_live_opt_in",
+            Self::LiveOptInRequired => Classification::new(
+                "policy.live_opt_in_required",
                 Kind::Policy,
                 Some(
-                    "set the explicit per-operation malformed-live opt-in in addition to policy approval",
+                    "set confirm_live_opt_in for this operation in addition to allow_live_opt_in_packets in policy",
                 ),
             ),
             Self::Io(error) => error.classification(),

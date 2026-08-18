@@ -13,7 +13,8 @@ pub struct Policy {
     /// Hostname resolution is a separate opt-in because a name has no stable
     /// address scope until after a resolver side effect.
     pub allow_hostname_resolution: bool,
-    pub allow_permissive_packets: bool,
+    /// Independent policy permission for packets requiring live opt-in.
+    pub allow_live_opt_in_packets: bool,
     pub max_packets_per_operation: u64,
     pub max_bytes_per_operation: u64,
     pub max_resolved_addresses: usize,
@@ -27,7 +28,7 @@ impl Default for Policy {
         Self {
             allow_public_destinations: false,
             allow_hostname_resolution: false,
-            allow_permissive_packets: false,
+            allow_live_opt_in_packets: false,
             max_packets_per_operation: 10_000,
             max_bytes_per_operation: 256 * 1024 * 1024,
             max_resolved_addresses: DEFAULT_MAX_RESOLVED_ADDRESSES,
@@ -44,8 +45,8 @@ pub enum Error {
     InvalidPacketSemantics { reason: String },
     #[error("traffic policy denies hostname resolution for {hostname}")]
     HostnameResolution { hostname: String },
-    #[error("traffic policy denies permissively built packets")]
-    PermissivePacket,
+    #[error("traffic policy denies packets requiring live opt-in")]
+    LiveOptInPacket,
     #[error("operation packet count {actual} exceeds policy limit {limit}")]
     PacketLimit { actual: u64, limit: u64 },
     #[error("operation byte count {actual} exceeds policy limit {limit}")]
@@ -67,9 +68,9 @@ impl Classified for Error {
                 "policy.hostname_resolution",
                 "explicitly authorize hostname resolution, then independently authorize every resolved address",
             ),
-            Self::PermissivePacket => (
-                "policy.permissive_packet",
-                "authorize permissive live traffic in both build options and traffic policy",
+            Self::LiveOptInPacket => (
+                "policy.live_opt_in_packet",
+                "set allow_live_opt_in_packets in policy in addition to confirm_live_opt_in for the operation",
             ),
             Self::PacketLimit { .. } => (
                 "policy.packet_limit",

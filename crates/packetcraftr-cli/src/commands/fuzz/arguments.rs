@@ -7,7 +7,7 @@ use clap::ValueEnum;
 use packetcraftr::core;
 
 use crate::command_options::{
-    BuildMode, CaptureLimitsArgs, PermissivePacketArgs, PublicDestinationArgs, RecipeArgs,
+    BuildMode, CaptureLimitsArgs, LiveOptInPacketArgs, PublicDestinationArgs, RecipeArgs,
     RouteSelectionArgs, TrafficBudgetArgs,
 };
 
@@ -40,7 +40,7 @@ impl From<Strategy> for core::fuzz::Strategy {
     mut_arg("interface", |arg| arg.help("Interface name or numeric index used as an exact live route constraint").requires("live")),
     mut_arg("source", |arg| arg.help("Interface-owned source preference used only for live route selection").requires("live")),
     mut_arg("link_mode", |arg| arg.help("Automatic, Layer 2, or raw Layer 3 live transmission intent").requires("live")),
-    mut_arg("allow_malformed_live", |arg| arg.requires("live")),
+    mut_arg("confirm_live_opt_in", |arg| arg.requires("live")),
     mut_arg("destination", |arg| arg.requires("live")),
     mut_arg("timeout_ms", |arg| arg.requires("live")),
     mut_arg("rate", |arg| arg.requires("live")),
@@ -49,7 +49,7 @@ impl From<Strategy> for core::fuzz::Strategy {
     mut_arg("snap_length", |arg| arg.requires("live")),
     mut_arg("overflow_policy", |arg| arg.requires("live")),
     mut_arg("allow_public_destinations", |arg| arg.requires("live")),
-    mut_arg("allow_permissive_packets", |arg| arg.requires("live")),
+    mut_arg("allow_live_opt_in_packets", |arg| arg.requires("live")),
     mut_arg("max_packets", |arg| arg.requires("live")),
     mut_arg("max_bytes", |arg| arg.requires("live"))
 )]
@@ -82,9 +82,9 @@ pub(crate) struct Args {
     /// Explicitly enable route, capture, and transmission; offline is the default.
     #[arg(long)]
     pub(crate) live: bool,
-    /// Independent per-operation opt-in for permissive/malformed live cases.
+    /// Confirm this operation may transmit packets requiring live opt-in.
     #[arg(long)]
-    pub(crate) allow_malformed_live: bool,
+    pub(crate) confirm_live_opt_in: bool,
     /// Optional route destination when the packet has no fixed destination.
     #[arg(long)]
     pub(crate) destination: Option<IpAddr>,
@@ -128,7 +128,7 @@ pub(crate) struct PolicyArgs {
     #[command(flatten)]
     public_destination: PublicDestinationArgs,
     #[command(flatten)]
-    permissive_packet: PermissivePacketArgs,
+    live_opt_in_packet: LiveOptInPacketArgs,
     #[command(flatten)]
     budgets: TrafficBudgetArgs,
 }
@@ -137,7 +137,7 @@ impl PolicyArgs {
     pub(crate) fn into_policy(self) -> packetcraftr::policy::Policy {
         let mut policy = packetcraftr::policy::Policy::default();
         self.public_destination.apply_to(&mut policy);
-        self.permissive_packet.apply_to(&mut policy);
+        self.live_opt_in_packet.apply_to(&mut policy);
         self.budgets.apply_to(&mut policy);
         policy
     }

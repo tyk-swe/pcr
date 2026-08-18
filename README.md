@@ -108,8 +108,11 @@ Live operations enforce several independent boundaries:
   an OS privilege grant.
 - Hostnames require `--allow-hostname-resolution`; resolution is bounded and
   every returned address must pass destination policy.
-- Permissive or malformed live packets require both the operation-specific
-  opt-in and `--allow-permissive-packets` where those flags are exposed.
+- Packets whose build output sets `requires_live_opt_in` require both
+  per-operation `--confirm-live-opt-in` and policy-level
+  `--allow-live-opt-in-packets` where those flags are exposed. Permissive build
+  mode, an explicit malformed layer, and a network trailer classified by the
+  builder set that derived state.
 - Packet, byte, duration, queue, and evidence budgets remain active. Active
   capture-backed workflows establish capture readiness before transmission.
 - Interface identity, route consistency, source ownership, MTU, and final wire

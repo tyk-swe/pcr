@@ -135,7 +135,7 @@ fn prepare(arguments: &Args) -> Result<Prepared, CliError> {
         },
         authorizer: packetcraftr::replay::SystemAuthorizer::new(
             policy,
-            arguments.allow_malformed_live,
+            arguments.confirm_live_opt_in,
         ),
         transmitter: packetcraftr::replay::SystemTransmitter::new(),
         clock: packetcraftr::clock::SystemClock,

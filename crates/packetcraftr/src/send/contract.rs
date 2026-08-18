@@ -10,8 +10,8 @@ pub struct Options {
     pub destination: Option<IpAddr>,
     pub plan: packetcraftr_netio::route::Options,
     pub build: packetcraftr_core::build::Options,
-    /// Second explicit opt-in required in addition to policy approval.
-    pub allow_permissive_live: bool,
+    /// Per-operation confirmation required in addition to policy approval.
+    pub confirm_live_opt_in: bool,
 }
 
 #[derive(Clone, Debug)]

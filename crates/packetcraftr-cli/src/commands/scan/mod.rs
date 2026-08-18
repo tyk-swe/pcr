@@ -75,7 +75,7 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
                 preferred_source: route.source,
             },
             build: core::build::Options::default(),
-            allow_permissive_live: false,
+            confirm_live_opt_in: false,
         },
         request.timeout,
         batch_size,

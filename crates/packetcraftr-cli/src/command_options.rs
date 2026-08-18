@@ -7,7 +7,7 @@ pub(crate) use address_family::AddressFamily;
 pub(crate) use capture_limits::CaptureLimitsArgs;
 pub(crate) use offline_limits::{OfflineCaptureLimitsArgs, OfflineLimitsArgs};
 pub(crate) use policy::{
-    HostnamePolicyArgs, HostnameResolutionArgs, PermissivePacketArgs, PublicDestinationArgs,
+    HostnamePolicyArgs, HostnameResolutionArgs, LiveOptInPacketArgs, PublicDestinationArgs,
     SendPolicyArgs, TrafficBudgetArgs,
 };
 pub(crate) use recipe::{BuildMode, RecipeArgs};

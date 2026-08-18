@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use clap::ValueEnum;
 use packetcraftr::analysis::pcap as capture;
 
-use crate::command_options::{LinkMode, PermissivePacketArgs, PublicDestinationArgs};
+use crate::command_options::{LinkMode, LiveOptInPacketArgs, PublicDestinationArgs};
 
 pub(crate) const AFTER_LONG_HELP: &str = r#"Replay is policy-gated and may require native features, dependencies, and privileges.
 
@@ -52,9 +52,9 @@ pub(crate) struct Args {
     /// Maximum PCAPNG interfaces accepted from the input.
     #[arg(long, default_value_t = capture::DEFAULT_INTERFACE_LIMIT)]
     pub(crate) max_interfaces: usize,
-    /// Per-operation opt-in required when dissection preserves malformed bytes.
+    /// Confirm this operation may transmit packets requiring live opt-in.
     #[arg(long)]
-    pub(crate) allow_malformed_live: bool,
+    pub(crate) confirm_live_opt_in: bool,
     /// Replay only frames matching a display filter; skipped frames are never
     /// authorized or transmitted.
     #[arg(long, value_name = "EXPR")]
@@ -68,7 +68,7 @@ pub(crate) struct PolicyArgs {
     #[command(flatten)]
     public_destination: PublicDestinationArgs,
     #[command(flatten)]
-    permissive_packet: PermissivePacketArgs,
+    live_opt_in_packet: LiveOptInPacketArgs,
     /// Maximum packets authorized for one operation.
     #[arg(long, default_value_t = capture::DEFAULT_STREAM_FRAMES)]
     max_packets: u64,
@@ -81,7 +81,7 @@ impl PolicyArgs {
     pub(crate) fn into_policy(self) -> packetcraftr::policy::Policy {
         let mut policy = packetcraftr::policy::Policy::default();
         self.public_destination.apply_to(&mut policy);
-        self.permissive_packet.apply_to(&mut policy);
+        self.live_opt_in_packet.apply_to(&mut policy);
         policy.max_packets_per_operation = self.max_packets;
         policy.max_bytes_per_operation = self.max_bytes;
         policy

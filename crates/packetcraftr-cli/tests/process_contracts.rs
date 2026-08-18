@@ -29,6 +29,29 @@ fn help_and_version_are_available_without_network_access() {
 }
 
 #[test]
+fn live_opt_in_flags_parse_and_appear_in_command_help() {
+    for command in ["send", "exchange", "fuzz", "replay"] {
+        let help = run_success(&[
+            command,
+            "--confirm-live-opt-in",
+            "--allow-live-opt-in-packets",
+            "--help",
+        ]);
+        let text = String::from_utf8(help.stdout).expect("help must be UTF-8");
+        assert_eq!(
+            text.matches("--confirm-live-opt-in").count(),
+            1,
+            "{command}"
+        );
+        assert_eq!(
+            text.matches("--allow-live-opt-in-packets").count(),
+            1,
+            "{command}"
+        );
+    }
+}
+
+#[test]
 fn offline_build_supports_json_hex_and_raw_without_terminal_style() {
     let json_output = run_success(&[
         "--output",

@@ -1,8 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Policy-gated, bounded capture replay. Every frame is individually authorized;
-//! malformed traffic requires explicit opt-in.
+//! Policy-gated, bounded capture replay. Every frame is individually authorized,
+//! and packets requiring live opt-in must pass both independent gates.
 
 mod engine;
 mod error;

@@ -43,7 +43,7 @@ where
             options.build.clone(),
         )?;
         validate_mtu(&preliminary, plan.decision.mtu)?;
-        self.authorize_built(&preliminary, options.allow_permissive_live)?;
+        self.authorize_built(&preliminary, options.confirm_live_opt_in)?;
         self.authorize_final_wire(&preliminary, &plan)?;
         self.policy.authorize_operation(
             1,
@@ -60,7 +60,7 @@ where
                 builder.build(packet_to_send, context, options.build)?
             };
             require_fixed_width_link_materialization(preliminary_len, built.bytes.len())?;
-            self.authorize_built(&built, options.allow_permissive_live)?;
+            self.authorize_built(&built, options.confirm_live_opt_in)?;
             self.authorize_final_wire(&built, &route.plan)?;
             self.policy
                 .authorize_operation(1, u64::try_from(built.bytes.len()).unwrap_or(u64::MAX))?;

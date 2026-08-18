@@ -344,7 +344,7 @@ fn offline_fuzz_is_bounded_reproducible_and_reports_rejections() {
 fn offline_fuzz_rejects_live_only_options_and_has_an_independent_packet_limit() {
     let base = ["fuzz", "--packet", "raw(text=hi)", "--cases", "1"];
     for live_only in [
-        &["--allow-malformed-live"][..],
+        &["--confirm-live-opt-in"][..],
         &["--destination", "127.0.0.1"],
         &["--timeout-ms", "1"],
         &["--rate", "1"],
@@ -356,7 +356,7 @@ fn offline_fuzz_rejects_live_only_options_and_has_an_independent_packet_limit() 
         &["--snap-length", "64"],
         &["--overflow-policy", "drop-newest"],
         &["--allow-public-destinations"],
-        &["--allow-permissive-packets"],
+        &["--allow-live-opt-in-packets"],
         &["--max-packets", "1"],
         &["--max-bytes", "64"],
     ] {

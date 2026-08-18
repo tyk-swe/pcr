@@ -22,10 +22,10 @@ pub(crate) struct HostnameResolutionArgs {
 }
 
 #[derive(Clone, Debug, Args)]
-pub(crate) struct PermissivePacketArgs {
-    /// Policy-level opt-in for permissive or malformed live packets.
+pub(crate) struct LiveOptInPacketArgs {
+    /// Policy permission for packets whose build output requires live opt-in.
     #[arg(long)]
-    allow_permissive_packets: bool,
+    allow_live_opt_in_packets: bool,
 }
 
 #[derive(Clone, Debug, Args)]
@@ -48,7 +48,7 @@ pub(crate) struct SendPolicyArgs {
     #[command(flatten)]
     hostname_resolution: HostnameResolutionArgs,
     #[command(flatten)]
-    permissive_packet: PermissivePacketArgs,
+    live_opt_in_packet: LiveOptInPacketArgs,
     #[command(flatten)]
     budgets: TrafficBudgetArgs,
 }
@@ -76,9 +76,9 @@ impl HostnameResolutionArgs {
     }
 }
 
-impl PermissivePacketArgs {
+impl LiveOptInPacketArgs {
     pub(crate) fn apply_to(self, policy: &mut packetcraftr::policy::Policy) {
-        policy.allow_permissive_packets = self.allow_permissive_packets;
+        policy.allow_live_opt_in_packets = self.allow_live_opt_in_packets;
     }
 }
 
@@ -94,7 +94,7 @@ impl SendPolicyArgs {
         let mut policy = packetcraftr::policy::Policy::default();
         self.public_destination.apply_to(&mut policy);
         self.hostname_resolution.apply_to(&mut policy);
-        self.permissive_packet.apply_to(&mut policy);
+        self.live_opt_in_packet.apply_to(&mut policy);
         self.budgets.apply_to(&mut policy);
         policy
     }

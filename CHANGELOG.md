@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** Standardized the live packet safety predicate on
+  `requires_live_opt_in`, with per-operation `confirm_live_opt_in` /
+  `--confirm-live-opt-in`, independent policy permission
+  `allow_live_opt_in_packets` / `--allow-live-opt-in-packets`, and
+  `LiveOptInRequired` / `LiveOptInPacket` errors classified as
+  `policy.live_opt_in_required` / `policy.live_opt_in_packet`. No compatibility
+  aliases are retained.
 - **Breaking:** Scan output now exposes address-bearing `endpoints` with an
   optional port, replacing the `ports` collection, ICMP port-zero sentinel,
   and evidence-derived address in aggregate and streaming output.
@@ -174,9 +181,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   store values derivable by the facade output layer. Output-v1 wire documents
   remain compatible except for the separately documented `follow` stream.
 - **Breaking:** Removed accepted no-op traffic-policy options: `plan` lost its
-  permissive and packet/byte flags; `capture`, `scan`, `traceroute`, and `dns`
-  lost their permissive flag; and `fuzz` lost its hostname-resolution flags.
-  Applicable authorization behavior and stable error codes are unchanged.
+  live-opt-in and packet/byte controls; `capture`, `scan`, `traceroute`, and
+  `dns` lost their live-opt-in controls; and `fuzz` lost its
+  hostname-resolution controls. Applicable authorization behavior is unchanged.
 - `packetcraftr-network/native-route` no longer enables `native-interfaces`, so a
   route-only build avoids the unrelated interface-enumeration dependency.
 - Replay now uses the canonical built-in dissector and shared fail-closed route

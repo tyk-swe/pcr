@@ -3,18 +3,25 @@
 
 use std::convert::Infallible;
 use std::io::Cursor;
-use std::net::{IpAddr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 
 use bytes::Bytes;
+use packetcraftr_core::Packet;
 use packetcraftr_core::analysis::pcap::{Reader, Writer};
-use packetcraftr_core::error::{Classification, Kind};
+use packetcraftr_core::build::{Builder, Context as BuildContext, Options as BuildOptions};
+use packetcraftr_core::error::{Classification, Classified, Kind};
 use packetcraftr_core::frame::{Frame, LinkType};
+use packetcraftr_core::layer::Raw;
+use packetcraftr_core::protocol::network::Ipv4;
+use packetcraftr_core::protocol::transport::Udp;
 use packetcraftr_netio::{
     Error as LiveIoError, interface::Id as InterfaceId, link::Mode as LinkMode,
     transmit::Submission,
 };
 
+use super::SystemAuthorizer;
 use super::engine::{run, run_with_selector};
 use super::error::Error;
 use super::model::{
@@ -154,6 +161,61 @@ fn replay_options(timing: Timing) -> Options {
         timing,
         limits: Limits::default(),
     }
+}
+
+fn live_opt_in_frame() -> Frame {
+    let registry =
+        Arc::new(packetcraftr_core::protocol::builtin::registry().expect("built-in registry"));
+    let mut packet = Packet::new();
+    packet
+        .push(Ipv4 {
+            source: Ipv4Addr::new(192, 0, 2, 1),
+            destination: Ipv4Addr::new(198, 51, 100, 1),
+            ..Ipv4::default()
+        })
+        .push(Udp {
+            destination_port: 9,
+            ..Udp::default()
+        })
+        .push(Raw::new(Bytes::from_static(b"replay")));
+    let built = Builder::new(registry)
+        .build(packet, BuildContext::default(), BuildOptions::default())
+        .expect("replay fixture builds");
+    Frame::new(UNIX_EPOCH, LinkType::RAW, built.bytes).expect("replay frame")
+}
+
+#[test]
+fn replay_uses_canonical_confirmation_and_policy_gates() {
+    let frame = live_opt_in_frame();
+    let missing_confirmation = SystemAuthorizer::new(crate::policy::Policy::default(), false)
+        .authorize_frame(&frame, LinkMode::Layer3)
+        .expect_err("missing replay confirmation must fail");
+    let classification = missing_confirmation.classification();
+    assert_eq!(classification.code, "policy.live_opt_in_required");
+    let remediation = classification.remediation.expect("replay remediation");
+    assert!(remediation.contains("--confirm-live-opt-in"));
+    assert!(remediation.contains("--allow-live-opt-in-packets"));
+    assert!(
+        missing_confirmation
+            .to_string()
+            .contains("--confirm-live-opt-in")
+    );
+
+    let missing_policy_permission = SystemAuthorizer::new(crate::policy::Policy::default(), true)
+        .authorize_frame(&frame, LinkMode::Layer3)
+        .expect_err("missing replay policy permission must fail");
+    assert_eq!(
+        missing_policy_permission.classification().code,
+        "policy.live_opt_in_packet"
+    );
+
+    let allowed_policy = crate::policy::Policy {
+        allow_live_opt_in_packets: true,
+        ..crate::policy::Policy::default()
+    };
+    SystemAuthorizer::new(allowed_policy, true)
+        .authorize_frame(&frame, LinkMode::Layer3)
+        .expect("both replay live opt-in gates allow the frame");
 }
 
 #[test]

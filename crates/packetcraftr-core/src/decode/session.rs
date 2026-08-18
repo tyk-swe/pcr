@@ -424,8 +424,7 @@ impl<'registry> DecodeSession<'registry> {
             self.ensure_layer_capacity()?;
             // Keep explicit coverage ownership so a strict byte-for-byte
             // rebuild preserves the declared protocol length. The builder
-            // marks padding outside a network root as requiring live
-            // malformed-traffic opt-in.
+            // marks padding outside a network root as requiring live opt-in.
             append_padding(
                 &mut self.packet,
                 &mut self.layouts,

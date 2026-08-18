@@ -29,7 +29,7 @@ pub(super) fn run(arguments: SendArgs, format: output::contract::Format) -> Resu
     let SendArgs {
         route,
         mode,
-        allow_permissive_live,
+        confirm_live_opt_in,
         policy,
     } = arguments;
     let registry = registry()?;
@@ -45,7 +45,7 @@ pub(super) fn run(arguments: SendArgs, format: output::contract::Format) -> Resu
                     mode: mode.into(),
                     ..core::build::Options::default()
                 },
-                allow_permissive_live,
+                confirm_live_opt_in,
             },
         )
         .map_err(CliError::classified)?;

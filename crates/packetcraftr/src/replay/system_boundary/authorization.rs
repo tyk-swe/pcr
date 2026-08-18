@@ -20,21 +20,21 @@ use super::super::wire::replay_network_envelope;
 pub struct SystemAuthorizer {
     policy: crate::policy::Policy,
     registry: Arc<Registry>,
-    allow_malformed_live: bool,
+    confirm_live_opt_in: bool,
 }
 
 impl SystemAuthorizer {
     /// # Panics
     ///
     /// Panics if the statically defined built-in protocol registry is invalid.
-    pub fn new(policy: crate::policy::Policy, allow_malformed_live: bool) -> Self {
+    pub fn new(policy: crate::policy::Policy, confirm_live_opt_in: bool) -> Self {
         Self {
             policy,
             registry: Arc::new(
                 packetcraftr_core::protocol::builtin::registry()
                     .expect("the built-in protocol registry must be valid"),
             ),
-            allow_malformed_live,
+            confirm_live_opt_in,
         }
     }
 
@@ -136,22 +136,22 @@ impl SystemAuthorizer {
                 Vec::new(),
             ));
         }
-        if rebuilt.requires_live_opt_in && !self.allow_malformed_live {
+        if rebuilt.requires_live_opt_in && !self.confirm_live_opt_in {
             return Err(BoundaryError::new(
-                "permissive or malformed captured bytes require --allow-malformed-live",
+                "captured bytes requiring live opt-in require --confirm-live-opt-in",
                 Classification::new(
-                    "policy.permissive_live_opt_in",
+                    "policy.live_opt_in_required",
                     Kind::Policy,
                     Some(
-                        "set the per-operation malformed-live opt-in in addition to policy approval",
+                        "set --confirm-live-opt-in for this replay in addition to --allow-live-opt-in-packets",
                     ),
                 ),
                 Vec::new(),
             ));
         }
-        if rebuilt.requires_live_opt_in && !self.policy.allow_permissive_packets {
+        if rebuilt.requires_live_opt_in && !self.policy.allow_live_opt_in_packets {
             return Err(BoundaryError::from_error(
-                crate::policy::Error::PermissivePacket,
+                crate::policy::Error::LiveOptInPacket,
             ));
         }
         Ok(())

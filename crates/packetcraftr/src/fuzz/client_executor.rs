@@ -29,16 +29,16 @@ impl Authorizer for PolicyAuthorizer<'_> {
         packets: &[Packet],
         destination: Option<IpAddr>,
         maximum_wire_bytes: u64,
-        requires_malformed_live: bool,
+        requires_live_opt_in: bool,
     ) -> Result<(), BoundaryError> {
         self.policy.validate().map_err(BoundaryError::from_error)?;
         let packet_count = u64::try_from(packets.len()).unwrap_or(u64::MAX);
         self.policy
             .authorize_operation(packet_count, maximum_wire_bytes)
             .map_err(BoundaryError::from_error)?;
-        if requires_malformed_live && !self.policy.allow_permissive_packets {
+        if requires_live_opt_in && !self.policy.allow_live_opt_in_packets {
             return Err(BoundaryError::from_error(
-                crate::policy::Error::PermissivePacket,
+                crate::policy::Error::LiveOptInPacket,
             ));
         }
         if let Some(destination) = destination {

@@ -143,7 +143,7 @@ where
             )?;
             ensure_preparation_deadline(deadline)?;
             validate_mtu(&preliminary, plan.decision.mtu)?;
-            self.authorize_built(&preliminary, options.send.allow_permissive_live)?;
+            self.authorize_built(&preliminary, options.send.confirm_live_opt_in)?;
             self.authorize_final_wire(&preliminary, &plan)?;
             total_bytes = total_bytes
                 .checked_add(u64::try_from(preliminary.bytes.len()).unwrap_or(u64::MAX))
@@ -176,7 +176,7 @@ where
         builder: &Builder,
     ) -> Result<Vec<PreparedPacket>, Error> {
         // Neighbor discovery is delayed until every packet has passed packet,
-        // route, permissive-build, and aggregate byte-policy checks.
+        // route, live-opt-in, and aggregate byte-policy checks.
         let mut prepared_packets = Vec::with_capacity(planned_packets.len());
         for planned_packet in planned_packets {
             ensure_preparation_deadline(deadline)?;
@@ -202,7 +202,7 @@ where
                 preliminary_build
             };
             ensure_preparation_deadline(deadline)?;
-            self.authorize_built(&built, options.send.allow_permissive_live)?;
+            self.authorize_built(&built, options.send.confirm_live_opt_in)?;
             // Every final materialized destination is authorized immediately
             // before capture arming and transmission can observe it.
             self.authorize_final_wire(&built, &route.plan)?;

@@ -105,7 +105,7 @@ fn prepare_exchange(
                 preferred_source: arguments.route.source,
             },
             build: core::build::Options::default(),
-            allow_permissive_live: false,
+            confirm_live_opt_in: false,
         },
         request.timeout,
         1,

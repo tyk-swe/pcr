@@ -92,7 +92,7 @@ struct PreparedCampaign {
     built_indices: Vec<usize>,
     built_case_count: u64,
     maximum_wire_bytes: u64,
-    requires_malformed_live: bool,
+    requires_live_opt_in: bool,
 }
 
 fn prepare_campaign(
@@ -120,13 +120,13 @@ fn prepare_campaign(
         .check_additional(worst_case)
         .map_err(duration_limit)?;
     let maximum_wire_bytes = maximum_wire_bytes(request, &cases)?;
-    let requires_malformed_live = cases.iter().any(|case| {
+    let requires_live_opt_in = cases.iter().any(|case| {
         case.built
             .as_ref()
             .is_some_and(|built| built.requires_live_opt_in)
     });
-    if requires_malformed_live && !live.allow_malformed_live {
-        return Err(Error::MalformedLiveOptInRequired);
+    if requires_live_opt_in && !live.confirm_live_opt_in {
+        return Err(Error::LiveOptInRequired);
     }
 
     Ok(PreparedCampaign {
@@ -134,7 +134,7 @@ fn prepare_campaign(
         built_indices,
         built_case_count,
         maximum_wire_bytes,
-        requires_malformed_live,
+        requires_live_opt_in,
     })
 }
 
@@ -185,7 +185,7 @@ where
             &packets,
             live.destination,
             prepared.maximum_wire_bytes,
-            prepared.requires_malformed_live,
+            prepared.requires_live_opt_in,
         )?;
     }
     Ok(())

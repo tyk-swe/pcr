@@ -358,8 +358,8 @@ fn stats_checked_add_is_complete_and_atomic_on_overflow() {
 fn public_errors_retain_stable_policy_and_target_classification() {
     let cases: Vec<(Box<dyn Classified>, &str, Kind)> = vec![
         (
-            Box::new(policy::Error::PermissivePacket),
-            "policy.permissive_packet",
+            Box::new(policy::Error::LiveOptInPacket),
+            "policy.live_opt_in_packet",
             Kind::Policy,
         ),
         (
@@ -397,6 +397,21 @@ fn public_errors_retain_stable_policy_and_target_classification() {
         assert_eq!(classification.code, code);
         assert_eq!(classification.kind, kind);
     }
+}
+
+#[test]
+fn live_opt_in_errors_use_canonical_classifications_and_remediation() {
+    let operation = packetcraftr::Error::LiveOptInRequired.classification();
+    assert_eq!(operation.code, "policy.live_opt_in_required");
+    let operation_remediation = operation.remediation.expect("operation remediation");
+    assert!(operation_remediation.contains("confirm_live_opt_in"));
+    assert!(operation_remediation.contains("allow_live_opt_in_packets"));
+
+    let policy = policy::Error::LiveOptInPacket.classification();
+    assert_eq!(policy.code, "policy.live_opt_in_packet");
+    let policy_remediation = policy.remediation.expect("policy remediation");
+    assert!(policy_remediation.contains("confirm_live_opt_in"));
+    assert!(policy_remediation.contains("allow_live_opt_in_packets"));
 }
 
 #[test]

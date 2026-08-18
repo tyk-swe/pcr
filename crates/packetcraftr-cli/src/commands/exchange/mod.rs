@@ -26,7 +26,7 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
     let SendArgs {
         route,
         mode,
-        allow_permissive_live,
+        confirm_live_opt_in,
         policy,
     } = send;
     let limits = limits.into_limits();
@@ -53,7 +53,7 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
             mode: mode.into(),
             ..core::build::Options::default()
         },
-        allow_permissive_live,
+        confirm_live_opt_in,
     };
     let client = client(Arc::clone(&registry), request.policy);
     let result = client

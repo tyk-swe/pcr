@@ -126,7 +126,7 @@ impl Authorizer for AllowAll {
         _packets: &[Packet],
         _destination: Option<std::net::IpAddr>,
         _maximum_wire_bytes: u64,
-        _requires_malformed_live: bool,
+        _requires_live_opt_in: bool,
     ) -> Result<(), BoundaryError> {
         Ok(())
     }
@@ -315,6 +315,90 @@ fn route_materializing_route() -> packetcraftr_netio::route::Materialized {
         },
         neighbor_resolution: None,
     }
+}
+
+fn live_opt_in_request() -> packet_fuzz::Request {
+    packet_fuzz::Request {
+        cases: 1,
+        strategies: vec![packet_fuzz::Strategy::BitFlip],
+        targets: vec!["2.bytes".parse().expect("raw field target")],
+        build: packetcraftr_core::build::Options {
+            mode: packetcraftr_core::build::Mode::Permissive,
+            ..packetcraftr_core::build::Options::default()
+        },
+        ..packet_fuzz::Request::default()
+    }
+}
+
+#[test]
+fn live_fuzz_uses_canonical_confirmation_and_policy_gates() {
+    let registry =
+        Arc::new(packetcraftr_core::protocol::builtin::registry().expect("built-in registry"));
+    let request = live_opt_in_request();
+    let mut executor = RebuildingExecutor;
+    let mut allow_all = AllowAll;
+    let missing_confirmation = run(
+        &request,
+        LiveOptions {
+            timeout: Duration::from_millis(1),
+            ..LiveOptions::default()
+        },
+        packet(),
+        Arc::clone(&registry),
+        &mut allow_all,
+        &mut executor,
+        &mut NoopClock,
+    )
+    .expect_err("missing operation confirmation must fail");
+    assert!(matches!(
+        &missing_confirmation,
+        super::Error::LiveOptInRequired
+    ));
+    assert_eq!(
+        missing_confirmation.classification().code,
+        "policy.live_opt_in_required"
+    );
+
+    let denied_policy = crate::policy::Policy::default();
+    let mut denied = super::PolicyAuthorizer::new(&denied_policy);
+    let missing_policy_permission = run(
+        &request,
+        LiveOptions {
+            timeout: Duration::from_millis(1),
+            confirm_live_opt_in: true,
+            ..LiveOptions::default()
+        },
+        packet(),
+        Arc::clone(&registry),
+        &mut denied,
+        &mut executor,
+        &mut NoopClock,
+    )
+    .expect_err("missing policy permission must fail");
+    assert_eq!(
+        missing_policy_permission.classification().code,
+        "policy.live_opt_in_packet"
+    );
+
+    let allowed_policy = crate::policy::Policy {
+        allow_live_opt_in_packets: true,
+        ..crate::policy::Policy::default()
+    };
+    let mut allowed = super::PolicyAuthorizer::new(&allowed_policy);
+    run(
+        &request,
+        LiveOptions {
+            timeout: Duration::from_millis(1),
+            confirm_live_opt_in: true,
+            ..LiveOptions::default()
+        },
+        packet(),
+        registry,
+        &mut allowed,
+        &mut executor,
+        &mut NoopClock,
+    )
+    .expect("both fuzz live opt-in gates allow the campaign");
 }
 
 #[test]

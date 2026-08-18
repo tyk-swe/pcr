@@ -20,8 +20,8 @@ pub enum Error {
     },
     #[error("fuzz live timeout {value:?} is invalid; maximum is {maximum:?}")]
     InvalidTimeout { value: Duration, maximum: Duration },
-    #[error("permissive or malformed fuzz cases require an explicit live opt-in")]
-    MalformedLiveOptInRequired,
+    #[error("fuzz cases requiring live opt-in require confirm_live_opt_in")]
+    LiveOptInRequired,
     #[error("fuzz worst-case duration {actual:?} exceeds the configured limit of {limit:?}")]
     DurationLimit { actual: Duration, limit: Duration },
     #[error("fuzz authorization failed: {0}")]
@@ -50,7 +50,7 @@ impl Error {
             Self::Campaign(_)
             | Self::InvalidLimit { .. }
             | Self::InvalidTimeout { .. }
-            | Self::MalformedLiveOptInRequired
+            | Self::LiveOptInRequired
             | Self::DurationLimit { .. }
             | Self::Authorization(_) => None,
         }
@@ -71,10 +71,12 @@ impl Classified for Error {
                 Kind::Policy,
                 Some("reduce cases, packet sizes, timeout, or rate delay"),
             ),
-            Self::MalformedLiveOptInRequired => Classification::new(
-                "policy.fuzz_malformed_opt_in",
+            Self::LiveOptInRequired => Classification::new(
+                "policy.live_opt_in_required",
                 Kind::Policy,
-                Some("pass the explicit malformed-live opt-in and authorize permissive packets"),
+                Some(
+                    "set confirm_live_opt_in for this fuzz operation in addition to allow_live_opt_in_packets in policy",
+                ),
             ),
             Self::Authorization(error) => error.classification(),
             Self::Execution { source, .. } => source.classification(),

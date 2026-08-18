@@ -12,9 +12,9 @@ pub(crate) struct SendArgs {
     /// Strict or permissive packet construction.
     #[arg(long, value_enum, default_value_t = BuildMode::Strict)]
     pub(crate) mode: BuildMode,
-    /// Per-operation opt-in required for a permissively built live frame.
+    /// Confirm this operation may transmit packets requiring live opt-in.
     #[arg(long)]
-    pub(crate) allow_permissive_live: bool,
+    pub(crate) confirm_live_opt_in: bool,
     #[command(flatten)]
     pub(crate) policy: SendPolicyArgs,
 }

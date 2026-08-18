@@ -31,7 +31,7 @@ pub trait Authorizer {
         packets: &[Packet],
         destination: Option<IpAddr>,
         maximum_wire_bytes: u64,
-        requires_malformed_live: bool,
+        requires_live_opt_in: bool,
     ) -> std::result::Result<(), crate::BoundaryError>;
 }
 

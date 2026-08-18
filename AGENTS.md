@@ -8,6 +8,8 @@
 - Avoid unnecessary wrappers, facades, indirection, and speculative abstractions.
 - Prefer the simplest structure that clearly expresses intent.
 - Do not make maintainability more complex
+- Be token efficent. Be efficent when reading large logs or shell outputs which uses expensive input tokens. And reduce expensive cache token usage by parallel tool calls.
+
 
 # Repository Guidelines
 

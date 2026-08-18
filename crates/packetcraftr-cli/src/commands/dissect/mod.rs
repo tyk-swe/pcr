@@ -55,9 +55,9 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
             core::decode::Options::default(),
         )
         .map_err(|source| CliError::new(3, source.to_string()))?;
-    // The filter selects emission, not validity: a frame it rejects emits
-    // nothing and the command still succeeds, while an unsupported output
-    // format is refused whether or not the frame matched.
+    // The filter selects emission, not validity: a frame it rejects is still
+    // decoded successfully, while an unsupported output format is refused
+    // whether or not the frame matched.
     let kept = match &filter {
         Some(filter) => filter
             .matches(&core::filter::Context {
@@ -97,12 +97,11 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
             }
             write_raw(result.bytes())
         }
-        output::contract::Format::Json => {
-            if !kept {
-                return Ok(());
-            }
-            emit_aggregate(output::contract::Command::Dissect, result, diagnostics)
-        }
+        output::contract::Format::Json => emit_aggregate(
+            output::contract::Command::Dissect,
+            output::dissect::AggregateResult::from_filter(kept, result),
+            diagnostics,
+        ),
         _ => unreachable!("dissect format is checked before command dispatch"),
     }
 }

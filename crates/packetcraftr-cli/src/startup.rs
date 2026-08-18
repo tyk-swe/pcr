@@ -48,7 +48,7 @@ pub(crate) fn run() -> ExitCode {
                 return match emitted {
                     Ok(()) => ExitCode::from(code),
                     Err(write_error) => {
-                        let _ = emit_stderr_error(&write_error.message);
+                        let _ = emit_stderr_error(&write_error);
                         ExitCode::from(write_error.exit_code)
                     }
                 };
@@ -81,14 +81,14 @@ pub(crate) fn run() -> ExitCode {
                         error.output_error(),
                     ))
                 }
-                _ => emit_stderr_error(&error.message),
+                _ => emit_stderr_error(&error),
             };
             if let Err(write_error) = emitted {
                 if matches!(
                     format,
                     output::contract::Format::Json | output::contract::Format::Ndjson
                 ) {
-                    let _ = emit_stderr_error(&write_error.message);
+                    let _ = emit_stderr_error(&write_error);
                 }
                 return ExitCode::from(write_error.exit_code);
             }

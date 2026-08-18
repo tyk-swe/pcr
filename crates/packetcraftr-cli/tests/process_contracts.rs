@@ -202,7 +202,10 @@ fn explicit_hex_does_not_wait_for_an_open_stdin_pipe() {
         IPV4_FRAME_HEX,
     ]);
     assert!(output.status.success(), "{:?}", output.stderr);
-    assert_eq!(parse_json(&output)["result"]["bytes_hex"], IPV4_FRAME_HEX);
+    assert_eq!(
+        parse_json(&output)["result"]["dissection"]["bytes_hex"],
+        IPV4_FRAME_HEX
+    );
 }
 
 #[test]
@@ -216,7 +219,10 @@ fn redirected_nonempty_stdin_is_accepted_without_an_explicit_source() {
         &decode_hex(IPV4_FRAME_HEX),
     );
     assert!(frame.status.success(), "{:?}", frame.stderr);
-    assert_eq!(parse_json(&frame)["result"]["bytes_hex"], IPV4_FRAME_HEX);
+    assert_eq!(
+        parse_json(&frame)["result"]["dissection"]["bytes_hex"],
+        IPV4_FRAME_HEX
+    );
 }
 
 #[test]
@@ -291,7 +297,10 @@ fn explicit_files_ignore_an_unrelated_open_stdin_pipe() {
         frame_path,
     ]);
     assert!(frame.status.success(), "{:?}", frame.stderr);
-    assert_eq!(parse_json(&frame)["result"]["bytes_hex"], IPV4_FRAME_HEX);
+    assert_eq!(
+        parse_json(&frame)["result"]["dissection"]["bytes_hex"],
+        IPV4_FRAME_HEX
+    );
 }
 
 fn decode_hex(value: &str) -> Vec<u8> {

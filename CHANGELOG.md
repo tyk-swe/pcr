@@ -100,6 +100,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Corrected `dissect --output json --filter` to emit one complete aggregate
   document for both matches and no-matches; no-match success now reports
   `result.matched: false` with `result.dissection: null`.
+- Human-readable runtime errors now include stable classification codes,
+  retained causes, and available remediation guidance.
 - Corrected the DNS text summary label from `response_name` to
   `response_code_name`.
 - Kept TCP follow delivery edges aligned with directional reassembly

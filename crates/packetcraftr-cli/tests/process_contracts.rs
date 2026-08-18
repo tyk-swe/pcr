@@ -120,6 +120,29 @@ fn invalid_input_and_live_policy_gates_have_structured_exit_codes() {
 }
 
 #[test]
+fn human_runtime_errors_include_actionable_classification_and_help() {
+    let expected = concat!(
+        "error[cli.protocol]: unknown built-in protocol 'tcpc'\n",
+        "help: run `packetcraftr protocols` to list built-in protocols\n",
+    );
+
+    for arguments in [
+        &["protocols", "tcpc"][..],
+        &["--color", "never", "protocols", "tcpc"][..],
+    ] {
+        let failure = run(arguments);
+        assert_eq!(failure.status.code(), Some(2), "{arguments:?}");
+        assert!(failure.stdout.is_empty(), "{arguments:?}");
+        assert_eq!(
+            String::from_utf8_lossy(&failure.stderr),
+            expected,
+            "{arguments:?}"
+        );
+        assert_no_terminal_style(&failure.stderr);
+    }
+}
+
+#[test]
 fn clap_failures_preserve_unambiguous_invocation_context() {
     for (arguments, expected_command) in [
         (

@@ -16,7 +16,7 @@ use packetcraftr::{
 use self::arguments::Args;
 use super::super::errors::CliError;
 use super::super::filtering::{self, Capabilities};
-use super::super::input::{read_bounded_file, read_stdin_bounded};
+use super::super::input::{InputKind, read_bounded_file, read_stdin_bounded};
 use super::super::rendering::{
     emit_aggregate, render_diagnostics_text, write_plain_line, write_raw, write_stdout_line,
 };
@@ -38,8 +38,14 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
         (Some(value), None) => core::protocol::raw::parse_hex(&value)
             .map_err(|source| CliError::new(2, source.to_string()))?
             .to_vec(),
-        (None, Some(path)) => read_bounded_file(&path, core::document::DEFAULT_MAX_DOCUMENT_BYTES)?,
-        (None, None) => read_stdin_bounded(core::document::DEFAULT_MAX_DOCUMENT_BYTES)?,
+        (None, Some(path)) => read_bounded_file(
+            &path,
+            core::document::DEFAULT_MAX_DOCUMENT_BYTES,
+            InputKind::Frame,
+        )?,
+        (None, None) => {
+            read_stdin_bounded(core::document::DEFAULT_MAX_DOCUMENT_BYTES, InputKind::Frame)?
+        }
         (Some(_), Some(_)) => unreachable!("clap enforces conflicts"),
     };
     let decoded = core::decode::Dissector::new(registry)

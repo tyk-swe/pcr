@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Explicit packet and frame sources now take precedence over stdin, while
+  missing interactive input fails immediately with command-specific guidance.
 - **Breaking:** Scan output now exposes address-bearing `endpoints` with an
   optional port, replacing the `ports` collection, ICMP port-zero sentinel,
   and evidence-derived address in aggregate and streaming output.

@@ -354,21 +354,6 @@ mod tests {
         }
     }
 
-    #[derive(Clone)]
-    struct UnusedCaptureProvider;
-
-    impl CaptureProvider for UnusedCaptureProvider {
-        type Capture = ObservedCapture;
-
-        fn arm_capture(
-            &self,
-            _route: &Plan,
-            _limits: CaptureQueueLimits,
-        ) -> Result<Self::Capture, LiveIoError> {
-            panic!("provider fixture is not used by direct exchange tests")
-        }
-    }
-
     struct ObservedCapture {
         timeouts: Arc<Mutex<Vec<Duration>>>,
     }
@@ -429,7 +414,7 @@ mod tests {
             SlowLayer2 {
                 delay: Duration::from_millis(10),
             },
-            UnusedCaptureProvider,
+            capture::SystemProvider,
             options,
         )
         .expect("resolver options");

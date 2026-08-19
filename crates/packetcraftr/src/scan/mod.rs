@@ -37,9 +37,9 @@ mod probe;
 mod tests;
 
 pub use classification::{ResponseClassification, classify_response};
-pub use engine::run;
+pub use engine::{run, run_with_events};
 pub use error::Error;
 pub use model::{
-    Batch, Classification, Endpoint, Execution, Executor, Limits, Probe, ProbeEvidence,
-    ProbeStatus, Request, Result, Transport,
+    Batch, Classification, Endpoint, Event, Execution, Executor, Limits, Probe, ProbeEvidence,
+    ProbeStatus, Request, Result, Summary, Transport,
 };

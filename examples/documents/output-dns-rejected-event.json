@@ -1,0 +1,23 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "dns",
+  "mode": "stream",
+  "sequence": 3,
+  "status": "success",
+  "result": {
+    "event": "rejected",
+    "attempt": 2,
+    "server": "resolver.lab",
+    "server_port": 53,
+    "query_name": "www.example.test.",
+    "query_type": "a",
+    "record": {
+      "section": "additional",
+      "index": 0,
+      "owner": "unrelated.example.test.",
+      "type_code": 1,
+      "reason": "additional record is not IN-class address glue referenced by accepted data"
+    }
+  },
+  "diagnostics": []
+}

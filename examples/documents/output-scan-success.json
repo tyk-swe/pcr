@@ -14,9 +14,9 @@
         "transport": "tcp",
         "port": 443,
         "classification": "timeout",
-        "evidence": [
-          {
-            "protocol": "tcp",
+          "evidence": [
+            {
+              "protocol": "tcp",
             "destination": "192.168.56.10",
             "destination_port": 443,
             "attempt": 1,

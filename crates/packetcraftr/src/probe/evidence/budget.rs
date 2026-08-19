@@ -85,7 +85,7 @@ pub(crate) fn push_undecoded_limit_diagnostic(
 )]
 pub(crate) fn retain_undecoded_frames<T, E>(
     frames: Vec<Frame>,
-    output: &mut Vec<T>,
+    retained_count: &mut usize,
     max_undecoded: usize,
     budget: &mut Budget,
     descriptor: EvidenceDiagnosticDescriptor,
@@ -93,11 +93,12 @@ pub(crate) fn retain_undecoded_frames<T, E>(
     max_evidence_bytes: usize,
     diagnostics: &mut Vec<Diagnostic>,
     mut map: impl FnMut(Frame) -> T,
+    mut emit: impl FnMut(T) -> Result<(), E>,
     mut check_deadline: impl FnMut() -> Result<(), E>,
 ) -> Result<(), E> {
     for frame in frames {
         check_deadline()?;
-        if output.len() >= max_undecoded {
+        if *retained_count >= max_undecoded {
             push_undecoded_limit_diagnostic(diagnostics, descriptor, max_undecoded);
             break;
         }
@@ -109,7 +110,8 @@ pub(crate) fn retain_undecoded_frames<T, E>(
             max_evidence_bytes,
             diagnostics,
         ) {
-            output.push(map(frame));
+            *retained_count += 1;
+            emit(map(frame))?;
         }
         check_deadline()?;
     }

@@ -24,6 +24,7 @@ fn endpoint(address: IpAddr, responded: bool) -> scan::Endpoint {
         port: None,
         classification,
         evidence: vec![scan::ProbeEvidence {
+            sequence: 0,
             attempt: 1,
             status: if responded {
                 scan::ProbeStatus::Response
@@ -103,14 +104,28 @@ fn scan_output_preserves_endpoint_identity_and_port_absence() {
         assert!(timeout.get(absent).is_none(), "{absent} must be omitted");
     }
 
-    let event = serde_json::to_value(scan_output::Event::Endpoint {
+    let event = serde_json::to_value(scan_output::Event::Probe {
         target: output.target,
-        endpoint: output.endpoints[2].clone(),
+        probe_sequence: 0,
+        address: ipv4,
+        transport: "icmp".to_owned(),
+        port: None,
+        evidence: Box::new(output.endpoints[0].evidence[0].clone()),
     })
-    .expect("endpoint event serializes without evidence");
-    assert_eq!(event["event"], "endpoint");
-    assert_eq!(event["endpoint"]["address"], ipv4.to_string());
+    .expect("probe event serializes with explicit endpoint identity");
+    assert_eq!(event["event"], "probe");
+    assert_eq!(event["address"], ipv4.to_string());
+    assert_eq!(event["probe_sequence"], 0);
+    assert!(event.get("port").is_none());
     assert!(event.get("resolved_address").is_none());
+
+    let undecoded = scan_output::Event::try_from_scan(scan::Event::Undecoded { frame: frame() })
+        .expect("undecoded event converts");
+    let undecoded = serde_json::to_value(undecoded).expect("undecoded event serializes");
+    assert_eq!(undecoded["event"], "undecoded");
+    assert!(undecoded.get("probe_sequence").is_none());
+    assert!(undecoded.get("address").is_none());
+    assert!(undecoded.get("port").is_none());
 
     let schema: serde_json::Value = serde_json::from_str(include_str!(
         "../../../schemas/packetcraftr.output.v1.schema.json"

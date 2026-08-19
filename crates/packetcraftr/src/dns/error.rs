@@ -125,6 +125,11 @@ pub enum Error {
     InvalidEvidence { attempt: u32, message: String },
     #[error("DNS statistic accounting overflowed on attempt {attempt}")]
     StatisticsOverflow { attempt: u32 },
+    #[error("DNS progressive output failed: {source}")]
+    Output {
+        #[source]
+        source: BoundaryError,
+    },
 }
 
 impl From<DeadlineExceeded> for Error {
@@ -174,6 +179,11 @@ impl Classified for Error {
                 Kind::Io,
                 Some("inspect the DNS retry timer and account for queries already transmitted"),
             ),
+            Self::Output { .. } => Classification::new(
+                "io.dns_output",
+                Kind::Io,
+                Some("inspect the output sink and account for DNS queries already transmitted"),
+            ),
             Self::InvalidEvidence { .. } | Self::StatisticsOverflow { .. } => Classification::new(
                 "internal.dns_evidence",
                 Kind::Internal,
@@ -187,7 +197,7 @@ impl Classified for Error {
     fn causes(&self) -> Vec<String> {
         match self {
             Self::Authorization(error) => error.causes(),
-            Self::Execution { source, .. } => source.causes(),
+            Self::Execution { source, .. } | Self::Output { source } => source.causes(),
             _ => Vec::new(),
         }
     }

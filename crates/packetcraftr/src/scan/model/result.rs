@@ -45,6 +45,7 @@ pub enum ProbeStatus {
 
 #[derive(Clone, Debug)]
 pub struct ProbeEvidence {
+    pub sequence: u64,
     pub attempt: u32,
     pub status: ProbeStatus,
     pub classification: Classification,
@@ -71,6 +72,28 @@ pub struct Result {
     pub resolved_addresses: Vec<IpAddr>,
     pub endpoints: Vec<Endpoint>,
     pub undecoded: Vec<Frame>,
+    pub diagnostics: Vec<Diagnostic>,
+    pub stats: Stats,
+}
+
+#[derive(Clone, Debug)]
+pub enum Event {
+    Probe {
+        target: String,
+        address: IpAddr,
+        transport: Transport,
+        port: Option<u16>,
+        evidence: ProbeEvidence,
+    },
+    Undecoded {
+        frame: Frame,
+    },
+}
+
+#[derive(Clone, Debug)]
+pub struct Summary {
+    pub target: String,
+    pub resolved_addresses: Vec<IpAddr>,
     pub diagnostics: Vec<Diagnostic>,
     pub stats: Stats,
 }

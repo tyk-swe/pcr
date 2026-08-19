@@ -3,6 +3,7 @@
 
 //! Traceroute orchestration across authorization, hop execution, and results.
 
+use std::collections::HashMap;
 use std::net::IpAddr;
 use std::time::Duration;
 
@@ -20,8 +21,8 @@ use super::classification::classify_response;
 use super::error::Error;
 use super::evidence::validate_execution;
 use super::model::{
-    Batch, Completion, Execution, Executor, Hop, Limits, ProbeEvidence, ProbeStatus, Request,
-    ResponseKind, Result, Strategy, UndecodedEvidence,
+    Batch, Completion, Event, Execution, Executor, Hop, Limits, Probe, ProbeEvidence, ProbeStatus,
+    Request, ResponseKind, Result, Strategy, Summary, UndecodedEvidence,
 };
 use super::plan::{build_batches, worst_case_duration};
 use super::{MAX_TRACEROUTE_PROBE_BYTES, TRACEROUTE_EVIDENCE_DIAGNOSTICS};
@@ -41,42 +42,114 @@ where
     E: Executor,
     C: Clock,
 {
+    let mut collector = Collector::default();
+    let summary = run_with_events(request, authorizer, registry, executor, clock, |event| {
+        collector.observe(event);
+        Ok(())
+    })?;
+    Ok(collector.finish(summary))
+}
+
+/// Executes one approved trace and publishes each final probe outcome and
+/// retained undecoded frame before starting a later hop.
+pub fn run_with_events<A, E, C, F>(
+    request: &Request,
+    authorizer: &mut A,
+    registry: &Registry,
+    executor: &mut E,
+    clock: &mut C,
+    mut emit: F,
+) -> std::result::Result<Summary, Error>
+where
+    A: Authorizer,
+    E: Executor,
+    C: Clock,
+    F: FnMut(Event) -> std::result::Result<(), BoundaryError>,
+{
     let mut deadline = Deadline::new(request.limits.max_duration);
     let approved = approve_traceroute(request, authorizer, &deadline)?;
     let batches = build_batches(request, approved.destination)?;
     enforce_deadline(&deadline)?;
-    let mut undecoded = Vec::new();
-    let mut diagnostics = Vec::new();
-    let mut evidence_budget = Budget::default();
+    let mut state = TracerouteState::default();
     let config = ProbeRunConfig {
         probes_per_second: request.probes_per_second,
         duration_limit: request.limits.max_duration,
         final_statistics_sequence: u64::try_from(approved.total_probes.saturating_sub(1))
             .unwrap_or(u64::MAX),
     };
-    let mut lifecycle = Lifecycle {
-        executor,
-        registry,
-        limits: request.limits,
-        evidence_budget: &mut evidence_budget,
-        undecoded: &mut undecoded,
-        diagnostics: &mut diagnostics,
+    let run = {
+        let mut lifecycle = Lifecycle {
+            executor,
+            registry,
+            limits: request.limits,
+            target: &approved.declared_target,
+            destination: approved.destination,
+            state: &mut state,
+            emit: &mut emit,
+        };
+        run_batches(&batches, config, &mut deadline, clock, &mut lifecycle)
     };
-    let run = run_batches(&batches, config, &mut deadline, clock, &mut lifecycle)?;
-    let completion = completion(&run.outputs);
+    let run = run?;
 
-    Ok(Result {
+    Ok(Summary {
         target: approved.declared_target,
         resolved_addresses: approved.resolved_addresses,
         destination: approved.destination,
         strategy: request.strategy,
         destination_port: request.destination_port,
-        hops: run.outputs,
-        undecoded,
-        completion,
-        diagnostics,
+        completion: state.completion,
+        diagnostics: state.diagnostics,
         stats: run.stats,
     })
+}
+
+#[derive(Default)]
+struct Collector {
+    hops: Vec<Hop>,
+    hop_indices: HashMap<u8, usize>,
+    undecoded: Vec<UndecodedEvidence>,
+}
+
+impl Collector {
+    fn observe(&mut self, event: Event) {
+        match event {
+            Event::Probe {
+                target: _,
+                destination: _,
+                probe,
+            } => {
+                let hop_index = match self.hop_indices.get(&probe.hop_limit) {
+                    Some(index) => *index,
+                    None => {
+                        let index = self.hops.len();
+                        self.hops.push(Hop {
+                            hop_limit: probe.hop_limit,
+                            probes: Vec::new(),
+                        });
+                        self.hop_indices.insert(probe.hop_limit, index);
+                        index
+                    }
+                };
+                self.hops[hop_index].probes.push(probe);
+            }
+            Event::Undecoded(evidence) => self.undecoded.push(evidence),
+        }
+    }
+
+    fn finish(self, summary: Summary) -> Result {
+        Result {
+            target: summary.target,
+            resolved_addresses: summary.resolved_addresses,
+            destination: summary.destination,
+            strategy: summary.strategy,
+            destination_port: summary.destination_port,
+            hops: self.hops,
+            undecoded: self.undecoded,
+            completion: summary.completion,
+            diagnostics: summary.diagnostics,
+            stats: summary.stats,
+        }
+    }
 }
 
 struct ApprovedTraceroute {
@@ -163,49 +236,54 @@ fn validate_probe_plan(request: &Request, total_probes: usize) -> std::result::R
     Ok(())
 }
 
-fn completion(hops: &[Hop]) -> Completion {
-    let any_response = hops.iter().any(|hop| {
-        hop.probes
-            .iter()
-            .any(|probe| probe.status == ProbeStatus::Response)
-    });
-    if hops.iter().any(|hop| {
-        hop.probes
-            .iter()
-            .any(|probe| probe.response_kind == Some(ResponseKind::DestinationReached))
-    }) {
-        Completion::DestinationReached
-    } else if hops.iter().any(|hop| {
-        hop.probes
-            .iter()
-            .any(|probe| probe.response_kind == Some(ResponseKind::Unreachable))
-    }) {
-        Completion::Unreachable
-    } else if any_response {
-        Completion::MaximumHops
-    } else {
-        Completion::Timeout
+struct TracerouteState {
+    evidence_budget: Budget,
+    retained_undecoded: usize,
+    completion: Completion,
+    diagnostics: Vec<Diagnostic>,
+}
+
+impl Default for TracerouteState {
+    fn default() -> Self {
+        Self {
+            evidence_budget: Budget::default(),
+            retained_undecoded: 0,
+            completion: Completion::Timeout,
+            diagnostics: Vec::new(),
+        }
     }
 }
 
-struct TracerouteEvidenceState<'a> {
-    budget: &'a mut Budget,
-    undecoded: &'a mut Vec<UndecodedEvidence>,
-    diagnostics: &'a mut Vec<Diagnostic>,
+impl TracerouteState {
+    fn observe_probe(&mut self, probe: &ProbeEvidence) {
+        self.completion = match (self.completion, probe.response_kind, probe.status) {
+            (_, Some(ResponseKind::DestinationReached), _) => Completion::DestinationReached,
+            (Completion::DestinationReached, _, _) => Completion::DestinationReached,
+            (_, Some(ResponseKind::Unreachable), _) => Completion::Unreachable,
+            (Completion::Unreachable, _, _) => Completion::Unreachable,
+            (_, _, ProbeStatus::Response) => Completion::MaximumHops,
+            (completion, _, _) => completion,
+        };
+    }
 }
 
-struct Lifecycle<'a, E> {
+struct Lifecycle<'a, E, F> {
     executor: &'a mut E,
     registry: &'a Registry,
     limits: Limits,
-    evidence_budget: &'a mut Budget,
-    undecoded: &'a mut Vec<UndecodedEvidence>,
-    diagnostics: &'a mut Vec<Diagnostic>,
+    target: &'a str,
+    destination: IpAddr,
+    state: &'a mut TracerouteState,
+    emit: &'a mut F,
 }
 
-impl<E: Executor> ProbeLifecycle<Batch> for Lifecycle<'_, E> {
+impl<E, F> ProbeLifecycle<Batch> for Lifecycle<'_, E, F>
+where
+    E: Executor,
+    F: FnMut(Event) -> std::result::Result<(), BoundaryError>,
+{
     type Execution = Execution;
-    type Output = Hop;
+    type Output = bool;
     type Error = Error;
 
     fn execute(&mut self, batch: &Batch) -> std::result::Result<Self::Execution, BoundaryError> {
@@ -226,23 +304,21 @@ impl<E: Executor> ProbeLifecycle<Batch> for Lifecycle<'_, E> {
         execution: Self::Execution,
         deadline: &Deadline,
     ) -> std::result::Result<Self::Output, Self::Error> {
-        let mut evidence = TracerouteEvidenceState {
-            budget: self.evidence_budget,
-            undecoded: self.undecoded,
-            diagnostics: self.diagnostics,
-        };
         process_batch(
             batch,
             execution,
             self.registry,
             self.limits,
-            &mut evidence,
+            self.target,
+            self.destination,
+            self.state,
+            self.emit,
             deadline,
         )
     }
 
     fn should_stop(output: &Self::Output) -> bool {
-        terminal_hop(output)
+        *output
     }
 
     fn duration_error(actual: Duration, limit: Duration) -> Self::Error {
@@ -270,14 +346,24 @@ impl<E: Executor> ProbeLifecycle<Batch> for Lifecycle<'_, E> {
     }
 }
 
-fn process_batch(
+#[expect(
+    clippy::too_many_arguments,
+    reason = "hop processing threads trusted execution evidence, command context, limits, state, and the progressive sink"
+)]
+fn process_batch<F>(
     batch: &Batch,
     execution: Execution,
     registry: &Registry,
     limits: Limits,
-    evidence: &mut TracerouteEvidenceState<'_>,
+    target: &str,
+    destination: IpAddr,
+    state: &mut TracerouteState,
+    emit: &mut F,
     deadline: &Deadline,
-) -> std::result::Result<Hop, Error> {
+) -> std::result::Result<bool, Error>
+where
+    F: FnMut(Event) -> std::result::Result<(), BoundaryError>,
+{
     enforce_deadline(deadline)?;
     let Execution {
         permit,
@@ -295,108 +381,156 @@ fn process_batch(
         });
     }
     for diagnostic in batch_diagnostics {
-        packetcraftr_core::diagnostic::push_once(evidence.diagnostics, diagnostic);
+        packetcraftr_core::diagnostic::push_once(&mut state.diagnostics, diagnostic);
     }
     enforce_deadline(deadline)?;
     let mut response_selector = ResponseSelector::new(&mut responses);
-    let probes = process_probes(
+    let terminal = process_probes(
         batch,
         &sent,
         &mut response_selector,
         registry,
         limits,
-        evidence,
+        target,
+        destination,
+        state,
+        emit,
         deadline,
     )?;
     let hop_limit = batch.probes[0].hop_limit;
     retain_undecoded_frames(
         batch_undecoded,
-        evidence.undecoded,
+        &mut state.retained_undecoded,
         limits.max_undecoded,
-        evidence.budget,
+        &mut state.evidence_budget,
         TRACEROUTE_EVIDENCE_DIAGNOSTICS,
         limits.max_evidence_frames,
         limits.max_evidence_bytes,
-        evidence.diagnostics,
-        |frame| UndecodedEvidence { hop_limit, frame },
+        &mut state.diagnostics,
+        |frame| Event::Undecoded(UndecodedEvidence { hop_limit, frame }),
+        |event| emit(event).map_err(|source| Error::Output { source }),
         || enforce_deadline(deadline),
     )?;
-    Ok(Hop { hop_limit, probes })
+    Ok(terminal)
 }
 
-fn process_probes(
+#[expect(
+    clippy::too_many_arguments,
+    reason = "hop processing threads trusted evidence, command context, limits, state, and the progressive sink"
+)]
+fn process_probes<F>(
     batch: &Batch,
     sent: &[SentPacket],
     response_selector: &mut ResponseSelector<'_>,
     registry: &Registry,
     limits: Limits,
-    evidence: &mut TracerouteEvidenceState<'_>,
+    target: &str,
+    destination: IpAddr,
+    state: &mut TracerouteState,
+    emit: &mut F,
     deadline: &Deadline,
-) -> std::result::Result<Vec<ProbeEvidence>, Error> {
-    let mut probes = Vec::with_capacity(batch.probes.len());
+) -> std::result::Result<bool, Error>
+where
+    F: FnMut(Event) -> std::result::Result<(), BoundaryError>,
+{
+    let mut terminal = false;
     for (request_index, (probe, sent)) in batch.probes.iter().zip(sent.iter()).enumerate() {
-        enforce_deadline(deadline)?;
-        let sent_at = sent.timing().freshness_marker().wall_clock();
-        let best = response_selector.select(
+        let evidence = classify_probe(
+            probe,
+            sent,
             request_index,
             batch.timeout,
-            |response| classify_response(registry, probe.strategy, &sent.built().packet, response),
-            |observation| observation.kind.rank(),
-            |observation| observation.responder,
-            || enforce_deadline(deadline),
+            response_selector,
+            registry,
+            limits,
+            state,
+            deadline,
         )?;
-
-        let probe_evidence = if let Some(candidate) = best {
-            let received_at = crate::live_timestamp(&candidate.decoded.frame);
-            let latency = candidate.latency;
-            let response = retain_evidence(
-                evidence.budget,
-                &candidate.decoded.frame,
-                TRACEROUTE_EVIDENCE_DIAGNOSTICS,
-                limits.max_evidence_frames,
-                limits.max_evidence_bytes,
-                evidence.diagnostics,
-            )
-            .then(|| candidate.decoded.frame.clone());
-            ProbeEvidence {
-                sequence: probe.sequence,
-                hop_limit: probe.hop_limit,
-                attempt: probe.attempt,
-                destination: probe.address,
-                strategy: probe.strategy,
-                destination_port: probe.destination_port,
-                status: ProbeStatus::Response,
-                response_kind: Some(candidate.observation.kind),
-                responder: Some(candidate.observation.responder),
-                sent_at,
-                received_at: Some(received_at),
-                latency: Some(latency),
-                response,
-                reason: candidate.observation.reason.to_owned(),
-            }
-        } else {
-            ProbeEvidence {
-                sequence: probe.sequence,
-                hop_limit: probe.hop_limit,
-                attempt: probe.attempt,
-                destination: probe.address,
-                strategy: probe.strategy,
-                destination_port: probe.destination_port,
-                status: ProbeStatus::Timeout,
-                response_kind: None,
-                responder: None,
-                sent_at,
-                received_at: None,
-                latency: None,
-                response: None,
-                reason: "no checksum-valid, protocol-consistent response before the deadline"
-                    .to_owned(),
-            }
-        };
-        probes.push(probe_evidence);
+        terminal |= matches!(
+            evidence.response_kind,
+            Some(ResponseKind::DestinationReached | ResponseKind::Unreachable)
+        );
+        state.observe_probe(&evidence);
+        emit(Event::Probe {
+            target: target.to_owned(),
+            destination,
+            probe: evidence,
+        })
+        .map_err(|source| Error::Output { source })?;
         enforce_deadline(deadline)?;
     }
-    Ok(probes)
+    Ok(terminal)
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "probe classification needs the planned probe, trusted send, response selector, limits, and evidence state"
+)]
+fn classify_probe(
+    probe: &Probe,
+    sent: &SentPacket,
+    request_index: usize,
+    timeout: Duration,
+    response_selector: &mut ResponseSelector<'_>,
+    registry: &Registry,
+    limits: Limits,
+    state: &mut TracerouteState,
+    deadline: &Deadline,
+) -> std::result::Result<ProbeEvidence, Error> {
+    enforce_deadline(deadline)?;
+    let sent_at = sent.timing().freshness_marker().wall_clock();
+    let best = response_selector.select(
+        request_index,
+        timeout,
+        |response| classify_response(registry, probe.strategy, &sent.built().packet, response),
+        |observation| observation.kind.rank(),
+        |observation| observation.responder,
+        || enforce_deadline(deadline),
+    )?;
+    let Some(candidate) = best else {
+        return Ok(ProbeEvidence {
+            sequence: probe.sequence,
+            hop_limit: probe.hop_limit,
+            attempt: probe.attempt,
+            destination: probe.address,
+            strategy: probe.strategy,
+            destination_port: probe.destination_port,
+            status: ProbeStatus::Timeout,
+            response_kind: None,
+            responder: None,
+            sent_at,
+            received_at: None,
+            latency: None,
+            response: None,
+            reason: "no checksum-valid, protocol-consistent response before the deadline"
+                .to_owned(),
+        });
+    };
+    let response = retain_evidence(
+        &mut state.evidence_budget,
+        &candidate.decoded.frame,
+        TRACEROUTE_EVIDENCE_DIAGNOSTICS,
+        limits.max_evidence_frames,
+        limits.max_evidence_bytes,
+        &mut state.diagnostics,
+    )
+    .then(|| candidate.decoded.frame.clone());
+    Ok(ProbeEvidence {
+        sequence: probe.sequence,
+        hop_limit: probe.hop_limit,
+        attempt: probe.attempt,
+        destination: probe.address,
+        strategy: probe.strategy,
+        destination_port: probe.destination_port,
+        status: ProbeStatus::Response,
+        response_kind: Some(candidate.observation.kind),
+        responder: Some(candidate.observation.responder),
+        sent_at,
+        received_at: Some(crate::live_timestamp(&candidate.decoded.frame)),
+        latency: Some(candidate.latency),
+        response,
+        reason: candidate.observation.reason.to_owned(),
+    })
 }
 
 fn enforce_deadline(deadline: &Deadline) -> std::result::Result<(), Error> {
@@ -405,15 +539,6 @@ fn enforce_deadline(deadline: &Deadline) -> std::result::Result<(), Error> {
 
 fn traceroute_duration_error(actual: Duration, limit: Duration) -> Error {
     Error::DurationLimit { actual, limit }
-}
-
-fn terminal_hop(hop: &Hop) -> bool {
-    hop.probes.iter().any(|probe| {
-        matches!(
-            probe.response_kind,
-            Some(ResponseKind::DestinationReached | ResponseKind::Unreachable)
-        )
-    })
 }
 
 impl ProbeBatch for Batch {

@@ -403,3 +403,44 @@ fn runtime_stream_error_follows_every_preserved_record() {
             .all(|record| record["result"]["event"] != "complete")
     );
 }
+
+#[test]
+fn progressive_live_commands_emit_one_sequence_zero_error_when_preparation_fails() {
+    let commands: &[&[&str]] = &[
+        &["--output", "ndjson", "scan", "8.8.8.8", "--ports", "80"],
+        &[
+            "--output",
+            "ndjson",
+            "traceroute",
+            "8.8.8.8",
+            "--strategy",
+            "icmp",
+            "--max-hops",
+            "1",
+            "--attempts",
+            "1",
+        ],
+        &[
+            "--output",
+            "ndjson",
+            "dns",
+            "8.8.8.8",
+            "example.com",
+            "--transaction-id",
+            "7",
+            "--source-port",
+            "49152",
+        ],
+    ];
+
+    for arguments in commands {
+        let failure = run(arguments);
+        assert_eq!(failure.status.code(), Some(6), "{arguments:?}");
+        let records = parse_ndjson(&failure);
+        assert_contiguous_stream(&records);
+        assert_eq!(records.len(), 1, "{arguments:?}");
+        assert_eq!(records[0]["sequence"], 0, "{arguments:?}");
+        assert_eq!(records[0]["status"], "error", "{arguments:?}");
+        assert!(records[0].get("result").is_none(), "{arguments:?}");
+    }
+}

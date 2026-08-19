@@ -8,6 +8,6 @@ mod result;
 pub use execution::{Exchange, Execution, Executor, Probe};
 pub use request::{Limits, QueryType, Request};
 pub use result::{
-    AttemptEvidence, Edns, EdnsOption, Name, Outcome, Record, RecordValue, RejectedRecord, Result,
-    Section, UndecodedEvidence, ValidatedResponse,
+    AttemptEvidence, Edns, EdnsOption, Event, Name, Outcome, Record, RecordValue, RejectedRecord,
+    ResponseSummary, Result, Section, Summary, UndecodedEvidence, ValidatedResponse,
 };

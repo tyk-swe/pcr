@@ -2344,17 +2344,39 @@
           "required": [
             "event",
             "target",
-            "endpoint"
+            "probe_sequence",
+            "address",
+            "transport",
+            "evidence"
           ],
           "properties": {
             "event": {
-              "const": "endpoint"
+              "const": "probe"
             },
             "target": {
               "type": "string"
             },
-            "endpoint": {
-              "$ref": "#/$defs/scanEndpoint"
+            "probe_sequence": {
+              "$ref": "#/$defs/uint64"
+            },
+            "address": {
+              "$ref": "#/$defs/ipAddress"
+            },
+            "transport": {
+              "type": "string",
+              "enum": [
+                "tcp",
+                "udp",
+                "icmp"
+              ]
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            "evidence": {
+              "$ref": "#/$defs/probeEvidence"
             }
           },
           "additionalProperties": false
@@ -2408,11 +2430,11 @@
             "event",
             "target",
             "destination",
-            "hop"
+            "probe"
           ],
           "properties": {
             "event": {
-              "const": "hop"
+              "const": "probe"
             },
             "target": {
               "type": "string"
@@ -2420,8 +2442,8 @@
             "destination": {
               "$ref": "#/$defs/ipAddress"
             },
-            "hop": {
-              "$ref": "#/$defs/traceHop"
+            "probe": {
+              "$ref": "#/$defs/traceHop/properties/probes/items"
             }
           },
           "additionalProperties": false
@@ -2565,6 +2587,7 @@
           "type": "object",
           "required": [
             "event",
+            "attempt",
             "server",
             "server_port",
             "query_name",
@@ -2575,6 +2598,11 @@
           "properties": {
             "event": {
               "const": "record"
+            },
+            "attempt": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 32
             },
             "server": {
               "type": "string"
@@ -2603,6 +2631,7 @@
           "type": "object",
           "required": [
             "event",
+            "attempt",
             "server",
             "server_port",
             "query_name",
@@ -2612,6 +2641,11 @@
           "properties": {
             "event": {
               "const": "rejected"
+            },
+            "attempt": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 32
             },
             "server": {
               "type": "string"

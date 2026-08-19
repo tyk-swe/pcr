@@ -107,7 +107,7 @@ pub struct Undecoded {
     pub frame: Captured,
 }
 
-/// Aggregate or streamed result of `traceroute`.
+/// Aggregate result of `traceroute`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Result {
     pub target: String,
@@ -143,24 +143,7 @@ impl Result {
                 let probe_outputs = hop
                     .probes
                     .into_iter()
-                    .map(|probe| {
-                        Ok(Probe {
-                            sequence: probe.sequence,
-                            hop_limit: probe.hop_limit,
-                            attempt: probe.attempt,
-                            strategy: probe.strategy.to_string(),
-                            destination: probe.destination,
-                            destination_port: probe.destination_port,
-                            status: probe.status.into(),
-                            response_kind: probe.response_kind.map(Into::into),
-                            responder: probe.responder,
-                            sent_at: probe.sent_at.try_into()?,
-                            received_at: probe.received_at.map(Timestamp::try_from).transpose()?,
-                            latency: probe.latency,
-                            frame: probe.response.map(Captured::try_from_frame).transpose()?,
-                            reason: probe.reason,
-                        })
-                    })
+                    .map(try_from_probe)
                     .collect::<std::result::Result<Vec<_>, Error>>()?;
                 Ok(Hop {
                     hop_limit: hop.hop_limit,
@@ -197,10 +180,10 @@ impl Result {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum Event {
-    Hop {
+    Probe {
         target: String,
         destination: IpAddr,
-        hop: Hop,
+        probe: Probe,
     },
     Undecoded {
         hop_limit: u8,
@@ -215,4 +198,62 @@ pub enum Event {
         destination_port: Option<u16>,
         completion: Completion,
     },
+}
+
+impl Event {
+    pub fn try_from_traceroute(
+        event: crate::traceroute::Event,
+    ) -> std::result::Result<Self, Error> {
+        match event {
+            crate::traceroute::Event::Probe {
+                target,
+                destination,
+                probe,
+            } => Ok(Self::Probe {
+                target,
+                destination,
+                probe: try_from_probe(probe)?,
+            }),
+            crate::traceroute::Event::Undecoded(evidence) => Ok(Self::Undecoded {
+                hop_limit: evidence.hop_limit,
+                frame: Captured::try_from_frame(evidence.frame)?,
+            }),
+        }
+    }
+
+    pub fn complete_from_traceroute(
+        summary: crate::traceroute::Summary,
+    ) -> (Self, Vec<Diagnostic>, Stats) {
+        (
+            Self::Complete {
+                target: summary.target,
+                resolved_addresses: summary.resolved_addresses,
+                destination: summary.destination,
+                strategy: summary.strategy.to_string(),
+                destination_port: summary.destination_port,
+                completion: summary.completion.into(),
+            },
+            summary.diagnostics,
+            summary.stats.into(),
+        )
+    }
+}
+
+fn try_from_probe(probe: crate::traceroute::ProbeEvidence) -> std::result::Result<Probe, Error> {
+    Ok(Probe {
+        sequence: probe.sequence,
+        hop_limit: probe.hop_limit,
+        attempt: probe.attempt,
+        strategy: probe.strategy.to_string(),
+        destination: probe.destination,
+        destination_port: probe.destination_port,
+        status: probe.status.into(),
+        response_kind: probe.response_kind.map(Into::into),
+        responder: probe.responder,
+        sent_at: probe.sent_at.try_into()?,
+        received_at: probe.received_at.map(Timestamp::try_from).transpose()?,
+        latency: probe.latency,
+        frame: probe.response.map(Captured::try_from_frame).transpose()?,
+        reason: probe.reason,
+    })
 }

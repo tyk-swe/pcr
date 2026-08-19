@@ -5,28 +5,24 @@
   "sequence": 0,
   "status": "success",
   "result": {
-    "event": "endpoint",
+    "event": "probe",
     "target": "192.168.56.10",
-    "endpoint": {
-      "address": "192.168.56.10",
-      "transport": "tcp",
-      "port": 443,
+    "probe_sequence": 70000,
+    "address": "192.168.56.10",
+    "transport": "tcp",
+    "port": 443,
+    "evidence": {
+      "protocol": "tcp",
+      "destination": "192.168.56.10",
+      "destination_port": 443,
+      "attempt": 1,
+      "status": "timeout",
       "classification": "timeout",
-      "evidence": [
-        {
-          "protocol": "tcp",
-          "destination": "192.168.56.10",
-          "destination_port": 443,
-          "attempt": 1,
-          "status": "timeout",
-          "classification": "timeout",
-          "sent_at": {
-            "unix_seconds": 1770000000,
-            "nanoseconds": 0
-          },
-          "reason": "no checksum-valid, protocol-consistent response before the deadline"
-        }
-      ]
+      "sent_at": {
+        "unix_seconds": 1770000000,
+        "nanoseconds": 0
+      },
+      "reason": "no checksum-valid, protocol-consistent response before the deadline"
     }
   },
   "diagnostics": []

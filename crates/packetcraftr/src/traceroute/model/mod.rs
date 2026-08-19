@@ -8,5 +8,6 @@ mod result;
 pub use execution::{Batch, Execution, Executor, Probe};
 pub use request::{Limits, Request, Strategy};
 pub use result::{
-    Completion, Hop, ProbeEvidence, ProbeStatus, ResponseKind, Result, UndecodedEvidence,
+    Completion, Event, Hop, ProbeEvidence, ProbeStatus, ResponseKind, Result, Summary,
+    UndecodedEvidence,
 };

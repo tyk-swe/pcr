@@ -1,0 +1,24 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "dns",
+  "mode": "stream",
+  "sequence": 2,
+  "status": "success",
+  "result": {
+    "event": "record",
+    "attempt": 2,
+    "server": "resolver.lab",
+    "server_port": 53,
+    "query_name": "www.example.test.",
+    "query_type": "a",
+    "section": "answer",
+    "record": {
+      "owner": "www.example.test.",
+      "class": 1,
+      "ttl": 60,
+      "type": "a",
+      "address": "192.0.2.10"
+    }
+  },
+  "diagnostics": []
+}

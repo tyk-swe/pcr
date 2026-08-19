@@ -53,12 +53,12 @@ mod model;
 mod tests;
 mod wire;
 
-pub use engine::run;
+pub use engine::{run, run_with_events};
 pub use error::{Error, WireError};
 pub use model::{
-    AttemptEvidence, Edns, EdnsOption, Exchange, Execution, Executor, Limits, Name, Outcome, Probe,
-    QueryType, Record, RecordValue, RejectedRecord, Request, Result, Section, UndecodedEvidence,
-    ValidatedResponse,
+    AttemptEvidence, Edns, EdnsOption, Event, Exchange, Execution, Executor, Limits, Name, Outcome,
+    Probe, QueryType, Record, RecordValue, RejectedRecord, Request, ResponseSummary, Result,
+    Section, Summary, UndecodedEvidence, ValidatedResponse,
 };
 pub use wire::{
     ResponseClassification, canonical_query_name, classify_response, decode_response,

@@ -101,51 +101,119 @@ fn completion_name(value: output::traceroute::Completion) -> &'static str {
     }
 }
 
-pub(super) fn render_stream(
-    result: output::traceroute::Result,
-    diagnostics: Vec<core::diagnostic::Diagnostic>,
-    stats: output::envelope::Stats,
+pub(super) fn render_event(
+    event: packetcraftr::traceroute::Event,
     stream: &mut NdjsonStream,
 ) -> Result<(), CliError> {
-    let output::traceroute::Result {
-        target,
-        resolved_addresses,
-        destination,
-        strategy,
-        destination_port,
-        hops,
-        undecoded,
-        completion,
-    } = result;
-    for hop in hops {
-        stream.emit_data(
-            output::traceroute::Event::Hop {
-                target: target.clone(),
-                destination,
-                hop,
-            },
-            Vec::new(),
-        )?;
-    }
-    for evidence in undecoded {
-        stream.emit_data(
-            output::traceroute::Event::Undecoded {
-                hop_limit: evidence.hop_limit,
-                frame: evidence.frame,
-            },
-            Vec::new(),
-        )?;
-    }
-    stream.complete_with_stats(
-        output::traceroute::Event::Complete {
-            target,
-            resolved_addresses,
+    let event =
+        output::traceroute::Event::try_from_traceroute(event).map_err(CliError::classified)?;
+    stream.emit_data(event, Vec::new())
+}
+
+pub(super) fn render_complete(
+    summary: packetcraftr::traceroute::Summary,
+    stream: &mut NdjsonStream,
+) -> Result<(), CliError> {
+    let (event, diagnostics, stats) = output::traceroute::Event::complete_from_traceroute(summary);
+    stream.complete_with_stats(event, diagnostics, stats)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::{IpAddr, Ipv4Addr};
+    use std::time::UNIX_EPOCH;
+
+    use packetcraftr::traceroute;
+
+    use super::*;
+    use crate::rendering::ndjson_test_support::{assert_contiguous, stream};
+
+    fn probe_event(sequence: u64, hop_limit: u8) -> traceroute::Event {
+        let destination = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 20));
+        traceroute::Event::Probe {
+            target: destination.to_string(),
             destination,
-            strategy,
-            destination_port,
-            completion,
-        },
-        diagnostics,
-        stats,
-    )
+            probe: traceroute::ProbeEvidence {
+                sequence,
+                hop_limit,
+                attempt: 1,
+                destination,
+                strategy: traceroute::Strategy::Udp,
+                destination_port: Some(33_434),
+                status: traceroute::ProbeStatus::Timeout,
+                response_kind: None,
+                responder: None,
+                sent_at: UNIX_EPOCH,
+                received_at: None,
+                latency: None,
+                response: None,
+                reason: "timeout".to_owned(),
+            },
+        }
+    }
+
+    fn summary() -> traceroute::Summary {
+        let destination = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 20));
+        traceroute::Summary {
+            target: destination.to_string(),
+            resolved_addresses: vec![destination],
+            destination,
+            strategy: traceroute::Strategy::Udp,
+            destination_port: Some(33_434),
+            completion: traceroute::Completion::Timeout,
+            diagnostics: Vec::new(),
+            stats: packetcraftr::Stats::default(),
+        }
+    }
+
+    #[test]
+    fn traceroute_stream_positions_ignore_probe_and_hop_ids() {
+        let (mut sink, output) = stream(output::contract::Command::Traceroute);
+        render_event(probe_event(4_000_000_000, 200), &mut sink).unwrap();
+        render_event(probe_event(3, 2), &mut sink).unwrap();
+        render_complete(summary(), &mut sink).unwrap();
+
+        let records = output.records();
+        assert_contiguous(&records);
+        assert_eq!(records[0]["result"]["probe"]["sequence"], 4_000_000_000_u64);
+        assert_eq!(records[0]["result"]["probe"]["hop_limit"], 200);
+        assert_eq!(records[1]["result"]["probe"]["sequence"], 3);
+        assert_eq!(records[2]["result"]["event"], "complete");
+        assert_eq!(
+            records
+                .iter()
+                .filter(|record| record["result"]["event"] == "complete")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn traceroute_failure_is_terminal_at_the_next_position() {
+        let (mut sink, output) = stream(output::contract::Command::Traceroute);
+        render_event(probe_event(999_999, 1), &mut sink).unwrap();
+        sink.emit_error(CliError::new(5, "later traceroute failure").output_error())
+            .unwrap();
+
+        let records = output.records();
+        assert_contiguous(&records);
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[1]["sequence"], 1);
+        assert_eq!(records[1]["status"], "error");
+        assert!(
+            records
+                .iter()
+                .all(|record| record["result"]["event"] != "complete")
+        );
+    }
+
+    #[test]
+    fn empty_traceroute_success_completes_at_zero() {
+        let (mut sink, output) = stream(output::contract::Command::Traceroute);
+        render_complete(summary(), &mut sink).unwrap();
+        let records = output.records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0]["sequence"], 0);
+        assert_eq!(records[0]["result"]["event"], "complete");
+    }
 }

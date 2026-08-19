@@ -101,151 +101,20 @@ fn render_record(
     ))
 }
 
-pub(super) fn render_stream(
-    result: output::dns::Result,
-    diagnostics: Vec<core::diagnostic::Diagnostic>,
-    stats: output::envelope::Stats,
+pub(super) fn render_event(
+    event: packetcraftr::dns::Event,
     stream: &mut NdjsonStream,
 ) -> Result<(), CliError> {
-    let output::dns::Result {
-        server,
-        server_port,
-        resolved_addresses,
-        query_name,
-        query_type,
-        transaction_id,
-        transport,
-        outcome,
-        response_code,
-        response_code_name,
-        edns,
-        authoritative,
-        truncated,
-        recursion_desired,
-        recursion_available,
-        authenticated_data,
-        checking_disabled,
-        answers,
-        authorities,
-        additionals,
-        rejected_records,
-        rejected_record_count,
-        attempts,
-        undecoded,
-    } = result;
-    let context = StreamContext {
-        server: &server,
-        server_port,
-        query_name: &query_name,
-        query_type: &query_type,
-    };
-    render_attempts(attempts, context, stream)?;
-    render_records(answers, authorities, additionals, context, stream)?;
-    render_rejected(rejected_records, context, stream)?;
-    for evidence in undecoded {
-        stream.emit_data(output::dns::Event::Undecoded { evidence }, Vec::new())?;
-    }
-    stream.complete_with_stats(
-        output::dns::Event::Complete {
-            server,
-            server_port,
-            resolved_addresses,
-            query_name,
-            query_type,
-            transaction_id,
-            transport,
-            outcome,
-            response_code,
-            response_code_name,
-            edns,
-            authoritative,
-            truncated,
-            recursion_desired,
-            recursion_available,
-            authenticated_data,
-            checking_disabled,
-            rejected_record_count,
-        },
-        diagnostics,
-        stats,
-    )
+    let event = output::dns::Event::try_from_dns(event).map_err(CliError::classified)?;
+    stream.emit_data(event, Vec::new())
 }
 
-#[derive(Clone, Copy)]
-struct StreamContext<'a> {
-    server: &'a str,
-    server_port: u16,
-    query_name: &'a str,
-    query_type: &'a str,
-}
-
-fn render_attempts(
-    attempts: Vec<output::dns::Attempt>,
-    context: StreamContext<'_>,
+pub(super) fn render_complete(
+    summary: packetcraftr::dns::Summary,
     stream: &mut NdjsonStream,
 ) -> Result<(), CliError> {
-    for evidence in attempts {
-        stream.emit_data(
-            output::dns::Event::Attempt {
-                server: context.server.to_owned(),
-                server_port: context.server_port,
-                query_name: context.query_name.to_owned(),
-                query_type: context.query_type.to_owned(),
-                evidence,
-            },
-            Vec::new(),
-        )?;
-    }
-    Ok(())
-}
-
-fn render_records(
-    answers: Vec<output::dns::Record>,
-    authorities: Vec<output::dns::Record>,
-    additionals: Vec<output::dns::Record>,
-    context: StreamContext<'_>,
-    stream: &mut NdjsonStream,
-) -> Result<(), CliError> {
-    for (section, records) in [
-        (output::dns::Section::Answer, answers),
-        (output::dns::Section::Authority, authorities),
-        (output::dns::Section::Additional, additionals),
-    ] {
-        for record in records {
-            stream.emit_data(
-                output::dns::Event::Record {
-                    server: context.server.to_owned(),
-                    server_port: context.server_port,
-                    query_name: context.query_name.to_owned(),
-                    query_type: context.query_type.to_owned(),
-                    section,
-                    record,
-                },
-                Vec::new(),
-            )?;
-        }
-    }
-    Ok(())
-}
-
-fn render_rejected(
-    records: Vec<output::dns::RejectedRecord>,
-    context: StreamContext<'_>,
-    stream: &mut NdjsonStream,
-) -> Result<(), CliError> {
-    for record in records {
-        stream.emit_data(
-            output::dns::Event::Rejected {
-                server: context.server.to_owned(),
-                server_port: context.server_port,
-                query_name: context.query_name.to_owned(),
-                query_type: context.query_type.to_owned(),
-                record,
-            },
-            Vec::new(),
-        )?;
-    }
-    Ok(())
+    let (event, diagnostics, stats) = output::dns::Event::complete_from_dns(summary);
+    stream.complete_with_stats(event, diagnostics, stats)
 }
 
 struct ResponseSummary<'a> {
@@ -288,7 +157,53 @@ fn outcome_name(value: output::dns::Outcome) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use std::net::{IpAddr, Ipv4Addr};
+    use std::time::UNIX_EPOCH;
+
+    use packetcraftr::dns;
+
     use super::{ResponseSummary, response_summary};
+    use super::{render_complete, render_event};
+    use crate::errors::CliError;
+    use crate::rendering::ndjson_test_support::{assert_contiguous, stream};
+    use packetcraftr::output;
+
+    fn attempt_event(attempt: u32) -> dns::Event {
+        let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53));
+        dns::Event::Attempt {
+            server: "resolver.test".to_owned(),
+            server_port: 53,
+            query_name: "example.test.".to_owned(),
+            query_type: dns::QueryType::A,
+            evidence: dns::AttemptEvidence {
+                attempt,
+                server_address: address,
+                source_port: 49_152,
+                status: dns::Outcome::Timeout,
+                sent_at: UNIX_EPOCH,
+                received_at: None,
+                latency: None,
+                response: None,
+                response_code: None,
+                reason: "timeout".to_owned(),
+            },
+        }
+    }
+
+    fn summary() -> dns::Summary {
+        dns::Summary {
+            server: "resolver.test".to_owned(),
+            server_port: 53,
+            resolved_addresses: vec![IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53))],
+            query_name: "example.test.".to_owned(),
+            query_type: dns::QueryType::A,
+            transaction_id: u16::MAX,
+            outcome: dns::Outcome::Timeout,
+            response: None,
+            diagnostics: Vec::new(),
+            stats: packetcraftr::Stats::default(),
+        }
+    }
 
     #[test]
     fn response_summary_uses_the_response_code_name_label() {
@@ -305,5 +220,56 @@ mod tests {
 
         assert!(summary.contains("response_code_name=NOERROR"));
         assert!(!summary.contains(" response_name="));
+    }
+
+    #[test]
+    fn dns_stream_positions_ignore_noncontiguous_attempt_ids() {
+        let (mut sink, output) = stream(output::contract::Command::Dns);
+        render_event(attempt_event(31), &mut sink).unwrap();
+        render_event(attempt_event(2), &mut sink).unwrap();
+        render_complete(summary(), &mut sink).unwrap();
+
+        let records = output.records();
+        assert_contiguous(&records);
+        assert_eq!(records[0]["result"]["evidence"]["attempt"], 31);
+        assert_eq!(records[1]["result"]["evidence"]["attempt"], 2);
+        assert_eq!(records[2]["result"]["transaction_id"], u16::MAX);
+        assert_eq!(records[2]["result"]["event"], "complete");
+        assert_eq!(
+            records
+                .iter()
+                .filter(|record| record["result"]["event"] == "complete")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn dns_failure_is_terminal_at_the_next_position() {
+        let (mut sink, output) = stream(output::contract::Command::Dns);
+        render_event(attempt_event(17), &mut sink).unwrap();
+        sink.emit_error(CliError::new(5, "later DNS failure").output_error())
+            .unwrap();
+
+        let records = output.records();
+        assert_contiguous(&records);
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[1]["sequence"], 1);
+        assert_eq!(records[1]["status"], "error");
+        assert!(
+            records
+                .iter()
+                .all(|record| record["result"]["event"] != "complete")
+        );
+    }
+
+    #[test]
+    fn empty_dns_success_completes_at_zero() {
+        let (mut sink, output) = stream(output::contract::Command::Dns);
+        render_complete(summary(), &mut sink).unwrap();
+        let records = output.records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0]["sequence"], 0);
+        assert_eq!(records[0]["result"]["event"], "complete");
     }
 }

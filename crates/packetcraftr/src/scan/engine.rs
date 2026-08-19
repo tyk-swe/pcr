@@ -22,8 +22,8 @@ use super::classification::classify_response;
 use super::error::Error;
 use super::evidence::validate_exchange_evidence;
 use super::model::{
-    Batch, Classification, Endpoint, Execution, Executor, Limits, ProbeEvidence, ProbeStatus,
-    Request, Result, Transport,
+    Batch, Classification, Endpoint, Event, Execution, Executor, Limits, Probe, ProbeEvidence,
+    ProbeStatus, Request, Result, Summary, Transport,
 };
 use super::plan::{build_batches, worst_case_duration};
 use super::{IPV4_PROBE_BYTES, IPV6_PROBE_BYTES, SCAN_EVIDENCE_DIAGNOSTICS};
@@ -43,33 +43,122 @@ where
     E: Executor,
     C: Clock,
 {
+    let mut collector = Collector::default();
+    let summary = run_with_events(request, authorizer, registry, executor, clock, |event| {
+        collector.observe(event);
+        Ok(())
+    })?;
+    Ok(collector.finish(summary))
+}
+
+/// Executes one approved scan and publishes each final probe outcome and
+/// retained undecoded frame before beginning later batches.
+pub fn run_with_events<A, E, C, F>(
+    request: &Request,
+    authorizer: &mut A,
+    registry: &Registry,
+    executor: &mut E,
+    clock: &mut C,
+    mut emit: F,
+) -> std::result::Result<Summary, Error>
+where
+    A: Authorizer,
+    E: Executor,
+    C: Clock,
+    F: FnMut(Event) -> std::result::Result<(), BoundaryError>,
+{
     let mut deadline = Deadline::new(request.limits.max_duration);
     let approved = approve_scan(request, authorizer, &deadline)?;
     let batches = build_batches(request, &approved.addresses, &approved.endpoint_ports)?;
     enforce_deadline(&deadline)?;
-    let mut output = initial_output(request, &approved.addresses, &approved.endpoint_ports);
+    let mut state = ScanState::default();
     let config = ProbeRunConfig {
         probes_per_second: request.probes_per_second,
         duration_limit: request.limits.max_duration,
         final_statistics_sequence: u64::try_from(approved.total_probes.saturating_sub(1))
             .unwrap_or(u64::MAX),
     };
-    let mut lifecycle = Lifecycle {
-        executor,
-        registry,
-        limits: request.limits,
-        output: &mut output,
+    let run = {
+        let mut lifecycle = Lifecycle {
+            executor,
+            registry,
+            limits: request.limits,
+            target: &approved.declared_target,
+            state: &mut state,
+            emit: &mut emit,
+        };
+        run_batches(&batches, config, &mut deadline, clock, &mut lifecycle)
     };
-    let run = run_batches(&batches, config, &mut deadline, clock, &mut lifecycle)?;
+    let run = run?;
 
-    Ok(Result {
+    Ok(Summary {
         target: approved.declared_target,
         resolved_addresses: approved.addresses,
-        endpoints: output.endpoints,
-        undecoded: output.undecoded,
-        diagnostics: output.diagnostics,
+        diagnostics: state.diagnostics,
         stats: run.stats,
     })
+}
+
+#[derive(Default)]
+struct Collector {
+    endpoints: Vec<Endpoint>,
+    endpoint_indices: HashMap<(IpAddr, Option<u16>), usize>,
+    undecoded: Vec<Frame>,
+}
+
+impl Collector {
+    fn observe(&mut self, event: Event) {
+        match event {
+            Event::Probe {
+                target: _,
+                address,
+                transport,
+                port,
+                evidence,
+            } => self.observe_probe(address, transport, port, evidence),
+            Event::Undecoded { frame } => self.undecoded.push(frame),
+        }
+    }
+
+    fn observe_probe(
+        &mut self,
+        address: IpAddr,
+        transport: Transport,
+        port: Option<u16>,
+        evidence: ProbeEvidence,
+    ) {
+        let index = match self.endpoint_indices.get(&(address, port)) {
+            Some(index) => *index,
+            None => {
+                let index = self.endpoints.len();
+                self.endpoints.push(Endpoint {
+                    address,
+                    transport,
+                    port,
+                    classification: Classification::Timeout,
+                    evidence: Vec::new(),
+                });
+                self.endpoint_indices.insert((address, port), index);
+                index
+            }
+        };
+        let endpoint = &mut self.endpoints[index];
+        if evidence.classification.rank() > endpoint.classification.rank() {
+            endpoint.classification = evidence.classification;
+        }
+        endpoint.evidence.push(evidence);
+    }
+
+    fn finish(self, summary: Summary) -> Result {
+        Result {
+            target: summary.target,
+            resolved_addresses: summary.resolved_addresses,
+            endpoints: self.endpoints,
+            undecoded: self.undecoded,
+            diagnostics: summary.diagnostics,
+            stats: summary.stats,
+        }
+    }
 }
 
 struct ApprovedScan {
@@ -195,55 +284,27 @@ fn maximum_wire_bytes(
     })
 }
 
-fn initial_output(
-    request: &Request,
-    addresses: &[IpAddr],
-    endpoint_ports: &[Option<u16>],
-) -> ScanOutput {
-    let endpoints = addresses
-        .iter()
-        .flat_map(|address| {
-            endpoint_ports.iter().map(move |port| Endpoint {
-                address: *address,
-                transport: request.transport,
-                port: *port,
-                classification: Classification::Timeout,
-                evidence: Vec::with_capacity(
-                    usize::try_from(request.attempts).unwrap_or(usize::MAX),
-                ),
-            })
-        })
-        .collect::<Vec<_>>();
-    let endpoint_indices = endpoints
-        .iter()
-        .enumerate()
-        .map(|(index, endpoint)| ((endpoint.address, endpoint.port), index))
-        .collect::<HashMap<_, _>>();
-    ScanOutput {
-        evidence_budget: Budget::default(),
-        endpoints,
-        endpoint_indices,
-        undecoded: Vec::new(),
-        diagnostics: Vec::new(),
-    }
-}
-
-struct ScanOutput {
+#[derive(Default)]
+struct ScanState {
     evidence_budget: Budget,
-    endpoints: Vec<Endpoint>,
-    endpoint_indices: HashMap<(IpAddr, Option<u16>), usize>,
-    undecoded: Vec<Frame>,
+    retained_undecoded: usize,
     diagnostics: Vec<Diagnostic>,
 }
 
-struct Lifecycle<'a, E> {
+struct Lifecycle<'a, E, F> {
     executor: &'a mut E,
     registry: &'a Registry,
     limits: Limits,
-    output: &'a mut ScanOutput,
+    target: &'a str,
+    state: &'a mut ScanState,
+    emit: &'a mut F,
 }
 
-impl<E: Executor> ProbeLifecycle<Batch> for Lifecycle<'_, E> {
+impl<E, F> ProbeLifecycle<Batch> for Lifecycle<'_, E, F>
+where
+    E: Executor,
+    F: FnMut(Event) -> std::result::Result<(), BoundaryError>,
+{
     type Execution = super::model::Execution;
     type Output = ();
     type Error = Error;
@@ -271,7 +332,9 @@ impl<E: Executor> ProbeLifecycle<Batch> for Lifecycle<'_, E> {
             execution,
             self.registry,
             self.limits,
-            self.output,
+            self.target,
+            self.state,
+            self.emit,
             deadline,
         )
     }
@@ -305,14 +368,23 @@ impl<E: Executor> ProbeLifecycle<Batch> for Lifecycle<'_, E> {
     }
 }
 
-fn process_batch(
+#[expect(
+    clippy::too_many_arguments,
+    reason = "batch processing threads trusted execution evidence, command context, limits, state, and the progressive sink"
+)]
+fn process_batch<F>(
     batch: &Batch,
     exchange: Execution,
     registry: &Registry,
     limits: Limits,
-    output: &mut ScanOutput,
+    target: &str,
+    state: &mut ScanState,
+    emit: &mut F,
     deadline: &Deadline,
-) -> std::result::Result<(), Error> {
+) -> std::result::Result<(), Error>
+where
+    F: FnMut(Event) -> std::result::Result<(), BoundaryError>,
+{
     enforce_deadline(deadline)?;
     let Execution {
         permit,
@@ -330,86 +402,111 @@ fn process_batch(
         });
     }
     for diagnostic in batch_diagnostics {
-        packetcraftr_core::diagnostic::push_once(&mut output.diagnostics, diagnostic);
+        packetcraftr_core::diagnostic::push_once(&mut state.diagnostics, diagnostic);
     }
     enforce_deadline(deadline)?;
     let mut response_selector = ResponseSelector::new(&mut responses);
 
     for (request_index, (probe, sent)) in batch.probes.iter().zip(sent.iter()).enumerate() {
-        enforce_deadline(deadline)?;
-        let sent_at = sent.timing().freshness_marker().wall_clock();
-        let best = response_selector.select(
+        let evidence = classify_probe(
+            probe,
+            sent,
             request_index,
             batch.timeout,
-            |response| classify_response(registry, probe.transport, &sent.built().packet, response),
-            |observation| observation.classification.rank(),
-            |observation| observation.responder,
-            || enforce_deadline(deadline),
+            registry,
+            limits,
+            state,
+            &mut response_selector,
+            deadline,
         )?;
-
-        let endpoint_index = output
-            .endpoint_indices
-            .get(&(probe.address, probe.port))
-            .copied()
-            .expect("validated scan probe must have a result endpoint");
-        let endpoint = &mut output.endpoints[endpoint_index];
-        let evidence = if let Some(candidate) = best {
-            let received_at = crate::live_timestamp(&candidate.decoded.frame);
-            let latency = candidate.latency;
-            let response = retain_evidence(
-                &mut output.evidence_budget,
-                &candidate.decoded.frame,
-                SCAN_EVIDENCE_DIAGNOSTICS,
-                limits.max_evidence_frames,
-                limits.max_evidence_bytes,
-                &mut output.diagnostics,
-            )
-            .then(|| candidate.decoded.frame.clone());
-            if candidate.observation.classification.rank() > endpoint.classification.rank() {
-                endpoint.classification = candidate.observation.classification;
-            }
-            ProbeEvidence {
-                attempt: probe.attempt,
-                status: ProbeStatus::Response,
-                classification: candidate.observation.classification,
-                responder: Some(candidate.observation.responder),
-                sent_at,
-                received_at: Some(received_at),
-                latency: Some(latency),
-                response,
-                reason: candidate.observation.reason.to_owned(),
-            }
-        } else {
-            ProbeEvidence {
-                attempt: probe.attempt,
-                status: ProbeStatus::Timeout,
-                classification: Classification::Timeout,
-                responder: None,
-                sent_at,
-                received_at: None,
-                latency: None,
-                response: None,
-                reason: "no checksum-valid, protocol-consistent response before the deadline"
-                    .to_owned(),
-            }
-        };
-        endpoint.evidence.push(evidence);
+        emit(Event::Probe {
+            target: target.to_owned(),
+            address: probe.address,
+            transport: probe.transport,
+            port: probe.port,
+            evidence,
+        })
+        .map_err(|source| Error::Output { source })?;
         enforce_deadline(deadline)?;
     }
 
     retain_undecoded_frames(
         batch_undecoded,
-        &mut output.undecoded,
+        &mut state.retained_undecoded,
         limits.max_undecoded,
-        &mut output.evidence_budget,
+        &mut state.evidence_budget,
         SCAN_EVIDENCE_DIAGNOSTICS,
         limits.max_evidence_frames,
         limits.max_evidence_bytes,
-        &mut output.diagnostics,
-        |frame| frame,
+        &mut state.diagnostics,
+        |frame| Event::Undecoded { frame },
+        |event| emit(event).map_err(|source| Error::Output { source }),
         || enforce_deadline(deadline),
     )?;
     Ok(())
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "probe classification needs the approved probe, trusted send evidence, response set, and operation limits"
+)]
+fn classify_probe(
+    probe: &Probe,
+    sent: &crate::SentPacket,
+    request_index: usize,
+    timeout: Duration,
+    registry: &Registry,
+    limits: Limits,
+    state: &mut ScanState,
+    response_selector: &mut ResponseSelector<'_>,
+    deadline: &Deadline,
+) -> std::result::Result<ProbeEvidence, Error> {
+    enforce_deadline(deadline)?;
+    let sent_at = sent.timing().freshness_marker().wall_clock();
+    let best = response_selector.select(
+        request_index,
+        timeout,
+        |response| classify_response(registry, probe.transport, &sent.built().packet, response),
+        |observation| observation.classification.rank(),
+        |observation| observation.responder,
+        || enforce_deadline(deadline),
+    )?;
+    let Some(candidate) = best else {
+        return Ok(ProbeEvidence {
+            sequence: probe.sequence,
+            attempt: probe.attempt,
+            status: ProbeStatus::Timeout,
+            classification: Classification::Timeout,
+            responder: None,
+            sent_at,
+            received_at: None,
+            latency: None,
+            response: None,
+            reason: "no checksum-valid, protocol-consistent response before the deadline"
+                .to_owned(),
+        });
+    };
+    let response = retain_evidence(
+        &mut state.evidence_budget,
+        &candidate.decoded.frame,
+        SCAN_EVIDENCE_DIAGNOSTICS,
+        limits.max_evidence_frames,
+        limits.max_evidence_bytes,
+        &mut state.diagnostics,
+    )
+    .then(|| candidate.decoded.frame.clone());
+    Ok(ProbeEvidence {
+        sequence: probe.sequence,
+        attempt: probe.attempt,
+        status: ProbeStatus::Response,
+        classification: candidate.observation.classification,
+        responder: Some(candidate.observation.responder),
+        sent_at,
+        received_at: Some(crate::live_timestamp(&candidate.decoded.frame)),
+        latency: Some(candidate.latency),
+        response,
+        reason: candidate.observation.reason.to_owned(),
+    })
 }
 
 fn enforce_deadline(deadline: &Deadline) -> std::result::Result<(), Error> {

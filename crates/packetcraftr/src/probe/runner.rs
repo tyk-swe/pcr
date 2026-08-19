@@ -74,8 +74,7 @@ impl ProbeExecution for Execution {
     }
 }
 
-pub(crate) struct BatchRun<O> {
-    pub(crate) outputs: Vec<O>,
+pub(crate) struct BatchRun {
     pub(crate) stats: Stats,
 }
 
@@ -116,13 +115,12 @@ pub(crate) fn run_batches<B, L, C>(
     deadline: &mut Deadline,
     clock: &mut C,
     lifecycle: &mut L,
-) -> Result<BatchRun<L::Output>, L::Error>
+) -> Result<BatchRun, L::Error>
 where
     B: ProbeBatch,
     L: ProbeLifecycle<B>,
     C: Clock,
 {
-    let mut outputs = Vec::with_capacity(batches.len());
     let mut stats = Stats::default();
     let mut scheduled_delay = Duration::ZERO;
 
@@ -168,7 +166,6 @@ where
             .ok_or_else(|| L::statistics_error(sequence))?;
         let output = lifecycle.process(batch, execution, deadline)?;
         let stop = L::should_stop(&output);
-        outputs.push(output);
         if stop {
             break;
         }
@@ -179,5 +176,5 @@ where
         .elapsed
         .checked_add(scheduled_delay)
         .ok_or_else(|| L::statistics_error(config.final_statistics_sequence))?;
-    Ok(BatchRun { outputs, stats })
+    Ok(BatchRun { stats })
 }

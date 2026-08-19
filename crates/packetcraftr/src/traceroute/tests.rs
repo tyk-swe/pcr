@@ -23,11 +23,11 @@ use packetcraftr_core::{
 
 use super::DEFAULT_TRACEROUTE_UDP_PORT;
 use super::classification::classify_response;
-use super::engine::run;
+use super::engine::{run, run_with_events};
 use super::error::Error;
 use super::model::{
-    Batch, Completion, Execution, Executor, Limits, Probe, ProbeStatus, Request, ResponseKind,
-    Strategy,
+    Batch, Completion, Event, Execution, Executor, Limits, Probe, ProbeStatus, Request,
+    ResponseKind, Strategy,
 };
 use super::probe::probe_packet;
 use crate::clock::Clock;
@@ -244,6 +244,42 @@ impl Executor for MixedHopExecutor {
                 capture: packetcraftr_netio::capture::Statistics::default(),
             },
         })
+    }
+}
+
+struct ProgressiveExecutor {
+    inner: NoResponseExecutor,
+    calls: Arc<AtomicUsize>,
+    shutdowns: Arc<AtomicUsize>,
+    fail_at: Option<usize>,
+}
+
+struct RetainedEvidenceExecutor(NoResponseExecutor);
+
+impl Executor for RetainedEvidenceExecutor {
+    fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
+        let mut execution = self.0.execute(batch)?;
+        execution.undecoded.extend([frame_at(3), frame_at(4)]);
+        execution
+            .diagnostics
+            .push(Diagnostic::info("traceroute.fixture", "fixture diagnostic"));
+        Ok(execution)
+    }
+}
+
+impl Executor for ProgressiveExecutor {
+    fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
+        let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
+        if self.fail_at == Some(call) {
+            return Err(BoundaryError::new(
+                "induced traceroute execution failure",
+                Classification::new("io.test_traceroute", Kind::Io, None),
+                Vec::new(),
+            ));
+        }
+        let execution = self.inner.execute(batch);
+        self.shutdowns.fetch_add(1, Ordering::SeqCst);
+        execution
     }
 }
 
@@ -584,4 +620,121 @@ fn traceroute_invalid_sent_evidence_reports_the_exact_probe_sequence() {
             if message
                 == "sent packet does not preserve the traceroute destination and probe identity"
     ));
+}
+
+#[test]
+fn traceroute_events_precede_later_hops_and_survive_a_later_failure() {
+    let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
+    let mut request = udp_traceroute_request(Target::Address(address));
+    request.probes_per_hop = 1;
+    request.max_hops = 3;
+    let calls = Arc::new(AtomicUsize::new(0));
+    let shutdowns = Arc::new(AtomicUsize::new(0));
+    let mut executor = ProgressiveExecutor {
+        inner: NoResponseExecutor::default(),
+        calls: Arc::clone(&calls),
+        shutdowns: Arc::clone(&shutdowns),
+        fail_at: Some(2),
+    };
+    let mut events = Vec::new();
+
+    let error = run_with_events(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: vec![address],
+        },
+        &packetcraftr_core::protocol::builtin::registry().unwrap(),
+        &mut executor,
+        &mut NoopClock,
+        |event| {
+            assert_eq!(calls.load(Ordering::SeqCst), 1);
+            events.push(event);
+            Ok(())
+        },
+    )
+    .expect_err("the second hop must fail");
+
+    assert!(matches!(error, Error::Execution { sequence: 1, .. }));
+    assert_eq!(events.len(), 1);
+    assert!(matches!(
+        &events[0],
+        Event::Probe { probe, .. } if probe.sequence == 0 && probe.hop_limit == 1
+    ));
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert_eq!(shutdowns.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn traceroute_sink_failure_stops_later_hops_after_session_shutdown() {
+    let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
+    let mut request = udp_traceroute_request(Target::Address(address));
+    request.probes_per_hop = 1;
+    request.max_hops = 3;
+    let calls = Arc::new(AtomicUsize::new(0));
+    let shutdowns = Arc::new(AtomicUsize::new(0));
+    let mut executor = ProgressiveExecutor {
+        inner: NoResponseExecutor::default(),
+        calls: Arc::clone(&calls),
+        shutdowns: Arc::clone(&shutdowns),
+        fail_at: None,
+    };
+
+    let error = run_with_events(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: vec![address],
+        },
+        &packetcraftr_core::protocol::builtin::registry().unwrap(),
+        &mut executor,
+        &mut NoopClock,
+        |_| {
+            Err(BoundaryError::new(
+                "induced output failure",
+                Classification::new("io.test_output", Kind::Io, None),
+                Vec::new(),
+            ))
+        },
+    )
+    .expect_err("the progressive sink must fail");
+
+    assert!(matches!(&error, Error::Output { .. }));
+    assert_eq!(error.classification().code, "io.traceroute_output");
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(shutdowns.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn traceroute_event_collection_preserves_stats_diagnostics_and_evidence_limits() {
+    let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
+    let mut request = udp_traceroute_request(Target::Address(address));
+    request.max_hops = 1;
+    request.probes_per_hop = 1;
+    request.limits.max_undecoded = 1;
+    let result = run(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: vec![address],
+        },
+        &packetcraftr_core::protocol::builtin::registry().unwrap(),
+        &mut RetainedEvidenceExecutor(NoResponseExecutor::default()),
+        &mut NoopClock,
+    )
+    .expect("bounded undecoded evidence must complete");
+
+    assert_eq!(result.hops.len(), 1);
+    assert_eq!(result.hops[0].probes.len(), 1);
+    assert_eq!(result.undecoded.len(), 1);
+    assert_eq!(result.stats.packets_completed, 1);
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "traceroute.fixture")
+    );
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "traceroute.undecoded_limit")
+    );
 }

@@ -21,10 +21,10 @@ use packetcraftr_core::{
 };
 
 use super::classification::classify_response;
-use super::engine::run;
+use super::engine::{run, run_with_events};
 use super::error::Error;
 use super::model::{
-    Batch, Classification, Execution, Executor, Limits, ProbeStatus, Request, Transport,
+    Batch, Classification, Event, Execution, Executor, Limits, ProbeStatus, Request, Transport,
 };
 use super::probe::probe_packet;
 use crate::clock::Clock;
@@ -208,6 +208,45 @@ impl Executor for LateResponseExecutor {
             Vec::new(),
         ));
         Ok(execution)
+    }
+}
+
+struct ProgressiveExecutor {
+    inner: TimeoutExecutor,
+    calls: Arc<AtomicUsize>,
+    shutdowns: Arc<AtomicUsize>,
+    fail_at: Option<usize>,
+}
+
+struct RetainedEvidenceExecutor(TimeoutExecutor);
+
+impl Executor for RetainedEvidenceExecutor {
+    fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
+        let mut execution = self.0.execute(batch)?;
+        execution.undecoded.extend([
+            Frame::new(UNIX_EPOCH, LinkType::RAW, Bytes::from_static(&[0xff])).unwrap(),
+            Frame::new(UNIX_EPOCH, LinkType::RAW, Bytes::from_static(&[0xfe])).unwrap(),
+        ]);
+        execution
+            .diagnostics
+            .push(Diagnostic::info("scan.fixture", "fixture diagnostic"));
+        Ok(execution)
+    }
+}
+
+impl Executor for ProgressiveExecutor {
+    fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
+        let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
+        if self.fail_at == Some(call) {
+            return Err(BoundaryError::new(
+                "induced scan execution failure",
+                ErrorClassification::new("io.test_scan", Kind::Io, None),
+                Vec::new(),
+            ));
+        }
+        let execution = self.inner.execute(batch);
+        self.shutdowns.fetch_add(1, Ordering::SeqCst);
+        execution
     }
 }
 
@@ -443,4 +482,122 @@ fn scan_invalid_sent_evidence_reports_the_exact_probe_sequence() {
         Error::InvalidEvidence { sequence: 1, message }
             if message == "sent packet does not preserve the scan destination and probe identity"
     ));
+}
+
+#[test]
+fn scan_events_precede_later_work_and_survive_a_later_failure() {
+    let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
+    let mut request = tcp_scan_request(Target::Address(address));
+    request.ports = vec![80, 81];
+    request.limits.batch_size = 1;
+    let calls = Arc::new(AtomicUsize::new(0));
+    let shutdowns = Arc::new(AtomicUsize::new(0));
+    let mut executor = ProgressiveExecutor {
+        inner: TimeoutExecutor::default(),
+        calls: Arc::clone(&calls),
+        shutdowns: Arc::clone(&shutdowns),
+        fail_at: Some(2),
+    };
+    let mut events = Vec::new();
+
+    let error = run_with_events(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: vec![address],
+        },
+        &packetcraftr_core::protocol::builtin::registry().unwrap(),
+        &mut executor,
+        &mut NoopClock,
+        |event| {
+            assert_eq!(calls.load(Ordering::SeqCst), 1);
+            events.push(event);
+            Ok(())
+        },
+    )
+    .expect_err("the second batch must fail");
+
+    assert!(matches!(error, Error::Execution { sequence: 1, .. }));
+    assert_eq!(events.len(), 1);
+    assert!(matches!(
+        &events[0],
+        Event::Probe { evidence, port: Some(80), .. } if evidence.sequence == 0
+    ));
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert_eq!(shutdowns.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn scan_sink_failure_stops_batches_after_cleaning_up_the_current_session() {
+    let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
+    let mut request = tcp_scan_request(Target::Address(address));
+    request.ports = vec![80, 81, 82];
+    request.limits.batch_size = 1;
+    let calls = Arc::new(AtomicUsize::new(0));
+    let shutdowns = Arc::new(AtomicUsize::new(0));
+    let mut executor = ProgressiveExecutor {
+        inner: TimeoutExecutor::default(),
+        calls: Arc::clone(&calls),
+        shutdowns: Arc::clone(&shutdowns),
+        fail_at: None,
+    };
+
+    let error = run_with_events(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: vec![address],
+        },
+        &packetcraftr_core::protocol::builtin::registry().unwrap(),
+        &mut executor,
+        &mut NoopClock,
+        |_| {
+            Err(BoundaryError::new(
+                "induced output failure",
+                ErrorClassification::new("io.test_output", Kind::Io, None),
+                Vec::new(),
+            ))
+        },
+    )
+    .expect_err("the progressive sink must fail");
+
+    assert!(matches!(&error, Error::Output { .. }));
+    assert_eq!(
+        packetcraftr_core::error::Classified::classification(&error).code,
+        "io.scan_output"
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(shutdowns.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn scan_event_collection_preserves_stats_diagnostics_and_evidence_limits() {
+    let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
+    let mut request = tcp_scan_request(Target::Address(address));
+    request.limits.max_undecoded = 1;
+    let result = run(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: vec![address],
+        },
+        &packetcraftr_core::protocol::builtin::registry().unwrap(),
+        &mut RetainedEvidenceExecutor(TimeoutExecutor::default()),
+        &mut NoopClock,
+    )
+    .expect("bounded undecoded evidence must complete");
+
+    assert_eq!(result.endpoints.len(), 1);
+    assert_eq!(result.endpoints[0].evidence.len(), 1);
+    assert_eq!(result.undecoded.len(), 1);
+    assert_eq!(result.stats.packets_completed, 1);
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "scan.fixture")
+    );
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "scan.undecoded_limit")
+    );
 }

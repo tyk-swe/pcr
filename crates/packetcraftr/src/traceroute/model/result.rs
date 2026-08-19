@@ -89,3 +89,25 @@ pub struct Result {
     pub diagnostics: Vec<Diagnostic>,
     pub stats: Stats,
 }
+
+#[derive(Clone, Debug)]
+pub enum Event {
+    Probe {
+        target: String,
+        destination: IpAddr,
+        probe: ProbeEvidence,
+    },
+    Undecoded(UndecodedEvidence),
+}
+
+#[derive(Clone, Debug)]
+pub struct Summary {
+    pub target: String,
+    pub resolved_addresses: Vec<IpAddr>,
+    pub destination: IpAddr,
+    pub strategy: Strategy,
+    pub destination_port: Option<u16>,
+    pub completion: Completion,
+    pub diagnostics: Vec<Diagnostic>,
+    pub stats: Stats,
+}

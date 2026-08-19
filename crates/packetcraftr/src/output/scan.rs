@@ -88,7 +88,7 @@ pub struct Endpoint {
     pub evidence: Vec<Evidence>,
 }
 
-/// Aggregate or streamed result of `scan`.
+/// Aggregate result of `scan`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Result {
     pub target: String,
@@ -116,31 +116,12 @@ impl Result {
                     .evidence
                     .into_iter()
                     .map(|evidence| {
-                        let protocol = match (endpoint.transport, endpoint.address) {
-                            (crate::scan::Transport::Icmp, IpAddr::V4(_)) => "icmpv4",
-                            (crate::scan::Transport::Icmp, IpAddr::V6(_)) => "icmpv6",
-                            _ => endpoint.transport.as_str(),
-                        };
-                        Ok(Evidence {
-                            protocol: protocol.to_owned(),
-                            destination: endpoint.address,
-                            destination_port: endpoint.port,
-                            attempt: evidence.attempt,
-                            status: evidence.status.into(),
-                            classification: evidence.classification.into(),
-                            responder: evidence.responder,
-                            sent_at: evidence.sent_at.try_into()?,
-                            received_at: evidence
-                                .received_at
-                                .map(Timestamp::try_from)
-                                .transpose()?,
-                            latency: evidence.latency,
-                            frame: evidence
-                                .response
-                                .map(Captured::try_from_frame)
-                                .transpose()?,
-                            reason: evidence.reason,
-                        })
+                        try_from_evidence(
+                            endpoint.address,
+                            endpoint.transport,
+                            endpoint.port,
+                            evidence,
+                        )
                     })
                     .collect::<std::result::Result<Vec<_>, Error>>()?;
                 Ok(Endpoint {
@@ -169,9 +150,14 @@ impl Result {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum Event {
-    Endpoint {
+    Probe {
         target: String,
-        endpoint: Endpoint,
+        probe_sequence: u64,
+        address: IpAddr,
+        transport: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        port: Option<u16>,
+        evidence: Box<Evidence>,
     },
     Undecoded {
         frame: Captured,
@@ -180,4 +166,72 @@ pub enum Event {
         target: String,
         resolved_addresses: Vec<IpAddr>,
     },
+}
+
+impl Event {
+    pub fn try_from_scan(event: crate::scan::Event) -> std::result::Result<Self, Error> {
+        match event {
+            crate::scan::Event::Probe {
+                target,
+                address,
+                transport,
+                port,
+                evidence,
+            } => {
+                let probe_sequence = evidence.sequence;
+                Ok(Self::Probe {
+                    target,
+                    probe_sequence,
+                    address,
+                    transport: transport.to_string(),
+                    port,
+                    evidence: Box::new(try_from_evidence(address, transport, port, evidence)?),
+                })
+            }
+            crate::scan::Event::Undecoded { frame } => Ok(Self::Undecoded {
+                frame: Captured::try_from_frame(frame)?,
+            }),
+        }
+    }
+
+    pub fn complete_from_scan(summary: crate::scan::Summary) -> (Self, Vec<Diagnostic>, Stats) {
+        (
+            Self::Complete {
+                target: summary.target,
+                resolved_addresses: summary.resolved_addresses,
+            },
+            summary.diagnostics,
+            summary.stats.into(),
+        )
+    }
+}
+
+fn try_from_evidence(
+    address: IpAddr,
+    transport: crate::scan::Transport,
+    port: Option<u16>,
+    evidence: crate::scan::ProbeEvidence,
+) -> std::result::Result<Evidence, Error> {
+    let protocol = match (transport, address) {
+        (crate::scan::Transport::Icmp, IpAddr::V4(_)) => "icmpv4",
+        (crate::scan::Transport::Icmp, IpAddr::V6(_)) => "icmpv6",
+        _ => transport.as_str(),
+    };
+    Ok(Evidence {
+        protocol: protocol.to_owned(),
+        destination: address,
+        destination_port: port,
+        attempt: evidence.attempt,
+        status: evidence.status.into(),
+        classification: evidence.classification.into(),
+        responder: evidence.responder,
+        sent_at: evidence.sent_at.try_into()?,
+        received_at: evidence.received_at.map(Timestamp::try_from).transpose()?,
+        latency: evidence.latency,
+        frame: evidence
+            .response
+            .map(Captured::try_from_frame)
+            .transpose()?,
+        reason: evidence.reason,
+    })
 }

@@ -7,4 +7,4 @@ mod result;
 
 pub use execution::{Batch, Execution, Executor, Probe};
 pub use request::{Limits, Request, Transport};
-pub use result::{Classification, Endpoint, ProbeEvidence, ProbeStatus, Result};
+pub use result::{Classification, Endpoint, Event, ProbeEvidence, ProbeStatus, Result, Summary};

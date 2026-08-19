@@ -44,6 +44,11 @@ pub enum Error {
     InvalidEvidence { sequence: u64, message: String },
     #[error("scan statistic accounting overflowed at probe {sequence}")]
     StatisticsOverflow { sequence: u64 },
+    #[error("scan progressive output failed: {source}")]
+    Output {
+        #[source]
+        source: BoundaryError,
+    },
 }
 
 impl Classified for Error {
@@ -78,6 +83,11 @@ impl Classified for Error {
                 Kind::Io,
                 Some("inspect the scan timer and account for probes already transmitted"),
             ),
+            Self::Output { .. } => ErrorClassification::new(
+                "io.scan_output",
+                Kind::Io,
+                Some("inspect the output sink and account for scan probes already transmitted"),
+            ),
             Self::InvalidEvidence { .. } | Self::StatisticsOverflow { .. } => {
                 ErrorClassification::new(
                     "internal.scan_evidence",
@@ -91,7 +101,7 @@ impl Classified for Error {
     fn causes(&self) -> Vec<String> {
         match self {
             Self::Authorization(error) => error.causes(),
-            Self::Execution { source, .. } => source.causes(),
+            Self::Execution { source, .. } | Self::Output { source } => source.causes(),
             _ => Vec::new(),
         }
     }

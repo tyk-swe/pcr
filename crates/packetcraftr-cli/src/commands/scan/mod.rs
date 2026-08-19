@@ -95,22 +95,51 @@ pub(super) fn run(
     let resolver = packetcraftr::target::SystemResolver;
     let mut authorizer = packetcraftr::target::PolicyAuthorizer::new(&policy, &resolver);
     let mut clock = packetcraftr::clock::SystemClock;
-    let result = packetcraftr::scan::run(
+    execute_and_render(
         &request,
         &mut authorizer,
         &registry,
         &mut executor,
         &mut clock,
+        format,
+        stream,
     )
-    .map_err(classified_error)?;
-    let (result, diagnostics, stats) =
-        output::scan::Result::try_from_scan(result).map_err(CliError::classified)?;
+}
 
+fn execute_and_render(
+    request: &packetcraftr::scan::Request,
+    authorizer: &mut impl packetcraftr::target::Authorizer,
+    registry: &core::registry::Registry,
+    executor: &mut impl packetcraftr::scan::Executor,
+    clock: &mut impl packetcraftr::clock::Clock,
+    format: output::contract::Format,
+    stream: &mut NdjsonStream,
+) -> Result<(), CliError> {
     match format {
-        output::contract::Format::Text => rendering::render_text(result, diagnostics, stats),
-        output::contract::Format::Json => rendering::render_aggregate(result, diagnostics, stats),
+        output::contract::Format::Text | output::contract::Format::Json => {
+            let result = packetcraftr::scan::run(request, authorizer, registry, executor, clock)
+                .map_err(classified_error)?;
+            let (result, diagnostics, stats) =
+                output::scan::Result::try_from_scan(result).map_err(CliError::classified)?;
+            if format == output::contract::Format::Text {
+                rendering::render_text(result, diagnostics, stats)
+            } else {
+                rendering::render_aggregate(result, diagnostics, stats)
+            }
+        }
         output::contract::Format::Ndjson => {
-            rendering::render_stream(result, diagnostics, stats, stream)
+            let summary = packetcraftr::scan::run_with_events(
+                request,
+                authorizer,
+                registry,
+                executor,
+                clock,
+                |event| {
+                    rendering::render_event(event, stream).map_err(CliError::into_boundary_error)
+                },
+            )
+            .map_err(classified_error)?;
+            rendering::render_complete(summary, stream)
         }
         _ => unreachable!("scan format is checked before command dispatch"),
     }

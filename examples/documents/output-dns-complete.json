@@ -2,7 +2,7 @@
   "schema": "packetcraftr.output/v1",
   "command": "dns",
   "mode": "stream",
-  "sequence": 2,
+  "sequence": 4,
   "status": "success",
   "result": {
     "event": "complete",
@@ -25,7 +25,7 @@
     "recursion_available": true,
     "authenticated_data": false,
     "checking_disabled": false,
-    "rejected_record_count": 0
+    "rejected_record_count": 1
   },
   "diagnostics": [],
   "stats": {

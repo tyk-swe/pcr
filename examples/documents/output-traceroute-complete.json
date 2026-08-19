@@ -2,7 +2,7 @@
   "schema": "packetcraftr.output/v1",
   "command": "traceroute",
   "mode": "stream",
-  "sequence": 2,
+  "sequence": 3,
   "status": "success",
   "result": {
     "event": "complete",

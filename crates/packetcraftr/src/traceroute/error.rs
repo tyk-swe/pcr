@@ -41,6 +41,11 @@ pub enum Error {
     InvalidEvidence { sequence: u64, message: String },
     #[error("traceroute statistic accounting overflowed at probe {sequence}")]
     StatisticsOverflow { sequence: u64 },
+    #[error("traceroute progressive output failed: {source}")]
+    Output {
+        #[source]
+        source: BoundaryError,
+    },
 }
 
 impl Classified for Error {
@@ -77,6 +82,13 @@ impl Classified for Error {
                 Kind::Io,
                 Some("inspect the traceroute timer and account for probes already transmitted"),
             ),
+            Self::Output { .. } => Classification::new(
+                "io.traceroute_output",
+                Kind::Io,
+                Some(
+                    "inspect the output sink and account for traceroute probes already transmitted",
+                ),
+            ),
             Self::InvalidEvidence { .. } | Self::StatisticsOverflow { .. } => Classification::new(
                 "internal.traceroute_evidence",
                 Kind::Internal,
@@ -88,7 +100,7 @@ impl Classified for Error {
     fn causes(&self) -> Vec<String> {
         match self {
             Self::Authorization(error) => error.causes(),
-            Self::Execution { source, .. } => source.causes(),
+            Self::Execution { source, .. } | Self::Output { source } => source.causes(),
             _ => Vec::new(),
         }
     }

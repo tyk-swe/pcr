@@ -320,3 +320,60 @@ pub struct Result {
     pub diagnostics: Vec<Diagnostic>,
     pub stats: Stats,
 }
+
+#[derive(Clone, Debug)]
+pub struct ResponseSummary {
+    pub transaction_id: u16,
+    pub response_code: u16,
+    pub edns: Option<Edns>,
+    pub authoritative: bool,
+    pub truncated: bool,
+    pub recursion_desired: bool,
+    pub recursion_available: bool,
+    pub authenticated_data: bool,
+    pub checking_disabled: bool,
+    pub rejected_record_count: usize,
+}
+
+#[derive(Clone, Debug)]
+pub enum Event {
+    Attempt {
+        server: String,
+        server_port: u16,
+        query_name: String,
+        query_type: QueryType,
+        evidence: AttemptEvidence,
+    },
+    Record {
+        attempt: u32,
+        server: String,
+        server_port: u16,
+        query_name: String,
+        query_type: QueryType,
+        section: Section,
+        record: Record,
+    },
+    Rejected {
+        attempt: u32,
+        server: String,
+        server_port: u16,
+        query_name: String,
+        query_type: QueryType,
+        record: RejectedRecord,
+    },
+    Undecoded(UndecodedEvidence),
+}
+
+#[derive(Clone, Debug)]
+pub struct Summary {
+    pub server: String,
+    pub server_port: u16,
+    pub resolved_addresses: Vec<IpAddr>,
+    pub query_name: String,
+    pub query_type: QueryType,
+    pub transaction_id: u16,
+    pub outcome: Outcome,
+    pub response: Option<ResponseSummary>,
+    pub diagnostics: Vec<Diagnostic>,
+    pub stats: Stats,
+}

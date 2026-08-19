@@ -42,21 +42,37 @@ pub(super) fn run(
     let resolver = packetcraftr::target::SystemResolver;
     let mut authorizer = packetcraftr::target::PolicyAuthorizer::new(&policy, &resolver);
     let mut clock = packetcraftr::clock::SystemClock;
-    let result = packetcraftr::dns::run(
-        &request,
-        &mut authorizer,
-        &registry,
-        &mut executor,
-        &mut clock,
-    )
-    .map_err(classified_error)?;
-    let (result, diagnostics, stats) =
-        output::dns::Result::try_from_dns(result).map_err(CliError::classified)?;
     match format {
-        output::contract::Format::Text => rendering::render_text(result, diagnostics, stats),
-        output::contract::Format::Json => rendering::render_aggregate(result, diagnostics, stats),
+        output::contract::Format::Text | output::contract::Format::Json => {
+            let result = packetcraftr::dns::run(
+                &request,
+                &mut authorizer,
+                &registry,
+                &mut executor,
+                &mut clock,
+            )
+            .map_err(classified_error)?;
+            let (result, diagnostics, stats) =
+                output::dns::Result::try_from_dns(result).map_err(CliError::classified)?;
+            if format == output::contract::Format::Text {
+                rendering::render_text(result, diagnostics, stats)
+            } else {
+                rendering::render_aggregate(result, diagnostics, stats)
+            }
+        }
         output::contract::Format::Ndjson => {
-            rendering::render_stream(result, diagnostics, stats, stream)
+            let summary = packetcraftr::dns::run_with_events(
+                &request,
+                &mut authorizer,
+                &registry,
+                &mut executor,
+                &mut clock,
+                |event| {
+                    rendering::render_event(event, stream).map_err(CliError::into_boundary_error)
+                },
+            )
+            .map_err(classified_error)?;
+            rendering::render_complete(summary, stream)
         }
         _ => unreachable!("dns format is checked before command dispatch"),
     }

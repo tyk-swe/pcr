@@ -10,6 +10,7 @@ use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::registry::Registry;
 
+use crate::BoundaryError;
 use crate::Stats;
 use crate::clock::Clock;
 use crate::evidence::Budget;
@@ -22,8 +23,8 @@ use crate::target::{Authorizer, approve_operation, resolve_selected};
 use super::error::Error;
 use super::evidence::validate_dns_execution;
 use super::model::{
-    AttemptEvidence, Exchange, Execution, Executor, Limits, Outcome, Probe, Request, Result,
-    UndecodedEvidence,
+    AttemptEvidence, Event, Exchange, Execution, Executor, Limits, Outcome, Probe, Record, Request,
+    ResponseSummary, Result, Section, Summary, UndecodedEvidence, ValidatedResponse,
 };
 use super::wire::{ResponseClassification, classify_response, encode_query};
 use super::{DNS_EPHEMERAL_SOURCE_PORT_BASE, DNS_EVIDENCE_DIAGNOSTICS, MAX_DNS_PROBE_OVERHEAD};
@@ -42,11 +43,35 @@ where
     E: Executor,
     C: Clock,
 {
+    let mut collector = Collector::default();
+    let summary = run_with_events(request, authorizer, registry, executor, clock, |event| {
+        collector.observe(event);
+        Ok(())
+    })?;
+    Ok(collector.finish(summary))
+}
+
+/// Executes one approved DNS retry sequence and publishes attempts, accepted
+/// and rejected records, and retained undecoded evidence as they become final.
+pub fn run_with_events<A, E, C, F>(
+    request: &Request,
+    authorizer: &mut A,
+    registry: &Registry,
+    executor: &mut E,
+    clock: &mut C,
+    mut emit: F,
+) -> std::result::Result<Summary, Error>
+where
+    A: Authorizer,
+    E: Executor,
+    C: Clock,
+    F: FnMut(Event) -> std::result::Result<(), BoundaryError>,
+{
     let PreparedOperation {
         deadline,
         query,
         delay,
-        result,
+        summary,
     } = prepare_operation(request, authorizer)?;
     Operation {
         request,
@@ -57,12 +82,75 @@ where
         deadline,
         query,
         delay,
-        result,
+        summary,
         evidence_budget: Budget::default(),
         fallback_rank: 0,
         scheduled_delay: Duration::ZERO,
+        attempts_completed: 0,
+        retained_undecoded: 0,
+        emit: &mut emit,
     }
     .execute()
+}
+
+#[derive(Default)]
+struct Collector {
+    attempts: Vec<AttemptEvidence>,
+    answers: Vec<Record>,
+    authorities: Vec<Record>,
+    additionals: Vec<Record>,
+    rejected: Vec<super::model::RejectedRecord>,
+    undecoded: Vec<UndecodedEvidence>,
+}
+
+impl Collector {
+    fn observe(&mut self, event: Event) {
+        match event {
+            Event::Attempt { evidence, .. } => self.attempts.push(evidence),
+            Event::Record {
+                section, record, ..
+            } => match section {
+                Section::Answer => self.answers.push(record),
+                Section::Authority => self.authorities.push(record),
+                Section::Additional => self.additionals.push(record),
+            },
+            Event::Rejected { record, .. } => self.rejected.push(record),
+            Event::Undecoded(evidence) => self.undecoded.push(evidence),
+        }
+    }
+
+    fn finish(self, summary: Summary) -> Result {
+        let response = summary.response.map(|response| ValidatedResponse {
+            transaction_id: response.transaction_id,
+            response_code: response.response_code,
+            edns: response.edns,
+            authoritative: response.authoritative,
+            truncated: response.truncated,
+            recursion_desired: response.recursion_desired,
+            recursion_available: response.recursion_available,
+            authenticated_data: response.authenticated_data,
+            checking_disabled: response.checking_disabled,
+            answers: self.answers,
+            authorities: self.authorities,
+            additionals: self.additionals,
+            rejected_records: self.rejected,
+            rejected_record_count: response.rejected_record_count,
+        });
+        Result {
+            server: summary.server,
+            server_port: summary.server_port,
+            resolved_addresses: summary.resolved_addresses,
+            query_name: summary.query_name,
+            query_type: summary.query_type,
+            transaction_id: summary.transaction_id,
+            outcome: summary.outcome,
+            response,
+            attempts: self.attempts,
+            undecoded: self.undecoded,
+            diagnostics: summary.diagnostics,
+            stats: summary.stats,
+        }
+    }
 }
 
 struct OperationBudget {
@@ -75,7 +163,7 @@ struct PreparedOperation {
     deadline: Deadline,
     query: Bytes,
     delay: Duration,
-    result: Result,
+    summary: Summary,
 }
 
 fn prepare_operation<A: Authorizer>(
@@ -107,7 +195,7 @@ fn prepare_operation<A: Authorizer>(
         deadline,
         query,
         delay: budget.delay,
-        result: Result {
+        summary: Summary {
             server: request.server.to_string(),
             server_port: request.server_port,
             resolved_addresses: Vec::new(),
@@ -116,8 +204,6 @@ fn prepare_operation<A: Authorizer>(
             transaction_id: request.transaction_id,
             outcome: Outcome::Timeout,
             response: None,
-            attempts: Vec::with_capacity(usize::try_from(request.attempts).unwrap_or(usize::MAX)),
-            undecoded: Vec::new(),
             diagnostics: Vec::new(),
             stats: Stats::default(),
         },
@@ -166,7 +252,7 @@ fn operation_budget(
     })
 }
 
-struct Operation<'a, A, E, C> {
+struct Operation<'a, A, E, C, F> {
     request: &'a Request,
     authorizer: &'a mut A,
     registry: &'a Registry,
@@ -175,29 +261,43 @@ struct Operation<'a, A, E, C> {
     deadline: Deadline,
     query: Bytes,
     delay: Duration,
-    result: Result,
+    summary: Summary,
     evidence_budget: Budget,
     fallback_rank: u8,
     scheduled_delay: Duration,
+    attempts_completed: u32,
+    retained_undecoded: usize,
+    emit: &'a mut F,
 }
 
-impl<A: Authorizer, E: Executor, C: Clock> Operation<'_, A, E, C> {
-    fn execute(mut self) -> std::result::Result<Result, Error> {
+struct ClassifiedAttempt {
+    evidence: AttemptEvidence,
+    response: Option<ValidatedResponse>,
+}
+
+impl<A, E, C, F> Operation<'_, A, E, C, F>
+where
+    A: Authorizer,
+    E: Executor,
+    C: Clock,
+    F: FnMut(Event) -> std::result::Result<(), BoundaryError>,
+{
+    fn execute(mut self) -> std::result::Result<Summary, Error> {
         for attempt in 1..=self.request.attempts {
             if self.execute_attempt(attempt)? {
                 break;
             }
         }
         self.deadline.check()?;
-        self.result.stats.elapsed = self
-            .result
+        self.summary.stats.elapsed = self
+            .summary
             .stats
             .elapsed
             .checked_add(self.scheduled_delay)
             .ok_or(Error::StatisticsOverflow {
-                attempt: u32::try_from(self.result.attempts.len()).unwrap_or(u32::MAX),
+                attempt: self.attempts_completed,
             })?;
-        Ok(self.result)
+        Ok(self.summary)
     }
 
     fn execute_attempt(&mut self, attempt: u32) -> std::result::Result<bool, Error> {
@@ -213,12 +313,22 @@ impl<A: Authorizer, E: Executor, C: Clock> Operation<'_, A, E, C> {
             self.request.limits,
             self.request.timeout,
         )?;
-        let evidence = match best {
+        let classified = match best {
             Some(candidate) => self.candidate_evidence(&probe, sent_at, candidate),
-            None => timeout_evidence(&probe, sent_at),
+            None => ClassifiedAttempt {
+                evidence: timeout_evidence(&probe, sent_at),
+                response: None,
+            },
         };
-        let terminal = matches!(evidence.status, Outcome::Response | Outcome::Truncated);
-        self.result.attempts.push(evidence);
+        let terminal = matches!(
+            classified.evidence.status,
+            Outcome::Response | Outcome::Truncated
+        );
+        self.attempts_completed = attempt;
+        self.emit_attempt(classified.evidence)?;
+        if let Some(response) = classified.response {
+            self.emit_response(attempt, response)?;
+        }
         self.retain_undecoded(attempt, execution.undecoded)?;
         Ok(terminal)
     }
@@ -253,7 +363,7 @@ impl<A: Authorizer, E: Executor, C: Clock> Operation<'_, A, E, C> {
             &self.deadline,
             duration_error,
         )?;
-        self.result.server = resolved.declared;
+        self.summary.server = resolved.declared;
         let addresses = resolved.addresses;
         if addresses.is_empty() {
             return Err(Error::Family {
@@ -261,8 +371,8 @@ impl<A: Authorizer, E: Executor, C: Clock> Operation<'_, A, E, C> {
             });
         }
         for address in &addresses {
-            if !self.result.resolved_addresses.contains(address) {
-                self.result.resolved_addresses.push(*address);
+            if !self.summary.resolved_addresses.contains(address) {
+                self.summary.resolved_addresses.push(*address);
             }
         }
         let address_index = (usize::try_from(attempt).unwrap_or(1) - 1) % addresses.len();
@@ -274,7 +384,7 @@ impl<A: Authorizer, E: Executor, C: Clock> Operation<'_, A, E, C> {
             server_port: self.request.server_port,
             source_port,
             transaction_id: self.request.transaction_id,
-            query_name: self.result.query_name.clone(),
+            query_name: self.summary.query_name.clone(),
             query_type: self.request.query_type,
             query: self.query.clone(),
         })
@@ -303,14 +413,14 @@ impl<A: Authorizer, E: Executor, C: Clock> Operation<'_, A, E, C> {
         self.deadline.account(execution.stats.elapsed)?;
         validate_dns_execution(probe, &execution, self.request.limits, self.request.timeout)?;
         self.deadline.check()?;
-        self.result
+        self.summary
             .stats
             .checked_add_assign(&execution.stats)
             .ok_or(Error::StatisticsOverflow {
                 attempt: probe.attempt,
             })?;
         for diagnostic in execution.diagnostics.drain(..) {
-            packetcraftr_core::diagnostic::push_once(&mut self.result.diagnostics, diagnostic);
+            packetcraftr_core::diagnostic::push_once(&mut self.summary.diagnostics, diagnostic);
         }
         Ok(execution)
     }
@@ -320,7 +430,7 @@ impl<A: Authorizer, E: Executor, C: Clock> Operation<'_, A, E, C> {
         probe: &Probe,
         sent_at: SystemTime,
         candidate: ResponseCandidate<'_, ResponseClassification>,
-    ) -> AttemptEvidence {
+    ) -> ClassifiedAttempt {
         let received_at = crate::live_timestamp(&candidate.decoded.frame);
         let latency = Some(candidate.latency);
         let response_frame = retain_evidence(
@@ -329,28 +439,32 @@ impl<A: Authorizer, E: Executor, C: Clock> Operation<'_, A, E, C> {
             DNS_EVIDENCE_DIAGNOSTICS,
             self.request.limits.max_evidence_frames,
             self.request.limits.max_evidence_bytes,
-            &mut self.result.diagnostics,
+            &mut self.summary.diagnostics,
         )
         .then(|| candidate.decoded.frame.clone());
-        let (status, response_code, reason) = self.accept_classification(candidate.observation);
-        AttemptEvidence {
-            attempt: probe.attempt,
-            server_address: probe.server_address,
-            source_port: probe.source_port,
-            status,
-            sent_at,
-            received_at: Some(received_at),
-            latency,
-            response: response_frame,
-            response_code,
-            reason,
+        let (status, response_code, reason, response) =
+            self.accept_classification(candidate.observation);
+        ClassifiedAttempt {
+            evidence: AttemptEvidence {
+                attempt: probe.attempt,
+                server_address: probe.server_address,
+                source_port: probe.source_port,
+                status,
+                sent_at,
+                received_at: Some(received_at),
+                latency,
+                response: response_frame,
+                response_code,
+                reason,
+            },
+            response,
         }
     }
 
     fn accept_classification(
         &mut self,
         classification: ResponseClassification,
-    ) -> (Outcome, Option<u16>, String) {
+    ) -> (Outcome, Option<u16>, String, Option<ValidatedResponse>) {
         match classification {
             ResponseClassification::Response(response) => {
                 let truncated = response.truncated;
@@ -369,26 +483,113 @@ impl<A: Authorizer, E: Executor, C: Clock> Operation<'_, A, E, C> {
                 } else {
                     Outcome::Response
                 };
-                self.result.outcome = status;
-                self.result.response = Some(response);
-                (status, response_code, reason)
+                self.summary.outcome = status;
+                (status, response_code, reason, Some(response))
             }
             ResponseClassification::NetworkFailure { reason } => {
                 let status = Outcome::NetworkFailure;
-                update_dns_fallback(&mut self.result.outcome, &mut self.fallback_rank, status);
-                (status, None, reason)
+                update_dns_fallback(&mut self.summary.outcome, &mut self.fallback_rank, status);
+                (status, None, reason, None)
             }
             ResponseClassification::DecodeFailure { reason } => {
                 let status = Outcome::DecodeFailure;
-                update_dns_fallback(&mut self.result.outcome, &mut self.fallback_rank, status);
-                (status, None, reason)
+                update_dns_fallback(&mut self.summary.outcome, &mut self.fallback_rank, status);
+                (status, None, reason, None)
             }
             ResponseClassification::Unrelated { reason } => {
                 let status = Outcome::Unrelated;
-                update_dns_fallback(&mut self.result.outcome, &mut self.fallback_rank, status);
-                (status, None, reason)
+                update_dns_fallback(&mut self.summary.outcome, &mut self.fallback_rank, status);
+                (status, None, reason, None)
             }
         }
+    }
+
+    fn emit_attempt(&mut self, evidence: AttemptEvidence) -> std::result::Result<(), Error> {
+        self.publish(Event::Attempt {
+            server: self.summary.server.clone(),
+            server_port: self.summary.server_port,
+            query_name: self.summary.query_name.clone(),
+            query_type: self.summary.query_type,
+            evidence,
+        })
+    }
+
+    fn emit_response(
+        &mut self,
+        attempt: u32,
+        response: ValidatedResponse,
+    ) -> std::result::Result<(), Error> {
+        let ValidatedResponse {
+            transaction_id,
+            response_code,
+            edns,
+            authoritative,
+            truncated,
+            recursion_desired,
+            recursion_available,
+            authenticated_data,
+            checking_disabled,
+            answers,
+            authorities,
+            additionals,
+            rejected_records,
+            rejected_record_count,
+        } = response;
+        for (section, records) in [
+            (Section::Answer, answers),
+            (Section::Authority, authorities),
+            (Section::Additional, additionals),
+        ] {
+            for record in records {
+                self.emit_record(attempt, section, record)?;
+            }
+        }
+        for record in rejected_records {
+            self.publish(Event::Rejected {
+                attempt,
+                server: self.summary.server.clone(),
+                server_port: self.summary.server_port,
+                query_name: self.summary.query_name.clone(),
+                query_type: self.summary.query_type,
+                record,
+            })?;
+        }
+        self.summary.response = Some(ResponseSummary {
+            transaction_id,
+            response_code,
+            edns,
+            authoritative,
+            truncated,
+            recursion_desired,
+            recursion_available,
+            authenticated_data,
+            checking_disabled,
+            rejected_record_count,
+        });
+        Ok(())
+    }
+
+    fn emit_record(
+        &mut self,
+        attempt: u32,
+        section: Section,
+        record: Record,
+    ) -> std::result::Result<(), Error> {
+        self.publish(Event::Record {
+            attempt,
+            server: self.summary.server.clone(),
+            server_port: self.summary.server_port,
+            query_name: self.summary.query_name.clone(),
+            query_type: self.summary.query_type,
+            section,
+            record,
+        })
+    }
+
+    fn publish(&mut self, event: Event) -> std::result::Result<(), Error> {
+        (self.emit)(event).map_err(|source| Error::Output { source })?;
+        self.deadline.check()?;
+        Ok(())
     }
 
     fn retain_undecoded(
@@ -400,9 +601,9 @@ impl<A: Authorizer, E: Executor, C: Clock> Operation<'_, A, E, C> {
         // frames under the one operation-wide retention budget.
         for frame in frames {
             self.deadline.check()?;
-            if self.result.undecoded.len() >= self.request.limits.max_undecoded {
+            if self.retained_undecoded >= self.request.limits.max_undecoded {
                 push_undecoded_limit_diagnostic(
-                    &mut self.result.diagnostics,
+                    &mut self.summary.diagnostics,
                     DNS_EVIDENCE_DIAGNOSTICS,
                     self.request.limits.max_undecoded,
                 );
@@ -414,11 +615,10 @@ impl<A: Authorizer, E: Executor, C: Clock> Operation<'_, A, E, C> {
                 DNS_EVIDENCE_DIAGNOSTICS,
                 self.request.limits.max_evidence_frames,
                 self.request.limits.max_evidence_bytes,
-                &mut self.result.diagnostics,
+                &mut self.summary.diagnostics,
             ) {
-                self.result
-                    .undecoded
-                    .push(UndecodedEvidence { attempt, frame });
+                self.retained_undecoded += 1;
+                self.publish(Event::Undecoded(UndecodedEvidence { attempt, frame }))?;
             }
             self.deadline.check()?;
         }

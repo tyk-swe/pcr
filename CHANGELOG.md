@@ -24,6 +24,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   longer select terminal error positions. Generic domain-error `sequence()`
   accessors were removed, and public stream-envelope constructors now accept an
   explicit `StreamPosition` instead of an arbitrary integer.
+- **Breaking:** Scan, traceroute, and DNS NDJSON now publish semantic events
+  during execution instead of serializing an accumulated result afterward.
+  Scan and traceroute stream records are per-probe, DNS record and rejection
+  events carry their attempt, retained undecoded evidence is emitted when
+  accepted, and each stream ends with exactly one terminal complete or error
+  record. The library exposes command-specific `run_with_events` entry points;
+  aggregate `run` results are collectors over the same event path.
 - **Breaking:** Scan output now exposes address-bearing `endpoints` with an
   optional port, replacing the `ports` collection, ICMP port-zero sentinel,
   and evidence-derived address in aggregate and streaming output.

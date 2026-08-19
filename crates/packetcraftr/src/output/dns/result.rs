@@ -139,6 +139,27 @@ impl ResponseFields {
             rejected_record_count: response.rejected_record_count,
         }
     }
+
+    fn from_summary(response: Option<crate::dns::ResponseSummary>) -> Self {
+        let Some(response) = response else {
+            return Self::default();
+        };
+        Self {
+            response_code: Some(response.response_code),
+            response_code_name: Some(
+                crate::dns::response_code_name(response.response_code).to_owned(),
+            ),
+            edns: response.edns.map(Into::into),
+            authoritative: Some(response.authoritative),
+            truncated: Some(response.truncated),
+            recursion_desired: Some(response.recursion_desired),
+            recursion_available: Some(response.recursion_available),
+            authenticated_data: Some(response.authenticated_data),
+            checking_disabled: Some(response.checking_disabled),
+            rejected_record_count: response.rejected_record_count,
+            ..Self::default()
+        }
+    }
 }
 
 impl Result {
@@ -263,6 +284,7 @@ pub enum Event {
         evidence: Attempt,
     },
     Record {
+        attempt: u32,
         server: String,
         server_port: u16,
         query_name: String,
@@ -271,6 +293,7 @@ pub enum Event {
         record: Record,
     },
     Rejected {
+        attempt: u32,
         server: String,
         server_port: u16,
         query_name: String,
@@ -309,4 +332,93 @@ pub enum Event {
         checking_disabled: Option<bool>,
         rejected_record_count: usize,
     },
+}
+
+impl Event {
+    pub fn try_from_dns(event: crate::dns::Event) -> std::result::Result<Self, Error> {
+        match event {
+            crate::dns::Event::Attempt {
+                server,
+                server_port,
+                query_name,
+                query_type,
+                evidence,
+            } => Ok(Self::Attempt {
+                server,
+                server_port,
+                query_name,
+                query_type: query_type.to_string(),
+                evidence: try_from_attempt(evidence)?,
+            }),
+            crate::dns::Event::Record {
+                attempt,
+                server,
+                server_port,
+                query_name,
+                query_type,
+                section,
+                record,
+            } => Ok(Self::Record {
+                attempt,
+                server,
+                server_port,
+                query_name,
+                query_type: query_type.to_string(),
+                section: section.into(),
+                record: Record::from_record(record),
+            }),
+            crate::dns::Event::Rejected {
+                attempt,
+                server,
+                server_port,
+                query_name,
+                query_type,
+                record,
+            } => Ok(Self::Rejected {
+                attempt,
+                server,
+                server_port,
+                query_name,
+                query_type: query_type.to_string(),
+                record: RejectedRecord {
+                    section: record.section.into(),
+                    index: record.index,
+                    owner: record.owner,
+                    type_code: record.type_code,
+                    reason: record.reason,
+                },
+            }),
+            crate::dns::Event::Undecoded(evidence) => Ok(Self::Undecoded {
+                evidence: try_from_undecoded(evidence)?,
+            }),
+        }
+    }
+
+    pub fn complete_from_dns(summary: crate::dns::Summary) -> (Self, Vec<Diagnostic>, Stats) {
+        let response = ResponseFields::from_summary(summary.response);
+        (
+            Self::Complete {
+                server: summary.server,
+                server_port: summary.server_port,
+                resolved_addresses: summary.resolved_addresses,
+                query_name: summary.query_name,
+                query_type: summary.query_type.to_string(),
+                transaction_id: summary.transaction_id,
+                transport: "udp".to_owned(),
+                outcome: summary.outcome.into(),
+                response_code: response.response_code,
+                response_code_name: response.response_code_name,
+                edns: response.edns,
+                authoritative: response.authoritative,
+                truncated: response.truncated,
+                recursion_desired: response.recursion_desired,
+                recursion_available: response.recursion_available,
+                authenticated_data: response.authenticated_data,
+                checking_disabled: response.checking_disabled,
+                rejected_record_count: response.rejected_record_count,
+            },
+            summary.diagnostics,
+            summary.stats.into(),
+        )
+    }
 }

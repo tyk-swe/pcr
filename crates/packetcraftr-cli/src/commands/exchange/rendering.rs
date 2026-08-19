@@ -12,7 +12,7 @@ use crate::rendering::{
 pub(super) fn render_text(result: &packetcraftr::exchange::Result) -> Result<(), CliError> {
     let mut diagnostics = result.diagnostics.clone();
     for sent in &result.sent {
-        diagnostics.extend(sent.built().diagnostics.clone());
+        diagnostics.extend(sent.built().diagnostics.iter().cloned());
     }
     write_stdout_line(format_args!(
         "sent={} responses={} unanswered={} unsolicited={} undecoded={} bytes={}",

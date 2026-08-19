@@ -7,7 +7,6 @@
   "result": {
     "event": "probe",
     "target": "router.lab",
-    "destination": "192.168.56.10",
     "probe": {
       "hop_limit": 1,
       "sequence": 70000,

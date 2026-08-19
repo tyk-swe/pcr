@@ -4,11 +4,14 @@
   "mode": "aggregate",
   "status": "error",
   "error": {
-    "code": "cli.capture_limit",
-    "kind": "cli",
-    "message": "capture stream limits must be non-zero",
+    "code": "internal.replay_evidence",
+    "kind": "internal",
+    "message": "replay transmitter returned invalid evidence at source index 7: accepted bytes differ from the submitted frame",
     "causes": [],
-    "remediation": "use finite non-zero capture frame, byte, packet, and interface limits"
+    "context": {
+      "source_frame": 8
+    },
+    "remediation": "treat the operation as incomplete; the backend did not confirm the exact submitted bytes"
   },
   "diagnostics": []
 }

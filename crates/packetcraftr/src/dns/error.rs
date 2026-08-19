@@ -7,7 +7,7 @@ use thiserror::Error;
 
 use crate::BoundaryError;
 use packetcraftr_core::budget::DeadlineExceeded;
-use packetcraftr_core::error::{Classification, Classified, Kind};
+use packetcraftr_core::error::{Classification, Classified, Context, Kind};
 
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 #[non_exhaustive]
@@ -179,11 +179,7 @@ impl Classified for Error {
                 Kind::Io,
                 Some("inspect the DNS retry timer and account for queries already transmitted"),
             ),
-            Self::Output { .. } => Classification::new(
-                "io.dns_output",
-                Kind::Io,
-                Some("inspect the output sink and account for DNS queries already transmitted"),
-            ),
+            Self::Output { source } => source.classification(),
             Self::InvalidEvidence { .. } | Self::StatisticsOverflow { .. } => Classification::new(
                 "internal.dns_evidence",
                 Kind::Internal,
@@ -191,6 +187,17 @@ impl Classified for Error {
                     "treat the DNS operation as incomplete because executor evidence was inconsistent",
                 ),
             ),
+        }
+    }
+
+    fn context(&self) -> Context {
+        match self {
+            Self::Authorization(error) | Self::Output { source: error } => error.context(),
+            Self::Execution { attempt, .. }
+            | Self::Clock { attempt, .. }
+            | Self::InvalidEvidence { attempt, .. }
+            | Self::StatisticsOverflow { attempt } => Context::attempt(*attempt),
+            _ => Context::default(),
         }
     }
 

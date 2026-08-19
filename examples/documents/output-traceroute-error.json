@@ -4,11 +4,14 @@
   "mode": "aggregate",
   "status": "error",
   "error": {
-    "code": "policy.public_destination",
-    "kind": "policy",
-    "message": "traceroute authorization failed: traffic policy denies public destination 8.8.8.8",
+    "code": "internal.traceroute_evidence",
+    "kind": "internal",
+    "message": "traceroute executor returned invalid evidence at probe 9: accepted bytes differ from the submitted probe",
     "causes": [],
-    "remediation": "explicitly authorize public destinations only for networks you are permitted to test"
+    "context": {
+      "probe_sequence": 9
+    },
+    "remediation": "treat the trace as incomplete because executor evidence was inconsistent"
   },
   "diagnostics": []
 }

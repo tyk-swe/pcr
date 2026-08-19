@@ -3,6 +3,7 @@
 
 //! DNS retry orchestration across authorization, execution, and outcomes.
 
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
@@ -15,7 +16,7 @@ use crate::Stats;
 use crate::clock::Clock;
 use crate::evidence::Budget;
 use crate::probe::evidence::{
-    ResponseCandidate, push_undecoded_limit_diagnostic, response_within_deadline, retain_evidence,
+    ResponseCandidate, UndecodedRetention, response_within_deadline, retain_evidence,
     update_best_candidate,
 };
 use crate::target::{Authorizer, approve_operation, resolve_selected};
@@ -23,8 +24,8 @@ use crate::target::{Authorizer, approve_operation, resolve_selected};
 use super::error::Error;
 use super::evidence::validate_dns_execution;
 use super::model::{
-    AttemptEvidence, Event, Exchange, Execution, Executor, Limits, Outcome, Probe, Record, Request,
-    ResponseSummary, Result, Section, Summary, UndecodedEvidence, ValidatedResponse,
+    AttemptEvidence, Event, EventContext, Exchange, Execution, Executor, Limits, Outcome, Probe,
+    Record, Request, Result, Section, Summary, UndecodedEvidence, ValidatedResponse,
 };
 use super::wire::{ResponseClassification, classify_response, encode_query};
 use super::{DNS_EPHEMERAL_SOURCE_PORT_BASE, DNS_EVIDENCE_DIAGNOSTICS, MAX_DNS_PROBE_OVERHEAD};
@@ -44,35 +45,112 @@ where
     C: Clock,
 {
     let mut collector = Collector::default();
-    let summary = run_with_events(request, authorizer, registry, executor, clock, |event| {
-        collector.observe(event);
-        Ok(())
-    })?;
+    let summary = run_observed(
+        request,
+        authorizer,
+        registry,
+        executor,
+        clock,
+        |event, _| {
+            collector.observe(event);
+            Ok(())
+        },
+    )?;
     Ok(collector.finish(summary))
 }
 
 /// Executes one approved DNS retry sequence and publishes attempts, accepted
 /// and rejected records, and retained undecoded evidence as they become final.
+/// The callback runs on a bounded worker and cannot extend live I/O beyond
+/// `max_duration`. Callback failure prevents later retries; a worker that
+/// outlives the deadline may finish after this function returns and must own
+/// its state.
 pub fn run_with_events<A, E, C, F>(
     request: &Request,
     authorizer: &mut A,
     registry: &Registry,
     executor: &mut E,
     clock: &mut C,
+    emit: F,
+) -> std::result::Result<Summary, Error>
+where
+    A: Authorizer,
+    E: Executor,
+    C: Clock,
+    F: FnMut(Event) -> std::result::Result<(), BoundaryError> + Send + 'static,
+{
+    let sink =
+        packetcraftr_core::progress::Sink::new(emit).map_err(|source| Error::Output { source })?;
+    run_observed(
+        request,
+        authorizer,
+        registry,
+        executor,
+        clock,
+        move |event, deadline| match sink.emit(event, deadline) {
+            Ok(()) => Ok(()),
+            Err(packetcraftr_core::progress::EmitError::Deadline(error)) => {
+                Err(duration_error(error.actual, error.limit))
+            }
+            Err(packetcraftr_core::progress::EmitError::Output(source)) => {
+                Err(Error::Output { source })
+            }
+        },
+    )
+}
+
+fn run_observed<A, E, C, F>(
+    request: &Request,
+    authorizer: &mut A,
+    registry: &Registry,
+    executor: &mut E,
+    clock: &mut C,
+    emit: F,
+) -> std::result::Result<Summary, Error>
+where
+    A: Authorizer,
+    E: Executor,
+    C: Clock,
+    F: FnMut(Event, &Deadline) -> std::result::Result<(), Error>,
+{
+    run_observed_with_deadline(
+        request,
+        authorizer,
+        registry,
+        executor,
+        clock,
+        Deadline::new(request.limits.max_duration),
+        emit,
+    )
+}
+
+pub(super) fn run_observed_with_deadline<A, E, C, F>(
+    request: &Request,
+    authorizer: &mut A,
+    registry: &Registry,
+    executor: &mut E,
+    clock: &mut C,
+    deadline: Deadline,
     mut emit: F,
 ) -> std::result::Result<Summary, Error>
 where
     A: Authorizer,
     E: Executor,
     C: Clock,
-    F: FnMut(Event) -> std::result::Result<(), BoundaryError>,
+    F: FnMut(Event, &Deadline) -> std::result::Result<(), Error>,
 {
     let PreparedOperation {
         deadline,
         query,
         delay,
         summary,
-    } = prepare_operation(request, authorizer)?;
+    } = prepare_operation(request, authorizer, deadline)?;
+    let context = Arc::new(EventContext {
+        server: Arc::from(summary.server.as_str()),
+        server_port: summary.server_port,
+        query_name: Arc::from(summary.query_name.as_str()),
+        query_type: summary.query_type,
+    });
     Operation {
         request,
         authorizer,
@@ -82,6 +160,7 @@ where
         deadline,
         query,
         delay,
+        context,
         summary,
         evidence_budget: Budget::default(),
         fallback_rank: 0,
@@ -94,17 +173,18 @@ where
 }
 
 #[derive(Default)]
-struct Collector {
+pub struct Collector {
     attempts: Vec<AttemptEvidence>,
     answers: Vec<Record>,
     authorities: Vec<Record>,
     additionals: Vec<Record>,
     rejected: Vec<super::model::RejectedRecord>,
     undecoded: Vec<UndecodedEvidence>,
+    diagnostics: Vec<packetcraftr_core::diagnostic::Diagnostic>,
 }
 
 impl Collector {
-    fn observe(&mut self, event: Event) {
+    pub fn observe(&mut self, event: Event) {
         match event {
             Event::Attempt { evidence, .. } => self.attempts.push(evidence),
             Event::Record {
@@ -116,26 +196,19 @@ impl Collector {
             },
             Event::Rejected { record, .. } => self.rejected.push(record),
             Event::Undecoded(evidence) => self.undecoded.push(evidence),
+            Event::Diagnostic(diagnostic) => self.diagnostics.push(diagnostic),
         }
     }
 
-    fn finish(self, summary: Summary) -> Result {
+    pub fn finish(mut self, summary: Summary) -> Result {
         let response = summary.response.map(|response| ValidatedResponse {
-            transaction_id: response.transaction_id,
-            response_code: response.response_code,
-            edns: response.edns,
-            authoritative: response.authoritative,
-            truncated: response.truncated,
-            recursion_desired: response.recursion_desired,
-            recursion_available: response.recursion_available,
-            authenticated_data: response.authenticated_data,
-            checking_disabled: response.checking_disabled,
+            metadata: response,
             answers: self.answers,
             authorities: self.authorities,
             additionals: self.additionals,
             rejected_records: self.rejected,
-            rejected_record_count: response.rejected_record_count,
         });
+        self.diagnostics.extend(summary.diagnostics);
         Result {
             server: summary.server,
             server_port: summary.server_port,
@@ -147,7 +220,7 @@ impl Collector {
             response,
             attempts: self.attempts,
             undecoded: self.undecoded,
-            diagnostics: summary.diagnostics,
+            diagnostics: self.diagnostics,
             stats: summary.stats,
         }
     }
@@ -169,8 +242,8 @@ struct PreparedOperation {
 fn prepare_operation<A: Authorizer>(
     request: &Request,
     authorizer: &mut A,
+    deadline: Deadline,
 ) -> std::result::Result<PreparedOperation, Error> {
-    let deadline = Deadline::new(request.limits.max_duration);
     let query_name = request.validate()?;
     let query = encode_query(
         &query_name,
@@ -261,6 +334,7 @@ struct Operation<'a, A, E, C, F> {
     deadline: Deadline,
     query: Bytes,
     delay: Duration,
+    context: Arc<EventContext>,
     summary: Summary,
     evidence_budget: Budget,
     fallback_rank: u8,
@@ -280,7 +354,7 @@ where
     A: Authorizer,
     E: Executor,
     C: Clock,
-    F: FnMut(Event) -> std::result::Result<(), BoundaryError>,
+    F: FnMut(Event, &Deadline) -> std::result::Result<(), Error>,
 {
     fn execute(mut self) -> std::result::Result<Summary, Error> {
         for attempt in 1..=self.request.attempts {
@@ -297,6 +371,7 @@ where
             .ok_or(Error::StatisticsOverflow {
                 attempt: self.attempts_completed,
             })?;
+        self.summary.diagnostics.clear();
         Ok(self.summary)
     }
 
@@ -313,6 +388,7 @@ where
             self.request.limits,
             self.request.timeout,
         )?;
+        let diagnostic_start = self.summary.diagnostics.len();
         let classified = match best {
             Some(candidate) => self.candidate_evidence(&probe, sent_at, candidate),
             None => ClassifiedAttempt {
@@ -320,6 +396,7 @@ where
                 response: None,
             },
         };
+        self.publish_diagnostics_since(diagnostic_start)?;
         let terminal = matches!(
             classified.evidence.status,
             Outcome::Response | Outcome::Truncated
@@ -420,7 +497,7 @@ where
                 attempt: probe.attempt,
             })?;
         for diagnostic in execution.diagnostics.drain(..) {
-            packetcraftr_core::diagnostic::push_once(&mut self.summary.diagnostics, diagnostic);
+            self.record_diagnostic(diagnostic)?;
         }
         Ok(execution)
     }
@@ -467,8 +544,8 @@ where
     ) -> (Outcome, Option<u16>, String, Option<ValidatedResponse>) {
         match classification {
             ResponseClassification::Response(response) => {
-                let truncated = response.truncated;
-                let response_code = Some(response.response_code);
+                let truncated = response.metadata.truncated;
+                let response_code = Some(response.metadata.response_code);
                 let reason = if truncated {
                     "validated DNS response set the truncation flag; partial records were not accepted"
                         .to_owned()
@@ -506,10 +583,7 @@ where
 
     fn emit_attempt(&mut self, evidence: AttemptEvidence) -> std::result::Result<(), Error> {
         self.publish(Event::Attempt {
-            server: self.summary.server.clone(),
-            server_port: self.summary.server_port,
-            query_name: self.summary.query_name.clone(),
-            query_type: self.summary.query_type,
+            context: Arc::clone(&self.context),
             evidence,
         })
     }
@@ -520,20 +594,11 @@ where
         response: ValidatedResponse,
     ) -> std::result::Result<(), Error> {
         let ValidatedResponse {
-            transaction_id,
-            response_code,
-            edns,
-            authoritative,
-            truncated,
-            recursion_desired,
-            recursion_available,
-            authenticated_data,
-            checking_disabled,
+            metadata,
             answers,
             authorities,
             additionals,
             rejected_records,
-            rejected_record_count,
         } = response;
         for (section, records) in [
             (Section::Answer, answers),
@@ -547,25 +612,11 @@ where
         for record in rejected_records {
             self.publish(Event::Rejected {
                 attempt,
-                server: self.summary.server.clone(),
-                server_port: self.summary.server_port,
-                query_name: self.summary.query_name.clone(),
-                query_type: self.summary.query_type,
+                context: Arc::clone(&self.context),
                 record,
             })?;
         }
-        self.summary.response = Some(ResponseSummary {
-            transaction_id,
-            response_code,
-            edns,
-            authoritative,
-            truncated,
-            recursion_desired,
-            recursion_available,
-            authenticated_data,
-            checking_disabled,
-            rejected_record_count,
-        });
+        self.summary.response = Some(metadata);
         Ok(())
     }
 
@@ -577,17 +628,14 @@ where
     ) -> std::result::Result<(), Error> {
         self.publish(Event::Record {
             attempt,
-            server: self.summary.server.clone(),
-            server_port: self.summary.server_port,
-            query_name: self.summary.query_name.clone(),
-            query_type: self.summary.query_type,
+            context: Arc::clone(&self.context),
             section,
             record,
         })
     }
 
     fn publish(&mut self, event: Event) -> std::result::Result<(), Error> {
-        (self.emit)(event).map_err(|source| Error::Output { source })?;
+        (self.emit)(event, &self.deadline)?;
         self.deadline.check()?;
         Ok(())
     }
@@ -597,30 +645,37 @@ where
         attempt: u32,
         frames: Vec<Frame>,
     ) -> std::result::Result<(), Error> {
-        // Correlated response evidence has priority over ambient undecodable
-        // frames under the one operation-wide retention budget.
-        for frame in frames {
-            self.deadline.check()?;
-            if self.retained_undecoded >= self.request.limits.max_undecoded {
-                push_undecoded_limit_diagnostic(
-                    &mut self.summary.diagnostics,
-                    DNS_EVIDENCE_DIAGNOSTICS,
-                    self.request.limits.max_undecoded,
-                );
-                break;
-            }
-            if retain_evidence(
-                &mut self.evidence_budget,
-                &frame,
-                DNS_EVIDENCE_DIAGNOSTICS,
-                self.request.limits.max_evidence_frames,
-                self.request.limits.max_evidence_bytes,
-                &mut self.summary.diagnostics,
-            ) {
-                self.retained_undecoded += 1;
-                self.publish(Event::Undecoded(UndecodedEvidence { attempt, frame }))?;
-            }
-            self.deadline.check()?;
+        let mut retention = UndecodedRetention::new(
+            &mut self.retained_undecoded,
+            self.request.limits.max_undecoded,
+            &mut self.evidence_budget,
+            DNS_EVIDENCE_DIAGNOSTICS,
+            self.request.limits.max_evidence_frames,
+            self.request.limits.max_evidence_bytes,
+            &mut self.summary.diagnostics,
+        );
+        retention.retain(
+            frames,
+            |frame| Event::Undecoded(UndecodedEvidence { attempt, frame }),
+            Event::Diagnostic,
+            |event| (self.emit)(event, &self.deadline),
+            || self.deadline.check().map_err(Into::into),
+        )
+    }
+
+    fn record_diagnostic(
+        &mut self,
+        diagnostic: packetcraftr_core::diagnostic::Diagnostic,
+    ) -> std::result::Result<(), Error> {
+        let start = self.summary.diagnostics.len();
+        packetcraftr_core::diagnostic::push_once(&mut self.summary.diagnostics, diagnostic);
+        self.publish_diagnostics_since(start)
+    }
+
+    fn publish_diagnostics_since(&mut self, start: usize) -> std::result::Result<(), Error> {
+        let diagnostics = self.summary.diagnostics[start..].to_vec();
+        for diagnostic in diagnostics {
+            self.publish(Event::Diagnostic(diagnostic))?;
         }
         Ok(())
     }

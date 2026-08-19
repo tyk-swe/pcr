@@ -166,7 +166,3 @@ fn prepare_filter(
         })
         .transpose()
 }
-
-pub(crate) fn classified_error(error: packetcraftr::replay::Error) -> CliError {
-    CliError::classified(error)
-}

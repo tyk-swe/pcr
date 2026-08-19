@@ -163,48 +163,169 @@ pub struct Result {
 }
 
 impl Result {
-    pub fn from_offline_events(summary: &packet_fuzz::Summary, cases: Vec<Case>) -> Self {
-        let packet_fuzz::Summary {
+    pub fn try_from_offline(
+        result: packet_fuzz::Result,
+    ) -> std::result::Result<(Self, Vec<PacketDiagnostic>, Stats), ContractError> {
+        let packet_fuzz::Result {
             seed,
             first_case,
-            stats,
-            ..
-        } = summary;
-        Self {
-            seed: *seed,
-            first_case: *first_case,
-            mode: Mode::Offline,
-            cases_generated: stats.cases_generated,
-            cases_built: stats.cases_built,
-            cases_rejected: stats.cases_generated.saturating_sub(stats.cases_built),
             cases,
-        }
+            diagnostics,
+            stats,
+        } = result;
+        let metadata = campaign(
+            seed,
+            first_case,
+            Mode::Offline,
+            stats.cases_generated,
+            stats.cases_built,
+        );
+        let cases = cases
+            .into_iter()
+            .map(Case::try_from_offline)
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok((from_events(metadata, cases)?, diagnostics, (&stats).into()))
     }
 
-    pub fn from_live_events(summary: &live_fuzz::Summary, cases: Vec<Case>) -> Self {
-        let live_fuzz::Summary {
+    pub fn try_from_live(
+        result: live_fuzz::Result,
+    ) -> std::result::Result<(Self, Vec<PacketDiagnostic>, Stats), ContractError> {
+        let live_fuzz::Result {
             seed,
             first_case,
-            stats,
-            ..
-        } = summary;
-        Self {
-            seed: *seed,
-            first_case: *first_case,
-            mode: Mode::Live,
-            cases_generated: stats.cases_generated,
-            cases_built: stats.cases_built,
-            cases_rejected: stats.cases_generated.saturating_sub(stats.cases_built),
             cases,
+            diagnostics,
+            stats,
+        } = result;
+        let metadata = campaign(
+            seed,
+            first_case,
+            Mode::Live,
+            stats.cases_generated,
+            stats.cases_built,
+        );
+        let cases = cases
+            .into_iter()
+            .map(Case::try_from_live)
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok((from_events(metadata, cases)?, diagnostics, (&stats).into()))
+    }
+
+    pub fn from_offline_events(
+        summary: &packet_fuzz::Summary,
+        cases: Vec<Case>,
+    ) -> std::result::Result<Self, ContractError> {
+        from_events(
+            campaign(
+                summary.seed,
+                summary.first_case,
+                Mode::Offline,
+                summary.stats.cases_generated,
+                summary.stats.cases_built,
+            ),
+            cases,
+        )
+    }
+
+    pub fn from_live_events(
+        summary: &live_fuzz::Summary,
+        cases: Vec<Case>,
+    ) -> std::result::Result<Self, ContractError> {
+        from_events(
+            campaign(
+                summary.seed,
+                summary.first_case,
+                Mode::Live,
+                summary.stats.cases_generated,
+                summary.stats.cases_built,
+            ),
+            cases,
+        )
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Campaign {
+    seed: u64,
+    first_case: u64,
+    mode: Mode,
+    cases_generated: u64,
+    cases_built: u64,
+    cases_rejected: u64,
+}
+
+const fn campaign(
+    seed: u64,
+    first_case: u64,
+    mode: Mode,
+    cases_generated: u64,
+    cases_built: u64,
+) -> Campaign {
+    Campaign {
+        seed,
+        first_case,
+        mode,
+        cases_generated,
+        cases_built,
+        cases_rejected: cases_generated.saturating_sub(cases_built),
+    }
+}
+
+fn from_events(metadata: Campaign, cases: Vec<Case>) -> std::result::Result<Result, ContractError> {
+    validate_events(metadata, &cases)?;
+    Ok(Result {
+        seed: metadata.seed,
+        first_case: metadata.first_case,
+        mode: metadata.mode,
+        cases_generated: metadata.cases_generated,
+        cases_built: metadata.cases_built,
+        cases_rejected: metadata.cases_rejected,
+        cases,
+    })
+}
+
+fn validate_events(metadata: Campaign, cases: &[Case]) -> std::result::Result<(), ContractError> {
+    if u64::try_from(cases.len()).unwrap_or(u64::MAX) != metadata.cases_generated {
+        return Err(incoherent(
+            "case cardinality does not match the campaign summary",
+        ));
+    }
+    let built = cases
+        .iter()
+        .filter(|case| case.outcome != Outcome::Rejected)
+        .count();
+    if u64::try_from(built).unwrap_or(u64::MAX) != metadata.cases_built {
+        return Err(incoherent(
+            "case outcomes do not match the campaign built count",
+        ));
+    }
+    for (offset, case) in cases.iter().enumerate() {
+        let expected = metadata
+            .first_case
+            .checked_add(u64::try_from(offset).unwrap_or(u64::MAX))
+            .ok_or_else(|| incoherent("case index order overflowed"))?;
+        if case.index != expected
+            || case.reproduction.case_index != expected
+            || case.reproduction.operation_seed != metadata.seed
+            || case.reproduction.case_seed != case.seed
+        {
+            return Err(incoherent(
+                "case identity or publication order does not match the campaign",
+            ));
         }
+    }
+    Ok(())
+}
+
+fn incoherent(message: &str) -> ContractError {
+    ContractError::IncoherentFuzzEvents {
+        message: message.to_owned(),
     }
 }
 
 impl Case {
-    fn try_from_offline(
-        operation_seed: u64,
-        case: packet_fuzz::Case,
-    ) -> std::result::Result<Self, ContractError> {
+    fn try_from_offline(case: packet_fuzz::Case) -> std::result::Result<Self, ContractError> {
+        let operation_seed = case.operation_seed;
         let outcome = case.outcome.into();
         convert_case(
             operation_seed,
@@ -217,10 +338,8 @@ impl Case {
         )
     }
 
-    fn try_from_live(
-        operation_seed: u64,
-        case: live_fuzz::Case,
-    ) -> std::result::Result<Self, ContractError> {
+    fn try_from_live(case: live_fuzz::Case) -> std::result::Result<Self, ContractError> {
+        let operation_seed = case.operation_seed;
         let live_fuzz::Case {
             prepared,
             outcome,
@@ -310,65 +429,85 @@ pub enum Event {
 }
 
 impl Event {
-    pub fn try_from_offline(
-        operation_seed: u64,
-        event: packet_fuzz::Event,
-    ) -> std::result::Result<Self, ContractError> {
-        let packet_fuzz::Event::Case(case) = event;
+    pub fn try_from_offline(case: packet_fuzz::Case) -> std::result::Result<Self, ContractError> {
+        let operation_seed = case.operation_seed;
         Ok(Self::Case {
             operation_seed,
-            case: Box::new(Case::try_from_offline(operation_seed, case)?),
+            case: Box::new(Case::try_from_offline(case)?),
         })
     }
 
-    pub fn try_from_live(
-        operation_seed: u64,
-        event: live_fuzz::Event,
-    ) -> std::result::Result<Self, ContractError> {
-        let live_fuzz::Event::Case(case) = event;
+    pub fn try_from_live(case: live_fuzz::Case) -> std::result::Result<Self, ContractError> {
+        let operation_seed = case.operation_seed;
         Ok(Self::Case {
             operation_seed,
-            case: Box::new(Case::try_from_live(operation_seed, case)?),
+            case: Box::new(Case::try_from_live(case)?),
         })
     }
 
     pub fn complete_from_offline(
-        summary: &packet_fuzz::Summary,
+        summary: packet_fuzz::Summary,
     ) -> (Self, Vec<PacketDiagnostic>, Stats) {
-        (
-            Self::Complete {
-                operation_seed: summary.seed,
-                first_case: summary.first_case,
-                mode: Mode::Offline,
-                cases_generated: summary.stats.cases_generated,
-                cases_built: summary.stats.cases_built,
-                cases_rejected: summary
-                    .stats
-                    .cases_generated
-                    .saturating_sub(summary.stats.cases_built),
-            },
-            summary.diagnostics.clone(),
-            (&summary.stats).into(),
-        )
+        let metadata = campaign(
+            summary.seed,
+            summary.first_case,
+            Mode::Offline,
+            summary.stats.cases_generated,
+            summary.stats.cases_built,
+        );
+        complete(metadata, summary.diagnostics, (&summary.stats).into())
     }
 
-    pub fn complete_from_live(
-        summary: &live_fuzz::Summary,
-    ) -> (Self, Vec<PacketDiagnostic>, Stats) {
-        (
-            Self::Complete {
-                operation_seed: summary.seed,
-                first_case: summary.first_case,
-                mode: Mode::Live,
-                cases_generated: summary.stats.cases_generated,
-                cases_built: summary.stats.cases_built,
-                cases_rejected: summary
-                    .stats
-                    .cases_generated
-                    .saturating_sub(summary.stats.cases_built),
+    pub fn complete_from_live(summary: live_fuzz::Summary) -> (Self, Vec<PacketDiagnostic>, Stats) {
+        let metadata = campaign(
+            summary.seed,
+            summary.first_case,
+            Mode::Live,
+            summary.stats.cases_generated,
+            summary.stats.cases_built,
+        );
+        complete(metadata, summary.diagnostics, (&summary.stats).into())
+    }
+}
+
+fn complete(
+    metadata: Campaign,
+    diagnostics: Vec<PacketDiagnostic>,
+    stats: Stats,
+) -> (Event, Vec<PacketDiagnostic>, Stats) {
+    (
+        Event::Complete {
+            operation_seed: metadata.seed,
+            first_case: metadata.first_case,
+            mode: metadata.mode,
+            cases_generated: metadata.cases_generated,
+            cases_built: metadata.cases_built,
+            cases_rejected: metadata.cases_rejected,
+        },
+        diagnostics,
+        stats,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn event_collection_rejects_summary_cardinality_mismatch() {
+        let summary = packet_fuzz::Summary {
+            seed: 7,
+            first_case: 10,
+            diagnostics: Vec::new(),
+            stats: packet_fuzz::Stats {
+                cases_generated: 1,
+                cases_built: 1,
+                ..packet_fuzz::Stats::default()
             },
-            summary.diagnostics.clone(),
-            (&summary.stats).into(),
-        )
+        };
+        assert!(matches!(
+            Result::from_offline_events(&summary, Vec::new()),
+            Err(ContractError::IncoherentFuzzEvents { .. })
+        ));
     }
 }

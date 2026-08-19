@@ -502,7 +502,7 @@ mod tests {
 
         assert_eq!(error.exit_code, 5);
         assert_eq!(error.classification.code, "io.replay");
-        assert!(error.message.contains("source frame 42"));
+        assert!(error.message.contains("source index 42"));
         assert!(error.message.contains("sequence 0"));
         assert_eq!(
             error.classification.remediation,

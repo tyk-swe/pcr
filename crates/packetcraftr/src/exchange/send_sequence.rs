@@ -3,6 +3,7 @@
 
 //! Ordered packet transmission and inter-send correlation drains.
 
+use std::sync::Arc;
 use std::time::Instant;
 
 use packetcraftr_netio::{
@@ -60,7 +61,11 @@ impl<C: Session> Transaction<C> {
         let route = &prepared.route;
         let frame = TransmissionFrame::try_new(&built.bytes, route)?;
         let report = io.send(frame)?;
-        let sent = crate::SentPacket::try_new(built.clone(), route.clone(), report)?;
+        let sent = Arc::new(crate::SentPacket::try_new(
+            built.clone(),
+            route.clone(),
+            report,
+        )?);
         self.completed_sends =
             self.completed_sends
                 .checked_add(1)
@@ -68,10 +73,10 @@ impl<C: Session> Transaction<C> {
                     bytes_sent: usize::MAX,
                     wire_bytes: usize::MAX,
                 })?;
-        self.sent.push(sent.clone());
+        self.sent.push(Arc::clone(&sent));
         emit(Event::Sent {
             request_index: send_index,
-            sent: Box::new(sent),
+            sent,
         })
         .map_err(OperationError::output)?;
         Ok(())

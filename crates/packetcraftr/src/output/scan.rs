@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use packetcraftr_core::diagnostic::Diagnostic;
+use packetcraftr_core::diagnostic::Diagnostic as PacketDiagnostic;
 
 use super::contract::Error;
 use super::envelope::Stats;
@@ -56,9 +56,10 @@ impl From<crate::scan::ProbeStatus> for ProbeStatus {
     }
 }
 
-/// Evidence common to scan and other active-probe tools.
+/// One canonical scan probe record used by aggregate and stream output.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Evidence {
+pub struct Probe {
+    pub sequence: u64,
     pub protocol: String,
     pub destination: IpAddr,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -85,7 +86,7 @@ pub struct Endpoint {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub port: Option<u16>,
     pub classification: Classification,
-    pub evidence: Vec<Evidence>,
+    pub probes: Vec<Probe>,
 }
 
 /// Aggregate result of `scan`.
@@ -100,7 +101,7 @@ pub struct Result {
 impl Result {
     pub fn try_from_scan(
         result: crate::scan::Result,
-    ) -> std::result::Result<(Self, Vec<Diagnostic>, Stats), Error> {
+    ) -> std::result::Result<(Self, Vec<PacketDiagnostic>, Stats), Error> {
         let crate::scan::Result {
             target,
             resolved_addresses,
@@ -112,24 +113,17 @@ impl Result {
         let endpoint_outputs = endpoints
             .into_iter()
             .map(|endpoint| {
-                let evidence_outputs = endpoint
-                    .evidence
+                let probe_outputs = endpoint
+                    .probes
                     .into_iter()
-                    .map(|evidence| {
-                        try_from_evidence(
-                            endpoint.address,
-                            endpoint.transport,
-                            endpoint.port,
-                            evidence,
-                        )
-                    })
+                    .map(try_from_probe)
                     .collect::<std::result::Result<Vec<_>, Error>>()?;
                 Ok(Endpoint {
                     address: endpoint.address,
                     transport: endpoint.transport.to_string(),
                     port: endpoint.port,
                     classification: endpoint.classification.into(),
-                    evidence: evidence_outputs,
+                    probes: probe_outputs,
                 })
             })
             .collect::<std::result::Result<Vec<_>, Error>>()?;
@@ -152,16 +146,12 @@ impl Result {
 pub enum Event {
     Probe {
         target: String,
-        probe_sequence: u64,
-        address: IpAddr,
-        transport: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        port: Option<u16>,
-        evidence: Box<Evidence>,
+        probe: Probe,
     },
     Undecoded {
         frame: Captured,
     },
+    Diagnostic,
     Complete {
         target: String,
         resolved_addresses: Vec<IpAddr>,
@@ -169,32 +159,31 @@ pub enum Event {
 }
 
 impl Event {
-    pub fn try_from_scan(event: crate::scan::Event) -> std::result::Result<Self, Error> {
-        match event {
-            crate::scan::Event::Probe {
-                target,
-                address,
-                transport,
-                port,
-                evidence,
-            } => {
-                let probe_sequence = evidence.sequence;
-                Ok(Self::Probe {
-                    target,
-                    probe_sequence,
-                    address,
-                    transport: transport.to_string(),
-                    port,
-                    evidence: Box::new(try_from_evidence(address, transport, port, evidence)?),
-                })
-            }
-            crate::scan::Event::Undecoded { frame } => Ok(Self::Undecoded {
-                frame: Captured::try_from_frame(frame)?,
-            }),
-        }
+    pub fn try_from_scan(
+        event: crate::scan::Event,
+    ) -> std::result::Result<(Self, Vec<PacketDiagnostic>), Error> {
+        let (event, diagnostics) = match event {
+            crate::scan::Event::Probe { target, probe } => (
+                Self::Probe {
+                    target: target.to_string(),
+                    probe: try_from_probe(probe)?,
+                },
+                Vec::new(),
+            ),
+            crate::scan::Event::Undecoded { frame } => (
+                Self::Undecoded {
+                    frame: Captured::try_from_frame(frame)?,
+                },
+                Vec::new(),
+            ),
+            crate::scan::Event::Diagnostic(diagnostic) => (Self::Diagnostic, vec![diagnostic]),
+        };
+        Ok((event, diagnostics))
     }
 
-    pub fn complete_from_scan(summary: crate::scan::Summary) -> (Self, Vec<Diagnostic>, Stats) {
+    pub fn complete_from_scan(
+        summary: crate::scan::Summary,
+    ) -> (Self, Vec<PacketDiagnostic>, Stats) {
         (
             Self::Complete {
                 target: summary.target,
@@ -206,21 +195,17 @@ impl Event {
     }
 }
 
-fn try_from_evidence(
-    address: IpAddr,
-    transport: crate::scan::Transport,
-    port: Option<u16>,
-    evidence: crate::scan::ProbeEvidence,
-) -> std::result::Result<Evidence, Error> {
-    let protocol = match (transport, address) {
+fn try_from_probe(evidence: crate::scan::ProbeEvidence) -> std::result::Result<Probe, Error> {
+    let protocol = match (evidence.transport, evidence.address) {
         (crate::scan::Transport::Icmp, IpAddr::V4(_)) => "icmpv4",
         (crate::scan::Transport::Icmp, IpAddr::V6(_)) => "icmpv6",
-        _ => transport.as_str(),
+        _ => evidence.transport.as_str(),
     };
-    Ok(Evidence {
+    Ok(Probe {
+        sequence: evidence.sequence,
         protocol: protocol.to_owned(),
-        destination: address,
-        destination_port: port,
+        destination: evidence.address,
+        destination_port: evidence.port,
         attempt: evidence.attempt,
         status: evidence.status.into(),
         classification: evidence.classification.into(),

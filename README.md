@@ -84,16 +84,30 @@ for example `packetcraftr --output json stats capture.pcapng`. Unsupported
 combinations fail explicitly. Machine and binary formats contain no terminal
 colour codes. Streaming commands use NDJSON.
 
-Structured errors include a stable code, kind, message, and remediation. The v1
-schema and checked-in examples are the contract reference.
+Structured errors include a stable code, kind, message, remediation, and typed
+domain context when a source frame, probe, attempt, or fuzz case is known. The
+v1 schema and checked-in examples are the contract reference.
 
-Fuzz and exchange NDJSON are execution-time streams rather than renderings of
-completed aggregate results. Fuzz publishes each final case in deterministic
-case order. Exchange publishes a send after the packet-I/O receipt is
-confirmed, capture evidence after its classification is final, and unanswered
-requests only after capture completion. Every successful stream has one final
-complete record; a later failure preserves earlier records and replaces that
-completion with one error at the next envelope sequence.
+Scan, traceroute, DNS, fuzz, and exchange NDJSON are execution-time streams,
+not renderings of completed aggregate results. Scan and traceroute publish a
+probe after its current batch evidence is final; stopping at that callback does
+not undo sends already confirmed in the batch. DNS publishes each attempt,
+accepted or rejected record, and retained undecodable frame before a later
+retry. Fuzz publishes each final case in deterministic case order. Exchange
+publishes a send after the packet-I/O receipt is confirmed, capture evidence
+after its classification is final, and unanswered requests only after capture
+completion. A diagnostic event is published when an operation-wide warning
+becomes final.
+
+The corresponding Rust event callbacks execute on a bounded one-event worker.
+The operation waits for each callback result, aborts later work on a classified
+callback error, and charges backpressure to the same finite operation deadline.
+If a callback never returns, the live operation still reaches its deadline,
+shuts capture down, and returns without waiting for that worker. Callbacks must
+therefore own their state and tolerate the worker finishing after the operation
+has returned. Every successful stream has one final complete record; a later
+failure preserves earlier records and replaces completion with one typed error
+at the next envelope sequence when the output sink remains writable.
 
 `dissect --output json` always emits one aggregate document. Its result contains
 `matched` and `dissection`; a filter no-match is a successful document with

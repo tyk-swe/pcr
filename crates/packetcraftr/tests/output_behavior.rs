@@ -1,7 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, UNIX_EPOCH};
 
 use packetcraftr::core::error::{Classified, Kind};
@@ -20,7 +22,7 @@ use packetcraftr::netio::{
 };
 use packetcraftr::output::{
     contract::{Command, Error as ContractError, Format},
-    envelope::{Aggregate, Error as OutputError, Stats, Stream, StreamPosition},
+    envelope::{Aggregate, Error as OutputError, Stats, StreamEncoder},
     frame::{Captured, Timestamp, Wire},
     interfaces,
     protocols::{Detail, Field, FieldKind, Summary},
@@ -103,9 +105,9 @@ fn command_format_matrix_display_and_errors_cover_the_full_vocabulary() {
             Kind::Packet,
         ),
         (
-            ContractError::SequenceOverflow,
-            "sequence exceeded",
-            "internal.output_sequence",
+            ContractError::InvalidSourceFrame,
+            "source frame must be",
+            "internal.source_frame",
             Kind::Internal,
         ),
     ] {
@@ -155,13 +157,12 @@ fn envelopes_convert_diagnostics_errors_and_statistics() {
         Diagnostic::info("packet.note", "note"),
         Diagnostic::warning("packet.warn", "warning"),
     ] {
-        let value = serde_json::to_value(Stream::success(
-            Command::Read,
-            &StreamPosition::initial(),
-            json!({}),
-            vec![diagnostic],
-        ))
-        .expect("stream serializes");
+        let output = SharedWriter::default();
+        let encoder = StreamEncoder::new(Some(Command::Read), output.clone());
+        encoder
+            .complete(json!({}), vec![diagnostic])
+            .expect("stream serializes");
+        let value = output.records().remove(0);
         assert!(matches!(
             value["diagnostics"][0]["severity"].as_str(),
             Some("info" | "warning")
@@ -178,15 +179,67 @@ fn envelopes_convert_diagnostics_errors_and_statistics() {
     assert_eq!(value["status"], "error");
     assert_eq!(value["error"]["code"], "packet.timestamp_range");
 
-    let position = StreamPosition::initial();
-    let stream: Stream<()> = Stream::error(None, &position, classified).with_stats(stats);
-    let value = serde_json::to_value(stream).expect("error stream serializes");
+    let output = SharedWriter::default();
+    StreamEncoder::new(None, output.clone())
+        .emit_error(classified)
+        .expect("error stream serializes");
+    let value = output.records().remove(0);
     assert_eq!(value["sequence"], 0);
     assert_eq!(value["status"], "error");
 
     let empty_stats = Stats::default();
     let value = serde_json::to_value(empty_stats).expect("empty stats serialize");
     assert!(value["capture"].get("receiver_dropped_frames").is_none());
+}
+
+#[test]
+fn domain_failures_preserve_typed_error_context() {
+    let replay = OutputError::classified(&packetcraftr::replay::Error::output_at_source_index(
+        7, "failed",
+    ));
+    assert_eq!(replay.context.source_frame, Some(8));
+
+    let scan = OutputError::classified(&packetcraftr::scan::Error::Clock {
+        sequence: 8,
+        message: "failed".to_owned(),
+    });
+    assert_eq!(scan.context.probe_sequence, Some(8));
+
+    let dns = OutputError::classified(&packetcraftr::dns::Error::Clock {
+        attempt: 3,
+        message: "failed".to_owned(),
+    });
+    assert_eq!(dns.context.attempt, Some(3));
+
+    let fuzz = OutputError::classified(&packetcraftr::fuzz::Error::Clock {
+        case_index: 11,
+        message: "failed".to_owned(),
+    });
+    assert_eq!(fuzz.context.case_index, Some(11));
+}
+
+#[derive(Clone, Default)]
+struct SharedWriter(Arc<Mutex<Vec<u8>>>);
+
+impl SharedWriter {
+    fn records(&self) -> Vec<serde_json::Value> {
+        std::str::from_utf8(&self.0.lock().unwrap())
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect()
+    }
+}
+
+impl Write for SharedWriter {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 #[test]

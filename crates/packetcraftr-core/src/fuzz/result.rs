@@ -72,6 +72,7 @@ impl Classified for CaseFailure {
 
 #[derive(Clone, Debug)]
 pub struct Case {
+    pub operation_seed: u64,
     pub index: u64,
     pub seed: u64,
     pub mutation: Mutation,
@@ -101,12 +102,6 @@ pub struct Result {
     pub cases: Vec<Case>,
     pub diagnostics: Vec<Diagnostic>,
     pub stats: Stats,
-}
-
-/// One finalized offline fuzz campaign event.
-#[derive(Clone, Debug)]
-pub enum Event {
-    Case(Case),
 }
 
 /// Final offline campaign metadata after every case event was published.

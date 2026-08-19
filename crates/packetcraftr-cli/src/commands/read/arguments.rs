@@ -14,9 +14,10 @@ pub(crate) const AFTER_LONG_HELP: &str = r#"Examples:
 Capture output validates and rewrites every source record without normalization.
 It requires the output format to match the input and cannot be combined with --filter.
 
-NDJSON emits frame events followed by one complete event. source_frame is the
-one-based capture position used by frame.number and is not renumbered by filtering;
-the envelope sequence is the zero-based emitted-record position."#;
+NDJSON emits frame events followed by one complete event. Text prefixes each frame,
+and NDJSON source_frame identifies it, with the one-based capture position used by
+frame.number. Filtering does not renumber that source position; NDJSON envelope
+sequence remains the zero-based emitted-record position."#;
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {

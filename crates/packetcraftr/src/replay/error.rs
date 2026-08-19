@@ -5,7 +5,7 @@
 use std::time::Duration;
 
 use packetcraftr_core::analysis::pcap::Error as CaptureError;
-use packetcraftr_core::error::{Classification, Classified, Kind};
+use packetcraftr_core::error::{Classification, Classified, Context, Kind};
 use packetcraftr_netio::{Error as LiveIoError, link::Mode as LinkMode};
 use thiserror::Error;
 
@@ -22,98 +22,131 @@ pub enum Error {
     InvalidDuration { value: Duration, maximum: Duration },
     #[error("invalid replay timing: invalid replay {mode} value {value}")]
     InvalidTiming { mode: &'static str, value: f64 },
-    #[error("replay timing failed at source frame {sequence}: invalid replay {mode} value {value}")]
+    #[error(
+        "replay timing failed at source index {source_index}: invalid replay {mode} value {value}"
+    )]
     Timing {
-        sequence: u64,
+        source_index: u64,
         mode: &'static str,
         value: f64,
     },
     #[error(
-        "replay {mode} timing requires a timestamp at source frame {sequence}, but none is available"
+        "replay {mode} timing requires a timestamp at source index {source_index}, but none is available"
     )]
-    TimestampUnavailable { sequence: u64, mode: &'static str },
-    #[error("capture read failed at source frame {sequence}: {source}")]
+    TimestampUnavailable {
+        source_index: u64,
+        mode: &'static str,
+    },
+    #[error("capture read failed at source index {source_index}: {source}")]
     Capture {
-        sequence: u64,
+        source_index: u64,
         #[source]
         source: CaptureError,
     },
     #[error(
-        "replay frame count {actual} exceeds the configured limit of {limit} at source frame {sequence}"
+        "replay frame count {actual} exceeds the configured limit of {limit} at source index {source_index}"
     )]
     FrameLimit {
-        sequence: u64,
+        source_index: u64,
         actual: u64,
         limit: u64,
     },
     #[error(
-        "replay byte count {actual} exceeds the configured limit of {limit} at source frame {sequence}"
+        "replay byte count {actual} exceeds the configured limit of {limit} at source index {source_index}"
     )]
     ByteLimit {
-        sequence: u64,
+        source_index: u64,
         actual: u64,
         limit: u64,
     },
     #[error(
-        "source frame {sequence} contains {actual} bytes, exceeding the per-frame limit of {limit}"
+        "source index {source_index} contains {actual} bytes, exceeding the per-frame limit of {limit}"
     )]
     FrameSizeLimit {
-        sequence: u64,
+        source_index: u64,
         actual: usize,
         limit: usize,
     },
     #[error(
-        "replay schedule {actual:?} exceeds the configured duration of {limit:?} at source frame {sequence}"
+        "replay schedule {actual:?} exceeds the configured duration of {limit:?} at source index {source_index}"
     )]
     DurationLimit {
-        sequence: u64,
+        source_index: u64,
         actual: Duration,
         limit: Duration,
     },
     #[error(
-        "capture link type {link_type} is not supported for live replay at source frame {sequence}"
+        "capture link type {link_type} is not supported for live replay at source index {source_index}"
     )]
-    UnsupportedLinkType { sequence: u64, link_type: u32 },
+    UnsupportedLinkType { source_index: u64, link_type: u32 },
     #[error(
-        "capture link type {link_type} is incompatible with requested {requested:?} replay at source frame {sequence}"
+        "capture link type {link_type} is incompatible with requested {requested:?} replay at source index {source_index}"
     )]
     LinkModeMismatch {
-        sequence: u64,
+        source_index: u64,
         link_type: u32,
         requested: LinkMode,
     },
-    #[error("replay frame selection failed at source frame {sequence}: {source}")]
+    #[error("replay frame selection failed at source index {source_index}: {source}")]
     Selection {
-        sequence: u64,
+        source_index: u64,
         #[source]
         source: crate::BoundaryError,
     },
-    #[error("replay policy denied source frame {sequence}: {source}")]
+    #[error("replay policy denied source index {source_index}: {source}")]
     Authorization {
-        sequence: u64,
+        source_index: u64,
         #[source]
         source: crate::BoundaryError,
     },
-    #[error("replay transmission failed at source frame {sequence}: {source}")]
+    #[error("replay transmission failed at source index {source_index}: {source}")]
     Transmission {
-        sequence: u64,
+        source_index: u64,
         #[source]
         source: LiveIoError,
     },
-    #[error("replay transmitter returned invalid evidence at source frame {sequence}: {message}")]
-    InvalidEvidence { sequence: u64, message: String },
-    #[error("replay clock failed at source frame {sequence}: {message}")]
-    Clock { sequence: u64, message: String },
-    #[error("replay output failed at source frame {sequence}: {message}")]
-    Output { sequence: u64, message: String },
+    #[error(
+        "replay transmitter returned invalid evidence at source index {source_index}: {message}"
+    )]
+    InvalidEvidence { source_index: u64, message: String },
+    #[error("replay clock failed at source index {source_index}: {message}")]
+    Clock { source_index: u64, message: String },
+    #[error("replay output failed at source index {source_index}: {message}")]
+    Output { source_index: u64, message: String },
 }
 
 impl Error {
     pub fn output_at_source_index(source_index: u64, message: impl Into<String>) -> Self {
         Self::Output {
-            sequence: source_index,
+            source_index,
             message: message.into(),
         }
+    }
+
+    fn context(&self) -> Context {
+        let source_index = match self {
+            Self::Timing { source_index, .. }
+            | Self::TimestampUnavailable { source_index, .. }
+            | Self::Capture { source_index, .. }
+            | Self::FrameLimit { source_index, .. }
+            | Self::ByteLimit { source_index, .. }
+            | Self::FrameSizeLimit { source_index, .. }
+            | Self::DurationLimit { source_index, .. }
+            | Self::UnsupportedLinkType { source_index, .. }
+            | Self::LinkModeMismatch { source_index, .. }
+            | Self::Selection { source_index, .. }
+            | Self::Authorization { source_index, .. }
+            | Self::Transmission { source_index, .. }
+            | Self::InvalidEvidence { source_index, .. }
+            | Self::Clock { source_index, .. }
+            | Self::Output { source_index, .. } => *source_index,
+            Self::InvalidLimit { .. }
+            | Self::InvalidDuration { .. }
+            | Self::InvalidTiming { .. } => {
+                return Context::default();
+            }
+        };
+        Context::source_frame(source_index.saturating_add(1))
     }
 }
 
@@ -182,6 +215,10 @@ impl Classified for Error {
                 ),
             ),
         }
+    }
+
+    fn context(&self) -> Context {
+        Error::context(self)
     }
 
     fn causes(&self) -> Vec<String> {

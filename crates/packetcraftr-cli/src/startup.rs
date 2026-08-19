@@ -37,7 +37,7 @@ pub(crate) fn run() -> ExitCode {
                         ))
                     }
                     output::contract::Format::Ndjson => {
-                        let mut stream = NdjsonStream::stdout(context.command);
+                        let stream = NdjsonStream::stdout(context.command);
                         stream.emit_error(error.output_error())
                     }
                     _ => unreachable!("startup context returns only structured formats"),
@@ -66,9 +66,25 @@ pub(crate) fn run() -> ExitCode {
     let command = cli.command.kind();
     let mut stream = NdjsonStream::stdout(Some(command));
     match cli.command.run(format, &mut stream) {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(()) => match require_success_terminal(format, &stream) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => command_failure(format, command, error, &mut stream),
+        },
         Err(error) => command_failure(format, command, error, &mut stream),
     }
+}
+
+fn require_success_terminal(
+    format: output::contract::Format,
+    stream: &NdjsonStream,
+) -> Result<(), CliError> {
+    if format == output::contract::Format::Ndjson && !stream.is_terminal() {
+        return Err(CliError::new(
+            70,
+            "NDJSON command returned without a terminal completion record",
+        ));
+    }
+    Ok(())
 }
 
 fn command_failure(
@@ -99,4 +115,23 @@ fn command_failure(
         return ExitCode::from(write_error.exit_code);
     }
     ExitCode::from(exit_code)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn successful_ndjson_requires_a_terminal_record() {
+        let stream = NdjsonStream::new(
+            Some(output::contract::Command::Read),
+            std::io::Cursor::new(Vec::new()),
+        );
+        assert!(require_success_terminal(output::contract::Format::Ndjson, &stream).is_err());
+        stream
+            .complete(serde_json::json!({"event": "complete"}), Vec::new())
+            .unwrap();
+        assert!(require_success_terminal(output::contract::Format::Ndjson, &stream).is_ok());
+        assert!(require_success_terminal(output::contract::Format::Json, &stream).is_ok());
+    }
 }

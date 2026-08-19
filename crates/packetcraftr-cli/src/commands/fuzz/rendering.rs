@@ -83,27 +83,20 @@ pub(super) fn render_text(
     render_diagnostics_text(&diagnostics)
 }
 
-pub(super) fn render_event(
-    event: output::fuzz::Event,
-    stream: &mut NdjsonStream,
-) -> Result<(), CliError> {
-    stream.emit_data(event, Vec::new())
-}
-
 pub(super) fn render_offline_complete(
-    summary: &core::fuzz::Summary,
-    stream: &mut NdjsonStream,
+    summary: core::fuzz::Summary,
+    stream: &NdjsonStream,
 ) -> Result<(), CliError> {
     let (event, diagnostics, stats) = output::fuzz::Event::complete_from_offline(summary);
-    stream.complete_with_stats(event, diagnostics, stats)
+    super::super::progressive::render_complete(event, diagnostics, stats, stream)
 }
 
 pub(super) fn render_live_complete(
-    summary: &packetcraftr::fuzz::Summary,
-    stream: &mut NdjsonStream,
+    summary: packetcraftr::fuzz::Summary,
+    stream: &NdjsonStream,
 ) -> Result<(), CliError> {
     let (event, diagnostics, stats) = output::fuzz::Event::complete_from_live(summary);
-    stream.complete_with_stats(event, diagnostics, stats)
+    super::super::progressive::render_complete(event, diagnostics, stats, stream)
 }
 
 fn mode_name(value: output::fuzz::Mode) -> &'static str {

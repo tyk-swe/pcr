@@ -82,6 +82,7 @@ impl<C: Session> Transaction<C> {
                 ),
             ),
         );
+        self.publish_diagnostics(emit)?;
         Ok(ProcessOutcome::Continue)
     }
 
@@ -104,7 +105,8 @@ impl<C: Session> Transaction<C> {
         };
         let processed = self.captured.process(frame, context);
         let promoted = self.promote_workflow(workflow_matcher);
-        for event in self.captured.take_events() {
+        self.publish_diagnostics(emit)?;
+        for event in self.captured.drain_events() {
             emit(event).map_err(OperationError::output)?;
         }
         if processed == ProcessOutcome::DuplicateRecordIdentity {
@@ -144,6 +146,18 @@ impl<C: Session> Transaction<C> {
             .is_some_and(|deadline| deadline.checked_duration_since(Instant::now()).is_none())
         {
             return Err(drain_deadline_error().into());
+        }
+        Ok(())
+    }
+
+    pub(super) fn publish_diagnostics<F>(&mut self, emit: &mut F) -> Result<(), OperationError>
+    where
+        F: FnMut(super::Event) -> Result<(), crate::BoundaryError>,
+    {
+        let diagnostics = self.captured.diagnostics[self.published_diagnostics..].to_vec();
+        for diagnostic in diagnostics {
+            emit(super::Event::Diagnostic(diagnostic)).map_err(OperationError::output)?;
+            self.published_diagnostics += 1;
         }
         Ok(())
     }

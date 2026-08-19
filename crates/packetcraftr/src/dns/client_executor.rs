@@ -68,7 +68,7 @@ where
         }
         Ok(Execution {
             permit: exchange.permit,
-            sent: sent.pop().expect("validated one sent packet"),
+            sent: crate::exchange::into_sent_packet(sent.pop().expect("validated one sent packet")),
             responses,
             unsolicited,
             undecoded,

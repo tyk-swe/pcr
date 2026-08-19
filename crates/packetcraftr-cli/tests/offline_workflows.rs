@@ -12,9 +12,12 @@ use packetcraftr::{
 };
 use serde_json::Value;
 
+#[path = "support/capture.rs"]
+mod capture_support;
 mod support;
 
-use support::{assert_contiguous_stream, parse_json, parse_ndjson, run, run_success};
+use capture_support::append_truncated_record;
+use support::{assert_contiguous, parse_json, parse_ndjson, run, run_success, schema_validator};
 
 const UDP_CLIENT: &str = "450000210000000040118e95c0000201c633640230390009000d9f8868656c6c6f";
 const UDP_SERVER: &str = "450000210000000040118e95c6336402c000020100093039000d957e776f726c64";
@@ -72,12 +75,7 @@ fn parse_single_json(output: &Output) -> Value {
 }
 
 fn assert_matches_published_schema(value: &Value) {
-    let schema: Value = serde_json::from_str(include_str!(
-        "../../../schemas/packetcraftr.output.v1.schema.json"
-    ))
-    .expect("published output schema must parse");
-    let validator = jsonschema::validator_for(&schema).expect("published schema must compile");
-    validator
+    schema_validator()
         .validate(value)
         .expect("output document must validate against the published schema");
 }
@@ -148,9 +146,7 @@ fn write_capture_with_later_missing_timestamp() -> tempfile::NamedTempFile {
 
 fn write_truncated_capture() -> tempfile::NamedTempFile {
     let mut file = write_capture();
-    file.write_all(&[0; 8])
-        .expect("truncated record header must write");
-    file.flush().expect("truncated capture must flush");
+    append_truncated_record(&mut file);
     file
 }
 
@@ -216,7 +212,7 @@ fn follow_handles_udp_directions_and_all_output_encodings() {
     let streamed = run(&["--output", "ndjson", "follow", path, "--stream", "udp:0"]);
     assert!(streamed.status.success(), "{:?}", streamed.stderr);
     let records = parse_ndjson(&streamed);
-    assert_contiguous_stream(&records);
+    assert_contiguous(&records);
     assert_eq!(records.len(), 3);
     assert_eq!(records[2]["status"], "success");
 
@@ -273,7 +269,7 @@ fn expert_reports_tcp_state_in_aggregate_stream_and_text_modes() {
         assert!(!output.stdout.is_empty());
         if format == "ndjson" {
             let records = parse_ndjson(&output);
-            assert_contiguous_stream(&records);
+            assert_contiguous(&records);
             assert_eq!(
                 records.last().and_then(|record| record["status"].as_str()),
                 Some("success")
@@ -321,7 +317,7 @@ fn follow_and_expert_stream_failures_terminate_at_the_next_position() {
             records.len() > 1,
             "{command:?} must preserve at least one progressive record"
         );
-        assert_contiguous_stream(&records);
+        assert_contiguous(&records);
         assert!(
             records[..records.len() - 1]
                 .iter()
@@ -406,7 +402,7 @@ fn read_ndjson_preserves_source_identity_and_always_completes() {
     let path = path_text(capture.path());
     let output = run_success(&["--output", "ndjson", "read", path]);
     let records = parse_ndjson(&output);
-    assert_contiguous_stream(&records);
+    assert_contiguous(&records);
     assert_eq!(records.len(), 4);
     for (index, record) in records[..3].iter().enumerate() {
         assert_eq!(record["result"]["event"], "frame");
@@ -432,7 +428,7 @@ fn read_ndjson_preserves_source_identity_and_always_completes() {
         "frame.number == 3",
     ]);
     let records = parse_ndjson(&filtered);
-    assert_contiguous_stream(&records);
+    assert_contiguous(&records);
     assert_eq!(records.len(), 2);
     assert_eq!(records[0]["sequence"], 0);
     assert_eq!(records[0]["result"]["source_frame"], 3);
@@ -534,7 +530,7 @@ fn read_missing_filter_timestamp_uses_source_identity_and_next_envelope_position
     ]);
     assert!(!output.status.success());
     let records = parse_ndjson(&output);
-    assert_contiguous_stream(&records);
+    assert_contiguous(&records);
     assert_eq!(records.len(), 2);
     assert_eq!(records[0]["result"]["source_frame"], 1);
     assert_eq!(records[1]["sequence"], 1);
@@ -552,212 +548,6 @@ fn read_missing_filter_timestamp_uses_source_identity_and_next_envelope_position
     for record in &records {
         assert_matches_published_schema(record);
     }
-}
-
-#[test]
-fn offline_fuzz_is_bounded_reproducible_and_reports_rejections() {
-    let packet = "ipv4(src=192.0.2.1,dst=198.51.100.2)/\
-                  udp(sport=12345,dport=9)/raw(text=hello)";
-    let arguments = [
-        "--output",
-        "json",
-        "fuzz",
-        "--packet",
-        packet,
-        "--seed",
-        "7",
-        "--cases",
-        "32",
-        "--max-field-bytes",
-        "32",
-        "--max-shrink-steps",
-        "3",
-    ];
-    let first = run(&arguments);
-    let second = run(&arguments);
-    assert!(first.status.success(), "{:?}", first.stderr);
-    assert!(second.status.success(), "{:?}", second.stderr);
-    assert_eq!(first.stdout, second.stdout);
-    let value = parse_json(&first);
-    assert_eq!(value["result"]["cases_generated"], 32);
-    let built = value["result"]["cases_built"].as_u64().expect("count");
-    let rejected = value["result"]["cases_rejected"].as_u64().expect("count");
-    assert_eq!(built + rejected, 32);
-    assert!(built > 0);
-    assert!(rejected > 0);
-
-    let permissive = run(&[
-        "--output",
-        "ndjson",
-        "fuzz",
-        "--packet",
-        packet,
-        "--seed",
-        "11",
-        "--first-case",
-        "100",
-        "--cases",
-        "8",
-        "--mode",
-        "permissive",
-        "--strategy",
-        "malformed,random",
-        "--field",
-        "0.ttl",
-        "--field",
-        "2.bytes",
-        "--max-field-bytes",
-        "16",
-        "--max-shrink-steps",
-        "2",
-    ]);
-    assert!(permissive.status.success(), "{:?}", permissive.stderr);
-    let lines: Vec<&str> = std::str::from_utf8(&permissive.stdout)
-        .expect("NDJSON must be UTF-8")
-        .lines()
-        .collect();
-    assert_eq!(lines.len(), 9);
-    let terminal: Value = serde_json::from_str(lines.last().expect("terminal record"))
-        .expect("terminal record must parse");
-    assert_eq!(terminal["result"]["event"], "complete");
-}
-
-#[test]
-fn offline_fuzz_rejects_live_only_options_and_has_an_independent_packet_limit() {
-    let base = ["fuzz", "--packet", "raw(text=hi)", "--cases", "1"];
-    for live_only in [
-        &["--allow-malformed-live"][..],
-        &["--destination", "127.0.0.1"],
-        &["--timeout-ms", "1"],
-        &["--rate", "1"],
-        &["--interface", "1"],
-        &["--source", "127.0.0.1"],
-        &["--link-mode", "layer3"],
-        &["--max-queue-frames", "1"],
-        &["--max-captured-bytes", "64"],
-        &["--snap-length", "64"],
-        &["--overflow-policy", "drop-newest"],
-        &["--allow-public-destinations"],
-        &["--allow-permissive-packets"],
-        &["--max-packets", "1"],
-        &["--max-bytes", "64"],
-    ] {
-        let arguments = base
-            .iter()
-            .copied()
-            .chain(live_only.iter().copied())
-            .collect::<Vec<_>>();
-        let output = run(&arguments);
-        assert_eq!(output.status.code(), Some(2), "{arguments:?}");
-        assert!(
-            String::from_utf8_lossy(&output.stderr).contains("--live"),
-            "{arguments:?}: {:?}",
-            output.stderr
-        );
-    }
-
-    let offline = run(&[
-        "--output",
-        "json",
-        "fuzz",
-        "--packet",
-        "raw(text=hi)",
-        "--cases",
-        "1",
-        "--max-packet-bytes",
-        "64",
-    ]);
-    assert!(offline.status.success(), "{:?}", offline.stderr);
-}
-
-#[test]
-fn fuzz_stream_preserves_cases_before_a_late_campaign_failure() {
-    let output = run(&[
-        "--output",
-        "ndjson",
-        "fuzz",
-        "--packet",
-        "raw(text=abcd)",
-        "--field",
-        "0.bytes",
-        "--strategy",
-        "bit-flip",
-        "--cases",
-        "3",
-        "--max-cases",
-        "3",
-        "--max-packet-bytes",
-        "32",
-        "--max-total-bytes",
-        "60",
-        "--max-field-bytes",
-        "16",
-    ]);
-    assert_eq!(output.status.code(), Some(6));
-    let records = parse_ndjson(&output);
-    assert_contiguous_stream(&records);
-    for record in &records {
-        assert_matches_published_schema(record);
-    }
-    assert_eq!(records.len(), 3);
-    assert_eq!(records[0]["result"]["case"]["index"], 0);
-    assert_eq!(records[1]["result"]["case"]["index"], 1);
-    assert_eq!(records[2]["status"], "error");
-    assert_eq!(records[2]["sequence"], 2);
-    assert!(
-        records
-            .iter()
-            .all(|record| record["result"]["event"] != "complete")
-    );
-}
-
-#[test]
-fn fuzz_aggregate_is_collected_from_the_streamed_case_path() {
-    let common = [
-        "fuzz",
-        "--packet",
-        "raw(text=abcd)",
-        "--field",
-        "0.bytes",
-        "--strategy",
-        "bit-flip",
-        "--cases",
-        "3",
-        "--max-cases",
-        "3",
-        "--max-packet-bytes",
-        "32",
-        "--max-total-bytes",
-        "100",
-        "--max-field-bytes",
-        "16",
-    ];
-    let aggregate_arguments = ["--output", "json"]
-        .into_iter()
-        .chain(common)
-        .collect::<Vec<_>>();
-    let stream_arguments = ["--output", "ndjson"]
-        .into_iter()
-        .chain(common)
-        .collect::<Vec<_>>();
-    let aggregate = parse_json(&run_success(&aggregate_arguments));
-    let streamed = parse_ndjson(&run_success(&stream_arguments));
-    let streamed_cases = streamed[..streamed.len() - 1]
-        .iter()
-        .map(|record| record["result"]["case"].clone())
-        .collect::<Vec<_>>();
-    let complete = streamed.last().expect("fuzz completion record");
-
-    assert_eq!(
-        aggregate["result"]["cases"]
-            .as_array()
-            .expect("aggregate fuzz cases"),
-        &streamed_cases
-    );
-    for field in ["cases_generated", "cases_built", "cases_rejected"] {
-        assert_eq!(aggregate["result"][field], complete["result"][field]);
-    }
-    assert_eq!(aggregate["stats"], complete["stats"]);
 }
 
 #[test]

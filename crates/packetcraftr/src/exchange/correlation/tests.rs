@@ -34,9 +34,9 @@ fn decoded_evidence(bytes: &'static [u8]) -> DecodedPacket {
 #[test]
 fn unsolicited_freshness_requires_proven_ingress_after_at_least_one_send() {
     let sent = [
-        crate::evidence::test_sent_packet(raw_packet()),
-        crate::evidence::test_sent_packet(raw_packet()),
-        crate::evidence::test_sent_packet(raw_packet()),
+        Arc::new(crate::evidence::test_sent_packet(raw_packet())),
+        Arc::new(crate::evidence::test_sent_packet(raw_packet())),
+        Arc::new(crate::evidence::test_sent_packet(raw_packet())),
     ];
     let first_marker = sent[0].timing().freshness_marker().monotonic();
     let second_marker = sent[1].timing().freshness_marker().monotonic();
@@ -79,10 +79,10 @@ fn capture_inside_submission_interval_is_not_proven_fresh() {
     let submission = Submission::start();
     let inside = submission.started().monotonic();
     std::thread::yield_now();
-    let sent = [crate::evidence::test_sent_packet_with_report(
+    let sent = [Arc::new(crate::evidence::test_sent_packet_with_report(
         raw_packet(),
         submission.complete(1, Bytes::from_static(&[0])),
-    )];
+    ))];
     let deadline = sent[0].timing().freshness_marker().monotonic() + Duration::from_secs(1);
 
     assert!(unsolicited_freshness(Some(inside), &sent, deadline).is_none());
@@ -125,8 +125,7 @@ fn workflow_deadline_expiry_preserves_unsolicited_order_and_discards_freshness()
     assert!(accumulator.unsolicited.is_empty());
     assert_eq!(
         accumulator
-            .take_events()
-            .into_iter()
+            .drain_events()
             .map(|event| match event {
                 super::super::Event::Unsolicited { frame } => frame.original,
                 _ => panic!("deadline candidates must become unsolicited events"),
@@ -139,7 +138,7 @@ fn workflow_deadline_expiry_preserves_unsolicited_order_and_discards_freshness()
 #[test]
 fn workflow_matcher_crossing_deadline_expires_and_retains_candidates() {
     let received_at = Instant::now();
-    let sent = [crate::evidence::test_sent_packet(raw_packet())];
+    let sent = [Arc::new(crate::evidence::test_sent_packet(raw_packet()))];
     let prepared = [PreparedPacket {
         built: sent[0].built().clone(),
         route: sent[0].route().clone(),
@@ -188,8 +187,7 @@ fn workflow_matcher_crossing_deadline_expires_and_retains_candidates() {
     assert!(accumulator.unsolicited.is_empty());
     assert_eq!(
         accumulator
-            .take_events()
-            .into_iter()
+            .drain_events()
             .map(|event| match event {
                 super::super::Event::Unsolicited { frame } => frame.original,
                 _ => panic!("expired candidates must become unsolicited events"),

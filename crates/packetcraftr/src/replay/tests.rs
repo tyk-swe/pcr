@@ -190,14 +190,14 @@ fn replay_timing_requires_capture_time_only_for_source_interval_modes() {
     assert!(matches!(
         Timing::Original.delay_between(None, Some(UNIX_EPOCH), 2),
         Err(Error::TimestampUnavailable {
-            sequence: 2,
+            source_index: 2,
             mode: "original"
         })
     ));
     assert!(matches!(
         Timing::Scaled(2.0).delay_between(Some(UNIX_EPOCH), None, 3),
         Err(Error::TimestampUnavailable {
-            sequence: 3,
+            source_index: 3,
             mode: "scaled"
         })
     ));
@@ -240,12 +240,12 @@ fn replay_network_envelope_rejects_malformed_ip_envelopes() {
 }
 
 #[test]
-fn replay_link_mode_errors_preserve_sequence_and_requested_mode() {
+fn replay_link_mode_errors_preserve_source_index_and_requested_mode() {
     let error = replay_link_mode(7, LinkType(999), LinkMode::Auto).unwrap_err();
     assert!(matches!(
         error,
         Error::UnsupportedLinkType {
-            sequence: 7,
+            source_index: 7,
             link_type: 999
         }
     ));
@@ -254,7 +254,7 @@ fn replay_link_mode_errors_preserve_sequence_and_requested_mode() {
     assert!(matches!(
         error,
         Error::LinkModeMismatch {
-            sequence: 8,
+            source_index: 8,
             link_type,
             requested: LinkMode::Layer3
         } if link_type == LinkType::ETHERNET.0
@@ -277,7 +277,13 @@ fn replay_transmission_evidence_requires_exact_wire_length_and_bytes() {
         &Submission::start().complete(2, frame.bytes().clone()),
     )
     .unwrap_err();
-    assert!(matches!(partial, Error::Transmission { sequence: 2, .. }));
+    assert!(matches!(
+        partial,
+        Error::Transmission {
+            source_index: 2,
+            ..
+        }
+    ));
 
     let mismatch = validate_transmission_evidence(
         3,
@@ -285,7 +291,13 @@ fn replay_transmission_evidence_requires_exact_wire_length_and_bytes() {
         &Submission::start().complete(3, Bytes::from_static(&[0x45, 1, 3])),
     )
     .unwrap_err();
-    assert!(matches!(mismatch, Error::Transmission { sequence: 3, .. }));
+    assert!(matches!(
+        mismatch,
+        Error::Transmission {
+            source_index: 3,
+            ..
+        }
+    ));
 }
 
 #[test]
@@ -307,7 +319,13 @@ fn replay_authorization_denial_has_no_later_io_side_effects() {
     )
     .unwrap_err();
 
-    assert!(matches!(error, Error::Authorization { sequence: 0, .. }));
+    assert!(matches!(
+        error,
+        Error::Authorization {
+            source_index: 0,
+            ..
+        }
+    ));
     assert_eq!(authorizer.calls, 1);
     assert_eq!(transmitter.validation_calls, 0);
     assert_eq!(transmitter.transmission_calls, 0);
@@ -408,7 +426,7 @@ fn replay_selector_skipped_frames_still_consume_the_frame_budget() {
     assert!(matches!(
         error,
         Error::FrameLimit {
-            sequence: 2,
+            source_index: 2,
             actual: 3,
             limit: 2,
         }

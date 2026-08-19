@@ -8,8 +8,6 @@ use packetcraftr::{analysis::pcap::Reader, core::frame::Frame};
 use crate::errors::CliError;
 use crate::filtering::FrameSelector;
 
-use super::classified_error;
-
 /// Bridges the CLI display filter to replay selection. Rejected frames skip
 /// authorization, delay, and transmission; undecodable frames fail replay.
 pub(super) struct FilterSelector<'a> {
@@ -49,5 +47,5 @@ where
         clock,
         sink,
     )
-    .map_err(classified_error)
+    .map_err(CliError::classified)
 }

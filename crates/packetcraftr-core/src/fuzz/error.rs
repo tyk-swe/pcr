@@ -6,7 +6,7 @@ use std::time::Duration;
 use thiserror::Error;
 
 use crate::budget::DeadlineExceeded;
-use crate::error::{BoundaryError, Classification, Classified, Kind};
+use crate::error::{BoundaryError, Classification, Classified, Context, Kind};
 
 use super::request::Target;
 
@@ -75,11 +75,14 @@ impl Classified for Error {
                     "reduce cases, packet sizes, timeout, or rate delay, or deliberately raise the finite fuzz limit",
                 ),
             ),
-            Self::Output { .. } => Classification::new(
-                "io.fuzz_output",
-                Kind::Io,
-                Some("inspect the output sink and account for fuzz cases already generated"),
-            ),
+            Self::Output { source } => source.classification(),
+        }
+    }
+
+    fn context(&self) -> Context {
+        match self {
+            Self::Output { source } => source.context(),
+            _ => Context::default(),
         }
     }
 

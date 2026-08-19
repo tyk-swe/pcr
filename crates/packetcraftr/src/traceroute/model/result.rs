@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 use std::net::IpAddr;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use serde::Serialize;
@@ -93,11 +94,11 @@ pub struct Result {
 #[derive(Clone, Debug)]
 pub enum Event {
     Probe {
-        target: String,
-        destination: IpAddr,
+        target: Arc<str>,
         probe: ProbeEvidence,
     },
     Undecoded(UndecodedEvidence),
+    Diagnostic(Diagnostic),
 }
 
 #[derive(Clone, Debug)]

@@ -93,7 +93,8 @@ where
                 sent.len()
             )));
         }
-        let sent = sent.pop().expect("validated one sent fuzz packet");
+        let sent =
+            crate::exchange::into_sent_packet(sent.pop().expect("validated one sent fuzz packet"));
         Ok(Execution {
             permit: case.permit,
             sent,

@@ -29,7 +29,7 @@ use super::execution::{
     worst_case_duration,
 };
 use super::request::LiveOptions;
-use super::result::{Case, CaseOutcome, Event, Result, Stats, Summary};
+use super::result::{Case, CaseOutcome, Result, Stats, Summary};
 use super::{
     SYNTHESIZED_ETHERNET_BYTES,
     decode::{dissect_built, has_link_root},
@@ -51,16 +51,17 @@ where
     C: Clock,
 {
     let mut cases = Vec::new();
-    let summary = run_with_events(
-        request,
-        live,
-        packet,
-        registry,
+    let summary = run_observed(
+        RunInput {
+            request,
+            live,
+            packet,
+            registry,
+        },
         authorizer,
         executor,
         clock,
-        |event| {
-            let Event::Case(case) = event;
+        |case, _| {
             cases.push(case);
             Ok(())
         },
@@ -75,7 +76,11 @@ where
 }
 
 /// Executes one fully authorized campaign and publishes cases in deterministic
-/// case order as soon as each live outcome is final.
+/// case order as soon as each live outcome is final. The bounded callback
+/// worker acknowledges every case before later transmission, preserves its
+/// classification on failure, and cannot keep live I/O armed beyond the
+/// campaign deadline. A callback that outlives the deadline may finish after
+/// this function returns and must therefore own its state.
 #[expect(
     clippy::too_many_arguments,
     reason = "live fuzz execution requires the request, approved I/O boundaries, clock, and progressive sink"
@@ -88,14 +93,64 @@ pub fn run_with_events<A, E, C, F>(
     authorizer: &mut A,
     executor: &mut E,
     clock: &mut C,
+    emit: F,
+) -> std::result::Result<Summary, Error>
+where
+    A: Authorizer,
+    E: Executor,
+    C: Clock,
+    F: FnMut(Case) -> std::result::Result<(), crate::BoundaryError> + Send + 'static,
+{
+    let sink =
+        packetcraftr_core::progress::Sink::new(emit).map_err(|source| Error::Output { source })?;
+    run_observed(
+        RunInput {
+            request,
+            live,
+            packet,
+            registry,
+        },
+        authorizer,
+        executor,
+        clock,
+        move |case, deadline| match sink.emit(case, deadline) {
+            Ok(()) => Ok(()),
+            Err(packetcraftr_core::progress::EmitError::Deadline(error)) => {
+                Err(duration_limit(error))
+            }
+            Err(packetcraftr_core::progress::EmitError::Output(source)) => {
+                Err(Error::Output { source })
+            }
+        },
+    )
+}
+
+struct RunInput<'a> {
+    request: &'a packet_fuzz::Request,
+    live: LiveOptions,
+    packet: Packet,
+    registry: Arc<Registry>,
+}
+
+fn run_observed<A, E, C, F>(
+    input: RunInput<'_>,
+    authorizer: &mut A,
+    executor: &mut E,
+    clock: &mut C,
     mut emit: F,
 ) -> std::result::Result<Summary, Error>
 where
     A: Authorizer,
     E: Executor,
     C: Clock,
-    F: FnMut(Event) -> std::result::Result<(), crate::BoundaryError>,
+    F: FnMut(Case, &Deadline) -> std::result::Result<(), Error>,
 {
+    let RunInput {
+        request,
+        live,
+        packet,
+        registry,
+    } = input;
     let live = live.validate()?;
     let mut deadline = Deadline::new(request.limits.max_duration);
     let live_dissector = Dissector::new(Arc::clone(&registry));
@@ -241,18 +296,21 @@ impl ExecutionPhase<'_> {
     where
         E: Executor,
         C: Clock,
-        F: FnMut(Event) -> std::result::Result<(), crate::BoundaryError>,
+        F: FnMut(Case, &Deadline) -> std::result::Result<(), Error>,
     {
         let cases = std::mem::take(&mut self.cases);
         let mut built_ordinal = 0;
         for mut case in cases {
+            let diagnostic_start = self.diagnostics.len();
             if case.built.is_some() {
                 self.pace(built_ordinal, case.index, clock)?;
                 self.deadline.check().map_err(duration_limit)?;
                 self.execute_case(&mut case, executor)?;
                 built_ordinal += 1;
             }
-            emit(Event::Case(case)).map_err(|source| Error::Output { source })?;
+            case.diagnostics
+                .extend(self.diagnostics[diagnostic_start..].iter().cloned());
+            emit(case, &self.deadline)?;
         }
         self.finish()
     }
@@ -388,7 +446,7 @@ impl ExecutionPhase<'_> {
         Ok(Summary {
             seed: self.request.seed,
             first_case: self.request.first_case,
-            diagnostics: self.diagnostics,
+            diagnostics: Vec::new(),
             stats: self.stats,
         })
     }

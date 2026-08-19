@@ -76,44 +76,94 @@ pub(crate) fn push_undecoded_limit_diagnostic(
     );
 }
 
-/// Applies the operation-wide evidence budget and undecoded retention cap in
-/// one place while allowing workflows to retain their own typed wrapper.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the retention seam threads the frame batch, its output sink, and every bound that \
-              caps it; a parameter struct would only rename the same fields"
-)]
-pub(crate) fn retain_undecoded_frames<T, E>(
-    frames: Vec<Frame>,
-    retained_count: &mut usize,
+/// Operation-wide evidence state for retaining undecodable frames.
+pub(crate) struct UndecodedRetention<'a> {
+    retained_count: &'a mut usize,
     max_undecoded: usize,
-    budget: &mut Budget,
+    budget: &'a mut Budget,
     descriptor: EvidenceDiagnosticDescriptor,
     max_evidence_frames: usize,
     max_evidence_bytes: usize,
-    diagnostics: &mut Vec<Diagnostic>,
-    mut map: impl FnMut(Frame) -> T,
-    mut emit: impl FnMut(T) -> Result<(), E>,
-    mut check_deadline: impl FnMut() -> Result<(), E>,
-) -> Result<(), E> {
-    for frame in frames {
-        check_deadline()?;
-        if *retained_count >= max_undecoded {
-            push_undecoded_limit_diagnostic(diagnostics, descriptor, max_undecoded);
-            break;
-        }
-        if retain_evidence(
+    diagnostics: &'a mut Vec<Diagnostic>,
+}
+
+impl<'a> UndecodedRetention<'a> {
+    pub(crate) fn new(
+        retained_count: &'a mut usize,
+        max_undecoded: usize,
+        budget: &'a mut Budget,
+        descriptor: EvidenceDiagnosticDescriptor,
+        max_evidence_frames: usize,
+        max_evidence_bytes: usize,
+        diagnostics: &'a mut Vec<Diagnostic>,
+    ) -> Self {
+        Self {
+            retained_count,
+            max_undecoded,
             budget,
-            &frame,
             descriptor,
             max_evidence_frames,
             max_evidence_bytes,
             diagnostics,
-        ) {
-            *retained_count += 1;
-            emit(map(frame))?;
         }
-        check_deadline()?;
+    }
+
+    pub(crate) fn retain<T, E>(
+        &mut self,
+        frames: Vec<Frame>,
+        mut map: impl FnMut(Frame) -> T,
+        mut map_diagnostic: impl FnMut(Diagnostic) -> T,
+        mut emit: impl FnMut(T) -> Result<(), E>,
+        mut check_deadline: impl FnMut() -> Result<(), E>,
+    ) -> Result<(), E> {
+        for frame in frames {
+            check_deadline()?;
+            let diagnostic_start = self.diagnostics.len();
+            if *self.retained_count >= self.max_undecoded {
+                push_undecoded_limit_diagnostic(
+                    self.diagnostics,
+                    self.descriptor,
+                    self.max_undecoded,
+                );
+                emit_diagnostics_since(
+                    self.diagnostics,
+                    diagnostic_start,
+                    &mut map_diagnostic,
+                    &mut emit,
+                )?;
+                break;
+            }
+            if retain_evidence(
+                self.budget,
+                &frame,
+                self.descriptor,
+                self.max_evidence_frames,
+                self.max_evidence_bytes,
+                self.diagnostics,
+            ) {
+                *self.retained_count += 1;
+                emit(map(frame))?;
+            }
+            emit_diagnostics_since(
+                self.diagnostics,
+                diagnostic_start,
+                &mut map_diagnostic,
+                &mut emit,
+            )?;
+            check_deadline()?;
+        }
+        Ok(())
+    }
+}
+
+fn emit_diagnostics_since<T, E>(
+    diagnostics: &[Diagnostic],
+    start: usize,
+    map: &mut impl FnMut(Diagnostic) -> T,
+    emit: &mut impl FnMut(T) -> Result<(), E>,
+) -> Result<(), E> {
+    for diagnostic in diagnostics[start..].iter().cloned() {
+        emit(map(diagnostic))?;
     }
     Ok(())
 }

@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 use std::net::IpAddr;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use serde::Serialize;
@@ -46,6 +47,9 @@ pub enum ProbeStatus {
 #[derive(Clone, Debug)]
 pub struct ProbeEvidence {
     pub sequence: u64,
+    pub address: IpAddr,
+    pub transport: Transport,
+    pub port: Option<u16>,
     pub attempt: u32,
     pub status: ProbeStatus,
     pub classification: Classification,
@@ -63,7 +67,7 @@ pub struct Endpoint {
     pub transport: Transport,
     pub port: Option<u16>,
     pub classification: Classification,
-    pub evidence: Vec<ProbeEvidence>,
+    pub probes: Vec<ProbeEvidence>,
 }
 
 #[derive(Clone, Debug)]
@@ -79,15 +83,13 @@ pub struct Result {
 #[derive(Clone, Debug)]
 pub enum Event {
     Probe {
-        target: String,
-        address: IpAddr,
-        transport: Transport,
-        port: Option<u16>,
-        evidence: ProbeEvidence,
+        target: Arc<str>,
+        probe: ProbeEvidence,
     },
     Undecoded {
         frame: Frame,
     },
+    Diagnostic(Diagnostic),
 }
 
 #[derive(Clone, Debug)]

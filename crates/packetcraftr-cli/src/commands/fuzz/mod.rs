@@ -99,7 +99,7 @@ fn prepare_live(
         },
     }
     .validate()
-    .map_err(classified_error)?;
+    .map_err(CliError::classified)?;
     let policy = arguments.policy.clone().into_policy();
     policy.validate().map_err(CliError::classified)?;
     validate_selector(arguments.route.interface.as_deref()).map(|_| ())?;
@@ -134,15 +134,56 @@ fn execute_and_render(
     format: output::contract::Format,
     stream: &mut NdjsonStream,
 ) -> Result<(), CliError> {
-    let mut observer = Observer::new(format, stream);
     if let Some(live) = live {
-        let mut executor = Executor {
-            client: client(Arc::clone(&registry), live.policy.clone()),
-            exchange: live.exchange,
-            interface: DeferredInterface::new(live.interface),
-        };
-        let mut authorizer = packetcraftr::fuzz::PolicyAuthorizer::new(&live.policy);
-        let mut clock = packetcraftr::clock::SystemClock;
+        execute_live(request, packet, registry, live, format, stream)
+    } else {
+        execute_offline(request, packet, registry, format, stream)
+    }
+}
+
+fn execute_offline(
+    request: core::fuzz::Request,
+    packet: core::Packet,
+    registry: Arc<core::registry::Registry>,
+    format: output::contract::Format,
+    stream: &NdjsonStream,
+) -> Result<(), CliError> {
+    if format == output::contract::Format::Ndjson {
+        let event_stream = stream.clone();
+        let summary = core::fuzz::run_with_events(&request, packet, registry, move |case| {
+            output::fuzz::Event::try_from_offline(case)
+                .map_err(CliError::classified)
+                .and_then(|event| {
+                    super::progressive::render_event(event, Vec::new(), &event_stream)
+                })
+                .map_err(CliError::into_boundary_error)
+        })
+        .map_err(CliError::classified)?;
+        return rendering::render_offline_complete(summary, stream);
+    }
+    let result = core::fuzz::run(&request, packet, registry).map_err(CliError::classified)?;
+    let (result, diagnostics, stats) =
+        output::fuzz::Result::try_from_offline(result).map_err(CliError::classified)?;
+    render_collected(result, diagnostics, stats, format)
+}
+
+fn execute_live(
+    request: core::fuzz::Request,
+    packet: core::Packet,
+    registry: Arc<core::registry::Registry>,
+    live: PreparedLive,
+    format: output::contract::Format,
+    stream: &NdjsonStream,
+) -> Result<(), CliError> {
+    let mut executor = Executor {
+        client: client(Arc::clone(&registry), live.policy.clone()),
+        exchange: live.exchange,
+        interface: DeferredInterface::new(live.interface),
+    };
+    let mut authorizer = packetcraftr::fuzz::PolicyAuthorizer::new(&live.policy);
+    let mut clock = packetcraftr::clock::SystemClock;
+    if format == output::contract::Format::Ndjson {
+        let event_stream = stream.clone();
         let summary = packetcraftr::fuzz::run_with_events(
             &request,
             live.options,
@@ -151,94 +192,31 @@ fn execute_and_render(
             &mut authorizer,
             &mut executor,
             &mut clock,
-            |event| {
-                observer
-                    .observe_live(request.seed, event)
+            move |case| {
+                output::fuzz::Event::try_from_live(case)
+                    .map_err(CliError::classified)
+                    .and_then(|event| {
+                        super::progressive::render_event(event, Vec::new(), &event_stream)
+                    })
                     .map_err(CliError::into_boundary_error)
             },
         )
-        .map_err(classified_error)?;
-        observer.finish_live(summary, format)
-    } else {
-        let summary = core::fuzz::run_with_events(&request, packet, registry, |event| {
-            observer
-                .observe_offline(request.seed, event)
-                .map_err(CliError::into_boundary_error)
-        })
         .map_err(CliError::classified)?;
-        observer.finish_offline(summary, format)
+        return rendering::render_live_complete(summary, stream);
     }
-}
-
-struct Observer<'a> {
-    stream: Option<&'a mut NdjsonStream>,
-    cases: Vec<output::fuzz::Case>,
-}
-
-impl<'a> Observer<'a> {
-    fn new(format: output::contract::Format, stream: &'a mut NdjsonStream) -> Self {
-        Self {
-            stream: (format == output::contract::Format::Ndjson).then_some(stream),
-            cases: Vec::new(),
-        }
-    }
-
-    fn observe_offline(
-        &mut self,
-        operation_seed: u64,
-        event: core::fuzz::Event,
-    ) -> Result<(), CliError> {
-        let event = output::fuzz::Event::try_from_offline(operation_seed, event)
-            .map_err(CliError::classified)?;
-        self.observe(event)
-    }
-
-    fn observe_live(
-        &mut self,
-        operation_seed: u64,
-        event: packetcraftr::fuzz::Event,
-    ) -> Result<(), CliError> {
-        let event = output::fuzz::Event::try_from_live(operation_seed, event)
-            .map_err(CliError::classified)?;
-        self.observe(event)
-    }
-
-    fn observe(&mut self, event: output::fuzz::Event) -> Result<(), CliError> {
-        if let Some(stream) = self.stream.as_deref_mut() {
-            return rendering::render_event(event, stream);
-        }
-        let output::fuzz::Event::Case { case, .. } = event else {
-            unreachable!("execution observers receive only fuzz case events")
-        };
-        self.cases.push(*case);
-        Ok(())
-    }
-
-    fn finish_offline(
-        self,
-        summary: core::fuzz::Summary,
-        format: output::contract::Format,
-    ) -> Result<(), CliError> {
-        if let Some(stream) = self.stream {
-            return rendering::render_offline_complete(&summary, stream);
-        }
-        let result = output::fuzz::Result::from_offline_events(&summary, self.cases);
-        let stats = (&summary.stats).into();
-        render_collected(result, summary.diagnostics, stats, format)
-    }
-
-    fn finish_live(
-        self,
-        summary: packetcraftr::fuzz::Summary,
-        format: output::contract::Format,
-    ) -> Result<(), CliError> {
-        if let Some(stream) = self.stream {
-            return rendering::render_live_complete(&summary, stream);
-        }
-        let result = output::fuzz::Result::from_live_events(&summary, self.cases);
-        let stats = (&summary.stats).into();
-        render_collected(result, summary.diagnostics, stats, format)
-    }
+    let result = packetcraftr::fuzz::run(
+        &request,
+        live.options,
+        packet,
+        registry,
+        &mut authorizer,
+        &mut executor,
+        &mut clock,
+    )
+    .map_err(CliError::classified)?;
+    let (result, diagnostics, stats) =
+        output::fuzz::Result::try_from_live(result).map_err(CliError::classified)?;
+    render_collected(result, diagnostics, stats, format)
 }
 
 fn render_collected(
@@ -252,8 +230,4 @@ fn render_collected(
         output::contract::Format::Json => rendering::render_aggregate(result, diagnostics, stats),
         _ => unreachable!("fuzz format is checked before command dispatch"),
     }
-}
-
-pub(crate) fn classified_error(error: packetcraftr::fuzz::Error) -> CliError {
-    CliError::classified(error)
 }

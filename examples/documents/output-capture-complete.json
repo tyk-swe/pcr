@@ -5,10 +5,7 @@
   "status": "success",
   "sequence": 1,
   "result": {
-    "event": "complete",
-    "frames_captured": 100,
-    "frames_matched": 1,
-    "captured_bytes": 8042
+    "event": "complete"
   },
   "diagnostics": [],
   "stats": {

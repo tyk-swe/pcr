@@ -1,0 +1,21 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "exchange",
+  "mode": "stream",
+  "sequence": 3,
+  "status": "success",
+  "result": {
+    "event": "undecoded",
+    "frame": {
+      "timestamp": {
+        "unix_seconds": 1770000000,
+        "nanoseconds": 6000000
+      },
+      "captured_length": 2,
+      "original_length": 2,
+      "link_type": 147,
+      "bytes_hex": "ffff"
+    }
+  },
+  "diagnostics": []
+}

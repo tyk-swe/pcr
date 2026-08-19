@@ -52,7 +52,7 @@ fn ensure_correlation_active(deadline: Instant) -> Result<(), CorrelationDeadlin
 fn select_attribution(
     registry: &Registry,
     prepared: &[PreparedPacket],
-    sent: &[crate::SentPacket],
+    sent: &[std::sync::Arc<crate::SentPacket>],
     received_at: Option<Instant>,
     decoded: &DecodedPacket,
     deadline: Instant,
@@ -476,7 +476,7 @@ impl Accumulator {
 
 fn unsolicited_freshness(
     received_at: Option<Instant>,
-    sent: &[crate::SentPacket],
+    sent: &[std::sync::Arc<crate::SentPacket>],
     deadline: Instant,
 ) -> Option<UnsolicitedFreshness> {
     let received_at = received_at.filter(|received_at| *received_at <= deadline)?;

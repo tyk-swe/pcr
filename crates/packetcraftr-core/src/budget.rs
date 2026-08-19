@@ -9,6 +9,7 @@
 
 #![forbid(unsafe_code)]
 
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// Cooperative operation deadline combining wall time with deterministic
@@ -18,16 +19,31 @@ pub struct Deadline {
     baseline: Instant,
     accounted: Duration,
     limit: Duration,
+    now: Arc<dyn Fn() -> Instant + Send + Sync>,
 }
 
 impl Deadline {
     /// Starts a deadline that expires once accounted time exceeds `limit`.
     #[must_use]
     pub fn new(limit: Duration) -> Self {
+        Self::with_time_source(limit, Instant::now)
+    }
+
+    /// Starts a deadline using an explicit monotonic time source.
+    ///
+    /// This constructor supports deterministic hosts and tests. The source
+    /// must never move backward.
+    #[must_use]
+    pub fn with_time_source(
+        limit: Duration,
+        now: impl Fn() -> Instant + Send + Sync + 'static,
+    ) -> Self {
+        let now = Arc::new(now);
         Self {
-            baseline: Instant::now(),
+            baseline: now(),
             accounted: Duration::ZERO,
             limit,
+            now,
         }
     }
 
@@ -37,7 +53,7 @@ impl Deadline {
     ///
     /// Returns [`DeadlineExceeded`] once accounted time passes the limit.
     pub fn check(&self) -> Result<(), DeadlineExceeded> {
-        self.check_elapsed(self.elapsed_at(Instant::now())?)
+        self.check_elapsed(self.elapsed_at((self.now)())?)
     }
 
     /// Checks prospective deterministic time without committing it.
@@ -48,7 +64,7 @@ impl Deadline {
     /// limit, leaving the accounted total untouched.
     pub fn check_additional(&self, additional: Duration) -> Result<(), DeadlineExceeded> {
         let actual = self
-            .elapsed_at(Instant::now())?
+            .elapsed_at((self.now)())?
             .checked_add(additional)
             .ok_or(self.overflow_error())?;
         self.check_elapsed(actual)
@@ -62,7 +78,7 @@ impl Deadline {
     /// Returns [`DeadlineExceeded`] when committed plus prospective time passes
     /// the limit.
     pub fn start_accounting(&mut self, prospective: Duration) -> Result<(), DeadlineExceeded> {
-        let now = Instant::now();
+        let now = (self.now)();
         let elapsed = self.elapsed_at(now)?;
         let actual = elapsed
             .checked_add(prospective)
@@ -96,6 +112,18 @@ impl Deadline {
         Ok(())
     }
 
+    /// Returns the wall-clock duration still available to an interruptible
+    /// boundary.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DeadlineExceeded`] after the operation budget is spent.
+    pub fn remaining(&self) -> Result<Duration, DeadlineExceeded> {
+        let elapsed = self.elapsed_at((self.now)())?;
+        self.check_elapsed(elapsed)?;
+        Ok(self.limit.saturating_sub(elapsed))
+    }
+
     /// Commits a completed phase, charging whichever of wall time or reported
     /// elapsed time is larger.
     ///
@@ -103,7 +131,7 @@ impl Deadline {
     ///
     /// Returns [`DeadlineExceeded`] when the committed total passes the limit.
     pub fn account(&mut self, elapsed: Duration) -> Result<(), DeadlineExceeded> {
-        let now = Instant::now();
+        let now = (self.now)();
         let phase_elapsed = now.duration_since(self.baseline).max(elapsed);
         self.accounted = self
             .accounted
@@ -115,6 +143,7 @@ impl Deadline {
 }
 
 /// Reports the accounted time that passed a [`Deadline`] and the limit it broke.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DeadlineExceeded {
     pub actual: Duration,
     pub limit: Duration,

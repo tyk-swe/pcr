@@ -82,7 +82,14 @@ pub struct SentPacket {
 }
 
 impl SentPacket {
-    pub(crate) fn try_new(
+    /// Validates a provider receipt against the exact built bytes and route,
+    /// then creates trusted sent evidence.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O contract error when the receipt does not confirm the
+    /// complete exact transmission or the route has no resolved link mode.
+    pub fn try_new(
         built: BuiltPacket,
         route: packetcraftr_netio::route::Materialized,
         report: TransmissionReport,

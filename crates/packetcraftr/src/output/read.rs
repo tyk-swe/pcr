@@ -8,7 +8,7 @@ use packetcraftr_core::frame::Frame as CaptureFrame;
 use serde::Serialize;
 
 use super::contract::Error;
-use super::frame::Captured;
+use super::frame::{Captured, SourceFrame};
 
 use super::frame::Stack;
 
@@ -17,7 +17,7 @@ use super::frame::Stack;
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum Event {
     Frame {
-        source_frame: u64,
+        source_frame: SourceFrame,
         frame: Captured,
         #[serde(skip_serializing_if = "Option::is_none")]
         decoded: Option<Stack>,
@@ -35,7 +35,7 @@ impl Event {
         frame: CaptureFrame,
     ) -> std::result::Result<Self, Error> {
         Ok(Self::Frame {
-            source_frame,
+            source_frame: source_frame.try_into()?,
             frame: Captured::try_from_frame(frame)?,
             decoded: None,
         })
@@ -48,7 +48,7 @@ impl Event {
         decoded: &DecodedPacket,
     ) -> std::result::Result<Self, Error> {
         Ok(Self::Frame {
-            source_frame,
+            source_frame: source_frame.try_into()?,
             frame: Captured::try_from_frame(frame)?,
             decoded: Some(Stack::from_decoded(decoded)),
         })

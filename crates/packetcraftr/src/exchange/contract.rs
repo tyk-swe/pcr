@@ -3,6 +3,7 @@
 
 //! Public exchange options and results.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use packetcraftr_core::frame::Frame;
@@ -58,7 +59,7 @@ pub struct Response {
 #[derive(Clone, Debug)]
 pub struct Result {
     /// Trusted receipts for exact provider-accepted transmissions.
-    pub sent: Vec<crate::SentPacket>,
+    pub sent: Vec<Arc<crate::SentPacket>>,
     pub responses: Vec<Response>,
     pub unanswered: Vec<usize>,
     pub unsolicited: Vec<DecodedPacket>,
@@ -74,7 +75,7 @@ pub struct Result {
 pub enum Event {
     Sent {
         request_index: usize,
-        sent: Box<crate::SentPacket>,
+        sent: Arc<crate::SentPacket>,
     },
     Response(Response),
     Unanswered {
@@ -86,6 +87,7 @@ pub enum Event {
     Undecoded {
         frame: Frame,
     },
+    Diagnostic(packetcraftr_core::diagnostic::Diagnostic),
 }
 
 /// Final exchange metadata published after capture shutdown and validation.
@@ -99,36 +101,106 @@ pub struct Summary {
 /// Reconstructs the aggregate exchange result from progressive domain events.
 #[derive(Default)]
 pub struct Collector {
-    sent: Vec<crate::SentPacket>,
+    sent: Vec<(usize, Arc<crate::SentPacket>)>,
     responses: Vec<Response>,
     unanswered: Vec<usize>,
     unsolicited: Vec<DecodedPacket>,
     undecoded: Vec<Frame>,
+    diagnostics: Vec<packetcraftr_core::diagnostic::Diagnostic>,
 }
 
 impl Collector {
     /// Adds one progressive event to the aggregate result under construction.
     pub fn observe(&mut self, event: Event) {
         match event {
-            Event::Sent { sent, .. } => self.sent.push(*sent),
+            Event::Sent {
+                request_index,
+                sent,
+            } => self.sent.push((request_index, sent)),
             Event::Response(response) => self.responses.push(response),
             Event::Unanswered { request_index } => self.unanswered.push(request_index),
             Event::Unsolicited { frame } => self.unsolicited.push(frame),
             Event::Undecoded { frame } => self.undecoded.push(frame),
+            Event::Diagnostic(diagnostic) => self.diagnostics.push(diagnostic),
         }
     }
 
     /// Combines collected events with final diagnostics and statistics.
-    pub fn finish(self, summary: Summary) -> Result {
-        debug_assert_eq!(self.unanswered, summary.unanswered);
-        Result {
-            sent: self.sent,
+    pub fn finish(mut self, summary: Summary) -> std::result::Result<Result, crate::Error> {
+        self.validate(&summary)?;
+        self.diagnostics.extend(summary.diagnostics);
+        Ok(Result {
+            sent: self.sent.into_iter().map(|(_, sent)| sent).collect(),
             responses: self.responses,
             unanswered: self.unanswered,
             unsolicited: self.unsolicited,
             undecoded: self.undecoded,
-            diagnostics: summary.diagnostics,
+            diagnostics: self.diagnostics,
             stats: summary.stats,
+        })
+    }
+
+    fn validate(&self, summary: &Summary) -> std::result::Result<(), crate::Error> {
+        if self.unanswered != summary.unanswered {
+            return Err(incoherent("unanswered events disagree with the summary"));
         }
+        if self
+            .sent
+            .iter()
+            .enumerate()
+            .any(|(expected, (actual, _))| expected != *actual)
+        {
+            return Err(incoherent(
+                "sent events are missing, duplicated, or reordered",
+            ));
+        }
+        let sent_count = self.sent.len();
+        if self
+            .responses
+            .iter()
+            .any(|response| response.request_index >= sent_count)
+            || self.unanswered.iter().any(|index| *index >= sent_count)
+        {
+            return Err(incoherent(
+                "response or unanswered identity has no sent request",
+            ));
+        }
+        if u64::try_from(sent_count).unwrap_or(u64::MAX) != summary.stats.packets_completed {
+            return Err(incoherent(
+                "sent events disagree with completion statistics",
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn incoherent(message: &str) -> crate::Error {
+    crate::Error::InvalidExchangeEvents {
+        message: message.to_owned(),
+    }
+}
+
+pub(crate) fn into_sent_packet(sent: Arc<crate::SentPacket>) -> crate::SentPacket {
+    Arc::try_unwrap(sent).unwrap_or_else(|sent| (*sent).clone())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn collector_rejects_summary_without_matching_sent_events() {
+        let summary = Summary {
+            unanswered: Vec::new(),
+            diagnostics: Vec::new(),
+            stats: Stats {
+                packets_completed: 1,
+                ..Stats::default()
+            },
+        };
+        assert!(matches!(
+            Collector::default().finish(summary),
+            Err(crate::Error::InvalidExchangeEvents { .. })
+        ));
     }
 }

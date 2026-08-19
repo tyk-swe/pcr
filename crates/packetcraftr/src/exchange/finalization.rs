@@ -33,6 +33,8 @@ impl<C: Session> Transaction<C> {
     {
         let capture_statistics = self.capture.inner.statistics().validate()?;
         self.apply_capture_loss_policy(capture_statistics)?;
+        self.publish_diagnostics(emit)
+            .map_err(OperationError::into_error)?;
         let unanswered = self
             .captured
             .response_counts
@@ -50,7 +52,7 @@ impl<C: Session> Transaction<C> {
         }
         Ok(super::Summary {
             unanswered,
-            diagnostics: self.captured.diagnostics,
+            diagnostics: Vec::new(),
             stats: Stats {
                 packets_attempted: self.packet_count,
                 packets_completed: self.completed_sends,

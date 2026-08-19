@@ -6,7 +6,7 @@ use std::time::Duration;
 use thiserror::Error;
 
 use crate::BoundaryError;
-use packetcraftr_core::error::{Classification, Classified, Kind};
+use packetcraftr_core::error::{Classification, Classified, Context, Kind};
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -82,18 +82,23 @@ impl Classified for Error {
                 Kind::Io,
                 Some("inspect the traceroute timer and account for probes already transmitted"),
             ),
-            Self::Output { .. } => Classification::new(
-                "io.traceroute_output",
-                Kind::Io,
-                Some(
-                    "inspect the output sink and account for traceroute probes already transmitted",
-                ),
-            ),
+            Self::Output { source } => source.classification(),
             Self::InvalidEvidence { .. } | Self::StatisticsOverflow { .. } => Classification::new(
                 "internal.traceroute_evidence",
                 Kind::Internal,
                 Some("treat the trace as incomplete because executor evidence was inconsistent"),
             ),
+        }
+    }
+
+    fn context(&self) -> Context {
+        match self {
+            Self::Authorization(error) | Self::Output { source: error } => error.context(),
+            Self::Execution { sequence, .. }
+            | Self::Clock { sequence, .. }
+            | Self::InvalidEvidence { sequence, .. }
+            | Self::StatisticsOverflow { sequence } => Context::probe_sequence(*sequence),
+            _ => Context::default(),
         }
     }
 

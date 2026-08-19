@@ -206,7 +206,8 @@ const FOLLOW_FORMATS: &[Format] = &[
 pub enum Error {
     UnsupportedFormat { command: Command, format: Format },
     TimestampOutOfRange,
-    SequenceOverflow,
+    InvalidSourceFrame,
+    IncoherentFuzzEvents { message: String },
 }
 
 impl fmt::Display for Error {
@@ -228,8 +229,11 @@ impl fmt::Display for Error {
             Self::TimestampOutOfRange => {
                 formatter.write_str("capture timestamp is outside the signed v1 output range")
             }
-            Self::SequenceOverflow => {
-                formatter.write_str("NDJSON sequence exceeded the v1 unsigned 64-bit range")
+            Self::InvalidSourceFrame => {
+                formatter.write_str("source frame must be a non-zero unsigned 64-bit position")
+            }
+            Self::IncoherentFuzzEvents { message } => {
+                write!(formatter, "fuzz events are incoherent: {message}")
             }
         }
     }
@@ -250,10 +254,15 @@ impl Classified for Error {
                 Kind::Packet,
                 Some("use a capture whose timestamp fits signed 64-bit Unix seconds"),
             ),
-            Self::SequenceOverflow => Classification::new(
-                "internal.output_sequence",
+            Self::InvalidSourceFrame => Classification::new(
+                "internal.source_frame",
                 Kind::Internal,
-                Some("split the stream before the unsigned 64-bit sequence limit"),
+                Some("use the one-based source position assigned while reading or capturing"),
+            ),
+            Self::IncoherentFuzzEvents { .. } => Classification::new(
+                "internal.fuzz_event_coherence",
+                Kind::Internal,
+                Some("collect cases from exactly one complete campaign in publication order"),
             ),
         }
     }

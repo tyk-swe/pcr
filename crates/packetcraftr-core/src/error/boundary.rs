@@ -4,13 +4,14 @@
 use std::error::Error;
 use std::fmt;
 
-use super::{Classification, Classified, Kind};
+use super::{Classification, Classified, Context, Kind};
 
 /// Classified failure propagated across a workflow authorization or execution seam.
 #[derive(Debug)]
 pub struct BoundaryError {
     message: String,
-    classification: Classification,
+    classification: Box<Classification>,
+    context: Option<Box<Context>>,
     causes: Vec<String>,
     source: Option<Box<dyn Error + Send + Sync>>,
 }
@@ -25,7 +26,8 @@ impl BoundaryError {
     ) -> Self {
         Self {
             message: message.into(),
-            classification,
+            classification: Box::new(classification),
+            context: None,
             causes,
             source: None,
         }
@@ -38,8 +40,15 @@ impl BoundaryError {
     {
         let message = error.to_string();
         let classification = error.classification();
+        let context = error.context();
         let causes = error.causes();
-        Self::with_source(message, classification, causes, error)
+        Self {
+            message,
+            classification: Box::new(classification),
+            context: (!context.is_empty()).then(|| Box::new(context)),
+            causes,
+            source: Some(Box::new(error)),
+        }
     }
 
     /// Builds a boundary error that reports its own message while retaining
@@ -55,10 +64,18 @@ impl BoundaryError {
     {
         Self {
             message: message.into(),
-            classification,
+            classification: Box::new(classification),
+            context: None,
             causes,
             source: Some(Box::new(source)),
         }
+    }
+
+    /// Attaches stable domain coordinates to a boundary failure.
+    #[must_use]
+    pub fn with_context(mut self, context: Context) -> Self {
+        self.context = (!context.is_empty()).then(|| Box::new(context));
+        self
     }
 
     /// Reports a broken executor contract as an internal invariant failure.
@@ -111,7 +128,11 @@ impl Error for BoundaryError {
 
 impl Classified for BoundaryError {
     fn classification(&self) -> Classification {
-        self.classification
+        *self.classification
+    }
+
+    fn context(&self) -> Context {
+        self.context.as_deref().copied().unwrap_or_default()
     }
 
     fn causes(&self) -> Vec<String> {

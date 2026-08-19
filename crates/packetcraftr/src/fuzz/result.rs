@@ -78,12 +78,6 @@ pub struct Result {
     pub stats: Stats,
 }
 
-/// One finalized live fuzz campaign event.
-#[derive(Clone, Debug)]
-pub enum Event {
-    Case(Case),
-}
-
 /// Final live campaign metadata after every case event was published.
 #[derive(Clone, Debug)]
 pub struct Summary {

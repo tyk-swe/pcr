@@ -11,6 +11,69 @@ mod boundary;
 
 pub use boundary::BoundaryError;
 
+/// Stable domain coordinates associated with a classified failure.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct Context {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_frame: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub probe_sequence: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attempt: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub case_index: Option<u64>,
+}
+
+impl Context {
+    #[must_use]
+    pub const fn source_frame(source_frame: u64) -> Self {
+        Self {
+            source_frame: Some(source_frame),
+            probe_sequence: None,
+            attempt: None,
+            case_index: None,
+        }
+    }
+
+    #[must_use]
+    pub const fn probe_sequence(probe_sequence: u64) -> Self {
+        Self {
+            source_frame: None,
+            probe_sequence: Some(probe_sequence),
+            attempt: None,
+            case_index: None,
+        }
+    }
+
+    #[must_use]
+    pub const fn attempt(attempt: u32) -> Self {
+        Self {
+            source_frame: None,
+            probe_sequence: None,
+            attempt: Some(attempt),
+            case_index: None,
+        }
+    }
+
+    #[must_use]
+    pub const fn case_index(case_index: u64) -> Self {
+        Self {
+            source_frame: None,
+            probe_sequence: None,
+            attempt: None,
+            case_index: Some(case_index),
+        }
+    }
+
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.source_frame.is_none()
+            && self.probe_sequence.is_none()
+            && self.attempt.is_none()
+            && self.case_index.is_none()
+    }
+}
+
 /// Top-level failure classes shared by API boundaries.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -59,6 +122,11 @@ impl Classification {
 /// Implemented by public errors that cross a live-workflow or CLI boundary.
 pub trait Classified {
     fn classification(&self) -> Classification;
+
+    /// Stable domain coordinates for automation and partial-stream recovery.
+    fn context(&self) -> Context {
+        Context::default()
+    }
 
     /// Ordered source diagnostics retained for structured renderers. The main
     /// error remains authoritative; implementations use this for dual

@@ -5,6 +5,11 @@ use std::process::{Command, Output};
 
 use serde_json::Value;
 
+#[path = "../../src/test_support.rs"]
+mod shared;
+
+pub(crate) use shared::{assert_contiguous, schema_validator};
+
 pub(crate) fn run(arguments: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_packetcraftr"))
         .args(arguments)
@@ -24,29 +29,25 @@ pub(crate) fn run_success(arguments: &[&str]) -> Output {
 }
 
 pub(crate) fn parse_json(output: &Output) -> Value {
-    serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
+    let value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
         panic!(
             "command output must be JSON ({error}): stdout={:?}, stderr={:?}",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr),
         )
-    })
+    });
+    schema_validator()
+        .validate(&value)
+        .expect("JSON output must match the published schema");
+    value
 }
 
 pub(crate) fn parse_ndjson(output: &Output) -> Vec<Value> {
-    std::str::from_utf8(&output.stdout)
-        .expect("NDJSON output must be UTF-8")
-        .lines()
-        .map(|line| serde_json::from_str(line).expect("each NDJSON line must be valid JSON"))
-        .collect()
-}
-
-pub(crate) fn assert_contiguous_stream(records: &[Value]) {
-    for (expected, record) in records.iter().enumerate() {
-        assert_eq!(
-            record["sequence"].as_u64(),
-            u64::try_from(expected).ok(),
-            "record {expected} has the wrong stream sequence"
-        );
+    let records = shared::parse_ndjson(&output.stdout);
+    for record in &records {
+        schema_validator()
+            .validate(record)
+            .expect("NDJSON record must match the published schema");
     }
+    records
 }

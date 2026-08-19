@@ -27,7 +27,8 @@ use crate::filtering::{self, Capabilities};
 use crate::input::{open_capture, validate_capture_stream_limits};
 use crate::rendering::{NdjsonStream, capture_file_format};
 
-use conversion::{decode_options, increment_counter};
+use super::increment_counter;
+use conversion::decode_options;
 use rendering::render_record;
 
 struct Decoding {

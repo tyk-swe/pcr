@@ -61,75 +61,30 @@ pub(super) fn run(
         allow_permissive_live,
     };
     let client = client(Arc::clone(&registry), request.policy);
-    let mut observer = Observer::new(format, stream);
-    let summary = client
-        .exchange_with_events(
-            &core::template::Template::new(request.packet),
-            options,
-            |event| {
-                observer
-                    .observe(event)
+    let template = core::template::Template::new(request.packet);
+    if format == output::contract::Format::Ndjson {
+        let event_stream = stream.clone();
+        let summary = client
+            .exchange_with_events(&template, options, move |event| {
+                output::exchange::Event::try_from_exchange(event)
+                    .map_err(CliError::classified)
+                    .and_then(|(event, diagnostics)| {
+                        super::progressive::render_event(event, diagnostics, &event_stream)
+                    })
                     .map_err(CliError::into_boundary_error)
-            },
-        )
+            })
+            .map_err(CliError::classified)?;
+        return rendering::render_complete(summary, stream);
+    }
+    let result = client
+        .exchange(&template, options)
         .map_err(CliError::classified)?;
-    observer.finish(summary, format)
-}
-
-struct Observer<'a> {
-    stream: Option<&'a mut NdjsonStream>,
-    collector: Option<packetcraftr::exchange::Collector>,
-    sent_diagnostics: Vec<core::diagnostic::Diagnostic>,
-}
-
-impl<'a> Observer<'a> {
-    fn new(format: output::contract::Format, stream: &'a mut NdjsonStream) -> Self {
-        let streaming = format == output::contract::Format::Ndjson;
-        Self {
-            stream: streaming.then_some(stream),
-            collector: (!streaming).then(packetcraftr::exchange::Collector::default),
-            sent_diagnostics: Vec::new(),
+    match format {
+        output::contract::Format::Text => rendering::render_text(&result),
+        output::contract::Format::Json => rendering::render_aggregate(result),
+        output::contract::Format::Pcap | output::contract::Format::PcapNg => {
+            rendering::render_capture(&result, format)
         }
-    }
-
-    fn observe(&mut self, event: packetcraftr::exchange::Event) -> Result<(), CliError> {
-        if let Some(stream) = self.stream.as_deref_mut() {
-            if let packetcraftr::exchange::Event::Sent { sent, .. } = &event {
-                self.sent_diagnostics
-                    .extend(sent.built().diagnostics.clone());
-            }
-            let event =
-                output::exchange::Event::try_from_exchange(event).map_err(CliError::classified)?;
-            return rendering::render_event(event, stream);
-        }
-        self.collector
-            .as_mut()
-            .expect("non-stream exchange observer has a collector")
-            .observe(event);
-        Ok(())
-    }
-
-    fn finish(
-        self,
-        summary: packetcraftr::exchange::Summary,
-        format: output::contract::Format,
-    ) -> Result<(), CliError> {
-        if let Some(stream) = self.stream {
-            let mut diagnostics = summary.diagnostics.clone();
-            diagnostics.extend(self.sent_diagnostics);
-            return rendering::render_complete(summary, diagnostics, stream);
-        }
-        let result = self
-            .collector
-            .expect("non-stream exchange observer has a collector")
-            .finish(summary);
-        match format {
-            output::contract::Format::Text => rendering::render_text(&result),
-            output::contract::Format::Json => rendering::render_aggregate(result),
-            output::contract::Format::Pcap | output::contract::Format::PcapNg => {
-                rendering::render_capture(&result, format)
-            }
-            _ => unreachable!("exchange format is checked before command dispatch"),
-        }
+        _ => unreachable!("exchange format is checked before command dispatch"),
     }
 }

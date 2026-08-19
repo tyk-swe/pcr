@@ -4,11 +4,14 @@
   "mode": "aggregate",
   "status": "error",
   "error": {
-    "code": "policy.public_destination",
-    "kind": "policy",
-    "message": "scan authorization failed: traffic policy denies public destination 8.8.8.8",
+    "code": "internal.scan_evidence",
+    "kind": "internal",
+    "message": "scan executor returned invalid evidence at probe 7: accepted bytes differ from the submitted probe",
     "causes": [],
-    "remediation": "explicitly authorize public destinations only for networks you are permitted to test"
+    "context": {
+      "probe_sequence": 7
+    },
+    "remediation": "treat the scan as incomplete because executor evidence was inconsistent"
   },
   "diagnostics": []
 }

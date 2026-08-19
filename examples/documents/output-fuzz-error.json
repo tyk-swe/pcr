@@ -4,11 +4,14 @@
   "mode": "aggregate",
   "status": "error",
   "error": {
-    "code": "cli.fuzz_limit",
-    "kind": "cli",
-    "message": "invalid fuzz limit cases=0: must be within 1..=10000",
+    "code": "internal.fuzz_evidence",
+    "kind": "internal",
+    "message": "fuzz executor returned invalid evidence at case 4: accepted bytes differ from the prepared case",
     "causes": [],
-    "remediation": "use valid layer.field targets and finite non-zero case, byte, rate, timeout, evidence, and duration limits"
+    "context": {
+      "case_index": 4
+    },
+    "remediation": "treat the fuzz operation as incomplete because evidence was inconsistent"
   },
   "diagnostics": []
 }

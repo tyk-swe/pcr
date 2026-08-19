@@ -296,7 +296,9 @@ fn dns_attempt_events_precede_retries_and_survive_a_later_failure() {
         shutdowns: Arc::clone(&shutdowns),
         fail_at: Some(2),
     };
-    let mut events = Vec::new();
+    let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let observed_events = Arc::clone(&events);
+    let callback_calls = Arc::clone(&calls);
 
     let error = super::engine::run_with_events(
         &request,
@@ -304,15 +306,16 @@ fn dns_attempt_events_precede_retries_and_survive_a_later_failure() {
         &packetcraftr_core::protocol::builtin::registry().expect("built-in registry"),
         &mut executor,
         &mut NoopClock,
-        |event| {
-            assert_eq!(calls.load(Ordering::SeqCst), 1);
-            events.push(event);
+        move |event| {
+            assert_eq!(callback_calls.load(Ordering::SeqCst), 1);
+            observed_events.lock().unwrap().push(event);
             Ok(())
         },
     )
     .expect_err("the second attempt must fail");
 
     assert!(matches!(error, super::Error::Execution { attempt: 2, .. }));
+    let events = events.lock().unwrap();
     assert_eq!(events.len(), 1);
     assert!(matches!(
         &events[0],
@@ -354,7 +357,7 @@ fn dns_sink_failure_stops_retries_after_session_shutdown() {
     assert!(matches!(&error, super::Error::Output { .. }));
     assert_eq!(
         packetcraftr_core::error::Classified::classification(&error).code,
-        "io.dns_output"
+        "io.test_output"
     );
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     assert_eq!(shutdowns.load(Ordering::SeqCst), 1);
@@ -386,23 +389,30 @@ fn dns_response_events_preserve_attempt_record_rejection_and_evidence_order() {
     let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 53));
     let mut request = dns_request(address);
     request.limits.max_undecoded = 1;
-    let mut events = Vec::new();
+    let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let observed_events = Arc::clone(&events);
     let summary = super::engine::run_with_events(
         &request,
         &mut SingleAddressAuthorizer { address },
         &packetcraftr_core::protocol::builtin::registry().expect("built-in registry"),
         &mut ClassifiedResponseExecutor,
         &mut NoopClock,
-        |event| {
-            events.push(event);
+        move |event| {
+            observed_events.lock().unwrap().push(event);
             Ok(())
         },
     )
     .expect("classified response must complete");
 
-    assert!(matches!(&events[0], super::Event::Attempt { evidence, .. } if evidence.attempt == 1));
+    let events = events.lock().unwrap();
+    assert!(events.iter().any(
+        |event| matches!(event, super::Event::Attempt { evidence, .. } if evidence.attempt == 1)
+    ));
     assert!(matches!(
-        &events[1],
+        events
+            .iter()
+            .find(|event| matches!(event, super::Event::Record { .. }))
+            .unwrap(),
         super::Event::Record {
             attempt: 1,
             section: super::Section::Answer,
@@ -410,10 +420,20 @@ fn dns_response_events_preserve_attempt_record_rejection_and_evidence_order() {
         }
     ));
     assert!(matches!(
-        &events[2],
+        events
+            .iter()
+            .find(|event| matches!(event, super::Event::Rejected { .. }))
+            .unwrap(),
         super::Event::Rejected { attempt: 1, .. }
     ));
-    assert!(matches!(&events[3], super::Event::Undecoded(evidence) if evidence.attempt == 1));
+    assert!(
+        events.iter().any(
+            |event| matches!(event, super::Event::Undecoded(evidence) if evidence.attempt == 1)
+        )
+    );
+    assert!(events.iter().any(
+        |event| matches!(event, super::Event::Diagnostic(diagnostic) if diagnostic.code == "dns.fixture")
+    ));
     assert_eq!(summary.outcome, super::Outcome::Response);
     assert_eq!(
         summary
@@ -435,7 +455,7 @@ fn dns_response_events_preserve_attempt_record_rejection_and_evidence_order() {
     assert_eq!(aggregate.attempts.len(), 1);
     assert_eq!(response.answers.len(), 1);
     assert_eq!(response.rejected_records.len(), 1);
-    assert_eq!(response.rejected_record_count, 1);
+    assert_eq!(response.metadata.rejected_record_count, 1);
     assert_eq!(aggregate.undecoded.len(), 1);
     assert_eq!(aggregate.stats.packets_completed, 1);
     assert!(
@@ -457,23 +477,33 @@ fn dns_stops_publishing_when_an_event_sink_exhausts_the_deadline() {
     let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 53));
     let mut request = dns_request(address);
     request.limits.max_duration = Duration::from_millis(50);
-    let mut events = Vec::new();
+    let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let observed_events = Arc::clone(&events);
+    let now = Arc::new(std::sync::Mutex::new(std::time::Instant::now()));
+    let deadline_now = Arc::clone(&now);
+    let callback_now = Arc::clone(&now);
+    let deadline = packetcraftr_core::budget::Deadline::with_time_source(
+        Duration::from_millis(50),
+        move || *deadline_now.lock().unwrap(),
+    );
 
-    let error = super::engine::run_with_events(
+    let error = super::engine::run_observed_with_deadline(
         &request,
         &mut SingleAddressAuthorizer { address },
         &packetcraftr_core::protocol::builtin::registry().expect("built-in registry"),
         &mut ClassifiedResponseExecutor,
         &mut NoopClock,
-        |event| {
-            events.push(event);
-            std::thread::sleep(Duration::from_millis(100));
+        deadline,
+        move |event, _| {
+            observed_events.lock().unwrap().push(event);
+            *callback_now.lock().unwrap() += Duration::from_millis(100);
             Ok(())
         },
     )
     .expect_err("the sink must exhaust the operation deadline");
 
     assert!(matches!(error, super::Error::DurationLimit { .. }));
+    let events = events.lock().unwrap();
     assert_eq!(events.len(), 1);
-    assert!(matches!(&events[0], super::Event::Attempt { .. }));
+    assert!(matches!(&events[0], super::Event::Diagnostic(_)));
 }

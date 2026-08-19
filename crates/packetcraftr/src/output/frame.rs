@@ -3,6 +3,7 @@
 
 //! Shared wire, captured, and decoded frame representations.
 
+use std::num::NonZeroU64;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bytes::Bytes;
@@ -16,6 +17,34 @@ use super::envelope::Diagnostic;
 use super::hex::CompactHex;
 
 const MAX_SIGNED_SECONDS: u64 = i64::MAX as u64;
+
+/// Validated one-based position in an input capture stream.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(transparent)]
+pub struct SourceFrame(NonZeroU64);
+
+impl SourceFrame {
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0.get()
+    }
+}
+
+impl TryFrom<u64> for SourceFrame {
+    type Error = Error;
+
+    fn try_from(value: u64) -> Result<Self, Self::Error> {
+        NonZeroU64::new(value)
+            .map(Self)
+            .ok_or(Error::InvalidSourceFrame)
+    }
+}
+
+impl std::fmt::Display for SourceFrame {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
 
 /// Canonical signed Unix timestamp used by output records, including pre-epoch captures.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]

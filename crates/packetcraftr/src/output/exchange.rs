@@ -44,34 +44,29 @@ impl Result {
         let sent_frames = sent
             .into_iter()
             .map(|sent| {
-                diagnostics.extend(sent.built().diagnostics.clone());
-                Wire::new(sent.wire_bytes().clone())
+                let (frame, sent_diagnostics) = sent_output(sent);
+                diagnostics.extend(sent_diagnostics);
+                frame
             })
             .collect();
         let response_outputs = responses
             .into_iter()
-            .map(|response| {
-                Ok(Response {
-                    request_index: u64::try_from(response.request_index).unwrap_or(u64::MAX),
-                    response: Decoded::try_from_decoded(response.response)?,
-                    latency: response.latency,
-                })
-            })
+            .map(response_output)
             .collect::<std::result::Result<Vec<_>, Error>>()?;
         let unsolicited_outputs = unsolicited
             .into_iter()
-            .map(Decoded::try_from_decoded)
+            .map(decoded_output)
             .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok((
             Self {
                 sent: sent_frames,
                 responses: response_outputs,
-                unanswered: unanswered
-                    .into_iter()
-                    .map(|index| u64::try_from(index).unwrap_or(u64::MAX))
-                    .collect(),
+                unanswered: unanswered.into_iter().map(request_index).collect(),
                 unsolicited: unsolicited_outputs,
-                undecoded: Captured::try_from_frames(undecoded)?,
+                undecoded: undecoded
+                    .into_iter()
+                    .map(captured_output)
+                    .collect::<std::result::Result<Vec<_>, _>>()?,
             },
             diagnostics,
             stats.into(),
@@ -101,52 +96,109 @@ pub enum Event {
     Undecoded {
         frame: Captured,
     },
+    Diagnostic,
     Complete {
         unanswered: Vec<u64>,
     },
 }
 
 impl Event {
-    pub fn try_from_exchange(event: crate::exchange::Event) -> std::result::Result<Self, Error> {
-        match event {
+    pub fn try_from_exchange(
+        event: crate::exchange::Event,
+    ) -> std::result::Result<(Self, Vec<Diagnostic>), Error> {
+        let (event, diagnostics) = match event {
             crate::exchange::Event::Sent {
-                request_index,
+                request_index: index,
                 sent,
-            } => Ok(Self::Sent {
-                request_index: u64::try_from(request_index).unwrap_or(u64::MAX),
-                frame: Wire::new(sent.wire_bytes().clone()),
-            }),
-            crate::exchange::Event::Response(response) => Ok(Self::Response {
-                request_index: u64::try_from(response.request_index).unwrap_or(u64::MAX),
-                response: Decoded::try_from_decoded(response.response)?,
-                latency: response.latency,
-            }),
-            crate::exchange::Event::Unanswered { request_index } => Ok(Self::Unanswered {
-                request_index: u64::try_from(request_index).unwrap_or(u64::MAX),
-            }),
-            crate::exchange::Event::Unsolicited { frame } => Ok(Self::Unsolicited {
-                frame: Decoded::try_from_decoded(frame)?,
-            }),
-            crate::exchange::Event::Undecoded { frame } => Ok(Self::Undecoded {
-                frame: Captured::try_from_frame(frame)?,
-            }),
-        }
+            } => {
+                let (frame, diagnostics) = sent_output(sent);
+                (
+                    Self::Sent {
+                        request_index: request_index(index),
+                        frame,
+                    },
+                    diagnostics,
+                )
+            }
+            crate::exchange::Event::Response(response) => {
+                let response = response_output(response)?;
+                (
+                    Self::Response {
+                        request_index: response.request_index,
+                        response: response.response,
+                        latency: response.latency,
+                    },
+                    Vec::new(),
+                )
+            }
+            crate::exchange::Event::Unanswered {
+                request_index: index,
+            } => (
+                Self::Unanswered {
+                    request_index: request_index(index),
+                },
+                Vec::new(),
+            ),
+            crate::exchange::Event::Unsolicited { frame } => (
+                Self::Unsolicited {
+                    frame: decoded_output(frame)?,
+                },
+                Vec::new(),
+            ),
+            crate::exchange::Event::Undecoded { frame } => (
+                Self::Undecoded {
+                    frame: captured_output(frame)?,
+                },
+                Vec::new(),
+            ),
+            crate::exchange::Event::Diagnostic(diagnostic) => (Self::Diagnostic, vec![diagnostic]),
+        };
+        Ok((event, diagnostics))
     }
 
     pub fn complete_from_exchange(
         summary: crate::exchange::Summary,
-        diagnostics: Vec<Diagnostic>,
     ) -> (Self, Vec<Diagnostic>, Stats) {
+        let crate::exchange::Summary {
+            unanswered,
+            diagnostics,
+            stats,
+        } = summary;
         (
             Self::Complete {
-                unanswered: summary
-                    .unanswered
-                    .into_iter()
-                    .map(|index| u64::try_from(index).unwrap_or(u64::MAX))
-                    .collect(),
+                unanswered: unanswered.into_iter().map(request_index).collect(),
             },
             diagnostics,
-            summary.stats.into(),
+            stats.into(),
         )
     }
+}
+
+fn sent_output(sent: std::sync::Arc<crate::SentPacket>) -> (Wire, Vec<Diagnostic>) {
+    (
+        Wire::new(sent.wire_bytes().clone()),
+        sent.built().diagnostics.clone(),
+    )
+}
+
+fn response_output(response: crate::exchange::Response) -> std::result::Result<Response, Error> {
+    Ok(Response {
+        request_index: request_index(response.request_index),
+        response: decoded_output(response.response)?,
+        latency: response.latency,
+    })
+}
+
+fn decoded_output(
+    frame: packetcraftr_core::decode::DecodedPacket,
+) -> std::result::Result<Decoded, Error> {
+    Decoded::try_from_decoded(frame)
+}
+
+fn captured_output(frame: packetcraftr_core::frame::Frame) -> std::result::Result<Captured, Error> {
+    Captured::try_from_frame(frame)
+}
+
+fn request_index(index: usize) -> u64 {
+    u64::try_from(index).unwrap_or(u64::MAX)
 }

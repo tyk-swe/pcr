@@ -1,0 +1,59 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "exchange",
+  "mode": "stream",
+  "sequence": 2,
+  "status": "success",
+  "result": {
+    "event": "unsolicited",
+    "frame": {
+      "frame": {
+        "timestamp": {
+          "unix_seconds": 1770000000,
+          "nanoseconds": 5000000
+        },
+        "captured_length": 4,
+        "original_length": 4,
+        "link_type": 147,
+        "bytes_hex": "01020304"
+      },
+      "packet": {
+        "schema": "packetcraftr.packet/v1",
+        "layers": [
+          {
+            "protocol": "raw",
+            "fields": {
+              "bytes": {
+                "type": "bytes",
+                "value": [1, 2, 3, 4]
+              }
+            }
+          }
+        ]
+      },
+      "layout": {
+        "layers": [
+          {
+            "index": 0,
+            "protocol": "raw",
+            "range": {
+              "start": 0,
+              "end": 4
+            },
+            "fields": [
+              {
+                "name": "bytes",
+                "range": {
+                  "start": 0,
+                  "end": 4
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "diagnostics": []
+    }
+  },
+  "diagnostics": []
+}

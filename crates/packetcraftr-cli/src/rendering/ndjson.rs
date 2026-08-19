@@ -8,18 +8,9 @@ use serde::Serialize;
 
 use super::super::errors::CliError;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum State {
-    Open,
-    Terminal,
-    Failed,
-}
-
+#[derive(Clone)]
 pub(crate) struct NdjsonStream {
-    command: Option<output::contract::Command>,
-    position: output::envelope::StreamPosition,
-    state: State,
-    writer: Box<dyn Write>,
+    encoder: output::envelope::StreamEncoder,
 }
 
 impl NdjsonStream {
@@ -29,167 +20,95 @@ impl NdjsonStream {
 
     pub(crate) fn new(
         command: Option<output::contract::Command>,
-        writer: impl Write + 'static,
+        writer: impl Write + Send + 'static,
     ) -> Self {
         Self {
-            command,
-            position: output::envelope::StreamPosition::initial(),
-            state: State::Open,
-            writer: Box::new(writer),
+            encoder: output::envelope::StreamEncoder::new(command, writer),
         }
     }
 
     pub(crate) fn emit_data<T: Serialize>(
-        &mut self,
+        &self,
         result: T,
         diagnostics: Vec<core::diagnostic::Diagnostic>,
     ) -> Result<(), CliError> {
-        self.require_open()?;
-        let next = self.position.checked_next().map_err(CliError::classified)?;
-        let command = self.success_command()?;
-        let record =
-            output::envelope::Stream::success(command, &self.position, result, diagnostics);
-        self.write_record(&record)?;
-        self.position = next;
-        Ok(())
+        self.encoder
+            .emit_data(result, diagnostics)
+            .map_err(CliError::classified)
     }
 
     pub(crate) fn complete<T: Serialize>(
-        &mut self,
+        &self,
         result: T,
         diagnostics: Vec<core::diagnostic::Diagnostic>,
     ) -> Result<(), CliError> {
-        self.complete_record(result, diagnostics, None)
+        self.encoder
+            .complete(result, diagnostics)
+            .map_err(CliError::classified)
     }
 
     pub(crate) fn complete_with_stats<T: Serialize>(
-        &mut self,
+        &self,
         result: T,
         diagnostics: Vec<core::diagnostic::Diagnostic>,
         stats: output::envelope::Stats,
     ) -> Result<(), CliError> {
-        self.complete_record(result, diagnostics, Some(stats))
+        self.encoder
+            .complete_with_stats(result, diagnostics, stats)
+            .map_err(CliError::classified)
     }
 
-    pub(crate) fn emit_error(&mut self, error: output::envelope::Error) -> Result<(), CliError> {
-        self.require_open()?;
-        let record = output::envelope::StreamError::error(self.command, &self.position, error);
-        self.write_record(&record)?;
-        self.state = State::Terminal;
-        Ok(())
+    pub(crate) fn emit_error(&self, error: output::envelope::Error) -> Result<(), CliError> {
+        self.encoder.emit_error(error).map_err(CliError::classified)
     }
 
     pub(crate) fn is_open(&self) -> bool {
-        self.state == State::Open
+        self.encoder.is_open()
+    }
+
+    pub(crate) fn is_terminal(&self) -> bool {
+        self.encoder.is_terminal()
     }
 
     #[cfg(test)]
     pub(crate) fn next_position(&self) -> u64 {
-        self.position.ordinal()
+        self.encoder
+            .next_sequence()
+            .expect("open test stream has a next sequence")
     }
 
     #[cfg(test)]
     pub(crate) fn is_failed(&self) -> bool {
-        self.state == State::Failed
+        self.encoder.is_failed()
     }
-
-    fn complete_record<T: Serialize>(
-        &mut self,
-        result: T,
-        diagnostics: Vec<core::diagnostic::Diagnostic>,
-        stats: Option<output::envelope::Stats>,
-    ) -> Result<(), CliError> {
-        self.require_open()?;
-        let command = self.success_command()?;
-        let mut record =
-            output::envelope::Stream::success(command, &self.position, result, diagnostics);
-        if let Some(stats) = stats {
-            record = record.with_stats(stats);
-        }
-        self.write_record(&record)?;
-        self.state = State::Terminal;
-        Ok(())
-    }
-
-    fn success_command(&self) -> Result<output::contract::Command, CliError> {
-        self.command
-            .ok_or_else(|| CliError::new(70, "NDJSON success record has no command"))
-    }
-
-    fn require_open(&self) -> Result<(), CliError> {
-        match self.state {
-            State::Open => Ok(()),
-            State::Terminal => Err(CliError::new(70, "NDJSON stream is already terminated")),
-            State::Failed => Err(CliError::new(70, "NDJSON stream output has already failed")),
-        }
-    }
-
-    fn write_record(&mut self, record: &impl Serialize) -> Result<(), CliError> {
-        let attempted_position = self.position.ordinal();
-        let mut line = match serde_json::to_vec(record) {
-            Ok(line) => line,
-            Err(source) => {
-                self.state = State::Failed;
-                return Err(attempted_record_error(
-                    CliError::new(70, format!("serialize output failed: {source}")),
-                    attempted_position,
-                ));
-            }
-        };
-        line.push(b'\n');
-        if let Err(source) = self
-            .writer
-            .write_all(&line)
-            .and_then(|()| self.writer.flush())
-        {
-            self.state = State::Failed;
-            return Err(attempted_record_error(
-                CliError::new(5, format!("write stdout failed: {source}")),
-                attempted_position,
-            ));
-        }
-        Ok(())
-    }
-}
-
-fn attempted_record_error(mut error: CliError, position: u64) -> CliError {
-    error.message = format!(
-        "NDJSON record at sequence {position} failed: {}",
-        error.message
-    );
-    error
 }
 
 #[cfg(test)]
 pub(crate) mod test_support {
-    use std::cell::RefCell;
     use std::io;
-    use std::rc::Rc;
-
-    use serde_json::Value;
+    use std::sync::{Arc, Mutex};
 
     use super::*;
 
     #[derive(Clone, Default)]
-    pub(crate) struct SharedBuffer(Rc<RefCell<Vec<u8>>>);
+    pub(crate) struct SharedBuffer(Arc<Mutex<Vec<u8>>>);
 
     impl SharedBuffer {
         pub(crate) fn bytes(&self) -> Vec<u8> {
-            self.0.borrow().clone()
+            self.0.lock().expect("shared buffer lock").clone()
         }
 
-        pub(crate) fn records(&self) -> Vec<Value> {
-            std::str::from_utf8(&self.0.borrow())
-                .expect("NDJSON output is UTF-8")
-                .lines()
-                .map(|line| serde_json::from_str(line).expect("each line is valid JSON"))
-                .collect()
+        pub(crate) fn records(&self) -> Vec<serde_json::Value> {
+            crate::test_support::parse_ndjson(&self.bytes())
         }
     }
 
     impl Write for SharedBuffer {
         fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-            self.0.borrow_mut().extend_from_slice(bytes);
+            self.0
+                .lock()
+                .expect("shared buffer lock")
+                .extend_from_slice(bytes);
             Ok(bytes.len())
         }
 
@@ -203,15 +122,7 @@ pub(crate) mod test_support {
         (NdjsonStream::new(Some(command), output.clone()), output)
     }
 
-    pub(crate) fn assert_contiguous(records: &[Value]) {
-        for (expected, record) in records.iter().enumerate() {
-            assert_eq!(
-                record["sequence"].as_u64(),
-                u64::try_from(expected).ok(),
-                "record {expected} has the wrong stream position"
-            );
-        }
-    }
+    pub(crate) use crate::test_support::assert_contiguous;
 }
 
 #[cfg(test)]
@@ -226,7 +137,7 @@ mod tests {
 
     #[test]
     fn data_and_completion_are_contiguous_from_zero() {
-        let (mut stream, output) = stream(output::contract::Command::Read);
+        let (stream, output) = stream(output::contract::Command::Read);
         assert_eq!(stream.next_position(), 0);
 
         stream.emit_data(json!({"frame": 1}), Vec::new()).unwrap();
@@ -246,11 +157,11 @@ mod tests {
     fn errors_use_the_next_unwritten_position() {
         let fixture_error = || CliError::new(5, "fixture failed").output_error();
 
-        let (mut empty, empty_output) = stream(output::contract::Command::Capture);
+        let (empty, empty_output) = stream(output::contract::Command::Capture);
         empty.emit_error(fixture_error()).unwrap();
         assert_eq!(empty_output.records()[0]["sequence"], 0);
 
-        let (mut partial, partial_output) = stream(output::contract::Command::Capture);
+        let (partial, partial_output) = stream(output::contract::Command::Capture);
         for value in 0..3 {
             partial
                 .emit_data(json!({"value": value}), Vec::new())
@@ -264,7 +175,7 @@ mod tests {
 
     #[test]
     fn domain_identifiers_do_not_select_envelope_positions() {
-        let (mut stream, output) = stream(output::contract::Command::Replay);
+        let (stream, output) = stream(output::contract::Command::Replay);
         stream
             .emit_data(json!({"source_sequence": 42}), Vec::new())
             .unwrap();
@@ -280,7 +191,7 @@ mod tests {
 
     #[test]
     fn terminal_state_rejects_every_later_record() {
-        let (mut success_stream, output) = stream(output::contract::Command::Follow);
+        let (success_stream, output) = stream(output::contract::Command::Follow);
         success_stream
             .complete(json!({"done": true}), Vec::new())
             .unwrap();
@@ -298,7 +209,7 @@ mod tests {
         );
         assert_eq!(output.bytes(), terminal);
 
-        let (mut error_stream, output) = stream(output::contract::Command::Follow);
+        let (error_stream, output) = stream(output::contract::Command::Follow);
         error_stream
             .emit_error(CliError::new(5, "terminal").output_error())
             .unwrap();
@@ -323,21 +234,23 @@ mod tests {
     }
 
     #[test]
-    fn serialization_failure_names_the_attempted_position_and_closes_output() {
-        let (mut stream, output) = stream(output::contract::Command::Expert);
+    fn serialization_failure_keeps_the_unwritten_position_open_for_terminal_error() {
+        let (stream, output) = stream(output::contract::Command::Expert);
         stream.emit_data(json!({"ok": true}), Vec::new()).unwrap();
         let error = stream
             .emit_data(FailingSerialization, Vec::new())
             .expect_err("serialization must fail");
 
         assert!(error.message.contains("sequence 1"));
-        assert!(stream.is_failed());
+        assert!(stream.is_open());
         assert_eq!(output.records().len(), 1);
-        assert!(
-            stream
-                .emit_error(CliError::new(5, "late").output_error())
-                .is_err()
-        );
+        stream
+            .emit_error(CliError::new(70, "serialization failed").output_error())
+            .unwrap();
+        let records = output.records();
+        assert_contiguous(&records);
+        assert_eq!(records[1]["sequence"], 1);
+        assert_eq!(records[1]["status"], "error");
     }
 
     struct SecondFlushFails {
@@ -367,7 +280,7 @@ mod tests {
             output: buffer.clone(),
             flushes: 0,
         };
-        let mut stream = NdjsonStream::new(Some(output::contract::Command::Capture), writer);
+        let stream = NdjsonStream::new(Some(output::contract::Command::Capture), writer);
         stream.emit_data(json!({"value": 0}), Vec::new()).unwrap();
         let error = stream
             .emit_data(json!({"value": 1}), Vec::new())

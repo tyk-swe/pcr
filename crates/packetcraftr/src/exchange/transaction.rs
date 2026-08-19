@@ -55,11 +55,12 @@ pub(crate) struct Transaction<C: Session> {
     pub(super) prepared: Vec<PreparedPacket>,
     pub(super) packet_count: u64,
     pub(super) total_bytes: u64,
-    pub(super) sent: Vec<crate::SentPacket>,
+    pub(super) sent: Vec<Arc<crate::SentPacket>>,
     pub(super) completed_sends: u64,
     pub(super) dissector: Dissector,
     pub(super) captured: Accumulator,
     pub(super) correlation_stopped: bool,
+    pub(super) published_diagnostics: usize,
 }
 
 impl<C: Session> Transaction<C> {
@@ -80,6 +81,7 @@ impl<C: Session> Transaction<C> {
             completed_sends: 0,
             captured: Accumulator::new(request_count),
             correlation_stopped: false,
+            published_diagnostics: 0,
         }
     }
 

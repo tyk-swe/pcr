@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use packetcraftr::{
-    core::error::{Classification, Classified, Kind},
+    core::error::{Classification, Classified, Context, Kind},
     netio as net, output,
 };
 
@@ -11,6 +11,7 @@ pub(super) struct CliError {
     pub(super) exit_code: u8,
     pub(super) message: String,
     pub(super) classification: Classification,
+    context: Option<Box<Context>>,
     pub(super) causes: Vec<String>,
 }
 
@@ -39,14 +40,16 @@ impl CliError {
                 kind,
                 None,
             ),
+            context: None,
             causes: Vec::new(),
         }
     }
 
     pub(super) fn classified(error: impl Classified + std::fmt::Display) -> Self {
         let classification = error.classification();
+        let context = error.context();
         let causes = error.causes();
-        Self::from_classification(classification, error.to_string(), causes)
+        Self::from_classification(classification, error.to_string(), causes).with_context(context)
     }
 
     pub(super) fn from_classification(
@@ -58,12 +61,20 @@ impl CliError {
             exit_code: exit_code_for_kind(classification.kind),
             message: message.into(),
             classification,
+            context: None,
             causes,
         }
     }
 
+    pub(super) fn with_context(mut self, context: Context) -> Self {
+        self.context = (!context.is_empty()).then(|| Box::new(context));
+        self
+    }
+
     pub(super) fn into_boundary_error(self) -> packetcraftr::BoundaryError {
+        let context = self.context.as_deref().copied().unwrap_or_default();
         packetcraftr::BoundaryError::new(self.message, self.classification, self.causes)
+            .with_context(context)
     }
 
     pub(super) fn with_cleanup(mut self, cleanup: net::Error) -> Self {
@@ -77,11 +88,13 @@ impl CliError {
     }
 
     pub(super) fn output_error(&self) -> output::envelope::Error {
+        let context = self.context.as_deref().copied().unwrap_or_default();
         output::envelope::Error::new(
             self.classification,
             self.message.clone(),
             self.causes.clone(),
         )
+        .with_context(context)
     }
 }
 
@@ -129,7 +142,8 @@ mod tests {
                 Some("authorize the fixture"),
             ),
             vec!["first cause".to_owned(), "second cause".to_owned()],
-        );
+        )
+        .with_context(Context::probe_sequence(42));
         let error = CliError::classified(classified);
         assert_eq!(error.exit_code, 6);
 
@@ -137,10 +151,12 @@ mod tests {
         assert_eq!(output.code, "fixture.denied");
         assert_eq!(output.causes, ["first cause", "second cause"]);
         assert_eq!(output.remediation.as_deref(), Some("authorize the fixture"));
+        assert_eq!(output.context.probe_sequence, Some(42));
 
         let boundary = error.into_boundary_error();
         assert_eq!(boundary.classification().code, "fixture.denied");
         assert_eq!(boundary.causes(), ["first cause", "second cause"]);
+        assert_eq!(boundary.context().probe_sequence, Some(42));
     }
 
     #[test]

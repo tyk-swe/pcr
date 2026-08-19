@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 use packetcraftr::{core, core::frame::Frame, netio as net, output};
 
+use super::super::increment_counter;
 use crate::errors::CliError;
 use crate::filtering::FrameSelector;
 
@@ -115,7 +116,7 @@ where
             break;
         };
         account_bytes(progress, &frame, budget.max_bytes)?;
-        let source_frame = increment(progress.frames_captured, "capture frame count")?;
+        let source_frame = increment_counter(progress.frames_captured, "capture frame count")?;
         if let Some(selector) = selector {
             match selector.keep(source_frame, &frame) {
                 Ok(true) => {}
@@ -128,7 +129,7 @@ where
         }
         emit(frame, source_frame)?;
         progress.frames_matched =
-            increment(progress.frames_matched, "capture matched-frame count")?;
+            increment_counter(progress.frames_matched, "capture matched-frame count")?;
         progress.frames_captured = source_frame;
     }
     Ok(())
@@ -155,12 +156,6 @@ fn account_bytes(progress: &mut Progress, frame: &Frame, limit: u64) -> Result<(
     }
     progress.captured_bytes = bytes;
     Ok(())
-}
-
-fn increment(value: u64, counter: &'static str) -> Result<u64, CliError> {
-    value
-        .checked_add(1)
-        .ok_or_else(|| CliError::new(70, format!("{counter} overflowed")))
 }
 
 fn finish<C: net::capture::Session>(

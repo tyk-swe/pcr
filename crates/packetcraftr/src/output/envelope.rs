@@ -4,12 +4,15 @@
 //! Aggregate JSON and streaming NDJSON envelopes.
 
 use std::fmt;
+use std::io::{self, Write};
+use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde::Serialize;
 
 use packetcraftr_core::diagnostic::Diagnostic as PacketDiagnostic;
-use packetcraftr_core::error::{Classification, Classified, Kind};
+use packetcraftr_core::error::{Classification, Classified, Context, Kind};
 
 use super::contract::{Command, Mode, SCHEMA_V1};
 
@@ -19,6 +22,8 @@ pub struct Error {
     pub kind: Kind,
     pub message: String,
     pub causes: Vec<String>,
+    #[serde(skip_serializing_if = "Context::is_empty")]
+    pub context: Context,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remediation: Option<String>,
 }
@@ -34,12 +39,20 @@ impl Error {
             kind: classification.kind,
             message: message.into(),
             causes,
+            context: Context::default(),
             remediation: classification.remediation.map(str::to_owned),
         }
     }
 
     pub fn classified(error: &(impl Classified + fmt::Display)) -> Self {
         Self::new(error.classification(), error.to_string(), error.causes())
+            .with_context(error.context())
+    }
+
+    #[must_use]
+    pub const fn with_context(mut self, context: Context) -> Self {
+        self.context = context;
+        self
     }
 }
 
@@ -233,33 +246,9 @@ impl<T> Aggregate<T> {
 /// Aggregate error envelope with no unused success-result type parameter.
 pub type AggregateError = Aggregate<()>;
 
-/// The next zero-based ordinal in one NDJSON command invocation.
-#[derive(Debug, Default, PartialEq, Eq)]
-pub struct StreamPosition(u64);
-
-impl StreamPosition {
-    /// Starts an empty stream at record zero.
-    pub const fn initial() -> Self {
-        Self(0)
-    }
-
-    /// Returns the ordinal that the next record will carry.
-    pub const fn ordinal(&self) -> u64 {
-        self.0
-    }
-
-    /// Produces the following position without allowing the ordinal to wrap.
-    pub fn checked_next(&self) -> Result<Self, super::contract::Error> {
-        self.0
-            .checked_add(1)
-            .map(Self)
-            .ok_or(super::contract::Error::SequenceOverflow)
-    }
-}
-
 /// One independently valid NDJSON success or terminal-error record.
 #[derive(Clone, Debug, Serialize)]
-pub struct Stream<T> {
+struct Stream<T> {
     schema: &'static str,
     command: Option<Command>,
     mode: Mode,
@@ -272,9 +261,9 @@ pub struct Stream<T> {
 }
 
 impl<T> Stream<T> {
-    pub fn success(
+    fn success(
         command: Command,
-        position: &StreamPosition,
+        sequence: u64,
         result: T,
         diagnostics: Vec<PacketDiagnostic>,
     ) -> Self {
@@ -282,19 +271,19 @@ impl<T> Stream<T> {
             schema: SCHEMA_V1,
             command: Some(command),
             mode: Mode::Stream,
-            sequence: position.ordinal(),
+            sequence,
             payload: OutputPayload::Success { result },
             diagnostics: diagnostics.into_iter().map(Into::into).collect(),
             stats: None,
         }
     }
 
-    pub fn error(command: Option<Command>, position: &StreamPosition, error: Error) -> Self {
+    fn error(command: Option<Command>, sequence: u64, error: Error) -> Self {
         Self {
             schema: SCHEMA_V1,
             command,
             mode: Mode::Stream,
-            sequence: position.ordinal(),
+            sequence,
             payload: OutputPayload::Error { error },
             diagnostics: Vec::new(),
             stats: None,
@@ -302,30 +291,273 @@ impl<T> Stream<T> {
     }
 
     #[must_use]
-    pub fn with_stats(mut self, stats: Stats) -> Self {
+    fn with_stats(mut self, stats: Stats) -> Self {
         self.stats = Some(stats);
         self
     }
 }
 
-/// Terminal NDJSON error record with no unused success-result type parameter.
-pub type StreamError = Stream<()>;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+enum EncoderState {
+    Open,
+    Writing,
+    Terminal,
+    Failed,
+}
+
+impl EncoderState {
+    fn from_u8(value: u8) -> Self {
+        match value {
+            0 => Self::Open,
+            1 => Self::Writing,
+            2 => Self::Terminal,
+            _ => Self::Failed,
+        }
+    }
+}
+
+struct EncoderOutput {
+    sequence: u64,
+    writer: Box<dyn Write + Send>,
+}
+
+struct EncoderShared {
+    command: Option<Command>,
+    state: AtomicU8,
+    output: Mutex<EncoderOutput>,
+}
+
+/// The single owning encoder for one contiguous NDJSON invocation.
+#[derive(Clone)]
+pub struct StreamEncoder {
+    shared: Arc<EncoderShared>,
+}
+
+impl StreamEncoder {
+    pub fn new(command: Option<Command>, writer: impl Write + Send + 'static) -> Self {
+        Self {
+            shared: Arc::new(EncoderShared {
+                command,
+                state: AtomicU8::new(EncoderState::Open as u8),
+                output: Mutex::new(EncoderOutput {
+                    sequence: 0,
+                    writer: Box::new(writer),
+                }),
+            }),
+        }
+    }
+
+    pub fn emit_data<T: Serialize>(
+        &self,
+        result: T,
+        diagnostics: Vec<PacketDiagnostic>,
+    ) -> Result<(), EncodeError> {
+        let command = self.shared.command.ok_or(EncodeError::MissingCommand)?;
+        self.write_success(command, result, diagnostics, None, false)
+    }
+
+    pub fn complete<T: Serialize>(
+        &self,
+        result: T,
+        diagnostics: Vec<PacketDiagnostic>,
+    ) -> Result<(), EncodeError> {
+        let command = self.shared.command.ok_or(EncodeError::MissingCommand)?;
+        self.write_success(command, result, diagnostics, None, true)
+    }
+
+    pub fn complete_with_stats<T: Serialize>(
+        &self,
+        result: T,
+        diagnostics: Vec<PacketDiagnostic>,
+        stats: Stats,
+    ) -> Result<(), EncodeError> {
+        let command = self.shared.command.ok_or(EncodeError::MissingCommand)?;
+        self.write_success(command, result, diagnostics, Some(stats), true)
+    }
+
+    pub fn emit_error(&self, error: Error) -> Result<(), EncodeError> {
+        let mut output = self.lock_output()?;
+        self.require_open()?;
+        let sequence = output.sequence;
+        let record: Stream<()> = Stream::error(self.shared.command, sequence, error);
+        let line = serialize_line(&record, sequence)?;
+        self.write_line(&mut output, &line, sequence, true)
+    }
+
+    #[must_use]
+    pub fn is_open(&self) -> bool {
+        self.state() == EncoderState::Open
+    }
+
+    #[must_use]
+    pub fn is_terminal(&self) -> bool {
+        self.state() == EncoderState::Terminal
+    }
+
+    #[must_use]
+    pub fn is_failed(&self) -> bool {
+        matches!(self.state(), EncoderState::Writing | EncoderState::Failed)
+    }
+
+    #[must_use]
+    pub fn next_sequence(&self) -> Option<u64> {
+        if !self.is_open() {
+            return None;
+        }
+        self.shared.output.lock().ok().map(|output| output.sequence)
+    }
+
+    fn write_success<T: Serialize>(
+        &self,
+        command: Command,
+        result: T,
+        diagnostics: Vec<PacketDiagnostic>,
+        stats: Option<Stats>,
+        terminal: bool,
+    ) -> Result<(), EncodeError> {
+        let mut output = self.lock_output()?;
+        self.require_open()?;
+        let sequence = output.sequence;
+        let next = if terminal {
+            None
+        } else {
+            Some(
+                sequence
+                    .checked_add(1)
+                    .ok_or(EncodeError::SequenceOverflow)?,
+            )
+        };
+        let mut record = Stream::success(command, sequence, result, diagnostics);
+        if let Some(stats) = stats {
+            record = record.with_stats(stats);
+        }
+        let line = serialize_line(&record, sequence)?;
+        self.write_line(&mut output, &line, sequence, terminal)?;
+        if let Some(next) = next {
+            output.sequence = next;
+        }
+        Ok(())
+    }
+
+    fn write_line(
+        &self,
+        output: &mut EncoderOutput,
+        line: &[u8],
+        sequence: u64,
+        terminal: bool,
+    ) -> Result<(), EncodeError> {
+        self.set_state(EncoderState::Writing);
+        if let Err(source) = output
+            .writer
+            .write_all(line)
+            .and_then(|()| output.writer.flush())
+        {
+            self.set_state(EncoderState::Failed);
+            return Err(EncodeError::Write { sequence, source });
+        }
+        self.set_state(if terminal {
+            EncoderState::Terminal
+        } else {
+            EncoderState::Open
+        });
+        Ok(())
+    }
+
+    fn lock_output(&self) -> Result<std::sync::MutexGuard<'_, EncoderOutput>, EncodeError> {
+        self.shared.output.lock().map_err(|_| EncodeError::Poisoned)
+    }
+
+    fn require_open(&self) -> Result<(), EncodeError> {
+        match self.state() {
+            EncoderState::Open => Ok(()),
+            EncoderState::Writing => Err(EncodeError::Writing),
+            EncoderState::Terminal => Err(EncodeError::Terminal),
+            EncoderState::Failed => Err(EncodeError::Failed),
+        }
+    }
+
+    fn state(&self) -> EncoderState {
+        EncoderState::from_u8(self.shared.state.load(Ordering::Acquire))
+    }
+
+    fn set_state(&self, state: EncoderState) {
+        self.shared.state.store(state as u8, Ordering::Release);
+    }
+}
+
+fn serialize_line(record: &impl Serialize, sequence: u64) -> Result<Vec<u8>, EncodeError> {
+    let mut line =
+        serde_json::to_vec(record).map_err(|source| EncodeError::Serialize { sequence, source })?;
+    line.push(b'\n');
+    Ok(line)
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum EncodeError {
+    #[error("NDJSON success record has no command")]
+    MissingCommand,
+    #[error("NDJSON stream is writing a record")]
+    Writing,
+    #[error("NDJSON stream is already terminated")]
+    Terminal,
+    #[error("NDJSON stream output has already failed")]
+    Failed,
+    #[error("NDJSON stream state lock was poisoned")]
+    Poisoned,
+    #[error("NDJSON sequence overflowed")]
+    SequenceOverflow,
+    #[error("NDJSON record at sequence {sequence} failed to serialize: {source}")]
+    Serialize {
+        sequence: u64,
+        #[source]
+        source: serde_json::Error,
+    },
+    #[error("NDJSON record at sequence {sequence} failed to write: {source}")]
+    Write {
+        sequence: u64,
+        #[source]
+        source: io::Error,
+    },
+}
+
+impl Classified for EncodeError {
+    fn classification(&self) -> Classification {
+        match self {
+            Self::Write { .. } => Classification::new(
+                "io.stdout",
+                Kind::Io,
+                Some("inspect the output sink and account for records already written"),
+            ),
+            _ => Classification::new(
+                "internal.ndjson_stream",
+                Kind::Internal,
+                Some("treat the structured stream as incomplete"),
+            ),
+        }
+    }
+
+    fn causes(&self) -> Vec<String> {
+        match self {
+            Self::Serialize { source, .. } => vec![source.to_string()],
+            Self::Write { source, .. } => vec![source.to_string()],
+            _ => Vec::new(),
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn stream_position_starts_at_zero_and_cannot_wrap() {
-        let initial = StreamPosition::initial();
-        assert_eq!(initial.ordinal(), 0);
-        assert_eq!(initial.checked_next().expect("zero advances").ordinal(), 1);
-
-        let maximum = StreamPosition(u64::MAX);
-        assert_eq!(
-            maximum.checked_next(),
-            Err(super::super::contract::Error::SequenceOverflow)
-        );
-        assert_eq!(maximum.ordinal(), u64::MAX);
+    fn classified_error_includes_typed_context() {
+        let source = packetcraftr_core::error::BoundaryError::new(
+            "failed",
+            Classification::new("fixture", Kind::Packet, None),
+            Vec::new(),
+        )
+        .with_context(Context::attempt(7));
+        assert_eq!(Error::classified(&source).context.attempt, Some(7));
     }
 }

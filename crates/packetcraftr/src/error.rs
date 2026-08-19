@@ -3,7 +3,7 @@
 
 use thiserror::Error as ThisError;
 
-use packetcraftr_core::error::{Classification, Classified, Kind};
+use packetcraftr_core::error::{Classification, Classified, Context, Kind};
 use packetcraftr_netio::Error as LiveIoError;
 
 use crate::{policy, target};
@@ -42,6 +42,8 @@ pub enum Error {
         output: Box<packetcraftr_core::error::BoundaryError>,
         shutdown: LiveIoError,
     },
+    #[error("exchange events are incoherent: {message}")]
+    InvalidExchangeEvents { message: String },
     #[error("exchange packets selected different interfaces or link modes")]
     HeterogeneousExchangeRoute,
     #[error("packet template expansion failed: {message}")]
@@ -86,15 +88,13 @@ impl Classified for Error {
             ),
             Self::Io(error) => error.classification(),
             Self::OperationAndCaptureShutdown { operation, .. } => operation.classification(),
-            Self::ExchangeOutput { .. } | Self::ExchangeOutputAndCaptureShutdown { .. } => {
-                Classification::new(
-                    "io.exchange_output",
-                    Kind::Io,
-                    Some(
-                        "inspect the output sink and account for exchange packets already transmitted",
-                    ),
-                )
-            }
+            Self::ExchangeOutput { source } => source.classification(),
+            Self::ExchangeOutputAndCaptureShutdown { output, .. } => output.classification(),
+            Self::InvalidExchangeEvents { .. } => Classification::new(
+                "internal.exchange_event_coherence",
+                Kind::Internal,
+                Some("collect every exchange event once in publication order"),
+            ),
             Self::HeterogeneousExchangeRoute => Classification::new(
                 "cli.heterogeneous_exchange_route",
                 Kind::Cli,
@@ -124,6 +124,20 @@ impl Classified for Error {
                     "use finite exchange timeout and retention limits no larger than the aggregate capture ceiling",
                 ),
             ),
+        }
+    }
+
+    fn context(&self) -> Context {
+        match self {
+            Self::Target(error) => error.context(),
+            Self::Plan(error) => error.context(),
+            Self::Neighbor(error) => error.context(),
+            Self::Policy(error) => error.context(),
+            Self::Io(error) => error.context(),
+            Self::OperationAndCaptureShutdown { operation, .. } => operation.context(),
+            Self::ExchangeOutput { source } => source.context(),
+            Self::ExchangeOutputAndCaptureShutdown { output, .. } => output.context(),
+            _ => Context::default(),
         }
     }
 

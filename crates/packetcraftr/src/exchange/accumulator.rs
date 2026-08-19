@@ -3,7 +3,7 @@
 
 //! Bounded response/result state for one armed exchange.
 
-use std::{collections::HashSet, time::Instant};
+use std::{collections::HashSet, sync::Arc, time::Instant};
 
 use packetcraftr_core::{
     Packet,
@@ -46,7 +46,7 @@ pub(crate) struct ProcessContext<'a> {
     pub(crate) registry: &'a Registry,
     pub(crate) dissector: &'a Dissector,
     pub(crate) prepared: &'a [PreparedPacket],
-    pub(crate) sent: &'a [crate::SentPacket],
+    pub(crate) sent: &'a [Arc<crate::SentPacket>],
     pub(crate) deadline: Instant,
     pub(crate) options: &'a super::contract::Options,
 }
@@ -54,7 +54,7 @@ pub(crate) struct ProcessContext<'a> {
 #[derive(Clone, Copy)]
 pub(crate) struct WorkflowPromotionContext<'a> {
     pub(crate) prepared: &'a [PreparedPacket],
-    pub(crate) sent: &'a [crate::SentPacket],
+    pub(crate) sent: &'a [Arc<crate::SentPacket>],
     pub(crate) deadline: Instant,
     pub(crate) max_responses: usize,
 }
@@ -89,7 +89,7 @@ impl Accumulator {
         self.retained_record_identities.insert(identity);
     }
 
-    pub(super) fn take_events(&mut self) -> Vec<super::contract::Event> {
-        std::mem::take(&mut self.pending_events)
+    pub(super) fn drain_events(&mut self) -> std::vec::Drain<'_, super::contract::Event> {
+        self.pending_events.drain(..)
     }
 }

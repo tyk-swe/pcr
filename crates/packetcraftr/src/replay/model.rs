@@ -53,16 +53,18 @@ impl Timing {
         self,
         previous: Option<SystemTime>,
         current: Option<SystemTime>,
-        sequence: u64,
+        source_index: u64,
     ) -> Result<Duration, Error> {
         self.validate()?;
         match self {
             Self::Original => {
-                let (previous, current) = required_times(previous, current, sequence, "original")?;
+                let (previous, current) =
+                    required_times(previous, current, source_index, "original")?;
                 Ok(current.duration_since(previous).unwrap_or(Duration::ZERO))
             }
             Self::Scaled(factor) => {
-                let (previous, current) = required_times(previous, current, sequence, "scaled")?;
+                let (previous, current) =
+                    required_times(previous, current, source_index, "scaled")?;
                 let original = current.duration_since(previous).unwrap_or(Duration::ZERO);
                 let delay =
                     Duration::try_from_secs_f64(original.as_secs_f64() * factor).map_err(|_| {
@@ -101,12 +103,12 @@ impl Timing {
 fn required_times(
     previous: Option<SystemTime>,
     current: Option<SystemTime>,
-    sequence: u64,
+    source_index: u64,
     mode: &'static str,
 ) -> Result<(SystemTime, SystemTime), Error> {
     match (previous, current) {
         (Some(previous), Some(current)) => Ok((previous, current)),
-        _ => Err(Error::TimestampUnavailable { sequence, mode }),
+        _ => Err(Error::TimestampUnavailable { source_index, mode }),
     }
 }
 

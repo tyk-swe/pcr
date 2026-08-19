@@ -51,7 +51,7 @@ pub(super) fn run(
                 &mut executor,
                 &mut clock,
             )
-            .map_err(classified_error)?;
+            .map_err(CliError::classified)?;
             let (result, diagnostics, stats) =
                 output::dns::Result::try_from_dns(result).map_err(CliError::classified)?;
             if format == output::contract::Format::Text {
@@ -61,17 +61,19 @@ pub(super) fn run(
             }
         }
         output::contract::Format::Ndjson => {
+            let event_stream = stream.clone();
             let summary = packetcraftr::dns::run_with_events(
                 &request,
                 &mut authorizer,
                 &registry,
                 &mut executor,
                 &mut clock,
-                |event| {
-                    rendering::render_event(event, stream).map_err(CliError::into_boundary_error)
+                move |event| {
+                    rendering::render_event(event, &event_stream)
+                        .map_err(CliError::into_boundary_error)
                 },
             )
-            .map_err(classified_error)?;
+            .map_err(CliError::classified)?;
             rendering::render_complete(summary, stream)
         }
         _ => unreachable!("dns format is checked before command dispatch"),
@@ -134,8 +136,4 @@ fn prepare_exchange(
         1,
         queue_limits,
     )
-}
-
-pub(crate) fn classified_error(error: packetcraftr::dns::Error) -> CliError {
-    CliError::classified(error)
 }

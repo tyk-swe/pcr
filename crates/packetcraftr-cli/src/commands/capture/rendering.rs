@@ -83,23 +83,13 @@ pub(super) fn render_stream<C: net::capture::Session>(
         budget,
         selector,
         |frame, source_frame| {
-            let frame =
-                output::frame::Captured::try_from_frame(frame).map_err(CliError::classified)?;
-            stream.emit_data(
-                output::capture::Event::Frame {
-                    source_frame,
-                    frame,
-                },
-                Vec::new(),
-            )
+            let event = output::capture::Event::try_from_frame(source_frame, frame)
+                .map_err(CliError::classified)?;
+            stream.emit_data(event, Vec::new())
         },
     )?;
     stream.complete_with_stats(
-        output::capture::Event::Complete {
-            frames_captured: outcome.stats.packets_attempted,
-            frames_matched: outcome.stats.packets_completed,
-            captured_bytes: outcome.stats.bytes,
-        },
+        output::capture::Event::Complete,
         outcome.diagnostics,
         outcome.stats,
     )
@@ -284,13 +274,8 @@ mod tests {
     }
 
     fn assert_matches_published_schema(records: &[Value]) {
-        let schema: Value = serde_json::from_str(include_str!(
-            "../../../../../schemas/packetcraftr.output.v1.schema.json"
-        ))
-        .expect("published output schema must parse");
-        let validator = jsonschema::validator_for(&schema).expect("published schema must compile");
         for record in records {
-            validator
+            crate::test_support::schema_validator()
                 .validate(record)
                 .expect("capture stream record must validate");
         }
@@ -316,9 +301,9 @@ mod tests {
         assert_eq!(records[0]["result"]["source_frame"], 1);
         assert_eq!(records[1]["result"]["source_frame"], 2);
         assert_eq!(records[2]["result"]["event"], "complete");
-        assert_eq!(records[2]["result"]["frames_captured"], 2);
-        assert_eq!(records[2]["result"]["frames_matched"], 2);
-        assert_eq!(records[2]["result"]["captured_bytes"], 2);
+        assert_eq!(records[2]["stats"]["packets_attempted"], 2);
+        assert_eq!(records[2]["stats"]["packets_completed"], 2);
+        assert_eq!(records[2]["stats"]["bytes"], 2);
         assert_matches_published_schema(&records);
         assert!(!stream.is_open());
     }
@@ -351,9 +336,10 @@ mod tests {
         assert_eq!(records[0]["sequence"], 0);
         assert_eq!(records[0]["result"]["source_frame"], 3);
         assert_eq!(records[1]["sequence"], 1);
-        assert_eq!(records[1]["result"]["frames_captured"], 3);
-        assert_eq!(records[1]["result"]["frames_matched"], 1);
-        assert_eq!(records[1]["result"]["captured_bytes"], 3);
+        assert_eq!(records[1]["result"]["event"], "complete");
+        assert_eq!(records[1]["stats"]["packets_attempted"], 3);
+        assert_eq!(records[1]["stats"]["packets_completed"], 1);
+        assert_eq!(records[1]["stats"]["bytes"], 3);
         assert_matches_published_schema(&records);
     }
 

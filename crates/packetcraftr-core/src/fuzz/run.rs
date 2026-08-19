@@ -7,9 +7,9 @@ use crate::budget::Deadline;
 use crate::error::BoundaryError;
 use crate::{Packet, field::FieldKind, registry::Registry};
 
-use super::error::Error;
+use super::error::{Error, duration_limit};
 use super::mutation::prepare_with_events;
-use super::result::{Event, Stats, Summary};
+use super::result::{Case, Stats, Summary};
 
 /// A completely prepared and bounded deterministic mutation campaign.
 ///
@@ -32,7 +32,7 @@ impl Campaign {
     ) -> Result<Self, Error> {
         request.validate()?;
         let mut cases = Vec::with_capacity(request.cases);
-        let prepared = prepare_with_events(request, packet, registry, deadline, &mut |case| {
+        let prepared = prepare_with_events(request, packet, registry, deadline, &mut |case, _| {
             cases.push(case);
             Ok(())
         })?;
@@ -71,8 +71,7 @@ pub fn run(
     registry: Arc<Registry>,
 ) -> Result<super::result::Result, Error> {
     let mut cases = Vec::new();
-    let summary = run_with_events(request, packet, registry, |event| {
-        let Event::Case(case) = event;
+    let summary = run_observed(request, packet, registry, |case, _| {
         cases.push(case);
         Ok(())
     })?;
@@ -87,20 +86,46 @@ pub fn run(
 
 /// Generates each deterministic case once and publishes it as soon as its
 /// offline outcome is final.
+///
+/// The callback runs on a bounded worker. Each result is acknowledged before
+/// generation continues, callback failure aborts later cases, and callback
+/// backpressure is charged to `request.limits.max_duration`. A callback that
+/// does not return is detached when the deadline expires, so it must own its
+/// state and tolerate finishing after this function returns.
 pub fn run_with_events<F>(
+    request: &super::request::Request,
+    packet: Packet,
+    registry: Arc<Registry>,
+    emit: F,
+) -> Result<Summary, Error>
+where
+    F: FnMut(Case) -> Result<(), BoundaryError> + Send + 'static,
+{
+    let sink = crate::progress::Sink::new(emit).map_err(|source| Error::Output { source })?;
+    run_observed(
+        request,
+        packet,
+        registry,
+        move |case, deadline| match sink.emit(case, deadline) {
+            Ok(()) => Ok(()),
+            Err(crate::progress::EmitError::Deadline(error)) => Err(duration_limit(error)),
+            Err(crate::progress::EmitError::Output(source)) => Err(Error::Output { source }),
+        },
+    )
+}
+
+fn run_observed<F>(
     request: &super::request::Request,
     packet: Packet,
     registry: Arc<Registry>,
     mut emit: F,
 ) -> Result<Summary, Error>
 where
-    F: FnMut(Event) -> Result<(), BoundaryError>,
+    F: FnMut(Case, &Deadline) -> Result<(), Error>,
 {
     request.validate()?;
     let mut deadline = Deadline::new(request.limits.max_duration);
-    let prepared = prepare_with_events(request, packet, registry, &mut deadline, &mut |case| {
-        emit(Event::Case(case))
-    })?;
+    let prepared = prepare_with_events(request, packet, registry, &mut deadline, &mut emit)?;
     Ok(Summary {
         seed: request.seed,
         first_case: request.first_case,

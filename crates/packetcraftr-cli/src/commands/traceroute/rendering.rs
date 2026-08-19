@@ -103,19 +103,19 @@ fn completion_name(value: output::traceroute::Completion) -> &'static str {
 
 pub(super) fn render_event(
     event: packetcraftr::traceroute::Event,
-    stream: &mut NdjsonStream,
+    stream: &NdjsonStream,
 ) -> Result<(), CliError> {
-    let event =
+    let (event, diagnostics) =
         output::traceroute::Event::try_from_traceroute(event).map_err(CliError::classified)?;
-    stream.emit_data(event, Vec::new())
+    super::super::progressive::render_event(event, diagnostics, stream)
 }
 
 pub(super) fn render_complete(
     summary: packetcraftr::traceroute::Summary,
-    stream: &mut NdjsonStream,
+    stream: &NdjsonStream,
 ) -> Result<(), CliError> {
     let (event, diagnostics, stats) = output::traceroute::Event::complete_from_traceroute(summary);
-    stream.complete_with_stats(event, diagnostics, stats)
+    super::super::progressive::render_complete(event, diagnostics, stats, stream)
 }
 
 #[cfg(test)]
@@ -131,8 +131,7 @@ mod tests {
     fn probe_event(sequence: u64, hop_limit: u8) -> traceroute::Event {
         let destination = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 20));
         traceroute::Event::Probe {
-            target: destination.to_string(),
-            destination,
+            target: destination.to_string().into(),
             probe: traceroute::ProbeEvidence {
                 sequence,
                 hop_limit,
@@ -168,10 +167,10 @@ mod tests {
 
     #[test]
     fn traceroute_stream_positions_ignore_probe_and_hop_ids() {
-        let (mut sink, output) = stream(output::contract::Command::Traceroute);
-        render_event(probe_event(4_000_000_000, 200), &mut sink).unwrap();
-        render_event(probe_event(3, 2), &mut sink).unwrap();
-        render_complete(summary(), &mut sink).unwrap();
+        let (sink, output) = stream(output::contract::Command::Traceroute);
+        render_event(probe_event(4_000_000_000, 200), &sink).unwrap();
+        render_event(probe_event(3, 2), &sink).unwrap();
+        render_complete(summary(), &sink).unwrap();
 
         let records = output.records();
         assert_contiguous(&records);
@@ -186,34 +185,5 @@ mod tests {
                 .count(),
             1
         );
-    }
-
-    #[test]
-    fn traceroute_failure_is_terminal_at_the_next_position() {
-        let (mut sink, output) = stream(output::contract::Command::Traceroute);
-        render_event(probe_event(999_999, 1), &mut sink).unwrap();
-        sink.emit_error(CliError::new(5, "later traceroute failure").output_error())
-            .unwrap();
-
-        let records = output.records();
-        assert_contiguous(&records);
-        assert_eq!(records.len(), 2);
-        assert_eq!(records[1]["sequence"], 1);
-        assert_eq!(records[1]["status"], "error");
-        assert!(
-            records
-                .iter()
-                .all(|record| record["result"]["event"] != "complete")
-        );
-    }
-
-    #[test]
-    fn empty_traceroute_success_completes_at_zero() {
-        let (mut sink, output) = stream(output::contract::Command::Traceroute);
-        render_complete(summary(), &mut sink).unwrap();
-        let records = output.records();
-        assert_eq!(records.len(), 1);
-        assert_eq!(records[0]["sequence"], 0);
-        assert_eq!(records[0]["result"]["event"], "complete");
     }
 }

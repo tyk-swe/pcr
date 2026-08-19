@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use packetcraftr_core::diagnostic::Diagnostic;
+use packetcraftr_core::diagnostic::Diagnostic as PacketDiagnostic;
 
 use super::contract::Error;
 use super::envelope::Stats;
@@ -124,7 +124,7 @@ pub struct Result {
 impl Result {
     pub fn try_from_traceroute(
         result: crate::traceroute::Result,
-    ) -> std::result::Result<(Self, Vec<Diagnostic>, Stats), Error> {
+    ) -> std::result::Result<(Self, Vec<PacketDiagnostic>, Stats), Error> {
         let crate::traceroute::Result {
             target,
             resolved_addresses,
@@ -182,13 +182,13 @@ impl Result {
 pub enum Event {
     Probe {
         target: String,
-        destination: IpAddr,
         probe: Probe,
     },
     Undecoded {
         hop_limit: u8,
         frame: Captured,
     },
+    Diagnostic,
     Complete {
         target: String,
         resolved_addresses: Vec<IpAddr>,
@@ -203,27 +203,32 @@ pub enum Event {
 impl Event {
     pub fn try_from_traceroute(
         event: crate::traceroute::Event,
-    ) -> std::result::Result<Self, Error> {
-        match event {
-            crate::traceroute::Event::Probe {
-                target,
-                destination,
-                probe,
-            } => Ok(Self::Probe {
-                target,
-                destination,
-                probe: try_from_probe(probe)?,
-            }),
-            crate::traceroute::Event::Undecoded(evidence) => Ok(Self::Undecoded {
-                hop_limit: evidence.hop_limit,
-                frame: Captured::try_from_frame(evidence.frame)?,
-            }),
-        }
+    ) -> std::result::Result<(Self, Vec<PacketDiagnostic>), Error> {
+        let (event, diagnostics) = match event {
+            crate::traceroute::Event::Probe { target, probe } => (
+                Self::Probe {
+                    target: target.to_string(),
+                    probe: try_from_probe(probe)?,
+                },
+                Vec::new(),
+            ),
+            crate::traceroute::Event::Undecoded(evidence) => (
+                Self::Undecoded {
+                    hop_limit: evidence.hop_limit,
+                    frame: Captured::try_from_frame(evidence.frame)?,
+                },
+                Vec::new(),
+            ),
+            crate::traceroute::Event::Diagnostic(diagnostic) => {
+                (Self::Diagnostic, vec![diagnostic])
+            }
+        };
+        Ok((event, diagnostics))
     }
 
     pub fn complete_from_traceroute(
         summary: crate::traceroute::Summary,
-    ) -> (Self, Vec<Diagnostic>, Stats) {
+    ) -> (Self, Vec<PacketDiagnostic>, Stats) {
         (
             Self::Complete {
                 target: summary.target,

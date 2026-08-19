@@ -128,22 +128,22 @@ fn offline_fuzz_sink_failure_stops_generation_after_the_emitted_case() {
         targets: vec!["0.bytes".parse().unwrap()],
         ..Request::default()
     };
-    let mut emitted = Vec::new();
+    let emitted = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let observed = std::sync::Arc::clone(&emitted);
 
     let error = run_with_events(
         &request,
         raw_fuzz_packet(),
         fuzz_protocol_registry(),
-        |event| {
-            let super::Event::Case(case) = event;
-            emitted.push(case.index);
+        move |case| {
+            observed.lock().unwrap().push(case.index);
             Err(output_failure())
         },
     )
     .expect_err("the first sink write must stop generation");
 
     assert!(matches!(error, Error::Output { .. }));
-    assert_eq!(emitted, [0]);
+    assert_eq!(*emitted.lock().unwrap(), [0]);
 }
 
 #[test]
@@ -165,22 +165,22 @@ fn offline_fuzz_late_limit_failure_preserves_earlier_cases() {
         },
         ..Request::default()
     };
-    let mut emitted = Vec::new();
+    let emitted = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let observed = std::sync::Arc::clone(&emitted);
 
     let error = run_with_events(
         &request,
         raw_fuzz_packet(),
         fuzz_protocol_registry(),
-        |event| {
-            let super::Event::Case(case) = event;
-            emitted.push(case.index);
+        move |case| {
+            observed.lock().unwrap().push(case.index);
             Ok(())
         },
     )
     .expect_err("the third retained case must exceed the campaign limit");
 
     assert!(matches!(error, Error::ByteLimit { .. }));
-    assert_eq!(emitted, [0, 1]);
+    assert_eq!(*emitted.lock().unwrap(), [0, 1]);
 }
 
 #[test]

@@ -18,6 +18,8 @@ mod ndjson_conformance;
 mod rendering;
 mod startup;
 mod system;
+#[cfg(test)]
+mod test_support;
 
 fn main() -> std::process::ExitCode {
     startup::run()

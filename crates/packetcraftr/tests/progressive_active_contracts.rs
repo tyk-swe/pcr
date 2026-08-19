@@ -229,18 +229,21 @@ fn assert_one_clean_exchange(state: &IoState) {
 fn exchange_events_follow_provider_confirmation_and_completion() {
     let state = Arc::new(IoState::default());
     let client = client(Arc::clone(&state));
-    let mut observed = Vec::new();
-    let mut collector = packetcraftr::exchange::Collector::default();
+    let observed = Arc::new(Mutex::new(Vec::new()));
+    let callback_observed = Arc::clone(&observed);
+    let collector = Arc::new(Mutex::new(packetcraftr::exchange::Collector::default()));
+    let callback_collector = Arc::clone(&collector);
+    let callback_state = Arc::clone(&state);
 
     let summary = client
         .exchange_with_events(
             &exchange_template(),
             two_packet_exchange_options(),
-            |event| {
-                collector.observe(event.clone());
+            move |event| {
+                callback_collector.lock().unwrap().observe(event.clone());
                 match event {
                     packetcraftr::exchange::Event::Sent { request_index, .. } => {
-                        let sends = state
+                        let sends = callback_state
                             .events
                             .lock()
                             .unwrap()
@@ -248,11 +251,20 @@ fn exchange_events_follow_provider_confirmation_and_completion() {
                             .filter(|event| **event == "send")
                             .count();
                         assert_eq!(sends, request_index + 1);
-                        observed.push(format!("sent:{request_index}"));
+                        callback_observed
+                            .lock()
+                            .unwrap()
+                            .push(format!("sent:{request_index}"));
                     }
                     packetcraftr::exchange::Event::Unanswered { request_index } => {
-                        assert_eq!(state.events.lock().unwrap().last(), Some(&"shutdown"));
-                        observed.push(format!("unanswered:{request_index}"));
+                        assert_eq!(
+                            callback_state.events.lock().unwrap().last(),
+                            Some(&"shutdown")
+                        );
+                        callback_observed
+                            .lock()
+                            .unwrap()
+                            .push(format!("unanswered:{request_index}"));
                     }
                     _ => panic!("empty fake capture produces only sent and unanswered events"),
                 }
@@ -262,11 +274,13 @@ fn exchange_events_follow_provider_confirmation_and_completion() {
         .expect("the fake exchange must complete");
 
     assert_eq!(
-        observed,
+        *observed.lock().unwrap(),
         ["sent:0", "sent:1", "unanswered:0", "unanswered:1"]
     );
     assert_eq!(summary.unanswered, [0, 1]);
-    let aggregate = collector.finish(summary);
+    let aggregate = std::mem::take(&mut *collector.lock().unwrap())
+        .finish(summary)
+        .expect("collected events must be coherent");
     assert_eq!(aggregate.sent.len(), 2);
     assert_eq!(aggregate.unanswered, [0, 1]);
     assert!(aggregate.responses.is_empty());
@@ -312,20 +326,34 @@ fn exchange_emits_unsolicited_evidence_before_the_next_send() {
         .unwrap()
         .push_back(undecodable_capture());
     let client = client(Arc::clone(&state));
-    let mut observed = Vec::new();
+    let observed = Arc::new(Mutex::new(Vec::new()));
+    let callback_observed = Arc::clone(&observed);
 
     let error = client
         .exchange_with_events(
             &exchange_template(),
             two_packet_exchange_options(),
-            |event| match event {
+            move |event| match event {
                 packetcraftr::exchange::Event::Sent { request_index, .. } => {
-                    observed.push(format!("sent:{request_index}"));
+                    callback_observed
+                        .lock()
+                        .unwrap()
+                        .push(format!("sent:{request_index}"));
                     Ok(())
                 }
                 packetcraftr::exchange::Event::Unsolicited { .. } => {
-                    observed.push("unsolicited".to_owned());
+                    callback_observed
+                        .lock()
+                        .unwrap()
+                        .push("unsolicited".to_owned());
                     Err(output_failure())
+                }
+                packetcraftr::exchange::Event::Diagnostic(diagnostic) => {
+                    callback_observed
+                        .lock()
+                        .unwrap()
+                        .push(format!("diagnostic:{}", diagnostic.code));
+                    Ok(())
                 }
                 event => panic!("the invalid frame produced an unexpected event: {event:?}"),
             },
@@ -333,7 +361,14 @@ fn exchange_emits_unsolicited_evidence_before_the_next_send() {
         .expect_err("the unsolicited-event sink failure must stop the exchange");
 
     assert!(matches!(error, packetcraftr::Error::ExchangeOutput { .. }));
-    assert_eq!(observed, ["sent:0", "unsolicited"]);
+    assert_eq!(
+        *observed.lock().unwrap(),
+        [
+            "sent:0",
+            "diagnostic:exchange.pre_send_frame",
+            "unsolicited"
+        ]
+    );
     assert_eq!(
         *state.events.lock().unwrap(),
         ["arm", "ready", "send", "shutdown"]
@@ -351,24 +386,41 @@ fn exchange_emits_retained_undecoded_evidence_before_the_next_send() {
     let client = client(Arc::clone(&state));
     let mut options = two_packet_exchange_options();
     options.decode.max_layers = 0;
-    let mut observed = Vec::new();
+    let observed = Arc::new(Mutex::new(Vec::new()));
+    let callback_observed = Arc::clone(&observed);
 
     let error = client
-        .exchange_with_events(&exchange_template(), options, |event| match event {
+        .exchange_with_events(&exchange_template(), options, move |event| match event {
             packetcraftr::exchange::Event::Sent { request_index, .. } => {
-                observed.push(format!("sent:{request_index}"));
+                callback_observed
+                    .lock()
+                    .unwrap()
+                    .push(format!("sent:{request_index}"));
                 Ok(())
             }
             packetcraftr::exchange::Event::Undecoded { .. } => {
-                observed.push("undecoded".to_owned());
+                callback_observed
+                    .lock()
+                    .unwrap()
+                    .push("undecoded".to_owned());
                 Err(output_failure())
+            }
+            packetcraftr::exchange::Event::Diagnostic(diagnostic) => {
+                callback_observed
+                    .lock()
+                    .unwrap()
+                    .push(format!("diagnostic:{}", diagnostic.code));
+                Ok(())
             }
             event => panic!("the decode limit produced an unexpected event: {event:?}"),
         })
         .expect_err("the undecoded-event sink failure must stop the exchange");
 
     assert!(matches!(error, packetcraftr::Error::ExchangeOutput { .. }));
-    assert_eq!(observed, ["sent:0", "undecoded"]);
+    assert_eq!(
+        *observed.lock().unwrap(),
+        ["sent:0", "diagnostic:exchange.decode_error", "undecoded"]
+    );
     assert_eq!(
         *state.events.lock().unwrap(),
         ["arm", "ready", "send", "shutdown"]
@@ -395,7 +447,7 @@ fn exchange_cleanup_failure_augments_the_output_error() {
         error,
         packetcraftr::Error::ExchangeOutputAndCaptureShutdown { .. }
     ));
-    assert_eq!(error.classification().code, "io.exchange_output");
+    assert_eq!(error.classification().code, "io.test_output");
     assert!(
         error
             .causes()
@@ -468,7 +520,8 @@ fn later_capture_shutdown_failure_preserves_the_earlier_scan_event() {
         limits: scan::Limits::default(),
     };
     request.limits.batch_size = 1;
-    let mut events = Vec::new();
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let callback_events = Arc::clone(&events);
 
     let error = scan::run_with_events(
         &request,
@@ -476,15 +529,15 @@ fn later_capture_shutdown_failure_preserves_the_earlier_scan_event() {
         &registry,
         &mut executor,
         &mut clock::SystemClock,
-        |event| {
-            events.push(event);
+        move |event| {
+            callback_events.lock().unwrap().push(event);
             Ok(())
         },
     )
     .expect_err("the second capture shutdown must fail");
 
     assert!(matches!(error, scan::Error::Execution { sequence: 1, .. }));
-    assert_eq!(events.len(), 1);
+    assert_eq!(events.lock().unwrap().len(), 1);
     assert_eq!(
         *state.events.lock().unwrap(),
         [

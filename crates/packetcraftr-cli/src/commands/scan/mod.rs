@@ -55,8 +55,8 @@ pub(super) fn run(
         max_evidence_bytes: queue_limits.max_bytes,
         max_undecoded,
     };
-    scan_limits.validate().map_err(classified_error)?;
-    let ports = conversion::expand_port_specs(&ports, max_ports).map_err(classified_error)?;
+    scan_limits.validate().map_err(CliError::classified)?;
+    let ports = conversion::expand_port_specs(&ports, max_ports).map_err(CliError::classified)?;
     let policy = policy.into_policy();
     policy.validate().map_err(CliError::classified)?;
     validate_selector(route.interface.as_deref()).map(|_| ())?;
@@ -118,7 +118,7 @@ fn execute_and_render(
     match format {
         output::contract::Format::Text | output::contract::Format::Json => {
             let result = packetcraftr::scan::run(request, authorizer, registry, executor, clock)
-                .map_err(classified_error)?;
+                .map_err(CliError::classified)?;
             let (result, diagnostics, stats) =
                 output::scan::Result::try_from_scan(result).map_err(CliError::classified)?;
             if format == output::contract::Format::Text {
@@ -128,23 +128,21 @@ fn execute_and_render(
             }
         }
         output::contract::Format::Ndjson => {
+            let event_stream = stream.clone();
             let summary = packetcraftr::scan::run_with_events(
                 request,
                 authorizer,
                 registry,
                 executor,
                 clock,
-                |event| {
-                    rendering::render_event(event, stream).map_err(CliError::into_boundary_error)
+                move |event| {
+                    rendering::render_event(event, &event_stream)
+                        .map_err(CliError::into_boundary_error)
                 },
             )
-            .map_err(classified_error)?;
+            .map_err(CliError::classified)?;
             rendering::render_complete(summary, stream)
         }
         _ => unreachable!("scan format is checked before command dispatch"),
     }
-}
-
-pub(crate) fn classified_error(error: packetcraftr::scan::Error) -> CliError {
-    CliError::classified(error)
 }

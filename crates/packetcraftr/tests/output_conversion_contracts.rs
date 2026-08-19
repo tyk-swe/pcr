@@ -24,7 +24,7 @@ use packetcraftr::core::layer::Raw;
 use packetcraftr::core::protocol::{builtin, network::Ipv4, transport::Udp};
 use packetcraftr::core::{build, decode};
 use packetcraftr::output::{build as build_output, dissect as dissect_output};
-use packetcraftr::output::{expert, follow, read, stats};
+use packetcraftr::output::{capture, contract, expert, follow, read, stats};
 use serde_json::Value;
 
 fn built_udp_packet() -> (
@@ -89,6 +89,14 @@ fn packet_output_adapters_preserve_wire_data_and_separate_diagnostics() {
         .diagnostics
         .push(Diagnostic::info("decode.fixture", "fixture note"));
 
+    assert!(matches!(
+        read::Event::try_from_frame(0, frame.clone()),
+        Err(contract::Error::InvalidSourceFrame)
+    ));
+    assert!(matches!(
+        capture::Event::try_from_frame(0, frame.clone()),
+        Err(contract::Error::InvalidSourceFrame)
+    ));
     let raw_record = read::Event::try_from_frame(7, frame.clone()).expect("raw frame converts");
     let dissected_record =
         read::Event::try_from_decoded(7, frame, &decoded).expect("dissected frame converts");
@@ -120,8 +128,8 @@ fn packet_output_adapters_preserve_wire_data_and_separate_diagnostics() {
     else {
         panic!("dissected conversion must produce a frame event")
     };
-    assert_eq!(source_frame, 7);
-    assert_eq!(dissected_source_frame, 7);
+    assert_eq!(source_frame.get(), 7);
+    assert_eq!(dissected_source_frame.get(), 7);
     assert!(raw_decoded.is_none());
     assert_eq!(raw_frame.bytes(), dissected_frame.bytes());
     let stack = decoded_stack.expect("dissection was requested");

@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and text results collect those same domain events. Sink failure stops later
   generation or transmission where possible and preserves capture cleanup;
   later operation failures retain earlier records and terminate with one error.
+- **Breaking:** Progressive Rust callbacks now run on a bounded one-event worker
+  with deadline-aware acknowledgement. Callback classification and typed domain
+  context are preserved; blocked callbacks cannot keep live I/O armed beyond
+  the finite operation deadline. Operation-wide warnings are emitted as
+  diagnostic events when they become final.
 - Added a shared schema-backed NDJSON conformance gate for read, capture,
   replay, follow, expert, scan, traceroute, DNS, fuzz, and exchange. It checks
   independent JSON validity, contiguous envelope sequence, empty completion,
@@ -24,9 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** `read` NDJSON is now an explicit event stream ending in one
   mandatory `complete` event with source frame, match, and captured-byte
   counters. `read` and `capture` frame events expose the stable one-based
-  `source_frame` used by display filters as `frame.number`, while envelope
-  `sequence` remains the zero-based emitted-record ordinal. Capture completion
-  now distinguishes captured source frames, matched frames, and captured bytes.
+  validated non-zero `source_frame` used by display filters as `frame.number`,
+  while envelope `sequence` remains the zero-based emitted-record ordinal.
+  Capture processed counters now live only in terminal envelope statistics;
+  provider-reported capture counters remain the distinct nested capture view.
 - Explicit packet and frame sources now take precedence over stdin, while
   missing interactive input fails immediately with command-specific guidance.
 - **Breaking:** NDJSON envelope `sequence` is now exclusively the contiguous,
@@ -34,8 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   owns stream position through terminal success or error; source-frame, probe,
   attempt, hop, replay, and fuzz-case identifiers remain domain data and no
   longer select terminal error positions. Generic domain-error `sequence()`
-  accessors were removed, and public stream-envelope constructors now accept an
-  explicit `StreamPosition` instead of an arbitrary integer.
+  accessors and raw stream-envelope constructors were removed; the public
+  `StreamEncoder` now owns contiguous position, terminal state, serialization,
+  and writes as one source of truth.
 - **Breaking:** Scan, traceroute, and DNS NDJSON now publish semantic events
   during execution instead of serializing an accumulated result afterward.
   Scan and traceroute stream records are per-probe, DNS record and rejection
@@ -45,7 +52,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   aggregate `run` results are collectors over the same event path.
 - **Breaking:** Scan output now exposes address-bearing `endpoints` with an
   optional port, replacing the `ports` collection, ICMP port-zero sentinel,
-  and evidence-derived address in aggregate and streaming output.
+  and evidence-derived address in aggregate and streaming output. Aggregate and
+  streaming forms reuse one canonical `probe` record containing sequence and
+  endpoint identity.
+- **Breaking:** Structured errors now carry optional typed `context` fields for
+  `source_frame`, `probe_sequence`, `attempt`, and `case_index`; replay Rust
+  APIs consistently call their capture coordinate `source_index`.
 - **Breaking:** Offline fuzz limits now contain only campaign-generation
   bounds. Live evidence bounds moved to `packetcraftr::fuzz::LiveLimits`, the
   CLI has an independent `--max-packet-bytes` option, and live-only fuzz

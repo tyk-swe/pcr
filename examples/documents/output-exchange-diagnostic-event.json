@@ -1,0 +1,17 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "exchange",
+  "mode": "stream",
+  "sequence": 1,
+  "status": "success",
+  "result": {
+    "event": "diagnostic"
+  },
+  "diagnostics": [
+    {
+      "code": "exchange.pre_send_frame",
+      "severity": "info",
+      "message": "a captured frame arrived before one or more requests were sent and was not correlated to those requests"
+    }
+  ]
+}

@@ -75,7 +75,7 @@ pub(super) fn render_text(
     }
     write_stdout_line(format_args!(
         "{}",
-        response_summary(ResponseSummary {
+        response_summary(ResponseLine {
             response_code: optional_display(result.response_code),
             response_code_name: result.response_code_name.as_deref().unwrap_or("none"),
             authoritative: optional_display(result.authoritative),
@@ -103,21 +103,22 @@ fn render_record(
 
 pub(super) fn render_event(
     event: packetcraftr::dns::Event,
-    stream: &mut NdjsonStream,
+    stream: &NdjsonStream,
 ) -> Result<(), CliError> {
-    let event = output::dns::Event::try_from_dns(event).map_err(CliError::classified)?;
-    stream.emit_data(event, Vec::new())
+    let (event, diagnostics) =
+        output::dns::Event::try_from_dns(event).map_err(CliError::classified)?;
+    super::super::progressive::render_event(event, diagnostics, stream)
 }
 
 pub(super) fn render_complete(
     summary: packetcraftr::dns::Summary,
-    stream: &mut NdjsonStream,
+    stream: &NdjsonStream,
 ) -> Result<(), CliError> {
     let (event, diagnostics, stats) = output::dns::Event::complete_from_dns(summary);
-    stream.complete_with_stats(event, diagnostics, stats)
+    super::super::progressive::render_complete(event, diagnostics, stats, stream)
 }
 
-struct ResponseSummary<'a> {
+struct ResponseLine<'a> {
     response_code: String,
     response_code_name: &'a str,
     authoritative: String,
@@ -128,8 +129,8 @@ struct ResponseSummary<'a> {
     bytes: u64,
 }
 
-fn response_summary(summary: ResponseSummary<'_>) -> String {
-    let ResponseSummary {
+fn response_summary(summary: ResponseLine<'_>) -> String {
+    let ResponseLine {
         response_code,
         response_code_name,
         authoritative,
@@ -158,23 +159,25 @@ fn outcome_name(value: output::dns::Outcome) -> &'static str {
 #[cfg(test)]
 mod tests {
     use std::net::{IpAddr, Ipv4Addr};
+    use std::sync::Arc;
     use std::time::UNIX_EPOCH;
 
     use packetcraftr::dns;
 
-    use super::{ResponseSummary, response_summary};
+    use super::{ResponseLine, response_summary};
     use super::{render_complete, render_event};
-    use crate::errors::CliError;
     use crate::rendering::ndjson_test_support::{assert_contiguous, stream};
     use packetcraftr::output;
 
     fn attempt_event(attempt: u32) -> dns::Event {
         let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53));
         dns::Event::Attempt {
-            server: "resolver.test".to_owned(),
-            server_port: 53,
-            query_name: "example.test.".to_owned(),
-            query_type: dns::QueryType::A,
+            context: Arc::new(dns::EventContext {
+                server: Arc::from("resolver.test"),
+                server_port: 53,
+                query_name: Arc::from("example.test."),
+                query_type: dns::QueryType::A,
+            }),
             evidence: dns::AttemptEvidence {
                 attempt,
                 server_address: address,
@@ -207,7 +210,7 @@ mod tests {
 
     #[test]
     fn response_summary_uses_the_response_code_name_label() {
-        let summary = response_summary(ResponseSummary {
+        let summary = response_summary(ResponseLine {
             response_code: "0".to_owned(),
             response_code_name: "NOERROR",
             authoritative: "true".to_owned(),
@@ -224,10 +227,10 @@ mod tests {
 
     #[test]
     fn dns_stream_positions_ignore_noncontiguous_attempt_ids() {
-        let (mut sink, output) = stream(output::contract::Command::Dns);
-        render_event(attempt_event(31), &mut sink).unwrap();
-        render_event(attempt_event(2), &mut sink).unwrap();
-        render_complete(summary(), &mut sink).unwrap();
+        let (sink, output) = stream(output::contract::Command::Dns);
+        render_event(attempt_event(31), &sink).unwrap();
+        render_event(attempt_event(2), &sink).unwrap();
+        render_complete(summary(), &sink).unwrap();
 
         let records = output.records();
         assert_contiguous(&records);
@@ -242,34 +245,5 @@ mod tests {
                 .count(),
             1
         );
-    }
-
-    #[test]
-    fn dns_failure_is_terminal_at_the_next_position() {
-        let (mut sink, output) = stream(output::contract::Command::Dns);
-        render_event(attempt_event(17), &mut sink).unwrap();
-        sink.emit_error(CliError::new(5, "later DNS failure").output_error())
-            .unwrap();
-
-        let records = output.records();
-        assert_contiguous(&records);
-        assert_eq!(records.len(), 2);
-        assert_eq!(records[1]["sequence"], 1);
-        assert_eq!(records[1]["status"], "error");
-        assert!(
-            records
-                .iter()
-                .all(|record| record["result"]["event"] != "complete")
-        );
-    }
-
-    #[test]
-    fn empty_dns_success_completes_at_zero() {
-        let (mut sink, output) = stream(output::contract::Command::Dns);
-        render_complete(summary(), &mut sink).unwrap();
-        let records = output.records();
-        assert_eq!(records.len(), 1);
-        assert_eq!(records[0]["sequence"], 0);
-        assert_eq!(records[0]["result"]["event"], "complete");
     }
 }

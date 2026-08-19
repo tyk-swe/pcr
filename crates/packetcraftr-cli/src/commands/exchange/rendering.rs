@@ -58,19 +58,10 @@ pub(super) fn render_aggregate(result: packetcraftr::exchange::Result) -> Result
     )
 }
 
-pub(super) fn render_event(
-    event: output::exchange::Event,
-    stream: &mut NdjsonStream,
-) -> Result<(), CliError> {
-    stream.emit_data(event, Vec::new())
-}
-
 pub(super) fn render_complete(
     summary: packetcraftr::exchange::Summary,
-    diagnostics: Vec<packetcraftr::core::diagnostic::Diagnostic>,
-    stream: &mut NdjsonStream,
+    stream: &NdjsonStream,
 ) -> Result<(), CliError> {
-    let (event, diagnostics, stats) =
-        output::exchange::Event::complete_from_exchange(summary, diagnostics);
-    stream.complete_with_stats(event, diagnostics, stats)
+    let (event, diagnostics, stats) = output::exchange::Event::complete_from_exchange(summary);
+    super::super::progressive::render_complete(event, diagnostics, stats, stream)
 }

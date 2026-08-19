@@ -23,8 +23,11 @@ fn endpoint(address: IpAddr, responded: bool) -> scan::Endpoint {
         transport: scan::Transport::Icmp,
         port: None,
         classification,
-        evidence: vec![scan::ProbeEvidence {
+        probes: vec![scan::ProbeEvidence {
             sequence: 0,
+            address,
+            transport: scan::Transport::Icmp,
+            port: None,
             attempt: 1,
             status: if responded {
                 scan::ProbeStatus::Response
@@ -51,7 +54,7 @@ fn scan_output_preserves_endpoint_identity_and_port_absence() {
         transport: scan::Transport::Tcp,
         port: Some(443),
         classification: scan::Classification::Unknown,
-        evidence: Vec::new(),
+        probes: Vec::new(),
     };
     let port_zero = scan::Endpoint {
         port: Some(0),
@@ -74,10 +77,10 @@ fn scan_output_preserves_endpoint_identity_and_port_absence() {
 
     assert_eq!(output.endpoints[0].address, ipv4);
     assert_eq!(output.endpoints[0].port, None);
-    assert_eq!(output.endpoints[0].evidence[0].protocol, "icmpv4");
+    assert_eq!(output.endpoints[0].probes[0].protocol, "icmpv4");
     assert_eq!(output.endpoints[1].address, ipv6);
     assert_eq!(output.endpoints[1].port, None);
-    assert_eq!(output.endpoints[1].evidence[0].protocol, "icmpv6");
+    assert_eq!(output.endpoints[1].probes[0].protocol, "icmpv6");
     assert_eq!(
         output.endpoints[0].classification,
         scan_output::Classification::Open
@@ -88,12 +91,12 @@ fn scan_output_preserves_endpoint_identity_and_port_absence() {
     );
     assert_eq!(output.endpoints[2].address, ipv4);
     assert_eq!(output.endpoints[2].port, Some(443));
-    assert!(output.endpoints[2].evidence.is_empty());
+    assert!(output.endpoints[2].probes.is_empty());
 
     let json = serde_json::to_value(&output).expect("scan output serializes");
     assert!(json["endpoints"][0].get("port").is_none());
     assert_eq!(json["endpoints"][3]["port"], 0);
-    let timeout = &json["endpoints"][1]["evidence"][0];
+    let timeout = &json["endpoints"][1]["probes"][0];
     for absent in [
         "destination_port",
         "responder",
@@ -106,21 +109,19 @@ fn scan_output_preserves_endpoint_identity_and_port_absence() {
 
     let event = serde_json::to_value(scan_output::Event::Probe {
         target: output.target,
-        probe_sequence: 0,
-        address: ipv4,
-        transport: "icmp".to_owned(),
-        port: None,
-        evidence: Box::new(output.endpoints[0].evidence[0].clone()),
+        probe: output.endpoints[0].probes[0].clone(),
     })
     .expect("probe event serializes with explicit endpoint identity");
     assert_eq!(event["event"], "probe");
-    assert_eq!(event["address"], ipv4.to_string());
-    assert_eq!(event["probe_sequence"], 0);
-    assert!(event.get("port").is_none());
+    assert_eq!(event["probe"]["destination"], ipv4.to_string());
+    assert_eq!(event["probe"]["sequence"], 0);
+    assert!(event["probe"].get("destination_port").is_none());
     assert!(event.get("resolved_address").is_none());
 
-    let undecoded = scan_output::Event::try_from_scan(scan::Event::Undecoded { frame: frame() })
-        .expect("undecoded event converts");
+    let (undecoded, diagnostics) =
+        scan_output::Event::try_from_scan(scan::Event::Undecoded { frame: frame() })
+            .expect("undecoded event converts");
+    assert!(diagnostics.is_empty());
     let undecoded = serde_json::to_value(undecoded).expect("undecoded event serializes");
     assert_eq!(undecoded["event"], "undecoded");
     assert!(undecoded.get("probe_sequence").is_none());

@@ -636,7 +636,9 @@ fn traceroute_events_precede_later_hops_and_survive_a_later_failure() {
         shutdowns: Arc::clone(&shutdowns),
         fail_at: Some(2),
     };
-    let mut events = Vec::new();
+    let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let observed_events = Arc::clone(&events);
+    let callback_calls = Arc::clone(&calls);
 
     let error = run_with_events(
         &request,
@@ -646,15 +648,16 @@ fn traceroute_events_precede_later_hops_and_survive_a_later_failure() {
         &packetcraftr_core::protocol::builtin::registry().unwrap(),
         &mut executor,
         &mut NoopClock,
-        |event| {
-            assert_eq!(calls.load(Ordering::SeqCst), 1);
-            events.push(event);
+        move |event| {
+            assert_eq!(callback_calls.load(Ordering::SeqCst), 1);
+            observed_events.lock().unwrap().push(event);
             Ok(())
         },
     )
     .expect_err("the second hop must fail");
 
     assert!(matches!(error, Error::Execution { sequence: 1, .. }));
+    let events = events.lock().unwrap();
     assert_eq!(events.len(), 1);
     assert!(matches!(
         &events[0],
@@ -698,7 +701,7 @@ fn traceroute_sink_failure_stops_later_hops_after_session_shutdown() {
     .expect_err("the progressive sink must fail");
 
     assert!(matches!(&error, Error::Output { .. }));
-    assert_eq!(error.classification().code, "io.traceroute_output");
+    assert_eq!(error.classification().code, "io.test_output");
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     assert_eq!(shutdowns.load(Ordering::SeqCst), 1);
 }

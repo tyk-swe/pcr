@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::budget::Deadline;
-use crate::error::{BoundaryError, Classification, Kind};
+use crate::error::{Classification, Kind};
 use crate::{
     Packet,
     build::Builder,
@@ -32,7 +32,7 @@ pub(in crate::fuzz) fn prepare_with_events<F>(
     emit: &mut F,
 ) -> Result<PreparedCases, Error>
 where
-    F: FnMut(super::super::result::Case) -> Result<(), BoundaryError>,
+    F: FnMut(super::super::result::Case, &Deadline) -> Result<(), Error>,
 {
     deadline
         .start_accounting(Duration::ZERO)
@@ -102,13 +102,13 @@ fn prepare_cases<F>(
     emit: &mut F,
 ) -> Result<PreparedCases, Error>
 where
-    F: FnMut(super::super::result::Case) -> Result<(), BoundaryError>,
+    F: FnMut(super::super::result::Case, &Deadline) -> Result<(), Error>,
 {
     let mut counters = Counters::default();
     for offset in 0..inputs.request.cases {
         deadline.check().map_err(duration_limit)?;
         let case = prepare_case(inputs, offset, &mut counters)?;
-        emit(case).map_err(|source| Error::Output { source })?;
+        emit(case, deadline)?;
     }
     Ok(PreparedCases {
         built_case_count: counters.built_cases,
@@ -168,7 +168,7 @@ fn prepare_case(
         retained_value_bytes,
         total_byte_limit,
     )?;
-    let mut case = new_case(index, seed, mutation, shrink_values, recipe);
+    let mut case = new_case(request.seed, index, seed, mutation, shrink_values, recipe);
     if let Err(source) = mutation_result {
         case.error = Some(mutation_failure(source));
         return Ok(case);
@@ -185,6 +185,7 @@ fn prepare_case(
 }
 
 fn new_case(
+    operation_seed: u64,
     index: u64,
     seed: u64,
     mutation: super::super::result::Mutation,
@@ -192,6 +193,7 @@ fn new_case(
     recipe: Packet,
 ) -> super::super::result::Case {
     super::super::result::Case {
+        operation_seed,
         index,
         seed,
         mutation,

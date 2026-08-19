@@ -100,63 +100,45 @@ impl ResponseFields {
         let Some(response) = response else {
             return Self::default();
         };
-        Self {
-            response_code: Some(response.response_code),
-            response_code_name: Some(response.response_code_name().to_owned()),
-            edns: response.edns.map(Into::into),
-            authoritative: Some(response.authoritative),
-            truncated: Some(response.truncated),
-            recursion_desired: Some(response.recursion_desired),
-            recursion_available: Some(response.recursion_available),
-            authenticated_data: Some(response.authenticated_data),
-            checking_disabled: Some(response.checking_disabled),
-            answers: response
-                .answers
-                .into_iter()
-                .map(Record::from_record)
-                .collect(),
-            authorities: response
-                .authorities
-                .into_iter()
-                .map(Record::from_record)
-                .collect(),
-            additionals: response
-                .additionals
-                .into_iter()
-                .map(Record::from_record)
-                .collect(),
-            rejected_records: response
-                .rejected_records
-                .into_iter()
-                .map(|record| RejectedRecord {
-                    section: record.section.into(),
-                    index: record.index,
-                    owner: record.owner,
-                    type_code: record.type_code,
-                    reason: record.reason,
-                })
-                .collect(),
-            rejected_record_count: response.rejected_record_count,
-        }
+        let crate::dns::ValidatedResponse {
+            metadata,
+            answers,
+            authorities,
+            additionals,
+            rejected_records,
+        } = response;
+        let mut fields = Self::from_metadata(Some(metadata));
+        fields.answers = answers.into_iter().map(Record::from_record).collect();
+        fields.authorities = authorities.into_iter().map(Record::from_record).collect();
+        fields.additionals = additionals.into_iter().map(Record::from_record).collect();
+        fields.rejected_records = rejected_records
+            .into_iter()
+            .map(|record| RejectedRecord {
+                section: record.section.into(),
+                index: record.index,
+                owner: record.owner,
+                type_code: record.type_code,
+                reason: record.reason,
+            })
+            .collect();
+        fields
     }
 
-    fn from_summary(response: Option<crate::dns::ResponseSummary>) -> Self {
-        let Some(response) = response else {
+    fn from_metadata(metadata: Option<crate::dns::ResponseMetadata>) -> Self {
+        let Some(metadata) = metadata else {
             return Self::default();
         };
         Self {
-            response_code: Some(response.response_code),
-            response_code_name: Some(
-                crate::dns::response_code_name(response.response_code).to_owned(),
-            ),
-            edns: response.edns.map(Into::into),
-            authoritative: Some(response.authoritative),
-            truncated: Some(response.truncated),
-            recursion_desired: Some(response.recursion_desired),
-            recursion_available: Some(response.recursion_available),
-            authenticated_data: Some(response.authenticated_data),
-            checking_disabled: Some(response.checking_disabled),
-            rejected_record_count: response.rejected_record_count,
+            response_code: Some(metadata.response_code),
+            response_code_name: Some(metadata.response_code_name().to_owned()),
+            edns: metadata.edns.map(Into::into),
+            authoritative: Some(metadata.authoritative),
+            truncated: Some(metadata.truncated),
+            recursion_desired: Some(metadata.recursion_desired),
+            recursion_available: Some(metadata.recursion_available),
+            authenticated_data: Some(metadata.authenticated_data),
+            checking_disabled: Some(metadata.checking_disabled),
+            rejected_record_count: metadata.rejected_record_count,
             ..Self::default()
         }
     }
@@ -303,6 +285,7 @@ pub enum Event {
     Undecoded {
         evidence: Undecoded,
     },
+    Diagnostic,
     Complete {
         server: String,
         server_port: u16,
@@ -335,67 +318,71 @@ pub enum Event {
 }
 
 impl Event {
-    pub fn try_from_dns(event: crate::dns::Event) -> std::result::Result<Self, Error> {
-        match event {
-            crate::dns::Event::Attempt {
-                server,
-                server_port,
-                query_name,
-                query_type,
-                evidence,
-            } => Ok(Self::Attempt {
-                server,
-                server_port,
-                query_name,
-                query_type: query_type.to_string(),
-                evidence: try_from_attempt(evidence)?,
-            }),
+    pub fn try_from_dns(
+        event: crate::dns::Event,
+    ) -> std::result::Result<(Self, Vec<Diagnostic>), Error> {
+        let (event, diagnostics) = match event {
+            crate::dns::Event::Attempt { context, evidence } => (
+                Self::Attempt {
+                    server: context.server.to_string(),
+                    server_port: context.server_port,
+                    query_name: context.query_name.to_string(),
+                    query_type: context.query_type.to_string(),
+                    evidence: try_from_attempt(evidence)?,
+                },
+                Vec::new(),
+            ),
             crate::dns::Event::Record {
                 attempt,
-                server,
-                server_port,
-                query_name,
-                query_type,
+                context,
                 section,
                 record,
-            } => Ok(Self::Record {
-                attempt,
-                server,
-                server_port,
-                query_name,
-                query_type: query_type.to_string(),
-                section: section.into(),
-                record: Record::from_record(record),
-            }),
+            } => (
+                Self::Record {
+                    attempt,
+                    server: context.server.to_string(),
+                    server_port: context.server_port,
+                    query_name: context.query_name.to_string(),
+                    query_type: context.query_type.to_string(),
+                    section: section.into(),
+                    record: Record::from_record(record),
+                },
+                Vec::new(),
+            ),
             crate::dns::Event::Rejected {
                 attempt,
-                server,
-                server_port,
-                query_name,
-                query_type,
+                context,
                 record,
-            } => Ok(Self::Rejected {
-                attempt,
-                server,
-                server_port,
-                query_name,
-                query_type: query_type.to_string(),
-                record: RejectedRecord {
-                    section: record.section.into(),
-                    index: record.index,
-                    owner: record.owner,
-                    type_code: record.type_code,
-                    reason: record.reason,
+            } => (
+                Self::Rejected {
+                    attempt,
+                    server: context.server.to_string(),
+                    server_port: context.server_port,
+                    query_name: context.query_name.to_string(),
+                    query_type: context.query_type.to_string(),
+                    record: RejectedRecord {
+                        section: record.section.into(),
+                        index: record.index,
+                        owner: record.owner,
+                        type_code: record.type_code,
+                        reason: record.reason,
+                    },
                 },
-            }),
-            crate::dns::Event::Undecoded(evidence) => Ok(Self::Undecoded {
-                evidence: try_from_undecoded(evidence)?,
-            }),
-        }
+                Vec::new(),
+            ),
+            crate::dns::Event::Undecoded(evidence) => (
+                Self::Undecoded {
+                    evidence: try_from_undecoded(evidence)?,
+                },
+                Vec::new(),
+            ),
+            crate::dns::Event::Diagnostic(diagnostic) => (Self::Diagnostic, vec![diagnostic]),
+        };
+        Ok((event, diagnostics))
     }
 
     pub fn complete_from_dns(summary: crate::dns::Summary) -> (Self, Vec<Diagnostic>, Stats) {
-        let response = ResponseFields::from_summary(summary.response);
+        let response = ResponseFields::from_metadata(summary.response);
         (
             Self::Complete {
                 server: summary.server,

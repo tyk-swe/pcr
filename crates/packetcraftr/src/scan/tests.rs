@@ -326,9 +326,9 @@ fn scan_batching_attempts_rate_and_timeout_evidence_are_deterministic() {
     assert_eq!(result.endpoints.len(), 4);
     assert!(result.endpoints.iter().all(|endpoint| {
         endpoint.classification == Classification::Timeout
-            && endpoint.evidence.len() == 2
+            && endpoint.probes.len() == 2
             && endpoint
-                .evidence
+                .probes
                 .iter()
                 .all(|evidence| evidence.status == ProbeStatus::Timeout)
     }));
@@ -455,7 +455,7 @@ fn scan_late_unsolicited_response_remains_a_timeout() {
     .unwrap();
 
     assert_eq!(result.endpoints[0].classification, Classification::Timeout);
-    assert_eq!(result.endpoints[0].evidence[0].status, ProbeStatus::Timeout);
+    assert_eq!(result.endpoints[0].probes[0].status, ProbeStatus::Timeout);
 }
 
 #[test]
@@ -498,7 +498,9 @@ fn scan_events_precede_later_work_and_survive_a_later_failure() {
         shutdowns: Arc::clone(&shutdowns),
         fail_at: Some(2),
     };
-    let mut events = Vec::new();
+    let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let observed_events = Arc::clone(&events);
+    let callback_calls = Arc::clone(&calls);
 
     let error = run_with_events(
         &request,
@@ -508,19 +510,20 @@ fn scan_events_precede_later_work_and_survive_a_later_failure() {
         &packetcraftr_core::protocol::builtin::registry().unwrap(),
         &mut executor,
         &mut NoopClock,
-        |event| {
-            assert_eq!(calls.load(Ordering::SeqCst), 1);
-            events.push(event);
+        move |event| {
+            assert_eq!(callback_calls.load(Ordering::SeqCst), 1);
+            observed_events.lock().unwrap().push(event);
             Ok(())
         },
     )
     .expect_err("the second batch must fail");
 
     assert!(matches!(error, Error::Execution { sequence: 1, .. }));
+    let events = events.lock().unwrap();
     assert_eq!(events.len(), 1);
     assert!(matches!(
         &events[0],
-        Event::Probe { evidence, port: Some(80), .. } if evidence.sequence == 0
+        Event::Probe { probe, .. } if probe.sequence == 0 && probe.port == Some(80)
     ));
     assert_eq!(calls.load(Ordering::SeqCst), 2);
     assert_eq!(shutdowns.load(Ordering::SeqCst), 1);
@@ -562,7 +565,7 @@ fn scan_sink_failure_stops_batches_after_cleaning_up_the_current_session() {
     assert!(matches!(&error, Error::Output { .. }));
     assert_eq!(
         packetcraftr_core::error::Classified::classification(&error).code,
-        "io.scan_output"
+        "io.test_output"
     );
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     assert_eq!(shutdowns.load(Ordering::SeqCst), 1);
@@ -585,7 +588,7 @@ fn scan_event_collection_preserves_stats_diagnostics_and_evidence_limits() {
     .expect("bounded undecoded evidence must complete");
 
     assert_eq!(result.endpoints.len(), 1);
-    assert_eq!(result.endpoints[0].evidence.len(), 1);
+    assert_eq!(result.endpoints[0].probes.len(), 1);
     assert_eq!(result.undecoded.len(), 1);
     assert_eq!(result.stats.packets_completed, 1);
     assert!(

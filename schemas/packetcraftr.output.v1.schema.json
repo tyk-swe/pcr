@@ -387,6 +387,11 @@
       "required": [
         "command",
         "result"
+      ],
+      "allOf": [
+        {
+          "$ref": "#/$defs/terminalWithStats"
+        }
       ]
     },
     "interfacesSuccess": {
@@ -1275,6 +1280,27 @@
         "result"
       ]
     },
+    "terminalWithStats": {
+      "if": {
+        "properties": {
+          "result": {
+            "required": [
+              "event"
+            ],
+            "properties": {
+              "event": {
+                "const": "complete"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "stats"
+        ]
+      }
+    },
     "exchangeStreamSuccess": {
       "description": "One progressive exchange event. Sent records follow provider-confirmed transmission, capture evidence follows definitive classification, unanswered records follow successful capture completion, and complete is terminal.",
       "type": "object",
@@ -1292,25 +1318,7 @@
       ],
       "allOf": [
         {
-          "if": {
-            "properties": {
-              "result": {
-                "required": [
-                  "event"
-                ],
-                "properties": {
-                  "event": {
-                    "const": "complete"
-                  }
-                }
-              }
-            }
-          },
-          "then": {
-            "required": [
-              "stats"
-            ]
-          }
+          "$ref": "#/$defs/terminalWithStats"
         }
       ]
     },
@@ -1391,25 +1399,7 @@
       ],
       "allOf": [
         {
-          "if": {
-            "properties": {
-              "result": {
-                "required": [
-                  "event"
-                ],
-                "properties": {
-                  "event": {
-                    "const": "complete"
-                  }
-                }
-              }
-            }
-          },
-          "then": {
-            "required": [
-              "stats"
-            ]
-          }
+          "$ref": "#/$defs/terminalWithStats"
         }
       ]
     },
@@ -1762,23 +1752,11 @@
         {
           "type": "object",
           "required": [
-            "event",
-            "frames_captured",
-            "frames_matched",
-            "captured_bytes"
+            "event"
           ],
           "properties": {
             "event": {
               "const": "complete"
-            },
-            "frames_captured": {
-              "$ref": "#/$defs/uint64"
-            },
-            "frames_matched": {
-              "$ref": "#/$defs/uint64"
-            },
-            "captured_bytes": {
-              "$ref": "#/$defs/uint64"
             }
           },
           "additionalProperties": false
@@ -2319,6 +2297,9 @@
           "additionalProperties": false
         },
         {
+          "$ref": "#/$defs/diagnosticEvent"
+        },
+        {
           "type": "object",
           "required": [
             "event",
@@ -2392,10 +2373,7 @@
           "required": [
             "event",
             "target",
-            "probe_sequence",
-            "address",
-            "transport",
-            "evidence"
+            "probe"
           ],
           "properties": {
             "event": {
@@ -2404,30 +2382,14 @@
             "target": {
               "type": "string"
             },
-            "probe_sequence": {
-              "$ref": "#/$defs/uint64"
-            },
-            "address": {
-              "$ref": "#/$defs/ipAddress"
-            },
-            "transport": {
-              "type": "string",
-              "enum": [
-                "tcp",
-                "udp",
-                "icmp"
-              ]
-            },
-            "port": {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 65535
-            },
-            "evidence": {
-              "$ref": "#/$defs/probeEvidence"
+            "probe": {
+              "$ref": "#/$defs/scanProbe"
             }
           },
           "additionalProperties": false
+        },
+        {
+          "$ref": "#/$defs/diagnosticEvent"
         },
         {
           "type": "object",
@@ -2477,7 +2439,6 @@
           "required": [
             "event",
             "target",
-            "destination",
             "probe"
           ],
           "properties": {
@@ -2487,14 +2448,14 @@
             "target": {
               "type": "string"
             },
-            "destination": {
-              "$ref": "#/$defs/ipAddress"
-            },
             "probe": {
-              "$ref": "#/$defs/traceHop/properties/probes/items"
+              "$ref": "#/$defs/traceProbe"
             }
           },
           "additionalProperties": false
+        },
+        {
+          "$ref": "#/$defs/diagnosticEvent"
         },
         {
           "type": "object",
@@ -2648,9 +2609,7 @@
               "const": "record"
             },
             "attempt": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 32
+              "$ref": "#/$defs/dnsAttemptNumber"
             },
             "server": {
               "type": "string"
@@ -2691,9 +2650,7 @@
               "const": "rejected"
             },
             "attempt": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 32
+              "$ref": "#/$defs/dnsAttemptNumber"
             },
             "server": {
               "type": "string"
@@ -2730,6 +2687,9 @@
             }
           },
           "additionalProperties": false
+        },
+        {
+          "$ref": "#/$defs/diagnosticEvent"
         },
         {
           "type": "object",
@@ -3528,7 +3488,7 @@
         "address",
         "transport",
         "classification",
-        "evidence"
+        "probes"
       ],
       "properties": {
         "address": {
@@ -3558,18 +3518,19 @@
             "timeout"
           ]
         },
-        "evidence": {
+        "probes": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/probeEvidence"
+            "$ref": "#/$defs/scanProbe"
           }
         }
       },
       "additionalProperties": false
     },
-    "probeEvidence": {
+    "scanProbe": {
       "type": "object",
       "required": [
+        "sequence",
         "protocol",
         "destination",
         "attempt",
@@ -3579,6 +3540,9 @@
         "reason"
       ],
       "properties": {
+        "sequence": {
+          "$ref": "#/$defs/uint64"
+        },
         "protocol": {
           "type": "string",
           "enum": [
@@ -3657,109 +3621,112 @@
           "type": "array",
           "minItems": 1,
           "items": {
-            "type": "object",
-            "required": [
-              "sequence",
-              "hop_limit",
-              "attempt",
-              "strategy",
-              "destination",
-              "status",
-              "sent_at",
-              "reason"
-            ],
-            "properties": {
-              "sequence": {
-                "$ref": "#/$defs/uint64"
-              },
-              "hop_limit": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 255
-              },
-              "attempt": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 4294967295
-              },
-              "strategy": {
-                "type": "string",
-                "enum": [
-                  "udp",
-                  "icmp",
-                  "tcp"
-                ]
-              },
-              "destination": {
-                "$ref": "#/$defs/ipAddress"
-              },
-              "destination_port": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 65535
-              },
-              "status": {
-                "type": "string",
-                "enum": [
-                  "response",
-                  "timeout"
-                ]
-              },
-              "response_kind": {
-                "type": "string",
-                "enum": [
-                  "intermediate",
-                  "destination_reached",
-                  "unreachable"
-                ]
-              },
-              "responder": {
-                "$ref": "#/$defs/ipAddress"
-              },
-              "sent_at": {
-                "$ref": "#/$defs/timestamp"
-              },
-              "received_at": {
-                "$ref": "#/$defs/timestamp"
-              },
-              "latency": {
-                "$ref": "#/$defs/duration"
-              },
-              "frame": {
-                "$ref": "#/$defs/frame"
-              },
-              "reason": {
-                "type": "string",
-                "minLength": 1
-              }
-            },
-            "allOf": [
-              {
-                "if": {
-                  "properties": {
-                    "strategy": {
-                      "const": "icmp"
-                    }
-                  }
-                },
-                "then": {
-                  "not": {
-                    "required": [
-                      "destination_port"
-                    ]
-                  }
-                },
-                "else": {
-                  "required": [
-                    "destination_port"
-                  ]
-                }
-              }
-            ],
-            "additionalProperties": false
+            "$ref": "#/$defs/traceProbe"
           }
         }
       },
+      "additionalProperties": false
+    },
+    "traceProbe": {
+      "type": "object",
+      "required": [
+        "sequence",
+        "hop_limit",
+        "attempt",
+        "strategy",
+        "destination",
+        "status",
+        "sent_at",
+        "reason"
+      ],
+      "properties": {
+        "sequence": {
+          "$ref": "#/$defs/uint64"
+        },
+        "hop_limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 255
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "strategy": {
+          "type": "string",
+          "enum": [
+            "udp",
+            "icmp",
+            "tcp"
+          ]
+        },
+        "destination": {
+          "$ref": "#/$defs/ipAddress"
+        },
+        "destination_port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "response",
+            "timeout"
+          ]
+        },
+        "response_kind": {
+          "type": "string",
+          "enum": [
+            "intermediate",
+            "destination_reached",
+            "unreachable"
+          ]
+        },
+        "responder": {
+          "$ref": "#/$defs/ipAddress"
+        },
+        "sent_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "received_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "latency": {
+          "$ref": "#/$defs/duration"
+        },
+        "frame": {
+          "$ref": "#/$defs/frame"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "strategy": {
+                "const": "icmp"
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": [
+                "destination_port"
+              ]
+            }
+          },
+          "else": {
+            "required": [
+              "destination_port"
+            ]
+          }
+        }
+      ],
       "additionalProperties": false
     },
     "dnsQueryType": {
@@ -3807,6 +3774,11 @@
         "network_failure"
       ]
     },
+    "dnsAttemptNumber": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 32
+    },
     "dnsAttempt": {
       "type": "object",
       "required": [
@@ -3819,9 +3791,7 @@
       ],
       "properties": {
         "attempt": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 32
+          "$ref": "#/$defs/dnsAttemptNumber"
         },
         "server_address": {
           "$ref": "#/$defs/ipAddress"
@@ -3955,9 +3925,7 @@
       ],
       "properties": {
         "attempt": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 32
+          "$ref": "#/$defs/dnsAttemptNumber"
         },
         "frame": {
           "$ref": "#/$defs/frame"
@@ -4539,6 +4507,39 @@
         }
       ]
     },
+    "diagnosticEvent": {
+      "type": "object",
+      "required": [
+        "event"
+      ],
+      "properties": {
+        "event": {
+          "const": "diagnostic"
+        }
+      },
+      "additionalProperties": false
+    },
+    "errorContext": {
+      "type": "object",
+      "minProperties": 1,
+      "properties": {
+        "source_frame": {
+          "$ref": "#/$defs/sourceFrame"
+        },
+        "probe_sequence": {
+          "$ref": "#/$defs/uint64"
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "case_index": {
+          "$ref": "#/$defs/uint64"
+        }
+      },
+      "additionalProperties": false
+    },
     "error": {
       "type": "object",
       "required": [
@@ -4573,6 +4574,9 @@
             "type": "string",
             "minLength": 1
           }
+        },
+        "context": {
+          "$ref": "#/$defs/errorContext"
         },
         "remediation": {
           "type": "string",
@@ -4618,6 +4622,7 @@
       "additionalProperties": false
     },
     "operationStats": {
+      "description": "Command-processed counters. For capture, packets_attempted is the one-based source-frame count, packets_completed is the matched/emitted frame count, and bytes is captured source bytes; capture contains distinct provider-reported backend statistics.",
       "type": "object",
       "required": [
         "packets_attempted",
@@ -4646,6 +4651,7 @@
       "additionalProperties": false
     },
     "captureStatistics": {
+      "description": "Capture-provider counters reported by the backend; these can differ from command-processed counters when filtering, queueing, or provider loss occurs.",
       "type": "object",
       "required": [
         "received_frames",
@@ -4721,9 +4727,14 @@
     },
     "sourceFrame": {
       "description": "One-based source-frame identity supplied to display filters as frame.number; filtering does not renumber it.",
-      "type": "integer",
-      "minimum": 1,
-      "maximum": 18446744073709551615
+      "allOf": [
+        {
+          "$ref": "#/$defs/uint64"
+        },
+        {
+          "minimum": 1
+        }
+      ]
     }
   }
 }

@@ -40,9 +40,10 @@ pub(super) fn render_text(
             endpoint_name,
             classification_name(endpoint.classification)
         ))?;
-        for evidence in &endpoint.evidence {
+        for evidence in &endpoint.probes {
             write_stdout_line(format_args!(
-                "  attempt={} status={} classification={} sent={} received={} responder={} latency={} reason={}",
+                "  sequence={} attempt={} status={} classification={} sent={} received={} responder={} latency={} reason={}",
+                evidence.sequence,
                 evidence.attempt,
                 probe_status_name(evidence.status),
                 classification_name(evidence.classification),
@@ -89,18 +90,19 @@ fn probe_status_name(value: output::scan::ProbeStatus) -> &'static str {
 
 pub(super) fn render_event(
     event: packetcraftr::scan::Event,
-    stream: &mut NdjsonStream,
+    stream: &NdjsonStream,
 ) -> Result<(), CliError> {
-    let event = output::scan::Event::try_from_scan(event).map_err(CliError::classified)?;
-    stream.emit_data(event, Vec::new())
+    let (event, diagnostics) =
+        output::scan::Event::try_from_scan(event).map_err(CliError::classified)?;
+    super::super::progressive::render_event(event, diagnostics, stream)
 }
 
 pub(super) fn render_complete(
     summary: packetcraftr::scan::Summary,
-    stream: &mut NdjsonStream,
+    stream: &NdjsonStream,
 ) -> Result<(), CliError> {
     let (event, diagnostics, stats) = output::scan::Event::complete_from_scan(summary);
-    stream.complete_with_stats(event, diagnostics, stats)
+    super::super::progressive::render_complete(event, diagnostics, stats, stream)
 }
 
 #[cfg(test)]
@@ -116,12 +118,12 @@ mod tests {
     fn probe_event(sequence: u64, port: u16) -> scan::Event {
         let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
         scan::Event::Probe {
-            target: address.to_string(),
-            address,
-            transport: scan::Transport::Tcp,
-            port: Some(port),
-            evidence: scan::ProbeEvidence {
+            target: address.to_string().into(),
+            probe: scan::ProbeEvidence {
                 sequence,
+                address,
+                transport: scan::Transport::Tcp,
+                port: Some(port),
                 attempt: 1,
                 status: scan::ProbeStatus::Timeout,
                 classification: scan::Classification::Timeout,
@@ -146,16 +148,16 @@ mod tests {
 
     #[test]
     fn scan_stream_positions_ignore_probe_ids_and_end_once() {
-        let (mut sink, output) = stream(output::contract::Command::Scan);
-        render_event(probe_event(70_000, 80), &mut sink).unwrap();
-        render_event(probe_event(9, 81), &mut sink).unwrap();
-        render_complete(summary(), &mut sink).unwrap();
+        let (sink, output) = stream(output::contract::Command::Scan);
+        render_event(probe_event(70_000, 80), &sink).unwrap();
+        render_event(probe_event(9, 81), &sink).unwrap();
+        render_complete(summary(), &sink).unwrap();
 
         let records = output.records();
         assert_contiguous(&records);
         assert_eq!(records.len(), 3);
-        assert_eq!(records[0]["result"]["probe_sequence"], 70_000);
-        assert_eq!(records[1]["result"]["probe_sequence"], 9);
+        assert_eq!(records[0]["result"]["probe"]["sequence"], 70_000);
+        assert_eq!(records[1]["result"]["probe"]["sequence"], 9);
         assert_eq!(records[2]["result"]["event"], "complete");
         assert_eq!(
             records
@@ -164,34 +166,5 @@ mod tests {
                 .count(),
             1
         );
-    }
-
-    #[test]
-    fn scan_partial_failure_uses_the_next_position_without_complete() {
-        let (mut sink, output) = stream(output::contract::Command::Scan);
-        render_event(probe_event(u64::MAX - 1, 80), &mut sink).unwrap();
-        sink.emit_error(CliError::new(5, "later scan failure").output_error())
-            .unwrap();
-
-        let records = output.records();
-        assert_contiguous(&records);
-        assert_eq!(records.len(), 2);
-        assert_eq!(records[1]["sequence"], 1);
-        assert_eq!(records[1]["status"], "error");
-        assert!(
-            records
-                .iter()
-                .all(|record| record["result"]["event"] != "complete")
-        );
-    }
-
-    #[test]
-    fn empty_scan_success_completes_at_zero() {
-        let (mut sink, output) = stream(output::contract::Command::Scan);
-        render_complete(summary(), &mut sink).unwrap();
-        let records = output.records();
-        assert_eq!(records.len(), 1);
-        assert_eq!(records[0]["sequence"], 0);
-        assert_eq!(records[0]["result"]["event"], "complete");
     }
 }

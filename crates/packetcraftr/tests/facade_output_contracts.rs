@@ -5,12 +5,14 @@ use packetcraftr::{
     core::protocol,
     output::{
         contract::{Command, Format, SCHEMA_V1},
-        envelope::{Aggregate, Stream, StreamPosition},
+        envelope::{Aggregate, StreamEncoder},
     },
 };
 use serde_json::{Value, json};
 use std::fs;
+use std::io::Write;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 #[test]
 fn facade_reexports_domains_and_command_formats_are_complete() {
@@ -37,20 +39,41 @@ fn aggregate_and_stream_envelopes_keep_version_and_discriminators() {
     assert_eq!(aggregate["status"], "success");
     assert!(aggregate.get("sequence").is_none());
 
-    let mut position = StreamPosition::initial();
-    for _ in 0..7 {
-        position = position.checked_next().expect("fixture position advances");
+    let output = SharedWriter::default();
+    let encoder = StreamEncoder::new(Some(Command::Read), output.clone());
+    for frame in 0..8 {
+        encoder
+            .emit_data(json!({"frame": frame}), Vec::new())
+            .expect("stream must serialize");
     }
-    let stream = serde_json::to_value(Stream::success(
-        Command::Read,
-        &position,
-        json!({"frame": 1}),
-        Vec::new(),
-    ))
-    .expect("stream must serialize");
+    let stream = output.records().pop().expect("eighth record");
     assert_eq!(stream["schema"], SCHEMA_V1);
     assert_eq!(stream["mode"], "stream");
     assert_eq!(stream["sequence"], 7);
+}
+
+#[derive(Clone, Default)]
+struct SharedWriter(Arc<Mutex<Vec<u8>>>);
+
+impl SharedWriter {
+    fn records(&self) -> Vec<Value> {
+        std::str::from_utf8(&self.0.lock().unwrap())
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect()
+    }
+}
+
+impl Write for SharedWriter {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 #[test]
@@ -68,7 +91,7 @@ fn current_schema_and_published_examples_use_output_v1() {
             .as_str()
             .is_some_and(|description| description.contains("Zero-based ordinal"))
     );
-    assert_eq!(schema["$defs"]["sourceFrame"]["minimum"], 1);
+    assert_eq!(schema["$defs"]["sourceFrame"]["allOf"][1]["minimum"], 1);
     assert!(
         schema["$defs"]["sourceFrame"]["description"]
             .as_str()

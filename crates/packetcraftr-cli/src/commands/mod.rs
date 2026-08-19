@@ -22,6 +22,7 @@ mod fuzz;
 mod interfaces;
 mod offline_analysis;
 mod plan;
+pub(crate) mod progressive;
 mod protocols;
 mod read;
 mod replay;
@@ -153,4 +154,10 @@ fn registry() -> Result<Arc<core::registry::Registry>, CliError> {
         .map_err(|source| {
             CliError::new(70, format!("built-in registry invariant failed: {source}"))
         })
+}
+
+fn increment_counter(value: u64, counter: &'static str) -> Result<u64, CliError> {
+    value
+        .checked_add(1)
+        .ok_or_else(|| CliError::new(70, format!("{counter} overflowed")))
 }

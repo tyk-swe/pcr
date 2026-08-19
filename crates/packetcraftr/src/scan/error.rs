@@ -9,7 +9,7 @@ use crate::BoundaryError;
 use packetcraftr_core::error::{Classified, Kind};
 // The scan model also exposes `Classification`, so the shared error taxonomy
 // is aliased here to keep the two names unambiguous.
-use packetcraftr_core::error::Classification as ErrorClassification;
+use packetcraftr_core::error::{Classification as ErrorClassification, Context};
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -83,11 +83,7 @@ impl Classified for Error {
                 Kind::Io,
                 Some("inspect the scan timer and account for probes already transmitted"),
             ),
-            Self::Output { .. } => ErrorClassification::new(
-                "io.scan_output",
-                Kind::Io,
-                Some("inspect the output sink and account for scan probes already transmitted"),
-            ),
+            Self::Output { source } => source.classification(),
             Self::InvalidEvidence { .. } | Self::StatisticsOverflow { .. } => {
                 ErrorClassification::new(
                     "internal.scan_evidence",
@@ -95,6 +91,17 @@ impl Classified for Error {
                     Some("treat the scan as incomplete because executor evidence was inconsistent"),
                 )
             }
+        }
+    }
+
+    fn context(&self) -> Context {
+        match self {
+            Self::Authorization(error) | Self::Output { source: error } => error.context(),
+            Self::Execution { sequence, .. }
+            | Self::Clock { sequence, .. }
+            | Self::InvalidEvidence { sequence, .. }
+            | Self::StatisticsOverflow { sequence } => Context::probe_sequence(*sequence),
+            _ => Context::default(),
         }
     }
 

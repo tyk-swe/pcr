@@ -213,15 +213,17 @@ fn basic_response_retains_header_flags_and_a_record() {
     assert_eq!(
         decoded,
         dns::ValidatedResponse {
-            transaction_id: ID,
-            response_code: 0,
-            edns: None,
-            authoritative: true,
-            truncated: false,
-            recursion_desired: true,
-            recursion_available: true,
-            authenticated_data: true,
-            checking_disabled: true,
+            metadata: dns::ResponseMetadata {
+                response_code: 0,
+                edns: None,
+                authoritative: true,
+                truncated: false,
+                recursion_desired: true,
+                recursion_available: true,
+                authenticated_data: true,
+                checking_disabled: true,
+                rejected_record_count: 0,
+            },
             answers: vec![Record {
                 owner,
                 class: 1,
@@ -231,7 +233,6 @@ fn basic_response_retains_header_flags_and_a_record() {
             authorities: Vec::new(),
             additionals: Vec::new(),
             rejected_records: Vec::new(),
-            rejected_record_count: 0,
         }
     );
     assert_eq!(decoded.response_code_name(), "no_error");
@@ -262,20 +263,21 @@ fn truncated_response_stops_after_the_complete_question() {
     assert_eq!(
         decoded,
         dns::ValidatedResponse {
-            transaction_id: ID,
-            response_code: 0,
-            edns: None,
-            authoritative: true,
-            truncated: true,
-            recursion_desired: false,
-            recursion_available: false,
-            authenticated_data: false,
-            checking_disabled: false,
+            metadata: dns::ResponseMetadata {
+                response_code: 0,
+                edns: None,
+                authoritative: true,
+                truncated: true,
+                recursion_desired: false,
+                recursion_available: false,
+                authenticated_data: false,
+                checking_disabled: false,
+                rejected_record_count: 0,
+            },
             answers: Vec::new(),
             authorities: Vec::new(),
             additionals: Vec::new(),
             rejected_records: Vec::new(),
-            rejected_record_count: 0,
         }
     );
 }
@@ -555,9 +557,9 @@ fn edns_metadata_extends_response_code_and_retains_options() {
         &[opt],
     );
     let decoded = decode(&message, "example.test", QueryType::A);
-    assert_eq!(decoded.response_code, 18);
+    assert_eq!(decoded.metadata.response_code, 18);
     assert_eq!(decoded.response_code_name(), "bad_time");
-    let edns = decoded.edns.expect("EDNS metadata");
+    let edns = decoded.metadata.edns.expect("EDNS metadata");
     assert_eq!(edns.udp_payload_size, 1_232);
     assert_eq!(edns.extended_response_code, 1);
     assert_eq!(edns.version, 0);
@@ -741,7 +743,7 @@ fn relevance_filter_follows_cname_authority_and_glue_references() {
     assert_eq!(decoded.answers.len(), 2);
     assert_eq!(decoded.authorities.len(), 1);
     assert_eq!(decoded.additionals.len(), 1);
-    assert_eq!(decoded.rejected_record_count, 2);
+    assert_eq!(decoded.metadata.rejected_record_count, 2);
     assert_eq!(decoded.rejected_records.len(), 1);
     assert_eq!(decoded.rejected_records[0].section, Section::Answer);
     assert!(decoded.rejected_records[0].reason.contains("unrelated"));

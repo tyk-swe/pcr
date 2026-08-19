@@ -20,6 +20,7 @@ mod transaction;
 pub(crate) use accumulator::{
     Accumulator, ProcessContext, ProcessOutcome, WorkflowPromotionContext, WorkflowResponseMatcher,
 };
+pub(crate) use contract::into_sent_packet;
 pub use contract::{
     Collector, DEFAULT_MAX_RESPONSES, DEFAULT_MAX_UNMATCHED_FRAMES, Event, MAX_EXCHANGE_TIMEOUT,
     Options, Response, Result, Summary,

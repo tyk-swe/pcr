@@ -7,11 +7,8 @@
   "result": {
     "event": "probe",
     "target": "192.168.56.10",
-    "probe_sequence": 70000,
-    "address": "192.168.56.10",
-    "transport": "tcp",
-    "port": 443,
-    "evidence": {
+    "probe": {
+      "sequence": 70000,
       "protocol": "tcp",
       "destination": "192.168.56.10",
       "destination_port": 443,

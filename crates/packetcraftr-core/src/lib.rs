@@ -27,6 +27,8 @@ pub mod layer;
 pub mod layout;
 pub mod matcher;
 mod model;
+#[doc(hidden)]
+pub mod progress;
 pub mod protocol;
 mod protocol_catalog;
 pub mod registry;

@@ -4,11 +4,14 @@
   "mode": "aggregate",
   "status": "error",
   "error": {
-    "code": "policy.public_destination",
-    "kind": "policy",
-    "message": "DNS authorization failed: traffic policy denies public destination 8.8.8.8",
+    "code": "internal.dns_evidence",
+    "kind": "internal",
+    "message": "DNS executor returned invalid evidence on attempt 2: response index was not zero",
     "causes": [],
-    "remediation": "explicitly authorize public destinations only for networks you are permitted to test"
+    "context": {
+      "attempt": 2
+    },
+    "remediation": "treat the DNS operation as incomplete because executor evidence was inconsistent"
   },
   "diagnostics": []
 }

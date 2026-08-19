@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
@@ -251,8 +252,7 @@ pub struct RejectedRecord {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ValidatedResponse {
-    pub transaction_id: u16,
+pub struct ResponseMetadata {
     pub response_code: u16,
     pub edns: Option<Edns>,
     pub authoritative: bool,
@@ -261,16 +261,27 @@ pub struct ValidatedResponse {
     pub recursion_available: bool,
     pub authenticated_data: bool,
     pub checking_disabled: bool,
+    pub rejected_record_count: usize,
+}
+
+impl ResponseMetadata {
+    pub fn response_code_name(&self) -> &'static str {
+        response_code_name(self.response_code)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ValidatedResponse {
+    pub metadata: ResponseMetadata,
     pub answers: Vec<Record>,
     pub authorities: Vec<Record>,
     pub additionals: Vec<Record>,
     pub rejected_records: Vec<RejectedRecord>,
-    pub rejected_record_count: usize,
 }
 
 impl ValidatedResponse {
     pub fn response_code_name(&self) -> &'static str {
-        response_code_name(self.response_code)
+        self.metadata.response_code_name()
     }
 }
 
@@ -322,46 +333,32 @@ pub struct Result {
 }
 
 #[derive(Clone, Debug)]
-pub struct ResponseSummary {
-    pub transaction_id: u16,
-    pub response_code: u16,
-    pub edns: Option<Edns>,
-    pub authoritative: bool,
-    pub truncated: bool,
-    pub recursion_desired: bool,
-    pub recursion_available: bool,
-    pub authenticated_data: bool,
-    pub checking_disabled: bool,
-    pub rejected_record_count: usize,
+pub struct EventContext {
+    pub server: Arc<str>,
+    pub server_port: u16,
+    pub query_name: Arc<str>,
+    pub query_type: QueryType,
 }
 
 #[derive(Clone, Debug)]
 pub enum Event {
     Attempt {
-        server: String,
-        server_port: u16,
-        query_name: String,
-        query_type: QueryType,
+        context: Arc<EventContext>,
         evidence: AttemptEvidence,
     },
     Record {
         attempt: u32,
-        server: String,
-        server_port: u16,
-        query_name: String,
-        query_type: QueryType,
+        context: Arc<EventContext>,
         section: Section,
         record: Record,
     },
     Rejected {
         attempt: u32,
-        server: String,
-        server_port: u16,
-        query_name: String,
-        query_type: QueryType,
+        context: Arc<EventContext>,
         record: RejectedRecord,
     },
     Undecoded(UndecodedEvidence),
+    Diagnostic(Diagnostic),
 }
 
 #[derive(Clone, Debug)]
@@ -373,7 +370,7 @@ pub struct Summary {
     pub query_type: QueryType,
     pub transaction_id: u16,
     pub outcome: Outcome,
-    pub response: Option<ResponseSummary>,
+    pub response: Option<ResponseMetadata>,
     pub diagnostics: Vec<Diagnostic>,
     pub stats: Stats,
 }

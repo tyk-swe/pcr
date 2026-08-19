@@ -420,7 +420,8 @@ fn live_fuzz_sink_failure_prevents_later_case_execution() {
     };
     let mut authorizer = AllowAll;
     let mut executor = CountingExecutor::default();
-    let mut emitted = Vec::new();
+    let emitted = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let observed = Arc::clone(&emitted);
 
     let error = run_with_events(
         &request,
@@ -433,9 +434,8 @@ fn live_fuzz_sink_failure_prevents_later_case_execution() {
         &mut authorizer,
         &mut executor,
         &mut NoopClock,
-        |event| {
-            let super::Event::Case(case) = event;
-            emitted.push(case.index);
+        move |case| {
+            observed.lock().unwrap().push(case.index);
             Err(BoundaryError::new(
                 "induced live fuzz sink failure",
                 packetcraftr_core::error::Classification::new(
@@ -451,7 +451,7 @@ fn live_fuzz_sink_failure_prevents_later_case_execution() {
 
     assert!(matches!(error, super::Error::Output { .. }));
     assert_eq!(executor.executions, 1);
-    assert_eq!(emitted, [0]);
+    assert_eq!(*emitted.lock().unwrap(), [0]);
 }
 
 #[test]

@@ -4,7 +4,9 @@
 //! Ordered DNS response validation and decoding orchestration.
 
 use super::super::error::WireError;
-use super::super::model::{Edns, Limits, Name, QueryType, Record, RecordValue, ValidatedResponse};
+use super::super::model::{
+    Edns, Limits, Name, QueryType, Record, RecordValue, ResponseMetadata, ValidatedResponse,
+};
 use super::super::{
     DNS_CLASS_IN, DNS_FLAG_AUTHENTICATED_DATA, DNS_FLAG_AUTHORITATIVE, DNS_FLAG_CHECKING_DISABLED,
     DNS_FLAG_RECURSION_AVAILABLE, DNS_FLAG_RECURSION_DESIRED, DNS_FLAG_RESPONSE,
@@ -59,7 +61,7 @@ pub fn decode_response(
     let offset = decode_question(message, &query_name, &expected_name, query_type, limits)?;
 
     if header.flags & DNS_FLAG_TRUNCATED != 0 {
-        return Ok(truncated_response(transaction_id, header.flags));
+        return Ok(truncated_response(header.flags));
     }
 
     validate_record_count(&header, limits)?;
@@ -85,20 +87,21 @@ pub fn decode_response(
         limits.max_rejected_records,
     );
     Ok(ValidatedResponse {
-        transaction_id,
-        response_code,
-        edns: sections.edns,
-        authoritative: header.flags & DNS_FLAG_AUTHORITATIVE != 0,
-        truncated: false,
-        recursion_desired: header.flags & DNS_FLAG_RECURSION_DESIRED != 0,
-        recursion_available: header.flags & DNS_FLAG_RECURSION_AVAILABLE != 0,
-        authenticated_data: header.flags & DNS_FLAG_AUTHENTICATED_DATA != 0,
-        checking_disabled: header.flags & DNS_FLAG_CHECKING_DISABLED != 0,
+        metadata: ResponseMetadata {
+            response_code,
+            edns: sections.edns,
+            authoritative: header.flags & DNS_FLAG_AUTHORITATIVE != 0,
+            truncated: false,
+            recursion_desired: header.flags & DNS_FLAG_RECURSION_DESIRED != 0,
+            recursion_available: header.flags & DNS_FLAG_RECURSION_AVAILABLE != 0,
+            authenticated_data: header.flags & DNS_FLAG_AUTHENTICATED_DATA != 0,
+            checking_disabled: header.flags & DNS_FLAG_CHECKING_DISABLED != 0,
+            rejected_record_count,
+        },
         answers,
         authorities,
         additionals,
         rejected_records,
-        rejected_record_count,
     })
 }
 
@@ -197,24 +200,25 @@ fn decode_question(
     Ok(offset)
 }
 
-fn truncated_response(transaction_id: u16, flags: u16) -> ValidatedResponse {
+fn truncated_response(flags: u16) -> ValidatedResponse {
     // A UDP truncation may end at any byte after the complete question.
     // Do not decode or present possibly partial records as accepted facts.
     ValidatedResponse {
-        transaction_id,
-        response_code: flags & DNS_RCODE_MASK,
-        edns: None,
-        authoritative: flags & DNS_FLAG_AUTHORITATIVE != 0,
-        truncated: true,
-        recursion_desired: flags & DNS_FLAG_RECURSION_DESIRED != 0,
-        recursion_available: flags & DNS_FLAG_RECURSION_AVAILABLE != 0,
-        authenticated_data: flags & DNS_FLAG_AUTHENTICATED_DATA != 0,
-        checking_disabled: flags & DNS_FLAG_CHECKING_DISABLED != 0,
+        metadata: ResponseMetadata {
+            response_code: flags & DNS_RCODE_MASK,
+            edns: None,
+            authoritative: flags & DNS_FLAG_AUTHORITATIVE != 0,
+            truncated: true,
+            recursion_desired: flags & DNS_FLAG_RECURSION_DESIRED != 0,
+            recursion_available: flags & DNS_FLAG_RECURSION_AVAILABLE != 0,
+            authenticated_data: flags & DNS_FLAG_AUTHENTICATED_DATA != 0,
+            checking_disabled: flags & DNS_FLAG_CHECKING_DISABLED != 0,
+            rejected_record_count: 0,
+        },
         answers: Vec::new(),
         authorities: Vec::new(),
         additionals: Vec::new(),
         rejected_records: Vec::new(),
-        rejected_record_count: 0,
     }
 }
 

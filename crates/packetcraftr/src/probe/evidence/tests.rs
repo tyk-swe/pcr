@@ -11,9 +11,8 @@ use packetcraftr_core::{Packet, decode::DecodedPacket, layer::Raw, layout::Packe
 
 use super::exact_validation::validate_decoded_frame;
 use super::{
-    EvidenceDiagnosticDescriptor, ExchangeEvidenceError, ResponseCandidate,
-    response_within_deadline, retain_undecoded_frames, update_best_candidate,
-    validate_batch_exchange_evidence,
+    EvidenceDiagnosticDescriptor, ExchangeEvidenceError, ResponseCandidate, UndecodedRetention,
+    response_within_deadline, update_best_candidate, validate_batch_exchange_evidence,
 };
 
 struct TestObservation {
@@ -227,32 +226,36 @@ fn retained_undecoded_evidence_is_emitted_before_a_later_deadline_failure() {
     let mut retained_count = 0;
     let mut budget = crate::evidence::Budget::default();
     let mut diagnostics = Vec::new();
-    let mut emitted = Vec::new();
+    let mut emitted_diagnostic = Vec::new();
     let mut checks = 0;
 
-    let result = retain_undecoded_frames(
-        vec![frame(&[1])],
+    let mut retention = UndecodedRetention::new(
         &mut retained_count,
-        1,
+        2,
         &mut budget,
         EvidenceDiagnosticDescriptor::new("fixture", "fixture"),
         1,
         1,
         &mut diagnostics,
-        |frame| frame,
-        |frame| {
-            emitted.push(frame);
+    );
+    let result = retention.retain(
+        vec![frame(&[1]), frame(&[2])],
+        |_| false,
+        |_| true,
+        |diagnostic| {
+            emitted_diagnostic.push(diagnostic);
             Ok(())
         },
         || {
             checks += 1;
-            if checks == 2 { Err(()) } else { Ok(()) }
+            if checks == 4 { Err(()) } else { Ok(()) }
         },
     );
 
     assert_eq!(result, Err(()));
     assert_eq!(retained_count, 1);
-    assert_eq!(emitted.len(), 1);
+    assert_eq!(emitted_diagnostic, [false, true]);
+    assert_eq!(diagnostics.len(), 1);
 }
 
 fn raw_packet(bytes: &'static [u8]) -> Packet {

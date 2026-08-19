@@ -7,9 +7,12 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
+#[path = "support/capture.rs"]
+mod capture_support;
 mod support;
 
-use support::{assert_contiguous_stream, parse_json, parse_ndjson, run, run_success};
+use capture_support::append_truncated_record;
+use support::{assert_contiguous, parse_json, parse_ndjson, run, run_success};
 
 const IPV4_FRAME_HEX: &str = "45000014000000004001f6e7c0000201c6336402";
 
@@ -88,10 +91,7 @@ fn partial_capture() -> tempfile::NamedTempFile {
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0,
         ])
         .expect("valid frame must write");
-    capture
-        .write_all(&[0; 8])
-        .expect("truncated record header must write");
-    capture.flush().expect("capture must flush");
+    append_truncated_record(&mut capture);
     capture
 }
 
@@ -390,7 +390,7 @@ fn runtime_stream_error_follows_every_preserved_record() {
     assert!(!failure.status.success());
 
     let records = parse_ndjson(&failure);
-    assert_contiguous_stream(&records);
+    assert_contiguous(&records);
     assert_eq!(records.len(), 2);
     assert_eq!(records[0]["status"], "success");
     assert_eq!(records[0]["result"]["event"], "frame");
@@ -437,7 +437,7 @@ fn progressive_live_commands_emit_one_sequence_zero_error_when_preparation_fails
         let failure = run(arguments);
         assert_eq!(failure.status.code(), Some(6), "{arguments:?}");
         let records = parse_ndjson(&failure);
-        assert_contiguous_stream(&records);
+        assert_contiguous(&records);
         assert_eq!(records.len(), 1, "{arguments:?}");
         assert_eq!(records[0]["sequence"], 0, "{arguments:?}");
         assert_eq!(records[0]["status"], "error", "{arguments:?}");

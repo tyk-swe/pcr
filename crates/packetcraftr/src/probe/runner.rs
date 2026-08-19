@@ -47,6 +47,10 @@ impl Execution {
             diagnostics,
             stats,
         } = result;
+        let sent = sent
+            .into_iter()
+            .map(crate::exchange::into_sent_packet)
+            .collect();
         Self {
             permit,
             sent,
@@ -74,10 +78,6 @@ impl ProbeExecution for Execution {
     }
 }
 
-pub(crate) struct BatchRun {
-    pub(crate) stats: Stats,
-}
-
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ProbeRunConfig {
     pub(crate) probes_per_second: Option<u32>,
@@ -88,7 +88,6 @@ pub(crate) struct ProbeRunConfig {
 /// Workflow-owned operations and error taxonomy for the shared probe runner.
 pub(crate) trait ProbeLifecycle<B> {
     type Execution: ProbeExecution;
-    type Output;
     type Error;
 
     fn execute(&mut self, batch: &B) -> Result<Self::Execution, BoundaryError>;
@@ -98,8 +97,7 @@ pub(crate) trait ProbeLifecycle<B> {
         batch: &B,
         execution: Self::Execution,
         deadline: &Deadline,
-    ) -> Result<Self::Output, Self::Error>;
-    fn should_stop(output: &Self::Output) -> bool;
+    ) -> Result<bool, Self::Error>;
     fn duration_error(actual: Duration, limit: Duration) -> Self::Error;
     fn rate_error(rate: Option<u32>) -> Self::Error;
     fn clock_error(sequence: u64, message: String) -> Self::Error;
@@ -115,7 +113,7 @@ pub(crate) fn run_batches<B, L, C>(
     deadline: &mut Deadline,
     clock: &mut C,
     lifecycle: &mut L,
-) -> Result<BatchRun, L::Error>
+) -> Result<Stats, L::Error>
 where
     B: ProbeBatch,
     L: ProbeLifecycle<B>,
@@ -164,9 +162,7 @@ where
         stats
             .checked_add_assign(execution.stats())
             .ok_or_else(|| L::statistics_error(sequence))?;
-        let output = lifecycle.process(batch, execution, deadline)?;
-        let stop = L::should_stop(&output);
-        if stop {
+        if lifecycle.process(batch, execution, deadline)? {
             break;
         }
     }
@@ -176,5 +172,5 @@ where
         .elapsed
         .checked_add(scheduled_delay)
         .ok_or_else(|| L::statistics_error(config.final_statistics_sequence))?;
-    Ok(BatchRun { stats })
+    Ok(stats)
 }

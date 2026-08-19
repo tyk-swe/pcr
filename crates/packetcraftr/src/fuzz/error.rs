@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use packetcraftr_core::budget::DeadlineExceeded;
-use packetcraftr_core::error::{Classification, Classified, Kind};
+use packetcraftr_core::error::{Classification, Classified, Context, Kind};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -71,16 +71,24 @@ impl Classified for Error {
                 Kind::Io,
                 Some("inspect the fuzz rate timer and account for cases already transmitted"),
             ),
-            Self::Output { .. } => Classification::new(
-                "io.fuzz_output",
-                Kind::Io,
-                Some("inspect the output sink and account for fuzz cases already transmitted"),
-            ),
+            Self::Output { source } => source.classification(),
             Self::InvalidEvidence { .. } | Self::StatisticsOverflow { .. } => Classification::new(
                 "internal.fuzz_evidence",
                 Kind::Internal,
                 Some("treat the fuzz operation as incomplete because evidence was inconsistent"),
             ),
+        }
+    }
+
+    fn context(&self) -> Context {
+        match self {
+            Self::Campaign(error) => error.context(),
+            Self::Authorization(error) | Self::Output { source: error } => error.context(),
+            Self::Execution { case_index, .. }
+            | Self::Clock { case_index, .. }
+            | Self::InvalidEvidence { case_index, .. }
+            | Self::StatisticsOverflow { case_index } => Context::case_index(*case_index),
+            _ => Context::default(),
         }
     }
 

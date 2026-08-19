@@ -18,7 +18,10 @@ use crate::clock::Clock;
 use crate::{BoundaryError, Stats as ExecutionStats};
 
 use super::execution::add_execution_stats;
-use super::{Authorizer, Execution, ExecutionCase, Executor, LiveLimits, LiveOptions, Stats, run};
+use super::{
+    Authorizer, Execution, ExecutionCase, Executor, LiveLimits, LiveOptions, Stats, run,
+    run_with_events,
+};
 
 #[test]
 fn live_evidence_limits_are_validated_outside_the_offline_campaign() {
@@ -44,6 +47,35 @@ fn live_evidence_limits_are_validated_outside_the_offline_campaign() {
         .expect_err("zero live evidence limit must fail");
         assert!(matches!(error, super::Error::InvalidLimit { .. }));
     }
+}
+
+#[test]
+fn aggregate_live_fuzz_validates_case_count_before_collecting() {
+    let registry =
+        Arc::new(packetcraftr_core::protocol::builtin::registry().expect("built-in registry"));
+    let request = packet_fuzz::Request {
+        cases: usize::MAX,
+        ..packet_fuzz::Request::default()
+    };
+    let mut authorizer = AllowAll;
+    let mut executor = CountingExecutor::default();
+
+    let error = run(
+        &request,
+        LiveOptions::default(),
+        packet(),
+        registry,
+        &mut authorizer,
+        &mut executor,
+        &mut NoopClock,
+    )
+    .expect_err("an oversized live aggregate campaign must fail validation");
+
+    assert!(matches!(
+        error,
+        super::Error::Campaign(packet_fuzz::Error::InvalidLimit { field: "cases", .. })
+    ));
+    assert_eq!(executor.executions, 0);
 }
 
 #[test]
@@ -155,6 +187,23 @@ impl Executor for RebuildingExecutor {
             undecoded: Vec::new(),
             diagnostics: Vec::new(),
         })
+    }
+}
+
+#[derive(Default)]
+struct CountingExecutor {
+    executions: usize,
+}
+
+impl Executor for CountingExecutor {
+    fn execute(
+        &mut self,
+        case: &ExecutionCase,
+        _timeout: Duration,
+    ) -> Result<Execution, BoundaryError> {
+        self.executions += 1;
+        let mut executor = RebuildingExecutor;
+        executor.execute(case, Duration::ZERO)
     }
 }
 
@@ -357,6 +406,52 @@ fn live_execution_uses_the_identical_packet_campaign() {
             live.built.as_ref().map(|built| built.bytes.as_ref())
         );
     }
+}
+
+#[test]
+fn live_fuzz_sink_failure_prevents_later_case_execution() {
+    let registry =
+        Arc::new(packetcraftr_core::protocol::builtin::registry().expect("built-in registry"));
+    let request = packet_fuzz::Request {
+        cases: 3,
+        strategies: vec![packet_fuzz::Strategy::BitFlip],
+        targets: vec!["2.bytes".parse().expect("raw field target")],
+        ..packet_fuzz::Request::default()
+    };
+    let mut authorizer = AllowAll;
+    let mut executor = CountingExecutor::default();
+    let mut emitted = Vec::new();
+
+    let error = run_with_events(
+        &request,
+        LiveOptions {
+            timeout: Duration::from_millis(1),
+            ..LiveOptions::default()
+        },
+        packet(),
+        registry,
+        &mut authorizer,
+        &mut executor,
+        &mut NoopClock,
+        |event| {
+            let super::Event::Case(case) = event;
+            emitted.push(case.index);
+            Err(BoundaryError::new(
+                "induced live fuzz sink failure",
+                packetcraftr_core::error::Classification::new(
+                    "io.test_output",
+                    packetcraftr_core::error::Kind::Io,
+                    None,
+                ),
+                Vec::new(),
+            ))
+        },
+    )
+    .expect_err("the first case event must stop the campaign");
+
+    assert!(matches!(error, super::Error::Output { .. }));
+    assert_eq!(executor.executions, 1);
+    assert_eq!(emitted, [0]);
 }
 
 #[test]

@@ -671,6 +671,96 @@ fn offline_fuzz_rejects_live_only_options_and_has_an_independent_packet_limit() 
 }
 
 #[test]
+fn fuzz_stream_preserves_cases_before_a_late_campaign_failure() {
+    let output = run(&[
+        "--output",
+        "ndjson",
+        "fuzz",
+        "--packet",
+        "raw(text=abcd)",
+        "--field",
+        "0.bytes",
+        "--strategy",
+        "bit-flip",
+        "--cases",
+        "3",
+        "--max-cases",
+        "3",
+        "--max-packet-bytes",
+        "32",
+        "--max-total-bytes",
+        "60",
+        "--max-field-bytes",
+        "16",
+    ]);
+    assert_eq!(output.status.code(), Some(6));
+    let records = parse_ndjson(&output);
+    assert_contiguous_stream(&records);
+    for record in &records {
+        assert_matches_published_schema(record);
+    }
+    assert_eq!(records.len(), 3);
+    assert_eq!(records[0]["result"]["case"]["index"], 0);
+    assert_eq!(records[1]["result"]["case"]["index"], 1);
+    assert_eq!(records[2]["status"], "error");
+    assert_eq!(records[2]["sequence"], 2);
+    assert!(
+        records
+            .iter()
+            .all(|record| record["result"]["event"] != "complete")
+    );
+}
+
+#[test]
+fn fuzz_aggregate_is_collected_from_the_streamed_case_path() {
+    let common = [
+        "fuzz",
+        "--packet",
+        "raw(text=abcd)",
+        "--field",
+        "0.bytes",
+        "--strategy",
+        "bit-flip",
+        "--cases",
+        "3",
+        "--max-cases",
+        "3",
+        "--max-packet-bytes",
+        "32",
+        "--max-total-bytes",
+        "100",
+        "--max-field-bytes",
+        "16",
+    ];
+    let aggregate_arguments = ["--output", "json"]
+        .into_iter()
+        .chain(common)
+        .collect::<Vec<_>>();
+    let stream_arguments = ["--output", "ndjson"]
+        .into_iter()
+        .chain(common)
+        .collect::<Vec<_>>();
+    let aggregate = parse_json(&run_success(&aggregate_arguments));
+    let streamed = parse_ndjson(&run_success(&stream_arguments));
+    let streamed_cases = streamed[..streamed.len() - 1]
+        .iter()
+        .map(|record| record["result"]["case"].clone())
+        .collect::<Vec<_>>();
+    let complete = streamed.last().expect("fuzz completion record");
+
+    assert_eq!(
+        aggregate["result"]["cases"]
+            .as_array()
+            .expect("aggregate fuzz cases"),
+        &streamed_cases
+    );
+    for field in ["cases_generated", "cases_built", "cases_rejected"] {
+        assert_eq!(aggregate["result"][field], complete["result"][field]);
+    }
+    assert_eq!(aggregate["stats"], complete["stats"]);
+}
+
+#[test]
 fn packet_documents_stdin_and_file_inputs_cover_offline_input_paths() {
     let documents = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/documents");
     for document in ["packet-ipv4-udp.json", "packet-raw.yaml"] {

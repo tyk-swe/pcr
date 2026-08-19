@@ -105,3 +105,48 @@ pub enum Event {
         unanswered: Vec<u64>,
     },
 }
+
+impl Event {
+    pub fn try_from_exchange(event: crate::exchange::Event) -> std::result::Result<Self, Error> {
+        match event {
+            crate::exchange::Event::Sent {
+                request_index,
+                sent,
+            } => Ok(Self::Sent {
+                request_index: u64::try_from(request_index).unwrap_or(u64::MAX),
+                frame: Wire::new(sent.wire_bytes().clone()),
+            }),
+            crate::exchange::Event::Response(response) => Ok(Self::Response {
+                request_index: u64::try_from(response.request_index).unwrap_or(u64::MAX),
+                response: Decoded::try_from_decoded(response.response)?,
+                latency: response.latency,
+            }),
+            crate::exchange::Event::Unanswered { request_index } => Ok(Self::Unanswered {
+                request_index: u64::try_from(request_index).unwrap_or(u64::MAX),
+            }),
+            crate::exchange::Event::Unsolicited { frame } => Ok(Self::Unsolicited {
+                frame: Decoded::try_from_decoded(frame)?,
+            }),
+            crate::exchange::Event::Undecoded { frame } => Ok(Self::Undecoded {
+                frame: Captured::try_from_frame(frame)?,
+            }),
+        }
+    }
+
+    pub fn complete_from_exchange(
+        summary: crate::exchange::Summary,
+        diagnostics: Vec<Diagnostic>,
+    ) -> (Self, Vec<Diagnostic>, Stats) {
+        (
+            Self::Complete {
+                unanswered: summary
+                    .unanswered
+                    .into_iter()
+                    .map(|index| u64::try_from(index).unwrap_or(u64::MAX))
+                    .collect(),
+            },
+            diagnostics,
+            summary.stats.into(),
+        )
+    }
+}

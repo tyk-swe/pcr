@@ -1276,6 +1276,7 @@
       ]
     },
     "exchangeStreamSuccess": {
+      "description": "One progressive exchange event. Sent records follow provider-confirmed transmission, capture evidence follows definitive classification, unanswered records follow successful capture completion, and complete is terminal.",
       "type": "object",
       "properties": {
         "command": {
@@ -1288,6 +1289,29 @@
       "required": [
         "command",
         "result"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "result": {
+                "required": [
+                  "event"
+                ],
+                "properties": {
+                  "event": {
+                    "const": "complete"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "stats"
+            ]
+          }
+        }
       ]
     },
     "replayFrameSuccess": {
@@ -1351,6 +1375,7 @@
       ]
     },
     "fuzzCaseSuccess": {
+      "description": "One progressive fuzz case or the single terminal complete event. Case index is deterministic domain identity and does not select envelope sequence.",
       "type": "object",
       "properties": {
         "command": {
@@ -1363,6 +1388,29 @@
       "required": [
         "command",
         "result"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "result": {
+                "required": [
+                  "event"
+                ],
+                "properties": {
+                  "event": {
+                    "const": "complete"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "stats"
+            ]
+          }
+        }
       ]
     },
     "buildResult": {

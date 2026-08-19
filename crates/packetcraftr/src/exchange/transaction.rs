@@ -18,6 +18,32 @@ use super::{Accumulator, PreparedPacket, WorkflowResponseMatcher};
 
 use crate::Error;
 
+pub(super) enum OperationError {
+    Io(LiveIoError),
+    Output(crate::BoundaryError),
+}
+
+impl From<LiveIoError> for OperationError {
+    fn from(error: LiveIoError) -> Self {
+        Self::Io(error)
+    }
+}
+
+impl OperationError {
+    pub(super) fn output(error: crate::BoundaryError) -> Self {
+        Self::Output(error)
+    }
+
+    pub(super) fn into_error(self) -> Error {
+        match self {
+            Self::Io(error) => Error::Io(error),
+            Self::Output(source) => Error::ExchangeOutput {
+                source: Box::new(source),
+            },
+        }
+    }
+}
+
 /// Mutable live-operation state, created after capture is armed.
 pub(crate) struct Transaction<C: Session> {
     pub(super) registry: Arc<Registry>,
@@ -57,28 +83,38 @@ impl<C: Session> Transaction<C> {
         }
     }
 
-    pub(crate) fn execute<I: PacketIo>(
+    pub(crate) fn execute<I, F>(
         mut self,
         io: &I,
         mut workflow_matcher: Option<&mut WorkflowResponseMatcher<'_>>,
-    ) -> Result<super::Result, Error> {
-        let operation = self.run(io, &mut workflow_matcher);
+        emit: &mut F,
+    ) -> Result<super::Summary, Error>
+    where
+        I: PacketIo,
+        F: FnMut(super::Event) -> Result<(), crate::BoundaryError>,
+    {
+        let operation = self.run(io, &mut workflow_matcher, emit);
         if let Err(operation) = operation {
             return Err(self.fail_after_shutdown(operation));
         }
 
         self.capture.shutdown()?;
-        self.finalize_exchange()
+        self.finalize_exchange(emit)
     }
 
-    fn run<I: PacketIo>(
+    fn run<I, F>(
         &mut self,
         io: &I,
         workflow_matcher: &mut Option<&mut WorkflowResponseMatcher<'_>>,
-    ) -> Result<(), packetcraftr_netio::Error> {
+        emit: &mut F,
+    ) -> Result<(), OperationError>
+    where
+        I: PacketIo,
+        F: FnMut(super::Event) -> Result<(), crate::BoundaryError>,
+    {
         self.await_capture_readiness()?;
-        self.send_requests(io, workflow_matcher)?;
-        self.collect_remaining(workflow_matcher)
+        self.send_requests(io, workflow_matcher, emit)?;
+        self.collect_remaining(workflow_matcher, emit)
     }
 
     fn await_capture_readiness(&mut self) -> Result<(), LiveIoError> {

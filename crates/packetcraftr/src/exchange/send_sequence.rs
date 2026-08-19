@@ -11,53 +11,56 @@ use packetcraftr_netio::{
     transmit::{Frame as TransmissionFrame, Sender as PacketIo},
 };
 
+use super::transaction::OperationError;
 use super::transaction::Transaction;
-use super::{ProcessOutcome, WorkflowResponseMatcher};
+use super::{Event, ProcessOutcome, WorkflowResponseMatcher};
 
 impl<C: Session> Transaction<C> {
-    pub(super) fn send_requests<I: PacketIo>(
+    pub(super) fn send_requests<I, F>(
         &mut self,
         io: &I,
         workflow_matcher: &mut Option<&mut WorkflowResponseMatcher<'_>>,
-    ) -> Result<(), LiveIoError> {
+        emit: &mut F,
+    ) -> Result<(), OperationError>
+    where
+        I: PacketIo,
+        F: FnMut(Event) -> Result<(), crate::BoundaryError>,
+    {
         for send_index in 0..self.prepared.len() {
-            self.drain(Some(self.deadline))?;
-            if self.promote_workflow(workflow_matcher) == ProcessOutcome::CorrelationDeadlineExpired
-            {
-                return Err(LiveIoError::DeadlineExceeded {
-                    operation: "correlating workflow responses before all requests were sent",
-                });
-            }
+            let _ = self.drain(Some(self.deadline), workflow_matcher, emit)?;
             self.ensure_send_deadline()?;
-            self.send_one(io, send_index)?;
+            self.send_one(io, send_index, emit)?;
             self.ensure_send_deadline()?;
 
             let more_requests = send_index + 1 < self.prepared.len();
-            self.drain(more_requests.then_some(self.deadline))?;
-            if self.promote_workflow(workflow_matcher) == ProcessOutcome::CorrelationDeadlineExpired
-            {
-                if more_requests {
-                    return Err(LiveIoError::DeadlineExceeded {
-                        operation: "correlating workflow responses before all requests were sent",
-                    });
-                }
+            let outcome = self.drain(
+                more_requests.then_some(self.deadline),
+                workflow_matcher,
+                emit,
+            )?;
+            if outcome == ProcessOutcome::CorrelationDeadlineExpired {
                 self.correlation_stopped = true;
             }
         }
         Ok(())
     }
 
-    fn send_one<I: PacketIo>(&mut self, io: &I, send_index: usize) -> Result<(), LiveIoError> {
+    fn send_one<I, F>(
+        &mut self,
+        io: &I,
+        send_index: usize,
+        emit: &mut F,
+    ) -> Result<(), OperationError>
+    where
+        I: PacketIo,
+        F: FnMut(Event) -> Result<(), crate::BoundaryError>,
+    {
         let prepared = &self.prepared[send_index];
         let built = &prepared.built;
         let route = &prepared.route;
         let frame = TransmissionFrame::try_new(&built.bytes, route)?;
         let report = io.send(frame)?;
-        self.sent.push(crate::SentPacket::try_new(
-            built.clone(),
-            route.clone(),
-            report,
-        )?);
+        let sent = crate::SentPacket::try_new(built.clone(), route.clone(), report)?;
         self.completed_sends =
             self.completed_sends
                 .checked_add(1)
@@ -65,6 +68,12 @@ impl<C: Session> Transaction<C> {
                     bytes_sent: usize::MAX,
                     wire_bytes: usize::MAX,
                 })?;
+        self.sent.push(sent.clone());
+        emit(Event::Sent {
+            request_index: send_index,
+            sent: Box::new(sent),
+        })
+        .map_err(OperationError::output)?;
         Ok(())
     }
 

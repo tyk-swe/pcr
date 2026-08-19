@@ -3,7 +3,7 @@
 
 //! Internal fuzz mutation façade.
 
-pub(super) use preparation::prepare;
+pub(super) use preparation::prepare_with_events;
 
 mod decode;
 mod preparation;

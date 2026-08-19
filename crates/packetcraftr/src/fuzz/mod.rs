@@ -25,5 +25,5 @@ pub use boundary::{Authorizer, Execution, ExecutionCase, Executor};
 pub use client_executor::PolicyAuthorizer;
 pub use error::Error;
 pub use request::{LiveLimits, LiveOptions};
-pub use result::{Case, CaseOutcome, Result, Stats};
-pub use run::run;
+pub use result::{Case, CaseOutcome, Event, Result, Stats, Summary};
+pub use run::{run, run_with_events};

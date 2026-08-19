@@ -1,14 +1,18 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::collections::VecDeque;
 use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
-use packetcraftr::core::error::{Classification, Kind};
+use bytes::Bytes;
+use packetcraftr::core::error::{Classification, Classified, Kind};
 use packetcraftr::core::frame::LinkType;
+use packetcraftr::core::protocol::{network::Ipv4, transport::Udp};
+use packetcraftr::core::{Packet, field::FieldValue, layer::Raw};
 use packetcraftr::netio::capture;
 use packetcraftr::netio::interface::Id as InterfaceId;
 use packetcraftr::netio::link::{Capability, Mode};
@@ -21,6 +25,7 @@ use packetcraftr::{BoundaryError, Client, ExchangeExecutor, clock, dns, policy, 
 #[derive(Default)]
 struct IoState {
     events: Mutex<Vec<&'static str>>,
+    captured: Mutex<VecDeque<capture::Captured>>,
     shutdown_calls: AtomicUsize,
     fail_shutdown_at: usize,
 }
@@ -66,7 +71,10 @@ impl capture::Session for FakeCapture {
         &mut self,
         _timeout: Duration,
     ) -> Result<Option<capture::Captured>, packetcraftr::netio::Error> {
-        Ok(None)
+        if !self.0.events.lock().unwrap().contains(&"send") {
+            return Ok(None);
+        }
+        Ok(self.0.captured.lock().unwrap().pop_front())
     }
 
     fn shutdown(&mut self) -> Result<(), packetcraftr::netio::Error> {
@@ -162,6 +170,46 @@ fn exchange_options() -> packetcraftr::exchange::Options {
     options
 }
 
+fn exchange_template() -> packetcraftr::core::template::Template {
+    let mut packet = Packet::new();
+    packet
+        .push(Ipv4 {
+            source: Ipv4Addr::new(10, 0, 0, 1),
+            destination: Ipv4Addr::new(10, 0, 0, 2),
+            ..Ipv4::default()
+        })
+        .push(Udp {
+            source_port: 40_000,
+            destination_port: 9,
+            ..Udp::default()
+        })
+        .push(Raw::new(Bytes::from_static(b"one")));
+    packetcraftr::core::template::Template::new(packet).axis(
+        2,
+        "bytes",
+        vec![
+            FieldValue::Bytes(Bytes::from_static(b"one")),
+            FieldValue::Bytes(Bytes::from_static(b"two")),
+        ],
+    )
+}
+
+fn two_packet_exchange_options() -> packetcraftr::exchange::Options {
+    let mut options = exchange_options();
+    options.max_template_packets = 2;
+    options
+}
+
+fn undecodable_capture() -> capture::Captured {
+    let frame = packetcraftr::core::frame::Frame::new(
+        UNIX_EPOCH,
+        LinkType::ETHERNET,
+        Bytes::from_static(&[0]),
+    )
+    .expect("bounded invalid Ethernet frame");
+    capture::Captured::new(frame, Instant::now())
+}
+
 fn output_failure() -> BoundaryError {
     BoundaryError::new(
         "induced progressive sink failure",
@@ -171,6 +219,189 @@ fn output_failure() -> BoundaryError {
 }
 
 fn assert_one_clean_exchange(state: &IoState) {
+    assert_eq!(
+        *state.events.lock().unwrap(),
+        ["arm", "ready", "send", "shutdown"]
+    );
+}
+
+#[test]
+fn exchange_events_follow_provider_confirmation_and_completion() {
+    let state = Arc::new(IoState::default());
+    let client = client(Arc::clone(&state));
+    let mut observed = Vec::new();
+    let mut collector = packetcraftr::exchange::Collector::default();
+
+    let summary = client
+        .exchange_with_events(
+            &exchange_template(),
+            two_packet_exchange_options(),
+            |event| {
+                collector.observe(event.clone());
+                match event {
+                    packetcraftr::exchange::Event::Sent { request_index, .. } => {
+                        let sends = state
+                            .events
+                            .lock()
+                            .unwrap()
+                            .iter()
+                            .filter(|event| **event == "send")
+                            .count();
+                        assert_eq!(sends, request_index + 1);
+                        observed.push(format!("sent:{request_index}"));
+                    }
+                    packetcraftr::exchange::Event::Unanswered { request_index } => {
+                        assert_eq!(state.events.lock().unwrap().last(), Some(&"shutdown"));
+                        observed.push(format!("unanswered:{request_index}"));
+                    }
+                    _ => panic!("empty fake capture produces only sent and unanswered events"),
+                }
+                Ok(())
+            },
+        )
+        .expect("the fake exchange must complete");
+
+    assert_eq!(
+        observed,
+        ["sent:0", "sent:1", "unanswered:0", "unanswered:1"]
+    );
+    assert_eq!(summary.unanswered, [0, 1]);
+    let aggregate = collector.finish(summary);
+    assert_eq!(aggregate.sent.len(), 2);
+    assert_eq!(aggregate.unanswered, [0, 1]);
+    assert!(aggregate.responses.is_empty());
+    assert!(aggregate.unsolicited.is_empty());
+    assert!(aggregate.undecoded.is_empty());
+    assert_eq!(
+        *state.events.lock().unwrap(),
+        ["arm", "ready", "send", "send", "shutdown"]
+    );
+}
+
+#[test]
+fn exchange_sink_failure_prevents_the_next_send_and_cleans_up() {
+    let state = Arc::new(IoState::default());
+    let client = client(Arc::clone(&state));
+
+    let error = client
+        .exchange_with_events(
+            &exchange_template(),
+            two_packet_exchange_options(),
+            |event| match event {
+                packetcraftr::exchange::Event::Sent {
+                    request_index: 0, ..
+                } => Err(output_failure()),
+                _ => panic!("the sink failure must stop before another event"),
+            },
+        )
+        .expect_err("the first sent event must stop the exchange");
+
+    assert!(matches!(error, packetcraftr::Error::ExchangeOutput { .. }));
+    assert_eq!(
+        *state.events.lock().unwrap(),
+        ["arm", "ready", "send", "shutdown"]
+    );
+}
+
+#[test]
+fn exchange_emits_unsolicited_evidence_before_the_next_send() {
+    let state = Arc::new(IoState::default());
+    state
+        .captured
+        .lock()
+        .unwrap()
+        .push_back(undecodable_capture());
+    let client = client(Arc::clone(&state));
+    let mut observed = Vec::new();
+
+    let error = client
+        .exchange_with_events(
+            &exchange_template(),
+            two_packet_exchange_options(),
+            |event| match event {
+                packetcraftr::exchange::Event::Sent { request_index, .. } => {
+                    observed.push(format!("sent:{request_index}"));
+                    Ok(())
+                }
+                packetcraftr::exchange::Event::Unsolicited { .. } => {
+                    observed.push("unsolicited".to_owned());
+                    Err(output_failure())
+                }
+                event => panic!("the invalid frame produced an unexpected event: {event:?}"),
+            },
+        )
+        .expect_err("the unsolicited-event sink failure must stop the exchange");
+
+    assert!(matches!(error, packetcraftr::Error::ExchangeOutput { .. }));
+    assert_eq!(observed, ["sent:0", "unsolicited"]);
+    assert_eq!(
+        *state.events.lock().unwrap(),
+        ["arm", "ready", "send", "shutdown"]
+    );
+}
+
+#[test]
+fn exchange_emits_retained_undecoded_evidence_before_the_next_send() {
+    let state = Arc::new(IoState::default());
+    state
+        .captured
+        .lock()
+        .unwrap()
+        .push_back(undecodable_capture());
+    let client = client(Arc::clone(&state));
+    let mut options = two_packet_exchange_options();
+    options.decode.max_layers = 0;
+    let mut observed = Vec::new();
+
+    let error = client
+        .exchange_with_events(&exchange_template(), options, |event| match event {
+            packetcraftr::exchange::Event::Sent { request_index, .. } => {
+                observed.push(format!("sent:{request_index}"));
+                Ok(())
+            }
+            packetcraftr::exchange::Event::Undecoded { .. } => {
+                observed.push("undecoded".to_owned());
+                Err(output_failure())
+            }
+            event => panic!("the decode limit produced an unexpected event: {event:?}"),
+        })
+        .expect_err("the undecoded-event sink failure must stop the exchange");
+
+    assert!(matches!(error, packetcraftr::Error::ExchangeOutput { .. }));
+    assert_eq!(observed, ["sent:0", "undecoded"]);
+    assert_eq!(
+        *state.events.lock().unwrap(),
+        ["arm", "ready", "send", "shutdown"]
+    );
+}
+
+#[test]
+fn exchange_cleanup_failure_augments_the_output_error() {
+    let state = Arc::new(IoState {
+        events: Mutex::new(Vec::new()),
+        captured: Mutex::new(VecDeque::new()),
+        shutdown_calls: AtomicUsize::new(0),
+        fail_shutdown_at: 1,
+    });
+    let client = client(Arc::clone(&state));
+
+    let error = client
+        .exchange_with_events(&exchange_template(), two_packet_exchange_options(), |_| {
+            Err(output_failure())
+        })
+        .expect_err("the output and cleanup failures must be combined");
+
+    assert!(matches!(
+        error,
+        packetcraftr::Error::ExchangeOutputAndCaptureShutdown { .. }
+    ));
+    assert_eq!(error.classification().code, "io.exchange_output");
+    assert!(
+        error
+            .causes()
+            .iter()
+            .any(|cause| cause.contains("capture shutdown failure"))
+    );
     assert_eq!(
         *state.events.lock().unwrap(),
         ["arm", "ready", "send", "shutdown"]
@@ -216,6 +447,7 @@ fn scan_sink_failure_stops_after_capture_shutdown() {
 fn later_capture_shutdown_failure_preserves_the_earlier_scan_event() {
     let state = Arc::new(IoState {
         events: Mutex::new(Vec::new()),
+        captured: Mutex::new(VecDeque::new()),
         shutdown_calls: AtomicUsize::new(0),
         fail_shutdown_at: 2,
     });

@@ -83,42 +83,27 @@ pub(super) fn render_text(
     render_diagnostics_text(&diagnostics)
 }
 
-pub(super) fn render_stream(
-    result: output::fuzz::Result,
-    diagnostics: Vec<core::diagnostic::Diagnostic>,
-    stats: output::envelope::Stats,
+pub(super) fn render_event(
+    event: output::fuzz::Event,
     stream: &mut NdjsonStream,
 ) -> Result<(), CliError> {
-    let output::fuzz::Result {
-        seed,
-        first_case,
-        mode,
-        cases_generated,
-        cases_built,
-        cases_rejected,
-        cases,
-    } = result;
-    for case in cases {
-        stream.emit_data(
-            output::fuzz::Event::Case {
-                operation_seed: seed,
-                case: Box::new(case),
-            },
-            Vec::new(),
-        )?;
-    }
-    stream.complete_with_stats(
-        output::fuzz::Event::Complete {
-            operation_seed: seed,
-            first_case,
-            mode,
-            cases_generated,
-            cases_built,
-            cases_rejected,
-        },
-        diagnostics,
-        stats,
-    )
+    stream.emit_data(event, Vec::new())
+}
+
+pub(super) fn render_offline_complete(
+    summary: &core::fuzz::Summary,
+    stream: &mut NdjsonStream,
+) -> Result<(), CliError> {
+    let (event, diagnostics, stats) = output::fuzz::Event::complete_from_offline(summary);
+    stream.complete_with_stats(event, diagnostics, stats)
+}
+
+pub(super) fn render_live_complete(
+    summary: &packetcraftr::fuzz::Summary,
+    stream: &mut NdjsonStream,
+) -> Result<(), CliError> {
+    let (event, diagnostics, stats) = output::fuzz::Event::complete_from_live(summary);
+    stream.complete_with_stats(event, diagnostics, stats)
 }
 
 fn mode_name(value: output::fuzz::Mode) -> &'static str {

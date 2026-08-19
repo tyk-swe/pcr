@@ -163,91 +163,81 @@ pub struct Result {
 }
 
 impl Result {
-    pub fn try_from_offline(
-        result: packet_fuzz::Result,
-    ) -> std::result::Result<(Self, Vec<PacketDiagnostic>, Stats), ContractError> {
-        let packet_fuzz::Result {
+    pub fn from_offline_events(summary: &packet_fuzz::Summary, cases: Vec<Case>) -> Self {
+        let packet_fuzz::Summary {
             seed,
             first_case,
-            cases,
-            diagnostics,
             stats,
-        } = result;
-        let case_outputs = cases
-            .into_iter()
-            .map(|case| {
-                let outcome = case.outcome.into();
-                convert_case(
-                    seed,
-                    case,
-                    outcome,
-                    None,
-                    Vec::new(),
-                    Vec::new(),
-                    Vec::new(),
-                )
-            })
-            .collect::<std::result::Result<Vec<_>, ContractError>>()?;
-        Ok((
-            Self {
-                seed,
-                first_case,
-                mode: Mode::Offline,
-                cases_generated: stats.cases_generated,
-                cases_built: stats.cases_built,
-                cases_rejected: stats.cases_generated.saturating_sub(stats.cases_built),
-                cases: case_outputs,
-            },
-            diagnostics,
-            (&stats).into(),
-        ))
+            ..
+        } = summary;
+        Self {
+            seed: *seed,
+            first_case: *first_case,
+            mode: Mode::Offline,
+            cases_generated: stats.cases_generated,
+            cases_built: stats.cases_built,
+            cases_rejected: stats.cases_generated.saturating_sub(stats.cases_built),
+            cases,
+        }
     }
 
-    pub fn try_from_live(
-        result: live_fuzz::Result,
-    ) -> std::result::Result<(Self, Vec<PacketDiagnostic>, Stats), ContractError> {
-        let live_fuzz::Result {
+    pub fn from_live_events(summary: &live_fuzz::Summary, cases: Vec<Case>) -> Self {
+        let live_fuzz::Summary {
             seed,
             first_case,
-            cases,
-            diagnostics,
             stats,
-        } = result;
-        let case_outputs = cases
-            .into_iter()
-            .map(|case| {
-                let live_fuzz::Case {
-                    prepared,
-                    outcome,
-                    sent,
-                    responses,
-                    unmatched,
-                    undecoded,
-                } = case;
-                convert_case(
-                    seed,
-                    prepared,
-                    outcome.into(),
-                    sent,
-                    responses,
-                    unmatched,
-                    undecoded,
-                )
-            })
-            .collect::<std::result::Result<Vec<_>, ContractError>>()?;
-        Ok((
-            Self {
-                seed,
-                first_case,
-                mode: Mode::Live,
-                cases_generated: stats.cases_generated,
-                cases_built: stats.cases_built,
-                cases_rejected: stats.cases_generated.saturating_sub(stats.cases_built),
-                cases: case_outputs,
-            },
-            diagnostics,
-            (&stats).into(),
-        ))
+            ..
+        } = summary;
+        Self {
+            seed: *seed,
+            first_case: *first_case,
+            mode: Mode::Live,
+            cases_generated: stats.cases_generated,
+            cases_built: stats.cases_built,
+            cases_rejected: stats.cases_generated.saturating_sub(stats.cases_built),
+            cases,
+        }
+    }
+}
+
+impl Case {
+    fn try_from_offline(
+        operation_seed: u64,
+        case: packet_fuzz::Case,
+    ) -> std::result::Result<Self, ContractError> {
+        let outcome = case.outcome.into();
+        convert_case(
+            operation_seed,
+            case,
+            outcome,
+            None,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
+    }
+
+    fn try_from_live(
+        operation_seed: u64,
+        case: live_fuzz::Case,
+    ) -> std::result::Result<Self, ContractError> {
+        let live_fuzz::Case {
+            prepared,
+            outcome,
+            sent,
+            responses,
+            unmatched,
+            undecoded,
+        } = case;
+        convert_case(
+            operation_seed,
+            prepared,
+            outcome.into(),
+            sent,
+            responses,
+            unmatched,
+            undecoded,
+        )
     }
 }
 
@@ -317,4 +307,68 @@ pub enum Event {
         cases_built: u64,
         cases_rejected: u64,
     },
+}
+
+impl Event {
+    pub fn try_from_offline(
+        operation_seed: u64,
+        event: packet_fuzz::Event,
+    ) -> std::result::Result<Self, ContractError> {
+        let packet_fuzz::Event::Case(case) = event;
+        Ok(Self::Case {
+            operation_seed,
+            case: Box::new(Case::try_from_offline(operation_seed, case)?),
+        })
+    }
+
+    pub fn try_from_live(
+        operation_seed: u64,
+        event: live_fuzz::Event,
+    ) -> std::result::Result<Self, ContractError> {
+        let live_fuzz::Event::Case(case) = event;
+        Ok(Self::Case {
+            operation_seed,
+            case: Box::new(Case::try_from_live(operation_seed, case)?),
+        })
+    }
+
+    pub fn complete_from_offline(
+        summary: &packet_fuzz::Summary,
+    ) -> (Self, Vec<PacketDiagnostic>, Stats) {
+        (
+            Self::Complete {
+                operation_seed: summary.seed,
+                first_case: summary.first_case,
+                mode: Mode::Offline,
+                cases_generated: summary.stats.cases_generated,
+                cases_built: summary.stats.cases_built,
+                cases_rejected: summary
+                    .stats
+                    .cases_generated
+                    .saturating_sub(summary.stats.cases_built),
+            },
+            summary.diagnostics.clone(),
+            (&summary.stats).into(),
+        )
+    }
+
+    pub fn complete_from_live(
+        summary: &live_fuzz::Summary,
+    ) -> (Self, Vec<PacketDiagnostic>, Stats) {
+        (
+            Self::Complete {
+                operation_seed: summary.seed,
+                first_case: summary.first_case,
+                mode: Mode::Live,
+                cases_generated: summary.stats.cases_generated,
+                cases_built: summary.stats.cases_built,
+                cases_rejected: summary
+                    .stats
+                    .cases_generated
+                    .saturating_sub(summary.stats.cases_built),
+            },
+            summary.diagnostics.clone(),
+            (&summary.stats).into(),
+        )
+    }
 }

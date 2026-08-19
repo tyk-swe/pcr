@@ -30,6 +30,18 @@ pub enum Error {
         operation: LiveIoError,
         shutdown: LiveIoError,
     },
+    #[error("exchange progressive output failed: {source}")]
+    ExchangeOutput {
+        #[source]
+        source: Box<packetcraftr_core::error::BoundaryError>,
+    },
+    #[error(
+        "exchange progressive output failed: {output}; capture shutdown also failed: {shutdown}"
+    )]
+    ExchangeOutputAndCaptureShutdown {
+        output: Box<packetcraftr_core::error::BoundaryError>,
+        shutdown: LiveIoError,
+    },
     #[error("exchange packets selected different interfaces or link modes")]
     HeterogeneousExchangeRoute,
     #[error("packet template expansion failed: {message}")]
@@ -74,6 +86,15 @@ impl Classified for Error {
             ),
             Self::Io(error) => error.classification(),
             Self::OperationAndCaptureShutdown { operation, .. } => operation.classification(),
+            Self::ExchangeOutput { .. } | Self::ExchangeOutputAndCaptureShutdown { .. } => {
+                Classification::new(
+                    "io.exchange_output",
+                    Kind::Io,
+                    Some(
+                        "inspect the output sink and account for exchange packets already transmitted",
+                    ),
+                )
+            }
             Self::HeterogeneousExchangeRoute => Classification::new(
                 "cli.heterogeneous_exchange_route",
                 Kind::Cli,
@@ -117,6 +138,15 @@ impl Classified for Error {
                 operation,
                 shutdown,
             } => vec![operation.to_string(), shutdown.to_string()],
+            Self::ExchangeOutput { source } => source.causes(),
+            Self::ExchangeOutputAndCaptureShutdown { output, shutdown } => {
+                let mut causes = output.causes();
+                if causes.is_empty() {
+                    causes.push(output.to_string());
+                }
+                causes.push(shutdown.to_string());
+                causes
+            }
             _ => Vec::new(),
         }
     }

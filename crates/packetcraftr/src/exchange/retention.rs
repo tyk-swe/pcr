@@ -63,7 +63,7 @@ impl Accumulator {
         options: &super::contract::Options,
         freshness: Option<super::accumulator::UnsolicitedFreshness>,
     ) {
-        if self.unsolicited.len() + self.undecoded.len() >= options.max_unmatched_frames {
+        if self.retained_unmatched >= options.max_unmatched_frames {
             packetcraftr_core::diagnostic::push_once(
                 &mut self.diagnostics,
                 packetcraftr_core::diagnostic::Diagnostic::warning(
@@ -78,6 +78,7 @@ impl Accumulator {
         }
         if self.reserve_decoded_evidence(decoded.original.len(), options) {
             self.mark_record_retained(identity);
+            self.retained_unmatched += 1;
             self.unsolicited
                 .push(UnsolicitedEvidence { decoded, freshness });
         }
@@ -89,7 +90,7 @@ impl Accumulator {
         frame: Frame,
         options: &super::contract::Options,
     ) {
-        if self.unsolicited.len() + self.undecoded.len() >= options.max_unmatched_frames {
+        if self.retained_unmatched >= options.max_unmatched_frames {
             packetcraftr_core::diagnostic::push_once(
                 &mut self.diagnostics,
                 packetcraftr_core::diagnostic::Diagnostic::warning(
@@ -104,7 +105,9 @@ impl Accumulator {
         }
         if self.reserve_decoded_evidence(frame.bytes().len(), options) {
             self.mark_record_retained(identity);
-            self.undecoded.push(frame);
+            self.retained_unmatched += 1;
+            self.pending_events
+                .push(super::contract::Event::Undecoded { frame });
         }
     }
 }

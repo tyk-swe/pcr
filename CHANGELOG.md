@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** Offline and authorized live fuzz NDJSON now emits each case when
+  its outcome becomes final, and exchange NDJSON now emits provider-confirmed
+  sends, definitively classified response/unsolicited/undecoded evidence, and
+  completion-time unanswered requests during the single execution. Aggregate
+  and text results collect those same domain events. Sink failure stops later
+  generation or transmission where possible and preserves capture cleanup;
+  later operation failures retain earlier records and terminate with one error.
+- Added a shared schema-backed NDJSON conformance gate for read, capture,
+  replay, follow, expert, scan, traceroute, DNS, fuzz, and exchange. It checks
+  independent JSON validity, contiguous envelope sequence, empty completion,
+  unique terminal success/error, sparse domain identifiers, partial failure,
+  failed-sink single-document behavior, and cleanup-error composition.
 - **Breaking:** `read` NDJSON is now an explicit event stream ending in one
   mandatory `complete` event with source frame, match, and captured-byte
   counters. `read` and `capture` frame events expose the stable one-based

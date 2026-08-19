@@ -21,8 +21,8 @@ pub(crate) use accumulator::{
     Accumulator, ProcessContext, ProcessOutcome, WorkflowPromotionContext, WorkflowResponseMatcher,
 };
 pub use contract::{
-    DEFAULT_MAX_RESPONSES, DEFAULT_MAX_UNMATCHED_FRAMES, MAX_EXCHANGE_TIMEOUT, Options, Response,
-    Result,
+    Collector, DEFAULT_MAX_RESPONSES, DEFAULT_MAX_UNMATCHED_FRAMES, Event, MAX_EXCHANGE_TIMEOUT,
+    Options, Response, Result, Summary,
 };
 pub(crate) use preparation::{Prepared, PreparedPacket};
 pub(crate) use shutdown::CaptureGuard;

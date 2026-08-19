@@ -4,10 +4,12 @@
 use std::sync::Arc;
 
 use crate::budget::Deadline;
+use crate::error::BoundaryError;
 use crate::{Packet, field::FieldKind, registry::Registry};
 
 use super::error::Error;
-use super::mutation::prepare;
+use super::mutation::prepare_with_events;
+use super::result::{Event, Stats, Summary};
 
 /// A completely prepared and bounded deterministic mutation campaign.
 ///
@@ -29,7 +31,17 @@ impl Campaign {
         deadline: &mut Deadline,
     ) -> Result<Self, Error> {
         request.validate()?;
-        prepare(request, packet, registry, deadline)
+        let mut cases = Vec::with_capacity(request.cases);
+        let prepared = prepare_with_events(request, packet, registry, deadline, &mut |case| {
+            cases.push(case);
+            Ok(())
+        })?;
+        Ok(Self {
+            cases,
+            built_case_count: prepared.built_case_count,
+            built_byte_count: prepared.built_byte_count,
+            retained_byte_count: prepared.retained_byte_count,
+        })
     }
 
     pub fn cases(&self) -> &[super::result::Case] {
@@ -58,20 +70,48 @@ pub fn run(
     packet: Packet,
     registry: Arc<Registry>,
 ) -> Result<super::result::Result, Error> {
-    let mut deadline = Deadline::new(request.limits.max_duration);
-    let campaign = Campaign::prepare(request, packet, registry, &mut deadline)?;
+    let mut cases = Vec::new();
+    let summary = run_with_events(request, packet, registry, |event| {
+        let Event::Case(case) = event;
+        cases.push(case);
+        Ok(())
+    })?;
     Ok(super::result::Result {
+        seed: summary.seed,
+        first_case: summary.first_case,
+        cases,
+        diagnostics: summary.diagnostics,
+        stats: summary.stats,
+    })
+}
+
+/// Generates each deterministic case once and publishes it as soon as its
+/// offline outcome is final.
+pub fn run_with_events<F>(
+    request: &super::request::Request,
+    packet: Packet,
+    registry: Arc<Registry>,
+    mut emit: F,
+) -> Result<Summary, Error>
+where
+    F: FnMut(Event) -> Result<(), BoundaryError>,
+{
+    request.validate()?;
+    let mut deadline = Deadline::new(request.limits.max_duration);
+    let prepared = prepare_with_events(request, packet, registry, &mut deadline, &mut |case| {
+        emit(Event::Case(case))
+    })?;
+    Ok(Summary {
         seed: request.seed,
         first_case: request.first_case,
-        cases: campaign.cases,
         diagnostics: Vec::new(),
-        stats: super::result::Stats {
+        stats: Stats {
             cases_generated: request.cases as u64,
-            cases_built: campaign.built_case_count,
+            cases_built: prepared.built_case_count,
             packets_attempted: request.cases as u64,
-            packets_completed: campaign.built_case_count,
-            bytes: campaign.built_byte_count,
-            ..super::result::Stats::default()
+            packets_completed: prepared.built_case_count,
+            bytes: prepared.built_byte_count,
+            ..Stats::default()
         },
     })
 }

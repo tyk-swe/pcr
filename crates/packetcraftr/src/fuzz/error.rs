@@ -38,6 +38,11 @@ pub enum Error {
     InvalidEvidence { case_index: u64, message: String },
     #[error("fuzz statistic accounting overflowed at case {case_index}")]
     StatisticsOverflow { case_index: u64 },
+    #[error("fuzz progressive output failed: {source}")]
+    Output {
+        #[source]
+        source: crate::BoundaryError,
+    },
 }
 
 impl Classified for Error {
@@ -66,6 +71,11 @@ impl Classified for Error {
                 Kind::Io,
                 Some("inspect the fuzz rate timer and account for cases already transmitted"),
             ),
+            Self::Output { .. } => Classification::new(
+                "io.fuzz_output",
+                Kind::Io,
+                Some("inspect the output sink and account for fuzz cases already transmitted"),
+            ),
             Self::InvalidEvidence { .. } | Self::StatisticsOverflow { .. } => Classification::new(
                 "internal.fuzz_evidence",
                 Kind::Internal,
@@ -78,7 +88,7 @@ impl Classified for Error {
         match self {
             Self::Campaign(error) => error.causes(),
             Self::Authorization(error) => error.causes(),
-            Self::Execution { source, .. } => source.causes(),
+            Self::Execution { source, .. } | Self::Output { source } => source.causes(),
             _ => Vec::new(),
         }
     }

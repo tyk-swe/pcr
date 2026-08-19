@@ -39,5 +39,5 @@ mod tests;
 
 pub use error::Error;
 pub use request::{Limits, Request, Strategy, Target, TargetParseError};
-pub use result::{Case, CaseFailure, CaseOutcome, Mutation, Result, Stats};
-pub use run::{Campaign, run};
+pub use result::{Case, CaseFailure, CaseOutcome, Event, Mutation, Result, Stats, Summary};
+pub use run::{Campaign, run, run_with_events};

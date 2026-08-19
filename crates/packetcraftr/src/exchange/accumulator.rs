@@ -5,7 +5,6 @@
 
 use std::{collections::HashSet, time::Instant};
 
-use packetcraftr_core::frame::Frame;
 use packetcraftr_core::{
     Packet,
     decode::{DecodedPacket, Dissector},
@@ -14,7 +13,6 @@ use packetcraftr_core::{
 use packetcraftr_netio::capture::RecordIdentity;
 
 use super::preparation::PreparedPacket;
-use crate::Stats;
 use crate::evidence::Budget;
 
 #[derive(Clone, Copy)]
@@ -32,14 +30,14 @@ pub(crate) type WorkflowResponseMatcher<'a> =
     dyn FnMut(usize, &Packet, &DecodedPacket) -> bool + 'a;
 
 pub(crate) struct Accumulator {
-    pub(crate) responses: Vec<super::contract::Response>,
     pub(super) unsolicited: Vec<UnsolicitedEvidence>,
-    pub(crate) undecoded: Vec<Frame>,
+    pub(super) pending_events: Vec<super::contract::Event>,
     pub(crate) diagnostics: Vec<packetcraftr_core::diagnostic::Diagnostic>,
     pub(super) evidence_budget: Budget,
     pub(crate) response_counts: Vec<usize>,
+    pub(super) response_count: usize,
+    pub(super) retained_unmatched: usize,
     pub(super) correlation_deadline_expired: bool,
-    pub(super) workflow_examined_unsolicited: usize,
     pub(super) retained_record_identities: HashSet<RecordIdentity>,
 }
 
@@ -71,14 +69,14 @@ pub(crate) enum ProcessOutcome {
 impl Accumulator {
     pub(crate) fn new(requests: usize) -> Self {
         Self {
-            responses: Vec::new(),
             unsolicited: Vec::new(),
-            undecoded: Vec::new(),
+            pending_events: Vec::new(),
             diagnostics: Vec::new(),
             evidence_budget: Budget::default(),
             response_counts: vec![0; requests],
+            response_count: 0,
+            retained_unmatched: 0,
             correlation_deadline_expired: false,
-            workflow_examined_unsolicited: 0,
             retained_record_identities: HashSet::new(),
         }
     }
@@ -91,24 +89,7 @@ impl Accumulator {
         self.retained_record_identities.insert(identity);
     }
 
-    pub(crate) fn finish(
-        self,
-        sent: Vec<crate::SentPacket>,
-        unanswered: Vec<usize>,
-        stats: Stats,
-    ) -> super::contract::Result {
-        super::contract::Result {
-            sent,
-            responses: self.responses,
-            unanswered,
-            unsolicited: self
-                .unsolicited
-                .into_iter()
-                .map(|evidence| evidence.decoded)
-                .collect(),
-            undecoded: self.undecoded,
-            diagnostics: self.diagnostics,
-            stats,
-        }
+    pub(super) fn take_events(&mut self) -> Vec<super::contract::Event> {
+        std::mem::take(&mut self.pending_events)
     }
 }

@@ -77,3 +77,18 @@ pub struct Result {
     pub diagnostics: Vec<Diagnostic>,
     pub stats: Stats,
 }
+
+/// One finalized live fuzz campaign event.
+#[derive(Clone, Debug)]
+pub enum Event {
+    Case(Case),
+}
+
+/// Final live campaign metadata after every case event was published.
+#[derive(Clone, Debug)]
+pub struct Summary {
+    pub seed: u64,
+    pub first_case: u64,
+    pub diagnostics: Vec<Diagnostic>,
+    pub stats: Stats,
+}

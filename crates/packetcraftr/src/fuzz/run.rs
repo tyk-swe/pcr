@@ -29,18 +29,13 @@ use super::execution::{
     worst_case_duration,
 };
 use super::request::LiveOptions;
-use super::result::{Case, CaseOutcome, Result, Stats};
+use super::result::{Case, CaseOutcome, Event, Result, Stats, Summary};
 use super::{
     SYNTHESIZED_ETHERNET_BYTES,
     decode::{dissect_built, has_link_root},
 };
 
 /// Builds and validates all cases offline, then authorizes and executes the campaign.
-///
-/// # Panics
-///
-/// Panics only if an internally selected case was never built; input errors return
-/// [`Error`].
 pub fn run<A, E, C>(
     request: &packet_fuzz::Request,
     live: LiveOptions,
@@ -55,6 +50,52 @@ where
     E: Executor,
     C: Clock,
 {
+    let mut cases = Vec::new();
+    let summary = run_with_events(
+        request,
+        live,
+        packet,
+        registry,
+        authorizer,
+        executor,
+        clock,
+        |event| {
+            let Event::Case(case) = event;
+            cases.push(case);
+            Ok(())
+        },
+    )?;
+    Ok(Result {
+        seed: summary.seed,
+        first_case: summary.first_case,
+        cases,
+        diagnostics: summary.diagnostics,
+        stats: summary.stats,
+    })
+}
+
+/// Executes one fully authorized campaign and publishes cases in deterministic
+/// case order as soon as each live outcome is final.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "live fuzz execution requires the request, approved I/O boundaries, clock, and progressive sink"
+)]
+pub fn run_with_events<A, E, C, F>(
+    request: &packet_fuzz::Request,
+    live: LiveOptions,
+    packet: Packet,
+    registry: Arc<Registry>,
+    authorizer: &mut A,
+    executor: &mut E,
+    clock: &mut C,
+    mut emit: F,
+) -> std::result::Result<Summary, Error>
+where
+    A: Authorizer,
+    E: Executor,
+    C: Clock,
+    F: FnMut(Event) -> std::result::Result<(), crate::BoundaryError>,
+{
     let live = live.validate()?;
     let mut deadline = Deadline::new(request.limits.max_duration);
     let live_dissector = Dissector::new(Arc::clone(&registry));
@@ -64,7 +105,6 @@ where
 
     let PreparedCampaign {
         cases,
-        built_indices,
         built_case_count,
         ..
     } = prepared;
@@ -84,12 +124,11 @@ where
         diagnostics: Vec::new(),
         scheduled_delay: Duration::ZERO,
     }
-    .execute(built_indices, executor, clock)
+    .execute(executor, clock, &mut emit)
 }
 
 struct PreparedCampaign {
     cases: Vec<Case>,
-    built_indices: Vec<usize>,
     built_case_count: u64,
     maximum_wire_bytes: u64,
     requires_malformed_live: bool,
@@ -109,13 +148,9 @@ fn prepare_campaign(
         .into_iter()
         .map(Case::from)
         .collect::<Vec<_>>();
-    let built_indices = cases
-        .iter()
-        .enumerate()
-        .filter_map(|(index, case)| case.built.is_some().then_some(index))
-        .collect::<Vec<_>>();
+    let built_cases = cases.iter().filter(|case| case.built.is_some()).count();
 
-    let worst_case = worst_case_duration(live, built_indices.len())?;
+    let worst_case = worst_case_duration(live, built_cases)?;
     deadline
         .check_additional(worst_case)
         .map_err(duration_limit)?;
@@ -131,7 +166,6 @@ fn prepare_campaign(
 
     Ok(PreparedCampaign {
         cases,
-        built_indices,
         built_case_count,
         maximum_wire_bytes,
         requires_malformed_live,
@@ -169,16 +203,9 @@ where
     A: Authorizer,
 {
     let packets = prepared
-        .built_indices
+        .cases
         .iter()
-        .map(|index| {
-            prepared.cases[*index]
-                .built
-                .as_ref()
-                .expect("selected built case")
-                .packet
-                .clone()
-        })
+        .filter_map(|case| case.built.as_ref().map(|built| built.packet.clone()))
         .collect::<Vec<_>>();
     if !packets.is_empty() {
         authorizer.authorize_operation(
@@ -205,21 +232,27 @@ struct ExecutionPhase<'a> {
 }
 
 impl ExecutionPhase<'_> {
-    fn execute<E, C>(
+    fn execute<E, C, F>(
         mut self,
-        built_indices: Vec<usize>,
         executor: &mut E,
         clock: &mut C,
-    ) -> std::result::Result<Result, Error>
+        emit: &mut F,
+    ) -> std::result::Result<Summary, Error>
     where
         E: Executor,
         C: Clock,
+        F: FnMut(Event) -> std::result::Result<(), crate::BoundaryError>,
     {
-        for (ordinal, case_index) in built_indices.into_iter().enumerate() {
-            let sequence = self.cases[case_index].index;
-            self.pace(ordinal, sequence, clock)?;
-            self.deadline.check().map_err(duration_limit)?;
-            self.execute_case(case_index, executor)?;
+        let cases = std::mem::take(&mut self.cases);
+        let mut built_ordinal = 0;
+        for mut case in cases {
+            if case.built.is_some() {
+                self.pace(built_ordinal, case.index, clock)?;
+                self.deadline.check().map_err(duration_limit)?;
+                self.execute_case(&mut case, executor)?;
+                built_ordinal += 1;
+            }
+            emit(Event::Case(case)).map_err(|source| Error::Output { source })?;
         }
         self.finish()
     }
@@ -258,13 +291,12 @@ impl ExecutionPhase<'_> {
 
     fn execute_case<E>(
         &mut self,
-        case_index: usize,
+        case: &mut Case,
         executor: &mut E,
     ) -> std::result::Result<(), Error>
     where
         E: Executor,
     {
-        let case = &mut self.cases[case_index];
         let execution_case = ExecutionCase {
             permit: crate::evidence::ExecutionPermit::new(),
             packet: case.recipe.clone(),
@@ -345,7 +377,7 @@ impl ExecutionPhase<'_> {
         Ok(())
     }
 
-    fn finish(mut self) -> std::result::Result<Result, Error> {
+    fn finish(mut self) -> std::result::Result<Summary, Error> {
         self.stats.elapsed = self.stats.elapsed.checked_add(self.scheduled_delay).ok_or(
             Error::StatisticsOverflow {
                 case_index: last_case_index(self.request),
@@ -353,10 +385,9 @@ impl ExecutionPhase<'_> {
         )?;
         self.deadline.check().map_err(duration_limit)?;
 
-        Ok(Result {
+        Ok(Summary {
             seed: self.request.seed,
             first_case: self.request.first_case,
-            cases: self.cases,
             diagnostics: self.diagnostics,
             stats: self.stats,
         })

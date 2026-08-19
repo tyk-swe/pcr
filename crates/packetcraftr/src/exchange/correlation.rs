@@ -272,7 +272,7 @@ impl Accumulator {
                 if Instant::now() >= context.deadline {
                     return self.expire_decoded(identity, decoded, context.options);
                 }
-                if self.responses.len() >= context.options.max_responses {
+                if self.response_count >= context.options.max_responses {
                     packetcraftr_core::diagnostic::push_once(
                         &mut self.diagnostics,
                         Diagnostic::warning(
@@ -291,16 +291,18 @@ impl Accumulator {
                 if self.reserve_decoded_evidence(decoded.original.len(), context.options) {
                     self.mark_record_retained(identity);
                     self.response_counts[request_index] += 1;
-                    self.responses.push(Response {
-                        request_index,
-                        response: decoded,
-                        latency: received_at.duration_since(
-                            context.sent[request_index]
-                                .timing()
-                                .freshness_marker()
-                                .monotonic(),
-                        ),
-                    });
+                    self.response_count += 1;
+                    self.pending_events
+                        .push(super::contract::Event::Response(Response {
+                            request_index,
+                            response: decoded,
+                            latency: received_at.duration_since(
+                                context.sent[request_index]
+                                    .timing()
+                                    .freshness_marker()
+                                    .monotonic(),
+                            ),
+                        }));
                 }
             }
             Attribution::None => {
@@ -335,32 +337,25 @@ impl Accumulator {
             deadline,
             max_responses,
         } = context;
-        if self.workflow_examined_unsolicited >= self.unsolicited.len() {
+        if self.unsolicited.is_empty() {
             return ProcessOutcome::Continue;
         }
+        let mut candidates = std::mem::take(&mut self.unsolicited).into_iter();
         if Instant::now() >= deadline {
-            return self.expire_workflow_candidates(std::iter::empty());
-        }
-        if self.workflow_response_limit_reached(max_responses) {
-            self.workflow_examined_unsolicited = self.unsolicited.len();
-            return ProcessOutcome::Continue;
+            return self.expire_workflow_candidates(candidates);
         }
 
-        let mut candidates = self
-            .unsolicited
-            .split_off(self.workflow_examined_unsolicited)
-            .into_iter();
         while let Some(candidate) = candidates.next() {
             if Instant::now() >= deadline {
                 return self
                     .expire_workflow_candidates(std::iter::once(candidate).chain(candidates));
             }
             let Some(freshness) = candidate.freshness else {
-                self.unsolicited.push(candidate);
+                self.queue_unsolicited(candidate);
                 continue;
             };
             if self.workflow_response_limit_reached(max_responses) {
-                self.unsolicited.push(candidate);
+                self.queue_unsolicited(candidate);
                 continue;
             }
             let mut winners = Vec::new();
@@ -394,45 +389,47 @@ impl Accumulator {
                             ),
                         );
                     }
-                    self.unsolicited.push(candidate);
+                    self.queue_unsolicited(candidate);
                     continue;
                 }
             };
             self.response_counts[request_index] += 1;
-            self.responses.push(Response {
-                request_index,
-                response: candidate.decoded,
-                latency: freshness
-                    .received_at
-                    .duration_since(sent[request_index].timing().freshness_marker().monotonic()),
-            });
+            self.response_count += 1;
+            self.retained_unmatched = self
+                .retained_unmatched
+                .checked_sub(1)
+                .expect("workflow candidates are retained unmatched evidence");
+            self.pending_events
+                .push(super::contract::Event::Response(Response {
+                    request_index,
+                    response: candidate.decoded,
+                    latency: freshness.received_at.duration_since(
+                        sent[request_index].timing().freshness_marker().monotonic(),
+                    ),
+                }));
         }
-        self.workflow_examined_unsolicited = self.unsolicited.len();
-        // Ambient frames remain available from Client::exchange, but the
-        // stable workflow execution types cannot carry per-request monotonic
-        // eligibility. Do not reintroduce an unsafe wall-clock fallback.
         ProcessOutcome::Continue
+    }
+
+    pub(crate) fn finalize_unsolicited(&mut self) {
+        for candidate in std::mem::take(&mut self.unsolicited) {
+            self.queue_unsolicited(candidate);
+        }
     }
 
     fn expire_workflow_candidates(
         &mut self,
         candidates: impl IntoIterator<Item = UnsolicitedEvidence>,
     ) -> ProcessOutcome {
-        self.unsolicited
-            .extend(candidates.into_iter().map(|mut candidate| {
-                candidate.freshness = None;
-                candidate
-            }));
-        for evidence in &mut self.unsolicited {
-            evidence.freshness = None;
+        for candidate in candidates {
+            self.queue_unsolicited(candidate);
         }
-        self.workflow_examined_unsolicited = self.unsolicited.len();
         self.mark_correlation_deadline_expired();
         ProcessOutcome::CorrelationDeadlineExpired
     }
 
     fn workflow_response_limit_reached(&mut self, max_responses: usize) -> bool {
-        if self.responses.len() < max_responses {
+        if self.response_count < max_responses {
             return false;
         }
         packetcraftr_core::diagnostic::push_once(
@@ -445,6 +442,13 @@ impl Accumulator {
             ),
         );
         true
+    }
+
+    fn queue_unsolicited(&mut self, candidate: UnsolicitedEvidence) {
+        self.pending_events
+            .push(super::contract::Event::Unsolicited {
+                frame: candidate.decoded,
+            });
     }
 
     fn mark_correlation_deadline_expired(&mut self) {

@@ -3,27 +3,34 @@
 
 //! Capture shutdown composition and fail-closed result/statistics validation.
 
-use packetcraftr_netio::{
-    Error as LiveIoError,
-    capture::{OverflowPolicy, Session, Statistics},
-};
+use packetcraftr_netio::capture::{OverflowPolicy, Session, Statistics};
 
+use super::transaction::OperationError;
 use super::transaction::Transaction;
 use crate::Error;
 use crate::Stats;
 
 impl<C: Session> Transaction<C> {
-    pub(super) fn fail_after_shutdown(&mut self, operation: LiveIoError) -> Error {
+    pub(super) fn fail_after_shutdown(&mut self, operation: OperationError) -> Error {
         match self.capture.shutdown() {
-            Ok(()) => Error::Io(operation),
-            Err(shutdown) => Error::OperationAndCaptureShutdown {
-                operation,
-                shutdown,
+            Ok(()) => operation.into_error(),
+            Err(shutdown) => match operation {
+                OperationError::Io(operation) => Error::OperationAndCaptureShutdown {
+                    operation,
+                    shutdown,
+                },
+                OperationError::Output(output) => Error::ExchangeOutputAndCaptureShutdown {
+                    output: Box::new(output),
+                    shutdown,
+                },
             },
         }
     }
 
-    pub(super) fn finalize_exchange(mut self) -> Result<super::Result, Error> {
+    pub(super) fn finalize_exchange<F>(mut self, emit: &mut F) -> Result<super::Summary, Error>
+    where
+        F: FnMut(super::Event) -> Result<(), crate::BoundaryError>,
+    {
         let capture_statistics = self.capture.inner.statistics().validate()?;
         self.apply_capture_loss_policy(capture_statistics)?;
         let unanswered = self
@@ -32,18 +39,26 @@ impl<C: Session> Transaction<C> {
             .iter()
             .enumerate()
             .filter_map(|(index, count)| (*count == 0).then_some(index))
-            .collect();
-        Ok(self.captured.finish(
-            self.sent,
+            .collect::<Vec<_>>();
+        for request_index in &unanswered {
+            emit(super::Event::Unanswered {
+                request_index: *request_index,
+            })
+            .map_err(|source| Error::ExchangeOutput {
+                source: Box::new(source),
+            })?;
+        }
+        Ok(super::Summary {
             unanswered,
-            Stats {
+            diagnostics: self.captured.diagnostics,
+            stats: Stats {
                 packets_attempted: self.packet_count,
                 packets_completed: self.completed_sends,
                 bytes: self.total_bytes,
                 elapsed: self.started.elapsed(),
                 capture: capture_statistics,
             },
-        ))
+        })
     }
 
     fn apply_capture_loss_policy(&mut self, statistics: Statistics) -> Result<(), Error> {

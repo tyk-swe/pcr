@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::budget::Deadline;
-use crate::error::{Classification, Kind};
+use crate::error::{BoundaryError, Classification, Kind};
 use crate::{
     Packet,
     build::Builder,
@@ -20,16 +20,20 @@ use super::super::MAX_TARGET_FIELDS;
 use super::super::error::{Error, duration_limit};
 use super::super::execution::case_seed;
 
-use super::super::run::{Campaign, ResolvedField};
+use super::super::run::ResolvedField;
 use super::decode::dissect_built;
 use super::value::{bounded_value_size, index_from, mutation_value, shrink_values};
 
-pub(in crate::fuzz) fn prepare(
+pub(in crate::fuzz) fn prepare_with_events<F>(
     request: &super::super::request::Request,
     packet: Packet,
     registry: Arc<Registry>,
     deadline: &mut Deadline,
-) -> Result<Campaign, Error> {
+    emit: &mut F,
+) -> Result<PreparedCases, Error>
+where
+    F: FnMut(super::super::result::Case) -> Result<(), BoundaryError>,
+{
     deadline
         .start_accounting(Duration::ZERO)
         .map_err(duration_limit)?;
@@ -55,15 +59,15 @@ pub(in crate::fuzz) fn prepare(
 
     let builder = Builder::new(Arc::clone(&registry));
     let dissector = Dissector::new(registry);
-    let campaign = prepare_cases(
+    let inputs = CaseInputs {
         request,
-        &packet,
-        &fields,
-        &compatible_mutations,
-        &builder,
-        &dissector,
-        deadline,
-    )?;
+        packet: &packet,
+        fields: &fields,
+        compatible_mutations: &compatible_mutations,
+        builder: &builder,
+        dissector: &dissector,
+    };
+    let campaign = prepare_cases(&inputs, deadline, emit)?;
     deadline
         .account(started.elapsed())
         .map_err(duration_limit)?;
@@ -77,6 +81,12 @@ struct Counters {
     retained_bytes: u64,
 }
 
+pub(in crate::fuzz) struct PreparedCases {
+    pub(in crate::fuzz) built_case_count: u64,
+    pub(in crate::fuzz) built_byte_count: u64,
+    pub(in crate::fuzz) retained_byte_count: u64,
+}
+
 struct CaseInputs<'a> {
     request: &'a super::super::request::Request,
     packet: &'a Packet,
@@ -86,31 +96,21 @@ struct CaseInputs<'a> {
     dissector: &'a Dissector,
 }
 
-fn prepare_cases(
-    request: &super::super::request::Request,
-    packet: &Packet,
-    fields: &[ResolvedField],
-    compatible_mutations: &[(super::super::request::Strategy, usize)],
-    builder: &Builder,
-    dissector: &Dissector,
+fn prepare_cases<F>(
+    inputs: &CaseInputs<'_>,
     deadline: &Deadline,
-) -> Result<Campaign, Error> {
-    let mut cases = Vec::with_capacity(request.cases);
+    emit: &mut F,
+) -> Result<PreparedCases, Error>
+where
+    F: FnMut(super::super::result::Case) -> Result<(), BoundaryError>,
+{
     let mut counters = Counters::default();
-    let inputs = CaseInputs {
-        request,
-        packet,
-        fields,
-        compatible_mutations,
-        builder,
-        dissector,
-    };
-    for offset in 0..request.cases {
+    for offset in 0..inputs.request.cases {
         deadline.check().map_err(duration_limit)?;
-        cases.push(prepare_case(&inputs, offset, &mut counters)?);
+        let case = prepare_case(inputs, offset, &mut counters)?;
+        emit(case).map_err(|source| Error::Output { source })?;
     }
-    Ok(Campaign {
-        cases,
+    Ok(PreparedCases {
         built_case_count: counters.built_cases,
         built_byte_count: counters.built_bytes,
         retained_byte_count: counters.retained_bytes,

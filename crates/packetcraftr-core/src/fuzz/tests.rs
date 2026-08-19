@@ -17,6 +17,8 @@ use super::error::Error;
 use super::request::{Limits, Request, Strategy};
 use super::result::CaseOutcome;
 use super::run::run as fuzz;
+use super::run::run_with_events;
+use crate::error::{BoundaryError, Classification, Kind};
 
 fn fuzz_protocol_registry() -> Arc<Registry> {
     Arc::new(crate::protocol::builtin::registry().expect("built-in protocol registry"))
@@ -37,6 +39,20 @@ fn udp_fuzz_packet() -> Packet {
         })
         .push(Raw::new(Bytes::from_static(b"abcdef")));
     packet
+}
+
+fn raw_fuzz_packet() -> Packet {
+    let mut packet = Packet::new();
+    packet.push(Raw::new(Bytes::from_static(b"abcd")));
+    packet
+}
+
+fn output_failure() -> BoundaryError {
+    BoundaryError::new(
+        "induced fuzz output failure",
+        Classification::new("io.test_output", Kind::Io, None),
+        Vec::new(),
+    )
 }
 
 #[test]
@@ -60,6 +76,21 @@ fn fuzz_same_seed_and_configuration_produce_identical_cases_and_bytes() {
             right.built.as_ref().map(|built| built.bytes.clone())
         );
     }
+}
+
+#[test]
+fn aggregate_fuzz_validates_case_count_before_collecting() {
+    let error = fuzz(
+        &Request {
+            cases: usize::MAX,
+            ..Request::default()
+        },
+        raw_fuzz_packet(),
+        fuzz_protocol_registry(),
+    )
+    .expect_err("an oversized aggregate campaign must fail validation");
+
+    assert!(matches!(error, Error::InvalidLimit { field: "cases", .. }));
 }
 
 #[test]
@@ -87,6 +118,69 @@ fn fuzz_bounded_resource_rejection_precedes_unbounded_case_growth() {
     )
     .unwrap_err();
     assert!(matches!(error, Error::ByteLimit { .. }));
+}
+
+#[test]
+fn offline_fuzz_sink_failure_stops_generation_after_the_emitted_case() {
+    let request = Request {
+        cases: 3,
+        strategies: vec![Strategy::BitFlip],
+        targets: vec!["0.bytes".parse().unwrap()],
+        ..Request::default()
+    };
+    let mut emitted = Vec::new();
+
+    let error = run_with_events(
+        &request,
+        raw_fuzz_packet(),
+        fuzz_protocol_registry(),
+        |event| {
+            let super::Event::Case(case) = event;
+            emitted.push(case.index);
+            Err(output_failure())
+        },
+    )
+    .expect_err("the first sink write must stop generation");
+
+    assert!(matches!(error, Error::Output { .. }));
+    assert_eq!(emitted, [0]);
+}
+
+#[test]
+fn offline_fuzz_late_limit_failure_preserves_earlier_cases() {
+    let request = Request {
+        cases: 3,
+        strategies: vec![Strategy::BitFlip],
+        targets: vec!["0.bytes".parse().unwrap()],
+        build: Options {
+            max_packet_size: 32,
+            ..Options::default()
+        },
+        limits: Limits {
+            max_cases: 3,
+            max_packet_bytes: 32,
+            max_total_bytes: 60,
+            max_field_bytes: 16,
+            ..Limits::default()
+        },
+        ..Request::default()
+    };
+    let mut emitted = Vec::new();
+
+    let error = run_with_events(
+        &request,
+        raw_fuzz_packet(),
+        fuzz_protocol_registry(),
+        |event| {
+            let super::Event::Case(case) = event;
+            emitted.push(case.index);
+            Ok(())
+        },
+    )
+    .expect_err("the third retained case must exceed the campaign limit");
+
+    assert!(matches!(error, Error::ByteLimit { .. }));
+    assert_eq!(emitted, [0, 1]);
 }
 
 #[test]

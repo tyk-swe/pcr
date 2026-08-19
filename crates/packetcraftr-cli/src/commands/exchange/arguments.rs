@@ -3,10 +3,10 @@
 
 use crate::command_options::{CaptureLimitsArgs, SendArgs};
 
-pub(crate) const AFTER_LONG_HELP: &str = r#"Live exchange is policy-gated and may require native features, dependencies, and privileges.
+pub(crate) const AFTER_LONG_HELP: &str = r#"Live exchange is policy-gated and may require native features, dependencies, and privileges. NDJSON publishes provider-confirmed sends and definitively classified capture evidence during the single exchange; unanswered records follow capture completion and one complete record terminates success.
 
 Example:
-  packetcraftr exchange --packet 'ipv4(dst=192.0.2.1)/icmpv4(type=8,code=0)' --timeout-ms 1000"#;
+  packetcraftr --output ndjson exchange --packet 'ipv4(dst=192.0.2.1)/icmpv4(type=8,code=0)' --timeout-ms 1000"#;
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {

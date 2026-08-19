@@ -1,0 +1,16 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "exchange",
+  "mode": "stream",
+  "sequence": 0,
+  "status": "success",
+  "result": {
+    "event": "sent",
+    "request_index": 0,
+    "frame": {
+      "bytes_hex": "deadbeef",
+      "length": 4
+    }
+  },
+  "diagnostics": []
+}

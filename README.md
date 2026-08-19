@@ -87,6 +87,14 @@ colour codes. Streaming commands use NDJSON.
 Structured errors include a stable code, kind, message, and remediation. The v1
 schema and checked-in examples are the contract reference.
 
+Fuzz and exchange NDJSON are execution-time streams rather than renderings of
+completed aggregate results. Fuzz publishes each final case in deterministic
+case order. Exchange publishes a send after the packet-I/O receipt is
+confirmed, capture evidence after its classification is final, and unanswered
+requests only after capture completion. Every successful stream has one final
+complete record; a later failure preserves earlier records and replaces that
+completion with one error at the next envelope sequence.
+
 `dissect --output json` always emits one aggregate document. Its result contains
 `matched` and `dissection`; a filter no-match is a successful document with
 `matched: false` and `dissection: null`, while a match has `matched: true` and

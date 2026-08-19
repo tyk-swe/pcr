@@ -68,3 +68,67 @@ pub struct Result {
     pub diagnostics: Vec<packetcraftr_core::diagnostic::Diagnostic>,
     pub stats: Stats,
 }
+
+/// One exchange outcome published when its classification becomes final.
+#[derive(Clone, Debug)]
+pub enum Event {
+    Sent {
+        request_index: usize,
+        sent: Box<crate::SentPacket>,
+    },
+    Response(Response),
+    Unanswered {
+        request_index: usize,
+    },
+    Unsolicited {
+        frame: DecodedPacket,
+    },
+    Undecoded {
+        frame: Frame,
+    },
+}
+
+/// Final exchange metadata published after capture shutdown and validation.
+#[derive(Clone, Debug)]
+pub struct Summary {
+    pub unanswered: Vec<usize>,
+    pub diagnostics: Vec<packetcraftr_core::diagnostic::Diagnostic>,
+    pub stats: Stats,
+}
+
+/// Reconstructs the aggregate exchange result from progressive domain events.
+#[derive(Default)]
+pub struct Collector {
+    sent: Vec<crate::SentPacket>,
+    responses: Vec<Response>,
+    unanswered: Vec<usize>,
+    unsolicited: Vec<DecodedPacket>,
+    undecoded: Vec<Frame>,
+}
+
+impl Collector {
+    /// Adds one progressive event to the aggregate result under construction.
+    pub fn observe(&mut self, event: Event) {
+        match event {
+            Event::Sent { sent, .. } => self.sent.push(*sent),
+            Event::Response(response) => self.responses.push(response),
+            Event::Unanswered { request_index } => self.unanswered.push(request_index),
+            Event::Unsolicited { frame } => self.unsolicited.push(frame),
+            Event::Undecoded { frame } => self.undecoded.push(frame),
+        }
+    }
+
+    /// Combines collected events with final diagnostics and statistics.
+    pub fn finish(self, summary: Summary) -> Result {
+        debug_assert_eq!(self.unanswered, summary.unanswered);
+        Result {
+            sent: self.sent,
+            responses: self.responses,
+            unanswered: self.unanswered,
+            unsolicited: self.unsolicited,
+            undecoded: self.undecoded,
+            diagnostics: summary.diagnostics,
+            stats: summary.stats,
+        }
+    }
+}

@@ -122,21 +122,17 @@ fn workflow_deadline_expiry_preserves_unsolicited_order_and_discards_freshness()
         ),
         ProcessOutcome::CorrelationDeadlineExpired
     );
-    assert!(
-        accumulator
-            .unsolicited
-            .iter()
-            .all(|evidence| evidence.freshness.is_none())
-    );
-
-    let result = accumulator.finish(Vec::new(), Vec::new(), crate::Stats::default());
+    assert!(accumulator.unsolicited.is_empty());
     assert_eq!(
-        result
-            .unsolicited
-            .iter()
-            .map(|decoded| decoded.original.as_ref())
+        accumulator
+            .take_events()
+            .into_iter()
+            .map(|event| match event {
+                super::super::Event::Unsolicited { frame } => frame.original,
+                _ => panic!("deadline candidates must become unsolicited events"),
+            })
             .collect::<Vec<_>>(),
-        vec![&[1][..], &[2][..]]
+        vec![Bytes::from_static(&[1]), Bytes::from_static(&[2])]
     );
 }
 
@@ -186,22 +182,20 @@ fn workflow_matcher_crossing_deadline_expires_and_retains_candidates() {
         ProcessOutcome::CorrelationDeadlineExpired
     );
     assert!(matcher_called);
-    assert!(accumulator.responses.is_empty());
+    assert_eq!(accumulator.response_count, 0);
     assert_eq!(accumulator.response_counts, vec![0]);
     assert!(accumulator.correlation_deadline_expired);
-    assert!(
-        accumulator
-            .unsolicited
-            .iter()
-            .all(|evidence| evidence.freshness.is_none())
-    );
+    assert!(accumulator.unsolicited.is_empty());
     assert_eq!(
         accumulator
-            .unsolicited
-            .iter()
-            .map(|evidence| evidence.decoded.original.as_ref())
+            .take_events()
+            .into_iter()
+            .map(|event| match event {
+                super::super::Event::Unsolicited { frame } => frame.original,
+                _ => panic!("expired candidates must become unsolicited events"),
+            })
             .collect::<Vec<_>>(),
-        vec![&[1][..], &[2][..]]
+        vec![Bytes::from_static(&[1]), Bytes::from_static(&[2])]
     );
     let deadline_diagnostics = accumulator
         .diagnostics
@@ -245,7 +239,7 @@ fn duplicated_ingress_record_cannot_enter_several_evidence_categories() {
         ProcessOutcome::DuplicateRecordIdentity
     );
     assert_eq!(
-        accumulator.responses.len() + accumulator.unsolicited.len() + accumulator.undecoded.len(),
+        accumulator.response_count + accumulator.retained_unmatched,
         1
     );
 }
@@ -292,10 +286,7 @@ fn duplicate_tracking_is_bounded_to_retained_evidence() {
         ProcessOutcome::Continue
     );
     assert_eq!(accumulator.retained_record_identities.len(), 1);
-    assert_eq!(
-        accumulator.unsolicited.len() + accumulator.undecoded.len(),
-        1
-    );
+    assert_eq!(accumulator.retained_unmatched, 1);
 }
 
 #[test]

@@ -6,7 +6,7 @@ use std::time::Duration;
 use thiserror::Error;
 
 use crate::budget::DeadlineExceeded;
-use crate::error::{Classification, Classified, Kind};
+use crate::error::{BoundaryError, Classification, Classified, Kind};
 
 use super::request::Target;
 
@@ -35,6 +35,11 @@ pub enum Error {
     ByteLimit { actual: u64, limit: u64 },
     #[error("fuzz worst-case duration {actual:?} exceeds the configured limit of {limit:?}")]
     DurationLimit { actual: Duration, limit: Duration },
+    #[error("fuzz progressive output failed: {source}")]
+    Output {
+        #[source]
+        source: BoundaryError,
+    },
 }
 
 impl Classified for Error {
@@ -70,11 +75,19 @@ impl Classified for Error {
                     "reduce cases, packet sizes, timeout, or rate delay, or deliberately raise the finite fuzz limit",
                 ),
             ),
+            Self::Output { .. } => Classification::new(
+                "io.fuzz_output",
+                Kind::Io,
+                Some("inspect the output sink and account for fuzz cases already generated"),
+            ),
         }
     }
 
     fn causes(&self) -> Vec<String> {
-        Vec::new()
+        match self {
+            Self::Output { source } => source.causes(),
+            _ => Vec::new(),
+        }
     }
 }
 

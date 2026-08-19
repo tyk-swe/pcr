@@ -7,100 +7,93 @@ use std::time::{Duration, Instant};
 
 use packetcraftr_netio::{Error as LiveIoError, capture::Session};
 
-use super::shutdown::CaptureGuard;
+use super::transaction::OperationError;
 use super::transaction::Transaction;
-use super::{
-    Accumulator, ProcessContext, ProcessOutcome, WorkflowPromotionContext, WorkflowResponseMatcher,
-};
-
-fn drain_available<C: Session>(
-    capture: &mut CaptureGuard<C>,
-    enforced_deadline: Option<Instant>,
-    frame_limit: usize,
-    captured: &mut Accumulator,
-    context: ProcessContext<'_>,
-) -> Result<(), LiveIoError> {
-    for _ in 0..frame_limit {
-        if enforced_deadline
-            .is_some_and(|deadline| deadline.checked_duration_since(Instant::now()).is_none())
-        {
-            return Err(LiveIoError::DeadlineExceeded {
-                operation: "draining capture before all requests were sent",
-            });
-        }
-        let Some(frame) = capture.inner.next_captured_frame(Duration::ZERO)? else {
-            return Ok(());
-        };
-        match captured.process(frame, context) {
-            ProcessOutcome::CorrelationDeadlineExpired => {
-                if enforced_deadline.is_some() {
-                    return Err(LiveIoError::DeadlineExceeded {
-                        operation: "draining capture before all requests were sent",
-                    });
-                }
-                return Ok(());
-            }
-            ProcessOutcome::DuplicateRecordIdentity => {
-                return Err(LiveIoError::Capture {
-                    message: "capture provider returned the same ingress record more than once"
-                        .to_owned(),
-                });
-            }
-            ProcessOutcome::Continue => {}
-        }
-    }
-    packetcraftr_core::diagnostic::push_once(
-        &mut captured.diagnostics,
-        packetcraftr_core::diagnostic::Diagnostic::warning(
-            "exchange.drain_limit",
-            format!("zero-time capture drain stopped after the bounded {frame_limit} frame(s)"),
-        ),
-    );
-    Ok(())
-}
+use super::{ProcessContext, ProcessOutcome, WorkflowPromotionContext, WorkflowResponseMatcher};
 
 impl<C: Session> Transaction<C> {
-    pub(super) fn collect_remaining(
+    pub(super) fn collect_remaining<F>(
         &mut self,
         workflow_matcher: &mut Option<&mut WorkflowResponseMatcher<'_>>,
-    ) -> Result<(), LiveIoError> {
+        emit: &mut F,
+    ) -> Result<(), OperationError>
+    where
+        F: FnMut(super::Event) -> Result<(), crate::BoundaryError>,
+    {
         if !self.correlation_stopped {
             while let Some(remaining) = self.deadline.checked_duration_since(Instant::now()) {
                 let Some(frame) = self.capture.inner.next_captured_frame(remaining)? else {
                     break;
                 };
-                let context = ProcessContext {
-                    registry: &self.registry,
-                    dissector: &self.dissector,
-                    prepared: &self.prepared,
-                    sent: &self.sent,
-                    deadline: self.deadline,
-                    options: &self.options,
-                };
-                match self.captured.process(frame, context) {
+                match self.process_frame(frame, workflow_matcher, emit)? {
                     ProcessOutcome::CorrelationDeadlineExpired => break,
                     ProcessOutcome::DuplicateRecordIdentity => {
                         return Err(LiveIoError::Capture {
                             message:
                                 "capture provider returned the same ingress record more than once"
                                     .to_owned(),
-                        });
+                        }
+                        .into());
                     }
                     ProcessOutcome::Continue => {}
                 }
-                if self.promote_workflow(workflow_matcher)
-                    == ProcessOutcome::CorrelationDeadlineExpired
-                {
-                    break;
-                }
             }
         }
-        self.drain(None)?;
-        let _ = self.promote_workflow(workflow_matcher);
+        let _ = self.drain(None, workflow_matcher, emit)?;
         Ok(())
     }
 
-    pub(super) fn drain(&mut self, enforced_deadline: Option<Instant>) -> Result<(), LiveIoError> {
+    pub(super) fn drain<F>(
+        &mut self,
+        enforced_deadline: Option<Instant>,
+        workflow_matcher: &mut Option<&mut WorkflowResponseMatcher<'_>>,
+        emit: &mut F,
+    ) -> Result<ProcessOutcome, OperationError>
+    where
+        F: FnMut(super::Event) -> Result<(), crate::BoundaryError>,
+    {
+        for _ in 0..self.capture_limits.max_frames {
+            self.ensure_drain_deadline(enforced_deadline)?;
+            let Some(frame) = self.capture.inner.next_captured_frame(Duration::ZERO)? else {
+                return Ok(ProcessOutcome::Continue);
+            };
+            let outcome = self.process_frame(frame, workflow_matcher, emit)?;
+            if outcome == ProcessOutcome::CorrelationDeadlineExpired {
+                if enforced_deadline.is_some() {
+                    return Err(drain_deadline_error().into());
+                }
+                return Ok(outcome);
+            }
+            if outcome == ProcessOutcome::DuplicateRecordIdentity {
+                return Err(LiveIoError::Capture {
+                    message: "capture provider returned the same ingress record more than once"
+                        .to_owned(),
+                }
+                .into());
+            }
+        }
+        packetcraftr_core::diagnostic::push_once(
+            &mut self.captured.diagnostics,
+            packetcraftr_core::diagnostic::Diagnostic::warning(
+                "exchange.drain_limit",
+                format!(
+                    "zero-time capture drain stopped after the bounded {} frame(s)",
+                    self.capture_limits.max_frames
+                ),
+            ),
+        );
+        Ok(ProcessOutcome::Continue)
+    }
+
+    fn process_frame<F>(
+        &mut self,
+        frame: packetcraftr_netio::capture::Captured,
+        workflow_matcher: &mut Option<&mut WorkflowResponseMatcher<'_>>,
+        emit: &mut F,
+    ) -> Result<ProcessOutcome, OperationError>
+    where
+        F: FnMut(super::Event) -> Result<(), crate::BoundaryError>,
+    {
         let context = ProcessContext {
             registry: &self.registry,
             dissector: &self.dissector,
@@ -109,13 +102,20 @@ impl<C: Session> Transaction<C> {
             deadline: self.deadline,
             options: &self.options,
         };
-        drain_available(
-            &mut self.capture,
-            enforced_deadline,
-            self.capture_limits.max_frames,
-            &mut self.captured,
-            context,
-        )
+        let processed = self.captured.process(frame, context);
+        let promoted = self.promote_workflow(workflow_matcher);
+        for event in self.captured.take_events() {
+            emit(event).map_err(OperationError::output)?;
+        }
+        if processed == ProcessOutcome::DuplicateRecordIdentity {
+            return Ok(processed);
+        }
+        if processed == ProcessOutcome::CorrelationDeadlineExpired
+            || promoted == ProcessOutcome::CorrelationDeadlineExpired
+        {
+            return Ok(ProcessOutcome::CorrelationDeadlineExpired);
+        }
+        Ok(ProcessOutcome::Continue)
     }
 
     pub(super) fn promote_workflow(
@@ -123,6 +123,7 @@ impl<C: Session> Transaction<C> {
         workflow_matcher: &mut Option<&mut WorkflowResponseMatcher<'_>>,
     ) -> ProcessOutcome {
         let Some(matches_request) = workflow_matcher.as_deref_mut() else {
+            self.captured.finalize_unsolicited();
             return ProcessOutcome::Continue;
         };
         let context = WorkflowPromotionContext {
@@ -133,5 +134,23 @@ impl<C: Session> Transaction<C> {
         };
         self.captured
             .promote_workflow_unsolicited(context, matches_request)
+    }
+
+    fn ensure_drain_deadline(
+        &self,
+        enforced_deadline: Option<Instant>,
+    ) -> Result<(), OperationError> {
+        if enforced_deadline
+            .is_some_and(|deadline| deadline.checked_duration_since(Instant::now()).is_none())
+        {
+            return Err(drain_deadline_error().into());
+        }
+        Ok(())
+    }
+}
+
+fn drain_deadline_error() -> LiveIoError {
+    LiveIoError::DeadlineExceeded {
+        operation: "draining capture before all requests were sent",
     }
 }

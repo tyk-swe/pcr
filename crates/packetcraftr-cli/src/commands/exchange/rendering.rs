@@ -58,75 +58,19 @@ pub(super) fn render_aggregate(result: packetcraftr::exchange::Result) -> Result
     )
 }
 
-pub(super) fn render_stream(
-    result: packetcraftr::exchange::Result,
+pub(super) fn render_event(
+    event: output::exchange::Event,
     stream: &mut NdjsonStream,
 ) -> Result<(), CliError> {
-    let (result, diagnostics, stats) =
-        output::exchange::Result::try_from_exchange(result).map_err(CliError::classified)?;
-    let output::exchange::Result {
-        sent,
-        responses,
-        unanswered,
-        unsolicited,
-        undecoded,
-    } = result;
-    render_sent(sent, stream)?;
-    for response in responses {
-        stream.emit_data(
-            output::exchange::Event::Response {
-                request_index: response.request_index,
-                response: response.response,
-                latency: response.latency,
-            },
-            Vec::new(),
-        )?;
-    }
-    for request_index in &unanswered {
-        stream.emit_data(
-            output::exchange::Event::Unanswered {
-                request_index: *request_index,
-            },
-            Vec::new(),
-        )?;
-    }
-    render_unmatched(unsolicited, undecoded, stream)?;
-    stream.complete_with_stats(
-        output::exchange::Event::Complete { unanswered },
-        diagnostics,
-        stats,
-    )
+    stream.emit_data(event, Vec::new())
 }
 
-fn render_sent(sent: Vec<output::frame::Wire>, stream: &mut NdjsonStream) -> Result<(), CliError> {
-    for (request_index, frame) in sent.into_iter().enumerate() {
-        let request_index = u64::try_from(request_index).map_err(|_| {
-            CliError::new(
-                70,
-                "exchange request index exceeds the unsigned 64-bit domain",
-            )
-        })?;
-        stream.emit_data(
-            output::exchange::Event::Sent {
-                request_index,
-                frame,
-            },
-            Vec::new(),
-        )?;
-    }
-    Ok(())
-}
-
-fn render_unmatched(
-    unsolicited: Vec<output::frame::Decoded>,
-    undecoded: Vec<output::frame::Captured>,
+pub(super) fn render_complete(
+    summary: packetcraftr::exchange::Summary,
+    diagnostics: Vec<packetcraftr::core::diagnostic::Diagnostic>,
     stream: &mut NdjsonStream,
 ) -> Result<(), CliError> {
-    for frame in unsolicited {
-        stream.emit_data(output::exchange::Event::Unsolicited { frame }, Vec::new())?;
-    }
-    for frame in undecoded {
-        stream.emit_data(output::exchange::Event::Undecoded { frame }, Vec::new())?;
-    }
-    Ok(())
+    let (event, diagnostics, stats) =
+        output::exchange::Event::complete_from_exchange(summary, diagnostics);
+    stream.complete_with_stats(event, diagnostics, stats)
 }

@@ -5,7 +5,7 @@ use packetcraftr::{core, output};
 
 use crate::errors::CliError;
 use crate::rendering::{
-    captured_frame_text, comma_separated, emit_aggregate_with_stats, emit_next, emit_with_stats,
+    NdjsonStream, captured_frame_text, comma_separated, emit_aggregate_with_stats,
     optional_display, output_timestamp_text, render_diagnostics_text, render_optional,
     write_stdout_line,
 };
@@ -91,6 +91,7 @@ pub(super) fn render_stream(
     result: output::scan::Result,
     diagnostics: Vec<core::diagnostic::Diagnostic>,
     stats: output::envelope::Stats,
+    stream: &mut NdjsonStream,
 ) -> Result<(), CliError> {
     let output::scan::Result {
         target,
@@ -98,27 +99,19 @@ pub(super) fn render_stream(
         endpoints,
         undecoded,
     } = result;
-    let mut sequence = 0_u64;
     for endpoint in endpoints {
-        emit_next(
-            output::contract::Command::Scan,
-            &mut sequence,
+        stream.emit_data(
             output::scan::Event::Endpoint {
                 target: target.clone(),
                 endpoint,
             },
+            Vec::new(),
         )?;
     }
     for frame in undecoded {
-        emit_next(
-            output::contract::Command::Scan,
-            &mut sequence,
-            output::scan::Event::Undecoded { frame },
-        )?;
+        stream.emit_data(output::scan::Event::Undecoded { frame }, Vec::new())?;
     }
-    emit_with_stats(
-        output::contract::Command::Scan,
-        sequence,
+    stream.complete_with_stats(
         output::scan::Event::Complete {
             target,
             resolved_addresses,

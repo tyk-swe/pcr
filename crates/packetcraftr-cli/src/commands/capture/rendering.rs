@@ -14,8 +14,8 @@ use super::execution::{self, Budget, shutdown_after_error};
 use crate::errors::CliError;
 use crate::filtering::FrameSelector;
 use crate::rendering::{
-    CaptureWriter, capture_file_format, captured_frame_text, emit, emit_stderr_message,
-    emit_with_stats, render_diagnostics_text, write_plain_line, write_stdout_line,
+    CaptureWriter, NdjsonStream, capture_file_format, captured_frame_text, emit_stderr_message,
+    render_diagnostics_text, write_plain_line, write_stdout_line,
 };
 
 pub(super) fn render_text<C: net::capture::Session>(
@@ -71,6 +71,7 @@ pub(super) fn render_stream<C: net::capture::Session>(
     limits: net::capture::Limits,
     budget: Budget,
     selector: Option<&FrameSelector>,
+    stream: &mut NdjsonStream,
 ) -> Result<(), CliError> {
     let outcome = execution::run(
         capture,
@@ -78,22 +79,15 @@ pub(super) fn render_stream<C: net::capture::Session>(
         limits,
         budget,
         selector,
-        |frame, sequence| {
+        |frame, _matched_index| {
             let frame =
                 output::frame::Captured::try_from_frame(frame).map_err(CliError::classified)?;
-            emit(
-                output::contract::Command::Capture,
-                sequence,
-                output::capture::Event::Frame { frame },
-                Vec::new(),
-            )
+            stream.emit_data(output::capture::Event::Frame { frame }, Vec::new())
         },
     )?;
-    let sequence = outcome.stats.packets_completed;
-    emit_with_stats(
-        output::contract::Command::Capture,
-        sequence,
-        output::capture::Event::Complete { frames: sequence },
+    let frames = outcome.stats.packets_completed;
+    stream.complete_with_stats(
+        output::capture::Event::Complete { frames },
         outcome.diagnostics,
         outcome.stats,
     )
@@ -206,4 +200,132 @@ fn render_diagnostics(diagnostics: &[core::diagnostic::Diagnostic]) -> Result<()
         ))?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::VecDeque;
+    use std::time::UNIX_EPOCH;
+
+    use packetcraftr::core::frame::Frame;
+    use serde_json::Value;
+
+    use super::*;
+    use crate::rendering::ndjson_test_support::{assert_contiguous, stream};
+
+    struct FakeSession {
+        frames: VecDeque<Result<net::capture::Captured, net::Error>>,
+        shutdown_error: Option<net::Error>,
+    }
+
+    impl FakeSession {
+        fn with_frames(count: usize) -> Self {
+            let frames = (0..count)
+                .map(|value| {
+                    let byte = u8::try_from(value).expect("fixture byte fits");
+                    let frame = Frame::new(UNIX_EPOCH, LinkType::RAW, vec![byte])
+                        .expect("fixture frame is valid");
+                    Ok(net::capture::Captured::without_ingress_time(frame))
+                })
+                .collect();
+            Self {
+                frames,
+                shutdown_error: None,
+            }
+        }
+    }
+
+    impl net::capture::Session for FakeSession {
+        fn wait_ready(&mut self, _timeout: Duration) -> Result<(), net::Error> {
+            Ok(())
+        }
+
+        fn next_captured_frame(
+            &mut self,
+            _timeout: Duration,
+        ) -> Result<Option<net::capture::Captured>, net::Error> {
+            self.frames.pop_front().transpose()
+        }
+
+        fn shutdown(&mut self) -> Result<(), net::Error> {
+            match self.shutdown_error.take() {
+                Some(error) => Err(error),
+                None => Ok(()),
+            }
+        }
+
+        fn statistics(&self) -> net::capture::Statistics {
+            net::capture::Statistics::default()
+        }
+    }
+
+    fn settings() -> (net::capture::Limits, Budget) {
+        (
+            net::capture::Limits::default(),
+            Budget {
+                max_frames: 8,
+                max_bytes: 8,
+            },
+        )
+    }
+
+    #[test]
+    fn capture_stream_success_is_contiguous_and_terminal() {
+        let (limits, budget) = settings();
+        let (mut stream, output) = stream(output::contract::Command::Capture);
+        render_stream(
+            FakeSession::with_frames(2),
+            Duration::from_secs(1),
+            limits,
+            budget,
+            None,
+            &mut stream,
+        )
+        .expect("fake capture succeeds");
+
+        let records = output.records();
+        assert_contiguous(&records);
+        assert_eq!(records.len(), 3);
+        assert_eq!(records[2]["result"]["event"], "complete");
+        assert!(!stream.is_open());
+    }
+
+    #[test]
+    fn capture_runtime_and_cleanup_failure_keep_primary_at_next_position() {
+        let (limits, budget) = settings();
+        let mut capture = FakeSession::with_frames(2);
+        capture.frames.push_back(Err(net::Error::Capture {
+            message: "primary receive failure".to_owned(),
+        }));
+        capture.shutdown_error = Some(net::Error::Capture {
+            message: "cleanup failure".to_owned(),
+        });
+        let (mut stream, output) = stream(output::contract::Command::Capture);
+
+        let error = render_stream(
+            capture,
+            Duration::from_secs(1),
+            limits,
+            budget,
+            None,
+            &mut stream,
+        )
+        .expect_err("fake capture fails after two records");
+        let primary_code = error.classification.code;
+        assert!(error.message.contains("primary receive failure"));
+        assert!(error.message.contains("cleanup failure"));
+        assert_eq!(stream.next_position(), 2);
+
+        stream.emit_error(error.output_error()).unwrap();
+        let records: Vec<Value> = output.records();
+        assert_contiguous(&records);
+        assert_eq!(records.len(), 3);
+        assert_eq!(records[2]["status"], "error");
+        assert_eq!(records[2]["error"]["code"], primary_code);
+        assert!(
+            records[2]["error"]["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("cleanup failure"))
+        );
+    }
 }

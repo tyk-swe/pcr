@@ -43,18 +43,6 @@ pub enum Error {
     StatisticsOverflow { sequence: u64 },
 }
 
-impl Error {
-    pub fn sequence(&self) -> Option<u64> {
-        match self {
-            Self::Execution { sequence, .. }
-            | Self::Clock { sequence, .. }
-            | Self::InvalidEvidence { sequence, .. }
-            | Self::StatisticsOverflow { sequence } => Some(*sequence),
-            _ => None,
-        }
-    }
-}
-
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {

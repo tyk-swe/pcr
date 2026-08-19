@@ -10,6 +10,7 @@ use self::arguments::{Args, Severity};
 use super::super::errors::CliError;
 use super::super::input::open_capture;
 use super::offline_analysis::{Prepared, prepare};
+use crate::rendering::NdjsonStream;
 
 fn matches_selector(
     finding: &analysis::expert::Finding,
@@ -30,7 +31,11 @@ fn matches_selector(
     true
 }
 
-pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
+pub(super) fn run(
+    arguments: Args,
+    format: output::contract::Format,
+    stream: &mut NdjsonStream,
+) -> Result<(), CliError> {
     let Prepared {
         registry,
         filter,
@@ -50,35 +55,26 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
         for finding in collector.observe(&record) {
             if matches_selector(&finding, arguments.min_severity, &arguments.codes) {
                 state.count(&finding);
-                rendering::render_record(format, finding.into(), &mut state)
+                rendering::render_record(format, finding.into(), &mut state, stream)
                     .map_err(CliError::into_boundary_error)?;
             }
         }
         Ok(())
     });
-    let summary = outcome.map_err(|error| {
-        let error = CliError::classified(error);
-        // Streamed records are numbered by emission, not by capture frame,
-        // so a terminal stream error continues that numbering.
-        if matches!(format, output::contract::Format::Ndjson) {
-            error.at_sequence(state.sequence)
-        } else {
-            error
-        }
-    })?;
+    let summary = outcome.map_err(CliError::classified)?;
     let (trailing, _expert_summary) =
         collector.finish(&summary.trailing_tcp_events, summary.frames_read);
     for finding in trailing {
         if matches_selector(&finding, arguments.min_severity, &arguments.codes) {
             state.count(&finding);
-            rendering::render_record(format, finding.into(), &mut state)?;
+            rendering::render_record(format, finding.into(), &mut state, stream)?;
         }
     }
 
     match format {
         output::contract::Format::Text => rendering::render_text(&summary, &state),
         output::contract::Format::Json => rendering::render_aggregate(&summary, state),
-        output::contract::Format::Ndjson => rendering::render_stream(&summary, state),
+        output::contract::Format::Ndjson => rendering::render_stream(&summary, state, stream),
         _ => unreachable!("the format contract admits only text, json, and ndjson"),
     }
 }

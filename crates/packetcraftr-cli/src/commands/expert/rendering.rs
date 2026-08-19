@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use packetcraftr::{analysis, output};
 
 use crate::errors::CliError;
-use crate::rendering::{emit, emit_aggregate, emit_next, write_stdout_line};
+use crate::rendering::{NdjsonStream, emit_aggregate, write_stdout_line};
 
 #[derive(Debug, Default)]
 pub(super) struct State {
@@ -16,7 +16,6 @@ pub(super) struct State {
     notes: u64,
     codes: BTreeMap<String, u64>,
     retained: Vec<output::expert::Finding>,
-    pub(super) sequence: u64,
 }
 
 impl State {
@@ -35,6 +34,7 @@ pub(super) fn render_record(
     format: output::contract::Format,
     finding: output::expert::Finding,
     state: &mut State,
+    stream: &mut NdjsonStream,
 ) -> Result<(), CliError> {
     match format {
         output::contract::Format::Text => match (finding.transport, finding.stream) {
@@ -55,11 +55,7 @@ pub(super) fn render_record(
             state.retained.push(finding);
             Ok(())
         }
-        output::contract::Format::Ndjson => emit_next(
-            output::contract::Command::Expert,
-            &mut state.sequence,
-            finding,
-        ),
+        output::contract::Format::Ndjson => stream.emit_data(finding, Vec::new()),
         _ => unreachable!("the format contract admits only text, json, and ndjson"),
     }
 }
@@ -84,14 +80,12 @@ pub(super) fn render_aggregate(summary: &analysis::Summary, state: State) -> Res
     )
 }
 
-pub(super) fn render_stream(summary: &analysis::Summary, state: State) -> Result<(), CliError> {
-    let sequence = state.sequence;
-    emit(
-        output::contract::Command::Expert,
-        sequence,
-        result(summary, state, false),
-        Vec::new(),
-    )
+pub(super) fn render_stream(
+    summary: &analysis::Summary,
+    state: State,
+    stream: &mut NdjsonStream,
+) -> Result<(), CliError> {
+    stream.complete(result(summary, state, false), Vec::new())
 }
 
 fn result(

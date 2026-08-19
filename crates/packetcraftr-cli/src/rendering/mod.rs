@@ -20,9 +20,12 @@ pub(crate) use human::{
 
 pub(crate) use machine::{
     captured_frame_text, comma_separated, emit_aggregate, emit_aggregate_with_stats, emit_json,
-    emit_json_compact, optional_display, output_timestamp_text, render_optional, spaced_hex,
+    optional_display, output_timestamp_text, render_optional, spaced_hex,
 };
 
-pub(crate) use ndjson::{emit, emit_next, emit_with_stats};
+pub(crate) use ndjson::NdjsonStream;
+
+#[cfg(test)]
+pub(crate) use ndjson::test_support as ndjson_test_support;
 
 pub(crate) use style::terminal_document;

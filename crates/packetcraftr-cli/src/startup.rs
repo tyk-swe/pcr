@@ -12,7 +12,7 @@ use self::context::from_env;
 use super::cli::Cli;
 use super::errors::CliError;
 use super::rendering::{
-    emit_json, emit_json_compact, emit_stderr_document, emit_stderr_error, emit_stdout_document,
+    NdjsonStream, emit_json, emit_stderr_document, emit_stderr_error, emit_stdout_document,
     terminal_document,
 };
 
@@ -37,11 +37,8 @@ pub(crate) fn run() -> ExitCode {
                         ))
                     }
                     output::contract::Format::Ndjson => {
-                        emit_json_compact(&output::envelope::StreamError::error(
-                            context.command,
-                            0,
-                            error.output_error(),
-                        ))
+                        let mut stream = NdjsonStream::stdout(context.command);
+                        stream.emit_error(error.output_error())
                     }
                     _ => unreachable!("startup context returns only structured formats"),
                 };
@@ -67,32 +64,39 @@ pub(crate) fn run() -> ExitCode {
     cli.color.write_global();
     let format = output::contract::Format::from(cli.format);
     let command = cli.command.kind();
-    match cli.command.run(format) {
+    let mut stream = NdjsonStream::stdout(Some(command));
+    match cli.command.run(format, &mut stream) {
         Ok(()) => ExitCode::SUCCESS,
-        Err(error) => {
-            let emitted = match format {
-                output::contract::Format::Json => emit_json(
-                    &output::envelope::AggregateError::error(Some(command), error.output_error()),
-                ),
-                output::contract::Format::Ndjson => {
-                    emit_json_compact(&output::envelope::StreamError::error(
-                        Some(command),
-                        error.sequence.unwrap_or(0),
-                        error.output_error(),
-                    ))
-                }
-                _ => emit_stderr_error(&error),
-            };
-            if let Err(write_error) = emitted {
-                if matches!(
-                    format,
-                    output::contract::Format::Json | output::contract::Format::Ndjson
-                ) {
-                    let _ = emit_stderr_error(&write_error);
-                }
-                return ExitCode::from(write_error.exit_code);
-            }
-            ExitCode::from(error.exit_code)
-        }
+        Err(error) => command_failure(format, command, error, &mut stream),
     }
+}
+
+fn command_failure(
+    format: output::contract::Format,
+    command: output::contract::Command,
+    error: CliError,
+    stream: &mut NdjsonStream,
+) -> ExitCode {
+    let exit_code = error.exit_code;
+    let (emitted, report_write_error) = match format {
+        output::contract::Format::Json => (
+            emit_json(&output::envelope::AggregateError::error(
+                Some(command),
+                error.output_error(),
+            )),
+            true,
+        ),
+        output::contract::Format::Ndjson if stream.is_open() => {
+            (stream.emit_error(error.output_error()), true)
+        }
+        output::contract::Format::Ndjson => (emit_stderr_error(&error), false),
+        _ => (emit_stderr_error(&error), false),
+    };
+    if let Err(write_error) = emitted {
+        if report_write_error {
+            let _ = emit_stderr_error(&write_error);
+        }
+        return ExitCode::from(write_error.exit_code);
+    }
+    ExitCode::from(exit_code)
 }

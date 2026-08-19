@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::fs::File;
+use std::io::Read;
 
 use packetcraftr::{analysis::pcap::Reader, core::frame::Frame};
 
@@ -24,16 +24,20 @@ impl packetcraftr::replay::Selector for FilterSelector<'_> {
     }
 }
 
-pub(super) fn run<F>(
-    reader: &mut Reader<File>,
+pub(super) fn run<R, A, T, C, F>(
+    reader: &mut Reader<R>,
     options: &packetcraftr::replay::Options,
     selector: Option<&mut dyn packetcraftr::replay::Selector>,
-    authorizer: &mut packetcraftr::replay::SystemAuthorizer,
-    transmitter: &mut packetcraftr::replay::SystemTransmitter,
-    clock: &mut packetcraftr::clock::SystemClock,
+    authorizer: &mut A,
+    transmitter: &mut T,
+    clock: &mut C,
     sink: F,
 ) -> Result<packetcraftr::replay::Summary, CliError>
 where
+    R: Read,
+    A: packetcraftr::replay::Authorizer,
+    T: packetcraftr::replay::Transmitter,
+    C: packetcraftr::clock::Clock,
     F: FnMut(packetcraftr::replay::FrameEvidence) -> Result<(), packetcraftr::replay::Error>,
 {
     packetcraftr::replay::run_with_selector(

@@ -9,6 +9,7 @@ use clap::Subcommand;
 use packetcraftr::{core, output};
 
 use crate::errors::CliError;
+use crate::rendering::NdjsonStream;
 
 mod build;
 mod capture;
@@ -115,7 +116,11 @@ impl Command {
         }
     }
 
-    pub(super) fn run(self, format: output::contract::Format) -> Result<(), CliError> {
+    pub(super) fn run(
+        self,
+        format: output::contract::Format,
+        stream: &mut NdjsonStream,
+    ) -> Result<(), CliError> {
         self.kind()
             .require_format(format)
             .map_err(CliError::classified)?;
@@ -123,20 +128,20 @@ impl Command {
             Self::Build(arguments) => build::run(arguments, format),
             Self::Dissect(arguments) => dissect::run(arguments, format),
             Self::Protocols(arguments) => protocols::run(arguments, format),
-            Self::Read(arguments) => read::run(arguments, format),
+            Self::Read(arguments) => read::run(arguments, format, stream),
             Self::Interfaces => interfaces::run(format),
             Self::Plan(arguments) => plan::run(arguments, format),
             Self::Send(arguments) => send::run(arguments, format),
-            Self::Capture(arguments) => capture::run(arguments, format),
-            Self::Expert(arguments) => expert::run(arguments, format),
-            Self::Follow(arguments) => follow::run(arguments, format),
-            Self::Exchange(arguments) => exchange::run(arguments, format),
-            Self::Replay(arguments) => replay::run(arguments, format),
-            Self::Scan(arguments) => scan::run(arguments, format),
+            Self::Capture(arguments) => capture::run(arguments, format, stream),
+            Self::Expert(arguments) => expert::run(arguments, format, stream),
+            Self::Follow(arguments) => follow::run(arguments, format, stream),
+            Self::Exchange(arguments) => exchange::run(arguments, format, stream),
+            Self::Replay(arguments) => replay::run(arguments, format, stream),
+            Self::Scan(arguments) => scan::run(arguments, format, stream),
             Self::Stats(arguments) => stats::run(arguments, format),
-            Self::Traceroute(arguments) => traceroute::run(arguments, format),
-            Self::Dns(arguments) => dns::run(arguments, format),
-            Self::Fuzz(arguments) => fuzz::run(arguments, format),
+            Self::Traceroute(arguments) => traceroute::run(arguments, format, stream),
+            Self::Dns(arguments) => dns::run(arguments, format, stream),
+            Self::Fuzz(arguments) => fuzz::run(arguments, format, stream),
             Self::Routes => routes::run(format),
         }
     }

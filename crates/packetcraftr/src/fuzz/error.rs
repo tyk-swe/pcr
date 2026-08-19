@@ -40,23 +40,6 @@ pub enum Error {
     StatisticsOverflow { case_index: u64 },
 }
 
-impl Error {
-    pub fn sequence(&self) -> Option<u64> {
-        match self {
-            Self::Execution { case_index, .. }
-            | Self::Clock { case_index, .. }
-            | Self::InvalidEvidence { case_index, .. }
-            | Self::StatisticsOverflow { case_index } => Some(*case_index),
-            Self::Campaign(_)
-            | Self::InvalidLimit { .. }
-            | Self::InvalidTimeout { .. }
-            | Self::MalformedLiveOptInRequired
-            | Self::DurationLimit { .. }
-            | Self::Authorization(_) => None,
-        }
-    }
-}
-
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {

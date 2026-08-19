@@ -86,10 +86,7 @@ fn wait_ready<C: net::capture::Session>(
     let remaining = deadline
         .checked_duration_since(Instant::now())
         .unwrap_or(Duration::ZERO);
-    capture
-        .wait_ready(remaining)
-        .map_err(CliError::classified)
-        .map_err(|error| error.at_sequence(0))
+    capture.wait_ready(remaining).map_err(CliError::classified)
 }
 
 fn capture_frames<C, F>(
@@ -112,14 +109,13 @@ where
         }
         let Some(frame) = capture
             .next_captured_frame(remaining)
-            .map_err(CliError::classified)
-            .map_err(|error| error.at_sequence(progress.matched))?
+            .map_err(CliError::classified)?
             .map(|captured| captured.frame)
         else {
             break;
         };
         account_bytes(progress, &frame, budget.max_bytes)?;
-        let number = increment(progress.frames, progress.matched)?;
+        let number = increment(progress.frames, "capture frame count")?;
         if let Some(selector) = selector {
             match selector.keep(number, &frame) {
                 Ok(true) => {}
@@ -127,12 +123,11 @@ where
                     progress.frames = number;
                     continue;
                 }
-                Err(error) => return Err(error.at_sequence_if_absent(progress.matched)),
+                Err(error) => return Err(error),
             }
         }
-        emit(frame, progress.matched)
-            .map_err(|error| error.at_sequence_if_absent(progress.matched))?;
-        progress.matched = increment(progress.matched, progress.matched)?;
+        emit(frame, progress.matched)?;
+        progress.matched = increment(progress.matched, "capture matched-frame count")?;
         progress.frames = number;
     }
     Ok(())
@@ -144,28 +139,27 @@ fn account_bytes(progress: &mut Progress, frame: &Frame, limit: u64) -> Result<(
             70,
             "captured frame length exceeds the byte-accounting domain",
         )
-        .at_sequence(progress.matched)
     })?;
-    let bytes = progress.bytes.checked_add(frame_bytes).ok_or_else(|| {
-        CliError::new(70, "capture output byte accounting overflowed").at_sequence(progress.matched)
-    })?;
+    let bytes = progress
+        .bytes
+        .checked_add(frame_bytes)
+        .ok_or_else(|| CliError::new(70, "capture output byte accounting overflowed"))?;
     if bytes > limit {
-        return Err(
-            CliError::classified(packetcraftr::policy::Error::ByteLimit {
+        return Err(CliError::classified(
+            packetcraftr::policy::Error::ByteLimit {
                 actual: bytes,
                 limit,
-            })
-            .at_sequence(progress.matched),
-        );
+            },
+        ));
     }
     progress.bytes = bytes;
     Ok(())
 }
 
-fn increment(value: u64, sequence: u64) -> Result<u64, CliError> {
-    value.checked_add(1).ok_or_else(|| {
-        CliError::classified(output::contract::Error::SequenceOverflow).at_sequence(sequence)
-    })
+fn increment(value: u64, counter: &'static str) -> Result<u64, CliError> {
+    value
+        .checked_add(1)
+        .ok_or_else(|| CliError::new(70, format!("{counter} overflowed")))
 }
 
 fn finish<C: net::capture::Session>(
@@ -173,16 +167,12 @@ fn finish<C: net::capture::Session>(
     progress: Progress,
     limits: net::capture::Limits,
 ) -> Result<Outcome, CliError> {
-    capture
-        .shutdown()
-        .map_err(CliError::classified)
-        .map_err(|error| error.at_sequence(progress.matched))?;
+    capture.shutdown().map_err(CliError::classified)?;
     let statistics = capture
         .statistics()
         .validate()
-        .map_err(CliError::classified)
-        .map_err(|error| error.at_sequence(progress.matched))?;
-    let diagnostics = loss_diagnostics(&statistics, limits, progress.matched)?;
+        .map_err(CliError::classified)?;
+    let diagnostics = loss_diagnostics(&statistics, limits)?;
     Ok(Outcome {
         diagnostics,
         stats: output::envelope::Stats {
@@ -198,7 +188,6 @@ fn finish<C: net::capture::Session>(
 fn loss_diagnostics(
     statistics: &net::capture::Statistics,
     limits: net::capture::Limits,
-    sequence: u64,
 ) -> Result<Vec<core::diagnostic::Diagnostic>, CliError> {
     if !statistics.has_loss() {
         return Ok(Vec::new());
@@ -208,8 +197,7 @@ fn loss_diagnostics(
             statistics
                 .evidence_loss_error()
                 .expect("lossy capture statistics must produce a typed error"),
-        )
-        .at_sequence(sequence));
+        ));
     }
     Ok(vec![core::diagnostic::Diagnostic::warning(
         "capture.evidence_incomplete",

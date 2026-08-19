@@ -25,7 +25,7 @@ use crate::command_options::OfflineCaptureLimitsArgs;
 use crate::errors::CliError;
 use crate::filtering::{self, Capabilities};
 use crate::input::{open_capture, validate_capture_stream_limits};
-use crate::rendering::capture_file_format;
+use crate::rendering::{NdjsonStream, capture_file_format};
 
 use conversion::{decode_options, increment_counter};
 use rendering::render_record;
@@ -37,12 +37,16 @@ struct Decoding {
 
 #[derive(Default)]
 struct StreamState {
-    sequence: u64,
+    emitted: u64,
     frames: u64,
     captured_bytes: u64,
 }
 
-pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
+pub(super) fn run(
+    arguments: Args,
+    format: output::contract::Format,
+    stream: &mut NdjsonStream,
+) -> Result<(), CliError> {
     let Args {
         path,
         limits,
@@ -64,7 +68,14 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
     ) {
         return rewrite_capture(&mut reader, format, stream_limits, filter.is_some());
     }
-    read_records(&mut reader, limits, decoding.as_ref(), dissect, format)
+    read_records(
+        &mut reader,
+        limits,
+        decoding.as_ref(),
+        dissect,
+        format,
+        stream,
+    )
 }
 
 fn validate_limits(limits: OfflineCaptureLimitsArgs) -> Result<(), CliError> {
@@ -157,19 +168,16 @@ fn read_records(
     decoding: Option<&Decoding>,
     dissect: bool,
     format: output::contract::Format,
+    stream: &mut NdjsonStream,
 ) -> Result<(), CliError> {
     let mut state = StreamState::default();
-    while let Some(frame) = reader
-        .next_frame()
-        .map_err(|source| CliError::classified(source).at_sequence(state.sequence))?
-    {
+    while let Some(frame) = reader.next_frame().map_err(CliError::classified)? {
         let number = account_frame(&mut state, &frame, limits)?;
-        let Some(result) = convert_frame(frame, number, state.sequence, decoding, dissect, limits)?
-        else {
+        let Some(result) = convert_frame(frame, number, decoding, dissect, limits)? else {
             continue;
         };
-        render_record(&result, format, state.sequence)?;
-        state.sequence = increment_counter(state.sequence, state.sequence)?;
+        render_record(&result, format, state.emitted, stream)?;
+        state.emitted = increment_counter(state.emitted, "read output record count")?;
     }
     Ok(())
 }
@@ -179,41 +187,34 @@ fn account_frame(
     frame: &core::frame::Frame,
     limits: OfflineCaptureLimitsArgs,
 ) -> Result<u64, CliError> {
-    state.frames = increment_counter(state.frames, state.sequence)?;
+    state.frames = increment_counter(state.frames, "read frame count")?;
     if state.frames > limits.max_frames {
         return Err(CliError::classified(
             packetcraftr::analysis::pcap::Error::FrameLimitExceeded {
                 actual: state.frames,
                 limit: limits.max_frames,
             },
-        )
-        .at_sequence(state.sequence));
+        ));
     }
     state.captured_bytes = state
         .captured_bytes
         .checked_add(u64::from(frame.captured_length()))
-        .ok_or_else(|| stream_byte_error(u64::MAX, limits.max_bytes, state.sequence))?;
+        .ok_or_else(|| stream_byte_error(u64::MAX, limits.max_bytes))?;
     if state.captured_bytes > limits.max_bytes {
-        return Err(stream_byte_error(
-            state.captured_bytes,
-            limits.max_bytes,
-            state.sequence,
-        ));
+        return Err(stream_byte_error(state.captured_bytes, limits.max_bytes));
     }
     Ok(state.frames)
 }
 
-fn stream_byte_error(actual: u64, limit: u64, sequence: u64) -> CliError {
+fn stream_byte_error(actual: u64, limit: u64) -> CliError {
     CliError::classified(
         packetcraftr::analysis::pcap::Error::StreamByteLimitExceeded { actual, limit },
     )
-    .at_sequence(sequence)
 }
 
 fn convert_frame(
     frame: core::frame::Frame,
     number: u64,
-    sequence: u64,
     decoding: Option<&Decoding>,
     dissect: bool,
     limits: OfflineCaptureLimitsArgs,
@@ -221,14 +222,14 @@ fn convert_frame(
     let Some(decoding) = decoding else {
         return output::read::Result::try_from_frame(frame)
             .map(Some)
-            .map_err(|source| CliError::classified(source).at_sequence(sequence));
+            .map_err(CliError::classified);
     };
     let decoded = decoding
         .decoder
         .decode(frame.clone(), decode_options(limits.max_frame_bytes))
-        .map_err(|source| CliError::new(3, source.to_string()).at_sequence(sequence))?;
+        .map_err(|source| CliError::new(3, source.to_string()))?;
     if let Some(filter) = &decoding.filter {
-        validate_filter_timestamp(filter, &frame, number, sequence)?;
+        validate_filter_timestamp(filter, &frame, number)?;
         if !filter
             .matches(&core::filter::Context {
                 decoded: &decoded,
@@ -236,7 +237,7 @@ fn convert_frame(
                 tcp_stream: None,
                 udp_stream: None,
             })
-            .map_err(|source| CliError::new(3, source.to_string()).at_sequence(sequence))?
+            .map_err(|source| CliError::new(3, source.to_string()))?
         {
             return Ok(None);
         }
@@ -247,14 +248,13 @@ fn convert_frame(
         output::read::Result::try_from_frame(frame)
     }
     .map(Some)
-    .map_err(|source| CliError::classified(source).at_sequence(sequence))
+    .map_err(CliError::classified)
 }
 
 fn validate_filter_timestamp(
     filter: &core::filter::Filter,
     frame: &core::frame::Frame,
     number: u64,
-    sequence: u64,
 ) -> Result<(), CliError> {
     if filter.requirements().timestamp && frame.timestamp.is_none() {
         return Err(CliError::from_classification(
@@ -265,8 +265,7 @@ fn validate_filter_timestamp(
             ),
             format!("frame {number} has no timestamp required by frame.time_epoch"),
             Vec::new(),
-        )
-        .at_sequence(sequence));
+        ));
     }
     Ok(())
 }

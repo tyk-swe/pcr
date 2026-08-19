@@ -5,7 +5,7 @@ use packetcraftr::{core, output};
 
 use crate::errors::CliError;
 use crate::rendering::{
-    captured_frame_text, comma_separated, emit_aggregate_with_stats, emit_next, emit_with_stats,
+    NdjsonStream, captured_frame_text, comma_separated, emit_aggregate_with_stats,
     optional_display, output_timestamp_text, render_diagnostics_text, render_optional,
     write_stdout_line,
 };
@@ -105,6 +105,7 @@ pub(super) fn render_stream(
     result: output::dns::Result,
     diagnostics: Vec<core::diagnostic::Diagnostic>,
     stats: output::envelope::Stats,
+    stream: &mut NdjsonStream,
 ) -> Result<(), CliError> {
     let output::dns::Result {
         server,
@@ -132,26 +133,19 @@ pub(super) fn render_stream(
         attempts,
         undecoded,
     } = result;
-    let mut sequence = 0_u64;
     let context = StreamContext {
         server: &server,
         server_port,
         query_name: &query_name,
         query_type: &query_type,
     };
-    render_attempts(attempts, context, &mut sequence)?;
-    render_records(answers, authorities, additionals, context, &mut sequence)?;
-    render_rejected(rejected_records, context, &mut sequence)?;
+    render_attempts(attempts, context, stream)?;
+    render_records(answers, authorities, additionals, context, stream)?;
+    render_rejected(rejected_records, context, stream)?;
     for evidence in undecoded {
-        emit_next(
-            output::contract::Command::Dns,
-            &mut sequence,
-            output::dns::Event::Undecoded { evidence },
-        )?;
+        stream.emit_data(output::dns::Event::Undecoded { evidence }, Vec::new())?;
     }
-    emit_with_stats(
-        output::contract::Command::Dns,
-        sequence,
+    stream.complete_with_stats(
         output::dns::Event::Complete {
             server,
             server_port,
@@ -188,12 +182,10 @@ struct StreamContext<'a> {
 fn render_attempts(
     attempts: Vec<output::dns::Attempt>,
     context: StreamContext<'_>,
-    sequence: &mut u64,
+    stream: &mut NdjsonStream,
 ) -> Result<(), CliError> {
     for evidence in attempts {
-        emit_next(
-            output::contract::Command::Dns,
-            sequence,
+        stream.emit_data(
             output::dns::Event::Attempt {
                 server: context.server.to_owned(),
                 server_port: context.server_port,
@@ -201,6 +193,7 @@ fn render_attempts(
                 query_type: context.query_type.to_owned(),
                 evidence,
             },
+            Vec::new(),
         )?;
     }
     Ok(())
@@ -211,7 +204,7 @@ fn render_records(
     authorities: Vec<output::dns::Record>,
     additionals: Vec<output::dns::Record>,
     context: StreamContext<'_>,
-    sequence: &mut u64,
+    stream: &mut NdjsonStream,
 ) -> Result<(), CliError> {
     for (section, records) in [
         (output::dns::Section::Answer, answers),
@@ -219,9 +212,7 @@ fn render_records(
         (output::dns::Section::Additional, additionals),
     ] {
         for record in records {
-            emit_next(
-                output::contract::Command::Dns,
-                sequence,
+            stream.emit_data(
                 output::dns::Event::Record {
                     server: context.server.to_owned(),
                     server_port: context.server_port,
@@ -230,6 +221,7 @@ fn render_records(
                     section,
                     record,
                 },
+                Vec::new(),
             )?;
         }
     }
@@ -239,12 +231,10 @@ fn render_records(
 fn render_rejected(
     records: Vec<output::dns::RejectedRecord>,
     context: StreamContext<'_>,
-    sequence: &mut u64,
+    stream: &mut NdjsonStream,
 ) -> Result<(), CliError> {
     for record in records {
-        emit_next(
-            output::contract::Command::Dns,
-            sequence,
+        stream.emit_data(
             output::dns::Event::Rejected {
                 server: context.server.to_owned(),
                 server_port: context.server_port,
@@ -252,6 +242,7 @@ fn render_rejected(
                 query_type: context.query_type.to_owned(),
                 record,
             },
+            Vec::new(),
         )?;
     }
     Ok(())

@@ -136,18 +136,6 @@ impl From<DeadlineExceeded> for Error {
     }
 }
 
-impl Error {
-    pub fn sequence(&self) -> Option<u64> {
-        match self {
-            Self::Execution { attempt, .. }
-            | Self::Clock { attempt, .. }
-            | Self::InvalidEvidence { attempt, .. }
-            | Self::StatisticsOverflow { attempt } => Some(u64::from(attempt.saturating_sub(1))),
-            _ => None,
-        }
-    }
-}
-
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {

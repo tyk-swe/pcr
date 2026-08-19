@@ -20,7 +20,7 @@ use packetcraftr::netio::{
 };
 use packetcraftr::output::{
     contract::{Command, Error as ContractError, Format},
-    envelope::{Aggregate, Error as OutputError, Stats, Stream},
+    envelope::{Aggregate, Error as OutputError, Stats, Stream, StreamPosition},
     frame::{Captured, Timestamp, Wire},
     interfaces,
     protocols::{Detail, Field, FieldKind, Summary},
@@ -157,7 +157,7 @@ fn envelopes_convert_diagnostics_errors_and_statistics() {
     ] {
         let value = serde_json::to_value(Stream::success(
             Command::Read,
-            9,
+            &StreamPosition::initial(),
             json!({}),
             vec![diagnostic],
         ))
@@ -178,9 +178,10 @@ fn envelopes_convert_diagnostics_errors_and_statistics() {
     assert_eq!(value["status"], "error");
     assert_eq!(value["error"]["code"], "packet.timestamp_range");
 
-    let stream: Stream<()> = Stream::error(None, u64::MAX, classified).with_stats(stats);
+    let position = StreamPosition::initial();
+    let stream: Stream<()> = Stream::error(None, &position, classified).with_stats(stats);
     let value = serde_json::to_value(stream).expect("error stream serializes");
-    assert_eq!(value["sequence"], u64::MAX);
+    assert_eq!(value["sequence"], 0);
     assert_eq!(value["status"], "error");
 
     let empty_stats = Stats::default();

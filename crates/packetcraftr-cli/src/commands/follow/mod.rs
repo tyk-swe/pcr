@@ -10,12 +10,17 @@ use self::arguments::{Args, Direction};
 use super::super::errors::CliError;
 use super::super::input::open_capture;
 use super::offline_analysis::{Prepared, prepare};
+use crate::rendering::NdjsonStream;
 
 use analysis::expert::StreamTransport;
 use analysis::follow::{Chunk, Collector, Selector};
 use rendering::State;
 
-pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
+pub(super) fn run(
+    arguments: Args,
+    format: output::contract::Format,
+    stream: &mut NdjsonStream,
+) -> Result<(), CliError> {
     let selector = parse_stream(&arguments.stream)?;
     if format == output::contract::Format::Raw && arguments.direction == Direction::Both {
         return Err(CliError::new(
@@ -57,27 +62,18 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
             if !direction_matches(direction, &chunk) {
                 continue;
             }
-            rendering::render_record(format, chunk, &mut state)
+            rendering::render_record(format, chunk, &mut state, stream)
                 .map_err(CliError::into_boundary_error)?;
         }
         Ok(())
     })
-    .map_err(|error| {
-        let error = CliError::classified(error);
-        // Streamed records are numbered by emission, not by capture frame,
-        // so a terminal stream error continues that numbering.
-        if matches!(format, output::contract::Format::Ndjson) {
-            error.at_sequence(state.sequence)
-        } else {
-            error
-        }
-    })?;
+    .map_err(CliError::classified)?;
     let summary = collector.finish(&run_summary.trailing_tcp_events);
 
     match format {
         output::contract::Format::Text => rendering::render_text(selector, &summary),
         output::contract::Format::Json => rendering::render_aggregate(selector, summary, state),
-        output::contract::Format::Ndjson => rendering::render_stream(selector, summary, state),
+        output::contract::Format::Ndjson => rendering::render_stream(selector, summary, stream),
         output::contract::Format::Hex | output::contract::Format::Raw => {
             rendering::render_payload_warning(&summary)
         }

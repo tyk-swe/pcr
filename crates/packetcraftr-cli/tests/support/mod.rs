@@ -32,3 +32,21 @@ pub(crate) fn parse_json(output: &Output) -> Value {
         )
     })
 }
+
+pub(crate) fn parse_ndjson(output: &Output) -> Vec<Value> {
+    std::str::from_utf8(&output.stdout)
+        .expect("NDJSON output must be UTF-8")
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("each NDJSON line must be valid JSON"))
+        .collect()
+}
+
+pub(crate) fn assert_contiguous_stream(records: &[Value]) {
+    for (expected, record) in records.iter().enumerate() {
+        assert_eq!(
+            record["sequence"].as_u64(),
+            u64::try_from(expected).ok(),
+            "record {expected} has the wrong stream sequence"
+        );
+    }
+}

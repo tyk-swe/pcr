@@ -74,6 +74,7 @@
           ]
         },
         "sequence": {
+          "description": "Zero-based ordinal of this emitted NDJSON record within one command invocation. Records are contiguous, and domain identifiers remain in result or error context.",
           "$ref": "#/$defs/uint64"
         },
         "result": {

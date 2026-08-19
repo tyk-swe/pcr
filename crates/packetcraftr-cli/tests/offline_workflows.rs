@@ -9,7 +9,7 @@ use serde_json::Value;
 
 mod support;
 
-use support::{parse_json, run, run_success};
+use support::{assert_contiguous_stream, parse_json, parse_ndjson, run, run_success};
 
 const UDP_CLIENT: &str = "450000210000000040118e95c0000201c633640230390009000d9f8868656c6c6f";
 const UDP_SERVER: &str = "450000210000000040118e95c6336402c000020100093039000d957e776f726c64";
@@ -109,6 +109,14 @@ fn write_capture() -> tempfile::NamedTempFile {
     file
 }
 
+fn write_truncated_capture() -> tempfile::NamedTempFile {
+    let mut file = write_capture();
+    file.write_all(&[0; 8])
+        .expect("truncated record header must write");
+    file.flush().expect("truncated capture must flush");
+    file
+}
+
 fn path_text(path: &Path) -> &str {
     path.to_str().expect("temporary path must be UTF-8")
 }
@@ -170,7 +178,10 @@ fn follow_handles_udp_directions_and_all_output_encodings() {
 
     let streamed = run(&["--output", "ndjson", "follow", path, "--stream", "udp:0"]);
     assert!(streamed.status.success(), "{:?}", streamed.stderr);
-    assert_eq!(streamed.stdout.split(|byte| *byte == b'\n').count(), 4);
+    let records = parse_ndjson(&streamed);
+    assert_contiguous_stream(&records);
+    assert_eq!(records.len(), 3);
+    assert_eq!(records[2]["status"], "success");
 
     let raw_client = run(&[
         "--output",
@@ -223,6 +234,14 @@ fn expert_reports_tcp_state_in_aggregate_stream_and_text_modes() {
         let output = run(&["--output", format, "expert", path, "--filter", "tcp"]);
         assert!(output.status.success(), "{format}: {:?}", output.stderr);
         assert!(!output.stdout.is_empty());
+        if format == "ndjson" {
+            let records = parse_ndjson(&output);
+            assert_contiguous_stream(&records);
+            assert_eq!(
+                records.last().and_then(|record| record["status"].as_str()),
+                Some("success")
+            );
+        }
     }
 
     let selected = run(&[
@@ -242,6 +261,48 @@ fn expert_reports_tcp_state_in_aggregate_stream_and_text_modes() {
         value["result"]["findings"].as_array().map(Vec::len),
         Some(0)
     );
+}
+
+#[test]
+fn follow_and_expert_stream_failures_terminate_at_the_next_position() {
+    let capture = write_truncated_capture();
+    let path = path_text(capture.path());
+    let commands = [
+        vec!["follow", path, "--stream", "udp:0"],
+        vec!["expert", path],
+    ];
+
+    for command in commands {
+        let arguments = ["--output", "ndjson"]
+            .into_iter()
+            .chain(command.iter().copied())
+            .collect::<Vec<_>>();
+        let output = run(&arguments);
+        assert!(!output.status.success(), "{command:?}");
+        let records = parse_ndjson(&output);
+        assert!(
+            records.len() > 1,
+            "{command:?} must preserve at least one progressive record"
+        );
+        assert_contiguous_stream(&records);
+        assert!(
+            records[..records.len() - 1]
+                .iter()
+                .all(|record| record["status"] == "success")
+        );
+        assert_eq!(
+            records.last().and_then(|record| record["status"].as_str()),
+            Some("error")
+        );
+        assert_eq!(
+            records
+                .iter()
+                .filter(|record| record["status"] == "error")
+                .count(),
+            1,
+            "{command:?}"
+        );
+    }
 }
 
 #[test]

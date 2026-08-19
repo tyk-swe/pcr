@@ -16,6 +16,7 @@ use self::arguments::Args;
 use super::registry;
 use crate::errors::CliError;
 use crate::input::read_recipe;
+use crate::rendering::NdjsonStream;
 use crate::system::{DeferredInterface, client, exchange, validate_selector};
 
 use execution::Executor;
@@ -27,7 +28,11 @@ struct PreparedLive {
     interface: Option<String>,
 }
 
-pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
+pub(super) fn run(
+    arguments: Args,
+    format: output::contract::Format,
+    stream: &mut NdjsonStream,
+) -> Result<(), CliError> {
     let request = prepare_request(&arguments)?;
     let live = prepare_live(&arguments, &request)?;
     let registry = registry()?;
@@ -36,7 +41,9 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
     match format {
         output::contract::Format::Text => rendering::render_text(result, diagnostics, stats),
         output::contract::Format::Json => rendering::render_aggregate(result, diagnostics, stats),
-        output::contract::Format::Ndjson => rendering::render_stream(result, diagnostics, stats),
+        output::contract::Format::Ndjson => {
+            rendering::render_stream(result, diagnostics, stats, stream)
+        }
         _ => unreachable!("fuzz format is checked before command dispatch"),
     }
 }
@@ -166,6 +173,5 @@ fn execute(
 }
 
 pub(crate) fn classified_error(error: packetcraftr::fuzz::Error) -> CliError {
-    let sequence = error.sequence();
-    CliError::classified_at_optional_sequence(error, sequence)
+    CliError::classified(error)
 }

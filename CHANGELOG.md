@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Explicit packet and frame sources now take precedence over stdin, while
   missing interactive input fails immediately with command-specific guidance.
+- **Breaking:** NDJSON envelope `sequence` is now exclusively the contiguous,
+  zero-based ordinal of an emitted record for one command invocation. The CLI
+  owns stream position through terminal success or error; source-frame, probe,
+  attempt, hop, replay, and fuzz-case identifiers remain domain data and no
+  longer select terminal error positions. Generic domain-error `sequence()`
+  accessors were removed, and public stream-envelope constructors now accept an
+  explicit `StreamPosition` instead of an arbitrary integer.
 - **Breaking:** Scan output now exposes address-bearing `endpoints` with an
   optional port, replacing the `ports` collection, ICMP port-zero sentinel,
   and evidence-derived address in aggregate and streaming output.

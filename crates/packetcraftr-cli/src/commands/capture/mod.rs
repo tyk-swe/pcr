@@ -17,12 +17,17 @@ use self::arguments::Args;
 use super::registry;
 use crate::errors::CliError;
 use crate::filtering::{self, Capabilities, FrameSelector};
+use crate::rendering::NdjsonStream;
 use crate::system::{client, prepare_route};
 
 use conversion::validate_window;
 use execution::Budget;
 
-pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
+pub(super) fn run(
+    arguments: Args,
+    format: output::contract::Format,
+    stream: &mut NdjsonStream,
+) -> Result<(), CliError> {
     let Args {
         route,
         timeout_ms,
@@ -73,6 +78,7 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
             limits,
             budget,
             selector.as_ref(),
+            stream,
         ),
         output::contract::Format::Pcap | output::contract::Format::PcapNg => {
             rendering::render_capture(

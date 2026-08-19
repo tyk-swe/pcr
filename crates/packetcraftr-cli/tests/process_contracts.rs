@@ -9,7 +9,7 @@ use serde_json::Value;
 
 mod support;
 
-use support::{parse_json, run, run_success};
+use support::{assert_contiguous_stream, parse_json, parse_ndjson, run, run_success};
 
 const IPV4_FRAME_HEX: &str = "45000014000000004001f6e7c0000201c6336402";
 
@@ -78,6 +78,21 @@ fn assert_no_terminal_style(bytes: &[u8]) {
         !bytes.windows(2).any(|window| window == b"\x1b["),
         "machine output contained an ANSI control sequence"
     );
+}
+
+fn partial_capture() -> tempfile::NamedTempFile {
+    let mut capture = tempfile::NamedTempFile::new().expect("temporary capture must open");
+    capture
+        .write_all(&[
+            0xd4, 0xc3, 0xb2, 0xa1, 2, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 0, 0, 101, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0,
+        ])
+        .expect("valid frame must write");
+    capture
+        .write_all(&[0; 8])
+        .expect("truncated record header must write");
+    capture.flush().expect("capture must flush");
+    capture
 }
 
 #[test]
@@ -362,4 +377,19 @@ fn clap_failures_preserve_unambiguous_invocation_context() {
     assert_eq!(value["command"], "protocols");
     assert_eq!(value["sequence"], 0);
     assert_eq!(value["error"]["kind"], "cli");
+}
+
+#[test]
+fn runtime_stream_error_follows_every_preserved_record() {
+    let capture = partial_capture();
+    let path = capture.path().to_str().expect("temporary path is UTF-8");
+    let failure = run(&["--output", "ndjson", "read", path, "--max-frames", "2"]);
+    assert!(!failure.status.success());
+
+    let records = parse_ndjson(&failure);
+    assert_contiguous_stream(&records);
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0]["status"], "success");
+    assert_eq!(records[1]["status"], "error");
+    assert_eq!(records[1]["sequence"], 1);
 }

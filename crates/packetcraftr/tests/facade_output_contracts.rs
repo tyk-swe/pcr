@@ -5,7 +5,7 @@ use packetcraftr::{
     core::protocol,
     output::{
         contract::{Command, Format, SCHEMA_V1},
-        envelope::{Aggregate, Stream},
+        envelope::{Aggregate, Stream, StreamPosition},
     },
 };
 use serde_json::{Value, json};
@@ -37,9 +37,13 @@ fn aggregate_and_stream_envelopes_keep_version_and_discriminators() {
     assert_eq!(aggregate["status"], "success");
     assert!(aggregate.get("sequence").is_none());
 
+    let mut position = StreamPosition::initial();
+    for _ in 0..7 {
+        position = position.checked_next().expect("fixture position advances");
+    }
     let stream = serde_json::to_value(Stream::success(
         Command::Read,
-        7,
+        &position,
         json!({"frame": 1}),
         Vec::new(),
     ))
@@ -58,6 +62,11 @@ fn current_schema_and_published_examples_use_output_v1() {
     assert_eq!(
         schema["$defs"]["baseEnvelope"]["properties"]["schema"]["const"],
         SCHEMA_V1
+    );
+    assert!(
+        schema["$defs"]["baseEnvelope"]["properties"]["sequence"]["description"]
+            .as_str()
+            .is_some_and(|description| description.contains("Zero-based ordinal"))
     );
     assert!(
         schema["$defs"]["routeDecision"]["properties"]["selection_reason"]["enum"]

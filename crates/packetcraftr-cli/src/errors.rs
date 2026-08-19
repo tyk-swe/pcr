@@ -12,7 +12,6 @@ pub(super) struct CliError {
     pub(super) message: String,
     pub(super) classification: Classification,
     pub(super) causes: Vec<String>,
-    pub(super) sequence: Option<u64>,
 }
 
 impl CliError {
@@ -41,7 +40,6 @@ impl CliError {
                 None,
             ),
             causes: Vec::new(),
-            sequence: None,
         }
     }
 
@@ -49,15 +47,6 @@ impl CliError {
         let classification = error.classification();
         let causes = error.causes();
         Self::from_classification(classification, error.to_string(), causes)
-    }
-
-    pub(super) fn classified_at_optional_sequence(
-        error: impl Classified + std::fmt::Display,
-        sequence: Option<u64>,
-    ) -> Self {
-        let mut error = Self::classified(error);
-        error.sequence = sequence;
-        error
     }
 
     pub(super) fn from_classification(
@@ -70,18 +59,7 @@ impl CliError {
             message: message.into(),
             classification,
             causes,
-            sequence: None,
         }
-    }
-
-    pub(super) fn at_sequence(mut self, sequence: u64) -> Self {
-        self.sequence = Some(sequence);
-        self
-    }
-
-    pub(super) fn at_sequence_if_absent(mut self, sequence: u64) -> Self {
-        self.sequence.get_or_insert(sequence);
-        self
     }
 
     pub(super) fn into_boundary_error(self) -> packetcraftr::BoundaryError {
@@ -142,7 +120,7 @@ mod tests {
     }
 
     #[test]
-    fn classified_errors_preserve_causes_sequence_and_boundary_contracts() {
+    fn classified_errors_preserve_causes_and_boundary_contracts() {
         let classified = packetcraftr::BoundaryError::new(
             "fixture failed",
             Classification::new(
@@ -152,9 +130,8 @@ mod tests {
             ),
             vec!["first cause".to_owned(), "second cause".to_owned()],
         );
-        let error = CliError::classified_at_optional_sequence(classified, Some(8));
+        let error = CliError::classified(classified);
         assert_eq!(error.exit_code, 6);
-        assert_eq!(error.sequence, Some(8));
 
         let output = error.output_error();
         assert_eq!(output.code, "fixture.denied");
@@ -167,15 +144,11 @@ mod tests {
     }
 
     #[test]
-    fn cleanup_failure_keeps_the_primary_error_and_existing_sequence() {
+    fn cleanup_failure_keeps_the_primary_error() {
         let cleanup = net::Error::Capture {
             message: "receiver stopped".to_owned(),
         };
-        let error = CliError::new(5, "capture failed")
-            .at_sequence(4)
-            .at_sequence_if_absent(9)
-            .with_cleanup(cleanup.clone());
-        assert_eq!(error.sequence, Some(4));
+        let error = CliError::new(5, "capture failed").with_cleanup(cleanup.clone());
         assert_eq!(
             error.message,
             format!("capture failed; capture shutdown also failed: {cleanup}")
@@ -190,9 +163,7 @@ mod tests {
             "capture failed",
             vec!["original source".to_owned()],
         )
-        .at_sequence_if_absent(11)
         .with_cleanup(cleanup.clone());
-        assert_eq!(error.sequence, Some(11));
         assert_eq!(
             error.causes,
             vec!["original source".to_owned(), cleanup.to_string()]

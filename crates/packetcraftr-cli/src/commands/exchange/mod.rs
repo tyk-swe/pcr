@@ -14,8 +14,13 @@ use super::super::errors::CliError;
 use super::super::system::{client, prepare_route};
 use super::registry;
 use crate::command_options::SendArgs;
+use crate::rendering::NdjsonStream;
 
-pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
+pub(super) fn run(
+    arguments: Args,
+    format: output::contract::Format,
+    stream: &mut NdjsonStream,
+) -> Result<(), CliError> {
     let Args {
         send,
         timeout_ms,
@@ -63,7 +68,7 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
     match format {
         output::contract::Format::Text => rendering::render_text(&result),
         output::contract::Format::Json => rendering::render_aggregate(result),
-        output::contract::Format::Ndjson => rendering::render_stream(result),
+        output::contract::Format::Ndjson => rendering::render_stream(result, stream),
         output::contract::Format::Pcap | output::contract::Format::PcapNg => {
             rendering::render_capture(&result, format)
         }

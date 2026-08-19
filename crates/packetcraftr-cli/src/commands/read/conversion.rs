@@ -3,12 +3,13 @@
 
 use packetcraftr::core;
 
-/// Advances a counter, reporting overflow as a sequence-overflow contract error.
-pub(super) fn increment_counter(value: u64, sequence: u64) -> Result<u64, crate::errors::CliError> {
-    value.checked_add(1).ok_or_else(|| {
-        crate::errors::CliError::classified(packetcraftr::output::contract::Error::SequenceOverflow)
-            .at_sequence(sequence)
-    })
+pub(super) fn increment_counter(
+    value: u64,
+    counter: &'static str,
+) -> Result<u64, crate::errors::CliError> {
+    value
+        .checked_add(1)
+        .ok_or_else(|| crate::errors::CliError::new(70, format!("{counter} overflowed")))
 }
 
 /// Decode bounds use the accepted per-frame capture limit, not the smaller

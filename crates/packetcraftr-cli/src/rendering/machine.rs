@@ -84,10 +84,6 @@ pub(crate) fn emit_json(value: &impl Serialize) -> Result<(), CliError> {
     emit_serialized(value, true)
 }
 
-pub(crate) fn emit_json_compact(value: &impl Serialize) -> Result<(), CliError> {
-    emit_serialized(value, false)
-}
-
 fn emit_serialized(value: &impl Serialize, pretty: bool) -> Result<(), CliError> {
     let stdout = io::stdout().lock();
     let mut writer = io::BufWriter::with_capacity(64 * 1024, stdout);

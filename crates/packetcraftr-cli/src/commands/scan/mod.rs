@@ -17,11 +17,16 @@ use self::arguments::Args;
 use super::registry;
 use crate::errors::CliError;
 use crate::input::parse_target;
+use crate::rendering::NdjsonStream;
 use crate::system::{DeferredInterface, client, exchange, validate_selector};
 
 use execution::Executor;
 
-pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
+pub(super) fn run(
+    arguments: Args,
+    format: output::contract::Format,
+    stream: &mut NdjsonStream,
+) -> Result<(), CliError> {
     let Args {
         target,
         transport,
@@ -104,12 +109,13 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
     match format {
         output::contract::Format::Text => rendering::render_text(result, diagnostics, stats),
         output::contract::Format::Json => rendering::render_aggregate(result, diagnostics, stats),
-        output::contract::Format::Ndjson => rendering::render_stream(result, diagnostics, stats),
+        output::contract::Format::Ndjson => {
+            rendering::render_stream(result, diagnostics, stats, stream)
+        }
         _ => unreachable!("scan format is checked before command dispatch"),
     }
 }
 
 pub(crate) fn classified_error(error: packetcraftr::scan::Error) -> CliError {
-    let sequence = error.sequence();
-    CliError::classified_at_optional_sequence(error, sequence)
+    CliError::classified(error)
 }

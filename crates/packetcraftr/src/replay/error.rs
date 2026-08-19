@@ -109,31 +109,10 @@ pub enum Error {
 }
 
 impl Error {
-    pub fn output(sequence: u64, message: impl Into<String>) -> Self {
+    pub fn output_at_source_index(source_index: u64, message: impl Into<String>) -> Self {
         Self::Output {
-            sequence,
+            sequence: source_index,
             message: message.into(),
-        }
-    }
-
-    pub fn sequence(&self) -> Option<u64> {
-        match self {
-            Self::Capture { sequence, .. }
-            | Self::FrameLimit { sequence, .. }
-            | Self::ByteLimit { sequence, .. }
-            | Self::FrameSizeLimit { sequence, .. }
-            | Self::DurationLimit { sequence, .. }
-            | Self::UnsupportedLinkType { sequence, .. }
-            | Self::LinkModeMismatch { sequence, .. }
-            | Self::Timing { sequence, .. }
-            | Self::TimestampUnavailable { sequence, .. }
-            | Self::Selection { sequence, .. }
-            | Self::Authorization { sequence, .. }
-            | Self::Transmission { sequence, .. }
-            | Self::InvalidEvidence { sequence, .. }
-            | Self::Clock { sequence, .. }
-            | Self::Output { sequence, .. } => Some(*sequence),
-            _ => None,
         }
     }
 }

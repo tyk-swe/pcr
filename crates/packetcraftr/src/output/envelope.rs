@@ -233,6 +233,30 @@ impl<T> Aggregate<T> {
 /// Aggregate error envelope with no unused success-result type parameter.
 pub type AggregateError = Aggregate<()>;
 
+/// The next zero-based ordinal in one NDJSON command invocation.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct StreamPosition(u64);
+
+impl StreamPosition {
+    /// Starts an empty stream at record zero.
+    pub const fn initial() -> Self {
+        Self(0)
+    }
+
+    /// Returns the ordinal that the next record will carry.
+    pub const fn ordinal(&self) -> u64 {
+        self.0
+    }
+
+    /// Produces the following position without allowing the ordinal to wrap.
+    pub fn checked_next(&self) -> Result<Self, super::contract::Error> {
+        self.0
+            .checked_add(1)
+            .map(Self)
+            .ok_or(super::contract::Error::SequenceOverflow)
+    }
+}
+
 /// One independently valid NDJSON success or terminal-error record.
 #[derive(Clone, Debug, Serialize)]
 pub struct Stream<T> {
@@ -250,7 +274,7 @@ pub struct Stream<T> {
 impl<T> Stream<T> {
     pub fn success(
         command: Command,
-        sequence: u64,
+        position: &StreamPosition,
         result: T,
         diagnostics: Vec<PacketDiagnostic>,
     ) -> Self {
@@ -258,19 +282,19 @@ impl<T> Stream<T> {
             schema: SCHEMA_V1,
             command: Some(command),
             mode: Mode::Stream,
-            sequence,
+            sequence: position.ordinal(),
             payload: OutputPayload::Success { result },
             diagnostics: diagnostics.into_iter().map(Into::into).collect(),
             stats: None,
         }
     }
 
-    pub fn error(command: Option<Command>, sequence: u64, error: Error) -> Self {
+    pub fn error(command: Option<Command>, position: &StreamPosition, error: Error) -> Self {
         Self {
             schema: SCHEMA_V1,
             command,
             mode: Mode::Stream,
-            sequence,
+            sequence: position.ordinal(),
             payload: OutputPayload::Error { error },
             diagnostics: Vec::new(),
             stats: None,
@@ -286,3 +310,22 @@ impl<T> Stream<T> {
 
 /// Terminal NDJSON error record with no unused success-result type parameter.
 pub type StreamError = Stream<()>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stream_position_starts_at_zero_and_cannot_wrap() {
+        let initial = StreamPosition::initial();
+        assert_eq!(initial.ordinal(), 0);
+        assert_eq!(initial.checked_next().expect("zero advances").ordinal(), 1);
+
+        let maximum = StreamPosition(u64::MAX);
+        assert_eq!(
+            maximum.checked_next(),
+            Err(super::super::contract::Error::SequenceOverflow)
+        );
+        assert_eq!(maximum.ordinal(), u64::MAX);
+    }
+}

@@ -5,8 +5,8 @@ use packetcraftr::{core, output};
 
 use crate::errors::CliError;
 use crate::rendering::{
-    captured_frame_text, emit_aggregate_with_stats, emit_next, emit_with_stats,
-    render_diagnostics_text, render_output_diagnostics_text, spaced_hex, write_stdout_line,
+    NdjsonStream, captured_frame_text, emit_aggregate_with_stats, render_diagnostics_text,
+    render_output_diagnostics_text, spaced_hex, write_stdout_line,
 };
 
 pub(super) fn render_aggregate(
@@ -87,6 +87,7 @@ pub(super) fn render_stream(
     result: output::fuzz::Result,
     diagnostics: Vec<core::diagnostic::Diagnostic>,
     stats: output::envelope::Stats,
+    stream: &mut NdjsonStream,
 ) -> Result<(), CliError> {
     let output::fuzz::Result {
         seed,
@@ -97,20 +98,16 @@ pub(super) fn render_stream(
         cases_rejected,
         cases,
     } = result;
-    let mut sequence = 0_u64;
     for case in cases {
-        emit_next(
-            output::contract::Command::Fuzz,
-            &mut sequence,
+        stream.emit_data(
             output::fuzz::Event::Case {
                 operation_seed: seed,
                 case: Box::new(case),
             },
+            Vec::new(),
         )?;
     }
-    emit_with_stats(
-        output::contract::Command::Fuzz,
-        sequence,
+    stream.complete_with_stats(
         output::fuzz::Event::Complete {
             operation_seed: seed,
             first_case,

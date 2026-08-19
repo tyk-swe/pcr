@@ -5,22 +5,23 @@ use packetcraftr::output;
 
 use crate::errors::CliError;
 use crate::rendering::{
-    captured_frame_text, emit, spaced_hex, write_plain_line, write_stdout_line,
+    NdjsonStream, captured_frame_text, spaced_hex, write_plain_line, write_stdout_line,
 };
 
 pub(super) fn render_record(
     result: &output::read::Result,
     format: output::contract::Format,
-    sequence: u64,
+    display_index: u64,
+    stream: &mut NdjsonStream,
 ) -> Result<(), CliError> {
     match format {
         output::contract::Format::Text => match &result.decoded {
             None => write_stdout_line(format_args!(
-                "{sequence}: {}",
+                "{display_index}: {}",
                 captured_frame_text(&result.frame)
             )),
             Some(decoded) => write_stdout_line(format_args!(
-                "{sequence}: dlt={} caplen={} wirelen={} layers={} {}",
+                "{display_index}: dlt={} caplen={} wirelen={} layers={} {}",
                 result.frame.link_type,
                 result.frame.captured_length,
                 result.frame.original_length,
@@ -37,12 +38,7 @@ pub(super) fn render_record(
         output::contract::Format::Hex => {
             write_plain_line(format_args!("{}", result.frame.bytes_hex()))
         }
-        output::contract::Format::Ndjson => emit(
-            output::contract::Command::Read,
-            sequence,
-            result,
-            Vec::new(),
-        ),
+        output::contract::Format::Ndjson => stream.emit_data(result, Vec::new()),
         _ => unreachable!("read format is checked before command dispatch"),
     }
 }

@@ -5,7 +5,7 @@ use packetcraftr::{analysis, output};
 
 use crate::errors::CliError;
 use crate::rendering::{
-    emit, emit_aggregate, emit_next, emit_stderr_message, write_raw, write_stdout_line,
+    NdjsonStream, emit_aggregate, emit_stderr_message, write_raw, write_stdout_line,
 };
 
 use analysis::expert::StreamTransport;
@@ -13,7 +13,6 @@ use analysis::follow::{Chunk, Selector, Summary};
 
 #[derive(Default)]
 pub(super) struct State {
-    pub(super) sequence: u64,
     retained: Vec<output::follow::Chunk>,
 }
 
@@ -21,6 +20,7 @@ pub(super) fn render_record(
     format: output::contract::Format,
     chunk: Chunk,
     state: &mut State,
+    stream: &mut NdjsonStream,
 ) -> Result<(), CliError> {
     match format {
         output::contract::Format::Text => write_stdout_line(format_args!(
@@ -43,11 +43,9 @@ pub(super) fn render_record(
             state.retained.push(chunk.into());
             Ok(())
         }
-        output::contract::Format::Ndjson => emit_next(
-            output::contract::Command::Follow,
-            &mut state.sequence,
-            output::follow::Chunk::from(chunk),
-        ),
+        output::contract::Format::Ndjson => {
+            stream.emit_data(output::follow::Chunk::from(chunk), Vec::new())
+        }
         _ => unreachable!("the format contract admits only text, json, ndjson, hex, and raw"),
     }
 }
@@ -95,11 +93,9 @@ pub(super) fn render_aggregate(
 pub(super) fn render_stream(
     selector: Selector,
     summary: Summary,
-    state: State,
+    stream: &mut NdjsonStream,
 ) -> Result<(), CliError> {
-    emit(
-        output::contract::Command::Follow,
-        state.sequence,
+    stream.complete(
         output::follow::Result::from_summary(
             selector.transport.into(),
             selector.index,

@@ -20,6 +20,7 @@ use crate::command_options::OfflineCaptureLimitsArgs;
 use crate::errors::CliError;
 use crate::filtering::{self, Capabilities, FrameSelector};
 use crate::input::{open_capture, validate_capture_stream_limits};
+use crate::rendering::NdjsonStream;
 
 use conversion::{interface, timing};
 use execution::FilterSelector;
@@ -35,7 +36,11 @@ struct Prepared {
     max_interfaces: usize,
 }
 
-pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
+pub(super) fn run(
+    arguments: Args,
+    format: output::contract::Format,
+    stream: &mut NdjsonStream,
+) -> Result<(), CliError> {
     let mut prepared = prepare(&arguments)?;
     let filtered = prepared.filter.is_some();
     let mut filter = prepared
@@ -71,7 +76,7 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
             &mut prepared.authorizer,
             &mut prepared.transmitter,
             &mut prepared.clock,
-            prepared.requested_interface,
+            stream,
         ),
         output::contract::Format::Pcap | output::contract::Format::PcapNg => {
             rendering::render_capture(
@@ -163,6 +168,5 @@ fn prepare_filter(
 }
 
 pub(crate) fn classified_error(error: packetcraftr::replay::Error) -> CliError {
-    let sequence = error.sequence();
-    CliError::classified_at_optional_sequence(error, sequence)
+    CliError::classified(error)
 }

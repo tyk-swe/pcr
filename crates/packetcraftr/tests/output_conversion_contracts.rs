@@ -89,12 +89,42 @@ fn packet_output_adapters_preserve_wire_data_and_separate_diagnostics() {
         .diagnostics
         .push(Diagnostic::info("decode.fixture", "fixture note"));
 
-    let raw_record = read::Result::try_from_frame(frame.clone()).expect("raw frame converts");
+    let raw_record = read::Event::try_from_frame(7, frame.clone()).expect("raw frame converts");
     let dissected_record =
-        read::Result::try_from_decoded(frame, &decoded).expect("dissected frame converts");
-    assert!(raw_record.decoded.is_none());
-    assert_eq!(raw_record.frame.bytes(), dissected_record.frame.bytes());
-    let stack = dissected_record.decoded.expect("dissection was requested");
+        read::Event::try_from_decoded(7, frame, &decoded).expect("dissected frame converts");
+    let raw_value = serde_json::to_value(&raw_record).expect("raw read event serializes");
+    assert_eq!(raw_value["event"], "frame");
+    assert_eq!(raw_value["source_frame"], 7);
+    assert!(raw_value.get("decoded").is_none());
+    let complete = serde_json::to_value(read::Event::Complete {
+        frames_read: 7,
+        frames_matched: 1,
+        captured_bytes_read: 512,
+    })
+    .expect("read completion serializes");
+    assert_eq!(complete["event"], "complete");
+    assert_eq!(complete["captured_bytes_read"], 512);
+    let read::Event::Frame {
+        source_frame,
+        frame: raw_frame,
+        decoded: raw_decoded,
+    } = raw_record
+    else {
+        panic!("raw conversion must produce a frame event")
+    };
+    let read::Event::Frame {
+        source_frame: dissected_source_frame,
+        frame: dissected_frame,
+        decoded: decoded_stack,
+    } = dissected_record
+    else {
+        panic!("dissected conversion must produce a frame event")
+    };
+    assert_eq!(source_frame, 7);
+    assert_eq!(dissected_source_frame, 7);
+    assert!(raw_decoded.is_none());
+    assert_eq!(raw_frame.bytes(), dissected_frame.bytes());
+    let stack = decoded_stack.expect("dissection was requested");
     assert_eq!(stack.layout, decoded.layout);
     assert!(
         stack

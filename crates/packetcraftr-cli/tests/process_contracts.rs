@@ -164,11 +164,14 @@ fn protocols_dissect_and_ndjson_read_are_offline_and_structured() {
         .expect("temporary path must be UTF-8");
     let read = run_success(&["--output", "ndjson", "read", path, "--max-frames", "1"]);
     assert_no_terminal_style(&read.stdout);
-    let records = String::from_utf8(read.stdout).expect("NDJSON must be UTF-8");
-    assert_eq!(records.lines().count(), 1);
-    let record: Value = serde_json::from_str(records.trim()).expect("record must parse");
-    assert_eq!(record["mode"], "stream");
-    assert_eq!(record["sequence"], 0);
+    let records = parse_ndjson(&read);
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0]["mode"], "stream");
+    assert_eq!(records[0]["sequence"], 0);
+    assert_eq!(records[0]["result"]["event"], "frame");
+    assert_eq!(records[0]["result"]["source_frame"], 1);
+    assert_eq!(records[1]["sequence"], 1);
+    assert_eq!(records[1]["result"]["event"], "complete");
 }
 
 #[test]
@@ -390,6 +393,13 @@ fn runtime_stream_error_follows_every_preserved_record() {
     assert_contiguous_stream(&records);
     assert_eq!(records.len(), 2);
     assert_eq!(records[0]["status"], "success");
+    assert_eq!(records[0]["result"]["event"], "frame");
+    assert_eq!(records[0]["result"]["source_frame"], 1);
     assert_eq!(records[1]["status"], "error");
     assert_eq!(records[1]["sequence"], 1);
+    assert!(
+        records
+            .iter()
+            .all(|record| record["result"]["event"] != "complete")
+    );
 }

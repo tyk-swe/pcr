@@ -366,7 +366,7 @@
           "const": "read"
         },
         "result": {
-          "$ref": "#/$defs/frameResult"
+          "$ref": "#/$defs/readStreamResult"
         }
       },
       "required": [
@@ -1638,20 +1638,56 @@
       },
       "additionalProperties": false
     },
-    "frameResult": {
-      "type": "object",
-      "required": [
-        "frame"
-      ],
-      "properties": {
-        "frame": {
-          "$ref": "#/$defs/frame"
+    "readStreamResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "event",
+            "source_frame",
+            "frame"
+          ],
+          "properties": {
+            "event": {
+              "const": "frame"
+            },
+            "source_frame": {
+              "$ref": "#/$defs/sourceFrame"
+            },
+            "frame": {
+              "$ref": "#/$defs/frame"
+            },
+            "decoded": {
+              "$ref": "#/$defs/decodedStack"
+            }
+          },
+          "additionalProperties": false
         },
-        "decoded": {
-          "$ref": "#/$defs/decodedStack"
+        {
+          "type": "object",
+          "required": [
+            "event",
+            "frames_read",
+            "frames_matched",
+            "captured_bytes_read"
+          ],
+          "properties": {
+            "event": {
+              "const": "complete"
+            },
+            "frames_read": {
+              "$ref": "#/$defs/uint64"
+            },
+            "frames_matched": {
+              "$ref": "#/$defs/uint64"
+            },
+            "captured_bytes_read": {
+              "$ref": "#/$defs/uint64"
+            }
+          },
+          "additionalProperties": false
         }
-      },
-      "additionalProperties": false
+      ]
     },
     "captureStreamResult": {
       "oneOf": [
@@ -1659,11 +1695,15 @@
           "type": "object",
           "required": [
             "event",
+            "source_frame",
             "frame"
           ],
           "properties": {
             "event": {
               "const": "frame"
+            },
+            "source_frame": {
+              "$ref": "#/$defs/sourceFrame"
             },
             "frame": {
               "$ref": "#/$defs/frame"
@@ -1675,13 +1715,21 @@
           "type": "object",
           "required": [
             "event",
-            "frames"
+            "frames_captured",
+            "frames_matched",
+            "captured_bytes"
           ],
           "properties": {
             "event": {
               "const": "complete"
             },
-            "frames": {
+            "frames_captured": {
+              "$ref": "#/$defs/uint64"
+            },
+            "frames_matched": {
+              "$ref": "#/$defs/uint64"
+            },
+            "captured_bytes": {
               "$ref": "#/$defs/uint64"
             }
           },
@@ -4587,6 +4635,12 @@
     "uint64": {
       "type": "integer",
       "minimum": 0,
+      "maximum": 18446744073709551615
+    },
+    "sourceFrame": {
+      "description": "One-based source-frame identity supplied to display filters as frame.number; filtering does not renumber it.",
+      "type": "integer",
+      "minimum": 1,
       "maximum": 18446744073709551615
     }
   }

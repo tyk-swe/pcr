@@ -6,6 +6,7 @@
   "sequence": 0,
   "result": {
     "event": "frame",
+    "source_frame": 100,
     "frame": {
       "timestamp": {
         "unix_seconds": 1783555200,
@@ -25,21 +26,5 @@
       "severity": "warning",
       "message": "no root binding for link type 147"
     }
-  ],
-  "stats": {
-    "packets_attempted": 1,
-    "packets_completed": 1,
-    "bytes": 4,
-    "elapsed": {
-      "secs": 0,
-      "nanos": 250000
-    },
-    "capture": {
-      "received_frames": 1,
-      "received_bytes": 4,
-      "dropped_frames": 0,
-      "dropped_bytes": 0,
-      "overflow_events": 0
-    }
-  }
+  ]
 }

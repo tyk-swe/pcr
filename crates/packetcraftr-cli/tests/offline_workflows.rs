@@ -4,7 +4,12 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
+use std::time::UNIX_EPOCH;
 
+use packetcraftr::{
+    analysis::pcap::{Format as CaptureFormat, Writer},
+    core::frame::{Frame, LinkType},
+};
 use serde_json::Value;
 
 mod support;
@@ -78,6 +83,10 @@ fn assert_matches_published_schema(value: &Value) {
 }
 
 fn write_capture() -> tempfile::NamedTempFile {
+    write_capture_frames(&[UDP_CLIENT, UDP_SERVER, TCP_CLIENT, TCP_SERVER, TCP_DATA])
+}
+
+fn write_capture_frames(frames: &[&str]) -> tempfile::NamedTempFile {
     let mut file = tempfile::NamedTempFile::new().expect("temporary capture must open");
     file.write_all(&[
         0xd4, 0xc3, 0xb2, 0xa1, // little-endian microsecond PCAP
@@ -88,11 +97,7 @@ fn write_capture() -> tempfile::NamedTempFile {
     ])
     .expect("global header must write");
 
-    for (index, bytes) in [UDP_CLIENT, UDP_SERVER, TCP_CLIENT, TCP_SERVER, TCP_DATA]
-        .into_iter()
-        .map(decode_hex)
-        .enumerate()
-    {
+    for (index, bytes) in frames.iter().copied().map(decode_hex).enumerate() {
         let seconds = u32::try_from(index + 1).expect("fixture index fits u32");
         let length = u32::try_from(bytes.len()).expect("fixture frame fits u32");
         file.write_all(&seconds.to_le_bytes())
@@ -105,6 +110,38 @@ fn write_capture() -> tempfile::NamedTempFile {
             .expect("original length must write");
         file.write_all(&bytes).expect("frame bytes must write");
     }
+    file.flush().expect("capture must flush");
+    file
+}
+
+fn write_capture_with_later_missing_timestamp() -> tempfile::NamedTempFile {
+    let mut file = tempfile::NamedTempFile::new().expect("temporary capture must open");
+    {
+        let mut writer = Writer::new(&mut file, CaptureFormat::PcapNg, LinkType::IPV4)
+            .expect("PCAPNG writer must initialize");
+        let frame = Frame::new(UNIX_EPOCH, LinkType::IPV4, decode_hex(UDP_CLIENT))
+            .expect("timestamped fixture frame must be valid");
+        writer
+            .write_frame(&frame)
+            .expect("timestamped fixture frame must write");
+        writer.flush().expect("PCAPNG prefix must flush");
+    }
+    let bytes = decode_hex(UDP_SERVER);
+    let padded_length = bytes.len().next_multiple_of(4);
+    let block_length = u32::try_from(16 + padded_length).expect("fixture block length fits");
+    let original_length = u32::try_from(bytes.len()).expect("fixture frame length fits");
+    file.write_all(&3_u32.to_le_bytes())
+        .expect("simple packet type must write");
+    file.write_all(&block_length.to_le_bytes())
+        .expect("simple packet length must write");
+    file.write_all(&original_length.to_le_bytes())
+        .expect("simple packet original length must write");
+    file.write_all(&bytes)
+        .expect("simple packet payload must write");
+    file.write_all(&vec![0; padded_length - bytes.len()])
+        .expect("simple packet padding must write");
+    file.write_all(&block_length.to_le_bytes())
+        .expect("simple packet trailer must write");
     file.flush().expect("capture must flush");
     file
 }
@@ -325,12 +362,13 @@ fn read_rewrites_same_format_and_rejects_lossy_capture_output() {
         .lines()
         .map(|line| serde_json::from_str(line).expect("record must parse"))
         .collect();
-    assert_eq!(records.len(), 2);
+    assert_eq!(records.len(), 3);
     assert!(
-        records
+        records[..2]
             .iter()
             .all(|record| record["result"]["decoded"].is_object())
     );
+    assert_eq!(records[2]["result"]["event"], "complete");
 
     for format in ["text", "hex"] {
         let output = run(&["--output", format, "read", path, "--max-frames", "5"]);
@@ -360,6 +398,160 @@ fn read_rewrites_same_format_and_rejects_lossy_capture_output() {
         "{:?}",
         filtered.stderr
     );
+}
+
+#[test]
+fn read_ndjson_preserves_source_identity_and_always_completes() {
+    let capture = write_capture_frames(&[UDP_CLIENT, UDP_SERVER, TCP_CLIENT]);
+    let path = path_text(capture.path());
+    let output = run_success(&["--output", "ndjson", "read", path]);
+    let records = parse_ndjson(&output);
+    assert_contiguous_stream(&records);
+    assert_eq!(records.len(), 4);
+    for (index, record) in records[..3].iter().enumerate() {
+        assert_eq!(record["result"]["event"], "frame");
+        assert_eq!(
+            record["result"]["source_frame"],
+            u64::try_from(index + 1).expect("fixture index fits")
+        );
+        assert_matches_published_schema(record);
+    }
+    let complete = &records[3];
+    assert_eq!(complete["result"]["event"], "complete");
+    assert_eq!(complete["result"]["frames_read"], 3);
+    assert_eq!(complete["result"]["frames_matched"], 3);
+    assert_eq!(complete["result"]["captured_bytes_read"], 109);
+    assert_matches_published_schema(complete);
+
+    let filtered = run_success(&[
+        "--output",
+        "ndjson",
+        "read",
+        path,
+        "--filter",
+        "frame.number == 3",
+    ]);
+    let records = parse_ndjson(&filtered);
+    assert_contiguous_stream(&records);
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0]["sequence"], 0);
+    assert_eq!(records[0]["result"]["source_frame"], 3);
+    assert_eq!(records[1]["sequence"], 1);
+    assert_eq!(records[1]["result"]["frames_read"], 3);
+    assert_eq!(records[1]["result"]["frames_matched"], 1);
+    for record in &records {
+        assert_matches_published_schema(record);
+    }
+
+    let text = run_success(&["read", path, "--filter", "frame.number == 3"]);
+    assert!(String::from_utf8_lossy(&text.stdout).starts_with("3: "));
+}
+
+#[test]
+fn read_ndjson_completes_empty_and_fully_filtered_inputs_at_zero() {
+    let cases = [
+        (write_capture_frames(&[]), None, 0, 0),
+        (
+            write_capture_frames(&[UDP_CLIENT, UDP_SERVER, TCP_CLIENT]),
+            Some("frame.number == 4"),
+            3,
+            109,
+        ),
+    ];
+    for (capture, filter, frames_read, captured_bytes_read) in cases {
+        let path = path_text(capture.path());
+        let mut arguments = vec!["--output", "ndjson", "read", path];
+        if let Some(filter) = filter {
+            arguments.extend(["--filter", filter]);
+        }
+        let output = run_success(&arguments);
+        let records = parse_ndjson(&output);
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0]["sequence"], 0);
+        assert_eq!(records[0]["result"]["event"], "complete");
+        assert_eq!(records[0]["result"]["frames_read"], frames_read);
+        assert_eq!(records[0]["result"]["frames_matched"], 0);
+        assert_eq!(
+            records[0]["result"]["captured_bytes_read"],
+            captured_bytes_read
+        );
+        assert_matches_published_schema(&records[0]);
+    }
+}
+
+#[test]
+fn read_limits_account_for_filtered_source_input() {
+    let capture = write_capture_frames(&[UDP_CLIENT, UDP_SERVER, TCP_CLIENT]);
+    let path = path_text(capture.path());
+    let cases = [
+        vec![
+            "--output",
+            "ndjson",
+            "read",
+            path,
+            "--filter",
+            "frame.number == 3",
+            "--max-frames",
+            "2",
+        ],
+        vec![
+            "--output",
+            "ndjson",
+            "read",
+            path,
+            "--filter",
+            "frame.number == 3",
+            "--max-bytes",
+            "33",
+        ],
+    ];
+    for arguments in cases {
+        let output = run(&arguments);
+        assert!(!output.status.success());
+        let records = parse_ndjson(&output);
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0]["sequence"], 0);
+        assert_eq!(records[0]["status"], "error");
+        assert!(
+            records
+                .iter()
+                .all(|record| record["result"]["event"] != "complete")
+        );
+        assert_matches_published_schema(&records[0]);
+    }
+}
+
+#[test]
+fn read_missing_filter_timestamp_uses_source_identity_and_next_envelope_position() {
+    let capture = write_capture_with_later_missing_timestamp();
+    let output = run(&[
+        "--output",
+        "ndjson",
+        "read",
+        path_text(capture.path()),
+        "--filter",
+        "frame.time_epoch >= 0",
+    ]);
+    assert!(!output.status.success());
+    let records = parse_ndjson(&output);
+    assert_contiguous_stream(&records);
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0]["result"]["source_frame"], 1);
+    assert_eq!(records[1]["sequence"], 1);
+    assert_eq!(records[1]["status"], "error");
+    assert!(
+        records[1]["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("frame 2"))
+    );
+    assert!(
+        records
+            .iter()
+            .all(|record| record["result"]["event"] != "complete")
+    );
+    for record in &records {
+        assert_matches_published_schema(record);
+    }
 }
 
 #[test]

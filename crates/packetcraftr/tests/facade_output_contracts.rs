@@ -68,6 +68,16 @@ fn current_schema_and_published_examples_use_output_v1() {
             .as_str()
             .is_some_and(|description| description.contains("Zero-based ordinal"))
     );
+    assert_eq!(schema["$defs"]["sourceFrame"]["minimum"], 1);
+    assert!(
+        schema["$defs"]["sourceFrame"]["description"]
+            .as_str()
+            .is_some_and(|description| description.contains("frame.number"))
+    );
+    assert_eq!(
+        schema["$defs"]["readSuccess"]["properties"]["result"]["$ref"],
+        "#/$defs/readStreamResult"
+    );
     assert!(
         schema["$defs"]["routeDecision"]["properties"]["selection_reason"]["enum"]
             .as_array()

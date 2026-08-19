@@ -1,0 +1,30 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "capture",
+  "mode": "stream",
+  "status": "success",
+  "sequence": 1,
+  "result": {
+    "event": "complete",
+    "frames_captured": 100,
+    "frames_matched": 1,
+    "captured_bytes": 8042
+  },
+  "diagnostics": [],
+  "stats": {
+    "packets_attempted": 100,
+    "packets_completed": 1,
+    "bytes": 8042,
+    "elapsed": {
+      "secs": 0,
+      "nanos": 250000
+    },
+    "capture": {
+      "received_frames": 100,
+      "received_bytes": 8042,
+      "dropped_frames": 0,
+      "dropped_bytes": 0,
+      "overflow_events": 0
+    }
+  }
+}

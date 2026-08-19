@@ -1,0 +1,14 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "read",
+  "mode": "stream",
+  "status": "success",
+  "sequence": 1,
+  "result": {
+    "event": "complete",
+    "frames_read": 100,
+    "frames_matched": 1,
+    "captured_bytes_read": 8042
+  },
+  "diagnostics": []
+}

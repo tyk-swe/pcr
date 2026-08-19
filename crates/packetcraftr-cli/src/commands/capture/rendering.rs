@@ -31,10 +31,13 @@ pub(super) fn render_text<C: net::capture::Session>(
         limits,
         budget,
         selector,
-        |frame, sequence| {
+        |frame, source_frame| {
             let frame =
                 output::frame::Captured::try_from_frame(frame).map_err(CliError::classified)?;
-            write_stdout_line(format_args!("{sequence}: {}", captured_frame_text(&frame)))
+            write_stdout_line(format_args!(
+                "{source_frame}: {}",
+                captured_frame_text(&frame)
+            ))
         },
     )?;
     if selector.is_some() {
@@ -79,15 +82,24 @@ pub(super) fn render_stream<C: net::capture::Session>(
         limits,
         budget,
         selector,
-        |frame, _matched_index| {
+        |frame, source_frame| {
             let frame =
                 output::frame::Captured::try_from_frame(frame).map_err(CliError::classified)?;
-            stream.emit_data(output::capture::Event::Frame { frame }, Vec::new())
+            stream.emit_data(
+                output::capture::Event::Frame {
+                    source_frame,
+                    frame,
+                },
+                Vec::new(),
+            )
         },
     )?;
-    let frames = outcome.stats.packets_completed;
     stream.complete_with_stats(
-        output::capture::Event::Complete { frames },
+        output::capture::Event::Complete {
+            frames_captured: outcome.stats.packets_attempted,
+            frames_matched: outcome.stats.packets_completed,
+            captured_bytes: outcome.stats.bytes,
+        },
         outcome.diagnostics,
         outcome.stats,
     )
@@ -205,12 +217,14 @@ fn render_diagnostics(diagnostics: &[core::diagnostic::Diagnostic]) -> Result<()
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;
+    use std::sync::Arc;
     use std::time::UNIX_EPOCH;
 
     use packetcraftr::core::frame::Frame;
     use serde_json::Value;
 
     use super::*;
+    use crate::filtering::{self, Capabilities};
     use crate::rendering::ndjson_test_support::{assert_contiguous, stream};
 
     struct FakeSession {
@@ -269,6 +283,19 @@ mod tests {
         )
     }
 
+    fn assert_matches_published_schema(records: &[Value]) {
+        let schema: Value = serde_json::from_str(include_str!(
+            "../../../../../schemas/packetcraftr.output.v1.schema.json"
+        ))
+        .expect("published output schema must parse");
+        let validator = jsonschema::validator_for(&schema).expect("published schema must compile");
+        for record in records {
+            validator
+                .validate(record)
+                .expect("capture stream record must validate");
+        }
+    }
+
     #[test]
     fn capture_stream_success_is_contiguous_and_terminal() {
         let (limits, budget) = settings();
@@ -286,8 +313,48 @@ mod tests {
         let records = output.records();
         assert_contiguous(&records);
         assert_eq!(records.len(), 3);
+        assert_eq!(records[0]["result"]["source_frame"], 1);
+        assert_eq!(records[1]["result"]["source_frame"], 2);
         assert_eq!(records[2]["result"]["event"], "complete");
+        assert_eq!(records[2]["result"]["frames_captured"], 2);
+        assert_eq!(records[2]["result"]["frames_matched"], 2);
+        assert_eq!(records[2]["result"]["captured_bytes"], 2);
+        assert_matches_published_schema(&records);
         assert!(!stream.is_open());
+    }
+
+    #[test]
+    fn capture_selector_preserves_the_retained_source_frame() {
+        let registry = Arc::new(
+            core::protocol::builtin::registry().expect("built-in registry must initialize"),
+        );
+        let filter =
+            filtering::compile("frame.number == 3", &registry, Capabilities::frames_only())
+                .expect("frame-number selector must compile");
+        let selector = FrameSelector::new(registry, filter, 1);
+        let (limits, budget) = settings();
+        let (mut stream, output) = stream(output::contract::Command::Capture);
+
+        render_stream(
+            FakeSession::with_frames(3),
+            Duration::from_secs(1),
+            limits,
+            budget,
+            Some(&selector),
+            &mut stream,
+        )
+        .expect("filtered fake capture succeeds");
+
+        let records = output.records();
+        assert_contiguous(&records);
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0]["sequence"], 0);
+        assert_eq!(records[0]["result"]["source_frame"], 3);
+        assert_eq!(records[1]["sequence"], 1);
+        assert_eq!(records[1]["result"]["frames_captured"], 3);
+        assert_eq!(records[1]["result"]["frames_matched"], 1);
+        assert_eq!(records[1]["result"]["captured_bytes"], 3);
+        assert_matches_published_schema(&records);
     }
 
     #[test]
@@ -327,5 +394,11 @@ mod tests {
                 .as_str()
                 .is_some_and(|message| message.contains("cleanup failure"))
         );
+        assert!(
+            records
+                .iter()
+                .all(|record| record["result"]["event"] != "complete")
+        );
+        assert_matches_published_schema(&records);
     }
 }

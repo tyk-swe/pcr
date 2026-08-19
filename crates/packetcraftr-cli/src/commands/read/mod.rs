@@ -37,9 +37,9 @@ struct Decoding {
 
 #[derive(Default)]
 struct StreamState {
-    emitted: u64,
-    frames: u64,
-    captured_bytes: u64,
+    frames_read: u64,
+    frames_matched: u64,
+    captured_bytes_read: u64,
 }
 
 pub(super) fn run(
@@ -172,12 +172,22 @@ fn read_records(
 ) -> Result<(), CliError> {
     let mut state = StreamState::default();
     while let Some(frame) = reader.next_frame().map_err(CliError::classified)? {
-        let number = account_frame(&mut state, &frame, limits)?;
-        let Some(result) = convert_frame(frame, number, decoding, dissect, limits)? else {
+        let source_frame = account_frame(&mut state, &frame, limits)?;
+        let Some(event) = convert_frame(frame, source_frame, decoding, dissect, limits)? else {
             continue;
         };
-        render_record(&result, format, state.emitted, stream)?;
-        state.emitted = increment_counter(state.emitted, "read output record count")?;
+        render_record(&event, format, stream)?;
+        state.frames_matched = increment_counter(state.frames_matched, "read matched-frame count")?;
+    }
+    if format == output::contract::Format::Ndjson {
+        stream.complete(
+            output::read::Event::Complete {
+                frames_read: state.frames_read,
+                frames_matched: state.frames_matched,
+                captured_bytes_read: state.captured_bytes_read,
+            },
+            Vec::new(),
+        )?;
     }
     Ok(())
 }
@@ -187,23 +197,26 @@ fn account_frame(
     frame: &core::frame::Frame,
     limits: OfflineCaptureLimitsArgs,
 ) -> Result<u64, CliError> {
-    state.frames = increment_counter(state.frames, "read frame count")?;
-    if state.frames > limits.max_frames {
+    state.frames_read = increment_counter(state.frames_read, "read frame count")?;
+    if state.frames_read > limits.max_frames {
         return Err(CliError::classified(
             packetcraftr::analysis::pcap::Error::FrameLimitExceeded {
-                actual: state.frames,
+                actual: state.frames_read,
                 limit: limits.max_frames,
             },
         ));
     }
-    state.captured_bytes = state
-        .captured_bytes
+    state.captured_bytes_read = state
+        .captured_bytes_read
         .checked_add(u64::from(frame.captured_length()))
         .ok_or_else(|| stream_byte_error(u64::MAX, limits.max_bytes))?;
-    if state.captured_bytes > limits.max_bytes {
-        return Err(stream_byte_error(state.captured_bytes, limits.max_bytes));
+    if state.captured_bytes_read > limits.max_bytes {
+        return Err(stream_byte_error(
+            state.captured_bytes_read,
+            limits.max_bytes,
+        ));
     }
-    Ok(state.frames)
+    Ok(state.frames_read)
 }
 
 fn stream_byte_error(actual: u64, limit: u64) -> CliError {
@@ -214,13 +227,13 @@ fn stream_byte_error(actual: u64, limit: u64) -> CliError {
 
 fn convert_frame(
     frame: core::frame::Frame,
-    number: u64,
+    source_frame: u64,
     decoding: Option<&Decoding>,
     dissect: bool,
     limits: OfflineCaptureLimitsArgs,
-) -> Result<Option<output::read::Result>, CliError> {
+) -> Result<Option<output::read::Event>, CliError> {
     let Some(decoding) = decoding else {
-        return output::read::Result::try_from_frame(frame)
+        return output::read::Event::try_from_frame(source_frame, frame)
             .map(Some)
             .map_err(CliError::classified);
     };
@@ -229,11 +242,11 @@ fn convert_frame(
         .decode(frame.clone(), decode_options(limits.max_frame_bytes))
         .map_err(|source| CliError::new(3, source.to_string()))?;
     if let Some(filter) = &decoding.filter {
-        validate_filter_timestamp(filter, &frame, number)?;
+        validate_filter_timestamp(filter, &frame, source_frame)?;
         if !filter
             .matches(&core::filter::Context {
                 decoded: &decoded,
-                number,
+                number: source_frame,
                 tcp_stream: None,
                 udp_stream: None,
             })
@@ -243,9 +256,9 @@ fn convert_frame(
         }
     }
     if dissect {
-        output::read::Result::try_from_decoded(frame, &decoded)
+        output::read::Event::try_from_decoded(source_frame, frame, &decoded)
     } else {
-        output::read::Result::try_from_frame(frame)
+        output::read::Event::try_from_frame(source_frame, frame)
     }
     .map(Some)
     .map_err(CliError::classified)
@@ -254,7 +267,7 @@ fn convert_frame(
 fn validate_filter_timestamp(
     filter: &core::filter::Filter,
     frame: &core::frame::Frame,
-    number: u64,
+    source_frame: u64,
 ) -> Result<(), CliError> {
     if filter.requirements().timestamp && frame.timestamp.is_none() {
         return Err(CliError::from_classification(
@@ -263,7 +276,7 @@ fn validate_filter_timestamp(
                 Kind::Packet,
                 Some("remove frame.time_epoch from the filter or use timestamped packet blocks"),
             ),
-            format!("frame {number} has no timestamp required by frame.time_epoch"),
+            format!("frame {source_frame} has no timestamp required by frame.time_epoch"),
             Vec::new(),
         ));
     }

@@ -32,9 +32,9 @@ impl From<&packetcraftr::policy::Policy> for Budget {
 struct Progress {
     started: Instant,
     deadline: Instant,
-    frames: u64,
-    matched: u64,
-    bytes: u64,
+    frames_captured: u64,
+    frames_matched: u64,
+    captured_bytes: u64,
 }
 
 impl Progress {
@@ -46,9 +46,9 @@ impl Progress {
         Self {
             started,
             deadline,
-            frames: 0,
-            matched: 0,
-            bytes: 0,
+            frames_captured: 0,
+            frames_matched: 0,
+            captured_bytes: 0,
         }
     }
 }
@@ -100,7 +100,7 @@ where
     C: net::capture::Session,
     F: FnMut(Frame, u64) -> Result<(), CliError>,
 {
-    while progress.frames < budget.max_frames {
+    while progress.frames_captured < budget.max_frames {
         let Some(remaining) = progress.deadline.checked_duration_since(Instant::now()) else {
             break;
         };
@@ -115,20 +115,21 @@ where
             break;
         };
         account_bytes(progress, &frame, budget.max_bytes)?;
-        let number = increment(progress.frames, "capture frame count")?;
+        let source_frame = increment(progress.frames_captured, "capture frame count")?;
         if let Some(selector) = selector {
-            match selector.keep(number, &frame) {
+            match selector.keep(source_frame, &frame) {
                 Ok(true) => {}
                 Ok(false) => {
-                    progress.frames = number;
+                    progress.frames_captured = source_frame;
                     continue;
                 }
                 Err(error) => return Err(error),
             }
         }
-        emit(frame, progress.matched)?;
-        progress.matched = increment(progress.matched, "capture matched-frame count")?;
-        progress.frames = number;
+        emit(frame, source_frame)?;
+        progress.frames_matched =
+            increment(progress.frames_matched, "capture matched-frame count")?;
+        progress.frames_captured = source_frame;
     }
     Ok(())
 }
@@ -141,7 +142,7 @@ fn account_bytes(progress: &mut Progress, frame: &Frame, limit: u64) -> Result<(
         )
     })?;
     let bytes = progress
-        .bytes
+        .captured_bytes
         .checked_add(frame_bytes)
         .ok_or_else(|| CliError::new(70, "capture output byte accounting overflowed"))?;
     if bytes > limit {
@@ -152,7 +153,7 @@ fn account_bytes(progress: &mut Progress, frame: &Frame, limit: u64) -> Result<(
             },
         ));
     }
-    progress.bytes = bytes;
+    progress.captured_bytes = bytes;
     Ok(())
 }
 
@@ -176,9 +177,9 @@ fn finish<C: net::capture::Session>(
     Ok(Outcome {
         diagnostics,
         stats: output::envelope::Stats {
-            packets_attempted: progress.frames,
-            packets_completed: progress.matched,
-            bytes: progress.bytes,
+            packets_attempted: progress.frames_captured,
+            packets_completed: progress.frames_matched,
+            bytes: progress.captured_bytes,
             elapsed: progress.started.elapsed(),
             capture: statistics.into(),
         },

@@ -11,6 +11,13 @@ use super::frame::Captured;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum Event {
-    Frame { frame: Captured },
-    Complete { frames: u64 },
+    Frame {
+        source_frame: u64,
+        frame: Captured,
+    },
+    Complete {
+        frames_captured: u64,
+        frames_matched: u64,
+        captured_bytes: u64,
+    },
 }

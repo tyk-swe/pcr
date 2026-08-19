@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Output contract for the `read` command.
+//! Stream output for the `read` command.
 
 use packetcraftr_core::decode::DecodedPacket;
 use packetcraftr_core::frame::Frame as CaptureFrame;
@@ -12,19 +12,30 @@ use super::frame::Captured;
 
 use super::frame::Stack;
 
-/// One streamed result of `read`.
+/// One NDJSON event produced by `read`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Result {
-    pub frame: Captured,
-    /// Present only when the caller asked for dissection. Absent records are
-    /// byte-identical to those produced before `--dissect` existed.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub decoded: Option<Stack>,
+#[serde(tag = "event", rename_all = "snake_case")]
+pub enum Event {
+    Frame {
+        source_frame: u64,
+        frame: Captured,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        decoded: Option<Stack>,
+    },
+    Complete {
+        frames_read: u64,
+        frames_matched: u64,
+        captured_bytes_read: u64,
+    },
 }
 
-impl Result {
-    pub fn try_from_frame(frame: CaptureFrame) -> std::result::Result<Self, Error> {
-        Ok(Self {
+impl Event {
+    pub fn try_from_frame(
+        source_frame: u64,
+        frame: CaptureFrame,
+    ) -> std::result::Result<Self, Error> {
+        Ok(Self::Frame {
+            source_frame,
             frame: Captured::try_from_frame(frame)?,
             decoded: None,
         })
@@ -32,10 +43,12 @@ impl Result {
 
     /// Builds a record that also carries the frame's dissected layer stack.
     pub fn try_from_decoded(
+        source_frame: u64,
         frame: CaptureFrame,
         decoded: &DecodedPacket,
     ) -> std::result::Result<Self, Error> {
-        Ok(Self {
+        Ok(Self::Frame {
+            source_frame,
             frame: Captured::try_from_frame(frame)?,
             decoded: Some(Stack::from_decoded(decoded)),
         })

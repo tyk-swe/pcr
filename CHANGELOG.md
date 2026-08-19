@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** `read` NDJSON is now an explicit event stream ending in one
+  mandatory `complete` event with source frame, match, and captured-byte
+  counters. `read` and `capture` frame events expose the stable one-based
+  `source_frame` used by display filters as `frame.number`, while envelope
+  `sequence` remains the zero-based emitted-record ordinal. Capture completion
+  now distinguishes captured source frames, matched frames, and captured bytes.
 - Explicit packet and frame sources now take precedence over stdin, while
   missing interactive input fails immediately with command-specific guidance.
 - **Breaking:** NDJSON envelope `sequence` is now exclusively the contiguous,

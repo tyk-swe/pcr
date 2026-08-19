@@ -86,8 +86,8 @@ impl FrameSelector {
         }
     }
 
-    /// Decides whether the frame numbered `number` (1-based) is kept.
-    pub(crate) fn keep(&self, number: u64, frame: &Frame) -> Result<bool, CliError> {
+    /// Decides whether the one-based `source_frame` is kept.
+    pub(crate) fn keep(&self, source_frame: u64, frame: &Frame) -> Result<bool, CliError> {
         let decoded = self
             .decoder
             .decode(
@@ -101,7 +101,7 @@ impl FrameSelector {
         self.filter
             .matches(&Context {
                 decoded: &decoded,
-                number,
+                number: source_frame,
                 tcp_stream: None,
                 udp_stream: None,
             })

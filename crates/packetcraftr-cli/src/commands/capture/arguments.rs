@@ -13,6 +13,10 @@ Use core BPF keywords and numeric address, network, port, and protocol operands.
 
 The two filters use different languages and may be combined.
 
+Text and NDJSON frame records use the one-based post-BPF source frame position.
+Display-filter rejection does not renumber later source_frame values; NDJSON envelope
+sequence remains the zero-based emitted-record position.
+
 Examples:
   packetcraftr capture --packet 'ipv4(dst=192.0.2.53)/udp(dport=53)' --timeout-ms 1000
   packetcraftr capture \

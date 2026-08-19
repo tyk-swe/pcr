@@ -9,22 +9,29 @@ use crate::rendering::{
 };
 
 pub(super) fn render_record(
-    result: &output::read::Result,
+    event: &output::read::Event,
     format: output::contract::Format,
-    display_index: u64,
     stream: &mut NdjsonStream,
 ) -> Result<(), CliError> {
+    let output::read::Event::Frame {
+        source_frame,
+        frame,
+        decoded,
+    } = event
+    else {
+        unreachable!("read completion is rendered by the stream owner")
+    };
     match format {
-        output::contract::Format::Text => match &result.decoded {
+        output::contract::Format::Text => match decoded {
             None => write_stdout_line(format_args!(
-                "{display_index}: {}",
-                captured_frame_text(&result.frame)
+                "{source_frame}: {}",
+                captured_frame_text(frame)
             )),
             Some(decoded) => write_stdout_line(format_args!(
-                "{display_index}: dlt={} caplen={} wirelen={} layers={} {}",
-                result.frame.link_type,
-                result.frame.captured_length,
-                result.frame.original_length,
+                "{source_frame}: dlt={} caplen={} wirelen={} layers={} {}",
+                frame.link_type,
+                frame.captured_length,
+                frame.original_length,
                 decoded
                     .packet
                     .layers
@@ -32,13 +39,11 @@ pub(super) fn render_record(
                     .map(|layer| layer.protocol.as_str())
                     .collect::<Vec<_>>()
                     .join("/"),
-                spaced_hex(result.frame.bytes())
+                spaced_hex(frame.bytes())
             )),
         },
-        output::contract::Format::Hex => {
-            write_plain_line(format_args!("{}", result.frame.bytes_hex()))
-        }
-        output::contract::Format::Ndjson => stream.emit_data(result, Vec::new()),
+        output::contract::Format::Hex => write_plain_line(format_args!("{}", frame.bytes_hex())),
+        output::contract::Format::Ndjson => stream.emit_data(event, Vec::new()),
         _ => unreachable!("read format is checked before command dispatch"),
     }
 }

@@ -24,27 +24,53 @@ pub(crate) fn checksum_parts(parts: &[&[u8]]) -> u16 {
 /// Accumulates 16-bit Internet Checksum (RFC 1071) over contiguous or chunked byte slices.
 #[derive(Debug, Clone, Default)]
 pub struct ChecksumAccumulator {
-    sum: u64,
+    sum: u128,
     pending_high_byte: Option<u8>,
 }
 
 impl ChecksumAccumulator {
     /// Adds byte slice to the checksum accumulator.
+    ///
+    /// Performance: Processes bytes in 64-bit (8-byte) chunks instead of 16-bit (2-byte) chunks.
+    /// RFC 1071 allows accumulating 16-bit big-endian words via 64-bit word additions because
+    /// carry propagation in 64-bit addition matches ones' complement 16-bit word addition modulo (2^16 - 1).
+    /// Using `u128` for `self.sum` prevents overflow during 64-bit chunk accumulation.
     pub fn add(&mut self, bytes: &[u8]) {
         let mut bytes = bytes;
         if let Some(high) = self.pending_high_byte {
             let Some((&low, remaining)) = bytes.split_first() else {
                 return;
             };
-            self.sum += u64::from(u16::from_be_bytes([high, low]));
+            self.sum += u128::from(u16::from_be_bytes([high, low]));
             bytes = remaining;
             self.pending_high_byte = None;
         }
-        let mut chunks = bytes.chunks_exact(2);
-        for chunk in &mut chunks {
-            self.sum += u64::from(u16::from_be_bytes([chunk[0], chunk[1]]));
+
+        // Process 8-byte chunks (64 bits) for up to 4x speedup on large byte slices.
+        let mut chunks8 = bytes.chunks_exact(8);
+        for chunk in &mut chunks8 {
+            #[expect(
+                clippy::indexing_slicing,
+                reason = "chunks_exact(8) yields slices of length exactly 8"
+            )]
+            let arr = [
+                chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], chunk[6], chunk[7],
+            ];
+            self.sum += u128::from(u64::from_be_bytes(arr));
         }
-        self.pending_high_byte = chunks.remainder().first().copied();
+
+        let remainder = chunks8.remainder();
+        let mut chunks2 = remainder.chunks_exact(2);
+        for chunk in &mut chunks2 {
+            #[expect(
+                clippy::indexing_slicing,
+                reason = "chunks_exact(2) yields slices of length exactly 2"
+            )]
+            let arr = [chunk[0], chunk[1]];
+            self.sum += u128::from(u16::from_be_bytes(arr));
+        }
+
+        self.pending_high_byte = chunks2.remainder().first().copied();
     }
 
     /// Finalizes and returns the 16-bit Internet Checksum.
@@ -52,7 +78,7 @@ impl ChecksumAccumulator {
         let sum = self.sum
             + self
                 .pending_high_byte
-                .map_or(0, |high| u64::from(high) << 8);
+                .map_or(0, |high| u128::from(high) << 8);
         fold_checksum(sum)
     }
 }
@@ -61,7 +87,9 @@ impl ChecksumAccumulator {
     clippy::cast_possible_truncation,
     reason = "the loop only exits once sum >> 16 is zero, so sum is at most 0xffff"
 )]
-fn fold_checksum(mut sum: u64) -> u16 {
+fn fold_checksum(mut sum: u128) -> u16 {
+    sum = (sum & 0xffff_ffff_ffff_ffff) + (sum >> 64);
+    sum = (sum & 0xffff_ffff) + (sum >> 32);
     while (sum >> 16) != 0 {
         sum = (sum & 0xffff) + (sum >> 16);
     }

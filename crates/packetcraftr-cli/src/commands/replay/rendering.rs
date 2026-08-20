@@ -263,7 +263,7 @@ fn render_capture_record<W: Write>(
         .write_source_frame(
             evidence.source_interface_id,
             evidence.capture_interface,
-            evidence.frame,
+            &evidence.frame,
         )
         .map_err(|source| {
             packetcraftr::replay::Error::output_at_source_index(source_index, source.to_string())

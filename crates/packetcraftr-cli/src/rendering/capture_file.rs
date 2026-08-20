@@ -23,17 +23,22 @@ pub(crate) fn capture_file_format(format: output::contract::Format) -> Result<Fo
     }
 }
 
-pub(crate) fn write_capture_file(
+pub(crate) fn write_capture_file<I, B>(
     format: output::contract::Format,
-    frames: impl IntoIterator<Item = Frame>,
-) -> Result<(), CliError> {
+    frames: I,
+) -> Result<(), CliError>
+where
+    I: IntoIterator<Item = B>,
+    B: std::borrow::Borrow<Frame>,
+{
     write_raw(&encode(format, frames)?)
 }
 
-fn encode(
-    format: output::contract::Format,
-    frames: impl IntoIterator<Item = Frame>,
-) -> Result<Vec<u8>, CliError> {
+fn encode<I, B>(format: output::contract::Format, frames: I) -> Result<Vec<u8>, CliError>
+where
+    I: IntoIterator<Item = B>,
+    B: std::borrow::Borrow<Frame>,
+{
     let format = capture_file_format(format)?;
     let mut frames = frames.into_iter();
     let first = frames.next().ok_or_else(|| {
@@ -43,23 +48,26 @@ fn encode(
         )
     })?;
     let writer = match format {
-        Format::Pcap => Writer::new(Vec::new(), format, first.link_type),
+        Format::Pcap => Writer::new(Vec::new(), format, first.borrow().link_type),
         Format::PcapNg => Writer::pcapng(Vec::new()),
     }
     .map_err(|source| CliError::new(5, format!("initialize capture output failed: {source}")))?;
     let mut output = CaptureWriter::for_link_types(writer);
-    for mut frame in std::iter::once(first).chain(frames) {
+    for frame in std::iter::once(first).chain(frames) {
+        let frame = frame.borrow();
         output.add_link_type(frame.link_type).map_err(|source| {
             CliError::new(5, format!("initialize capture interface failed: {source}"))
         })?;
         // Classic PCAP cannot carry an interface ID; PCAPNG uses the
         // stable per-link-type mapping.
-        if format == Format::Pcap {
+        if format == Format::Pcap && frame.interface.is_some() {
+            let mut frame = frame.clone();
             frame.interface = None;
+            output.write_link_mapped(&frame)
+        } else {
+            output.write_link_mapped(frame)
         }
-        output
-            .write_link_mapped(frame)
-            .map_err(|source| CliError::new(5, format!("write capture output failed: {source}")))?;
+        .map_err(|source| CliError::new(5, format!("write capture output failed: {source}")))?;
     }
     Ok(output.into_inner())
 }

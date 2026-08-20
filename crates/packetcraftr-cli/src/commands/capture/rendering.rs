@@ -118,7 +118,7 @@ where
         };
     let outcome = execution::run(capture, timeout, limits, budget, selector, |frame, _| {
         writer
-            .write_on_link_type(link_type, frame)
+            .write_on_link_type(link_type, &frame)
             .map_err(|source| CliError::new(5, format!("write capture output failed: {source}")))
     })?;
     writer

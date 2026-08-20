@@ -84,19 +84,32 @@ impl<W: Write> CaptureWriter<W> {
     }
 
     /// Writes a generated frame, mapping each PCAPNG link type once.
-    pub(crate) fn write_link_mapped(&mut self, mut frame: Frame) -> Result<(), Error> {
-        frame.interface = self.add_link_type(frame.link_type)?;
-        self.writer.write_frame(&frame)
+    pub(crate) fn write_link_mapped(&mut self, frame: &Frame) -> Result<(), Error> {
+        let interface = self.add_link_type(frame.link_type)?;
+        if frame.interface == interface {
+            self.writer.write_frame(frame)
+        } else {
+            let mut frame = frame.clone();
+            frame.interface = interface;
+            self.writer.write_frame(&frame)
+        }
     }
 
     /// Writes a frame on an eagerly chosen link-type interface.
     pub(crate) fn write_on_link_type(
         &mut self,
         link_type: LinkType,
-        mut frame: Frame,
+        frame: &Frame,
     ) -> Result<(), Error> {
-        frame.interface = self.add_link_type(link_type)?;
-        self.writer.write_frame(&frame)
+        let interface = self.add_link_type(link_type)?;
+        if frame.link_type == link_type && frame.interface == interface {
+            self.writer.write_frame(frame)
+        } else {
+            let mut frame = frame.clone();
+            frame.link_type = link_type;
+            frame.interface = interface;
+            self.writer.write_frame(&frame)
+        }
     }
 
     /// Registers one declared interface and returns its output ID.
@@ -133,10 +146,26 @@ impl<W: Write> CaptureWriter<W> {
         &mut self,
         source_id: Option<u32>,
         description: Interface,
-        mut frame: Frame,
+        frame: &Frame,
     ) -> Result<(), Error> {
-        frame.interface = self.add_source_interface(source_id, description)?;
-        self.writer.write_frame(&frame)
+        if self.format() == Format::Pcap {
+            if frame.interface.is_some() {
+                let mut frame = frame.clone();
+                frame.interface = None;
+                self.writer.write_frame(&frame)
+            } else {
+                self.writer.write_frame(frame)
+            }
+        } else {
+            let interface_id = self.add_source_interface(source_id, description)?;
+            if frame.interface == interface_id {
+                self.writer.write_frame(frame)
+            } else {
+                let mut frame = frame.clone();
+                frame.interface = interface_id;
+                self.writer.write_frame(&frame)
+            }
+        }
     }
 
     pub(crate) fn flush(&mut self) -> Result<(), Error> {
@@ -187,10 +216,10 @@ mod tests {
         assert_eq!(output.add_link_type(LinkType::ETHERNET).unwrap(), Some(0));
         assert_eq!(output.add_link_type(LinkType::ETHERNET).unwrap(), Some(0));
         output
-            .write_link_mapped(frame(LinkType::ETHERNET, 1))
+            .write_link_mapped(&frame(LinkType::ETHERNET, 1))
             .expect("Ethernet frame");
         output
-            .write_on_link_type(LinkType::IPV4, frame(LinkType::IPV4, 2))
+            .write_on_link_type(LinkType::IPV4, &frame(LinkType::IPV4, 2))
             .expect("IPv4 frame");
         output.flush().expect("memory writer flushes");
 
@@ -234,21 +263,21 @@ mod tests {
             .write_source_frame(
                 Some(7),
                 interface(LinkType::ETHERNET, 64),
-                frame(LinkType::ETHERNET, 1),
+                &frame(LinkType::ETHERNET, 1),
             )
             .expect("first source frame");
         output
             .write_source_frame(
                 Some(7),
                 interface(LinkType::ETHERNET, 128),
-                frame(LinkType::ETHERNET, 2),
+                &frame(LinkType::ETHERNET, 2),
             )
             .expect("repeated source frame");
         output
             .write_source_frame(
                 None,
                 interface(LinkType::IPV4, 256),
-                frame(LinkType::IPV4, 3),
+                &frame(LinkType::IPV4, 3),
             )
             .expect("source without an ID");
 
@@ -278,10 +307,10 @@ mod tests {
 
         assert_eq!(output.add_link_type(LinkType::ETHERNET).unwrap(), None);
         output
-            .write_link_mapped(frame(LinkType::ETHERNET, 1))
+            .write_link_mapped(&frame(LinkType::ETHERNET, 1))
             .expect("first frame fits");
         assert!(matches!(
-            output.write_link_mapped(frame(LinkType::ETHERNET, 2)),
+            output.write_link_mapped(&frame(LinkType::ETHERNET, 2)),
             Err(Error::FrameLimitExceeded {
                 actual: 2,
                 limit: 1

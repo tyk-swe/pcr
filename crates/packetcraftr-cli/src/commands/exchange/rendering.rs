@@ -33,15 +33,15 @@ pub(super) fn render_capture(
     let mut frames = result
         .sent
         .iter()
-        .map(|sent| sent.frame().clone())
+        .map(|sent| sent.frame())
         .chain(
             result
                 .responses
                 .iter()
-                .map(|response| response.response.frame.clone()),
+                .map(|response| &response.response.frame),
         )
-        .chain(result.unsolicited.iter().map(|packet| packet.frame.clone()))
-        .chain(result.undecoded.iter().cloned())
+        .chain(result.unsolicited.iter().map(|packet| &packet.frame))
+        .chain(result.undecoded.iter())
         .collect::<Vec<_>>();
     frames.sort_by_key(|frame| frame.timestamp);
     write_capture_file(format, frames)

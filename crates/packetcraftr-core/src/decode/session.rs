@@ -102,7 +102,7 @@ impl<'registry> DecodeSession<'registry> {
                     break;
                 }
             };
-            let layer = self.validate_layer(codec.as_ref(), &cursor, decoded)?;
+            let layer = Self::validate_layer(codec.as_ref(), &cursor, decoded)?;
             self.preserve_trailing_bytes(&cursor, &layer, allow_link_padding);
             let child = self.select_child(&layer);
             let next = self.commit_layer(cursor, layer, child)?;
@@ -177,7 +177,6 @@ impl<'registry> DecodeSession<'registry> {
     }
 
     fn validate_layer(
-        &self,
         codec: &dyn LayerCodec,
         cursor: &DecodeCursor,
         mut decoded: DecodedLayerValue,

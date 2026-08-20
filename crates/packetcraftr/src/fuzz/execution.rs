@@ -47,7 +47,6 @@ pub(super) fn validate_execution(
     case: &Case,
     execution: &Execution,
     max_packet_bytes: usize,
-    _timeout: Duration,
     deadline: &Deadline,
 ) -> Result<(), Error> {
     if execution.stats.packets_attempted != 1 || execution.stats.packets_completed != 1 {

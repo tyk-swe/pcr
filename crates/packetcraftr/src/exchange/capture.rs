@@ -53,7 +53,7 @@ impl<C: Session> Transaction<C> {
         F: FnMut(super::Event) -> Result<(), crate::BoundaryError>,
     {
         for _ in 0..self.capture_limits.max_frames {
-            self.ensure_drain_deadline(enforced_deadline)?;
+            Self::ensure_drain_deadline(enforced_deadline)?;
             let Some(frame) = self.capture.inner.next_captured_frame(Duration::ZERO)? else {
                 return Ok(ProcessOutcome::Continue);
             };
@@ -138,10 +138,7 @@ impl<C: Session> Transaction<C> {
             .promote_workflow_unsolicited(context, matches_request)
     }
 
-    fn ensure_drain_deadline(
-        &self,
-        enforced_deadline: Option<Instant>,
-    ) -> Result<(), OperationError> {
+    fn ensure_drain_deadline(enforced_deadline: Option<Instant>) -> Result<(), OperationError> {
         if enforced_deadline
             .is_some_and(|deadline| deadline.checked_duration_since(Instant::now()).is_none())
         {

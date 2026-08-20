@@ -489,7 +489,7 @@ where
             || enforce_deadline(deadline),
         )?;
         let Some(candidate) = best else {
-            return Ok(self.probe_evidence(
+            return Ok(Self::probe_evidence(
                 probe,
                 ProbeOutcome {
                     status: ProbeStatus::Timeout,
@@ -513,7 +513,7 @@ where
             &mut self.state.diagnostics,
         )
         .then(|| candidate.decoded.frame.clone());
-        Ok(self.probe_evidence(
+        Ok(Self::probe_evidence(
             probe,
             ProbeOutcome {
                 status: ProbeStatus::Response,
@@ -528,7 +528,7 @@ where
         ))
     }
 
-    fn probe_evidence(&self, probe: &Probe, outcome: ProbeOutcome) -> ProbeEvidence {
+    fn probe_evidence(probe: &Probe, outcome: ProbeOutcome) -> ProbeEvidence {
         ProbeEvidence {
             sequence: probe.sequence,
             address: probe.address,

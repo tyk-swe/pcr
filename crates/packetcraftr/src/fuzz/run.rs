@@ -398,7 +398,6 @@ impl ExecutionPhase<'_> {
             case,
             &execution,
             self.request.limits.max_packet_bytes,
-            self.live.timeout,
             &self.deadline,
         )?;
         add_execution_stats(&mut self.stats, &execution.stats, case.index)?;

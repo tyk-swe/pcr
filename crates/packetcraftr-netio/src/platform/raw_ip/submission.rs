@@ -181,11 +181,6 @@ pub(super) fn validate_platform_support(packet: &PreparedRawIp) -> Result<(), Li
     Ok(())
 }
 
-#[cfg(not(target_os = "macos"))]
-pub(super) fn validate_platform_support(_packet: &PreparedRawIp) -> Result<(), LiveIoError> {
-    Ok(())
-}
-
 pub(super) fn raw_error(operation: &'static str, source: io::Error) -> RawSocketError {
     RawSocketError { operation, source }
 }

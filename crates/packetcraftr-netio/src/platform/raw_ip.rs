@@ -13,13 +13,16 @@ use super::super::{
 };
 
 use preparation::prepare;
-use submission::{map_raw_error, send, validate_platform_support};
+#[cfg(target_os = "macos")]
+use submission::validate_platform_support;
+use submission::{map_raw_error, send};
 
 mod preparation;
 mod submission;
 
 pub(super) fn send_layer3(frame: Layer3Frame<'_>) -> Result<IoSendReport, LiveIoError> {
     let packet = prepare(frame)?;
+    #[cfg(target_os = "macos")]
     validate_platform_support(&packet)?;
     let submission = Submission::start();
     let actual = send(&packet).map_err(|error| map_raw_error(&packet.interface, error))?;

@@ -225,6 +225,14 @@ impl<T> Aggregate<T> {
         }
     }
 
+    #[must_use]
+    pub fn with_stats(mut self, stats: Stats) -> Self {
+        self.stats = Some(stats);
+        self
+    }
+}
+
+impl Aggregate<()> {
     pub fn error(command: Option<Command>, error: Error) -> Self {
         Self {
             schema: SCHEMA_V1,
@@ -234,12 +242,6 @@ impl<T> Aggregate<T> {
             diagnostics: Vec::new(),
             stats: None,
         }
-    }
-
-    #[must_use]
-    pub fn with_stats(mut self, stats: Stats) -> Self {
-        self.stats = Some(stats);
-        self
     }
 }
 

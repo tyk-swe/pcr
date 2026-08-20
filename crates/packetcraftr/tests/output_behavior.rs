@@ -174,7 +174,7 @@ fn envelopes_convert_diagnostics_errors_and_statistics() {
     assert_eq!(classified.kind, Kind::Packet);
     assert!(classified.remediation.is_some());
 
-    let aggregate: Aggregate<()> = Aggregate::error(Some(Command::Build), classified.clone());
+    let aggregate = Aggregate::error(Some(Command::Build), classified.clone());
     let value = serde_json::to_value(aggregate).expect("error aggregate serializes");
     assert_eq!(value["status"], "error");
     assert_eq!(value["error"]["code"], "packet.timestamp_range");

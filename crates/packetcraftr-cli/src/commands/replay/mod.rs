@@ -9,7 +9,6 @@ mod execution;
 mod rendering;
 
 use std::fs::File;
-use std::sync::Arc;
 use std::time::Duration;
 
 use packetcraftr::{analysis::pcap::Reader, netio as net, output};
@@ -18,7 +17,7 @@ use self::arguments::Args;
 use super::registry;
 use crate::command_options::OfflineCaptureLimitsArgs;
 use crate::errors::CliError;
-use crate::filtering::{self, Capabilities, FrameSelector};
+use crate::filtering::FrameSelector;
 use crate::input::{open_capture, validate_capture_stream_limits};
 use crate::rendering::NdjsonStream;
 
@@ -106,7 +105,7 @@ fn prepare(arguments: &Args) -> Result<Prepared, CliError> {
     )?;
     let timing = timing(arguments)?;
     let registry = registry()?;
-    let filter = prepare_filter(
+    let filter = FrameSelector::compile_optional(
         arguments.filter.as_deref(),
         &registry,
         arguments.max_frame_bytes,
@@ -148,21 +147,4 @@ fn prepare(arguments: &Args) -> Result<Prepared, CliError> {
         requested_interface,
         max_interfaces: arguments.max_interfaces,
     })
-}
-
-fn prepare_filter(
-    source: Option<&str>,
-    registry: &Arc<packetcraftr::core::registry::Registry>,
-    max_frame_bytes: usize,
-) -> Result<Option<FrameSelector>, CliError> {
-    source
-        .map(|source| {
-            let filter = filtering::compile(source, registry, Capabilities::frames_only())?;
-            Ok(FrameSelector::new(
-                Arc::clone(registry),
-                filter,
-                max_frame_bytes,
-            ))
-        })
-        .transpose()
 }

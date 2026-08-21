@@ -16,7 +16,7 @@ use packetcraftr::{netio as net, netio::capture::Provider as _, output};
 use self::arguments::Args;
 use super::registry;
 use crate::errors::CliError;
-use crate::filtering::{self, Capabilities, FrameSelector};
+use crate::filtering::FrameSelector;
 use crate::rendering::NdjsonStream;
 use crate::system::{client, prepare_route};
 
@@ -43,7 +43,8 @@ pub(super) fn run(
         .validate()
         .map_err(CliError::classified)?;
     let registry = registry()?;
-    let selector = prepare_selector(filter.as_deref(), &registry, limits.snap_length)?;
+    let selector =
+        FrameSelector::compile_optional(filter.as_deref(), &registry, limits.snap_length)?;
     let request = prepare_route(route, policy.into_policy(), &registry)?;
     let budget = Budget::from(&request.policy);
     let client = client(Arc::clone(&registry), request.policy);
@@ -93,21 +94,4 @@ pub(super) fn run(
         }
         _ => unreachable!("capture format is checked before command dispatch"),
     }
-}
-
-fn prepare_selector(
-    source: Option<&str>,
-    registry: &Arc<packetcraftr::core::registry::Registry>,
-    max_frame_bytes: usize,
-) -> Result<Option<FrameSelector>, CliError> {
-    source
-        .map(|source| {
-            let filter = filtering::compile(source, registry, Capabilities::frames_only())?;
-            Ok(FrameSelector::new(
-                Arc::clone(registry),
-                filter,
-                max_frame_bytes,
-            ))
-        })
-        .transpose()
 }

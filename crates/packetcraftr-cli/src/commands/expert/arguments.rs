@@ -27,12 +27,12 @@ pub(crate) enum Severity {
     Error,
 }
 
-impl Severity {
-    pub(crate) const fn rank(self) -> u8 {
-        match self {
-            Self::Info => 1,
-            Self::Warning => 2,
-            Self::Error => 3,
+impl From<packetcraftr::core::diagnostic::Severity> for Severity {
+    fn from(value: packetcraftr::core::diagnostic::Severity) -> Self {
+        match value {
+            packetcraftr::core::diagnostic::Severity::Info => Self::Info,
+            packetcraftr::core::diagnostic::Severity::Warning => Self::Warning,
+            packetcraftr::core::diagnostic::Severity::Error => Self::Error,
         }
     }
 }

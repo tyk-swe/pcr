@@ -24,6 +24,15 @@ pub(crate) enum Timing {
     Immediate,
 }
 
+impl From<Timing> for packetcraftr::replay::Timing {
+    fn from(value: Timing) -> Self {
+        match value {
+            Timing::Original => Self::Original,
+            Timing::Immediate => Self::Immediate,
+        }
+    }
+}
+
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
     /// Classic PCAP or PCAPNG input path.

@@ -25,10 +25,7 @@ pub(super) fn timing(arguments: &Args) -> Result<packetcraftr::replay::Timing, C
         }
         packetcraftr::replay::Timing::Scaled(1.0 / speed)
     } else {
-        match arguments.timing {
-            Timing::Original => packetcraftr::replay::Timing::Original,
-            Timing::Immediate => packetcraftr::replay::Timing::Immediate,
-        }
+        arguments.timing.into()
     };
     timing.validate().map_err(CliError::classified)
 }

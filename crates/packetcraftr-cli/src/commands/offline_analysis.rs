@@ -38,14 +38,9 @@ pub(super) fn prepare(
         capture.max_interfaces,
     )?;
     let registry = registry()?;
-    let filter = match filter_source {
-        Some(source) => Some(filtering::compile(
-            source,
-            &registry,
-            Capabilities::stream_capable(),
-        )?),
-        None => None,
-    };
+    let filter = filter_source
+        .map(|source| filtering::compile(source, &registry, Capabilities::stream_capable()))
+        .transpose()?;
     let limits = analysis::Limits {
         max_frames: capture.max_frames,
         max_bytes: capture.max_bytes,

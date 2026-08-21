@@ -17,12 +17,7 @@ fn matches_selector(
     min_severity: Severity,
     codes: &[String],
 ) -> bool {
-    let finding_rank = match finding.severity {
-        packetcraftr::core::diagnostic::Severity::Info => 1,
-        packetcraftr::core::diagnostic::Severity::Warning => 2,
-        packetcraftr::core::diagnostic::Severity::Error => 3,
-    };
-    if finding_rank < min_severity.rank() {
+    if Severity::from(finding.severity) < min_severity {
         return false;
     }
     if !codes.is_empty() && !codes.iter().any(|c| c == &finding.code) {

@@ -46,7 +46,7 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
         output::contract::Format::Text => render_text(arguments.table, &report, &summary),
         output::contract::Format::Json => {
             let result = output::stats::Result::try_from_report(
-                table(arguments.table),
+                arguments.table.into(),
                 &report,
                 summary.frames_read,
             )
@@ -54,16 +54,6 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
             emit_aggregate(output::contract::Command::Stats, result, Vec::new())
         }
         _ => unreachable!("the format contract admits only text and json"),
-    }
-}
-
-fn table(table: Table) -> output::stats::Table {
-    match table {
-        Table::Conversations => output::stats::Table::Conversations,
-        Table::Endpoints => output::stats::Table::Endpoints,
-        Table::Protocols => output::stats::Table::Protocols,
-        Table::Ports => output::stats::Table::Ports,
-        Table::Io => output::stats::Table::Io,
     }
 }
 

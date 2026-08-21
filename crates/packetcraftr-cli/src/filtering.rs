@@ -71,6 +71,7 @@ pub(crate) fn compile(
 /// Evaluates a compiled filter against complete bounded frames.
 ///
 /// Undissectable frames are errors rather than silent mismatches.
+#[derive(Debug)]
 pub(crate) struct FrameSelector {
     decoder: core::decode::Dissector,
     filter: Filter,
@@ -84,6 +85,20 @@ impl FrameSelector {
             filter,
             max_frame_bytes,
         }
+    }
+
+    /// Compiles an optional display filter into a [`FrameSelector`].
+    pub(crate) fn compile_optional(
+        source: Option<&str>,
+        registry: &Arc<Registry>,
+        max_frame_bytes: usize,
+    ) -> Result<Option<Self>, CliError> {
+        source
+            .map(|source| {
+                let filter = compile(source, registry, Capabilities::frames_only())?;
+                Ok(Self::new(Arc::clone(registry), filter, max_frame_bytes))
+            })
+            .transpose()
     }
 
     /// Decides whether the one-based `source_frame` is kept.
@@ -216,5 +231,31 @@ mod tests {
                 error.classification.remediation
             );
         }
+    }
+
+    #[test]
+    fn compile_optional_handles_none_valid_and_invalid_filters() {
+        let registry = registry();
+        let none_selector = FrameSelector::compile_optional(None, &registry, 14)
+            .expect("absent filter compiles to None");
+        assert!(none_selector.is_none());
+
+        let some_selector = FrameSelector::compile_optional(Some("frame.len == 14"), &registry, 14)
+            .expect("valid filter compiles to Some")
+            .expect("selector is present");
+        let frame = Frame::new(UNIX_EPOCH, LinkType::ETHERNET, vec![0_u8; 14])
+            .expect("bounded Ethernet frame");
+        assert!(some_selector.keep(1, &frame).expect("frame dissects"));
+
+        let stream_error = FrameSelector::compile_optional(Some("tcp.stream == 1"), &registry, 14)
+            .expect_err("stream field rejected under frames_only capability");
+        assert_eq!(
+            stream_error.classification.code,
+            "cli.filter_unsupported_field"
+        );
+
+        let syntax_error = FrameSelector::compile_optional(Some("(ethernet"), &registry, 14)
+            .expect_err("malformed filter rejected");
+        assert_eq!(syntax_error.classification.code, "cli.filter");
     }
 }

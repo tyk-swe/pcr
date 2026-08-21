@@ -26,14 +26,11 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
     let registry = registry()?;
     // A bad filter fails before any input is read, so it cannot leave the
     // command waiting on standard input for frame bytes it would never use.
-    let filter = match arguments.filter.as_deref() {
-        Some(source) => Some(filtering::compile(
-            source,
-            &registry,
-            Capabilities::frames_only(),
-        )?),
-        None => None,
-    };
+    let filter = arguments
+        .filter
+        .as_deref()
+        .map(|source| filtering::compile(source, &registry, Capabilities::frames_only()))
+        .transpose()?;
     let bytes = match (arguments.hex, arguments.file) {
         (Some(value), None) => core::protocol::raw::parse_hex(&value)
             .map_err(|source| CliError::new(2, source.to_string()))?

@@ -25,6 +25,18 @@ pub(crate) enum Table {
     Io,
 }
 
+impl From<Table> for packetcraftr::output::stats::Table {
+    fn from(value: Table) -> Self {
+        match value {
+            Table::Conversations => Self::Conversations,
+            Table::Endpoints => Self::Endpoints,
+            Table::Protocols => Self::Protocols,
+            Table::Ports => Self::Ports,
+            Table::Io => Self::Io,
+        }
+    }
+}
+
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
     /// Classic PCAP or PCAPNG input path.

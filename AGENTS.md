@@ -4,11 +4,9 @@
 - Prefer self-explanatory code with clear, descriptive names and obvious control flow.
 - Avoid comments. Add them only when necessary to explain an unavoidable non-obvious workaround or genuinely complex algorithm.
 - Use `pnpm`.
-- Keep functions under 100 lines and source files under 30 KB.
 - Avoid unnecessary wrappers, facades, indirection, and speculative abstractions.
 - Prefer the simplest structure that clearly expresses intent.
-- Do not make maintainability more complex
-- Be token efficent. Be efficent when reading large logs or shell outputs which uses expensive input tokens. And reduce expensive cache token usage by parallel tool calls.
+- Adhere to YAGNI, KISS, DRY
 
 
 # Repository Guidelines

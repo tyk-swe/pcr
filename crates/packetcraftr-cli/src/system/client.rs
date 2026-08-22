@@ -9,6 +9,12 @@ type PacketIo = net::transmit::Dispatch<net::transmit::SystemLayer2, net::transm
 type ExchangeIo = (PacketIo, net::capture::SystemProvider);
 pub(crate) type Client =
     WorkflowClient<net::route::SystemProvider, net::neighbor::SystemResolver, ExchangeIo>;
+pub(crate) type Exchange<'a> = packetcraftr::ExchangeExecutor<
+    'a,
+    net::route::SystemProvider,
+    net::neighbor::SystemResolver,
+    ExchangeIo,
+>;
 
 pub(crate) fn client(
     registry: Arc<core::registry::Registry>,

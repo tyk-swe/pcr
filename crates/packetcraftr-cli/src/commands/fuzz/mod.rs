@@ -4,7 +4,6 @@
 //! Fuzz CLI command logic.
 
 pub(super) mod arguments;
-mod execution;
 mod rendering;
 
 use std::sync::Arc;
@@ -19,7 +18,7 @@ use crate::input::read_recipe;
 use crate::rendering::NdjsonStream;
 use crate::system::{DeferredInterface, client, exchange, validate_selector};
 
-use execution::Executor;
+use super::execution::Executor;
 
 struct PreparedLive {
     options: packetcraftr::fuzz::LiveOptions,

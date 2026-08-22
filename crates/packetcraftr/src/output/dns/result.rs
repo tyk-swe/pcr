@@ -14,30 +14,7 @@ use super::super::envelope::Stats;
 use super::super::frame::{Captured, Timestamp};
 use super::record::{Edns, Record, RejectedRecord, Section};
 
-/// Output-v1 DNS terminal outcome.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Outcome {
-    Response,
-    Truncated,
-    Timeout,
-    Unrelated,
-    DecodeFailure,
-    NetworkFailure,
-}
-
-impl From<crate::dns::Outcome> for Outcome {
-    fn from(value: crate::dns::Outcome) -> Self {
-        match value {
-            crate::dns::Outcome::Response => Self::Response,
-            crate::dns::Outcome::Truncated => Self::Truncated,
-            crate::dns::Outcome::Timeout => Self::Timeout,
-            crate::dns::Outcome::Unrelated => Self::Unrelated,
-            crate::dns::Outcome::DecodeFailure => Self::DecodeFailure,
-            crate::dns::Outcome::NetworkFailure => Self::NetworkFailure,
-        }
-    }
-}
+pub use crate::dns::Outcome;
 
 /// Aggregate result of `dns`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -114,7 +91,7 @@ impl ResponseFields {
         fields.rejected_records = rejected_records
             .into_iter()
             .map(|record| RejectedRecord {
-                section: record.section.into(),
+                section: record.section,
                 index: record.index,
                 owner: record.owner,
                 type_code: record.type_code,
@@ -180,7 +157,7 @@ impl Result {
                 query_type: query_type.to_string(),
                 transaction_id,
                 transport: "udp".to_owned(),
-                outcome: outcome.into(),
+                outcome,
                 response_code: response_fields.response_code,
                 response_code_name: response_fields.response_code_name,
                 edns: response_fields.edns,
@@ -209,7 +186,7 @@ fn try_from_attempt(evidence: crate::dns::AttemptEvidence) -> std::result::Resul
         attempt: evidence.attempt,
         server_address: evidence.server_address,
         source_port: evidence.source_port,
-        status: evidence.status.into(),
+        status: evidence.status,
         sent_at: evidence.sent_at.try_into()?,
         received_at: evidence.received_at.map(Timestamp::try_from).transpose()?,
         latency: evidence.latency,
@@ -344,7 +321,7 @@ impl Event {
                     server_port: context.server_port,
                     query_name: context.query_name.to_string(),
                     query_type: context.query_type.to_string(),
-                    section: section.into(),
+                    section,
                     record: Record::from_record(record),
                 },
                 Vec::new(),
@@ -361,7 +338,7 @@ impl Event {
                     query_name: context.query_name.to_string(),
                     query_type: context.query_type.to_string(),
                     record: RejectedRecord {
-                        section: record.section.into(),
+                        section: record.section,
                         index: record.index,
                         owner: record.owner,
                         type_code: record.type_code,
@@ -392,7 +369,7 @@ impl Event {
                 query_type: summary.query_type.to_string(),
                 transaction_id: summary.transaction_id,
                 transport: "udp".to_owned(),
-                outcome: summary.outcome.into(),
+                outcome: summary.outcome,
                 response_code: response.response_code,
                 response_code_name: response.response_code_name,
                 edns: response.edns,

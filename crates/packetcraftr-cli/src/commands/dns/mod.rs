@@ -5,7 +5,6 @@
 
 pub(super) mod arguments;
 mod conversion;
-mod execution;
 mod rendering;
 
 use std::sync::Arc;
@@ -20,7 +19,7 @@ use crate::input::parse_target;
 use crate::rendering::NdjsonStream;
 use crate::system::{DeferredInterface, client, exchange, validate_selector};
 
-use execution::Executor;
+use super::execution::Executor;
 
 pub(super) fn run(
     arguments: Args,

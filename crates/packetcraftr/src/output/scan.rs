@@ -14,47 +14,7 @@ use super::contract::Error;
 use super::envelope::Stats;
 use super::frame::{Captured, Timestamp};
 
-/// Output-v1 scan classification.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Classification {
-    Open,
-    Closed,
-    Filtered,
-    Unreachable,
-    Unknown,
-    Timeout,
-}
-
-impl From<crate::scan::Classification> for Classification {
-    fn from(value: crate::scan::Classification) -> Self {
-        match value {
-            crate::scan::Classification::Open => Self::Open,
-            crate::scan::Classification::Closed => Self::Closed,
-            crate::scan::Classification::Filtered => Self::Filtered,
-            crate::scan::Classification::Unreachable => Self::Unreachable,
-            crate::scan::Classification::Unknown => Self::Unknown,
-            crate::scan::Classification::Timeout => Self::Timeout,
-        }
-    }
-}
-
-/// Output-v1 scan-probe status.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ProbeStatus {
-    Response,
-    Timeout,
-}
-
-impl From<crate::scan::ProbeStatus> for ProbeStatus {
-    fn from(value: crate::scan::ProbeStatus) -> Self {
-        match value {
-            crate::scan::ProbeStatus::Response => Self::Response,
-            crate::scan::ProbeStatus::Timeout => Self::Timeout,
-        }
-    }
-}
+pub use crate::scan::{Classification, ProbeStatus};
 
 /// One canonical scan probe record used by aggregate and stream output.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -122,7 +82,7 @@ impl Result {
                     address: endpoint.address,
                     transport: endpoint.transport.to_string(),
                     port: endpoint.port,
-                    classification: endpoint.classification.into(),
+                    classification: endpoint.classification,
                     probes: probe_outputs,
                 })
             })
@@ -207,8 +167,8 @@ fn try_from_probe(evidence: crate::scan::ProbeEvidence) -> std::result::Result<P
         destination: evidence.address,
         destination_port: evidence.port,
         attempt: evidence.attempt,
-        status: evidence.status.into(),
-        classification: evidence.classification.into(),
+        status: evidence.status,
+        classification: evidence.classification,
         responder: evidence.responder,
         sent_at: evidence.sent_at.try_into()?,
         received_at: evidence.received_at.map(Timestamp::try_from).transpose()?,

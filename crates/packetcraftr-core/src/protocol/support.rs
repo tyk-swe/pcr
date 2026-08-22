@@ -1,6 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Built-in codec and capture-root capability information.
+//!
+//! [`BUILTIN_PROTOCOLS`] distinguishes construction, dissection, exact round
+//! trips, response matching, and decode-only support. [`BUILTIN_CAPTURE_ROOTS`]
+//! lists the default registry's numeric capture bindings.
+
 //! Public built-in codec and capture-root capability tables.
 
 use crate::semantics::{BuiltinProtocol, builtin_protocol_catalog};

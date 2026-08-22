@@ -3,41 +3,13 @@
 
 //! DNS record, EDNS, and section output contracts.
 
-use std::fmt;
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 use serde::Serialize;
 
 use super::super::hex::compact_hex;
 
-/// Output-v1 DNS section.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Section {
-    Answer,
-    Authority,
-    Additional,
-}
-
-impl From<crate::dns::Section> for Section {
-    fn from(value: crate::dns::Section) -> Self {
-        match value {
-            crate::dns::Section::Answer => Self::Answer,
-            crate::dns::Section::Authority => Self::Authority,
-            crate::dns::Section::Additional => Self::Additional,
-        }
-    }
-}
-
-impl fmt::Display for Section {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(match self {
-            Self::Answer => "answer",
-            Self::Authority => "authority",
-            Self::Additional => "additional",
-        })
-    }
-}
+pub use crate::dns::Section;
 
 /// Typed DNS record data; unknown records preserve exact RDATA as hexadecimal.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

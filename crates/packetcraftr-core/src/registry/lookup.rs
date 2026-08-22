@@ -139,11 +139,4 @@ impl Registry {
     pub fn filter_field(&self, path: &str) -> Option<&FilterFieldBinding> {
         self.filter_fields.get(&path.trim().to_ascii_lowercase())
     }
-
-    /// Every registered display-filter path, in lexicographic order.
-    pub fn filter_fields(&self) -> impl ExactSizeIterator<Item = (&str, &FilterFieldBinding)> {
-        self.filter_fields
-            .iter()
-            .map(|(path, binding)| (path.as_str(), binding))
-    }
 }

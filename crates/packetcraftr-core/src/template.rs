@@ -1,11 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Bounded packet templates.
+
 use thiserror::Error;
 
-use super::super::Packet;
-use super::super::field::FieldValue;
-use super::super::layer::FieldError;
+use crate::Packet;
+use crate::field::FieldValue;
+use crate::layer::FieldError;
 
 pub const DEFAULT_MAX_TEMPLATE_PACKETS: usize = 10_000;
 

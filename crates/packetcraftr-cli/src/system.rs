@@ -13,4 +13,4 @@ pub(crate) use interface::{DeferredInterface, validate_selector};
 
 pub(crate) use route::prepare_route;
 
-pub(crate) use client::{Client, client};
+pub(crate) use client::{Client, Exchange, client};

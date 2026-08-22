@@ -71,60 +71,24 @@ pub(crate) fn style_human_line(value: &str) -> String {
             _ => None,
         };
         if let Some(style) = style {
-            return format!("{style}{prefix}{style:#}{}", style_key_value_labels(rest));
+            return format!("{style}{prefix}{style:#}{rest}");
         }
     }
 
     if let Some(rest) = value.strip_prefix("error:") {
         let style = error_style();
-        return format!("{style}error:{style:#}{}", style_key_value_labels(rest));
+        return format!("{style}error:{style:#}{rest}");
     }
     if let Some(rest) = value.strip_prefix("warning:") {
         let style = warning_style();
-        return format!("{style}warning:{style:#}{}", style_key_value_labels(rest));
+        return format!("{style}warning:{style:#}{rest}");
     }
-    style_key_value_labels(value)
+    value.to_owned()
 }
 
 fn split_leading_token(value: &str) -> Option<(&str, &str)> {
     let split = value.find(|character: char| character.is_whitespace())?;
     Some((&value[..split], &value[split..]))
-}
-
-fn style_key_value_labels(value: &str) -> String {
-    let bytes = value.as_bytes();
-    let mut rendered = String::with_capacity(value.len());
-    let mut copied = 0;
-    let mut index = 0;
-    while index < bytes.len() {
-        let starts_key = bytes[index].is_ascii_alphabetic() || bytes[index] == b'_';
-        let boundary =
-            index == 0 || matches!(bytes[index - 1], b' ' | b',' | b'(' | b'[' | b'{' | b':');
-        if starts_key && boundary {
-            let mut end = index + 1;
-            while end < bytes.len()
-                && (bytes[end].is_ascii_alphanumeric() || matches!(bytes[end], b'_' | b'-' | b'.'))
-            {
-                end += 1;
-            }
-            if bytes.get(end) == Some(&b'=') {
-                rendered.push_str(&value[copied..index]);
-                let style = key_style();
-                rendered.push_str(&format!("{style}{}{style:#}", &value[index..end]));
-                rendered.push('=');
-                copied = end + 1;
-                index = copied;
-                continue;
-            }
-        }
-        let character = value[index..]
-            .chars()
-            .next()
-            .expect("index remains on a UTF-8 boundary");
-        index += character.len_utf8();
-    }
-    rendered.push_str(&value[copied..]);
-    rendered
 }
 
 pub(crate) fn style_document(value: &str) -> String {
@@ -183,10 +147,6 @@ fn info_style() -> Style {
 
 fn heading_style() -> Style {
     Style::new().fg_color(Some(AnsiColor::Cyan.into())).bold()
-}
-
-fn key_style() -> Style {
-    Style::new().fg_color(Some(AnsiColor::Cyan.into()))
 }
 
 fn muted_style() -> Style {

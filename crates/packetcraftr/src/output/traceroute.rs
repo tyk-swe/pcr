@@ -14,62 +14,7 @@ use super::contract::Error;
 use super::envelope::Stats;
 use super::frame::{Captured, Timestamp};
 
-/// Output-v1 traceroute-probe status.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ProbeStatus {
-    Response,
-    Timeout,
-}
-
-impl From<crate::traceroute::ProbeStatus> for ProbeStatus {
-    fn from(value: crate::traceroute::ProbeStatus) -> Self {
-        match value {
-            crate::traceroute::ProbeStatus::Response => Self::Response,
-            crate::traceroute::ProbeStatus::Timeout => Self::Timeout,
-        }
-    }
-}
-
-/// Output-v1 traceroute response classification.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ResponseKind {
-    Intermediate,
-    DestinationReached,
-    Unreachable,
-}
-
-impl From<crate::traceroute::ResponseKind> for ResponseKind {
-    fn from(value: crate::traceroute::ResponseKind) -> Self {
-        match value {
-            crate::traceroute::ResponseKind::Intermediate => Self::Intermediate,
-            crate::traceroute::ResponseKind::DestinationReached => Self::DestinationReached,
-            crate::traceroute::ResponseKind::Unreachable => Self::Unreachable,
-        }
-    }
-}
-
-/// Output-v1 traceroute completion reason.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Completion {
-    DestinationReached,
-    Unreachable,
-    MaximumHops,
-    Timeout,
-}
-
-impl From<crate::traceroute::Completion> for Completion {
-    fn from(value: crate::traceroute::Completion) -> Self {
-        match value {
-            crate::traceroute::Completion::DestinationReached => Self::DestinationReached,
-            crate::traceroute::Completion::Unreachable => Self::Unreachable,
-            crate::traceroute::Completion::MaximumHops => Self::MaximumHops,
-            crate::traceroute::Completion::Timeout => Self::Timeout,
-        }
-    }
-}
+pub use crate::traceroute::{Completion, ProbeStatus, ResponseKind};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Probe {
@@ -169,7 +114,7 @@ impl Result {
                 destination_port,
                 hops: hop_outputs,
                 undecoded: undecoded_outputs,
-                completion: completion.into(),
+                completion,
             },
             diagnostics,
             stats.into(),
@@ -236,7 +181,7 @@ impl Event {
                 destination: summary.destination,
                 strategy: summary.strategy.to_string(),
                 destination_port: summary.destination_port,
-                completion: summary.completion.into(),
+                completion: summary.completion,
             },
             summary.diagnostics,
             summary.stats.into(),
@@ -252,8 +197,8 @@ fn try_from_probe(probe: crate::traceroute::ProbeEvidence) -> std::result::Resul
         strategy: probe.strategy.to_string(),
         destination: probe.destination,
         destination_port: probe.destination_port,
-        status: probe.status.into(),
-        response_kind: probe.response_kind.map(Into::into),
+        status: probe.status,
+        response_kind: probe.response_kind,
         responder: probe.responder,
         sent_at: probe.sent_at.try_into()?,
         received_at: probe.received_at.map(Timestamp::try_from).transpose()?,

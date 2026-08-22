@@ -35,52 +35,44 @@ pub(crate) fn system_route(
 
 #[cfg(all(
     feature = "native-route",
-    not(any(target_os = "linux", target_os = "macos", windows))
-))]
-pub(crate) fn system_route(
-    _destination: IpAddr,
-    _interface_hint: Option<&InterfaceId>,
-    _preferred_source: Option<IpAddr>,
-) -> Result<Decision, SystemError> {
-    Err(SystemError::Unsupported {
-        message: "native route selection is unsupported on this target".to_owned(),
-    })
-}
-
-#[cfg(not(feature = "native-route"))]
-pub(crate) fn system_route(
-    _destination: IpAddr,
-    _interface_hint: Option<&InterfaceId>,
-    _preferred_source: Option<IpAddr>,
-) -> Result<Decision, SystemError> {
-    Err(SystemError::Unsupported {
-        message: "enable the native-route feature for passive operating-system route selection"
-            .to_owned(),
-    })
-}
-
-#[cfg(all(
-    feature = "native-route",
     any(target_os = "linux", target_os = "macos", windows)
 ))]
 pub(crate) fn system_interface_route(interface: &InterfaceId) -> Result<Decision, SystemError> {
     native::interface_route(interface)
 }
 
-#[cfg(all(
+#[cfg(not(all(
     feature = "native-route",
-    not(any(target_os = "linux", target_os = "macos", windows))
-))]
-pub(crate) fn system_interface_route(_interface: &InterfaceId) -> Result<Decision, SystemError> {
-    Err(SystemError::Unsupported {
-        message: "native interface selection is unsupported on this target".to_owned(),
-    })
+    any(target_os = "linux", target_os = "macos", windows)
+)))]
+pub(crate) fn system_route(
+    _destination: IpAddr,
+    _interface_hint: Option<&InterfaceId>,
+    _preferred_source: Option<IpAddr>,
+) -> Result<Decision, SystemError> {
+    Err(unsupported("route selection"))
 }
 
-#[cfg(not(feature = "native-route"))]
+#[cfg(not(all(
+    feature = "native-route",
+    any(target_os = "linux", target_os = "macos", windows)
+)))]
 pub(crate) fn system_interface_route(_interface: &InterfaceId) -> Result<Decision, SystemError> {
-    Err(SystemError::Unsupported {
-        message: "enable the native-route feature for passive operating-system interface selection"
-            .to_owned(),
-    })
+    Err(unsupported("interface selection"))
+}
+
+/// Distinguishes a target that has no native implementation from a build that
+/// simply left the feature off, so the message names the actionable cause.
+#[cfg(not(all(
+    feature = "native-route",
+    any(target_os = "linux", target_os = "macos", windows)
+)))]
+fn unsupported(capability: &str) -> SystemError {
+    SystemError::Unsupported {
+        message: if cfg!(feature = "native-route") {
+            format!("native {capability} is unsupported on this target")
+        } else {
+            format!("enable the native-route feature for passive operating-system {capability}")
+        },
+    }
 }

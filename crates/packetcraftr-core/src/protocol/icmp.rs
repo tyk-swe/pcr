@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Internet Control Message Protocol models.
+
 use std::collections::BTreeMap;
 
 use bytes::Bytes;
@@ -12,12 +14,12 @@ use crate::{
     layer::{Layer, reflective_layer},
 };
 
-use super::super::common::{
+use super::common::{
     ValueExpectation, checksum, checksum_parts, ensure_encode_budget, invalid, make_layer,
     payload_without_padding, protocol, resolve_u16, transport_checksum, transport_checksum_parts,
     truncated, wrong_layer,
 };
-use super::super::network::resolve_envelope;
+use super::network::resolve_envelope;
 
 const ICMP_MIN_LEN: usize = 4;
 

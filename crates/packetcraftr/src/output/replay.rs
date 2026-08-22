@@ -29,25 +29,7 @@ impl From<packetcraftr_core::analysis::pcap::Format> for SourceFormat {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Timing {
-    Original,
-    Scaled(f64),
-    FixedRate(f64),
-    Immediate,
-}
-
-impl From<crate::replay::Timing> for Timing {
-    fn from(value: crate::replay::Timing) -> Self {
-        match value {
-            crate::replay::Timing::Original => Self::Original,
-            crate::replay::Timing::Scaled(scale) => Self::Scaled(scale),
-            crate::replay::Timing::FixedRate(rate) => Self::FixedRate(rate),
-            crate::replay::Timing::Immediate => Self::Immediate,
-        }
-    }
-}
+pub use crate::replay::Timing;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Interface {
@@ -107,7 +89,7 @@ impl Result {
     ) -> Self {
         Self {
             source_format: summary.source_format.into(),
-            timing: summary.timing.into(),
+            timing: summary.timing,
             requested_interface: requested_interface.into(),
             requested_link_mode: requested_link_mode.into(),
             frames_read: summary.frames_read,

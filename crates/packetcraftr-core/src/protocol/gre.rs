@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Generic Routing Encapsulation protocol model.
+
 use std::collections::BTreeMap;
 
 use crate::{
@@ -11,7 +13,7 @@ use crate::{
     registry::Discriminator,
 };
 
-use super::super::common::{
+use super::common::{
     ValueExpectation, checksum, checksum_parts, ensure_encode_budget,
     expected_discriminator_for_value, invalid, make_layer, payload_without_padding, protocol,
     resolve_u16, strict_or_diagnostic, truncated, validate_auto_raw_discriminator,

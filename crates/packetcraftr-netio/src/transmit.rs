@@ -142,14 +142,6 @@ impl Timing {
         self.started
     }
 
-    pub fn completed(self) -> TimeMarker {
-        self.completed
-    }
-
-    pub fn exact_commit(self) -> Option<TimeMarker> {
-        self.exact.then_some(self.completed)
-    }
-
     /// Earliest marker after which a capture is proven to follow acceptance.
     pub fn freshness_marker(self) -> TimeMarker {
         self.completed

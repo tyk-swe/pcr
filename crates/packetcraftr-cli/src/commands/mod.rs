@@ -16,6 +16,7 @@ mod capture;
 mod dissect;
 mod dns;
 mod exchange;
+mod execution;
 mod expert;
 mod follow;
 mod fuzz;

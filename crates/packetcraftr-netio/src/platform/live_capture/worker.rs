@@ -25,17 +25,6 @@ pub(super) fn transfer_capture_worker(
     stop: Arc<AtomicBool>,
     interrupt: Option<Arc<dyn super::CaptureInterrupt>>,
 ) {
-    transfer_capture_worker_with_callback(worker, stop, interrupt, || {});
-}
-
-fn transfer_capture_worker_with_callback<F>(
-    worker: JoinHandle<()>,
-    stop: Arc<AtomicBool>,
-    interrupt: Option<Arc<dyn super::CaptureInterrupt>>,
-    after_join: F,
-) where
-    F: FnOnce() + Send + 'static,
-{
     let _ = thread::Builder::new()
         .name("packetcraftr-capture-reaper".to_owned())
         .spawn(move || {
@@ -47,7 +36,6 @@ fn transfer_capture_worker_with_callback<F>(
                 thread::park_timeout(REAPER_POLL_INTERVAL);
             }
             let _ = worker.join();
-            after_join();
         })
         .expect("could not start the native capture worker reaper");
 }

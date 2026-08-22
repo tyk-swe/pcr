@@ -16,8 +16,8 @@ use self::arguments::Args;
 use super::registry;
 use crate::errors::CliError;
 use crate::input::parse_target;
-use crate::rendering::NdjsonStream;
-use crate::system::{DeferredInterface, client, exchange, validate_selector};
+use crate::rendering::{NdjsonStream, emit_aggregate_with_stats};
+use crate::system::{client, exchange, validate_selector};
 
 use super::execution::Executor;
 
@@ -89,7 +89,7 @@ pub(super) fn run(
     let mut executor = Executor {
         client: client(Arc::clone(&registry), policy.clone()),
         exchange,
-        interface: DeferredInterface::new(route.interface),
+        interface: route.interface,
     };
     let resolver = packetcraftr::target::SystemResolver;
     let mut authorizer = packetcraftr::target::PolicyAuthorizer::new(&policy, &resolver);
@@ -123,7 +123,12 @@ fn execute_and_render(
             if format == output::contract::Format::Text {
                 rendering::render_text(result, diagnostics, stats)
             } else {
-                rendering::render_aggregate(result, diagnostics, stats)
+                emit_aggregate_with_stats(
+                    output::contract::Command::Scan,
+                    result,
+                    diagnostics,
+                    stats,
+                )
             }
         }
         output::contract::Format::Ndjson => {

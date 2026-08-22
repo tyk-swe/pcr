@@ -508,10 +508,11 @@ fn expressions_and_documents_round_trip_and_enforce_resource_bounds() {
         Err(document::Error::UnknownProtocol { .. })
     ));
     assert!(matches!(
-        document::Packet::parse_with_nesting_limit(
+        document::Packet::parse_with_resource_limits(
             &json,
             document::Format::Json,
             json.len(),
+            packetcraftr_core::build::DEFAULT_MAX_LAYERS,
             document::MAX_DOCUMENT_NESTING + 1,
         ),
         Err(document::Error::InvalidLimit { .. })

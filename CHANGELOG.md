@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** Removed the redundant
+  `document::Packet::parse_with_nesting_limit` and `CaptureRecord::frame`
+  convenience APIs; use `parse_with_resource_limits` and the public `frame`
+  field. Fuzz output no longer exposes the never-produced `sent` and `error`
+  case outcomes, and exact output vocabularies reuse their canonical domain
+  types without changing serialized values.
+- Simplified live packet preparation to rebuild after link materialization and
+  run Linux netlink operations on bounded per-call worker threads. Removed the
+  unmeasured Ethernet byte-patching and namespace-worker caches while retaining
+  finite deadlines and timed-out worker reaping.
 - **Breaking:** Removed undocumented serialization and introspection scaffolding
   from native-I/O models, fuzz campaigns/results, and `StreamEncoder`; versioned
   `output` models remain the serialization source of truth. Live fuzz cases now

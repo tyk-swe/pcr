@@ -70,16 +70,6 @@ where
     C: CaptureProvider,
 {
     fn resolve(&self, request: &Request) -> Result<Resolution, Error> {
-        self.resolve_active(request)
-    }
-}
-
-impl<L, C> ActiveResolver<L, C>
-where
-    L: Layer2Io,
-    C: CaptureProvider,
-{
-    fn resolve_active(&self, request: &Request) -> Result<Resolution, Error> {
         validate_request(request)?;
         let cache_key = NeighborCacheKey::from(request);
         if let Some(mac_address) = self.cache.get(&cache_key)? {
@@ -163,7 +153,13 @@ where
             capture_statistics: validated_statistics,
         })
     }
+}
 
+impl<L, C> ActiveResolver<L, C>
+where
+    L: Layer2Io,
+    C: CaptureProvider,
+{
     fn exchange<S: CaptureSession>(
         &self,
         request: &Request,

@@ -1,19 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Namespace-aware netlink worker, cache, channel, and runtime lifecycle.
+//! Bounded route-netlink execution on a caller-namespace worker thread.
 
 #![forbid(unsafe_code)]
 
 use std::{
-    any::Any,
-    cell::RefCell,
-    fs,
     future::Future,
-    os::unix::fs::MetadataExt,
-    panic::{AssertUnwindSafe, catch_unwind},
-    pin::Pin,
-    sync::mpsc::{self, Receiver, Sender, SyncSender},
+    sync::mpsc::{self, SyncSender},
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
@@ -33,364 +27,58 @@ where
     Fut: Future<Output = Result<T, SystemError>> + Send + 'static,
     T: Send + 'static,
 {
-    with_netlink_for_namespace(current_network_namespace(), operation)
-}
-
-pub(super) fn with_netlink_for_namespace<F, Fut, T>(
-    namespace: Option<NetworkNamespaceId>,
-    operation: F,
-) -> Result<T, SystemError>
-where
-    F: FnOnce(Handle) -> Fut + Send + 'static,
-    Fut: Future<Output = Result<T, SystemError>> + Send + 'static,
-    T: Send + 'static,
-{
-    match namespace {
-        Some(namespace) => with_netlink_in_namespace(namespace, operation),
-        None => {
-            // Without namespace metadata, do not cache workers; fresh threads inherit the caller's namespace.
-            NETLINK_WORKER.with(|worker| retire_cached_worker(&mut worker.borrow_mut()))?;
-            with_uncached_netlink(operation)
-        }
-    }
-}
-
-pub(super) fn with_netlink_in_namespace<F, Fut, T>(
-    namespace: NetworkNamespaceId,
-    operation: F,
-) -> Result<T, SystemError>
-where
-    F: FnOnce(Handle) -> Fut + Send + 'static,
-    Fut: Future<Output = Result<T, SystemError>> + Send + 'static,
-    T: Send + 'static,
-{
-    NETLINK_WORKER.with(|worker| {
-        let mut worker = worker.borrow_mut();
-        if worker
-            .as_ref()
-            .is_none_or(|worker| worker.namespace != namespace)
-        {
-            // Replace workers created in another per-thread network namespace.
-            retire_cached_worker(&mut worker)?;
-            *worker = Some(NetlinkWorker::start(namespace)?);
-        }
-        let result = worker
-            .as_ref()
-            .expect("the netlink worker was initialized above")
-            .execute(operation);
-        match result {
-            Ok(value) => Ok(value),
-            Err(NetlinkExecutionError::Operation(error)) => Err(error),
-            Err(NetlinkExecutionError::Worker(error)) => {
-                // A broken channel makes this worker unusable. Retire it before
-                // the slot is reused; a finite cleanup timeout transfers any
-                // unfinished thread to the reaper.
-                match retire_cached_worker(&mut worker) {
-                    Err(cleanup_error) => Err(cleanup_error),
-                    Ok(()) => Err(error),
-                }
-            }
-        }
-    })
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct NetworkNamespaceId {
-    pub(super) device: u64,
-    pub(super) inode: u64,
-}
-
-pub(super) fn current_network_namespace() -> Option<NetworkNamespaceId> {
-    let metadata = fs::metadata("/proc/thread-self/ns/net").ok()?;
-    Some(NetworkNamespaceId {
-        device: metadata.dev(),
-        inode: metadata.ino(),
-    })
-}
-
-fn with_uncached_netlink<F, Fut, T>(operation: F) -> Result<T, SystemError>
-where
-    F: FnOnce(Handle) -> Fut + Send + 'static,
-    Fut: Future<Output = Result<T, SystemError>> + Send + 'static,
-    T: Send + 'static,
-{
-    thread::Builder::new()
+    // ponytail: one worker per call; restore namespace-local reuse only if route benchmarks show
+    // startup dominates.
+    let (setup, setup_receiver) = mpsc::sync_channel(1);
+    let (response, response_receiver) = mpsc::sync_channel(1);
+    let worker = thread::Builder::new()
         .name("packetcraftr-netlink".to_owned())
-        .spawn(move || {
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_io()
-                .enable_time()
-                .build()
-                .map_err(|error| os_error("create Tokio netlink runtime", error))?;
-            runtime.block_on(async move {
-                let (connection, handle, _) = new_connection()
-                    .map_err(|error| os_error("open route netlink socket", error))?;
-                let connection = tokio::spawn(connection);
-                let result =
-                    await_netlink_operation(operation(handle), NETLINK_OPERATION_TIMEOUT).await;
-                connection.abort();
-                result
-            })
-        })
-        .map_err(|error| os_error("spawn netlink worker", error))?
-        .join()
-        .map_err(|_| netlink_worker_panicked())?
-}
+        .spawn(move || netlink_worker(operation, setup, response))
+        .map_err(|error| os_error("spawn netlink worker", error))?;
 
-thread_local! {
-    pub(super) static NETLINK_WORKER: RefCell<Option<NetlinkWorker>> =
-        const { RefCell::new(None) };
-}
-
-fn retire_cached_worker(worker: &mut Option<NetlinkWorker>) -> Result<(), SystemError> {
-    let shutdown_result = worker.as_mut().map(NetlinkWorker::shutdown);
-    if let Some(mut worker) = worker.take() {
-        worker.transfer_to_reaper();
-    }
-    shutdown_result.unwrap_or(Ok(()))
-}
-
-type ErasedNetlinkResult = Result<Box<dyn Any + Send>, SystemError>;
-
-type NetlinkFuture = Pin<Box<dyn Future<Output = ErasedNetlinkResult> + Send>>;
-
-type NetlinkOperation = Box<dyn FnOnce(Handle) -> NetlinkFuture + Send>;
-
-pub(super) enum NetlinkCommand {
-    Execute {
-        operation: NetlinkOperation,
-        response: SyncSender<ErasedNetlinkResult>,
-    },
-    Shutdown,
-}
-
-pub(super) struct NetlinkWorker {
-    pub(super) namespace: NetworkNamespaceId,
-    pub(super) commands: Sender<NetlinkCommand>,
-    pub(super) thread: Option<JoinHandle<()>>,
-    shutdown_timeout: Duration,
-    shutdown_result: Option<Result<(), SystemError>>,
-    shutdown_sent: bool,
-}
-
-impl NetlinkWorker {
-    pub(super) fn start(namespace: NetworkNamespaceId) -> Result<Self, SystemError> {
-        let (commands, command_receiver) = mpsc::channel();
-        let (setup_sender, setup_receiver) = mpsc::sync_channel(1);
-        let thread = thread::Builder::new()
-            .name("packetcraftr-netlink".to_owned())
-            .spawn(move || netlink_worker(command_receiver, setup_sender))
-            .map_err(|error| os_error("spawn netlink worker", error))?;
-
-        finish_netlink_start(
-            namespace,
-            commands,
-            setup_receiver,
-            thread,
-            NETLINK_OPERATION_TIMEOUT,
-        )
-    }
-
-    pub(super) fn execute<F, Fut, T>(&self, operation: F) -> Result<T, NetlinkExecutionError>
-    where
-        F: FnOnce(Handle) -> Fut + Send + 'static,
-        Fut: Future<Output = Result<T, SystemError>> + Send + 'static,
-        T: Send + 'static,
-    {
-        let operation = Box::new(move |handle| {
-            Box::pin(async move {
-                operation(handle)
-                    .await
-                    .map(|value| Box::new(value) as Box<dyn Any + Send>)
-            }) as NetlinkFuture
-        });
-        let (response, receiver) = mpsc::sync_channel(1);
-        self.commands
-            .send(NetlinkCommand::Execute {
-                operation,
-                response,
-            })
-            .map_err(|_| {
-                NetlinkExecutionError::Worker(netlink_channel_error("command channel closed"))
-            })?;
-        let response =
-            receiver
-                .recv_timeout(NETLINK_RESPONSE_TIMEOUT)
-                .map_err(|error| match error {
-                    mpsc::RecvTimeoutError::Disconnected => NetlinkExecutionError::Worker(
-                        netlink_channel_error("response channel closed"),
-                    ),
-                    mpsc::RecvTimeoutError::Timeout => {
-                        NetlinkExecutionError::Worker(netlink_timeout("wait for netlink response"))
-                    }
-                })?;
-        let value = response.map_err(NetlinkExecutionError::Operation)?;
-        value.downcast::<T>().map(|value| *value).map_err(|_| {
-            NetlinkExecutionError::Worker(netlink_channel_error(
-                "returned an unexpected response type",
-            ))
-        })
-    }
-
-    pub(super) fn shutdown(&mut self) -> Result<(), SystemError> {
-        self.shutdown_with_timeout(self.shutdown_timeout)
-    }
-
-    fn shutdown_with_timeout(&mut self, timeout: Duration) -> Result<(), SystemError> {
-        if let Some(result) = &self.shutdown_result {
-            return result.clone();
+    match setup_receiver.recv_timeout(NETLINK_OPERATION_TIMEOUT) {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => return finish_failed_start(worker, error),
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            return finish_failed_start(
+                worker,
+                netlink_channel_error("setup response channel closed"),
+            );
         }
-        if self.thread.is_none() {
-            let result = Ok(());
-            self.shutdown_result = Some(result.clone());
-            return result;
-        }
-        let send_result = if self.shutdown_sent {
-            Ok(())
-        } else {
-            match self.commands.send(NetlinkCommand::Shutdown) {
-                Ok(()) => {
-                    self.shutdown_sent = true;
-                    Ok(())
-                }
-                Err(_) => Err(netlink_channel_error("shutdown command channel closed")),
-            }
-        };
-        let join_result = match join_netlink_worker(&mut self.thread, timeout) {
-            NetlinkJoinAttempt::TimedOut(error) => return Err(error),
-            NetlinkJoinAttempt::Finished(result) => result,
-        };
-        let result = join_result.and(send_result);
-        self.shutdown_result = Some(result.clone());
-        result
-    }
-
-    fn transfer_to_reaper(&mut self) {
-        if let Some(thread) = self.thread.take() {
-            transfer_netlink_worker(thread, self.commands.clone());
-        }
-    }
-}
-
-impl Drop for NetlinkWorker {
-    fn drop(&mut self) {
-        let _ = self.shutdown();
-        self.transfer_to_reaper();
-    }
-}
-
-fn finish_netlink_start(
-    namespace: NetworkNamespaceId,
-    commands: Sender<NetlinkCommand>,
-    setup_receiver: Receiver<Result<(), SystemError>>,
-    thread: JoinHandle<()>,
-    setup_timeout: Duration,
-) -> Result<NetlinkWorker, SystemError> {
-    finish_netlink_start_with_callback(
-        namespace,
-        commands,
-        setup_receiver,
-        thread,
-        setup_timeout,
-        NETLINK_RESPONSE_TIMEOUT,
-        || {},
-    )
-}
-
-fn finish_netlink_start_with_callback<F>(
-    namespace: NetworkNamespaceId,
-    commands: Sender<NetlinkCommand>,
-    setup_receiver: Receiver<Result<(), SystemError>>,
-    thread: JoinHandle<()>,
-    setup_timeout: Duration,
-    shutdown_timeout: Duration,
-    after_reap: F,
-) -> Result<NetlinkWorker, SystemError>
-where
-    F: FnOnce() + Send + 'static,
-{
-    match setup_receiver.recv_timeout(setup_timeout) {
-        Ok(Ok(())) => Ok(NetlinkWorker {
-            namespace,
-            commands,
-            thread: Some(thread),
-            shutdown_timeout,
-            shutdown_result: None,
-            shutdown_sent: false,
-        }),
-        Ok(Err(error)) => {
-            finish_failed_netlink_start(commands, thread, error, shutdown_timeout, after_reap)
-        }
-        Err(mpsc::RecvTimeoutError::Disconnected) => finish_failed_netlink_start(
-            commands,
-            thread,
-            netlink_channel_error("setup response channel closed"),
-            shutdown_timeout,
-            after_reap,
-        ),
         Err(mpsc::RecvTimeoutError::Timeout) => {
-            transfer_netlink_worker_with_callback(thread, commands, after_reap);
-            Err(netlink_timeout("initialize netlink"))
+            transfer_netlink_worker(worker);
+            return Err(netlink_timeout("initialize netlink"));
         }
     }
-}
 
-fn finish_failed_netlink_start<F>(
-    commands: Sender<NetlinkCommand>,
-    thread: JoinHandle<()>,
-    startup_error: SystemError,
-    shutdown_timeout: Duration,
-    after_reap: F,
-) -> Result<NetlinkWorker, SystemError>
-where
-    F: FnOnce() + Send + 'static,
-{
-    let _ = commands.send(NetlinkCommand::Shutdown);
-    let mut thread = Some(thread);
-    match join_netlink_worker(&mut thread, shutdown_timeout) {
-        NetlinkJoinAttempt::Finished(Ok(())) => Err(startup_error),
-        NetlinkJoinAttempt::Finished(Err(error)) => Err(error),
-        NetlinkJoinAttempt::TimedOut(error) => {
-            let thread = thread
-                .take()
-                .expect("timed-out netlink startup worker handle disappeared");
-            transfer_netlink_worker_with_callback(thread, commands, after_reap);
-            Err(error)
+    let result = match response_receiver.recv_timeout(NETLINK_RESPONSE_TIMEOUT) {
+        Ok(result) => result,
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            join_netlink_worker(worker, NETLINK_RESPONSE_TIMEOUT)?;
+            return Err(netlink_channel_error("response channel closed"));
         }
-    }
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            transfer_netlink_worker(worker);
+            return Err(netlink_timeout("wait for netlink response"));
+        }
+    };
+    join_netlink_worker(worker, NETLINK_RESPONSE_TIMEOUT)?;
+    result
 }
 
-fn transfer_netlink_worker(thread: JoinHandle<()>, commands: Sender<NetlinkCommand>) {
-    transfer_netlink_worker_with_callback(thread, commands, || {});
+fn finish_failed_start<T>(worker: JoinHandle<()>, error: SystemError) -> Result<T, SystemError> {
+    join_netlink_worker(worker, NETLINK_RESPONSE_TIMEOUT)?;
+    Err(error)
 }
 
-fn transfer_netlink_worker_with_callback<F>(
-    thread: JoinHandle<()>,
-    commands: Sender<NetlinkCommand>,
-    after_join: F,
+fn netlink_worker<F, Fut, T>(
+    operation: F,
+    setup: SyncSender<Result<(), SystemError>>,
+    response: SyncSender<Result<T, SystemError>>,
 ) where
-    F: FnOnce() + Send + 'static,
+    F: FnOnce(Handle) -> Fut,
+    Fut: Future<Output = Result<T, SystemError>>,
 {
-    let _ = thread::Builder::new()
-        .name("packetcraftr-netlink-reaper".to_owned())
-        .spawn(move || {
-            let _ = commands.send(NetlinkCommand::Shutdown);
-            while !thread.is_finished() {
-                thread::park_timeout(NETLINK_REAPER_POLL_INTERVAL);
-            }
-            let _ = thread.join();
-            after_join();
-        })
-        .expect("could not start the Linux netlink worker reaper");
-}
-
-#[derive(Debug)]
-pub(super) enum NetlinkExecutionError {
-    Operation(SystemError),
-    Worker(SystemError),
-}
-
-fn netlink_worker(commands: Receiver<NetlinkCommand>, setup: SyncSender<Result<(), SystemError>>) {
     let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_io()
         .enable_time()
@@ -414,26 +102,12 @@ fn netlink_worker(commands: Receiver<NetlinkCommand>, setup: SyncSender<Result<(
         connection.abort();
         return;
     }
-
-    while let Ok(command) = commands.recv() {
-        match command {
-            NetlinkCommand::Execute {
-                operation,
-                response,
-            } => {
-                let result = catch_unwind(AssertUnwindSafe(|| {
-                    runtime.block_on(await_netlink_operation(
-                        operation(handle.clone()),
-                        NETLINK_OPERATION_TIMEOUT,
-                    ))
-                }))
-                .unwrap_or_else(|_| Err(netlink_worker_panicked()));
-                let _ = response.send(result);
-            }
-            NetlinkCommand::Shutdown => break,
-        }
-    }
+    let result = runtime.block_on(await_netlink_operation(
+        operation(handle),
+        NETLINK_OPERATION_TIMEOUT,
+    ));
     connection.abort();
+    let _ = response.send(result);
 }
 
 async fn await_netlink_operation<F, T>(operation: F, timeout: Duration) -> Result<T, SystemError>
@@ -443,6 +117,33 @@ where
     tokio::time::timeout(timeout, operation)
         .await
         .map_err(|_| netlink_timeout("execute netlink operation"))?
+}
+
+fn join_netlink_worker(worker: JoinHandle<()>, timeout: Duration) -> Result<(), SystemError> {
+    let Some(deadline) = Instant::now().checked_add(timeout) else {
+        transfer_netlink_worker(worker);
+        return Err(netlink_timeout("shut down netlink worker"));
+    };
+    while !worker.is_finished() {
+        let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+            transfer_netlink_worker(worker);
+            return Err(netlink_timeout("shut down netlink worker"));
+        };
+        thread::park_timeout(remaining.min(NETLINK_REAPER_POLL_INTERVAL));
+    }
+    worker.join().map_err(|_| netlink_worker_panicked())
+}
+
+fn transfer_netlink_worker(worker: JoinHandle<()>) {
+    let _ = thread::Builder::new()
+        .name("packetcraftr-netlink-reaper".to_owned())
+        .spawn(move || {
+            while !worker.is_finished() {
+                thread::park_timeout(NETLINK_REAPER_POLL_INTERVAL);
+            }
+            let _ = worker.join();
+        })
+        .expect("could not start the Linux netlink worker reaper");
 }
 
 fn netlink_worker_panicked() -> SystemError {
@@ -464,35 +165,47 @@ fn netlink_timeout(operation: &'static str) -> SystemError {
     }
 }
 
-enum NetlinkJoinAttempt {
-    Finished(Result<(), SystemError>),
-    TimedOut(SystemError),
-}
-
-fn join_netlink_worker(
-    thread: &mut Option<JoinHandle<()>>,
-    timeout: Duration,
-) -> NetlinkJoinAttempt {
-    let Some(deadline) = Instant::now().checked_add(timeout) else {
-        return NetlinkJoinAttempt::TimedOut(netlink_timeout("shut down netlink worker"));
-    };
-    loop {
-        let Some(handle) = thread.as_ref() else {
-            return NetlinkJoinAttempt::Finished(Ok(()));
-        };
-        if handle.is_finished() {
-            break;
-        }
-        let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
-            return NetlinkJoinAttempt::TimedOut(netlink_timeout("shut down netlink worker"));
-        };
-        thread::park_timeout(remaining.min(NETLINK_REAPER_POLL_INTERVAL));
-    }
-    let handle = thread
-        .take()
-        .expect("finished netlink worker handle disappeared");
-    NetlinkJoinAttempt::Finished(handle.join().map_err(|_| netlink_worker_panicked()))
-}
-
 #[cfg(test)]
-mod tests;
+mod tests {
+    use std::future;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+
+    use super::*;
+
+    #[test]
+    fn operation_and_join_waits_are_bounded() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        assert!(matches!(
+            runtime.block_on(await_netlink_operation(
+                future::pending::<Result<(), SystemError>>(),
+                Duration::ZERO,
+            )),
+            Err(SystemError::OperatingSystem {
+                operation: "execute netlink operation",
+                ..
+            })
+        ));
+
+        let release = Arc::new(AtomicBool::new(false));
+        let worker_release = Arc::clone(&release);
+        let worker = thread::spawn(move || {
+            while !worker_release.load(Ordering::Acquire) {
+                thread::park_timeout(Duration::from_millis(1));
+            }
+        });
+        assert!(matches!(
+            join_netlink_worker(worker, Duration::ZERO),
+            Err(SystemError::OperatingSystem {
+                operation: "shut down netlink worker",
+                ..
+            })
+        ));
+        release.store(true, Ordering::Release);
+    }
+}

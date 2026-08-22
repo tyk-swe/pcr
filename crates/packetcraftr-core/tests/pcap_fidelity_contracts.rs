@@ -287,7 +287,7 @@ fn assert_packet_records(records: &[CaptureRecord]) {
         }
     ));
     assert_eq!(
-        packets[0].frame().and_then(|frame| frame.timestamp),
+        packets[0].frame.as_ref().and_then(|frame| frame.timestamp),
         Some(SystemTime::UNIX_EPOCH)
     );
     if let RecordKind::Packet { options, .. } = &packets[0].kind {
@@ -305,7 +305,10 @@ fn assert_packet_records(records: &[CaptureRecord]) {
             ..
         }
     ));
-    assert_eq!(packets[1].frame().and_then(|frame| frame.timestamp), None);
+    assert_eq!(
+        packets[1].frame.as_ref().and_then(|frame| frame.timestamp),
+        None
+    );
     assert!(matches!(
         packets[2].kind,
         RecordKind::Packet {
@@ -323,15 +326,15 @@ fn assert_packet_records(records: &[CaptureRecord]) {
         }
     ));
     assert_eq!(
-        packets[3].frame().and_then(|frame| frame.timestamp),
+        packets[3].frame.as_ref().and_then(|frame| frame.timestamp),
         Some(SystemTime::UNIX_EPOCH)
     );
     assert_eq!(
-        packets[0].frame().and_then(|frame| frame.interface),
+        packets[0].frame.as_ref().and_then(|frame| frame.interface),
         Some(0)
     );
     assert_eq!(
-        packets[3].frame().and_then(|frame| frame.interface),
+        packets[3].frame.as_ref().and_then(|frame| frame.interface),
         Some(1)
     );
 }

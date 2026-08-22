@@ -1,33 +1,20 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::fmt;
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Error {
-    message: String,
-}
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("{0}")]
+pub struct Error(String);
 
 impl Error {
     pub(super) fn new(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-        }
+        Self(message.into())
     }
 
     pub(super) fn field(
         protocol: &crate::layer::Id,
         field: &str,
-        reason: impl fmt::Display,
+        reason: impl std::fmt::Display,
     ) -> Self {
         Self::new(format!("field {field} on layer {protocol} {reason}"))
     }
 }
-
-impl fmt::Display for Error {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.message)
-    }
-}
-
-impl std::error::Error for Error {}

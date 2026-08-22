@@ -9,7 +9,7 @@ pub(crate) mod exchange;
 mod interface;
 mod route;
 
-pub(crate) use interface::{DeferredInterface, validate_selector};
+pub(crate) use interface::{resolve, validate_selector};
 
 pub(crate) use route::prepare_route;
 

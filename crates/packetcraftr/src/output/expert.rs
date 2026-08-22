@@ -9,23 +9,7 @@ use packetcraftr_core::analysis::expert::{
     Finding as AnalysisFinding, StreamTransport as AnalysisStreamTransport,
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Severity {
-    Info,
-    Warning,
-    Error,
-}
-
-impl From<packetcraftr_core::diagnostic::Severity> for Severity {
-    fn from(value: packetcraftr_core::diagnostic::Severity) -> Self {
-        match value {
-            packetcraftr_core::diagnostic::Severity::Info => Self::Info,
-            packetcraftr_core::diagnostic::Severity::Warning => Self::Warning,
-            packetcraftr_core::diagnostic::Severity::Error => Self::Error,
-        }
-    }
-}
+pub use packetcraftr_core::diagnostic::Severity;
 
 /// Transport namespace for a stream index; TCP and UDP indices are independent.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -70,7 +54,7 @@ pub struct Finding {
 impl From<AnalysisFinding> for Finding {
     fn from(value: AnalysisFinding) -> Self {
         Self {
-            severity: value.severity.into(),
+            severity: value.severity,
             code: value.code,
             frame: value.number,
             transport: value.stream.map(|stream| stream.transport.into()),

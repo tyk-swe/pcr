@@ -16,7 +16,7 @@ use crate::Error;
 use crate::Stats;
 use crate::materialize::{
     build_context, materialize_link_fields, materialize_link_structure, materialize_network_fields,
-    patch_builtin_ethernet, require_fixed_width_link_materialization,
+    require_fixed_width_link_materialization,
 };
 use crate::mtu::validate_mtu;
 use crate::send::{Options, Report};
@@ -37,7 +37,7 @@ where
         let builder = Builder::new(Arc::clone(&self.registry));
         let context = build_context(&plan);
         // Validate all packet fields before neighbor discovery emits traffic.
-        let mut preliminary = builder.build(
+        let preliminary = builder.build(
             packet_to_send.clone(),
             context.clone(),
             options.build.clone(),
@@ -53,12 +53,7 @@ where
         let route = materialize(plan, &self.neighbors)?;
         let link_changed = materialize_link_fields(&mut packet_to_send, &route)?;
         let built = if link_changed {
-            let built = if patch_builtin_ethernet(&self.registry, &mut preliminary, &packet_to_send)
-            {
-                preliminary
-            } else {
-                builder.build(packet_to_send, context, options.build)?
-            };
+            let built = builder.build(packet_to_send, context, options.build)?;
             require_fixed_width_link_materialization(preliminary_len, built.bytes.len())?;
             self.authorize_built(&built, options.allow_permissive_live)?;
             self.authorize_final_wire(&built, &route.plan)?;

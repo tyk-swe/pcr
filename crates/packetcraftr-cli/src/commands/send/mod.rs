@@ -1,21 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-mod arguments;
-
 pub(super) use crate::command_options::SendArgs;
-pub(super) use arguments::AFTER_LONG_HELP;
 
 use std::sync::Arc;
-use std::time::SystemTime;
 
-use packetcraftr::{
-    core::{
-        self,
-        frame::{Frame, LinkType},
-    },
-    netio as net, output,
-};
+use packetcraftr::{core, output};
 
 use super::super::errors::CliError;
 use super::super::rendering::{
@@ -24,6 +14,11 @@ use super::super::rendering::{
 };
 use super::super::system::{client, prepare_route};
 use super::registry;
+
+pub(super) const AFTER_LONG_HELP: &str = r#"Live transmission is policy-gated and may require native features, dependencies, and privileges.
+
+Example:
+  packetcraftr send --packet 'ipv4(dst=192.0.2.1)/icmpv4(type=8,code=0)'"#;
 
 pub(super) fn run(arguments: SendArgs, format: output::contract::Format) -> Result<(), CliError> {
     let SendArgs {
@@ -49,10 +44,7 @@ pub(super) fn run(arguments: SendArgs, format: output::contract::Format) -> Resu
             },
         )
         .map_err(CliError::classified)?;
-    let capture_link_type = capture_link_type(
-        report.sent.route().plan.mode,
-        report.sent.route().plan.decision.link_type,
-    )?;
+    let capture_frame = report.sent.frame().clone();
     let (result, diagnostics, stats) =
         output::send::Result::try_from_report(report).map_err(CliError::classified)?;
     match format {
@@ -74,28 +66,8 @@ pub(super) fn run(arguments: SendArgs, format: output::contract::Format) -> Resu
         }
         output::contract::Format::Raw => write_raw(result.frame.bytes()),
         output::contract::Format::Pcap | output::contract::Format::PcapNg => {
-            let frame = Frame::new(
-                SystemTime::now(),
-                capture_link_type,
-                result.frame.bytes().to_vec(),
-            )
-            .map_err(|source| CliError::new(3, source.to_string()))?;
-            write_capture_file(format, [frame])
+            write_capture_file(format, [capture_frame])
         }
         _ => unreachable!("send format is checked before command dispatch"),
-    }
-}
-
-fn capture_link_type(
-    mode: net::link::Mode,
-    route_link_type: LinkType,
-) -> Result<LinkType, CliError> {
-    match mode {
-        net::link::Mode::Layer2 => Ok(route_link_type),
-        net::link::Mode::Layer3 => Ok(LinkType::RAW),
-        net::link::Mode::Auto => Err(CliError::new(
-            70,
-            "send result retained an unresolved automatic link mode",
-        )),
     }
 }

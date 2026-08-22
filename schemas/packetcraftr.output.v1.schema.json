@@ -4252,10 +4252,8 @@
           "enum": [
             "built",
             "rejected",
-            "sent",
             "response",
-            "timeout",
-            "error"
+            "timeout"
           ]
         },
         "error": {
@@ -4295,7 +4293,7 @@
             "required": ["outcome"],
             "properties": {
               "outcome": {
-                "enum": ["built", "sent", "response", "timeout"]
+                "enum": ["built", "response", "timeout"]
               }
             }
           },
@@ -4308,7 +4306,7 @@
             "required": ["outcome"],
             "properties": {
               "outcome": {
-                "enum": ["sent", "response", "timeout"]
+                "enum": ["response", "timeout"]
               }
             }
           },
@@ -4321,7 +4319,7 @@
             "required": ["outcome"],
             "properties": {
               "outcome": {
-                "enum": ["rejected", "error"]
+                "const": "rejected"
               }
             }
           },

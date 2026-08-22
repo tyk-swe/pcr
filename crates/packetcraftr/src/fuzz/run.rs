@@ -20,7 +20,7 @@ use crate::clock::Clock;
 use crate::evidence::Budget;
 use crate::materialize::{
     build_context, materialize_link_fields, materialize_link_structure, materialize_network_fields,
-    patch_builtin_ethernet, require_fixed_width_link_materialization,
+    require_fixed_width_link_materialization,
 };
 
 use super::SYNTHESIZED_ETHERNET_BYTES;
@@ -476,30 +476,19 @@ fn expected_live_build(
 
     let context = build_context(&route.plan);
     let builder = Builder::new(Arc::clone(registry));
-    let mut preliminary = build_packet(&builder, packet.clone(), context.clone(), request)?;
+    let preliminary = build_packet(&builder, packet.clone(), context.clone(), request)?;
     let preliminary_len = preliminary.bytes.len();
 
-    if stringify(materialize_link_fields(&mut packet, route))? {
-        if patch_builtin_ethernet(registry, &mut preliminary, &packet) {
-            stringify(require_fixed_width_link_materialization(
-                preliminary_len,
-                preliminary.bytes.len(),
-            ))?;
-            return Ok(preliminary);
-        }
-        let materialized = build_packet(&builder, packet, context, request)?;
-        stringify(require_fixed_width_link_materialization(
-            preliminary_len,
-            materialized.bytes.len(),
-        ))?;
-        return Ok(materialized);
-    }
-
+    let built = if stringify(materialize_link_fields(&mut packet, route))? {
+        build_packet(&builder, packet, context, request)?
+    } else {
+        preliminary
+    };
     stringify(require_fixed_width_link_materialization(
         preliminary_len,
-        preliminary.bytes.len(),
+        built.bytes.len(),
     ))?;
-    Ok(preliminary)
+    Ok(built)
 }
 
 fn build_packet(

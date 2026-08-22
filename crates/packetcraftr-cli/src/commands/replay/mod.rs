@@ -5,7 +5,6 @@
 
 pub(super) mod arguments;
 mod conversion;
-mod execution;
 mod rendering;
 
 use std::fs::File;
@@ -22,7 +21,6 @@ use crate::input::{open_capture, validate_capture_stream_limits};
 use crate::rendering::NdjsonStream;
 
 use conversion::{interface, timing};
-use execution::FilterSelector;
 
 struct Prepared {
     reader: Reader<File>,
@@ -42,11 +40,8 @@ pub(super) fn run(
 ) -> Result<(), CliError> {
     let mut prepared = prepare(&arguments)?;
     let filtered = prepared.filter.is_some();
-    let mut filter = prepared
+    let selector = prepared
         .filter
-        .as_ref()
-        .map(|selector| FilterSelector { selector });
-    let selector = filter
         .as_mut()
         .map(|selector| selector as &mut dyn packetcraftr::replay::Selector);
     match format {

@@ -157,24 +157,7 @@ impl Serialize for Wire {
     }
 }
 
-/// Shared capture-frame representation for read, capture, exchange, and evidence.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Direction {
-    Inbound,
-    Outbound,
-    Unknown,
-}
-
-impl From<packetcraftr_core::frame::Direction> for Direction {
-    fn from(value: packetcraftr_core::frame::Direction) -> Self {
-        match value {
-            packetcraftr_core::frame::Direction::Inbound => Self::Inbound,
-            packetcraftr_core::frame::Direction::Outbound => Self::Outbound,
-            packetcraftr_core::frame::Direction::Unknown => Self::Unknown,
-        }
-    }
-}
+pub use packetcraftr_core::frame::Direction;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Captured {
@@ -196,7 +179,7 @@ impl Captured {
             original_length: frame.original_length(),
             link_type: frame.link_type.0,
             interface: frame.interface,
-            direction: frame.direction.map(Into::into),
+            direction: frame.direction,
             bytes: frame.bytes().clone(),
         })
     }

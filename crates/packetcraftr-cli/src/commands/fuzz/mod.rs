@@ -15,8 +15,8 @@ use self::arguments::Args;
 use super::registry;
 use crate::errors::CliError;
 use crate::input::read_recipe;
-use crate::rendering::NdjsonStream;
-use crate::system::{DeferredInterface, client, exchange, validate_selector};
+use crate::rendering::{NdjsonStream, emit_aggregate_with_stats};
+use crate::system::{client, exchange, validate_selector};
 
 use super::execution::Executor;
 
@@ -175,7 +175,7 @@ fn execute_live(
     let mut executor = Executor {
         client: client(Arc::clone(&registry), live.policy.clone()),
         exchange: live.exchange,
-        interface: DeferredInterface::new(live.interface),
+        interface: live.interface,
     };
     let mut authorizer = packetcraftr::fuzz::PolicyAuthorizer::new(&live.policy);
     let mut clock = packetcraftr::clock::SystemClock;
@@ -222,7 +222,9 @@ fn render_collected(
 ) -> Result<(), CliError> {
     match format {
         output::contract::Format::Text => rendering::render_text(result, diagnostics, stats),
-        output::contract::Format::Json => rendering::render_aggregate(result, diagnostics, stats),
+        output::contract::Format::Json => {
+            emit_aggregate_with_stats(output::contract::Command::Fuzz, result, diagnostics, stats)
+        }
         _ => unreachable!("fuzz format is checked before command dispatch"),
     }
 }

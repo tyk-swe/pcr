@@ -5,23 +5,9 @@ use packetcraftr::{core, output};
 
 use crate::errors::CliError;
 use crate::rendering::{
-    NdjsonStream, captured_frame_text, comma_separated, emit_aggregate_with_stats,
-    optional_display, output_timestamp_text, render_diagnostics_text, render_optional,
-    write_stdout_line,
+    NdjsonStream, captured_frame_text, comma_separated, optional_display, output_timestamp_text,
+    render_diagnostics_text, render_optional, write_stdout_line,
 };
-
-pub(super) fn render_aggregate(
-    result: output::traceroute::Result,
-    diagnostics: Vec<core::diagnostic::Diagnostic>,
-    stats: output::envelope::Stats,
-) -> Result<(), CliError> {
-    emit_aggregate_with_stats(
-        output::contract::Command::Traceroute,
-        result,
-        diagnostics,
-        stats,
-    )
-}
 
 pub(super) fn render_text(
     result: output::traceroute::Result,

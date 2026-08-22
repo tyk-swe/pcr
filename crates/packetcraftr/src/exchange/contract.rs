@@ -181,7 +181,7 @@ fn incoherent(message: &str) -> crate::Error {
 }
 
 pub(crate) fn into_sent_packet(sent: Arc<crate::SentPacket>) -> crate::SentPacket {
-    Arc::try_unwrap(sent).unwrap_or_else(|sent| (*sent).clone())
+    Arc::unwrap_or_clone(sent)
 }
 
 #[cfg(test)]

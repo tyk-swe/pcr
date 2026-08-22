@@ -5,31 +5,7 @@ use packetcraftr::netio as net;
 
 use super::super::errors::CliError;
 
-#[derive(Debug)]
-pub(crate) enum DeferredInterface {
-    Pending(String),
-    Applied,
-}
-
-impl DeferredInterface {
-    pub(crate) fn new(selector: Option<String>) -> Self {
-        match selector {
-            Some(selector) => Self::Pending(selector),
-            None => Self::Applied,
-        }
-    }
-
-    pub(crate) fn apply(&mut self, options: &mut net::route::Options) -> Result<(), CliError> {
-        let Self::Pending(selector) = self else {
-            return Ok(());
-        };
-        options.interface = resolve(Some(selector.clone()), &net::interface::SystemProvider)?;
-        *self = Self::Applied;
-        Ok(())
-    }
-}
-
-pub(super) fn resolve<I: net::interface::Provider>(
+pub(crate) fn resolve<I: net::interface::Provider>(
     selector: Option<String>,
     provider: &I,
 ) -> Result<Option<net::interface::Id>, CliError> {

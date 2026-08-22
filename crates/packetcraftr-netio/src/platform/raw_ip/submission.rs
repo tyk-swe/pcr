@@ -22,7 +22,7 @@ use windows::Win32::Networking::WinSock::{
     SOCKET, SOCKET_ERROR, WSAGetLastError, setsockopt,
 };
 
-use super::preparation::{IpFamily, PreparedRawIp};
+use super::preparation::PreparedRawIp;
 use crate::Error as LiveIoError;
 use crate::interface::Id as InterfaceId;
 
@@ -52,15 +52,15 @@ impl RawSocketOption {
 }
 
 fn configure_socket_options(
-    family: IpFamily,
+    destination: IpAddr,
     mut apply: impl FnMut(RawSocketOption) -> io::Result<()>,
 ) -> Result<(), RawSocketError> {
-    let options: &[RawSocketOption] = match family {
-        IpFamily::V4 => &[
+    let options: &[RawSocketOption] = match destination {
+        IpAddr::V4(_) => &[
             RawSocketOption::Ipv4HeaderIncluded,
             RawSocketOption::Ipv4Broadcast,
         ],
-        IpFamily::V6 => &[RawSocketOption::Ipv6HeaderIncluded],
+        IpAddr::V6(_) => &[RawSocketOption::Ipv6HeaderIncluded],
     };
     for option in options {
         apply(*option).map_err(|source| raw_error(option.operation(), source))?;
@@ -69,13 +69,13 @@ fn configure_socket_options(
 }
 
 pub(super) fn send(packet: &PreparedRawIp) -> Result<usize, RawSocketError> {
-    let domain = match packet.family {
-        IpFamily::V4 => Domain::IPV4,
-        IpFamily::V6 => Domain::IPV6,
+    let domain = match packet.destination {
+        IpAddr::V4(_) => Domain::IPV4,
+        IpAddr::V6(_) => Domain::IPV6,
     };
     let socket = Socket::new(domain, Type::RAW, Some(Protocol::from(IPPROTO_RAW)))
         .map_err(|source| raw_error("opening a raw IP socket", source))?;
-    configure_socket_options(packet.family, |option| match option {
+    configure_socket_options(packet.destination, |option| match option {
         RawSocketOption::Ipv4HeaderIncluded => socket.set_header_included_v4(true),
         RawSocketOption::Ipv4Broadcast => socket.set_broadcast(true),
         RawSocketOption::Ipv6HeaderIncluded => socket.set_header_included_v6(true),
@@ -105,17 +105,17 @@ fn bind_interface(socket: &Socket, packet: &PreparedRawIp) -> Result<(), RawSock
             io::Error::new(io::ErrorKind::InvalidInput, "interface index is zero"),
         )
     })?;
-    match packet.family {
-        IpFamily::V4 => socket.bind_device_by_index_v4(Some(index)),
-        IpFamily::V6 => socket.bind_device_by_index_v6(Some(index)),
+    match packet.destination {
+        IpAddr::V4(_) => socket.bind_device_by_index_v4(Some(index)),
+        IpAddr::V6(_) => socket.bind_device_by_index_v6(Some(index)),
     }
     .map_err(|source| raw_error("binding the selected macOS interface", source))
 }
 
 #[cfg(windows)]
 fn bind_interface(socket: &Socket, packet: &PreparedRawIp) -> Result<(), RawSocketError> {
-    let (level, option, index) = match packet.family {
-        IpFamily::V4 => (
+    let (level, option, index) = match packet.destination {
+        IpAddr::V4(_) => (
             IPPROTO_IP.0,
             if packet.destination.is_multicast() {
                 IP_MULTICAST_IF
@@ -124,7 +124,7 @@ fn bind_interface(socket: &Socket, packet: &PreparedRawIp) -> Result<(), RawSock
             },
             packet.interface.index.to_be_bytes(),
         ),
-        IpFamily::V6 => (
+        IpAddr::V6(_) => (
             IPPROTO_IPV6.0,
             if packet.destination.is_multicast() {
                 IPV6_MULTICAST_IF
@@ -172,7 +172,7 @@ fn socket_address(address: IpAddr, interface_index: u32) -> SockAddr {
 
 #[cfg(target_os = "macos")]
 pub(super) fn validate_platform_support(packet: &PreparedRawIp) -> Result<(), LiveIoError> {
-    if packet.family == IpFamily::V6 {
+    if packet.destination.is_ipv6() {
         return Err(LiveIoError::Unsupported {
             message: "Darwin raw IPv6 sockets synthesize the IPv6 header and do not support IPV6_HDRINCL; exact complete-header transmission requires an explicit Layer 2 path"
                 .to_owned(),
@@ -251,13 +251,8 @@ mod tests {
         ];
 
         for (name, destination, expected) in cases {
-            let family = if destination.is_ipv4() {
-                IpFamily::V4
-            } else {
-                IpFamily::V6
-            };
             let mut operations = Vec::new();
-            configure_socket_options(family, |option| {
+            configure_socket_options(destination, |option| {
                 operations.push(Operation::Option(option));
                 Ok(())
             })
@@ -270,7 +265,7 @@ mod tests {
     #[test]
     fn raw_socket_option_failure_preserves_the_failed_operation() {
         let mut attempted = Vec::new();
-        let error = configure_socket_options(IpFamily::V4, |option| {
+        let error = configure_socket_options(IpAddr::V4(Ipv4Addr::LOCALHOST), |option| {
             attempted.push(option);
             if option == RawSocketOption::Ipv4Broadcast {
                 Err(io::Error::new(

@@ -3,8 +3,6 @@
 
 //! Structured packet-fuzzing output.
 
-use std::fmt;
-
 use serde::Serialize;
 
 use crate::fuzz as live_fuzz;
@@ -23,28 +21,7 @@ pub enum Mode {
     Live,
 }
 
-/// Output-v1 fuzz case outcome.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Outcome {
-    Built,
-    Rejected,
-    Sent,
-    Response,
-    Timeout,
-    Error,
-}
-
-impl From<crate::fuzz::CaseOutcome> for Outcome {
-    fn from(value: crate::fuzz::CaseOutcome) -> Self {
-        match value {
-            crate::fuzz::CaseOutcome::Built => Self::Built,
-            crate::fuzz::CaseOutcome::Rejected => Self::Rejected,
-            crate::fuzz::CaseOutcome::Response => Self::Response,
-            crate::fuzz::CaseOutcome::Timeout => Self::Timeout,
-        }
-    }
-}
+pub use crate::fuzz::CaseOutcome as Outcome;
 
 impl From<packet_fuzz::CaseOutcome> for Outcome {
     fn from(value: packet_fuzz::CaseOutcome) -> Self {
@@ -55,43 +32,7 @@ impl From<packet_fuzz::CaseOutcome> for Outcome {
     }
 }
 
-/// Output-v1 fuzz mutation strategy.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Strategy {
-    Boundary,
-    Random,
-    BitFlip,
-    Malformed,
-}
-
-impl Strategy {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Boundary => "boundary",
-            Self::Random => "random",
-            Self::BitFlip => "bit_flip",
-            Self::Malformed => "malformed",
-        }
-    }
-}
-
-impl fmt::Display for Strategy {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-
-impl From<packet_fuzz::Strategy> for Strategy {
-    fn from(value: packet_fuzz::Strategy) -> Self {
-        match value {
-            packet_fuzz::Strategy::Boundary => Self::Boundary,
-            packet_fuzz::Strategy::Random => Self::Random,
-            packet_fuzz::Strategy::BitFlip => Self::BitFlip,
-            packet_fuzz::Strategy::Malformed => Self::Malformed,
-        }
-    }
-}
+pub use packet_fuzz::Strategy;
 
 /// Output-v1 description of one deterministic field mutation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -110,7 +51,7 @@ impl From<packet_fuzz::Mutation> for Mutation {
             layer: value.layer,
             protocol: value.protocol,
             field: value.field,
-            strategy: value.strategy.into(),
+            strategy: value.strategy,
             original: value.original,
             value: value.value,
         }
@@ -319,7 +260,7 @@ impl Case {
         convert_case(
             operation_seed,
             prepared,
-            outcome.into(),
+            outcome,
             sent,
             responses,
             unmatched,

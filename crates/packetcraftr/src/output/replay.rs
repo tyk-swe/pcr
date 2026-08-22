@@ -12,24 +12,8 @@ use packetcraftr_netio::{interface::Id as InterfaceId, link::Mode as NetworkLink
 use super::contract::Error;
 use super::frame::Captured;
 
-/// Aggregate or terminal result of `replay`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SourceFormat {
-    Pcap,
-    PcapNg,
-}
-
-impl From<packetcraftr_core::analysis::pcap::Format> for SourceFormat {
-    fn from(value: packetcraftr_core::analysis::pcap::Format) -> Self {
-        match value {
-            packetcraftr_core::analysis::pcap::Format::Pcap => Self::Pcap,
-            packetcraftr_core::analysis::pcap::Format::PcapNg => Self::PcapNg,
-        }
-    }
-}
-
 pub use crate::replay::Timing;
+pub use packetcraftr_core::analysis::pcap::Format as SourceFormat;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Interface {
@@ -88,7 +72,7 @@ impl Result {
         frames: Vec<Frame>,
     ) -> Self {
         Self {
-            source_format: summary.source_format.into(),
+            source_format: summary.source_format,
             timing: summary.timing,
             requested_interface: requested_interface.into(),
             requested_link_mode: requested_link_mode.into(),

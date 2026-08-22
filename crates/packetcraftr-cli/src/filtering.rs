@@ -124,6 +124,17 @@ impl FrameSelector {
     }
 }
 
+impl packetcraftr::replay::Selector for FrameSelector {
+    fn select(
+        &mut self,
+        source_frame: u64,
+        frame: &Frame,
+    ) -> Result<bool, packetcraftr::BoundaryError> {
+        self.keep(source_frame, frame)
+            .map_err(CliError::into_boundary_error)
+    }
+}
+
 /// Converts a filter compilation failure into the CLI error taxonomy.
 fn cli_error(error: packetcraftr::core::filter::Error) -> CliError {
     let remediation = match &error {

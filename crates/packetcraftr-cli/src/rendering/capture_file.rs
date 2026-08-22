@@ -48,15 +48,7 @@ fn encode(
     }
     .map_err(|source| CliError::new(5, format!("initialize capture output failed: {source}")))?;
     let mut output = CaptureWriter::for_link_types(writer);
-    for mut frame in std::iter::once(first).chain(frames) {
-        output.add_link_type(frame.link_type).map_err(|source| {
-            CliError::new(5, format!("initialize capture interface failed: {source}"))
-        })?;
-        // Classic PCAP cannot carry an interface ID; PCAPNG uses the
-        // stable per-link-type mapping.
-        if format == Format::Pcap {
-            frame.interface = None;
-        }
+    for frame in std::iter::once(first).chain(frames) {
         output
             .write_link_mapped(frame)
             .map_err(|source| CliError::new(5, format!("write capture output failed: {source}")))?;

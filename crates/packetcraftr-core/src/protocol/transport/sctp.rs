@@ -114,9 +114,9 @@ impl LayerCodec for SctpCodec {
             ValueExpectation::Required(expected_checksum),
             context.mode,
             &mut diagnostics,
-            checksum_from_wire,
+            u32::from_le_bytes,
         )?;
-        header[8..12].copy_from_slice(&checksum_to_wire(checksum));
+        header[8..12].copy_from_slice(&checksum.to_le_bytes());
 
         let mut materialized = layer.clone();
         materialized.checksum = materialized_checksum;
@@ -142,7 +142,7 @@ impl LayerCodec for SctpCodec {
 
         let source_port = u16::from_be_bytes([input[0], input[1]]);
         let destination_port = u16::from_be_bytes([input[2], input[3]]);
-        let checksum = checksum_from_wire([input[8], input[9], input[10], input[11]]);
+        let checksum = u32::from_le_bytes([input[8], input[9], input[10], input[11]]);
         let mut diagnostics = Vec::new();
         if source_port == 0 {
             warn_zero_port(&mut diagnostics, "source_port", "source");
@@ -332,12 +332,4 @@ fn crc32c_parts(parts: &[&[u8]]) -> u32 {
         }
     }
     !remainder
-}
-
-fn checksum_to_wire(checksum: u32) -> [u8; 4] {
-    checksum.to_le_bytes()
-}
-
-fn checksum_from_wire(bytes: [u8; 4]) -> u32 {
-    u32::from_le_bytes(bytes)
 }

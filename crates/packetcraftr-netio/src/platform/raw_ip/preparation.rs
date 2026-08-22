@@ -15,17 +15,9 @@ use crate::{checksum, interface::Id as InterfaceId};
 const IPV4_MINIMUM_HEADER: usize = 20;
 const IPV6_HEADER: usize = 40;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum IpFamily {
-    V4,
-    V6,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct PreparedRawIp {
-    pub(super) family: IpFamily,
     pub(super) interface: InterfaceId,
-    pub(super) interface_source: IpAddr,
     pub(super) destination: IpAddr,
     pub(super) submission: Bytes,
     pub(super) wire_bytes: Bytes,
@@ -58,11 +50,10 @@ pub(super) fn prepare(frame: Layer3Frame<'_>) -> Result<PreparedRawIp, LiveIoErr
         return Err(invalid_frame("packet is empty".to_owned()));
     };
 
-    let (family, packet_source, destination, submission) = match version {
+    let (packet_source, destination, submission) = match version {
         4 => {
             let (source, destination) = validate_ipv4(&bytes)?;
             (
-                IpFamily::V4,
                 IpAddr::V4(source),
                 IpAddr::V4(destination),
                 ipv4_submission(&bytes),
@@ -70,16 +61,11 @@ pub(super) fn prepare(frame: Layer3Frame<'_>) -> Result<PreparedRawIp, LiveIoErr
         }
         6 => {
             let (source, destination) = validate_ipv6(&bytes)?;
-            (
-                IpFamily::V6,
-                IpAddr::V6(source),
-                IpAddr::V6(destination),
-                bytes.clone(),
-            )
+            (IpAddr::V6(source), IpAddr::V6(destination), bytes.clone())
         }
         version => return Err(invalid_frame(format!("unsupported IP version {version}"))),
     };
-    if interface_source.is_ipv4() != matches!(family, IpFamily::V4) {
+    if interface_source.is_ipv4() != destination.is_ipv4() {
         return Err(invalid_frame(
             "route-selected source address family differs from packet family".to_owned(),
         ));
@@ -99,9 +85,7 @@ pub(super) fn prepare(frame: Layer3Frame<'_>) -> Result<PreparedRawIp, LiveIoErr
     validate_windows_restrictions(&bytes, packet_source, interface_source)?;
 
     Ok(PreparedRawIp {
-        family,
         interface: plan.decision.interface.clone(),
-        interface_source,
         destination,
         submission,
         wire_bytes: bytes,

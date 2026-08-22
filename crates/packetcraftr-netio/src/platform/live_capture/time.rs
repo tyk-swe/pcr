@@ -44,10 +44,6 @@ pub(in crate::platform) fn monotonic_packet_time(
     observed_at: Instant,
 ) -> Option<Instant> {
     let age = observed_wall.duration_since(packet_timestamp).ok()?;
-    monotonic_time_for_age(age, observed_at)
-}
-
-pub(super) fn monotonic_time_for_age(age: Duration, observed_at: Instant) -> Option<Instant> {
     observed_at.checked_sub(age)
 }
 

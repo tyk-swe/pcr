@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use super::error::Error;
 use crate::field::FieldValue;
 
 pub const PACKET_DOCUMENT_SCHEMA_V1: &str = "packetcraftr.packet/v1";
@@ -36,4 +37,30 @@ pub struct Layer {
     pub protocol: String,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub fields: BTreeMap<String, FieldValue>,
+}
+
+impl Packet {
+    pub fn validate_schema(&self) -> Result<(), Error> {
+        if self.schema != PACKET_DOCUMENT_SCHEMA_V1 {
+            return Err(Error::Schema {
+                actual: self.schema.clone(),
+                expected: PACKET_DOCUMENT_SCHEMA_V1,
+            });
+        }
+        Ok(())
+    }
+
+    pub fn to_json_pretty(&self) -> Result<String, Error> {
+        serde_json::to_string_pretty(self).map_err(|source| Error::Serialize {
+            format: "JSON",
+            message: source.to_string(),
+        })
+    }
+
+    pub fn to_yaml(&self) -> Result<String, Error> {
+        noyalib::to_string(self).map_err(|source| Error::Serialize {
+            format: "YAML",
+            message: source.to_string(),
+        })
+    }
 }

@@ -17,7 +17,7 @@ use crate::Client;
 use crate::Error;
 use crate::materialize::{
     build_context, materialize_link_fields, materialize_link_structure, materialize_network_fields,
-    patch_builtin_ethernet, require_fixed_width_link_materialization,
+    require_fixed_width_link_materialization,
 };
 use crate::mtu::validate_mtu;
 use crate::planning::ensure_preparation_deadline;
@@ -184,7 +184,7 @@ where
                 mut packet,
                 plan,
                 build_context,
-                mut preliminary_build,
+                preliminary_build,
             } = planned_packet;
             let preliminary_len = preliminary_build.bytes.len();
             let route = route::materialize(plan, &self.neighbors)?;
@@ -192,12 +192,8 @@ where
             // Neighbor materialization is the only step that resolves link fields.
             let link_changed = materialize_link_fields(&mut packet, &route)?;
             let built = if link_changed {
-                if patch_builtin_ethernet(&self.registry, &mut preliminary_build, &packet) {
-                    preliminary_build
-                } else {
-                    ensure_preparation_deadline(deadline)?;
-                    builder.build(packet, build_context, options.send.build.clone())?
-                }
+                ensure_preparation_deadline(deadline)?;
+                builder.build(packet, build_context, options.send.build.clone())?
             } else {
                 preliminary_build
             };

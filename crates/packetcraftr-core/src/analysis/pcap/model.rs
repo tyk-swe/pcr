@@ -365,10 +365,6 @@ impl CaptureRecord {
     pub fn raw_bytes(&self) -> &[u8] {
         &self.raw
     }
-
-    pub fn frame(&self) -> Option<&crate::frame::Frame> {
-        self.frame.as_ref()
-    }
 }
 
 /// Result of a bounded streaming capture rewrite.

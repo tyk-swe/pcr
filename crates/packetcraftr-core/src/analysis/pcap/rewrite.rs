@@ -24,7 +24,7 @@ pub fn rewrite<R: Read, W: Write>(
     let mut captured_bytes = 0_u64;
     let mut metadata_records = 0_u64;
     while let Some(record) = reader.next_record()? {
-        if let Some(frame) = record.frame() {
+        if let Some(frame) = record.frame.as_ref() {
             (frames, captured_bytes) =
                 limits.advance(frames, captured_bytes, frame.captured_length())?;
         } else if matches!(record.kind, RecordKind::Metadata(_)) {

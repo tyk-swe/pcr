@@ -131,24 +131,7 @@ impl From<&packetcraftr_core::fuzz::Stats> for Stats {
     }
 }
 
-/// Output-v1 diagnostic severity.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DiagnosticSeverity {
-    Info,
-    Warning,
-    Error,
-}
-
-impl From<packetcraftr_core::diagnostic::Severity> for DiagnosticSeverity {
-    fn from(value: packetcraftr_core::diagnostic::Severity) -> Self {
-        match value {
-            packetcraftr_core::diagnostic::Severity::Info => Self::Info,
-            packetcraftr_core::diagnostic::Severity::Warning => Self::Warning,
-            packetcraftr_core::diagnostic::Severity::Error => Self::Error,
-        }
-    }
-}
+pub use packetcraftr_core::diagnostic::Severity as DiagnosticSeverity;
 
 /// Output-v1 byte range used by diagnostics.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -184,7 +167,7 @@ impl From<PacketDiagnostic> for Diagnostic {
     fn from(value: PacketDiagnostic) -> Self {
         Self {
             code: value.code,
-            severity: value.severity.into(),
+            severity: value.severity,
             message: value.message,
             layer: value.layer,
             field: value.field,

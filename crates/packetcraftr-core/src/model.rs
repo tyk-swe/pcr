@@ -7,7 +7,6 @@ use super::field::FieldValue;
 use super::layer::Layer;
 
 mod boundary;
-mod equality;
 mod error;
 
 pub use error::Error;
@@ -232,7 +231,16 @@ impl Packet {
 
     /// Compares protocol order and every reflected field.
     pub fn structurally_eq(&self, other: &Self) -> bool {
-        equality::structurally_eq(self, other)
+        self.len() == other.len()
+            && self.iter().zip(other.iter()).all(|(left, right)| {
+                left.protocol_id() == right.protocol_id()
+                    && left.schema() == right.schema()
+                    && left
+                        .schema()
+                        .fields
+                        .iter()
+                        .all(|field| left.field(field.name) == right.field(field.name))
+            })
     }
 
     /// Returns the cached number of encoded bytes after the layer at `index`.

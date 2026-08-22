@@ -27,23 +27,6 @@ impl Packet {
         )
     }
 
-    /// Parses one document with a caller-selected nesting ceiling and the
-    /// stable default layer ceiling.
-    pub fn parse_with_nesting_limit(
-        input: &str,
-        format: Format,
-        max_bytes: usize,
-        max_nesting: usize,
-    ) -> Result<Self, Error> {
-        Self::parse_with_resource_limits(
-            input,
-            format,
-            max_bytes,
-            crate::build::DEFAULT_MAX_LAYERS,
-            max_nesting,
-        )
-    }
-
     /// Parses one packet document while enforcing byte, layer, and nesting
     /// limits during lexical/streaming deserialization.
     pub fn parse_with_resource_limits(

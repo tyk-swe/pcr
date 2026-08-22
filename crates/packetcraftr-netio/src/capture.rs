@@ -6,8 +6,6 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use serde::{Deserialize, Serialize};
-
 use super::Error;
 use super::route::Plan;
 use packetcraftr_core::frame::{DEFAULT_SIZE_LIMIT, Frame as CaptureFrame};
@@ -27,19 +25,14 @@ pub const MAX_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 
 /// Capture counters for accepted frames and pre-delivery loss. Native receiver
 /// drops are a subset; overflow events are bounded-queue observations.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Statistics {
     pub received_frames: u64,
     pub received_bytes: u64,
     pub dropped_frames: u64,
     pub dropped_bytes: u64,
     pub overflow_events: u64,
-    #[serde(default, skip_serializing_if = "is_zero")]
     pub receiver_dropped_frames: u64,
-}
-
-const fn is_zero(value: &u64) -> bool {
-    *value == 0
 }
 
 impl Statistics {
@@ -178,8 +171,7 @@ impl Captured {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum OverflowPolicy {
     #[default]
     Fail,

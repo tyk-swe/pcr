@@ -104,7 +104,7 @@ where
 
     fn plan_packets(
         &self,
-        mut expanded_packets: template::Iter<'_>,
+        mut expanded_packets: impl ExactSizeIterator<Item = Result<Packet, template::Error>>,
         packet_count: u64,
         deadline: Instant,
         options: &Options,

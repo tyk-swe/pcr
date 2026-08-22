@@ -38,6 +38,7 @@ mod run;
 mod tests;
 
 pub use error::Error;
+pub use mutation::{dissect_built, packet_link_type};
 pub use request::{Limits, Request, Strategy, Target, TargetParseError};
 pub use result::{Case, CaseFailure, CaseOutcome, Mutation, Result, Stats, Summary};
 pub use run::{Campaign, run, run_with_events};

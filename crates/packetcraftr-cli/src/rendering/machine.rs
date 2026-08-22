@@ -81,18 +81,9 @@ pub(crate) fn output_timestamp_text(timestamp: output::frame::Timestamp) -> Stri
 }
 
 pub(crate) fn emit_json(value: &impl Serialize) -> Result<(), CliError> {
-    emit_serialized(value, true)
-}
-
-fn emit_serialized(value: &impl Serialize, pretty: bool) -> Result<(), CliError> {
     let stdout = io::stdout().lock();
     let mut writer = io::BufWriter::with_capacity(64 * 1024, stdout);
-    let result = if pretty {
-        serde_json::to_writer_pretty(&mut writer, value)
-    } else {
-        serde_json::to_writer(&mut writer, value)
-    };
-    result.map_err(json_error)?;
+    serde_json::to_writer_pretty(&mut writer, value).map_err(json_error)?;
     writer
         .write_all(b"\n")
         .and_then(|()| writer.flush())

@@ -22,7 +22,6 @@ mod fuzz;
 mod interfaces;
 mod offline_analysis;
 mod plan;
-pub(crate) mod progressive;
 mod protocols;
 mod read;
 mod replay;

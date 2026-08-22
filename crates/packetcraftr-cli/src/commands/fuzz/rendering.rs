@@ -88,7 +88,7 @@ pub(super) fn render_offline_complete(
     stream: &NdjsonStream,
 ) -> Result<(), CliError> {
     let (event, diagnostics, stats) = output::fuzz::Event::complete_from_offline(summary);
-    super::super::progressive::render_complete(event, diagnostics, stats, stream)
+    stream.complete_with_stats(event, diagnostics, stats)
 }
 
 pub(super) fn render_live_complete(
@@ -96,7 +96,7 @@ pub(super) fn render_live_complete(
     stream: &NdjsonStream,
 ) -> Result<(), CliError> {
     let (event, diagnostics, stats) = output::fuzz::Event::complete_from_live(summary);
-    super::super::progressive::render_complete(event, diagnostics, stats, stream)
+    stream.complete_with_stats(event, diagnostics, stats)
 }
 
 fn mode_name(value: output::fuzz::Mode) -> &'static str {

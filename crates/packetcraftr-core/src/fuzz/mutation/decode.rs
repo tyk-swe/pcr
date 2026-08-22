@@ -12,7 +12,7 @@ use crate::{
     semantics::BuiltinProtocol,
 };
 
-pub(in crate::fuzz) fn dissect_built(
+pub fn dissect_built(
     dissector: &Dissector,
     built: &BuiltPacket,
     limits: super::super::request::Limits,
@@ -56,7 +56,7 @@ pub(in crate::fuzz) fn dissect_built(
     }
 }
 
-fn packet_link_type(packet: &Packet) -> Option<LinkType> {
+pub fn packet_link_type(packet: &Packet) -> Option<LinkType> {
     Some(match BuiltinProtocol::of(packet.layer(0)?)? {
         BuiltinProtocol::Ethernet => LinkType::ETHERNET,
         BuiltinProtocol::BsdNull => LinkType::NULL,

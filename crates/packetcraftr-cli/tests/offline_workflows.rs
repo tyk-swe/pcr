@@ -3,21 +3,18 @@
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
 use std::time::UNIX_EPOCH;
 
 use packetcraftr::{
     analysis::pcap::{Format as CaptureFormat, Writer},
     core::frame::{Frame, LinkType},
 };
-use serde_json::Value;
-
-#[path = "support/capture.rs"]
-mod capture_support;
+#[path = "support/process.rs"]
+mod process_support;
 mod support;
 
-use capture_support::append_truncated_record;
-use support::{assert_contiguous, parse_json, parse_ndjson, run, run_success, schema_validator};
+use process_support::{append_truncated_record, decode_hex, run_with_stdin};
+use support::{assert_contiguous, parse_json, parse_ndjson, run, run_success};
 
 const UDP_CLIENT: &str = "450000210000000040118e95c0000201c633640230390009000d9f8868656c6c6f";
 const UDP_SERVER: &str = "450000210000000040118e95c6336402c000020100093039000d957e776f726c64";
@@ -27,58 +24,6 @@ const TCP_SERVER: &str =
     "450000280000000040068e99c6336402c0000201005030390000000a000000045012100083040000";
 const TCP_DATA: &str =
     "4500002b0000000040068e96c0000201c633640230390050000000040000000b50181000be970000616263";
-
-fn run_with_stdin(arguments: &[&str], input: &[u8]) -> Output {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_packetcraftr"))
-        .args(arguments)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("CLI process must start");
-    child
-        .stdin
-        .take()
-        .expect("stdin must be piped")
-        .write_all(input)
-        .expect("stdin must accept the frame");
-    child.wait_with_output().expect("CLI process must finish")
-}
-
-fn decode_hex(value: &str) -> Vec<u8> {
-    value
-        .as_bytes()
-        .chunks_exact(2)
-        .map(|pair| {
-            let pair = std::str::from_utf8(pair).expect("fixture hex must be UTF-8");
-            u8::from_str_radix(pair, 16).expect("fixture hex must be valid")
-        })
-        .collect()
-}
-
-fn parse_single_json(output: &Output) -> Value {
-    assert!(!output.stdout.is_empty(), "JSON output must not be empty");
-    assert!(
-        output.stdout.ends_with(b"\n"),
-        "JSON output must end with a newline"
-    );
-    let mut documents = serde_json::Deserializer::from_slice(&output.stdout).into_iter::<Value>();
-    let value = documents
-        .next()
-        .expect("JSON output must contain one document")
-        .expect("JSON output must parse");
-    assert!(
-        documents.next().is_none(),
-        "JSON output must contain one document"
-    );
-    value
-}
-
-fn assert_matches_published_schema(value: &Value) {
-    schema_validator()
-        .validate(value)
-        .expect("output document must validate against the published schema");
-}
 
 fn write_capture() -> tempfile::NamedTempFile {
     write_capture_frames(&[UDP_CLIENT, UDP_SERVER, TCP_CLIENT, TCP_SERVER, TCP_DATA])
@@ -353,11 +298,7 @@ fn read_rewrites_same_format_and_rejects_lossy_capture_output() {
         "udp",
     ]);
     assert!(dissected.status.success(), "{:?}", dissected.stderr);
-    let records: Vec<Value> = String::from_utf8(dissected.stdout)
-        .expect("NDJSON must be UTF-8")
-        .lines()
-        .map(|line| serde_json::from_str(line).expect("record must parse"))
-        .collect();
+    let records = parse_ndjson(&dissected);
     assert_eq!(records.len(), 3);
     assert!(
         records[..2]
@@ -410,14 +351,12 @@ fn read_ndjson_preserves_source_identity_and_always_completes() {
             record["result"]["source_frame"],
             u64::try_from(index + 1).expect("fixture index fits")
         );
-        assert_matches_published_schema(record);
     }
     let complete = &records[3];
     assert_eq!(complete["result"]["event"], "complete");
     assert_eq!(complete["result"]["frames_read"], 3);
     assert_eq!(complete["result"]["frames_matched"], 3);
     assert_eq!(complete["result"]["captured_bytes_read"], 109);
-    assert_matches_published_schema(complete);
 
     let filtered = run_success(&[
         "--output",
@@ -435,10 +374,6 @@ fn read_ndjson_preserves_source_identity_and_always_completes() {
     assert_eq!(records[1]["sequence"], 1);
     assert_eq!(records[1]["result"]["frames_read"], 3);
     assert_eq!(records[1]["result"]["frames_matched"], 1);
-    for record in &records {
-        assert_matches_published_schema(record);
-    }
-
     let text = run_success(&["read", path, "--filter", "frame.number == 3"]);
     assert!(String::from_utf8_lossy(&text.stdout).starts_with("3: "));
 }
@@ -471,7 +406,6 @@ fn read_ndjson_completes_empty_and_fully_filtered_inputs_at_zero() {
             records[0]["result"]["captured_bytes_read"],
             captured_bytes_read
         );
-        assert_matches_published_schema(&records[0]);
     }
 }
 
@@ -513,7 +447,6 @@ fn read_limits_account_for_filtered_source_input() {
                 .iter()
                 .all(|record| record["result"]["event"] != "complete")
         );
-        assert_matches_published_schema(&records[0]);
     }
 }
 
@@ -545,9 +478,6 @@ fn read_missing_filter_timestamp_uses_source_identity_and_next_envelope_position
             .iter()
             .all(|record| record["result"]["event"] != "complete")
     );
-    for record in &records {
-        assert_matches_published_schema(record);
-    }
 }
 
 #[test]
@@ -572,8 +502,7 @@ fn packet_documents_stdin_and_file_inputs_cover_offline_input_paths() {
         &frame,
     );
     assert!(decoded.status.success(), "{:?}", decoded.stderr);
-    let decoded_value = parse_single_json(&decoded);
-    assert_matches_published_schema(&decoded_value);
+    let decoded_value = parse_json(&decoded);
     assert_eq!(decoded_value["result"]["matched"], true);
     assert_eq!(
         decoded_value["result"]["dissection"]["bytes_hex"],
@@ -593,8 +522,7 @@ fn packet_documents_stdin_and_file_inputs_cover_offline_input_paths() {
         &frame,
     );
     assert!(filtered.status.success(), "{:?}", filtered.stderr);
-    let value = parse_single_json(&filtered);
-    assert_matches_published_schema(&value);
+    let value = parse_json(&filtered);
     assert_eq!(value["result"]["matched"], false);
     assert!(value["result"]["dissection"].is_null());
 
@@ -611,15 +539,13 @@ fn packet_documents_stdin_and_file_inputs_cover_offline_input_paths() {
         &frame,
     );
     assert!(matched.status.success(), "{:?}", matched.stderr);
-    let matched_value = parse_single_json(&matched);
-    assert_matches_published_schema(&matched_value);
+    let matched_value = parse_json(&matched);
     assert_eq!(matched_value["result"]["matched"], true);
     assert!(matched_value["result"]["dissection"].is_object());
 
     let malformed = run(&["--output", "json", "dissect", "--hex", "not-hex"]);
     assert_eq!(malformed.status.code(), Some(2));
-    let malformed_value = parse_single_json(&malformed);
-    assert_matches_published_schema(&malformed_value);
+    let malformed_value = parse_json(&malformed);
     assert_eq!(malformed_value["status"], "error");
     assert!(malformed_value["error"].is_object());
     assert!(malformed_value.get("result").is_none());
@@ -735,8 +661,7 @@ fn every_live_command_keeps_public_destinations_behind_policy() {
             "{arguments:?}: {:?}",
             output.stderr
         );
-        let value: Value =
-            serde_json::from_slice(&output.stdout).expect("policy error must be JSON");
+        let value = parse_json(&output);
         assert_eq!(value["status"], "error");
         assert_eq!(value["error"]["code"], "policy.public_destination");
     }

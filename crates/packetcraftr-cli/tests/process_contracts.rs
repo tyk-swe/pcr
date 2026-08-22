@@ -7,31 +7,14 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
-#[path = "support/capture.rs"]
-mod capture_support;
+#[path = "support/process.rs"]
+mod process_support;
 mod support;
 
-use capture_support::append_truncated_record;
+use process_support::{append_truncated_record, decode_hex, run_with_stdin};
 use support::{assert_contiguous, parse_json, parse_ndjson, run, run_success};
 
 const IPV4_FRAME_HEX: &str = "45000014000000004001f6e7c0000201c6336402";
-
-fn run_with_stdin(arguments: &[&str], input: &[u8]) -> Output {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_packetcraftr"))
-        .args(arguments)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("CLI process must start");
-    child
-        .stdin
-        .take()
-        .expect("stdin must be piped")
-        .write_all(input)
-        .expect("stdin must accept input");
-    child.wait_with_output().expect("CLI process must finish")
-}
 
 fn run_with_open_stdin(arguments: &[&str]) -> Output {
     let mut child = Command::new(env!("CARGO_BIN_EXE_packetcraftr"))
@@ -319,17 +302,6 @@ fn explicit_files_ignore_an_unrelated_open_stdin_pipe() {
         parse_json(&frame)["result"]["dissection"]["bytes_hex"],
         IPV4_FRAME_HEX
     );
-}
-
-fn decode_hex(value: &str) -> Vec<u8> {
-    value
-        .as_bytes()
-        .chunks_exact(2)
-        .map(|pair| {
-            let pair = std::str::from_utf8(pair).expect("fixture hex must be UTF-8");
-            u8::from_str_radix(pair, 16).expect("fixture hex must be valid")
-        })
-        .collect()
 }
 
 #[test]

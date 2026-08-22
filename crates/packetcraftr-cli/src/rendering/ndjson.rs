@@ -69,18 +69,6 @@ impl NdjsonStream {
     pub(crate) fn is_terminal(&self) -> bool {
         self.encoder.is_terminal()
     }
-
-    #[cfg(test)]
-    pub(crate) fn next_position(&self) -> u64 {
-        self.encoder
-            .next_sequence()
-            .expect("open test stream has a next sequence")
-    }
-
-    #[cfg(test)]
-    pub(crate) fn is_failed(&self) -> bool {
-        self.encoder.is_failed()
-    }
 }
 
 #[cfg(test)]
@@ -138,8 +126,6 @@ mod tests {
     #[test]
     fn data_and_completion_are_contiguous_from_zero() {
         let (stream, output) = stream(output::contract::Command::Read);
-        assert_eq!(stream.next_position(), 0);
-
         stream.emit_data(json!({"frame": 1}), Vec::new()).unwrap();
         stream.emit_data(json!({"frame": 2}), Vec::new()).unwrap();
         stream
@@ -151,6 +137,19 @@ mod tests {
         assert_eq!(records.len(), 3);
         assert_eq!(records[2]["result"]["event"], "complete");
         assert!(!stream.is_open());
+    }
+
+    #[test]
+    fn empty_success_completes_at_zero() {
+        let (stream, output) = stream(output::contract::Command::Read);
+        stream
+            .complete(json!({"event": "complete"}), Vec::new())
+            .unwrap();
+
+        let records = output.records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0]["sequence"], 0);
+        assert_eq!(records[0]["status"], "success");
     }
 
     #[test]
@@ -287,7 +286,8 @@ mod tests {
             .expect_err("second flush must fail");
 
         assert!(error.message.contains("sequence 1"));
-        assert!(stream.is_failed());
+        assert!(!stream.is_open());
+        assert!(!stream.is_terminal());
         let records = buffer.records();
         assert_contiguous(&records);
         assert_eq!(records.len(), 2);

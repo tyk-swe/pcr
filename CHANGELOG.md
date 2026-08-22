@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** Removed undocumented serialization and introspection scaffolding
+  from native-I/O models, fuzz campaigns/results, and `StreamEncoder`; versioned
+  `output` models remain the serialization source of truth. Live fuzz cases now
+  expose their offline case explicitly through `prepared`, and template
+  expansion returns an opaque exact-size iterator instead of a named iterator
+  type. Offline and live fuzzing share one core decode/link mapping.
 - **Breaking:** Offline and authorized live fuzz NDJSON now emits each case when
   its outcome becomes final, and exchange NDJSON now emits provider-confirmed
   sends, definitively classified response/unsolicited/undecoded evidence, and

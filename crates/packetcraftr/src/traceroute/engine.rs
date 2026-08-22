@@ -325,17 +325,16 @@ where
     E: Executor,
     F: FnMut(Event, &Deadline) -> std::result::Result<(), Error>,
 {
-    type Execution = Execution;
     type Error = Error;
 
-    fn execute(&mut self, batch: &Batch) -> std::result::Result<Self::Execution, BoundaryError> {
+    fn execute(&mut self, batch: &Batch) -> std::result::Result<Execution, BoundaryError> {
         self.executor.execute(batch)
     }
 
     fn validate(
         &mut self,
         batch: &Batch,
-        execution: &Self::Execution,
+        execution: &Execution,
     ) -> std::result::Result<(), Self::Error> {
         validate_execution(batch, execution, self.limits)
     }
@@ -343,7 +342,7 @@ where
     fn process(
         &mut self,
         batch: &Batch,
-        execution: Self::Execution,
+        execution: Execution,
         deadline: &Deadline,
     ) -> std::result::Result<bool, Self::Error> {
         self.process_batch(batch, execution, deadline)

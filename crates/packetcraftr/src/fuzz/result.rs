@@ -1,12 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::ops::{Deref, DerefMut};
 use std::time::Duration;
 
 use packetcraftr_core::{diagnostic::Diagnostic, frame::Frame, fuzz as packet_fuzz};
 use packetcraftr_netio::capture::Statistics as CaptureStatistics;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -44,21 +43,7 @@ impl From<packet_fuzz::Case> for Case {
     }
 }
 
-impl Deref for Case {
-    type Target = packet_fuzz::Case;
-
-    fn deref(&self) -> &Self::Target {
-        &self.prepared
-    }
-}
-
-impl DerefMut for Case {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.prepared
-    }
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Stats {
     pub cases_generated: u64,
     pub cases_built: u64,

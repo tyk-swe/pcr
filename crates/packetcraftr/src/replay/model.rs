@@ -168,7 +168,7 @@ impl Limits {
 }
 
 /// Complete replay request after the caller has selected an interface.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Options {
     pub interface: InterfaceId,
     pub link_mode: LinkMode,

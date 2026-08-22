@@ -48,10 +48,6 @@ impl CaseFailure {
             causes,
         }
     }
-
-    pub fn message(&self) -> &str {
-        &self.message
-    }
 }
 
 impl fmt::Display for CaseFailure {

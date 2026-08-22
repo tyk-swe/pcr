@@ -3,6 +3,7 @@
 
 //! Internal fuzz mutation façade.
 
+pub use decode::{dissect_built, packet_link_type};
 pub(super) use preparation::prepare_with_events;
 
 mod decode;

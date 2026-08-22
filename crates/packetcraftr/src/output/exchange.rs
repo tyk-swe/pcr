@@ -55,7 +55,7 @@ impl Result {
             .collect::<std::result::Result<Vec<_>, Error>>()?;
         let unsolicited_outputs = unsolicited
             .into_iter()
-            .map(decoded_output)
+            .map(Decoded::try_from_decoded)
             .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok((
             Self {
@@ -65,7 +65,7 @@ impl Result {
                 unsolicited: unsolicited_outputs,
                 undecoded: undecoded
                     .into_iter()
-                    .map(captured_output)
+                    .map(Captured::try_from_frame)
                     .collect::<std::result::Result<Vec<_>, _>>()?,
             },
             diagnostics,
@@ -141,13 +141,13 @@ impl Event {
             ),
             crate::exchange::Event::Unsolicited { frame } => (
                 Self::Unsolicited {
-                    frame: decoded_output(frame)?,
+                    frame: Decoded::try_from_decoded(frame)?,
                 },
                 Vec::new(),
             ),
             crate::exchange::Event::Undecoded { frame } => (
                 Self::Undecoded {
-                    frame: captured_output(frame)?,
+                    frame: Captured::try_from_frame(frame)?,
                 },
                 Vec::new(),
             ),
@@ -184,19 +184,9 @@ fn sent_output(sent: std::sync::Arc<crate::SentPacket>) -> (Wire, Vec<Diagnostic
 fn response_output(response: crate::exchange::Response) -> std::result::Result<Response, Error> {
     Ok(Response {
         request_index: request_index(response.request_index),
-        response: decoded_output(response.response)?,
+        response: Decoded::try_from_decoded(response.response)?,
         latency: response.latency,
     })
-}
-
-fn decoded_output(
-    frame: packetcraftr_core::decode::DecodedPacket,
-) -> std::result::Result<Decoded, Error> {
-    Decoded::try_from_decoded(frame)
-}
-
-fn captured_output(frame: packetcraftr_core::frame::Frame) -> std::result::Result<Captured, Error> {
-    Captured::try_from_frame(frame)
 }
 
 fn request_index(index: usize) -> u64 {

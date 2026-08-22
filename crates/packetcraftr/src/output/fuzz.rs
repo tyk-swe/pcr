@@ -210,38 +210,6 @@ impl Result {
             .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok((from_events(metadata, cases)?, diagnostics, (&stats).into()))
     }
-
-    pub fn from_offline_events(
-        summary: &packet_fuzz::Summary,
-        cases: Vec<Case>,
-    ) -> std::result::Result<Self, ContractError> {
-        from_events(
-            campaign(
-                summary.seed,
-                summary.first_case,
-                Mode::Offline,
-                summary.stats.cases_generated,
-                summary.stats.cases_built,
-            ),
-            cases,
-        )
-    }
-
-    pub fn from_live_events(
-        summary: &live_fuzz::Summary,
-        cases: Vec<Case>,
-    ) -> std::result::Result<Self, ContractError> {
-        from_events(
-            campaign(
-                summary.seed,
-                summary.first_case,
-                Mode::Live,
-                summary.stats.cases_generated,
-                summary.stats.cases_built,
-            ),
-            cases,
-        )
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -339,7 +307,7 @@ impl Case {
     }
 
     fn try_from_live(case: live_fuzz::Case) -> std::result::Result<Self, ContractError> {
-        let operation_seed = case.operation_seed;
+        let operation_seed = case.prepared.operation_seed;
         let live_fuzz::Case {
             prepared,
             outcome,
@@ -438,7 +406,7 @@ impl Event {
     }
 
     pub fn try_from_live(case: live_fuzz::Case) -> std::result::Result<Self, ContractError> {
-        let operation_seed = case.operation_seed;
+        let operation_seed = case.prepared.operation_seed;
         Ok(Self::Case {
             operation_seed,
             case: Box::new(Case::try_from_live(case)?),
@@ -495,18 +463,8 @@ mod tests {
 
     #[test]
     fn event_collection_rejects_summary_cardinality_mismatch() {
-        let summary = packet_fuzz::Summary {
-            seed: 7,
-            first_case: 10,
-            diagnostics: Vec::new(),
-            stats: packet_fuzz::Stats {
-                cases_generated: 1,
-                cases_built: 1,
-                ..packet_fuzz::Stats::default()
-            },
-        };
         assert!(matches!(
-            Result::from_offline_events(&summary, Vec::new()),
+            from_events(campaign(7, 10, Mode::Offline, 1, 1), Vec::new()),
             Err(ContractError::IncoherentFuzzEvents { .. })
         ));
     }

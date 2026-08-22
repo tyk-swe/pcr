@@ -12,7 +12,6 @@ const SYNTHESIZED_ETHERNET_BYTES: u64 = 14;
 
 mod boundary;
 mod client_executor;
-mod decode;
 mod error;
 mod execution;
 mod request;

@@ -4,15 +4,13 @@
 use std::net::IpAddr;
 
 use packetcraftr_core::frame::{Frame, LinkType};
-use serde::{Deserialize, Serialize};
 
 use crate::{capture::Statistics, interface::Id, link::MacAddress};
 
 /// Maximum explicit VLAN headers copied into a neighbor-discovery request.
 pub(crate) const MAX_VLAN_TAGS: usize = 8;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum VlanKind {
     Ieee8021Q,
     Ieee8021Ad,
@@ -28,7 +26,7 @@ impl VlanKind {
 }
 
 /// One fixed-width tag copied from a packet's explicit VLAN stack.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct VlanTag {
     pub kind: VlanKind,
     pub priority: u8,
@@ -49,7 +47,7 @@ pub struct Request {
 }
 
 /// Bounded evidence returned by an active resolver.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Resolution {
     pub mac_address: MacAddress,
     pub attempts: u32,

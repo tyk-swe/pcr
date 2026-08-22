@@ -51,19 +51,19 @@ pub(super) fn validate_execution(
 ) -> Result<(), Error> {
     if execution.stats.packets_attempted != 1 || execution.stats.packets_completed != 1 {
         return Err(Error::InvalidEvidence {
-            case_index: case.index,
+            case_index: case.prepared.index,
             message: "successful live execution must account for exactly one attempted and completed packet".to_owned(),
         });
     }
     if execution.stats.bytes != u64::try_from(execution.sent.bytes_sent()).unwrap_or(u64::MAX) {
         return Err(Error::InvalidEvidence {
-            case_index: case.index,
+            case_index: case.prepared.index,
             message: "sent receipt and byte statistics disagree".to_owned(),
         });
     }
     if execution.sent.built().bytes.len() > max_packet_bytes {
         return Err(Error::InvalidEvidence {
-            case_index: case.index,
+            case_index: case.prepared.index,
             message: format!(
                 "executor built {} bytes, exceeding max_packet_bytes={}",
                 execution.sent.built().bytes.len(),
@@ -76,14 +76,14 @@ pub(super) fn validate_execution(
         .capture
         .validate()
         .map_err(|source| Error::InvalidEvidence {
-            case_index: case.index,
+            case_index: case.prepared.index,
             message: format!("invalid capture statistics: {source}"),
         })?;
     for response in &execution.responses {
         deadline.check().map_err(duration_limit)?;
         let Some(_received_at) = response.timestamp else {
             return Err(Error::InvalidEvidence {
-                case_index: case.index,
+                case_index: case.prepared.index,
                 message: "executor returned response frame without a timestamp".to_owned(),
             });
         };

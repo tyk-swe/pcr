@@ -4,7 +4,6 @@
 //! Read CLI command logic.
 
 pub(super) mod arguments;
-mod conversion;
 mod rendering;
 
 use std::fs::File;
@@ -28,7 +27,6 @@ use crate::input::{open_capture, validate_capture_stream_limits};
 use crate::rendering::{NdjsonStream, capture_file_format};
 
 use super::increment_counter;
-use conversion::decode_options;
 use rendering::render_record;
 
 struct Decoding {
@@ -240,7 +238,13 @@ fn convert_frame(
     };
     let decoded = decoding
         .decoder
-        .decode(frame.clone(), decode_options(limits.max_frame_bytes))
+        .decode(
+            frame.clone(),
+            core::decode::Options {
+                max_packet_size: limits.max_frame_bytes,
+                ..core::decode::Options::default()
+            },
+        )
         .map_err(|source| CliError::new(3, source.to_string()))?;
     if let Some(filter) = &decoding.filter {
         validate_filter_timestamp(filter, &frame, source_frame)?;

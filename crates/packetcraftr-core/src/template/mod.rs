@@ -5,4 +5,4 @@
 
 mod model;
 
-pub use model::{DEFAULT_MAX_TEMPLATE_PACKETS, Error, Iter, Template};
+pub use model::{DEFAULT_MAX_TEMPLATE_PACKETS, Error, Template};

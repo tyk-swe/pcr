@@ -107,7 +107,7 @@ pub(super) fn render_event(
 ) -> Result<(), CliError> {
     let (event, diagnostics) =
         output::traceroute::Event::try_from_traceroute(event).map_err(CliError::classified)?;
-    super::super::progressive::render_event(event, diagnostics, stream)
+    stream.emit_data(event, diagnostics)
 }
 
 pub(super) fn render_complete(
@@ -115,7 +115,7 @@ pub(super) fn render_complete(
     stream: &NdjsonStream,
 ) -> Result<(), CliError> {
     let (event, diagnostics, stats) = output::traceroute::Event::complete_from_traceroute(summary);
-    super::super::progressive::render_complete(event, diagnostics, stats, stream)
+    stream.complete_with_stats(event, diagnostics, stats)
 }
 
 #[cfg(test)]

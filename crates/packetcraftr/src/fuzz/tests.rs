@@ -397,13 +397,16 @@ fn live_execution_uses_the_identical_packet_campaign() {
 
     assert_eq!(offline.cases.len(), live.cases.len());
     for (offline, live) in offline.cases.iter().zip(&live.cases) {
-        assert_eq!(offline.index, live.index);
-        assert_eq!(offline.seed, live.seed);
-        assert_eq!(offline.mutation, live.mutation);
-        assert_eq!(offline.shrink_values, live.shrink_values);
+        assert_eq!(offline.index, live.prepared.index);
+        assert_eq!(offline.seed, live.prepared.seed);
+        assert_eq!(offline.mutation, live.prepared.mutation);
+        assert_eq!(offline.shrink_values, live.prepared.shrink_values);
         assert_eq!(
             offline.built.as_ref().map(|built| built.bytes.as_ref()),
-            live.built.as_ref().map(|built| built.bytes.as_ref())
+            live.prepared
+                .built
+                .as_ref()
+                .map(|built| built.bytes.as_ref())
         );
     }
 }
@@ -435,7 +438,7 @@ fn live_fuzz_sink_failure_prevents_later_case_execution() {
         &mut executor,
         &mut NoopClock,
         move |case| {
-            observed.lock().unwrap().push(case.index);
+            observed.lock().unwrap().push(case.prepared.index);
             Err(BoundaryError::new(
                 "induced live fuzz sink failure",
                 packetcraftr_core::error::Classification::new(
@@ -485,7 +488,7 @@ fn live_fuzz_accepts_route_materialized_case() {
     let built = live
         .cases
         .iter()
-        .find_map(|case| case.built.as_ref())
+        .find_map(|case| case.prepared.built.as_ref())
         .expect("one built live fuzz case");
     let ipv4 = built
         .packet

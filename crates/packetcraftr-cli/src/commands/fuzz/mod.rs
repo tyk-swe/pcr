@@ -153,9 +153,7 @@ fn execute_offline(
         let summary = core::fuzz::run_with_events(&request, packet, registry, move |case| {
             output::fuzz::Event::try_from_offline(case)
                 .map_err(CliError::classified)
-                .and_then(|event| {
-                    super::progressive::render_event(event, Vec::new(), &event_stream)
-                })
+                .and_then(|event| event_stream.emit_data(event, Vec::new()))
                 .map_err(CliError::into_boundary_error)
         })
         .map_err(CliError::classified)?;
@@ -195,9 +193,7 @@ fn execute_live(
             move |case| {
                 output::fuzz::Event::try_from_live(case)
                     .map_err(CliError::classified)
-                    .and_then(|event| {
-                        super::progressive::render_event(event, Vec::new(), &event_stream)
-                    })
+                    .and_then(|event| event_stream.emit_data(event, Vec::new()))
                     .map_err(CliError::into_boundary_error)
             },
         )

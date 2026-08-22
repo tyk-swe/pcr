@@ -84,7 +84,6 @@ struct Counters {
 pub(in crate::fuzz) struct PreparedCases {
     pub(in crate::fuzz) built_case_count: u64,
     pub(in crate::fuzz) built_byte_count: u64,
-    pub(in crate::fuzz) retained_byte_count: u64,
 }
 
 struct CaseInputs<'a> {
@@ -113,7 +112,6 @@ where
     Ok(PreparedCases {
         built_case_count: counters.built_cases,
         built_byte_count: counters.built_bytes,
-        retained_byte_count: counters.retained_bytes,
     })
 }
 

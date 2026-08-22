@@ -11,6 +11,7 @@ use packetcraftr_core::{
     build::{Builder, BuiltPacket},
     decode::Dissector,
     diagnostic::Diagnostic,
+    frame::LinkType,
     fuzz as packet_fuzz,
     registry::Registry,
 };
@@ -22,6 +23,7 @@ use crate::materialize::{
     patch_builtin_ethernet, require_fixed_width_link_materialization,
 };
 
+use super::SYNTHESIZED_ETHERNET_BYTES;
 use super::boundary::{Authorizer, Execution, ExecutionCase, Executor};
 use super::error::{Error, duration_limit};
 use super::execution::{
@@ -30,10 +32,6 @@ use super::execution::{
 };
 use super::request::LiveOptions;
 use super::result::{Case, CaseOutcome, Result, Stats, Summary};
-use super::{
-    SYNTHESIZED_ETHERNET_BYTES,
-    decode::{dissect_built, has_link_root},
-};
 
 /// Builds and validates all cases offline, then authorizes and executes the campaign.
 pub fn run<A, E, C>(
@@ -197,13 +195,16 @@ fn prepare_campaign(
     deadline: &mut Deadline,
 ) -> std::result::Result<PreparedCampaign, Error> {
     let campaign = packet_fuzz::Campaign::prepare(request, packet, Arc::clone(registry), deadline)?;
-    let built_case_count = campaign.built_case_count();
     let cases = campaign
         .into_cases()
         .into_iter()
         .map(Case::from)
         .collect::<Vec<_>>();
-    let built_cases = cases.iter().filter(|case| case.built.is_some()).count();
+    let built_cases = cases
+        .iter()
+        .filter(|case| case.prepared.built.is_some())
+        .count();
+    let built_case_count = u64::try_from(built_cases).unwrap_or(u64::MAX);
 
     let worst_case = worst_case_duration(live, built_cases)?;
     deadline
@@ -211,7 +212,8 @@ fn prepare_campaign(
         .map_err(duration_limit)?;
     let maximum_wire_bytes = maximum_wire_bytes(request, &cases)?;
     let requires_malformed_live = cases.iter().any(|case| {
-        case.built
+        case.prepared
+            .built
             .as_ref()
             .is_some_and(|built| built.requires_live_opt_in)
     });
@@ -232,13 +234,18 @@ fn maximum_wire_bytes(
     cases: &[Case],
 ) -> std::result::Result<u64, Error> {
     cases.iter().try_fold(0_u64, |total, case| {
-        let Some(built) = &case.built else {
+        let Some(built) = &case.prepared.built else {
             return Ok(total);
         };
-        let overhead = if has_link_root(&built.packet) {
-            0
-        } else {
-            SYNTHESIZED_ETHERNET_BYTES
+        let overhead = match packet_fuzz::packet_link_type(&built.packet) {
+            Some(
+                LinkType::ETHERNET
+                | LinkType::NULL
+                | LinkType::LOOP
+                | LinkType::LINUX_SLL
+                | LinkType::LINUX_SLL2,
+            ) => 0,
+            _ => SYNTHESIZED_ETHERNET_BYTES,
         };
         total
             .checked_add(u64::try_from(built.bytes.len()).unwrap_or(u64::MAX))
@@ -260,7 +267,12 @@ where
     let packets = prepared
         .cases
         .iter()
-        .filter_map(|case| case.built.as_ref().map(|built| built.packet.clone()))
+        .filter_map(|case| {
+            case.prepared
+                .built
+                .as_ref()
+                .map(|built| built.packet.clone())
+        })
         .collect::<Vec<_>>();
     if !packets.is_empty() {
         authorizer.authorize_operation(
@@ -302,13 +314,14 @@ impl ExecutionPhase<'_> {
         let mut built_ordinal = 0;
         for mut case in cases {
             let diagnostic_start = self.diagnostics.len();
-            if case.built.is_some() {
-                self.pace(built_ordinal, case.index, clock)?;
+            if case.prepared.built.is_some() {
+                self.pace(built_ordinal, case.prepared.index, clock)?;
                 self.deadline.check().map_err(duration_limit)?;
                 self.execute_case(&mut case, executor)?;
                 built_ordinal += 1;
             }
-            case.diagnostics
+            case.prepared
+                .diagnostics
                 .extend(self.diagnostics[diagnostic_start..].iter().cloned());
             emit(case, &self.deadline)?;
         }
@@ -357,7 +370,7 @@ impl ExecutionPhase<'_> {
     {
         let execution_case = ExecutionCase {
             permit: crate::evidence::ExecutionPermit::new(),
-            packet: case.recipe.clone(),
+            packet: case.prepared.recipe.clone(),
         };
         self.deadline
             .start_accounting(Duration::ZERO)
@@ -365,28 +378,28 @@ impl ExecutionPhase<'_> {
         let execution = executor
             .execute(&execution_case, self.live.timeout)
             .map_err(|source| Error::Execution {
-                case_index: case.index,
+                case_index: case.prepared.index,
                 source,
             })?;
         if execution.permit != execution_case.permit {
             return Err(Error::InvalidEvidence {
-                case_index: case.index,
+                case_index: case.prepared.index,
                 message: "executor returned evidence for a different execution permit".to_owned(),
             });
         }
         let expected_live_build = expected_live_build(
             self.request,
-            case.recipe.clone(),
+            case.prepared.recipe.clone(),
             &self.registry,
             &execution,
         )
         .map_err(|message| Error::InvalidEvidence {
-            case_index: case.index,
+            case_index: case.prepared.index,
             message,
         })?;
         if execution.sent.wire_bytes() != &expected_live_build.bytes {
             return Err(Error::InvalidEvidence {
-                case_index: case.index,
+                case_index: case.prepared.index,
                 message: "executor substituted bytes for the route-materialized case".to_owned(),
             });
         }
@@ -400,19 +413,19 @@ impl ExecutionPhase<'_> {
             self.request.limits.max_packet_bytes,
             &self.deadline,
         )?;
-        add_execution_stats(&mut self.stats, &execution.stats, case.index)?;
+        add_execution_stats(&mut self.stats, &execution.stats, case.prepared.index)?;
         let had_response = !execution.responses.is_empty();
-        case.diagnostics = execution.sent.built().diagnostics.clone();
-        case.decoded = dissect_built(
+        case.prepared.diagnostics = execution.sent.built().diagnostics.clone();
+        case.prepared.decoded = packet_fuzz::dissect_built(
             &self.live_dissector,
             execution.sent.built(),
             self.request.limits,
-            &mut case.diagnostics,
+            &mut case.prepared.diagnostics,
         );
         self.deadline.check().map_err(duration_limit)?;
-        case.built = Some(execution.sent.built().clone());
+        case.prepared.built = Some(execution.sent.built().clone());
         case.sent = Some(execution.sent.frame().clone());
-        case.diagnostics.extend(execution.diagnostics);
+        case.prepared.diagnostics.extend(execution.diagnostics);
         retain_evidence(
             case,
             ExecutionEvidence {

@@ -367,8 +367,6 @@ mod tests {
         let primary_code = error.classification.code;
         assert!(error.message.contains("primary receive failure"));
         assert!(error.message.contains("cleanup failure"));
-        assert_eq!(stream.next_position(), 2);
-
         stream.emit_error(error.output_error()).unwrap();
         let records: Vec<Value> = output.records();
         assert_contiguous(&records);

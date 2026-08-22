@@ -5,14 +5,10 @@
 
 use std::fmt;
 
-use serde::{Deserialize, Serialize};
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Capability {
     Layer2,
     Layer3,
-    #[serde(rename = "layer2_and3")]
     Layer2AndLayer3,
 }
 
@@ -26,8 +22,7 @@ impl Capability {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Mode {
     #[default]
     Auto,
@@ -35,8 +30,7 @@ pub enum Mode {
     Layer3,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct MacAddress(pub [u8; 6]);
 
 impl fmt::Display for MacAddress {

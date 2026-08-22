@@ -18,9 +18,6 @@ use super::result::{Case, Stats, Summary};
 #[derive(Clone, Debug)]
 pub struct Campaign {
     pub(super) cases: Vec<super::result::Case>,
-    pub(super) built_case_count: u64,
-    pub(super) built_byte_count: u64,
-    pub(super) retained_byte_count: u64,
 }
 
 impl Campaign {
@@ -32,32 +29,11 @@ impl Campaign {
     ) -> Result<Self, Error> {
         request.validate()?;
         let mut cases = Vec::with_capacity(request.cases);
-        let prepared = prepare_with_events(request, packet, registry, deadline, &mut |case, _| {
+        prepare_with_events(request, packet, registry, deadline, &mut |case, _| {
             cases.push(case);
             Ok(())
         })?;
-        Ok(Self {
-            cases,
-            built_case_count: prepared.built_case_count,
-            built_byte_count: prepared.built_byte_count,
-            retained_byte_count: prepared.retained_byte_count,
-        })
-    }
-
-    pub fn cases(&self) -> &[super::result::Case] {
-        &self.cases
-    }
-
-    pub fn built_case_count(&self) -> u64 {
-        self.built_case_count
-    }
-
-    pub fn built_byte_count(&self) -> u64 {
-        self.built_byte_count
-    }
-
-    pub fn retained_byte_count(&self) -> u64 {
-        self.retained_byte_count
+        Ok(Self { cases })
     }
 
     pub fn into_cases(self) -> Vec<super::result::Case> {

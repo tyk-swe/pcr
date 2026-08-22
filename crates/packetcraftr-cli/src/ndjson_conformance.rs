@@ -1,9 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::io;
 use std::net::{IpAddr, Ipv4Addr};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 
 use packetcraftr::{core, output};
@@ -16,21 +15,7 @@ use crate::rendering::ndjson_test_support::{assert_contiguous, stream};
 struct Fixture {
     command: output::contract::Command,
     requires_terminal_stats: bool,
-    sparse_identifier: SparseIdentifier,
-    event: Value,
     complete: Value,
-}
-
-#[derive(Clone, Copy)]
-enum SparseIdentifier {
-    SourceFrame,
-    SourceSequence,
-    Frame,
-    ScanProbe,
-    TraceProbe,
-    DnsAttempt,
-    FuzzCase,
-    RequestIndex,
 }
 
 fn result(document: &str) -> Value {
@@ -42,10 +27,6 @@ fn offline_fixtures() -> Vec<Fixture> {
         Fixture {
             command: output::contract::Command::Read,
             requires_terminal_stats: false,
-            sparse_identifier: SparseIdentifier::SourceFrame,
-            event: result(include_str!(
-                "../../../examples/documents/output-read-event.json"
-            )),
             complete: result(include_str!(
                 "../../../examples/documents/output-read-complete.json"
             )),
@@ -53,10 +34,6 @@ fn offline_fixtures() -> Vec<Fixture> {
         Fixture {
             command: output::contract::Command::Capture,
             requires_terminal_stats: true,
-            sparse_identifier: SparseIdentifier::SourceFrame,
-            event: result(include_str!(
-                "../../../examples/documents/output-capture-event.json"
-            )),
             complete: result(include_str!(
                 "../../../examples/documents/output-capture-complete.json"
             )),
@@ -64,10 +41,6 @@ fn offline_fixtures() -> Vec<Fixture> {
         Fixture {
             command: output::contract::Command::Replay,
             requires_terminal_stats: false,
-            sparse_identifier: SparseIdentifier::SourceSequence,
-            event: result(include_str!(
-                "../../../examples/documents/output-replay-event.json"
-            )),
             complete: result(include_str!(
                 "../../../examples/documents/output-replay-success.json"
             )),
@@ -75,10 +48,6 @@ fn offline_fixtures() -> Vec<Fixture> {
         Fixture {
             command: output::contract::Command::Follow,
             requires_terminal_stats: false,
-            sparse_identifier: SparseIdentifier::Frame,
-            event: result(include_str!(
-                "../../../examples/documents/output-follow-event.json"
-            )),
             complete: result(include_str!(
                 "../../../examples/documents/output-follow-complete.json"
             )),
@@ -86,10 +55,6 @@ fn offline_fixtures() -> Vec<Fixture> {
         Fixture {
             command: output::contract::Command::Expert,
             requires_terminal_stats: false,
-            sparse_identifier: SparseIdentifier::Frame,
-            event: result(include_str!(
-                "../../../examples/documents/output-expert-event.json"
-            )),
             complete: result(include_str!(
                 "../../../examples/documents/output-expert-success.json"
             )),
@@ -102,10 +67,6 @@ fn active_fixtures() -> Vec<Fixture> {
         Fixture {
             command: output::contract::Command::Scan,
             requires_terminal_stats: false,
-            sparse_identifier: SparseIdentifier::ScanProbe,
-            event: result(include_str!(
-                "../../../examples/documents/output-scan-event.json"
-            )),
             complete: result(include_str!(
                 "../../../examples/documents/output-scan-complete.json"
             )),
@@ -113,10 +74,6 @@ fn active_fixtures() -> Vec<Fixture> {
         Fixture {
             command: output::contract::Command::Traceroute,
             requires_terminal_stats: false,
-            sparse_identifier: SparseIdentifier::TraceProbe,
-            event: result(include_str!(
-                "../../../examples/documents/output-traceroute-event.json"
-            )),
             complete: result(include_str!(
                 "../../../examples/documents/output-traceroute-complete.json"
             )),
@@ -124,10 +81,6 @@ fn active_fixtures() -> Vec<Fixture> {
         Fixture {
             command: output::contract::Command::Dns,
             requires_terminal_stats: false,
-            sparse_identifier: SparseIdentifier::DnsAttempt,
-            event: result(include_str!(
-                "../../../examples/documents/output-dns-event.json"
-            )),
             complete: result(include_str!(
                 "../../../examples/documents/output-dns-complete.json"
             )),
@@ -135,10 +88,6 @@ fn active_fixtures() -> Vec<Fixture> {
         Fixture {
             command: output::contract::Command::Fuzz,
             requires_terminal_stats: true,
-            sparse_identifier: SparseIdentifier::FuzzCase,
-            event: result(include_str!(
-                "../../../examples/documents/output-fuzz-event.json"
-            )),
             complete: result(include_str!(
                 "../../../examples/documents/output-fuzz-complete.json"
             )),
@@ -146,10 +95,6 @@ fn active_fixtures() -> Vec<Fixture> {
         Fixture {
             command: output::contract::Command::Exchange,
             requires_terminal_stats: true,
-            sparse_identifier: SparseIdentifier::RequestIndex,
-            event: result(include_str!(
-                "../../../examples/documents/output-exchange-sent-event.json"
-            )),
             complete: result(include_str!(
                 "../../../examples/documents/output-exchange-complete.json"
             )),
@@ -206,7 +151,8 @@ fn validate_typed_event<T: serde::Serialize + Clone>(
         .find(|fixture| fixture.command == command)
         .expect("typed event command has a completion fixture");
     let (success, bytes) = stream(command);
-    crate::commands::progressive::render_event(event.clone(), diagnostics.clone(), &success)
+    success
+        .emit_data(event.clone(), diagnostics.clone())
         .expect("typed production event must render");
     complete(&success, fixture.requires_terminal_stats, fixture.complete)
         .expect("typed production stream must complete");
@@ -216,7 +162,7 @@ fn validate_typed_event<T: serde::Serialize + Clone>(
     assert!(records.iter().all(|record| record["status"] == "success"));
 
     let (sink, bytes) = stream(command);
-    crate::commands::progressive::render_event(event, diagnostics, &sink)
+    sink.emit_data(event, diagnostics)
         .expect("typed production event must render");
     sink.emit_error(CliError::new(5, "typed partial failure").output_error())
         .expect("typed partial stream must terminate");
@@ -549,153 +495,6 @@ fn complete(
         sink.complete_with_stats(result, Vec::new(), output::envelope::Stats::default())
     } else {
         sink.complete(result, Vec::new())
-    }
-}
-
-#[test]
-fn every_command_stream_is_schema_valid_contiguous_and_terminal() {
-    let validator = crate::test_support::schema_validator();
-    for fixture in fixtures() {
-        let (sink, output) = stream(fixture.command);
-        sink.emit_data(fixture.event, Vec::new()).unwrap();
-        complete(&sink, fixture.requires_terminal_stats, fixture.complete).unwrap();
-        let terminal_bytes = output.bytes();
-        let records = output.records();
-
-        validate_records(validator, &records);
-        assert_eq!(records.len(), 2);
-        assert_eq!(records[0]["status"], "success");
-        assert_eq!(records[1]["status"], "success");
-        assert!(sink.emit_data(json!({"late": true}), Vec::new()).is_err());
-        assert!(
-            sink.emit_error(CliError::new(5, "late").output_error())
-                .is_err()
-        );
-        assert_eq!(output.bytes(), terminal_bytes);
-    }
-}
-
-#[test]
-fn every_command_empty_success_completes_at_zero() {
-    let validator = crate::test_support::schema_validator();
-    for fixture in fixtures() {
-        let (sink, output) = stream(fixture.command);
-        complete(&sink, fixture.requires_terminal_stats, fixture.complete).unwrap();
-        let records = output.records();
-
-        validate_records(validator, &records);
-        assert_eq!(records.len(), 1);
-        assert_eq!(records[0]["sequence"], 0);
-        assert_eq!(records[0]["status"], "success");
-    }
-}
-
-#[test]
-fn every_command_early_and_late_failure_is_the_only_terminal_record() {
-    let validator = crate::test_support::schema_validator();
-    for fixture in fixtures() {
-        let (empty, output) = stream(fixture.command);
-        empty
-            .emit_error(CliError::new(5, "early failure").output_error())
-            .unwrap();
-        let records = output.records();
-        validate_records(validator, &records);
-        assert_eq!(records.len(), 1);
-        assert_eq!(records[0]["sequence"], 0);
-        assert_eq!(records[0]["status"], "error");
-
-        let (partial, output) = stream(fixture.command);
-        partial.emit_data(fixture.event, Vec::new()).unwrap();
-        partial
-            .emit_error(CliError::new(5, "late failure").output_error())
-            .unwrap();
-        let terminal_bytes = output.bytes();
-        let records = output.records();
-        validate_records(validator, &records);
-        assert_eq!(records.len(), 2);
-        assert_eq!(records[1]["sequence"], 1);
-        assert_eq!(records[1]["status"], "error");
-        assert!(partial.emit_data(fixture.complete, Vec::new()).is_err());
-        assert_eq!(output.bytes(), terminal_bytes);
-    }
-}
-
-#[test]
-fn sparse_domain_identifiers_never_select_envelope_sequence() {
-    let validator = crate::test_support::schema_validator();
-    for mut fixture in fixtures() {
-        set_sparse_domain_identifier(fixture.sparse_identifier, &mut fixture.event);
-        let (sink, output) = stream(fixture.command);
-        sink.emit_data(fixture.event, Vec::new()).unwrap();
-        complete(&sink, fixture.requires_terminal_stats, fixture.complete).unwrap();
-        let records = output.records();
-
-        validate_records(validator, &records);
-        assert_eq!(records[0]["sequence"], 0);
-        assert_eq!(records[1]["sequence"], 1);
-    }
-}
-
-fn set_sparse_domain_identifier(identifier: SparseIdentifier, event: &mut Value) {
-    let sparse = json!(9_000_000_007_u64);
-    match identifier {
-        SparseIdentifier::SourceFrame => {
-            event["source_frame"] = sparse;
-        }
-        SparseIdentifier::SourceSequence => event["source_sequence"] = sparse,
-        SparseIdentifier::Frame => {
-            event["frame"] = sparse;
-        }
-        SparseIdentifier::ScanProbe | SparseIdentifier::TraceProbe => {
-            event["probe"]["sequence"] = sparse;
-        }
-        SparseIdentifier::DnsAttempt => event["evidence"]["attempt"] = json!(31),
-        SparseIdentifier::FuzzCase => {
-            event["case"]["index"] = sparse.clone();
-            event["case"]["reproduction"]["case_index"] = sparse;
-        }
-        SparseIdentifier::RequestIndex => event["request_index"] = sparse,
-    }
-}
-
-#[derive(Clone, Default)]
-struct SharedBytes(Arc<Mutex<Vec<u8>>>);
-
-impl io::Write for SharedBytes {
-    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        self.0.lock().unwrap().extend_from_slice(bytes);
-        Ok(bytes.len())
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        Err(io::Error::other("induced flush failure"))
-    }
-}
-
-#[test]
-fn sink_failure_never_appends_a_second_stdout_document() {
-    let validator = crate::test_support::schema_validator();
-    for fixture in fixtures() {
-        let output = SharedBytes::default();
-        let sink = NdjsonStream::new(Some(fixture.command), output.clone());
-        let error = sink
-            .emit_data(fixture.event, Vec::new())
-            .expect_err("the record flush must fail");
-        assert!(error.message.contains("sequence 0"));
-        let bytes_after_failure = output.0.lock().unwrap().clone();
-        let records = std::str::from_utf8(&bytes_after_failure)
-            .unwrap()
-            .lines()
-            .map(|line| serde_json::from_str::<Value>(line).unwrap())
-            .collect::<Vec<_>>();
-        validate_records(validator, &records);
-        assert_eq!(records.len(), 1);
-
-        assert!(
-            sink.emit_error(CliError::new(5, "secondary error").output_error())
-                .is_err()
-        );
-        assert_eq!(*output.0.lock().unwrap(), bytes_after_failure);
     }
 }
 

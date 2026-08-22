@@ -53,18 +53,12 @@ pub(super) struct NeighborExchangeOutcome {
     pub(super) evidence_truncated: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(super) struct NeighborCache {
     entries: Mutex<HashMap<NeighborCacheKey, NeighborCacheEntry>>,
 }
 
 impl NeighborCache {
-    pub(super) fn new() -> Self {
-        Self {
-            entries: Mutex::new(HashMap::new()),
-        }
-    }
-
     pub(super) fn get(
         &self,
         key: &NeighborCacheKey,
@@ -189,7 +183,7 @@ mod tests {
 
     #[test]
     fn cache_returns_inserted_values_and_evicts_the_oldest_entry() {
-        let cache = NeighborCache::new();
+        let cache = NeighborCache::default();
         let first = NeighborCacheKey::from(&request(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2))));
         let second = NeighborCacheKey::from(&request(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 3))));
         let first_mac = MacAddress([0x02, 0, 0, 0, 0, 2]);
@@ -210,7 +204,7 @@ mod tests {
 
     #[test]
     fn cache_expires_entries_and_rejects_deadline_overflow() {
-        let cache = NeighborCache::new();
+        let cache = NeighborCache::default();
         let key = NeighborCacheKey::from(&request(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2))));
         cache
             .insert(
@@ -234,7 +228,7 @@ mod tests {
 
     #[test]
     fn poisoned_cache_state_fails_closed_for_reads_and_writes() {
-        let cache = Arc::new(NeighborCache::new());
+        let cache = Arc::new(NeighborCache::default());
         let poison = Arc::clone(&cache);
         let _ = std::thread::spawn(move || {
             let _guard = poison.entries.lock().expect("initial mutex lock");

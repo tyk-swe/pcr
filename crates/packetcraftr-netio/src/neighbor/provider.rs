@@ -32,27 +32,12 @@ pub trait Resolver: Send + Sync {
 }
 
 /// Injectable active resolver; production uses `System*` providers.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ActiveResolver<L, C> {
     layer2: L,
     capture: C,
     options: Options,
     cache: Arc<NeighborCache>,
-}
-
-impl<L, C> Clone for ActiveResolver<L, C>
-where
-    L: Clone,
-    C: Clone,
-{
-    fn clone(&self) -> Self {
-        Self {
-            layer2: self.layer2.clone(),
-            capture: self.capture.clone(),
-            options: self.options.clone(),
-            cache: Arc::clone(&self.cache),
-        }
-    }
 }
 
 impl<L, C> ActiveResolver<L, C> {
@@ -61,7 +46,7 @@ impl<L, C> ActiveResolver<L, C> {
             layer2,
             capture,
             options: options.validate()?,
-            cache: Arc::new(NeighborCache::new()),
+            cache: Arc::new(NeighborCache::default()),
         })
     }
 }

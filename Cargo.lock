@@ -914,7 +914,6 @@ dependencies = [
  "pcap",
  "pnet_datalink",
  "rtnetlink",
- "serde",
  "socket2",
  "thiserror 2.0.19",
  "tokio",

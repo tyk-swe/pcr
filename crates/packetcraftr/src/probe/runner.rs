@@ -68,16 +68,6 @@ pub(crate) trait ProbeBatch {
     fn probe_count(&self) -> usize;
 }
 
-pub(crate) trait ProbeExecution {
-    fn stats(&self) -> &Stats;
-}
-
-impl ProbeExecution for Execution {
-    fn stats(&self) -> &Stats {
-        &self.stats
-    }
-}
-
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ProbeRunConfig {
     pub(crate) probes_per_second: Option<u32>,
@@ -87,15 +77,14 @@ pub(crate) struct ProbeRunConfig {
 
 /// Workflow-owned operations and error taxonomy for the shared probe runner.
 pub(crate) trait ProbeLifecycle<B> {
-    type Execution: ProbeExecution;
     type Error;
 
-    fn execute(&mut self, batch: &B) -> Result<Self::Execution, BoundaryError>;
-    fn validate(&mut self, batch: &B, execution: &Self::Execution) -> Result<(), Self::Error>;
+    fn execute(&mut self, batch: &B) -> Result<Execution, BoundaryError>;
+    fn validate(&mut self, batch: &B, execution: &Execution) -> Result<(), Self::Error>;
     fn process(
         &mut self,
         batch: &B,
-        execution: Self::Execution,
+        execution: Execution,
         deadline: &Deadline,
     ) -> Result<bool, Self::Error>;
     fn duration_error(actual: Duration, limit: Duration) -> Self::Error;
@@ -155,12 +144,12 @@ where
             .map_err(|source| L::execution_error(sequence, source))?;
         check_deadline(deadline, L::duration_error)?;
         deadline
-            .account(execution.stats().elapsed)
+            .account(execution.stats.elapsed)
             .map_err(|error| L::duration_error(error.actual, error.limit))?;
         lifecycle.validate(batch, &execution)?;
         check_deadline(deadline, L::duration_error)?;
         stats
-            .checked_add_assign(execution.stats())
+            .checked_add_assign(&execution.stats)
             .ok_or_else(|| L::statistics_error(sequence))?;
         if lifecycle.process(batch, execution, deadline)? {
             break;

@@ -31,7 +31,6 @@ native-layer3 = ["native-interfaces", "dep:socket2"]
 [dependencies]
 bytes.workspace = true
 packetcraftr-core.workspace = true
-serde.workspace = true
 thiserror.workspace = true
 
 [target.'cfg(not(windows))'.dependencies]

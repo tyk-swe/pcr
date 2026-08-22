@@ -68,9 +68,7 @@ pub(super) fn run(
             .exchange_with_events(&template, options, move |event| {
                 output::exchange::Event::try_from_exchange(event)
                     .map_err(CliError::classified)
-                    .and_then(|(event, diagnostics)| {
-                        super::progressive::render_event(event, diagnostics, &event_stream)
-                    })
+                    .and_then(|(event, diagnostics)| event_stream.emit_data(event, diagnostics))
                     .map_err(CliError::into_boundary_error)
             })
             .map_err(CliError::classified)?;

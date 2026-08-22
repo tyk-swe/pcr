@@ -1,9 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::io::Read;
-
-use packetcraftr::{analysis::pcap::Reader, core::frame::Frame};
+use packetcraftr::core::frame::Frame;
 
 use crate::errors::CliError;
 use crate::filtering::FrameSelector;
@@ -20,32 +18,4 @@ impl packetcraftr::replay::Selector for FilterSelector<'_> {
             .keep(number, frame)
             .map_err(CliError::into_boundary_error)
     }
-}
-
-pub(super) fn run<R, A, T, C, F>(
-    reader: &mut Reader<R>,
-    options: &packetcraftr::replay::Options,
-    selector: Option<&mut dyn packetcraftr::replay::Selector>,
-    authorizer: &mut A,
-    transmitter: &mut T,
-    clock: &mut C,
-    sink: F,
-) -> Result<packetcraftr::replay::Summary, CliError>
-where
-    R: Read,
-    A: packetcraftr::replay::Authorizer,
-    T: packetcraftr::replay::Transmitter,
-    C: packetcraftr::clock::Clock,
-    F: FnMut(packetcraftr::replay::FrameEvidence) -> Result<(), packetcraftr::replay::Error>,
-{
-    packetcraftr::replay::run_with_selector(
-        reader,
-        options,
-        selector,
-        authorizer,
-        transmitter,
-        clock,
-        sink,
-    )
-    .map_err(CliError::classified)
 }

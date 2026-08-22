@@ -29,6 +29,10 @@ pub(crate) fn run_success(arguments: &[&str]) -> Output {
 }
 
 pub(crate) fn parse_json(output: &Output) -> Value {
+    assert!(
+        output.stdout.ends_with(b"\n"),
+        "JSON output must end with a newline"
+    );
     let value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
         panic!(
             "command output must be JSON ({error}): stdout={:?}, stderr={:?}",

@@ -4,9 +4,8 @@
 use std::time::Duration;
 
 use packetcraftr_netio::capture::Statistics;
-use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Stats {
     pub packets_attempted: u64,
     pub packets_completed: u64,

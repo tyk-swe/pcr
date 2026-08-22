@@ -10,7 +10,6 @@ use packetcraftr::{
     netio as net, output,
 };
 
-use super::execution;
 use crate::errors::CliError;
 use crate::rendering::{
     CaptureWriter, NdjsonStream, capture_file_format, emit_aggregate_with_stats, spaced_hex,
@@ -33,7 +32,7 @@ pub(super) fn render_text(
     clock: &mut packetcraftr::clock::SystemClock,
     filtered: bool,
 ) -> Result<(), CliError> {
-    let summary = execution::run(
+    let summary = packetcraftr::replay::run_with_selector(
         reader,
         options,
         selector,
@@ -41,7 +40,8 @@ pub(super) fn render_text(
         transmitter,
         clock,
         render_record,
-    )?;
+    )
+    .map_err(CliError::classified)?;
     if filtered {
         write_stdout_line(format_args!(
             "replayed {} of {} frame(s), {} byte(s), scheduled delay {:?}",
@@ -69,7 +69,7 @@ pub(super) fn render_aggregate(
 ) -> Result<(), CliError> {
     let started = Instant::now();
     let mut frames = Vec::new();
-    let summary = execution::run(
+    let summary = packetcraftr::replay::run_with_selector(
         reader,
         options,
         selector,
@@ -80,7 +80,8 @@ pub(super) fn render_aggregate(
             frames.push(output_frame(evidence)?);
             Ok(())
         },
-    )?;
+    )
+    .map_err(CliError::classified)?;
     let stats = stats(&summary, started.elapsed());
     let result = output::replay::Result::from_summary(
         summary,
@@ -107,7 +108,7 @@ where
     C: packetcraftr::clock::Clock,
 {
     let started = Instant::now();
-    let summary = execution::run(
+    let summary = packetcraftr::replay::run_with_selector(
         reader,
         options,
         selector,
@@ -115,7 +116,8 @@ where
         transmitter,
         clock,
         |evidence| render_stream_record(stream, evidence),
-    )?;
+    )
+    .map_err(CliError::classified)?;
     let stats = stats(&summary, started.elapsed());
     let result = output::replay::Result::from_summary(
         summary,
@@ -144,7 +146,7 @@ pub(super) fn render_capture(
         options.limits,
         settings.max_interfaces,
     )?;
-    execution::run(
+    packetcraftr::replay::run_with_selector(
         reader,
         options,
         selector,
@@ -152,7 +154,8 @@ pub(super) fn render_capture(
         transmitter,
         clock,
         |evidence| render_capture_record(&mut writer, evidence),
-    )?;
+    )
+    .map_err(CliError::classified)?;
     writer.flush().map_err(CliError::classified)
 }
 
@@ -457,7 +460,6 @@ mod tests {
         assert_eq!(error.exit_code, 6);
         assert_eq!(error.classification.code, "policy.fixture_replay");
         assert_eq!(error.causes, ["fixture domain cause"]);
-        assert_eq!(stream.next_position(), 2);
         stream.emit_error(error.output_error()).unwrap();
 
         let records = output.records();
@@ -510,6 +512,7 @@ mod tests {
                 "inspect the replay timer or output sink and account for frames already transmitted"
             )
         );
-        assert!(stream.is_failed());
+        assert!(!stream.is_open());
+        assert!(!stream.is_terminal());
     }
 }

@@ -3,16 +3,13 @@
 
 use std::net::{IpAddr, Ipv4Addr};
 
-use serde::{Deserialize, Serialize};
-
 use crate::interface::Id as InterfaceId;
 use crate::link::{Capability, MacAddress, Mode};
 use crate::neighbor::VlanTag as NeighborVlanTag;
 use packetcraftr_core::error::{Classification, Kind};
 use packetcraftr_core::frame::LinkType;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Scope {
     Host,
     Link,
@@ -24,8 +21,7 @@ pub enum Scope {
 
 /// Why the operating system selected a route. The concrete next hop remains
 /// in [`Decision::next_hop`]; this enum is stable across native APIs.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SelectionReason {
     Local,
     OnLink,
@@ -34,13 +30,11 @@ pub enum SelectionReason {
     InterfaceOnly,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Decision {
     pub interface: InterfaceId,
     /// Interface-owned source MAC used for Layer 2 materialization.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_mac: Option<MacAddress>,
-    #[serde(rename = "selected_address")]
     pub selected_source: Option<IpAddr>,
     pub preferred_source: Option<IpAddr>,
     pub next_hop: Option<IpAddr>,
@@ -101,18 +95,15 @@ pub struct Options {
     pub preferred_source: Option<IpAddr>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Plan {
-    #[serde(rename = "route")]
     pub decision: Decision,
     pub mode: Mode,
     /// Route lookup destination. For an SRH this is the first visited segment.
     /// Destination-free Layer 2 frames have no lookup destination.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lookup_destination: Option<IpAddr>,
     /// Final network-layer destination used for transport checksums. This is
     /// absent for a packet containing no network-layer route.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub final_destination: Option<IpAddr>,
     /// Ordered SRH visit targets, or the single final destination without SRH.
     pub visited_destinations: Vec<IpAddr>,
@@ -122,7 +113,6 @@ pub struct Plan {
     pub destination_mac: Option<MacAddress>,
     pub source_mac: Option<MacAddress>,
     /// Planned VLAN stack reused for ARP/NDP to stay on the same logical link.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub neighbor_vlan_tags: Vec<NeighborVlanTag>,
     pub synthesized_ethernet: bool,
 }

@@ -4,12 +4,11 @@
 //! Capture CLI command logic.
 
 pub(super) mod arguments;
-mod conversion;
 mod execution;
 mod rendering;
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use packetcraftr::{netio as net, netio::capture::Provider as _, output};
 
@@ -20,7 +19,6 @@ use crate::filtering::FrameSelector;
 use crate::rendering::NdjsonStream;
 use crate::system::{client, prepare_route};
 
-use conversion::validate_window;
 use execution::Budget;
 
 pub(super) fn run(
@@ -37,7 +35,12 @@ pub(super) fn run(
         policy,
     } = arguments;
     let timeout = Duration::from_millis(timeout_ms);
-    validate_window(timeout)?;
+    if timeout > net::capture::MAX_TIMEOUT || Instant::now().checked_add(timeout).is_none() {
+        return Err(CliError::classified(net::Error::InvalidCaptureTimeout {
+            timeout,
+            maximum: net::capture::MAX_TIMEOUT,
+        }));
+    }
     let limits = limits
         .into_limits()
         .validate()

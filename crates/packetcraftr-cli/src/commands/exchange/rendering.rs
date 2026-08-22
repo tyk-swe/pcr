@@ -63,5 +63,5 @@ pub(super) fn render_complete(
     stream: &NdjsonStream,
 ) -> Result<(), CliError> {
     let (event, diagnostics, stats) = output::exchange::Event::complete_from_exchange(summary);
-    super::super::progressive::render_complete(event, diagnostics, stats, stream)
+    stream.complete_with_stats(event, diagnostics, stats)
 }

@@ -28,9 +28,9 @@ pub(crate) fn system_interfaces() -> Result<Vec<InterfaceInfo>, LiveIoError> {
             message: error.to_string(),
         },
     })?;
-    super::interface_validation::validate_native_interfaces(interfaces).map_err(|error| {
+    super::interface_validation::validate_native_interfaces(interfaces).map_err(|message| {
         LiveIoError::InterfaceDiscovery {
-            message: format!("native route response was invalid: {error}"),
+            message: format!("native route response was invalid: {message}"),
         }
     })
 }

@@ -397,19 +397,6 @@ impl StreamEncoder {
         self.state() == EncoderState::Terminal
     }
 
-    #[must_use]
-    pub fn is_failed(&self) -> bool {
-        matches!(self.state(), EncoderState::Writing | EncoderState::Failed)
-    }
-
-    #[must_use]
-    pub fn next_sequence(&self) -> Option<u64> {
-        if !self.is_open() {
-            return None;
-        }
-        self.shared.output.lock().ok().map(|output| output.sequence)
-    }
-
     fn write_success<T: Serialize>(
         &self,
         command: Command,

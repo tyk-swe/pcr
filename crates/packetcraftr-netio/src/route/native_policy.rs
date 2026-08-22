@@ -230,9 +230,7 @@ fn validate_interface_hint(
 }
 
 fn validate_interface(interface: &InterfaceInfo) -> Result<(), SystemError> {
-    validate_native_interface(interface).map_err(|error| SystemError::InvalidResponse {
-        message: error.to_string(),
-    })
+    validate_native_interface(interface).map_err(|message| SystemError::InvalidResponse { message })
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]

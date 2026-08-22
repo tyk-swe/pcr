@@ -51,7 +51,10 @@ impl Template {
         })
     }
 
-    pub fn expand(&self, maximum: usize) -> Result<Iter<'_>, Error> {
+    pub fn expand(
+        &self,
+        maximum: usize,
+    ) -> Result<impl ExactSizeIterator<Item = Result<Packet, Error>> + '_, Error> {
         let total = self.expansion_len()?;
         if total > maximum {
             return Err(Error::ExpansionLimit {
@@ -59,63 +62,31 @@ impl Template {
                 limit: maximum,
             });
         }
-        Ok(Iter {
-            template: self,
-            next_ordinal: 0,
-            total,
-        })
-    }
-}
-
-pub struct Iter<'a> {
-    template: &'a Template,
-    next_ordinal: usize,
-    total: usize,
-}
-
-impl Iterator for Iter<'_> {
-    type Item = Result<Packet, Error>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.next_ordinal >= self.total {
-            return None;
-        }
-        let ordinal = self.next_ordinal;
-        self.next_ordinal += 1;
-        let mut packet = self.template.base.clone();
-        let mut divisor = self.total;
-        for axis in &self.template.axes {
-            let length = axis.values.len();
-            if length == 0 {
-                return None;
-            }
-            divisor /= length;
-            let index = (ordinal / divisor) % length;
-            let value = axis.values[index].clone();
-            let Some(layer) = packet.layer_mut(axis.layer) else {
-                return Some(Err(Error::LayerIndex {
+        Ok((0..total).map(move |ordinal| {
+            let mut packet = self.base.clone();
+            let mut divisor = total;
+            for axis in &self.axes {
+                let length = axis.values.len();
+                divisor /= length;
+                let index = (ordinal / divisor) % length;
+                let value = axis.values[index].clone();
+                let packet_len = packet.len();
+                let layer = packet.layer_mut(axis.layer).ok_or(Error::LayerIndex {
                     index: axis.layer,
-                    len: packet.len(),
-                }));
-            };
-            if let Err(source) = layer.set_field(&axis.field, value) {
-                return Some(Err(Error::Field {
-                    layer: axis.layer,
-                    field: axis.field.clone(),
-                    source,
-                }));
+                    len: packet_len,
+                })?;
+                layer
+                    .set_field(&axis.field, value)
+                    .map_err(|source| Error::Field {
+                        layer: axis.layer,
+                        field: axis.field.clone(),
+                        source,
+                    })?;
             }
-        }
-        Some(Ok(packet))
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = self.total.saturating_sub(self.next_ordinal);
-        (remaining, Some(remaining))
+            Ok(packet)
+        }))
     }
 }
-
-impl ExactSizeIterator for Iter<'_> {}
 
 #[derive(Debug, Error)]
 #[non_exhaustive]

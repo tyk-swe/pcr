@@ -11,7 +11,19 @@ Default to decomposition: split work into independent bounded
 slices with disjoint files, launch all independent slices in one
 message so they run in parallel, sequence only slices that depend
 on another's output. Work inline only when the task is smaller
-than its handoff. Also, uss gpt-5.6-luna woth "max" reasoning effort as base subagent and use gpt-5.6-sol with "high" reasoning effort only for most hardest tasks.
+than its handoff.
+
+Parallel is the default, not the exception: a slice waits only for
+a slice whose *output it compiles against*. Two slices that touch
+disjoint files run concurrently on the same tree even while a
+third is in flight. Give any file two slices would both edit to
+one owner and hand the other slice's edit to that owner (or do it
+yourself afterwards). Tell parallel slices that compile errors in
+files they do not own are another slice's in-flight work — skip
+the full gate, do not "fix" those files; you run the gate once
+after all return.
+
+Also, uss gpt-5.6-luna woth "max" reasoning effort as base subagent and use gpt-5.6-sol with "high" reasoning effort only for most hardest tasks.
 
 Delegate:
 

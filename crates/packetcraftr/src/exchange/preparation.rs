@@ -22,7 +22,7 @@ use crate::materialize::{
 use crate::mtu::validate_mtu;
 use crate::planning::ensure_preparation_deadline;
 
-use super::contract::Options;
+use super::model::Options;
 use super::route_cache::CachedProvider;
 
 pub(crate) struct PlannedPacket {

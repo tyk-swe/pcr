@@ -4,13 +4,15 @@
 //! Private wire correlation shared by probe-based workflows.
 
 pub(crate) mod client_executor;
+pub(crate) mod engine;
 pub(crate) mod evidence;
-pub(crate) mod runner;
+
+pub(crate) use engine::Limits;
 
 use std::net::IpAddr;
 
 use packetcraftr_core::protocol::{
-    QuotedIcmpError, QuotedProbeTransport, quoted_icmp_error_kind, transport::Tcp,
+    QuotedIcmpReason, QuotedProbeTransport, quoted_icmp_error_kind, transport::Tcp,
 };
 use packetcraftr_core::{
     Packet,
@@ -193,22 +195,22 @@ fn classify_icmp_error(
         })?;
     let ipv6 = icmp_protocol == BuiltinProtocol::Icmpv6;
     let (correlation, ipv4_reason, ipv6_reason) = match kind {
-        QuotedIcmpError::PortUnreachable => (
+        QuotedIcmpReason::PortUnreachable => (
             Correlation::PortUnreachable,
             "ICMPv4 port unreachable",
             "ICMPv6 port unreachable",
         ),
-        QuotedIcmpError::AdministrativelyProhibited => (
+        QuotedIcmpReason::AdministrativelyProhibited => (
             Correlation::AdministrativelyProhibited,
             "ICMPv4 administratively prohibited",
             "ICMPv6 policy or administrative rejection",
         ),
-        QuotedIcmpError::DestinationUnreachable => (
+        QuotedIcmpReason::DestinationUnreachable => (
             Correlation::DestinationUnreachable,
             "ICMPv4 destination unreachable",
             "ICMPv6 destination unreachable",
         ),
-        QuotedIcmpError::TimeExceeded => (
+        QuotedIcmpReason::TimeExceeded => (
             Correlation::TimeExceeded,
             "ICMPv4 time exceeded before reaching the endpoint",
             "ICMPv6 time exceeded before reaching the endpoint",

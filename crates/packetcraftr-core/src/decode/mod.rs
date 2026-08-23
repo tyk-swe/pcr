@@ -21,11 +21,13 @@ const SYNTHETIC_LINK_TYPE: LinkType = LinkType(u32::MAX);
 mod error;
 mod fallback;
 mod options;
+mod packet;
 mod session;
 mod traversal;
 
 pub use error::Error;
-pub use options::{DecodedPacket, Options};
+pub use options::Options;
+pub use packet::DecodedPacket;
 
 #[derive(Clone, Debug)]
 pub struct Dissector {

@@ -7,7 +7,7 @@
 //! keep importing from `protocol::common` regardless of where a helper lives.
 
 mod checksum;
-mod errors;
+mod error;
 mod fields;
 mod payload;
 mod validation;
@@ -16,7 +16,7 @@ pub use checksum::ChecksumAccumulator;
 pub(crate) use checksum::{
     checksum, checksum_parts, network_from_addresses, transport_checksum, transport_checksum_parts,
 };
-pub(crate) use errors::{
+pub(crate) use error::{
     binding_protocol, invalid, out_of_range, protocol, truncated, wrong_layer, wrong_type,
 };
 pub(crate) use fields::{

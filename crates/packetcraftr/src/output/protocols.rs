@@ -112,7 +112,7 @@ impl From<&FieldSchema> for Field {
 
 /// Detailed capability and reflection data for one built-in protocol.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Detail {
+pub struct Protocol {
     pub protocol: String,
     pub aliases: Vec<String>,
     pub build: bool,
@@ -123,7 +123,7 @@ pub struct Detail {
     pub fields: Vec<Field>,
 }
 
-impl Detail {
+impl Protocol {
     pub fn new(summary: Summary, fields: Vec<Field>) -> Self {
         Self {
             protocol: summary.protocol,
@@ -140,12 +140,12 @@ impl Detail {
 
 /// Aggregate result of listing built-in protocols.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct ListResult {
+pub struct List {
     pub protocols: Vec<Summary>,
 }
 
 /// Aggregate result of describing one built-in protocol.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct DetailResult {
-    pub protocol: Detail,
+pub struct Detail {
+    pub protocol: Protocol,
 }

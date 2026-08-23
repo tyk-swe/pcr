@@ -5,7 +5,7 @@
 
 use crate::{codec::LayerEncodeContext, layer::Padding};
 
-use super::errors::invalid;
+use super::error::invalid;
 
 pub(crate) fn payload_without_padding<'a>(
     name: &str,

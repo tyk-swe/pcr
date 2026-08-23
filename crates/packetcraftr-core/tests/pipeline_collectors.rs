@@ -1,16 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-mod common;
+mod support;
 
 use std::io::Cursor;
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use common::{
-    CLIENT, SERVER, TcpSpec, client_tcp, reader, registry, server_tcp, tcp_frame, udp_frame,
-};
 use packetcraftr_core::Packet;
 use packetcraftr_core::analysis::expert::{Finding, StreamRef, StreamTransport};
 use packetcraftr_core::analysis::follow::{Direction as FollowDirection, Selector};
@@ -27,6 +24,9 @@ use packetcraftr_core::protocol::link::Ethernet;
 use packetcraftr_core::protocol::network::Ipv4;
 use packetcraftr_core::protocol::transport::{Tcp, Udp};
 use packetcraftr_core::protocol::tunnel::Vxlan;
+use support::{
+    CLIENT, SERVER, TcpSpec, client_tcp, reader, registry, server_tcp, tcp_frame, udp_frame,
+};
 
 fn tunnel_endpoints(spec: &TcpSpec) -> (Ipv4Addr, Ipv4Addr) {
     let client = Ipv4Addr::new(203, 0, 113, 1);

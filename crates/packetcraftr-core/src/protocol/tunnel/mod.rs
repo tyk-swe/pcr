@@ -5,6 +5,7 @@
 
 mod erspan;
 mod geneve;
+pub mod gre;
 mod ipsec;
 mod l2tp;
 mod mpls;

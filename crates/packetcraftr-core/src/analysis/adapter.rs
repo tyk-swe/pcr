@@ -8,10 +8,10 @@ use std::net::IpAddr;
 use crate::Packet;
 use crate::decode::DecodedPacket;
 use crate::layer::Padding;
-use crate::protocol::gre::Gre;
 use crate::protocol::link::{Vlan, Vlan8021ad};
 use crate::protocol::network::{Ipv4, Ipv6};
 use crate::protocol::transport::{Tcp, Udp};
+use crate::protocol::tunnel::gre::Gre;
 use crate::protocol::tunnel::{Ah, Erspan, Geneve, L2tpv3, Mpls, Pppoe, Vxlan};
 use bytes::Bytes;
 

@@ -8,7 +8,7 @@ use crate::ExchangeExecutor;
 use packetcraftr_core::error::Classification;
 use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Sender as PacketIo};
 
-use super::boundary::{Execution, ExecutionCase, Executor};
+use super::model::{Execution, ExecutionCase, Executor};
 
 /// Executes one generated fuzz case through the client's capture-ready
 /// exchange lifecycle.

@@ -14,7 +14,7 @@ use crate::{
 use super::{sctp::sctp_initiate_tag, unsigned_field};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum QuotedIcmpError {
+pub enum QuotedIcmpReason {
     PortUnreachable,
     AdministrativelyProhibited,
     DestinationUnreachable,
@@ -36,7 +36,7 @@ pub fn quoted_icmp_error_kind(
     request: &Packet,
     response: &Packet,
     expected_transport: QuotedProbeTransport,
-) -> Option<QuotedIcmpError> {
+) -> Option<QuotedIcmpReason> {
     let transport = request
         .iter()
         .find_map(|layer| match BuiltinProtocol::of(layer) {
@@ -56,17 +56,17 @@ pub fn quoted_icmp_error_kind(
     let code = unsigned_field::<u8>(layer, "code")?;
     let kind = match icmp_protocol {
         BuiltinProtocol::Icmpv4 if icmp_type == 3 => match code {
-            3 if transport == QuotedProbeTransport::Udp => QuotedIcmpError::PortUnreachable,
-            9 | 10 | 13 => QuotedIcmpError::AdministrativelyProhibited,
-            _ => QuotedIcmpError::DestinationUnreachable,
+            3 if transport == QuotedProbeTransport::Udp => QuotedIcmpReason::PortUnreachable,
+            9 | 10 | 13 => QuotedIcmpReason::AdministrativelyProhibited,
+            _ => QuotedIcmpReason::DestinationUnreachable,
         },
-        BuiltinProtocol::Icmpv4 if icmp_type == 11 => QuotedIcmpError::TimeExceeded,
+        BuiltinProtocol::Icmpv4 if icmp_type == 11 => QuotedIcmpReason::TimeExceeded,
         BuiltinProtocol::Icmpv6 if icmp_type == 1 => match code {
-            4 if transport == QuotedProbeTransport::Udp => QuotedIcmpError::PortUnreachable,
-            1 | 5 | 6 => QuotedIcmpError::AdministrativelyProhibited,
-            _ => QuotedIcmpError::DestinationUnreachable,
+            4 if transport == QuotedProbeTransport::Udp => QuotedIcmpReason::PortUnreachable,
+            1 | 5 | 6 => QuotedIcmpReason::AdministrativelyProhibited,
+            _ => QuotedIcmpReason::DestinationUnreachable,
         },
-        BuiltinProtocol::Icmpv6 if icmp_type == 3 => QuotedIcmpError::TimeExceeded,
+        BuiltinProtocol::Icmpv6 if icmp_type == 3 => QuotedIcmpReason::TimeExceeded,
         _ => return None,
     };
     let FieldValue::Bytes(body) = layer.field("body")? else {

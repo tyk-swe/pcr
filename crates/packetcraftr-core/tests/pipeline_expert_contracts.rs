@@ -1,12 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-mod common;
+mod support;
 
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use common::{TcpSpec, client_tcp, reader, registry, server_tcp, tcp_frame};
 use packetcraftr_core::analysis::expert::Collector;
 use packetcraftr_core::analysis::reassembly::tcp;
 use packetcraftr_core::analysis::{Error, Options, run};
@@ -14,6 +13,7 @@ use packetcraftr_core::error::{BoundaryError, Classification, Classified, Kind};
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::protocol::transport::Tcp;
 use packetcraftr_core::registry::Registry;
+use support::{TcpSpec, client_tcp, reader, registry, server_tcp, tcp_frame};
 
 fn expert_frames(registry: &Arc<Registry>, epoch: SystemTime) -> Vec<Frame> {
     let mut frames = vec![
@@ -104,7 +104,7 @@ fn expert_frames(registry: &Arc<Registry>, epoch: SystemTime) -> Vec<Frame> {
 
 #[test]
 fn expert_combines_header_reassembly_and_end_of_capture_findings() {
-    let _udp_fixture = common::udp_frame;
+    let _udp_fixture = support::udp_frame;
     let registry = registry();
     let frames = expert_frames(&registry, SystemTime::UNIX_EPOCH);
     let mut capture = reader(&frames);

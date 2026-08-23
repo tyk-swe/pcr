@@ -13,7 +13,7 @@ use crate::{
     registry::Discriminator,
 };
 
-use super::common::{
+use super::super::common::{
     ValueExpectation, checksum, checksum_parts, ensure_encode_budget,
     expected_discriminator_for_value, invalid, make_layer, payload_without_padding, protocol,
     resolve_u16, strict_or_diagnostic, truncated, validate_auto_raw_discriminator,

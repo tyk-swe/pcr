@@ -8,8 +8,9 @@ use packetcraftr::{analysis, output};
 
 use self::arguments::{Args, Direction};
 use super::super::input::open_capture;
-use super::offline_analysis::{Prepared, prepare};
+use super::registry;
 use crate::error::{FOLLOW_STREAM, failure};
+use crate::offline_analysis::{Prepared, prepare};
 use crate::rendering::NdjsonStream;
 use packetcraftr::BoundaryError;
 
@@ -45,7 +46,7 @@ pub(super) fn run(
         registry,
         filter,
         limits,
-    } = prepare(arguments.limits, Some(&source))?;
+    } = prepare(registry()?, arguments.limits, Some(&source))?;
     let filter = filter.expect("follow always prepares a stream filter");
     let mut reader = open_capture(&arguments.path, arguments.limits.capture)?;
 

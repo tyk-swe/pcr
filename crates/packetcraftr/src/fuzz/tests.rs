@@ -18,29 +18,25 @@ use crate::clock::Clock;
 use crate::{BoundaryError, Error, Stats as ExecutionStats};
 
 use super::execution::add_execution_stats;
-use super::{
-    Execution, ExecutionCase, Executor, LiveLimits, LiveOptions, Stats, run, run_with_events,
-};
+use super::{Execution, ExecutionCase, Executor, Limits, Options, Stats, run, run_with_events};
 
 #[test]
 fn live_evidence_limits_are_validated_outside_the_offline_campaign() {
-    LiveOptions::default()
-        .validate()
-        .expect("default live limits");
+    Options::default().validate().expect("default live limits");
 
     for limits in [
-        LiveLimits {
+        Limits {
             max_evidence_frames: 0,
-            ..LiveLimits::default()
+            ..Limits::default()
         },
-        LiveLimits {
+        Limits {
             max_evidence_bytes: 0,
-            ..LiveLimits::default()
+            ..Limits::default()
         },
     ] {
-        let error = LiveOptions {
+        let error = Options {
             limits,
-            ..LiveOptions::default()
+            ..Options::default()
         }
         .validate()
         .expect_err("zero live evidence limit must fail");
@@ -60,7 +56,7 @@ fn aggregate_live_fuzz_validates_case_count_before_collecting() {
 
     let error = run(
         &request,
-        LiveOptions::default(),
+        Options::default(),
         packet(),
         registry,
         &crate::policy::Policy::default(),
@@ -366,9 +362,9 @@ fn live_execution_uses_the_identical_packet_campaign() {
     let mut executor = RebuildingExecutor;
     let live = run(
         &request,
-        LiveOptions {
+        Options {
             timeout: Duration::from_millis(1),
-            ..LiveOptions::default()
+            ..Options::default()
         },
         packet(),
         registry,
@@ -410,9 +406,9 @@ fn live_fuzz_sink_failure_prevents_later_case_execution() {
 
     let error = run_with_events(
         &request,
-        LiveOptions {
+        Options {
             timeout: Duration::from_millis(1),
-            ..LiveOptions::default()
+            ..Options::default()
         },
         packet(),
         registry,
@@ -450,9 +446,9 @@ fn live_fuzz_accepts_route_materialized_case() {
     };
     let live = run(
         &request,
-        LiveOptions {
+        Options {
             timeout: Duration::from_millis(1),
-            ..LiveOptions::default()
+            ..Options::default()
         },
         route_materialized_packet(),
         registry,
@@ -488,9 +484,9 @@ fn live_fuzz_rejects_substituted_authorized_case() {
     let mut executor = SubstitutingFuzzExecutor;
     let error = run(
         &request,
-        LiveOptions {
+        Options {
             timeout: Duration::from_millis(1),
-            ..LiveOptions::default()
+            ..Options::default()
         },
         packet(),
         registry,

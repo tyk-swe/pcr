@@ -6,13 +6,13 @@
 
 use std::time::Duration;
 
-use crate::system::{Client, Exchange, resolve};
+use super::{Client, Exchange, resolve};
 use packetcraftr::BoundaryError;
 
-pub(super) struct Executor {
-    pub(super) client: Client,
-    pub(super) exchange: packetcraftr::exchange::Options,
-    pub(super) interface: Option<String>,
+pub(crate) struct Executor {
+    pub(crate) client: Client,
+    pub(crate) exchange: packetcraftr::exchange::Options,
+    pub(crate) interface: Option<String>,
 }
 
 impl Executor {

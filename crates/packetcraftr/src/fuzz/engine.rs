@@ -27,18 +27,18 @@ use crate::materialize::{
 use crate::policy::Policy;
 
 use super::SYNTHESIZED_ETHERNET_BYTES;
-use super::boundary::{Execution, ExecutionCase, Executor};
 use super::execution::{
     ExecutionEvidence, add_execution_stats, rate_delay, retain_evidence, validate_execution,
     worst_case_duration,
 };
-use super::request::LiveOptions;
-use super::result::{Case, CaseOutcome, Result, Stats, Summary};
+use super::model::{
+    Case, CaseOutcome, Execution, ExecutionCase, Executor, Options, Result, Stats, Summary,
+};
 
 /// Builds and validates all cases offline, then authorizes and executes the campaign.
 pub fn run<E, C>(
     request: &packet_fuzz::Request,
-    live: LiveOptions,
+    live: Options,
     packet: Packet,
     registry: Arc<Registry>,
     policy: &Policy,
@@ -51,12 +51,10 @@ where
 {
     let mut cases = Vec::new();
     let summary = run_observed(
-        RunInput {
-            request,
-            live,
-            packet,
-            registry,
-        },
+        request,
+        live,
+        packet,
+        registry,
         policy,
         executor,
         clock,
@@ -86,7 +84,7 @@ where
 )]
 pub fn run_with_events<E, C, F>(
     request: &packet_fuzz::Request,
-    live: LiveOptions,
+    live: Options,
     packet: Packet,
     registry: Arc<Registry>,
     policy: &Policy,
@@ -103,12 +101,10 @@ where
         source: Box::new(source),
     })?;
     run_observed(
-        RunInput {
-            request,
-            live,
-            packet,
-            registry,
-        },
+        request,
+        live,
+        packet,
+        registry,
         policy,
         executor,
         clock,
@@ -122,15 +118,15 @@ where
     )
 }
 
-struct RunInput<'a> {
-    request: &'a packet_fuzz::Request,
-    live: LiveOptions,
+#[expect(
+    clippy::too_many_arguments,
+    reason = "live fuzz execution requires the request, approved I/O boundaries, clock, and progressive sink"
+)]
+fn run_observed<E, C, F>(
+    request: &packet_fuzz::Request,
+    live: Options,
     packet: Packet,
     registry: Arc<Registry>,
-}
-
-fn run_observed<E, C, F>(
-    input: RunInput<'_>,
     policy: &Policy,
     executor: &mut E,
     clock: &mut C,
@@ -141,12 +137,6 @@ where
     C: Clock,
     F: FnMut(Case, &Deadline) -> std::result::Result<(), Error>,
 {
-    let RunInput {
-        request,
-        live,
-        packet,
-        registry,
-    } = input;
     let live = live.validate()?;
     let mut deadline = Deadline::new(request.limits.max_duration);
     let live_dissector = Dissector::new(Arc::clone(&registry));
@@ -187,7 +177,7 @@ struct PreparedCampaign {
 
 fn prepare_campaign(
     request: &packet_fuzz::Request,
-    live: LiveOptions,
+    live: Options,
     packet: Packet,
     registry: &Arc<Registry>,
     deadline: &mut Deadline,
@@ -250,7 +240,7 @@ fn maximum_wire_bytes(
 
 fn authorize_campaign(
     prepared: &PreparedCampaign,
-    live: LiveOptions,
+    live: Options,
     policy: &Policy,
 ) -> std::result::Result<(), Error> {
     let packets = prepared
@@ -283,7 +273,7 @@ fn authorize_campaign(
 
 struct ExecutionPhase<'a> {
     request: &'a packet_fuzz::Request,
-    live: LiveOptions,
+    live: Options,
     registry: Arc<Registry>,
     live_dissector: Dissector,
     deadline: Deadline,

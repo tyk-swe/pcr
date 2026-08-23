@@ -31,7 +31,7 @@ pub(crate) type WorkflowResponseMatcher<'a> =
 
 pub(crate) struct Accumulator {
     pub(super) unsolicited: Vec<UnsolicitedEvidence>,
-    pub(super) pending_events: Vec<super::contract::Event>,
+    pub(super) pending_events: Vec<super::model::Event>,
     pub(crate) diagnostics: Vec<packetcraftr_core::diagnostic::Diagnostic>,
     pub(super) evidence_budget: Budget,
     pub(crate) response_counts: Vec<usize>,
@@ -48,7 +48,7 @@ pub(crate) struct ProcessContext<'a> {
     pub(crate) prepared: &'a [PreparedPacket],
     pub(crate) sent: &'a [Arc<crate::SentPacket>],
     pub(crate) deadline: Instant,
-    pub(crate) options: &'a super::contract::Options,
+    pub(crate) options: &'a super::model::Options,
 }
 
 #[derive(Clone, Copy)]
@@ -89,7 +89,7 @@ impl Accumulator {
         self.retained_record_identities.insert(identity);
     }
 
-    pub(super) fn drain_events(&mut self) -> std::vec::Drain<'_, super::contract::Event> {
+    pub(super) fn drain_events(&mut self) -> std::vec::Drain<'_, super::model::Event> {
         self.pending_events.drain(..)
     }
 }

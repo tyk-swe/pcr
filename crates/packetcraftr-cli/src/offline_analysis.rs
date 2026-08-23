@@ -11,22 +11,22 @@ use packetcraftr::{
     core::{filter::Filter, registry::Registry},
 };
 
-use super::super::command_options::OfflineLimitsArgs;
-use super::super::filtering::{self, Capabilities};
-use super::super::input::validate_capture_stream_limits;
-use super::registry;
+use crate::command_options::OfflineLimitsArgs;
+use crate::filtering::{self, Capabilities};
+use crate::input::validate_capture_stream_limits;
 use packetcraftr::BoundaryError;
 
 /// Validated, I/O-free analysis state.
-pub(super) struct Prepared {
-    pub(super) registry: Arc<Registry>,
-    pub(super) filter: Option<Filter>,
-    pub(super) limits: analysis::Limits,
+pub(crate) struct Prepared {
+    pub(crate) registry: Arc<Registry>,
+    pub(crate) filter: Option<Filter>,
+    pub(crate) limits: analysis::Limits,
 }
 
 /// Validates capture bounds, prepares registry/filter state, then validates
 /// analysis bounds.
-pub(super) fn prepare(
+pub(crate) fn prepare(
+    registry: Arc<Registry>,
     limits: OfflineLimitsArgs,
     filter_source: Option<&str>,
 ) -> Result<Prepared, BoundaryError> {
@@ -37,7 +37,6 @@ pub(super) fn prepare(
         capture.max_frame_bytes,
         capture.max_interfaces,
     )?;
-    let registry = registry()?;
     let filter = filter_source
         .map(|source| filtering::compile(source, &registry, Capabilities::stream_capable()))
         .transpose()?;

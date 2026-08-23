@@ -24,8 +24,8 @@ impl Probe {
     }
 }
 
-pub type Batch = crate::probe::runner::Batch<Probe>;
-pub use crate::probe::runner::Execution;
+pub type Batch = crate::probe::engine::Batch<Probe>;
+pub use crate::probe::engine::Execution;
 
 pub trait Executor {
     fn execute(&mut self, batch: &Batch) -> std::result::Result<Execution, crate::BoundaryError>;

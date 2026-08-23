@@ -8,7 +8,8 @@ use packetcraftr::{analysis, output};
 
 use self::arguments::{Args, Severity};
 use super::super::input::open_capture;
-use super::offline_analysis::{Prepared, prepare};
+use super::registry;
+use crate::offline_analysis::{Prepared, prepare};
 use crate::rendering::NdjsonStream;
 use packetcraftr::BoundaryError;
 
@@ -35,7 +36,7 @@ pub(super) fn run(
         registry,
         filter,
         limits,
-    } = prepare(arguments.limits, arguments.filter.as_deref())?;
+    } = prepare(registry()?, arguments.limits, arguments.filter.as_deref())?;
     let mut reader = open_capture(&arguments.path, arguments.limits.capture)?;
 
     let options = analysis::Options {

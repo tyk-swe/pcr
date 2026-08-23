@@ -9,7 +9,7 @@ use packetcraftr_core::error::{Classification, Classified};
 
 use crate::interface::Id as InterfaceId;
 
-use super::models::{Decision, Provider};
+use super::model::{Decision, Provider};
 
 /// Errors emitted by the current target's passive route/interface adapter.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]

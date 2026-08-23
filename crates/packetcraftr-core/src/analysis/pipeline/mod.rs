@@ -15,9 +15,9 @@ use crate::registry::Registry;
 
 use crate::analysis::Error;
 use crate::analysis::adapter::{tcp_segment, udp_flow};
-use crate::analysis::conversation_index::StreamIndex;
 use crate::analysis::reassembly::tcp::{Event as TcpEvent, ScopedFlowKey};
 use crate::analysis::scope::Interner;
+use crate::analysis::stream_index::StreamIndex;
 
 mod clock;
 mod dispatch;

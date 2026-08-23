@@ -14,12 +14,12 @@ use crate::{
     layer::{Layer, reflective_layer},
 };
 
-use super::common::{
+use super::super::common::{
     ValueExpectation, checksum, checksum_parts, ensure_encode_budget, invalid, make_layer,
     payload_without_padding, protocol, resolve_u16, transport_checksum, transport_checksum_parts,
     truncated, wrong_layer,
 };
-use super::network::resolve_envelope;
+use super::resolve_envelope;
 
 const ICMP_MIN_LEN: usize = 4;
 

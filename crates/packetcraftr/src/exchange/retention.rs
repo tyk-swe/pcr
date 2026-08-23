@@ -15,7 +15,7 @@ impl Accumulator {
     pub(super) fn reserve_decoded_evidence(
         &mut self,
         additional: usize,
-        options: &super::contract::Options,
+        options: &super::model::Options,
     ) -> bool {
         let error = match self.evidence_budget.reserve(
             additional,
@@ -60,7 +60,7 @@ impl Accumulator {
         &mut self,
         identity: RecordIdentity,
         decoded: DecodedPacket,
-        options: &super::contract::Options,
+        options: &super::model::Options,
         freshness: Option<super::accumulator::UnsolicitedFreshness>,
     ) {
         if self.retained_unmatched >= options.max_unmatched_frames {
@@ -88,7 +88,7 @@ impl Accumulator {
         &mut self,
         identity: RecordIdentity,
         frame: Frame,
-        options: &super::contract::Options,
+        options: &super::model::Options,
     ) {
         if self.retained_unmatched >= options.max_unmatched_frames {
             packetcraftr_core::diagnostic::push_once(
@@ -107,7 +107,7 @@ impl Accumulator {
             self.mark_record_retained(identity);
             self.retained_unmatched += 1;
             self.pending_events
-                .push(super::contract::Event::Undecoded { frame });
+                .push(super::model::Event::Undecoded { frame });
         }
     }
 }

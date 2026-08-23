@@ -19,7 +19,10 @@ use crate::clock::Clock;
 use crate::evidence::Budget;
 use crate::policy::Policy;
 use crate::probe::evidence::{ResponseSelector, UndecodedRetention, retain_evidence};
-use crate::probe::runner::{ProbeBatch, ProbeLifecycle, ProbeRunConfig, run_batches};
+use crate::probe::{
+    Limits as ProbeLimits,
+    engine::{ProbeBatch, ProbeLifecycle, run_batches},
+};
 use crate::target::{Resolver, approve_operation, resolve_selected};
 
 use super::classification::classify_response;
@@ -123,7 +126,7 @@ where
     let batches = build_batches(request, &approved.addresses, &approved.endpoint_ports)?;
     enforce_deadline(&deadline)?;
     let mut state = ScanState::default();
-    let config = ProbeRunConfig {
+    let config = ProbeLimits {
         probes_per_second: request.probes_per_second,
         duration_limit: request.limits.max_duration,
         final_statistics_sequence: u64::try_from(approved.total_probes.saturating_sub(1))

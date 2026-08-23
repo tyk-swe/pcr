@@ -6,11 +6,11 @@
 
 mod client;
 pub(crate) mod exchange;
+mod executor;
 mod interface;
 mod route;
 
-pub(crate) use interface::{resolve, validate_selector};
-
-pub(crate) use route::prepare_route;
-
 pub(crate) use client::{Client, Exchange, client};
+pub(crate) use executor::Executor;
+pub(crate) use interface::{resolve, validate_selector};
+pub(crate) use route::prepare_route;

@@ -6,8 +6,10 @@
 //! Portable built-in Internet protocol layers and their deterministic registry module.
 
 use super::super::{
-    application, capture as capture_link, gre, icmp, ipv6 as ipv6_ext, link, matcher,
-    network as ip, raw, transport, tunnel,
+    application, capture as capture_link, ipv6 as ipv6_ext, link, matcher,
+    network::{self as ip, icmp},
+    raw, transport,
+    tunnel::{self, gre},
 };
 
 use capture_link::{BsdLoopCodec, BsdNullCodec, LinuxSll2Codec, LinuxSllCodec};

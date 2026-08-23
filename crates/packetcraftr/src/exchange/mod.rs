@@ -5,11 +5,10 @@
 
 mod accumulator;
 mod capture;
-mod contract;
 mod correlation;
 mod execution;
 mod finalization;
-mod options;
+mod model;
 mod preparation;
 mod retention;
 mod route_cache;
@@ -20,8 +19,8 @@ mod transaction;
 pub(crate) use accumulator::{
     Accumulator, ProcessContext, ProcessOutcome, WorkflowPromotionContext, WorkflowResponseMatcher,
 };
-pub(crate) use contract::into_sent_packet;
-pub use contract::{
+pub(crate) use model::into_sent_packet;
+pub use model::{
     Collector, DEFAULT_MAX_RESPONSES, DEFAULT_MAX_UNMATCHED_FRAMES, Event, MAX_EXCHANGE_TIMEOUT,
     Options, Response, Result, Summary,
 };

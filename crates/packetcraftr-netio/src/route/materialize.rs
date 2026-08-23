@@ -8,7 +8,7 @@
 use crate::link::Mode;
 use crate::neighbor::{Request as NeighborRequest, Resolution as NeighborResolution};
 
-use super::models::Plan;
+use super::model::Plan;
 
 /// Materialize a planned route, invoking neighbor resolution when required.
 pub fn materialize<N: crate::neighbor::Resolver>(

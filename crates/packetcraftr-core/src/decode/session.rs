@@ -19,7 +19,7 @@ use super::error::Error;
 use super::fallback::{
     append_malformed, append_missing_required_layer, append_padding, append_raw, slice_original,
 };
-use super::options::DecodedPacket;
+use super::packet::DecodedPacket;
 use super::traversal::TraversalScope;
 
 struct DecodeCursor {

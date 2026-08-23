@@ -12,11 +12,9 @@ use crate::Error;
 use crate::evidence::Budget;
 
 use super::MAX_DURATION;
-use super::boundary::Execution;
-use super::request::{LiveLimits, LiveOptions};
-use super::result::{Case, Stats};
+use super::model::{Case, Execution, Limits, Options, Stats};
 
-pub(super) fn worst_case_duration(live: LiveOptions, cases: usize) -> Result<Duration, Error> {
+pub(super) fn worst_case_duration(live: Options, cases: usize) -> Result<Duration, Error> {
     let exchange = live
         .timeout
         .checked_mul(u32::try_from(cases).unwrap_or(u32::MAX))
@@ -130,7 +128,7 @@ pub(super) fn add_execution_stats(
     Ok(())
 }
 
-fn retain_frame(budget: &mut Budget, frame: &Frame, limits: LiveLimits) -> bool {
+fn retain_frame(budget: &mut Budget, frame: &Frame, limits: Limits) -> bool {
     budget
         .reserve(
             frame.bytes().len(),
@@ -149,7 +147,7 @@ pub(super) struct ExecutionEvidence {
 pub(super) fn retain_evidence(
     case: &mut Case,
     evidence: ExecutionEvidence,
-    limits: LiveLimits,
+    limits: Limits,
     budget: &mut Budget,
     diagnostics: &mut Vec<Diagnostic>,
     deadline: &Deadline,

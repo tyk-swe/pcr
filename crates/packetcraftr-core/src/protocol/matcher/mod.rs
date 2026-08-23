@@ -15,7 +15,7 @@ use crate::{
 
 pub(crate) use echo::EchoMatcher;
 #[doc(hidden)]
-pub use quoted_icmp::{QuotedIcmpError, QuotedProbeTransport, quoted_icmp_error_kind};
+pub use quoted_icmp::{QuotedIcmpReason, QuotedProbeTransport, quoted_icmp_error_kind};
 pub(crate) use reverse_flow::ReverseFlowMatcher;
 
 struct ReversedProtocolLayers<'request, 'response> {

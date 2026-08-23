@@ -69,7 +69,7 @@ pub(crate) trait ProbeBatch {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct ProbeRunConfig {
+pub(crate) struct Limits {
     pub(crate) probes_per_second: Option<u32>,
     pub(crate) duration_limit: Duration,
     pub(crate) final_statistics_sequence: u64,
@@ -91,7 +91,7 @@ pub(crate) trait ProbeLifecycle<B> {
 /// executor-boundary, evidence-validation, and checked-statistics policy.
 pub(crate) fn run_batches<B, L, C>(
     batches: &[B],
-    config: ProbeRunConfig,
+    config: Limits,
     deadline: &mut Deadline,
     clock: &mut C,
     lifecycle: &mut L,

@@ -11,7 +11,8 @@ use packetcraftr::{analysis, output};
 use self::arguments::{Args, Table};
 use super::super::input::open_capture;
 use super::super::rendering::{emit_aggregate, write_stdout_line};
-use super::offline_analysis::{Prepared, prepare};
+use super::registry;
+use crate::offline_analysis::{Prepared, prepare};
 use packetcraftr::BoundaryError;
 
 pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), BoundaryError> {
@@ -21,7 +22,7 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
         registry,
         filter,
         limits,
-    } = prepare(arguments.limits, arguments.filter.as_deref())?;
+    } = prepare(registry()?, arguments.limits, arguments.filter.as_deref())?;
     let mut collector =
         analysis::stats::Collector::new(Duration::from_millis(arguments.interval_ms))
             .map_err(BoundaryError::from_error)?;

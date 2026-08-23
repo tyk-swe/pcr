@@ -18,7 +18,7 @@ use crate::{
     neighbor::VlanTag as NeighborVlanTag,
 };
 
-use super::models::{Decision, Options, Plan, Provider};
+use super::model::{Decision, Options, Plan, Provider};
 
 /// Passively selects route, source, and link without ARP/NDP, capture, or transmission.
 pub fn plan<P: Provider>(

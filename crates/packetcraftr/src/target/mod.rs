@@ -3,8 +3,8 @@
 
 //! Live target resolution.
 
-mod contract;
-mod workflow;
+mod authorization;
+mod model;
 
-pub use contract::{Authorized, Error, Family, Hostname, Resolver, SystemResolver, Target};
-pub(crate) use workflow::{approve_operation, resolve_selected};
+pub use model::{Authorized, Error, Family, Hostname, Resolver, SystemResolver, Target};
+pub(crate) use authorization::{approve_operation, resolve_selected};

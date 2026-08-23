@@ -18,7 +18,7 @@ use super::accumulator::{
     Accumulator, ProcessContext, ProcessOutcome, UnsolicitedEvidence, UnsolicitedFreshness,
     WorkflowPromotionContext, WorkflowResponseMatcher,
 };
-use super::contract::{Options, Response};
+use super::model::{Options, Response};
 use super::preparation::PreparedPacket;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -293,7 +293,7 @@ impl Accumulator {
                     self.response_counts[request_index] += 1;
                     self.response_count += 1;
                     self.pending_events
-                        .push(super::contract::Event::Response(Response {
+                        .push(super::model::Event::Response(Response {
                             request_index,
                             response: decoded,
                             latency: received_at.duration_since(
@@ -400,7 +400,7 @@ impl Accumulator {
                 .checked_sub(1)
                 .expect("workflow candidates are retained unmatched evidence");
             self.pending_events
-                .push(super::contract::Event::Response(Response {
+                .push(super::model::Event::Response(Response {
                     request_index,
                     response: candidate.decoded,
                     latency: freshness.received_at.duration_since(
@@ -445,10 +445,9 @@ impl Accumulator {
     }
 
     fn queue_unsolicited(&mut self, candidate: UnsolicitedEvidence) {
-        self.pending_events
-            .push(super::contract::Event::Unsolicited {
-                frame: candidate.decoded,
-            });
+        self.pending_events.push(super::model::Event::Unsolicited {
+            frame: candidate.decoded,
+        });
     }
 
     fn mark_correlation_deadline_expired(&mut self) {

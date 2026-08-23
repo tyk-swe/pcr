@@ -4,15 +4,17 @@
 //! Public exchange options and results.
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::{decode::DecodedPacket, template::DEFAULT_MAX_TEMPLATE_PACKETS};
 use packetcraftr_netio::capture::{
-    DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES, OverflowPolicy,
+    DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES, Limits as CaptureQueueLimits,
+    OverflowPolicy,
 };
 
 use super::super::Stats;
+use crate::Error;
 
 pub const DEFAULT_MAX_UNMATCHED_FRAMES: usize = DEFAULT_CAPTURE_QUEUE_FRAMES;
 pub const DEFAULT_MAX_RESPONSES: usize = DEFAULT_CAPTURE_QUEUE_FRAMES;
@@ -46,6 +48,52 @@ impl Default for Options {
             capture_overflow_policy: OverflowPolicy::Fail,
             decode: packetcraftr_core::decode::Options::default(),
         }
+    }
+}
+
+impl Options {
+    /// Validates finite options and retention bounds before live providers run.
+    pub fn validate(&self) -> std::result::Result<CaptureQueueLimits, Error> {
+        if self.timeout > MAX_EXCHANGE_TIMEOUT {
+            return Err(Error::InvalidExchangeOption {
+                field: "timeout",
+                message: format!("must not exceed {MAX_EXCHANGE_TIMEOUT:?}"),
+            });
+        }
+        if self.max_template_packets == 0 {
+            return Err(Error::InvalidExchangeOption {
+                field: "max_template_packets",
+                message: "must be greater than zero".to_owned(),
+            });
+        }
+        for (field, value) in [
+            ("max_responses", self.max_responses),
+            ("max_unmatched_frames", self.max_unmatched_frames),
+        ] {
+            if value > self.max_capture_queue_frames {
+                return Err(Error::InvalidExchangeOption {
+                    field,
+                    message: format!(
+                        "{value} exceeds aggregate capture frame ceiling {}",
+                        self.max_capture_queue_frames
+                    ),
+                });
+            }
+        }
+        Instant::now()
+            .checked_add(self.timeout)
+            .ok_or_else(|| Error::InvalidExchangeOption {
+                field: "timeout",
+                message: "cannot be represented by the platform monotonic clock".to_owned(),
+            })?;
+        CaptureQueueLimits {
+            max_frames: self.max_capture_queue_frames,
+            max_bytes: self.max_captured_bytes,
+            snap_length: self.decode.max_packet_size,
+            overflow_policy: self.capture_overflow_policy,
+        }
+        .validate()
+        .map_err(Error::from)
     }
 }
 

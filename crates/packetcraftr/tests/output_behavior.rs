@@ -25,7 +25,7 @@ use packetcraftr::output::{
     envelope::{Aggregate, Error as OutputError, Stats, StreamEncoder},
     frame::{Captured, Timestamp, Wire},
     interfaces,
-    protocols::{Detail, Field, FieldKind, Summary},
+    protocols::{Field, FieldKind, Protocol, Summary},
 };
 use serde_json::json;
 
@@ -350,7 +350,7 @@ fn protocol_output_converts_every_field_kind_and_manifest_capability() {
             .any(|protocol| !protocol.aliases.is_empty())
     );
 
-    let detail = Detail::new(summaries[0].clone(), vec![field.clone()]);
+    let detail = Protocol::new(summaries[0].clone(), vec![field.clone()]);
     assert_eq!(detail.protocol, summaries[0].protocol);
     assert_eq!(detail.fields, vec![field]);
 }

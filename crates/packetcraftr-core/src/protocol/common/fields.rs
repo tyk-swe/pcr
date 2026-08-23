@@ -14,7 +14,7 @@ use crate::{
     registry::Discriminator,
 };
 
-use super::errors::{binding_protocol, invalid};
+use super::error::{binding_protocol, invalid};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ValueExpectation<T> {

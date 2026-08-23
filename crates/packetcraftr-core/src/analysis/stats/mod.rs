@@ -10,9 +10,9 @@ use std::time::{Duration, SystemTime};
 use crate::protocol::network::{Ipv4, Ipv6};
 
 use crate::analysis::Error;
-use crate::analysis::conversation_index::CanonicalFlow;
 use crate::analysis::pipeline::FrameRecord;
 use crate::analysis::reassembly::tcp::ScopedFlowKey;
+use crate::analysis::stream_index::CanonicalFlow;
 
 mod report;
 pub use report::{

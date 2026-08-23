@@ -12,7 +12,7 @@ use packetcraftr_core::protocol::network::{Ipv4, Ipv6};
 use packetcraftr_core::protocol::transport::{Sctp, Tcp, Udp};
 use packetcraftr_core::protocol::tunnel::Ah;
 use packetcraftr_core::protocol::{
-    QuotedIcmpError, QuotedProbeTransport, builtin, quoted_icmp_error_kind,
+    QuotedIcmpReason, QuotedProbeTransport, builtin, quoted_icmp_error_kind,
 };
 use packetcraftr_core::{Packet, build};
 
@@ -226,7 +226,7 @@ fn reverse_udp_and_echo_matchers_require_reversed_identity() {
 fn quoted_icmp_errors_classify_every_transport_in_both_address_families() {
     use NetworkVersion::{V4, V6};
     use ProbeTransport::{Icmp, Sctp, Tcp, Udp};
-    use QuotedIcmpError::{
+    use QuotedIcmpReason::{
         AdministrativelyProhibited, DestinationUnreachable, PortUnreachable, TimeExceeded,
     };
 
@@ -340,7 +340,7 @@ fn quoted_ipv6_walks_extensions_and_rejects_non_initial_fragments() {
     let response = quoted_response(NetworkVersion::V6, &request.bytes, 1, 4);
     assert_eq!(
         quoted_icmp_error_kind(&request.packet, &response, QuotedProbeTransport::Udp),
-        Some(QuotedIcmpError::PortUnreachable)
+        Some(QuotedIcmpReason::PortUnreachable)
     );
 
     let malformed_quotes = [

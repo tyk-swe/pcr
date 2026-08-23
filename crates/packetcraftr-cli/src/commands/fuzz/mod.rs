@@ -19,10 +19,10 @@ use crate::rendering::{NdjsonStream, emit_aggregate_with_stats};
 use crate::system::{client, exchange, validate_selector};
 use packetcraftr::BoundaryError;
 
-use super::execution::Executor;
+use crate::system::Executor;
 
 struct PreparedLive {
-    options: packetcraftr::fuzz::LiveOptions,
+    options: packetcraftr::fuzz::Options,
     policy: packetcraftr::policy::Policy,
     exchange: packetcraftr::exchange::Options,
     interface: Option<String>,
@@ -88,12 +88,12 @@ fn prepare_live(
         return Ok(None);
     }
     let queue_limits = arguments.limits.clone().into_limits();
-    let options = packetcraftr::fuzz::LiveOptions {
+    let options = packetcraftr::fuzz::Options {
         timeout: Duration::from_millis(arguments.timeout_ms),
         cases_per_second: arguments.rate,
         destination: arguments.destination,
         allow_permissive_live: arguments.allow_permissive_live,
-        limits: packetcraftr::fuzz::LiveLimits {
+        limits: packetcraftr::fuzz::Limits {
             max_evidence_frames: queue_limits.max_frames,
             max_evidence_bytes: queue_limits.max_bytes,
         },

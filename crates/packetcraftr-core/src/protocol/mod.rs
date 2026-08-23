@@ -27,8 +27,6 @@ pub mod application;
 pub mod builtin;
 pub mod capture;
 mod common;
-pub mod gre;
-pub mod icmp;
 pub mod ipv6;
 pub mod link;
 mod matcher;
@@ -39,6 +37,8 @@ pub mod transport;
 pub mod tunnel;
 
 pub use common::ChecksumAccumulator;
+pub use network::icmp;
+pub use tunnel::gre;
 
 #[doc(hidden)]
-pub use matcher::{QuotedIcmpError, QuotedProbeTransport, quoted_icmp_error_kind};
+pub use matcher::{QuotedIcmpReason, QuotedProbeTransport, quoted_icmp_error_kind};

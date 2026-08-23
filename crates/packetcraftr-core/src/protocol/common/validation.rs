@@ -7,7 +7,7 @@ use crate::{
     codec::LayerEncodeContext, diagnostic::Diagnostic, field::WireValue, registry::Discriminator,
 };
 
-use super::errors::{binding_protocol, invalid, protocol};
+use super::error::{binding_protocol, invalid, protocol};
 
 pub(crate) fn validate_ipv6_routing_child(
     name: &str,

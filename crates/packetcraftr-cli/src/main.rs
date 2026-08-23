@@ -15,6 +15,7 @@ mod filtering;
 mod input;
 #[cfg(test)]
 mod ndjson_conformance;
+mod offline_analysis;
 mod rendering;
 mod startup;
 mod system;

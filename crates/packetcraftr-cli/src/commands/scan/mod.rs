@@ -19,7 +19,7 @@ use crate::rendering::{NdjsonStream, emit_aggregate_with_stats};
 use crate::system::{client, exchange, validate_selector};
 use packetcraftr::BoundaryError;
 
-use super::execution::Executor;
+use crate::system::Executor;
 
 pub(super) fn run(
     arguments: Args,

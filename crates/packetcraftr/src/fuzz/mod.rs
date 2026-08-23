@@ -10,16 +10,14 @@ pub const MAX_DURATION: Duration = packetcraftr_netio::capture::MAX_TIMEOUT;
 
 const SYNTHESIZED_ETHERNET_BYTES: u64 = 14;
 
-mod boundary;
 mod client_executor;
+mod engine;
 mod execution;
-mod request;
-mod result;
-mod run;
+mod model;
 #[cfg(test)]
 mod tests;
 
-pub use boundary::{Execution, ExecutionCase, Executor};
-pub use request::{LiveLimits, LiveOptions};
-pub use result::{Case, CaseOutcome, Result, Stats, Summary};
-pub use run::{run, run_with_events};
+pub use engine::{run, run_with_events};
+pub use model::{
+    Case, CaseOutcome, Execution, ExecutionCase, Executor, Limits, Options, Result, Stats, Summary,
+};

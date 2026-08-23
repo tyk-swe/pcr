@@ -18,7 +18,6 @@
 //! frames, keeping a filtered run scoped to the selected conversations.
 
 mod adapter;
-mod conversation_index;
 mod error;
 pub mod expert;
 pub mod follow;
@@ -27,6 +26,7 @@ mod pipeline;
 pub mod reassembly;
 pub mod scope;
 pub mod stats;
+mod stream_index;
 
 pub use error::Error;
 pub use pipeline::{FrameRecord, Limits, Options, Summary, run};

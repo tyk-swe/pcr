@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** `packetcraftr::fuzz::{LiveOptions, LiveLimits}` are
+  `fuzz::{Options, Limits}`; `output::protocols::{ListResult, DetailResult,
+  Detail}` are `{List, Detail, Protocol}`; the canonical
+  `packetcraftr_core::protocol::{gre, icmp}` modules moved under
+  `protocol::tunnel` and `protocol::network`; `QuotedIcmpError` is
+  `QuotedIcmpReason`.
 - **Breaking:** the CLI no longer emits the generic codes `cli.error`, `packet.error`, `capability.unavailable`, `io.runtime`, `policy.denied`, `internal.error`; typed library errors surface their own codes and CLI-only conditions use `cli.interface_selector`, `cli.follow_stream`, `cli.replay_timing`, `cli.input_read`, `cli.input_limit`, `io.output_write`, `io.capture_output`, `internal.invariant`. Exit codes are unchanged.
 - `capture` enforces its frame and byte ceilings through the traffic policy (`Policy::authorize_operation`) instead of a private copy of them; `--max-packets`/`--max-bytes` defaults are read from `Policy::default()` (values unchanged).
 - **Breaking:** scan, traceroute, DNS, and fuzz workflows return `packetcraftr::Error` and take `&Policy` plus a `Resolver` instead of an `Authorizer`; their error codes are condition-named (`cli.live_limit`, `policy.duration_limit`, `io.clock`, `internal.live_evidence`, `internal.live_statistics`) instead of per-workflow. `target::Authorizer`, `target::PolicyAuthorizer`, `fuzz::Authorizer`, and `fuzz::PolicyAuthorizer` are removed.
@@ -39,7 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with address-bearing `endpoints`. Structured errors expose typed context, and
   replay Rust APIs consistently use `source_index` for capture coordinates.
 - **Breaking:** Offline fuzz limits now cover only campaign generation. Live
-  evidence limits use `packetcraftr::fuzz::LiveLimits`, the CLI has a separate
+  evidence limits use `packetcraftr::fuzz::Limits`, the CLI has a separate
   `--max-packet-bytes` limit, and live-only options require `--live`.
 - **Breaking:** The workspace now has four crates: `packetcraftr-packet` became
   `packetcraftr-core`, analysis moved under `packetcraftr_core::analysis`,

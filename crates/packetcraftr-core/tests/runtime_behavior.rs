@@ -20,7 +20,7 @@ use packetcraftr_core::layout::{ByteRange, FieldLayout};
 use packetcraftr_core::registry::{Discriminator, FilterFieldBinding};
 use packetcraftr_core::{Packet, build, decode, document, expression, reflective_layer, template};
 
-include!("common/runtime_fixture.rs");
+include!("support/runtime_fixture.rs");
 
 fn assert_failed_packet_mutations(packet: &mut Packet) {
     let before_failed_mutations = packet.clone();

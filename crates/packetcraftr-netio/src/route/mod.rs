@@ -6,7 +6,7 @@
 mod error;
 mod intent;
 mod materialize;
-mod models;
+mod model;
 #[cfg(all(
     feature = "native-route",
     any(target_os = "linux", target_os = "macos", windows)
@@ -17,7 +17,7 @@ mod provider;
 
 pub use error::Error;
 pub use materialize::{Materialized, materialize};
-pub use models::{Decision, Options, Plan, Provider, Scope, SelectionReason};
+pub use model::{Decision, Options, Plan, Provider, Scope, SelectionReason};
 pub use planner::plan;
 pub use provider::{SystemError, SystemProvider};
 

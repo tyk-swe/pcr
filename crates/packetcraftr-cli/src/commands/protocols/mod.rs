@@ -19,7 +19,7 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
 }
 
 fn list_protocols(format: output::contract::Format) -> Result<(), BoundaryError> {
-    let result = output::protocols::ListResult {
+    let result = output::protocols::List {
         protocols: support::BUILTIN_PROTOCOLS
             .iter()
             .map(output::protocols::Summary::from)
@@ -70,19 +70,20 @@ fn describe_protocol(name: &str, format: output::contract::Format) -> Result<(),
                 .collect()
         })
         .unwrap_or_default();
-    let detail = output::protocols::Detail::new(output::protocols::Summary::from(support), fields);
+    let detail =
+        output::protocols::Protocol::new(output::protocols::Summary::from(support), fields);
     match format {
         output::contract::Format::Text => render_detail(&detail),
         output::contract::Format::Json => emit_aggregate(
             output::contract::Command::Protocols,
-            output::protocols::DetailResult { protocol: detail },
+            output::protocols::Detail { protocol: detail },
             Vec::new(),
         ),
         _ => unreachable!("protocols format is checked before command dispatch"),
     }
 }
 
-fn render_detail(protocol: &output::protocols::Detail) -> Result<(), BoundaryError> {
+fn render_detail(protocol: &output::protocols::Protocol) -> Result<(), BoundaryError> {
     write_stdout_line(format_args!("protocol: {}", protocol.protocol))?;
     write_stdout_line(format_args!("aliases: [{}]", protocol.aliases.join(", ")))?;
     write_stdout_line(format_args!("build: {}", protocol.build))?;

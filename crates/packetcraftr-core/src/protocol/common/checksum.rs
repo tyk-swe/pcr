@@ -7,7 +7,7 @@ use std::net::IpAddr;
 
 use crate::codec::NetworkEnvelope;
 
-use super::errors::invalid;
+use super::error::invalid;
 
 pub(crate) fn checksum(bytes: &[u8]) -> u16 {
     checksum_parts(&[bytes])

@@ -8,17 +8,17 @@ use serde::{Deserialize, Serialize};
 
 use packetcraftr_netio::capture::{DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES};
 
-use super::MAX_RATE;
+use super::super::MAX_RATE;
 use crate::Error;
 
 /// Bounds exact response evidence retained by a live fuzz campaign.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LiveLimits {
+pub struct Limits {
     pub max_evidence_frames: usize,
     pub max_evidence_bytes: usize,
 }
 
-impl Default for LiveLimits {
+impl Default for Limits {
     fn default() -> Self {
         Self {
             max_evidence_frames: DEFAULT_CAPTURE_QUEUE_FRAMES,
@@ -27,7 +27,7 @@ impl Default for LiveLimits {
     }
 }
 
-impl LiveLimits {
+impl Limits {
     pub fn validate(self) -> Result<Self, Error> {
         for (field, value, maximum) in [
             (
@@ -53,28 +53,28 @@ impl LiveLimits {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LiveOptions {
+pub struct Options {
     pub timeout: Duration,
     pub cases_per_second: Option<u32>,
     pub destination: Option<IpAddr>,
     /// Independent call-site opt-in for a permissive live frame.
     pub allow_permissive_live: bool,
-    pub limits: LiveLimits,
+    pub limits: Limits,
 }
 
-impl Default for LiveOptions {
+impl Default for Options {
     fn default() -> Self {
         Self {
             timeout: Duration::from_secs(1),
             cases_per_second: None,
             destination: None,
             allow_permissive_live: false,
-            limits: LiveLimits::default(),
+            limits: Limits::default(),
         }
     }
 }
 
-impl LiveOptions {
+impl Options {
     pub fn validate(self) -> Result<Self, Error> {
         self.limits.validate()?;
         if self.timeout.is_zero() || self.timeout > packetcraftr_netio::capture::MAX_TIMEOUT {

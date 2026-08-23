@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use clap::Args;
-use packetcraftr::netio as net;
 
 #[derive(Clone, Debug, Args)]
 pub(crate) struct PublicDestinationArgs {
@@ -38,12 +37,15 @@ pub(crate) struct SourceSpoofingArgs {
 #[derive(Clone, Debug, Args)]
 pub(crate) struct TrafficBudgetArgs {
     /// Maximum packets authorized for one operation.
-    #[arg(long, default_value_t = 10_000)]
+    #[arg(
+        long,
+        default_value_t = packetcraftr::policy::Policy::default().max_packets_per_operation
+    )]
     max_packets: u64,
     /// Maximum packet bytes authorized for one operation.
     #[arg(
         long,
-        default_value_t = u64::try_from(net::capture::Limits::default().max_bytes).expect("default max bytes fits u64")
+        default_value_t = packetcraftr::policy::Policy::default().max_bytes_per_operation
     )]
     max_bytes: u64,
 }

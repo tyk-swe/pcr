@@ -18,8 +18,6 @@ use crate::filtering::FrameSelector;
 use crate::rendering::NdjsonStream;
 use crate::system::resolve;
 
-use execution::Budget;
-
 pub(super) fn run(
     arguments: Args,
     format: output::contract::Format,
@@ -51,7 +49,6 @@ pub(super) fn run(
     let interface = resolve(Some(interface), &net::interface::SystemProvider)?
         .expect("required capture interface must resolve to an identity");
     let policy = budgets.into_policy();
-    let budget = Budget::from(&policy);
     let request = net::capture::Request {
         interface,
         limits,
@@ -64,16 +61,16 @@ pub(super) fn run(
 
     match format {
         output::contract::Format::Text => {
-            rendering::render_text(capture, timeout, limits, budget, selector.as_ref())
+            rendering::render_text(capture, timeout, limits, &policy, selector.as_ref())
         }
         output::contract::Format::Hex => {
-            rendering::render_hex(capture, timeout, limits, budget, selector.as_ref())
+            rendering::render_hex(capture, timeout, limits, &policy, selector.as_ref())
         }
         output::contract::Format::Ndjson => {
-            rendering::render_stream(capture, timeout, limits, budget, selector.as_ref(), stream)
+            rendering::render_stream(capture, timeout, limits, &policy, selector.as_ref(), stream)
         }
         output::contract::Format::Pcap | output::contract::Format::PcapNg => {
-            rendering::render_capture(capture, format, timeout, limits, budget, selector.as_ref())
+            rendering::render_capture(capture, format, timeout, limits, &policy, selector.as_ref())
         }
         _ => unreachable!("capture format is checked before command dispatch"),
     }

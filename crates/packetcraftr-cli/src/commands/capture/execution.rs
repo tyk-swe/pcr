@@ -15,21 +15,6 @@ pub(super) struct Outcome {
     pub(super) stats: output::envelope::Stats,
 }
 
-#[derive(Clone, Copy, Debug)]
-pub(super) struct Budget {
-    pub(super) max_frames: u64,
-    pub(super) max_bytes: u64,
-}
-
-impl From<&packetcraftr::policy::Policy> for Budget {
-    fn from(policy: &packetcraftr::policy::Policy) -> Self {
-        Self {
-            max_frames: policy.max_packets_per_operation,
-            max_bytes: policy.max_bytes_per_operation,
-        }
-    }
-}
-
 struct Progress {
     started: Instant,
     deadline: Instant,
@@ -58,7 +43,7 @@ pub(super) fn run<C, F>(
     mut capture: C,
     timeout: Duration,
     limits: net::capture::Limits,
-    budget: Budget,
+    policy: &packetcraftr::policy::Policy,
     selector: Option<&FrameSelector>,
     mut emit: F,
 ) -> Result<Outcome, CliError>
@@ -70,7 +55,7 @@ where
     if let Err(error) = wait_ready(&mut capture, timeout, progress.deadline) {
         return Err(shutdown_after_error(&mut capture, error));
     }
-    if let Err(error) = capture_frames(&mut capture, &mut progress, budget, selector, &mut emit) {
+    if let Err(error) = capture_frames(&mut capture, &mut progress, policy, selector, &mut emit) {
         return Err(shutdown_after_error(&mut capture, error));
     }
     finish(capture, progress, limits)
@@ -93,7 +78,7 @@ fn wait_ready<C: net::capture::Session>(
 fn capture_frames<C, F>(
     capture: &mut C,
     progress: &mut Progress,
-    budget: Budget,
+    policy: &packetcraftr::policy::Policy,
     selector: Option<&FrameSelector>,
     emit: &mut F,
 ) -> Result<(), CliError>
@@ -101,7 +86,7 @@ where
     C: net::capture::Session,
     F: FnMut(Frame, u64) -> Result<(), CliError>,
 {
-    while progress.frames_captured < budget.max_frames {
+    while progress.frames_captured < policy.max_packets_per_operation {
         let Some(remaining) = progress.deadline.checked_duration_since(Instant::now()) else {
             break;
         };
@@ -115,7 +100,7 @@ where
         else {
             break;
         };
-        account_bytes(progress, &frame, budget.max_bytes)?;
+        account_bytes(progress, &frame, policy)?;
         let source_frame = increment_counter(progress.frames_captured, "capture frame count")?;
         if let Some(selector) = selector {
             match selector.keep(source_frame, &frame) {
@@ -135,7 +120,11 @@ where
     Ok(())
 }
 
-fn account_bytes(progress: &mut Progress, frame: &Frame, limit: u64) -> Result<(), CliError> {
+fn account_bytes(
+    progress: &mut Progress,
+    frame: &Frame,
+    policy: &packetcraftr::policy::Policy,
+) -> Result<(), CliError> {
     let frame_bytes = u64::try_from(frame.bytes().len()).map_err(|_| {
         CliError::new(
             70,
@@ -146,14 +135,9 @@ fn account_bytes(progress: &mut Progress, frame: &Frame, limit: u64) -> Result<(
         .captured_bytes
         .checked_add(frame_bytes)
         .ok_or_else(|| CliError::new(70, "capture output byte accounting overflowed"))?;
-    if bytes > limit {
-        return Err(CliError::classified(
-            packetcraftr::policy::Error::ByteLimit {
-                actual: bytes,
-                limit,
-            },
-        ));
-    }
+    policy
+        .authorize_operation(progress.frames_captured, bytes)
+        .map_err(CliError::classified)?;
     progress.captured_bytes = bytes;
     Ok(())
 }

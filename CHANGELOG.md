@@ -17,18 +17,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Breaking:** `packetcraftr::fuzz::{LiveOptions, LiveLimits}` are
-  `fuzz::{Options, Limits}`; `output::protocols::{ListResult, DetailResult,
-  Detail}` are `{List, Detail, Protocol}`; the canonical
-  `packetcraftr_core::protocol::{gre, icmp}` modules moved under
-  `protocol::tunnel` and `protocol::network`; `QuotedIcmpError` is
+- **Breaking:** Error classification is derived, not repeated.
+  `packetcraftr_core::error::Classification::new` takes `(code, remediation)`
+  and reads the `Kind` from the code prefix, so a code and its kind cannot
+  disagree; `BoundaryError::internal_execution` and `execution_validation` are
+  removed. Build, decode, document, expression, filter, and frame errors carry
+  their own codes (`packet.build*`, `packet.decode*`, `cli.packet_document`,
+  `cli.packet_expression`, `cli.filter*`, `packet.frame_length`) instead of a
+  generic `packet.error`, and the analysis, replay, and live-workflow errors
+  that wrap them delegate to those codes.
+- **Breaking:** Scan, traceroute, DNS, and fuzz share `packetcraftr::Error` and
+  take `&Policy` plus a `Resolver` in place of an `Authorizer`. Their codes name
+  the condition rather than the workflow (`cli.live_limit`,
+  `policy.duration_limit`, `io.clock`, `internal.live_evidence`,
+  `internal.live_statistics`), and per-probe coordinates travel in
+  `core::error::Context`. `target::Authorizer`, `target::PolicyAuthorizer`,
+  `fuzz::Authorizer`, and `fuzz::PolicyAuthorizer` are removed;
+  `replay::Authorizer` remains as the capture-fidelity gate.
+- **Breaking:** One permissive opt-in replaces four. `fuzz --live` and `replay`
+  use `--allow-permissive-live` (was `--allow-malformed-live`), and a missing
+  opt-in is always `policy.permissive_live_opt_in` (`policy.permissive_packet`
+  and `policy.fuzz_malformed_opt_in` are removed). `Policy::validate` reports
+  `policy::Error::InvalidAddressLimit` (`cli.policy_limit`), and `capture`
+  enforces its frame and byte ceilings through `Policy::authorize_operation`
+  instead of a private copy, with `--max-packets`/`--max-bytes` defaults read
+  from `Policy::default()` (values unchanged).
+- **Breaking:** The CLI no longer invents error codes. `cli.error`,
+  `packet.error`, `capability.unavailable`, `io.runtime`, `policy.denied`, and
+  `internal.error` are gone: typed library errors surface their own
+  classification and CLI-only conditions use named ones (`cli.arguments`,
+  `cli.interface_selector`, `cli.follow_stream`, `cli.replay_timing`,
+  `cli.input_read`, `cli.input_limit`, `io.output_write`, `io.capture_output`,
+  `internal.invariant`). Exit codes are unchanged except that a DNS
+  serialization invariant now exits 70 instead of 4, and a capture file that
+  cannot be opened exits 2 with `cli.input_read` instead of 5.
+- **Breaking:** Public names follow one convention per concept.
+  `packetcraftr::fuzz::{LiveOptions, LiveLimits}` are `fuzz::{Options, Limits}`;
+  `output::protocols::{ListResult, DetailResult, Detail}` are
+  `{List, Detail, Protocol}`; `packetcraftr_core::protocol::{gre, icmp}` moved
+  under `protocol::{tunnel, network}`; and `QuotedIcmpError` is
   `QuotedIcmpReason`.
-- **Breaking:** the CLI no longer emits the generic codes `cli.error`, `packet.error`, `capability.unavailable`, `io.runtime`, `policy.denied`, `internal.error`; typed library errors surface their own codes and CLI-only conditions use `cli.interface_selector`, `cli.follow_stream`, `cli.replay_timing`, `cli.input_read`, `cli.input_limit`, `io.output_write`, `io.capture_output`, `internal.invariant`. Exit codes are unchanged.
-- `capture` enforces its frame and byte ceilings through the traffic policy (`Policy::authorize_operation`) instead of a private copy of them; `--max-packets`/`--max-bytes` defaults are read from `Policy::default()` (values unchanged).
-- **Breaking:** scan, traceroute, DNS, and fuzz workflows return `packetcraftr::Error` and take `&Policy` plus a `Resolver` instead of an `Authorizer`; their error codes are condition-named (`cli.live_limit`, `policy.duration_limit`, `io.clock`, `internal.live_evidence`, `internal.live_statistics`) instead of per-workflow. `target::Authorizer`, `target::PolicyAuthorizer`, `fuzz::Authorizer`, and `fuzz::PolicyAuthorizer` are removed.
-- **Breaking:** build, decode, document, expression, filter, and frame errors now carry their own classification codes (`packet.build*`, `packet.decode*`, `cli.packet_document`, `cli.packet_expression`, `cli.filter*`, `packet.frame_length`) instead of the generic `packet.error`; analysis, replay, and live-workflow errors that wrap them delegate to those codes.
-- **Breaking:** `fuzz --live` and `replay` use `--allow-permissive-live` (was `--allow-malformed-live`); the single denial code for a missing permissive opt-in is `policy.permissive_live_opt_in` (`policy.permissive_packet` and `policy.fuzz_malformed_opt_in` are removed). `Policy::validate` reports `policy::Error::InvalidAddressLimit` (`cli.policy_limit`).
-- **Breaking:** `packetcraftr_core::error::Classification::new` now takes `(code, remediation)` and derives `Kind` from the code prefix; `BoundaryError::internal_execution`/`execution_validation` are removed.
 - Live integrity rejection now matches the exact built-in checksum diagnostic
   codes (`packetcraftr_core::diagnostic::CHECKSUM_FAILURE_CODES`) instead of
   searching diagnostic text, so unrelated external diagnostics cannot affect

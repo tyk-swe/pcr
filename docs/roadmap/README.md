@@ -19,6 +19,21 @@ following:
 Everything else remains a candidate until a concrete user workflow, measured
 limit, and maintainer are known.
 
+## Todo list
+
+- [ ] [Define the 1.0 contract](#define-the-10-contract).
+- [ ] [Interface-based, DLT-correct
+  capture](#interface-based-dlt-correct-capture).
+- [ ] [Authorization of non-interface-owned
+  sources](#authorization-of-non-interface-owned-sources).
+- [ ] [Canonical integrity classification](#canonical-integrity-classification).
+- [ ] [Registry extension](#registry-extension).
+- [ ] [Public API and serialized contracts](#public-api-and-serialized-contracts).
+- [ ] [Performance-sensitive contracts](#performance-sensitive-contracts).
+- [ ] [Confidence gate](#confidence-gate).
+- [ ] [Decisions that do not imply
+  implementation](#decisions-that-do-not-imply-implementation).
+
 ## Define the 1.0 contract
 
 Before the first release candidate, decide and document:

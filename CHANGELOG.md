@@ -7,210 +7,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- Added a pre-1.0 roadmap that separates demonstrated release blockers and
-  contract-confidence work from demand-driven post-1.0 candidates.
-
 ### Changed
 
-- **Breaking:** Live capture now takes one interface-based request containing
-  queue limits, native filtering, and an explicit promiscuous-mode choice.
-  Capture sessions report the activated interface, data-link type, and
-  effective snapshot length; passive CLI capture requires `--interface`
-  instead of packet, destination, or route inputs, and capture-file headers use
-  the session metadata.
-- **Breaking:** Removed the redundant
-  `document::Packet::parse_with_nesting_limit` and `CaptureRecord::frame`
-  convenience APIs; use `parse_with_resource_limits` and the public `frame`
-  field. Fuzz output no longer exposes the never-produced `sent` and `error`
-  case outcomes, and exact output vocabularies reuse their canonical domain
-  types without changing serialized values.
-- Simplified live packet preparation to rebuild after link materialization and
-  run Linux netlink operations on bounded per-call worker threads. Removed the
-  unmeasured Ethernet byte-patching and namespace-worker caches while retaining
-  finite deadlines and timed-out worker reaping.
-- **Breaking:** Removed undocumented serialization and introspection scaffolding
-  from native-I/O models, fuzz campaigns/results, and `StreamEncoder`; versioned
-  `output` models remain the serialization source of truth. Live fuzz cases now
-  expose their offline case explicitly through `prepared`, and template
-  expansion returns an opaque exact-size iterator instead of a named iterator
-  type. Offline and live fuzzing share one core decode/link mapping.
-- **Breaking:** Offline and authorized live fuzz NDJSON now emits each case when
-  its outcome becomes final, and exchange NDJSON now emits provider-confirmed
-  sends, definitively classified response/unsolicited/undecoded evidence, and
-  completion-time unanswered requests during the single execution. Aggregate
-  and text results collect those same domain events. Sink failure stops later
-  generation or transmission where possible and preserves capture cleanup;
-  later operation failures retain earlier records and terminate with one error.
-- **Breaking:** Progressive Rust callbacks now run on a bounded one-event worker
-  with deadline-aware acknowledgement. Callback classification and typed domain
-  context are preserved; blocked callbacks cannot keep live I/O armed beyond
-  the finite operation deadline. Operation-wide warnings are emitted as
-  diagnostic events when they become final.
-- Added a shared schema-backed NDJSON conformance gate for read, capture,
-  replay, follow, expert, scan, traceroute, DNS, fuzz, and exchange. It checks
-  independent JSON validity, contiguous envelope sequence, empty completion,
-  unique terminal success/error, sparse domain identifiers, partial failure,
-  failed-sink single-document behavior, and cleanup-error composition.
-- **Breaking:** `read` NDJSON is now an explicit event stream ending in one
-  mandatory `complete` event with source frame, match, and captured-byte
-  counters. `read` and `capture` frame events expose the stable one-based
-  validated non-zero `source_frame` used by display filters as `frame.number`,
-  while envelope `sequence` remains the zero-based emitted-record ordinal.
-  Capture processed counters now live only in terminal envelope statistics;
-  provider-reported capture counters remain the distinct nested capture view.
-- Explicit packet and frame sources now take precedence over stdin, while
-  missing interactive input fails immediately with command-specific guidance.
-- **Breaking:** NDJSON envelope `sequence` is now exclusively the contiguous,
-  zero-based ordinal of an emitted record for one command invocation. The CLI
-  owns stream position through terminal success or error; source-frame, probe,
-  attempt, hop, replay, and fuzz-case identifiers remain domain data and no
-  longer select terminal error positions. Generic domain-error `sequence()`
-  accessors and raw stream-envelope constructors were removed; the public
-  `StreamEncoder` now owns contiguous position, terminal state, serialization,
-  and writes as one source of truth.
-- **Breaking:** Scan, traceroute, and DNS NDJSON now publish semantic events
-  during execution instead of serializing an accumulated result afterward.
-  Scan and traceroute stream records are per-probe, DNS record and rejection
-  events carry their attempt, retained undecoded evidence is emitted when
-  accepted, and each stream ends with exactly one terminal complete or error
-  record. The library exposes command-specific `run_with_events` entry points;
-  aggregate `run` results are collectors over the same event path.
-- **Breaking:** Scan output now exposes address-bearing `endpoints` with an
-  optional port, replacing the `ports` collection, ICMP port-zero sentinel,
-  and evidence-derived address in aggregate and streaming output. Aggregate and
-  streaming forms reuse one canonical `probe` record containing sequence and
-  endpoint identity.
-- **Breaking:** Structured errors now carry optional typed `context` fields for
-  `source_frame`, `probe_sequence`, `attempt`, and `case_index`; replay Rust
-  APIs consistently call their capture coordinate `source_index`.
-- **Breaking:** Offline fuzz limits now contain only campaign-generation
-  bounds. Live evidence bounds moved to `packetcraftr::fuzz::LiveLimits`, the
-  CLI has an independent `--max-packet-bytes` option, and live-only fuzz
-  options require `--live`.
-- Shared wire and captured-frame output records now retain only exact bytes and
-  serialize hexadecimal lazily. JSON and hexadecimal output stream to stdout,
-  text hexadecimal no longer allocates a second temporary representation, and
-  exchange text summaries bypass decoded machine-output construction.
-- **Breaking:** Offline TCP and IP-fragment reassembly keys now require a
-  compact capture-scope identity created by the exact scope interner.
-- **Breaking:** Consolidated the workspace from six crates to four.
-  `packetcraftr-packet` became `packetcraftr-core`, with packet mechanics at its
-  crate root and the former `packetcraftr-analysis` API under
-  `packetcraftr_core::analysis`; `packetcraftr-network` became
-  `packetcraftr-netio`; and the former `packetcraftr-live` workflows now live
-  directly under `packetcraftr`. The main library re-exports `core`,
-  `core::analysis` as `analysis`, and `netio`; the former `packet`, `network`,
-  and `live` aliases have no compatibility shims. The `packetcraftr` CLI name,
-  command-line interface, and versioned packet and output schema shapes are
-  unchanged. Unlike `packetcraftr-live`, `packetcraftr` enables
-  `native-interfaces` by default; direct consumers that need the former
-  portable footprint must set `default-features = false` when migrating.
-- Flattened the public `packetcraftr-core` build, codec, decode, diagnostic,
-  document, expression, field, layout, and matcher module paths, and exposed
-  `protocol::ChecksumAccumulator` for shared incremental Internet checksums.
-- **Breaking:** Rust APIs now use their module as context instead of repeating
-  it in type names or exposing alias facades. Canonical examples include
-  `build::{Error, Context, Mode, Options, BuiltPacket}`,
-  `decode::{Dissector, Error, Options, DecodedPacket}`, `registry::Registry`,
-  `document::Packet`, and the scoped `dns::{Error, Request, Result}` family.
-  The former domain-prefixed definitions have no compatibility aliases.
-- **Breaking:** Route and neighbor contracts now live under their actual
-  owners as `route::{Error, Options, Plan, Decision, Provider}` and
-  `neighbor::{Error, Options, Resolver}`. Route Rust fields use
-  `selected_source` and `decision`, while output-v1 retains the existing
-  `selected_address` and `route` keys.
-- **Breaking:** Command output modules now expose concise `Result` and `Event`
-  models, with shared frame and network representations under public
-  `output::frame` and `output::network` owners. Output-v1 documents are
-  unchanged.
-- Reorganized packet decoding, fragment reassembly, route planning, and live
-  exchange correlation around explicit phase and state owners. That internal
-  reorganization did not change serialized output contracts or runtime
-  behavior.
-- Split oversized builders, codecs, reassembly planners, workflow engines, CLI
-  orchestration, and integration tests at concrete phase boundaries.
-- Added checked, all-or-nothing capture-statistics aggregation through
-  `packetcraftr_netio::capture::Statistics::checked_add`.
-- **Breaking:** Removed the undocumented `Client::exchange_for_workflow` seam;
-  bounded workflows continue to expose supported executors.
-- **Breaking:** Layer decoders now use `consumed` as the sole child-payload
-  offset; removed the redundant `DecodedLayerValue::payload_offset` field.
-- **Breaking:** Live scan, traceroute, and DNS executors now share the canonical
-  exchange response-evidence type. Custom DNS executors must set its request
-  index, which is normally zero for the single DNS probe in an exchange. DNS
-  evidence-limit errors now use the shared captured-frame/byte terminology.
-- **Breaking:** Live transmission now returns opaque provider receipts that bind
-  semantic builds, materialized routes, exact accepted bytes, byte counts, and
-  provider-established monotonic/wall-clock timing. Capture correlation uses
-  opaque ingress identity and monotonic freshness, and high-level executor
-  successes are invocation-bound rather than caller-constructible evidence.
-- **Breaking:** Capture rewriting is now a bounded, same-format operation that
-  preserves every validated source record and rejects CLI format conversion or
-  filtering instead of silently normalizing PCAPNG structure. The capture API
-  exposes section-local records, packet block kinds, arbitrary options, and
-  the complete classic-PCAP network word; `transcode` has been removed.
-- **Breaking:** Capture-frame timestamps are optional because PCAPNG Simple
-  Packet Blocks do not carry time. Timestamp-dependent filters, offline
-  analysis, original/scaled replay timing, and capture writers diagnose missing
-  time; immediate/fixed-rate replay and structured frame output support it.
-- Source, CI, and release builds now use Cargo and Rust toolchain platform
-  defaults without a project-level compiler wrapper or linker override.
-- **Breaking:** Removed the generic `Packet::mutate_fixed_width_layer` escape
-  hatch. All public mutable layer access now invalidates cached encoded
-  payload lengths; decoded packets populate those lengths from their layer
-  ranges.
-- Display-filter requirements now identify TCP and UDP stream-index needs
-  independently while retaining the aggregate stream-index signal.
-- The workspace now uses Cargo resolver version 3 so dependency selection
-  honors the declared workspace Rust version.
-- Updated user, contributor, security, and API documentation for the four-crate
-  layout and removed duplicated command, feature, and validation inventories.
+- **Breaking:** Passive live capture is now interface-based. CLI `capture`
+  requires `--interface`, requests include queue, filter, and promiscuous-mode
+  settings, and sessions provide the link metadata written to capture files.
+- **Breaking:** NDJSON for `read`, `capture`, `scan`, `traceroute`, `dns`,
+  `fuzz`, and `exchange` now streams semantic events, uses contiguous zero-based
+  envelope sequences, and ends with exactly one `complete` or `error` event. Domain
+  coordinates remain in typed event fields, including one-based `source_frame`
+  for `read` and `capture`.
+- **Breaking:** Scan output replaces `ports` and the ICMP port-zero sentinel
+  with address-bearing `endpoints`. Structured errors expose typed context, and
+  replay Rust APIs consistently use `source_index` for capture coordinates.
+- **Breaking:** Offline fuzz limits now cover only campaign generation. Live
+  evidence limits use `packetcraftr::fuzz::LiveLimits`, the CLI has a separate
+  `--max-packet-bytes` limit, and live-only options require `--live`.
+- **Breaking:** The workspace now has four crates: `packetcraftr-packet` became
+  `packetcraftr-core`, analysis moved under `packetcraftr_core::analysis`,
+  `packetcraftr-network` became `packetcraftr-netio`, and live workflows moved
+  into `packetcraftr`. Old aliases are removed, and `packetcraftr` enables
+  `native-interfaces` by default.
+- **Breaking:** Public Rust APIs now use flattened, module-scoped names.
+  Deprecated aliases and redundant APIs such as `parse_with_nesting_limit`,
+  `CaptureRecord::frame`, `Client::exchange_for_workflow`,
+  `DecodedLayerValue::payload_offset`, and `Packet::mutate_fixed_width_layer`
+  were removed; use `parse_with_resource_limits` and the public `frame` field.
+- **Breaking:** Offline TCP and IP-fragment reassembly keys now include capture
+  scope identity.
+- **Breaking:** Live I/O now uses opaque transmission receipts, ingress
+  identity, and monotonic freshness; scan, traceroute, and DNS share one
+  response-evidence type. Progressive callbacks cannot extend I/O past the
+  operation deadline.
+- **Breaking:** Capture rewriting preserves validated records in their original
+  format and rejects conversion or filtering; `transcode` was removed. Capture
+  timestamps are optional, and operations that require time now diagnose
+  timestamp-less PCAPNG Simple Packet Blocks.
+- Explicit packet and frame inputs now take precedence over stdin; missing
+  interactive input fails immediately with command-specific guidance.
+- Machine-readable and hexadecimal output now stream directly from exact frame bytes
+  without building duplicate representations.
 
 ### Fixed
 
-- Corrected `dissect --output json --filter` to emit one complete aggregate
-  document for both matches and no-matches; no-match success now reports
-  `result.matched: false` with `result.dissection: null`.
-- Human-readable runtime errors now include stable classification codes,
-  retained causes, and available remediation guidance.
-- Corrected the DNS text summary label from `response_name` to
-  `response_code_name`.
-- Kept TCP follow delivery edges aligned with directional reassembly
-  generations, preventing Fast Open payload retransmissions from being emitted
-  twice while still resetting deduplication for four-tuple reuse.
-- Required captured reverse-direction outstanding payload before reporting TCP
-  duplicate acknowledgments, without advancing duplicate counts for
-  unreportable repeats.
-- Used the ultimate remaining IPv4 LSRR or SSRR destination for TCP and UDP
-  pseudo-header checksums during encoding and decoding.
-- Enabled IPv4 broadcast permission on every raw IPv4 socket before
-  transmission, including sockets used for subnet-directed broadcasts.
-- **Breaking:** Preserved limited and subnet-directed IPv4 broadcast routes
-  through native selection and Layer-2 planning, emitting the Ethernet
-  broadcast MAC without neighbor resolution and exposing `broadcast` as a
-  route selection reason.
-- Indexed offline TCP and IP-fragment expiry deadlines so dense captures no
-  longer scan every resident reassembly flow for each pushable segment.
-- Kept conversation indexing, follow/statistics/expert analysis, TCP
-  reassembly, and IP-fragment reassembly separate across PCAPNG interfaces and
-  semantic encapsulation paths such as VLAN stacks, tunnel identifiers, MPLS
-  labels, and PPPoE sessions.
-- Accepted valid injected-provider transmission reports across backward
-  wall-clock adjustments by validating timing with monotonic endpoints.
-- Preserved TCP response correlation for Layer2 exchanges whose TCP
-  sequence-space length depends on encoded payload caches.
-- Bounded live duplicate capture tracking to retained exchange evidence.
-- Kept neighbor resolution attempt timeouts anchored before Layer2 sends.
-- Native capture and Linux netlink workers now retain ownership across finite
-  shutdown timeouts and transfer unfinished threads to explicit reapers.
-- Rejected byte-slice filter indices whose exclusive upper bound cannot be
-  represented instead of silently compiling them as empty ranges.
-- Accounted for retained TCP flow-table metadata within the aggregate
-  reassembly budget, including transactional replacement and close handling.
-- Correctly attributed structured CLI parse errors without mistaking the
-  executable, global-option values, or later positionals for the command.
+- `dissect --output json --filter` now emits one complete aggregate document for
+  matches and no-matches; a no-match reports `matched: false` and a null
+  dissection.
+- Human-readable runtime errors now include classification codes, causes, and
+  remediation; structured CLI parse errors identify the actual command. The DNS
+  text summary uses `response_code_name`.
+- Offline TCP and fragment analysis now isolates flows by PCAPNG interface and
+  encapsulation path, fixes Fast Open retransmission and duplicate-ACK handling,
+  indexes expiry deadlines, and accounts flow metadata against resource budgets.
+- **Breaking:** IPv4 broadcast routes remain broadcasts through native
+  selection and Layer-2 planning, use Ethernet broadcast without neighbor
+  resolution, and expose `broadcast` as their selection reason. Raw IPv4 sends
+  enable broadcast permission, and transport checksums honor the final LSRR or
+  SSRR destination.
+- Live workflows now tolerate backward wall-clock adjustments, preserve TCP
+  response correlation, bound duplicate evidence, anchor neighbor timeouts
+  before sends, and retain worker ownership through finite shutdown timeouts.
+- Byte-slice filters now reject upper bounds that cannot be represented instead
+  of silently compiling them as empty ranges.
 
 ## [0.5.0-beta.1] - 2026-08-09
 

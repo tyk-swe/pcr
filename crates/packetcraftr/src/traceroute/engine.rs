@@ -9,17 +9,18 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::error::Context;
 use packetcraftr_core::{diagnostic::Diagnostic, registry::Registry};
 
 use crate::clock::Clock;
 use crate::evidence::Budget;
+use crate::policy::Policy;
 use crate::probe::evidence::{ResponseSelector, UndecodedRetention, retain_evidence};
 use crate::probe::runner::{ProbeBatch, ProbeLifecycle, ProbeRunConfig, run_batches};
-use crate::target::{Authorizer, approve_operation, resolve_selected};
-use crate::{BoundaryError, SentPacket};
+use crate::target::{Resolver, approve_operation, resolve_selected};
+use crate::{BoundaryError, Error, SentPacket};
 
 use super::classification::classify_response;
-use super::error::Error;
 use super::evidence::validate_execution;
 use super::model::{
     Batch, Completion, Event, Execution, Executor, Hop, Limits, Probe, ProbeEvidence, ProbeStatus,
@@ -31,22 +32,23 @@ use super::{MAX_TRACEROUTE_PROBE_BYTES, TRACEROUTE_EVIDENCE_DIAGNOSTICS};
 /// Validates the request, authorizes every resolved target and the complete
 /// operation budget before constructing probes, then executes hop batches until
 /// checksum-valid evidence reaches the destination or reports it unreachable.
-pub fn run<A, E, C>(
+pub fn run<E, C>(
     request: &Request,
-    authorizer: &mut A,
+    policy: &Policy,
+    resolver: &impl Resolver,
     registry: &Registry,
     executor: &mut E,
     clock: &mut C,
 ) -> std::result::Result<Result, Error>
 where
-    A: Authorizer,
     E: Executor,
     C: Clock,
 {
     let mut collector = Collector::default();
     let summary = run_observed(
         request,
-        authorizer,
+        policy,
+        resolver,
         registry,
         executor,
         clock,
@@ -64,25 +66,27 @@ where
 /// Confirmed sends in the current hop are not undone, callback failure prevents
 /// later hops, and a worker that outlives the deadline may finish after this
 /// function returns and must own its state.
-pub fn run_with_events<A, E, C, F>(
+pub fn run_with_events<E, C, F>(
     request: &Request,
-    authorizer: &mut A,
+    policy: &Policy,
+    resolver: &impl Resolver,
     registry: &Registry,
     executor: &mut E,
     clock: &mut C,
     emit: F,
 ) -> std::result::Result<Summary, Error>
 where
-    A: Authorizer,
     E: Executor,
     C: Clock,
     F: FnMut(Event) -> std::result::Result<(), BoundaryError> + Send + 'static,
 {
-    let sink =
-        packetcraftr_core::progress::Sink::new(emit).map_err(|source| Error::Output { source })?;
+    let sink = packetcraftr_core::progress::Sink::new(emit).map_err(|source| Error::Output {
+        source: Box::new(source),
+    })?;
     run_observed(
         request,
-        authorizer,
+        policy,
+        resolver,
         registry,
         executor,
         clock,
@@ -91,29 +95,29 @@ where
             Err(packetcraftr_core::progress::EmitError::Deadline(error)) => {
                 Err(traceroute_duration_error(error.actual, error.limit))
             }
-            Err(packetcraftr_core::progress::EmitError::Output(source)) => {
-                Err(Error::Output { source })
-            }
+            Err(packetcraftr_core::progress::EmitError::Output(source)) => Err(Error::Output {
+                source: Box::new(source),
+            }),
         },
     )
 }
 
-fn run_observed<A, E, C, F>(
+fn run_observed<E, C, F>(
     request: &Request,
-    authorizer: &mut A,
+    policy: &Policy,
+    resolver: &impl Resolver,
     registry: &Registry,
     executor: &mut E,
     clock: &mut C,
     mut emit: F,
 ) -> std::result::Result<Summary, Error>
 where
-    A: Authorizer,
     E: Executor,
     C: Clock,
     F: FnMut(Event, &Deadline) -> std::result::Result<(), Error>,
 {
     let mut deadline = Deadline::new(request.limits.max_duration);
-    let approved = approve_traceroute(request, authorizer, &deadline)?;
+    let approved = approve_traceroute(request, policy, resolver, &deadline)?;
     let batches = build_batches(request, approved.destination)?;
     enforce_deadline(&deadline)?;
     let mut state = TracerouteState::default();
@@ -203,23 +207,25 @@ struct ApprovedTraceroute {
     total_probes: usize,
 }
 
-fn approve_traceroute<A: Authorizer>(
+fn approve_traceroute(
     request: &Request,
-    authorizer: &mut A,
+    policy: &Policy,
+    resolver: &impl Resolver,
     deadline: &Deadline,
 ) -> std::result::Result<ApprovedTraceroute, Error> {
     request.validate()?;
     let resolved = resolve_selected(
-        authorizer,
+        policy,
+        resolver,
         &request.target,
         request.address_family,
         deadline,
-        traceroute_duration_error,
     )?;
     let Some(&destination) = resolved.addresses.first() else {
-        return Err(Error::Family {
+        return Err(crate::target::Error::AddressFamilyUnavailable {
             family: request.address_family.label(),
-        });
+        }
+        .into());
     };
 
     let total_probes = request.total_probe_count()?;
@@ -227,17 +233,16 @@ fn approve_traceroute<A: Authorizer>(
     let maximum_wire_bytes = u64::try_from(total_probes)
         .unwrap_or(u64::MAX)
         .checked_mul(MAX_TRACEROUTE_PROBE_BYTES)
-        .ok_or(Error::InvalidLimit {
+        .ok_or(Error::InvalidRequest {
             field: "wire_bytes",
-            value: u64::MAX,
-            reason: "wire-byte accounting overflowed".to_owned(),
+            message: "wire-byte accounting overflowed; received an unrepresentable total"
+                .to_owned(),
         })?;
     approve_operation(
-        authorizer,
+        policy,
         u64::try_from(total_probes).unwrap_or(u64::MAX),
         maximum_wire_bytes,
         deadline,
-        traceroute_duration_error,
     )?;
     Ok(ApprovedTraceroute {
         declared_target: resolved.declared,
@@ -249,10 +254,12 @@ fn approve_traceroute<A: Authorizer>(
 
 fn validate_probe_plan(request: &Request, total_probes: usize) -> std::result::Result<(), Error> {
     if total_probes > request.limits.max_probes {
-        return Err(Error::InvalidLimit {
+        return Err(Error::InvalidRequest {
             field: "probes",
-            value: u64::try_from(total_probes).unwrap_or(u64::MAX),
-            reason: format!("exceeds max_probes={}", request.limits.max_probes),
+            message: format!(
+                "exceeds max_probes={}; received {total_probes}",
+                request.limits.max_probes
+            ),
         });
     }
     if request.strategy == Strategy::Udp {
@@ -262,7 +269,8 @@ fn validate_probe_plan(request: &Request, total_probes: usize) -> std::result::R
             .checked_add(last_offset)
             .is_none_or(|last| last > usize::from(u16::MAX))
         {
-            return Err(Error::InvalidPort {
+            return Err(Error::InvalidRequest {
+                field: "destination_port",
                 message: format!(
                     "base UDP port {base} plus {} unique probe(s) exceeds 65535",
                     total_probes
@@ -325,17 +333,11 @@ where
     E: Executor,
     F: FnMut(Event, &Deadline) -> std::result::Result<(), Error>,
 {
-    type Error = Error;
-
     fn execute(&mut self, batch: &Batch) -> std::result::Result<Execution, BoundaryError> {
         self.executor.execute(batch)
     }
 
-    fn validate(
-        &mut self,
-        batch: &Batch,
-        execution: &Execution,
-    ) -> std::result::Result<(), Self::Error> {
+    fn validate(&mut self, batch: &Batch, execution: &Execution) -> std::result::Result<(), Error> {
         validate_execution(batch, execution, self.limits)
     }
 
@@ -344,32 +346,8 @@ where
         batch: &Batch,
         execution: Execution,
         deadline: &Deadline,
-    ) -> std::result::Result<bool, Self::Error> {
+    ) -> std::result::Result<bool, Error> {
         self.process_batch(batch, execution, deadline)
-    }
-
-    fn duration_error(actual: Duration, limit: Duration) -> Self::Error {
-        traceroute_duration_error(actual, limit)
-    }
-
-    fn rate_error(rate: Option<u32>) -> Self::Error {
-        Error::InvalidLimit {
-            field: "probes_per_second",
-            value: u64::from(rate.unwrap_or_default()),
-            reason: "rate-delay arithmetic overflowed".to_owned(),
-        }
-    }
-
-    fn clock_error(sequence: u64, message: String) -> Self::Error {
-        Error::Clock { sequence, message }
-    }
-
-    fn execution_error(sequence: u64, source: BoundaryError) -> Self::Error {
-        Error::Execution { sequence, source }
-    }
-
-    fn statistics_error(sequence: u64) -> Self::Error {
-        Error::StatisticsOverflow { sequence }
     }
 }
 
@@ -396,7 +374,7 @@ where
         } = execution;
         if permit != batch.permit {
             return Err(Error::InvalidEvidence {
-                sequence: batch.sequence(),
+                context: Context::probe_sequence(batch.sequence()),
                 message: "executor returned evidence for a different execution permit".to_owned(),
             });
         }
@@ -566,7 +544,7 @@ where
 }
 
 fn enforce_deadline(deadline: &Deadline) -> std::result::Result<(), Error> {
-    crate::clock::check_deadline(deadline, traceroute_duration_error)
+    deadline.check().map_err(Error::from)
 }
 
 fn traceroute_duration_error(actual: Duration, limit: Duration) -> Error {

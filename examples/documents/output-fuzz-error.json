@@ -4,14 +4,14 @@
   "mode": "aggregate",
   "status": "error",
   "error": {
-    "code": "internal.fuzz_evidence",
+    "code": "internal.live_evidence",
     "kind": "internal",
-    "message": "fuzz executor returned invalid evidence at case 4: accepted bytes differ from the prepared case",
+    "message": "executor returned invalid evidence at case 4: accepted bytes differ from the prepared case",
     "causes": [],
     "context": {
       "case_index": 4
     },
-    "remediation": "treat the fuzz operation as incomplete because evidence was inconsistent"
+    "remediation": "treat the live operation as incomplete because executor evidence was inconsistent"
   },
   "diagnostics": []
 }

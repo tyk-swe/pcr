@@ -10,7 +10,7 @@ use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::{decode::DecodedPacket, diagnostic::Diagnostic};
 
-use crate::clock::{Clock, check_deadline, rate_delay};
+use crate::clock::{Clock, rate_delay};
 use crate::{SentPacket, Stats};
 
 /// Common request envelope for homogeneous scan and traceroute batches.
@@ -77,21 +77,14 @@ pub(crate) struct ProbeRunConfig {
 
 /// Workflow-owned operations and error taxonomy for the shared probe runner.
 pub(crate) trait ProbeLifecycle<B> {
-    type Error;
-
     fn execute(&mut self, batch: &B) -> Result<Execution, BoundaryError>;
-    fn validate(&mut self, batch: &B, execution: &Execution) -> Result<(), Self::Error>;
+    fn validate(&mut self, batch: &B, execution: &Execution) -> Result<(), crate::Error>;
     fn process(
         &mut self,
         batch: &B,
         execution: Execution,
         deadline: &Deadline,
-    ) -> Result<bool, Self::Error>;
-    fn duration_error(actual: Duration, limit: Duration) -> Self::Error;
-    fn rate_error(rate: Option<u32>) -> Self::Error;
-    fn clock_error(sequence: u64, message: String) -> Self::Error;
-    fn execution_error(sequence: u64, source: BoundaryError) -> Self::Error;
-    fn statistics_error(sequence: u64) -> Self::Error;
+    ) -> Result<bool, crate::Error>;
 }
 
 /// Runs already-approved homogeneous batches with shared deadline, pacing,
@@ -102,7 +95,7 @@ pub(crate) fn run_batches<B, L, C>(
     deadline: &mut Deadline,
     clock: &mut C,
     lifecycle: &mut L,
-) -> Result<Stats, L::Error>
+) -> Result<Stats, crate::Error>
 where
     B: ProbeBatch,
     L: ProbeLifecycle<B>,
@@ -112,54 +105,67 @@ where
     let mut scheduled_delay = Duration::ZERO;
 
     for (batch_index, batch) in batches.iter().enumerate() {
-        check_deadline(deadline, L::duration_error)?;
+        deadline.check()?;
         let sequence = batch.sequence();
         if batch_index != 0 {
             let delay = rate_delay(
                 batches[batch_index - 1].probe_count(),
                 config.probes_per_second,
             )
-            .ok_or_else(|| L::rate_error(config.probes_per_second))?;
-            check_deadline(deadline, L::duration_error)?;
-            deadline
-                .start_accounting(delay)
-                .map_err(|error| L::duration_error(error.actual, error.limit))?;
-            clock
-                .sleep(delay)
-                .map_err(|source| L::clock_error(sequence, source.to_string()))?;
-            deadline
-                .account(delay)
-                .map_err(|error| L::duration_error(error.actual, error.limit))?;
-            scheduled_delay = scheduled_delay
-                .checked_add(delay)
-                .ok_or_else(|| L::duration_error(Duration::MAX, config.duration_limit))?;
+            .ok_or_else(|| crate::Error::InvalidRequest {
+                field: "rate",
+                message: format!(
+                    "must be between 1 and u32::MAX; received {:?}",
+                    config.probes_per_second
+                ),
+            })?;
+            deadline.check()?;
+            deadline.start_accounting(delay)?;
+            clock.sleep(delay).map_err(|source| crate::Error::Clock {
+                context: packetcraftr_core::error::Context::probe_sequence(sequence),
+                message: source.to_string(),
+            })?;
+            deadline.account(delay)?;
+            scheduled_delay =
+                scheduled_delay
+                    .checked_add(delay)
+                    .ok_or(crate::Error::DurationLimit {
+                        actual: Duration::MAX,
+                        limit: config.duration_limit,
+                    })?;
         }
 
-        check_deadline(deadline, L::duration_error)?;
-        deadline
-            .start_accounting(Duration::ZERO)
-            .map_err(|error| L::duration_error(error.actual, error.limit))?;
+        deadline.check()?;
+        deadline.start_accounting(Duration::ZERO)?;
         let execution = lifecycle
             .execute(batch)
-            .map_err(|source| L::execution_error(sequence, source))?;
-        check_deadline(deadline, L::duration_error)?;
-        deadline
-            .account(execution.stats.elapsed)
-            .map_err(|error| L::duration_error(error.actual, error.limit))?;
+            .map_err(|source| crate::Error::Execution {
+                context: packetcraftr_core::error::Context::probe_sequence(sequence),
+                source: Box::new(source),
+            })?;
+        deadline.check()?;
+        deadline.account(execution.stats.elapsed)?;
         lifecycle.validate(batch, &execution)?;
-        check_deadline(deadline, L::duration_error)?;
+        deadline.check()?;
         stats
             .checked_add_assign(&execution.stats)
-            .ok_or_else(|| L::statistics_error(sequence))?;
+            .ok_or(crate::Error::StatisticsOverflow {
+                context: packetcraftr_core::error::Context::probe_sequence(sequence),
+            })?;
         if lifecycle.process(batch, execution, deadline)? {
             break;
         }
     }
 
-    check_deadline(deadline, L::duration_error)?;
-    stats.elapsed = stats
-        .elapsed
-        .checked_add(scheduled_delay)
-        .ok_or_else(|| L::statistics_error(config.final_statistics_sequence))?;
+    deadline.check()?;
+    stats.elapsed =
+        stats
+            .elapsed
+            .checked_add(scheduled_delay)
+            .ok_or(crate::Error::StatisticsOverflow {
+                context: packetcraftr_core::error::Context::probe_sequence(
+                    config.final_statistics_sequence,
+                ),
+            })?;
     Ok(stats)
 }

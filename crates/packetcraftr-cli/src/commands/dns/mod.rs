@@ -39,13 +39,13 @@ pub(super) fn run(
         interface: arguments.route.interface,
     };
     let resolver = packetcraftr::target::SystemResolver;
-    let mut authorizer = packetcraftr::target::PolicyAuthorizer::new(&policy, &resolver);
     let mut clock = packetcraftr::clock::SystemClock;
     match format {
         output::contract::Format::Text | output::contract::Format::Json => {
             let result = packetcraftr::dns::run(
                 &request,
-                &mut authorizer,
+                &policy,
+                &resolver,
                 &registry,
                 &mut executor,
                 &mut clock,
@@ -68,7 +68,8 @@ pub(super) fn run(
             let event_stream = stream.clone();
             let summary = packetcraftr::dns::run_with_events(
                 &request,
-                &mut authorizer,
+                &policy,
+                &resolver,
                 &registry,
                 &mut executor,
                 &mut clock,

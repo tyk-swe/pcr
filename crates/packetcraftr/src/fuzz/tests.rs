@@ -8,19 +8,18 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use packetcraftr_core::build::Builder;
-use packetcraftr_core::error::Classified;
+use packetcraftr_core::error::{Classified, Context};
 use packetcraftr_core::fuzz as packet_fuzz;
 use packetcraftr_core::protocol::{network::Ipv4, transport::Udp};
 use packetcraftr_core::{Packet, layer::Raw};
 use packetcraftr_netio::{capture::Statistics as CaptureStatistics, transmit::Submission};
 
 use crate::clock::Clock;
-use crate::{BoundaryError, Stats as ExecutionStats};
+use crate::{BoundaryError, Error, Stats as ExecutionStats};
 
 use super::execution::add_execution_stats;
 use super::{
-    Authorizer, Execution, ExecutionCase, Executor, LiveLimits, LiveOptions, Stats, run,
-    run_with_events,
+    Execution, ExecutionCase, Executor, LiveLimits, LiveOptions, Stats, run, run_with_events,
 };
 
 #[test]
@@ -45,7 +44,7 @@ fn live_evidence_limits_are_validated_outside_the_offline_campaign() {
         }
         .validate()
         .expect_err("zero live evidence limit must fail");
-        assert!(matches!(error, super::Error::InvalidLimit { .. }));
+        assert!(matches!(error, Error::InvalidRequest { .. }));
     }
 }
 
@@ -57,7 +56,6 @@ fn aggregate_live_fuzz_validates_case_count_before_collecting() {
         cases: usize::MAX,
         ..packet_fuzz::Request::default()
     };
-    let mut authorizer = AllowAll;
     let mut executor = CountingExecutor::default();
 
     let error = run(
@@ -65,7 +63,7 @@ fn aggregate_live_fuzz_validates_case_count_before_collecting() {
         LiveOptions::default(),
         packet(),
         registry,
-        &mut authorizer,
+        &crate::policy::Policy::default(),
         &mut executor,
         &mut NoopClock,
     )
@@ -73,7 +71,7 @@ fn aggregate_live_fuzz_validates_case_count_before_collecting() {
 
     assert!(matches!(
         error,
-        super::Error::Campaign(packet_fuzz::Error::InvalidLimit { field: "cases", .. })
+        Error::FuzzCampaign(packet_fuzz::Error::InvalidLimit { field: "cases", .. })
     ));
     assert_eq!(executor.executions, 0);
 }
@@ -145,24 +143,9 @@ fn execution_statistics_aggregation_is_complete_and_atomic() {
     .expect_err("capture counter must overflow");
     assert!(matches!(
         error,
-        super::Error::StatisticsOverflow { case_index: 12 }
+        Error::StatisticsOverflow { context } if context == Context::case_index(12)
     ));
     assert_eq!(total, before);
-}
-
-struct AllowAll;
-
-impl Authorizer for AllowAll {
-    fn authorize_operation(
-        &mut self,
-        _packets: &[Packet],
-        _destination: Option<std::net::IpAddr>,
-        _maximum_wire_bytes: u64,
-        _requires_permissive_live: bool,
-        _allow_permissive_live: bool,
-    ) -> Result<(), BoundaryError> {
-        Ok(())
-    }
 }
 
 struct RebuildingExecutor;
@@ -380,7 +363,6 @@ fn live_execution_uses_the_identical_packet_campaign() {
     };
     let offline =
         packet_fuzz::run(&request, packet(), Arc::clone(&registry)).expect("offline campaign");
-    let mut authorizer = AllowAll;
     let mut executor = RebuildingExecutor;
     let live = run(
         &request,
@@ -390,7 +372,7 @@ fn live_execution_uses_the_identical_packet_campaign() {
         },
         packet(),
         registry,
-        &mut authorizer,
+        &crate::policy::Policy::default(),
         &mut executor,
         &mut NoopClock,
     )
@@ -422,7 +404,6 @@ fn live_fuzz_sink_failure_prevents_later_case_execution() {
         targets: vec!["2.bytes".parse().expect("raw field target")],
         ..packet_fuzz::Request::default()
     };
-    let mut authorizer = AllowAll;
     let mut executor = CountingExecutor::default();
     let emitted = Arc::new(std::sync::Mutex::new(Vec::new()));
     let observed = Arc::clone(&emitted);
@@ -435,7 +416,7 @@ fn live_fuzz_sink_failure_prevents_later_case_execution() {
         },
         packet(),
         registry,
-        &mut authorizer,
+        &crate::policy::Policy::default(),
         &mut executor,
         &mut NoopClock,
         move |case| {
@@ -449,7 +430,7 @@ fn live_fuzz_sink_failure_prevents_later_case_execution() {
     )
     .expect_err("the first case event must stop the campaign");
 
-    assert!(matches!(error, super::Error::Output { .. }));
+    assert!(matches!(error, Error::Output { .. }));
     assert_eq!(executor.executions, 1);
     assert_eq!(*emitted.lock().unwrap(), [0]);
 }
@@ -464,7 +445,6 @@ fn live_fuzz_accepts_route_materialized_case() {
         targets: vec!["2.bytes".parse().expect("raw field target")],
         ..packet_fuzz::Request::default()
     };
-    let mut authorizer = AllowAll;
     let mut executor = RouteMaterializingExecutor {
         registry: Arc::clone(&registry),
     };
@@ -476,7 +456,7 @@ fn live_fuzz_accepts_route_materialized_case() {
         },
         route_materialized_packet(),
         registry,
-        &mut authorizer,
+        &crate::policy::Policy::default(),
         &mut executor,
         &mut NoopClock,
     )
@@ -505,7 +485,6 @@ fn live_fuzz_rejects_substituted_authorized_case() {
         targets: vec!["2.bytes".parse().expect("raw field target")],
         ..packet_fuzz::Request::default()
     };
-    let mut authorizer = AllowAll;
     let mut executor = SubstitutingFuzzExecutor;
     let error = run(
         &request,
@@ -515,12 +494,12 @@ fn live_fuzz_rejects_substituted_authorized_case() {
         },
         packet(),
         registry,
-        &mut authorizer,
+        &crate::policy::Policy::default(),
         &mut executor,
         &mut NoopClock,
     )
     .expect_err("substituted sent evidence must be rejected");
 
-    assert_eq!(error.classification().code, "internal.fuzz_evidence");
+    assert_eq!(error.classification().code, "internal.live_evidence");
     assert!(error.to_string().contains("substituted bytes"));
 }

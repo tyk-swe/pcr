@@ -8,20 +8,22 @@ use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
 use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::error::Context;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::registry::Registry;
 
 use crate::BoundaryError;
+use crate::Error;
 use crate::Stats;
 use crate::clock::Clock;
 use crate::evidence::Budget;
+use crate::policy::Policy;
 use crate::probe::evidence::{
     ResponseCandidate, UndecodedRetention, response_within_deadline, retain_evidence,
     update_best_candidate,
 };
-use crate::target::{Authorizer, approve_operation, resolve_selected};
+use crate::target::{Resolver, approve_operation, resolve_selected};
 
-use super::error::Error;
 use super::evidence::validate_dns_execution;
 use super::model::{
     AttemptEvidence, Event, EventContext, Exchange, Execution, Executor, Limits, Outcome, Probe,
@@ -32,22 +34,24 @@ use super::{DNS_EPHEMERAL_SOURCE_PORT_BASE, DNS_EVIDENCE_DIAGNOSTICS, MAX_DNS_PR
 
 /// Executes bounded DNS retries, repeating declared-name authorization,
 /// resolution, and resolved-answer authorization before each probe.
-pub fn run<A, E, C>(
+pub fn run<R, E, C>(
     request: &Request,
-    authorizer: &mut A,
+    policy: &Policy,
+    resolver: &R,
     registry: &Registry,
     executor: &mut E,
     clock: &mut C,
 ) -> std::result::Result<Result, Error>
 where
-    A: Authorizer,
+    R: Resolver,
     E: Executor,
     C: Clock,
 {
     let mut collector = Collector::default();
     let summary = run_observed(
         request,
-        authorizer,
+        policy,
+        resolver,
         registry,
         executor,
         clock,
@@ -65,25 +69,28 @@ where
 /// `max_duration`. Callback failure prevents later retries; a worker that
 /// outlives the deadline may finish after this function returns and must own
 /// its state.
-pub fn run_with_events<A, E, C, F>(
+pub fn run_with_events<R, E, C, F>(
     request: &Request,
-    authorizer: &mut A,
+    policy: &Policy,
+    resolver: &R,
     registry: &Registry,
     executor: &mut E,
     clock: &mut C,
     emit: F,
 ) -> std::result::Result<Summary, Error>
 where
-    A: Authorizer,
+    R: Resolver,
     E: Executor,
     C: Clock,
     F: FnMut(Event) -> std::result::Result<(), BoundaryError> + Send + 'static,
 {
-    let sink =
-        packetcraftr_core::progress::Sink::new(emit).map_err(|source| Error::Output { source })?;
+    let sink = packetcraftr_core::progress::Sink::new(emit).map_err(|source| Error::Output {
+        source: Box::new(source),
+    })?;
     run_observed(
         request,
-        authorizer,
+        policy,
+        resolver,
         registry,
         executor,
         clock,
@@ -92,30 +99,32 @@ where
             Err(packetcraftr_core::progress::EmitError::Deadline(error)) => {
                 Err(duration_error(error.actual, error.limit))
             }
-            Err(packetcraftr_core::progress::EmitError::Output(source)) => {
-                Err(Error::Output { source })
-            }
+            Err(packetcraftr_core::progress::EmitError::Output(source)) => Err(Error::Output {
+                source: Box::new(source),
+            }),
         },
     )
 }
 
-fn run_observed<A, E, C, F>(
+fn run_observed<R, E, C, F>(
     request: &Request,
-    authorizer: &mut A,
+    policy: &Policy,
+    resolver: &R,
     registry: &Registry,
     executor: &mut E,
     clock: &mut C,
     emit: F,
 ) -> std::result::Result<Summary, Error>
 where
-    A: Authorizer,
+    R: Resolver,
     E: Executor,
     C: Clock,
     F: FnMut(Event, &Deadline) -> std::result::Result<(), Error>,
 {
     run_observed_with_deadline(
         request,
-        authorizer,
+        policy,
+        resolver,
         registry,
         executor,
         clock,
@@ -124,9 +133,14 @@ where
     )
 }
 
-pub(super) fn run_observed_with_deadline<A, E, C, F>(
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the deadline-injection test seam mirrors every public DNS workflow boundary"
+)]
+pub(super) fn run_observed_with_deadline<R, E, C, F>(
     request: &Request,
-    authorizer: &mut A,
+    policy: &Policy,
+    resolver: &R,
     registry: &Registry,
     executor: &mut E,
     clock: &mut C,
@@ -134,7 +148,7 @@ pub(super) fn run_observed_with_deadline<A, E, C, F>(
     mut emit: F,
 ) -> std::result::Result<Summary, Error>
 where
-    A: Authorizer,
+    R: Resolver,
     E: Executor,
     C: Clock,
     F: FnMut(Event, &Deadline) -> std::result::Result<(), Error>,
@@ -144,7 +158,7 @@ where
         query,
         delay,
         summary,
-    } = prepare_operation(request, authorizer, deadline)?;
+    } = prepare_operation(request, policy, deadline)?;
     let context = Arc::new(EventContext {
         server: Arc::from(summary.server.as_str()),
         server_port: summary.server_port,
@@ -153,7 +167,8 @@ where
     });
     Operation {
         request,
-        authorizer,
+        policy,
+        resolver,
         registry,
         executor,
         clock,
@@ -239,9 +254,9 @@ struct PreparedOperation {
     summary: Summary,
 }
 
-fn prepare_operation<A: Authorizer>(
+fn prepare_operation(
     request: &Request,
-    authorizer: &mut A,
+    policy: &Policy,
     deadline: Deadline,
 ) -> std::result::Result<PreparedOperation, Error> {
     let query_name = request.validate()?;
@@ -251,17 +266,16 @@ fn prepare_operation<A: Authorizer>(
         request.transaction_id,
         request.recursion_desired,
     )
-    .map_err(Error::Query)?;
+    .map_err(Error::DnsQuery)?;
     let budget = operation_budget(request, query.len())?;
     // This complete-operation gate deliberately precedes resolution and probe
     // construction. The authorizer's resolver path independently enforces the
     // declared hostname before every resolver side effect.
     approve_operation(
-        authorizer,
+        policy,
         budget.packet_count,
         budget.maximum_wire_bytes,
         &deadline,
-        duration_error,
     )?;
 
     Ok(PreparedOperation {
@@ -294,10 +308,10 @@ fn operation_budget(
     let maximum_wire_bytes =
         packet_count
             .checked_mul(per_probe_bytes)
-            .ok_or(Error::InvalidLimit {
+            .ok_or(Error::InvalidRequest {
                 field: "wire_bytes",
-                value: u64::MAX,
-                reason: "wire-byte accounting overflowed".to_owned(),
+                message: "wire-byte accounting overflowed; received an unrepresentable total"
+                    .to_owned(),
             })?;
     let delay = dns_rate_delay(request.queries_per_second)?;
     let worst_case = request
@@ -325,9 +339,10 @@ fn operation_budget(
     })
 }
 
-struct Operation<'a, A, E, C, F> {
+struct Operation<'a, R, E, C, F> {
     request: &'a Request,
-    authorizer: &'a mut A,
+    policy: &'a Policy,
+    resolver: &'a R,
     registry: &'a Registry,
     executor: &'a mut E,
     clock: &'a mut C,
@@ -349,9 +364,9 @@ struct ClassifiedAttempt {
     response: Option<ValidatedResponse>,
 }
 
-impl<A, E, C, F> Operation<'_, A, E, C, F>
+impl<R, E, C, F> Operation<'_, R, E, C, F>
 where
-    A: Authorizer,
+    R: Resolver,
     E: Executor,
     C: Clock,
     F: FnMut(Event, &Deadline) -> std::result::Result<(), Error>,
@@ -369,7 +384,7 @@ where
             .elapsed
             .checked_add(self.scheduled_delay)
             .ok_or(Error::StatisticsOverflow {
-                attempt: self.attempts_completed,
+                context: Context::attempt(self.attempts_completed),
             })?;
         self.summary.diagnostics.clear();
         Ok(self.summary)
@@ -417,7 +432,7 @@ where
             self.clock
                 .sleep(self.delay)
                 .map_err(|source| Error::Clock {
-                    attempt,
+                    context: Context::attempt(attempt),
                     message: source.to_string(),
                 })?;
             self.deadline.account(self.delay)?;
@@ -434,18 +449,19 @@ where
 
     fn prepare_probe(&mut self, attempt: u32) -> std::result::Result<Probe, Error> {
         let resolved = resolve_selected(
-            self.authorizer,
+            self.policy,
+            self.resolver,
             &self.request.server,
             self.request.address_family,
             &self.deadline,
-            duration_error,
         )?;
         self.summary.server = resolved.declared;
         let addresses = resolved.addresses;
         if addresses.is_empty() {
-            return Err(Error::Family {
+            return Err(crate::target::Error::AddressFamilyUnavailable {
                 family: self.request.address_family.label(),
-            });
+            }
+            .into());
         }
         for address in &addresses {
             if !self.summary.resolved_addresses.contains(address) {
@@ -478,12 +494,12 @@ where
         let execution = self.executor.execute(&execution_request);
         self.deadline.check()?;
         let mut execution = execution.map_err(|source| Error::Execution {
-            attempt: probe.attempt,
-            source,
+            context: Context::attempt(probe.attempt),
+            source: Box::new(source),
         })?;
         if execution.permit != execution_request.permit {
             return Err(Error::InvalidEvidence {
-                attempt: probe.attempt,
+                context: Context::attempt(probe.attempt),
                 message: "executor returned evidence for a different execution permit".to_owned(),
             });
         }
@@ -494,7 +510,7 @@ where
             .stats
             .checked_add_assign(&execution.stats)
             .ok_or(Error::StatisticsOverflow {
-                attempt: probe.attempt,
+                context: Context::attempt(probe.attempt),
             })?;
         for diagnostic in execution.diagnostics.drain(..) {
             self.record_diagnostic(diagnostic)?;
@@ -748,10 +764,12 @@ pub(super) fn dns_source_port(base: u16, attempt: u32) -> u16 {
 }
 
 fn dns_rate_delay(rate: Option<u32>) -> std::result::Result<Duration, Error> {
-    crate::clock::rate_delay(1, rate).ok_or(Error::InvalidLimit {
+    crate::clock::rate_delay(1, rate).ok_or_else(|| Error::InvalidRequest {
         field: "queries_per_second",
-        value: u64::from(rate.unwrap_or_default()),
-        reason: "rate-delay arithmetic overflowed".to_owned(),
+        message: format!(
+            "rate-delay arithmetic overflowed; received {}",
+            rate.unwrap_or_default()
+        ),
     })
 }
 

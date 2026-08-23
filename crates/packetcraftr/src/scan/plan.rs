@@ -6,8 +6,8 @@
 use std::net::IpAddr;
 use std::time::Duration;
 
-use super::error::Error;
 use super::model::{Batch, Probe, Request};
+use crate::Error;
 
 pub(super) fn build_batches(
     request: &Request,
@@ -29,10 +29,10 @@ pub(super) fn build_batches(
                             port: *port,
                             attempt,
                         };
-                        sequence = sequence.checked_add(1).ok_or(Error::InvalidLimit {
+                        sequence = sequence.checked_add(1).ok_or(Error::InvalidRequest {
                             field: "probes",
-                            value: u64::MAX,
-                            reason: "probe sequence overflowed".to_owned(),
+                            message: "probe sequence overflowed; received an unrepresentable total"
+                                .to_owned(),
                         })?;
                         Ok(probe)
                     })
@@ -98,9 +98,11 @@ pub(super) fn worst_case_duration(
 }
 
 fn rate_delay(probes: usize, rate: Option<u32>) -> Result<Duration, Error> {
-    crate::clock::rate_delay(probes, rate).ok_or(Error::InvalidLimit {
+    crate::clock::rate_delay(probes, rate).ok_or_else(|| Error::InvalidRequest {
         field: "probes_per_second",
-        value: u64::from(rate.unwrap_or_default()),
-        reason: "rate-delay arithmetic overflowed".to_owned(),
+        message: format!(
+            "rate-delay arithmetic overflowed; received {}",
+            rate.unwrap_or_default()
+        ),
     })
 }

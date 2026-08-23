@@ -10,7 +10,6 @@ use packetcraftr_netio::capture::{DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_Q
 use crate::target::Family;
 use crate::target::Target;
 
-use super::super::error::Error;
 use super::super::wire::canonical_query_name;
 use super::super::{
     DEFAULT_MAX_DNS_NAME_POINTERS, DEFAULT_MAX_DNS_RECORDS, DEFAULT_MAX_DNS_TXT_BYTES,
@@ -18,6 +17,7 @@ use super::super::{
     DEFAULT_MAX_UNDECODED_DNS_FRAMES, MAX_DNS_ATTEMPTS, MAX_DNS_DURATION, MAX_DNS_MESSAGE_BYTES,
     MAX_DNS_NAME_POINTERS, MAX_DNS_RATE, MAX_DNS_RECORDS,
 };
+use crate::Error;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -132,31 +132,37 @@ impl Limits {
             ),
         ] {
             if value == 0 || value > maximum {
-                return Err(Error::InvalidLimit {
+                return Err(Error::InvalidRequest {
                     field,
-                    value: u64::try_from(value).unwrap_or(u64::MAX),
-                    reason: format!("must be within 1..={maximum}"),
+                    message: format!("must be within 1..={maximum}; received {value}"),
                 });
             }
         }
         if self.max_rejected_records > self.max_records {
-            return Err(Error::InvalidLimit {
+            return Err(Error::InvalidRequest {
                 field: "max_rejected_records",
-                value: u64::try_from(self.max_rejected_records).unwrap_or(u64::MAX),
-                reason: "cannot exceed max_records".to_owned(),
+                message: format!(
+                    "cannot exceed max_records; received {}",
+                    self.max_rejected_records
+                ),
             });
         }
         if self.max_undecoded > self.max_evidence_frames {
-            return Err(Error::InvalidLimit {
+            return Err(Error::InvalidRequest {
                 field: "max_undecoded",
-                value: u64::try_from(self.max_undecoded).unwrap_or(u64::MAX),
-                reason: "cannot exceed max_evidence_frames".to_owned(),
+                message: format!(
+                    "cannot exceed max_evidence_frames; received {}",
+                    self.max_undecoded
+                ),
             });
         }
         if self.max_duration.is_zero() || self.max_duration > MAX_DNS_DURATION {
-            return Err(Error::InvalidDuration {
-                value: self.max_duration,
-                maximum: MAX_DNS_DURATION,
+            return Err(Error::InvalidRequest {
+                field: "max_duration",
+                message: format!(
+                    "must be finite, non-zero, and no greater than {MAX_DNS_DURATION:?}; received {:?}",
+                    self.max_duration
+                ),
             });
         }
         Ok(self)
@@ -183,33 +189,44 @@ impl Request {
     pub fn validate(&self) -> std::result::Result<String, Error> {
         self.limits.validate()?;
         if self.server_port == 0 {
-            return Err(Error::InvalidPort);
+            return Err(Error::InvalidRequest {
+                field: "server_port",
+                message: "must be non-zero; received 0".to_owned(),
+            });
         }
         if self.source_port == 0 {
-            return Err(Error::InvalidSourcePort);
+            return Err(Error::InvalidRequest {
+                field: "source_port",
+                message: "must be non-zero; received 0".to_owned(),
+            });
         }
         if !(1..=MAX_DNS_ATTEMPTS).contains(&self.attempts) {
-            return Err(Error::InvalidLimit {
+            return Err(Error::InvalidRequest {
                 field: "attempts",
-                value: u64::from(self.attempts),
-                reason: format!("must be within 1..={MAX_DNS_ATTEMPTS}"),
+                message: format!(
+                    "must be within 1..={MAX_DNS_ATTEMPTS}; received {}",
+                    self.attempts
+                ),
             });
         }
         if self.timeout.is_zero() || self.timeout > packetcraftr_netio::capture::MAX_TIMEOUT {
-            return Err(Error::InvalidTimeout {
-                value: self.timeout,
-                maximum: packetcraftr_netio::capture::MAX_TIMEOUT,
+            return Err(Error::InvalidRequest {
+                field: "timeout",
+                message: format!(
+                    "must be finite, non-zero, and no greater than {:?}; received {:?}",
+                    packetcraftr_netio::capture::MAX_TIMEOUT,
+                    self.timeout
+                ),
             });
         }
         if let Some(rate) = self.queries_per_second
             && (rate == 0 || rate > MAX_DNS_RATE)
         {
-            return Err(Error::InvalidLimit {
+            return Err(Error::InvalidRequest {
                 field: "queries_per_second",
-                value: u64::from(rate),
-                reason: format!("must be within 1..={MAX_DNS_RATE}"),
+                message: format!("must be within 1..={MAX_DNS_RATE}; received {rate}"),
             });
         }
-        canonical_query_name(&self.query_name).map_err(Error::Query)
+        canonical_query_name(&self.query_name).map_err(Error::DnsQuery)
     }
 }

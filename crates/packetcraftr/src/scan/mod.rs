@@ -28,7 +28,6 @@ const SCAN_EVIDENCE_DIAGNOSTICS: EvidenceDiagnosticDescriptor =
 mod classification;
 mod client_executor;
 mod engine;
-mod error;
 mod evidence;
 mod model;
 mod plan;
@@ -38,7 +37,6 @@ mod tests;
 
 pub use classification::{ResponseClassification, classify_response};
 pub use engine::{Collector, run, run_with_events};
-pub use error::Error;
 pub use model::{
     Batch, Classification, Endpoint, Event, Execution, Executor, Limits, Probe, ProbeEvidence,
     ProbeStatus, Request, Result, Summary, Transport,

@@ -3,7 +3,6 @@
 
 //! Ordered DNS response validation and decoding orchestration.
 
-use super::super::error::WireError;
 use super::super::model::{
     Edns, Limits, Name, QueryType, Record, RecordValue, ResponseMetadata, ValidatedResponse,
 };
@@ -12,6 +11,7 @@ use super::super::{
     DNS_FLAG_RECURSION_AVAILABLE, DNS_FLAG_RECURSION_DESIRED, DNS_FLAG_RESPONSE,
     DNS_FLAG_TRUNCATED, DNS_HEADER_BYTES, DNS_OPCODE_MASK, DNS_RCODE_MASK, DNS_RESERVED_MASK,
 };
+use super::WireError;
 use super::name::{canonical_query_name, decode_name};
 use super::relevance::{RelevantRecords, filter_relevant_records};
 

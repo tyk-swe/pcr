@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::error::Context;
 use packetcraftr_core::{
     Packet,
     build::{Builder, BuiltPacket},
@@ -16,16 +17,17 @@ use packetcraftr_core::{
     registry::Registry,
 };
 
+use crate::Error;
 use crate::clock::Clock;
 use crate::evidence::Budget;
 use crate::materialize::{
     build_context, materialize_link_fields, materialize_link_structure, materialize_network_fields,
     require_fixed_width_link_materialization,
 };
+use crate::policy::Policy;
 
 use super::SYNTHESIZED_ETHERNET_BYTES;
-use super::boundary::{Authorizer, Execution, ExecutionCase, Executor};
-use super::error::{Error, duration_limit};
+use super::boundary::{Execution, ExecutionCase, Executor};
 use super::execution::{
     ExecutionEvidence, add_execution_stats, rate_delay, retain_evidence, validate_execution,
     worst_case_duration,
@@ -34,17 +36,16 @@ use super::request::LiveOptions;
 use super::result::{Case, CaseOutcome, Result, Stats, Summary};
 
 /// Builds and validates all cases offline, then authorizes and executes the campaign.
-pub fn run<A, E, C>(
+pub fn run<E, C>(
     request: &packet_fuzz::Request,
     live: LiveOptions,
     packet: Packet,
     registry: Arc<Registry>,
-    authorizer: &mut A,
+    policy: &Policy,
     executor: &mut E,
     clock: &mut C,
 ) -> std::result::Result<Result, Error>
 where
-    A: Authorizer,
     E: Executor,
     C: Clock,
 {
@@ -56,7 +57,7 @@ where
             packet,
             registry,
         },
-        authorizer,
+        policy,
         executor,
         clock,
         |case, _| {
@@ -83,24 +84,24 @@ where
     clippy::too_many_arguments,
     reason = "live fuzz execution requires the request, approved I/O boundaries, clock, and progressive sink"
 )]
-pub fn run_with_events<A, E, C, F>(
+pub fn run_with_events<E, C, F>(
     request: &packet_fuzz::Request,
     live: LiveOptions,
     packet: Packet,
     registry: Arc<Registry>,
-    authorizer: &mut A,
+    policy: &Policy,
     executor: &mut E,
     clock: &mut C,
     emit: F,
 ) -> std::result::Result<Summary, Error>
 where
-    A: Authorizer,
     E: Executor,
     C: Clock,
     F: FnMut(Case) -> std::result::Result<(), crate::BoundaryError> + Send + 'static,
 {
-    let sink =
-        packetcraftr_core::progress::Sink::new(emit).map_err(|source| Error::Output { source })?;
+    let sink = packetcraftr_core::progress::Sink::new(emit).map_err(|source| Error::Output {
+        source: Box::new(source),
+    })?;
     run_observed(
         RunInput {
             request,
@@ -108,17 +109,15 @@ where
             packet,
             registry,
         },
-        authorizer,
+        policy,
         executor,
         clock,
         move |case, deadline| match sink.emit(case, deadline) {
             Ok(()) => Ok(()),
-            Err(packetcraftr_core::progress::EmitError::Deadline(error)) => {
-                Err(duration_limit(error))
-            }
-            Err(packetcraftr_core::progress::EmitError::Output(source)) => {
-                Err(Error::Output { source })
-            }
+            Err(packetcraftr_core::progress::EmitError::Deadline(error)) => Err(error.into()),
+            Err(packetcraftr_core::progress::EmitError::Output(source)) => Err(Error::Output {
+                source: Box::new(source),
+            }),
         },
     )
 }
@@ -130,15 +129,14 @@ struct RunInput<'a> {
     registry: Arc<Registry>,
 }
 
-fn run_observed<A, E, C, F>(
+fn run_observed<E, C, F>(
     input: RunInput<'_>,
-    authorizer: &mut A,
+    policy: &Policy,
     executor: &mut E,
     clock: &mut C,
     mut emit: F,
 ) -> std::result::Result<Summary, Error>
 where
-    A: Authorizer,
     E: Executor,
     C: Clock,
     F: FnMut(Case, &Deadline) -> std::result::Result<(), Error>,
@@ -153,8 +151,8 @@ where
     let mut deadline = Deadline::new(request.limits.max_duration);
     let live_dissector = Dissector::new(Arc::clone(&registry));
     let prepared = prepare_campaign(request, live, packet, &registry, &mut deadline)?;
-    authorize_campaign(&prepared, live, authorizer)?;
-    deadline.check().map_err(duration_limit)?;
+    authorize_campaign(&prepared, live, policy)?;
+    deadline.check()?;
 
     let PreparedCampaign {
         cases,
@@ -207,9 +205,7 @@ fn prepare_campaign(
     let built_case_count = u64::try_from(built_cases).unwrap_or(u64::MAX);
 
     let worst_case = worst_case_duration(live, built_cases)?;
-    deadline
-        .check_additional(worst_case)
-        .map_err(duration_limit)?;
+    deadline.check_additional(worst_case)?;
     let maximum_wire_bytes = maximum_wire_bytes(request, &cases)?;
     let requires_permissive_live = cases.iter().any(|case| {
         case.prepared
@@ -247,19 +243,16 @@ fn maximum_wire_bytes(
             .checked_add(u64::try_from(built.bytes.len()).unwrap_or(u64::MAX))
             .and_then(|value| value.checked_add(overhead))
             .ok_or(Error::StatisticsOverflow {
-                case_index: last_case_index(request),
+                context: Context::case_index(last_case_index(request)),
             })
     })
 }
 
-fn authorize_campaign<A>(
+fn authorize_campaign(
     prepared: &PreparedCampaign,
     live: LiveOptions,
-    authorizer: &mut A,
-) -> std::result::Result<(), Error>
-where
-    A: Authorizer,
-{
+    policy: &Policy,
+) -> std::result::Result<(), Error> {
     let packets = prepared
         .cases
         .iter()
@@ -270,14 +263,20 @@ where
                 .map(|built| built.packet.clone())
         })
         .collect::<Vec<_>>();
-    if !packets.is_empty() {
-        authorizer.authorize_operation(
-            &packets,
-            live.destination,
-            prepared.maximum_wire_bytes,
-            prepared.requires_permissive_live,
-            live.allow_permissive_live,
-        )?;
+    policy.validate()?;
+    policy.authorize_operation(
+        u64::try_from(packets.len()).unwrap_or(u64::MAX),
+        prepared.maximum_wire_bytes,
+    )?;
+    policy.authorize_permissive(
+        prepared.requires_permissive_live,
+        live.allow_permissive_live,
+    )?;
+    if let Some(destination) = live.destination {
+        policy.authorize_destination(destination)?;
+    }
+    for packet in &packets {
+        policy.authorize_packet_destinations(packet)?;
     }
     Ok(())
 }
@@ -313,7 +312,7 @@ impl ExecutionPhase<'_> {
             let diagnostic_start = self.diagnostics.len();
             if case.prepared.built.is_some() {
                 self.pace(built_ordinal, case.prepared.index, clock)?;
-                self.deadline.check().map_err(duration_limit)?;
+                self.deadline.check()?;
                 self.execute_case(&mut case, executor)?;
                 built_ordinal += 1;
             }
@@ -345,14 +344,12 @@ impl ExecutionPhase<'_> {
                     actual: Duration::MAX,
                     limit: self.request.limits.max_duration,
                 })?;
-        self.deadline
-            .start_accounting(delay)
-            .map_err(duration_limit)?;
+        self.deadline.start_accounting(delay)?;
         clock.sleep(delay).map_err(|source| Error::Clock {
-            case_index,
+            context: Context::case_index(case_index),
             message: source.to_string(),
         })?;
-        self.deadline.account(delay).map_err(duration_limit)?;
+        self.deadline.account(delay)?;
         self.scheduled_delay = prospective_scheduled_delay;
         Ok(())
     }
@@ -369,18 +366,16 @@ impl ExecutionPhase<'_> {
             permit: crate::evidence::ExecutionPermit::new(),
             packet: case.prepared.recipe.clone(),
         };
-        self.deadline
-            .start_accounting(Duration::ZERO)
-            .map_err(duration_limit)?;
+        self.deadline.start_accounting(Duration::ZERO)?;
         let execution = executor
             .execute(&execution_case, self.live.timeout)
             .map_err(|source| Error::Execution {
-                case_index: case.prepared.index,
-                source,
+                context: Context::case_index(case.prepared.index),
+                source: Box::new(source),
             })?;
         if execution.permit != execution_case.permit {
             return Err(Error::InvalidEvidence {
-                case_index: case.prepared.index,
+                context: Context::case_index(case.prepared.index),
                 message: "executor returned evidence for a different execution permit".to_owned(),
             });
         }
@@ -391,19 +386,17 @@ impl ExecutionPhase<'_> {
             &execution,
         )
         .map_err(|message| Error::InvalidEvidence {
-            case_index: case.prepared.index,
+            context: Context::case_index(case.prepared.index),
             message,
         })?;
         if execution.sent.wire_bytes() != &expected_live_build.bytes {
             return Err(Error::InvalidEvidence {
-                case_index: case.prepared.index,
+                context: Context::case_index(case.prepared.index),
                 message: "executor substituted bytes for the route-materialized case".to_owned(),
             });
         }
-        self.deadline.check().map_err(duration_limit)?;
-        self.deadline
-            .account(execution.stats.elapsed)
-            .map_err(duration_limit)?;
+        self.deadline.check()?;
+        self.deadline.account(execution.stats.elapsed)?;
         validate_execution(
             case,
             &execution,
@@ -419,7 +412,7 @@ impl ExecutionPhase<'_> {
             self.request.limits,
             &mut case.prepared.diagnostics,
         );
-        self.deadline.check().map_err(duration_limit)?;
+        self.deadline.check()?;
         case.prepared.built = Some(execution.sent.built().clone());
         case.sent = Some(execution.sent.frame().clone());
         case.prepared.diagnostics.extend(execution.diagnostics);
@@ -440,17 +433,17 @@ impl ExecutionPhase<'_> {
         } else {
             CaseOutcome::Timeout
         };
-        self.deadline.check().map_err(duration_limit)?;
+        self.deadline.check()?;
         Ok(())
     }
 
     fn finish(mut self) -> std::result::Result<Summary, Error> {
         self.stats.elapsed = self.stats.elapsed.checked_add(self.scheduled_delay).ok_or(
             Error::StatisticsOverflow {
-                case_index: last_case_index(self.request),
+                context: Context::case_index(last_case_index(self.request)),
             },
         )?;
-        self.deadline.check().map_err(duration_limit)?;
+        self.deadline.check()?;
 
         Ok(Summary {
             seed: self.request.seed,

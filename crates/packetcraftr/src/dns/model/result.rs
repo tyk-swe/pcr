@@ -14,7 +14,7 @@ use packetcraftr_core::frame::Frame;
 use crate::Stats;
 
 use super::super::DNS_TYPE_OPT;
-use super::super::error::WireError;
+use super::super::wire::WireError;
 use super::super::wire::response_code_name;
 use super::request::QueryType;
 

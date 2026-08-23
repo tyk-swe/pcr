@@ -46,7 +46,6 @@ const MAX_DNS_PROBE_OVERHEAD: u64 = 14 + 40 + 8;
 
 mod client_executor;
 mod engine;
-mod error;
 mod evidence;
 mod model;
 #[cfg(test)]
@@ -54,13 +53,12 @@ mod tests;
 mod wire;
 
 pub use engine::{Collector, run, run_with_events};
-pub use error::{Error, WireError};
 pub use model::{
     AttemptEvidence, Edns, EdnsOption, Event, EventContext, Exchange, Execution, Executor, Limits,
     Name, Outcome, Probe, QueryType, Record, RecordValue, RejectedRecord, Request,
     ResponseMetadata, Result, Section, Summary, UndecodedEvidence, ValidatedResponse,
 };
 pub use wire::{
-    ResponseClassification, canonical_query_name, classify_response, decode_response,
+    ResponseClassification, WireError, canonical_query_name, classify_response, decode_response,
     decode_tcp_frame, encode_query, response_code_name,
 };

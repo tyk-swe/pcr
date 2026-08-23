@@ -45,7 +45,7 @@ pub(super) fn run(
     } = arguments;
     let target = parse_target(target)?;
     let queue_limits = limits.into_limits();
-    let scan_limits = packetcraftr::scan::Limits {
+    let workflow_limits = packetcraftr::scan::Limits {
         max_ports,
         max_probes,
         batch_size,
@@ -54,7 +54,7 @@ pub(super) fn run(
         max_evidence_bytes: queue_limits.max_bytes,
         max_undecoded,
     };
-    scan_limits.validate().map_err(CliError::classified)?;
+    workflow_limits.validate().map_err(CliError::classified)?;
     let ports = conversion::expand_port_specs(&ports, max_ports).map_err(CliError::classified)?;
     let policy = policy.into_policy();
     policy.validate().map_err(CliError::classified)?;
@@ -67,7 +67,7 @@ pub(super) fn run(
         attempts,
         timeout: Duration::from_millis(timeout_ms),
         probes_per_second: rate,
-        limits: scan_limits,
+        limits: workflow_limits,
     };
     let registry = registry()?;
     let exchange = exchange::options(
@@ -92,32 +92,18 @@ pub(super) fn run(
         interface: route.interface,
     };
     let resolver = packetcraftr::target::SystemResolver;
-    let mut authorizer = packetcraftr::target::PolicyAuthorizer::new(&policy, &resolver);
     let mut clock = packetcraftr::clock::SystemClock;
-    execute_and_render(
-        &request,
-        &mut authorizer,
-        &registry,
-        &mut executor,
-        &mut clock,
-        format,
-        stream,
-    )
-}
-
-fn execute_and_render(
-    request: &packetcraftr::scan::Request,
-    authorizer: &mut impl packetcraftr::target::Authorizer,
-    registry: &core::registry::Registry,
-    executor: &mut impl packetcraftr::scan::Executor,
-    clock: &mut impl packetcraftr::clock::Clock,
-    format: output::contract::Format,
-    stream: &mut NdjsonStream,
-) -> Result<(), CliError> {
     match format {
         output::contract::Format::Text | output::contract::Format::Json => {
-            let result = packetcraftr::scan::run(request, authorizer, registry, executor, clock)
-                .map_err(CliError::classified)?;
+            let result = packetcraftr::scan::run(
+                &request,
+                &policy,
+                &resolver,
+                &registry,
+                &mut executor,
+                &mut clock,
+            )
+            .map_err(CliError::classified)?;
             let (result, diagnostics, stats) =
                 output::scan::Result::try_from_scan(result).map_err(CliError::classified)?;
             if format == output::contract::Format::Text {
@@ -134,11 +120,12 @@ fn execute_and_render(
         output::contract::Format::Ndjson => {
             let event_stream = stream.clone();
             let summary = packetcraftr::scan::run_with_events(
-                request,
-                authorizer,
-                registry,
-                executor,
-                clock,
+                &request,
+                &policy,
+                &resolver,
+                &registry,
+                &mut executor,
+                &mut clock,
                 move |event| {
                     rendering::render_event(event, &event_stream)
                         .map_err(CliError::into_boundary_error)

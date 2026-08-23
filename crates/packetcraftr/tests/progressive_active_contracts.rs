@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use bytes::Bytes;
-use packetcraftr::core::error::{Classification, Classified};
+use packetcraftr::core::error::{Classification, Classified, Context};
 use packetcraftr::core::frame::LinkType;
 use packetcraftr::core::protocol::{network::Ipv4, transport::Udp};
 use packetcraftr::core::{Packet, field::FieldValue, layer::Raw};
@@ -20,7 +20,9 @@ use packetcraftr::netio::neighbor;
 use packetcraftr::netio::route::{Decision, Provider, Scope, SelectionReason};
 use packetcraftr::netio::transmit;
 use packetcraftr::target::{Hostname, Resolver, Target};
-use packetcraftr::{BoundaryError, Client, ExchangeExecutor, clock, dns, policy, scan, traceroute};
+use packetcraftr::{
+    BoundaryError, Client, Error, ExchangeExecutor, clock, dns, policy, scan, traceroute,
+};
 
 #[derive(Default)]
 struct IoState {
@@ -341,7 +343,7 @@ fn exchange_sink_failure_prevents_the_next_send_and_cleans_up() {
         )
         .expect_err("the first sent event must stop the exchange");
 
-    assert!(matches!(error, packetcraftr::Error::ExchangeOutput { .. }));
+    assert!(matches!(error, packetcraftr::Error::Output { .. }));
     assert_eq!(
         *state.events.lock().unwrap(),
         ["arm", "ready", "send", "shutdown"]
@@ -391,7 +393,7 @@ fn exchange_emits_unsolicited_evidence_before_the_next_send() {
         )
         .expect_err("the unsolicited-event sink failure must stop the exchange");
 
-    assert!(matches!(error, packetcraftr::Error::ExchangeOutput { .. }));
+    assert!(matches!(error, packetcraftr::Error::Output { .. }));
     assert_eq!(
         *observed.lock().unwrap(),
         [
@@ -447,7 +449,7 @@ fn exchange_emits_retained_undecoded_evidence_before_the_next_send() {
         })
         .expect_err("the undecoded-event sink failure must stop the exchange");
 
-    assert!(matches!(error, packetcraftr::Error::ExchangeOutput { .. }));
+    assert!(matches!(error, packetcraftr::Error::Output { .. }));
     assert_eq!(
         *observed.lock().unwrap(),
         ["sent:0", "diagnostic:exchange.decode_error", "undecoded"]
@@ -474,7 +476,7 @@ fn exchange_cleanup_failure_augments_the_output_error() {
 
     assert!(matches!(
         error,
-        packetcraftr::Error::ExchangeOutputAndCaptureShutdown { .. }
+        packetcraftr::Error::OutputAndCaptureShutdown { .. }
     ));
     assert_eq!(error.classification().code, "io.test_output");
     assert!(
@@ -496,7 +498,6 @@ fn scan_sink_failure_stops_after_capture_shutdown() {
     let registry = Arc::clone(client.registry());
     let mut executor = ExchangeExecutor::new(&client, exchange_options());
     let policy = traffic_policy();
-    let mut authorizer = packetcraftr::target::PolicyAuthorizer::new(&policy, &NoResolver);
     let destination = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
     let mut request = scan::Request {
         target: Target::Address(destination),
@@ -512,7 +513,8 @@ fn scan_sink_failure_stops_after_capture_shutdown() {
 
     let error = scan::run_with_events(
         &request,
-        &mut authorizer,
+        &policy,
+        &NoResolver,
         &registry,
         &mut executor,
         &mut clock::SystemClock,
@@ -520,7 +522,7 @@ fn scan_sink_failure_stops_after_capture_shutdown() {
     )
     .expect_err("sink failure must abort the second scan batch");
 
-    assert!(matches!(error, scan::Error::Output { .. }), "{error:?}");
+    assert!(matches!(error, Error::Output { .. }), "{error:?}");
     assert_one_clean_exchange(&state);
 }
 
@@ -534,7 +536,6 @@ fn later_capture_shutdown_failure_preserves_the_earlier_scan_event() {
     let registry = Arc::clone(client.registry());
     let mut executor = ExchangeExecutor::new(&client, exchange_options());
     let policy = traffic_policy();
-    let mut authorizer = packetcraftr::target::PolicyAuthorizer::new(&policy, &NoResolver);
     let destination = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
     let mut request = scan::Request {
         target: Target::Address(destination),
@@ -552,7 +553,8 @@ fn later_capture_shutdown_failure_preserves_the_earlier_scan_event() {
 
     let error = scan::run_with_events(
         &request,
-        &mut authorizer,
+        &policy,
+        &NoResolver,
         &registry,
         &mut executor,
         &mut clock::SystemClock,
@@ -563,7 +565,10 @@ fn later_capture_shutdown_failure_preserves_the_earlier_scan_event() {
     )
     .expect_err("the second capture shutdown must fail");
 
-    assert!(matches!(error, scan::Error::Execution { sequence: 1, .. }));
+    assert!(matches!(
+        error,
+        Error::Execution { context, .. } if context == Context::probe_sequence(1)
+    ));
     assert_eq!(events.lock().unwrap().len(), 1);
     assert_eq!(
         *state.events.lock().unwrap(),
@@ -580,7 +585,6 @@ fn traceroute_sink_failure_stops_after_capture_shutdown() {
     let registry = Arc::clone(client.registry());
     let mut executor = ExchangeExecutor::new(&client, exchange_options());
     let policy = traffic_policy();
-    let mut authorizer = packetcraftr::target::PolicyAuthorizer::new(&policy, &NoResolver);
     let destination = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
     let request = traceroute::Request {
         target: Target::Address(destination),
@@ -597,7 +601,8 @@ fn traceroute_sink_failure_stops_after_capture_shutdown() {
 
     let error = traceroute::run_with_events(
         &request,
-        &mut authorizer,
+        &policy,
+        &NoResolver,
         &registry,
         &mut executor,
         &mut clock::SystemClock,
@@ -605,10 +610,7 @@ fn traceroute_sink_failure_stops_after_capture_shutdown() {
     )
     .expect_err("sink failure must abort the second hop");
 
-    assert!(
-        matches!(error, traceroute::Error::Output { .. }),
-        "{error:?}"
-    );
+    assert!(matches!(error, Error::Output { .. }), "{error:?}");
     assert_one_clean_exchange(&state);
 }
 
@@ -619,7 +621,6 @@ fn dns_sink_failure_stops_after_capture_shutdown() {
     let registry = Arc::clone(client.registry());
     let mut executor = ExchangeExecutor::new(&client, exchange_options());
     let policy = traffic_policy();
-    let mut authorizer = packetcraftr::target::PolicyAuthorizer::new(&policy, &NoResolver);
     let destination = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 53));
     let request = dns::Request {
         server: Target::Address(destination),
@@ -638,7 +639,8 @@ fn dns_sink_failure_stops_after_capture_shutdown() {
 
     let error = dns::run_with_events(
         &request,
-        &mut authorizer,
+        &policy,
+        &NoResolver,
         &registry,
         &mut executor,
         &mut clock::SystemClock,
@@ -646,6 +648,6 @@ fn dns_sink_failure_stops_after_capture_shutdown() {
     )
     .expect_err("sink failure must abort the second DNS attempt");
 
-    assert!(matches!(error, dns::Error::Output { .. }), "{error:?}");
+    assert!(matches!(error, Error::Output { .. }), "{error:?}");
     assert_one_clean_exchange(&state);
 }

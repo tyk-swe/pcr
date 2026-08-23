@@ -37,7 +37,7 @@ impl OperationError {
     pub(super) fn into_error(self) -> Error {
         match self {
             Self::Io(error) => Error::Io(error),
-            Self::Output(source) => Error::ExchangeOutput {
+            Self::Output(source) => Error::Output {
                 source: Box::new(source),
             },
         }

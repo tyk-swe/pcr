@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `capture` enforces its frame and byte ceilings through the traffic policy (`Policy::authorize_operation`) instead of a private copy of them; `--max-packets`/`--max-bytes` defaults are read from `Policy::default()` (values unchanged).
+- **Breaking:** scan, traceroute, DNS, and fuzz workflows return `packetcraftr::Error` and take `&Policy` plus a `Resolver` instead of an `Authorizer`; their error codes are condition-named (`cli.live_limit`, `policy.duration_limit`, `io.clock`, `internal.live_evidence`, `internal.live_statistics`) instead of per-workflow. `target::Authorizer`, `target::PolicyAuthorizer`, `fuzz::Authorizer`, and `fuzz::PolicyAuthorizer` are removed.
 - **Breaking:** build, decode, document, expression, filter, and frame errors now carry their own classification codes (`packet.build*`, `packet.decode*`, `cli.packet_document`, `cli.packet_expression`, `cli.filter*`, `packet.frame_length`) instead of the generic `packet.error`; analysis, replay, and live-workflow errors that wrap them delegate to those codes.
 - **Breaking:** `fuzz --live` and `replay` use `--allow-permissive-live` (was `--allow-malformed-live`); the single denial code for a missing permissive opt-in is `policy.permissive_live_opt_in` (`policy.permissive_packet` and `policy.fuzz_malformed_opt_in` are removed). `Policy::validate` reports `policy::Error::InvalidAddressLimit` (`cli.policy_limit`).
 - **Breaking:** `packetcraftr_core::error::Classification::new` now takes `(code, remediation)` and derives `Kind` from the code prefix; `BoundaryError::internal_execution`/`execution_validation` are removed.

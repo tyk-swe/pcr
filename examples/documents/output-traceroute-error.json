@@ -4,14 +4,14 @@
   "mode": "aggregate",
   "status": "error",
   "error": {
-    "code": "internal.traceroute_evidence",
+    "code": "internal.live_evidence",
     "kind": "internal",
-    "message": "traceroute executor returned invalid evidence at probe 9: accepted bytes differ from the submitted probe",
+    "message": "executor returned invalid evidence at probe 9: accepted bytes differ from the submitted probe",
     "causes": [],
     "context": {
       "probe_sequence": 9
     },
-    "remediation": "treat the trace as incomplete because executor evidence was inconsistent"
+    "remediation": "treat the live operation as incomplete because executor evidence was inconsistent"
   },
   "diagnostics": []
 }

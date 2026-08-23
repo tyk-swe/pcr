@@ -1,59 +1,14 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-/// Applies the client's traffic policy to a complete live fuzz campaign before
-/// route, capture, neighbor, or transmission providers are invoked.
-use std::net::IpAddr;
 use std::time::Duration;
 
 use crate::BoundaryError;
 use crate::ExchangeExecutor;
-use packetcraftr_core::Packet;
 use packetcraftr_core::error::Classification;
 use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Sender as PacketIo};
 
-use super::boundary::{Authorizer, Execution, ExecutionCase, Executor};
-
-pub struct PolicyAuthorizer<'a> {
-    policy: &'a crate::policy::Policy,
-}
-
-impl<'a> PolicyAuthorizer<'a> {
-    pub fn new(policy: &'a crate::policy::Policy) -> Self {
-        Self { policy }
-    }
-}
-
-impl Authorizer for PolicyAuthorizer<'_> {
-    fn authorize_operation(
-        &mut self,
-        packets: &[Packet],
-        destination: Option<IpAddr>,
-        maximum_wire_bytes: u64,
-        requires_permissive_live: bool,
-        allow_permissive_live: bool,
-    ) -> Result<(), BoundaryError> {
-        self.policy.validate().map_err(BoundaryError::from_error)?;
-        let packet_count = u64::try_from(packets.len()).unwrap_or(u64::MAX);
-        self.policy
-            .authorize_operation(packet_count, maximum_wire_bytes)
-            .map_err(BoundaryError::from_error)?;
-        self.policy
-            .authorize_permissive(requires_permissive_live, allow_permissive_live)
-            .map_err(BoundaryError::from_error)?;
-        if let Some(destination) = destination {
-            self.policy
-                .authorize_destination(destination)
-                .map_err(BoundaryError::from_error)?;
-        }
-        for packet in packets {
-            self.policy
-                .authorize_packet_destinations(packet)
-                .map_err(BoundaryError::from_error)?;
-        }
-        Ok(())
-    }
-}
+use super::boundary::{Execution, ExecutionCase, Executor};
 
 /// Executes one generated fuzz case through the client's capture-ready
 /// exchange lifecycle.

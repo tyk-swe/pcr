@@ -12,7 +12,6 @@ const SYNTHESIZED_ETHERNET_BYTES: u64 = 14;
 
 mod boundary;
 mod client_executor;
-mod error;
 mod execution;
 mod request;
 mod result;
@@ -20,9 +19,7 @@ mod run;
 #[cfg(test)]
 mod tests;
 
-pub use boundary::{Authorizer, Execution, ExecutionCase, Executor};
-pub use client_executor::PolicyAuthorizer;
-pub use error::Error;
+pub use boundary::{Execution, ExecutionCase, Executor};
 pub use request::{LiveLimits, LiveOptions};
 pub use result::{Case, CaseOutcome, Result, Stats, Summary};
 pub use run::{run, run_with_events};

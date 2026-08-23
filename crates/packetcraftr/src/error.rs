@@ -1,9 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::time::Duration;
+
 use thiserror::Error as ThisError;
 
-use packetcraftr_core::error::{Classification, Classified, Context};
+use packetcraftr_core::error::{BoundaryError, Classification, Classified, Context};
 use packetcraftr_netio::Error as LiveIoError;
 
 use crate::{policy, target};
@@ -28,15 +30,13 @@ pub enum Error {
         operation: LiveIoError,
         shutdown: LiveIoError,
     },
-    #[error("exchange progressive output failed: {source}")]
-    ExchangeOutput {
+    #[error("progressive output failed: {source}")]
+    Output {
         #[source]
         source: Box<packetcraftr_core::error::BoundaryError>,
     },
-    #[error(
-        "exchange progressive output failed: {output}; capture shutdown also failed: {shutdown}"
-    )]
-    ExchangeOutputAndCaptureShutdown {
+    #[error("progressive output failed: {output}; capture shutdown also failed: {shutdown}")]
+    OutputAndCaptureShutdown {
         output: Box<packetcraftr_core::error::BoundaryError>,
         shutdown: LiveIoError,
     },
@@ -61,6 +61,38 @@ pub enum Error {
         field: &'static str,
         message: String,
     },
+    #[error("invalid {field}: {message}")]
+    InvalidRequest {
+        field: &'static str,
+        message: String,
+    },
+    #[error("worst-case duration {actual:?} exceeds the configured limit of {limit:?}")]
+    DurationLimit { actual: Duration, limit: Duration },
+    #[error("execution failed at {context}: {source}")]
+    Execution {
+        context: Context,
+        #[source]
+        source: Box<BoundaryError>,
+    },
+    #[error("clock failed at {context}: {message}")]
+    Clock { context: Context, message: String },
+    #[error("executor returned invalid evidence at {context}: {message}")]
+    InvalidEvidence { context: Context, message: String },
+    #[error("statistic accounting overflowed at {context}")]
+    StatisticsOverflow { context: Context },
+    #[error("DNS query construction failed: {0}")]
+    DnsQuery(#[source] crate::dns::WireError),
+    #[error(transparent)]
+    FuzzCampaign(#[from] packetcraftr_core::fuzz::Error),
+}
+
+impl From<packetcraftr_core::budget::DeadlineExceeded> for Error {
+    fn from(error: packetcraftr_core::budget::DeadlineExceeded) -> Self {
+        Self::DurationLimit {
+            actual: error.actual,
+            limit: error.limit,
+        }
+    }
 }
 
 impl Classified for Error {
@@ -73,8 +105,8 @@ impl Classified for Error {
             Self::Policy(error) => error.classification(),
             Self::Io(error) => error.classification(),
             Self::OperationAndCaptureShutdown { operation, .. } => operation.classification(),
-            Self::ExchangeOutput { source } => source.classification(),
-            Self::ExchangeOutputAndCaptureShutdown { output, .. } => output.classification(),
+            Self::Output { source } => source.classification(),
+            Self::OutputAndCaptureShutdown { output, .. } => output.classification(),
             Self::InvalidExchangeEvents { .. } => Classification::new(
                 "internal.exchange_event_coherence",
                 Some("collect every exchange event once in publication order"),
@@ -103,6 +135,38 @@ impl Classified for Error {
                     "use finite exchange timeout and retention limits no larger than the aggregate capture ceiling",
                 ),
             ),
+            Self::InvalidRequest { .. } => Classification::new(
+                "cli.live_limit",
+                Some("use a valid finite non-zero live request value within the documented limit"),
+            ),
+            Self::DurationLimit { .. } => Classification::new(
+                "policy.duration_limit",
+                Some(
+                    "reduce the operation workload or rate delay, or deliberately raise the finite duration limit",
+                ),
+            ),
+            Self::Execution { source, .. } => source.classification(),
+            Self::Clock { .. } => Classification::new(
+                "io.clock",
+                Some("inspect the timer and account for traffic already transmitted"),
+            ),
+            Self::InvalidEvidence { .. } => Classification::new(
+                "internal.live_evidence",
+                Some(
+                    "treat the live operation as incomplete because executor evidence was inconsistent",
+                ),
+            ),
+            Self::StatisticsOverflow { .. } => Classification::new(
+                "internal.live_statistics",
+                Some(
+                    "treat the live operation as incomplete because statistic accounting overflowed",
+                ),
+            ),
+            Self::DnsQuery(_) => Classification::new(
+                "packet.dns_query",
+                Some("use a bounded ASCII DNS name and a supported query type"),
+            ),
+            Self::FuzzCampaign(error) => error.classification(),
         }
     }
 
@@ -111,11 +175,17 @@ impl Classified for Error {
             Self::Target(error) => error.context(),
             Self::Plan(error) => error.context(),
             Self::Neighbor(error) => error.context(),
+            Self::Build(error) => error.context(),
             Self::Policy(error) => error.context(),
             Self::Io(error) => error.context(),
             Self::OperationAndCaptureShutdown { operation, .. } => operation.context(),
-            Self::ExchangeOutput { source } => source.context(),
-            Self::ExchangeOutputAndCaptureShutdown { output, .. } => output.context(),
+            Self::Output { source } => source.context(),
+            Self::OutputAndCaptureShutdown { output, .. } => output.context(),
+            Self::Execution { context, .. }
+            | Self::Clock { context, .. }
+            | Self::InvalidEvidence { context, .. }
+            | Self::StatisticsOverflow { context } => *context,
+            Self::FuzzCampaign(error) => error.context(),
             _ => Context::default(),
         }
     }
@@ -125,14 +195,15 @@ impl Classified for Error {
             Self::Target(error) => error.causes(),
             Self::Plan(error) => error.causes(),
             Self::Neighbor(error) => error.causes(),
+            Self::Build(error) => error.causes(),
             Self::Policy(error) => error.causes(),
             Self::Io(error) => error.causes(),
             Self::OperationAndCaptureShutdown {
                 operation,
                 shutdown,
             } => vec![operation.to_string(), shutdown.to_string()],
-            Self::ExchangeOutput { source } => source.causes(),
-            Self::ExchangeOutputAndCaptureShutdown { output, shutdown } => {
+            Self::Output { source } => source.causes(),
+            Self::OutputAndCaptureShutdown { output, shutdown } => {
                 let mut causes = output.causes();
                 if causes.is_empty() {
                     causes.push(output.to_string());
@@ -140,6 +211,8 @@ impl Classified for Error {
                 causes.push(shutdown.to_string());
                 causes
             }
+            Self::Execution { source, .. } => source.causes(),
+            Self::FuzzCampaign(error) => error.causes(),
             _ => Vec::new(),
         }
     }

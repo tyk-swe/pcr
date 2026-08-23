@@ -11,6 +11,7 @@ use std::time::{Duration, UNIX_EPOCH};
 use crate::target::{Error as TargetError, Resolver};
 use bytes::Bytes;
 use packetcraftr_core::error::Classification as ErrorClassification;
+use packetcraftr_core::error::Context;
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::protocol::{
     network::{Ipv4, Ipv6},
@@ -22,13 +23,13 @@ use packetcraftr_core::{
 
 use super::classification::classify_response;
 use super::engine::{run, run_with_events};
-use super::error::Error;
 use super::model::{
     Batch, Classification, Event, Execution, Executor, Limits, ProbeStatus, Request, Transport,
 };
 use super::probe::probe_packet;
+use crate::Error;
 use crate::clock::Clock;
-use crate::target::{Authorized, Authorizer, PolicyAuthorizer, Target};
+use crate::target::Target;
 use crate::{BoundaryError, Stats, target::Family};
 
 fn private_scan_policy() -> crate::policy::Policy {
@@ -71,27 +72,6 @@ impl Clock for RecordingClock {
 
     fn sleep(&mut self, delay: Duration) -> Result<(), Self::Error> {
         self.0.push(delay);
-        Ok(())
-    }
-}
-
-struct AddressListAuthorizer {
-    addresses: Vec<IpAddr>,
-}
-
-impl Authorizer for AddressListAuthorizer {
-    fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> {
-        Ok(Authorized {
-            declared: target.clone(),
-            addresses: self.addresses.clone(),
-        })
-    }
-
-    fn authorize_operation(
-        &mut self,
-        _packets: u64,
-        _maximum_wire_bytes: u64,
-    ) -> Result<(), BoundaryError> {
         Ok(())
     }
 }
@@ -304,9 +284,8 @@ fn scan_batching_attempts_rate_and_timeout_evidence_are_deterministic() {
 
     let result = run(
         &request,
-        &mut AddressListAuthorizer {
-            addresses: vec![address],
-        },
+        &private_scan_policy(),
+        &ScriptedResolver::new([]),
         &registry,
         &mut executor,
         &mut clock,
@@ -345,10 +324,10 @@ fn scan_hostname_policy_denial_precedes_resolution_and_execution() {
         calls: Arc::clone(&executor_calls),
     };
     let policy = private_scan_policy();
-    let mut authorizer = PolicyAuthorizer::new(&policy, &resolver);
     let error = run(
         &tcp_scan_request(Target::Hostname("lab.example".parse().unwrap())),
-        &mut authorizer,
+        &policy,
+        &resolver,
         &packetcraftr_core::protocol::builtin::registry().unwrap(),
         &mut executor,
         &mut NoopClock,
@@ -377,11 +356,10 @@ fn scan_authorizes_mixed_resolution_answers_before_family_filtering() {
     policy.allow_hostname_resolution = true;
     let mut request = tcp_scan_request(Target::Hostname("mixed.example".parse().unwrap()));
     request.address_family = Family::Ipv6;
-    let mut authorizer = PolicyAuthorizer::new(&policy, &resolver);
-
     let error = run(
         &request,
-        &mut authorizer,
+        &policy,
+        &resolver,
         &packetcraftr_core::protocol::builtin::registry().unwrap(),
         &mut executor,
         &mut NoopClock,
@@ -465,9 +443,8 @@ fn scan_late_unsolicited_response_remains_a_timeout() {
     let request = tcp_scan_request(Target::Address(address));
     let result = run(
         &request,
-        &mut AddressListAuthorizer {
-            addresses: vec![address],
-        },
+        &private_scan_policy(),
+        &ScriptedResolver::new([]),
         &packetcraftr_core::protocol::builtin::registry().unwrap(),
         &mut LateResponseExecutor(TimeoutExecutor::default()),
         &mut NoopClock,
@@ -485,9 +462,8 @@ fn scan_invalid_sent_evidence_reports_the_exact_probe_sequence() {
     request.ports = vec![80, 81];
     let error = run(
         &request,
-        &mut AddressListAuthorizer {
-            addresses: vec![address],
-        },
+        &private_scan_policy(),
+        &ScriptedResolver::new([]),
         &packetcraftr_core::protocol::builtin::registry().unwrap(),
         &mut TimeoutExecutor {
             invalid_sent_index: Some(1),
@@ -499,8 +475,9 @@ fn scan_invalid_sent_evidence_reports_the_exact_probe_sequence() {
 
     assert!(matches!(
         error,
-        Error::InvalidEvidence { sequence: 1, message }
-            if message == "sent packet does not preserve the scan destination and probe identity"
+        Error::InvalidEvidence { context, message }
+            if context == Context::probe_sequence(1)
+                && message == "sent packet does not preserve the scan destination and probe identity"
     ));
 }
 
@@ -524,9 +501,8 @@ fn scan_events_precede_later_work_and_survive_a_later_failure() {
 
     let error = run_with_events(
         &request,
-        &mut AddressListAuthorizer {
-            addresses: vec![address],
-        },
+        &private_scan_policy(),
+        &ScriptedResolver::new([]),
         &packetcraftr_core::protocol::builtin::registry().unwrap(),
         &mut executor,
         &mut NoopClock,
@@ -538,7 +514,10 @@ fn scan_events_precede_later_work_and_survive_a_later_failure() {
     )
     .expect_err("the second batch must fail");
 
-    assert!(matches!(error, Error::Execution { sequence: 1, .. }));
+    assert!(matches!(
+        error,
+        Error::Execution { context, .. } if context == Context::probe_sequence(1)
+    ));
     let events = events.lock().unwrap();
     assert_eq!(events.len(), 1);
     assert!(matches!(
@@ -566,9 +545,8 @@ fn scan_sink_failure_stops_batches_after_cleaning_up_the_current_session() {
 
     let error = run_with_events(
         &request,
-        &mut AddressListAuthorizer {
-            addresses: vec![address],
-        },
+        &private_scan_policy(),
+        &ScriptedResolver::new([]),
         &packetcraftr_core::protocol::builtin::registry().unwrap(),
         &mut executor,
         &mut NoopClock,
@@ -598,9 +576,8 @@ fn scan_event_collection_preserves_stats_diagnostics_and_evidence_limits() {
     request.limits.max_undecoded = 1;
     let result = run(
         &request,
-        &mut AddressListAuthorizer {
-            addresses: vec![address],
-        },
+        &private_scan_policy(),
+        &ScriptedResolver::new([]),
         &packetcraftr_core::protocol::builtin::registry().unwrap(),
         &mut RetainedEvidenceExecutor(TimeoutExecutor::default()),
         &mut NoopClock,

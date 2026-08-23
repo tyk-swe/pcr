@@ -18,21 +18,20 @@ use super::arguments::PortSpec;
 pub(crate) fn expand_port_specs(
     specs: &[PortSpec],
     max_ports: usize,
-) -> Result<Vec<u16>, packetcraftr::scan::Error> {
+) -> Result<Vec<u16>, packetcraftr::Error> {
     let limit = u64::try_from(max_ports).expect("max_ports fits u64 after Limits::validate");
     let mut ports: Vec<u16> = Vec::new();
     let mut seen: HashSet<u16> = HashSet::new();
-    let mut push_distinct = |port: u16| -> Result<(), packetcraftr::scan::Error> {
+    let mut push_distinct = |port: u16| -> Result<(), packetcraftr::Error> {
         if !seen.insert(port) {
             return Ok(());
         }
         let distinct = u64::try_from(ports.len())
             .expect("port count never exceeds the validated max_ports ceiling");
         if distinct >= limit {
-            return Err(packetcraftr::scan::Error::InvalidLimit {
+            return Err(packetcraftr::Error::InvalidRequest {
                 field: "ports",
-                value: distinct + 1,
-                reason: format!("exceeds max_ports={max_ports}"),
+                message: format!("exceeds max_ports={max_ports}; received {}", distinct + 1),
             });
         }
         ports.push(port);
@@ -95,14 +94,9 @@ mod tests {
         .expect_err("a third distinct port exceeds the bound");
 
         match error {
-            packetcraftr::scan::Error::InvalidLimit {
-                field,
-                value,
-                reason,
-            } => {
+            packetcraftr::Error::InvalidRequest { field, message } => {
                 assert_eq!(field, "ports");
-                assert_eq!(value, 3);
-                assert_eq!(reason, "exceeds max_ports=2");
+                assert_eq!(message, "exceeds max_ports=2; received 3");
             }
             other => panic!("unexpected error: {other:?}"),
         }

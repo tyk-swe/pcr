@@ -8,7 +8,8 @@ use serde::{Deserialize, Serialize};
 
 use packetcraftr_netio::capture::{DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES};
 
-use super::{MAX_RATE, error::Error};
+use super::MAX_RATE;
+use crate::Error;
 
 /// Bounds exact response evidence retained by a live fuzz campaign.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -41,10 +42,9 @@ impl LiveLimits {
             ),
         ] {
             if value == 0 || value > maximum {
-                return Err(Error::InvalidLimit {
+                return Err(Error::InvalidRequest {
                     field,
-                    value: u64::try_from(value).unwrap_or(u64::MAX),
-                    reason: format!("must be within 1..={maximum}"),
+                    message: format!("must be within 1..={maximum}; received {value}"),
                 });
             }
         }
@@ -78,18 +78,21 @@ impl LiveOptions {
     pub fn validate(self) -> Result<Self, Error> {
         self.limits.validate()?;
         if self.timeout.is_zero() || self.timeout > packetcraftr_netio::capture::MAX_TIMEOUT {
-            return Err(Error::InvalidTimeout {
-                value: self.timeout,
-                maximum: packetcraftr_netio::capture::MAX_TIMEOUT,
+            return Err(Error::InvalidRequest {
+                field: "timeout",
+                message: format!(
+                    "must be finite, non-zero, and no greater than {:?}; received {:?}",
+                    packetcraftr_netio::capture::MAX_TIMEOUT,
+                    self.timeout
+                ),
             });
         }
         if let Some(rate) = self.cases_per_second
             && (rate == 0 || rate > MAX_RATE)
         {
-            return Err(Error::InvalidLimit {
+            return Err(Error::InvalidRequest {
                 field: "cases_per_second",
-                value: u64::from(rate),
-                reason: format!("must be within 1..={MAX_RATE}"),
+                message: format!("must be within 1..={MAX_RATE}; received {rate}"),
             });
         }
         Ok(self)

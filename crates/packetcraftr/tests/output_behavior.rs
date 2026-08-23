@@ -6,7 +6,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, UNIX_EPOCH};
 
-use packetcraftr::core::error::{Classified, Kind};
+use packetcraftr::core::error::{Classified, Context, Kind};
 use packetcraftr::core::frame::{Direction as CaptureDirection, Frame, LinkType};
 use packetcraftr::core::protocol::support::BUILTIN_PROTOCOLS;
 use packetcraftr::core::{
@@ -199,22 +199,25 @@ fn domain_failures_preserve_typed_error_context() {
     ));
     assert_eq!(replay.context.source_frame, Some(8));
 
-    let scan = OutputError::classified(&packetcraftr::scan::Error::Clock {
-        sequence: 8,
+    let scan = OutputError::classified(&packetcraftr::Error::Clock {
+        context: Context::probe_sequence(8),
         message: "failed".to_owned(),
     });
+    assert_eq!(scan.code, "io.clock");
     assert_eq!(scan.context.probe_sequence, Some(8));
 
-    let dns = OutputError::classified(&packetcraftr::dns::Error::Clock {
-        attempt: 3,
+    let dns = OutputError::classified(&packetcraftr::Error::Clock {
+        context: Context::attempt(3),
         message: "failed".to_owned(),
     });
+    assert_eq!(dns.code, "io.clock");
     assert_eq!(dns.context.attempt, Some(3));
 
-    let fuzz = OutputError::classified(&packetcraftr::fuzz::Error::Clock {
-        case_index: 11,
+    let fuzz = OutputError::classified(&packetcraftr::Error::Clock {
+        context: Context::case_index(11),
         message: "failed".to_owned(),
     });
+    assert_eq!(fuzz.code, "io.clock");
     assert_eq!(fuzz.context.case_index, Some(11));
 }
 

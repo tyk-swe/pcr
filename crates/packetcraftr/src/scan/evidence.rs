@@ -4,10 +4,11 @@
 //! Exact scan executor-evidence validation and accounting errors.
 
 use crate::probe::evidence::{format_exchange_evidence_error, validate_batch_exchange_evidence};
+use packetcraftr_core::error::Context;
 
-use super::error::Error;
 use super::model::{Batch, Execution, Limits};
 use super::probe::sent_scan_probe_matches;
+use crate::Error;
 
 pub(super) fn validate_exchange_evidence(
     batch: &Batch,
@@ -22,11 +23,13 @@ pub(super) fn validate_exchange_evidence(
         sent_scan_probe_matches,
     )
     .map_err(|error| Error::InvalidEvidence {
-        sequence: error
-            .request_index()
-            .map_or(batch.probes[0].sequence, |index| {
-                batch.probes[index].sequence
-            }),
+        context: Context::probe_sequence(
+            error
+                .request_index()
+                .map_or(batch.probes[0].sequence, |index| {
+                    batch.probes[index].sequence
+                }),
+        ),
         message: format_exchange_evidence_error(error, "batch", "scan"),
     })
 }

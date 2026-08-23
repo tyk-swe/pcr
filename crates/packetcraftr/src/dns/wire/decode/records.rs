@@ -8,8 +8,8 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 use bytes::Bytes;
 
 use super::super::super::DNS_TYPE_OPT;
-use super::super::super::error::WireError;
 use super::super::super::model::{Edns, EdnsOption, Limits, Name, Record, RecordValue};
+use super::super::WireError;
 use super::super::name::decode_name;
 use super::primitives::{read_u16, read_u32};
 

@@ -177,7 +177,6 @@ fn execute_live(
         exchange: live.exchange,
         interface: live.interface,
     };
-    let mut authorizer = packetcraftr::fuzz::PolicyAuthorizer::new(&live.policy);
     let mut clock = packetcraftr::clock::SystemClock;
     if format == output::contract::Format::Ndjson {
         let event_stream = stream.clone();
@@ -186,7 +185,7 @@ fn execute_live(
             live.options,
             packet,
             registry,
-            &mut authorizer,
+            &live.policy,
             &mut executor,
             &mut clock,
             move |case| {
@@ -204,7 +203,7 @@ fn execute_live(
         live.options,
         packet,
         registry,
-        &mut authorizer,
+        &live.policy,
         &mut executor,
         &mut clock,
     )

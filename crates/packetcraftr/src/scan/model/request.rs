@@ -12,11 +12,11 @@ use packetcraftr_netio::capture::{DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_Q
 use crate::target::Family;
 use crate::target::Target;
 
-use super::super::error::Error;
 use super::super::{
     DEFAULT_MAX_SCAN_PORTS, DEFAULT_MAX_UNDECODED_SCAN_FRAMES, DEFAULT_SCAN_BATCH_SIZE,
     MAX_SCAN_ATTEMPTS, MAX_SCAN_DURATION, MAX_SCAN_PROBES, MAX_SCAN_RATE,
 };
+use crate::Error;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -93,40 +93,43 @@ impl Limits {
             ),
         ] {
             if value == 0 || value > maximum {
-                return Err(Error::InvalidLimit {
+                return Err(Error::InvalidRequest {
                     field,
-                    value: u64::try_from(value).unwrap_or(u64::MAX),
-                    reason: format!("must be within 1..={maximum}"),
+                    message: format!("must be within 1..={maximum}; received {value}"),
                 });
             }
         }
         if self.batch_size > self.max_probes {
-            return Err(Error::InvalidLimit {
+            return Err(Error::InvalidRequest {
                 field: "batch_size",
-                value: u64::try_from(self.batch_size).unwrap_or(u64::MAX),
-                reason: "cannot exceed max_probes".to_owned(),
+                message: format!("cannot exceed max_probes; received {}", self.batch_size),
             });
         }
         if self.batch_size > self.max_evidence_frames {
-            return Err(Error::InvalidLimit {
+            return Err(Error::InvalidRequest {
                 field: "batch_size",
-                value: u64::try_from(self.batch_size).unwrap_or(u64::MAX),
-                reason:
-                    "cannot exceed max_evidence_frames because every probe may receive a response"
-                        .to_owned(),
+                message: format!(
+                    "cannot exceed max_evidence_frames because every probe may receive a response; received {}",
+                    self.batch_size
+                ),
             });
         }
         if self.max_undecoded > self.max_evidence_frames {
-            return Err(Error::InvalidLimit {
+            return Err(Error::InvalidRequest {
                 field: "max_undecoded",
-                value: u64::try_from(self.max_undecoded).unwrap_or(u64::MAX),
-                reason: "cannot exceed max_evidence_frames".to_owned(),
+                message: format!(
+                    "cannot exceed max_evidence_frames; received {}",
+                    self.max_undecoded
+                ),
             });
         }
         if self.max_duration.is_zero() || self.max_duration > MAX_SCAN_DURATION {
-            return Err(Error::InvalidDuration {
-                value: self.max_duration,
-                maximum: MAX_SCAN_DURATION,
+            return Err(Error::InvalidRequest {
+                field: "max_duration",
+                message: format!(
+                    "must be finite, non-zero, and no greater than {MAX_SCAN_DURATION:?}; received {:?}",
+                    self.max_duration
+                ),
             });
         }
         Ok(self)
@@ -153,35 +156,42 @@ impl Request {
     pub(in crate::scan) fn validate(&self) -> std::result::Result<Vec<u16>, Error> {
         self.limits.validate()?;
         if !(1..=MAX_SCAN_ATTEMPTS).contains(&self.attempts) {
-            return Err(Error::InvalidLimit {
+            return Err(Error::InvalidRequest {
                 field: "attempts",
-                value: u64::from(self.attempts),
-                reason: format!("must be within 1..={MAX_SCAN_ATTEMPTS}"),
+                message: format!(
+                    "must be within 1..={MAX_SCAN_ATTEMPTS}; received {}",
+                    self.attempts
+                ),
             });
         }
         if self.timeout.is_zero() || self.timeout > packetcraftr_netio::capture::MAX_TIMEOUT {
-            return Err(Error::InvalidTimeout {
-                value: self.timeout,
-                maximum: packetcraftr_netio::capture::MAX_TIMEOUT,
+            return Err(Error::InvalidRequest {
+                field: "timeout",
+                message: format!(
+                    "must be finite, non-zero, and no greater than {:?}; received {:?}",
+                    packetcraftr_netio::capture::MAX_TIMEOUT,
+                    self.timeout
+                ),
             });
         }
         if let Some(rate) = self.probes_per_second
             && (rate == 0 || rate > MAX_SCAN_RATE)
         {
-            return Err(Error::InvalidLimit {
+            return Err(Error::InvalidRequest {
                 field: "probes_per_second",
-                value: u64::from(rate),
-                reason: format!("must be within 1..={MAX_SCAN_RATE}"),
+                message: format!("must be within 1..={MAX_SCAN_RATE}; received {rate}"),
             });
         }
         match self.transport {
             Transport::Tcp | Transport::Udp if self.ports.is_empty() => {
-                return Err(Error::InvalidPorts {
+                return Err(Error::InvalidRequest {
+                    field: "ports",
                     message: "TCP and UDP scans require at least one destination port".to_owned(),
                 });
             }
             Transport::Icmp if !self.ports.is_empty() => {
-                return Err(Error::InvalidPorts {
+                return Err(Error::InvalidRequest {
+                    field: "ports",
                     message: "ICMP scans are portless and do not accept destination ports"
                         .to_owned(),
                 });
@@ -196,10 +206,13 @@ impl Request {
             }
         }
         if ports.len() > self.limits.max_ports {
-            return Err(Error::InvalidLimit {
+            return Err(Error::InvalidRequest {
                 field: "ports",
-                value: u64::try_from(ports.len()).unwrap_or(u64::MAX),
-                reason: format!("exceeds max_ports={}", self.limits.max_ports),
+                message: format!(
+                    "exceeds max_ports={}; received {}",
+                    self.limits.max_ports,
+                    ports.len()
+                ),
             });
         }
         Ok(ports)

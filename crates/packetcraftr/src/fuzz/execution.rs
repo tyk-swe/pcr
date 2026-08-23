@@ -5,13 +5,14 @@ use std::time::Duration;
 
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::diagnostic::Diagnostic;
+use packetcraftr_core::error::Context;
 use packetcraftr_core::frame::Frame;
 
+use crate::Error;
 use crate::evidence::Budget;
 
 use super::MAX_DURATION;
 use super::boundary::Execution;
-use super::error::{Error, duration_limit};
 use super::request::{LiveLimits, LiveOptions};
 use super::result::{Case, Stats};
 
@@ -36,10 +37,12 @@ pub(super) fn worst_case_duration(live: LiveOptions, cases: usize) -> Result<Dur
 }
 
 pub(super) fn rate_delay(rate: Option<u32>) -> Result<Duration, Error> {
-    crate::clock::rate_delay(1, rate).ok_or(Error::InvalidLimit {
+    crate::clock::rate_delay(1, rate).ok_or_else(|| Error::InvalidRequest {
         field: "cases_per_second",
-        value: u64::from(rate.unwrap_or_default()),
-        reason: "rate-delay arithmetic overflowed".to_owned(),
+        message: format!(
+            "rate-delay arithmetic overflowed; received {}",
+            rate.unwrap_or_default()
+        ),
     })
 }
 
@@ -51,19 +54,19 @@ pub(super) fn validate_execution(
 ) -> Result<(), Error> {
     if execution.stats.packets_attempted != 1 || execution.stats.packets_completed != 1 {
         return Err(Error::InvalidEvidence {
-            case_index: case.prepared.index,
+            context: Context::case_index(case.prepared.index),
             message: "successful live execution must account for exactly one attempted and completed packet".to_owned(),
         });
     }
     if execution.stats.bytes != u64::try_from(execution.sent.bytes_sent()).unwrap_or(u64::MAX) {
         return Err(Error::InvalidEvidence {
-            case_index: case.prepared.index,
+            context: Context::case_index(case.prepared.index),
             message: "sent receipt and byte statistics disagree".to_owned(),
         });
     }
     if execution.sent.built().bytes.len() > max_packet_bytes {
         return Err(Error::InvalidEvidence {
-            case_index: case.prepared.index,
+            context: Context::case_index(case.prepared.index),
             message: format!(
                 "executor built {} bytes, exceeding max_packet_bytes={}",
                 execution.sent.built().bytes.len(),
@@ -76,19 +79,19 @@ pub(super) fn validate_execution(
         .capture
         .validate()
         .map_err(|source| Error::InvalidEvidence {
-            case_index: case.prepared.index,
+            context: Context::case_index(case.prepared.index),
             message: format!("invalid capture statistics: {source}"),
         })?;
     for response in &execution.responses {
-        deadline.check().map_err(duration_limit)?;
+        deadline.check()?;
         let Some(_received_at) = response.timestamp else {
             return Err(Error::InvalidEvidence {
-                case_index: case.prepared.index,
+                context: Context::case_index(case.prepared.index),
                 message: "executor returned response frame without a timestamp".to_owned(),
             });
         };
     }
-    deadline.check().map_err(duration_limit)?;
+    deadline.check()?;
     Ok(())
 }
 
@@ -103,7 +106,9 @@ pub(super) fn add_execution_stats(
             sum.$field = sum
                 .$field
                 .checked_add(value.$field)
-                .ok_or(Error::StatisticsOverflow { case_index })?;
+                .ok_or(Error::StatisticsOverflow {
+                    context: Context::case_index(case_index),
+                })?;
         };
     }
     add!(packets_attempted);
@@ -112,16 +117,20 @@ pub(super) fn add_execution_stats(
     sum.elapsed = sum
         .elapsed
         .checked_add(value.elapsed)
-        .ok_or(Error::StatisticsOverflow { case_index })?;
+        .ok_or(Error::StatisticsOverflow {
+            context: Context::case_index(case_index),
+        })?;
     sum.capture = sum
         .capture
         .checked_add(value.capture)
-        .ok_or(Error::StatisticsOverflow { case_index })?;
+        .ok_or(Error::StatisticsOverflow {
+            context: Context::case_index(case_index),
+        })?;
     *total = sum;
     Ok(())
 }
 
-fn retain_fuzz_evidence(budget: &mut Budget, frame: &Frame, limits: LiveLimits) -> bool {
+fn retain_frame(budget: &mut Budget, frame: &Frame, limits: LiveLimits) -> bool {
     budget
         .reserve(
             frame.bytes().len(),
@@ -147,24 +156,24 @@ pub(super) fn retain_evidence(
 ) -> Result<(), Error> {
     let mut omitted = false;
     for frame in evidence.responses {
-        deadline.check().map_err(duration_limit)?;
-        if retain_fuzz_evidence(budget, &frame, limits) {
+        deadline.check()?;
+        if retain_frame(budget, &frame, limits) {
             case.responses.push(frame);
         } else {
             omitted = true;
         }
     }
     for frame in evidence.unmatched {
-        deadline.check().map_err(duration_limit)?;
-        if retain_fuzz_evidence(budget, &frame, limits) {
+        deadline.check()?;
+        if retain_frame(budget, &frame, limits) {
             case.unmatched.push(frame);
         } else {
             omitted = true;
         }
     }
     for frame in evidence.undecoded {
-        deadline.check().map_err(duration_limit)?;
-        if retain_fuzz_evidence(budget, &frame, limits) {
+        deadline.check()?;
+        if retain_frame(budget, &frame, limits) {
             case.undecoded.push(frame);
         } else {
             omitted = true;
@@ -182,6 +191,6 @@ pub(super) fn retain_evidence(
             ),
         );
     }
-    deadline.check().map_err(duration_limit)?;
+    deadline.check()?;
     Ok(())
 }

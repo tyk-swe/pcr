@@ -10,7 +10,7 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use crate::target::{Error as TargetError, Resolver};
 use bytes::Bytes;
-use packetcraftr_core::error::{Classification, Classified};
+use packetcraftr_core::error::{Classification, Classified, Context};
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::protocol::{
     icmp::{Icmpv4, Icmpv6},
@@ -24,14 +24,14 @@ use packetcraftr_core::{
 use super::DEFAULT_TRACEROUTE_UDP_PORT;
 use super::classification::classify_response;
 use super::engine::{run, run_with_events};
-use super::error::Error;
 use super::model::{
     Batch, Completion, Event, Execution, Executor, Limits, Probe, ProbeStatus, Request,
     ResponseKind, Strategy,
 };
 use super::probe::probe_packet;
+use crate::Error;
 use crate::clock::Clock;
-use crate::target::{Authorized, Authorizer, PolicyAuthorizer, Target};
+use crate::target::Target;
 use crate::{BoundaryError, Stats, target::Family};
 
 fn udp_traceroute_request(target: Target) -> Request {
@@ -56,50 +56,6 @@ impl Clock for NoopClock {
     type Error = Infallible;
 
     fn sleep(&mut self, _delay: Duration) -> Result<(), Self::Error> {
-        Ok(())
-    }
-}
-
-struct FixedAuthorizer {
-    address: IpAddr,
-    operations: Vec<(u64, u64)>,
-}
-
-impl Authorizer for FixedAuthorizer {
-    fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> {
-        Ok(Authorized {
-            declared: target.clone(),
-            addresses: vec![self.address],
-        })
-    }
-
-    fn authorize_operation(
-        &mut self,
-        packets: u64,
-        maximum_wire_bytes: u64,
-    ) -> Result<(), BoundaryError> {
-        self.operations.push((packets, maximum_wire_bytes));
-        Ok(())
-    }
-}
-
-struct AddressListAuthorizer {
-    addresses: Vec<IpAddr>,
-}
-
-impl Authorizer for AddressListAuthorizer {
-    fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> {
-        Ok(Authorized {
-            declared: target.clone(),
-            addresses: self.addresses.clone(),
-        })
-    }
-
-    fn authorize_operation(
-        &mut self,
-        _packets: u64,
-        _maximum_wire_bytes: u64,
-    ) -> Result<(), BoundaryError> {
         Ok(())
     }
 }
@@ -403,11 +359,21 @@ fn traceroute_address_ordering_deduplicates_after_family_filtering() {
     request.address_family = Family::Ipv4;
     request.max_hops = 1;
     request.probes_per_hop = 1;
+    let resolver = ScriptedResolver::new([vec![
+        Ipv6Addr::LOCALHOST.into(),
+        first,
+        first,
+        second,
+        first,
+    ]]);
+    let policy = crate::policy::Policy {
+        allow_hostname_resolution: true,
+        ..private_traceroute_policy()
+    };
     let result = run(
         &request,
-        &mut AddressListAuthorizer {
-            addresses: vec![Ipv6Addr::LOCALHOST.into(), first, first, second, first],
-        },
+        &policy,
+        &resolver,
         &packetcraftr_core::protocol::builtin::registry().unwrap(),
         &mut NoResponseExecutor::default(),
         &mut NoopClock,
@@ -425,10 +391,10 @@ fn traceroute_hostname_policy_precedes_resolution_and_probe_execution() {
     let calls = Arc::new(AtomicUsize::new(0));
     let mut executor = CountingRejectExecutor(Arc::clone(&calls));
     let policy = private_traceroute_policy();
-    let mut authorizer = PolicyAuthorizer::new(&policy, &resolver);
     let error = run(
         &udp_traceroute_request(Target::Hostname("lab.example".parse().unwrap())),
-        &mut authorizer,
+        &policy,
+        &resolver,
         &packetcraftr_core::protocol::builtin::registry().unwrap(),
         &mut executor,
         &mut NoopClock,
@@ -443,10 +409,10 @@ fn traceroute_hostname_policy_precedes_resolution_and_probe_execution() {
     policy.allow_hostname_resolution = true;
     let mut request = udp_traceroute_request(Target::Hostname("mixed.example".parse().unwrap()));
     request.address_family = Family::Ipv6;
-    let mut authorizer = PolicyAuthorizer::new(&policy, &resolver);
     let error = run(
         &request,
-        &mut authorizer,
+        &policy,
+        &resolver,
         &packetcraftr_core::protocol::builtin::registry().unwrap(),
         &mut executor,
         &mut NoopClock,
@@ -462,22 +428,22 @@ fn traceroute_udp_port_overflow_is_rejected_before_authorization_or_execution() 
     let destination = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
     let mut request = udp_traceroute_request(Target::Address(destination));
     request.destination_port = Some(u16::MAX);
-    let mut authorizer = FixedAuthorizer {
-        address: destination,
-        operations: Vec::new(),
+    let policy = crate::policy::Policy {
+        max_packets_per_operation: 0,
+        ..private_traceroute_policy()
     };
     let calls = Arc::new(AtomicUsize::new(0));
     let error = run(
         &request,
-        &mut authorizer,
+        &policy,
+        &ScriptedResolver::new([]),
         &packetcraftr_core::protocol::builtin::registry().unwrap(),
         &mut CountingRejectExecutor(Arc::clone(&calls)),
         &mut NoopClock,
     )
     .unwrap_err();
 
-    assert!(matches!(error, Error::InvalidPort { .. }));
-    assert!(authorizer.operations.is_empty());
+    assert!(matches!(error, Error::InvalidRequest { .. }));
     assert_eq!(calls.load(Ordering::SeqCst), 0);
 }
 
@@ -566,13 +532,10 @@ fn traceroute_stops_after_the_first_terminal_hop() {
     let mut request = udp_traceroute_request(Target::Address(destination));
     request.probes_per_second = Some(2);
     request.max_hops = 8;
-    let mut authorizer = FixedAuthorizer {
-        address: destination,
-        operations: Vec::new(),
-    };
     let result = run(
         &request,
-        &mut authorizer,
+        &private_traceroute_policy(),
+        &ScriptedResolver::new([]),
         &packetcraftr_core::protocol::builtin::registry().unwrap(),
         &mut MixedHopExecutor,
         &mut NoopClock,
@@ -594,7 +557,23 @@ fn traceroute_stops_after_the_first_terminal_hop() {
     );
     assert_eq!(result.hops[1].probes[1].status, ProbeStatus::Timeout);
     assert_eq!(result.stats.packets_completed, 4);
-    assert_eq!(authorizer.operations, vec![(16, 16 * 74)]);
+    let restricted_policy = crate::policy::Policy {
+        max_bytes_per_operation: 16 * 74 - 1,
+        ..private_traceroute_policy()
+    };
+    let error = run(
+        &request,
+        &restricted_policy,
+        &ScriptedResolver::new([]),
+        &packetcraftr_core::protocol::builtin::registry().unwrap(),
+        &mut NoResponseExecutor::default(),
+        &mut NoopClock,
+    )
+    .unwrap_err();
+    assert!(matches!(
+        error,
+        Error::Policy(crate::policy::Error::ByteLimit { actual: 1184, .. })
+    ));
 }
 
 #[test]
@@ -603,9 +582,8 @@ fn traceroute_invalid_sent_evidence_reports_the_exact_probe_sequence() {
     let request = udp_traceroute_request(Target::Address(address));
     let error = run(
         &request,
-        &mut AddressListAuthorizer {
-            addresses: vec![address],
-        },
+        &private_traceroute_policy(),
+        &ScriptedResolver::new([]),
         &packetcraftr_core::protocol::builtin::registry().unwrap(),
         &mut NoResponseExecutor {
             invalid_sent_index: Some(1),
@@ -616,8 +594,8 @@ fn traceroute_invalid_sent_evidence_reports_the_exact_probe_sequence() {
 
     assert!(matches!(
         error,
-        Error::InvalidEvidence { sequence: 1, message }
-            if message
+        Error::InvalidEvidence { context, message }
+            if context == Context::probe_sequence(1) && message
                 == "sent packet does not preserve the traceroute destination and probe identity"
     ));
 }
@@ -642,9 +620,8 @@ fn traceroute_events_precede_later_hops_and_survive_a_later_failure() {
 
     let error = run_with_events(
         &request,
-        &mut AddressListAuthorizer {
-            addresses: vec![address],
-        },
+        &private_traceroute_policy(),
+        &ScriptedResolver::new([]),
         &packetcraftr_core::protocol::builtin::registry().unwrap(),
         &mut executor,
         &mut NoopClock,
@@ -656,7 +633,10 @@ fn traceroute_events_precede_later_hops_and_survive_a_later_failure() {
     )
     .expect_err("the second hop must fail");
 
-    assert!(matches!(error, Error::Execution { sequence: 1, .. }));
+    assert!(matches!(
+        error,
+        Error::Execution { context, .. } if context == Context::probe_sequence(1)
+    ));
     let events = events.lock().unwrap();
     assert_eq!(events.len(), 1);
     assert!(matches!(
@@ -684,9 +664,8 @@ fn traceroute_sink_failure_stops_later_hops_after_session_shutdown() {
 
     let error = run_with_events(
         &request,
-        &mut AddressListAuthorizer {
-            addresses: vec![address],
-        },
+        &private_traceroute_policy(),
+        &ScriptedResolver::new([]),
         &packetcraftr_core::protocol::builtin::registry().unwrap(),
         &mut executor,
         &mut NoopClock,
@@ -715,9 +694,8 @@ fn traceroute_event_collection_preserves_stats_diagnostics_and_evidence_limits()
     request.limits.max_undecoded = 1;
     let result = run(
         &request,
-        &mut AddressListAuthorizer {
-            addresses: vec![address],
-        },
+        &private_traceroute_policy(),
+        &ScriptedResolver::new([]),
         &packetcraftr_core::protocol::builtin::registry().unwrap(),
         &mut RetainedEvidenceExecutor(NoResponseExecutor::default()),
         &mut NoopClock,

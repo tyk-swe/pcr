@@ -19,7 +19,7 @@ impl<C: Session> Transaction<C> {
                     operation,
                     shutdown,
                 },
-                OperationError::Output(output) => Error::ExchangeOutputAndCaptureShutdown {
+                OperationError::Output(output) => Error::OutputAndCaptureShutdown {
                     output: Box::new(output),
                     shutdown,
                 },
@@ -46,7 +46,7 @@ impl<C: Session> Transaction<C> {
             emit(super::Event::Unanswered {
                 request_index: *request_index,
             })
-            .map_err(|source| Error::ExchangeOutput {
+            .map_err(|source| Error::Output {
                 source: Box::new(source),
             })?;
         }

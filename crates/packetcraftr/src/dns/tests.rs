@@ -8,14 +8,14 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, UNIX_EPOCH};
 
 use bytes::Bytes;
-use packetcraftr_core::error::Classification;
+use packetcraftr_core::error::{Classification, Context};
 use packetcraftr_core::layer::Raw;
 use packetcraftr_core::protocol::{network::Ipv4, transport::Udp};
 use packetcraftr_core::{Packet, decode::DecodedPacket, frame::Frame, frame::LinkType};
 
 use crate::clock::Clock;
-use crate::target::{Authorized, Authorizer, Family, Target};
-use crate::{BoundaryError, Stats};
+use crate::target::{Error as TargetError, Family, Hostname, Resolver, Target};
+use crate::{BoundaryError, Error, Stats};
 
 use super::DEFAULT_DNS_SERVER_PORT;
 
@@ -30,24 +30,11 @@ impl Clock for NoopClock {
     }
 }
 
-struct SingleAddressAuthorizer {
-    address: IpAddr,
-}
+struct NoResolver;
 
-impl Authorizer for SingleAddressAuthorizer {
-    fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> {
-        Ok(Authorized {
-            declared: target.clone(),
-            addresses: vec![self.address],
-        })
-    }
-
-    fn authorize_operation(
-        &mut self,
-        _packets: u64,
-        _maximum_wire_bytes: u64,
-    ) -> Result<(), BoundaryError> {
-        Ok(())
+impl Resolver for NoResolver {
+    fn resolve(&self, _hostname: &Hostname, _limit: usize) -> Result<Vec<IpAddr>, TargetError> {
+        panic!("address targets must not invoke the resolver")
     }
 }
 
@@ -257,7 +244,8 @@ fn dns_executor_success_uses_trusted_sent_timestamp() {
     let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 53));
     super::engine::run(
         &dns_request(address),
-        &mut SingleAddressAuthorizer { address },
+        &crate::policy::Policy::default(),
+        &NoResolver,
         &packetcraftr_core::protocol::builtin::registry().expect("built-in registry"),
         &mut TrustedReceiptExecutor,
         &mut NoopClock,
@@ -270,7 +258,8 @@ fn dns_executor_rejects_nonzero_response_index() {
     let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 53));
     let error = super::engine::run(
         &dns_request(address),
-        &mut SingleAddressAuthorizer { address },
+        &crate::policy::Policy::default(),
+        &NoResolver,
         &packetcraftr_core::protocol::builtin::registry().expect("built-in registry"),
         &mut InvalidResponseIndexExecutor,
         &mut NoopClock,
@@ -302,7 +291,8 @@ fn dns_attempt_events_precede_retries_and_survive_a_later_failure() {
 
     let error = super::engine::run_with_events(
         &request,
-        &mut SingleAddressAuthorizer { address },
+        &crate::policy::Policy::default(),
+        &NoResolver,
         &packetcraftr_core::protocol::builtin::registry().expect("built-in registry"),
         &mut executor,
         &mut NoopClock,
@@ -314,7 +304,10 @@ fn dns_attempt_events_precede_retries_and_survive_a_later_failure() {
     )
     .expect_err("the second attempt must fail");
 
-    assert!(matches!(error, super::Error::Execution { attempt: 2, .. }));
+    assert!(matches!(
+        error,
+        Error::Execution { context, .. } if context == Context::attempt(2)
+    ));
     let events = events.lock().unwrap();
     assert_eq!(events.len(), 1);
     assert!(matches!(
@@ -340,7 +333,8 @@ fn dns_sink_failure_stops_retries_after_session_shutdown() {
 
     let error = super::engine::run_with_events(
         &request,
-        &mut SingleAddressAuthorizer { address },
+        &crate::policy::Policy::default(),
+        &NoResolver,
         &packetcraftr_core::protocol::builtin::registry().expect("built-in registry"),
         &mut executor,
         &mut NoopClock,
@@ -354,7 +348,7 @@ fn dns_sink_failure_stops_retries_after_session_shutdown() {
     )
     .expect_err("the progressive sink must fail");
 
-    assert!(matches!(&error, super::Error::Output { .. }));
+    assert!(matches!(&error, Error::Output { .. }));
     assert_eq!(
         packetcraftr_core::error::Classified::classification(&error).code,
         "io.test_output"
@@ -370,7 +364,8 @@ fn dns_aggregate_result_is_collected_from_attempt_events() {
     request.attempts = 2;
     let result = super::engine::run(
         &request,
-        &mut SingleAddressAuthorizer { address },
+        &crate::policy::Policy::default(),
+        &NoResolver,
         &packetcraftr_core::protocol::builtin::registry().expect("built-in registry"),
         &mut TrustedReceiptExecutor,
         &mut NoopClock,
@@ -393,7 +388,8 @@ fn dns_response_events_preserve_attempt_record_rejection_and_evidence_order() {
     let observed_events = Arc::clone(&events);
     let summary = super::engine::run_with_events(
         &request,
-        &mut SingleAddressAuthorizer { address },
+        &crate::policy::Policy::default(),
+        &NoResolver,
         &packetcraftr_core::protocol::builtin::registry().expect("built-in registry"),
         &mut ClassifiedResponseExecutor,
         &mut NoopClock,
@@ -445,7 +441,8 @@ fn dns_response_events_preserve_attempt_record_rejection_and_evidence_order() {
 
     let aggregate = super::engine::run(
         &request,
-        &mut SingleAddressAuthorizer { address },
+        &crate::policy::Policy::default(),
+        &NoResolver,
         &packetcraftr_core::protocol::builtin::registry().expect("built-in registry"),
         &mut ClassifiedResponseExecutor,
         &mut NoopClock,
@@ -489,7 +486,8 @@ fn dns_stops_publishing_when_an_event_sink_exhausts_the_deadline() {
 
     let error = super::engine::run_observed_with_deadline(
         &request,
-        &mut SingleAddressAuthorizer { address },
+        &crate::policy::Policy::default(),
+        &NoResolver,
         &packetcraftr_core::protocol::builtin::registry().expect("built-in registry"),
         &mut ClassifiedResponseExecutor,
         &mut NoopClock,
@@ -502,7 +500,7 @@ fn dns_stops_publishing_when_an_event_sink_exhausts_the_deadline() {
     )
     .expect_err("the sink must exhaust the operation deadline");
 
-    assert!(matches!(error, super::Error::DurationLimit { .. }));
+    assert!(matches!(error, Error::DurationLimit { .. }));
     let events = events.lock().unwrap();
     assert_eq!(events.len(), 1);
     assert!(matches!(&events[0], super::Event::Diagnostic(_)));

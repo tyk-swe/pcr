@@ -50,11 +50,10 @@ where
         F: FnMut(crate::exchange::Event) -> Result<(), crate::BoundaryError> + Send + 'static,
     {
         let deadline = Deadline::new(options.timeout);
-        let sink = packetcraftr_core::progress::Sink::new(emit).map_err(|source| {
-            Error::ExchangeOutput {
+        let sink =
+            packetcraftr_core::progress::Sink::new(emit).map_err(|source| Error::Output {
                 source: Box::new(source),
-            }
-        })?;
+            })?;
         self.exchange_internal_with_events(template, options, None, &mut |event| {
             sink.emit(event, &deadline).map_err(exchange_sink_error)
         })
@@ -137,8 +136,8 @@ fn exchange_sink_error(error: packetcraftr_core::progress::EmitError) -> Boundar
                 error.limit
             ),
             Classification::new(
-                "policy.exchange_duration_limit",
-                Some("reduce exchange output backpressure or raise the finite timeout"),
+                "policy.duration_limit",
+                Some("reduce output backpressure or deliberately raise the finite duration limit"),
             ),
             Vec::new(),
         ),

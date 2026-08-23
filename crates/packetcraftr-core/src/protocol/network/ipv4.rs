@@ -10,7 +10,7 @@ use bytes::Bytes;
 
 use crate::{
     codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
-    diagnostic::Diagnostic,
+    diagnostic::{Diagnostic, IPV4_CHECKSUM},
     field::{FieldValue, WireValue},
     layer::{Layer, reflective_layer},
     registry::Discriminator,
@@ -233,7 +233,7 @@ impl LayerCodec for Ipv4Codec {
         let mut diagnostics = Vec::new();
         if context.verify_checksums && checksum(&input[..header_len]) != 0 {
             diagnostics.push(
-                Diagnostic::warning("decode.ipv4_checksum", "IPv4 header checksum mismatch")
+                Diagnostic::warning(IPV4_CHECKSUM, "IPv4 header checksum mismatch")
                     .at_field("checksum"),
             );
         }

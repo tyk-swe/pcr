@@ -22,9 +22,9 @@ limit, and maintainer are known.
 ## Todo list
 
 - [ ] [Define the 1.0 contract](#define-the-10-contract).
-- [ ] [Authorization of non-interface-owned
+- [x] [Authorization of non-interface-owned
   sources](#authorization-of-non-interface-owned-sources).
-- [ ] [Canonical integrity classification](#canonical-integrity-classification).
+- [x] [Canonical integrity classification](#canonical-integrity-classification).
 - [ ] [Registry extension](#registry-extension).
 - [ ] [Public API and serialized contracts](#public-api-and-serialized-contracts).
 - [ ] [Performance-sensitive contracts](#performance-sensitive-contracts).

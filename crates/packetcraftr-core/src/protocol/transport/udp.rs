@@ -8,7 +8,7 @@ use std::net::IpAddr;
 
 use crate::{
     codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
-    diagnostic::Diagnostic,
+    diagnostic::{Diagnostic, UDP_CHECKSUM},
     field::{FieldValue, WireValue},
     layer::{Layer, reflective_layer},
     registry::Discriminator,
@@ -207,17 +207,13 @@ impl LayerCodec for UdpCodec {
             if checksum_value == 0 {
                 if matches!(network.source, IpAddr::V6(_)) {
                     diagnostics.push(
-                        Diagnostic::warning(
-                            "decode.udp_checksum",
-                            "zero UDP checksum is invalid for IPv6",
-                        )
-                        .at_field("checksum"),
+                        Diagnostic::warning(UDP_CHECKSUM, "zero UDP checksum is invalid for IPv6")
+                            .at_field("checksum"),
                     );
                 }
             } else if transport_checksum(network, 17, &input[..length])? != 0 {
                 diagnostics.push(
-                    Diagnostic::warning("decode.udp_checksum", "UDP checksum mismatch")
-                        .at_field("checksum"),
+                    Diagnostic::warning(UDP_CHECKSUM, "UDP checksum mismatch").at_field("checksum"),
                 );
             }
         }

@@ -1,11 +1,16 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::collections::BTreeSet;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
+use packetcraftr_core::diagnostic::{
+    CHECKSUM_FAILURE_CODES, GRE_CHECKSUM, ICMPV4_CHECKSUM, ICMPV6_CHECKSUM, IGMP_CHECKSUM,
+    IPV4_CHECKSUM, SCTP_CHECKSUM, TCP_CHECKSUM, UDP_CHECKSUM,
+};
 use packetcraftr_core::filter::{Context as FilterContext, Filter};
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::{Layer, Malformed, Raw};
@@ -18,7 +23,7 @@ use packetcraftr_core::protocol::ipv6::{
     DestinationOptions, Fragment, HopByHop, SegmentRoutingHeader,
 };
 use packetcraftr_core::protocol::link::{Arp, Ethernet, Llc, Snap, Vlan};
-use packetcraftr_core::protocol::network::{Ipv4, Ipv6};
+use packetcraftr_core::protocol::network::{Igmp, Ipv4, Ipv6};
 use packetcraftr_core::protocol::transport::{Sctp, Tcp, Udp};
 use packetcraftr_core::protocol::tunnel::{
     Ah, Erspan, Esp, Geneve, L2tpv3, Mpls, Ppp, Pppoe, Vxlan,
@@ -961,5 +966,100 @@ fn strict_and_permissive_modes_distinguish_noncanonical_wire_requests() {
                 },
             )
             .is_ok()
+    );
+}
+
+#[test]
+fn corrupted_builtin_checksums_report_integrity_failures() {
+    let mut ipv4_header = Packet::new();
+    ipv4_header.push(ipv4([192, 0, 2, 1], [192, 0, 2, 2]));
+    ipv4_header.push(Icmpv4::default());
+
+    let mut tcp = Packet::new();
+    tcp.push(ipv4([192, 0, 2, 1], [192, 0, 2, 2]));
+    tcp.push(known_tcp());
+
+    let mut udp = Packet::new();
+    udp.push(ipv4([192, 0, 2, 1], [192, 0, 2, 2]));
+    udp.push(Udp {
+        source_port: 12_345,
+        destination_port: 40_000,
+        ..Udp::default()
+    });
+    udp.push(Raw::new(b"PCR!".to_vec()));
+
+    let mut sctp = Packet::new();
+    sctp.push(ipv4([192, 0, 2, 1], [192, 0, 2, 2]));
+    sctp.push(Sctp::default());
+    sctp.push(Raw::new(vec![11, 0, 0, 4]));
+
+    let mut icmpv4 = Packet::new();
+    icmpv4.push(ipv4([192, 0, 2, 1], [192, 0, 2, 2]));
+    icmpv4.push(Icmpv4::default());
+
+    let mut icmpv6 = Packet::new();
+    icmpv6.push(ipv6("2001:db8::1", "2001:db8::2"));
+    icmpv6.push(Icmpv6::default());
+
+    let mut igmp = Packet::new();
+    igmp.push(ipv4([192, 0, 2, 1], [224, 0, 0, 1]));
+    igmp.push(Igmp::default());
+
+    let mut gre = Packet::new();
+    gre.push(ipv4([192, 0, 2, 1], [192, 0, 2, 2]));
+    gre.push(Gre {
+        checksum: Some(Default::default()),
+        key: Some(7),
+        ..Gre::default()
+    });
+    gre.push(Ethernet::default());
+    gre.push(Arp::default());
+
+    let cases = [
+        (IPV4_CHECKSUM, "ipv4", ipv4_header, 8),
+        (TCP_CHECKSUM, "ipv4", tcp, 38),
+        (UDP_CHECKSUM, "ipv4", udp, 31),
+        (SCTP_CHECKSUM, "ipv4", sctp, 24),
+        (ICMPV4_CHECKSUM, "ipv4", icmpv4, 27),
+        (ICMPV6_CHECKSUM, "ipv6", icmpv6, 47),
+        (IGMP_CHECKSUM, "ipv4", igmp, 27),
+        (GRE_CHECKSUM, "ipv4", gre, 28),
+    ];
+
+    let registry = registry();
+    let builder = build::Builder::new(Arc::clone(&registry));
+    let dissector = decode::Dissector::new(registry);
+    let mut observed = BTreeSet::new();
+
+    for (code, root, packet, corrupted_offset) in cases {
+        let built = builder
+            .build(packet, build::Context::default(), build::Options::default())
+            .unwrap_or_else(|error| panic!("{code} build: {error}"));
+        let mut bytes = built.bytes.to_vec();
+        bytes[corrupted_offset] ^= 0xff;
+        let decoded = dissector
+            .decode_with_root(Bytes::from(bytes), root.into(), decode::Options::default())
+            .unwrap_or_else(|error| panic!("{code} decode: {error}"));
+        let failures: Vec<&str> = decoded
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.is_checksum_failure())
+            .map(|diagnostic| diagnostic.code.as_str())
+            .collect();
+        assert_eq!(
+            failures,
+            [code],
+            "{code} diagnostics: {:?}",
+            decoded.diagnostics
+        );
+        observed.insert(code);
+    }
+
+    assert_eq!(
+        observed,
+        CHECKSUM_FAILURE_CODES
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>()
     );
 }

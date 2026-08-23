@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 
 use crate::{
     codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
-    diagnostic::Diagnostic,
+    diagnostic::{Diagnostic, GRE_CHECKSUM},
     field::{FieldValue, WireValue},
     layer::{Layer, reflect_get, reflect_set, reflective_layer},
     registry::Discriminator,
@@ -210,8 +210,7 @@ impl LayerCodec for GreCodec {
         }
         if checksum_value.is_some() && context.verify_checksums && checksum(input) != 0 {
             diagnostics.push(
-                Diagnostic::warning("decode.gre_checksum", "GRE checksum mismatch")
-                    .at_field("checksum"),
+                Diagnostic::warning(GRE_CHECKSUM, "GRE checksum mismatch").at_field("checksum"),
             );
         }
         let layer = Gre {

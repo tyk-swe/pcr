@@ -7,8 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Traffic policy now denies an explicit outer IP or Ethernet source that the
+  selected interface does not own; `Policy::allow_source_spoofing` and
+  `--allow-source-spoofing` on packet-sending commands are the single opt-in.
+  The check runs after interface selection and before neighbor discovery,
+  capture, or transmission.
+
 ### Changed
 
+- Live integrity rejection now matches the exact built-in checksum diagnostic
+  codes (`packetcraftr_core::diagnostic::CHECKSUM_FAILURE_CODES`) instead of
+  searching diagnostic text, so unrelated external diagnostics cannot affect
+  correlation. Checksum-offload limits of that rejection are documented.
 - **Breaking:** Passive live capture is now interface-based. CLI `capture`
   requires `--interface`, requests include queue, filter, and promiscuous-mode
   settings, and sessions provide the link metadata written to capture files.

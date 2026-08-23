@@ -9,7 +9,7 @@ use bytes::Bytes;
 
 use crate::{
     codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
-    diagnostic::Diagnostic,
+    diagnostic::{Diagnostic, TCP_CHECKSUM},
     field::{FieldValue, WireValue},
     layer::{Layer, reflective_layer},
     registry::Discriminator,
@@ -219,8 +219,7 @@ impl LayerCodec for TcpCodec {
             && transport_checksum(network, 6, input)? != 0
         {
             diagnostics.push(
-                Diagnostic::warning("decode.tcp_checksum", "TCP checksum mismatch")
-                    .at_field("checksum"),
+                Diagnostic::warning(TCP_CHECKSUM, "TCP checksum mismatch").at_field("checksum"),
             );
         }
         let payload_len = input.len() - header_len;

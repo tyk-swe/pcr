@@ -87,6 +87,7 @@ where
             ensure_preparation_deadline(deadline)?;
         }
         let plan = plan_route(packet, destination, options, provider)?;
+        self.policy.authorize_packet_sources(packet, &plan)?;
         for destination in &plan.visited_destinations {
             self.policy.authorize_destination(*destination)?;
         }

@@ -74,6 +74,8 @@ impl<R, N, I> Client<R, N, I> {
                 reason: error.to_string(),
             })?;
         self.policy.authorize_packet_destinations(&decoded.packet)?;
+        self.policy
+            .authorize_packet_sources(&decoded.packet, route)?;
         Ok(())
     }
 }

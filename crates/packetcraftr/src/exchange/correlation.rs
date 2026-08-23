@@ -193,10 +193,10 @@ impl Accumulator {
         decoded: DecodedPacket,
         context: ProcessContext<'_>,
     ) -> ProcessOutcome {
-        let integrity_failure = decoded.diagnostics.iter().any(|diagnostic| {
-            diagnostic.code.contains("checksum")
-                && diagnostic.severity != packetcraftr_core::diagnostic::Severity::Info
-        });
+        let integrity_failure = decoded
+            .diagnostics
+            .iter()
+            .any(Diagnostic::is_checksum_failure);
         if Instant::now() >= context.deadline {
             return self.expire_decoded(identity, decoded, context.options);
         }
@@ -205,7 +205,7 @@ impl Accumulator {
                 &mut self.diagnostics,
                 Diagnostic::warning(
                     "exchange.integrity_rejected",
-                    "a response with failed checksum validation was not correlated",
+                    "a response whose checksum did not verify was not correlated",
                 ),
             );
             self.retain_unsolicited(

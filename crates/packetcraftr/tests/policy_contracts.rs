@@ -12,7 +12,11 @@ use packetcraftr::{
     Client, policy,
     target::{Hostname, Resolver, Target},
 };
-use packetcraftr_core::{Packet, layer::Raw};
+use packetcraftr_core::{
+    Packet,
+    layer::Raw,
+    protocol::{link::Ethernet, network::Ipv4},
+};
 use packetcraftr_netio::{
     interface::Id as InterfaceId,
     neighbor,
@@ -156,4 +160,151 @@ fn denied_resolved_address_never_reaches_route_neighbor_or_transmit_providers() 
     assert!(error.to_string().contains("denies public destination"));
     assert_eq!(resolver.calls.load(Ordering::SeqCst), 1);
     assert_eq!(route_calls.load(Ordering::SeqCst), 0);
+}
+
+struct FixedRoutes;
+
+const INTERFACE_MAC: packetcraftr_netio::link::MacAddress =
+    packetcraftr_netio::link::MacAddress([0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0x01]);
+const SELECTED_SOURCE: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 5);
+const PREFERRED_SOURCE: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 6);
+
+impl Provider for FixedRoutes {
+    type Error = std::convert::Infallible;
+
+    fn lookup_with_preferences(
+        &self,
+        _destination: IpAddr,
+        _interface_hint: Option<&InterfaceId>,
+        _preferred_source: Option<IpAddr>,
+    ) -> Result<Decision, Self::Error> {
+        Ok(Decision {
+            interface: InterfaceId {
+                name: "fixture0".to_owned(),
+                index: 1,
+            },
+            source_mac: Some(INTERFACE_MAC),
+            selected_source: Some(IpAddr::V4(SELECTED_SOURCE)),
+            preferred_source: Some(IpAddr::V4(PREFERRED_SOURCE)),
+            next_hop: None,
+            selection_reason: packetcraftr_netio::route::SelectionReason::OnLink,
+            destination_scope: packetcraftr_netio::route::Scope::Link,
+            mtu: 1_500,
+            capability: packetcraftr_netio::link::Capability::Layer2AndLayer3,
+            link_type: packetcraftr_core::frame::LinkType::ETHERNET,
+        })
+    }
+}
+
+fn source_client(
+    allow_source_spoofing: bool,
+) -> Client<FixedRoutes, NeverNeighbors, NeverTransmit> {
+    Client::new(
+        Arc::new(
+            packetcraftr_core::protocol::builtin::registry().expect("built-ins must register"),
+        ),
+        FixedRoutes,
+        NeverNeighbors,
+        NeverTransmit,
+        policy::Policy {
+            allow_source_spoofing,
+            ..policy::Policy::default()
+        },
+    )
+}
+
+fn sourced_packet(source_mac: Option<[u8; 6]>, source: Ipv4Addr) -> Packet {
+    let mut packet = Packet::new();
+    if let Some(source) = source_mac {
+        packet.push(Ethernet {
+            source,
+            ..Ethernet::default()
+        });
+    }
+    packet.push(Ipv4 {
+        source,
+        destination: Ipv4Addr::new(10, 0, 0, 2),
+        ..Ipv4::default()
+    });
+    packet
+}
+
+#[test]
+fn only_non_interface_owned_sources_require_the_spoofing_opt_in() {
+    let foreign_mac = [0x02, 0, 0, 0, 0, 0x09];
+    let foreign_ip = Ipv4Addr::new(10, 0, 0, 200);
+    let cases = [
+        (None, Ipv4Addr::UNSPECIFIED, false, true),
+        (None, SELECTED_SOURCE, false, true),
+        (None, PREFERRED_SOURCE, false, true),
+        (Some([0; 6]), Ipv4Addr::UNSPECIFIED, false, true),
+        (Some(INTERFACE_MAC.0), Ipv4Addr::UNSPECIFIED, false, true),
+        (None, foreign_ip, false, false),
+        (Some(foreign_mac), Ipv4Addr::UNSPECIFIED, false, false),
+        (None, foreign_ip, true, true),
+        (Some(foreign_mac), foreign_ip, true, true),
+    ];
+    for (source_mac, source, allow_source_spoofing, expect_ok) in cases {
+        let result = source_client(allow_source_spoofing).plan(
+            &sourced_packet(source_mac, source),
+            Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))),
+            &packetcraftr_netio::route::Options::default(),
+        );
+        match result {
+            Ok(_) => assert!(expect_ok, "{source_mac:?}/{source} must be denied"),
+            Err(error) => {
+                assert!(!expect_ok, "{source_mac:?}/{source} must plan: {error}");
+                assert_eq!(
+                    packetcraftr_core::error::Classified::classification(&error).code,
+                    "policy.source_ownership"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn unspecified_final_wire_ip_source_requires_the_spoofing_opt_in() {
+    let packet = sourced_packet(Some(INTERFACE_MAC.0), Ipv4Addr::UNSPECIFIED);
+    let destination = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
+    let mut plan = source_client(false)
+        .plan(
+            &packet,
+            Some(destination),
+            &packetcraftr_netio::route::Options::default(),
+        )
+        .expect("unspecified authored source must use the planned source");
+    plan.packet_source = None;
+
+    let error = policy::Policy::default()
+        .authorize_packet_sources(&packet, &plan)
+        .expect_err("unspecified final-wire source must be denied");
+
+    assert_eq!(
+        packetcraftr_core::error::Classified::classification(&error).code,
+        "policy.source_ownership"
+    );
+}
+
+#[test]
+fn raw_layer3_wire_source_requires_the_spoofing_opt_in() {
+    let mut packet = Packet::new();
+    packet.push(Raw::new(vec![
+        0x45, 0x00, 0x00, 0x14, 0x00, 0x01, 0x00, 0x00, 0x40, 0xfd, 0x65, 0x23, 0x0a, 0x00, 0x00,
+        0xc8, 0x0a, 0x00, 0x00, 0x02,
+    ]));
+    let mut options = packetcraftr::send::Options {
+        destination: Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))),
+        ..packetcraftr::send::Options::default()
+    };
+    options.plan.link_mode = packetcraftr_netio::link::Mode::Layer3;
+
+    let error = source_client(false)
+        .send(packet, options)
+        .expect_err("foreign final-wire source must be denied");
+
+    assert_eq!(
+        packetcraftr_core::error::Classified::classification(&error).code,
+        "policy.source_ownership"
+    );
 }

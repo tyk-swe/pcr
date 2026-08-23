@@ -8,7 +8,7 @@ pub(crate) use capture_limits::CaptureLimitsArgs;
 pub(crate) use offline_limits::{OfflineCaptureLimitsArgs, OfflineLimitsArgs};
 pub(crate) use policy::{
     HostnamePolicyArgs, HostnameResolutionArgs, PermissivePacketArgs, PublicDestinationArgs,
-    SendPolicyArgs, TrafficBudgetArgs,
+    SendPolicyArgs, SourceSpoofingArgs, TrafficBudgetArgs,
 };
 pub(crate) use recipe::{BuildMode, RecipeArgs};
 pub(crate) use route::{LinkMode, RouteArgs, RouteSelectionArgs};

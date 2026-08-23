@@ -5,7 +5,9 @@
 
 use bytes::Bytes;
 use packetcraftr_core::protocol::application::Dns;
-use packetcraftr_core::{Packet, decode::DecodedPacket, layer::Raw, registry::Registry};
+use packetcraftr_core::{
+    Packet, decode::DecodedPacket, diagnostic::Diagnostic, layer::Raw, registry::Registry,
+};
 
 use crate::probe::{self, Transport as ProbeTransport};
 
@@ -74,10 +76,11 @@ pub fn classify_response(
         });
     }
     if direct_udp_match(registry, sent, &response.packet) {
-        if response.diagnostics.iter().any(|diagnostic| {
-            diagnostic.code.contains("checksum")
-                && diagnostic.severity != packetcraftr_core::diagnostic::Severity::Info
-        }) {
+        if response
+            .diagnostics
+            .iter()
+            .any(Diagnostic::is_checksum_failure)
+        {
             return Some(ResponseClassification::DecodeFailure {
                 reason: "correlated UDP response has an invalid checksum diagnostic".to_owned(),
             });

@@ -9,7 +9,7 @@ use bytes::Bytes;
 
 use crate::{
     codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
-    diagnostic::Diagnostic,
+    diagnostic::{Diagnostic, ICMPV4_CHECKSUM, ICMPV6_CHECKSUM},
     field::{FieldValue, WireValue},
     layer::{Layer, reflective_layer},
 };
@@ -158,7 +158,7 @@ impl LayerCodec for Icmpv4Codec {
         let mut diagnostics = Vec::new();
         if context.verify_checksums && checksum(input) != 0 {
             diagnostics.push(
-                Diagnostic::warning("decode.icmpv4_checksum", "ICMPv4 checksum mismatch")
+                Diagnostic::warning(ICMPV4_CHECKSUM, "ICMPv4 checksum mismatch")
                     .at_field("checksum"),
             );
         }
@@ -250,7 +250,7 @@ impl LayerCodec for Icmpv6Codec {
             && transport_checksum(network, 58, input)? != 0
         {
             diagnostics.push(
-                Diagnostic::warning("decode.icmpv6_checksum", "ICMPv6 checksum mismatch")
+                Diagnostic::warning(ICMPV6_CHECKSUM, "ICMPv6 checksum mismatch")
                     .at_field("checksum"),
             );
         }

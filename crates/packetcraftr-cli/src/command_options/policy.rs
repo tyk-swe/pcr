@@ -29,6 +29,13 @@ pub(crate) struct PermissivePacketArgs {
 }
 
 #[derive(Clone, Debug, Args)]
+pub(crate) struct SourceSpoofingArgs {
+    /// Policy-level opt-in for outer IP or Ethernet sources the selected interface does not own.
+    #[arg(long)]
+    allow_source_spoofing: bool,
+}
+
+#[derive(Clone, Debug, Args)]
 pub(crate) struct TrafficBudgetArgs {
     /// Maximum packets authorized for one operation.
     #[arg(long, default_value_t = 10_000)]
@@ -49,6 +56,8 @@ pub(crate) struct SendPolicyArgs {
     hostname_resolution: HostnameResolutionArgs,
     #[command(flatten)]
     permissive_packet: PermissivePacketArgs,
+    #[command(flatten)]
+    source_spoofing: SourceSpoofingArgs,
     #[command(flatten)]
     budgets: TrafficBudgetArgs,
 }
@@ -82,6 +91,12 @@ impl PermissivePacketArgs {
     }
 }
 
+impl SourceSpoofingArgs {
+    pub(crate) fn apply_to(self, policy: &mut packetcraftr::policy::Policy) {
+        policy.allow_source_spoofing = self.allow_source_spoofing;
+    }
+}
+
 impl TrafficBudgetArgs {
     pub(crate) fn apply_to(self, policy: &mut packetcraftr::policy::Policy) {
         policy.max_packets_per_operation = self.max_packets;
@@ -101,6 +116,7 @@ impl SendPolicyArgs {
         self.public_destination.apply_to(&mut policy);
         self.hostname_resolution.apply_to(&mut policy);
         self.permissive_packet.apply_to(&mut policy);
+        self.source_spoofing.apply_to(&mut policy);
         self.budgets.apply_to(&mut policy);
         policy
     }

@@ -432,10 +432,30 @@ fn scan_tcp_correlation_requires_integrity_and_classifies_valid_replies() {
             &request,
             &decoded(
                 tcp_packet(remote, local, 443, 50_000, Tcp::SYN | Tcp::ACK),
-                vec![Diagnostic::warning("tcp.checksum", "invalid checksum")],
+                vec![Diagnostic::warning(
+                    packetcraftr_core::diagnostic::TCP_CHECKSUM,
+                    "invalid checksum",
+                )],
             ),
         )
         .is_none()
+    );
+    assert_eq!(
+        classify_response(
+            &registry,
+            Transport::Tcp,
+            &request,
+            &decoded(
+                tcp_packet(remote, local, 443, 50_000, Tcp::SYN | Tcp::ACK),
+                vec![Diagnostic::warning(
+                    "vendor.checksum_mismatch",
+                    "unrelated vendor diagnostic",
+                )],
+            ),
+        )
+        .unwrap()
+        .classification,
+        Classification::Open
     );
 }
 

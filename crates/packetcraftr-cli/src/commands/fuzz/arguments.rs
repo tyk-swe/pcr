@@ -8,7 +8,7 @@ use packetcraftr::core;
 
 use crate::command_options::{
     BuildMode, CaptureLimitsArgs, PermissivePacketArgs, PublicDestinationArgs, RecipeArgs,
-    RouteSelectionArgs, TrafficBudgetArgs,
+    RouteSelectionArgs, SourceSpoofingArgs, TrafficBudgetArgs,
 };
 
 pub(crate) const AFTER_LONG_HELP: &str = r#"NDJSON publishes each case as soon as its offline or live outcome is final, then one complete event with campaign statistics. Earlier case records remain valid if a later case fails.
@@ -52,6 +52,7 @@ impl From<Strategy> for core::fuzz::Strategy {
     mut_arg("overflow_policy", |arg| arg.requires("live")),
     mut_arg("allow_public_destinations", |arg| arg.requires("live")),
     mut_arg("allow_permissive_packets", |arg| arg.requires("live")),
+    mut_arg("allow_source_spoofing", |arg| arg.requires("live")),
     mut_arg("max_packets", |arg| arg.requires("live")),
     mut_arg("max_bytes", |arg| arg.requires("live"))
 )]
@@ -132,6 +133,8 @@ pub(crate) struct PolicyArgs {
     #[command(flatten)]
     permissive_packet: PermissivePacketArgs,
     #[command(flatten)]
+    source_spoofing: SourceSpoofingArgs,
+    #[command(flatten)]
     budgets: TrafficBudgetArgs,
 }
 
@@ -140,6 +143,7 @@ impl PolicyArgs {
         let mut policy = packetcraftr::policy::Policy::default();
         self.public_destination.apply_to(&mut policy);
         self.permissive_packet.apply_to(&mut policy);
+        self.source_spoofing.apply_to(&mut policy);
         self.budgets.apply_to(&mut policy);
         policy
     }

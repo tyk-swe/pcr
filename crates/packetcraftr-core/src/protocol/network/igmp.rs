@@ -7,7 +7,7 @@ use bytes::Bytes;
 
 use crate::{
     codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
-    diagnostic::Diagnostic,
+    diagnostic::{Diagnostic, IGMP_CHECKSUM},
     field::{FieldValue, WireValue},
     layer::{Layer, reflective_layer},
 };
@@ -137,8 +137,7 @@ impl LayerCodec for IgmpCodec {
         let mut diagnostics = Vec::new();
         if context.verify_checksums && checksum(input) != 0 {
             diagnostics.push(
-                Diagnostic::warning("decode.igmp_checksum", "IGMP checksum mismatch")
-                    .at_field("checksum"),
+                Diagnostic::warning(IGMP_CHECKSUM, "IGMP checksum mismatch").at_field("checksum"),
             );
         }
         Ok(DecodedLayerValue {

@@ -3,7 +3,8 @@
 
 use std::net::IpAddr;
 
-use packetcraftr_core::{Packet, semantics};
+use packetcraftr_core::{Packet, protocol::link::Ethernet, semantics};
+use packetcraftr_netio::{link::MacAddress, route::Plan};
 
 use super::super::address::is_public;
 use super::super::target::{Authorized, Error as TargetError, Hostname, Resolver, Target};
@@ -72,6 +73,46 @@ impl Policy {
             self.authorize_destination(destination)?;
         }
         Ok(())
+    }
+
+    /// Authorizes the packet's outer IP and Ethernet sources against what the
+    /// selected interface owns. Unspecified sources use planned values when available.
+    pub fn authorize_packet_sources(&self, packet: &Packet, plan: &Plan) -> Result<(), Error> {
+        if self.allow_source_spoofing {
+            return Ok(());
+        }
+        let decision = &plan.decision;
+        let packet_source = semantics::outer_ip_path(packet)
+            .map_err(|source| Error::InvalidPacketSemantics {
+                reason: source.to_string(),
+            })?
+            .map(|path| path.source)
+            .map_or(plan.packet_source, |source| {
+                if source.is_unspecified() {
+                    plan.packet_source.or(Some(source))
+                } else {
+                    Some(source)
+                }
+            });
+        let source_mac = semantics::outer_layers(packet)
+            .find_map(|layer| layer.as_any().downcast_ref::<Ethernet>())
+            .map(|ethernet| MacAddress(ethernet.source))
+            .filter(|source| source.0 != [0; 6])
+            .or(plan.source_mac);
+        let foreign_ip = packet_source.filter(|source| {
+            Some(*source) != decision.selected_source && Some(*source) != decision.preferred_source
+        });
+        let foreign_mac = source_mac.filter(|source| Some(*source) != decision.source_mac);
+        let Some(packet_source) = foreign_ip
+            .map(|source| source.to_string())
+            .or_else(|| foreign_mac.map(|source| source.to_string()))
+        else {
+            return Ok(());
+        };
+        Err(Error::SourceNotInterfaceOwned {
+            packet_source,
+            interface: decision.interface.name.clone(),
+        })
     }
 
     /// Authorizes a declared target before resolution, invokes the resolver at

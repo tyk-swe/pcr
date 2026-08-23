@@ -7,6 +7,28 @@ use serde::{Deserialize, Serialize};
 
 use crate::layout::ByteRange;
 
+pub const IPV4_CHECKSUM: &str = "decode.ipv4_checksum";
+pub const TCP_CHECKSUM: &str = "decode.tcp_checksum";
+pub const UDP_CHECKSUM: &str = "decode.udp_checksum";
+pub const SCTP_CHECKSUM: &str = "decode.sctp_checksum";
+pub const ICMPV4_CHECKSUM: &str = "decode.icmpv4_checksum";
+pub const ICMPV6_CHECKSUM: &str = "decode.icmpv6_checksum";
+pub const IGMP_CHECKSUM: &str = "decode.igmp_checksum";
+pub const GRE_CHECKSUM: &str = "decode.gre_checksum";
+
+/// Integrity rejection matches these codes exactly; no other code counts as a
+/// checksum failure.
+pub const CHECKSUM_FAILURE_CODES: &[&str] = &[
+    IPV4_CHECKSUM,
+    TCP_CHECKSUM,
+    UDP_CHECKSUM,
+    SCTP_CHECKSUM,
+    ICMPV4_CHECKSUM,
+    ICMPV6_CHECKSUM,
+    IGMP_CHECKSUM,
+    GRE_CHECKSUM,
+];
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Severity {
@@ -64,6 +86,12 @@ impl Diagnostic {
         self.field = Some(field.into());
         self
     }
+
+    /// True only for a built-in checksum verification failure.
+    #[must_use]
+    pub fn is_checksum_failure(&self) -> bool {
+        CHECKSUM_FAILURE_CODES.contains(&self.code.as_str())
+    }
 }
 
 /// Appends `diagnostic` unless one with the same code is already present.
@@ -73,5 +101,24 @@ pub fn push_once(diagnostics: &mut Vec<Diagnostic>, diagnostic: Diagnostic) {
         .any(|existing| existing.code == diagnostic.code)
     {
         diagnostics.push(diagnostic);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unrelated_diagnostic_codes_never_classify_as_integrity_failures() {
+        for code in [
+            "decode.tcp_checksum_hint",
+            "tcp.checksum",
+            "vendor.checksum_mismatch",
+            "decode.udp_length",
+        ] {
+            assert!(!Diagnostic::info(code, "unrelated").is_checksum_failure());
+            assert!(!Diagnostic::warning(code, "unrelated").is_checksum_failure());
+            assert!(!Diagnostic::error(code, "unrelated").is_checksum_failure());
+        }
     }
 }

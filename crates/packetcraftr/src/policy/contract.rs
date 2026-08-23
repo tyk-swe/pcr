@@ -14,6 +14,10 @@ pub struct Policy {
     /// address scope until after a resolver side effect.
     pub allow_hostname_resolution: bool,
     pub allow_permissive_packets: bool,
+    /// Single opt-in for an explicit outer IP or Ethernet source the selected
+    /// interface does not own. Replay transmits captured sources verbatim and
+    /// does not consult it.
+    pub allow_source_spoofing: bool,
     pub max_packets_per_operation: u64,
     pub max_bytes_per_operation: u64,
     pub max_resolved_addresses: usize,
@@ -28,6 +32,7 @@ impl Default for Policy {
             allow_public_destinations: false,
             allow_hostname_resolution: false,
             allow_permissive_packets: false,
+            allow_source_spoofing: false,
             max_packets_per_operation: 10_000,
             max_bytes_per_operation: 256 * 1024 * 1024,
             max_resolved_addresses: DEFAULT_MAX_RESOLVED_ADDRESSES,
@@ -46,6 +51,11 @@ pub enum Error {
     HostnameResolution { hostname: String },
     #[error("traffic policy denies permissively built packets")]
     PermissivePacket,
+    #[error("traffic policy denies source {packet_source} that interface {interface} does not own")]
+    SourceNotInterfaceOwned {
+        packet_source: String,
+        interface: String,
+    },
     #[error("operation packet count {actual} exceeds policy limit {limit}")]
     PacketLimit { actual: u64, limit: u64 },
     #[error("operation byte count {actual} exceeds policy limit {limit}")]
@@ -70,6 +80,10 @@ impl Classified for Error {
             Self::PermissivePacket => (
                 "policy.permissive_packet",
                 "authorize permissive live traffic in both build options and traffic policy",
+            ),
+            Self::SourceNotInterfaceOwned { .. } => (
+                "policy.source_ownership",
+                "use an interface-owned source, select it with the route source option, or explicitly authorize source spoofing",
             ),
             Self::PacketLimit { .. } => (
                 "policy.packet_limit",

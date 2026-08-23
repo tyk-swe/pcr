@@ -141,8 +141,21 @@ Live operations enforce several independent boundaries:
   opt-in and `--allow-permissive-packets` where those flags are exposed.
 - Packet, byte, duration, queue, and evidence budgets remain active. Active
   capture-backed workflows establish capture readiness before transmission.
-- Interface identity, route consistency, source ownership, MTU, and final wire
-  bytes are checked again at the native boundary.
+- Unspecified outer IP and Ethernet sources materialize from the selected
+  route. An explicit source the selected interface owns (the route-selected or
+  `--source` address and the interface MAC) needs no further permission. Any
+  other outer IP or Ethernet source is denied after interface selection and
+  before neighbor discovery, capture, or transmission unless
+  `--allow-source-spoofing` is set where that flag is exposed.
+- Interface identity, route consistency, MTU, and final wire bytes are checked
+  again at the native boundary. That boundary requires a route with an
+  interface-owned source and rejects unspecified packet sources, but it does
+  not re-check spoofed sources authorized by policy.
+- Live response correlation rejects a response whose built-in checksum
+  verification fails. Capture cannot tell corruption from checksum offload:
+  loopback, virtual, and locally bridged responders may appear with unfilled
+  checksums and be rejected. Disable offload on the capture interface or test
+  across a physical link before treating rejection as corruption.
 
 Only applicable commands expose each control. Read that command's `--help`
 instead of copying flags between workflows. For `capture`, `--capture-filter`

@@ -3,6 +3,8 @@
 
 use thiserror::Error;
 
+use crate::error::{Classification, Classified};
+
 /// Why a display filter could not be compiled or evaluated.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -52,4 +54,45 @@ pub enum Error {
         path: String,
         protocol: super::super::layer::Id,
     },
+}
+
+impl Classified for Error {
+    fn classification(&self) -> Classification {
+        match self {
+            Self::UnknownField { .. } | Self::UnresolvableProtocol { .. } => Classification::new(
+                "cli.filter_field",
+                Some(
+                    "run `packetcraftr protocols <PROTOCOL>` to list the fields a protocol exposes",
+                ),
+            ),
+            Self::IncompatibleLiteral { .. } | Self::OrderedPrefixComparison { .. } => {
+                Classification::new(
+                    "cli.filter_type",
+                    Some("compare the field against a value of its own type"),
+                )
+            }
+            Self::UnsliceableField { .. } => Classification::new(
+                "cli.filter_slice",
+                Some("slice only fields that hold bytes, such as an address or a byte string"),
+            ),
+            Self::SizeLimit { .. }
+            | Self::NestingLimit { .. }
+            | Self::TermLimit { .. }
+            | Self::SetMemberLimit { .. }
+            | Self::InvalidNestingLimit { .. }
+            | Self::InvalidTermLimit { .. }
+            | Self::InvalidSetMemberLimit { .. } => Classification::new(
+                "cli.filter_limit",
+                Some("simplify the filter to fit the stable bounds"),
+            ),
+            Self::Empty | Self::Syntax { .. } => Classification::new(
+                "cli.filter",
+                Some("check the filter syntax; see `packetcraftr read --help` for examples"),
+            ),
+            Self::TimestampUnavailable => Classification::new(
+                "packet.timestamp_unavailable",
+                Some("use timestamped packet blocks for time-dependent offline analysis"),
+            ),
+        }
+    }
 }

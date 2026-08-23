@@ -80,10 +80,7 @@ impl Classified for Error {
                 source: crate::decode::Error::PacketSizeLimit { .. },
                 ..
             } => resource_limit(),
-            Self::Decode { .. } => Classification::new(
-                "packet.decode",
-                Some("repair the frame or raise the per-frame byte limit it was read under"),
-            ),
+            Self::Decode { source, .. } => source.classification(),
             Self::TimestampRange { .. } => Classification::new(
                 "packet.timestamp",
                 Some("repair the capture timestamp that exceeds the platform clock range"),
@@ -92,16 +89,7 @@ impl Classified for Error {
                 "packet.timestamp_unavailable",
                 Some("use timestamped packet blocks for time-dependent offline analysis"),
             ),
-            Self::Filter {
-                source: crate::filter::Error::TimestampUnavailable,
-                ..
-            } => Classification::new(
-                "packet.timestamp_unavailable",
-                Some("remove frame.time_epoch from the filter or use timestamped packet blocks"),
-            ),
-            Self::Filter { .. } => {
-                Classification::new("cli.filter", Some("repair the display filter"))
-            }
+            Self::Filter { source, .. } => source.classification(),
             Self::StreamLimit { .. } | Self::Scope { .. } | Self::DurationLimit { .. } => {
                 resource_limit()
             }

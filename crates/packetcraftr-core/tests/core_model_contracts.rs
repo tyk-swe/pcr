@@ -7,7 +7,9 @@ use std::time::{Duration, SystemTime};
 
 use packetcraftr_core::{
     budget::Deadline,
+    build, decode, document,
     error::{BoundaryError, Classification, Classified, Kind},
+    expression, filter,
     frame::{Direction, Frame, LinkType},
 };
 
@@ -240,5 +242,161 @@ fn every_error_kind_has_a_stable_machine_name() {
 
     for (kind, expected) in cases {
         assert_eq!(kind.as_str(), expected);
+    }
+}
+
+#[test]
+fn build_errors_have_stable_classifications() {
+    let cases = [
+        (build::Error::LengthOverflow, "packet.build_limit"),
+        (build::Error::EmptyPacket, "packet.build"),
+        (
+            build::Error::MissingCodec {
+                index: 0,
+                protocol: packetcraftr_core::layer::Id::new("missing"),
+            },
+            "packet.unknown_protocol",
+        ),
+        (
+            build::Error::InvalidCodecLayout {
+                protocol: packetcraftr_core::layer::Id::new("fixture"),
+            },
+            "internal.codec_contract",
+        ),
+    ];
+
+    for (error, expected_code) in cases {
+        let classification = error.classification();
+        assert_eq!(classification.code, expected_code);
+        assert_eq!(Kind::from_code(expected_code), Some(classification.kind));
+    }
+}
+
+#[test]
+fn decode_errors_have_stable_classifications() {
+    let cases = [
+        (
+            decode::Error::PacketSizeLimit {
+                actual: 2,
+                limit: 1,
+            },
+            "packet.decode_limit",
+        ),
+        (
+            decode::Error::MissingRootCodec {
+                protocol: packetcraftr_core::layer::Id::new("missing"),
+            },
+            "packet.decode",
+        ),
+        (
+            decode::Error::InvalidCodecCursor {
+                protocol: packetcraftr_core::layer::Id::new("fixture"),
+            },
+            "internal.codec_contract",
+        ),
+    ];
+
+    for (error, expected_code) in cases {
+        let classification = error.classification();
+        assert_eq!(classification.code, expected_code);
+        assert_eq!(Kind::from_code(expected_code), Some(classification.kind));
+    }
+}
+
+#[test]
+fn document_errors_have_stable_classifications() {
+    let cases = [
+        (
+            document::Error::SizeLimit {
+                actual: 2,
+                limit: 1,
+            },
+            "cli.packet_document",
+        ),
+        (
+            document::Error::Serialize {
+                format: "json",
+                message: "fixture".to_owned(),
+            },
+            "internal.document_serialize",
+        ),
+    ];
+
+    for (error, expected_code) in cases {
+        let classification = error.classification();
+        assert_eq!(classification.code, expected_code);
+        assert_eq!(Kind::from_code(expected_code), Some(classification.kind));
+    }
+}
+
+#[test]
+fn expression_errors_have_stable_classifications() {
+    let cases = [(expression::Error::Empty, "cli.packet_expression")];
+
+    for (error, expected_code) in cases {
+        let classification = error.classification();
+        assert_eq!(classification.code, expected_code);
+        assert_eq!(Kind::from_code(expected_code), Some(classification.kind));
+    }
+}
+
+#[test]
+fn frame_errors_have_stable_classifications() {
+    let cases = [(
+        packetcraftr_core::frame::Error::CapturedLengthTooLarge { actual: 1 },
+        "packet.frame_length",
+    )];
+
+    for (error, expected_code) in cases {
+        let classification = error.classification();
+        assert_eq!(classification.code, expected_code);
+        assert_eq!(Kind::from_code(expected_code), Some(classification.kind));
+    }
+}
+
+#[test]
+fn filter_errors_have_stable_classifications() {
+    let cases = [
+        (
+            filter::Error::UnknownField {
+                offset: 0,
+                path: "missing".to_owned(),
+            },
+            "cli.filter_field",
+        ),
+        (
+            filter::Error::IncompatibleLiteral {
+                offset: 0,
+                path: "frame.len".to_owned(),
+                kind: "unsigned",
+                literal: "text".to_owned(),
+            },
+            "cli.filter_type",
+        ),
+        (
+            filter::Error::UnsliceableField {
+                offset: 0,
+                path: "frame.len".to_owned(),
+            },
+            "cli.filter_slice",
+        ),
+        (
+            filter::Error::SizeLimit {
+                actual: 2,
+                limit: 1,
+            },
+            "cli.filter_limit",
+        ),
+        (filter::Error::Empty, "cli.filter"),
+        (
+            filter::Error::TimestampUnavailable,
+            "packet.timestamp_unavailable",
+        ),
+    ];
+
+    for (error, expected_code) in cases {
+        let classification = error.classification();
+        assert_eq!(classification.code, expected_code);
+        assert_eq!(Kind::from_code(expected_code), Some(classification.kind));
     }
 }

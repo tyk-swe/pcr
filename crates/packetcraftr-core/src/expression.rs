@@ -11,6 +11,7 @@ use thiserror::Error;
 
 use crate::Packet;
 
+use crate::error::{Classification, Classified};
 use crate::field::{FieldValue, parse_mac};
 use crate::registry::Registry;
 
@@ -44,6 +45,15 @@ pub enum Error {
         #[source]
         source: crate::codec::Error,
     },
+}
+
+impl Classified for Error {
+    fn classification(&self) -> Classification {
+        Classification::new(
+            "cli.packet_expression",
+            Some("provide a valid packet expression within the configured limits"),
+        )
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

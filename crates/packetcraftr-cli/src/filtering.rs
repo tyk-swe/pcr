@@ -136,34 +136,7 @@ impl packetcraftr::replay::Selector for FrameSelector {
 
 /// Converts a filter compilation failure into the CLI error taxonomy.
 fn cli_error(error: packetcraftr::core::filter::Error) -> CliError {
-    let remediation = match &error {
-        packetcraftr::core::filter::Error::UnknownField { .. }
-        | packetcraftr::core::filter::Error::UnresolvableProtocol { .. } => {
-            "run `packetcraftr protocols <PROTOCOL>` to list the fields a protocol exposes"
-        }
-        packetcraftr::core::filter::Error::IncompatibleLiteral { .. }
-        | packetcraftr::core::filter::Error::OrderedPrefixComparison { .. } => {
-            "compare the field against a value of its own type"
-        }
-        packetcraftr::core::filter::Error::UnsliceableField { .. } => {
-            "slice only fields that hold bytes, such as an address or a byte string"
-        }
-        packetcraftr::core::filter::Error::SizeLimit { .. }
-        | packetcraftr::core::filter::Error::NestingLimit { .. }
-        | packetcraftr::core::filter::Error::TermLimit { .. }
-        | packetcraftr::core::filter::Error::SetMemberLimit { .. }
-        | packetcraftr::core::filter::Error::InvalidNestingLimit { .. } => {
-            "simplify the filter to fit the stable bounds"
-        }
-        // Covers `Empty` and `Syntax`, and — because `filter::Error` is
-        // non-exhaustive — any variant added later.
-        _ => "check the filter syntax; see `packetcraftr read --help` for examples",
-    };
-    CliError::from_classification(
-        Classification::new("cli.filter", Some(remediation)),
-        error.to_string(),
-        Vec::new(),
-    )
+    CliError::classified(error)
 }
 
 #[cfg(test)]

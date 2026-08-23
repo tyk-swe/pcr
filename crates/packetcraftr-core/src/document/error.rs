@@ -3,6 +3,8 @@
 
 use thiserror::Error;
 
+use crate::error::{Classification, Classified};
+
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum Error {
@@ -42,4 +44,26 @@ pub enum Error {
         format: &'static str,
         message: String,
     },
+}
+
+impl Classified for Error {
+    fn classification(&self) -> Classification {
+        match self {
+            Self::Serialize { .. } => Classification::new(
+                "internal.document_serialize",
+                Some("repair the packet document serializer"),
+            ),
+            Self::SizeLimit { .. }
+            | Self::Parse { .. }
+            | Self::Schema { .. }
+            | Self::LayerLimit { .. }
+            | Self::NestingLimit { .. }
+            | Self::InvalidLimit { .. }
+            | Self::UnknownProtocol { .. }
+            | Self::Layer { .. } => Classification::new(
+                "cli.packet_document",
+                Some("provide a valid packet document within the configured limits"),
+            ),
+        }
+    }
 }

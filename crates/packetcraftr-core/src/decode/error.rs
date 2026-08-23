@@ -3,6 +3,7 @@
 
 use thiserror::Error;
 
+use crate::error::{Classification, Classified};
 use crate::layer::FieldError;
 
 #[derive(Debug, Error)]
@@ -31,4 +32,26 @@ pub enum Error {
     },
     #[error("invalid frame: {0}")]
     InvalidFrame(#[from] crate::frame::Error),
+}
+
+impl Classified for Error {
+    fn classification(&self) -> Classification {
+        match self {
+            Self::PacketSizeLimit { .. } | Self::LayerLimit { .. } => Classification::new(
+                "packet.decode_limit",
+                Some("reduce the frame or raise the finite decode limit"),
+            ),
+            Self::MissingRootCodec { .. } | Self::InvalidFrame(_) => Classification::new(
+                "packet.decode",
+                Some("repair the frame or register a root codec before decoding"),
+            ),
+            Self::InvalidCodecCursor { .. }
+            | Self::InvalidCodecLayout { .. }
+            | Self::CodecLayerMismatch { .. }
+            | Self::InvalidLayer { .. } => Classification::new(
+                "internal.codec_contract",
+                Some("repair the codec to honor the layer decoding contract"),
+            ),
+        }
+    }
 }

@@ -3,6 +3,7 @@
 
 use thiserror::Error;
 
+use crate::error::{Classification, Classified};
 use crate::layer::FieldError;
 
 #[derive(Debug, Error)]
@@ -53,4 +54,37 @@ pub enum Error {
     InvalidPaddingBoundary { index: usize, outside_layer: usize },
     #[error("padding layer at index {index} has no enclosing link-layer frame")]
     PaddingWithoutLinkLayer { index: usize },
+}
+
+impl Classified for Error {
+    fn classification(&self) -> Classification {
+        match self {
+            Self::LayerLimit { .. }
+            | Self::PacketSizeLimit { .. }
+            | Self::AllocationFailure { .. }
+            | Self::LengthOverflow => Classification::new(
+                "packet.build_limit",
+                Some("reduce the packet or raise the finite build limit"),
+            ),
+            Self::EmptyPacket
+            | Self::UnboundLayers { .. }
+            | Self::InvalidLayer { .. }
+            | Self::Codec { .. }
+            | Self::InvalidPaddingBoundary { .. }
+            | Self::PaddingWithoutLinkLayer { .. } => Classification::new(
+                "packet.build",
+                Some("correct the packet layers and fields before building"),
+            ),
+            Self::MissingCodec { .. } => Classification::new(
+                "packet.unknown_protocol",
+                Some("register a codec for every packet layer before building"),
+            ),
+            Self::MaterializedProtocolMismatch { .. } | Self::InvalidCodecLayout { .. } => {
+                Classification::new(
+                    "internal.codec_contract",
+                    Some("repair the codec to honor the layer encoding contract"),
+                )
+            }
+        }
+    }
 }

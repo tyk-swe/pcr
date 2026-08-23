@@ -20,8 +20,6 @@ pub enum Error {
     },
     #[error("fuzz live timeout {value:?} is invalid; maximum is {maximum:?}")]
     InvalidTimeout { value: Duration, maximum: Duration },
-    #[error("permissive or malformed fuzz cases require an explicit live opt-in")]
-    MalformedLiveOptInRequired,
     #[error("fuzz worst-case duration {actual:?} exceeds the configured limit of {limit:?}")]
     DurationLimit { actual: Duration, limit: Duration },
     #[error("fuzz authorization failed: {0}")]
@@ -56,10 +54,6 @@ impl Classified for Error {
             Self::DurationLimit { .. } => Classification::new(
                 "policy.fuzz_resource_limit",
                 Some("reduce cases, packet sizes, timeout, or rate delay"),
-            ),
-            Self::MalformedLiveOptInRequired => Classification::new(
-                "policy.fuzz_malformed_opt_in",
-                Some("pass the explicit malformed-live opt-in and authorize permissive packets"),
             ),
             Self::Authorization(error) => error.classification(),
             Self::Execution { source, .. } => source.classification(),

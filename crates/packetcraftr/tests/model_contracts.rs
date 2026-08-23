@@ -203,7 +203,7 @@ fn policy_validates_address_and_operation_bounds() {
             ..defaults.clone()
         }
         .validate(),
-        Err(TargetError::InvalidAddressLimit { value: 0, .. })
+        Err(policy::Error::InvalidAddressLimit { value: 0, .. })
     ));
     assert!(matches!(
         policy::Policy {
@@ -211,7 +211,7 @@ fn policy_validates_address_and_operation_bounds() {
             ..defaults.clone()
         }
         .validate(),
-        Err(TargetError::InvalidAddressLimit { .. })
+        Err(policy::Error::InvalidAddressLimit { .. })
     ));
 
     defaults
@@ -358,9 +358,17 @@ fn stats_checked_add_is_complete_and_atomic_on_overflow() {
 fn public_errors_retain_stable_policy_and_target_classification() {
     let cases: Vec<(Box<dyn Classified>, &str, Kind)> = vec![
         (
-            Box::new(policy::Error::PermissivePacket),
-            "policy.permissive_packet",
+            Box::new(policy::Error::PermissiveLiveOptInRequired),
+            "policy.permissive_live_opt_in",
             Kind::Policy,
+        ),
+        (
+            Box::new(policy::Error::InvalidAddressLimit {
+                value: 0,
+                maximum: policy::MAX_RESOLVED_ADDRESSES,
+            }),
+            "cli.policy_limit",
+            Kind::Cli,
         ),
         (
             Box::new(policy::Error::InvalidPacketSemantics {

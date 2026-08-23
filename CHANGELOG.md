@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** build, decode, document, expression, filter, and frame errors now carry their own classification codes (`packet.build*`, `packet.decode*`, `cli.packet_document`, `cli.packet_expression`, `cli.filter*`, `packet.frame_length`) instead of the generic `packet.error`; analysis, replay, and live-workflow errors that wrap them delegate to those codes.
+- **Breaking:** `fuzz --live` and `replay` use `--allow-permissive-live` (was `--allow-malformed-live`); the single denial code for a missing permissive opt-in is `policy.permissive_live_opt_in` (`policy.permissive_packet` and `policy.fuzz_malformed_opt_in` are removed). `Policy::validate` reports `policy::Error::InvalidAddressLimit` (`cli.policy_limit`).
 - **Breaking:** `packetcraftr_core::error::Classification::new` now takes `(code, remediation)` and derives `Kind` from the code prefix; `BoundaryError::internal_execution`/`execution_validation` are removed.
 - Live integrity rejection now matches the exact built-in checksum diagnostic
   codes (`packetcraftr_core::diagnostic::CHECKSUM_FAILURE_CODES`) instead of

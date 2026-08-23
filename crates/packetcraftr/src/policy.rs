@@ -1,21 +1,58 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Live traffic authorization policy.
+
 use std::net::IpAddr;
 
+use thiserror::Error;
+
+use packetcraftr_core::error::{Classification, Classified};
 use packetcraftr_core::{Packet, protocol::link::Ethernet, semantics};
 use packetcraftr_netio::{link::MacAddress, route::Plan};
 
-use super::super::address::is_public;
-use super::super::target::{Authorized, Error as TargetError, Hostname, Resolver, Target};
-use super::contract::{Error, MAX_RESOLVED_ADDRESSES, Policy};
+use crate::address::is_public;
+use crate::target::{Authorized, Error as TargetError, Hostname, Resolver, Target};
+
+pub const DEFAULT_MAX_RESOLVED_ADDRESSES: usize = 64;
+pub const MAX_RESOLVED_ADDRESSES: usize = 4_096;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Policy {
+    pub allow_public_destinations: bool,
+    /// Hostname resolution is a separate opt-in because a name has no stable
+    /// address scope until after a resolver side effect.
+    pub allow_hostname_resolution: bool,
+    pub allow_permissive_packets: bool,
+    /// Single opt-in for an explicit outer IP or Ethernet source the selected
+    /// interface does not own. Replay transmits captured sources verbatim and
+    /// does not consult it.
+    pub allow_source_spoofing: bool,
+    pub max_packets_per_operation: u64,
+    pub max_bytes_per_operation: u64,
+    pub max_resolved_addresses: usize,
+}
+
+impl Default for Policy {
+    fn default() -> Self {
+        Self {
+            allow_public_destinations: false,
+            allow_hostname_resolution: false,
+            allow_permissive_packets: false,
+            allow_source_spoofing: false,
+            max_packets_per_operation: 10_000,
+            max_bytes_per_operation: 256 * 1024 * 1024,
+            max_resolved_addresses: DEFAULT_MAX_RESOLVED_ADDRESSES,
+        }
+    }
+}
 
 impl Policy {
     /// Validates policy configuration before resolver, route, capture, or
     /// transmission providers are invoked.
-    pub fn validate(&self) -> Result<(), TargetError> {
+    pub fn validate(&self) -> Result<(), Error> {
         if !(1..=MAX_RESOLVED_ADDRESSES).contains(&self.max_resolved_addresses) {
-            return Err(TargetError::InvalidAddressLimit {
+            return Err(Error::InvalidAddressLimit {
                 value: self.max_resolved_addresses,
                 maximum: MAX_RESOLVED_ADDRESSES,
             });
@@ -33,9 +70,6 @@ impl Policy {
 
     /// Applies the operation-wide packet and exact wire-byte budgets together.
     /// Callers provide prospective totals before starting live side effects.
-    /// Authorization seam used by the bounded workflows. Not part of the
-    /// documented API.
-    #[doc(hidden)]
     pub fn authorize_operation(&self, packets: u64, wire_bytes: u64) -> Result<(), Error> {
         if packets > self.max_packets_per_operation {
             return Err(Error::PacketLimit {
@@ -48,6 +82,18 @@ impl Policy {
                 actual: wire_bytes,
                 limit: self.max_bytes_per_operation,
             });
+        }
+        Ok(())
+    }
+
+    /// Authorizes the explicit permissive-live opt-in and policy approval.
+    pub fn authorize_permissive(
+        &self,
+        requires_live_opt_in: bool,
+        allow_permissive_live: bool,
+    ) -> Result<(), Error> {
+        if requires_live_opt_in && !(allow_permissive_live && self.allow_permissive_packets) {
+            return Err(Error::PermissiveLiveOptInRequired);
         }
         Ok(())
     }
@@ -161,5 +207,71 @@ impl Policy {
             declared: target.clone(),
             addresses,
         })
+    }
+}
+
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Error {
+    #[error("traffic policy denies public destination {destination}")]
+    PublicDestination { destination: IpAddr },
+    #[error("traffic policy cannot authorize packet routing semantics: {reason}")]
+    InvalidPacketSemantics { reason: String },
+    #[error("traffic policy denies hostname resolution for {hostname}")]
+    HostnameResolution { hostname: String },
+    #[error(
+        "permissively built packets require both --allow-permissive-live and --allow-permissive-packets"
+    )]
+    PermissiveLiveOptInRequired,
+    #[error("traffic policy denies source {packet_source} that interface {interface} does not own")]
+    SourceNotInterfaceOwned {
+        packet_source: String,
+        interface: String,
+    },
+    #[error("operation packet count {actual} exceeds policy limit {limit}")]
+    PacketLimit { actual: u64, limit: u64 },
+    #[error("operation byte count {actual} exceeds policy limit {limit}")]
+    ByteLimit { actual: u64, limit: u64 },
+    #[error("resolved-address limit {value} is invalid; expected 1..={maximum}")]
+    InvalidAddressLimit { value: usize, maximum: usize },
+}
+
+impl Classified for Error {
+    fn classification(&self) -> Classification {
+        let (code, remediation) = match self {
+            Self::PublicDestination { .. } => (
+                "policy.public_destination",
+                "explicitly authorize public destinations only for networks you are permitted to test",
+            ),
+            Self::InvalidPacketSemantics { .. } => (
+                "policy.invalid_packet_semantics",
+                "repair malformed or unsupported route-bearing packet fields before live transmission",
+            ),
+            Self::HostnameResolution { .. } => (
+                "policy.hostname_resolution",
+                "explicitly authorize hostname resolution, then independently authorize every resolved address",
+            ),
+            Self::PermissiveLiveOptInRequired => (
+                "policy.permissive_live_opt_in",
+                "set the per-operation --allow-permissive-live opt-in and authorize permissive packets in the traffic policy",
+            ),
+            Self::SourceNotInterfaceOwned { .. } => (
+                "policy.source_ownership",
+                "use an interface-owned source, select it with the route source option, or explicitly authorize source spoofing",
+            ),
+            Self::PacketLimit { .. } => (
+                "policy.packet_limit",
+                "reduce the operation packet count or deliberately raise the configured traffic budget",
+            ),
+            Self::ByteLimit { .. } => (
+                "policy.byte_limit",
+                "reduce the operation byte count or deliberately raise the configured traffic budget",
+            ),
+            Self::InvalidAddressLimit { .. } => (
+                "cli.policy_limit",
+                "use a resolved-address limit between 1 and the documented maximum",
+            ),
+        };
+        Classification::new(code, Some(remediation))
     }
 }

@@ -158,7 +158,8 @@ impl Authorizer for AllowAll {
         _packets: &[Packet],
         _destination: Option<std::net::IpAddr>,
         _maximum_wire_bytes: u64,
-        _requires_malformed_live: bool,
+        _requires_permissive_live: bool,
+        _allow_permissive_live: bool,
     ) -> Result<(), BoundaryError> {
         Ok(())
     }

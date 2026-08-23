@@ -146,11 +146,7 @@ where
             self.authorize_built(&preliminary, options.send.allow_permissive_live)?;
             self.authorize_final_wire(&preliminary, &plan)?;
             total_bytes = total_bytes
-                .checked_add(u64::try_from(preliminary.bytes.len()).unwrap_or(u64::MAX))
-                .ok_or(crate::policy::Error::ByteLimit {
-                    actual: u64::MAX,
-                    limit: self.policy.max_bytes_per_operation,
-                })?;
+                .saturating_add(u64::try_from(preliminary.bytes.len()).unwrap_or(u64::MAX));
             self.policy.authorize_operation(packet_count, total_bytes)?;
             if let Some(first_packet) = planned_packets.first()
                 && (first_packet.plan.decision.interface != plan.decision.interface

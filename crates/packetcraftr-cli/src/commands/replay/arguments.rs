@@ -61,9 +61,9 @@ pub(crate) struct Args {
     /// Maximum PCAPNG interfaces accepted from the input.
     #[arg(long, default_value_t = capture::DEFAULT_INTERFACE_LIMIT)]
     pub(crate) max_interfaces: usize,
-    /// Per-operation opt-in required when dissection preserves malformed bytes.
+    /// Per-operation opt-in required for a permissively built live frame.
     #[arg(long)]
-    pub(crate) allow_malformed_live: bool,
+    pub(crate) allow_permissive_live: bool,
     /// Replay only frames matching a display filter; skipped frames are never
     /// authorized or transmitted.
     #[arg(long, value_name = "EXPR")]

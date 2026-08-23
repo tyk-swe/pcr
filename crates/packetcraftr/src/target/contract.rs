@@ -159,8 +159,6 @@ pub enum Error {
         hostname: String,
         reason: &'static str,
     },
-    #[error("resolved-address limit {value} is invalid; expected 1..={maximum}")]
-    InvalidAddressLimit { value: usize, maximum: usize },
     #[error("hostname resolution for {hostname} failed: {message}")]
     Resolver { hostname: String, message: String },
     #[error("hostname {hostname} did not resolve to any addresses")]
@@ -176,7 +174,7 @@ pub enum Error {
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
-            Self::InvalidHostname { .. } | Self::InvalidAddressLimit { .. } => Classification::new(
+            Self::InvalidHostname { .. } => Classification::new(
                 "cli.live_target",
                 Some("use a valid IP address or bounded ASCII DNS hostname"),
             ),

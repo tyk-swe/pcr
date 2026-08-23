@@ -57,8 +57,8 @@ pub struct LiveOptions {
     pub timeout: Duration,
     pub cases_per_second: Option<u32>,
     pub destination: Option<IpAddr>,
-    /// Independent call-site opt-in for a permissive/malformed live frame.
-    pub allow_malformed_live: bool,
+    /// Independent call-site opt-in for a permissive live frame.
+    pub allow_permissive_live: bool,
     pub limits: LiveLimits,
 }
 
@@ -68,7 +68,7 @@ impl Default for LiveOptions {
             timeout: Duration::from_secs(1),
             cases_per_second: None,
             destination: None,
-            allow_malformed_live: false,
+            allow_permissive_live: false,
             limits: LiveLimits::default(),
         }
     }

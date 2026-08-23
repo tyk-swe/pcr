@@ -125,6 +125,24 @@ fn every_resolved_address_is_authorized_and_duplicates_are_removed() {
 }
 
 #[test]
+fn permissive_live_requires_both_opt_ins() {
+    let policy = policy::Policy::default();
+    assert!(matches!(
+        policy.authorize_permissive(true, false),
+        Err(policy::Error::PermissiveLiveOptInRequired)
+    ));
+    assert!(policy.authorize_permissive(false, false).is_ok());
+    assert!(
+        policy::Policy {
+            allow_permissive_packets: true,
+            ..policy
+        }
+        .authorize_permissive(true, true)
+        .is_ok()
+    );
+}
+
+#[test]
 fn denied_resolved_address_never_reaches_route_neighbor_or_transmit_providers() {
     let resolver = CountingResolver {
         calls: AtomicUsize::new(0),

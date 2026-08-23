@@ -20,21 +20,21 @@ use super::super::wire::replay_network_envelope;
 pub struct SystemAuthorizer {
     policy: crate::policy::Policy,
     registry: Arc<Registry>,
-    allow_malformed_live: bool,
+    allow_permissive_live: bool,
 }
 
 impl SystemAuthorizer {
     /// # Panics
     ///
     /// Panics if the statically defined built-in protocol registry is invalid.
-    pub fn new(policy: crate::policy::Policy, allow_malformed_live: bool) -> Self {
+    pub fn new(policy: crate::policy::Policy, allow_permissive_live: bool) -> Self {
         Self {
             policy,
             registry: Arc::new(
                 packetcraftr_core::protocol::builtin::registry()
                     .expect("the built-in protocol registry must be valid"),
             ),
-            allow_malformed_live,
+            allow_permissive_live,
         }
     }
 
@@ -75,17 +75,7 @@ impl SystemAuthorizer {
     fn decode_frame(&self, frame: &Frame) -> Result<decode::DecodedPacket, BoundaryError> {
         decode::Dissector::new(Arc::clone(&self.registry))
             .decode(frame.clone(), decode::Options::default())
-            .map_err(|source| {
-                BoundaryError::with_source(
-                    source.to_string(),
-                    Classification::new(
-                        "packet.decode",
-                        Some("repair the frame or link type before authorizing live replay"),
-                    ),
-                    Vec::new(),
-                    source,
-                )
-            })
+            .map_err(BoundaryError::from_error)
     }
 
     fn rebuild_frame(
@@ -133,24 +123,9 @@ impl SystemAuthorizer {
                 Vec::new(),
             ));
         }
-        if rebuilt.requires_live_opt_in && !self.allow_malformed_live {
-            return Err(BoundaryError::new(
-                "permissive or malformed captured bytes require --allow-malformed-live",
-                Classification::new(
-                    "policy.permissive_live_opt_in",
-                    Some(
-                        "set the per-operation malformed-live opt-in in addition to policy approval",
-                    ),
-                ),
-                Vec::new(),
-            ));
-        }
-        if rebuilt.requires_live_opt_in && !self.policy.allow_permissive_packets {
-            return Err(BoundaryError::from_error(
-                crate::policy::Error::PermissivePacket,
-            ));
-        }
-        Ok(())
+        self.policy
+            .authorize_permissive(rebuilt.requires_live_opt_in, self.allow_permissive_live)
+            .map_err(BoundaryError::from_error)
     }
 }
 

@@ -1,16 +1,17 @@
 # PacketcraftR
 
-PacketcraftR is a Rust library and CLI for exact packet construction, bounded
-dissection, capture-file I/O, offline analysis, and policy-gated live
-networking.
+PacketcraftR is a Rust library and CLI for protocol development,
+interoperability testing, and authorized network diagnostics. It provides
+exact packet construction, bounded dissection, capture-file I/O, offline
+analysis, and policy-gated live networking.
 
 Current release: pre-1.0 beta `0.5.0-beta.1`. Rust APIs and versioned
 serialized contracts may change between beta releases; review the
 [changelog](CHANGELOG.md) before upgrading.
 
-> **Live-network warning:** run live commands only on systems and networks you
-> own or are explicitly authorized to test. PacketcraftR opt-in flags are
-> technical controls, not permission.
+> **Authorized use:** PacketcraftR is designed for controlled labs, protocol
+> testing, and diagnostics on systems and networks you own or are explicitly
+> authorized to test. Its opt-in flags are technical controls, not permission.
 
 ## Quick Start
 

@@ -3,6 +3,9 @@
 
 //! Policy-gated live workflows and versioned, render-neutral output.
 //!
+//! The intended use is protocol engineering, interoperability testing, and
+//! authorized network diagnostics.
+//!
 //! [`core`] exposes portable packet mechanics, [`analysis`] exposes offline
 //! capture analysis, and [`netio`] exposes provider contracts and native I/O.
 //! Live entry points such as [`scan`], [`dns`], and [`send`] require a

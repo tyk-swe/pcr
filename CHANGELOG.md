@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Clarified the intended protocol-engineering and authorized-diagnostics scope
+  in the README, agent guidance, and crate documentation.
 - Live integrity rejection now matches the exact built-in checksum diagnostic
   codes (`packetcraftr_core::diagnostic::CHECKSUM_FAILURE_CODES`) instead of
   searching diagnostic text, so unrelated external diagnostics cannot affect

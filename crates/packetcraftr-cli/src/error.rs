@@ -111,10 +111,11 @@ pub(crate) fn with_cleanup(error: BoundaryError, cleanup: &net::Error) -> Bounda
         causes.push(operation.clone());
     }
     causes.push(cleanup.to_string());
-    BoundaryError::new(
+    BoundaryError::with_source(
         format!("{operation}; capture shutdown also failed: {cleanup}"),
         classification,
         causes,
+        error,
     )
     .with_context(context)
 }
@@ -133,6 +134,8 @@ pub(crate) const fn test_classification(
 
 #[cfg(test)]
 mod tests {
+    use std::error::Error as _;
+
     use super::*;
 
     #[test]
@@ -164,6 +167,10 @@ mod tests {
         assert_eq!(
             error.causes(),
             vec!["capture failed".to_owned(), cleanup.to_string()]
+        );
+        assert_eq!(
+            error.source().map(ToString::to_string),
+            Some("capture failed".to_owned())
         );
 
         let error = with_cleanup(

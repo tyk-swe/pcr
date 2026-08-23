@@ -4,11 +4,14 @@
 //! Live traffic authorization policy.
 
 use std::net::IpAddr;
+use std::sync::{Arc, OnceLock};
 
 use thiserror::Error;
 
 use packetcraftr_core::error::{Classification, Classified};
-use packetcraftr_core::{Packet, protocol::link::Ethernet, semantics};
+use packetcraftr_core::frame::{Frame, LinkType};
+use packetcraftr_core::registry::Registry;
+use packetcraftr_core::{Packet, decode::Dissector, protocol::link::Ethernet, semantics};
 use packetcraftr_netio::{link::MacAddress, route::Plan};
 
 use crate::address::is_public;
@@ -48,6 +51,57 @@ impl Default for Policy {
 }
 
 impl Policy {
+    /// Decodes and authorizes the exact bytes that will be placed on the wire.
+    pub(crate) fn authorize_final_wire(
+        &self,
+        bytes: Vec<u8>,
+        link_type: LinkType,
+        plan: &Plan,
+    ) -> Result<(), Error> {
+        static REGISTRY: OnceLock<Result<Arc<Registry>, String>> = OnceLock::new();
+        let registry = REGISTRY
+            .get_or_init(|| {
+                packetcraftr_core::protocol::builtin::registry()
+                    .map(Arc::new)
+                    .map_err(|error| error.to_string())
+            })
+            .as_ref()
+            .map_err(|reason| Error::InvalidPacketSemantics {
+                reason: reason.clone(),
+            })?;
+        self.authorize_link_type(link_type, registry, "final-wire")?;
+        let frame =
+            Frame::new(std::time::SystemTime::UNIX_EPOCH, link_type, bytes).map_err(|error| {
+                Error::InvalidPacketSemantics {
+                    reason: error.to_string(),
+                }
+            })?;
+        let decoded = Dissector::new(Arc::clone(registry))
+            .decode(frame, packetcraftr_core::decode::Options::default())
+            .map_err(|error| Error::InvalidPacketSemantics {
+                reason: error.to_string(),
+            })?;
+        self.authorize_packet_destinations(&decoded.packet)?;
+        self.authorize_packet_sources(&decoded.packet, plan)
+    }
+
+    pub(crate) fn authorize_link_type(
+        &self,
+        link_type: LinkType,
+        registry: &Registry,
+        operation: &str,
+    ) -> Result<(), Error> {
+        if registry.root_for_link_type(link_type.0).is_none() {
+            return Err(Error::InvalidPacketSemantics {
+                reason: format!(
+                    "{operation} authorization does not support link type {}",
+                    link_type.0
+                ),
+            });
+        }
+        Ok(())
+    }
+
     /// Validates policy configuration before resolver, route, capture, or
     /// transmission providers are invoked.
     pub fn validate(&self) -> Result<(), Error> {

@@ -103,8 +103,8 @@ where
         else {
             break;
         };
-        account_bytes(progress, &frame, policy)?;
         let source_frame = increment_counter(progress.frames_captured, "capture frame count")?;
+        account_frame(progress, source_frame, &frame, policy)?;
         if let Some(selector) = selector {
             match selector.keep(source_frame, &frame) {
                 Ok(true) => {}
@@ -123,8 +123,9 @@ where
     Ok(())
 }
 
-fn account_bytes(
+fn account_frame(
     progress: &mut Progress,
+    prospective_frames: u64,
     frame: &Frame,
     policy: &packetcraftr::policy::Policy,
 ) -> Result<(), BoundaryError> {
@@ -139,7 +140,7 @@ fn account_bytes(
         .checked_add(frame_bytes)
         .ok_or_else(|| failure(INVARIANT, "capture output byte accounting overflowed"))?;
     policy
-        .authorize_operation(progress.frames_captured, bytes)
+        .authorize_operation(prospective_frames, bytes)
         .map_err(BoundaryError::from_error)?;
     progress.captured_bytes = bytes;
     Ok(())

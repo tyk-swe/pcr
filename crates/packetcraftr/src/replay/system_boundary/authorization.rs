@@ -55,21 +55,9 @@ impl SystemAuthorizer {
     }
 
     fn validate_link_type(&self, frame: &Frame) -> Result<(), BoundaryError> {
-        if self
-            .registry
-            .root_for_link_type(frame.link_type.0)
-            .is_some()
-        {
-            return Ok(());
-        }
-        Err(BoundaryError::from_error(
-            crate::policy::Error::InvalidPacketSemantics {
-                reason: format!(
-                    "replay authorization does not support link type {}",
-                    frame.link_type.0
-                ),
-            },
-        ))
+        self.policy
+            .authorize_link_type(frame.link_type, &self.registry, "replay")
+            .map_err(BoundaryError::from_error)
     }
 
     fn decode_frame(&self, frame: &Frame) -> Result<decode::DecodedPacket, BoundaryError> {

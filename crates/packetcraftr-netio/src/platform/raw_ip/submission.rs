@@ -22,11 +22,29 @@ use windows::Win32::Networking::WinSock::{
     SOCKET, SOCKET_ERROR, WSAGetLastError, setsockopt,
 };
 
-use super::preparation::PreparedRawIp;
-use crate::Error as LiveIoError;
-use crate::interface::Id as InterfaceId;
+use super::preparation::{PreparedRawIp, prepare};
+use crate::{
+    Error as LiveIoError,
+    interface::Id as InterfaceId,
+    transmit::{IoSendReport, Layer3Frame, Submission},
+};
 
 const IPPROTO_RAW: i32 = 255;
+
+pub(in crate::platform) fn send_layer3(
+    frame: Layer3Frame<'_>,
+) -> Result<IoSendReport, LiveIoError> {
+    let packet = prepare(frame)?;
+    #[cfg(target_os = "macos")]
+    validate_platform_support(&packet)?;
+    let submission = Submission::start();
+    let actual = send(&packet).map_err(|error| map_raw_error(&packet.interface, error))?;
+    let expected = packet.submission.len();
+    if actual != expected {
+        return Err(LiveIoError::PartialSend { expected, actual });
+    }
+    Ok(submission.complete(packet.wire_bytes.len(), packet.wire_bytes))
+}
 
 #[derive(Debug)]
 pub(super) struct RawSocketError {

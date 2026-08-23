@@ -15,7 +15,7 @@ use crate::{
     transmit::{IoSendReport, Layer2Frame, Submission},
 };
 
-pub(in crate::platform::npcap) fn send_layer2(
+pub(in crate::platform) fn send_layer2(
     frame: Layer2Frame<'_>,
 ) -> Result<IoSendReport, LiveIoError> {
     let interface = &frame.route().plan.decision.interface;

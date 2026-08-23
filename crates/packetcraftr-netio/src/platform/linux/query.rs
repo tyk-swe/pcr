@@ -20,13 +20,36 @@ use rtnetlink::{
     },
 };
 
-use super::os_error;
+use super::{os_error, worker::with_netlink};
 use crate::{
     interface::{Id as InterfaceId, InterfaceAddress, InterfaceFlags, InterfaceInfo},
     link::{Capability, MacAddress},
-    route::{Decision, NativeRouteSnapshot, SelectionReason, SystemError, finish_route},
+    route::{
+        Decision, NativeRouteSnapshot, SelectionReason, SystemError, find_interface, finish_route,
+        interface_decision, validate_preferred_source_family,
+    },
 };
 use packetcraftr_core::frame::LinkType;
+
+pub(in crate::platform) fn interfaces() -> Result<Vec<InterfaceInfo>, SystemError> {
+    with_netlink(|handle| async move { query_interfaces(&handle).await })
+}
+
+pub(in crate::platform) fn route(
+    destination: IpAddr,
+    interface_hint: Option<&InterfaceId>,
+    preferred_source: Option<IpAddr>,
+) -> Result<Decision, SystemError> {
+    validate_preferred_source_family(destination, preferred_source)?;
+    let interface_hint = interface_hint.cloned();
+    with_netlink(move |handle| query_route(handle, destination, interface_hint, preferred_source))
+}
+
+pub(in crate::platform) fn interface_route(
+    requested: &InterfaceId,
+) -> Result<Decision, SystemError> {
+    interface_decision(find_interface(&interfaces()?, requested)?)
+}
 
 pub(super) async fn query_route(
     handle: Handle,

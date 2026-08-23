@@ -1,9 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Owned native capture worker and bounded queue shared by libpcap and Npcap.
-
-#![forbid(unsafe_code)]
+//! Shared native capture packets, source contracts, and backend conversions.
 
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};
@@ -15,15 +13,7 @@ use crate::{
     Error as LiveIoError, capture::Metadata as CaptureMetadata, interface::Id as InterfaceId,
 };
 
-pub(super) use session::NativeCaptureSession;
-pub(super) use time::{monotonic_packet_time, system_time};
-
-mod queue;
-mod session;
-mod time;
-mod worker;
-
-pub(super) struct NativeCapturedPacket {
+pub(in crate::platform) struct NativeCapturedPacket {
     pub timestamp: SystemTime,
     /// Conservative monotonic time derived from the kernel packet timestamp.
     pub received_at: Option<Instant>,
@@ -33,24 +23,24 @@ pub(super) struct NativeCapturedPacket {
 }
 
 #[derive(Clone, Copy, Debug, Default)]
-pub(super) struct NativeCaptureStatistics {
+pub(in crate::platform) struct NativeCaptureStatistics {
     pub capture_dropped_frames: u32,
     pub network_dropped_frames: u32,
     pub interface_dropped_frames: u32,
 }
 
-pub(super) enum NativeCaptureEvent {
+pub(in crate::platform) enum NativeCaptureEvent {
     Packet(NativeCapturedPacket),
     Timeout,
     Closed,
 }
 
-pub(super) trait NativeCaptureSource: Send {
+pub(in crate::platform) trait NativeCaptureSource: Send {
     fn next_event(&mut self) -> Result<NativeCaptureEvent, LiveIoError>;
     fn statistics(&mut self) -> Result<NativeCaptureStatistics, LiveIoError>;
 }
 
-pub(super) trait CaptureInterrupt: Send + Sync {
+pub(in crate::platform) trait CaptureInterrupt: Send + Sync {
     fn interrupt(&self);
 }
 
@@ -73,7 +63,7 @@ const DLT_PKTAP: u32 = 149;
 #[cfg(target_os = "macos")]
 const LINKTYPE_PKTAP: LinkType = LinkType(258);
 
-pub(super) fn canonical_link_type(datalink: u32) -> LinkType {
+pub(in crate::platform) fn canonical_link_type(datalink: u32) -> LinkType {
     match datalink {
         DLT_ATM_RFC1483 => LINKTYPE_ATM_RFC1483,
         DLT_RAW => LinkType::RAW,
@@ -88,7 +78,7 @@ pub(super) fn canonical_link_type(datalink: u32) -> LinkType {
     }
 }
 
-pub(super) fn validate_effective_snapshot_length(
+pub(in crate::platform) fn validate_effective_snapshot_length(
     backend: &str,
     interface: &InterfaceId,
     requested: usize,
@@ -119,7 +109,7 @@ pub(super) fn validate_effective_snapshot_length(
     Ok(effective)
 }
 
-pub(super) struct NativeCaptureParts {
+pub(in crate::platform) struct NativeCaptureParts {
     pub source: Box<dyn NativeCaptureSource>,
     pub interrupt: Arc<dyn CaptureInterrupt>,
     pub metadata: CaptureMetadata,

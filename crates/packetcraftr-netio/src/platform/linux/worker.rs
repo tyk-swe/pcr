@@ -14,12 +14,21 @@ use std::{
 
 use rtnetlink::{Handle, new_connection};
 
-use super::os_error;
 use crate::route::SystemError;
 
 const NETLINK_OPERATION_TIMEOUT: Duration = Duration::from_secs(2);
 const NETLINK_RESPONSE_TIMEOUT: Duration = Duration::from_secs(3);
 const NETLINK_REAPER_POLL_INTERVAL: Duration = Duration::from_millis(10);
+
+pub(in crate::platform) fn os_error(
+    operation: &'static str,
+    error: impl std::fmt::Display,
+) -> SystemError {
+    SystemError::OperatingSystem {
+        operation,
+        message: error.to_string(),
+    }
+}
 
 pub(super) fn with_netlink<F, Fut, T>(operation: F) -> Result<T, SystemError>
 where

@@ -5,13 +5,10 @@
 
 #![forbid(unsafe_code)]
 
+use std::error::Error;
 use std::fmt;
 
 use serde::Serialize;
-
-mod boundary;
-
-pub use boundary::BoundaryError;
 
 /// Stable domain coordinates associated with a classified failure.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
@@ -210,5 +207,106 @@ mod tests {
         };
         assert_eq!(context.to_string(), "frame 3, probe 5, attempt 7, case 9");
         assert_eq!(Context::default().to_string(), "unknown position");
+    }
+}
+
+/// Classified failure propagated across a workflow authorization or execution seam.
+#[derive(Debug)]
+pub struct BoundaryError {
+    message: String,
+    classification: Box<Classification>,
+    context: Option<Box<Context>>,
+    causes: Vec<String>,
+    source: Option<Box<dyn Error + Send + Sync>>,
+}
+
+impl BoundaryError {
+    /// Builds a boundary error from a message and its classification.
+    #[must_use]
+    pub fn new(
+        message: impl Into<String>,
+        classification: Classification,
+        causes: Vec<String>,
+    ) -> Self {
+        Self {
+            message: message.into(),
+            classification: Box::new(classification),
+            context: None,
+            causes,
+            source: None,
+        }
+    }
+
+    /// Erases an owned classified error, retaining it in the source chain.
+    pub fn from_error<E>(error: E) -> Self
+    where
+        E: Classified + Error + Send + Sync + 'static,
+    {
+        let message = error.to_string();
+        let classification = error.classification();
+        let context = error.context();
+        let causes = error.causes();
+        Self {
+            message,
+            classification: Box::new(classification),
+            context: (!context.is_empty()).then(|| Box::new(context)),
+            causes,
+            source: Some(Box::new(error)),
+        }
+    }
+
+    /// Builds a boundary error that reports its own message while retaining
+    /// an unrelated source error.
+    pub fn with_source<E>(
+        message: impl Into<String>,
+        classification: Classification,
+        causes: Vec<String>,
+        source: E,
+    ) -> Self
+    where
+        E: Error + Send + Sync + 'static,
+    {
+        Self {
+            message: message.into(),
+            classification: Box::new(classification),
+            context: None,
+            causes,
+            source: Some(Box::new(source)),
+        }
+    }
+
+    /// Attaches stable domain coordinates to a boundary failure.
+    #[must_use]
+    pub fn with_context(mut self, context: Context) -> Self {
+        self.context = (!context.is_empty()).then(|| Box::new(context));
+        self
+    }
+}
+
+impl fmt::Display for BoundaryError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl Error for BoundaryError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        self.source
+            .as_deref()
+            .map(|source| source as &(dyn Error + 'static))
+    }
+}
+
+impl Classified for BoundaryError {
+    fn classification(&self) -> Classification {
+        *self.classification
+    }
+
+    fn context(&self) -> Context {
+        self.context.as_deref().copied().unwrap_or_default()
+    }
+
+    fn causes(&self) -> Vec<String> {
+        self.causes.clone()
     }
 }

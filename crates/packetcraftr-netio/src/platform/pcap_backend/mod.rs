@@ -1,15 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Npcap implementation for the pinned x86_64 MSVC target.
+//! libpcap-backed Layer 2 capture and injection for Linux and macOS.
 
 #![allow(unsafe_code)]
 
-mod abi;
+mod bpf;
 mod capture;
-mod error;
-mod handles;
-mod loader;
 mod transmit;
 
 pub(super) use capture::open_capture;

@@ -28,7 +28,7 @@ use crate::{
 };
 use bytes::Bytes;
 
-pub(in crate::platform::npcap) fn open_capture(
+pub(in crate::platform) fn open_capture(
     interface: &InterfaceId,
     limits: CaptureQueueLimits,
     capture_filter: Option<&str>,

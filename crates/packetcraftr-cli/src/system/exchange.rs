@@ -5,14 +5,14 @@ use std::time::Duration;
 
 use packetcraftr::{core, netio as net};
 
-use super::super::errors::CliError;
+use packetcraftr::BoundaryError;
 
 pub(crate) fn options(
     send: packetcraftr::send::Options,
     timeout: Duration,
     max_template_packets: usize,
     limits: net::capture::Limits,
-) -> Result<packetcraftr::exchange::Options, CliError> {
+) -> Result<packetcraftr::exchange::Options, BoundaryError> {
     let mut options = packetcraftr::exchange::Options {
         send,
         timeout,
@@ -25,6 +25,6 @@ pub(crate) fn options(
         decode: core::decode::Options::default(),
     };
     options.decode.max_packet_size = limits.snap_length;
-    options.validate().map_err(CliError::classified)?;
+    options.validate().map_err(BoundaryError::from_error)?;
     Ok(options)
 }

@@ -3,17 +3,17 @@
 
 use packetcraftr::{core, output};
 
-use crate::errors::CliError;
 use crate::rendering::{
     NdjsonStream, captured_frame_text, comma_separated, optional_display, output_timestamp_text,
     render_diagnostics_text, render_optional, write_stdout_line,
 };
+use packetcraftr::BoundaryError;
 
 pub(super) fn render_text(
     result: output::traceroute::Result,
     diagnostics: Vec<core::diagnostic::Diagnostic>,
     stats: output::envelope::Stats,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     write_stdout_line(format_args!(
         "target={} resolved={} destination={} strategy={} port={}",
         result.target,
@@ -90,16 +90,16 @@ fn completion_name(value: output::traceroute::Completion) -> &'static str {
 pub(super) fn render_event(
     event: packetcraftr::traceroute::Event,
     stream: &NdjsonStream,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     let (event, diagnostics) =
-        output::traceroute::Event::try_from_traceroute(event).map_err(CliError::classified)?;
+        output::traceroute::Event::try_from_traceroute(event).map_err(BoundaryError::from_error)?;
     stream.emit_data(event, diagnostics)
 }
 
 pub(super) fn render_complete(
     summary: packetcraftr::traceroute::Summary,
     stream: &NdjsonStream,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     let (event, diagnostics, stats) = output::traceroute::Event::complete_from_traceroute(summary);
     stream.complete_with_stats(event, diagnostics, stats)
 }

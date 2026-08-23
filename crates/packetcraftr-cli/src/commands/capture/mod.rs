@@ -13,16 +13,16 @@ use packetcraftr::{netio as net, netio::capture::Provider as _, output};
 
 use self::arguments::Args;
 use super::registry;
-use crate::errors::CliError;
 use crate::filtering::FrameSelector;
 use crate::rendering::NdjsonStream;
 use crate::system::resolve;
+use packetcraftr::BoundaryError;
 
 pub(super) fn run(
     arguments: Args,
     format: output::contract::Format,
     stream: &mut NdjsonStream,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     let Args {
         interface,
         promiscuous,
@@ -34,15 +34,17 @@ pub(super) fn run(
     } = arguments;
     let timeout = Duration::from_millis(timeout_ms);
     if timeout > net::capture::MAX_TIMEOUT || Instant::now().checked_add(timeout).is_none() {
-        return Err(CliError::classified(net::Error::InvalidCaptureTimeout {
-            timeout,
-            maximum: net::capture::MAX_TIMEOUT,
-        }));
+        return Err(BoundaryError::from_error(
+            net::Error::InvalidCaptureTimeout {
+                timeout,
+                maximum: net::capture::MAX_TIMEOUT,
+            },
+        ));
     }
     let limits = limits
         .into_limits()
         .validate()
-        .map_err(CliError::classified)?;
+        .map_err(BoundaryError::from_error)?;
     let registry = registry()?;
     let selector =
         FrameSelector::compile_optional(filter.as_deref(), &registry, limits.snap_length)?;
@@ -57,7 +59,7 @@ pub(super) fn run(
     };
     let capture = net::capture::SystemProvider
         .arm_capture(&request)
-        .map_err(CliError::classified)?;
+        .map_err(BoundaryError::from_error)?;
 
     match format {
         output::contract::Format::Text => {

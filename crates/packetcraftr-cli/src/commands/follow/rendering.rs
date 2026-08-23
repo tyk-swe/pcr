@@ -3,10 +3,10 @@
 
 use packetcraftr::{analysis, output};
 
-use crate::errors::CliError;
 use crate::rendering::{
     NdjsonStream, emit_aggregate, emit_stderr_message, write_raw, write_stdout_line,
 };
+use packetcraftr::BoundaryError;
 
 use analysis::expert::StreamTransport;
 use analysis::follow::{Chunk, Selector, Summary};
@@ -21,7 +21,7 @@ pub(super) fn render_record(
     chunk: Chunk,
     state: &mut State,
     stream: &mut NdjsonStream,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     match format {
         output::contract::Format::Text => write_stdout_line(format_args!(
             "{} #{} {}",
@@ -50,7 +50,7 @@ pub(super) fn render_record(
     }
 }
 
-pub(super) fn render_text(selector: Selector, summary: &Summary) -> Result<(), CliError> {
+pub(super) fn render_text(selector: Selector, summary: &Summary) -> Result<(), BoundaryError> {
     let transport = transport_name(selector.transport);
     match &summary.client_flow {
         Some(flow) => write_stdout_line(format_args!(
@@ -77,7 +77,7 @@ pub(super) fn render_aggregate(
     selector: Selector,
     summary: Summary,
     state: State,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     emit_aggregate(
         output::contract::Command::Follow,
         output::follow::Result::from_summary(
@@ -94,7 +94,7 @@ pub(super) fn render_stream(
     selector: Selector,
     summary: Summary,
     stream: &mut NdjsonStream,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     stream.complete(
         output::follow::Result::from_summary(
             selector.transport.into(),
@@ -106,7 +106,7 @@ pub(super) fn render_stream(
     )
 }
 
-pub(super) fn render_payload_warning(summary: &Summary) -> Result<(), CliError> {
+pub(super) fn render_payload_warning(summary: &Summary) -> Result<(), BoundaryError> {
     if summary.undelivered_bytes == 0 {
         return Ok(());
     }

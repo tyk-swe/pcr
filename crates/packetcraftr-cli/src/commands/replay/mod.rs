@@ -15,10 +15,10 @@ use packetcraftr::{analysis::pcap::Reader, netio as net, output};
 use self::arguments::Args;
 use super::registry;
 use crate::command_options::OfflineCaptureLimitsArgs;
-use crate::errors::CliError;
 use crate::filtering::FrameSelector;
 use crate::input::{open_capture, validate_capture_stream_limits};
 use crate::rendering::NdjsonStream;
+use packetcraftr::BoundaryError;
 
 use conversion::{interface, timing};
 
@@ -37,7 +37,7 @@ pub(super) fn run(
     arguments: Args,
     format: output::contract::Format,
     stream: &mut NdjsonStream,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     let mut prepared = prepare(&arguments)?;
     let filtered = prepared.filter.is_some();
     let selector = prepared
@@ -90,7 +90,7 @@ pub(super) fn run(
     }
 }
 
-fn prepare(arguments: &Args) -> Result<Prepared, CliError> {
+fn prepare(arguments: &Args) -> Result<Prepared, BoundaryError> {
     let policy = arguments.policy.clone().into_policy();
     validate_capture_stream_limits(
         policy.max_packets_per_operation,
@@ -106,7 +106,7 @@ fn prepare(arguments: &Args) -> Result<Prepared, CliError> {
         arguments.max_frame_bytes,
     )?;
     let requested_interface = interface(&arguments.interface)?;
-    policy.validate().map_err(CliError::classified)?;
+    policy.validate().map_err(BoundaryError::from_error)?;
     let limits = packetcraftr::replay::Limits {
         max_frames: policy.max_packets_per_operation,
         max_bytes: policy.max_bytes_per_operation,
@@ -114,7 +114,7 @@ fn prepare(arguments: &Args) -> Result<Prepared, CliError> {
         max_duration: Duration::from_millis(arguments.max_duration_ms),
     }
     .validate()
-    .map_err(CliError::classified)?;
+    .map_err(BoundaryError::from_error)?;
     let reader = open_capture(
         &arguments.path,
         OfflineCaptureLimitsArgs {

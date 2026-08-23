@@ -12,12 +12,13 @@ use packetcraftr::{
 };
 
 use super::execution::{self, shutdown_after_error};
-use crate::errors::CliError;
+use crate::error::{CAPTURE_OUTPUT, OUTPUT_WRITE, failure};
 use crate::filtering::FrameSelector;
 use crate::rendering::{
     CaptureWriter, NdjsonStream, capture_file_format, captured_frame_text, emit_stderr_message,
     render_diagnostics_text, write_plain_line, write_stdout_line,
 };
+use packetcraftr::BoundaryError;
 
 pub(super) fn render_text<C: net::capture::Session>(
     capture: C,
@@ -25,7 +26,7 @@ pub(super) fn render_text<C: net::capture::Session>(
     limits: net::capture::Limits,
     policy: &packetcraftr::policy::Policy,
     selector: Option<&FrameSelector>,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     let outcome = execution::run(
         capture,
         timeout,
@@ -33,8 +34,8 @@ pub(super) fn render_text<C: net::capture::Session>(
         policy,
         selector,
         |frame, source_frame| {
-            let frame =
-                output::frame::Captured::try_from_frame(frame).map_err(CliError::classified)?;
+            let frame = output::frame::Captured::try_from_frame(frame)
+                .map_err(BoundaryError::from_error)?;
             write_stdout_line(format_args!(
                 "{source_frame}: {}",
                 captured_frame_text(&frame)
@@ -61,9 +62,10 @@ pub(super) fn render_hex<C: net::capture::Session>(
     limits: net::capture::Limits,
     policy: &packetcraftr::policy::Policy,
     selector: Option<&FrameSelector>,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     let outcome = execution::run(capture, timeout, limits, policy, selector, |frame, _| {
-        let frame = output::frame::Captured::try_from_frame(frame).map_err(CliError::classified)?;
+        let frame =
+            output::frame::Captured::try_from_frame(frame).map_err(BoundaryError::from_error)?;
         write_plain_line(format_args!("{}", frame.bytes_hex()))
     })?;
     render_diagnostics(&outcome.diagnostics)
@@ -76,7 +78,7 @@ pub(super) fn render_stream<C: net::capture::Session>(
     policy: &packetcraftr::policy::Policy,
     selector: Option<&FrameSelector>,
     stream: &mut NdjsonStream,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     let outcome = execution::run(
         capture,
         timeout,
@@ -85,7 +87,7 @@ pub(super) fn render_stream<C: net::capture::Session>(
         selector,
         |frame, source_frame| {
             let event = output::capture::Event::try_from_frame(source_frame, frame)
-                .map_err(CliError::classified)?;
+                .map_err(BoundaryError::from_error)?;
             stream.emit_data(event, Vec::new())
         },
     )?;
@@ -103,7 +105,7 @@ pub(super) fn render_capture<C: net::capture::Session>(
     limits: net::capture::Limits,
     policy: &packetcraftr::policy::Policy,
     selector: Option<&FrameSelector>,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     let format = match capture_file_format(format) {
         Ok(format) => format,
         Err(error) => return Err(shutdown_after_error(&mut capture, error)),
@@ -118,12 +120,17 @@ pub(super) fn render_capture<C: net::capture::Session>(
     let outcome = execution::run(capture, timeout, limits, policy, selector, |frame, _| {
         writer
             .write_source_frame(source_id, description.clone(), frame)
-            .map_err(|source| CliError::new(5, format!("write capture output failed: {source}")))
+            .map_err(|source| {
+                failure(
+                    OUTPUT_WRITE,
+                    format!("write capture output failed: {source}"),
+                )
+            })
     })?;
     writer
         .into_inner()
         .flush()
-        .map_err(|source| CliError::new(5, format!("write stdout failed: {source}")))?;
+        .map_err(|source| failure(OUTPUT_WRITE, format!("write stdout failed: {source}")))?;
     render_diagnostics(&outcome.diagnostics)
 }
 
@@ -132,10 +139,10 @@ fn initialize_writer<W: Write>(
     format: capture::Format,
     metadata: &net::capture::Metadata,
     policy: &packetcraftr::policy::Policy,
-) -> Result<(CaptureWriter<W>, Interface), CliError> {
+) -> Result<(CaptureWriter<W>, Interface), BoundaryError> {
     let snap_len = u32::try_from(metadata.snap_length).map_err(|_| {
-        CliError::new(
-            5,
+        failure(
+            CAPTURE_OUTPUT,
             "initialize capture output failed: backend snapshot length exceeds the capture-file domain",
         )
     })?;
@@ -163,32 +170,40 @@ fn initialize_writer<W: Write>(
             },
         ),
     }
-    .map_err(|source| CliError::new(5, format!("initialize capture output failed: {source}")))?;
+    .map_err(|source| {
+        failure(
+            OUTPUT_WRITE,
+            format!("initialize capture output failed: {source}"),
+        )
+    })?;
     let mut writer = CaptureWriter::for_source_interfaces(writer);
     writer
         .add_source_interface(Some(metadata.interface.index), description.clone())
         .map_err(|source| {
-            CliError::new(5, format!("initialize capture output failed: {source}"))
+            failure(
+                OUTPUT_WRITE,
+                format!("initialize capture output failed: {source}"),
+            )
         })?;
     writer
         .set_stream_limits(Limits {
             max_frames: policy.max_packets_per_operation,
             max_bytes: policy.max_bytes_per_operation,
         })
-        .map_err(CliError::classified)?;
+        .map_err(BoundaryError::from_error)?;
     Ok((writer, description))
 }
 
-fn pcapng_max_size(snap_length: usize) -> Result<usize, CliError> {
+fn pcapng_max_size(snap_length: usize) -> Result<usize, BoundaryError> {
     snap_length.checked_add(47).ok_or_else(|| {
-        CliError::new(
-            5,
+        failure(
+            CAPTURE_OUTPUT,
             "initialize capture output failed: backend snapshot length cannot fit a PCAPNG packet block",
         )
     })
 }
 
-fn render_diagnostics(diagnostics: &[core::diagnostic::Diagnostic]) -> Result<(), CliError> {
+fn render_diagnostics(diagnostics: &[core::diagnostic::Diagnostic]) -> Result<(), BoundaryError> {
     for diagnostic in diagnostics {
         emit_stderr_message(&format!(
             "{:?} {}: {}",
@@ -203,6 +218,8 @@ mod tests {
     use std::collections::VecDeque;
     use std::sync::Arc;
     use std::time::UNIX_EPOCH;
+
+    use packetcraftr::core::error::Classified;
 
     use packetcraftr::core::frame::{Frame, LinkType};
     use serde_json::Value;
@@ -413,10 +430,12 @@ mod tests {
             &mut stream,
         )
         .expect_err("fake capture fails after two records");
-        let primary_code = error.classification.code;
-        assert!(error.message.contains("primary receive failure"));
-        assert!(error.message.contains("cleanup failure"));
-        stream.emit_error(error.output_error()).unwrap();
+        let primary_code = error.classification().code;
+        assert!(error.to_string().contains("primary receive failure"));
+        assert!(error.to_string().contains("cleanup failure"));
+        stream
+            .emit_error(output::envelope::Error::classified(&error))
+            .unwrap();
         let records: Vec<Value> = output.records();
         assert_contiguous(&records);
         assert_eq!(records.len(), 3);

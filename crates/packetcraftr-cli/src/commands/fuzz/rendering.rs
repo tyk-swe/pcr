@@ -3,17 +3,18 @@
 
 use packetcraftr::{core, output};
 
-use crate::errors::CliError;
+use crate::error::{INVARIANT, failure};
 use crate::rendering::{
     NdjsonStream, captured_frame_text, render_diagnostics_text, render_output_diagnostics_text,
     spaced_hex, write_stdout_line,
 };
+use packetcraftr::BoundaryError;
 
 pub(super) fn render_text(
     result: output::fuzz::Result,
     diagnostics: Vec<core::diagnostic::Diagnostic>,
     stats: output::envelope::Stats,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     write_stdout_line(format_args!(
         "mode={} seed={} first_case={} generated={} built={} rejected={}",
         mode_name(result.mode),
@@ -37,10 +38,16 @@ pub(super) fn render_text(
             case.reproduction.case_index,
         ))?;
         let original = serde_json::to_string(&case.mutation.original).map_err(|source| {
-            CliError::new(70, format!("serialize fuzz mutation failed: {source}"))
+            failure(
+                INVARIANT,
+                format!("serialize fuzz mutation failed: {source}"),
+            )
         })?;
         let value = serde_json::to_string(&case.mutation.value).map_err(|source| {
-            CliError::new(70, format!("serialize fuzz mutation failed: {source}"))
+            failure(
+                INVARIANT,
+                format!("serialize fuzz mutation failed: {source}"),
+            )
         })?;
         write_stdout_line(format_args!("  original={original} value={value}"))?;
         if let Some(frame) = &case.frame {
@@ -78,7 +85,7 @@ pub(super) fn render_text(
 pub(super) fn render_offline_complete(
     summary: core::fuzz::Summary,
     stream: &NdjsonStream,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     let (event, diagnostics, stats) = output::fuzz::Event::complete_from_offline(summary);
     stream.complete_with_stats(event, diagnostics, stats)
 }
@@ -86,7 +93,7 @@ pub(super) fn render_offline_complete(
 pub(super) fn render_live_complete(
     summary: packetcraftr::fuzz::Summary,
     stream: &NdjsonStream,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     let (event, diagnostics, stats) = output::fuzz::Event::complete_from_live(summary);
     stream.complete_with_stats(event, diagnostics, stats)
 }

@@ -4,10 +4,10 @@
 use std::fmt;
 use std::io::{self, Write};
 
-use packetcraftr::{core, output};
+use packetcraftr::{BoundaryError, core, output};
 use serde::Serialize;
 
-use super::super::errors::CliError;
+use crate::error::{INVARIANT, OUTPUT_WRITE, failure};
 
 pub(crate) fn render_optional<T>(value: Option<T>, render: impl FnOnce(T) -> String) -> String {
     value.map_or_else(|| "none".to_owned(), render)
@@ -80,21 +80,21 @@ pub(crate) fn output_timestamp_text(timestamp: output::frame::Timestamp) -> Stri
     format!("-{whole_seconds}.{fractional:09}")
 }
 
-pub(crate) fn emit_json(value: &impl Serialize) -> Result<(), CliError> {
+pub(crate) fn emit_json(value: &impl Serialize) -> Result<(), BoundaryError> {
     let stdout = io::stdout().lock();
     let mut writer = io::BufWriter::with_capacity(64 * 1024, stdout);
     serde_json::to_writer_pretty(&mut writer, value).map_err(json_error)?;
     writer
         .write_all(b"\n")
         .and_then(|()| writer.flush())
-        .map_err(|source| CliError::new(5, format!("write stdout failed: {source}")))
+        .map_err(|source| failure(OUTPUT_WRITE, format!("write stdout failed: {source}")))
 }
 
-fn json_error(source: serde_json::Error) -> CliError {
+fn json_error(source: serde_json::Error) -> BoundaryError {
     if source.is_io() {
-        CliError::new(5, format!("write stdout failed: {source}"))
+        failure(OUTPUT_WRITE, format!("write stdout failed: {source}"))
     } else {
-        CliError::new(70, format!("serialize output failed: {source}"))
+        failure(INVARIANT, format!("serialize output failed: {source}"))
     }
 }
 
@@ -102,7 +102,7 @@ pub(crate) fn emit_aggregate<T: Serialize>(
     command: output::contract::Command,
     result: T,
     diagnostics: Vec<core::diagnostic::Diagnostic>,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     emit_json(&output::envelope::Aggregate::success(
         command,
         result,
@@ -115,7 +115,7 @@ pub(crate) fn emit_aggregate_with_stats<T: Serialize>(
     result: T,
     diagnostics: Vec<core::diagnostic::Diagnostic>,
     stats: output::envelope::Stats,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     emit_json(&output::envelope::Aggregate::success(command, result, diagnostics).with_stats(stats))
 }
 

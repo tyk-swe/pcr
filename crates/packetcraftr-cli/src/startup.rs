@@ -6,11 +6,15 @@ mod context;
 use std::process::ExitCode;
 
 use clap::Parser;
-use packetcraftr::output;
+use packetcraftr::{
+    BoundaryError,
+    core::error::{Classification, Kind},
+    output,
+};
 
 use self::context::from_env;
 use super::cli::Cli;
-use super::errors::CliError;
+use super::error::{INVARIANT, exit_code, exit_code_for_kind, failure};
 use super::rendering::{
     NdjsonStream, emit_json, emit_stderr_document, emit_stderr_error, emit_stdout_document,
     terminal_document,
@@ -28,17 +32,18 @@ pub(crate) fn run() -> ExitCode {
             if error.use_stderr()
                 && let Some(format) = context.format
             {
-                let error = CliError::new(code, message);
+                let error = failure(Classification::new("cli.arguments", None), message);
+                let code = exit_code_for_kind(Kind::Cli);
                 let emitted = match format {
                     output::contract::Format::Json => {
                         emit_json(&output::envelope::AggregateError::error(
                             context.command,
-                            error.output_error(),
+                            output::envelope::Error::classified(&error),
                         ))
                     }
                     output::contract::Format::Ndjson => {
                         let stream = NdjsonStream::stdout(context.command);
-                        stream.emit_error(error.output_error())
+                        stream.emit_error(output::envelope::Error::classified(&error))
                     }
                     _ => unreachable!("startup context returns only structured formats"),
                 };
@@ -46,7 +51,7 @@ pub(crate) fn run() -> ExitCode {
                     Ok(()) => ExitCode::from(code),
                     Err(write_error) => {
                         let _ = emit_stderr_error(&write_error);
-                        ExitCode::from(write_error.exit_code)
+                        ExitCode::from(exit_code(&write_error))
                     }
                 };
             }
@@ -77,10 +82,10 @@ pub(crate) fn run() -> ExitCode {
 fn require_success_terminal(
     format: output::contract::Format,
     stream: &NdjsonStream,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     if format == output::contract::Format::Ndjson && !stream.is_terminal() {
-        return Err(CliError::new(
-            70,
+        return Err(failure(
+            INVARIANT,
             "NDJSON command returned without a terminal completion record",
         ));
     }
@@ -90,21 +95,22 @@ fn require_success_terminal(
 fn command_failure(
     format: output::contract::Format,
     command: output::contract::Command,
-    error: CliError,
+    error: BoundaryError,
     stream: &mut NdjsonStream,
 ) -> ExitCode {
-    let exit_code = error.exit_code;
+    let code = exit_code(&error);
     let (emitted, report_write_error) = match format {
         output::contract::Format::Json => (
             emit_json(&output::envelope::AggregateError::error(
                 Some(command),
-                error.output_error(),
+                output::envelope::Error::classified(&error),
             )),
             true,
         ),
-        output::contract::Format::Ndjson if stream.is_open() => {
-            (stream.emit_error(error.output_error()), true)
-        }
+        output::contract::Format::Ndjson if stream.is_open() => (
+            stream.emit_error(output::envelope::Error::classified(&error)),
+            true,
+        ),
         output::contract::Format::Ndjson => (emit_stderr_error(&error), false),
         _ => (emit_stderr_error(&error), false),
     };
@@ -112,9 +118,9 @@ fn command_failure(
         if report_write_error {
             let _ = emit_stderr_error(&write_error);
         }
-        return ExitCode::from(write_error.exit_code);
+        return ExitCode::from(exit_code(&write_error));
     }
-    ExitCode::from(exit_code)
+    ExitCode::from(code)
 }
 
 #[cfg(test)]

@@ -8,19 +8,19 @@ use std::sync::Arc;
 use packetcraftr::output;
 
 use self::arguments::Args;
-use super::super::errors::CliError;
 use super::super::rendering::{emit_aggregate, optional_display, write_stdout_line};
 use super::super::system::{client, prepare_route};
 use super::registry;
+use packetcraftr::BoundaryError;
 
-pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
+pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), BoundaryError> {
     let Args { route, policy } = arguments;
     let registry = registry()?;
     let request = prepare_route(route, policy.into_policy(), &registry)?;
     let client = client(Arc::clone(&registry), request.policy);
     let route = client
         .plan(&request.packet, request.destination, &request.options)
-        .map_err(CliError::classified)?;
+        .map_err(BoundaryError::from_error)?;
     let result = output::plan::Result { plan: route.into() };
     match format {
         output::contract::Format::Text => render_text(&result.plan),
@@ -31,7 +31,7 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
     }
 }
 
-fn render_text(route: &output::network::Plan) -> Result<(), CliError> {
+fn render_text(route: &output::network::Plan) -> Result<(), BoundaryError> {
     write_stdout_line(format_args!(
         "interface={} index={} mode={:?} mtu={} link_type={}",
         route.decision.interface.name,

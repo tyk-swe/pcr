@@ -10,11 +10,12 @@ use packetcraftr::{
     netio as net, output,
 };
 
-use crate::errors::CliError;
+use crate::error::{CAPTURE_LIMIT, failure};
 use crate::rendering::{
     CaptureWriter, NdjsonStream, capture_file_format, emit_aggregate_with_stats, spaced_hex,
     write_stdout_line,
 };
+use packetcraftr::BoundaryError;
 
 type Selector<'a> = Option<&'a mut dyn packetcraftr::replay::Selector>;
 
@@ -31,7 +32,7 @@ pub(super) fn render_text(
     transmitter: &mut packetcraftr::replay::SystemTransmitter,
     clock: &mut packetcraftr::clock::SystemClock,
     filtered: bool,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     let summary = packetcraftr::replay::run_with_selector(
         reader,
         options,
@@ -41,7 +42,7 @@ pub(super) fn render_text(
         clock,
         render_record,
     )
-    .map_err(CliError::classified)?;
+    .map_err(BoundaryError::from_error)?;
     if filtered {
         write_stdout_line(format_args!(
             "replayed {} of {} frame(s), {} byte(s), scheduled delay {:?}",
@@ -66,7 +67,7 @@ pub(super) fn render_aggregate(
     transmitter: &mut packetcraftr::replay::SystemTransmitter,
     clock: &mut packetcraftr::clock::SystemClock,
     requested_interface: net::interface::Id,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     let started = Instant::now();
     let mut frames = Vec::new();
     let summary = packetcraftr::replay::run_with_selector(
@@ -81,7 +82,7 @@ pub(super) fn render_aggregate(
             Ok(())
         },
     )
-    .map_err(CliError::classified)?;
+    .map_err(BoundaryError::from_error)?;
     let stats = stats(&summary, started.elapsed());
     let result = output::replay::Result::from_summary(
         summary,
@@ -100,7 +101,7 @@ pub(super) fn render_stream<R, A, T, C>(
     transmitter: &mut T,
     clock: &mut C,
     stream: &mut NdjsonStream,
-) -> Result<(), CliError>
+) -> Result<(), BoundaryError>
 where
     R: Read,
     A: packetcraftr::replay::Authorizer,
@@ -117,7 +118,7 @@ where
         clock,
         |evidence| render_stream_record(stream, evidence),
     )
-    .map_err(CliError::classified)?;
+    .map_err(BoundaryError::from_error)?;
     let stats = stats(&summary, started.elapsed());
     let result = output::replay::Result::from_summary(
         summary,
@@ -136,7 +137,7 @@ pub(super) fn render_capture(
     transmitter: &mut packetcraftr::replay::SystemTransmitter,
     clock: &mut packetcraftr::clock::SystemClock,
     settings: CaptureSettings,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     let format = capture_file_format(settings.format)?;
     let stdout = io::stdout();
     let mut writer = capture_writer(
@@ -155,8 +156,8 @@ pub(super) fn render_capture(
         clock,
         |evidence| render_capture_record(&mut writer, evidence),
     )
-    .map_err(CliError::classified)?;
-    writer.flush().map_err(CliError::classified)
+    .map_err(BoundaryError::from_error)?;
+    writer.flush().map_err(BoundaryError::from_error)
 }
 
 fn output_frame(
@@ -183,7 +184,7 @@ fn render_record(
         spaced_hex(result.frame.bytes())
     ))
     .map_err(|source| {
-        packetcraftr::replay::Error::output_at_source_index(result.source_index, source.message)
+        packetcraftr::replay::Error::output_at_source_index(result.source_index, source.to_string())
     })
 }
 
@@ -194,7 +195,7 @@ fn render_stream_record(
     let source_index = evidence.source_index;
     let result = output_frame(evidence)?;
     stream.emit_data(result, Vec::new()).map_err(|error| {
-        packetcraftr::replay::Error::output_at_source_index(source_index, error.message)
+        packetcraftr::replay::Error::output_at_source_index(source_index, error.to_string())
     })
 }
 
@@ -204,7 +205,7 @@ fn capture_writer<W: Write>(
     format: Format,
     limits: packetcraftr::replay::Limits,
     max_interfaces: usize,
-) -> Result<CaptureWriter<W>, CliError> {
+) -> Result<CaptureWriter<W>, BoundaryError> {
     let writer = match format {
         Format::Pcap => classic_writer(reader, destination, format, limits)?,
         Format::PcapNg => Writer::pcapng_with_options(
@@ -215,7 +216,7 @@ fn capture_writer<W: Write>(
                 max_interfaces,
             },
         )
-        .map_err(CliError::classified)?,
+        .map_err(BoundaryError::from_error)?,
     };
     let mut writer = CaptureWriter::for_source_interfaces(writer);
     writer
@@ -223,7 +224,7 @@ fn capture_writer<W: Write>(
             max_frames: limits.max_frames,
             max_bytes: limits.max_bytes,
         })
-        .map_err(CliError::classified)?;
+        .map_err(BoundaryError::from_error)?;
     Ok(writer)
 }
 
@@ -232,9 +233,9 @@ fn classic_writer<W: Write>(
     destination: W,
     format: Format,
     limits: packetcraftr::replay::Limits,
-) -> Result<Writer<W>, CliError> {
+) -> Result<Writer<W>, BoundaryError> {
     if reader.format() != Format::Pcap {
-        return Err(CliError::classified(
+        return Err(BoundaryError::from_error(
             capture::Error::MetadataNotRepresentable {
                 format,
                 field: "pcapng replay evidence",
@@ -242,8 +243,12 @@ fn classic_writer<W: Write>(
         ));
     }
     let interface = reader.interfaces()[0].clone();
-    let snap_length = usize::try_from(interface.snap_len)
-        .map_err(|_| CliError::new(2, "capture snap length exceeds the platform size limit"))?;
+    let snap_length = usize::try_from(interface.snap_len).map_err(|_| {
+        failure(
+            CAPTURE_LIMIT,
+            "capture snap length exceeds the platform size limit",
+        )
+    })?;
     Writer::pcap_with_options(
         destination,
         interface.link_type,
@@ -254,7 +259,7 @@ fn classic_writer<W: Write>(
             max_size: limits.max_frame_bytes,
         },
     )
-    .map_err(CliError::classified)
+    .map_err(BoundaryError::from_error)
 }
 
 fn render_capture_record<W: Write>(
@@ -289,10 +294,11 @@ mod tests {
     use std::io::{self, Cursor};
     use std::time::UNIX_EPOCH;
 
-    use packetcraftr::core::error::Classification;
+    use packetcraftr::core::error::Classified;
     use packetcraftr::core::frame::{Frame, LinkType};
 
     use super::*;
+    use crate::error::{exit_code, test_classification};
     use crate::rendering::ndjson_test_support::{assert_contiguous, stream};
 
     #[derive(Default)]
@@ -312,7 +318,7 @@ mod tests {
             if self.deny_on == Some(self.calls) {
                 return Err(packetcraftr::BoundaryError::new(
                     "fixture policy denied replay",
-                    Classification::new("policy.fixture_replay", Some("authorize the fixture")),
+                    test_classification("policy.fixture_replay", Some("authorize the fixture")),
                     vec!["fixture domain cause".to_owned()],
                 ));
             }
@@ -413,7 +419,7 @@ mod tests {
         selector: Selector<'_>,
         authorizer: &mut FakeAuthorizer,
         stream: &mut NdjsonStream,
-    ) -> Result<(), CliError> {
+    ) -> Result<(), BoundaryError> {
         render_stream(
             reader,
             &options(),
@@ -453,10 +459,12 @@ mod tests {
         let error = render_fixture(&mut reader(3), None, &mut authorizer, &mut stream)
             .expect_err("third fake replay authorization is denied");
 
-        assert_eq!(error.exit_code, 6);
-        assert_eq!(error.classification.code, "policy.fixture_replay");
-        assert_eq!(error.causes, ["fixture domain cause"]);
-        stream.emit_error(error.output_error()).unwrap();
+        assert_eq!(exit_code(&error), 6);
+        assert_eq!(error.classification().code, "policy.fixture_replay");
+        assert_eq!(error.causes(), ["fixture domain cause"]);
+        stream
+            .emit_error(output::envelope::Error::classified(&error))
+            .unwrap();
 
         let records = output.records();
         assert_contiguous(&records);
@@ -498,12 +506,12 @@ mod tests {
         )
         .expect_err("selected replay output must fail");
 
-        assert_eq!(error.exit_code, 5);
-        assert_eq!(error.classification.code, "io.replay");
-        assert!(error.message.contains("source index 42"));
-        assert!(error.message.contains("sequence 0"));
+        assert_eq!(exit_code(&error), 5);
+        assert_eq!(error.classification().code, "io.replay");
+        assert!(error.to_string().contains("source index 42"));
+        assert!(error.to_string().contains("sequence 0"));
         assert_eq!(
-            error.classification.remediation,
+            error.classification().remediation,
             Some(
                 "inspect the replay timer or output sink and account for frames already transmitted"
             )

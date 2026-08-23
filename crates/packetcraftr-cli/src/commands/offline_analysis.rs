@@ -12,10 +12,10 @@ use packetcraftr::{
 };
 
 use super::super::command_options::OfflineLimitsArgs;
-use super::super::errors::CliError;
 use super::super::filtering::{self, Capabilities};
 use super::super::input::validate_capture_stream_limits;
 use super::registry;
+use packetcraftr::BoundaryError;
 
 /// Validated, I/O-free analysis state.
 pub(super) struct Prepared {
@@ -29,7 +29,7 @@ pub(super) struct Prepared {
 pub(super) fn prepare(
     limits: OfflineLimitsArgs,
     filter_source: Option<&str>,
-) -> Result<Prepared, CliError> {
+) -> Result<Prepared, BoundaryError> {
     let capture = limits.capture;
     validate_capture_stream_limits(
         capture.max_frames,
@@ -48,7 +48,7 @@ pub(super) fn prepare(
         max_flows: limits.max_flows,
         max_duration: Duration::from_millis(limits.max_duration_ms),
     };
-    limits.validate().map_err(CliError::classified)?;
+    limits.validate().map_err(BoundaryError::from_error)?;
 
     Ok(Prepared {
         registry,

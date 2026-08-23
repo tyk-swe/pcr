@@ -7,20 +7,23 @@ use std::sync::Arc;
 
 use packetcraftr::{core, output};
 
-use super::super::errors::CliError;
 use super::super::rendering::{
     emit_aggregate_with_stats, render_diagnostics_text, write_capture_file, write_plain_line,
     write_raw, write_stdout_line,
 };
 use super::super::system::{client, prepare_route};
 use super::registry;
+use packetcraftr::BoundaryError;
 
 pub(super) const AFTER_LONG_HELP: &str = r#"Live transmission is policy-gated and may require native features, dependencies, and privileges.
 
 Example:
   packetcraftr send --packet 'ipv4(dst=192.0.2.1)/icmpv4(type=8,code=0)'"#;
 
-pub(super) fn run(arguments: SendArgs, format: output::contract::Format) -> Result<(), CliError> {
+pub(super) fn run(
+    arguments: SendArgs,
+    format: output::contract::Format,
+) -> Result<(), BoundaryError> {
     let SendArgs {
         route,
         mode,
@@ -43,10 +46,10 @@ pub(super) fn run(arguments: SendArgs, format: output::contract::Format) -> Resu
                 allow_permissive_live,
             },
         )
-        .map_err(CliError::classified)?;
+        .map_err(BoundaryError::from_error)?;
     let capture_frame = report.sent.frame().clone();
     let (result, diagnostics, stats) =
-        output::send::Result::try_from_report(report).map_err(CliError::classified)?;
+        output::send::Result::try_from_report(report).map_err(BoundaryError::from_error)?;
     match format {
         output::contract::Format::Text => {
             write_stdout_line(format_args!(

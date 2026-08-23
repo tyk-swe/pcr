@@ -3,17 +3,17 @@
 
 use packetcraftr::{core, output};
 
-use crate::errors::CliError;
 use crate::rendering::{
     NdjsonStream, captured_frame_text, comma_separated, optional_display, output_timestamp_text,
     render_diagnostics_text, render_optional, write_stdout_line,
 };
+use packetcraftr::BoundaryError;
 
 pub(super) fn render_text(
     result: output::scan::Result,
     diagnostics: Vec<core::diagnostic::Diagnostic>,
     stats: output::envelope::Stats,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     write_stdout_line(format_args!(
         "target={} resolved={}",
         result.target,
@@ -82,16 +82,16 @@ fn probe_status_name(value: output::scan::ProbeStatus) -> &'static str {
 pub(super) fn render_event(
     event: packetcraftr::scan::Event,
     stream: &NdjsonStream,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     let (event, diagnostics) =
-        output::scan::Event::try_from_scan(event).map_err(CliError::classified)?;
+        output::scan::Event::try_from_scan(event).map_err(BoundaryError::from_error)?;
     stream.emit_data(event, diagnostics)
 }
 
 pub(super) fn render_complete(
     summary: packetcraftr::scan::Summary,
     stream: &NdjsonStream,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     let (event, diagnostics, stats) = output::scan::Event::complete_from_scan(summary);
     stream.complete_with_stats(event, diagnostics, stats)
 }

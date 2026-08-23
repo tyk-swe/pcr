@@ -10,7 +10,7 @@
 mod cli;
 mod command_options;
 mod commands;
-mod errors;
+mod error;
 mod filtering;
 mod input;
 #[cfg(test)]

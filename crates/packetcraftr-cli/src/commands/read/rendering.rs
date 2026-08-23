@@ -3,16 +3,16 @@
 
 use packetcraftr::output;
 
-use crate::errors::CliError;
 use crate::rendering::{
     NdjsonStream, captured_frame_text, spaced_hex, write_plain_line, write_stdout_line,
 };
+use packetcraftr::BoundaryError;
 
 pub(super) fn render_record(
     event: &output::read::Event,
     format: output::contract::Format,
     stream: &mut NdjsonStream,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     let output::read::Event::Frame {
         source_frame,
         frame,

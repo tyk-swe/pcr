@@ -9,12 +9,12 @@ use std::time::Duration;
 use packetcraftr::{analysis, output};
 
 use self::arguments::{Args, Table};
-use super::super::errors::CliError;
 use super::super::input::open_capture;
 use super::super::rendering::{emit_aggregate, write_stdout_line};
 use super::offline_analysis::{Prepared, prepare};
+use packetcraftr::BoundaryError;
 
-pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
+pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), BoundaryError> {
     // Stats assigns conversation indices, so stream-aware filters like
     // `tcp.stream == 7` are supported here.
     let Prepared {
@@ -24,7 +24,7 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
     } = prepare(arguments.limits, arguments.filter.as_deref())?;
     let mut collector =
         analysis::stats::Collector::new(Duration::from_millis(arguments.interval_ms))
-            .map_err(CliError::classified)?;
+            .map_err(BoundaryError::from_error)?;
 
     let mut reader = open_capture(&arguments.path, arguments.limits.capture)?;
 
@@ -39,7 +39,7 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
             .expect("the analysis pipeline supplies timestamped statistics records");
         Ok(())
     })
-    .map_err(CliError::classified)?;
+    .map_err(BoundaryError::from_error)?;
     let report = collector.finish();
 
     match format {
@@ -50,7 +50,7 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
                 &report,
                 summary.frames_read,
             )
-            .map_err(CliError::classified)?;
+            .map_err(BoundaryError::from_error)?;
             emit_aggregate(output::contract::Command::Stats, result, Vec::new())
         }
         _ => unreachable!("the format contract admits only text and json"),
@@ -61,7 +61,7 @@ fn render_text(
     table: Table,
     report: &analysis::stats::Report,
     summary: &analysis::Summary,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     write_stdout_line(format_args!(
         "matched {} of {} frame(s), {} byte(s)",
         report.frames, summary.frames_read, report.bytes

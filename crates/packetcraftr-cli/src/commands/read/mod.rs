@@ -11,17 +11,20 @@ use std::io;
 
 use packetcraftr::{
     analysis::pcap::{Limits, Reader, rewrite},
-    core::{self, error::Classification},
-    output,
+    core, output,
 };
 
 use self::arguments::Args;
 use super::registry;
 use crate::command_options::OfflineCaptureLimitsArgs;
-use crate::errors::CliError;
+use crate::error::{
+    CAPTURE_REWRITE_FILTER, CAPTURE_REWRITE_FORMAT, DISSECT_UNSUPPORTED_FORMAT,
+    TIMESTAMP_UNAVAILABLE,
+};
 use crate::filtering::{self, Capabilities};
 use crate::input::{open_capture, validate_capture_stream_limits};
 use crate::rendering::{NdjsonStream, capture_file_format};
+use packetcraftr::BoundaryError;
 
 use super::increment_counter;
 use rendering::render_record;
@@ -42,7 +45,7 @@ pub(super) fn run(
     arguments: Args,
     format: output::contract::Format,
     stream: &mut NdjsonStream,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     let Args {
         path,
         limits,
@@ -74,7 +77,7 @@ pub(super) fn run(
     )
 }
 
-fn validate_limits(limits: OfflineCaptureLimitsArgs) -> Result<(), CliError> {
+fn validate_limits(limits: OfflineCaptureLimitsArgs) -> Result<(), BoundaryError> {
     validate_capture_stream_limits(
         limits.max_frames,
         limits.max_bytes,
@@ -86,26 +89,26 @@ fn validate_limits(limits: OfflineCaptureLimitsArgs) -> Result<(), CliError> {
 fn validate_dissect_format(
     dissect: bool,
     format: output::contract::Format,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     if dissect
         && !matches!(
             format,
             output::contract::Format::Text | output::contract::Format::Ndjson
         )
     {
-        return Err(CliError::from_classification(
-            Classification::new(
-                "cli.dissect_unsupported_format",
-                Some("use --output text or --output ndjson to show the layer stack"),
-            ),
+        return Err(BoundaryError::new(
             format!("--dissect has no effect on {format} output"),
+            DISSECT_UNSUPPORTED_FORMAT,
             Vec::new(),
         ));
     }
     Ok(())
 }
 
-fn prepare_decoding(filter: Option<&str>, dissect: bool) -> Result<Option<Decoding>, CliError> {
+fn prepare_decoding(
+    filter: Option<&str>,
+    dissect: bool,
+) -> Result<Option<Decoding>, BoundaryError> {
     if filter.is_none() && !dissect {
         return Ok(None);
     }
@@ -124,35 +127,29 @@ fn rewrite_capture(
     format: output::contract::Format,
     limits: Limits,
     filtered: bool,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     if filtered {
-        return Err(CliError::from_classification(
-            Classification::new(
-                "cli.capture_rewrite_filter",
-                Some("use text, hex, or ndjson output to filter frames"),
-            ),
+        return Err(BoundaryError::new(
             "capture rewriting cannot filter records without discarding source structure",
+            CAPTURE_REWRITE_FILTER,
             Vec::new(),
         ));
     }
     let format = capture_file_format(format)?;
     if format != reader.format() {
-        return Err(CliError::from_classification(
-            Classification::new(
-                "cli.capture_rewrite_format",
-                Some("select the capture output format matching the input capture"),
-            ),
+        return Err(BoundaryError::new(
             format!(
                 "capture rewriting cannot convert {:?} input to {format:?} without normalization",
                 reader.format()
             ),
+            CAPTURE_REWRITE_FORMAT,
             Vec::new(),
         ));
     }
     let stdout = io::stdout();
     rewrite(reader, stdout.lock(), limits)
         .map(|_| ())
-        .map_err(CliError::classified)
+        .map_err(BoundaryError::from_error)
 }
 
 fn read_records(
@@ -162,9 +159,9 @@ fn read_records(
     dissect: bool,
     format: output::contract::Format,
     stream: &mut NdjsonStream,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     let mut state = StreamState::default();
-    while let Some(frame) = reader.next_frame().map_err(CliError::classified)? {
+    while let Some(frame) = reader.next_frame().map_err(BoundaryError::from_error)? {
         let source_frame = account_frame(&mut state, &frame, limits)?;
         let Some(event) = convert_frame(frame, source_frame, decoding, dissect, limits)? else {
             continue;
@@ -189,10 +186,10 @@ fn account_frame(
     state: &mut StreamState,
     frame: &core::frame::Frame,
     limits: OfflineCaptureLimitsArgs,
-) -> Result<u64, CliError> {
+) -> Result<u64, BoundaryError> {
     state.frames_read = increment_counter(state.frames_read, "read frame count")?;
     if state.frames_read > limits.max_frames {
-        return Err(CliError::classified(
+        return Err(BoundaryError::from_error(
             packetcraftr::analysis::pcap::Error::FrameLimitExceeded {
                 actual: state.frames_read,
                 limit: limits.max_frames,
@@ -212,8 +209,8 @@ fn account_frame(
     Ok(state.frames_read)
 }
 
-fn stream_byte_error(actual: u64, limit: u64) -> CliError {
-    CliError::classified(
+fn stream_byte_error(actual: u64, limit: u64) -> BoundaryError {
+    BoundaryError::from_error(
         packetcraftr::analysis::pcap::Error::StreamByteLimitExceeded { actual, limit },
     )
 }
@@ -224,11 +221,11 @@ fn convert_frame(
     decoding: Option<&Decoding>,
     dissect: bool,
     limits: OfflineCaptureLimitsArgs,
-) -> Result<Option<output::read::Event>, CliError> {
+) -> Result<Option<output::read::Event>, BoundaryError> {
     let Some(decoding) = decoding else {
         return output::read::Event::try_from_frame(source_frame, frame)
             .map(Some)
-            .map_err(CliError::classified);
+            .map_err(BoundaryError::from_error);
     };
     let decoded = decoding
         .decoder
@@ -239,7 +236,7 @@ fn convert_frame(
                 ..core::decode::Options::default()
             },
         )
-        .map_err(|source| CliError::new(3, source.to_string()))?;
+        .map_err(BoundaryError::from_error)?;
     if let Some(filter) = &decoding.filter {
         validate_filter_timestamp(filter, &frame, source_frame)?;
         if !filter
@@ -249,7 +246,7 @@ fn convert_frame(
                 tcp_stream: None,
                 udp_stream: None,
             })
-            .map_err(|source| CliError::new(3, source.to_string()))?
+            .map_err(BoundaryError::from_error)?
         {
             return Ok(None);
         }
@@ -260,21 +257,18 @@ fn convert_frame(
         output::read::Event::try_from_frame(source_frame, frame)
     }
     .map(Some)
-    .map_err(CliError::classified)
+    .map_err(BoundaryError::from_error)
 }
 
 fn validate_filter_timestamp(
     filter: &core::filter::Filter,
     frame: &core::frame::Frame,
     source_frame: u64,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     if filter.requirements().timestamp && frame.timestamp.is_none() {
-        return Err(CliError::from_classification(
-            Classification::new(
-                "packet.timestamp_unavailable",
-                Some("remove frame.time_epoch from the filter or use timestamped packet blocks"),
-            ),
+        return Err(BoundaryError::new(
             format!("frame {source_frame} has no timestamp required by frame.time_epoch"),
+            TIMESTAMP_UNAVAILABLE,
             Vec::new(),
         ));
     }

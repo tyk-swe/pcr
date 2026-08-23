@@ -4,17 +4,17 @@
 use packetcraftr::netio::{interface::Provider as _, route::Provider as _};
 use packetcraftr::{netio as net, output};
 
-use super::super::errors::CliError;
 use super::super::rendering::{emit_aggregate, optional_display, write_stdout_line};
+use packetcraftr::BoundaryError;
 
 pub(super) const AFTER_LONG_HELP: &str = r#"Examples:
   packetcraftr routes
   packetcraftr --output json routes"#;
 
-pub(super) fn run(format: output::contract::Format) -> Result<(), CliError> {
+pub(super) fn run(format: output::contract::Format) -> Result<(), BoundaryError> {
     let interfaces = net::interface::SystemProvider
         .interfaces()
-        .map_err(CliError::classified)?;
+        .map_err(BoundaryError::from_error)?;
     let provider = net::route::SystemProvider;
     let mut routes = Vec::new();
     for interface in interfaces
@@ -22,9 +22,9 @@ pub(super) fn run(format: output::contract::Format) -> Result<(), CliError> {
         .filter(|interface| interface.flags.up)
     {
         let route = provider.lookup_interface(&interface.id).map_err(|source| {
-            CliError::from_classification(
-                provider.classify_error(&source),
+            BoundaryError::new(
                 source.to_string(),
+                provider.classify_error(&source),
                 Vec::new(),
             )
         })?;

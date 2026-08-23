@@ -3,21 +3,22 @@
 
 pub(super) mod arguments;
 
-use packetcraftr::{core::error::Classification, core::protocol::support, output};
+use packetcraftr::{core::protocol::support, output};
 
 use self::arguments::Args;
-use super::super::errors::CliError;
 use super::super::rendering::{emit_aggregate, write_stdout_line};
 use super::registry;
+use crate::error::UNKNOWN_PROTOCOL;
+use packetcraftr::BoundaryError;
 
-pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
+pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), BoundaryError> {
     match arguments.protocol {
         Some(name) => describe_protocol(&name, format),
         None => list_protocols(format),
     }
 }
 
-fn list_protocols(format: output::contract::Format) -> Result<(), CliError> {
+fn list_protocols(format: output::contract::Format) -> Result<(), BoundaryError> {
     let result = output::protocols::ListResult {
         protocols: support::BUILTIN_PROTOCOLS
             .iter()
@@ -47,7 +48,7 @@ fn list_protocols(format: output::contract::Format) -> Result<(), CliError> {
     }
 }
 
-fn describe_protocol(name: &str, format: output::contract::Format) -> Result<(), CliError> {
+fn describe_protocol(name: &str, format: output::contract::Format) -> Result<(), BoundaryError> {
     let support = support::BUILTIN_PROTOCOLS
         .iter()
         .find(|support| {
@@ -81,7 +82,7 @@ fn describe_protocol(name: &str, format: output::contract::Format) -> Result<(),
     }
 }
 
-fn render_detail(protocol: &output::protocols::Detail) -> Result<(), CliError> {
+fn render_detail(protocol: &output::protocols::Detail) -> Result<(), BoundaryError> {
     write_stdout_line(format_args!("protocol: {}", protocol.protocol))?;
     write_stdout_line(format_args!("aliases: [{}]", protocol.aliases.join(", ")))?;
     write_stdout_line(format_args!("build: {}", protocol.build))?;
@@ -106,13 +107,10 @@ fn render_detail(protocol: &output::protocols::Detail) -> Result<(), CliError> {
     Ok(())
 }
 
-fn unknown_protocol(name: &str) -> CliError {
-    CliError::from_classification(
-        Classification::new(
-            "cli.protocol",
-            Some("run `packetcraftr protocols` to list built-in protocols"),
-        ),
+fn unknown_protocol(name: &str) -> BoundaryError {
+    BoundaryError::new(
         format!("unknown built-in protocol '{name}'"),
+        UNKNOWN_PROTOCOL,
         Vec::new(),
     )
 }

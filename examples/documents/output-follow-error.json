@@ -4,10 +4,11 @@
   "mode": "aggregate",
   "status": "error",
   "error": {
-    "code": "cli.error",
+    "code": "cli.follow_stream",
     "kind": "cli",
     "message": "invalid --stream 'bogus:0': expected tcp:INDEX or udp:INDEX",
-    "causes": []
+    "causes": [],
+    "remediation": "use a stream selector in the form tcp:<stream-id> or udp:<stream-id>"
   },
   "diagnostics": []
 }

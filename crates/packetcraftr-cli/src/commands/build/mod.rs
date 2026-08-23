@@ -6,15 +6,15 @@ pub(super) mod arguments;
 use packetcraftr::{core, output};
 
 use self::arguments::Args;
-use super::super::errors::CliError;
 use super::super::input::read_recipe;
 use super::super::rendering::{
     emit_aggregate, render_diagnostics_text, spaced_hex, write_plain_line, write_raw,
     write_stdout_line,
 };
 use super::registry;
+use packetcraftr::BoundaryError;
 
-pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
+pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), BoundaryError> {
     let registry = registry()?;
     let packet = read_recipe(arguments.recipe, &registry)?;
     let built = core::build::Builder::new(registry)
@@ -26,7 +26,7 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
                 ..core::build::Options::default()
             },
         )
-        .map_err(|source| CliError::new(3, source.to_string()))?;
+        .map_err(BoundaryError::from_error)?;
     let (result, diagnostics) = output::build::Result::from_built(built);
     match format {
         output::contract::Format::Text => {

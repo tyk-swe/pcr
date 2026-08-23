@@ -7,10 +7,10 @@ mod rendering;
 use packetcraftr::{analysis, output};
 
 use self::arguments::{Args, Severity};
-use super::super::errors::CliError;
 use super::super::input::open_capture;
 use super::offline_analysis::{Prepared, prepare};
 use crate::rendering::NdjsonStream;
+use packetcraftr::BoundaryError;
 
 fn matches_selector(
     finding: &analysis::expert::Finding,
@@ -30,7 +30,7 @@ pub(super) fn run(
     arguments: Args,
     format: output::contract::Format,
     stream: &mut NdjsonStream,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     let Prepared {
         registry,
         filter,
@@ -50,13 +50,12 @@ pub(super) fn run(
         for finding in collector.observe(&record) {
             if matches_selector(&finding, arguments.min_severity, &arguments.codes) {
                 state.count(&finding);
-                rendering::render_record(format, finding.into(), &mut state, stream)
-                    .map_err(CliError::into_boundary_error)?;
+                rendering::render_record(format, finding.into(), &mut state, stream)?;
             }
         }
         Ok(())
     });
-    let summary = outcome.map_err(CliError::classified)?;
+    let summary = outcome.map_err(BoundaryError::from_error)?;
     let (trailing, _expert_summary) =
         collector.finish(&summary.trailing_tcp_events, summary.frames_read);
     for finding in trailing {

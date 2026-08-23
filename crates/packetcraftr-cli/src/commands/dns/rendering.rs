@@ -3,17 +3,18 @@
 
 use packetcraftr::{core, output};
 
-use crate::errors::CliError;
+use crate::error::{INVARIANT, failure};
 use crate::rendering::{
     NdjsonStream, captured_frame_text, comma_separated, optional_display, output_timestamp_text,
     render_diagnostics_text, render_optional, write_stdout_line,
 };
+use packetcraftr::BoundaryError;
 
 pub(super) fn render_text(
     result: output::dns::Result,
     diagnostics: Vec<core::diagnostic::Diagnostic>,
     stats: output::envelope::Stats,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     write_stdout_line(format_args!(
         "server={}:{} resolved={} query={} type={} id={} transport={} outcome={}",
         result.server,
@@ -83,9 +84,13 @@ pub(super) fn render_text(
 fn render_record(
     section: output::dns::Section,
     record: &output::dns::Record,
-) -> Result<(), CliError> {
-    let data = serde_json::to_string(&record.data)
-        .map_err(|error| CliError::new(4, format!("DNS output serialization failed: {error}")))?;
+) -> Result<(), BoundaryError> {
+    let data = serde_json::to_string(&record.data).map_err(|error| {
+        failure(
+            INVARIANT,
+            format!("DNS output serialization failed: {error}"),
+        )
+    })?;
     write_stdout_line(format_args!(
         "record section={} owner={} class={} ttl={} data={}",
         section, record.owner, record.class, record.ttl, data,
@@ -95,16 +100,16 @@ fn render_record(
 pub(super) fn render_event(
     event: packetcraftr::dns::Event,
     stream: &NdjsonStream,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     let (event, diagnostics) =
-        output::dns::Event::try_from_dns(event).map_err(CliError::classified)?;
+        output::dns::Event::try_from_dns(event).map_err(BoundaryError::from_error)?;
     stream.emit_data(event, diagnostics)
 }
 
 pub(super) fn render_complete(
     summary: packetcraftr::dns::Summary,
     stream: &NdjsonStream,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     let (event, diagnostics, stats) = output::dns::Event::complete_from_dns(summary);
     stream.complete_with_stats(event, diagnostics, stats)
 }

@@ -8,9 +8,10 @@ use std::time::{Duration, UNIX_EPOCH};
 use packetcraftr::{core, output};
 use serde_json::{Value, json};
 
-use crate::errors::CliError;
+use crate::error::{OUTPUT_WRITE, failure, test_classification, with_cleanup};
 use crate::rendering::NdjsonStream;
 use crate::rendering::ndjson_test_support::{assert_contiguous, stream};
+use packetcraftr::BoundaryError;
 
 struct Fixture {
     command: output::contract::Command,
@@ -164,8 +165,11 @@ fn validate_typed_event<T: serde::Serialize + Clone>(
     let (sink, bytes) = stream(command);
     sink.emit_data(event, diagnostics)
         .expect("typed production event must render");
-    sink.emit_error(CliError::new(5, "typed partial failure").output_error())
-        .expect("typed partial stream must terminate");
+    sink.emit_error(output::envelope::Error::classified(&failure(
+        OUTPUT_WRITE,
+        "typed partial failure",
+    )))
+    .expect("typed partial stream must terminate");
     let records = bytes.records();
     validate_records(crate::test_support::schema_validator(), &records);
     assert_eq!(records.len(), 2);
@@ -490,7 +494,7 @@ fn complete(
     sink: &NdjsonStream,
     requires_terminal_stats: bool,
     result: Value,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     if requires_terminal_stats {
         sink.complete_with_stats(result, Vec::new(), output::envelope::Stats::default())
     } else {
@@ -510,15 +514,18 @@ fn cleanup_failure_augments_the_primary_error_at_the_next_position() {
         Vec::new(),
     )
     .unwrap();
-    let primary = CliError::from_classification(
-        packetcraftr::core::error::Classification::new("io.primary", None),
-        "primary capture failure",
-        vec!["primary cause".to_owned()],
-    )
-    .with_cleanup(packetcraftr::netio::Error::Capture {
-        message: "cleanup failure".to_owned(),
-    });
-    sink.emit_error(primary.output_error()).unwrap();
+    let primary = with_cleanup(
+        BoundaryError::new(
+            "primary capture failure",
+            test_classification("io.primary", None),
+            vec!["primary cause".to_owned()],
+        ),
+        &packetcraftr::netio::Error::Capture {
+            message: "cleanup failure".to_owned(),
+        },
+    );
+    sink.emit_error(output::envelope::Error::classified(&primary))
+        .unwrap();
 
     let records = output.records();
     validate_records(crate::test_support::schema_validator(), &records);

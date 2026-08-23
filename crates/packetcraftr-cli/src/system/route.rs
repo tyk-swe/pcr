@@ -6,9 +6,9 @@ use std::net::IpAddr;
 use packetcraftr::{core, core::Packet, netio as net};
 
 use super::super::command_options::RouteArgs;
-use super::super::errors::CliError;
 use super::super::input::read_recipe;
 use super::interface;
+use packetcraftr::BoundaryError;
 
 pub(crate) struct Prepared {
     pub(crate) packet: Packet,
@@ -21,18 +21,18 @@ pub(crate) fn prepare_route(
     arguments: RouteArgs,
     policy: packetcraftr::policy::Policy,
     registry: &core::registry::Registry,
-) -> Result<Prepared, CliError> {
+) -> Result<Prepared, BoundaryError> {
     let RouteArgs {
         recipe,
         destination,
         route,
     } = arguments;
     let packet = read_recipe(recipe, registry)?;
-    policy.validate().map_err(CliError::classified)?;
+    policy.validate().map_err(BoundaryError::from_error)?;
     // This check intentionally precedes interface discovery and route lookup.
     policy
         .authorize_packet_destinations(&packet)
-        .map_err(CliError::classified)?;
+        .map_err(BoundaryError::from_error)?;
     let destination = resolve_destination(destination, &packet, &policy)?;
     let interface = interface::resolve(route.interface, &net::interface::SystemProvider)?;
     Ok(Prepared {
@@ -51,16 +51,16 @@ fn resolve_destination(
     destination: Option<String>,
     packet: &Packet,
     policy: &packetcraftr::policy::Policy,
-) -> Result<Option<IpAddr>, CliError> {
+) -> Result<Option<IpAddr>, BoundaryError> {
     let Some(destination) = destination else {
         return Ok(None);
     };
     let target = destination
         .parse::<packetcraftr::target::Target>()
-        .map_err(CliError::classified)?;
+        .map_err(BoundaryError::from_error)?;
     let resolved = policy
         .resolve_target(&target, &packetcraftr::target::SystemResolver)
-        .map_err(CliError::classified)?;
+        .map_err(BoundaryError::from_error)?;
     let ip_version = packet
         .iter()
         .find_map(|layer| match layer.protocol_id().as_str() {
@@ -73,7 +73,7 @@ fn resolve_destination(
             .address_for_family(version)
             .map(Some)
             .ok_or_else(|| {
-                CliError::classified(packetcraftr::target::Error::AddressFamilyUnavailable {
+                BoundaryError::from_error(packetcraftr::target::Error::AddressFamilyUnavailable {
                     family: version.label(),
                 })
             }),

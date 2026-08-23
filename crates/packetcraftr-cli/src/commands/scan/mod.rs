@@ -14,10 +14,10 @@ use packetcraftr::{core, netio as net, output};
 
 use self::arguments::Args;
 use super::registry;
-use crate::errors::CliError;
 use crate::input::parse_target;
 use crate::rendering::{NdjsonStream, emit_aggregate_with_stats};
 use crate::system::{client, exchange, validate_selector};
+use packetcraftr::BoundaryError;
 
 use super::execution::Executor;
 
@@ -25,7 +25,7 @@ pub(super) fn run(
     arguments: Args,
     format: output::contract::Format,
     stream: &mut NdjsonStream,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     let Args {
         target,
         transport,
@@ -54,10 +54,13 @@ pub(super) fn run(
         max_evidence_bytes: queue_limits.max_bytes,
         max_undecoded,
     };
-    workflow_limits.validate().map_err(CliError::classified)?;
-    let ports = conversion::expand_port_specs(&ports, max_ports).map_err(CliError::classified)?;
+    workflow_limits
+        .validate()
+        .map_err(BoundaryError::from_error)?;
+    let ports =
+        conversion::expand_port_specs(&ports, max_ports).map_err(BoundaryError::from_error)?;
     let policy = policy.into_policy();
-    policy.validate().map_err(CliError::classified)?;
+    policy.validate().map_err(BoundaryError::from_error)?;
     validate_selector(route.interface.as_deref()).map(|_| ())?;
     let request = packetcraftr::scan::Request {
         target,
@@ -103,9 +106,9 @@ pub(super) fn run(
                 &mut executor,
                 &mut clock,
             )
-            .map_err(CliError::classified)?;
+            .map_err(BoundaryError::from_error)?;
             let (result, diagnostics, stats) =
-                output::scan::Result::try_from_scan(result).map_err(CliError::classified)?;
+                output::scan::Result::try_from_scan(result).map_err(BoundaryError::from_error)?;
             if format == output::contract::Format::Text {
                 rendering::render_text(result, diagnostics, stats)
             } else {
@@ -126,12 +129,9 @@ pub(super) fn run(
                 &registry,
                 &mut executor,
                 &mut clock,
-                move |event| {
-                    rendering::render_event(event, &event_stream)
-                        .map_err(CliError::into_boundary_error)
-                },
+                move |event| rendering::render_event(event, &event_stream),
             )
-            .map_err(CliError::classified)?;
+            .map_err(BoundaryError::from_error)?;
             rendering::render_complete(summary, stream)
         }
         _ => unreachable!("scan format is checked before command dispatch"),

@@ -14,10 +14,10 @@ use packetcraftr::{core, netio as net, output};
 
 use self::arguments::Args;
 use super::registry;
-use crate::errors::CliError;
 use crate::input::parse_target;
 use crate::rendering::{NdjsonStream, emit_aggregate_with_stats};
 use crate::system::{client, exchange, validate_selector};
+use packetcraftr::BoundaryError;
 
 use super::execution::Executor;
 
@@ -25,11 +25,11 @@ pub(super) fn run(
     arguments: Args,
     format: output::contract::Format,
     stream: &mut NdjsonStream,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     let queue_limits = arguments.limits.clone().into_limits();
     let request = prepare_request(&arguments, queue_limits)?;
     let policy = arguments.policy.clone().into_policy();
-    policy.validate().map_err(CliError::classified)?;
+    policy.validate().map_err(BoundaryError::from_error)?;
     validate_selector(arguments.route.interface.as_deref()).map(|_| ())?;
     let registry = registry()?;
     let exchange = prepare_exchange(&arguments, &request, queue_limits)?;
@@ -50,9 +50,9 @@ pub(super) fn run(
                 &mut executor,
                 &mut clock,
             )
-            .map_err(CliError::classified)?;
+            .map_err(BoundaryError::from_error)?;
             let (result, diagnostics, stats) =
-                output::dns::Result::try_from_dns(result).map_err(CliError::classified)?;
+                output::dns::Result::try_from_dns(result).map_err(BoundaryError::from_error)?;
             if format == output::contract::Format::Text {
                 rendering::render_text(result, diagnostics, stats)
             } else {
@@ -73,12 +73,9 @@ pub(super) fn run(
                 &registry,
                 &mut executor,
                 &mut clock,
-                move |event| {
-                    rendering::render_event(event, &event_stream)
-                        .map_err(CliError::into_boundary_error)
-                },
+                move |event| rendering::render_event(event, &event_stream),
             )
-            .map_err(CliError::classified)?;
+            .map_err(BoundaryError::from_error)?;
             rendering::render_complete(summary, stream)
         }
         _ => unreachable!("dns format is checked before command dispatch"),
@@ -88,7 +85,7 @@ pub(super) fn run(
 fn prepare_request(
     arguments: &Args,
     queue_limits: net::capture::Limits,
-) -> Result<packetcraftr::dns::Request, CliError> {
+) -> Result<packetcraftr::dns::Request, BoundaryError> {
     let request = packetcraftr::dns::Request {
         server: parse_target(arguments.server.clone())?,
         address_family: arguments.family.into(),
@@ -125,7 +122,7 @@ fn prepare_exchange(
     arguments: &Args,
     request: &packetcraftr::dns::Request,
     queue_limits: net::capture::Limits,
-) -> Result<packetcraftr::exchange::Options, CliError> {
+) -> Result<packetcraftr::exchange::Options, BoundaryError> {
     exchange::options(
         packetcraftr::send::Options {
             destination: None,

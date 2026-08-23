@@ -6,8 +6,8 @@
 
 use std::time::Duration;
 
-use crate::errors::CliError;
 use crate::system::{Client, Exchange, resolve};
+use packetcraftr::BoundaryError;
 
 pub(super) struct Executor {
     pub(super) client: Client,
@@ -16,7 +16,7 @@ pub(super) struct Executor {
 }
 
 impl Executor {
-    fn prepared(&mut self) -> Result<Exchange<'_>, CliError> {
+    fn prepared(&mut self) -> Result<Exchange<'_>, BoundaryError> {
         if let Some(selector) = &self.interface {
             self.exchange.send.plan.interface = resolve(
                 Some(selector.clone()),
@@ -36,9 +36,7 @@ impl packetcraftr::dns::Executor for Executor {
         &mut self,
         exchange: &packetcraftr::dns::Exchange,
     ) -> Result<packetcraftr::dns::Execution, packetcraftr::BoundaryError> {
-        self.prepared()
-            .map_err(CliError::into_boundary_error)?
-            .execute(exchange)
+        self.prepared()?.execute(exchange)
     }
 }
 
@@ -47,9 +45,7 @@ impl packetcraftr::scan::Executor for Executor {
         &mut self,
         batch: &packetcraftr::scan::Batch,
     ) -> Result<packetcraftr::scan::Execution, packetcraftr::BoundaryError> {
-        self.prepared()
-            .map_err(CliError::into_boundary_error)?
-            .execute(batch)
+        self.prepared()?.execute(batch)
     }
 }
 
@@ -58,9 +54,7 @@ impl packetcraftr::traceroute::Executor for Executor {
         &mut self,
         batch: &packetcraftr::traceroute::Batch,
     ) -> Result<packetcraftr::traceroute::Execution, packetcraftr::BoundaryError> {
-        self.prepared()
-            .map_err(CliError::into_boundary_error)?
-            .execute(batch)
+        self.prepared()?.execute(batch)
     }
 }
 
@@ -70,8 +64,6 @@ impl packetcraftr::fuzz::Executor for Executor {
         case: &packetcraftr::fuzz::ExecutionCase,
         timeout: Duration,
     ) -> Result<packetcraftr::fuzz::Execution, packetcraftr::BoundaryError> {
-        self.prepared()
-            .map_err(CliError::into_boundary_error)?
-            .execute(case, timeout)
+        self.prepared()?.execute(case, timeout)
     }
 }

@@ -7,10 +7,11 @@ mod rendering;
 use packetcraftr::{analysis, output};
 
 use self::arguments::{Args, Direction};
-use super::super::errors::CliError;
 use super::super::input::open_capture;
 use super::offline_analysis::{Prepared, prepare};
+use crate::error::{FOLLOW_STREAM, failure};
 use crate::rendering::NdjsonStream;
+use packetcraftr::BoundaryError;
 
 use analysis::expert::StreamTransport;
 use analysis::follow::{Chunk, Collector, Selector};
@@ -20,11 +21,11 @@ pub(super) fn run(
     arguments: Args,
     format: output::contract::Format,
     stream: &mut NdjsonStream,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     let selector = parse_stream(&arguments.stream)?;
     if format == output::contract::Format::Raw && arguments.direction == Direction::Both {
-        return Err(CliError::new(
-            2,
+        return Err(failure(
+            FOLLOW_STREAM,
             "raw output interleaves both directions indistinguishably; \
              choose --direction client or --direction server",
         ));
@@ -62,12 +63,11 @@ pub(super) fn run(
             if !direction_matches(direction, &chunk) {
                 continue;
             }
-            rendering::render_record(format, chunk, &mut state, stream)
-                .map_err(CliError::into_boundary_error)?;
+            rendering::render_record(format, chunk, &mut state, stream)?;
         }
         Ok(())
     })
-    .map_err(CliError::classified)?;
+    .map_err(BoundaryError::from_error)?;
     let summary = collector.finish(&run_summary.trailing_tcp_events);
 
     match format {
@@ -90,10 +90,10 @@ fn direction_matches(direction: Direction, chunk: &Chunk) -> bool {
 }
 
 /// Parses a `tcp:INDEX` or `udp:INDEX` conversation spec.
-fn parse_stream(spec: &str) -> Result<Selector, CliError> {
+fn parse_stream(spec: &str) -> Result<Selector, BoundaryError> {
     let invalid = || {
-        CliError::new(
-            2,
+        failure(
+            FOLLOW_STREAM,
             format!("invalid --stream '{spec}': expected tcp:INDEX or udp:INDEX"),
         )
     };

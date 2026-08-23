@@ -3,16 +3,16 @@
 
 use packetcraftr::{netio as net, output};
 
-use super::super::errors::CliError;
 use super::super::rendering::{emit_aggregate, write_stdout_line};
+use packetcraftr::BoundaryError;
 
 pub(super) const AFTER_LONG_HELP: &str = r#"Examples:
   packetcraftr interfaces
   packetcraftr --output json interfaces"#;
 
-pub(super) fn run(format: output::contract::Format) -> Result<(), CliError> {
+pub(super) fn run(format: output::contract::Format) -> Result<(), BoundaryError> {
     let interfaces = net::interface::Provider::interfaces(&net::interface::SystemProvider)
-        .map_err(CliError::classified)?;
+        .map_err(BoundaryError::from_error)?;
     let result = output::interfaces::Result::new(interfaces);
     match format {
         output::contract::Format::Text => {

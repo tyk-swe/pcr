@@ -5,8 +5,8 @@ use std::collections::BTreeMap;
 
 use packetcraftr::{analysis, output};
 
-use crate::errors::CliError;
 use crate::rendering::{NdjsonStream, emit_aggregate, write_stdout_line};
+use packetcraftr::BoundaryError;
 
 #[derive(Debug, Default)]
 pub(super) struct State {
@@ -35,7 +35,7 @@ pub(super) fn render_record(
     finding: output::expert::Finding,
     state: &mut State,
     stream: &mut NdjsonStream,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     match format {
         output::contract::Format::Text => match (finding.transport, finding.stream) {
             (Some(transport), Some(stream)) => write_stdout_line(format_args!(
@@ -60,7 +60,7 @@ pub(super) fn render_record(
     }
 }
 
-pub(super) fn render_text(summary: &analysis::Summary, state: &State) -> Result<(), CliError> {
+pub(super) fn render_text(summary: &analysis::Summary, state: &State) -> Result<(), BoundaryError> {
     write_stdout_line(format_args!(
         "found {} finding(s) ({} error(s), {} warning(s), {} note(s)) in {} of {} frame(s)",
         state.findings,
@@ -72,7 +72,10 @@ pub(super) fn render_text(summary: &analysis::Summary, state: &State) -> Result<
     ))
 }
 
-pub(super) fn render_aggregate(summary: &analysis::Summary, state: State) -> Result<(), CliError> {
+pub(super) fn render_aggregate(
+    summary: &analysis::Summary,
+    state: State,
+) -> Result<(), BoundaryError> {
     emit_aggregate(
         output::contract::Command::Expert,
         result(summary, state, true),
@@ -84,7 +87,7 @@ pub(super) fn render_stream(
     summary: &analysis::Summary,
     state: State,
     stream: &mut NdjsonStream,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     stream.complete(result(summary, state, false), Vec::new())
 }
 

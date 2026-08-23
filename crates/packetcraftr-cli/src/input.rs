@@ -6,13 +6,16 @@ use std::io::{self, IsTerminal, Read};
 use std::path::Path;
 
 use packetcraftr::{
+    BoundaryError,
     analysis::pcap::{Reader, ReaderOptions},
-    core::error::Classification,
     core::{self, Packet},
 };
 
 use super::command_options::{OfflineCaptureLimitsArgs, RecipeArgs};
-use super::errors::CliError;
+use super::error::{
+    CAPTURE_LIMIT, FRAME_INPUT_SOURCE, INPUT_LIMIT, INPUT_READ, INVARIANT, OUTPUT_WRITE,
+    RECIPE_INPUT_SOURCE, failure,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum InputKind {
@@ -34,30 +37,25 @@ impl InputKind {
             Self::Frame => "--hex, --file, or redirect non-empty stdin",
         }
     }
-
-    const fn remediation(self) -> &'static str {
-        match self {
-            Self::Recipe => {
-                "provide --packet, --packet-file, or pipe a non-empty packet recipe to stdin"
-            }
-            Self::Frame => "provide --hex, --file, or pipe non-empty frame bytes to stdin",
-        }
-    }
 }
 
-fn missing_input_error(kind: InputKind) -> CliError {
-    CliError::from_classification(
-        Classification::new("cli.input_source", Some(kind.remediation())),
+fn missing_input_error(kind: InputKind) -> BoundaryError {
+    let classification = match kind {
+        InputKind::Recipe => RECIPE_INPUT_SOURCE,
+        InputKind::Frame => FRAME_INPUT_SOURCE,
+    };
+    BoundaryError::new(
         format!(
             "{} input is required: provide {}",
             kind.label(),
             kind.options()
         ),
+        classification,
         Vec::new(),
     )
 }
 
-fn require_redirected_stdin(kind: InputKind, stdin_is_terminal: bool) -> Result<(), CliError> {
+fn require_redirected_stdin(kind: InputKind, stdin_is_terminal: bool) -> Result<(), BoundaryError> {
     if stdin_is_terminal {
         Err(missing_input_error(kind))
     } else {
@@ -68,7 +66,7 @@ fn require_redirected_stdin(kind: InputKind, stdin_is_terminal: bool) -> Result<
 pub(super) fn read_recipe(
     arguments: RecipeArgs,
     registry: &core::registry::Registry,
-) -> Result<Packet, CliError> {
+) -> Result<Packet, BoundaryError> {
     let RecipeArgs {
         packet,
         packet_file,
@@ -83,7 +81,10 @@ pub(super) fn read_recipe(
                 InputKind::Recipe,
             )?;
             let input = String::from_utf8(bytes).map_err(|source| {
-                CliError::new(2, format!("packet document is not UTF-8: {source}"))
+                failure(
+                    INPUT_READ,
+                    format!("packet document is not UTF-8: {source}"),
+                )
             })?;
             (input, Some(path))
         }
@@ -93,7 +94,7 @@ pub(super) fn read_recipe(
                 InputKind::Recipe,
             )?;
             let input = String::from_utf8(bytes).map_err(|source| {
-                CliError::new(2, format!("stdin recipe is not UTF-8: {source}"))
+                failure(INPUT_READ, format!("stdin recipe is not UTF-8: {source}"))
             })?;
             (input, None)
         }
@@ -121,14 +122,17 @@ pub(super) fn read_recipe(
             core::document::DEFAULT_MAX_DOCUMENT_NESTING,
         )
         .and_then(|document| document.to_packet(registry, core::build::DEFAULT_MAX_LAYERS))
-        .map_err(|source| CliError::new(2, source.to_string()));
+        .map_err(BoundaryError::from_error);
     }
     parse_expression(&input, registry)
 }
 
-fn parse_expression(input: &str, registry: &core::registry::Registry) -> Result<Packet, CliError> {
+fn parse_expression(
+    input: &str,
+    registry: &core::registry::Registry,
+) -> Result<Packet, BoundaryError> {
     core::expression::parse(input, registry, core::expression::Options::default())
-        .map_err(|source| CliError::new(2, source.to_string()))
+        .map_err(BoundaryError::from_error)
 }
 
 fn document_format_from_path(path: &Path) -> Option<core::document::Format> {
@@ -143,30 +147,41 @@ pub(super) fn read_bounded_file(
     path: &Path,
     max_bytes: usize,
     kind: InputKind,
-) -> Result<Vec<u8>, CliError> {
-    let file = File::open(path)
-        .map_err(|source| CliError::new(2, format!("open {} failed: {source}", path.display())))?;
+) -> Result<Vec<u8>, BoundaryError> {
+    let file = File::open(path).map_err(|source| {
+        failure(
+            INPUT_READ,
+            format!("open {} failed: {source}", path.display()),
+        )
+    })?;
     read_bounded(file, max_bytes, kind)
 }
 
-pub(super) fn read_stdin_bounded(max_bytes: usize, kind: InputKind) -> Result<Vec<u8>, CliError> {
+pub(super) fn read_stdin_bounded(
+    max_bytes: usize,
+    kind: InputKind,
+) -> Result<Vec<u8>, BoundaryError> {
     let stdin = io::stdin();
     require_redirected_stdin(kind, stdin.is_terminal())?;
     read_bounded(stdin.lock(), max_bytes, kind)
 }
 
-pub(super) fn parse_target(target: String) -> Result<packetcraftr::target::Target, CliError> {
+pub(super) fn parse_target(target: String) -> Result<packetcraftr::target::Target, BoundaryError> {
     target
         .parse::<packetcraftr::target::Target>()
-        .map_err(CliError::classified)
+        .map_err(BoundaryError::from_error)
 }
 
 pub(super) fn open_capture(
     path: &Path,
     limits: OfflineCaptureLimitsArgs,
-) -> Result<Reader<File>, CliError> {
-    let file = File::open(path)
-        .map_err(|source| CliError::new(5, format!("open {} failed: {source}", path.display())))?;
+) -> Result<Reader<File>, BoundaryError> {
+    let file = File::open(path).map_err(|source| {
+        failure(
+            OUTPUT_WRITE,
+            format!("open {} failed: {source}", path.display()),
+        )
+    })?;
     Reader::with_options(
         file,
         ReaderOptions {
@@ -175,10 +190,14 @@ pub(super) fn open_capture(
             ..ReaderOptions::default()
         },
     )
-    .map_err(CliError::classified)
+    .map_err(BoundaryError::from_error)
 }
 
-fn read_bounded(reader: impl Read, max_bytes: usize, kind: InputKind) -> Result<Vec<u8>, CliError> {
+fn read_bounded(
+    reader: impl Read,
+    max_bytes: usize,
+    kind: InputKind,
+) -> Result<Vec<u8>, BoundaryError> {
     let bytes = read_bounded_allow_empty(reader, max_bytes, kind)?;
     if bytes.is_empty() {
         return Err(missing_input_error(kind));
@@ -190,13 +209,13 @@ fn read_bounded_allow_empty(
     reader: impl Read,
     max_bytes: usize,
     kind: InputKind,
-) -> Result<Vec<u8>, CliError> {
+) -> Result<Vec<u8>, BoundaryError> {
     let read_limit = max_bytes
         .checked_add(1)
         .and_then(|value| u64::try_from(value).ok())
         .ok_or_else(|| {
-            CliError::new(
-                70,
+            failure(
+                INVARIANT,
                 format!("{} input byte limit cannot be represented", kind.label()),
             )
         })?;
@@ -205,11 +224,14 @@ fn read_bounded_allow_empty(
         .take(read_limit)
         .read_to_end(&mut bytes)
         .map_err(|source| {
-            CliError::new(2, format!("read {} input failed: {source}", kind.label()))
+            failure(
+                INPUT_READ,
+                format!("read {} input failed: {source}", kind.label()),
+            )
         })?;
     if bytes.len() > max_bytes {
-        return Err(CliError::new(
-            2,
+        return Err(failure(
+            INPUT_LIMIT,
             format!("{} input exceeds {max_bytes} byte limit", kind.label()),
         ));
     }
@@ -221,25 +243,17 @@ pub(super) fn validate_capture_stream_limits(
     max_bytes: u64,
     max_frame_bytes: usize,
     max_interfaces: usize,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     if max_frames == 0 || max_bytes == 0 || max_frame_bytes == 0 || max_interfaces == 0 {
-        return Err(CliError::from_classification(
-            Classification::new(
-                "cli.capture_limit",
-                Some("use finite non-zero capture frame, byte, packet, and interface limits"),
-            ),
+        return Err(failure(
+            CAPTURE_LIMIT,
             "capture stream limits must be non-zero",
-            Vec::new(),
         ));
     }
     if u64::try_from(max_frame_bytes).unwrap_or(u64::MAX) > max_bytes {
-        return Err(CliError::from_classification(
-            Classification::new(
-                "cli.capture_limit",
-                Some("set max-frame-bytes no higher than the aggregate max-bytes budget"),
-            ),
+        return Err(failure(
+            CAPTURE_LIMIT,
             format!("max-frame-bytes {max_frame_bytes} exceeds max-bytes {max_bytes}"),
-            Vec::new(),
         ));
     }
     Ok(())
@@ -249,7 +263,10 @@ pub(super) fn validate_capture_stream_limits(
 mod tests {
     use std::io::Cursor;
 
+    use packetcraftr::core::error::Classified;
+
     use super::*;
+    use crate::error::exit_code;
 
     #[test]
     fn bounded_reads_distinguish_empty_exact_and_oversized_input() {
@@ -266,39 +283,39 @@ mod tests {
 
         let empty = read_bounded(Cursor::new([]), 4, InputKind::Recipe)
             .expect_err("required input is empty");
-        assert_eq!(empty.exit_code, 2);
-        assert!(empty.message.contains("non-empty stdin"));
+        assert_eq!(exit_code(&empty), 2);
+        assert!(empty.to_string().contains("non-empty stdin"));
 
         let oversized = read_bounded_allow_empty(Cursor::new(b"abcde"), 4, InputKind::Recipe)
             .expect_err("limit is enforced");
-        assert_eq!(oversized.exit_code, 2);
-        assert_eq!(oversized.message, "packet input exceeds 4 byte limit");
+        assert_eq!(exit_code(&oversized), 2);
+        assert_eq!(oversized.to_string(), "packet input exceeds 4 byte limit");
 
         let unrepresentable =
             read_bounded_allow_empty(Cursor::new([]), usize::MAX, InputKind::Recipe)
                 .expect_err("the sentinel byte must be representable");
-        assert_eq!(unrepresentable.exit_code, 70);
+        assert_eq!(exit_code(&unrepresentable), 70);
     }
 
     #[test]
     fn terminal_input_decision_is_immediate_and_command_specific() {
         let recipe = require_redirected_stdin(InputKind::Recipe, true)
             .expect_err("recipe terminal input must be rejected");
-        assert_eq!(recipe.classification.code, "cli.input_source");
-        assert_eq!(recipe.exit_code, 2);
-        assert!(recipe.message.contains("--packet"));
-        assert!(recipe.message.contains("--packet-file"));
-        assert!(recipe.classification.remediation.is_some());
+        assert_eq!(recipe.classification().code, "cli.input_source");
+        assert_eq!(exit_code(&recipe), 2);
+        assert!(recipe.to_string().contains("--packet"));
+        assert!(recipe.to_string().contains("--packet-file"));
+        assert!(recipe.classification().remediation.is_some());
 
         let frame = require_redirected_stdin(InputKind::Frame, true)
             .expect_err("frame terminal input must be rejected");
-        assert_eq!(frame.classification.code, "cli.input_source");
-        assert_eq!(frame.exit_code, 2);
-        assert!(frame.message.contains("--hex"));
-        assert!(frame.message.contains("--file"));
-        assert!(!frame.message.contains("--packet"));
-        assert!(!frame.message.contains("--packet-file"));
-        assert!(frame.classification.remediation.is_some());
+        assert_eq!(frame.classification().code, "cli.input_source");
+        assert_eq!(exit_code(&frame), 2);
+        assert!(frame.to_string().contains("--hex"));
+        assert!(frame.to_string().contains("--file"));
+        assert!(!frame.to_string().contains("--packet"));
+        assert!(!frame.to_string().contains("--packet-file"));
+        assert!(frame.classification().remediation.is_some());
 
         require_redirected_stdin(InputKind::Recipe, false)
             .expect("redirected recipe input must remain available");
@@ -311,13 +328,13 @@ mod tests {
         for limits in [(0, 1, 1, 1), (1, 0, 1, 1), (1, 1, 0, 1), (1, 1, 1, 0)] {
             let error = validate_capture_stream_limits(limits.0, limits.1, limits.2, limits.3)
                 .expect_err("every capture bound must be non-zero");
-            assert_eq!(error.exit_code, 2, "limits={limits:?}");
-            assert_eq!(error.classification.code, "cli.capture_limit");
+            assert_eq!(exit_code(&error), 2, "limits={limits:?}");
+            assert_eq!(error.classification().code, "cli.capture_limit");
         }
 
         let error = validate_capture_stream_limits(1, 7, 8, 1)
             .expect_err("one frame cannot exceed the aggregate byte budget");
-        assert_eq!(error.message, "max-frame-bytes 8 exceeds max-bytes 7");
+        assert_eq!(error.to_string(), "max-frame-bytes 8 exceeds max-bytes 7");
         validate_capture_stream_limits(1, 8, 8, 1).expect("equal byte bounds are valid");
     }
 

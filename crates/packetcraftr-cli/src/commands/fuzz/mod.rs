@@ -13,10 +13,11 @@ use packetcraftr::{core, netio as net, output};
 
 use self::arguments::Args;
 use super::registry;
-use crate::errors::CliError;
+use crate::error::{INPUT_READ, failure};
 use crate::input::read_recipe;
 use crate::rendering::{NdjsonStream, emit_aggregate_with_stats};
 use crate::system::{client, exchange, validate_selector};
+use packetcraftr::BoundaryError;
 
 use super::execution::Executor;
 
@@ -31,7 +32,7 @@ pub(super) fn run(
     arguments: Args,
     format: output::contract::Format,
     stream: &mut NdjsonStream,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     let request = prepare_request(&arguments)?;
     let live = prepare_live(&arguments, &request)?;
     let registry = registry()?;
@@ -39,14 +40,14 @@ pub(super) fn run(
     execute_and_render(request, packet, registry, live, format, stream)
 }
 
-fn prepare_request(arguments: &Args) -> Result<core::fuzz::Request, CliError> {
+fn prepare_request(arguments: &Args) -> Result<core::fuzz::Request, BoundaryError> {
     let targets = arguments
         .fields
         .iter()
         .map(|field| {
             field
                 .parse::<core::fuzz::Target>()
-                .map_err(|source| CliError::new(2, source.to_string()))
+                .map_err(|source| failure(INPUT_READ, source.to_string()))
         })
         .collect::<Result<Vec<_>, _>>()?;
     let request = core::fuzz::Request {
@@ -75,14 +76,14 @@ fn prepare_request(arguments: &Args) -> Result<core::fuzz::Request, CliError> {
             max_duration: Duration::from_millis(arguments.max_duration_ms),
         },
     };
-    request.validate().map_err(CliError::classified)?;
+    request.validate().map_err(BoundaryError::from_error)?;
     Ok(request)
 }
 
 fn prepare_live(
     arguments: &Args,
     request: &core::fuzz::Request,
-) -> Result<Option<PreparedLive>, CliError> {
+) -> Result<Option<PreparedLive>, BoundaryError> {
     if !arguments.live {
         return Ok(None);
     }
@@ -98,9 +99,9 @@ fn prepare_live(
         },
     }
     .validate()
-    .map_err(CliError::classified)?;
+    .map_err(BoundaryError::from_error)?;
     let policy = arguments.policy.clone().into_policy();
-    policy.validate().map_err(CliError::classified)?;
+    policy.validate().map_err(BoundaryError::from_error)?;
     validate_selector(arguments.route.interface.as_deref()).map(|_| ())?;
     let exchange = exchange::options(
         packetcraftr::send::Options {
@@ -132,7 +133,7 @@ fn execute_and_render(
     live: Option<PreparedLive>,
     format: output::contract::Format,
     stream: &mut NdjsonStream,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     if let Some(live) = live {
         execute_live(request, packet, registry, live, format, stream)
     } else {
@@ -146,21 +147,20 @@ fn execute_offline(
     registry: Arc<core::registry::Registry>,
     format: output::contract::Format,
     stream: &NdjsonStream,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     if format == output::contract::Format::Ndjson {
         let event_stream = stream.clone();
         let summary = core::fuzz::run_with_events(&request, packet, registry, move |case| {
             output::fuzz::Event::try_from_offline(case)
-                .map_err(CliError::classified)
+                .map_err(BoundaryError::from_error)
                 .and_then(|event| event_stream.emit_data(event, Vec::new()))
-                .map_err(CliError::into_boundary_error)
         })
-        .map_err(CliError::classified)?;
+        .map_err(BoundaryError::from_error)?;
         return rendering::render_offline_complete(summary, stream);
     }
-    let result = core::fuzz::run(&request, packet, registry).map_err(CliError::classified)?;
+    let result = core::fuzz::run(&request, packet, registry).map_err(BoundaryError::from_error)?;
     let (result, diagnostics, stats) =
-        output::fuzz::Result::try_from_offline(result).map_err(CliError::classified)?;
+        output::fuzz::Result::try_from_offline(result).map_err(BoundaryError::from_error)?;
     render_collected(result, diagnostics, stats, format)
 }
 
@@ -171,7 +171,7 @@ fn execute_live(
     live: PreparedLive,
     format: output::contract::Format,
     stream: &NdjsonStream,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     let mut executor = Executor {
         client: client(Arc::clone(&registry), live.policy.clone()),
         exchange: live.exchange,
@@ -190,12 +190,11 @@ fn execute_live(
             &mut clock,
             move |case| {
                 output::fuzz::Event::try_from_live(case)
-                    .map_err(CliError::classified)
+                    .map_err(BoundaryError::from_error)
                     .and_then(|event| event_stream.emit_data(event, Vec::new()))
-                    .map_err(CliError::into_boundary_error)
             },
         )
-        .map_err(CliError::classified)?;
+        .map_err(BoundaryError::from_error)?;
         return rendering::render_live_complete(summary, stream);
     }
     let result = packetcraftr::fuzz::run(
@@ -207,9 +206,9 @@ fn execute_live(
         &mut executor,
         &mut clock,
     )
-    .map_err(CliError::classified)?;
+    .map_err(BoundaryError::from_error)?;
     let (result, diagnostics, stats) =
-        output::fuzz::Result::try_from_live(result).map_err(CliError::classified)?;
+        output::fuzz::Result::try_from_live(result).map_err(BoundaryError::from_error)?;
     render_collected(result, diagnostics, stats, format)
 }
 
@@ -218,7 +217,7 @@ fn render_collected(
     diagnostics: Vec<core::diagnostic::Diagnostic>,
     stats: output::envelope::Stats,
     format: output::contract::Format,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     match format {
         output::contract::Format::Text => rendering::render_text(result, diagnostics, stats),
         output::contract::Format::Json => {

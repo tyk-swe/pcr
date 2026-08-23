@@ -6,8 +6,9 @@ use std::time::{Duration, Instant};
 use packetcraftr::{core, core::frame::Frame, netio as net, output};
 
 use super::super::increment_counter;
-use crate::errors::CliError;
+use crate::error::{INVARIANT, failure, with_cleanup};
 use crate::filtering::FrameSelector;
+use packetcraftr::BoundaryError;
 
 #[derive(Debug)]
 pub(super) struct Outcome {
@@ -46,10 +47,10 @@ pub(super) fn run<C, F>(
     policy: &packetcraftr::policy::Policy,
     selector: Option<&FrameSelector>,
     mut emit: F,
-) -> Result<Outcome, CliError>
+) -> Result<Outcome, BoundaryError>
 where
     C: net::capture::Session,
-    F: FnMut(Frame, u64) -> Result<(), CliError>,
+    F: FnMut(Frame, u64) -> Result<(), BoundaryError>,
 {
     let mut progress = Progress::new(timeout);
     if let Err(error) = wait_ready(&mut capture, timeout, progress.deadline) {
@@ -65,14 +66,16 @@ fn wait_ready<C: net::capture::Session>(
     capture: &mut C,
     timeout: Duration,
     deadline: Instant,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     if timeout.is_zero() {
         return Ok(());
     }
     let remaining = deadline
         .checked_duration_since(Instant::now())
         .unwrap_or(Duration::ZERO);
-    capture.wait_ready(remaining).map_err(CliError::classified)
+    capture
+        .wait_ready(remaining)
+        .map_err(BoundaryError::from_error)
 }
 
 fn capture_frames<C, F>(
@@ -81,10 +84,10 @@ fn capture_frames<C, F>(
     policy: &packetcraftr::policy::Policy,
     selector: Option<&FrameSelector>,
     emit: &mut F,
-) -> Result<(), CliError>
+) -> Result<(), BoundaryError>
 where
     C: net::capture::Session,
-    F: FnMut(Frame, u64) -> Result<(), CliError>,
+    F: FnMut(Frame, u64) -> Result<(), BoundaryError>,
 {
     while progress.frames_captured < policy.max_packets_per_operation {
         let Some(remaining) = progress.deadline.checked_duration_since(Instant::now()) else {
@@ -95,7 +98,7 @@ where
         }
         let Some(frame) = capture
             .next_captured_frame(remaining)
-            .map_err(CliError::classified)?
+            .map_err(BoundaryError::from_error)?
             .map(|captured| captured.frame)
         else {
             break;
@@ -124,20 +127,20 @@ fn account_bytes(
     progress: &mut Progress,
     frame: &Frame,
     policy: &packetcraftr::policy::Policy,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     let frame_bytes = u64::try_from(frame.bytes().len()).map_err(|_| {
-        CliError::new(
-            70,
+        failure(
+            INVARIANT,
             "captured frame length exceeds the byte-accounting domain",
         )
     })?;
     let bytes = progress
         .captured_bytes
         .checked_add(frame_bytes)
-        .ok_or_else(|| CliError::new(70, "capture output byte accounting overflowed"))?;
+        .ok_or_else(|| failure(INVARIANT, "capture output byte accounting overflowed"))?;
     policy
         .authorize_operation(progress.frames_captured, bytes)
-        .map_err(CliError::classified)?;
+        .map_err(BoundaryError::from_error)?;
     progress.captured_bytes = bytes;
     Ok(())
 }
@@ -146,12 +149,12 @@ fn finish<C: net::capture::Session>(
     mut capture: C,
     progress: Progress,
     limits: net::capture::Limits,
-) -> Result<Outcome, CliError> {
-    capture.shutdown().map_err(CliError::classified)?;
+) -> Result<Outcome, BoundaryError> {
+    capture.shutdown().map_err(BoundaryError::from_error)?;
     let statistics = capture
         .statistics()
         .validate()
-        .map_err(CliError::classified)?;
+        .map_err(BoundaryError::from_error)?;
     let diagnostics = loss_diagnostics(&statistics, limits)?;
     Ok(Outcome {
         diagnostics,
@@ -168,12 +171,12 @@ fn finish<C: net::capture::Session>(
 fn loss_diagnostics(
     statistics: &net::capture::Statistics,
     limits: net::capture::Limits,
-) -> Result<Vec<core::diagnostic::Diagnostic>, CliError> {
+) -> Result<Vec<core::diagnostic::Diagnostic>, BoundaryError> {
     if !statistics.has_loss() {
         return Ok(Vec::new());
     }
     if limits.overflow_policy == net::capture::OverflowPolicy::Fail {
-        return Err(CliError::classified(
+        return Err(BoundaryError::from_error(
             statistics
                 .evidence_loss_error()
                 .expect("lossy capture statistics must produce a typed error"),
@@ -194,10 +197,10 @@ fn loss_diagnostics(
 
 pub(super) fn shutdown_after_error<C: net::capture::Session>(
     capture: &mut C,
-    error: CliError,
-) -> CliError {
+    error: BoundaryError,
+) -> BoundaryError {
     match capture.shutdown() {
         Ok(()) => error,
-        Err(cleanup) => error.with_cleanup(cleanup),
+        Err(cleanup) => with_cleanup(error, &cleanup),
     }
 }

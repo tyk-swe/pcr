@@ -14,15 +14,16 @@ use packetcraftr::{
 };
 
 use self::arguments::Args;
-use super::super::errors::CliError;
+use super::super::error::{INPUT_READ, failure};
 use super::super::filtering::{self, Capabilities};
 use super::super::input::{InputKind, read_bounded_file, read_stdin_bounded};
 use super::super::rendering::{
     emit_aggregate, render_diagnostics_text, write_plain_line, write_raw, write_stdout_line,
 };
 use super::registry;
+use packetcraftr::BoundaryError;
 
-pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
+pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), BoundaryError> {
     let registry = registry()?;
     // A bad filter fails before any input is read, so it cannot leave the
     // command waiting on standard input for frame bytes it would never use.
@@ -33,7 +34,7 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
         .transpose()?;
     let bytes = match (arguments.hex, arguments.file) {
         (Some(value), None) => core::protocol::raw::parse_hex(&value)
-            .map_err(|source| CliError::new(2, source.to_string()))?
+            .map_err(|source| failure(INPUT_READ, source.to_string()))?
             .to_vec(),
         (None, Some(path)) => read_bounded_file(
             &path,
@@ -48,10 +49,10 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
     let decoded = core::decode::Dissector::new(registry)
         .decode(
             Frame::new(SystemTime::now(), LinkType(arguments.link_type), bytes)
-                .map_err(|source| CliError::new(3, source.to_string()))?,
+                .map_err(BoundaryError::from_error)?,
             core::decode::Options::default(),
         )
-        .map_err(|source| CliError::new(3, source.to_string()))?;
+        .map_err(BoundaryError::from_error)?;
     // The filter selects emission, not validity: a frame it rejects is still
     // decoded successfully, while an unsupported output format is refused
     // whether or not the frame matched.
@@ -63,7 +64,7 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
                 tcp_stream: None,
                 udp_stream: None,
             })
-            .map_err(|source| CliError::new(3, source.to_string()))?,
+            .map_err(BoundaryError::from_error)?,
         None => true,
     };
     let (result, diagnostics) = output::dissect::Result::from_decoded(decoded);

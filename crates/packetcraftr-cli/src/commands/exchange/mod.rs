@@ -10,17 +10,17 @@ use std::time::Duration;
 use packetcraftr::{core, output};
 
 use self::arguments::Args;
-use super::super::errors::CliError;
 use super::super::system::{client, prepare_route};
 use super::registry;
 use crate::command_options::SendArgs;
 use crate::rendering::NdjsonStream;
+use packetcraftr::BoundaryError;
 
 pub(super) fn run(
     arguments: Args,
     format: output::contract::Format,
     stream: &mut NdjsonStream,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     let Args {
         send,
         timeout_ms,
@@ -47,7 +47,7 @@ pub(super) fn run(
     };
     options.decode.max_packet_size = limits.snap_length;
     // Validate before packet parsing can trigger hostname/interface work.
-    options.validate().map_err(CliError::classified)?;
+    options.validate().map_err(BoundaryError::from_error)?;
 
     let registry = registry()?;
     let request = prepare_route(route, policy.into_policy(), &registry)?;
@@ -67,16 +67,15 @@ pub(super) fn run(
         let summary = client
             .exchange_with_events(&template, options, move |event| {
                 output::exchange::Event::try_from_exchange(event)
-                    .map_err(CliError::classified)
+                    .map_err(BoundaryError::from_error)
                     .and_then(|(event, diagnostics)| event_stream.emit_data(event, diagnostics))
-                    .map_err(CliError::into_boundary_error)
             })
-            .map_err(CliError::classified)?;
+            .map_err(BoundaryError::from_error)?;
         return rendering::render_complete(summary, stream);
     }
     let result = client
         .exchange(&template, options)
-        .map_err(CliError::classified)?;
+        .map_err(BoundaryError::from_error)?;
     match format {
         output::contract::Format::Text => rendering::render_text(&result),
         output::contract::Format::Json => rendering::render_aggregate(result),

@@ -4,7 +4,6 @@
 use std::sync::Arc;
 
 use packetcraftr::{
-    core::error::Classification,
     core::frame::Frame,
     core::{
         self,
@@ -13,7 +12,8 @@ use packetcraftr::{
     },
 };
 
-use super::errors::CliError;
+use crate::error::FILTER_UNSUPPORTED_FIELD;
+use packetcraftr::BoundaryError;
 
 /// Filter capabilities a command declares before input is read.
 ///
@@ -43,24 +43,18 @@ pub(crate) fn compile(
     source: &str,
     registry: &Registry,
     capabilities: Capabilities,
-) -> Result<Filter, CliError> {
+) -> Result<Filter, BoundaryError> {
     let filter = Filter::compile(
         source,
         registry,
         packetcraftr::core::filter::Options::default(),
     )
-    .map_err(cli_error)?;
+    .map_err(BoundaryError::from_error)?;
     if filter.requirements().stream_index && !capabilities.stream_index {
-        return Err(CliError::from_classification(
-            Classification::new(
-                "cli.filter_unsupported_field",
-                Some(
-                    "use `follow`, `stats`, or `expert` for stream-aware filters, \
-                     or filter on header fields instead",
-                ),
-            ),
+        return Err(BoundaryError::new(
             "this command assigns no conversation index, so the filter cannot read \
              `tcp.stream` or `udp.stream`",
+            FILTER_UNSUPPORTED_FIELD,
             Vec::new(),
         ));
     }
@@ -91,7 +85,7 @@ impl FrameSelector {
         source: Option<&str>,
         registry: &Arc<Registry>,
         max_frame_bytes: usize,
-    ) -> Result<Option<Self>, CliError> {
+    ) -> Result<Option<Self>, BoundaryError> {
         source
             .map(|source| {
                 let filter = compile(source, registry, Capabilities::frames_only())?;
@@ -101,7 +95,7 @@ impl FrameSelector {
     }
 
     /// Decides whether the one-based `source_frame` is kept.
-    pub(crate) fn keep(&self, source_frame: u64, frame: &Frame) -> Result<bool, CliError> {
+    pub(crate) fn keep(&self, source_frame: u64, frame: &Frame) -> Result<bool, BoundaryError> {
         let decoded = self
             .decoder
             .decode(
@@ -111,7 +105,7 @@ impl FrameSelector {
                     ..core::decode::Options::default()
                 },
             )
-            .map_err(|source| CliError::new(3, source.to_string()))?;
+            .map_err(BoundaryError::from_error)?;
         self.filter
             .matches(&Context {
                 decoded: &decoded,
@@ -119,7 +113,7 @@ impl FrameSelector {
                 tcp_stream: None,
                 udp_stream: None,
             })
-            .map_err(cli_error)
+            .map_err(BoundaryError::from_error)
     }
 }
 
@@ -130,19 +124,14 @@ impl packetcraftr::replay::Selector for FrameSelector {
         frame: &Frame,
     ) -> Result<bool, packetcraftr::BoundaryError> {
         self.keep(source_frame, frame)
-            .map_err(CliError::into_boundary_error)
     }
-}
-
-/// Converts a filter compilation failure into the CLI error taxonomy.
-fn cli_error(error: packetcraftr::core::filter::Error) -> CliError {
-    CliError::classified(error)
 }
 
 #[cfg(test)]
 mod tests {
     use std::time::UNIX_EPOCH;
 
+    use packetcraftr::core::error::Classified;
     use packetcraftr::core::{frame::LinkType, protocol::builtin};
 
     use super::*;
@@ -158,14 +147,14 @@ mod tests {
 
         let error = compile("udp.stream == 1", &registry, Capabilities::frames_only())
             .expect_err("frame-only commands lack stream indices");
-        assert_eq!(error.classification.code, "cli.filter_unsupported_field");
+        assert_eq!(error.classification().code, "cli.filter_unsupported_field");
         assert!(
             error
-                .classification
+                .classification()
                 .remediation
                 .is_some_and(|value| value.contains("stream-aware filters"))
         );
-        assert!(error.message.contains("tcp.stream"));
+        assert!(error.to_string().contains("tcp.stream"));
     }
 
     #[test]
@@ -189,7 +178,7 @@ mod tests {
         let error = too_small
             .keep(2, &frame)
             .expect_err("decode errors cannot become silent mismatches");
-        assert_eq!(error.classification.code, "packet.error");
+        assert_eq!(error.classification().code, "packet.decode_limit");
     }
 
     #[test]
@@ -207,11 +196,11 @@ mod tests {
                 .expect_err("fixture filter must fail");
             assert!(
                 error
-                    .classification
+                    .classification()
                     .remediation
                     .is_some_and(|value| value.contains(expected_remediation)),
                 "{source}: {:?}",
-                error.classification.remediation
+                error.classification().remediation
             );
         }
     }
@@ -233,12 +222,12 @@ mod tests {
         let stream_error = FrameSelector::compile_optional(Some("tcp.stream == 1"), &registry, 14)
             .expect_err("stream field rejected under frames_only capability");
         assert_eq!(
-            stream_error.classification.code,
+            stream_error.classification().code,
             "cli.filter_unsupported_field"
         );
 
         let syntax_error = FrameSelector::compile_optional(Some("(ethernet"), &registry, 14)
             .expect_err("malformed filter rejected");
-        assert_eq!(syntax_error.classification.code, "cli.filter");
+        assert_eq!(syntax_error.classification().code, "cli.filter");
     }
 }

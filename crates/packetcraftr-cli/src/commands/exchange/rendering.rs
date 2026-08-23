@@ -3,13 +3,13 @@
 
 use packetcraftr::output;
 
-use crate::errors::CliError;
 use crate::rendering::{
     NdjsonStream, emit_aggregate_with_stats, render_diagnostics_text, write_capture_file,
     write_stdout_line,
 };
+use packetcraftr::BoundaryError;
 
-pub(super) fn render_text(result: &packetcraftr::exchange::Result) -> Result<(), CliError> {
+pub(super) fn render_text(result: &packetcraftr::exchange::Result) -> Result<(), BoundaryError> {
     let mut diagnostics = result.diagnostics.clone();
     for sent in &result.sent {
         diagnostics.extend(sent.built().diagnostics.iter().cloned());
@@ -29,7 +29,7 @@ pub(super) fn render_text(result: &packetcraftr::exchange::Result) -> Result<(),
 pub(super) fn render_capture(
     result: &packetcraftr::exchange::Result,
     format: output::contract::Format,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     let mut frames = result
         .sent
         .iter()
@@ -47,9 +47,11 @@ pub(super) fn render_capture(
     write_capture_file(format, frames)
 }
 
-pub(super) fn render_aggregate(result: packetcraftr::exchange::Result) -> Result<(), CliError> {
+pub(super) fn render_aggregate(
+    result: packetcraftr::exchange::Result,
+) -> Result<(), BoundaryError> {
     let (result, diagnostics, stats) =
-        output::exchange::Result::try_from_exchange(result).map_err(CliError::classified)?;
+        output::exchange::Result::try_from_exchange(result).map_err(BoundaryError::from_error)?;
     emit_aggregate_with_stats(
         output::contract::Command::Exchange,
         result,
@@ -61,7 +63,7 @@ pub(super) fn render_aggregate(result: packetcraftr::exchange::Result) -> Result
 pub(super) fn render_complete(
     summary: packetcraftr::exchange::Summary,
     stream: &NdjsonStream,
-) -> Result<(), CliError> {
+) -> Result<(), BoundaryError> {
     let (event, diagnostics, stats) = output::exchange::Event::complete_from_exchange(summary);
     stream.complete_with_stats(event, diagnostics, stats)
 }

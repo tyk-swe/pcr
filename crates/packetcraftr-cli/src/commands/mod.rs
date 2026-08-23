@@ -8,8 +8,9 @@ use std::sync::Arc;
 use clap::Subcommand;
 use packetcraftr::{core, output};
 
-use crate::errors::CliError;
+use crate::error::{INVARIANT, failure};
 use crate::rendering::NdjsonStream;
+use packetcraftr::BoundaryError;
 
 mod build;
 mod capture;
@@ -121,10 +122,10 @@ impl Command {
         self,
         format: output::contract::Format,
         stream: &mut NdjsonStream,
-    ) -> Result<(), CliError> {
+    ) -> Result<(), BoundaryError> {
         self.kind()
             .require_format(format)
-            .map_err(CliError::classified)?;
+            .map_err(BoundaryError::from_error)?;
         match self {
             Self::Build(arguments) => build::run(arguments, format),
             Self::Dissect(arguments) => dissect::run(arguments, format),
@@ -148,16 +149,19 @@ impl Command {
     }
 }
 
-fn registry() -> Result<Arc<core::registry::Registry>, CliError> {
+fn registry() -> Result<Arc<core::registry::Registry>, BoundaryError> {
     core::protocol::builtin::registry()
         .map(Arc::new)
         .map_err(|source| {
-            CliError::new(70, format!("built-in registry invariant failed: {source}"))
+            failure(
+                INVARIANT,
+                format!("built-in registry invariant failed: {source}"),
+            )
         })
 }
 
-fn increment_counter(value: u64, counter: &'static str) -> Result<u64, CliError> {
+fn increment_counter(value: u64, counter: &'static str) -> Result<u64, BoundaryError> {
     value
         .checked_add(1)
-        .ok_or_else(|| CliError::new(70, format!("{counter} overflowed")))
+        .ok_or_else(|| failure(INVARIANT, format!("{counter} overflowed")))
 }

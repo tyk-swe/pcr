@@ -4,10 +4,11 @@
   "mode": "aggregate",
   "status": "error",
   "error": {
-    "code": "cli.error",
+    "code": "cli.input_read",
     "kind": "cli",
     "message": "invalid raw layer: invalid hex at byte 0",
-    "causes": []
+    "causes": [],
+    "remediation": "check that the input exists, is readable, and uses the expected encoding"
   },
   "diagnostics": []
 }

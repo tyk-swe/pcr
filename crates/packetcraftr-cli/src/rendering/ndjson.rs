@@ -6,7 +6,7 @@ use std::io::{self, Write};
 use packetcraftr::{core, output};
 use serde::Serialize;
 
-use super::super::errors::CliError;
+use packetcraftr::BoundaryError;
 
 #[derive(Clone)]
 pub(crate) struct NdjsonStream {
@@ -31,20 +31,20 @@ impl NdjsonStream {
         &self,
         result: T,
         diagnostics: Vec<core::diagnostic::Diagnostic>,
-    ) -> Result<(), CliError> {
+    ) -> Result<(), BoundaryError> {
         self.encoder
             .emit_data(result, diagnostics)
-            .map_err(CliError::classified)
+            .map_err(BoundaryError::from_error)
     }
 
     pub(crate) fn complete<T: Serialize>(
         &self,
         result: T,
         diagnostics: Vec<core::diagnostic::Diagnostic>,
-    ) -> Result<(), CliError> {
+    ) -> Result<(), BoundaryError> {
         self.encoder
             .complete(result, diagnostics)
-            .map_err(CliError::classified)
+            .map_err(BoundaryError::from_error)
     }
 
     pub(crate) fn complete_with_stats<T: Serialize>(
@@ -52,14 +52,16 @@ impl NdjsonStream {
         result: T,
         diagnostics: Vec<core::diagnostic::Diagnostic>,
         stats: output::envelope::Stats,
-    ) -> Result<(), CliError> {
+    ) -> Result<(), BoundaryError> {
         self.encoder
             .complete_with_stats(result, diagnostics, stats)
-            .map_err(CliError::classified)
+            .map_err(BoundaryError::from_error)
     }
 
-    pub(crate) fn emit_error(&self, error: output::envelope::Error) -> Result<(), CliError> {
-        self.encoder.emit_error(error).map_err(CliError::classified)
+    pub(crate) fn emit_error(&self, error: output::envelope::Error) -> Result<(), BoundaryError> {
+        self.encoder
+            .emit_error(error)
+            .map_err(BoundaryError::from_error)
     }
 
     pub(crate) fn is_open(&self) -> bool {
@@ -122,6 +124,7 @@ mod tests {
 
     use super::test_support::{SharedBuffer, assert_contiguous, stream};
     use super::*;
+    use crate::error::{INVARIANT, OUTPUT_WRITE, failure};
 
     #[test]
     fn data_and_completion_are_contiguous_from_zero() {
@@ -154,7 +157,8 @@ mod tests {
 
     #[test]
     fn errors_use_the_next_unwritten_position() {
-        let fixture_error = || CliError::new(5, "fixture failed").output_error();
+        let fixture_error =
+            || output::envelope::Error::classified(&failure(OUTPUT_WRITE, "fixture failed"));
 
         let (empty, empty_output) = stream(output::contract::Command::Capture);
         empty.emit_error(fixture_error()).unwrap();
@@ -203,14 +207,20 @@ mod tests {
         );
         assert!(
             success_stream
-                .emit_error(CliError::new(5, "late").output_error())
+                .emit_error(output::envelope::Error::classified(&failure(
+                    OUTPUT_WRITE,
+                    "late",
+                )))
                 .is_err()
         );
         assert_eq!(output.bytes(), terminal);
 
         let (error_stream, output) = stream(output::contract::Command::Follow);
         error_stream
-            .emit_error(CliError::new(5, "terminal").output_error())
+            .emit_error(output::envelope::Error::classified(&failure(
+                OUTPUT_WRITE,
+                "terminal",
+            )))
             .unwrap();
         let terminal = output.bytes();
         assert!(
@@ -240,11 +250,14 @@ mod tests {
             .emit_data(FailingSerialization, Vec::new())
             .expect_err("serialization must fail");
 
-        assert!(error.message.contains("sequence 1"));
+        assert!(error.to_string().contains("sequence 1"));
         assert!(stream.is_open());
         assert_eq!(output.records().len(), 1);
         stream
-            .emit_error(CliError::new(70, "serialization failed").output_error())
+            .emit_error(output::envelope::Error::classified(&failure(
+                INVARIANT,
+                "serialization failed",
+            )))
             .unwrap();
         let records = output.records();
         assert_contiguous(&records);
@@ -285,7 +298,7 @@ mod tests {
             .emit_data(json!({"value": 1}), Vec::new())
             .expect_err("second flush must fail");
 
-        assert!(error.message.contains("sequence 1"));
+        assert!(error.to_string().contains("sequence 1"));
         assert!(!stream.is_open());
         assert!(!stream.is_terminal());
         let records = buffer.records();
@@ -293,7 +306,10 @@ mod tests {
         assert_eq!(records.len(), 2);
         assert!(
             stream
-                .emit_error(CliError::new(5, "late").output_error())
+                .emit_error(output::envelope::Error::classified(&failure(
+                    OUTPUT_WRITE,
+                    "late",
+                )))
                 .is_err()
         );
         assert_eq!(buffer.records(), records);

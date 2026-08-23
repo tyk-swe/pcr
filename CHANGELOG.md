@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added a pre-1.0 roadmap that separates demonstrated release blockers and
+  contract-confidence work from demand-driven post-1.0 candidates.
+
 ### Changed
 
 - **Breaking:** Removed the redundant

@@ -8,7 +8,7 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use bytes::Bytes;
 use packetcraftr_core::analysis::pcap::{Reader, Writer};
-use packetcraftr_core::error::{Classification, Kind};
+use packetcraftr_core::error::Classification;
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_netio::{
     Error as LiveIoError, interface::Id as InterfaceId, link::Mode as LinkMode,
@@ -43,7 +43,7 @@ impl Authorizer for RecordingAuthorizer {
         if self.deny {
             Err(BoundaryError::new(
                 "denied by test policy",
-                Classification::new("policy.test", Kind::Policy, None),
+                Classification::new("policy.test", None),
                 Vec::new(),
             ))
         } else {

@@ -8,13 +8,15 @@ use std::thread;
 use std::time::Duration;
 
 use crate::budget::{Deadline, DeadlineExceeded};
-use crate::error::{BoundaryError, Classification, Kind};
+use crate::error::{BoundaryError, Classification};
 
 /// Failure returned by an interruptible progressive sink.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum EmitError {
-    Deadline(DeadlineExceeded),
-    Output(BoundaryError),
+    #[error(transparent)]
+    Deadline(#[from] DeadlineExceeded),
+    #[error(transparent)]
+    Output(#[from] BoundaryError),
 }
 
 /// Runs a user callback on an isolated worker and bounds every publication by
@@ -96,7 +98,6 @@ fn unavailable(message: &'static str) -> BoundaryError {
 const fn output_classification() -> Classification {
     Classification::new(
         "internal.progressive_output",
-        Kind::Internal,
         Some("treat the progressive operation as incomplete and inspect the event callback"),
     )
 }
@@ -131,7 +132,7 @@ mod tests {
         let sink = Sink::new(|(): ()| {
             Err(BoundaryError::new(
                 "denied",
-                Classification::new("policy.fixture", Kind::Policy, None),
+                Classification::new("policy.fixture", None),
                 Vec::new(),
             ))
         })

@@ -5,6 +5,7 @@ use crate::BoundaryError;
 use crate::ExchangeExecutor;
 use crate::probe::{self, Transport as ProbeTransport};
 
+use packetcraftr_core::error::Classification;
 use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Sender as PacketIo};
 
 use super::model::{Exchange, Execution, Executor};
@@ -79,17 +80,23 @@ where
 }
 
 fn invalid_client_execution(message: impl Into<String>) -> BoundaryError {
-    BoundaryError::execution_validation(
+    BoundaryError::new(
         message,
-        "cli.dns_executor",
-        "use one bounded UDP DNS query and retain at least one response",
+        Classification::new(
+            "cli.dns_executor",
+            Some("use one bounded UDP DNS query and retain at least one response"),
+        ),
+        Vec::new(),
     )
 }
 
 fn invalid_client_result(message: impl Into<String>) -> BoundaryError {
-    BoundaryError::internal_execution(
+    BoundaryError::new(
         message,
-        "internal.dns_executor",
-        "treat the DNS operation as incomplete because client evidence was inconsistent",
+        Classification::new(
+            "internal.dns_executor",
+            Some("treat the DNS operation as incomplete because client evidence was inconsistent"),
+        ),
+        Vec::new(),
     )
 }

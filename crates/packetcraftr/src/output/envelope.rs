@@ -498,12 +498,10 @@ impl Classified for EncodeError {
         match self {
             Self::Write { .. } => Classification::new(
                 "io.stdout",
-                Kind::Io,
                 Some("inspect the output sink and account for records already written"),
             ),
             _ => Classification::new(
                 "internal.ndjson_stream",
-                Kind::Internal,
                 Some("treat the structured stream as incomplete"),
             ),
         }
@@ -526,7 +524,7 @@ mod tests {
     fn classified_error_includes_typed_context() {
         let source = packetcraftr_core::error::BoundaryError::new(
             "failed",
-            Classification::new("fixture", Kind::Packet, None),
+            Classification::new("internal.fixture", None),
             Vec::new(),
         )
         .with_context(Context::attempt(7));

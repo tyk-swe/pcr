@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::budget::Deadline;
-use crate::error::{Classification, Kind};
+use crate::error::Classification;
 use crate::{
     Packet,
     build::Builder,
@@ -210,7 +210,6 @@ fn mutation_failure(source: impl std::fmt::Display) -> super::super::result::Cas
         format!("mutation was rejected: {source}"),
         Classification::new(
             "packet.fuzz_mutation",
-            Kind::Packet,
             Some(
                 "select a type/range accepted by the target field or retain the rejected case as fuzz evidence",
             ),
@@ -265,7 +264,6 @@ fn build_case(
                 format!("mutated packet was rejected: {source}"),
                 Classification::new(
                     "packet.fuzz_build",
-                    Kind::Packet,
                     Some(
                         "reproduce the case in permissive offline mode when malformed dependent fields are intentional",
                     ),

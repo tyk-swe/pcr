@@ -10,7 +10,7 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use crate::target::{Error as TargetError, Resolver};
 use bytes::Bytes;
-use packetcraftr_core::error::{Classification as ErrorClassification, Kind};
+use packetcraftr_core::error::Classification as ErrorClassification;
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::protocol::{
     network::{Ipv4, Ipv6},
@@ -135,7 +135,7 @@ impl Executor for CountingRejectExecutor {
         self.calls.fetch_add(1, Ordering::SeqCst);
         Err(BoundaryError::new(
             "stop after authorization",
-            ErrorClassification::new("io.test", Kind::Io, None),
+            ErrorClassification::new("io.test", None),
             Vec::new(),
         ))
     }
@@ -240,7 +240,7 @@ impl Executor for ProgressiveExecutor {
         if self.fail_at == Some(call) {
             return Err(BoundaryError::new(
                 "induced scan execution failure",
-                ErrorClassification::new("io.test_scan", Kind::Io, None),
+                ErrorClassification::new("io.test_scan", None),
                 Vec::new(),
             ));
         }
@@ -575,7 +575,7 @@ fn scan_sink_failure_stops_batches_after_cleaning_up_the_current_session() {
         |_| {
             Err(BoundaryError::new(
                 "induced output failure",
-                ErrorClassification::new("io.test_output", Kind::Io, None),
+                ErrorClassification::new("io.test_output", None),
                 Vec::new(),
             ))
         },

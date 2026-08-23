@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** `packetcraftr_core::error::Classification::new` now takes `(code, remediation)` and derives `Kind` from the code prefix; `BoundaryError::internal_execution`/`execution_validation` are removed.
 - Live integrity rejection now matches the exact built-in checksum diagnostic
   codes (`packetcraftr_core::diagnostic::CHECKSUM_FAILURE_CODES`) instead of
   searching diagnostic text, so unrelated external diagnostics cannot affect

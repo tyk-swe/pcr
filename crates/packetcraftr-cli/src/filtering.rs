@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use packetcraftr::{
-    core::error::{Classification, Kind},
+    core::error::Classification,
     core::frame::Frame,
     core::{
         self,
@@ -54,7 +54,6 @@ pub(crate) fn compile(
         return Err(CliError::from_classification(
             Classification::new(
                 "cli.filter_unsupported_field",
-                Kind::Cli,
                 Some(
                     "use `follow`, `stats`, or `expert` for stream-aware filters, \
                      or filter on header fields instead",
@@ -161,7 +160,7 @@ fn cli_error(error: packetcraftr::core::filter::Error) -> CliError {
         _ => "check the filter syntax; see `packetcraftr read --help` for examples",
     };
     CliError::from_classification(
-        Classification::new("cli.filter", Kind::Cli, Some(remediation)),
+        Classification::new("cli.filter", Some(remediation)),
         error.to_string(),
         Vec::new(),
     )

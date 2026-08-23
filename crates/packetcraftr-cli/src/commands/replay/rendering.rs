@@ -289,7 +289,7 @@ mod tests {
     use std::io::{self, Cursor};
     use std::time::UNIX_EPOCH;
 
-    use packetcraftr::core::error::{Classification, Kind};
+    use packetcraftr::core::error::Classification;
     use packetcraftr::core::frame::{Frame, LinkType};
 
     use super::*;
@@ -312,11 +312,7 @@ mod tests {
             if self.deny_on == Some(self.calls) {
                 return Err(packetcraftr::BoundaryError::new(
                     "fixture policy denied replay",
-                    Classification::new(
-                        "policy.fixture_replay",
-                        Kind::Policy,
-                        Some("authorize the fixture"),
-                    ),
+                    Classification::new("policy.fixture_replay", Some("authorize the fixture")),
                     vec!["fixture domain cause".to_owned()],
                 ));
             }

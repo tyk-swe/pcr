@@ -6,7 +6,7 @@ use std::io;
 use thiserror::Error;
 
 use super::model::Format;
-use crate::error::{Classification, Classified, Kind};
+use crate::error::{Classification, Classified};
 
 /// An error while reading or writing an offline capture.
 #[derive(Debug, Error)]
@@ -105,24 +105,20 @@ impl Classified for Error {
         match self {
             Self::Io(_) => Classification::new(
                 "io.capture_file",
-                Kind::Io,
                 Some(
                     "inspect the capture input/output stream and retry from a known record boundary",
                 ),
             ),
             Self::InvalidTimestampResolution { .. } => Classification::new(
                 "cli.capture_option",
-                Kind::Cli,
                 Some("use a supported finite capture timestamp or replay timing option"),
             ),
             Self::WrongWriterFormat { .. } => Classification::new(
                 "cli.capture_option",
-                Kind::Cli,
                 Some("call the writer method that matches the writer's configured format"),
             ),
             Self::TimestampUnavailable { .. } => Classification::new(
                 "packet.timestamp_unavailable",
-                Kind::Packet,
                 Some("use a timestamped frame with generated capture writers"),
             ),
             Self::SizeLimitExceeded { .. }
@@ -133,14 +129,12 @@ impl Classified for Error {
             | Self::FrameLimitExceeded { .. }
             | Self::StreamByteLimitExceeded { .. } => Classification::new(
                 "policy.capture_stream_limit",
-                Kind::Policy,
                 Some(
                     "reduce the capture stream or deliberately raise its finite frame/byte budget",
                 ),
             ),
             _ => Classification::new(
                 "packet.capture_file",
-                Kind::Packet,
                 Some("repair the malformed or unrepresentable capture record before processing it"),
             ),
         }

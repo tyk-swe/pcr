@@ -7,7 +7,7 @@ use std::path::Path;
 
 use packetcraftr::{
     analysis::pcap::{Reader, ReaderOptions},
-    core::error::{Classification, Kind},
+    core::error::Classification,
     core::{self, Packet},
 };
 
@@ -47,7 +47,7 @@ impl InputKind {
 
 fn missing_input_error(kind: InputKind) -> CliError {
     CliError::from_classification(
-        Classification::new("cli.input_source", Kind::Cli, Some(kind.remediation())),
+        Classification::new("cli.input_source", Some(kind.remediation())),
         format!(
             "{} input is required: provide {}",
             kind.label(),
@@ -226,7 +226,6 @@ pub(super) fn validate_capture_stream_limits(
         return Err(CliError::from_classification(
             Classification::new(
                 "cli.capture_limit",
-                Kind::Cli,
                 Some("use finite non-zero capture frame, byte, packet, and interface limits"),
             ),
             "capture stream limits must be non-zero",
@@ -237,7 +236,6 @@ pub(super) fn validate_capture_stream_limits(
         return Err(CliError::from_classification(
             Classification::new(
                 "cli.capture_limit",
-                Kind::Cli,
                 Some("set max-frame-bytes no higher than the aggregate max-bytes budget"),
             ),
             format!("max-frame-bytes {max_frame_bytes} exceeds max-bytes {max_bytes}"),

@@ -4,6 +4,7 @@
 use crate::BoundaryError;
 use crate::ExchangeExecutor;
 
+use packetcraftr_core::error::Classification;
 use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Sender as PacketIo};
 
 use super::classification::classify_response;
@@ -98,9 +99,12 @@ where
 }
 
 fn invalid_client_execution(message: impl Into<String>) -> BoundaryError {
-    BoundaryError::execution_validation(
+    BoundaryError::new(
         message,
-        "cli.traceroute_executor",
-        "use homogeneous bounded hop batches and retain at least one response per probe",
+        Classification::new(
+            "cli.traceroute_executor",
+            Some("use homogeneous bounded hop batches and retain at least one response per probe"),
+        ),
+        Vec::new(),
     )
 }

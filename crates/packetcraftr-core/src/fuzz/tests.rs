@@ -18,7 +18,7 @@ use super::request::{Limits, Request, Strategy};
 use super::result::CaseOutcome;
 use super::run::run as fuzz;
 use super::run::run_with_events;
-use crate::error::{BoundaryError, Classification, Kind};
+use crate::error::{BoundaryError, Classification};
 
 fn fuzz_protocol_registry() -> Arc<Registry> {
     Arc::new(crate::protocol::builtin::registry().expect("built-in protocol registry"))
@@ -50,7 +50,7 @@ fn raw_fuzz_packet() -> Packet {
 fn output_failure() -> BoundaryError {
     BoundaryError::new(
         "induced fuzz output failure",
-        Classification::new("io.test_output", Kind::Io, None),
+        Classification::new("io.test_output", None),
         Vec::new(),
     )
 }

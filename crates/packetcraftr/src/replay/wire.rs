@@ -4,7 +4,6 @@
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use packetcraftr_core::codec::NetworkEnvelope;
-use packetcraftr_core::error::Kind;
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_netio::route::Provider;
 use packetcraftr_netio::{
@@ -17,13 +16,14 @@ pub(super) fn map_replay_route_error(
     source: packetcraftr_netio::route::SystemError,
 ) -> LiveIoError {
     let classification = packetcraftr_netio::route::SystemProvider.classify_error(&source);
-    match classification.kind {
-        Kind::Capability => LiveIoError::Unsupported {
+    if classification.kind.as_str() == "capability" {
+        LiveIoError::Unsupported {
             message: source.to_string(),
-        },
-        _ => LiveIoError::Send {
+        }
+    } else {
+        LiveIoError::Send {
             message: format!("replay route selection failed: {source}"),
-        },
+        }
     }
 }
 

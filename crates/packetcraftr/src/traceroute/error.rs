@@ -6,7 +6,7 @@ use std::time::Duration;
 use thiserror::Error;
 
 use crate::BoundaryError;
-use packetcraftr_core::error::{Classification, Classified, Context, Kind};
+use packetcraftr_core::error::{Classification, Classified, Context};
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -56,7 +56,6 @@ impl Classified for Error {
             | Self::InvalidTimeout { .. }
             | Self::InvalidDuration { .. } => Classification::new(
                 "cli.traceroute_limit",
-                Kind::Cli,
                 Some(
                     "use finite non-zero hops, attempts, timeouts, rates, ports, and evidence limits",
                 ),
@@ -64,14 +63,12 @@ impl Classified for Error {
             Self::Authorization(error) => error.classification(),
             Self::Family { .. } => Classification::new(
                 "packet.target_address_family",
-                Kind::Packet,
                 Some(
                     "select a traceroute address family returned by the authorized target resolution",
                 ),
             ),
             Self::DurationLimit { .. } => Classification::new(
                 "policy.traceroute_duration_limit",
-                Kind::Policy,
                 Some(
                     "reduce hops, attempts, timeout, or rate delay, or deliberately raise the finite duration limit",
                 ),
@@ -79,13 +76,11 @@ impl Classified for Error {
             Self::Execution { source, .. } => source.classification(),
             Self::Clock { .. } => Classification::new(
                 "io.traceroute_clock",
-                Kind::Io,
                 Some("inspect the traceroute timer and account for probes already transmitted"),
             ),
             Self::Output { source } => source.classification(),
             Self::InvalidEvidence { .. } | Self::StatisticsOverflow { .. } => Classification::new(
                 "internal.traceroute_evidence",
-                Kind::Internal,
                 Some("treat the trace as incomplete because executor evidence was inconsistent"),
             ),
         }

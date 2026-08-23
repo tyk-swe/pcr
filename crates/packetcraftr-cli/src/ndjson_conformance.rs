@@ -511,11 +511,7 @@ fn cleanup_failure_augments_the_primary_error_at_the_next_position() {
     )
     .unwrap();
     let primary = CliError::from_classification(
-        packetcraftr::core::error::Classification::new(
-            "io.primary",
-            packetcraftr::core::error::Kind::Io,
-            None,
-        ),
+        packetcraftr::core::error::Classification::new("io.primary", None),
         "primary capture failure",
         vec!["primary cause".to_owned()],
     )

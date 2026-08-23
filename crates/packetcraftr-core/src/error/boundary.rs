@@ -4,7 +4,7 @@
 use std::error::Error;
 use std::fmt;
 
-use super::{Classification, Classified, Context, Kind};
+use super::{Classification, Classified, Context};
 
 /// Classified failure propagated across a workflow authorization or execution seam.
 #[derive(Debug)]
@@ -76,39 +76,6 @@ impl BoundaryError {
     pub fn with_context(mut self, context: Context) -> Self {
         self.context = (!context.is_empty()).then(|| Box::new(context));
         self
-    }
-
-    /// Reports a broken executor contract as an internal invariant failure.
-    #[must_use]
-    pub fn internal_execution(
-        message: impl Into<String>,
-        code: &'static str,
-        remediation: &'static str,
-    ) -> Self {
-        Self::execution_error(message, code, Kind::Internal, remediation)
-    }
-
-    /// Reports invalid executor input as a caller validation failure.
-    #[must_use]
-    pub fn execution_validation(
-        message: impl Into<String>,
-        code: &'static str,
-        remediation: &'static str,
-    ) -> Self {
-        Self::execution_error(message, code, Kind::Cli, remediation)
-    }
-
-    fn execution_error(
-        message: impl Into<String>,
-        code: &'static str,
-        kind: Kind,
-        remediation: &'static str,
-    ) -> Self {
-        Self::new(
-            message,
-            Classification::new(code, kind, Some(remediation)),
-            Vec::new(),
-        )
     }
 }
 

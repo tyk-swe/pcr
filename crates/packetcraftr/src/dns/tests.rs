@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, UNIX_EPOCH};
 
 use bytes::Bytes;
-use packetcraftr_core::error::{Classification, Kind};
+use packetcraftr_core::error::Classification;
 use packetcraftr_core::layer::Raw;
 use packetcraftr_core::protocol::{network::Ipv4, transport::Udp};
 use packetcraftr_core::{Packet, decode::DecodedPacket, frame::Frame, frame::LinkType};
@@ -225,7 +225,7 @@ impl super::model::Executor for ProgressiveExecutor {
         if self.fail_at == Some(call) {
             return Err(BoundaryError::new(
                 "induced DNS execution failure",
-                Classification::new("io.test_dns", Kind::Io, None),
+                Classification::new("io.test_dns", None),
                 Vec::new(),
             ));
         }
@@ -347,7 +347,7 @@ fn dns_sink_failure_stops_retries_after_session_shutdown() {
         |_| {
             Err(BoundaryError::new(
                 "induced output failure",
-                Classification::new("io.test_output", Kind::Io, None),
+                Classification::new("io.test_output", None),
                 Vec::new(),
             ))
         },

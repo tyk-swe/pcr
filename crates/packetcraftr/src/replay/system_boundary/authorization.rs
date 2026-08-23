@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use packetcraftr_core::error::{Classification, Kind};
+use packetcraftr_core::error::Classification;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::{build, decode, registry::Registry};
 use packetcraftr_netio::link::Mode;
@@ -80,7 +80,6 @@ impl SystemAuthorizer {
                     source.to_string(),
                     Classification::new(
                         "packet.decode",
-                        Kind::Packet,
                         Some("repair the frame or link type before authorizing live replay"),
                     ),
                     Vec::new(),
@@ -107,7 +106,6 @@ impl SystemAuthorizer {
                     format!("captured frame cannot be rebuilt exactly: {source}"),
                     Classification::new(
                         "packet.replay_rebuild",
-                        Kind::Packet,
                         Some(
                             "repair the capture so its decoded layers rebuild the exact submitted bytes",
                         ),
@@ -128,7 +126,6 @@ impl SystemAuthorizer {
                 "captured frame did not reproduce the exact source bytes",
                 Classification::new(
                     "internal.replay_rebuild",
-                    Kind::Internal,
                     Some(
                         "do not replay bytes whose codec round trip changed the authoritative capture",
                     ),
@@ -141,7 +138,6 @@ impl SystemAuthorizer {
                 "permissive or malformed captured bytes require --allow-malformed-live",
                 Classification::new(
                     "policy.permissive_live_opt_in",
-                    Kind::Policy,
                     Some(
                         "set the per-operation malformed-live opt-in in addition to policy approval",
                     ),
@@ -170,7 +166,6 @@ fn validate_complete_frame(frame: &Frame) -> Result<(), BoundaryError> {
         ),
         Classification::new(
             "packet.replay_truncated",
-            Kind::Packet,
             Some("replay only complete captured frames whose captured and original lengths match"),
         ),
         Vec::new(),
@@ -186,7 +181,6 @@ fn validate_network_frame(frame: &Frame, mode: Mode) -> Result<(), BoundaryError
             source.to_string(),
             Classification::new(
                 "packet.replay_network",
-                Kind::Packet,
                 Some("repair the raw IP header or capture link type before live replay"),
             ),
             Vec::new(),

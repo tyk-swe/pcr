@@ -19,7 +19,7 @@ use packetcraftr_core::analysis::reassembly::tcp;
 use packetcraftr_core::analysis::stats::TransportKind;
 use packetcraftr_core::analysis::{Error, Limits, Options, run};
 use packetcraftr_core::build::Builder;
-use packetcraftr_core::error::BoundaryError;
+use packetcraftr_core::error::{BoundaryError, Classification};
 use packetcraftr_core::filter::Filter;
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::protocol::gre::Gre;
@@ -437,10 +437,10 @@ fn assert_decode_flow_and_sink_limits(
         Arc::clone(registry),
         &Options::default(),
         |_| {
-            Err(BoundaryError::execution_validation(
+            Err(BoundaryError::new(
                 "sink refused record",
-                "test.sink",
-                "fix the fixture",
+                Classification::new("cli.test_sink", Some("fix the fixture")),
+                Vec::new(),
             ))
         },
     )

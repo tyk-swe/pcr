@@ -8,7 +8,7 @@
 use std::net::IpAddr;
 
 use packetcraftr_core::{
-    error::{Classification, Classified, Kind},
+    error::{Classification, Classified},
     frame::Frame,
 };
 
@@ -81,21 +81,18 @@ impl Classified for Error {
             Self::OperationAndCleanup { operation, .. } => operation.classification(),
             Self::NotFound { .. } => Classification::new(
                 "io.neighbor_timeout",
-                Kind::Io,
                 Some(
                     "inspect the selected gateway, VLAN, and interface; the finite neighbor-resolution budget was exhausted",
                 ),
             ),
             Self::Resolution { .. } => Classification::new(
                 "io.neighbor",
-                Kind::Io,
                 Some(
                     "inspect the correlated ARP/NDP evidence and selected logical link before retrying",
                 ),
             ),
             Self::InvalidOptions { .. } => Classification::new(
                 "cli.neighbor_limit",
-                Kind::Cli,
                 Some(
                     "use finite non-zero neighbor attempts, timeouts, cache limits, and capture bounds",
                 ),
@@ -106,7 +103,6 @@ impl Classified for Error {
             | Self::InvalidRequest { .. }
             | Self::State { .. } => Classification::new(
                 "internal.neighbor_invariant",
-                Kind::Internal,
                 Some(
                     "do not transmit with the incomplete neighbor request or inconsistent resolver state",
                 ),

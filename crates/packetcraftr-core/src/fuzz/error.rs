@@ -6,7 +6,7 @@ use std::time::Duration;
 use thiserror::Error;
 
 use crate::budget::DeadlineExceeded;
-use crate::error::{BoundaryError, Classification, Classified, Context, Kind};
+use crate::error::{BoundaryError, Classification, Classified, Context};
 
 use super::request::Target;
 
@@ -51,26 +51,22 @@ impl Classified for Error {
             | Self::InvalidDuration { .. }
             | Self::InvalidTarget { .. } => Classification::new(
                 "cli.fuzz_limit",
-                Kind::Cli,
                 Some(
                     "use valid layer.field targets and finite non-zero case, byte, field, list, shrink, and duration limits",
                 ),
             ),
             Self::InvalidBasePacket { .. } => Classification::new(
                 "packet.fuzz_recipe",
-                Kind::Packet,
                 Some(
                     "use a base packet within the configured layer, reflected-value, and target-field limits",
                 ),
             ),
             Self::NoCompatibleTargets => Classification::new(
                 "packet.fuzz_target",
-                Kind::Packet,
                 Some("select a strategy compatible with at least one reflective packet field"),
             ),
             Self::ByteLimit { .. } | Self::DurationLimit { .. } => Classification::new(
                 "policy.fuzz_resource_limit",
-                Kind::Policy,
                 Some(
                     "reduce cases, packet sizes, timeout, or rate delay, or deliberately raise the finite fuzz limit",
                 ),

@@ -11,10 +11,7 @@ use std::io;
 
 use packetcraftr::{
     analysis::pcap::{Limits, Reader, rewrite},
-    core::{
-        self,
-        error::{Classification, Kind},
-    },
+    core::{self, error::Classification},
     output,
 };
 
@@ -99,7 +96,6 @@ fn validate_dissect_format(
         return Err(CliError::from_classification(
             Classification::new(
                 "cli.dissect_unsupported_format",
-                Kind::Cli,
                 Some("use --output text or --output ndjson to show the layer stack"),
             ),
             format!("--dissect has no effect on {format} output"),
@@ -133,7 +129,6 @@ fn rewrite_capture(
         return Err(CliError::from_classification(
             Classification::new(
                 "cli.capture_rewrite_filter",
-                Kind::Cli,
                 Some("use text, hex, or ndjson output to filter frames"),
             ),
             "capture rewriting cannot filter records without discarding source structure",
@@ -145,7 +140,6 @@ fn rewrite_capture(
         return Err(CliError::from_classification(
             Classification::new(
                 "cli.capture_rewrite_format",
-                Kind::Cli,
                 Some("select the capture output format matching the input capture"),
             ),
             format!(
@@ -278,7 +272,6 @@ fn validate_filter_timestamp(
         return Err(CliError::from_classification(
             Classification::new(
                 "packet.timestamp_unavailable",
-                Kind::Packet,
                 Some("remove frame.time_epoch from the filter or use timestamped packet blocks"),
             ),
             format!("frame {source_frame} has no timestamp required by frame.time_epoch"),

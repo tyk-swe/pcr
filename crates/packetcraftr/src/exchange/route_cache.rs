@@ -105,7 +105,7 @@ mod tests {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     use super::*;
-    use packetcraftr_core::error::{Classification, Kind};
+    use packetcraftr_core::error::Classification;
     use packetcraftr_core::frame::LinkType;
     use packetcraftr_netio::link::{Capability, MacAddress};
     use packetcraftr_netio::route::{Provider, Scope, SelectionReason};
@@ -172,7 +172,7 @@ mod tests {
         }
 
         fn classify_error(&self, _error: &Self::Error) -> Classification {
-            Classification::new("capability.fixture", Kind::Capability, None)
+            Classification::new("capability.fixture", None)
         }
     }
 
@@ -277,7 +277,7 @@ mod tests {
         assert_eq!(provider.lookups.load(Ordering::SeqCst), 2);
         assert_eq!(
             cache.classify_error(&FixtureError),
-            Classification::new("capability.fixture", Kind::Capability, None)
+            Classification::new("capability.fixture", None)
         );
     }
 

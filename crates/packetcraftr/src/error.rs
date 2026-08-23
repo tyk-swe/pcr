@@ -3,7 +3,7 @@
 
 use thiserror::Error as ThisError;
 
-use packetcraftr_core::error::{Classification, Classified, Context, Kind};
+use packetcraftr_core::error::{Classification, Classified, Context};
 use packetcraftr_netio::Error as LiveIoError;
 
 use crate::{policy, target};
@@ -73,7 +73,6 @@ impl Classified for Error {
             Self::Neighbor(error) => error.classification(),
             Self::Build(_) => Classification::new(
                 "packet.build",
-                Kind::Packet,
                 Some(
                     "correct the packet fields or select permissive mode with the required live opt-ins",
                 ),
@@ -81,7 +80,6 @@ impl Classified for Error {
             Self::Policy(error) => error.classification(),
             Self::PermissiveLiveOptInRequired => Classification::new(
                 "policy.permissive_live_opt_in",
-                Kind::Policy,
                 Some(
                     "set the explicit per-operation malformed-live opt-in in addition to policy approval",
                 ),
@@ -92,34 +90,28 @@ impl Classified for Error {
             Self::ExchangeOutputAndCaptureShutdown { output, .. } => output.classification(),
             Self::InvalidExchangeEvents { .. } => Classification::new(
                 "internal.exchange_event_coherence",
-                Kind::Internal,
                 Some("collect every exchange event once in publication order"),
             ),
             Self::HeterogeneousExchangeRoute => Classification::new(
                 "cli.heterogeneous_exchange_route",
-                Kind::Cli,
                 Some("split the exchange so every packet uses the same interface and link mode"),
             ),
             Self::Template { .. } => Classification::new(
                 "packet.template",
-                Kind::Packet,
                 Some("reduce or correct the bounded packet-template expansion"),
             ),
             Self::PacketMaterialization { .. } => Classification::new(
                 "packet.materialization",
-                Kind::Packet,
                 Some(
                     "correct the route-dependent packet fields; post-build shape changes are rejected",
                 ),
             ),
             Self::PacketExceedsMtu { .. } => Classification::new(
                 "packet.mtu",
-                Kind::Packet,
                 Some("reduce the network packet or apply an explicit fragmentation transform"),
             ),
             Self::InvalidExchangeOption { .. } => Classification::new(
                 "cli.exchange_limit",
-                Kind::Cli,
                 Some(
                     "use finite exchange timeout and retention limits no larger than the aggregate capture ceiling",
                 ),

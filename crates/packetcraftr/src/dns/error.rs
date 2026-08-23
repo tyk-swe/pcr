@@ -7,7 +7,7 @@ use thiserror::Error;
 
 use crate::BoundaryError;
 use packetcraftr_core::budget::DeadlineExceeded;
-use packetcraftr_core::error::{Classification, Classified, Context, Kind};
+use packetcraftr_core::error::{Classification, Classified, Context};
 
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 #[non_exhaustive]
@@ -150,25 +150,21 @@ impl Classified for Error {
             | Self::InvalidTimeout { .. }
             | Self::InvalidDuration { .. } => Classification::new(
                 "cli.dns_limit",
-                Kind::Cli,
                 Some(
                     "use a valid query and finite non-zero DNS attempt, timeout, rate, message, record, and evidence limits",
                 ),
             ),
             Self::Query(_) => Classification::new(
                 "packet.dns_query",
-                Kind::Packet,
                 Some("use a bounded ASCII DNS name and a supported query type"),
             ),
             Self::Authorization(error) => error.classification(),
             Self::Family { .. } => Classification::new(
                 "packet.target_address_family",
-                Kind::Packet,
                 Some("select a DNS server address family returned by the authorized resolution"),
             ),
             Self::DurationLimit { .. } => Classification::new(
                 "policy.dns_duration_limit",
-                Kind::Policy,
                 Some(
                     "reduce attempts, timeout, or retry delay, or deliberately raise the finite duration limit",
                 ),
@@ -176,13 +172,11 @@ impl Classified for Error {
             Self::Execution { source, .. } => source.classification(),
             Self::Clock { .. } => Classification::new(
                 "io.dns_clock",
-                Kind::Io,
                 Some("inspect the DNS retry timer and account for queries already transmitted"),
             ),
             Self::Output { source } => source.classification(),
             Self::InvalidEvidence { .. } | Self::StatisticsOverflow { .. } => Classification::new(
                 "internal.dns_evidence",
-                Kind::Internal,
                 Some(
                     "treat the DNS operation as incomplete because executor evidence was inconsistent",
                 ),

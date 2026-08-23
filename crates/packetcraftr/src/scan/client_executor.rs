@@ -3,6 +3,7 @@
 
 use crate::BoundaryError;
 use crate::ExchangeExecutor;
+use packetcraftr_core::error::Classification;
 use packetcraftr_core::field::FieldValue;
 use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Sender as PacketIo};
 
@@ -79,9 +80,12 @@ where
 }
 
 fn invalid_client_execution(message: impl Into<String>) -> BoundaryError {
-    BoundaryError::execution_validation(
+    BoundaryError::new(
         message,
-        "cli.scan_executor",
-        "use homogeneous bounded scan batches and retain at least one response per probe",
+        Classification::new(
+            "cli.scan_executor",
+            Some("use homogeneous bounded scan batches and retain at least one response per probe"),
+        ),
+        Vec::new(),
     )
 }

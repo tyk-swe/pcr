@@ -10,7 +10,7 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use crate::target::{Error as TargetError, Resolver};
 use bytes::Bytes;
-use packetcraftr_core::error::{Classification, Classified, Kind};
+use packetcraftr_core::error::{Classification, Classified};
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::protocol::{
     icmp::{Icmpv4, Icmpv6},
@@ -141,7 +141,7 @@ impl Executor for CountingRejectExecutor {
         self.0.fetch_add(1, Ordering::SeqCst);
         Err(BoundaryError::new(
             "stop after authorization",
-            Classification::new("io.test", Kind::Io, None),
+            Classification::new("io.test", None),
             Vec::new(),
         ))
     }
@@ -273,7 +273,7 @@ impl Executor for ProgressiveExecutor {
         if self.fail_at == Some(call) {
             return Err(BoundaryError::new(
                 "induced traceroute execution failure",
-                Classification::new("io.test_traceroute", Kind::Io, None),
+                Classification::new("io.test_traceroute", None),
                 Vec::new(),
             ));
         }
@@ -693,7 +693,7 @@ fn traceroute_sink_failure_stops_later_hops_after_session_shutdown() {
         |_| {
             Err(BoundaryError::new(
                 "induced output failure",
-                Classification::new("io.test_output", Kind::Io, None),
+                Classification::new("io.test_output", None),
                 Vec::new(),
             ))
         },

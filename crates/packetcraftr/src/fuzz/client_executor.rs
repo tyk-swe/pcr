@@ -9,6 +9,7 @@ use std::time::Duration;
 use crate::BoundaryError;
 use crate::ExchangeExecutor;
 use packetcraftr_core::Packet;
+use packetcraftr_core::error::Classification;
 use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Sender as PacketIo};
 
 use super::boundary::{Authorizer, Execution, ExecutionCase, Executor};
@@ -114,9 +115,12 @@ where
 }
 
 fn invalid_client_execution(message: impl Into<String>) -> BoundaryError {
-    BoundaryError::internal_execution(
+    BoundaryError::new(
         message,
-        "internal.fuzz_executor",
-        "execute exactly one bounded fuzz case per capture-ready exchange",
+        Classification::new(
+            "internal.fuzz_executor",
+            Some("execute exactly one bounded fuzz case per capture-ready exchange"),
+        ),
+        Vec::new(),
     )
 }

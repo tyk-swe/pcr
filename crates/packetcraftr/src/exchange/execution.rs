@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use packetcraftr_core::budget::Deadline;
-use packetcraftr_core::error::{BoundaryError, Classification, Kind};
+use packetcraftr_core::error::{BoundaryError, Classification};
 use packetcraftr_netio::{
     capture::{Provider as CaptureProvider, Request as CaptureRequest},
     transmit::Sender as PacketIo,
@@ -138,7 +138,6 @@ fn exchange_sink_error(error: packetcraftr_core::progress::EmitError) -> Boundar
             ),
             Classification::new(
                 "policy.exchange_duration_limit",
-                Kind::Policy,
                 Some("reduce exchange output backpressure or raise the finite timeout"),
             ),
             Vec::new(),

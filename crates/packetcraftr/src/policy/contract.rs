@@ -5,7 +5,7 @@ use std::net::IpAddr;
 
 use thiserror::Error;
 
-use packetcraftr_core::error::{Classification, Classified, Kind};
+use packetcraftr_core::error::{Classification, Classified};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Policy {
@@ -94,6 +94,6 @@ impl Classified for Error {
                 "reduce the operation byte count or deliberately raise the configured traffic budget",
             ),
         };
-        Classification::new(code, Kind::Policy, Some(remediation))
+        Classification::new(code, Some(remediation))
     }
 }

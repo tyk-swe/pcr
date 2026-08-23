@@ -24,7 +24,7 @@ impl std::error::Error for ClassifiedFailure {}
 
 impl Classified for ClassifiedFailure {
     fn classification(&self) -> Classification {
-        Classification::new("test.failure", Kind::Packet, Some("repair the fixture"))
+        Classification::new("internal.test_failure", Some("repair the fixture"))
     }
 
     fn causes(&self) -> Vec<String> {
@@ -184,7 +184,7 @@ fn erased_classified_error_retains_source_classification_and_causes() {
     assert_eq!(error.to_string(), "classified failure");
     assert_eq!(
         error.classification(),
-        Classification::new("test.failure", Kind::Packet, Some("repair the fixture"))
+        Classification::new("internal.test_failure", Some("repair the fixture"))
     );
     assert_eq!(error.causes(), ["wire cause", "schema cause"]);
     assert_eq!(
@@ -195,7 +195,7 @@ fn erased_classified_error_retains_source_classification_and_causes() {
 
 #[test]
 fn boundary_error_new_preserves_the_supplied_contract() {
-    let classification = Classification::new("policy.test", Kind::Policy, Some("stop"));
+    let classification = Classification::new("policy.test", Some("stop"));
     let error = BoundaryError::new("denied", classification, vec!["first".to_owned()]);
 
     assert_eq!(error.to_string(), "denied");
@@ -205,8 +205,11 @@ fn boundary_error_new_preserves_the_supplied_contract() {
 
 #[test]
 fn boundary_constructors_distinguish_validation_from_internal_failures() {
-    let validation =
-        BoundaryError::execution_validation("bad request", "cli.test", "change the request");
+    let validation = BoundaryError::new(
+        "bad request",
+        Classification::new("cli.test", Some("change the request")),
+        Vec::new(),
+    );
     assert_eq!(validation.classification().kind, Kind::Cli);
     assert_eq!(validation.classification().code, "cli.test");
     assert_eq!(
@@ -215,10 +218,10 @@ fn boundary_constructors_distinguish_validation_from_internal_failures() {
     );
     assert!(validation.source().is_none());
 
-    let internal = BoundaryError::internal_execution(
+    let internal = BoundaryError::new(
         "broken executor",
-        "internal.test",
-        "replace the executor",
+        Classification::new("internal.test", Some("replace the executor")),
+        Vec::new(),
     );
     assert_eq!(internal.classification().kind, Kind::Internal);
     assert_eq!(internal.classification().code, "internal.test");

@@ -6,7 +6,7 @@ use std::time::Duration;
 use thiserror::Error;
 
 use crate::BoundaryError;
-use packetcraftr_core::error::{Classified, Kind};
+use packetcraftr_core::error::Classified;
 // The scan model also exposes `Classification`, so the shared error taxonomy
 // is aliased here to keep the two names unambiguous.
 use packetcraftr_core::error::{Classification as ErrorClassification, Context};
@@ -59,7 +59,6 @@ impl Classified for Error {
             | Self::InvalidTimeout { .. }
             | Self::InvalidDuration { .. } => ErrorClassification::new(
                 "cli.scan_limit",
-                Kind::Cli,
                 Some(
                     "use finite non-zero scan ports, attempts, timeouts, batches, rate, and evidence limits",
                 ),
@@ -67,12 +66,10 @@ impl Classified for Error {
             Self::Authorization(error) => error.classification(),
             Self::Family { .. } => ErrorClassification::new(
                 "packet.target_address_family",
-                Kind::Packet,
                 Some("select a scan address family returned by the authorized target resolution"),
             ),
             Self::DurationLimit { .. } => ErrorClassification::new(
                 "policy.scan_duration_limit",
-                Kind::Policy,
                 Some(
                     "reduce ports, addresses, attempts, timeout, or rate delay, or deliberately raise the finite duration limit",
                 ),
@@ -80,14 +77,12 @@ impl Classified for Error {
             Self::Execution { source, .. } => source.classification(),
             Self::Clock { .. } => ErrorClassification::new(
                 "io.scan_clock",
-                Kind::Io,
                 Some("inspect the scan timer and account for probes already transmitted"),
             ),
             Self::Output { source } => source.classification(),
             Self::InvalidEvidence { .. } | Self::StatisticsOverflow { .. } => {
                 ErrorClassification::new(
                     "internal.scan_evidence",
-                    Kind::Internal,
                     Some("treat the scan as incomplete because executor evidence was inconsistent"),
                 )
             }

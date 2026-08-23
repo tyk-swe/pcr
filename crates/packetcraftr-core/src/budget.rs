@@ -143,7 +143,8 @@ impl Deadline {
 }
 
 /// Reports the accounted time that passed a [`Deadline`] and the limit it broke.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("accounted {actual:?} exceeds the {limit:?} deadline")]
 pub struct DeadlineExceeded {
     pub actual: Duration,
     pub limit: Duration,

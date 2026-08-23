@@ -10,7 +10,7 @@ use common::{TcpSpec, client_tcp, reader, registry, server_tcp, tcp_frame};
 use packetcraftr_core::analysis::expert::Collector;
 use packetcraftr_core::analysis::reassembly::tcp;
 use packetcraftr_core::analysis::{Error, Options, run};
-use packetcraftr_core::error::{BoundaryError, Classified, Kind};
+use packetcraftr_core::error::{BoundaryError, Classification, Classified, Kind};
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::protocol::transport::Tcp;
 use packetcraftr_core::registry::Registry;
@@ -195,8 +195,12 @@ fn analysis_errors_keep_policy_packet_and_boundary_classifications_distinct() {
     assert_eq!(bounded.classification().kind, Kind::Policy);
     let sink = Error::Sink {
         number: 4,
-        source: BoundaryError::execution_validation("bad sink", "test.sink", "repair it"),
+        source: BoundaryError::new(
+            "bad sink",
+            Classification::new("cli.test_sink", Some("repair it")),
+            Vec::new(),
+        ),
     };
-    assert_eq!(sink.classification().code, "test.sink");
+    assert_eq!(sink.classification().code, "cli.test_sink");
     assert_eq!(sink.causes(), Vec::<String>::new());
 }

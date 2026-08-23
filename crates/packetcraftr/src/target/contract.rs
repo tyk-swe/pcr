@@ -7,7 +7,7 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use packetcraftr_core::error::{Classification, Classified, Kind};
+use packetcraftr_core::error::{Classification, Classified};
 
 /// Validated, canonical ASCII DNS hostname used by live target resolution.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -178,26 +178,22 @@ impl Classified for Error {
         match self {
             Self::InvalidHostname { .. } | Self::InvalidAddressLimit { .. } => Classification::new(
                 "cli.live_target",
-                Kind::Cli,
                 Some("use a valid IP address or bounded ASCII DNS hostname"),
             ),
             Self::Resolver { .. } | Self::NoAddresses { .. } => Classification::new(
                 "io.hostname_resolution",
-                Kind::Io,
                 Some(
                     "inspect resolver configuration and retry; no route lookup or transmission was attempted",
                 ),
             ),
             Self::AddressLimit { .. } => Classification::new(
                 "io.hostname_address_limit",
-                Kind::Io,
                 Some(
                     "reduce the resolver result set or deliberately raise the bounded address limit",
                 ),
             ),
             Self::AddressFamilyUnavailable { .. } => Classification::new(
                 "packet.target_address_family",
-                Kind::Packet,
                 Some("select a target address whose family matches the packet's IP layer"),
             ),
             Self::Policy(error) => error.classification(),

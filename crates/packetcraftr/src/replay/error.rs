@@ -5,7 +5,7 @@
 use std::time::Duration;
 
 use packetcraftr_core::analysis::pcap::Error as CaptureError;
-use packetcraftr_core::error::{Classification, Classified, Context, Kind};
+use packetcraftr_core::error::{Classification, Classified, Context};
 use packetcraftr_netio::{Error as LiveIoError, link::Mode as LinkMode};
 use thiserror::Error;
 
@@ -157,14 +157,12 @@ impl Classified for Error {
             | Self::InvalidDuration { .. }
             | Self::InvalidTiming { .. } => Classification::new(
                 "cli.replay_limit",
-                Kind::Cli,
                 Some("use finite non-zero replay limits and a valid positive timing value"),
             ),
             Self::Capture { source, .. } => source.classification(),
             Self::FrameLimit { .. } | Self::ByteLimit { .. } | Self::DurationLimit { .. } => {
                 Classification::new(
                     "policy.replay_limit",
-                    Kind::Policy,
                     Some(
                         "reduce the replay input or deliberately raise the finite operation budget",
                     ),
@@ -172,25 +170,21 @@ impl Classified for Error {
             }
             Self::FrameSizeLimit { .. } => Classification::new(
                 "packet.capture_size",
-                Kind::Packet,
                 Some(
                     "reduce the captured frame size or deliberately raise the bounded frame limit",
                 ),
             ),
             Self::Timing { .. } => Classification::new(
                 "packet.replay_timing",
-                Kind::Packet,
                 Some("reduce the captured interval or select a bounded replay timing"),
             ),
             Self::TimestampUnavailable { .. } => Classification::new(
                 "packet.timestamp_unavailable",
-                Kind::Packet,
                 Some("select bounded fixed-rate or immediate replay timing"),
             ),
             Self::UnsupportedLinkType { .. } | Self::LinkModeMismatch { .. } => {
                 Classification::new(
                     "capability.replay_link_type",
-                    Kind::Capability,
                     Some(
                         "replay complete Ethernet frames through Layer 2 or raw IPv4/IPv6 datagrams through Layer 3",
                     ),
@@ -202,14 +196,12 @@ impl Classified for Error {
             Self::Transmission { source, .. } => source.classification(),
             Self::InvalidEvidence { .. } => Classification::new(
                 "internal.replay_evidence",
-                Kind::Internal,
                 Some(
                     "treat the operation as incomplete; the backend did not confirm the exact submitted bytes",
                 ),
             ),
             Self::Clock { .. } | Self::Output { .. } => Classification::new(
                 "io.replay",
-                Kind::Io,
                 Some(
                     "inspect the replay timer or output sink and account for frames already transmitted",
                 ),

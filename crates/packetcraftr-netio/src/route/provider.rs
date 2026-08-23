@@ -5,7 +5,7 @@ use std::net::IpAddr;
 
 use thiserror::Error;
 
-use packetcraftr_core::error::{Classification, Classified, Kind};
+use packetcraftr_core::error::{Classification, Classified};
 
 use crate::interface::Id as InterfaceId;
 
@@ -82,40 +82,34 @@ impl Classified for SystemError {
         match self {
             Self::Unsupported { .. } => Classification::new(
                 "capability.route",
-                Kind::Capability,
                 Some(
                     "enable the native-route capability on a supported target or inject a route provider",
                 ),
             ),
             Self::RouteNotFound { .. } => Classification::new(
                 "io.route_not_found",
-                Kind::Io,
                 Some(
                     "add or select a route for the destination; PacketcraftR will not fall back to another link mode",
                 ),
             ),
             Self::InterfaceNotFound { .. } => Classification::new(
                 "io.interface_not_found",
-                Kind::Io,
                 Some("select an existing interface using its current name and index"),
             ),
             Self::InterfaceMismatch { .. }
             | Self::SourceFamilyMismatch { .. }
             | Self::SourceUnavailable { .. } => Classification::new(
                 "io.route_selection",
-                Kind::Io,
                 Some(
                     "choose an interface-owned source and interface compatible with the destination family",
                 ),
             ),
             Self::InvalidResponse { .. } => Classification::new(
                 "internal.route_response",
-                Kind::Internal,
                 Some("report the invalid native route response; do not use it for transmission"),
             ),
             Self::OperatingSystem { .. } => Classification::new(
                 "io.route",
-                Kind::Io,
                 Some(
                     "inspect the operating-system route diagnostic and current network configuration",
                 ),

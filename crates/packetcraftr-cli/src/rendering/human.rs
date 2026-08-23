@@ -123,7 +123,7 @@ fn write_terminated(
 mod tests {
     use std::io::Write as _;
 
-    use packetcraftr::core::error::{Classification, Kind};
+    use packetcraftr::core::error::Classification;
 
     use super::*;
 
@@ -134,7 +134,7 @@ mod tests {
     #[test]
     fn classified_errors_render_causes_and_remediation_in_order() {
         let error = CliError::from_classification(
-            Classification::new("cli.fixture", Kind::Cli, Some("try again")),
+            Classification::new("cli.fixture", Some("try again")),
             "primary failure",
             vec!["first cause".to_owned(), "second cause".to_owned()],
         );
@@ -153,7 +153,7 @@ mod tests {
     #[test]
     fn classified_errors_without_causes_or_remediation_have_no_empty_sections() {
         let error = CliError::from_classification(
-            Classification::new("io.fixture", Kind::Io, None),
+            Classification::new("io.fixture", None),
             "primary failure",
             Vec::new(),
         );
@@ -164,7 +164,7 @@ mod tests {
     #[test]
     fn empty_causes_and_remediation_do_not_create_empty_sections() {
         let error = CliError::from_classification(
-            Classification::new("cli.fixture", Kind::Cli, Some("  ")),
+            Classification::new("cli.fixture", Some("  ")),
             "primary failure",
             vec![String::new(), "\t".to_owned()],
         );
@@ -190,11 +190,7 @@ mod tests {
     #[test]
     fn terminal_safety_applies_to_every_rendered_error_field() {
         let error = CliError::from_classification(
-            Classification::new(
-                "cli.\u{202e}code\x1b",
-                Kind::Cli,
-                Some("help:\t\u{2066}now\r\n"),
-            ),
+            Classification::new("cli.\u{202e}code\x1b", Some("help:\t\u{2066}now\r\n")),
             "primary\n\t\u{200f}\x1bmessage",
             vec!["cause\r\n\u{200b}one".to_owned(), "cause two".to_owned()],
         );
@@ -214,7 +210,7 @@ mod tests {
     #[test]
     fn identical_primary_causes_are_not_rendered_twice() {
         let error = CliError::from_classification(
-            Classification::new("cli.fixture", Kind::Cli, None),
+            Classification::new("cli.fixture", None),
             "same message",
             vec![
                 "same message".to_owned(),
@@ -232,7 +228,7 @@ mod tests {
     #[test]
     fn disabled_or_noninteractive_streams_strip_renderer_styles() {
         let error = CliError::from_classification(
-            Classification::new("cli.fixture", Kind::Cli, Some("try again")),
+            Classification::new("cli.fixture", Some("try again")),
             "primary failure",
             vec!["cause".to_owned()],
         );

@@ -7,7 +7,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use packetcraftr_core::error::{Classification, Classified, Kind};
+use packetcraftr_core::error::{Classification, Classified};
 
 /// Version identifier emitted by every structured CLI record.
 pub const SCHEMA_V1: &str = "packetcraftr.output/v1";
@@ -246,22 +246,18 @@ impl Classified for Error {
         match self {
             Self::UnsupportedFormat { .. } => Classification::new(
                 "cli.output_format",
-                Kind::Cli,
                 Some("choose one of the formats listed for this command"),
             ),
             Self::TimestampOutOfRange => Classification::new(
                 "packet.timestamp_range",
-                Kind::Packet,
                 Some("use a capture whose timestamp fits signed 64-bit Unix seconds"),
             ),
             Self::InvalidSourceFrame => Classification::new(
                 "internal.source_frame",
-                Kind::Internal,
                 Some("use the one-based source position assigned while reading or capturing"),
             ),
             Self::IncoherentFuzzEvents { .. } => Classification::new(
                 "internal.fuzz_event_coherence",
-                Kind::Internal,
                 Some("collect cases from exactly one complete campaign in publication order"),
             ),
         }

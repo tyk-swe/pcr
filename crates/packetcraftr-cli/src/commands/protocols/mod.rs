@@ -3,11 +3,7 @@
 
 pub(super) mod arguments;
 
-use packetcraftr::{
-    core::error::{Classification, Kind},
-    core::protocol::support,
-    output,
-};
+use packetcraftr::{core::error::Classification, core::protocol::support, output};
 
 use self::arguments::Args;
 use super::super::errors::CliError;
@@ -114,7 +110,6 @@ fn unknown_protocol(name: &str) -> CliError {
     CliError::from_classification(
         Classification::new(
             "cli.protocol",
-            Kind::Cli,
             Some("run `packetcraftr protocols` to list built-in protocols"),
         ),
         format!("unknown built-in protocol '{name}'"),

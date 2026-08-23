@@ -5,6 +5,8 @@
 
 #![forbid(unsafe_code)]
 
+use std::fmt;
+
 use serde::Serialize;
 
 mod boundary;
@@ -74,6 +76,36 @@ impl Context {
     }
 }
 
+impl fmt::Display for Context {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let parts = [
+            self.source_frame.map(|n| format!("frame {n}")),
+            self.probe_sequence.map(|n| format!("probe {n}")),
+            self.attempt.map(|n| format!("attempt {n}")),
+            self.case_index.map(|n| format!("case {n}")),
+        ];
+        let parts = parts.into_iter().flatten().collect::<Vec<_>>();
+        if parts.is_empty() {
+            return formatter.write_str("unknown position");
+        }
+        formatter.write_str(&parts.join(", "))
+    }
+}
+
+const fn starts_with(bytes: &[u8], prefix: &[u8]) -> bool {
+    if bytes.len() < prefix.len() {
+        return false;
+    }
+    let mut index = 0;
+    while index < prefix.len() {
+        if bytes[index] != prefix[index] {
+            return false;
+        }
+        index += 1;
+    }
+    true
+}
+
 /// Top-level failure classes shared by API boundaries.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -87,6 +119,25 @@ pub enum Kind {
 }
 
 impl Kind {
+    pub const fn from_code(code: &str) -> Option<Kind> {
+        let bytes = code.as_bytes();
+        if starts_with(bytes, b"cli.") {
+            Some(Self::Cli)
+        } else if starts_with(bytes, b"packet.") {
+            Some(Self::Packet)
+        } else if starts_with(bytes, b"capability.") {
+            Some(Self::Capability)
+        } else if starts_with(bytes, b"io.") {
+            Some(Self::Io)
+        } else if starts_with(bytes, b"policy.") {
+            Some(Self::Policy)
+        } else if starts_with(bytes, b"internal.") {
+            Some(Self::Internal)
+        } else {
+            None
+        }
+    }
+
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Cli => "cli",
@@ -110,7 +161,16 @@ pub struct Classification {
 }
 
 impl Classification {
-    pub const fn new(code: &'static str, kind: Kind, remediation: Option<&'static str>) -> Self {
+    /// Creates a classification whose kind is derived from the code prefix.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `code` does not start with a recognized [`Kind`] prefix.
+    pub const fn new(code: &'static str, remediation: Option<&'static str>) -> Self {
+        let kind = match Kind::from_code(code) {
+            Some(kind) => kind,
+            None => panic!("classification code must start with a Kind prefix"),
+        };
         Self {
             code,
             kind,
@@ -133,5 +193,22 @@ pub trait Classified {
     /// operation/cleanup failures and typed adapter causes.
     fn causes(&self) -> Vec<String> {
         Vec::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Context;
+
+    #[test]
+    fn context_displays_coordinates_in_field_order() {
+        let context = Context {
+            source_frame: Some(3),
+            probe_sequence: Some(5),
+            attempt: Some(7),
+            case_index: Some(9),
+        };
+        assert_eq!(context.to_string(), "frame 3, probe 5, attempt 7, case 9");
+        assert_eq!(Context::default().to_string(), "unknown position");
     }
 }

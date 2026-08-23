@@ -6,7 +6,7 @@ use std::net::{IpAddr, Ipv4Addr};
 use crate::interface::Id as InterfaceId;
 use crate::link::{Capability, MacAddress, Mode};
 use crate::neighbor::VlanTag as NeighborVlanTag;
-use packetcraftr_core::error::{Classification, Kind};
+use packetcraftr_core::error::Classification;
 use packetcraftr_core::frame::LinkType;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,7 +79,6 @@ pub trait Provider: Send + Sync {
     fn classify_error(&self, _error: &Self::Error) -> Classification {
         Classification::new(
             "io.route",
-            Kind::Io,
             Some(
                 "inspect the route table, interface selection, and provider diagnostic before retrying",
             ),

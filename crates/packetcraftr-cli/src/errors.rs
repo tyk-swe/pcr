@@ -37,7 +37,6 @@ impl CliError {
                     Kind::Policy => "policy.denied",
                     Kind::Internal => "internal.error",
                 },
-                kind,
                 None,
             ),
             context: None,
@@ -136,11 +135,7 @@ mod tests {
     fn classified_errors_preserve_causes_and_boundary_contracts() {
         let classified = packetcraftr::BoundaryError::new(
             "fixture failed",
-            Classification::new(
-                "fixture.denied",
-                Kind::Policy,
-                Some("authorize the fixture"),
-            ),
+            Classification::new("policy.fixture_denied", Some("authorize the fixture")),
             vec!["first cause".to_owned(), "second cause".to_owned()],
         )
         .with_context(Context::probe_sequence(42));
@@ -148,13 +143,13 @@ mod tests {
         assert_eq!(error.exit_code, 6);
 
         let output = error.output_error();
-        assert_eq!(output.code, "fixture.denied");
+        assert_eq!(output.code, "policy.fixture_denied");
         assert_eq!(output.causes, ["first cause", "second cause"]);
         assert_eq!(output.remediation.as_deref(), Some("authorize the fixture"));
         assert_eq!(output.context.probe_sequence, Some(42));
 
         let boundary = error.into_boundary_error();
-        assert_eq!(boundary.classification().code, "fixture.denied");
+        assert_eq!(boundary.classification().code, "policy.fixture_denied");
         assert_eq!(boundary.causes(), ["first cause", "second cause"]);
         assert_eq!(boundary.context().probe_sequence, Some(42));
     }
@@ -175,7 +170,7 @@ mod tests {
         );
 
         let error = CliError::from_classification(
-            Classification::new("io.fixture", Kind::Io, None),
+            Classification::new("io.fixture", None),
             "capture failed",
             vec!["original source".to_owned()],
         )

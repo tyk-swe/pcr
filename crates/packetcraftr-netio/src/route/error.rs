@@ -7,7 +7,7 @@ use std::net::IpAddr;
 
 use thiserror::Error;
 
-use packetcraftr_core::error::{Classification, Classified, Kind};
+use packetcraftr_core::error::{Classification, Classified};
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -83,21 +83,18 @@ impl Classified for Error {
             Self::RouteLookup { failure, .. } | Self::InterfaceLookup { failure, .. } => *failure,
             Self::MissingLayer2Interface => Classification::new(
                 "cli.interface_required",
-                Kind::Cli,
                 Some("select an explicit interface for a destination-free Layer 2 packet"),
             ),
             Self::InterfaceLookupUnsupported { .. }
             | Self::Layer2Unsupported
             | Self::Layer3Unsupported => Classification::new(
                 "capability.link_mode",
-                Kind::Capability,
                 Some(
                     "select a provider and interface that support the explicitly requested link mode",
                 ),
             ),
             Self::OfflineOnlyLinkHeader { .. } => Classification::new(
                 "packet.offline_link_header",
-                Kind::Packet,
                 Some("replace the capture-only header with a live Ethernet or raw-IP packet root"),
             ),
             Self::MissingDestination
@@ -109,7 +106,6 @@ impl Classified for Error {
             | Self::InvalidSourceRouting { .. }
             | Self::InvalidNeighborVlan { .. } => Classification::new(
                 "packet.plan",
-                Kind::Packet,
                 Some(
                     "correct the packet destination, address family, or link-layer intent before planning again",
                 ),
@@ -119,7 +115,6 @@ impl Classified for Error {
             | Self::PreferredSourceNotSelected { .. }
             | Self::MissingPacketSource => Classification::new(
                 "internal.route_contract",
-                Kind::Internal,
                 Some(
                     "do not transmit with the inconsistent route result; inspect or replace the route provider",
                 ),

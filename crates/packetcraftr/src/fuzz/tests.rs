@@ -441,11 +441,7 @@ fn live_fuzz_sink_failure_prevents_later_case_execution() {
             observed.lock().unwrap().push(case.prepared.index);
             Err(BoundaryError::new(
                 "induced live fuzz sink failure",
-                packetcraftr_core::error::Classification::new(
-                    "io.test_output",
-                    packetcraftr_core::error::Kind::Io,
-                    None,
-                ),
+                packetcraftr_core::error::Classification::new("io.test_output", None),
                 Vec::new(),
             ))
         },

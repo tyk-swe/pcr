@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use bytes::Bytes;
-use packetcraftr::core::error::{Classification, Classified, Kind};
+use packetcraftr::core::error::{Classification, Classified};
 use packetcraftr::core::frame::LinkType;
 use packetcraftr::core::protocol::{network::Ipv4, transport::Udp};
 use packetcraftr::core::{Packet, field::FieldValue, layer::Raw};
@@ -229,7 +229,7 @@ fn undecodable_capture() -> capture::Captured {
 fn output_failure() -> BoundaryError {
     BoundaryError::new(
         "induced progressive sink failure",
-        Classification::new("io.test_output", Kind::Io, None),
+        Classification::new("io.test_output", None),
         Vec::new(),
     )
 }

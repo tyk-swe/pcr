@@ -14,6 +14,7 @@ pub(super) const PCAP_NETMASK_UNKNOWN: c_uint = 0xffff_ffff;
 pub(super) const READ_TIMEOUT_MILLIS: c_int = 50;
 pub(super) const SEND_SNAPSHOT_LENGTH: c_int = 65_535;
 
+pub(super) const PCAP_WARNING_PROMISC_NOTSUP: c_int = 2;
 pub(super) const PCAP_ERROR: c_int = -1;
 pub(super) const PCAP_ERROR_BREAK: c_int = -2;
 pub(super) const PCAP_ERROR_NO_SUCH_DEVICE: c_int = -5;
@@ -28,6 +29,7 @@ pub(super) type PcapCreate = unsafe extern "C" fn(*const c_char, *mut c_char) ->
 pub(super) type PcapSetInteger = unsafe extern "C" fn(*mut c_void, c_int) -> c_int;
 pub(super) type PcapActivate = unsafe extern "C" fn(*mut c_void) -> c_int;
 pub(super) type PcapDatalink = unsafe extern "C" fn(*mut c_void) -> c_int;
+pub(super) type PcapSnapshot = unsafe extern "C" fn(*mut c_void) -> c_int;
 pub(super) type PcapCompile =
     unsafe extern "C" fn(*mut c_void, *mut BpfProgram, *const c_char, c_int, c_uint) -> c_int;
 pub(super) type PcapSetFilter = unsafe extern "C" fn(*mut c_void, *mut BpfProgram) -> c_int;

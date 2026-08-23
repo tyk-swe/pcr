@@ -22,8 +22,6 @@ limit, and maintainer are known.
 ## Todo list
 
 - [ ] [Define the 1.0 contract](#define-the-10-contract).
-- [ ] [Interface-based, DLT-correct
-  capture](#interface-based-dlt-correct-capture).
 - [ ] [Authorization of non-interface-owned
   sources](#authorization-of-non-interface-owned-sources).
 - [ ] [Canonical integrity classification](#canonical-integrity-classification).
@@ -51,30 +49,6 @@ Known limitations may remain in 1.0 when they are explicit and do not violate a
 supported contract.
 
 ## Release blockers
-
-### Interface-based, DLT-correct capture
-
-Passive capture is currently coupled to a transmission route, and the CLI
-initializes capture-file output from the route's predicted link type even
-though the backend discovers the actual data-link type after activation.
-
-The smallest complete replacement is an interface-based capture request and
-session metadata containing the actual interface, data-link type, and effective
-snapshot length.
-
-Acceptance criteria:
-
-- passive capture requires no packet recipe, destination, or route lookup;
-- native capture retains the existing finite queue, filter, readiness, loss,
-  timeout, and shutdown guarantees;
-- PCAP and PCAPNG output use backend-negotiated metadata;
-- a predicted/actual link-type mismatch cannot create mislabeled output; and
-- route-bound exchange and neighbor workflows reuse the same capture boundary.
-
-Additional capture controls are not part of this blocker except for a
-promiscuous-mode choice, because the current backend unconditionally enables
-it. Direction, kernel-buffer, timestamp, monitor-mode, multi-interface, and
-`any` capture support require separate user cases.
 
 ### Authorization of non-interface-owned sources
 

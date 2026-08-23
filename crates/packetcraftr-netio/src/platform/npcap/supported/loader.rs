@@ -31,7 +31,7 @@ use super::{
     abi::{
         NPCAP_DEPENDENCY, PCAP_CHAR_ENC_UTF_8, PCAP_ERROR_BUFFER_SIZE, PcapActivate, PcapBreakLoop,
         PcapClose, PcapCompile, PcapCreate, PcapDatalink, PcapFreeCode, PcapGetError, PcapInit,
-        PcapNextEx, PcapSendPacket, PcapSetFilter, PcapSetInteger, PcapStats,
+        PcapNextEx, PcapSendPacket, PcapSetFilter, PcapSetInteger, PcapSnapshot, PcapStats,
     },
     error::{error_buffer_message, interface_conversion_error},
 };
@@ -47,6 +47,7 @@ pub(super) struct NpcapApi {
     pub(super) pcap_set_immediate_mode: PcapSetInteger,
     pub(super) pcap_activate: PcapActivate,
     pub(super) pcap_datalink: PcapDatalink,
+    pub(super) pcap_snapshot: PcapSnapshot,
     pub(super) pcap_compile: PcapCompile,
     pub(super) pcap_setfilter: PcapSetFilter,
     pub(super) pcap_freecode: PcapFreeCode,
@@ -100,6 +101,8 @@ impl NpcapApi {
         // SAFETY: see the ABI note above.
         let pcap_datalink = unsafe { load_symbol::<PcapDatalink>(&library, b"pcap_datalink\0")? };
         // SAFETY: see the ABI note above.
+        let pcap_snapshot = unsafe { load_symbol::<PcapSnapshot>(&library, b"pcap_snapshot\0")? };
+        // SAFETY: see the ABI note above.
         let pcap_compile = unsafe { load_symbol::<PcapCompile>(&library, b"pcap_compile\0")? };
         // SAFETY: see the ABI note above.
         let pcap_setfilter =
@@ -144,6 +147,7 @@ impl NpcapApi {
             pcap_set_immediate_mode,
             pcap_activate,
             pcap_datalink,
+            pcap_snapshot,
             pcap_compile,
             pcap_setfilter,
             pcap_freecode,

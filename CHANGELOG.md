@@ -14,6 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** Live capture now takes one interface-based request containing
+  queue limits, native filtering, and an explicit promiscuous-mode choice.
+  Capture sessions report the activated interface, data-link type, and
+  effective snapshot length; passive CLI capture requires `--interface`
+  instead of packet, destination, or route inputs, and capture-file headers use
+  the session metadata.
 - **Breaking:** Removed the redundant
   `document::Packet::parse_with_nesting_limit` and `CaptureRecord::frame`
   convenience APIs; use `parse_with_resource_limits` and the public `frame`

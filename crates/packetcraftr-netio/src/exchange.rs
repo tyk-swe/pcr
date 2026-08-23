@@ -4,8 +4,7 @@
 //! Tuple composition for capture-before-send exchanges.
 
 use super::Error;
-use super::capture::{CaptureProvider, CaptureQueueLimits};
-use super::route::Plan;
+use super::capture::{CaptureProvider, CaptureRequest};
 use super::transmit::{IoSendReport, PacketIo, TransmissionFrame};
 
 impl<S, C> PacketIo for (S, C)
@@ -25,20 +24,7 @@ where
 {
     type Capture = C::Capture;
 
-    fn arm_capture(
-        &self,
-        route: &Plan,
-        limits: CaptureQueueLimits,
-    ) -> Result<Self::Capture, Error> {
-        self.1.arm_capture(route, limits)
-    }
-
-    fn arm_capture_with_filter(
-        &self,
-        route: &Plan,
-        limits: CaptureQueueLimits,
-        filter: &str,
-    ) -> Result<Self::Capture, Error> {
-        self.1.arm_capture_with_filter(route, limits, filter)
+    fn arm_capture(&self, request: &CaptureRequest) -> Result<Self::Capture, Error> {
+        self.1.arm_capture(request)
     }
 }

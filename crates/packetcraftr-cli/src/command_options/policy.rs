@@ -33,7 +33,7 @@ pub(crate) struct TrafficBudgetArgs {
     /// Maximum packets authorized for one operation.
     #[arg(long, default_value_t = 10_000)]
     max_packets: u64,
-    /// Maximum wire bytes authorized for one operation.
+    /// Maximum packet bytes authorized for one operation.
     #[arg(
         long,
         default_value_t = u64::try_from(net::capture::Limits::default().max_bytes).expect("default max bytes fits u64")
@@ -86,6 +86,12 @@ impl TrafficBudgetArgs {
     pub(crate) fn apply_to(self, policy: &mut packetcraftr::policy::Policy) {
         policy.max_packets_per_operation = self.max_packets;
         policy.max_bytes_per_operation = self.max_bytes;
+    }
+
+    pub(crate) fn into_policy(self) -> packetcraftr::policy::Policy {
+        let mut policy = packetcraftr::policy::Policy::default();
+        self.apply_to(&mut policy);
+        policy
     }
 }
 

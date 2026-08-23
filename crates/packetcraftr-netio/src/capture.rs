@@ -7,13 +7,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use super::Error;
-use super::route::Plan;
-use packetcraftr_core::frame::{DEFAULT_SIZE_LIMIT, Frame as CaptureFrame};
+use super::interface::Id as InterfaceId;
+use packetcraftr_core::frame::{DEFAULT_SIZE_LIMIT, Frame as CaptureFrame, LinkType};
 
 pub(crate) use self::{
     Captured as CapturedFrame, Limits as CaptureQueueLimits,
     OverflowPolicy as CaptureOverflowPolicy, Provider as CaptureProvider,
-    Session as CaptureSession,
+    Request as CaptureRequest, Session as CaptureSession,
 };
 /// Aggregate backend capture-queue capacity used by default.
 pub const DEFAULT_CAPTURE_QUEUE_FRAMES: usize = 4_096;
@@ -94,6 +94,8 @@ impl Statistics {
 }
 
 pub trait Session: Send {
+    /// Returns the backend-confirmed properties fixed when the session was activated.
+    fn metadata(&self) -> &Metadata;
     /// Readiness is an explicit barrier. No exchange frame may be sent first.
     fn wait_ready(&mut self, timeout: Duration) -> Result<(), Error>;
     fn next_captured_frame(&mut self, timeout: Duration) -> Result<Option<Captured>, Error>;
@@ -104,6 +106,10 @@ pub trait Session: Send {
 }
 
 impl<T: Session + ?Sized> Session for Box<T> {
+    fn metadata(&self) -> &Metadata {
+        (**self).metadata()
+    }
+
     fn wait_ready(&mut self, timeout: Duration) -> Result<(), Error> {
         (**self).wait_ready(timeout)
     }
@@ -119,6 +125,24 @@ impl<T: Session + ?Sized> Session for Box<T> {
     fn statistics(&self) -> Statistics {
         (**self).statistics()
     }
+}
+
+/// Configuration for one single-interface capture session.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Request {
+    pub interface: InterfaceId,
+    pub limits: Limits,
+    /// Native filter that the provider must install before delivery or reject.
+    pub filter: Option<String>,
+    pub promiscuous: bool,
+}
+
+/// Backend-confirmed properties of an activated capture session.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Metadata {
+    pub interface: InterfaceId,
+    pub link_type: LinkType,
+    pub snap_length: usize,
 }
 
 /// Capture evidence with an optional monotonic ingress marker. Wall-clock time is
@@ -238,23 +262,11 @@ impl Limits {
     }
 }
 
-/// Starts an owned capture stream using platform-neutral route and limit data.
+/// Starts an owned capture stream using platform-neutral interface data.
 pub trait Provider: Send + Sync {
     type Capture: Session;
 
-    fn arm_capture(&self, route: &Plan, limits: Limits) -> Result<Self::Capture, Error>;
-
-    /// Starts capture with native BPF filtering; unsupported providers fail closed.
-    fn arm_capture_with_filter(
-        &self,
-        _route: &Plan,
-        _limits: Limits,
-        _filter: &str,
-    ) -> Result<Self::Capture, Error> {
-        Err(Error::Unsupported {
-            message: "this capture provider cannot install native capture filters".to_owned(),
-        })
-    }
+    fn arm_capture(&self, request: &Request) -> Result<Self::Capture, Error>;
 }
 
 /// Platform-native capture session with private handle and worker.
@@ -267,16 +279,7 @@ pub struct SystemProvider;
 impl Provider for SystemProvider {
     type Capture = SystemSession;
 
-    fn arm_capture(&self, route: &Plan, limits: Limits) -> Result<Self::Capture, Error> {
-        super::platform::system_capture(route, limits, None)
-    }
-
-    fn arm_capture_with_filter(
-        &self,
-        route: &Plan,
-        limits: Limits,
-        filter: &str,
-    ) -> Result<Self::Capture, Error> {
-        super::platform::system_capture(route, limits, Some(filter))
+    fn arm_capture(&self, request: &Request) -> Result<Self::Capture, Error> {
+        super::platform::system_capture(request)
     }
 }

@@ -585,7 +585,7 @@ fn format_and_limit_failures_are_reported_before_offline_work() {
 }
 
 #[test]
-fn every_live_command_keeps_public_destinations_behind_policy() {
+fn destination_bearing_live_commands_keep_public_destinations_behind_policy() {
     let commands: &[&[&str]] = &[
         &[
             "--output",
@@ -607,15 +607,6 @@ fn every_live_command_keeps_public_destinations_behind_policy() {
             "exchange",
             "--packet",
             "ipv4(dst=8.8.8.8)/udp(dport=9)",
-        ],
-        &[
-            "--output",
-            "ndjson",
-            "capture",
-            "--packet",
-            "ipv4(dst=8.8.8.8)/udp(dport=9)",
-            "--timeout-ms",
-            "1",
         ],
         &["--output", "json", "scan", "8.8.8.8", "--ports", "80"],
         &[

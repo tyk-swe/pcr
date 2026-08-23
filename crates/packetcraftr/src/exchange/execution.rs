@@ -7,7 +7,10 @@ use std::sync::Arc;
 
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::{BoundaryError, Classification, Kind};
-use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Sender as PacketIo};
+use packetcraftr_netio::{
+    capture::{Provider as CaptureProvider, Request as CaptureRequest},
+    transmit::Sender as PacketIo,
+};
 
 use crate::Client;
 use crate::Error;
@@ -111,7 +114,12 @@ where
             .route
             .plan;
         ensure_preparation_deadline(prepared.deadline)?;
-        let capture = self.io.arm_capture(first_route, prepared.capture_limits)?;
+        let capture = self.io.arm_capture(&CaptureRequest {
+            interface: first_route.decision.interface.clone(),
+            limits: prepared.capture_limits,
+            filter: None,
+            promiscuous: false,
+        })?;
         Ok(Transaction::new(
             Arc::clone(&self.registry),
             capture,

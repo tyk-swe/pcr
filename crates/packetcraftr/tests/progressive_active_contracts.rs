@@ -26,6 +26,7 @@ use packetcraftr::{BoundaryError, Client, ExchangeExecutor, clock, dns, policy, 
 struct IoState {
     events: Mutex<Vec<&'static str>>,
     captured: Mutex<VecDeque<capture::Captured>>,
+    capture_requests: Mutex<Vec<capture::Request>>,
     shutdown_calls: AtomicUsize,
     fail_shutdown_at: usize,
 }
@@ -51,17 +52,32 @@ impl capture::Provider for FakeIo {
 
     fn arm_capture(
         &self,
-        _route: &packetcraftr::netio::route::Plan,
-        _limits: capture::Limits,
+        request: &capture::Request,
     ) -> Result<Self::Capture, packetcraftr::netio::Error> {
         self.0.events.lock().unwrap().push("arm");
-        Ok(FakeCapture(Arc::clone(&self.0)))
+        self.0
+            .capture_requests
+            .lock()
+            .unwrap()
+            .push(request.clone());
+        Ok(FakeCapture(
+            Arc::clone(&self.0),
+            capture::Metadata {
+                interface: request.interface.clone(),
+                link_type: LinkType::ETHERNET,
+                snap_length: request.limits.snap_length,
+            },
+        ))
     }
 }
 
-struct FakeCapture(Arc<IoState>);
+struct FakeCapture(Arc<IoState>, capture::Metadata);
 
 impl capture::Session for FakeCapture {
+    fn metadata(&self) -> &capture::Metadata {
+        &self.1
+    }
+
     fn wait_ready(&mut self, _timeout: Duration) -> Result<(), packetcraftr::netio::Error> {
         self.0.events.lock().unwrap().push("ready");
         Ok(())
@@ -235,6 +251,9 @@ fn exchange_events_follow_provider_confirmation_and_completion() {
     let callback_collector = Arc::clone(&collector);
     let callback_state = Arc::clone(&state);
 
+    let expected_capture_limits = two_packet_exchange_options()
+        .validate()
+        .expect("valid exchange options");
     let summary = client
         .exchange_with_events(
             &exchange_template(),
@@ -290,6 +309,18 @@ fn exchange_events_follow_provider_confirmation_and_completion() {
         *state.events.lock().unwrap(),
         ["arm", "ready", "send", "send", "shutdown"]
     );
+    let requests = state.capture_requests.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0].interface,
+        InterfaceId {
+            name: "fake0".to_owned(),
+            index: 7,
+        }
+    );
+    assert_eq!(requests[0].limits, expected_capture_limits);
+    assert_eq!(requests[0].filter, None);
+    assert!(!requests[0].promiscuous);
 }
 
 #[test]
@@ -430,10 +461,8 @@ fn exchange_emits_retained_undecoded_evidence_before_the_next_send() {
 #[test]
 fn exchange_cleanup_failure_augments_the_output_error() {
     let state = Arc::new(IoState {
-        events: Mutex::new(Vec::new()),
-        captured: Mutex::new(VecDeque::new()),
-        shutdown_calls: AtomicUsize::new(0),
         fail_shutdown_at: 1,
+        ..IoState::default()
     });
     let client = client(Arc::clone(&state));
 
@@ -498,10 +527,8 @@ fn scan_sink_failure_stops_after_capture_shutdown() {
 #[test]
 fn later_capture_shutdown_failure_preserves_the_earlier_scan_event() {
     let state = Arc::new(IoState {
-        events: Mutex::new(Vec::new()),
-        captured: Mutex::new(VecDeque::new()),
-        shutdown_calls: AtomicUsize::new(0),
         fail_shutdown_at: 2,
+        ..IoState::default()
     });
     let client = client(Arc::clone(&state));
     let registry = Arc::clone(client.registry());

@@ -89,18 +89,8 @@ impl<W: Write> CaptureWriter<W> {
         self.writer.write_frame(&frame)
     }
 
-    /// Writes a frame on an eagerly chosen link-type interface.
-    pub(crate) fn write_on_link_type(
-        &mut self,
-        link_type: LinkType,
-        mut frame: Frame,
-    ) -> Result<(), Error> {
-        frame.interface = self.add_link_type(link_type)?;
-        self.writer.write_frame(&frame)
-    }
-
     /// Registers one declared interface and returns its output ID.
-    fn add_source_interface(
+    pub(crate) fn add_source_interface(
         &mut self,
         source_id: Option<u32>,
         description: Interface,
@@ -190,7 +180,7 @@ mod tests {
             .write_link_mapped(frame(LinkType::ETHERNET, 1))
             .expect("Ethernet frame");
         output
-            .write_on_link_type(LinkType::IPV4, frame(LinkType::IPV4, 2))
+            .write_link_mapped(frame(LinkType::IPV4, 2))
             .expect("IPv4 frame");
         output.flush().expect("memory writer flushes");
 

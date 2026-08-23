@@ -5,9 +5,10 @@ use std::io::{self, Write};
 use std::time::Duration;
 
 use packetcraftr::{
-    analysis::pcap::{self as capture, Limits, PcapNgOptions, PcapOptions, Writer},
-    core::{self, frame::LinkType},
-    netio as net, output,
+    analysis::pcap::{
+        self as capture, Interface, Limits, PcapNgOptions, PcapOptions, TimestampResolution, Writer,
+    },
+    core, netio as net, output,
 };
 
 use super::execution::{self, Budget, shutdown_after_error};
@@ -95,30 +96,28 @@ pub(super) fn render_stream<C: net::capture::Session>(
     )
 }
 
-pub(super) fn render_capture<A>(
-    arm_capture: A,
+pub(super) fn render_capture<C: net::capture::Session>(
+    mut capture: C,
     format: output::contract::Format,
-    link_type: LinkType,
     timeout: Duration,
     limits: net::capture::Limits,
     budget: Budget,
     selector: Option<&FrameSelector>,
-) -> Result<(), CliError>
-where
-    A: FnOnce() -> Result<net::capture::SystemSession, net::Error>,
-{
-    let format = capture_file_format(format)?;
-    validate_writer_configuration(format, link_type, limits.snap_length)?;
-    let mut capture = arm_capture().map_err(CliError::classified)?;
+) -> Result<(), CliError> {
+    let format = match capture_file_format(format) {
+        Ok(format) => format,
+        Err(error) => return Err(shutdown_after_error(&mut capture, error)),
+    };
+    let source_id = Some(capture.metadata().interface.index);
     let stdout = io::stdout();
-    let mut writer =
-        match initialize_writer(stdout.lock(), format, link_type, limits.snap_length, budget) {
-            Ok(writer) => writer,
+    let (mut writer, description) =
+        match initialize_writer(stdout.lock(), format, capture.metadata(), budget) {
+            Ok(initialized) => initialized,
             Err(error) => return Err(shutdown_after_error(&mut capture, error)),
         };
     let outcome = execution::run(capture, timeout, limits, budget, selector, |frame, _| {
         writer
-            .write_on_link_type(link_type, frame)
+            .write_source_frame(source_id, description.clone(), frame)
             .map_err(|source| CliError::new(5, format!("write capture output failed: {source}")))
     })?;
     writer
@@ -128,70 +127,65 @@ where
     render_diagnostics(&outcome.diagnostics)
 }
 
-fn validate_writer_configuration(
-    format: capture::Format,
-    link_type: LinkType,
-    max_size: usize,
-) -> Result<(), CliError> {
-    let error = match format {
-        capture::Format::PcapNg if max_size < 32 => Some(capture::Error::SizeLimitExceeded {
-            kind: "pcapng interface description",
-            declared: 32,
-            limit: max_size,
-        }),
-        capture::Format::PcapNg if link_type.0 > u32::from(u16::MAX) => {
-            Some(capture::Error::LinkTypeOutOfRange {
-                link_type: link_type.0,
-            })
-        }
-        _ => None,
-    };
-    match error {
-        Some(source) => Err(CliError::new(
-            5,
-            format!("initialize capture output failed: {source}"),
-        )),
-        None => Ok(()),
-    }
-}
-
 fn initialize_writer<W: Write>(
     destination: W,
     format: capture::Format,
-    link_type: LinkType,
-    max_size: usize,
+    metadata: &net::capture::Metadata,
     budget: Budget,
-) -> Result<CaptureWriter<W>, CliError> {
+) -> Result<(CaptureWriter<W>, Interface), CliError> {
+    let snap_len = u32::try_from(metadata.snap_length).map_err(|_| {
+        CliError::new(
+            5,
+            "initialize capture output failed: backend snapshot length exceeds the capture-file domain",
+        )
+    })?;
+    let description = Interface {
+        link_type: metadata.link_type,
+        snap_len,
+        timestamp_resolution: TimestampResolution::Decimal(9),
+        timestamp_offset: 0,
+    };
     let writer = match format {
         capture::Format::Pcap => Writer::pcap_with_options(
             destination,
-            link_type,
+            metadata.link_type,
             PcapOptions {
-                snap_len: max_size,
-                max_size,
+                snap_len: metadata.snap_length,
+                max_size: metadata.snap_length,
                 ..PcapOptions::default()
             },
         ),
         capture::Format::PcapNg => Writer::pcapng_with_options(
             destination,
             PcapNgOptions {
-                max_size,
+                max_size: pcapng_max_size(metadata.snap_length)?,
                 ..PcapNgOptions::default()
             },
         ),
     }
     .map_err(|source| CliError::new(5, format!("initialize capture output failed: {source}")))?;
-    let mut writer = CaptureWriter::for_link_types(writer);
-    writer.add_link_type(link_type).map_err(|source| {
-        CliError::new(5, format!("initialize capture output failed: {source}"))
-    })?;
+    let mut writer = CaptureWriter::for_source_interfaces(writer);
+    writer
+        .add_source_interface(Some(metadata.interface.index), description.clone())
+        .map_err(|source| {
+            CliError::new(5, format!("initialize capture output failed: {source}"))
+        })?;
     writer
         .set_stream_limits(Limits {
             max_frames: budget.max_frames,
             max_bytes: budget.max_bytes,
         })
         .map_err(CliError::classified)?;
-    Ok(writer)
+    Ok((writer, description))
+}
+
+fn pcapng_max_size(snap_length: usize) -> Result<usize, CliError> {
+    snap_length.checked_add(47).ok_or_else(|| {
+        CliError::new(
+            5,
+            "initialize capture output failed: backend snapshot length cannot fit a PCAPNG packet block",
+        )
+    })
 }
 
 fn render_diagnostics(diagnostics: &[core::diagnostic::Diagnostic]) -> Result<(), CliError> {
@@ -210,7 +204,7 @@ mod tests {
     use std::sync::Arc;
     use std::time::UNIX_EPOCH;
 
-    use packetcraftr::core::frame::Frame;
+    use packetcraftr::core::frame::{Frame, LinkType};
     use serde_json::Value;
 
     use super::*;
@@ -218,6 +212,7 @@ mod tests {
     use crate::rendering::ndjson_test_support::{assert_contiguous, stream};
 
     struct FakeSession {
+        metadata: net::capture::Metadata,
         frames: VecDeque<Result<net::capture::Captured, net::Error>>,
         shutdown_error: Option<net::Error>,
     }
@@ -233,6 +228,14 @@ mod tests {
                 })
                 .collect();
             Self {
+                metadata: net::capture::Metadata {
+                    interface: net::interface::Id {
+                        name: "fixture0".to_owned(),
+                        index: 7,
+                    },
+                    link_type: LinkType::RAW,
+                    snap_length: net::capture::Limits::default().snap_length,
+                },
                 frames,
                 shutdown_error: None,
             }
@@ -240,6 +243,10 @@ mod tests {
     }
 
     impl net::capture::Session for FakeSession {
+        fn metadata(&self) -> &net::capture::Metadata {
+            &self.metadata
+        }
+
         fn wait_ready(&mut self, _timeout: Duration) -> Result<(), net::Error> {
             Ok(())
         }
@@ -278,6 +285,46 @@ mod tests {
             crate::test_support::schema_validator()
                 .validate(record)
                 .expect("capture stream record must validate");
+        }
+    }
+
+    #[test]
+    fn capture_files_use_negotiated_session_metadata_at_the_snapshot_limit() {
+        use std::io::Cursor;
+
+        use packetcraftr::analysis::pcap::Reader;
+        use packetcraftr::netio::capture::Session as _;
+
+        let mut capture = FakeSession::with_frames(0);
+        capture.metadata.link_type = LinkType::LINUX_SLL2;
+        capture.metadata.snap_length = 96;
+        let budget = Budget {
+            max_frames: 1,
+            max_bytes: 96,
+        };
+
+        for format in [capture::Format::Pcap, capture::Format::PcapNg] {
+            let (mut writer, description) =
+                initialize_writer(Vec::new(), format, capture.metadata(), budget)
+                    .expect("capture writer must use negotiated metadata");
+            writer
+                .write_source_frame(
+                    Some(capture.metadata.interface.index),
+                    description,
+                    Frame::new(
+                        UNIX_EPOCH,
+                        capture.metadata.link_type,
+                        vec![0_u8; capture.metadata.snap_length],
+                    )
+                    .expect("snapshot-sized frame"),
+                )
+                .expect("snapshot-sized frame must fit its output container");
+
+            let mut reader =
+                Reader::new(Cursor::new(writer.into_inner())).expect("generated capture must open");
+            assert!(reader.next_frame().expect("generated frame").is_some());
+            assert_eq!(reader.interfaces()[0].link_type, capture.metadata.link_type);
+            assert_eq!(reader.interfaces()[0].snap_len, 96);
         }
     }
 

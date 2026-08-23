@@ -15,7 +15,10 @@ use std::{
 
 use crate::{
     Error as LiveIoError,
-    capture::{CaptureQueueLimits, CaptureSession, CapturedFrame, MAX_TIMEOUT, Statistics},
+    capture::{
+        CaptureQueueLimits, CaptureSession, CapturedFrame, MAX_TIMEOUT,
+        Metadata as CaptureMetadata, Statistics,
+    },
 };
 
 use super::{
@@ -42,6 +45,7 @@ fn capture_deadline(timeout: Duration) -> Result<Instant, LiveIoError> {
 }
 
 pub(in crate::platform) struct NativeCaptureSession {
+    metadata: CaptureMetadata,
     shared: Arc<SharedCapture>,
     stop: Arc<AtomicBool>,
     interrupt: Option<Arc<dyn CaptureInterrupt>>,
@@ -64,15 +68,21 @@ impl NativeCaptureSession {
         limits: CaptureQueueLimits,
         shutdown_timeout: Duration,
     ) -> Result<Self, LiveIoError> {
+        let NativeCaptureParts {
+            source,
+            interrupt,
+            metadata,
+        } = parts;
         let shared = Arc::new(SharedCapture::new(limits));
         let stop = Arc::new(AtomicBool::new(false));
         let worker_shared = Arc::clone(&shared);
         let worker_stop = Arc::clone(&stop);
-        let interface_index = parts.interface.index;
-        let link_type = parts.link_type;
-        let mut source = parts.source;
+        let interface_index = metadata.interface.index;
+        let link_type = metadata.link_type;
+        let worker_name = format!("packetcraftr-capture-{}", metadata.interface.name);
+        let mut source = source;
         let worker = thread::Builder::new()
-            .name(format!("packetcraftr-capture-{}", parts.interface.name))
+            .name(worker_name)
             .spawn(move || {
                 let panic_shared = Arc::clone(&worker_shared);
                 if catch_unwind(AssertUnwindSafe(|| {
@@ -95,9 +105,10 @@ impl NativeCaptureSession {
                 message: format!("could not start the owned capture worker: {error}"),
             })?;
         Ok(Self {
+            metadata,
             shared,
             stop,
-            interrupt: Some(parts.interrupt),
+            interrupt: Some(interrupt),
             worker: Some(worker),
             shutdown_timeout,
             shutdown_attempted: false,
@@ -107,6 +118,10 @@ impl NativeCaptureSession {
 }
 
 impl CaptureSession for NativeCaptureSession {
+    fn metadata(&self) -> &CaptureMetadata {
+        &self.metadata
+    }
+
     fn wait_ready(&mut self, timeout: Duration) -> Result<(), LiveIoError> {
         let deadline = capture_deadline(timeout)?;
         let mut state = self.shared.lock()?;
@@ -286,7 +301,21 @@ mod tests {
 
     use super::super::{NativeCaptureEvent, NativeCaptureSource, NativeCaptureStatistics};
     use super::*;
-    use crate::{capture::CaptureQueueLimits, interface::Id as InterfaceId};
+    use crate::{
+        capture::{CaptureQueueLimits, Metadata as CaptureMetadata},
+        interface::Id as InterfaceId,
+    };
+
+    fn metadata(name: &str, index: u32) -> CaptureMetadata {
+        CaptureMetadata {
+            interface: InterfaceId {
+                name: name.to_owned(),
+                index,
+            },
+            link_type: LinkType::ETHERNET,
+            snap_length: 64,
+        }
+    }
 
     #[derive(Default)]
     struct FakeInterrupt {
@@ -357,11 +386,7 @@ mod tests {
                     finished,
                 }),
                 interrupt: interrupt_for_parts,
-                interface: InterfaceId {
-                    name: "fake-capture".to_owned(),
-                    index: 1,
-                },
-                link_type: LinkType::ETHERNET,
+                metadata: metadata("fake-capture", 1),
             },
             CaptureQueueLimits::default(),
             shutdown_timeout,
@@ -422,11 +447,7 @@ mod tests {
                     started: Some(started_sender),
                 }),
                 interrupt: interrupt_for_parts,
-                interface: InterfaceId {
-                    name: "fake-panic".to_owned(),
-                    index: 2,
-                },
-                link_type: LinkType::ETHERNET,
+                metadata: metadata("fake-panic", 2),
             },
             CaptureQueueLimits::default(),
             Duration::from_millis(100),

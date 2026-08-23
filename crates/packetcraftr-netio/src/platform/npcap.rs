@@ -21,14 +21,15 @@ pub(super) fn open_capture(
     limits: CaptureQueueLimits,
     capture_filter: Option<&str>,
     netmask: Option<u32>,
+    promiscuous: bool,
 ) -> Result<NativeCaptureParts, LiveIoError> {
     #[cfg(all(target_arch = "x86_64", target_env = "msvc"))]
     {
-        supported::open_capture(interface, limits, capture_filter, netmask)
+        supported::open_capture(interface, limits, capture_filter, netmask, promiscuous)
     }
     #[cfg(not(all(target_arch = "x86_64", target_env = "msvc")))]
     {
-        let _ = (interface, limits, capture_filter, netmask);
+        let _ = (interface, limits, capture_filter, netmask, promiscuous);
         Err(LiveIoError::Unsupported {
             message: "native Windows Layer 2 I/O supports only x86_64-pc-windows-msvc".to_owned(),
         })

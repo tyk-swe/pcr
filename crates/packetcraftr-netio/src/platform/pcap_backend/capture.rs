@@ -6,6 +6,7 @@
 #![allow(unsafe_code)]
 
 use std::{
+    ffi::{c_int, c_void},
     sync::Arc,
     time::{Instant, SystemTime},
 };
@@ -16,23 +17,28 @@ use pcap::{Active, Capture, Error as PcapError};
 use super::bpf::install_capture_filter;
 use crate::{
     Error as LiveIoError,
-    capture::CaptureQueueLimits,
+    capture::{CaptureQueueLimits, Metadata as CaptureMetadata},
     interface::Id as InterfaceId,
     platform::live_capture::{
         CaptureInterrupt, NativeCaptureEvent, NativeCaptureParts, NativeCaptureSource,
-        NativeCaptureStatistics, NativeCapturedPacket, monotonic_packet_time, system_time,
+        NativeCaptureStatistics, NativeCapturedPacket, canonical_link_type, monotonic_packet_time,
+        system_time, validate_effective_snapshot_length,
     },
 };
-use packetcraftr_core::frame::LinkType;
-
 const READ_TIMEOUT_MILLIS: i32 = 50;
 pub(super) const PCAP_NETMASK_UNKNOWN: u32 = u32::MAX;
+
+#[link(name = "pcap")]
+unsafe extern "C" {
+    fn pcap_snapshot(handle: *mut c_void) -> c_int;
+}
 
 pub(crate) fn open_capture(
     interface: &InterfaceId,
     limits: CaptureQueueLimits,
     capture_filter: Option<&str>,
     netmask: Option<u32>,
+    promiscuous: bool,
 ) -> Result<NativeCaptureParts, LiveIoError> {
     let snap_length =
         i32::try_from(limits.snap_length).map_err(|_| LiveIoError::InvalidCaptureQueueLimit {
@@ -43,7 +49,7 @@ pub(crate) fn open_capture(
     let mut capture = Capture::from_device(interface.name.as_str())
         .map_err(|error| map_open_error(interface, error))?
         .snaplen(snap_length)
-        .promisc(true)
+        .promisc(promiscuous)
         .timeout(READ_TIMEOUT_MILLIS)
         .immediate_mode(true)
         .open()
@@ -57,24 +63,35 @@ pub(crate) fn open_capture(
         )?;
     }
     let datalink = capture.get_datalink().0;
-    let link_type =
-        u32::try_from(datalink)
-            .map(LinkType)
-            .map_err(|_| LiveIoError::Unsupported {
-                message: format!(
-                    "libpcap returned negative data-link type {datalink} for {}",
-                    interface.name
-                ),
-            })?;
+    let link_type = u32::try_from(datalink)
+        .map(canonical_link_type)
+        .map_err(|_| LiveIoError::Unsupported {
+            message: format!(
+                "libpcap returned negative data-link type {datalink} for {}",
+                interface.name
+            ),
+        })?;
+    // SAFETY: capture is activated and remains live and immutably borrowed for
+    // this query; pcap_snapshot only reads its configured snapshot length.
+    let reported_snap_length = unsafe { pcap_snapshot(capture.as_ptr().cast()) };
+    let snap_length = validate_effective_snapshot_length(
+        "libpcap",
+        interface,
+        limits.snap_length,
+        reported_snap_length,
+    )?;
     let interrupt = Arc::new(PcapInterrupt(capture.breakloop_handle()));
     Ok(NativeCaptureParts {
         source: Box::new(PcapCaptureSource {
             capture,
-            snap_length: limits.snap_length,
+            snap_length,
         }),
         interrupt,
-        interface: interface.clone(),
-        link_type,
+        metadata: CaptureMetadata {
+            interface: interface.clone(),
+            link_type,
+            snap_length,
+        },
     })
 }
 

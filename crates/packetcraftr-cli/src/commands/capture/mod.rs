@@ -7,7 +7,6 @@ pub(super) mod arguments;
 mod execution;
 mod rendering;
 
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use packetcraftr::{netio as net, netio::capture::Provider as _, output};
@@ -17,7 +16,7 @@ use super::registry;
 use crate::errors::CliError;
 use crate::filtering::FrameSelector;
 use crate::rendering::NdjsonStream;
-use crate::system::{client, prepare_route};
+use crate::system::resolve;
 
 use execution::Budget;
 
@@ -27,12 +26,13 @@ pub(super) fn run(
     stream: &mut NdjsonStream,
 ) -> Result<(), CliError> {
     let Args {
-        route,
+        interface,
+        promiscuous,
         timeout_ms,
         capture_filter,
         filter,
         limits,
-        policy,
+        budgets,
     } = arguments;
     let timeout = Duration::from_millis(timeout_ms);
     if timeout > net::capture::MAX_TIMEOUT || Instant::now().checked_add(timeout).is_none() {
@@ -48,52 +48,32 @@ pub(super) fn run(
     let registry = registry()?;
     let selector =
         FrameSelector::compile_optional(filter.as_deref(), &registry, limits.snap_length)?;
-    let request = prepare_route(route, policy.into_policy(), &registry)?;
-    let budget = Budget::from(&request.policy);
-    let client = client(Arc::clone(&registry), request.policy);
-    let route = client
-        .plan(&request.packet, request.destination, &request.options)
-        .map_err(CliError::classified)?;
-    let arm_capture = || match capture_filter.as_deref() {
-        Some(filter) => {
-            net::capture::SystemProvider.arm_capture_with_filter(&route, limits, filter)
-        }
-        None => net::capture::SystemProvider.arm_capture(&route, limits),
+    let interface = resolve(Some(interface), &net::interface::SystemProvider)?
+        .expect("required capture interface must resolve to an identity");
+    let policy = budgets.into_policy();
+    let budget = Budget::from(&policy);
+    let request = net::capture::Request {
+        interface,
+        limits,
+        filter: capture_filter,
+        promiscuous,
     };
+    let capture = net::capture::SystemProvider
+        .arm_capture(&request)
+        .map_err(CliError::classified)?;
 
     match format {
-        output::contract::Format::Text => rendering::render_text(
-            arm_capture().map_err(CliError::classified)?,
-            timeout,
-            limits,
-            budget,
-            selector.as_ref(),
-        ),
-        output::contract::Format::Hex => rendering::render_hex(
-            arm_capture().map_err(CliError::classified)?,
-            timeout,
-            limits,
-            budget,
-            selector.as_ref(),
-        ),
-        output::contract::Format::Ndjson => rendering::render_stream(
-            arm_capture().map_err(CliError::classified)?,
-            timeout,
-            limits,
-            budget,
-            selector.as_ref(),
-            stream,
-        ),
+        output::contract::Format::Text => {
+            rendering::render_text(capture, timeout, limits, budget, selector.as_ref())
+        }
+        output::contract::Format::Hex => {
+            rendering::render_hex(capture, timeout, limits, budget, selector.as_ref())
+        }
+        output::contract::Format::Ndjson => {
+            rendering::render_stream(capture, timeout, limits, budget, selector.as_ref(), stream)
+        }
         output::contract::Format::Pcap | output::contract::Format::PcapNg => {
-            rendering::render_capture(
-                arm_capture,
-                format,
-                route.decision.link_type,
-                timeout,
-                limits,
-                budget,
-                selector.as_ref(),
-            )
+            rendering::render_capture(capture, format, timeout, limits, budget, selector.as_ref())
         }
         _ => unreachable!("capture format is checked before command dispatch"),
     }

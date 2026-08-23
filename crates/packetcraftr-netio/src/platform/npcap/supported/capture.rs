@@ -12,28 +12,28 @@ use std::{
     time::{Instant, SystemTime},
 };
 
-use bytes::Bytes;
-use packetcraftr_core::frame::LinkType;
-
 use super::{
     abi::{BpfProgram, PCAP_ERROR, PCAP_ERROR_BREAK, PCAP_NETMASK_UNKNOWN, PcapStatistics},
     handles::{NpcapHandle, PromiscuousMode, open_handle},
 };
 use crate::{
     Error as LiveIoError,
-    capture::CaptureQueueLimits,
+    capture::{CaptureQueueLimits, Metadata as CaptureMetadata},
     interface::Id as InterfaceId,
     platform::live_capture::{
         CaptureInterrupt, NativeCaptureEvent, NativeCaptureParts, NativeCaptureSource,
-        NativeCaptureStatistics, NativeCapturedPacket, monotonic_packet_time, system_time,
+        NativeCaptureStatistics, NativeCapturedPacket, canonical_link_type, monotonic_packet_time,
+        system_time, validate_effective_snapshot_length,
     },
 };
+use bytes::Bytes;
 
 pub(in crate::platform::npcap) fn open_capture(
     interface: &InterfaceId,
     limits: CaptureQueueLimits,
     capture_filter: Option<&str>,
     netmask: Option<u32>,
+    promiscuous: bool,
 ) -> Result<NativeCaptureParts, LiveIoError> {
     let snap_length =
         i32::try_from(limits.snap_length).map_err(|_| LiveIoError::InvalidCaptureQueueLimit {
@@ -41,7 +41,12 @@ pub(in crate::platform::npcap) fn open_capture(
             value: limits.snap_length,
             reason: "Npcap snap length exceeds i32",
         })?;
-    let handle = open_handle(interface, snap_length, PromiscuousMode::Enabled)?;
+    let promiscuous_mode = if promiscuous {
+        PromiscuousMode::Enabled
+    } else {
+        PromiscuousMode::Disabled
+    };
+    let handle = open_handle(interface, snap_length, promiscuous_mode)?;
     if let Some(filter) = capture_filter {
         install_capture_filter(
             &handle,
@@ -53,23 +58,36 @@ pub(in crate::platform::npcap) fn open_capture(
     // SAFETY: handle is activated and live; pcap_datalink only reads its
     // negotiated link-layer type.
     let datalink = unsafe { (handle.api.pcap_datalink)(handle.raw.as_ptr()) };
-    let datalink = u32::try_from(datalink).map_err(|_| LiveIoError::Capture {
-        message: format!(
-            "Npcap could not report the data-link type for {}: {}",
-            interface.name,
-            handle.error_message()
-        ),
-    })?;
-    let link_type = LinkType(datalink);
+    let link_type = u32::try_from(datalink)
+        .map(canonical_link_type)
+        .map_err(|_| LiveIoError::Capture {
+            message: format!(
+                "Npcap could not report the data-link type for {}: {}",
+                interface.name,
+                handle.error_message()
+            ),
+        })?;
+    // SAFETY: handle is activated and live; pcap_snapshot only reads its
+    // effective snapshot length.
+    let reported_snap_length = unsafe { (handle.api.pcap_snapshot)(handle.raw.as_ptr()) };
+    let snap_length = validate_effective_snapshot_length(
+        "Npcap",
+        interface,
+        limits.snap_length,
+        reported_snap_length,
+    )?;
     let interrupt = Arc::new(NpcapInterrupt(Arc::clone(&handle)));
     Ok(NativeCaptureParts {
         source: Box::new(NpcapCaptureSource {
             handle,
-            snap_length: limits.snap_length,
+            snap_length,
         }),
         interrupt,
-        interface: interface.clone(),
-        link_type,
+        metadata: CaptureMetadata {
+            interface: interface.clone(),
+            link_type,
+            snap_length,
+        },
     })
 }
 

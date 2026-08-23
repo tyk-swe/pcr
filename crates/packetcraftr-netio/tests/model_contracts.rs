@@ -329,15 +329,29 @@ struct NoCapture;
 impl capture::Provider for NoCapture {
     type Capture = EmptySession;
 
-    fn arm_capture(&self, _route: &Plan, _limits: capture::Limits) -> Result<Self::Capture, Error> {
-        Ok(EmptySession)
+    fn arm_capture(&self, request: &capture::Request) -> Result<Self::Capture, Error> {
+        assert_eq!(request.filter.as_deref(), Some("udp"));
+        assert!(request.promiscuous);
+        Ok(EmptySession {
+            metadata: capture::Metadata {
+                interface: request.interface.clone(),
+                link_type: LinkType::LINUX_SLL,
+                snap_length: request.limits.snap_length,
+            },
+        })
     }
 }
 
 #[derive(Debug)]
-struct EmptySession;
+struct EmptySession {
+    metadata: capture::Metadata,
+}
 
 impl capture::Session for EmptySession {
+    fn metadata(&self) -> &capture::Metadata {
+        &self.metadata
+    }
+
     fn wait_ready(&mut self, _timeout: Duration) -> Result<(), Error> {
         Ok(())
     }
@@ -359,15 +373,22 @@ impl capture::Session for EmptySession {
 }
 
 #[test]
-fn capture_provider_default_filter_fails_closed_and_session_is_owned() {
-    let error = NoCapture
-        .arm_capture_with_filter(&planned(Mode::Layer2), capture::Limits::default(), "udp")
-        .expect_err("providers must explicitly support native filtering");
-    assert!(matches!(error, Error::Unsupported { .. }));
-
-    let mut session = NoCapture
-        .arm_capture(&planned(Mode::Layer2), capture::Limits::default())
-        .expect("fixture session");
+fn capture_request_and_session_metadata_are_owned() {
+    let request = capture::Request {
+        interface: interface(),
+        limits: capture::Limits::default(),
+        filter: Some("udp".to_owned()),
+        promiscuous: true,
+    };
+    let mut session = NoCapture.arm_capture(&request).expect("fixture session");
+    assert_eq!(
+        session.metadata(),
+        &capture::Metadata {
+            interface: interface(),
+            link_type: LinkType::LINUX_SLL,
+            snap_length: request.limits.snap_length,
+        }
+    );
     session
         .wait_ready(Duration::ZERO)
         .expect("fixture is immediately ready");

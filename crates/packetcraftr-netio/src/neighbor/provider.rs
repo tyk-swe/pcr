@@ -95,9 +95,15 @@ where
             snap_length: self.options.snap_length,
             overflow_policy: CaptureOverflowPolicy::Fail,
         };
+        let capture_request = capture::Request {
+            interface: request.interface.clone(),
+            limits,
+            filter: None,
+            promiscuous: false,
+        };
         let mut capture = self
             .capture
-            .arm_capture(&planned_route, limits)
+            .arm_capture(&capture_request)
             .map_err(|error| map_io_error(request, "arming capture", error))?;
         let primary = self.exchange(request, &request_bytes, &materialized_route, &mut capture);
         let cleanup = capture.shutdown();
@@ -336,10 +342,15 @@ mod tests {
     }
 
     struct ObservedCapture {
+        metadata: capture::Metadata,
         timeouts: Arc<Mutex<Vec<Duration>>>,
     }
 
     impl CaptureSession for ObservedCapture {
+        fn metadata(&self) -> &capture::Metadata {
+            &self.metadata
+        }
+
         fn wait_ready(&mut self, _timeout: Duration) -> Result<(), LiveIoError> {
             Ok(())
         }
@@ -391,6 +402,7 @@ mod tests {
             max_captured_bytes: 128,
             snap_length: 128,
         };
+        let snap_length = options.snap_length;
         let resolver = ActiveResolver::try_new(
             SlowLayer2 {
                 delay: Duration::from_millis(10),
@@ -407,6 +419,11 @@ mod tests {
             neighbor_resolution: None,
         };
         let mut capture = ObservedCapture {
+            metadata: capture::Metadata {
+                interface: request.interface.clone(),
+                link_type: request.link_type,
+                snap_length,
+            },
             timeouts: Arc::clone(&timeouts),
         };
 

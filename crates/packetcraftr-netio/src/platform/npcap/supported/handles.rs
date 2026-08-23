@@ -12,7 +12,9 @@ use std::{
 };
 
 use super::{
-    abi::{PCAP_ERROR_BUFFER_SIZE, PcapSetInteger, READ_TIMEOUT_MILLIS},
+    abi::{
+        PCAP_ERROR_BUFFER_SIZE, PCAP_WARNING_PROMISC_NOTSUP, PcapSetInteger, READ_TIMEOUT_MILLIS,
+    },
     error::{error_buffer_message, map_activation_error, map_open_message},
     loader::{NpcapApi, npcap_api, npcap_device_name},
 };
@@ -121,7 +123,7 @@ pub(super) fn open_handle(
     // SAFETY: all pre-activation options are complete and this handle has not
     // previously been activated.
     let activation = unsafe { (handle.api.pcap_activate)(handle.raw.as_ptr()) };
-    if activation < 0 {
+    if activation_rejected(activation, promiscuous_mode) {
         return Err(map_activation_error(
             interface,
             activation,
@@ -129,6 +131,12 @@ pub(super) fn open_handle(
         ));
     }
     Ok(handle)
+}
+
+fn activation_rejected(status: c_int, promiscuous_mode: PromiscuousMode) -> bool {
+    status < 0
+        || status == PCAP_WARNING_PROMISC_NOTSUP
+            && matches!(promiscuous_mode, PromiscuousMode::Enabled)
 }
 
 fn set_integer_option(
@@ -151,5 +159,24 @@ fn set_integer_option(
                 handle.error_message()
             ),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn promiscuous_warning_is_rejected_only_when_requested() {
+        assert!(activation_rejected(-1, PromiscuousMode::Disabled));
+        assert!(!activation_rejected(0, PromiscuousMode::Enabled));
+        assert!(!activation_rejected(
+            PCAP_WARNING_PROMISC_NOTSUP,
+            PromiscuousMode::Disabled
+        ));
+        assert!(activation_rejected(
+            PCAP_WARNING_PROMISC_NOTSUP,
+            PromiscuousMode::Enabled
+        ));
     }
 }

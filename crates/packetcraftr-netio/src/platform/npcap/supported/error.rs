@@ -10,7 +10,7 @@ use std::ffi::{c_char, c_int};
 use super::abi::{
     PCAP_ERROR_BUFFER_SIZE, PCAP_ERROR_CAPTURE_NOTSUP, PCAP_ERROR_IFACE_NOT_UP,
     PCAP_ERROR_NO_SUCH_DEVICE, PCAP_ERROR_PERM_DENIED, PCAP_ERROR_PROMISC_PERM_DENIED,
-    PCAP_ERROR_RFMON_NOTSUP,
+    PCAP_ERROR_RFMON_NOTSUP, PCAP_WARNING_PROMISC_NOTSUP,
 };
 use crate::{Error as LiveIoError, interface::Id as InterfaceId};
 
@@ -20,6 +20,12 @@ pub(super) fn map_activation_error(
     message: String,
 ) -> LiveIoError {
     match status {
+        PCAP_WARNING_PROMISC_NOTSUP => LiveIoError::Unsupported {
+            message: format!(
+                "Npcap does not support requested promiscuous capture on {}: {message}",
+                interface.name
+            ),
+        },
         PCAP_ERROR_PERM_DENIED | PCAP_ERROR_PROMISC_PERM_DENIED => LiveIoError::Privilege {
             message: format!(
                 "cannot open {} through Npcap: {message}; grant capture privileges or run elevated",

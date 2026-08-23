@@ -7,6 +7,10 @@ use packetcraftr::{
     netio as net,
 };
 
+pub(crate) const ARGUMENTS: Classification = Classification::new(
+    "cli.arguments",
+    Some("run the command with --help and correct the reported argument"),
+);
 pub(crate) const INTERFACE_SELECTOR: Classification = Classification::new(
     "cli.interface_selector",
     Some("use a non-empty interface name or a non-zero numeric interface index"),

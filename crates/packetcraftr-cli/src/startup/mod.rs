@@ -6,15 +6,11 @@ mod context;
 use std::process::ExitCode;
 
 use clap::Parser;
-use packetcraftr::{
-    BoundaryError,
-    core::error::{Classification, Kind},
-    output,
-};
+use packetcraftr::{BoundaryError, core::error::Kind, output};
 
 use self::context::from_env;
 use super::cli::Cli;
-use super::error::{INVARIANT, exit_code, exit_code_for_kind, failure};
+use super::error::{ARGUMENTS, INVARIANT, exit_code, exit_code_for_kind, failure};
 use super::rendering::{
     NdjsonStream, emit_json, emit_stderr_document, emit_stderr_error, emit_stdout_document,
     terminal_document,
@@ -32,7 +28,7 @@ pub(crate) fn run() -> ExitCode {
             if error.use_stderr()
                 && let Some(format) = context.format
             {
-                let error = failure(Classification::new("cli.arguments", None), message);
+                let error = failure(ARGUMENTS, message);
                 let code = exit_code_for_kind(Kind::Cli);
                 let emitted = match format {
                     output::contract::Format::Json => {

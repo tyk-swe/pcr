@@ -13,8 +13,8 @@ use packetcraftr::{
 
 use super::command_options::{OfflineCaptureLimitsArgs, RecipeArgs};
 use super::error::{
-    CAPTURE_LIMIT, FRAME_INPUT_SOURCE, INPUT_LIMIT, INPUT_READ, INVARIANT, OUTPUT_WRITE,
-    RECIPE_INPUT_SOURCE, failure,
+    CAPTURE_LIMIT, FRAME_INPUT_SOURCE, INPUT_LIMIT, INPUT_READ, INVARIANT, RECIPE_INPUT_SOURCE,
+    failure,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -178,7 +178,7 @@ pub(super) fn open_capture(
 ) -> Result<Reader<File>, BoundaryError> {
     let file = File::open(path).map_err(|source| {
         failure(
-            OUTPUT_WRITE,
+            INPUT_READ,
             format!("open {} failed: {source}", path.display()),
         )
     })?;

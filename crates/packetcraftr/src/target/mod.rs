@@ -6,5 +6,5 @@
 mod authorization;
 mod model;
 
-pub use model::{Authorized, Error, Family, Hostname, Resolver, SystemResolver, Target};
 pub(crate) use authorization::{approve_operation, resolve_selected};
+pub use model::{Authorized, Error, Family, Hostname, Resolver, SystemResolver, Target};

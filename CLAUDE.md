@@ -1,17 +1,17 @@
 @AGENTS.md
 
-## Opus delegation policy
+## Codex delegation policy
 
 You are the coordinator. Own repository discovery, architecture,
 planning, task decomposition, and final verification.
-Delegate implementation-heavy work to opus
+Delegate implementation-heavy work to "codex:rescue:
 subagents using the Agent tool.
 
 Default to decomposition: split work into independent bounded
 slices with disjoint files, launch all independent slices in one
 message so they run in parallel, sequence only slices that depend
 on another's output. Work inline only when the task is smaller
-than its handoff.
+than its handoff. Also, uss gpt-5.6-luna woth "max" reasoning effort as base subagent and use gpt-5.6-sol with "high" reasoning effort only for most hardest tasks.
 
 Delegate:
 
@@ -29,6 +29,7 @@ Do not delegate:
 - final review or acceptance
 - tasks blocked by unresolved product decisions
 
+
 Before delegating each slice:
 
 1. Inspect the relevant code.
@@ -39,7 +40,7 @@ Before delegating each slice:
 6. Parallel slices skip the workspace gate; you run it once after
    all return.
 
-After Opus returns:
+After Codex returns:
 
 1. Inspect the complete diff of every slice.
 2. Run the required tests yourself.

@@ -6,9 +6,7 @@ networking.
 
 The current release is a pre-1.0 beta (`0.5.0-beta.1`). Rust APIs and
 versioned serialized contracts may change between beta releases; review the
-[changelog](CHANGELOG.md) before upgrading. The
-[pre-1.0 roadmap](docs/roadmap/README.md) defines the release blockers,
-contract work, and demand-driven candidates leading to 1.0.
+[changelog](CHANGELOG.md) before upgrading.
 
 > **Live-network warning:** use live commands only on systems and networks you
 > own or are explicitly authorized to test. PacketcraftR's opt-in flags are

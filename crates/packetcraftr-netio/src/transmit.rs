@@ -340,4 +340,47 @@ mod tests {
 
         assert!(report.validate_exact(&expected).is_ok());
     }
+
+    #[test]
+    fn inconsistent_monotonic_intervals_and_nonexact_commit_markers_fail_closed() {
+        let expected = Bytes::from_static(&[1, 2, 3]);
+        let first = Instant::now();
+        for timing in [
+            Timing {
+                started: TimeMarker {
+                    monotonic: first + Duration::from_millis(1),
+                    wall_clock: SystemTime::UNIX_EPOCH,
+                },
+                completed: TimeMarker {
+                    monotonic: first,
+                    wall_clock: SystemTime::UNIX_EPOCH,
+                },
+                exact: false,
+            },
+            Timing {
+                started: TimeMarker {
+                    monotonic: first,
+                    wall_clock: SystemTime::UNIX_EPOCH,
+                },
+                completed: TimeMarker {
+                    monotonic: first + Duration::from_millis(1),
+                    wall_clock: SystemTime::UNIX_EPOCH,
+                },
+                exact: true,
+            },
+        ] {
+            let report = Report {
+                bytes_sent: expected.len(),
+                wire_bytes: expected.clone(),
+                timing,
+            };
+
+            assert!(!report.timing().is_consistent());
+            assert!(matches!(
+                report.validate_exact(&expected),
+                Err(Error::InvalidSendEvidence { ref message })
+                    if message.contains("timing")
+            ));
+        }
+    }
 }

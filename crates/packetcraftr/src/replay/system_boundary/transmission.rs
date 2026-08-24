@@ -242,3 +242,269 @@ impl Transmitter for SystemTransmitter {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::net::{IpAddr, Ipv4Addr};
+    use std::time::UNIX_EPOCH;
+
+    use packetcraftr_core::frame::LinkType;
+    use packetcraftr_netio::interface::{Address, Flags};
+    use packetcraftr_netio::link::MacAddress;
+
+    use super::*;
+
+    const INTERFACE_MAC: MacAddress = MacAddress([0x02, 0, 0, 0, 0, 1]);
+
+    fn interface(capability: LinkCapability, link_type: LinkType) -> InterfaceInfo {
+        InterfaceInfo {
+            id: InterfaceId {
+                name: "fixture0".to_owned(),
+                index: 7,
+            },
+            description: Some("offline replay fixture".to_owned()),
+            mac_address: Some(INTERFACE_MAC),
+            addresses: vec![Address {
+                address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
+                prefix_length: 24,
+            }],
+            flags: Flags {
+                up: true,
+                ..Flags::default()
+            },
+            mtu: Some(1_400),
+            capability,
+            link_type,
+        }
+    }
+
+    fn transmitter_with_cached_interface(interface: InterfaceInfo) -> SystemTransmitter {
+        let mut transmitter = SystemTransmitter::new();
+        transmitter.validated_interface = Some(interface);
+        transmitter
+    }
+
+    fn ethernet_frame(link_type: LinkType) -> Frame {
+        Frame::new(UNIX_EPOCH, link_type, vec![0_u8; 14]).expect("bounded fixture frame")
+    }
+
+    fn ipv4_frame() -> Frame {
+        let mut bytes = vec![0_u8; 20];
+        bytes[0] = 0x45;
+        bytes[12..16].copy_from_slice(&[192, 0, 2, 1]);
+        bytes[16..20].copy_from_slice(&[192, 0, 2, 2]);
+        Frame::new(UNIX_EPOCH, LinkType::RAW, bytes).expect("bounded raw IPv4 fixture")
+    }
+
+    #[test]
+    fn interface_matching_supports_exact_name_or_index_but_rejects_an_empty_selector() {
+        let actual = InterfaceId {
+            name: "fixture0".to_owned(),
+            index: 7,
+        };
+        for requested in [
+            actual.clone(),
+            InterfaceId {
+                name: String::new(),
+                index: 7,
+            },
+            InterfaceId {
+                name: "fixture0".to_owned(),
+                index: 0,
+            },
+        ] {
+            assert!(requested_interface_matches(&actual, &requested));
+        }
+        for requested in [
+            InterfaceId {
+                name: String::new(),
+                index: 0,
+            },
+            InterfaceId {
+                name: "other0".to_owned(),
+                index: 7,
+            },
+            InterfaceId {
+                name: "fixture0".to_owned(),
+                index: 8,
+            },
+        ] {
+            assert!(!requested_interface_matches(&actual, &requested));
+        }
+    }
+
+    #[test]
+    fn cached_interface_validation_accepts_layer2_and_layer3_without_system_lookup() {
+        let selected = interface(LinkCapability::Layer2AndLayer3, LinkType::ETHERNET);
+        let requested = selected.id.clone();
+        let mut transmitter = transmitter_with_cached_interface(selected);
+
+        assert_eq!(
+            transmitter
+                .validate_interface(
+                    &requested,
+                    LinkMode::Layer2,
+                    &ethernet_frame(LinkType::ETHERNET),
+                )
+                .expect("matching cached Layer 2 interface"),
+            requested
+        );
+        assert!(transmitter.validated_network.is_none());
+
+        assert_eq!(
+            transmitter
+                .validate_interface(&requested, LinkMode::Layer3, &ipv4_frame())
+                .expect("matching cached Layer 3 interface"),
+            requested
+        );
+        let (_, envelope) = transmitter
+            .validated_network
+            .as_ref()
+            .expect("Layer 3 envelope is retained for route materialization");
+        assert_eq!(envelope.source, IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)));
+        assert_eq!(
+            envelope.destination,
+            IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2))
+        );
+    }
+
+    #[test]
+    fn cached_interface_validation_rejects_modes_capabilities_and_link_mismatches() {
+        let selected = interface(LinkCapability::Layer2AndLayer3, LinkType::ETHERNET);
+        let requested = selected.id.clone();
+        let mut transmitter = transmitter_with_cached_interface(selected);
+        assert!(matches!(
+            transmitter.validate_interface(
+                &requested,
+                LinkMode::Auto,
+                &ethernet_frame(LinkType::ETHERNET),
+            ),
+            Err(LiveIoError::Unsupported { .. })
+        ));
+
+        let selected = interface(LinkCapability::Layer3, LinkType::RAW);
+        let requested = selected.id.clone();
+        let mut transmitter = transmitter_with_cached_interface(selected);
+        assert!(matches!(
+            transmitter.validate_interface(
+                &requested,
+                LinkMode::Layer2,
+                &ethernet_frame(LinkType::RAW),
+            ),
+            Err(LiveIoError::Unsupported { .. })
+        ));
+
+        let selected = interface(LinkCapability::Layer2, LinkType::ETHERNET);
+        let requested = selected.id.clone();
+        let mut transmitter = transmitter_with_cached_interface(selected);
+        assert!(matches!(
+            transmitter.validate_interface(&requested, LinkMode::Layer3, &ipv4_frame()),
+            Err(LiveIoError::Unsupported { .. })
+        ));
+
+        let selected = interface(LinkCapability::Layer2AndLayer3, LinkType::RAW);
+        let requested = selected.id.clone();
+        let mut transmitter = transmitter_with_cached_interface(selected);
+        assert!(matches!(
+            transmitter.validate_interface(
+                &requested,
+                LinkMode::Layer2,
+                &ethernet_frame(LinkType::ETHERNET),
+            ),
+            Err(LiveIoError::Device { message, .. })
+                if message.contains("differs from captured link type")
+        ));
+
+        let selected = interface(LinkCapability::Layer2AndLayer3, LinkType::ETHERNET);
+        let requested = selected.id.clone();
+        let mut transmitter = transmitter_with_cached_interface(selected);
+        assert!(matches!(
+            transmitter.validate_interface(
+                &requested,
+                LinkMode::Layer3,
+                &ethernet_frame(LinkType::RAW),
+            ),
+            Err(LiveIoError::InvalidTransmissionFrame { .. })
+        ));
+    }
+
+    #[test]
+    fn layer2_route_materialization_preserves_validated_interface_evidence() {
+        let selected = interface(LinkCapability::Layer2AndLayer3, LinkType::ETHERNET);
+        let transmitter = transmitter_with_cached_interface(selected.clone());
+        let frame = ethernet_frame(LinkType::ETHERNET);
+
+        let route = transmitter
+            .materialized_route(&selected, LinkMode::Layer2, &frame)
+            .expect("Layer 2 replay route is local and passive");
+        assert_eq!(route.plan.decision.interface, selected.id);
+        assert_eq!(route.plan.decision.source_mac, Some(INTERFACE_MAC));
+        assert_eq!(
+            route.plan.decision.selected_source,
+            Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)))
+        );
+        assert_eq!(route.plan.decision.mtu, 1_400);
+        assert_eq!(route.plan.decision.link_type, LinkType::ETHERNET);
+        assert_eq!(route.plan.mode, LinkMode::Layer2);
+        assert_eq!(route.plan.source_mac, Some(INTERFACE_MAC));
+        assert!(route.plan.lookup_destination.is_none());
+        assert!(route.plan.final_destination.is_none());
+        assert!(route.plan.visited_destinations.is_empty());
+        assert!(route.neighbor_resolution.is_none());
+
+        let mut without_mtu = selected;
+        without_mtu.mtu = None;
+        let route = transmitter
+            .materialized_route(&without_mtu, LinkMode::Layer2, &frame)
+            .expect("missing native MTU uses the unbounded model value");
+        assert_eq!(route.plan.decision.mtu, u32::MAX);
+    }
+
+    #[test]
+    fn route_materialization_requires_matching_prior_network_validation() {
+        let selected = interface(LinkCapability::Layer2AndLayer3, LinkType::ETHERNET);
+        let transmitter = transmitter_with_cached_interface(selected.clone());
+
+        assert!(matches!(
+            transmitter.materialized_route(&selected, LinkMode::Layer3, &ipv4_frame()),
+            Err(LiveIoError::InvalidTransmissionFrame { message })
+                if message.contains("not validated")
+        ));
+        assert!(matches!(
+            transmitter.materialized_route(
+                &selected,
+                LinkMode::Auto,
+                &ethernet_frame(LinkType::ETHERNET),
+            ),
+            Err(LiveIoError::UnresolvedLinkMode)
+        ));
+    }
+
+    #[test]
+    fn transmission_rejects_missing_or_mismatched_validation_before_packet_io() {
+        let selected = interface(LinkCapability::Layer2AndLayer3, LinkType::ETHERNET);
+        let frame = ethernet_frame(LinkType::ETHERNET);
+        let mut transmitter = SystemTransmitter::default();
+        assert!(matches!(
+            transmitter.transmit(&selected.id, LinkMode::Layer2, &frame),
+            Err(LiveIoError::Device { message, .. })
+                if message.contains("not validated")
+        ));
+
+        let mut transmitter = transmitter_with_cached_interface(selected.clone());
+        let other = InterfaceId {
+            name: "other0".to_owned(),
+            index: 8,
+        };
+        assert!(matches!(
+            transmitter.transmit(&other, LinkMode::Layer2, &frame),
+            Err(LiveIoError::Device { message, .. })
+                if message.contains("not validated")
+        ));
+
+        assert!(matches!(
+            transmitter.transmit(&selected.id, LinkMode::Auto, &frame),
+            Err(LiveIoError::UnresolvedLinkMode)
+        ));
+    }
+}

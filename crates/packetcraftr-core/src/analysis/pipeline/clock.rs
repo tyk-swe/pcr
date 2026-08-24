@@ -64,3 +64,37 @@ impl CaptureClock {
         due
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn capture_time_advances_from_the_first_frame_and_never_rewinds() {
+        let mut clock = CaptureClock::new();
+        let origin = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
+
+        let first = clock.at(origin, 1).expect("origin timestamp fits");
+        let advanced = clock
+            .at(origin + Duration::from_secs(3), 2)
+            .expect("later timestamp fits");
+        let rewound = clock
+            .at(origin + Duration::from_secs(1), 3)
+            .expect("out-of-order timestamp is clamped");
+
+        assert_eq!(advanced.duration_since(first), Duration::from_secs(3));
+        assert_eq!(rewound, advanced);
+    }
+
+    #[test]
+    fn sweep_throttle_is_inclusive_and_tolerates_out_of_order_instants() {
+        let mut clock = CaptureClock::new();
+        let first = clock.base;
+
+        assert!(clock.should_sweep(first));
+        assert!(!clock.should_sweep(first + Duration::from_millis(999)));
+        assert!(clock.should_sweep(first + SWEEP_GRANULARITY));
+        assert!(!clock.should_sweep(first));
+        assert!(clock.should_sweep(first + SWEEP_GRANULARITY * 2));
+    }
+}

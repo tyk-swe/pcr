@@ -318,6 +318,95 @@ mod tests {
     }
 
     #[test]
+    fn drop_oldest_retains_existing_frames_when_the_new_frame_cannot_fit_alone() {
+        let queue = queue(CaptureOverflowPolicy::DropOldest, 2, 4);
+        queue.enqueue(captured(&[1, 1])).expect("first frame");
+        queue.enqueue(captured(&[2, 2])).expect("second frame");
+
+        queue
+            .enqueue(captured(&[3, 3, 3, 3, 3]))
+            .expect("an individually oversized frame is dropped by policy");
+
+        let state = queue.lock().expect("queue state");
+        assert_eq!(state.queue.len(), 2);
+        assert_eq!(state.queued_bytes, 4);
+        assert_eq!(state.statistics.received_frames, 2);
+        assert_eq!(state.statistics.received_bytes, 4);
+        assert_eq!(state.statistics.dropped_frames, 1);
+        assert_eq!(state.statistics.dropped_bytes, 5);
+        assert_eq!(state.statistics.overflow_events, 1);
+    }
+
+    #[test]
+    fn queue_state_transitions_are_monotonic_and_preserve_the_first_error() {
+        let queue = queue(CaptureOverflowPolicy::Fail, 1, 1);
+        let state = queue.lock().expect("queue state");
+        let (state, _) = queue
+            .wait_timeout(state, Duration::ZERO)
+            .expect("unpoisoned condition variable");
+        assert!(!state.ready);
+        assert!(!state.closed);
+        assert!(state.error.is_none());
+        assert!(state.queue.is_empty());
+        drop(state);
+
+        queue.set_ready();
+        queue.set_error(LiveIoError::Capture {
+            message: "first failure".to_owned(),
+        });
+        queue.set_error(LiveIoError::Capture {
+            message: "later failure".to_owned(),
+        });
+        queue.close();
+
+        let state = queue.lock().expect("queue state");
+        assert!(state.ready);
+        assert!(state.closed);
+        assert!(matches!(
+            state.error.as_ref(),
+            Some(LiveIoError::Capture { message }) if message == "first failure"
+        ));
+    }
+
+    #[test]
+    fn queue_counter_overflow_does_not_partially_commit_a_frame_or_loss_event() {
+        let received = queue(CaptureOverflowPolicy::Fail, 1, 1);
+        received
+            .lock()
+            .expect("queue state")
+            .statistics
+            .received_frames = u64::MAX;
+        assert!(matches!(
+            received.enqueue(captured(&[1])),
+            Err(LiveIoError::InvalidCaptureStatistics { .. })
+        ));
+        {
+            let state = received.lock().expect("queue state");
+            assert!(state.queue.is_empty());
+            assert_eq!(state.queued_bytes, 0);
+            assert_eq!(state.statistics.received_frames, u64::MAX);
+            assert_eq!(state.statistics.received_bytes, 0);
+        }
+
+        let overflow = queue(CaptureOverflowPolicy::Fail, 1, 1);
+        overflow.enqueue(captured(&[1])).expect("first frame");
+        overflow
+            .lock()
+            .expect("queue state")
+            .statistics
+            .overflow_events = u64::MAX;
+        assert!(matches!(
+            overflow.enqueue(captured(&[2])),
+            Err(LiveIoError::InvalidCaptureStatistics { .. })
+        ));
+        let state = overflow.lock().expect("queue state");
+        assert_eq!(state.queue.len(), 1);
+        assert_eq!(state.statistics.overflow_events, u64::MAX);
+        assert_eq!(state.statistics.dropped_frames, 0);
+        assert_eq!(state.statistics.dropped_bytes, 0);
+    }
+
+    #[test]
     fn native_drop_deltas_handle_counter_wrap_and_commit_atomically() {
         let queue = queue(CaptureOverflowPolicy::Fail, 1, 1);
         queue
@@ -353,5 +442,27 @@ mod tests {
         let state = queue.lock().expect("queue state");
         assert_eq!(state.statistics.dropped_frames, u64::MAX);
         assert_eq!(state.statistics.receiver_dropped_frames, 3);
+
+        drop(state);
+        queue.lock().expect("queue state").statistics = Statistics {
+            receiver_dropped_frames: u64::MAX,
+            ..Statistics::default()
+        };
+        let error = queue
+            .add_native_drop_deltas(
+                NativeCaptureStatistics::default(),
+                NativeCaptureStatistics {
+                    network_dropped_frames: 1,
+                    ..NativeCaptureStatistics::default()
+                },
+            )
+            .expect_err("the second counter overflow must not commit the first");
+        assert!(matches!(
+            error,
+            LiveIoError::InvalidCaptureStatistics { .. }
+        ));
+        let state = queue.lock().expect("queue state");
+        assert_eq!(state.statistics.dropped_frames, 0);
+        assert_eq!(state.statistics.receiver_dropped_frames, u64::MAX);
     }
 }

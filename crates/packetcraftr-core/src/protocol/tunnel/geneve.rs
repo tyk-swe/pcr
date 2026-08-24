@@ -361,3 +361,255 @@ fn validate_option_chain(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Packet;
+
+    fn encode(
+        layer: &Geneve,
+        mode: crate::build::Mode,
+        remaining_packet_bytes: usize,
+    ) -> Result<EncodedLayer, crate::codec::Error> {
+        let registry = crate::protocol::builtin::registry().expect("built-in registry");
+        let packet = Packet::new();
+        let build_context = crate::build::Context::default();
+        let context = LayerEncodeContext {
+            packet: &packet,
+            index: 0,
+            build_context: &build_context,
+            mode,
+            registry: &registry,
+            child: None,
+            remaining_packet_bytes,
+        };
+        GeneveCodec.encode(layer, &[], &context)
+    }
+
+    fn decode(input: &[u8]) -> Result<DecodedLayerValue, crate::codec::Error> {
+        let registry = crate::protocol::builtin::registry().expect("built-in registry");
+        let context = LayerDecodeContext {
+            registry: &registry,
+            layer_index: 0,
+            absolute_offset: 0,
+            verify_checksums: true,
+            allow_trailing_padding: false,
+            network: None,
+            discriminator: None,
+        };
+        GeneveCodec.decode(input, &context)
+    }
+
+    fn decode_error(input: &[u8]) -> crate::codec::Error {
+        match decode(input) {
+            Ok(_) => panic!("GENEVE vector unexpectedly decoded: {input:02x?}"),
+            Err(error) => error,
+        }
+    }
+
+    fn encode_error(layer: &Geneve) -> crate::codec::Error {
+        match encode(layer, crate::build::Mode::Strict, usize::MAX) {
+            Ok(_) => panic!("invalid GENEVE layer unexpectedly encoded: {layer:?}"),
+            Err(error) => error,
+        }
+    }
+
+    #[test]
+    fn critical_option_chain_has_an_exact_wire_image_and_layout() {
+        let options = Bytes::from_static(&[0x01, 0x02, 0x83, 0x01, 0xde, 0xad, 0xbe, 0xef]);
+        let layer = Geneve {
+            control: true,
+            critical: true,
+            protocol_type: WireValue::Exact(0x1234),
+            vni: 0xab_cdef,
+            options: options.clone(),
+            ..Geneve::default()
+        };
+
+        let encoded = encode(&layer, crate::build::Mode::Strict, 16).unwrap();
+        assert_eq!(
+            encoded.prefix,
+            [
+                0x02, 0xc0, 0x12, 0x34, 0xab, 0xcd, 0xef, 0x00, 0x01, 0x02, 0x83, 0x01, 0xde, 0xad,
+                0xbe, 0xef,
+            ]
+        );
+        assert!(encoded.diagnostics.is_empty());
+        assert_eq!(
+            encoded
+                .fields
+                .iter()
+                .find(|field| field.name == "options")
+                .map(|field| field.range),
+            Some(crate::layout::ByteRange::new(8, 16))
+        );
+
+        let decoded = decode(&encoded.prefix).unwrap();
+        assert_eq!(decoded.consumed, 16);
+        assert_eq!(decoded.payload_len, 0);
+        assert!(decoded.stop);
+        assert_eq!(decoded.next, [Discriminator(0x1234)]);
+        assert!(decoded.diagnostics.is_empty());
+        assert_eq!(
+            decoded.layer.as_any().downcast_ref::<Geneve>(),
+            Some(&layer)
+        );
+    }
+
+    #[test]
+    fn decoder_rejects_truncation_and_unknown_versions_before_reading_options() {
+        assert!(matches!(
+            decode_error(&[0; 7]),
+            crate::codec::Error::Truncated {
+                needed: 8,
+                available: 7,
+                ..
+            }
+        ));
+
+        let mut unsupported = [0_u8; 8];
+        unsupported[0] = 0x40;
+        assert!(matches!(
+            decode_error(&unsupported),
+            crate::codec::Error::Unsupported { .. }
+        ));
+
+        let mut truncated_options = [0_u8; 8];
+        truncated_options[0] = 1;
+        assert!(matches!(
+            decode_error(&truncated_options),
+            crate::codec::Error::Truncated {
+                needed: 12,
+                available: 8,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn decoder_preserves_noncanonical_options_and_reports_each_wire_inconsistency() {
+        let malformed_options = [0x01, 0x41, 0x12, 0x34, 0x00, 0x00, 0x01, 0x02, 0, 0, 0, 1];
+        let decoded = decode(&malformed_options).unwrap();
+        assert_eq!(
+            decoded
+                .diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.code.as_str())
+                .collect::<Vec<_>>(),
+            ["decode.geneve_reserved", "decode.geneve_options"]
+        );
+        assert_eq!(
+            decoded
+                .layer
+                .as_any()
+                .downcast_ref::<Geneve>()
+                .expect("typed GENEVE")
+                .options,
+            Bytes::from_static(&[0, 0, 0, 1])
+        );
+
+        let option_mismatch = [0x01, 0x00, 0x12, 0x34, 0, 0, 1, 0, 0, 0, 0x80, 0xe0];
+        let decoded = decode(&option_mismatch).unwrap();
+        assert_eq!(
+            decoded
+                .diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.code.as_str())
+                .collect::<Vec<_>>(),
+            ["decode.geneve_critical", "decode.geneve_reserved"]
+        );
+    }
+
+    #[test]
+    fn encoder_enforces_field_option_and_packet_size_bounds_atomically() {
+        let cases = [
+            (
+                Geneve {
+                    version: 4,
+                    ..Geneve::default()
+                },
+                "field exceeds its wire range",
+            ),
+            (
+                Geneve {
+                    vni: VNI_MAX + 1,
+                    ..Geneve::default()
+                },
+                "field exceeds its wire range",
+            ),
+            (
+                Geneve {
+                    options: Bytes::from_static(&[0, 1, 2]),
+                    ..Geneve::default()
+                },
+                "multiple of 4 bytes",
+            ),
+            (
+                Geneve {
+                    options: Bytes::from(vec![0; GENEVE_MAX_OPTIONS_LEN + 4]),
+                    ..Geneve::default()
+                },
+                "multiple of 4 bytes up to",
+            ),
+            (
+                Geneve {
+                    options: Bytes::from_static(&[0, 0, 0, 1]),
+                    ..Geneve::default()
+                },
+                "do not parse as an exact TLV chain",
+            ),
+            (
+                Geneve {
+                    options: Bytes::from_static(&[0, 0, 0x80, 0]),
+                    ..Geneve::default()
+                },
+                "C bit must be set",
+            ),
+            (
+                Geneve {
+                    options: Bytes::from_static(&[0, 0, 0, 0xe0]),
+                    ..Geneve::default()
+                },
+                "reserved bits must be zero",
+            ),
+        ];
+
+        for (layer, expected) in cases {
+            let error = encode_error(&layer);
+            assert!(error.to_string().contains(expected), "{layer:?}: {error}");
+        }
+
+        let error = match encode(&Geneve::default(), crate::build::Mode::Strict, 7) {
+            Ok(_) => panic!("undersized packet budget unexpectedly encoded"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("only 7 remain"));
+    }
+
+    #[test]
+    fn permissive_mode_preserves_noncanonical_fields_with_actionable_diagnostics() {
+        let layer = Geneve {
+            version: 1,
+            reserved1: 1,
+            reserved2: 2,
+            options: Bytes::from_static(&[0, 0, 0, 1]),
+            ..Geneve::default()
+        };
+        let encoded = encode(&layer, crate::build::Mode::Permissive, 12).unwrap();
+
+        assert_eq!(encoded.prefix.len(), 12);
+        assert_eq!(
+            encoded
+                .diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.code.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "build.geneve_version",
+                "build.geneve_reserved",
+                "build.geneve_options",
+            ]
+        );
+    }
+}

@@ -77,3 +77,56 @@ impl PacketLayout {
         self.layers.iter().find(|layout| layout.index == index)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::layer::Id;
+
+    fn layer() -> LayerLayout {
+        LayerLayout {
+            index: 3,
+            protocol: Id::new("fixture"),
+            range: ByteRange::new(2, 8),
+            fields: vec![FieldLayout {
+                name: "value".to_owned(),
+                range: ByteRange::new(4, 6),
+            }],
+        }
+    }
+
+    #[test]
+    fn byte_range_length_saturates_and_failed_shift_is_atomic() {
+        assert_eq!(ByteRange::new(2, 8).len(), 6);
+        assert_eq!(ByteRange::new(8, 2).len(), 0);
+
+        let mut range = ByteRange::new(usize::MAX - 1, usize::MAX);
+        assert!(!range.checked_shift(1));
+        assert_eq!(range, ByteRange::new(usize::MAX - 1, usize::MAX));
+    }
+
+    #[test]
+    fn layer_shift_updates_every_range_or_none_of_them() {
+        let mut shifted = layer();
+        assert!(shifted.checked_shift(10));
+        assert_eq!(shifted.range, ByteRange::new(12, 18));
+        assert_eq!(shifted.fields[0].range, ByteRange::new(14, 16));
+
+        let mut overflowing = layer();
+        overflowing.fields[0].range.end = usize::MAX;
+        let before = overflowing.clone();
+        assert!(!overflowing.checked_shift(1));
+        assert_eq!(overflowing, before);
+    }
+
+    #[test]
+    fn packet_layout_lookup_uses_semantic_layer_indices() {
+        let expected = layer();
+        let layout = PacketLayout {
+            layers: vec![expected.clone()],
+        };
+
+        assert_eq!(layout.layer(3), Some(&expected));
+        assert_eq!(layout.layer(0), None);
+    }
+}

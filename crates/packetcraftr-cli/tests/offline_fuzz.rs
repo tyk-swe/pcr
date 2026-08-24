@@ -209,3 +209,34 @@ fn fuzz_aggregate_is_collected_from_the_streamed_case_path() {
     }
     assert_eq!(aggregate["stats"], complete["stats"]);
 }
+
+#[test]
+fn offline_fuzz_text_preserves_reproduction_and_outcome_details() {
+    let output = run_success(&[
+        "--output",
+        "text",
+        "fuzz",
+        "--packet",
+        "ipv4(src=192.0.2.1,dst=198.51.100.2)/udp(sport=12345,dport=9)/raw(text=hello)",
+        "--seed",
+        "7",
+        "--cases",
+        "32",
+        "--max-field-bytes",
+        "32",
+        "--max-shrink-steps",
+        "3",
+    ]);
+    let text = String::from_utf8(output.stdout).expect("text output must be UTF-8");
+
+    assert!(text.starts_with("mode=offline seed=7 first_case=0 generated=32"));
+    assert!(text.contains(" outcome=built "));
+    assert!(text.contains(" outcome=rejected "));
+    assert!(text.contains(" reproduce=--seed 7 --first-case "));
+    assert!(text.contains("\n  original="));
+    assert!(text.contains("\n  frame "));
+    assert!(text.contains("\n  error kind="));
+    assert!(text.contains("\nfuzz completed 32 case(s), "));
+    assert!(text.contains(" packet operation(s), "));
+    assert!(text.ends_with(" byte(s)\n"));
+}

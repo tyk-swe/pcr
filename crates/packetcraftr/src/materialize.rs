@@ -200,3 +200,277 @@ pub(super) fn require_fixed_width_link_materialization(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+    use packetcraftr_core::Packet;
+    use packetcraftr_core::frame::LinkType;
+    use packetcraftr_core::layer::Raw;
+    use packetcraftr_core::protocol::{link::Ethernet, network::Ipv4, network::Ipv6};
+    use packetcraftr_netio::interface::Id as InterfaceId;
+    use packetcraftr_netio::link::{Capability, MacAddress, Mode};
+    use packetcraftr_netio::route::{Decision, Materialized, Plan, Scope, SelectionReason};
+
+    use super::*;
+
+    const ROUTE_SOURCE_MAC: MacAddress = MacAddress([0x02, 0, 0, 0, 0, 1]);
+    const ROUTE_DESTINATION_MAC: MacAddress = MacAddress([0x02, 0, 0, 0, 0, 2]);
+
+    fn ipv4(last_octet: u8) -> IpAddr {
+        IpAddr::V4(Ipv4Addr::new(192, 0, 2, last_octet))
+    }
+
+    fn plan(mode: Mode) -> Plan {
+        Plan {
+            decision: Decision {
+                interface: InterfaceId {
+                    name: "fixture0".to_owned(),
+                    index: 7,
+                },
+                source_mac: Some(ROUTE_SOURCE_MAC),
+                selected_source: Some(ipv4(1)),
+                preferred_source: None,
+                next_hop: None,
+                selection_reason: SelectionReason::OnLink,
+                destination_scope: Scope::Global,
+                mtu: 1_500,
+                capability: Capability::Layer2AndLayer3,
+                link_type: LinkType::ETHERNET,
+            },
+            mode,
+            lookup_destination: Some(ipv4(2)),
+            final_destination: Some(ipv4(2)),
+            visited_destinations: vec![ipv4(2)],
+            packet_source: Some(ipv4(1)),
+            neighbor_source: Some(ipv4(1)),
+            neighbor_target: Some(ipv4(2)),
+            destination_mac: Some(ROUTE_DESTINATION_MAC),
+            source_mac: Some(ROUTE_SOURCE_MAC),
+            neighbor_vlan_tags: Vec::new(),
+            synthesized_ethernet: false,
+        }
+    }
+
+    fn materialized(plan: Plan) -> Materialized {
+        Materialized {
+            plan,
+            neighbor_resolution: None,
+        }
+    }
+
+    #[test]
+    fn build_context_preserves_the_planned_checksum_endpoints() {
+        let route = plan(Mode::Layer3);
+
+        assert_eq!(
+            build_context(&route),
+            packetcraftr_core::build::Context {
+                source: Some(ipv4(1)),
+                destination: Some(ipv4(2)),
+            }
+        );
+    }
+
+    #[test]
+    fn synthesized_ethernet_is_inserted_once_and_only_when_planned() {
+        let mut route = plan(Mode::Layer2);
+        route.synthesized_ethernet = true;
+        let mut packet = Packet::new();
+        packet.push(Ipv4::default());
+
+        materialize_link_structure(&mut packet, &route).expect("Ethernet insertion");
+        assert_eq!(packet.len(), 2);
+        assert_eq!(packet.get::<Ethernet>(), Some(&Ethernet::default()));
+
+        materialize_link_structure(&mut packet, &route).expect("idempotent materialization");
+        assert_eq!(
+            packet.len(),
+            2,
+            "an existing outer Ethernet layer is reused"
+        );
+
+        let mut route = plan(Mode::Layer2);
+        let mut packet = Packet::new();
+        packet.push(Ipv4::default());
+        materialize_link_structure(&mut packet, &route).expect("no synthesis requested");
+        assert_eq!(packet.len(), 1);
+
+        route.synthesized_ethernet = true;
+        let mut already_framed = Packet::new();
+        already_framed
+            .push(Ethernet::default())
+            .push(Ipv4::default());
+        materialize_link_structure(&mut already_framed, &route).expect("existing Ethernet");
+        assert_eq!(already_framed.len(), 2);
+    }
+
+    #[test]
+    fn network_materialization_fills_only_unspecified_ipv4_fields() {
+        let route = plan(Mode::Layer3);
+        let mut packet = Packet::new();
+        packet.push(Ipv4::default());
+
+        materialize_network_fields(&mut packet, &route).expect("matching IPv4 route");
+        let layer = packet.get::<Ipv4>().expect("IPv4 layer");
+        assert_eq!(layer.source, Ipv4Addr::new(192, 0, 2, 1));
+        assert_eq!(layer.destination, Ipv4Addr::new(192, 0, 2, 2));
+
+        let explicit_source = Ipv4Addr::new(198, 51, 100, 1);
+        let explicit_destination = Ipv4Addr::new(203, 0, 113, 2);
+        let mut explicit_packet = Packet::new();
+        explicit_packet.push(Ipv4 {
+            source: explicit_source,
+            destination: explicit_destination,
+            ..Ipv4::default()
+        });
+        materialize_network_fields(&mut explicit_packet, &route)
+            .expect("explicit packet addresses are authoritative");
+        let layer = explicit_packet.get::<Ipv4>().expect("IPv4 layer");
+        assert_eq!(layer.source, explicit_source);
+        assert_eq!(layer.destination, explicit_destination);
+    }
+
+    #[test]
+    fn network_materialization_supports_ipv6_and_ignores_non_network_packets() {
+        let source = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1);
+        let destination = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 2);
+        let mut route = plan(Mode::Layer3);
+        route.packet_source = Some(IpAddr::V6(source));
+        route.lookup_destination = Some(IpAddr::V6(destination));
+        let mut packet = Packet::new();
+        packet.push(Ipv6::default());
+
+        materialize_network_fields(&mut packet, &route).expect("matching IPv6 route");
+        let layer = packet.get::<Ipv6>().expect("IPv6 layer");
+        assert_eq!(layer.source, source);
+        assert_eq!(layer.destination, destination);
+
+        let mut raw = Packet::new();
+        raw.push(Raw::new(vec![1, 2, 3]));
+        materialize_network_fields(&mut raw, &route).expect("no network fields to fill");
+        assert_eq!(raw.len(), 1);
+    }
+
+    #[test]
+    fn network_materialization_rejects_missing_or_mismatched_route_families() {
+        let mut missing_source = plan(Mode::Layer3);
+        missing_source.packet_source = None;
+        let mut packet = Packet::new();
+        packet.push(Ipv4::default());
+        assert!(matches!(
+            materialize_network_fields(&mut packet, &missing_source),
+            Err(Error::PacketMaterialization {
+                layer: 0,
+                field: "source",
+                message,
+            }) if message.contains("family does not match")
+        ));
+
+        let mut missing_destination = plan(Mode::Layer3);
+        missing_destination.lookup_destination = Some(IpAddr::V6(Ipv6Addr::LOCALHOST));
+        let mut packet = Packet::new();
+        packet.push(Ipv4 {
+            source: Ipv4Addr::new(192, 0, 2, 9),
+            ..Ipv4::default()
+        });
+        assert!(matches!(
+            materialize_network_fields(&mut packet, &missing_destination),
+            Err(Error::PacketMaterialization {
+                layer: 0,
+                field: "destination",
+                message,
+            }) if message.contains("family does not match")
+        ));
+    }
+
+    #[test]
+    fn link_materialization_fills_zero_addresses_without_overwriting_explicit_values() {
+        let route = materialized(plan(Mode::Layer2));
+        let mut packet = Packet::new();
+        packet.push(Ethernet::default()).push(Ipv4::default());
+
+        assert!(materialize_link_fields(&mut packet, &route).expect("complete Layer 2 route"));
+        let ethernet = packet.get::<Ethernet>().expect("Ethernet layer");
+        assert_eq!(ethernet.source, ROUTE_SOURCE_MAC.0);
+        assert_eq!(ethernet.destination, ROUTE_DESTINATION_MAC.0);
+
+        assert!(
+            !materialize_link_fields(&mut packet, &route)
+                .expect("already materialized fields are stable")
+        );
+
+        let explicit_source = [0x0a, 0, 0, 0, 0, 1];
+        let explicit_destination = [0x0a, 0, 0, 0, 0, 2];
+        let mut explicit_packet = Packet::new();
+        explicit_packet.push(Ethernet {
+            source: explicit_source,
+            destination: explicit_destination,
+            ..Ethernet::default()
+        });
+        assert!(
+            !materialize_link_fields(&mut explicit_packet, &route)
+                .expect("explicit link fields are authoritative")
+        );
+        let ethernet = explicit_packet.get::<Ethernet>().expect("Ethernet layer");
+        assert_eq!(ethernet.source, explicit_source);
+        assert_eq!(ethernet.destination, explicit_destination);
+    }
+
+    #[test]
+    fn link_materialization_skips_irrelevant_packets_and_requires_both_route_macs() {
+        let layer3_route = materialized(plan(Mode::Layer3));
+        let mut ethernet = Packet::new();
+        ethernet.push(Ethernet::default());
+        assert!(!materialize_link_fields(&mut ethernet, &layer3_route).expect("Layer 3 skip"));
+
+        let layer2_route = materialized(plan(Mode::Layer2));
+        let mut raw = Packet::new();
+        raw.push(Raw::new(vec![1]));
+        assert!(!materialize_link_fields(&mut raw, &layer2_route).expect("no Ethernet skip"));
+
+        let mut missing_source = plan(Mode::Layer2);
+        missing_source.source_mac = None;
+        let mut packet = Packet::new();
+        packet.push(Ethernet::default());
+        assert!(matches!(
+            materialize_link_fields(&mut packet, &materialized(missing_source)),
+            Err(Error::PacketMaterialization {
+                layer: 0,
+                field: "source",
+                message,
+            }) if message.contains("source MAC")
+        ));
+
+        let mut missing_destination = plan(Mode::Layer2);
+        missing_destination.destination_mac = None;
+        let mut packet = Packet::new();
+        packet.push(Ethernet {
+            source: ROUTE_SOURCE_MAC.0,
+            ..Ethernet::default()
+        });
+        assert!(matches!(
+            materialize_link_fields(&mut packet, &materialized(missing_destination)),
+            Err(Error::PacketMaterialization {
+                layer: 0,
+                field: "destination",
+                message,
+            }) if message.contains("destination MAC")
+        ));
+    }
+
+    #[test]
+    fn link_materialization_must_preserve_the_planned_frame_width() {
+        require_fixed_width_link_materialization(64, 64).expect("fixed-width rewrite");
+
+        assert!(matches!(
+            require_fixed_width_link_materialization(64, 65),
+            Err(Error::PacketMaterialization {
+                layer: 0,
+                field: "ethernet",
+                message,
+            }) if message.contains("from 64 to 65 bytes")
+        ));
+    }
+}

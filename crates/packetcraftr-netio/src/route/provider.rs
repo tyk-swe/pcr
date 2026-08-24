@@ -123,3 +123,49 @@ impl Classified for SystemError {
         }
     }
 }
+
+#[cfg(all(test, not(feature = "native-route")))]
+mod tests {
+    use std::net::{IpAddr, Ipv4Addr};
+
+    use super::*;
+
+    fn interface() -> InterfaceId {
+        InterfaceId {
+            name: "fixture0".to_owned(),
+            index: 7,
+        }
+    }
+
+    #[test]
+    fn portable_system_provider_fails_closed_for_both_lookup_contracts() {
+        let provider = SystemProvider;
+        let destination = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 9));
+
+        let route = provider
+            .lookup_with_preferences(
+                destination,
+                Some(&interface()),
+                Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2))),
+            )
+            .expect_err("portable build has no native route provider");
+        let interface = provider
+            .lookup_interface(&interface())
+            .expect_err("portable build has no native interface route provider");
+
+        for (error, capability) in [
+            (route, "route selection"),
+            (interface, "interface selection"),
+        ] {
+            assert!(matches!(
+                error,
+                SystemError::Unsupported { ref message }
+                    if message.contains("enable the native-route feature")
+                        && message.contains(capability)
+            ));
+            let classification = provider.classify_error(&error);
+            assert_eq!(classification.code, "capability.route");
+            assert_eq!(classification.kind, Kind::Capability);
+        }
+    }
+}

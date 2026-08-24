@@ -152,3 +152,82 @@ fn allocate_zeroed(capacity: usize) -> Result<Vec<u8>, Error> {
     storage.resize(capacity, 0);
     Ok(storage)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wrapping_reuses_front_and_back_slack_without_changing_wire_order() {
+        let mut buffer = PacketBuffer::default();
+
+        buffer.wrap(b"middle", b"", 64).expect("initial wrap fits");
+        let capacity = buffer.storage.len();
+        buffer.wrap(b"prefix-", b"", 64).expect("front slack fits");
+        buffer.wrap(b"", b"-suffix", 64).expect("recentring fits");
+
+        assert_eq!(buffer.as_slice(), b"prefix-middle-suffix");
+        assert_eq!(buffer.storage.len(), capacity, "recentering must not grow");
+        assert_eq!(buffer.into_bytes().as_ref(), b"prefix-middle-suffix");
+    }
+
+    #[test]
+    fn wrapping_grows_only_as_far_as_the_configured_maximum() {
+        let mut buffer = PacketBuffer::default();
+        let prefix = [0x11; 40];
+        let suffix = [0x22; 40];
+
+        buffer
+            .wrap(&prefix, &suffix, 100)
+            .expect("eighty-byte packet fits");
+        assert_eq!(buffer.storage.len(), 80);
+
+        buffer
+            .wrap(&[0x33; 10], &[0x44; 10], 100)
+            .expect("packet exactly at its limit fits");
+        assert_eq!(buffer.len(), 100);
+        assert_eq!(buffer.storage.len(), 100);
+        assert_eq!(&buffer.as_slice()[..10], &[0x33; 10]);
+        assert_eq!(&buffer.as_slice()[10..50], &prefix);
+        assert_eq!(&buffer.as_slice()[50..90], &suffix);
+        assert_eq!(&buffer.as_slice()[90..], &[0x44; 10]);
+    }
+
+    #[test]
+    fn rejected_wrap_preserves_the_previously_built_packet() {
+        let mut buffer = PacketBuffer::default();
+        buffer
+            .wrap(b"retained", b"", 16)
+            .expect("fixture fits its limit");
+        let before = buffer.as_slice().to_vec();
+        let capacity = buffer.storage.len();
+
+        let error = buffer
+            .wrap(b"too-large-prefix", b"suffix", 16)
+            .expect_err("oversized wrapping must fail");
+
+        assert!(matches!(
+            error,
+            Error::PacketSizeLimit {
+                actual: 30,
+                limit: 16
+            }
+        ));
+        assert_eq!(buffer.as_slice(), before);
+        assert_eq!(buffer.storage.len(), capacity);
+    }
+
+    #[test]
+    fn suffix_only_packet_uses_the_entire_allocation_without_copying_on_finish() {
+        let mut buffer = PacketBuffer::default();
+        let payload = vec![0xab; PacketBuffer::MINIMUM_CAPACITY];
+
+        buffer
+            .wrap(&[], &payload, PacketBuffer::MINIMUM_CAPACITY)
+            .expect("exact allocation fits");
+
+        assert_eq!(buffer.start, 0);
+        assert_eq!(buffer.end, buffer.storage.len());
+        assert_eq!(buffer.into_bytes().as_ref(), payload.as_slice());
+    }
+}

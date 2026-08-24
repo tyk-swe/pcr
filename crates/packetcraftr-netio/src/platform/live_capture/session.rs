@@ -291,15 +291,20 @@ impl Drop for NativeCaptureSession {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
     use std::sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
         mpsc::{self, Receiver, Sender},
     };
+    use std::time::SystemTime;
 
+    use bytes::Bytes;
     use packetcraftr_core::frame::LinkType;
 
-    use super::super::{NativeCaptureEvent, NativeCaptureSource, NativeCaptureStatistics};
+    use super::super::{
+        NativeCaptureEvent, NativeCaptureSource, NativeCaptureStatistics, NativeCapturedPacket,
+    };
     use super::*;
     use crate::{
         capture::{CaptureQueueLimits, Metadata as CaptureMetadata},
@@ -368,6 +373,67 @@ mod tests {
         fn statistics(&mut self) -> Result<NativeCaptureStatistics, LiveIoError> {
             Ok(NativeCaptureStatistics::default())
         }
+    }
+
+    struct ScriptedSource {
+        events: VecDeque<Result<NativeCaptureEvent, LiveIoError>>,
+        finished: Option<Sender<()>>,
+    }
+
+    impl NativeCaptureSource for ScriptedSource {
+        fn next_event(&mut self) -> Result<NativeCaptureEvent, LiveIoError> {
+            self.events.pop_front().unwrap_or_else(|| {
+                Err(LiveIoError::Capture {
+                    message: "scripted source exhausted".to_owned(),
+                })
+            })
+        }
+
+        fn statistics(&mut self) -> Result<NativeCaptureStatistics, LiveIoError> {
+            Ok(NativeCaptureStatistics::default())
+        }
+    }
+
+    impl Drop for ScriptedSource {
+        fn drop(&mut self) {
+            if let Some(finished) = self.finished.take() {
+                let _ = finished.send(());
+            }
+        }
+    }
+
+    fn scripted_session(
+        events: impl IntoIterator<Item = Result<NativeCaptureEvent, LiveIoError>>,
+        interrupt: Arc<FakeInterrupt>,
+    ) -> (NativeCaptureSession, Receiver<()>) {
+        let (finished_sender, finished_receiver) = mpsc::channel();
+        let interrupt: Arc<dyn CaptureInterrupt> = interrupt;
+        let session = NativeCaptureSession::spawn(
+            NativeCaptureParts {
+                source: Box::new(ScriptedSource {
+                    events: events.into_iter().collect(),
+                    finished: Some(finished_sender),
+                }),
+                interrupt,
+                metadata: metadata("scripted-capture", 9),
+            },
+            CaptureQueueLimits::default(),
+        )
+        .expect("scripted capture worker should spawn");
+        (session, finished_receiver)
+    }
+
+    fn wait_for_scripted_terminal_state(
+        session: &NativeCaptureSession,
+        finished: Receiver<()>,
+        queued_frames: usize,
+    ) {
+        finished
+            .recv_timeout(Duration::from_secs(1))
+            .expect("scripted capture worker should reach its terminal state");
+        let state = session.shared.lock().expect("scripted capture state");
+        assert!(state.error.is_some());
+        assert_eq!(state.queue.len(), queued_frames);
     }
 
     fn blocked_session(
@@ -472,6 +538,105 @@ mod tests {
         assert!(session.worker.is_none());
         assert!(session.interrupt.is_none());
         assert_eq!(interrupt.calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn queued_frame_is_delivered_before_a_later_terminal_source_error() {
+        let ingress = Instant::now();
+        let terminal = LiveIoError::Capture {
+            message: "source failed after one frame".to_owned(),
+        };
+        let interrupt = Arc::new(FakeInterrupt::default());
+        let (mut session, finished) = scripted_session(
+            [
+                Ok(NativeCaptureEvent::Packet(NativeCapturedPacket {
+                    timestamp: SystemTime::UNIX_EPOCH,
+                    received_at: Some(ingress),
+                    captured_length: 3,
+                    original_length: 5,
+                    bytes: Bytes::from_static(&[1, 2, 3]),
+                })),
+                Err(terminal.clone()),
+            ],
+            Arc::clone(&interrupt),
+        );
+        wait_for_scripted_terminal_state(&session, finished, 1);
+
+        session
+            .wait_ready(Duration::from_millis(100))
+            .expect("queued evidence keeps a ready session readable");
+        let captured = session
+            .next_captured_frame(Duration::ZERO)
+            .expect("queued frame")
+            .expect("one queued frame");
+        assert_eq!(captured.frame.bytes().as_ref(), &[1, 2, 3]);
+        assert_eq!(captured.frame.captured_length(), 3);
+        assert_eq!(captured.frame.original_length(), 5);
+        assert_eq!(captured.frame.interface, Some(9));
+        assert_eq!(captured.received_at, Some(ingress));
+        assert_eq!(
+            session
+                .next_captured_frame(Duration::ZERO)
+                .expect_err("terminal error follows queued evidence"),
+            terminal
+        );
+        assert_eq!(
+            session.statistics(),
+            Statistics {
+                received_frames: 1,
+                received_bytes: 3,
+                ..Statistics::default()
+            }
+        );
+        session
+            .shutdown()
+            .expect("an already-observed worker error does not become a cleanup error");
+        assert_eq!(interrupt.calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn invalid_native_frame_fails_readiness_without_delivering_partial_evidence() {
+        let interrupt = Arc::new(FakeInterrupt::default());
+        let (mut session, finished) = scripted_session(
+            [Ok(NativeCaptureEvent::Packet(NativeCapturedPacket {
+                timestamp: SystemTime::UNIX_EPOCH,
+                received_at: None,
+                captured_length: 2,
+                original_length: 2,
+                bytes: Bytes::from_static(&[1]),
+            }))],
+            interrupt,
+        );
+        wait_for_scripted_terminal_state(&session, finished, 0);
+
+        let error = session
+            .wait_ready(Duration::from_millis(100))
+            .expect_err("invalid frame must fail closed");
+        assert!(matches!(
+            error,
+            LiveIoError::Capture { ref message }
+                if message.contains("native capture returned an invalid frame")
+        ));
+        assert!(matches!(
+            session.next_captured_frame(Duration::ZERO),
+            Err(LiveIoError::Capture { .. })
+        ));
+        assert_eq!(session.statistics(), Statistics::default());
+        session
+            .shutdown()
+            .expect("observed capture error leaves no cleanup error");
+    }
+
+    #[test]
+    fn capture_waits_reject_timeouts_above_the_public_maximum() {
+        assert!(capture_deadline(MAX_TIMEOUT).is_ok());
+        assert!(matches!(
+            capture_deadline(MAX_TIMEOUT + Duration::from_nanos(1)),
+            Err(LiveIoError::InvalidCaptureTimeout {
+                maximum: MAX_TIMEOUT,
+                ..
+            })
+        ));
     }
 
     #[test]

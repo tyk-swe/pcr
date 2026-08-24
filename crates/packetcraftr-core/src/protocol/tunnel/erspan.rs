@@ -395,3 +395,295 @@ fn erspan_layout(layer: &Erspan) -> Vec<crate::layout::FieldLayout> {
     }
     fields
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Packet;
+    use crate::protocol::link::Ethernet;
+
+    fn encode(
+        layer: &Erspan,
+        mode: crate::build::Mode,
+        remaining_packet_bytes: usize,
+    ) -> Result<EncodedLayer, crate::codec::Error> {
+        let registry = crate::protocol::builtin::registry().expect("built-in registry");
+        let packet = Packet::new();
+        let build_context = crate::build::Context::default();
+        let child = Ethernet::default();
+        let context = LayerEncodeContext {
+            packet: &packet,
+            index: 0,
+            build_context: &build_context,
+            mode,
+            registry: &registry,
+            child: Some(&child),
+            remaining_packet_bytes,
+        };
+        ErspanCodec.encode(layer, &[], &context)
+    }
+
+    fn decode(
+        input: &[u8],
+        discriminator: Option<u64>,
+    ) -> Result<DecodedLayerValue, crate::codec::Error> {
+        let registry = crate::protocol::builtin::registry().expect("built-in registry");
+        let context = LayerDecodeContext {
+            registry: &registry,
+            layer_index: 0,
+            absolute_offset: 0,
+            verify_checksums: true,
+            allow_trailing_padding: false,
+            network: None,
+            discriminator: discriminator.map(Discriminator),
+        };
+        ErspanCodec.decode(input, &context)
+    }
+
+    fn decode_error(input: &[u8]) -> crate::codec::Error {
+        match decode(input, None) {
+            Ok(_) => panic!("ERSPAN vector unexpectedly decoded: {input:02x?}"),
+            Err(error) => error,
+        }
+    }
+
+    fn encode_error(layer: &Erspan) -> crate::codec::Error {
+        match encode(layer, crate::build::Mode::Strict, usize::MAX) {
+            Ok(_) => panic!("invalid ERSPAN layer unexpectedly encoded: {layer:?}"),
+            Err(error) => error,
+        }
+    }
+
+    #[test]
+    fn type_two_header_has_an_exact_wire_image_and_round_trips_all_fields() {
+        let layer = Erspan {
+            version: 1,
+            vlan: 0xabc,
+            cos: 5,
+            encapsulation: 2,
+            truncated: true,
+            session_id: 0x155,
+            index_word: 0x1234_5678,
+            type3: None,
+        };
+
+        let encoded = encode(&layer, crate::build::Mode::Strict, ERSPAN_II_LEN).unwrap();
+        assert_eq!(
+            encoded.prefix,
+            [0x1a, 0xbc, 0xb5, 0x55, 0x12, 0x34, 0x56, 0x78]
+        );
+        assert!(encoded.diagnostics.is_empty());
+
+        let decoded = decode(&encoded.prefix, Some(TYPE_II_PROTOCOL)).unwrap();
+        assert_eq!(decoded.consumed, ERSPAN_II_LEN);
+        assert_eq!(decoded.payload_len, 0);
+        assert!(decoded.stop);
+        assert!(decoded.diagnostics.is_empty());
+        assert_eq!(decoded.next, [Discriminator(0)]);
+        assert_eq!(
+            decoded.layer.as_any().downcast_ref::<Erspan>(),
+            Some(&layer)
+        );
+    }
+
+    #[test]
+    fn type_three_optional_subheader_round_trips_and_has_precise_layout() {
+        let subheader = Bytes::from_static(b"PCR-TEST");
+        let layer = Erspan {
+            version: 2,
+            vlan: 0x123,
+            cos: 3,
+            encapsulation: 1,
+            truncated: false,
+            session_id: 0x2aa,
+            index_word: 0,
+            type3: Some(ErspanType3 {
+                timestamp: 0x0102_0304,
+                sgt: 0x0506,
+                flags: SUBHEADER_FLAG,
+                subheader: Some(subheader.clone()),
+            }),
+        };
+
+        let encoded = encode(&layer, crate::build::Mode::Strict, 20).unwrap();
+        assert_eq!(
+            encoded.prefix,
+            [
+                0x21, 0x23, 0x6a, 0xaa, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x00, 0x01, b'P', b'C',
+                b'R', b'-', b'T', b'E', b'S', b'T',
+            ]
+        );
+        assert_eq!(
+            encoded
+                .fields
+                .iter()
+                .find(|field| field.name == "subheader")
+                .map(|field| field.range),
+            Some(crate::layout::ByteRange::new(12, 20))
+        );
+        assert!(
+            !encoded
+                .fields
+                .iter()
+                .any(|field| field.name == "index_word")
+        );
+
+        let decoded = decode(&encoded.prefix, Some(TYPE_III_PROTOCOL)).unwrap();
+        assert_eq!(decoded.consumed, 20);
+        assert_eq!(
+            decoded.layer.as_any().downcast_ref::<Erspan>(),
+            Some(&layer)
+        );
+    }
+
+    #[test]
+    fn decoder_distinguishes_base_type_three_and_optional_subheader_truncation() {
+        assert!(matches!(
+            decode_error(&[0; 7]),
+            crate::codec::Error::Truncated {
+                needed: 8,
+                available: 7,
+                ..
+            }
+        ));
+
+        let mut short_type_three = [0_u8; 8];
+        short_type_three[0] = 0x20;
+        assert!(matches!(
+            decode_error(&short_type_three),
+            crate::codec::Error::Truncated {
+                needed: 12,
+                available: 8,
+                ..
+            }
+        ));
+
+        let mut short_subheader = [0_u8; 12];
+        short_subheader[0] = 0x20;
+        short_subheader[11] = 1;
+        assert!(matches!(
+            decode_error(&short_subheader),
+            crate::codec::Error::Truncated {
+                needed: 20,
+                available: 12,
+                ..
+            }
+        ));
+
+        assert!(matches!(
+            decode_error(&[0; 8]),
+            crate::codec::Error::Unsupported { .. }
+        ));
+    }
+
+    #[test]
+    fn enclosing_gre_discriminator_mismatch_is_retained_as_a_decode_diagnostic() {
+        let type_two = [0x10, 0, 0, 0, 0, 0, 0, 0];
+        let decoded = decode(&type_two, Some(TYPE_III_PROTOCOL)).unwrap();
+        assert_eq!(decoded.diagnostics.len(), 1);
+        assert_eq!(decoded.diagnostics[0].code, "decode.erspan_type");
+        assert_eq!(decoded.diagnostics[0].field.as_deref(), Some("version"));
+    }
+
+    #[test]
+    fn encoder_rejects_version_shape_subheader_range_and_budget_mismatches() {
+        let type_three = || Erspan {
+            version: 2,
+            type3: Some(ErspanType3::default()),
+            ..Erspan::default()
+        };
+        let cases = [
+            (
+                Erspan {
+                    version: 3,
+                    ..Erspan::default()
+                },
+                "not a known ERSPAN header type",
+            ),
+            (
+                Erspan {
+                    vlan: 0x1000,
+                    ..Erspan::default()
+                },
+                "field exceeds its wire range",
+            ),
+            (
+                Erspan {
+                    version: 2,
+                    type3: None,
+                    ..Erspan::default()
+                },
+                "present exactly when the version is 2",
+            ),
+            (
+                Erspan {
+                    type3: Some(ErspanType3::default()),
+                    ..Erspan::default()
+                },
+                "present exactly when the version is 2",
+            ),
+            (
+                Erspan {
+                    type3: Some(ErspanType3 {
+                        flags: SUBHEADER_FLAG,
+                        subheader: Some(Bytes::from_static(b"short")),
+                        ..ErspanType3::default()
+                    }),
+                    ..type_three()
+                },
+                "exactly 8 bytes",
+            ),
+            (
+                Erspan {
+                    type3: Some(ErspanType3 {
+                        subheader: Some(Bytes::from_static(b"12345678")),
+                        ..ErspanType3::default()
+                    }),
+                    ..type_three()
+                },
+                "subheader requires the flag word's O bit",
+            ),
+            (
+                Erspan {
+                    type3: Some(ErspanType3 {
+                        flags: SUBHEADER_FLAG,
+                        ..ErspanType3::default()
+                    }),
+                    ..type_three()
+                },
+                "O bit requires the 8-byte subheader",
+            ),
+        ];
+
+        for (layer, expected) in cases {
+            let error = encode_error(&layer);
+            assert!(error.to_string().contains(expected), "{layer:?}: {error}");
+        }
+
+        let error = match encode(&Erspan::default(), crate::build::Mode::Strict, 7) {
+            Ok(_) => panic!("undersized packet budget unexpectedly encoded"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("only 7 remain"));
+    }
+
+    #[test]
+    fn type_three_index_word_is_strictly_rejected_or_permissively_diagnosed() {
+        let layer = Erspan {
+            version: 2,
+            index_word: 1,
+            type3: Some(ErspanType3::default()),
+            ..Erspan::default()
+        };
+        assert!(
+            encode_error(&layer)
+                .to_string()
+                .contains("Type II headers only")
+        );
+
+        let encoded = encode(&layer, crate::build::Mode::Permissive, 12).unwrap();
+        assert_eq!(encoded.prefix.len(), 12);
+        assert_eq!(encoded.diagnostics.len(), 1);
+        assert_eq!(encoded.diagnostics[0].code, "build.erspan_index");
+    }
+}

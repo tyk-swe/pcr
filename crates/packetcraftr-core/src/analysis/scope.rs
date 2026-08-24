@@ -153,3 +153,80 @@ impl Interner {
         self.descriptors.is_empty()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::net::{IpAddr, Ipv4Addr};
+
+    use super::*;
+
+    fn tunnel_path(vni: u32) -> Vec<EncapsulationIdentifier> {
+        vec![
+            EncapsulationIdentifier::Network {
+                first: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
+                second: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2)),
+            },
+            EncapsulationIdentifier::Vxlan { vni },
+        ]
+    }
+
+    #[test]
+    fn exact_scope_reuses_both_identity_and_interned_path() {
+        let mut interner = Interner::new();
+        assert!(interner.is_empty());
+
+        let first = interner
+            .intern(Some(7), tunnel_path(42))
+            .expect("first scope fits");
+        let repeated = interner
+            .intern(Some(7), tunnel_path(42))
+            .expect("same scope reuses its identity");
+
+        assert_eq!(first, repeated);
+        assert_eq!(first.get(), 0);
+        assert_eq!(interner.len(), 1);
+        assert_eq!(
+            interner.get(first).expect("assigned scope exists"),
+            &FlowScope {
+                interface: Some(7),
+                encapsulation: InternedEncapsulationPath(Arc::from(tunnel_path(42))),
+            }
+        );
+    }
+
+    #[test]
+    fn interface_and_encapsulation_are_independent_scope_dimensions() {
+        let mut interner = Interner::new();
+        let base = interner
+            .intern(Some(1), tunnel_path(10))
+            .expect("base scope fits");
+        let other_interface = interner
+            .intern(Some(2), tunnel_path(10))
+            .expect("interface-specific scope fits");
+        let other_tunnel = interner
+            .intern(Some(1), tunnel_path(11))
+            .expect("encapsulation-specific scope fits");
+
+        assert_eq!(
+            [base.get(), other_interface.get(), other_tunnel.get()],
+            [0, 1, 2]
+        );
+        assert_eq!(interner.len(), 3);
+        assert_eq!(interner.get(ScopeId(u32::MAX)), None);
+
+        let first = &interner
+            .get(base)
+            .expect("base scope exists")
+            .encapsulation
+            .0;
+        let second = &interner
+            .get(other_interface)
+            .expect("second scope exists")
+            .encapsulation
+            .0;
+        assert!(
+            Arc::ptr_eq(first, second),
+            "equal paths should share storage"
+        );
+    }
+}

@@ -433,3 +433,201 @@ fn strip_hex_prefix(input: &str) -> Option<&str> {
         .strip_prefix("0x")
         .or_else(|| input.strip_prefix("0X"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn value_parser_distinguishes_addresses_numbers_macs_lists_and_text() {
+        let cases = [
+            ("TRUE", FieldValue::Bool(true)),
+            ("false", FieldValue::Bool(false)),
+            ("192.0.2.1", FieldValue::Ipv4(Ipv4Addr::new(192, 0, 2, 1))),
+            (
+                "2001:db8::1",
+                FieldValue::Ipv6("2001:db8::1".parse().expect("fixture address")),
+            ),
+            ("0Xff", FieldValue::Unsigned(255)),
+            ("18446744073709551615", FieldValue::Unsigned(u64::MAX)),
+            ("-42", FieldValue::Signed(-42)),
+            (
+                "00:11:22:33:44:55",
+                FieldValue::Mac([0, 0x11, 0x22, 0x33, 0x44, 0x55]),
+            ),
+            ("service-name", FieldValue::Text("service-name".to_owned())),
+            (
+                "[1, [true, 192.0.2.1]]",
+                FieldValue::List(vec![
+                    FieldValue::Unsigned(1),
+                    FieldValue::List(vec![
+                        FieldValue::Bool(true),
+                        FieldValue::Ipv4(Ipv4Addr::new(192, 0, 2, 1)),
+                    ]),
+                ]),
+            ),
+        ];
+
+        for (source, expected) in cases {
+            assert_eq!(
+                parse_value_bounded(source, 0, 8).unwrap(),
+                expected,
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn quoted_values_decode_supported_escapes_and_reject_ambiguous_strings() {
+        assert_eq!(
+            parse_quoted(r#""line\nreturn\rindent\tquote\"slash\\""#).unwrap(),
+            "line\nreturn\rindent\tquote\"slash\\"
+        );
+
+        for (source, expected) in [
+            (r#""unterminated"#, "unterminated quoted string"),
+            (r#""bad\q""#, "unsupported escape `\\q`"),
+            (r#""a"b""#, "unescaped quote in quoted string"),
+            (r#""tail\""#, "trailing escape"),
+        ] {
+            let error = parse_quoted(source).expect_err(source);
+            assert!(error.to_string().contains(expected), "{source}: {error}");
+        }
+    }
+
+    #[test]
+    fn top_level_splitting_ignores_nested_and_quoted_delimiters() {
+        assert_eq!(
+            split_top_level_bounded(r#"alpha(value="x/y")/beta(values=[1,2])"#, '/', None).unwrap(),
+            [r#"alpha(value="x/y")"#, "beta(values=[1,2])"]
+        );
+        assert_eq!(
+            split_top_level_bounded(r#"a="x=y",b=[1,2]"#, ',', None).unwrap(),
+            [r#"a="x=y""#, "b=[1,2]"]
+        );
+        assert!(matches!(
+            split_top_level_bounded("a/b", '/', Some(1)),
+            Err(Error::LayerLimit { limit: 1 })
+        ));
+        assert!(matches!(
+            split_top_level_bounded("a]", '/', None),
+            Err(Error::Syntax { offset: 1, .. })
+        ));
+        assert!(matches!(
+            split_top_level_bounded("a([", '/', None),
+            Err(Error::Syntax { offset: 3, .. })
+        ));
+    }
+
+    #[test]
+    fn layer_arguments_reject_duplicates_missing_values_and_unbalanced_delimiters() {
+        let (name, fields) = parse_layer(
+            r#"TCP(source_port=1, options=[1, [2, 3]], label="a,b")"#,
+            4,
+            8,
+        )
+        .unwrap();
+        assert_eq!(name, "tcp");
+        assert_eq!(fields.len(), 3);
+
+        let duplicate = parse_layer("tcp(source_port=1,SOURCE_PORT=2)", 4, 8).unwrap_err();
+        assert!(matches!(
+            duplicate,
+            Error::DuplicateField {
+                layer: 4,
+                ref field
+            } if field == "source_port"
+        ));
+
+        for (source, expected) in [
+            ("", "empty layer"),
+            ("(field=1)", "missing protocol name"),
+            ("tcp(field=1", "arguments must end"),
+            ("tcp(field)", "expected field=value"),
+            ("tcp(=1)", "empty field name"),
+            ("tcp(field=)", "missing field value"),
+            ("tcp(field=[1,2)", "unterminated quote or delimiter"),
+        ] {
+            let error = parse_layer(source, 0, 8).expect_err(source);
+            assert!(error.to_string().contains(expected), "{source}: {error}");
+        }
+    }
+
+    #[test]
+    fn expression_limits_and_registry_failures_report_the_exact_boundary() {
+        let registry = crate::protocol::builtin::registry().expect("built-in registry");
+
+        assert!(matches!(
+            parse(" ", &registry, Options::default()),
+            Err(Error::Empty)
+        ));
+        assert!(matches!(
+            parse(
+                "ipv4",
+                &registry,
+                Options {
+                    max_bytes: 3,
+                    ..Options::default()
+                }
+            ),
+            Err(Error::SizeLimit {
+                actual: 4,
+                limit: 3
+            })
+        ));
+        assert!(matches!(
+            parse(
+                "ipv4",
+                &registry,
+                Options {
+                    max_nesting: MAX_EXPRESSION_NESTING + 1,
+                    ..Options::default()
+                }
+            ),
+            Err(Error::InvalidNestingLimit { .. })
+        ));
+        assert!(matches!(
+            parse(
+                "ipv4/udp",
+                &registry,
+                Options {
+                    max_layers: 1,
+                    ..Options::default()
+                }
+            ),
+            Err(Error::LayerLimit { limit: 1 })
+        ));
+        assert!(matches!(
+            parse("unknown_fixture", &registry, Options::default()),
+            Err(Error::UnknownProtocol { layer: 0, .. })
+        ));
+        assert!(matches!(
+            parse("ipv4(source=not-an-address)", &registry, Options::default()),
+            Err(Error::Layer { layer: 0, .. })
+        ));
+    }
+
+    #[test]
+    fn recursive_list_limit_is_checked_before_descending() {
+        assert_eq!(
+            parse_value_bounded("[]", 0, 1).unwrap(),
+            FieldValue::List(Vec::new())
+        );
+        assert!(matches!(
+            parse_value_bounded("[]", 0, 0),
+            Err(Error::NestingLimit { limit: 0 })
+        ));
+        assert!(matches!(
+            parse_value_bounded("[[1]]", 0, 1),
+            Err(Error::NestingLimit { limit: 1 })
+        ));
+        assert!(matches!(
+            parse_value_bounded("[1", 0, 8),
+            Err(Error::Syntax { .. })
+        ));
+        assert!(matches!(
+            parse_value_bounded("0xgg", 0, 8),
+            Err(Error::Syntax { .. })
+        ));
+    }
+}

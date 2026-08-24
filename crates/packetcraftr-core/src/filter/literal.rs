@@ -203,3 +203,144 @@ pub(super) fn searchable_needle(literal: &Literal) -> bool {
         Literal::Bytes(_) | Literal::Text(_) | Literal::Mac(_)
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn spec(kind: FieldKind) -> FieldSpec {
+        FieldSpec {
+            kind,
+            derived: false,
+        }
+    }
+
+    #[test]
+    fn literal_shapes_are_disambiguated_before_broader_hex_and_number_forms() {
+        assert_eq!(parse("true"), Some(Literal::Bool(true)));
+        assert_eq!(parse("0Xff"), Some(Literal::Unsigned(255)));
+        assert_eq!(
+            parse("192.0.2.1/24"),
+            Some(Literal::Ipv4Net(Ipv4Addr::new(192, 0, 2, 1), 24))
+        );
+        assert!(matches!(
+            parse("2001:db8::1/64"),
+            Some(Literal::Ipv6Net(..))
+        ));
+        assert!(matches!(parse("2001:db8::1"), Some(Literal::Ipv6(..))));
+        assert_eq!(
+            parse("00:11:22:33:44:55"),
+            Some(Literal::Mac([0, 0x11, 0x22, 0x33, 0x44, 0x55]))
+        );
+        assert_eq!(
+            parse("47:45:54:20"),
+            Some(Literal::Bytes(Bytes::from_static(b"GET ")))
+        );
+        assert_eq!(
+            parse("18446744073709551615"),
+            Some(Literal::Unsigned(u64::MAX))
+        );
+        assert_eq!(parse("-42"), Some(Literal::Signed(-42)));
+    }
+
+    #[test]
+    fn malformed_literal_shapes_are_not_partially_accepted() {
+        for malformed in [
+            "0x",
+            "0xgg",
+            "192.0.2.1/33",
+            "2001:db8::1/129",
+            "aa:bb-cc",
+            "a:bb",
+            "aa:",
+            "ff",
+        ] {
+            assert_eq!(parse(malformed), None, "{malformed}");
+        }
+    }
+
+    #[test]
+    fn literal_display_is_stable_for_machine_and_human_readable_values() {
+        let cases = [
+            (Literal::Bool(false), "false"),
+            (Literal::Unsigned(7), "7"),
+            (Literal::Signed(-7), "-7"),
+            (Literal::Text("dns".to_owned()), "\"dns\""),
+            (
+                Literal::Bytes(Bytes::from_static(&[0, 0xab, 0xff])),
+                "00:ab:ff",
+            ),
+            (Literal::Ipv4(Ipv4Addr::new(192, 0, 2, 1)), "192.0.2.1"),
+            (
+                Literal::Ipv4Net(Ipv4Addr::new(192, 0, 2, 0), 24),
+                "192.0.2.0/24",
+            ),
+            (Literal::Mac([0, 1, 2, 3, 4, 5]), "00:01:02:03:04:05"),
+        ];
+
+        for (literal, expected) in cases {
+            assert_eq!(literal.to_string(), expected);
+        }
+        assert_eq!(
+            Literal::Ipv6("2001:db8::1".parse().expect("fixture address")).to_string(),
+            "2001:db8::1"
+        );
+        assert_eq!(
+            Literal::Ipv6Net("2001:db8::".parse().expect("fixture prefix"), 32).to_string(),
+            "2001:db8::/32"
+        );
+    }
+
+    #[test]
+    fn field_compatibility_rejects_impossible_comparisons() {
+        assert!(compatible(spec(FieldKind::Bool), &Literal::Bool(true)));
+        assert!(compatible(spec(FieldKind::Bool), &Literal::Unsigned(1)));
+        assert!(!compatible(spec(FieldKind::Bool), &Literal::Unsigned(2)));
+        assert!(compatible(spec(FieldKind::Signed), &Literal::Unsigned(1)));
+        assert!(compatible(spec(FieldKind::Unsigned), &Literal::Signed(-1)));
+        assert!(!compatible(
+            spec(FieldKind::Unsigned),
+            &Literal::Text(AUTO_WIRE_VALUE.to_owned())
+        ));
+        assert!(compatible(
+            FieldSpec {
+                kind: FieldKind::Unsigned,
+                derived: true,
+            },
+            &Literal::Text(AUTO_WIRE_VALUE.to_owned())
+        ));
+        assert!(compatible(spec(FieldKind::Bytes), &Literal::Unsigned(255)));
+        assert!(!compatible(spec(FieldKind::Bytes), &Literal::Unsigned(256)));
+        assert!(compatible(
+            spec(FieldKind::Ipv4),
+            &Literal::Ipv4Net(Ipv4Addr::UNSPECIFIED, 0)
+        ));
+        assert!(compatible(
+            spec(FieldKind::Mac),
+            &Literal::Bytes(Bytes::from_static(&[0, 1]))
+        ));
+        assert!(compatible(spec(FieldKind::List), &Literal::Bool(false)));
+    }
+
+    #[test]
+    fn searchable_types_and_prefix_markers_match_evaluation_contracts() {
+        for kind in [FieldKind::Bytes, FieldKind::Text, FieldKind::Mac] {
+            assert!(searchable(kind), "{}", kind_name(kind));
+        }
+        for kind in [
+            FieldKind::Bool,
+            FieldKind::Unsigned,
+            FieldKind::Signed,
+            FieldKind::Ipv4,
+            FieldKind::Ipv6,
+            FieldKind::List,
+        ] {
+            assert!(!searchable(kind), "{}", kind_name(kind));
+        }
+        assert!(searchable_needle(&Literal::Text("x".to_owned())));
+        assert!(searchable_needle(&Literal::Mac([0; 6])));
+        assert!(!searchable_needle(&Literal::Unsigned(0)));
+        assert!(Literal::Ipv4Net(Ipv4Addr::UNSPECIFIED, 0).is_prefix());
+        assert!(!Literal::Ipv4(Ipv4Addr::UNSPECIFIED).is_prefix());
+    }
+}

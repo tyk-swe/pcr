@@ -106,3 +106,18 @@ fn outcome_name(value: output::fuzz::Outcome) -> &'static str {
         output::fuzz::Outcome::Timeout => "timeout",
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn human_labels_cover_every_fuzz_mode_and_outcome() {
+        assert_eq!(mode_name(output::fuzz::Mode::Offline), "offline");
+        assert_eq!(mode_name(output::fuzz::Mode::Live), "live");
+        assert_eq!(outcome_name(output::fuzz::Outcome::Built), "built");
+        assert_eq!(outcome_name(output::fuzz::Outcome::Rejected), "rejected");
+        assert_eq!(outcome_name(output::fuzz::Outcome::Response), "response");
+        assert_eq!(outcome_name(output::fuzz::Outcome::Timeout), "timeout");
+    }
+}

@@ -38,3 +38,92 @@ pub(super) fn validate_native_interfaces(
     }
     Ok(interfaces)
 }
+
+#[cfg(test)]
+mod tests {
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+    use packetcraftr_core::frame::LinkType;
+
+    use super::*;
+    use crate::{
+        interface::{Address as InterfaceAddress, Flags as InterfaceFlags, Id as InterfaceId},
+        link::Capability,
+    };
+
+    fn interface(name: &str, index: u32, addresses: Vec<InterfaceAddress>) -> InterfaceInfo {
+        InterfaceInfo {
+            id: InterfaceId {
+                name: name.to_owned(),
+                index,
+            },
+            description: None,
+            mac_address: None,
+            addresses,
+            flags: InterfaceFlags::default(),
+            mtu: Some(1_500),
+            capability: Capability::Layer3,
+            link_type: LinkType::RAW,
+        }
+    }
+
+    #[test]
+    fn native_interface_validation_accepts_complete_identity_and_family_prefix_bounds() {
+        let interfaces = vec![interface(
+            "fixture0",
+            7,
+            vec![
+                InterfaceAddress {
+                    address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
+                    prefix_length: 32,
+                },
+                InterfaceAddress {
+                    address: IpAddr::V6(Ipv6Addr::LOCALHOST),
+                    prefix_length: 128,
+                },
+            ],
+        )];
+
+        assert_eq!(
+            validate_native_interfaces(interfaces.clone()).expect("valid native snapshot"),
+            interfaces
+        );
+    }
+
+    #[test]
+    fn native_interface_validation_rejects_incomplete_identity_and_invalid_family_prefixes() {
+        for invalid in [
+            interface("", 7, Vec::new()),
+            interface("fixture0", 0, Vec::new()),
+            interface(
+                "fixture0",
+                7,
+                vec![InterfaceAddress {
+                    address: IpAddr::V4(Ipv4Addr::LOCALHOST),
+                    prefix_length: 33,
+                }],
+            ),
+            interface(
+                "fixture0",
+                7,
+                vec![InterfaceAddress {
+                    address: IpAddr::V6(Ipv6Addr::LOCALHOST),
+                    prefix_length: 129,
+                }],
+            ),
+        ] {
+            assert!(validate_native_interface(&invalid).is_err(), "{invalid:?}");
+        }
+    }
+
+    #[test]
+    fn native_interface_snapshot_rejects_duplicate_stable_identities() {
+        let first = interface("fixture0", 7, Vec::new());
+        let duplicate = first.clone();
+
+        let error = validate_native_interfaces(vec![first, duplicate])
+            .expect_err("duplicate identity must fail closed");
+
+        assert!(error.contains("duplicate interface fixture0 (index 7)"));
+    }
+}

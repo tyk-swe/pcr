@@ -1,10 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::io::Write;
+use std::io::{Cursor, Write};
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
+use packetcraftr::analysis::pcap::{Format as CaptureFormat, Reader};
 use serde_json::Value;
 
 #[path = "support/process.rs"]
@@ -66,7 +67,7 @@ fn assert_no_terminal_style(bytes: &[u8]) {
     );
 }
 
-fn partial_capture() -> tempfile::NamedTempFile {
+fn malformed_raw_frame_capture() -> tempfile::NamedTempFile {
     let mut capture = tempfile::NamedTempFile::new().expect("temporary capture must open");
     capture
         .write_all(&[
@@ -74,6 +75,11 @@ fn partial_capture() -> tempfile::NamedTempFile {
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0,
         ])
         .expect("valid frame must write");
+    capture
+}
+
+fn partial_capture() -> tempfile::NamedTempFile {
+    let mut capture = malformed_raw_frame_capture();
     append_truncated_record(&mut capture);
     capture
 }
@@ -414,5 +420,83 @@ fn progressive_live_commands_emit_one_sequence_zero_error_when_preparation_fails
         assert_eq!(records[0]["sequence"], 0, "{arguments:?}");
         assert_eq!(records[0]["status"], "error", "{arguments:?}");
         assert!(records[0].get("result").is_none(), "{arguments:?}");
+    }
+}
+
+#[test]
+fn replay_rejects_malformed_capture_before_emitting_transmission_evidence() {
+    let capture = malformed_raw_frame_capture();
+    let path = capture.path().to_str().expect("temporary path is UTF-8");
+
+    for format in ["text", "json", "ndjson", "pcap", "pcapng"] {
+        let failure = run(&[
+            "--output",
+            format,
+            "replay",
+            path,
+            "--interface",
+            "fixture0",
+            "--timing",
+            "immediate",
+        ]);
+        assert_eq!(failure.status.code(), Some(3), "{format}: {failure:?}");
+
+        match format {
+            "json" => {
+                let value = parse_json(&failure);
+                assert_eq!(value["command"], "replay");
+                assert_eq!(value["error"]["code"], "packet.replay_network");
+            }
+            "ndjson" => {
+                let records = parse_ndjson(&failure);
+                assert_contiguous(&records);
+                assert_eq!(records.len(), 1);
+                assert_eq!(records[0]["sequence"], 0);
+                assert_eq!(records[0]["error"]["code"], "packet.replay_network");
+            }
+            "pcap" => {
+                let mut reader = Reader::new(Cursor::new(failure.stdout.as_slice()))
+                    .expect("failure output remains a valid classic capture");
+                assert_eq!(reader.format(), CaptureFormat::Pcap);
+                assert!(
+                    reader
+                        .next_frame()
+                        .expect("capture remains readable")
+                        .is_none(),
+                    "no frame evidence may be written"
+                );
+                assert!(
+                    String::from_utf8_lossy(&failure.stderr).contains("packet.replay_network"),
+                    "{:?}",
+                    failure.stderr
+                );
+            }
+            "pcapng" => {
+                let mut reader = Reader::new(Cursor::new(failure.stdout.as_slice()))
+                    .expect("failure output remains a valid PCAPNG capture");
+                assert_eq!(reader.format(), CaptureFormat::PcapNg);
+                assert!(
+                    reader
+                        .next_frame()
+                        .expect("capture remains readable")
+                        .is_none(),
+                    "no frame evidence may be written"
+                );
+                assert!(
+                    String::from_utf8_lossy(&failure.stderr).contains("packet.replay_network"),
+                    "{:?}",
+                    failure.stderr
+                );
+            }
+            "text" => {
+                assert!(failure.stdout.is_empty());
+                assert!(
+                    String::from_utf8_lossy(&failure.stderr).contains("packet.replay_network"),
+                    "{:?}",
+                    failure.stderr
+                );
+            }
+            _ => unreachable!("the fixture enumerates every asserted format"),
+        }
     }
 }

@@ -357,3 +357,319 @@ pub(super) fn shrink_values(value: &FieldValue, maximum: usize) -> Vec<FieldValu
     }
     values
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fuzz::request::{Limits, Strategy, Target};
+
+    fn resolved(kind: FieldKind) -> ResolvedField {
+        ResolvedField {
+            target: Target {
+                layer: 0,
+                field: "fixture".to_owned(),
+            },
+            protocol: "fixture".to_owned(),
+            kind,
+            is_derived: false,
+        }
+    }
+
+    fn limits(max_field_bytes: usize, max_list_items: usize) -> Limits {
+        Limits {
+            max_field_bytes,
+            max_list_items,
+            ..Limits::default()
+        }
+    }
+
+    #[test]
+    fn boundary_mutations_cycle_through_stable_numeric_extremes() {
+        let unsigned = resolved(FieldKind::Unsigned);
+        let signed = resolved(FieldKind::Signed);
+        let expected_unsigned = [
+            0,
+            1,
+            u8::MAX as u64,
+            u16::MAX as u64,
+            u32::MAX as u64,
+            u64::MAX,
+        ];
+        let expected_signed = [0, 1, -1, i8::MIN as i64, i8::MAX as i64, i64::MIN, i64::MAX];
+
+        for (round, expected) in expected_unsigned.into_iter().enumerate() {
+            assert_eq!(
+                mutation_value(
+                    Strategy::Boundary,
+                    &unsigned,
+                    &FieldValue::Unsigned(42),
+                    0,
+                    round as u64,
+                    limits(32, 4),
+                ),
+                FieldValue::Unsigned(expected)
+            );
+        }
+        for (round, expected) in expected_signed.into_iter().enumerate() {
+            assert_eq!(
+                mutation_value(
+                    Strategy::Boundary,
+                    &signed,
+                    &FieldValue::Signed(42),
+                    0,
+                    round as u64,
+                    limits(32, 4),
+                ),
+                FieldValue::Signed(expected)
+            );
+        }
+    }
+
+    #[test]
+    fn every_boundary_kind_is_deterministic_and_respects_field_budgets() {
+        let cases = [
+            (FieldKind::Bool, FieldValue::Bool(true)),
+            (FieldKind::Text, FieldValue::Text("original".to_owned())),
+            (
+                FieldKind::Bytes,
+                FieldValue::Bytes(Bytes::from_static(b"original")),
+            ),
+            (
+                FieldKind::Ipv4,
+                FieldValue::Ipv4(Ipv4Addr::new(198, 51, 100, 9)),
+            ),
+            (FieldKind::Ipv6, FieldValue::Ipv6(Ipv6Addr::LOCALHOST)),
+            (FieldKind::Mac, FieldValue::Mac([1, 2, 3, 4, 5, 6])),
+            (
+                FieldKind::List,
+                FieldValue::List(vec![FieldValue::Bool(true)]),
+            ),
+        ];
+        let limits = limits(16, 2);
+
+        for (kind, original) in cases {
+            for round in 0..4 {
+                let first = mutation_value(
+                    Strategy::Boundary,
+                    &resolved(kind),
+                    &original,
+                    19,
+                    round,
+                    limits,
+                );
+                let repeated = mutation_value(
+                    Strategy::Boundary,
+                    &resolved(kind),
+                    &original,
+                    19,
+                    round,
+                    limits,
+                );
+                assert_eq!(first, repeated, "{kind:?} round {round}");
+                assert!(
+                    bounded_value_size(&first, limits.max_field_bytes, limits.max_list_items, 0,)
+                        .is_some(),
+                    "{kind:?} round {round}: {first:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn random_mutations_are_reproducible_and_bounded_for_every_field_kind() {
+        let originals = [
+            (FieldKind::Bool, FieldValue::Bool(false)),
+            (FieldKind::Unsigned, FieldValue::Unsigned(7)),
+            (FieldKind::Signed, FieldValue::Signed(-7)),
+            (FieldKind::Text, FieldValue::Text("text".to_owned())),
+            (
+                FieldKind::Bytes,
+                FieldValue::Bytes(Bytes::from_static(b"bytes")),
+            ),
+            (FieldKind::Ipv4, FieldValue::Ipv4(Ipv4Addr::LOCALHOST)),
+            (FieldKind::Ipv6, FieldValue::Ipv6(Ipv6Addr::LOCALHOST)),
+            (FieldKind::Mac, FieldValue::Mac([0; 6])),
+            (
+                FieldKind::List,
+                FieldValue::List(vec![
+                    FieldValue::Text("a".to_owned()),
+                    FieldValue::Bytes(Bytes::from_static(b"bc")),
+                ]),
+            ),
+        ];
+        let limits = limits(32, 3);
+
+        for (kind, original) in originals {
+            let first = mutation_value(
+                Strategy::Random,
+                &resolved(kind),
+                &original,
+                0xfeed_beef,
+                17,
+                limits,
+            );
+            let repeated = mutation_value(
+                Strategy::Random,
+                &resolved(kind),
+                &original,
+                0xfeed_beef,
+                17,
+                limits,
+            );
+            assert_eq!(first, repeated, "{kind:?}");
+            assert!(
+                bounded_value_size(&first, limits.max_field_bytes, limits.max_list_items, 0,)
+                    .is_some(),
+                "{kind:?}: {first:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn bit_flip_and_malformed_strategies_preserve_their_bounded_contracts() {
+        let bytes = resolved(FieldKind::Bytes);
+        assert_eq!(
+            mutation_value(
+                Strategy::BitFlip,
+                &bytes,
+                &FieldValue::Bytes(Bytes::new()),
+                1,
+                0,
+                limits(4, 2),
+            ),
+            FieldValue::Bytes(Bytes::from_static(&[1]))
+        );
+
+        let original = [0xaa; 8];
+        let FieldValue::Bytes(flipped) = mutation_value(
+            Strategy::BitFlip,
+            &bytes,
+            &FieldValue::Bytes(Bytes::copy_from_slice(&original)),
+            2,
+            0,
+            limits(4, 2),
+        ) else {
+            panic!("byte mutation must remain bytes")
+        };
+        assert_eq!(flipped.len(), 4);
+        assert_eq!(
+            flipped
+                .iter()
+                .zip(&original)
+                .map(|(mutated, original)| (mutated ^ original).count_ones())
+                .sum::<u32>(),
+            1
+        );
+
+        let unsigned = resolved(FieldKind::Unsigned);
+        assert!(matches!(
+            mutation_value(
+                Strategy::Malformed,
+                &unsigned,
+                &FieldValue::Unsigned(1),
+                3,
+                0,
+                limits(4, 2),
+            ),
+            FieldValue::Unsigned(0..=65_535)
+        ));
+        let FieldValue::Bytes(malformed) = mutation_value(
+            Strategy::Malformed,
+            &unsigned,
+            &FieldValue::Unsigned(1),
+            3,
+            1,
+            limits(4, 2),
+        ) else {
+            panic!("odd malformed round must change the reflective type")
+        };
+        assert!((1..=4).contains(&malformed.len()));
+    }
+
+    #[test]
+    fn bounded_size_counts_list_structure_and_rejects_depth_and_item_overflow() {
+        let nested = FieldValue::List(vec![
+            FieldValue::List(Vec::new()),
+            FieldValue::Text("ab".to_owned()),
+        ]);
+        assert_eq!(bounded_value_size(&nested, 4, 2, 0), Some(4));
+        assert_eq!(bounded_value_size(&nested, 3, 2, 0), None);
+        assert_eq!(bounded_value_size(&nested, 16, 1, 0), None);
+        assert_eq!(
+            bounded_value_size(&FieldValue::Ipv6(Ipv6Addr::LOCALHOST), 15, 2, 0),
+            None
+        );
+
+        let mut too_deep = FieldValue::Bool(false);
+        for _ in 0..65 {
+            too_deep = FieldValue::List(vec![too_deep]);
+        }
+        assert_eq!(bounded_value_size(&too_deep, 1_000, 1, 0), None);
+    }
+
+    #[test]
+    fn shrinking_is_stable_unique_unicode_safe_and_honors_the_step_limit() {
+        assert_eq!(
+            shrink_values(&FieldValue::Unsigned(10), 8),
+            [
+                FieldValue::Unsigned(0),
+                FieldValue::Unsigned(1),
+                FieldValue::Unsigned(5),
+            ]
+        );
+        assert_eq!(
+            shrink_values(&FieldValue::Signed(-10), 8),
+            [
+                FieldValue::Signed(0),
+                FieldValue::Signed(-1),
+                FieldValue::Signed(-5),
+            ]
+        );
+        assert_eq!(
+            shrink_values(&FieldValue::Text("éé".to_owned()), 8),
+            [
+                FieldValue::Text(String::new()),
+                FieldValue::Text("é".to_owned()),
+            ]
+        );
+        assert_eq!(
+            shrink_values(&FieldValue::Bytes(Bytes::from_static(&[1, 2, 3, 4])), 8),
+            [
+                FieldValue::Bytes(Bytes::new()),
+                FieldValue::Bytes(Bytes::from_static(&[1, 2])),
+                FieldValue::Bytes(Bytes::from_static(&[0, 0, 0, 0])),
+            ]
+        );
+        assert_eq!(
+            shrink_values(&FieldValue::Unsigned(10), 1),
+            [FieldValue::Unsigned(0)]
+        );
+        assert!(shrink_values(&FieldValue::Bool(false), 8).is_empty());
+    }
+
+    #[test]
+    fn address_mac_and_list_shrinks_converge_on_canonical_empty_values() {
+        assert_eq!(
+            shrink_values(&FieldValue::Ipv4(Ipv4Addr::BROADCAST), 2),
+            [FieldValue::Ipv4(Ipv4Addr::UNSPECIFIED)]
+        );
+        assert_eq!(
+            shrink_values(&FieldValue::Ipv6(Ipv6Addr::LOCALHOST), 2),
+            [FieldValue::Ipv6(Ipv6Addr::UNSPECIFIED)]
+        );
+        assert_eq!(
+            shrink_values(&FieldValue::Mac([1; 6]), 2),
+            [FieldValue::Mac([0; 6])]
+        );
+        assert_eq!(
+            shrink_values(
+                &FieldValue::List(vec![FieldValue::Unsigned(1), FieldValue::Unsigned(2)]),
+                2,
+            ),
+            [
+                FieldValue::List(Vec::new()),
+                FieldValue::List(vec![FieldValue::Unsigned(1)]),
+            ]
+        );
+    }
+}

@@ -6,12 +6,14 @@
 use bytes::Bytes;
 
 use crate::analysis::adapter::{transport_payload, transports};
+use crate::analysis::dedup::Deduplicator;
 use crate::analysis::expert::StreamTransport;
 use crate::analysis::pipeline::FrameRecord;
 use crate::analysis::reassembly::tcp::{Event as TcpEvent, FlowKey, ScopedFlowKey};
 
-mod dedup;
-use dedup::Deduplicator;
+/// Direction lives with the deduplicator every TCP conversation collector
+/// shares; this is its public path.
+pub use crate::analysis::dedup::Direction;
 
 /// Which conversation to follow, in the same vocabulary the `tcp.stream`
 /// and `udp.stream` display filters use.
@@ -19,18 +21,6 @@ use dedup::Deduplicator;
 pub struct Selector {
     pub transport: StreamTransport,
     pub index: u64,
-}
-
-/// Who sent a chunk, relative to the conversation's first captured frame.
-///
-/// A capture cannot always see the true initiator, so the client is defined
-/// as the endpoint that sent the first frame this capture holds for the
-/// conversation — which for a capture that includes the handshake is the
-/// endpoint that sent the SYN.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Direction {
-    ClientToServer,
-    ServerToClient,
 }
 
 /// One run of conversation payload, in delivery order.

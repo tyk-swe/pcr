@@ -19,6 +19,7 @@
 
 mod adapter;
 mod conversation_index;
+pub(crate) mod dedup;
 mod error;
 pub mod expert;
 pub mod follow;

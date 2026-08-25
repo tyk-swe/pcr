@@ -11,6 +11,8 @@ use packetcraftr::{
     core::{filter::Filter, registry::Registry},
 };
 
+use analysis::expert::StreamTransport;
+
 use super::super::command_options::OfflineLimitsArgs;
 use super::super::errors::CliError;
 use super::super::filtering::{self, Capabilities};
@@ -55,4 +57,33 @@ pub(super) fn prepare(
         filter,
         limits,
     })
+}
+
+/// A parsed `--stream` conversation spec.
+///
+/// Parsing admits both transports so each command states its own
+/// restriction: `follow` follows either, while a TCP-only command rejects a
+/// `udp:` selector with a message that says so.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct StreamSelector {
+    pub(crate) transport: StreamTransport,
+    pub(crate) index: u64,
+}
+
+/// Parses a `tcp:INDEX` or `udp:INDEX` conversation spec.
+pub(crate) fn parse_stream_selector(spec: &str) -> Result<StreamSelector, CliError> {
+    let invalid = || {
+        CliError::new(
+            2,
+            format!("invalid --stream '{spec}': expected tcp:INDEX or udp:INDEX"),
+        )
+    };
+    let (transport, index) = spec.split_once(':').ok_or_else(invalid)?;
+    let transport = match transport {
+        "tcp" => StreamTransport::Tcp,
+        "udp" => StreamTransport::Udp,
+        _ => return Err(invalid()),
+    };
+    let index = index.parse::<u64>().map_err(|_| invalid())?;
+    Ok(StreamSelector { transport, index })
 }

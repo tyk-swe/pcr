@@ -9,7 +9,7 @@ use packetcraftr::{analysis, output};
 use self::arguments::{Args, Direction};
 use super::super::errors::CliError;
 use super::super::input::open_capture;
-use super::offline_analysis::{Prepared, prepare};
+use super::offline_analysis::{Prepared, StreamSelector, parse_stream_selector, prepare};
 use crate::rendering::NdjsonStream;
 
 use analysis::expert::StreamTransport;
@@ -21,7 +21,8 @@ pub(super) fn run(
     format: output::contract::Format,
     stream: &mut NdjsonStream,
 ) -> Result<(), CliError> {
-    let selector = parse_stream(&arguments.stream)?;
+    let StreamSelector { transport, index } = parse_stream_selector(&arguments.stream)?;
+    let selector = Selector { transport, index };
     if format == output::contract::Format::Raw && arguments.direction == Direction::Both {
         return Err(CliError::new(
             2,
@@ -87,22 +88,4 @@ fn direction_matches(direction: Direction, chunk: &Chunk) -> bool {
         Direction::Client => chunk.direction == analysis::follow::Direction::ClientToServer,
         Direction::Server => chunk.direction == analysis::follow::Direction::ServerToClient,
     }
-}
-
-/// Parses a `tcp:INDEX` or `udp:INDEX` conversation spec.
-fn parse_stream(spec: &str) -> Result<Selector, CliError> {
-    let invalid = || {
-        CliError::new(
-            2,
-            format!("invalid --stream '{spec}': expected tcp:INDEX or udp:INDEX"),
-        )
-    };
-    let (transport, index) = spec.split_once(':').ok_or_else(invalid)?;
-    let transport = match transport {
-        "tcp" => StreamTransport::Tcp,
-        "udp" => StreamTransport::Udp,
-        _ => return Err(invalid()),
-    };
-    let index = index.parse::<u64>().map_err(|_| invalid())?;
-    Ok(Selector { transport, index })
 }

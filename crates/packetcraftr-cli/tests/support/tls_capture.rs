@@ -14,11 +14,14 @@ use std::time::{Duration, SystemTime};
 
 use packetcraftr::analysis::pcap::{Format as CaptureFormat, Writer};
 use packetcraftr::core::frame::{Frame, LinkType};
+use packetcraftr::core::protocol::application::tls::model::extension::{
+    ALPN, KEY_SHARE, SERVER_NAME, SIGNATURE_ALGORITHMS, SUPPORTED_GROUPS, SUPPORTED_VERSIONS,
+};
 use packetcraftr::core::protocol::application::tls::model::{
     CONTENT_TYPE_HANDSHAKE, HANDSHAKE_CLIENT_HELLO, HANDSHAKE_SERVER_HELLO,
 };
 use packetcraftr::core::protocol::network::Ipv4;
-use packetcraftr::core::protocol::transport::Tcp;
+use packetcraftr::core::protocol::transport::{Tcp, Udp};
 use packetcraftr::core::registry::Registry;
 use packetcraftr::core::{self, Packet, layer::Raw};
 
@@ -73,9 +76,16 @@ impl Handshake {
 
 /// Writes a PCAPNG capture holding one TCP conversation per handshake.
 pub(crate) fn write_capture(handshakes: &[Handshake]) -> tempfile::NamedTempFile {
-    let registry = Arc::new(
-        packetcraftr::core::protocol::builtin::registry().expect("built-in registry must build"),
-    );
+    write_capture_with_udp_443(handshakes, 0)
+}
+
+/// Writes the same capture with `udp_443_frames` UDP datagrams on port 443
+/// appended, standing in for the QUIC traffic this command does not read.
+pub(crate) fn write_capture_with_udp_443(
+    handshakes: &[Handshake],
+    udp_443_frames: u16,
+) -> tempfile::NamedTempFile {
+    let registry = registry();
     let mut file = tempfile::NamedTempFile::new().expect("temporary capture must open");
     {
         let mut writer = Writer::new(&mut file, CaptureFormat::PcapNg, LinkType::IPV4)
@@ -90,10 +100,78 @@ pub(crate) fn write_capture(handshakes: &[Handshake]) -> tempfile::NamedTempFile
             }
             millis += 1_000;
         }
+        for index in 0..udp_443_frames {
+            let timestamp =
+                SystemTime::UNIX_EPOCH + Duration::from_millis(millis + u64::from(index));
+            writer
+                .write_frame(&udp_443_frame(&registry, timestamp, index))
+                .expect("fixture frame must write");
+        }
         writer.flush().expect("fixture capture must flush");
     }
     file.flush().expect("fixture capture must flush");
     file
+}
+
+/// One ClientHello frame, as whole-frame hexadecimal for `dissect --hex`.
+pub(crate) fn client_hello_frame_hex(server_port: u16, sni: &str) -> String {
+    let mut packet = Packet::new();
+    packet.push(Ipv4 {
+        source: CLIENT,
+        destination: SERVER,
+        ..Ipv4::default()
+    });
+    packet.push(Tcp {
+        source_port: 40_000,
+        destination_port: server_port,
+        sequence: 1_001,
+        acknowledgment: 5_001,
+        flags: Tcp::ACK,
+        window: 64_240,
+        ..Tcp::default()
+    });
+    packet.push(Raw::new(record(&client_hello(sni))));
+    build(&registry(), packet)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn registry() -> Arc<Registry> {
+    Arc::new(
+        packetcraftr::core::protocol::builtin::registry().expect("built-in registry must build"),
+    )
+}
+
+/// A datagram on UDP port 443, which the collector counts but never assembles.
+fn udp_443_frame(registry: &Arc<Registry>, timestamp: SystemTime, index: u16) -> Frame {
+    let mut packet = Packet::new();
+    packet.push(Ipv4 {
+        source: CLIENT,
+        destination: SERVER,
+        ..Ipv4::default()
+    });
+    packet.push(Udp {
+        source_port: 50_000 + index,
+        destination_port: 443,
+        ..Udp::default()
+    });
+    packet.push(Raw::new(vec![0x40; 16]));
+    Frame::new(timestamp, LinkType::IPV4, build(registry, packet))
+        .expect("fixture frame must be valid")
+}
+
+/// Serializes one packet with the built-in registry.
+fn build(registry: &Arc<Registry>, packet: Packet) -> Vec<u8> {
+    core::build::Builder::new(Arc::clone(registry))
+        .build(
+            packet,
+            core::build::Context::default(),
+            core::build::Options::default(),
+        )
+        .expect("fixture frame must build")
+        .bytes
+        .to_vec()
 }
 
 /// One TCP segment's header fields.
@@ -203,14 +281,8 @@ fn frame(registry: &Arc<Registry>, timestamp: SystemTime, spec: Segment, payload
     if !payload.is_empty() {
         packet.push(Raw::new(payload.to_vec()));
     }
-    let built = core::build::Builder::new(Arc::clone(registry))
-        .build(
-            packet,
-            core::build::Context::default(),
-            core::build::Options::default(),
-        )
-        .expect("fixture frame must build");
-    Frame::new(timestamp, LinkType::IPV4, built.bytes).expect("fixture frame must be valid")
+    Frame::new(timestamp, LinkType::IPV4, build(registry, packet))
+        .expect("fixture frame must be valid")
 }
 
 fn vector8(body: &[u8]) -> Vec<u8> {
@@ -265,18 +337,27 @@ fn client_hello(sni: &str) -> Vec<u8> {
 
     let mut entry = vec![0];
     entry.extend_from_slice(&vector16(sni.as_bytes()));
-    let mut extensions = extension(0x0000, &vector16(&entry));
+    let mut extensions = extension(SERVER_NAME, &vector16(&entry));
     let alpn = [b"h2".as_slice(), b"http/1.1".as_slice()]
         .into_iter()
         .flat_map(vector8)
         .collect::<Vec<_>>();
-    extensions.extend_from_slice(&extension(0x0010, &vector16(&alpn)));
-    extensions.extend_from_slice(&extension(0x000a, &vector16(&u16_list(&[X25519]))));
-    extensions.extend_from_slice(&extension(0x000d, &vector16(&u16_list(&[0x0403]))));
-    extensions.extend_from_slice(&extension(0x002b, &vector8(&u16_list(&[TLS_1_3]))));
+    extensions.extend_from_slice(&extension(ALPN, &vector16(&alpn)));
+    extensions.extend_from_slice(&extension(
+        SUPPORTED_GROUPS,
+        &vector16(&u16_list(&[X25519])),
+    ));
+    extensions.extend_from_slice(&extension(
+        SIGNATURE_ALGORITHMS,
+        &vector16(&u16_list(&[0x0403])),
+    ));
+    extensions.extend_from_slice(&extension(
+        SUPPORTED_VERSIONS,
+        &vector8(&u16_list(&[TLS_1_3])),
+    ));
     let mut share = X25519.to_be_bytes().to_vec();
     share.extend_from_slice(&vector16(&[0x99; 32]));
-    extensions.extend_from_slice(&extension(0x0033, &vector16(&share)));
+    extensions.extend_from_slice(&extension(KEY_SHARE, &vector16(&share)));
     body.extend_from_slice(&vector16(&extensions));
     handshake(HANDSHAKE_CLIENT_HELLO, &body)
 }
@@ -288,10 +369,10 @@ fn server_hello() -> Vec<u8> {
     body.extend_from_slice(&TLS_AES_128_GCM_SHA256.to_be_bytes());
     body.push(0);
 
-    let mut extensions = extension(0x002b, &TLS_1_3.to_be_bytes());
+    let mut extensions = extension(SUPPORTED_VERSIONS, &TLS_1_3.to_be_bytes());
     let mut share = X25519.to_be_bytes().to_vec();
     share.extend_from_slice(&vector16(&[0x88; 32]));
-    extensions.extend_from_slice(&extension(0x0033, &share));
+    extensions.extend_from_slice(&extension(KEY_SHARE, &share));
     body.extend_from_slice(&vector16(&extensions));
     handshake(HANDSHAKE_SERVER_HELLO, &body)
 }

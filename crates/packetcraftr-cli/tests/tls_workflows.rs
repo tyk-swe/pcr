@@ -11,7 +11,7 @@ mod support;
 mod tls_capture;
 
 use support::{assert_contiguous, parse_json, parse_ndjson, run, run_success};
-use tls_capture::{Handshake, write_capture};
+use tls_capture::{Handshake, client_hello_frame_hex, write_capture, write_capture_with_udp_443};
 
 fn path_text(path: &Path) -> &str {
     path.to_str().expect("temporary path must be UTF-8")
@@ -308,6 +308,97 @@ fn the_retention_ceiling_reports_what_it_left_out() {
     ]));
     assert_eq!(records.len(), 4);
     assert_eq!(records[3]["result"]["sessions_omitted"], 0);
+
+    // Text writes each session as it completes, so it omits none either.
+    let rendered = text(&run_success(&["tls", path, "--max-tls-sessions", "2"]));
+    let lines = rendered.lines().collect::<Vec<_>>();
+    assert_eq!(lines.len(), 4, "{rendered}");
+    for sni in ["api.example.test", "files.example.test", "www.example.test"] {
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains(&format!("sni={sni} "))),
+            "{rendered}"
+        );
+    }
+    assert!(
+        lines[3].contains("sessions=3 selected=3 omitted=0"),
+        "{rendered}"
+    );
+}
+
+#[test]
+fn selectors_that_keep_nothing_say_so_without_claiming_the_capture_has_no_tls() {
+    let capture = write_capture(&[
+        Handshake::complete(40_000, 443, "api.example.test"),
+        Handshake::complete(40_001, 443, "files.example.test"),
+    ]);
+    let path = path_text(capture.path());
+
+    let rendered = text(&run_success(&["tls", path, "--sni", "absent.example.test"]));
+    let lines = rendered.lines().collect::<Vec<_>>();
+    assert_eq!(
+        lines.first().copied(),
+        Some("no session matched the selectors (2 assembled)"),
+        "{rendered}"
+    );
+    assert!(
+        !rendered.contains("no TLS sessions assembled"),
+        "{rendered}"
+    );
+    assert!(!rendered.contains("hint: no ClientHello"), "{rendered}");
+    assert!(
+        lines[1].starts_with("tls sessions=2 selected=0 omitted=0"),
+        "{rendered}"
+    );
+
+    // Nothing assembled at all is the other answer, and it keeps its hint.
+    let empty = text(&run_success(&["tls", path_text(write_capture(&[]).path())]));
+    assert!(empty.contains("no TLS sessions assembled"), "{empty}");
+    assert!(empty.contains("hint: no ClientHello"), "{empty}");
+}
+
+#[test]
+fn the_empty_report_lists_the_ports_the_per_frame_layer_actually_binds() {
+    let capture = write_capture_with_udp_443(&[Handshake::plain(40_000, 443)], 2);
+    let path = path_text(capture.path());
+
+    let rendered = text(&run_success(&["tls", path, "--tls-port", "4433"]));
+    assert!(
+        rendered.contains("bound to ports 443,465,636,853,993,995,4433,8443 (add --tls-port PORT"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("note: 2 UDP frame(s) on port 443 are most likely QUIC"),
+        "{rendered}"
+    );
+    assert!(rendered.contains("udp_443_frames=2"), "{rendered}");
+}
+
+#[test]
+fn dissect_reads_a_remapped_port_as_tls_only_when_the_flag_is_given() {
+    let hex = client_hello_frame_hex(4433, "api.example.test");
+
+    let remapped = text(&run_success(&[
+        "dissect",
+        "--hex",
+        &hex,
+        "--link-type",
+        "228",
+        "--tls-port",
+        "4433",
+    ]));
+    assert!(remapped.contains("2: tls"), "{remapped}");
+
+    let plain = text(&run_success(&[
+        "dissect",
+        "--hex",
+        &hex,
+        "--link-type",
+        "228",
+    ]));
+    assert!(!plain.contains("tls"), "{plain}");
+    assert!(plain.contains("1: tcp"), "{plain}");
 }
 
 #[test]
@@ -325,4 +416,19 @@ fn limit_failures_are_reported_before_any_capture_is_read() {
             String::from_utf8_lossy(&output.stderr)
         );
     }
+
+    // The floor is the per-direction buffer, and the flag that set it is the
+    // one named back.
+    let floored = run(&["tls", path_text(&missing), "--max-tls-buffer-bytes", "1024"]);
+    assert_eq!(floored.status.code(), Some(2));
+    let rendered = String::from_utf8_lossy(&floored.stderr);
+    assert!(
+        rendered.contains("--max-tls-buffer-bytes=1024"),
+        "{rendered}"
+    );
+    assert!(rendered.contains("135168"), "{rendered}");
+    assert!(
+        !rendered.contains("max_direction_bytes"),
+        "the internal field name never reaches the user: {rendered}"
+    );
 }

@@ -355,6 +355,7 @@ fn tls_session_event() -> output::tls::Event {
             description: 40,
             description_name: Some("handshake_failure"),
         }],
+        alerts_dropped: 2,
         status: output::tls::Status::Gap,
         reason: Some("no ClientHello observed".to_owned()),
     })

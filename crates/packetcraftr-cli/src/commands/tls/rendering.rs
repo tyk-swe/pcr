@@ -6,19 +6,20 @@ use packetcraftr::{analysis, core, output};
 use crate::errors::CliError;
 use crate::rendering::{NdjsonStream, comma_separated, emit_aggregate, write_stdout_line};
 
+use analysis::tls::{ALERT_LEVEL_FATAL, ALERT_LEVEL_WARNING};
 use output::tls::{Client, Server, Session, Summary};
 
 /// What has been reported so far.
 ///
-/// Text and JSON both hold their sessions to a ceiling: a capture with more
-/// handshakes than `--max-tls-sessions` reports the first of them and says in
-/// the summary how many it left out, rather than growing without bound. NDJSON
-/// streams each session as it completes and needs no ceiling.
+/// The retention ceiling is a property of the JSON document, which has to hold
+/// every session in memory before it can be written: past `--max-tls-sessions`
+/// the document keeps the sessions it already has and says in the summary how
+/// many it left out. Text and NDJSON write each session as it completes, so
+/// neither holds anything and neither ever leaves a session out.
 pub(super) struct State {
     max_sessions: usize,
     retained: Vec<Session>,
     selected: u64,
-    kept: u64,
     omitted: u64,
 }
 
@@ -28,7 +29,6 @@ impl State {
             max_sessions,
             retained: Vec::new(),
             selected: 0,
-            kept: 0,
             omitted: 0,
         }
     }
@@ -40,15 +40,18 @@ impl State {
         }
     }
 
-    /// Whether this session fits under the retention ceiling.
-    fn admit(&mut self) -> bool {
+    /// Counts a session the selectors kept, whatever the format does with it.
+    fn select(&mut self) {
         self.selected = self.selected.saturating_add(1);
-        if usize::try_from(self.kept).unwrap_or(usize::MAX) >= self.max_sessions {
+    }
+
+    /// Holds a session for the aggregate document, up to the ceiling.
+    fn retain(&mut self, session: Session) {
+        if self.retained.len() >= self.max_sessions {
             self.omitted = self.omitted.saturating_add(1);
-            return false;
+            return;
         }
-        self.kept = self.kept.saturating_add(1);
-        true
+        self.retained.push(session);
     }
 }
 
@@ -59,22 +62,16 @@ pub(super) fn render_session(
     stream: &mut NdjsonStream,
 ) -> Result<(), CliError> {
     let session = Session::from(session);
+    state.select();
     match format {
         output::contract::Format::Text => {
-            if state.admit() {
-                write_stdout_line(format_args!("{}", session_line(&session)))
-            } else {
-                Ok(())
-            }
+            write_stdout_line(format_args!("{}", session_line(&session)))
         }
         output::contract::Format::Json => {
-            if state.admit() {
-                state.retained.push(session);
-            }
+            state.retain(session);
             Ok(())
         }
         output::contract::Format::Ndjson => {
-            state.selected = state.selected.saturating_add(1);
             stream.emit_data(output::tls::Event::session(session), Vec::new())
         }
         _ => unreachable!("the format contract admits only text, json, and ndjson"),
@@ -87,7 +84,10 @@ pub(super) fn render_text(
     extra_ports: &[u16],
 ) -> Result<(), CliError> {
     if state.selected == 0 {
-        render_empty(summary, extra_ports)?;
+        match unmatched_note(summary) {
+            Some(note) => write_stdout_line(format_args!("{note}"))?,
+            None => render_empty(summary, extra_ports)?,
+        }
     }
     write_stdout_line(format_args!("{}", summary_line(summary)))
 }
@@ -105,6 +105,22 @@ pub(super) fn render_aggregate(state: State, summary: Summary) -> Result<(), Cli
 
 pub(super) fn render_stream(summary: Summary, stream: &mut NdjsonStream) -> Result<(), CliError> {
     stream.complete(output::tls::Event::complete(summary), Vec::new())
+}
+
+/// The single line for selectors that kept none of the sessions that were
+/// assembled.
+///
+/// `None` when nothing was assembled at all: that is a different answer, and
+/// [`render_empty`] gives it. Telling someone whose `--sni` simply matched
+/// nothing that no session was assembled would send them looking for a
+/// capture problem that is not there.
+fn unmatched_note(summary: &Summary) -> Option<String> {
+    (summary.sessions > 0).then(|| {
+        format!(
+            "no session matched the selectors ({} assembled)",
+            summary.sessions
+        )
+    })
 }
 
 /// Says what was read and where to look next, so an empty report is never
@@ -170,6 +186,9 @@ fn session_line(session: &Session) -> String {
         line.push_str(&comma_separated(
             session.alerts.iter().map(alert_text).collect::<Vec<_>>(),
         ));
+    }
+    if session.alerts_dropped > 0 {
+        line.push_str(&format!(" alerts_dropped={}", session.alerts_dropped));
     }
     // Last, because it is the one field that carries spaces.
     if let Some(reason) = &session.reason {
@@ -241,8 +260,8 @@ fn alpn_text(client: Option<&Client>) -> String {
 
 fn alert_text(alert: &output::tls::Alert) -> String {
     let level = match alert.level {
-        1 => "warning".to_owned(),
-        2 => "fatal".to_owned(),
+        ALERT_LEVEL_WARNING => "warning".to_owned(),
+        ALERT_LEVEL_FATAL => "fatal".to_owned(),
         level => level.to_string(),
     };
     match alert.description_name {
@@ -279,6 +298,7 @@ mod tests {
             server: None,
             hello_retry: false,
             alerts: Vec::new(),
+            alerts_dropped: 0,
             status: Status::Truncated,
             reason: None,
         }
@@ -354,25 +374,54 @@ mod tests {
                 description: 200,
                 description_name: None,
             },
+            output::tls::Alert {
+                level: 7,
+                description: 40,
+                description_name: Some("handshake_failure"),
+            },
         ];
+        session.alerts_dropped = 4;
         session.reason = Some("the capture ended while the handshake was in flight".to_owned());
         let line = session_line(&session);
         assert!(
             line.contains(
-                " hello_retry=true alerts=fatal:handshake_failure,warning:200 \
-                 reason=the capture ended"
+                " hello_retry=true alerts=fatal:handshake_failure,warning:200,7:handshake_failure \
+                 alerts_dropped=4 reason=the capture ended"
             ),
             "{line}"
         );
     }
 
     #[test]
-    fn the_retention_ceiling_counts_what_it_leaves_out() {
+    fn the_retention_ceiling_applies_to_the_aggregate_document_alone() {
         let mut state = State::new(2);
         for _ in 0..5 {
-            state.admit();
+            state.select();
+            state.retain(session());
         }
+        assert_eq!(state.retained.len(), 2);
         assert_eq!(state.counts().selected, 5);
         assert_eq!(state.counts().omitted, 3);
+
+        // Text counts every session it printed and leaves none out.
+        let mut streaming = State::new(2);
+        for _ in 0..5 {
+            streaming.select();
+        }
+        assert_eq!(streaming.counts().selected, 5);
+        assert_eq!(streaming.counts().omitted, 0);
+    }
+
+    #[test]
+    fn selectors_that_match_nothing_read_differently_from_a_capture_without_tls() {
+        let summary = |sessions: u64| Summary {
+            sessions,
+            ..Summary::default()
+        };
+        assert_eq!(
+            unmatched_note(&summary(3)).as_deref(),
+            Some("no session matched the selectors (3 assembled)")
+        );
+        assert_eq!(unmatched_note(&summary(0)), None);
     }
 }

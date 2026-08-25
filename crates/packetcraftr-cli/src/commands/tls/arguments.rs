@@ -6,11 +6,11 @@ use std::path::PathBuf;
 use clap::{ArgAction, ValueEnum};
 use packetcraftr::analysis::tls::{Limits as TlsLimits, Status as AnalysisStatus};
 
-use crate::command_options::OfflineLimitsArgs;
+use crate::command_options::{OfflineLimitsArgs, TlsPortArgs};
 
 pub(crate) const AFTER_LONG_HELP: &str = r#"Session assembly is computed offline over dissected frames; no live capture or transmission is involved.
 
-Session assembly reads every TCP stream, so a handshake on a non-standard port is found without any configuration. Port bindings belong to the per-frame 'tls' layer: TCP ports 443, 465, 636, 853, 993, 995 and 8443 dissect as TLS by default, and --tls-port adds one more. The flag repeats, adds to the defaults, and 'read' and 'dissect' accept the same flag, so their per-frame view agrees with this one.
+Session assembly reads every TCP stream, so a handshake on a non-standard port is assembled with no flag at all. --tls-port does not change what this command assembles. It changes the per-frame 'tls' layer, which binds TCP ports 443, 465, 636, 853, 993, 995 and 8443 by default, and it changes the port list printed when no session was assembled. The flag repeats, adds to the defaults, and 'read' and 'dissect' take the same flag, so their per-frame view agrees with this one.
 
 Statuses:
   complete     a ClientHello and its matching ServerHello were both assembled
@@ -25,7 +25,7 @@ Selectors run on assembled sessions, not on frames, so there is deliberately no 
 
 The per-frame 'tls' layer is a different view: read --filter 'tls.sni contains "x"' sees only the hellos that fit in a single segment, and 'tls.incomplete' filters the frames whose record continues into the next one. Use this command for the assembled answer.
 
-Text and JSON hold every selected session in memory, bounded by --max-tls-sessions; NDJSON streams each session as it completes and is the format for large captures.
+Text prints each selected session as it is assembled and leaves none out. JSON holds every selected session in memory to emit one document, bounded by --max-tls-sessions, and reports what that bound left out as sessions_omitted. NDJSON streams each session as it completes and is the format for large captures.
 
 Examples:
   packetcraftr tls examples/captures/tls-handshake.pcapng
@@ -86,23 +86,62 @@ pub(crate) struct Args {
     /// Keep sessions with this status; repeatable, matching any listed status.
     #[arg(long = "status", value_enum, value_name = "STATUS", action = ArgAction::Append)]
     pub(crate) statuses: Vec<Status>,
-    /// Dissect this TCP port as TLS in the per-frame layer, in addition to
-    /// the well-known ports; repeatable. Session assembly reads every TCP
-    /// stream and needs no port list.
-    #[arg(
-        long = "tls-port",
-        value_name = "PORT",
-        action = ArgAction::Append,
-        value_parser = clap::value_parser!(u16).range(1..)
-    )]
-    pub(crate) tls_ports: Vec<u16>,
+    #[command(flatten)]
+    pub(crate) tls_ports: TlsPortArgs,
     /// Maximum handshake bytes buffered across every tracked conversation.
+    /// The smallest accepted value is 135168, which one direction of one
+    /// conversation may buffer on its own.
     #[arg(long, default_value_t = TlsLimits::default().max_buffered_bytes)]
     pub(crate) max_tls_buffer_bytes: usize,
     /// Maximum TLS conversations tracked at once, and sessions retained by
-    /// text and JSON output.
+    /// the JSON document. Text and NDJSON report every selected session.
     #[arg(long, default_value_t = TlsLimits::default().max_sessions)]
     pub(crate) max_tls_sessions: usize,
     #[command(flatten)]
     pub(crate) limits: OfflineLimitsArgs,
+}
+
+#[cfg(test)]
+mod tests {
+    use packetcraftr::core::protocol::builtin::TLS_TCP_PORTS;
+
+    use super::*;
+
+    /// The ports the long help names, in the order it names them.
+    fn documented_ports() -> Vec<u16> {
+        let (_, rest) = AFTER_LONG_HELP
+            .split_once("binds TCP ports ")
+            .expect("the long help introduces the default port list");
+        let (list, _) = rest
+            .split_once(" by default")
+            .expect("the long help closes the default port list");
+        list.split(|character: char| !character.is_ascii_digit())
+            .filter(|piece| !piece.is_empty())
+            .map(|piece| piece.parse().expect("a documented port is numeric"))
+            .collect()
+    }
+
+    #[test]
+    fn the_long_help_names_exactly_the_ports_the_registry_binds() {
+        assert_eq!(documented_ports(), TLS_TCP_PORTS);
+    }
+
+    #[test]
+    fn the_status_selector_names_match_the_analysis_statuses() {
+        let selectors = Status::value_variants()
+            .iter()
+            .map(|status| {
+                status
+                    .to_possible_value()
+                    .expect("every status selector is selectable")
+                    .get_name()
+                    .to_owned()
+            })
+            .collect::<Vec<_>>();
+        let statuses = AnalysisStatus::ALL
+            .into_iter()
+            .map(AnalysisStatus::as_str)
+            .collect::<Vec<_>>();
+        assert_eq!(selectors, statuses);
+    }
 }

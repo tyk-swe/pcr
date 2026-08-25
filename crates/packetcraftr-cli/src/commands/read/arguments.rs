@@ -3,9 +3,7 @@
 
 use std::path::PathBuf;
 
-use clap::ArgAction;
-
-use crate::command_options::OfflineCaptureLimitsArgs;
+use crate::command_options::{OfflineCaptureLimitsArgs, TlsPortArgs};
 
 pub(crate) const AFTER_LONG_HELP: &str = r#"Examples:
   packetcraftr read capture.pcapng --max-frames 100
@@ -34,13 +32,6 @@ pub(crate) struct Args {
     /// Include each frame's dissected layer stack in the output.
     #[arg(long)]
     pub(crate) dissect: bool,
-    /// Dissect this TCP port as TLS in addition to the well-known ports;
-    /// repeatable. Applies to --filter and --dissect.
-    #[arg(
-        long = "tls-port",
-        value_name = "PORT",
-        action = ArgAction::Append,
-        value_parser = clap::value_parser!(u16).range(1..)
-    )]
-    pub(crate) tls_ports: Vec<u16>,
+    #[command(flatten)]
+    pub(crate) tls_ports: TlsPortArgs,
 }

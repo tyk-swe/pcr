@@ -13,6 +13,7 @@ pub(crate) use policy::{
 pub(crate) use recipe::{BuildMode, RecipeArgs};
 pub(crate) use route::{LinkMode, RouteArgs, RouteSelectionArgs};
 pub(crate) use send::SendArgs;
+pub(crate) use tls_ports::TlsPortArgs;
 
 mod address_family;
 mod capture_limits;
@@ -21,3 +22,4 @@ mod policy;
 mod recipe;
 mod route;
 mod send;
+mod tls_ports;

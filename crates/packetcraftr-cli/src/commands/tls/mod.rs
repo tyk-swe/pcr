@@ -132,6 +132,11 @@ pub(super) fn run(
         max_buffered_bytes: arguments.max_tls_buffer_bytes,
         ..TlsLimits::default()
     };
+    if arguments.max_tls_buffer_bytes != 0
+        && arguments.max_tls_buffer_bytes < analysis::tls::MAX_DIRECTION_BUFFER
+    {
+        return Err(buffer_floor_error(arguments.max_tls_buffer_bytes));
+    }
     tls_limits.validate().map_err(CliError::classified)?;
 
     // The stream filter narrows reassembly to one conversation while indices
@@ -141,7 +146,11 @@ pub(super) fn run(
         registry,
         filter,
         limits,
-    } = prepare_with_tls_ports(arguments.limits, source.as_deref(), &arguments.tls_ports)?;
+    } = prepare_with_tls_ports(
+        arguments.limits,
+        source.as_deref(),
+        &arguments.tls_ports.ports,
+    )?;
     let mut reader = open_capture(&arguments.path, arguments.limits.capture)?;
 
     let options = analysis::Options {
@@ -185,12 +194,24 @@ pub(super) fn run(
     );
     match format {
         output::contract::Format::Text => {
-            rendering::render_text(&state, &summary, &arguments.tls_ports)
+            rendering::render_text(&state, &summary, &arguments.tls_ports.ports)
         }
         output::contract::Format::Json => rendering::render_aggregate(state, summary),
         output::contract::Format::Ndjson => rendering::render_stream(summary, stream),
         _ => unreachable!("the format contract admits only text, json, and ndjson"),
     }
+}
+
+/// Rejects a whole-run buffer ceiling that one direction alone could fill.
+///
+/// The core check reports this as `max_direction_bytes`, an internal field no
+/// flag sets, so the flag that did set it is named here instead.
+fn buffer_floor_error(value: usize) -> CliError {
+    CliError::classified(analysis::Error::InvalidLimit {
+        field: "--max-tls-buffer-bytes",
+        value: u64::try_from(value).unwrap_or(u64::MAX),
+        reason: "cannot be below the per-direction handshake buffer of 135168 bytes",
+    })
 }
 
 /// Parses `--stream`, rejecting the transports this command cannot assemble.
@@ -227,7 +248,7 @@ fn missing_stream_error(index: u64, arguments: &Args) -> Result<CliError, CliErr
 fn count_tcp_streams(arguments: &Args) -> Result<u64, CliError> {
     let Prepared {
         registry, limits, ..
-    } = prepare_with_tls_ports(arguments.limits, None, &arguments.tls_ports)?;
+    } = prepare_with_tls_ports(arguments.limits, None, &arguments.tls_ports.ports)?;
     let mut reader = open_capture(&arguments.path, arguments.limits.capture)?;
     let options = analysis::Options {
         filter: None,
@@ -243,4 +264,27 @@ fn count_tcp_streams(arguments: &Args) -> Result<u64, CliError> {
     })
     .map_err(CliError::classified)?;
     Ok(highest.map_or(0, |highest| highest.saturating_add(1)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_buffer_floor_error_quotes_the_per_direction_buffer() {
+        let error = buffer_floor_error(1_024);
+        assert_eq!(error.exit_code, 2);
+        assert!(
+            error.message.contains("--max-tls-buffer-bytes=1024"),
+            "{}",
+            error.message
+        );
+        assert!(
+            error
+                .message
+                .contains(&analysis::tls::MAX_DIRECTION_BUFFER.to_string()),
+            "{}",
+            error.message
+        );
+    }
 }

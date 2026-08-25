@@ -1572,9 +1572,8 @@
           "$ref": "#/$defs/uint64"
         },
         "handshake_rtt_ms": {
-          "description": "Milliseconds between the frame completing the ClientHello and the frame completing the ServerHello, when both were captured.",
-          "type": "number",
-          "minimum": 0
+          "description": "Milliseconds between the frame completing the ClientHello and the frame completing the ServerHello, when both were captured. Negative when the ServerHello frame is timestamped before the ClientHello frame, which capture clocks do produce.",
+          "type": "number"
         },
         "client": {
           "$ref": "#/$defs/tlsClient"
@@ -1590,6 +1589,10 @@
           "items": {
             "$ref": "#/$defs/tlsAlert"
           }
+        },
+        "alerts_dropped": {
+          "description": "Alerts seen past the per-session cap and not listed in alerts. Absent when none were dropped.",
+          "$ref": "#/$defs/uint64"
         },
         "status": {
           "$ref": "#/$defs/tlsStatus"

@@ -55,7 +55,7 @@ pub(super) fn run(
     } = arguments;
     validate_limits(limits)?;
     validate_dissect_format(dissect, format)?;
-    let decoding = prepare_decoding(filter.as_deref(), dissect, &tls_ports)?;
+    let decoding = prepare_decoding(filter.as_deref(), dissect, &tls_ports.ports)?;
     let mut reader = open_capture(&path, limits)?;
     let stream_limits = Limits {
         max_frames: limits.max_frames,

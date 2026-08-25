@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use clap::ArgAction;
+use crate::command_options::TlsPortArgs;
 
 pub(crate) const AFTER_LONG_HELP: &str = r#"When neither --hex nor --file is supplied, raw frame bytes are read from standard input.
 
@@ -29,13 +29,6 @@ pub(crate) struct Args {
     /// Filter the decoded frame; aggregate JSON reports whether it matched.
     #[arg(long, value_name = "EXPR")]
     pub(crate) filter: Option<String>,
-    /// Dissect this TCP port as TLS in addition to the well-known ports;
-    /// repeatable.
-    #[arg(
-        long = "tls-port",
-        value_name = "PORT",
-        action = ArgAction::Append,
-        value_parser = clap::value_parser!(u16).range(1..)
-    )]
-    pub(crate) tls_ports: Vec<u16>,
+    #[command(flatten)]
+    pub(crate) tls_ports: TlsPortArgs,
 }

@@ -23,7 +23,7 @@ use super::super::rendering::{
 use super::registry_with_tls_ports;
 
 pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
-    let registry = registry_with_tls_ports(&arguments.tls_ports)?;
+    let registry = registry_with_tls_ports(&arguments.tls_ports.ports)?;
     // A bad filter fails before any input is read, so it cannot leave the
     // command waiting on standard input for frame bytes it would never use.
     let filter = arguments

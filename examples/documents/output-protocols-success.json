@@ -38,6 +38,7 @@
       {"protocol": "sctp", "aliases": [], "build": true, "dissect": true, "exact_round_trip": true, "matcher": true, "decode_only": false},
       {"protocol": "snap", "aliases": [], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
       {"protocol": "tcp", "aliases": [], "build": true, "dissect": true, "exact_round_trip": true, "matcher": true, "decode_only": false},
+      {"protocol": "tls", "aliases": ["ssl"], "build": false, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": true},
       {"protocol": "udp", "aliases": [], "build": true, "dissect": true, "exact_round_trip": true, "matcher": true, "decode_only": false},
       {"protocol": "vlan", "aliases": ["dot1q", "8021q"], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
       {"protocol": "vlan8021ad", "aliases": ["dot1ad", "8021ad", "qinq"], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},

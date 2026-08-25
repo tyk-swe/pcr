@@ -25,7 +25,7 @@ use packetcraftr::output::{
     envelope::{Aggregate, Error as OutputError, Stats, StreamEncoder},
     frame::{Captured, Timestamp, Wire},
     interfaces,
-    protocols::{Detail, Field, FieldKind, Summary},
+    protocols::{Binding, Detail, Field, FieldKind, Summary},
 };
 use serde_json::json;
 
@@ -45,6 +45,7 @@ fn command_format_matrix_display_and_errors_cover_the_full_vocabulary() {
         "stats",
         "expert",
         "follow",
+        "tls",
         "traceroute",
         "dns",
         "fuzz",
@@ -347,9 +348,18 @@ fn protocol_output_converts_every_field_kind_and_manifest_capability() {
             .any(|protocol| !protocol.aliases.is_empty())
     );
 
-    let detail = Detail::new(summaries[0].clone(), vec![field.clone()]);
+    let binding = Binding {
+        parent: "tcp".to_owned(),
+        discriminator: 443,
+    };
+    let detail = Detail::new(
+        summaries[0].clone(),
+        vec![field.clone()],
+        vec![binding.clone()],
+    );
     assert_eq!(detail.protocol, summaries[0].protocol);
     assert_eq!(detail.fields, vec![field]);
+    assert_eq!(detail.bindings, vec![binding]);
 }
 
 fn interface_fixture() -> Vec<Info> {

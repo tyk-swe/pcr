@@ -35,9 +35,51 @@ catalog.
 | Area | Commands |
 | --- | --- |
 | Packets and captures | `build`, `dissect`, `protocols`, `read` |
-| Offline analysis | `expert`, `follow`, `stats`, `fuzz` |
+| Offline analysis | `expert`, `follow`, `stats`, `tls`, `fuzz` |
 | Native inspection and planning | `interfaces`, `routes`, `plan` |
 | Live workflows | `send`, `exchange`, `capture`, `replay`, `scan`, `traceroute`, `dns`, `fuzz --live` |
+
+## TLS Handshakes
+
+`tls` assembles one record per handshake from a capture file, joining the
+client's offer to the server's decision across TCP segmentation. The repository
+ships a capture to run it on:
+
+```console
+$ packetcraftr tls examples/captures/tls-handshake.pcapng
+session=0 stream=tcp:0 client=192.0.2.1:54321 server=198.51.100.2:443 status=complete sni=api.example.test version=TLS1.3 cipher=0x1301(TLS_AES_128_GCM_SHA256) group=x25519 alpn=h2,http/1.1 selected_alpn=none ja3=54e2a2e989457808c77e4464d9361826 ja4=t13d0406h2_77f0cd3447db_5d4d534e3685 frames=4..5 rtt_ms=24.000
+tls sessions=1 selected=1 omitted=0 evicted=0 complete=1 client_only=0 retry=0 alert=0 malformed=0 gap=0 truncated=0 tcp_streams=1 buffer_limit_hits=0 udp_443_frames=0 frames_matched=8 frames_read=8
+```
+
+One `key=value` line per session, so `grep sni=` and `sort | uniq -c` work.
+`--output json` and `--output ndjson` carry the same session record with
+numeric code points, and a `*_name` companion for the negotiated version,
+cipher suite, key-share group, and alert description; the offered lists stay
+numeric. JSON emits one document holding the sessions and a summary, while
+NDJSON streams each session as it completes and is the format for large
+captures.
+
+Sessions are picked after assembly, not by a frame filter: `--stream`,
+`--sni`, `--server-port`, and a repeatable `--status`.
+
+Coming from tshark:
+
+| tshark | packetcraftr |
+| --- | --- |
+| `-Y 'tls.handshake.extensions_server_name'` | `tls capture.pcapng` (assembled, not per frame) |
+| `-Y 'tls.handshake.extensions_server_name == "x"'` | `tls capture.pcapng --sni x` |
+| `-Y 'tls.handshake.type == 1'` | `tls capture.pcapng` (every session carries its client) |
+| `-d tcp.port==4433,tls` | `--tls-port 4433` on `read`, `dissect`, or `tls`; session assembly already reads every TCP stream |
+| `-z follow,tls,ascii,0` | `follow capture.pcapng --stream tcp:0` (raw stream bytes, not decrypted TLS payload) |
+| `-T fields -e tls.handshake.ja3` | `--output json tls capture.pcapng` → `.result.sessions[].client.ja3` |
+| `-e tls.handshake.ciphersuite` | `.result.sessions[].server.cipher_suite` and `.cipher_suite_name` |
+| `-e tls.handshake.ja3s` | `.result.sessions[].server.ja3s` (JSON and NDJSON only) |
+| `-Y 'tcp.stream == 12 && tls'` | `tls capture.pcapng --stream tcp:12` |
+
+Per-frame and assembled are different views on purpose: `read --filter 'tls.sni
+contains "example"'` matches only the hellos that fit in a single segment, while
+`tls` reassembles the stream first. `tls.incomplete` filters the frames whose
+record continues into the next one.
 
 ## Install
 

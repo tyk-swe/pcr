@@ -16,7 +16,9 @@ workspace = true
 # below those crates makes native I/O unavailable by construction.
 [dependencies]
 bytes.workspace = true
+md-5.workspace = true
 noyalib.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 thiserror.workspace = true

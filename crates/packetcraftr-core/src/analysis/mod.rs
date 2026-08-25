@@ -4,9 +4,9 @@
 //! Bounded offline capture analysis.
 //!
 //! [`pcap`] handles capture files; [`run`] drives the shared read → dissect →
-//! index → filter → dispatch loop; and [`expert`], [`follow`], and [`stats`]
-//! consume it. [`reassembly`] is a standalone algorithm API fed by explicit
-//! decoded-layer adapters.
+//! index → filter → dispatch loop; and [`expert`], [`follow`], [`stats`], and
+//! [`tls`] consume it. [`reassembly`] is a standalone algorithm API fed by
+//! explicit decoded-layer adapters.
 //!
 //! There is no resolver, route lookup, live-capture, or transmission seam.
 //! `packetcraftr-core` depends on neither `packetcraftr-netio` nor
@@ -19,6 +19,7 @@
 
 mod adapter;
 mod conversation_index;
+pub(crate) mod dedup;
 mod error;
 pub mod expert;
 pub mod follow;
@@ -27,6 +28,7 @@ mod pipeline;
 pub mod reassembly;
 pub mod scope;
 pub mod stats;
+pub mod tls;
 
 pub use error::Error;
 pub use pipeline::{FrameRecord, Limits, Options, Summary, run};

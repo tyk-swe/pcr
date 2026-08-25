@@ -1,18 +1,33 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Sequence tracking and payload deduplication for followed TCP conversations.
+//! Direction and payload deduplication shared by TCP conversation collectors.
+//!
+//! The reassembler delivers each byte once per generation, but it forgets a
+//! cleanly closed flow, so a collector that spans generations — one
+//! [`Deduplicator`] per followed conversation or per TLS session — needs its
+//! own delivery edges to stay exactly-once.
 
 use crate::protocol::transport::Tcp;
 use bytes::Bytes;
 
 use crate::analysis::reassembly::tcp::ScopedFlowKey as FlowKey;
 
-use super::Direction;
+/// Who sent a chunk, relative to the conversation's first captured frame.
+///
+/// A capture cannot always see the true initiator, so the client is defined
+/// as the endpoint that sent the first frame this capture holds for the
+/// conversation — which for a capture that includes the handshake is the
+/// endpoint that sent the SYN.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Direction {
+    ClientToServer,
+    ServerToClient,
+}
 
 /// Tracks delivery edges per direction to deduplicate retransmitted TCP segments.
 #[derive(Debug, Default)]
-pub(super) struct Deduplicator {
+pub(crate) struct Deduplicator {
     /// Sequence one past the last byte delivered per direction. The
     /// reassembler delivers exactly once within a generation, but it forgets
     /// a cleanly closed flow, so a retransmitted closing segment re-delivers
@@ -33,7 +48,7 @@ pub(super) struct Deduplicator {
 }
 
 impl Deduplicator {
-    pub(super) fn mark_evicted(&mut self, flow: &FlowKey, client: &FlowKey) {
+    pub(crate) fn mark_evicted(&mut self, flow: &FlowKey, client: &FlowKey) {
         let (delivered, syn_base, closed) = if flow == client {
             (
                 &mut self.client_delivered,
@@ -52,7 +67,7 @@ impl Deduplicator {
         *closed = false;
     }
 
-    pub(super) fn mark_closed(&mut self, flow: &FlowKey, client: &FlowKey) {
+    pub(crate) fn mark_closed(&mut self, flow: &FlowKey, client: &FlowKey) {
         let closed = if flow == client {
             &mut self.client_closed
         } else {
@@ -61,7 +76,7 @@ impl Deduplicator {
         *closed = true;
     }
 
-    pub(super) fn observe_syn(&mut self, flow: &FlowKey, client: &FlowKey, tcp: &Tcp) {
+    pub(crate) fn observe_syn(&mut self, flow: &FlowKey, client: &FlowKey, tcp: &Tcp) {
         if tcp.flags & Tcp::SYN != 0 {
             let first = tcp.sequence.wrapping_add(1);
             let (recorded, closed, delivered) = if flow == client {
@@ -91,7 +106,7 @@ impl Deduplicator {
     /// segment retransmitted after its flow closed cleanly re-delivers from
     /// a fresh generation; bytes at or before the edge are dropped and the
     /// edge advances over what remains.
-    pub(super) fn deduplicate(
+    pub(crate) fn deduplicate(
         &mut self,
         direction: Direction,
         sequence: u32,

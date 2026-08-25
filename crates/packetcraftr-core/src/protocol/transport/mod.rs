@@ -3,6 +3,7 @@
 
 //! Transport protocol models.
 
+mod ports;
 mod sctp;
 mod tcp;
 mod udp;

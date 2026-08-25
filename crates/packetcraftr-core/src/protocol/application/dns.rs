@@ -14,7 +14,9 @@ use crate::{
     layer::{FieldError, Layer, reflective_layer},
 };
 
-use super::super::common::{ensure_encode_budget, invalid, protocol, truncated, wrong_layer};
+use super::super::common::{
+    ensure_encode_budget, invalid, protocol, text_list, truncated, unsigned_list, wrong_layer,
+};
 
 const DNS_HEADER_LEN: usize = 12;
 const MAX_QUESTIONS: usize = 64;
@@ -268,14 +270,6 @@ fn read_only(field: &str) -> Result<(), FieldError> {
         protocol: dns_schema().protocol.clone(),
         field: field.to_owned(),
     })
-}
-
-fn text_list(values: &[String]) -> FieldValue {
-    FieldValue::List(values.iter().cloned().map(FieldValue::Text).collect())
-}
-
-fn unsigned_list(values: &[u16]) -> FieldValue {
-    FieldValue::List(values.iter().copied().map(FieldValue::from).collect())
 }
 
 reflective_layer! {

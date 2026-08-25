@@ -20,10 +20,10 @@ use super::super::input::{InputKind, read_bounded_file, read_stdin_bounded};
 use super::super::rendering::{
     emit_aggregate, render_diagnostics_text, write_plain_line, write_raw, write_stdout_line,
 };
-use super::registry;
+use super::registry_with_tls_ports;
 
 pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
-    let registry = registry()?;
+    let registry = registry_with_tls_ports(&arguments.tls_ports.ports)?;
     // A bad filter fails before any input is read, so it cannot leave the
     // command waiting on standard input for frame bytes it would never use.
     let filter = arguments

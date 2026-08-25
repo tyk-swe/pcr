@@ -641,6 +641,58 @@ fn destination_bearing_live_commands_keep_public_destinations_behind_policy() {
 }
 
 #[test]
+fn the_tls_protocol_report_names_every_port_bound_to_the_per_frame_layer() {
+    let ports = [443_u64, 465, 636, 853, 993, 995, 8443];
+
+    let rendered = String::from_utf8_lossy(&run_success(&["protocols", "tls"]).stdout).into_owned();
+    let listed = rendered
+        .lines()
+        .skip_while(|line| *line != "bindings:")
+        .skip(1)
+        .take_while(|line| line.starts_with("  "))
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    let expected = ports
+        .iter()
+        .map(|port| format!("  tcp discriminator={port}"))
+        .collect::<Vec<_>>();
+    assert_eq!(listed, expected, "{rendered}");
+
+    let value = parse_json(&run_success(&["--output", "json", "protocols", "tls"]));
+    let bindings = value["result"]["protocol"]["bindings"]
+        .as_array()
+        .expect("bindings is an array");
+    assert_eq!(bindings.len(), ports.len());
+    for (binding, port) in bindings.iter().zip(ports) {
+        assert_eq!(binding["parent"], "tcp");
+        assert_eq!(binding["discriminator"], port);
+    }
+
+    // The published detail example carries the same two keys per binding.
+    let published = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/documents/output-protocols-detail-success.json");
+    let document: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(&published).expect("the published example must be readable"),
+    )
+    .expect("the published example must be JSON");
+    let mut published_keys = document["result"]["protocol"]["bindings"][0]
+        .as_object()
+        .expect("the published example lists bindings")
+        .keys()
+        .cloned()
+        .collect::<Vec<_>>();
+    published_keys.sort();
+    let mut reported_keys = bindings[0]
+        .as_object()
+        .expect("each binding is an object")
+        .keys()
+        .cloned()
+        .collect::<Vec<_>>();
+    reported_keys.sort();
+    assert_eq!(reported_keys, published_keys);
+}
+
+#[test]
 fn protocol_discovery_lists_describes_and_rejects_names() {
     for arguments in [
         vec!["protocols"],

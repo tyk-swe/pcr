@@ -48,6 +48,7 @@ macro_rules! builtin_protocol_catalog {
             Sctp { canonical: "sctp", aliases: [], constructible: true, matcher: reverse_flow, codec: SctpCodec }
             Snap { canonical: "snap", aliases: [], constructible: true, matcher: none, codec: SnapCodec }
             Tcp { canonical: "tcp", aliases: [], constructible: true, matcher: reverse_flow, codec: TcpCodec }
+            Tls { canonical: "tls", aliases: ["ssl"], constructible: false, matcher: none, codec: TlsCodec }
             Udp { canonical: "udp", aliases: [], constructible: true, matcher: reverse_flow, codec: UdpCodec }
             Vlan { canonical: "vlan", aliases: ["dot1q", "8021q"], constructible: true, matcher: none, codec: VlanCodec }
             Vlan8021ad { canonical: "vlan8021ad", aliases: ["dot1ad", "8021ad", "qinq"], constructible: true, matcher: none, codec: Vlan8021adCodec }

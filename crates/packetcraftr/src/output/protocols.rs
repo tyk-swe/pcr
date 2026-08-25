@@ -110,6 +110,17 @@ impl From<&FieldSchema> for Field {
     }
 }
 
+/// One registered edge that reaches a protocol during dissection.
+///
+/// `discriminator` is the parent's selector value: a TCP or UDP port, an
+/// EtherType, an IP protocol number. Zero is the parent's fallback binding,
+/// used when nothing more specific matches.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Binding {
+    pub parent: String,
+    pub discriminator: u64,
+}
+
 /// Detailed capability and reflection data for one built-in protocol.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Detail {
@@ -121,10 +132,11 @@ pub struct Detail {
     pub matcher: bool,
     pub decode_only: bool,
     pub fields: Vec<Field>,
+    pub bindings: Vec<Binding>,
 }
 
 impl Detail {
-    pub fn new(summary: Summary, fields: Vec<Field>) -> Self {
+    pub fn new(summary: Summary, fields: Vec<Field>, bindings: Vec<Binding>) -> Self {
         Self {
             protocol: summary.protocol,
             aliases: summary.aliases,
@@ -134,6 +146,7 @@ impl Detail {
             matcher: summary.matcher,
             decode_only: summary.decode_only,
             fields,
+            bindings,
         }
     }
 }

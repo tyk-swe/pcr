@@ -26,4 +26,5 @@ pub mod routes;
 pub mod scan;
 pub mod send;
 pub mod stats;
+pub mod tls;
 pub mod traceroute;

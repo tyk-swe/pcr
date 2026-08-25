@@ -38,7 +38,41 @@ pub(super) fn register(
             (BuiltinProtocol::Arp, 0, BuiltinProtocol::Padding, 0),
         ],
     )?;
+    register_tls(builder)?;
     crate::protocol::builtin::filter::register_filter_fields(builder)
+}
+
+/// TCP ports whose payload the default registry dissects as TLS.
+///
+/// HTTPS, SMTPS, LDAPS, DNS-over-TLS, IMAPS, POP3S, and the conventional
+/// alternate HTTPS port. Anything else on these ports still dissects as `raw`:
+/// the codec gates on the payload, not on the port alone.
+pub(crate) const TLS_TCP_PORTS: &[u16] = &[443, 465, 636, 853, 993, 995, 8443];
+
+/// Binds the TLS codec under every well-known TCP port and gives it the raw
+/// tail binding its unconsumed remainder needs.
+fn register_tls(builder: &mut crate::registry::Builder) -> Result<(), crate::registry::Error> {
+    bind_tls_ports(builder, TLS_TCP_PORTS)?;
+    bind_all(
+        builder,
+        &[(BuiltinProtocol::Tls, 0, BuiltinProtocol::Raw, 0)],
+    )
+}
+
+/// Binds extra TCP ports to the TLS codec, for callers remapping a service.
+pub(crate) fn bind_tls_ports(
+    builder: &mut crate::registry::Builder,
+    ports: &[u16],
+) -> Result<(), crate::registry::Error> {
+    for port in ports {
+        builder.bind(
+            BuiltinProtocol::Tcp.as_str(),
+            u64::from(*port),
+            BuiltinProtocol::Tls.as_str(),
+            100,
+        )?;
+    }
+    Ok(())
 }
 
 fn register_link(builder: &mut crate::registry::Builder) -> Result<(), crate::registry::Error> {

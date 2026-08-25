@@ -19,7 +19,7 @@ use packetcraftr::{
 };
 
 use self::arguments::Args;
-use super::registry;
+use super::registry_with_tls_ports;
 use crate::command_options::OfflineCaptureLimitsArgs;
 use crate::errors::CliError;
 use crate::filtering::{self, Capabilities};
@@ -51,10 +51,11 @@ pub(super) fn run(
         limits,
         filter,
         dissect,
+        tls_ports,
     } = arguments;
     validate_limits(limits)?;
     validate_dissect_format(dissect, format)?;
-    let decoding = prepare_decoding(filter.as_deref(), dissect)?;
+    let decoding = prepare_decoding(filter.as_deref(), dissect, &tls_ports)?;
     let mut reader = open_capture(&path, limits)?;
     let stream_limits = Limits {
         max_frames: limits.max_frames,
@@ -109,11 +110,15 @@ fn validate_dissect_format(
     Ok(())
 }
 
-fn prepare_decoding(filter: Option<&str>, dissect: bool) -> Result<Option<Decoding>, CliError> {
+fn prepare_decoding(
+    filter: Option<&str>,
+    dissect: bool,
+    tls_ports: &[u16],
+) -> Result<Option<Decoding>, CliError> {
     if filter.is_none() && !dissect {
         return Ok(None);
     }
-    let registry = registry()?;
+    let registry = registry_with_tls_ports(tls_ports)?;
     let filter = filter
         .map(|source| filtering::compile(source, &registry, Capabilities::frames_only()))
         .transpose()?;

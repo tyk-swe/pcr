@@ -3,6 +3,8 @@
 
 use std::path::PathBuf;
 
+use clap::ArgAction;
+
 pub(crate) const AFTER_LONG_HELP: &str = r#"When neither --hex nor --file is supplied, raw frame bytes are read from standard input.
 
 With --filter, text, hex, and raw output emit the dissection only when the frame matches. Aggregate JSON always emits one document: result.matched reports the filter outcome and result.dissection is null only when the frame does not match.
@@ -10,7 +12,8 @@ With --filter, text, hex, and raw output emit the dissection only when the frame
 Examples:
   packetcraftr dissect --hex '45000014000000004001f6e7c0000201c6336402'
   packetcraftr --output json dissect --file frame.bin --link-type 1
-  packetcraftr dissect --file frame.bin --filter 'icmpv4 && ip.dst == 198.51.100.2'"#;
+  packetcraftr dissect --file frame.bin --filter 'icmpv4 && ip.dst == 198.51.100.2'
+  packetcraftr dissect --file frame.bin --link-type 228 --tls-port 4433"#;
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
@@ -26,4 +29,13 @@ pub(crate) struct Args {
     /// Filter the decoded frame; aggregate JSON reports whether it matched.
     #[arg(long, value_name = "EXPR")]
     pub(crate) filter: Option<String>,
+    /// Dissect this TCP port as TLS in addition to the well-known ports;
+    /// repeatable.
+    #[arg(
+        long = "tls-port",
+        value_name = "PORT",
+        action = ArgAction::Append,
+        value_parser = clap::value_parser!(u16).range(1..)
+    )]
+    pub(crate) tls_ports: Vec<u16>,
 }

@@ -52,6 +52,7 @@
             "replay",
             "scan",
             "stats",
+            "tls",
             "traceroute",
             "dns",
             "fuzz",
@@ -166,6 +167,9 @@
               "$ref": "#/$defs/statsSuccess"
             },
             {
+              "$ref": "#/$defs/tlsSuccess"
+            },
+            {
               "$ref": "#/$defs/tracerouteSuccess"
             },
             {
@@ -244,6 +248,9 @@
             },
             {
               "$ref": "#/$defs/fuzzCaseSuccess"
+            },
+            {
+              "$ref": "#/$defs/tlsStreamSuccess"
             }
           ]
         }
@@ -1174,6 +1181,527 @@
         }
       },
       "additionalProperties": false
+    },
+    "tlsSuccess": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "tls"
+        },
+        "result": {
+          "$ref": "#/$defs/tlsResult"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ]
+    },
+    "tlsStreamSuccess": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "tls"
+        },
+        "result": {
+          "$ref": "#/$defs/tlsStreamResult"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ]
+    },
+    "tlsStreamResult": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/tlsSessionEvent"
+        },
+        {
+          "$ref": "#/$defs/tlsCompleteEvent"
+        }
+      ]
+    },
+    "tlsResult": {
+      "description": "Every assembled TLS session the selectors kept, plus the pass counters.",
+      "type": "object",
+      "required": [
+        "sessions",
+        "summary"
+      ],
+      "properties": {
+        "sessions": {
+          "description": "Sessions in first-seen order, bounded by --max-tls-sessions; summary.sessions_omitted reports what that ceiling left out.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/tlsSessionRecord"
+          }
+        },
+        "summary": {
+          "$ref": "#/$defs/tlsSummaryRecord"
+        }
+      },
+      "additionalProperties": false
+    },
+    "tlsSessionRecord": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/tlsSession"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "tlsSummaryRecord": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/tlsSummary"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "tlsSessionEvent": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/tlsSession"
+        },
+        {
+          "type": "object",
+          "required": [
+            "event"
+          ],
+          "properties": {
+            "event": {
+              "const": "session"
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "tlsCompleteEvent": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/tlsSummary"
+        },
+        {
+          "type": "object",
+          "required": [
+            "event"
+          ],
+          "properties": {
+            "event": {
+              "const": "complete"
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "tlsStatus": {
+      "description": "How far a handshake got, and why it stopped. Exactly one status is reported per session.",
+      "type": "string",
+      "oneOf": [
+        {
+          "const": "complete",
+          "description": "A ClientHello and its matching ServerHello were both assembled."
+        },
+        {
+          "const": "client_only",
+          "description": "A ClientHello was assembled and the connection ended before any ServerHello."
+        },
+        {
+          "const": "retry",
+          "description": "A HelloRetryRequest was assembled and the connection ended before the real ServerHello."
+        },
+        {
+          "const": "alert",
+          "description": "A fatal alert in the clear ended the handshake."
+        },
+        {
+          "const": "malformed",
+          "description": "Record or handshake bytes could not be parsed, or one direction's buffer reached its ceiling."
+        },
+        {
+          "const": "gap",
+          "description": "Handshake bytes were missing: reassembly reported a gap, a resource ceiling retired the session, or the capture started mid-handshake."
+        },
+        {
+          "const": "truncated",
+          "description": "The capture ended while the handshake was still in flight."
+        }
+      ]
+    },
+    "tlsEndpoint": {
+      "type": "object",
+      "required": [
+        "address",
+        "port"
+      ],
+      "properties": {
+        "address": {
+          "$ref": "#/$defs/ipAddress"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        }
+      },
+      "additionalProperties": false
+    },
+    "tlsAlert": {
+      "description": "One alert record observed in the clear. A TLS 1.3 alert sent after the ServerHello is encrypted and therefore invisible.",
+      "type": "object",
+      "required": [
+        "level",
+        "description",
+        "description_name"
+      ],
+      "properties": {
+        "level": {
+          "description": "warning (1) or fatal (2).",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "description": {
+          "description": "The AlertDescription code point.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "description_name": {
+          "description": "The registered AlertDescription name, or null for an unregistered code point.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "tlsClient": {
+      "description": "What one client offered. Lists keep wire order and include GREASE code points. Fingerprints are advisory: every byte they are computed from is chosen by the client.",
+      "type": "object",
+      "required": [
+        "legacy_version",
+        "legacy_version_name",
+        "sni",
+        "sni_raw_hex",
+        "sni_is_outer",
+        "ech",
+        "alpn",
+        "supported_versions",
+        "cipher_suites",
+        "supported_groups",
+        "key_share_groups",
+        "signature_algorithms",
+        "ja3",
+        "ja3_raw",
+        "ja4"
+      ],
+      "properties": {
+        "legacy_version": {
+          "$ref": "#/$defs/tlsCodePoint"
+        },
+        "legacy_version_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sni": {
+          "description": "The offered server name, null when absent or rejected as invalid.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sni_raw_hex": {
+          "description": "The raw host_name bytes, kept whenever the entry was present.",
+          "oneOf": [
+            {
+              "$ref": "#/$defs/hexBytes"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sni_is_outer": {
+          "description": "Whether sni is the outer, public name of an Encrypted ClientHello.",
+          "type": "boolean"
+        },
+        "ech": {
+          "type": "boolean"
+        },
+        "alpn": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "supported_versions": {
+          "$ref": "#/$defs/tlsCodePointList"
+        },
+        "cipher_suites": {
+          "$ref": "#/$defs/tlsCodePointList"
+        },
+        "supported_groups": {
+          "$ref": "#/$defs/tlsCodePointList"
+        },
+        "key_share_groups": {
+          "$ref": "#/$defs/tlsCodePointList"
+        },
+        "signature_algorithms": {
+          "$ref": "#/$defs/tlsCodePointList"
+        },
+        "ja3": {
+          "description": "Lowercase hex MD5 of ja3_raw.",
+          "type": "string"
+        },
+        "ja3_raw": {
+          "type": "string"
+        },
+        "ja4": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "tlsServer": {
+      "description": "What one server decided.",
+      "type": "object",
+      "required": [
+        "selected_version",
+        "selected_version_name",
+        "cipher_suite",
+        "cipher_suite_name",
+        "alpn",
+        "key_share_group",
+        "key_share_group_name",
+        "ja3s",
+        "ja3s_raw"
+      ],
+      "properties": {
+        "selected_version": {
+          "$ref": "#/$defs/tlsCodePoint"
+        },
+        "selected_version_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cipher_suite": {
+          "$ref": "#/$defs/tlsCodePoint"
+        },
+        "cipher_suite_name": {
+          "description": "The registered cipher suite name, or null for an unregistered code point.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "alpn": {
+          "description": "The selected ALPN protocol. TLS 1.3 moves ALPN into the encrypted extensions, so this is populated for TLS 1.2 and below only.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "key_share_group": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/tlsCodePoint"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "key_share_group_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ja3s": {
+          "description": "Lowercase hex MD5 of ja3s_raw.",
+          "type": "string"
+        },
+        "ja3s_raw": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "tlsSession": {
+      "description": "One assembled TLS handshake, joining a client's offer to a server's decision.",
+      "type": "object",
+      "required": [
+        "session",
+        "tcp_stream",
+        "client_endpoint",
+        "server_endpoint",
+        "first_frame",
+        "last_frame",
+        "hello_retry",
+        "alerts",
+        "status"
+      ],
+      "properties": {
+        "session": {
+          "description": "Monotonic zero-based index in first-seen order, unique for the run.",
+          "$ref": "#/$defs/uint64"
+        },
+        "tcp_stream": {
+          "description": "The tcp.stream conversation index this handshake rode on. A four-tuple reused after a clean close carries several sessions on one stream.",
+          "$ref": "#/$defs/uint64"
+        },
+        "client_endpoint": {
+          "$ref": "#/$defs/tlsEndpoint"
+        },
+        "server_endpoint": {
+          "$ref": "#/$defs/tlsEndpoint"
+        },
+        "first_frame": {
+          "$ref": "#/$defs/uint64"
+        },
+        "last_frame": {
+          "$ref": "#/$defs/uint64"
+        },
+        "handshake_rtt_ms": {
+          "description": "Milliseconds between the frame completing the ClientHello and the frame completing the ServerHello, when both were captured.",
+          "type": "number",
+          "minimum": 0
+        },
+        "client": {
+          "$ref": "#/$defs/tlsClient"
+        },
+        "server": {
+          "$ref": "#/$defs/tlsServer"
+        },
+        "hello_retry": {
+          "type": "boolean"
+        },
+        "alerts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/tlsAlert"
+          }
+        },
+        "status": {
+          "$ref": "#/$defs/tlsStatus"
+        },
+        "reason": {
+          "description": "Why the status is what it is, for malformed, gap, and truncated.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "tlsStatusCounts": {
+      "description": "Sessions per terminal status. Every status is reported, so a zero is a statement rather than a missing key.",
+      "type": "object",
+      "required": [
+        "complete",
+        "client_only",
+        "retry",
+        "alert",
+        "malformed",
+        "gap",
+        "truncated"
+      ],
+      "properties": {
+        "complete": {
+          "$ref": "#/$defs/uint64"
+        },
+        "client_only": {
+          "$ref": "#/$defs/uint64"
+        },
+        "retry": {
+          "$ref": "#/$defs/uint64"
+        },
+        "alert": {
+          "$ref": "#/$defs/uint64"
+        },
+        "malformed": {
+          "$ref": "#/$defs/uint64"
+        },
+        "gap": {
+          "$ref": "#/$defs/uint64"
+        },
+        "truncated": {
+          "$ref": "#/$defs/uint64"
+        }
+      },
+      "additionalProperties": false
+    },
+    "tlsSummary": {
+      "type": "object",
+      "required": [
+        "frames_read",
+        "frames_matched",
+        "sessions",
+        "sessions_selected",
+        "by_status",
+        "tcp_streams",
+        "sessions_evicted",
+        "sessions_omitted",
+        "buffer_limit_hits",
+        "udp_443_frames"
+      ],
+      "properties": {
+        "frames_read": {
+          "$ref": "#/$defs/uint64"
+        },
+        "frames_matched": {
+          "$ref": "#/$defs/uint64"
+        },
+        "sessions": {
+          "description": "Sessions assembled, of every status, whether or not a selector kept them.",
+          "$ref": "#/$defs/uint64"
+        },
+        "sessions_selected": {
+          "description": "Sessions that passed the command's selectors.",
+          "$ref": "#/$defs/uint64"
+        },
+        "by_status": {
+          "$ref": "#/$defs/tlsStatusCounts"
+        },
+        "tcp_streams": {
+          "description": "TCP conversations seen, whether or not they carried TLS.",
+          "$ref": "#/$defs/uint64"
+        },
+        "sessions_evicted": {
+          "description": "Sessions retired by a resource ceiling rather than by the capture.",
+          "$ref": "#/$defs/uint64"
+        },
+        "sessions_omitted": {
+          "description": "Selected sessions left out of the aggregate because it reached its retention ceiling. Always zero in NDJSON.",
+          "$ref": "#/$defs/uint64"
+        },
+        "buffer_limit_hits": {
+          "$ref": "#/$defs/uint64"
+        },
+        "udp_443_frames": {
+          "description": "UDP frames seen on port 443, which are most likely QUIC. TLS over QUIC is out of scope, so this is how under-reporting stays visible.",
+          "$ref": "#/$defs/uint64"
+        }
+      }
+    },
+    "tlsCodePoint": {
+      "description": "An IANA TLS registry code point, kept numeric and authoritative.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 65535
+    },
+    "tlsCodePointList": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/tlsCodePoint"
+      }
     },
     "sendSuccess": {
       "type": "object",

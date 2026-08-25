@@ -1,0 +1,97 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "tls",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "sessions": [
+      {
+        "session": 0,
+        "tcp_stream": 0,
+        "client_endpoint": {
+          "address": "192.0.2.1",
+          "port": 54321
+        },
+        "server_endpoint": {
+          "address": "198.51.100.2",
+          "port": 443
+        },
+        "first_frame": 4,
+        "last_frame": 5,
+        "handshake_rtt_ms": 24.0,
+        "client": {
+          "legacy_version": 771,
+          "legacy_version_name": "TLS 1.2",
+          "sni": "api.example.test",
+          "sni_raw_hex": "6170692e6578616d706c652e74657374",
+          "sni_is_outer": false,
+          "ech": false,
+          "alpn": [
+            "h2",
+            "http/1.1"
+          ],
+          "supported_versions": [
+            772,
+            771
+          ],
+          "cipher_suites": [
+            4865,
+            4866,
+            4867,
+            49199
+          ],
+          "supported_groups": [
+            29,
+            23
+          ],
+          "key_share_groups": [
+            29
+          ],
+          "signature_algorithms": [
+            1027,
+            2052,
+            1025
+          ],
+          "ja3": "54e2a2e989457808c77e4464d9361826",
+          "ja3_raw": "771,4865-4866-4867-49199,0-16-10-13-43-51,29-23,",
+          "ja4": "t13d0406h2_77f0cd3447db_5d4d534e3685"
+        },
+        "server": {
+          "selected_version": 772,
+          "selected_version_name": "TLS 1.3",
+          "cipher_suite": 4865,
+          "cipher_suite_name": "TLS_AES_128_GCM_SHA256",
+          "alpn": null,
+          "key_share_group": 29,
+          "key_share_group_name": "x25519",
+          "ja3s": "f4febc55ea12b31ae17cfb7e614afda8",
+          "ja3s_raw": "771,4865,43-51"
+        },
+        "hello_retry": false,
+        "alerts": [],
+        "status": "complete"
+      }
+    ],
+    "summary": {
+      "frames_read": 8,
+      "frames_matched": 8,
+      "sessions": 1,
+      "sessions_selected": 1,
+      "by_status": {
+        "complete": 1,
+        "client_only": 0,
+        "retry": 0,
+        "alert": 0,
+        "malformed": 0,
+        "gap": 0,
+        "truncated": 0
+      },
+      "tcp_streams": 1,
+      "sessions_evicted": 0,
+      "sessions_omitted": 0,
+      "buffer_limit_hits": 0,
+      "udp_443_frames": 0
+    }
+  },
+  "diagnostics": []
+}

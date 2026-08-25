@@ -63,6 +63,11 @@ const COMPLETION_FIXTURES: &[(output::contract::Command, bool, &str)] = &[
         true,
         include_str!("../../../examples/documents/output-exchange-complete.json"),
     ),
+    (
+        output::contract::Command::Tls,
+        false,
+        include_str!("../../../examples/documents/output-tls-complete.json"),
+    ),
 ];
 
 fn result(document: &str) -> Value {
@@ -317,9 +322,42 @@ fn production_typed_event_variants_are_schema_valid() {
         },
         Vec::new(),
     );
+    validate_typed_event(
+        output::contract::Command::Tls,
+        tls_session_event(),
+        Vec::new(),
+    );
     validate_active_event_variants();
     validate_fuzz_event_variants();
     validate_exchange_event_variants();
+}
+
+/// A minimal session record: the shape a `gap` session takes when the capture
+/// started after the ClientHello, so the optional halves are exercised too.
+fn tls_session_event() -> output::tls::Event {
+    let endpoint = |last: u8, port: u16| output::tls::Endpoint {
+        address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, last)),
+        port,
+    };
+    output::tls::Event::session(output::tls::Session {
+        session: 0,
+        tcp_stream: 4,
+        client_endpoint: endpoint(1, 40_000),
+        server_endpoint: endpoint(2, 443),
+        first_frame: 2,
+        last_frame: 3,
+        handshake_rtt_ms: None,
+        client: None,
+        server: None,
+        hello_retry: false,
+        alerts: vec![output::tls::Alert {
+            level: 2,
+            description: 40,
+            description_name: Some("handshake_failure"),
+        }],
+        status: output::tls::Status::Gap,
+        reason: Some("no ClientHello observed".to_owned()),
+    })
 }
 
 fn validate_active_event_variants() {

@@ -163,6 +163,12 @@ mod tests {
                 command: Some(output::contract::Command::Dissect),
             },
             Case {
+                arguments: &["packetcraftr", "--output=ndjson", "tls", "capture.pcapng"],
+                format: Some(output::contract::Format::Ndjson),
+                color: "auto",
+                command: Some(output::contract::Command::Tls),
+            },
+            Case {
                 arguments: &["packetcraftr", "--output=json", "invalid", "build"],
                 format: Some(output::contract::Format::Json),
                 color: "auto",

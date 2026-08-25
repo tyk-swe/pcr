@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `packetcraftr tls <CAPTURE>` assembles TLS handshake sessions from a capture
+  file, joining each ClientHello to its ServerHello across TCP segmentation and
+  reporting SNI, ALPN, offered and selected parameters, JA3/JA3S/JA4, alerts,
+  handshake RTT, frame range, and a status of `complete`, `client_only`,
+  `retry`, `alert`, `malformed`, `gap`, or `truncated`. Sessions are selected
+  after assembly by `--stream`, `--sni`, `--server-port`, and a repeatable
+  `--status`; text prints one `key=value` line per session, and NDJSON streams
+  each session as it completes.
+- A decode-only `tls` layer (aliased `ssl`) bound to TCP ports 443, 465, 636,
+  853, 993, 995, and 8443, with record and handshake fields, SNI, ALPN, offered
+  and selected parameters, JA3, and JA4 available to display filters.
+- `--tls-port PORT` on `tls`, `read`, and `dissect` dissects one more TCP port
+  as TLS in the per-frame layer. It repeats and adds to the well-known ports.
+  Session assembly reads every TCP stream and needs no port list.
+- `protocols <PROTOCOL>` detail output now reports the parent `bindings` a
+  protocol is registered under.
+- `examples/captures/tls-handshake.pcapng`, a checked-in eight-frame TLS 1.3
+  handshake over RFC 5737 addresses, so the `tls` examples are runnable from a
+  fresh clone.
 - Traffic policy now denies an explicit outer IP or Ethernet source that the
   selected interface does not own; `Policy::allow_source_spoofing` and
   `--allow-source-spoofing` on packet-sending commands are the single opt-in.
@@ -17,6 +36,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** TCP now dispatches children by port, as UDP already did, so
+  frames on TCP ports 443, 465, 636, 853, 993, 995, and 8443 dissect as `tls`
+  where they previously dissected as `raw`. Every observable consequence:
+  `dissect` and `read --dissect` report a `tls` layer and its fields for those
+  frames; `stats --table protocols` reclassifies them from `raw` to `tls`;
+  display filters over `raw.*` no longer match them, while `tls.*` does; and
+  `output::contract::Command` gained a `Tls` variant, which changes the
+  exhaustive match of any Rust caller. Bytes that do not look like a TLS record
+  stay `raw` with no diagnostics, and `build(dissect(x)) == x` still holds for
+  every frame on a bound port.
+- **Breaking:** `output::protocols::Detail::new` takes the parent bindings as a
+  third argument.
 - Clarified the intended protocol-engineering and authorized-diagnostics scope
   in the README, agent guidance, and crate documentation.
 - Live integrity rejection now matches the exact built-in checksum diagnostic

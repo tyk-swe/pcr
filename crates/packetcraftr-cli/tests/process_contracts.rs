@@ -441,3 +441,22 @@ fn replay_rejects_malformed_capture_before_emitting_transmission_evidence() {
         }
     }
 }
+
+#[test]
+fn unsupported_output_formats_fail_before_a_capture_is_read() {
+    let capture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/captures/tls-handshake.pcapng");
+    let path = capture.to_str().expect("example capture path is UTF-8");
+
+    for format in ["hex", "raw", "pcap", "pcapng"] {
+        let refused = run(&["--output", format, "tls", path]);
+        assert_eq!(refused.status.code(), Some(2), "{format}");
+        assert!(refused.stdout.is_empty(), "{format}");
+        let rendered = String::from_utf8_lossy(&refused.stderr);
+        assert!(
+            rendered.contains(&format!("tls does not support {format} output")),
+            "{rendered}"
+        );
+        assert!(rendered.contains("choose text, json, ndjson"), "{rendered}");
+    }
+}

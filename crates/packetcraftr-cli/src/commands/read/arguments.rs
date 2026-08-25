@@ -3,12 +3,15 @@
 
 use std::path::PathBuf;
 
+use clap::ArgAction;
+
 use crate::command_options::OfflineCaptureLimitsArgs;
 
 pub(crate) const AFTER_LONG_HELP: &str = r#"Examples:
   packetcraftr read capture.pcapng --max-frames 100
   packetcraftr --output ndjson read capture.pcap
   packetcraftr read capture.pcapng --filter 'tcp.flags.syn == 1 && !tcp.flags.ack' --dissect
+  packetcraftr read capture.pcapng --tls-port 4433 --filter 'tls.sni contains "example"' --dissect
   packetcraftr --output pcapng read capture.pcapng > validated-copy.pcapng
 
 Capture output validates and rewrites every source record without normalization.
@@ -31,4 +34,13 @@ pub(crate) struct Args {
     /// Include each frame's dissected layer stack in the output.
     #[arg(long)]
     pub(crate) dissect: bool,
+    /// Dissect this TCP port as TLS in addition to the well-known ports;
+    /// repeatable. Applies to --filter and --dissect.
+    #[arg(
+        long = "tls-port",
+        value_name = "PORT",
+        action = ArgAction::Append,
+        value_parser = clap::value_parser!(u16).range(1..)
+    )]
+    pub(crate) tls_ports: Vec<u16>,
 }

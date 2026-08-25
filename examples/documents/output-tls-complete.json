@@ -1,0 +1,29 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "tls",
+  "mode": "stream",
+  "sequence": 1,
+  "status": "success",
+  "result": {
+    "event": "complete",
+    "frames_read": 8,
+    "frames_matched": 8,
+    "sessions": 1,
+    "sessions_selected": 1,
+    "by_status": {
+      "complete": 1,
+      "client_only": 0,
+      "retry": 0,
+      "alert": 0,
+      "malformed": 0,
+      "gap": 0,
+      "truncated": 0
+    },
+    "tcp_streams": 1,
+    "sessions_evicted": 0,
+    "sessions_omitted": 0,
+    "buffer_limit_hits": 0,
+    "udp_443_frames": 0
+  },
+  "diagnostics": []
+}

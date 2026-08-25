@@ -34,6 +34,7 @@ pub enum Command {
     Interfaces,
     Routes,
     Protocols,
+    Tls,
 }
 
 impl Command {
@@ -52,6 +53,7 @@ impl Command {
         Self::Stats,
         Self::Expert,
         Self::Follow,
+        Self::Tls,
         Self::Traceroute,
         Self::Dns,
         Self::Fuzz,
@@ -74,6 +76,7 @@ impl Command {
             Self::Replay => "replay",
             Self::Scan => "scan",
             Self::Stats => "stats",
+            Self::Tls => "tls",
             Self::Traceroute => "traceroute",
             Self::Dns => "dns",
             Self::Fuzz => "fuzz",
@@ -94,7 +97,9 @@ impl Command {
             Self::Capture | Self::Read => CAPTURE_FORMATS,
             Self::Replay => REPLAY_FORMATS,
             Self::Follow => FOLLOW_FORMATS,
-            Self::Scan | Self::Traceroute | Self::Dns | Self::Fuzz | Self::Expert => TOOL_FORMATS,
+            Self::Scan | Self::Traceroute | Self::Dns | Self::Fuzz | Self::Expert | Self::Tls => {
+                TOOL_FORMATS
+            }
         }
     }
 

@@ -17,7 +17,7 @@ use super::super::command_options::OfflineLimitsArgs;
 use super::super::errors::CliError;
 use super::super::filtering::{self, Capabilities};
 use super::super::input::validate_capture_stream_limits;
-use super::registry;
+use super::registry_with_tls_ports;
 
 /// Validated, I/O-free analysis state.
 pub(super) struct Prepared {
@@ -32,6 +32,19 @@ pub(super) fn prepare(
     limits: OfflineLimitsArgs,
     filter_source: Option<&str>,
 ) -> Result<Prepared, CliError> {
+    prepare_with_tls_ports(limits, filter_source, &[])
+}
+
+/// [`prepare`], with extra TCP ports dissected as TLS.
+///
+/// The seam exists because the default registry is immutable once built, so a
+/// command honouring `--tls-port` needs the extra bindings before the registry
+/// is frozen rather than after.
+pub(super) fn prepare_with_tls_ports(
+    limits: OfflineLimitsArgs,
+    filter_source: Option<&str>,
+    tls_ports: &[u16],
+) -> Result<Prepared, CliError> {
     let capture = limits.capture;
     validate_capture_stream_limits(
         capture.max_frames,
@@ -39,7 +52,7 @@ pub(super) fn prepare(
         capture.max_frame_bytes,
         capture.max_interfaces,
     )?;
-    let registry = registry()?;
+    let registry = registry_with_tls_ports(tls_ports)?;
     let filter = filter_source
         .map(|source| filtering::compile(source, &registry, Capabilities::stream_capable()))
         .transpose()?;

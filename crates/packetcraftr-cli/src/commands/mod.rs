@@ -30,6 +30,7 @@ mod routes;
 mod scan;
 mod send;
 mod stats;
+mod tls;
 mod traceroute;
 
 #[derive(Debug, Subcommand)]
@@ -76,6 +77,9 @@ pub(crate) enum Command {
     /// Compute aggregate statistics over a capture file.
     #[command(after_long_help = stats::arguments::AFTER_LONG_HELP)]
     Stats(stats::arguments::Args),
+    /// Assemble TLS handshake sessions from a capture file.
+    #[command(after_long_help = tls::arguments::AFTER_LONG_HELP)]
+    Tls(tls::arguments::Args),
     /// Run bounded, policy-gated traceroute probes.
     #[command(
         long_about = traceroute::arguments::LONG_ABOUT,
@@ -110,6 +114,7 @@ impl Command {
             Self::Replay(_) => output::contract::Command::Replay,
             Self::Scan(_) => output::contract::Command::Scan,
             Self::Stats(_) => output::contract::Command::Stats,
+            Self::Tls(_) => output::contract::Command::Tls,
             Self::Traceroute(_) => output::contract::Command::Traceroute,
             Self::Dns(_) => output::contract::Command::Dns,
             Self::Fuzz(_) => output::contract::Command::Fuzz,
@@ -140,6 +145,7 @@ impl Command {
             Self::Replay(arguments) => replay::run(arguments, format, stream),
             Self::Scan(arguments) => scan::run(arguments, format, stream),
             Self::Stats(arguments) => stats::run(arguments, format),
+            Self::Tls(arguments) => tls::run(arguments, format, stream),
             Self::Traceroute(arguments) => traceroute::run(arguments, format, stream),
             Self::Dns(arguments) => dns::run(arguments, format, stream),
             Self::Fuzz(arguments) => fuzz::run(arguments, format, stream),
@@ -149,7 +155,16 @@ impl Command {
 }
 
 fn registry() -> Result<Arc<core::registry::Registry>, CliError> {
-    core::protocol::builtin::registry()
+    registry_with_tls_ports(&[])
+}
+
+/// The built-in registry with extra TCP ports dissected as TLS.
+///
+/// `--tls-port` reaches every command that dissects capture bytes, so the
+/// per-frame view of `read` and `dissect` agrees with the assembled view of
+/// `tls`.
+fn registry_with_tls_ports(ports: &[u16]) -> Result<Arc<core::registry::Registry>, CliError> {
+    core::protocol::builtin::registry_with_tls_ports(ports)
         .map(Arc::new)
         .map_err(|source| {
             CliError::new(70, format!("built-in registry invariant failed: {source}"))

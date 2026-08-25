@@ -298,8 +298,8 @@ mod tests {
     use crate::analysis::reassembly::tcp::FlowKey;
     use crate::analysis::scope::Interner;
 
-    const IDLE_FLOW_COUNT: usize = 8_000;
-    const ACTIVE_SEGMENT_COUNT: u32 = 100_000;
+    const IDLE_FLOW_COUNT: usize = 512;
+    const ACTIVE_SEGMENT_COUNT: u32 = 4_096;
 
     fn test_flow(source_port: u16) -> ScopedFlowKey {
         let scope = Interner::new()

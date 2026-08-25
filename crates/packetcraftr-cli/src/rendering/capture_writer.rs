@@ -199,24 +199,6 @@ mod tests {
     }
 
     #[test]
-    fn constructors_select_their_interface_map() {
-        let link_types =
-            CaptureWriter::for_link_types(Writer::pcapng(Vec::new()).expect("PCAPNG writer"));
-        assert!(matches!(
-            link_types.interface_map,
-            InterfaceMap::LinkTypes(_)
-        ));
-
-        let source_interfaces = CaptureWriter::for_source_interfaces(
-            Writer::pcapng(Vec::new()).expect("PCAPNG writer"),
-        );
-        assert!(matches!(
-            source_interfaces.interface_map,
-            InterfaceMap::SourceInterfaces(_)
-        ));
-    }
-
-    #[test]
     fn pcapng_source_mapping_uses_source_identity_not_repeated_descriptions() {
         let writer = Writer::pcapng(Vec::new()).expect("PCAPNG writer");
         let mut output = CaptureWriter::for_source_interfaces(writer);

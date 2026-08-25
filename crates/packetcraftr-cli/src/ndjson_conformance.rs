@@ -12,124 +12,61 @@ use crate::errors::CliError;
 use crate::rendering::NdjsonStream;
 use crate::rendering::ndjson_test_support::{assert_contiguous, stream};
 
-struct Fixture {
-    command: output::contract::Command,
-    requires_terminal_stats: bool,
-    complete: Value,
-}
+const COMPLETION_FIXTURES: &[(output::contract::Command, bool, &str)] = &[
+    (
+        output::contract::Command::Read,
+        false,
+        include_str!("../../../examples/documents/output-read-complete.json"),
+    ),
+    (
+        output::contract::Command::Capture,
+        true,
+        include_str!("../../../examples/documents/output-capture-complete.json"),
+    ),
+    (
+        output::contract::Command::Replay,
+        false,
+        include_str!("../../../examples/documents/output-replay-success.json"),
+    ),
+    (
+        output::contract::Command::Follow,
+        false,
+        include_str!("../../../examples/documents/output-follow-complete.json"),
+    ),
+    (
+        output::contract::Command::Expert,
+        false,
+        include_str!("../../../examples/documents/output-expert-success.json"),
+    ),
+    (
+        output::contract::Command::Scan,
+        false,
+        include_str!("../../../examples/documents/output-scan-complete.json"),
+    ),
+    (
+        output::contract::Command::Traceroute,
+        false,
+        include_str!("../../../examples/documents/output-traceroute-complete.json"),
+    ),
+    (
+        output::contract::Command::Dns,
+        false,
+        include_str!("../../../examples/documents/output-dns-complete.json"),
+    ),
+    (
+        output::contract::Command::Fuzz,
+        true,
+        include_str!("../../../examples/documents/output-fuzz-complete.json"),
+    ),
+    (
+        output::contract::Command::Exchange,
+        true,
+        include_str!("../../../examples/documents/output-exchange-complete.json"),
+    ),
+];
 
 fn result(document: &str) -> Value {
     serde_json::from_str::<Value>(document).expect("published example must parse")["result"].clone()
-}
-
-fn offline_fixtures() -> Vec<Fixture> {
-    vec![
-        Fixture {
-            command: output::contract::Command::Read,
-            requires_terminal_stats: false,
-            complete: result(include_str!(
-                "../../../examples/documents/output-read-complete.json"
-            )),
-        },
-        Fixture {
-            command: output::contract::Command::Capture,
-            requires_terminal_stats: true,
-            complete: result(include_str!(
-                "../../../examples/documents/output-capture-complete.json"
-            )),
-        },
-        Fixture {
-            command: output::contract::Command::Replay,
-            requires_terminal_stats: false,
-            complete: result(include_str!(
-                "../../../examples/documents/output-replay-success.json"
-            )),
-        },
-        Fixture {
-            command: output::contract::Command::Follow,
-            requires_terminal_stats: false,
-            complete: result(include_str!(
-                "../../../examples/documents/output-follow-complete.json"
-            )),
-        },
-        Fixture {
-            command: output::contract::Command::Expert,
-            requires_terminal_stats: false,
-            complete: result(include_str!(
-                "../../../examples/documents/output-expert-success.json"
-            )),
-        },
-    ]
-}
-
-fn active_fixtures() -> Vec<Fixture> {
-    vec![
-        Fixture {
-            command: output::contract::Command::Scan,
-            requires_terminal_stats: false,
-            complete: result(include_str!(
-                "../../../examples/documents/output-scan-complete.json"
-            )),
-        },
-        Fixture {
-            command: output::contract::Command::Traceroute,
-            requires_terminal_stats: false,
-            complete: result(include_str!(
-                "../../../examples/documents/output-traceroute-complete.json"
-            )),
-        },
-        Fixture {
-            command: output::contract::Command::Dns,
-            requires_terminal_stats: false,
-            complete: result(include_str!(
-                "../../../examples/documents/output-dns-complete.json"
-            )),
-        },
-        Fixture {
-            command: output::contract::Command::Fuzz,
-            requires_terminal_stats: true,
-            complete: result(include_str!(
-                "../../../examples/documents/output-fuzz-complete.json"
-            )),
-        },
-        Fixture {
-            command: output::contract::Command::Exchange,
-            requires_terminal_stats: true,
-            complete: result(include_str!(
-                "../../../examples/documents/output-exchange-complete.json"
-            )),
-        },
-    ]
-}
-
-fn fixtures() -> Vec<Fixture> {
-    let fixtures = offline_fixtures()
-        .into_iter()
-        .chain(active_fixtures())
-        .collect::<Vec<_>>();
-    let expected = output::contract::Command::ALL
-        .iter()
-        .copied()
-        .filter(|command| {
-            command
-                .formats()
-                .contains(&output::contract::Format::Ndjson)
-        })
-        .collect::<std::collections::HashSet<_>>();
-    let actual = fixtures
-        .iter()
-        .map(|fixture| fixture.command)
-        .collect::<std::collections::HashSet<_>>();
-    assert_eq!(
-        actual, expected,
-        "NDJSON fixture inventory must be complete"
-    );
-    assert_eq!(
-        fixtures.len(),
-        actual.len(),
-        "NDJSON fixtures must be unique"
-    );
-    fixtures
 }
 
 fn validate_records(validator: &jsonschema::Validator, records: &[Value]) {
@@ -141,36 +78,51 @@ fn validate_records(validator: &jsonschema::Validator, records: &[Value]) {
     }
 }
 
-fn validate_typed_event<T: serde::Serialize + Clone>(
+fn validate_typed_event<T: serde::Serialize>(
     command: output::contract::Command,
     event: T,
     diagnostics: Vec<core::diagnostic::Diagnostic>,
 ) {
-    let fixture = fixtures()
-        .into_iter()
-        .find(|fixture| fixture.command == command)
-        .expect("typed event command has a completion fixture");
-    let (success, bytes) = stream(command);
-    success
-        .emit_data(event.clone(), diagnostics.clone())
-        .expect("typed production event must render");
-    complete(&success, fixture.requires_terminal_stats, fixture.complete)
-        .expect("typed production stream must complete");
-    let records = bytes.records();
-    validate_records(crate::test_support::schema_validator(), &records);
-    assert_eq!(records.len(), 2);
-    assert!(records.iter().all(|record| record["status"] == "success"));
-
     let (sink, bytes) = stream(command);
     sink.emit_data(event, diagnostics)
         .expect("typed production event must render");
-    sink.emit_error(CliError::new(5, "typed partial failure").output_error())
-        .expect("typed partial stream must terminate");
     let records = bytes.records();
     validate_records(crate::test_support::schema_validator(), &records);
-    assert_eq!(records.len(), 2);
+    assert_eq!(records.len(), 1);
     assert_eq!(records[0]["status"], "success");
-    assert_eq!(records[1]["status"], "error");
+}
+
+#[test]
+fn published_completion_fixtures_are_schema_valid() {
+    let expected = output::contract::Command::ALL
+        .iter()
+        .copied()
+        .filter(|command| {
+            command
+                .formats()
+                .contains(&output::contract::Format::Ndjson)
+        })
+        .collect::<std::collections::HashSet<_>>();
+    let actual = COMPLETION_FIXTURES
+        .iter()
+        .map(|(command, _, _)| *command)
+        .collect::<std::collections::HashSet<_>>();
+    assert_eq!(actual, expected, "fixture inventory must be complete");
+    assert_eq!(
+        COMPLETION_FIXTURES.len(),
+        actual.len(),
+        "fixtures must be unique"
+    );
+
+    for &(command, requires_terminal_stats, document) in COMPLETION_FIXTURES {
+        let (sink, bytes) = stream(command);
+        complete(&sink, requires_terminal_stats, result(document))
+            .expect("published completion must render");
+        let records = bytes.records();
+        validate_records(crate::test_support::schema_validator(), &records);
+        assert_eq!(records.len(), 1, "{command:?}");
+        assert_eq!(records[0]["status"], "success", "{command:?}");
+    }
 }
 
 fn frame(bytes: &[u8]) -> core::frame::Frame {

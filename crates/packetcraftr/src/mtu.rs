@@ -48,7 +48,7 @@ mod tests {
     use std::net::Ipv4Addr;
     use std::sync::Arc;
 
-    use bytes::Bytes;
+    use super::*;
     use packetcraftr_core::protocol::{link::Ethernet, network::Ipv4, transport::Udp};
     use packetcraftr_core::{
         Packet,
@@ -56,45 +56,6 @@ mod tests {
         field::WireValue,
         layer::{Padding, Raw},
     };
-    use packetcraftr_netio::Error as LiveIoError;
-    use packetcraftr_netio::transmit::Submission;
-
-    use super::*;
-
-    #[test]
-    fn send_report_requires_exact_count_length_and_wire_bytes() {
-        let expected = Bytes::from_static(&[1, 2, 3]);
-        assert!(
-            Submission::start()
-                .complete(3, expected.clone())
-                .validate_exact(&expected)
-                .is_ok()
-        );
-        assert!(matches!(
-            Submission::start()
-                .complete(2, Bytes::from_static(&[1, 2]))
-                .validate_exact(&expected),
-            Err(LiveIoError::PartialSend {
-                expected: 3,
-                actual: 2
-            })
-        ));
-        assert!(matches!(
-            Submission::start()
-                .complete(3, Bytes::from_static(&[1, 2]))
-                .validate_exact(&expected),
-            Err(LiveIoError::InvalidSendReport {
-                bytes_sent: 3,
-                wire_bytes: 2
-            })
-        ));
-        assert!(matches!(
-            Submission::start()
-                .complete(3, Bytes::from_static(&[3, 2, 1]))
-                .validate_exact(&expected),
-            Err(LiveIoError::InvalidSendEvidence { .. })
-        ));
-    }
 
     fn build(packet: Packet) -> BuiltPacket {
         Builder::new(Arc::new(

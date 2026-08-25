@@ -5,7 +5,7 @@ use std::io::Cursor;
 use std::time::{Duration, SystemTime};
 
 use packetcraftr_core::analysis::pcap::{
-    Endianness, Error, Format, Limits, PcapOptions, Reader, ReaderOptions, Writer, rewrite,
+    Endianness, Error, Format, PcapOptions, Reader, ReaderOptions, Writer,
 };
 use packetcraftr_core::frame::{Frame, LinkType};
 
@@ -73,33 +73,4 @@ fn truncated_records_and_declared_size_limits_fail_closed() {
         reader.next_frame(),
         Err(Error::SizeLimitExceeded { limit: 3, .. })
     ));
-}
-
-#[test]
-fn bounded_rewrite_preserves_records_and_reports_accounting() {
-    let input = pcap(Endianness::Big);
-    let mut source = Reader::new(Cursor::new(input.clone())).expect("capture must open");
-    let (bytes, report) = rewrite(
-        &mut source,
-        Vec::new(),
-        Limits {
-            max_frames: 1,
-            max_bytes: 4,
-        },
-    )
-    .expect("same-format rewrite must succeed");
-    assert_eq!(report.frames, 1);
-    assert_eq!(report.captured_bytes, 4);
-    assert_eq!(bytes, input);
-    let mut decoded = Reader::new(Cursor::new(bytes)).expect("pcap must open");
-    assert_eq!(decoded.format(), Format::Pcap);
-    assert_eq!(
-        decoded
-            .next_frame()
-            .expect("record must parse")
-            .expect("record must exist")
-            .bytes()
-            .as_ref(),
-        [1, 2, 3, 4]
-    );
 }

@@ -473,6 +473,20 @@ fn expressions_and_documents_round_trip_and_enforce_resource_bounds() {
     document.validate_schema().expect("current schema");
     let json = document.to_json_pretty().expect("JSON serialization");
     let yaml = document.to_yaml().expect("YAML serialization");
+    assert!(matches!(
+        document::Packet::parse(&json, document::Format::Json, json.len() - 1),
+        Err(document::Error::SizeLimit { .. })
+    ));
+    assert!(matches!(
+        document::Packet::parse_with_resource_limits(
+            &json,
+            document::Format::Json,
+            json.len(),
+            0,
+            document::DEFAULT_MAX_DOCUMENT_NESTING,
+        ),
+        Err(document::Error::LayerLimit { limit: 0 })
+    ));
     let from_json =
         document::Packet::parse(&json, document::Format::Json, json.len()).expect("JSON parse");
     let from_yaml =
@@ -519,6 +533,8 @@ fn expressions_and_documents_round_trip_and_enforce_resource_bounds() {
     ));
     assert!(document::Packet::parse("{} trailing", document::Format::Json, 20).is_err());
     assert!(document::Packet::parse("---\n{}\n---\n{}", document::Format::Yaml, 20).is_err());
+    let duplicate = "schema: packetcraftr.packet/v1\nschema: duplicate\nlayers: []\n";
+    assert!(document::Packet::parse(duplicate, document::Format::Yaml, duplicate.len()).is_err());
 }
 
 fn assert_registry_queries(registry: &packetcraftr_core::registry::Registry) {

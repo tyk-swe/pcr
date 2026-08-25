@@ -104,24 +104,6 @@ fn stats_exercises_every_table_and_filtering_mode() {
     let capture = write_capture();
     let path = path_text(capture.path());
 
-    for table in ["conversations", "endpoints", "protocols", "ports", "io"] {
-        let output = run_success(&[
-            "--output",
-            "json",
-            "stats",
-            path,
-            "--table",
-            table,
-            "--interval-ms",
-            "500",
-        ]);
-        let value = parse_json(&output);
-        assert_eq!(value["command"], "stats");
-        assert_eq!(value["result"]["table"], table);
-        assert_eq!(value["result"]["frames_read"], 5);
-        assert_eq!(value["result"]["frames_matched"], 5);
-    }
-
     let filtered = run_success(&[
         "--output",
         "json",

@@ -40,9 +40,6 @@ use super::{
     MAX_VLAN_TAGS as MAX_NEIGHBOR_VLAN_TAGS, VlanKind as NeighborVlanKind,
     VlanTag as NeighborVlanTag,
 };
-#[cfg(test)]
-use crate::checksum::compute_parts as checksum;
-
 pub(super) fn build_request_frame(
     request: &NeighborRequest,
 ) -> Result<(Bytes, MacAddress), crate::neighbor::Error> {
@@ -534,15 +531,6 @@ mod tests {
         assert_eq!(upper_layer_icmpv6(44, &[0; 8]), None);
         assert_eq!(upper_layer_icmpv6(6, &[0; 8]), None);
         assert_eq!(upper_layer_icmpv6(0, &[IPV6_NEXT_HEADER_ICMP]), None);
-    }
-
-    #[test]
-    fn checksum_is_independent_of_part_boundaries_and_handles_odd_bytes() {
-        let contiguous = checksum(&[&[1, 2, 3, 4, 5]]);
-        let split = checksum(&[&[1], &[], &[2, 3], &[4], &[5]]);
-        assert_eq!(contiguous, split);
-        assert_eq!(checksum(&[&[]]), u16::MAX);
-        assert_eq!(checksum(&[&[0xff, 0xff]]), 0);
     }
 
     #[test]

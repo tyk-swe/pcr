@@ -447,6 +447,9 @@ impl Collector {
     }
 
     /// Counts a conversation the first time one of its frames is seen.
+    /// Stream indices rise in first-seen order, so a rise is a new
+    /// conversation; a caller that filters frames before observing can hide
+    /// an earlier conversation's frames and undercount.
     fn note_stream(&mut self, stream: u64) {
         if self.highest_stream.is_none_or(|highest| stream > highest) {
             self.highest_stream = Some(stream);
@@ -542,12 +545,17 @@ impl Collector {
         });
     }
 
-    /// Forgets a conversation that assembled nothing.
+    /// Closes a conversation. One that assembled nothing is forgotten
+    /// outright, so a later hello on the same four-tuple is tracked again;
+    /// one that did leaves a closed marker until a new connection opens.
     fn discard(&mut self, key: &ScopedFlowKey) {
         if let Some(entry) = self.entries.get_mut(key)
             && let Tracked::Live(live) = std::mem::replace(&mut entry.state, Tracked::Closed)
         {
             self.buffered_bytes = self.buffered_bytes.saturating_sub(live.buffered());
+            if !live.is_session() {
+                self.forget(key);
+            }
         }
     }
 

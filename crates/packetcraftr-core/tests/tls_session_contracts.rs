@@ -1226,6 +1226,35 @@ fn an_alert_record_too_short_to_read_is_ignored_rather_than_recorded() {
 }
 
 #[test]
+fn a_fatal_alert_past_the_ceiling_displaces_a_warning_so_the_status_names_it() {
+    let mut alerts = Vec::new();
+    for _ in 0..MAX_ALERTS {
+        alerts.extend_from_slice(&alert(ALERT_LEVEL_WARNING, ALERT_CLOSE_NOTIFY));
+    }
+    alerts.extend_from_slice(&alert(ALERT_LEVEL_FATAL, ALERT_CLOSE_NOTIFY));
+    let mut capture = Capture::new();
+    let mut stream = Stream::new(40_000);
+    capture.open(&mut stream);
+    capture.client(
+        &mut stream,
+        &handshake_record(&client_hello(&ClientHelloSpec::default())),
+    );
+    for segment in split(&alerts, 4) {
+        capture.server(&mut stream, &segment);
+    }
+    let (sessions, _) = assemble_default(&capture);
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0].status, Status::Alert);
+    assert_eq!(sessions[0].alerts.len(), MAX_ALERTS);
+    assert_eq!(
+        sessions[0].alerts.last().map(|alert| alert.level),
+        Some(ALERT_LEVEL_FATAL),
+        "the alert that ended the session is the one the record keeps"
+    );
+    assert_eq!(sessions[0].alerts_dropped, 1);
+}
+
+#[test]
 fn warning_alerts_past_the_ceiling_are_counted_rather_than_retained() {
     let extra = 10;
     let mut alerts = Vec::new();

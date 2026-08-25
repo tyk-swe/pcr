@@ -1682,7 +1682,7 @@
           "$ref": "#/$defs/uint64"
         },
         "sessions_omitted": {
-          "description": "Selected sessions left out of the aggregate because it reached its retention ceiling. Always zero in NDJSON.",
+          "description": "Selected sessions left out of the aggregate because it reached its retention ceiling. Non-zero only in the JSON aggregate; text and NDJSON write each session as it completes and omit nothing.",
           "$ref": "#/$defs/uint64"
         },
         "buffer_limit_hits": {

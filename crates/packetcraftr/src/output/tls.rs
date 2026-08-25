@@ -271,8 +271,8 @@ pub struct Summary {
     /// Sessions retired by a resource ceiling rather than by the capture.
     pub sessions_evicted: u64,
     /// Selected sessions left out of `sessions` because the aggregate reached
-    /// its retention ceiling. Always zero in NDJSON, which streams instead of
-    /// retaining.
+    /// its retention ceiling. Non-zero only in the JSON aggregate; text and
+    /// NDJSON write each session as it completes and omit nothing.
     pub sessions_omitted: u64,
     /// Times one direction's handshake buffer reached its ceiling.
     pub buffer_limit_hits: u64,

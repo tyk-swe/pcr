@@ -138,8 +138,8 @@ pub struct ClientSummary {
     /// The hello's `legacy_version` field, frozen at 0x0303 by TLS 1.3.
     pub legacy_version: u16,
     /// The offered server name, present only when it passed validation.
-    /// Escaped the way the per-frame layer escapes wire text: printable ASCII
-    /// stays, every other byte becomes `\\DDD`.
+    /// Escaped the way the per-frame layer escapes wire text: graphic ASCII
+    /// stays, every other byte (space included) becomes `\\DDD`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sni: Option<String>,
     /// The raw `host_name` bytes, retained whenever the entry was present so
@@ -609,6 +609,13 @@ impl Live {
                 };
                 if self.alerts.len() < MAX_ALERTS {
                     self.alerts.push(alert);
+                } else if alert.level == ALERT_LEVEL_FATAL {
+                    // The alert that ends the session is always in the record,
+                    // so a status of `alert` names the alert it reports; the
+                    // warning it displaces is counted instead.
+                    self.alerts.pop();
+                    self.alerts.push(alert);
+                    self.alerts_dropped = self.alerts_dropped.saturating_add(1);
                 } else {
                     // A peer can warn as often as it likes, so the ceiling is
                     // what keeps the record finite; the rest are counted.

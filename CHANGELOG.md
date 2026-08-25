@@ -9,19 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `packetcraftr tls <CAPTURE>` assembles TLS handshake sessions from a capture
-  file, joining each ClientHello to its ServerHello across TCP segmentation and
-  reporting SNI, ALPN, offered and selected parameters, JA3/JA3S/JA4, alerts,
-  handshake RTT, frame range, and a status of `complete`, `client_only`,
-  `retry`, `alert`, `malformed`, `gap`, or `truncated`. Sessions are selected
-  after assembly by `--stream`, `--sni`, `--server-port`, and a repeatable
-  `--status`; text prints one `key=value` line per session and never leaves a
-  session out, and NDJSON streams each session as it completes.
-  `--max-tls-sessions` bounds the conversations tracked at once and the
-  sessions the JSON document holds, and `sessions_omitted` counts what that
-  document left out. A session lists at most 32 alerts and reports the rest as
-  `alerts_dropped`. `handshake_rtt_ms` is signed: a negative value means the
-  ServerHello frame is timestamped before the ClientHello frame.
+- `packetcraftr tls <CAPTURE>` assembles TLS handshake sessions from a
+  capture file, joining each ClientHello to its ServerHello across TCP
+  segmentation and reporting SNI, ALPN, offered and selected parameters,
+  JA3/JA3S/JA4, alerts, handshake RTT, frame range, whether the ClientHello
+  carried an encrypted-client-hello extension and its SNI is therefore the
+  outer name, and a status of `complete`, `client_only`, `retry`, `alert`,
+  `malformed`, `gap`, or `truncated`. Sessions are selected after assembly
+  by `--stream`, `--sni`, `--server-port`, and a repeatable `--status`; text
+  prints one `key=value` line per session and never leaves a session out,
+  and NDJSON streams each session as it completes. `--max-tls-sessions`
+  bounds the conversations tracked at once and the sessions the JSON
+  document holds, and `sessions_omitted` counts what that document left out.
+  `--max-tls-buffer-bytes` bounds the handshake bytes buffered across every
+  tracked conversation. A session lists at most 32 alerts and reports the
+  rest as `alerts_dropped`. `handshake_rtt_ms` is signed: a negative value
+  means the ServerHello frame is timestamped before the ClientHello frame.
 - A decode-only `tls` layer (aliased `ssl`) bound to TCP ports 443, 465, 636,
   853, 993, 995, and 8443, with record and handshake fields, SNI, ALPN, offered
   and selected parameters, JA3, and JA4 available to display filters.
@@ -34,8 +37,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `packetcraftr_core::protocol::builtin::{registry_with, registry_with_tls_ports, TLS_TCP_PORTS}`
   build a registry with extra TLS ports and name the well-known ones,
   `packetcraftr_core::registry::Registry::parent_bindings` reports what a
-  protocol is bound under, `packetcraftr_core::analysis::tls` holds session
-  assembly, and `packetcraftr::output::tls` holds its serialized shape.
+  protocol is bound under, `packetcraftr_core::protocol::application::tls`
+  holds the record and handshake parser, the model types, and the JA3/JA3S/JA4
+  functions, `packetcraftr_core::analysis::tls` holds session assembly,
+  `packetcraftr::output::tls` holds its serialized shape, and
+  `packetcraftr::output::protocols::Binding` is the type the new `bindings`
+  field is made of.
 - `examples/captures/tls-handshake.pcapng`, a checked-in eight-frame TLS 1.3
   handshake over RFC 5737 addresses, so the `tls` examples are runnable from a
   fresh clone.
@@ -56,7 +63,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `output::contract::Command` gained a `Tls` variant, which changes the
   exhaustive match of any Rust caller. Bytes that do not look like a TLS record
   stay `raw` with no diagnostics, and `build(dissect(x)) == x` still holds for
-  every frame on a bound port.
+  every frame on a bound port. `packetcraftr_core::semantics::BuiltinProtocol`
+  gained a `Tls` variant for the same reason, which breaks an external
+  exhaustive match the same way.
 - **Breaking:** `output::protocols::Detail::new` takes the parent bindings as a
   third argument, and `output::protocols::Detail` gained a public `bindings`
   field.

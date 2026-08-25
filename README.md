@@ -52,9 +52,15 @@ tls sessions=1 selected=1 omitted=0 evicted=0 complete=1 client_only=0 retry=0 a
 ```
 
 One `key=value` line per session, so `grep sni=` and `sort | uniq -c` work.
-`--output json` and `--output ndjson` carry the same record with numeric code
-points plus `*_name` companions; NDJSON streams each session as it completes
-and is the format for large captures.
+`--output json` and `--output ndjson` carry the same session record with
+numeric code points, and a `*_name` companion for the negotiated version,
+cipher suite, key-share group, and alert description; the offered lists stay
+numeric. JSON emits one document holding the sessions and a summary, while
+NDJSON streams each session as it completes and is the format for large
+captures.
+
+Sessions are picked after assembly, not by a frame filter: `--stream`,
+`--sni`, `--server-port`, and a repeatable `--status`.
 
 Coming from tshark:
 
@@ -63,10 +69,11 @@ Coming from tshark:
 | `-Y 'tls.handshake.extensions_server_name'` | `tls capture.pcapng` (assembled, not per frame) |
 | `-Y 'tls.handshake.extensions_server_name == "x"'` | `tls capture.pcapng --sni x` |
 | `-Y 'tls.handshake.type == 1'` | `tls capture.pcapng` (every session carries its client) |
-| `-d tcp.port==4433,tls` | `--tls-port 4433` on `tls`, `read`, or `dissect` |
+| `-d tcp.port==4433,tls` | `--tls-port 4433` on `read`, `dissect`, or `tls`; session assembly already reads every TCP stream |
 | `-z follow,tls,ascii,0` | `follow capture.pcapng --stream tcp:0` (raw stream bytes, not decrypted TLS payload) |
 | `-T fields -e tls.handshake.ja3` | `--output json tls capture.pcapng` → `.result.sessions[].client.ja3` |
 | `-e tls.handshake.ciphersuite` | `.result.sessions[].server.cipher_suite` and `.cipher_suite_name` |
+| `-e tls.handshake.ja3s` | `.result.sessions[].server.ja3s` (JSON and NDJSON only) |
 | `-Y 'tcp.stream == 12 && tls'` | `tls capture.pcapng --stream tcp:12` |
 
 Per-frame and assembled are different views on purpose: `read --filter 'tls.sni

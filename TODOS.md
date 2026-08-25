@@ -22,6 +22,19 @@ them. Each is a candidate, not a commitment.
   fourth collector says what the trait should be.
 - `--columns` field selection for text output, in the shape of `tshark -T
   fields -e`.
+- Partial hello reporting: keep what parsed before a failing extension. Today
+  one bad optional extension makes the whole hello `malformed` and hides the
+  fingerprint that did parse, and a first message shaped like a ServerHello
+  poisons the role election for the stream.
+- Hot-path allocation work, with a benchmark first so the win is measured:
+  borrow record bodies in the per-frame codec instead of one
+  `Bytes::copy_from_slice` per record, and expose TCP flags on `FrameRecord` so
+  collectors stop re-walking the layer stack for every frame.
+- A typed captured-direction enum in `analysis::tls::session`, in place of the
+  `usize` index the buffers are keyed by.
+- A published full-ClientHello JA3 MD5 and JA4 hash vector taken from a real
+  capture, so the fingerprints are checked against something other than our own
+  builder.
 
 ## Distribution
 

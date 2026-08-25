@@ -62,9 +62,9 @@ Coming from tshark:
 | --- | --- |
 | `-Y 'tls.handshake.extensions_server_name'` | `tls capture.pcapng` (assembled, not per frame) |
 | `-Y 'tls.handshake.extensions_server_name == "x"'` | `tls capture.pcapng --sni x` |
-| `-Y 'tls.handshake.type == 1'` | `tls capture.pcapng --status client_only` |
+| `-Y 'tls.handshake.type == 1'` | `tls capture.pcapng` (every session carries its client) |
 | `-d tcp.port==4433,tls` | `--tls-port 4433` on `tls`, `read`, or `dissect` |
-| `-z follow,tls,ascii,0` | `follow capture.pcapng --stream tcp:0` |
+| `-z follow,tls,ascii,0` | `follow capture.pcapng --stream tcp:0` (raw stream bytes, not decrypted TLS payload) |
 | `-T fields -e tls.handshake.ja3` | `--output json tls capture.pcapng` → `.result.sessions[].client.ja3` |
 | `-e tls.handshake.ciphersuite` | `.result.sessions[].server.cipher_suite` and `.cipher_suite_name` |
 | `-Y 'tcp.stream == 12 && tls'` | `tls capture.pcapng --stream tcp:12` |

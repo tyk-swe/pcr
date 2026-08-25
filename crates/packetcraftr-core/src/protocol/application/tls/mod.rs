@@ -26,6 +26,21 @@ pub mod model;
 pub mod names;
 pub mod parse;
 
+pub use codec::escape_wire_text;
 pub use fingerprint::{Ja3, Transport, is_grease, ja3, ja3s, ja4};
 pub use model::{ClientHello, Extension, Handshake, Record, ServerHello};
 pub use parse::{Outcome, looks_like_record_start, parse_handshake, parse_record};
+
+/// Renders bytes as lowercase hexadecimal, two characters per byte.
+///
+/// Shared by the fingerprint digests and the codec's raw-byte fields so both
+/// spell a digest the same way.
+fn hex(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+
+    let mut text = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        let _ = write!(text, "{byte:02x}");
+    }
+    text
+}

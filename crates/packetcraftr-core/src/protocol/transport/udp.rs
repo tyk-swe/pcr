@@ -11,7 +11,6 @@ use crate::{
     diagnostic::{Diagnostic, UDP_CHECKSUM},
     field::{FieldValue, WireValue},
     layer::{Layer, reflective_layer},
-    registry::Discriminator,
     semantics::BuiltinProtocol,
 };
 
@@ -21,6 +20,7 @@ use super::super::common::{
     wrong_layer,
 };
 use super::super::network::resolve_envelope;
+use super::ports::child_discriminators;
 
 const UDP_LEN: usize = 8;
 const DNS_HEADER_LEN: usize = 12;
@@ -28,29 +28,16 @@ const DNS_PORT: u16 = 53;
 const DNS_RESPONSE_FLAG: u16 = 0x8000;
 const DNS_RESERVED_Z_FLAG: u16 = 0x0040;
 
-/// Child discriminators in dissection order. The destination port normally
-/// wins, but a structurally plausible DNS response gives source port 53
-/// precedence so replies to a client port that is also registered for a
-/// tunnel still dissect as DNS. A zero port never shadows the raw fallback.
-fn child_discriminators(
-    source_port: u16,
-    destination_port: u16,
-    payload: &[u8],
-) -> Vec<Discriminator> {
-    let ports = if dns_response_prefers_source_port(source_port, payload) {
+/// The ordered port pair UDP offers its children. The destination port
+/// normally wins, but a structurally plausible DNS response gives source port
+/// 53 precedence so replies to a client port that is also registered for a
+/// tunnel still dissect as DNS.
+fn preferred_ports(source_port: u16, destination_port: u16, payload: &[u8]) -> [u16; 2] {
+    if dns_response_prefers_source_port(source_port, payload) {
         [source_port, destination_port]
     } else {
         [destination_port, source_port]
-    };
-    let mut next = Vec::with_capacity(3);
-    for port in ports {
-        let discriminator = Discriminator(u64::from(port));
-        if port != 0 && !next.contains(&discriminator) {
-            next.push(discriminator);
-        }
     }
-    next.push(Discriminator(0));
-    next
 }
 
 fn dns_response_prefers_source_port(source_port: u16, payload: &[u8]) -> bool {
@@ -235,7 +222,11 @@ impl LayerCodec for UdpCodec {
             next: if payload_len == 0 {
                 Vec::new()
             } else {
-                child_discriminators(source_port, destination_port, &input[UDP_LEN..length])
+                child_discriminators(preferred_ports(
+                    source_port,
+                    destination_port,
+                    &input[UDP_LEN..length],
+                ))
             },
             fields: udp_layout(),
             diagnostics,
@@ -274,10 +265,13 @@ fn validate_child_selection(
     ) {
         return Ok(diagnostics);
     }
-    let Some(selected) = child_discriminators(layer.source_port, layer.destination_port, payload)
-        .into_iter()
-        .find_map(|discriminator| context.registry.child_for("udp", discriminator))
-    else {
+    let Some(selected) = child_discriminators(preferred_ports(
+        layer.source_port,
+        layer.destination_port,
+        payload,
+    ))
+    .into_iter()
+    .find_map(|discriminator| context.registry.child_for("udp", discriminator)) else {
         return Ok(diagnostics);
     };
     if *selected == *child.protocol_id() {

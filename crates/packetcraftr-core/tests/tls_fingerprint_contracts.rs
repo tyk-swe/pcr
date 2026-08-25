@@ -120,5 +120,10 @@ fn every_vector_states_where_its_expectation_came_from() {
             "{}: a vector without a source is not a vector",
             vector.name
         );
+        assert!(
+            vector.expected_ja3_raw.is_some() || vector.expected_ja4_a.is_some(),
+            "{}: a vector that asserts nothing is not a vector",
+            vector.name
+        );
     }
 }

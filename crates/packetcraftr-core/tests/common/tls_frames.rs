@@ -7,6 +7,10 @@
 //! field so a test can say exactly which byte it is exercising. Host names
 //! are documentation names and the endpoints are RFC 5737 addresses.
 
+use packetcraftr_core::protocol::application::tls::model::extension::{
+    ALPN, ENCRYPTED_CLIENT_HELLO, KEY_SHARE, SERVER_NAME, SIGNATURE_ALGORITHMS, SUPPORTED_GROUPS,
+    SUPPORTED_VERSIONS,
+};
 use packetcraftr_core::protocol::application::tls::model::{
     CONTENT_TYPE_ALERT, CONTENT_TYPE_APPLICATION_DATA, CONTENT_TYPE_CHANGE_CIPHER_SPEC,
     CONTENT_TYPE_HANDSHAKE, HANDSHAKE_CLIENT_HELLO, HANDSHAKE_SERVER_HELLO,
@@ -155,7 +159,7 @@ pub(crate) fn client_hello(spec: &ClientHelloSpec) -> Vec<u8> {
     if let Some(name) = &spec.sni {
         let mut entry = vec![0];
         entry.extend_from_slice(&vector16(name.as_bytes()));
-        extensions.extend_from_slice(&extension(0x0000, &vector16(&entry)));
+        extensions.extend_from_slice(&extension(SERVER_NAME, &vector16(&entry)));
     }
     if !spec.alpn.is_empty() {
         let list = spec
@@ -163,23 +167,23 @@ pub(crate) fn client_hello(spec: &ClientHelloSpec) -> Vec<u8> {
             .iter()
             .flat_map(|protocol| vector8(protocol.as_bytes()))
             .collect::<Vec<_>>();
-        extensions.extend_from_slice(&extension(0x0010, &vector16(&list)));
+        extensions.extend_from_slice(&extension(ALPN, &vector16(&list)));
     }
     if !spec.supported_groups.is_empty() {
         extensions.extend_from_slice(&extension(
-            0x000a,
+            SUPPORTED_GROUPS,
             &vector16(&u16_list(&spec.supported_groups)),
         ));
     }
     if !spec.signature_algorithms.is_empty() {
         extensions.extend_from_slice(&extension(
-            0x000d,
+            SIGNATURE_ALGORITHMS,
             &vector16(&u16_list(&spec.signature_algorithms)),
         ));
     }
     if !spec.supported_versions.is_empty() {
         extensions.extend_from_slice(&extension(
-            0x002b,
+            SUPPORTED_VERSIONS,
             &vector8(&u16_list(&spec.supported_versions)),
         ));
     }
@@ -193,10 +197,10 @@ pub(crate) fn client_hello(spec: &ClientHelloSpec) -> Vec<u8> {
                 entry
             })
             .collect::<Vec<_>>();
-        extensions.extend_from_slice(&extension(0x0033, &vector16(&shares)));
+        extensions.extend_from_slice(&extension(KEY_SHARE, &vector16(&shares)));
     }
     if spec.encrypted_client_hello {
-        extensions.extend_from_slice(&extension(0xfe0d, &[0x00, 0x01, 0x02]));
+        extensions.extend_from_slice(&extension(ENCRYPTED_CLIENT_HELLO, &[0x00, 0x01, 0x02]));
     }
     if spec.padding > 0 {
         extensions.extend_from_slice(&extension(EXTENSION_PADDING, &vec![0; spec.padding]));
@@ -219,15 +223,15 @@ pub(crate) fn server_hello(spec: &ServerHelloSpec) -> Vec<u8> {
 
     let mut extensions = Vec::new();
     if let Some(version) = spec.selected_version {
-        extensions.extend_from_slice(&extension(0x002b, &version.to_be_bytes()));
+        extensions.extend_from_slice(&extension(SUPPORTED_VERSIONS, &version.to_be_bytes()));
     }
     if let Some(group) = spec.key_share_group {
         let mut share = group.to_be_bytes().to_vec();
         share.extend_from_slice(&vector16(&[0x88; 32]));
-        extensions.extend_from_slice(&extension(0x0033, &share));
+        extensions.extend_from_slice(&extension(KEY_SHARE, &share));
     }
     if let Some(protocol) = &spec.alpn {
-        extensions.extend_from_slice(&extension(0x0010, &vector16(&vector8(protocol.as_bytes()))));
+        extensions.extend_from_slice(&extension(ALPN, &vector16(&vector8(protocol.as_bytes()))));
     }
     body.extend_from_slice(&vector16(&extensions));
     handshake(HANDSHAKE_SERVER_HELLO, &body)

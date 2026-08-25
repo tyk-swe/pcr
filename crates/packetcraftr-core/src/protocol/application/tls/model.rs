@@ -163,8 +163,10 @@ pub struct ClientHello {
     pub sni_raw: Option<Bytes>,
     /// Whether a `server_name` extension was present at all, valid or not.
     pub has_sni_extension: bool,
-    /// ALPN protocol names in offer order.
+    /// ALPN protocol names in offer order, lossily decoded for display.
     pub alpn: Vec<String>,
+    /// The same ALPN protocol names as raw wire bytes, in the same order.
+    pub alpn_raw: Vec<Bytes>,
     /// `supported_versions` entries, GREASE included.
     pub supported_versions: Vec<u16>,
     /// `supported_groups` entries, GREASE included.
@@ -203,9 +205,12 @@ pub struct ServerHello {
     pub compression: u8,
     /// Extensions in the order the server sent them.
     pub extensions: Vec<Extension>,
-    /// The selected ALPN protocol. TLS 1.3 moves ALPN into the encrypted
-    /// extensions, so this is populated for TLS 1.2 and below only.
+    /// The selected ALPN protocol, lossily decoded for display. TLS 1.3 moves
+    /// ALPN into the encrypted extensions, so this is populated for TLS 1.2
+    /// and below only.
     pub alpn: Option<String>,
+    /// The same selected ALPN protocol as raw wire bytes.
+    pub alpn_raw: Option<Bytes>,
     /// The group selected by `key_share`.
     pub key_share_group: Option<u16>,
     /// Whether the random equals [`HELLO_RETRY_REQUEST_RANDOM`].

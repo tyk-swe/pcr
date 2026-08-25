@@ -37,6 +37,7 @@ use std::fmt::Write as _;
 use md5::Md5;
 use sha2::{Digest as _, Sha256};
 
+use super::hex;
 use super::model::{ClientHello, ServerHello, extension};
 
 /// Hash length, in hex characters, of the JA4 `b` and `c` components.
@@ -106,19 +107,19 @@ pub fn ja3(hello: &ClientHello) -> Ja3 {
     let mut raw = String::new();
     let _ = write!(raw, "{}", hello.legacy_version);
     raw.push(',');
-    push_decimal_u16(
+    push_decimal(
         &mut raw,
         without_grease(hello.cipher_suites.iter().copied()),
     );
     raw.push(',');
-    push_decimal_u16(&mut raw, without_grease(hello.extension_kinds()));
+    push_decimal(&mut raw, without_grease(hello.extension_kinds()));
     raw.push(',');
-    push_decimal_u16(
+    push_decimal(
         &mut raw,
         without_grease(hello.supported_groups.iter().copied()),
     );
     raw.push(',');
-    push_decimal_u8(&mut raw, hello.ec_point_formats.iter().copied());
+    push_decimal(&mut raw, hello.ec_point_formats.iter().copied());
     Ja3::new(raw)
 }
 
@@ -131,7 +132,7 @@ pub fn ja3(hello: &ClientHello) -> Ja3 {
 pub fn ja3s(hello: &ServerHello) -> Ja3 {
     let mut raw = String::new();
     let _ = write!(raw, "{},{},", hello.legacy_version, hello.cipher_suite);
-    push_decimal_u16(&mut raw, without_grease(hello.extension_kinds()));
+    push_decimal(&mut raw, without_grease(hello.extension_kinds()));
     Ja3::new(raw)
 }
 
@@ -210,24 +211,36 @@ fn version_code(version: u16) -> &'static str {
     }
 }
 
-/// Returns the two ALPN characters: `00` without ALPN, the first and last
-/// byte of the first offered protocol when both are alphanumeric ASCII, and
-/// `99` otherwise.
+/// Returns the two ALPN characters: `00` without ALPN, and otherwise the
+/// first and last byte of the first offered protocol.
+///
+/// When either of those bytes is not alphanumeric ASCII, JA4 substitutes the
+/// hexadecimal form: the first character of the first byte's two-digit hex,
+/// then the last character of the last byte's two-digit hex. A protocol of
+/// `0x01 0x02` therefore reads `02`, and a single `0xab` byte reads `ab`.
+/// The raw wire bytes are used, so a protocol name that is not UTF-8 still
+/// fingerprints as it was sent.
 fn ja4_alpn(hello: &ClientHello) -> String {
-    let Some(first) = hello.alpn.first() else {
+    let Some(first) = hello.alpn_raw.first() else {
         return "00".to_owned();
     };
-    let bytes = first.as_bytes();
-    let (Some(head), Some(tail)) = (bytes.first(), bytes.last()) else {
+    let (Some(head), Some(tail)) = (first.first(), first.last()) else {
         return "00".to_owned();
     };
-    if !head.is_ascii_alphanumeric() || !tail.is_ascii_alphanumeric() {
-        return "99".to_owned();
-    }
     let mut code = String::with_capacity(2);
-    code.push(char::from(*head));
-    code.push(char::from(*tail));
+    if head.is_ascii_alphanumeric() && tail.is_ascii_alphanumeric() {
+        code.push(char::from(*head));
+        code.push(char::from(*tail));
+    } else {
+        code.push(hex_digit(head >> 4));
+        code.push(hex_digit(tail & 0x0f));
+    }
     code
+}
+
+/// Renders one nibble as a lowercase hexadecimal character.
+fn hex_digit(nibble: u8) -> char {
+    char::from_digit(u32::from(nibble & 0x0f), 16).unwrap_or('0')
 }
 
 fn without_grease(values: impl Iterator<Item = u16>) -> impl Iterator<Item = u16> {
@@ -252,30 +265,13 @@ fn hex_list(values: &[u16]) -> String {
     text
 }
 
-fn push_decimal_u16(text: &mut String, values: impl Iterator<Item = u16>) {
+fn push_decimal<T: std::fmt::Display>(text: &mut String, values: impl Iterator<Item = T>) {
     for (index, value) in values.enumerate() {
         if index != 0 {
             text.push('-');
         }
         let _ = write!(text, "{value}");
     }
-}
-
-fn push_decimal_u8(text: &mut String, values: impl Iterator<Item = u8>) {
-    for (index, value) in values.enumerate() {
-        if index != 0 {
-            text.push('-');
-        }
-        let _ = write!(text, "{value}");
-    }
-}
-
-fn hex(bytes: &[u8]) -> String {
-    let mut text = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        let _ = write!(text, "{byte:02x}");
-    }
-    text
 }
 
 #[cfg(test)]
@@ -284,8 +280,9 @@ mod tests {
     use md5::Md5;
     use sha2::{Digest as _, Sha256};
 
+    use super::super::hex;
     use super::super::model::{ClientHello, Extension, ServerHello};
-    use super::{Transport, hex, is_grease, ja3, ja3s, ja4};
+    use super::{Transport, is_grease, ja3, ja3s, ja4};
 
     fn extensions(kinds: &[u16]) -> Vec<Extension> {
         kinds
@@ -306,6 +303,7 @@ mod tests {
             sni_raw: Some(Bytes::from_static(b"api.example.test")),
             has_sni_extension: true,
             alpn: vec!["h2".to_owned()],
+            alpn_raw: vec![Bytes::from_static(b"h2")],
             supported_versions: vec![0x0304, 0x0303],
             supported_groups: vec![0x001d],
             signature_algorithms: vec![0x0403, 0x0804],
@@ -422,17 +420,54 @@ mod tests {
     #[test]
     fn ja4_alpn_uses_the_first_and_last_character_of_the_first_protocol() {
         let mut client = hello();
-        client.alpn = vec!["http/1.1".to_owned(), "h2".to_owned()];
+        client.alpn_raw = vec![Bytes::from_static(b"http/1.1"), Bytes::from_static(b"h2")];
         assert_eq!(&ja4(&client, Transport::Tcp)[8..10], "h1");
 
-        client.alpn = vec!["h".to_owned()];
+        client.alpn_raw = vec![Bytes::from_static(b"h")];
         assert_eq!(&ja4(&client, Transport::Tcp)[8..10], "hh");
 
-        client.alpn = vec!["\u{fffd}2".to_owned()];
-        assert_eq!(&ja4(&client, Transport::Tcp)[8..10], "99");
-
-        client.alpn.clear();
+        client.alpn_raw.clear();
         assert_eq!(&ja4(&client, Transport::Tcp)[8..10], "00");
+    }
+
+    #[test]
+    fn ja4_alpn_falls_back_to_hex_characters_for_non_alphanumeric_ends() {
+        let mut client = hello();
+        client.alpn_raw = vec![Bytes::from_static(&[0x01, 0x02])];
+        assert_eq!(&ja4(&client, Transport::Tcp)[8..10], "02");
+
+        client.alpn_raw = vec![Bytes::from_static(&[0xab])];
+        assert_eq!(&ja4(&client, Transport::Tcp)[8..10], "ab");
+
+        // Only one end has to break the rule for the hex form to apply.
+        client.alpn_raw = vec![Bytes::from_static(b"h2\x00")];
+        assert_eq!(&ja4(&client, Transport::Tcp)[8..10], "60");
+
+        client.alpn_raw = vec![Bytes::from_static(b"\xffh2")];
+        assert_eq!(&ja4(&client, Transport::Tcp)[8..10], "f2");
+    }
+
+    #[test]
+    fn ja4_reads_the_raw_alpn_bytes_rather_than_their_lossy_text() {
+        let mut client = hello();
+        // The text form of these bytes is the replacement character, whose
+        // first byte is not what the wire carried.
+        client.alpn = vec!["\u{fffd}\u{fffd}".to_owned()];
+        client.alpn_raw = vec![Bytes::from_static(&[0xc3, 0x28])];
+        assert_eq!(&ja4(&client, Transport::Tcp)[8..10], "c8");
+    }
+
+    #[test]
+    fn ja4_reports_the_fallback_version_code_for_unregistered_versions() {
+        let mut client = hello();
+        client.supported_versions = vec![0xfefe];
+        assert_eq!(&ja4(&client, Transport::Tcp)[1..3], "00");
+
+        client.supported_versions = vec![0x0200];
+        assert_eq!(&ja4(&client, Transport::Tcp)[1..3], "s2");
+
+        client.supported_versions = vec![0x0100];
+        assert_eq!(&ja4(&client, Transport::Tcp)[1..3], "s1");
     }
 
     #[test]

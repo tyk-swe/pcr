@@ -12,7 +12,6 @@ use crate::{
     diagnostic::{Diagnostic, TCP_CHECKSUM},
     field::{FieldValue, WireValue},
     layer::{Layer, reflective_layer},
-    registry::Discriminator,
 };
 
 use super::super::common::{
@@ -20,25 +19,9 @@ use super::super::common::{
     resolve_u16, transport_checksum, transport_checksum_parts, truncated, wrong_layer,
 };
 use super::super::network::resolve_envelope;
+use super::ports::child_discriminators;
 
 const TCP_MIN_LEN: usize = 20;
-
-/// Child discriminators in dissection order, mirroring UDP: the destination
-/// port first, then the source port, then the zero fallback that reaches
-/// `raw`. Unlike UDP there is no content preference between the two endpoints;
-/// a TLS segment looks the same in both directions and the codec gates on the
-/// payload itself. A zero port never shadows the raw fallback.
-fn child_discriminators(source_port: u16, destination_port: u16) -> Vec<Discriminator> {
-    let mut next = Vec::with_capacity(3);
-    for port in [destination_port, source_port] {
-        let discriminator = Discriminator(u64::from(port));
-        if port != 0 && !next.contains(&discriminator) {
-            next.push(discriminator);
-        }
-    }
-    next.push(Discriminator(0));
-    next
-}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Tcp {
@@ -240,10 +223,12 @@ impl LayerCodec for TcpCodec {
             );
         }
         let payload_len = input.len() - header_len;
+        let source_port = u16::from_be_bytes([input[0], input[1]]);
+        let destination_port = u16::from_be_bytes([input[2], input[3]]);
         Ok(DecodedLayerValue {
             layer: Box::new(Tcp {
-                source_port: u16::from_be_bytes([input[0], input[1]]),
-                destination_port: u16::from_be_bytes([input[2], input[3]]),
+                source_port,
+                destination_port,
                 sequence: u32::from_be_bytes([input[4], input[5], input[6], input[7]]),
                 acknowledgment: u32::from_be_bytes([input[8], input[9], input[10], input[11]]),
                 reserved_bits,
@@ -257,14 +242,13 @@ impl LayerCodec for TcpCodec {
             payload_len,
             // Both endpoints are offered before the raw fallback, exactly as
             // UDP does, so a payload protocol bound to a well-known TCP port
-            // dissects in either direction.
+            // dissects in either direction. Unlike UDP there is no content
+            // preference between them: a TLS segment looks the same in both
+            // directions and the codec gates on the payload itself.
             next: if payload_len == 0 {
                 Vec::new()
             } else {
-                child_discriminators(
-                    u16::from_be_bytes([input[0], input[1]]),
-                    u16::from_be_bytes([input[2], input[3]]),
-                )
+                child_discriminators([destination_port, source_port])
             },
             fields: tcp_layout(header_len),
             diagnostics,
@@ -285,5 +269,33 @@ impl LayerCodec for TcpCodec {
                 &[("sport", "source_port"), ("dport", "destination_port")],
             )?,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::child_discriminators;
+    use crate::registry::Discriminator;
+
+    fn ports(source_port: u16, destination_port: u16) -> Vec<u64> {
+        child_discriminators([destination_port, source_port])
+            .into_iter()
+            .map(|Discriminator(value)| value)
+            .collect()
+    }
+
+    #[test]
+    fn the_destination_port_is_offered_before_the_source_port_and_the_fallback() {
+        assert_eq!(ports(40_000, 443), vec![443, 40_000, 0]);
+    }
+
+    #[test]
+    fn a_repeated_port_is_offered_once() {
+        assert_eq!(ports(443, 443), vec![443, 0]);
+    }
+
+    #[test]
+    fn a_zero_port_never_shadows_the_raw_fallback() {
+        assert_eq!(ports(0, 0), vec![0]);
     }
 }

@@ -17,7 +17,8 @@ use bytes::Bytes;
 
 use super::super::super::common::invalid;
 use super::model::{
-    ClientHello, Extension, HANDSHAKE_CLIENT_HELLO, HANDSHAKE_HEADER_LEN, HANDSHAKE_SERVER_HELLO,
+    CONTENT_TYPE_APPLICATION_DATA, CONTENT_TYPE_CHANGE_CIPHER_SPEC, ClientHello, Extension,
+    HANDSHAKE_CLIENT_HELLO, HANDSHAKE_HEADER_LEN, HANDSHAKE_SERVER_HELLO,
     HELLO_RETRY_REQUEST_RANDOM, Handshake, MAX_ALPN, MAX_CIPHER_SUITES, MAX_EXTENSION_LEN,
     MAX_EXTENSIONS, MAX_HANDSHAKE_BODY, MAX_LEGACY_VERSION, MAX_RECORD_BODY, MAX_SESSION_ID_LEN,
     MAX_SNI_LEN, MIN_LEGACY_VERSION, RECORD_HEADER_LEN, Record, ServerHello, extension,
@@ -51,15 +52,6 @@ impl<T> Outcome<T> {
     #[must_use]
     pub fn is_complete(&self) -> bool {
         matches!(self, Self::Complete { .. })
-    }
-
-    /// Returns the parsed item, discarding the consumed length.
-    #[must_use]
-    pub fn into_value(self) -> Option<T> {
-        match self {
-            Self::Complete { value, .. } => Some(value),
-            Self::NeedMore { .. } | Self::Malformed(_) => None,
-        }
     }
 }
 
@@ -167,6 +159,7 @@ pub fn parse_client_hello(body: &[u8]) -> Result<ClientHello, crate::codec::Erro
     }
     let extensions = reader.vector16()?;
     parse_client_extensions(extensions, &mut hello)?;
+    trailing_bytes(&reader, "ClientHello")?;
     Ok(hello)
 }
 
@@ -188,7 +181,22 @@ pub fn parse_server_hello(body: &[u8]) -> Result<ServerHello, crate::codec::Erro
     }
     let extensions = reader.vector16()?;
     parse_server_extensions(extensions, &mut hello)?;
+    trailing_bytes(&reader, "ServerHello")?;
     Ok(hello)
+}
+
+/// Rejects a hello that carries bytes after its extension block: the message
+/// length is declared, so anything left over is not a hello this parser read
+/// correctly.
+fn trailing_bytes(reader: &Reader<'_>, what: &str) -> Result<(), Error> {
+    let remaining = reader.remaining();
+    if remaining == 0 {
+        return Ok(());
+    }
+    Err(invalid(
+        "tls",
+        format!("{what} has {remaining} trailing bytes after its extension block"),
+    ))
 }
 
 struct RecordHeader {
@@ -199,17 +207,23 @@ struct RecordHeader {
 
 fn record_header(header: &[u8; RECORD_HEADER_LEN]) -> Result<RecordHeader, Error> {
     let content_type = header[0];
-    if !(20..=23).contains(&content_type) {
+    if !(CONTENT_TYPE_CHANGE_CIPHER_SPEC..=CONTENT_TYPE_APPLICATION_DATA).contains(&content_type) {
         return Err(invalid(
             "tls",
-            format!("record content type {content_type} is outside 20..=23"),
+            format!(
+                "record content type {content_type} is outside \
+                 {CONTENT_TYPE_CHANGE_CIPHER_SPEC}..={CONTENT_TYPE_APPLICATION_DATA}"
+            ),
         ));
     }
     let legacy_version = u16::from_be_bytes([header[1], header[2]]);
     if !(MIN_LEGACY_VERSION..=MAX_LEGACY_VERSION).contains(&legacy_version) {
         return Err(invalid(
             "tls",
-            format!("record version {legacy_version:#06x} is outside 0x0300..=0x0304"),
+            format!(
+                "record version {legacy_version:#06x} is outside \
+                 {MIN_LEGACY_VERSION:#06x}..={MAX_LEGACY_VERSION:#06x}"
+            ),
         ));
     }
     let length = usize::from(u16::from_be_bytes([header[3], header[4]]));
@@ -291,7 +305,12 @@ fn apply_client_extension(kind: u16, body: &[u8], hello: &mut ClientHello) -> Re
     match kind {
         extension::SERVER_NAME => parse_server_name(body, hello),
         extension::ALPN => {
-            hello.alpn = parse_alpn(body)?;
+            hello.alpn_raw = parse_alpn(body)?;
+            hello.alpn = hello
+                .alpn_raw
+                .iter()
+                .map(|protocol| String::from_utf8_lossy(protocol).into_owned())
+                .collect();
             Ok(())
         }
         extension::SUPPORTED_VERSIONS => {
@@ -335,7 +354,11 @@ fn apply_server_extension(kind: u16, body: &[u8], hello: &mut ServerHello) -> Re
             Ok(())
         }
         extension::ALPN => {
-            hello.alpn = parse_alpn(body)?.into_iter().next();
+            hello.alpn_raw = parse_alpn(body)?.into_iter().next();
+            hello.alpn = hello
+                .alpn_raw
+                .as_ref()
+                .map(|protocol| String::from_utf8_lossy(protocol).into_owned());
             Ok(())
         }
         _ => Ok(()),
@@ -384,7 +407,9 @@ fn validated_host_name(name: &[u8]) -> Option<String> {
     Some(text.to_owned())
 }
 
-fn parse_alpn(body: &[u8]) -> Result<Vec<String>, Error> {
+/// Reads the ALPN protocol list as raw wire bytes. The text form is derived
+/// by the caller: JA4 reads the bytes, display reads the text.
+fn parse_alpn(body: &[u8]) -> Result<Vec<Bytes>, Error> {
     let mut reader = Reader::new(body);
     let mut list = Reader::new(reader.vector16()?);
     let mut protocols = Vec::new();
@@ -399,7 +424,7 @@ fn parse_alpn(body: &[u8]) -> Result<Vec<String>, Error> {
         if protocol.is_empty() {
             return Err(invalid("tls", "ALPN protocol name is empty"));
         }
-        protocols.push(String::from_utf8_lossy(protocol).into_owned());
+        protocols.push(Bytes::copy_from_slice(protocol));
     }
     Ok(protocols)
 }
@@ -472,7 +497,11 @@ impl<'a> Reader<'a> {
     }
 
     fn is_empty(&self) -> bool {
-        self.cursor >= self.input.len()
+        self.remaining() == 0
+    }
+
+    fn remaining(&self) -> usize {
+        self.input.len().saturating_sub(self.cursor)
     }
 
     fn take(&mut self, len: usize) -> Result<&'a [u8], Error> {
@@ -522,10 +551,10 @@ impl<'a> Reader<'a> {
 mod tests {
     use super::super::model::{
         CONTENT_TYPE_APPLICATION_DATA, CONTENT_TYPE_HANDSHAKE, HANDSHAKE_CLIENT_HELLO,
-        HANDSHAKE_SERVER_HELLO, HELLO_RETRY_REQUEST_RANDOM, Handshake, MAX_CIPHER_SUITES,
+        HANDSHAKE_SERVER_HELLO, HELLO_RETRY_REQUEST_RANDOM, Handshake, MAX_ALPN, MAX_CIPHER_SUITES,
         MAX_EXTENSION_LEN, MAX_EXTENSIONS, MAX_HANDSHAKE_BODY, MAX_RECORD_BODY, RECORD_HEADER_LEN,
     };
-    use super::{Outcome, looks_like_record_start, parse_handshake, parse_record};
+    use super::{Outcome, looks_like_record_start, parse_handshake, parse_record, u16_list};
 
     fn record(content_type: u8, version: u16, body: &[u8]) -> Vec<u8> {
         let mut bytes = vec![content_type];
@@ -1033,6 +1062,87 @@ mod tests {
         let body = client_hello_body(0x0303, &[], &[0x1301], &[]);
         let outcome = parse_handshake(&handshake_message(HANDSHAKE_CLIENT_HELLO, &body[..10]));
         assert!(matches!(outcome, Outcome::Malformed(_)));
+    }
+
+    #[test]
+    fn an_alpn_list_past_the_limit_is_malformed() {
+        let protocols = vec![&b"a"[..]; MAX_ALPN + 1];
+        let outcome = parse_handshake(&client_hello(&[alpn_extension(&protocols)]));
+        assert!(malformed_message(outcome).contains("ALPN list"));
+    }
+
+    #[test]
+    fn alpn_keeps_the_raw_bytes_of_a_name_that_is_not_utf8() {
+        let hello = parsed_client_hello(&[alpn_extension(&[b"\xffh2", b"h2"])]);
+        assert_eq!(
+            hello.alpn_raw.first().map(|raw| raw.as_ref()),
+            Some(&b"\xffh2"[..])
+        );
+        assert_eq!(hello.alpn_raw.len(), 2);
+        // The text form is lossy, which is why the raw bytes are kept.
+        assert_eq!(hello.alpn, vec!["\u{fffd}h2".to_owned(), "h2".to_owned()]);
+    }
+
+    #[test]
+    fn a_key_share_list_past_the_extension_limit_is_malformed() {
+        let mut list = Vec::new();
+        for index in 0..=MAX_EXTENSIONS {
+            let group = u16::try_from(index).expect("group index fits") + 0x0100;
+            list.extend_from_slice(&group.to_be_bytes());
+            list.extend_from_slice(&vector16(&[]));
+        }
+        let outcome = parse_handshake(&client_hello(&[extension(0x0033, &vector16(&list))]));
+        assert!(malformed_message(outcome).contains("key_share list"));
+    }
+
+    #[test]
+    fn a_server_name_list_reports_the_first_host_name_entry() {
+        let mut list = vec![9u8];
+        list.extend_from_slice(&vector16(b"not-a-host-name"));
+        list.push(0);
+        list.extend_from_slice(&vector16(b"api.example.test"));
+        let hello = parsed_client_hello(&[extension(0x0000, &vector16(&list))]);
+        assert_eq!(hello.sni.as_deref(), Some("api.example.test"));
+        assert_eq!(hello.sni_raw.as_deref(), Some(&b"api.example.test"[..]));
+    }
+
+    #[test]
+    fn a_u16_list_past_its_entry_cap_is_malformed() {
+        // The cap sits above what one extension body can carry, so it is
+        // asserted here directly rather than through a hello.
+        let limit = MAX_EXTENSION_LEN / 2;
+        let input = vec![0u8; (limit + 1) * 2];
+        let error = u16_list(&input, limit, "supported group")
+            .expect_err("a list past the cap is rejected");
+        assert!(
+            error.to_string().contains("supported group list"),
+            "{error}"
+        );
+        assert!(u16_list(&input[..limit * 2], limit, "supported group").is_ok());
+    }
+
+    #[test]
+    fn bytes_after_a_client_hello_extension_block_are_malformed() {
+        let mut body = client_hello_body(0x0303, &[], &[0x1301], &[]);
+        body.extend_from_slice(&[0xde, 0xad, 0xbe, 0xef]);
+        let outcome = parse_handshake(&handshake_message(HANDSHAKE_CLIENT_HELLO, &body));
+        let message = malformed_message(outcome);
+        assert!(
+            message.contains("ClientHello has 4 trailing bytes"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn bytes_after_a_server_hello_extension_block_are_malformed() {
+        let mut body = server_hello_body(0x0303, [1; 32], 0x1301, &[]);
+        body.extend_from_slice(&[0x00]);
+        let outcome = parse_handshake(&handshake_message(HANDSHAKE_SERVER_HELLO, &body));
+        let message = malformed_message(outcome);
+        assert!(
+            message.contains("ServerHello has 1 trailing bytes"),
+            "{message}"
+        );
     }
 
     /// A cheap deterministic generator: no dependency, and a failure reproduces

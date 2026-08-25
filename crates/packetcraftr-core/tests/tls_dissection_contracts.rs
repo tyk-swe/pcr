@@ -18,6 +18,7 @@ use bytes::Bytes;
 use packetcraftr_core::field::FieldValue;
 use packetcraftr_core::filter::{Context as FilterContext, Filter};
 use packetcraftr_core::layer::Raw;
+use packetcraftr_core::protocol::application::Tls;
 use packetcraftr_core::protocol::builtin;
 use packetcraftr_core::protocol::link::Ethernet;
 use packetcraftr_core::protocol::network::Ipv4;
@@ -44,6 +45,40 @@ fn client_hello_record() -> Vec<u8> {
 /// A whole ServerHello record.
 fn server_hello_record() -> Vec<u8> {
     decode_hex(SERVER_HELLO_VECTORS[0].record_hex)
+}
+
+fn vector16(body: &[u8]) -> Vec<u8> {
+    let mut bytes = u16::try_from(body.len())
+        .expect("vector fits in u16")
+        .to_be_bytes()
+        .to_vec();
+    bytes.extend_from_slice(body);
+    bytes
+}
+
+/// A ClientHello record whose only extension is `server_name`, so a test can
+/// choose exactly which name bytes the dissector sees.
+fn client_hello_record_with_server_name(name: &[u8]) -> Vec<u8> {
+    let mut entry = vec![0_u8];
+    entry.extend_from_slice(&vector16(name));
+    let mut extensions = 0x0000_u16.to_be_bytes().to_vec();
+    extensions.extend_from_slice(&vector16(&vector16(&entry)));
+
+    let mut body = 0x0303_u16.to_be_bytes().to_vec();
+    body.extend_from_slice(&[0x11; 32]);
+    body.push(0);
+    body.extend_from_slice(&vector16(&0x1301_u16.to_be_bytes()));
+    body.extend_from_slice(&[1, 0]);
+    body.extend_from_slice(&vector16(&extensions));
+
+    let length = u32::try_from(body.len()).expect("hello body fits in u24");
+    let mut message = vec![1_u8];
+    message.extend_from_slice(&length.to_be_bytes()[1..]);
+    message.extend_from_slice(&body);
+
+    let mut record = vec![22_u8, 0x03, 0x03];
+    record.extend_from_slice(&vector16(&message));
+    record
 }
 
 /// One application-data record with `body` as its payload.
@@ -237,6 +272,51 @@ fn a_server_hello_publishes_its_selection() {
     );
     assert_eq!(tls_field(&decoded, "sni"), None);
     assert_eq!(tls_field(&decoded, "ja4"), None);
+}
+
+#[test]
+fn a_server_name_that_is_not_a_host_name_is_reported_and_left_unpublished() {
+    let decoded = dissect(
+        CLIENT_PORT,
+        443,
+        &client_hello_record_with_server_name(b"192.0.2.10"),
+    );
+    assert_eq!(protocols(&decoded), vec!["ethernet", "ipv4", "tcp", "tls"]);
+    assert_eq!(diagnostic_codes(&decoded), vec!["tls.sni_invalid"]);
+    assert_eq!(tls_field(&decoded, "sni"), None);
+    assert_eq!(
+        tls_field(&decoded, "sni_raw"),
+        Some(FieldValue::Text("3139322e302e322e3130".to_owned()))
+    );
+}
+
+#[test]
+fn a_layer_retains_the_records_it_covered_byte_for_byte() {
+    let record = client_hello_record();
+    let decoded = dissect(CLIENT_PORT, 443, &record);
+    assert_eq!(
+        decoded
+            .packet
+            .get::<Tls>()
+            .expect("a tls layer")
+            .wire()
+            .as_ref(),
+        &record[..]
+    );
+
+    // A tail the parser cannot read stays outside the layer's wire.
+    let mut segment = record.clone();
+    segment.extend_from_slice(b"\x00\x00\x00\x00\x00\x00\x00\x00");
+    let decoded = dissect(CLIENT_PORT, 443, &segment);
+    assert_eq!(
+        decoded
+            .packet
+            .get::<Tls>()
+            .expect("a tls layer")
+            .wire()
+            .as_ref(),
+        &record[..]
+    );
 }
 
 #[test]

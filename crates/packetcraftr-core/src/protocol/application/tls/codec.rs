@@ -42,6 +42,7 @@ use super::super::super::common::{
 };
 
 use super::fingerprint::{Transport, ja3, ja4};
+use super::hex;
 use super::model::{
     CONTENT_TYPE_HANDSHAKE, ClientHello, HANDSHAKE_CLIENT_HELLO, HANDSHAKE_SERVER_HELLO, Handshake,
     Record, ServerHello,
@@ -292,26 +293,20 @@ impl Tls {
 }
 
 /// Escapes text read from the wire the way DNS escapes label bytes:
-/// printable ASCII stays, everything else becomes `\DDD` per byte. Unlike a
+/// graphic ASCII stays, everything else (including the space that would split
+/// a `key=value` text line) becomes `\DDD` per byte. Unlike a
 /// DNS label, `.` is not a separator here and is kept verbatim.
-fn escape_wire_text(value: &str) -> String {
+#[must_use]
+pub fn escape_wire_text(value: &str) -> String {
     let mut escaped = String::with_capacity(value.len());
     for byte in value.bytes() {
-        if (0x20..=0x7e).contains(&byte) && byte != b'\\' {
+        if (0x21..=0x7e).contains(&byte) && byte != b'\\' {
             escaped.push(char::from(byte));
         } else {
             let _ = write!(escaped, "\\{byte:03}");
         }
     }
     escaped
-}
-
-fn hex(bytes: &Bytes) -> String {
-    let mut text = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        let _ = write!(text, "{byte:02x}");
-    }
-    text
 }
 
 fn read_only(field: &str) -> Result<(), FieldError> {
@@ -532,10 +527,70 @@ mod tests {
         assert_eq!(escape_wire_text("api.example.test"), "api.example.test");
         assert_eq!(escape_wire_text("h2\u{0}"), "h2\\000");
         assert_eq!(escape_wire_text("a\\b"), "a\\092b");
+        assert_eq!(escape_wire_text("h2 x"), "h2\\032x");
     }
 
     #[test]
     fn hex_renders_lowercase_pairs() {
-        assert_eq!(hex(&Bytes::from_static(&[0x00, 0x0f, 0xff])), "000fff");
+        assert_eq!(hex(&[0x00, 0x0f, 0xff]), "000fff");
+    }
+
+    /// Encodes `layer` the way the builder does, with an empty packet around
+    /// it: the codec writes back only the bytes the layer retained.
+    fn encode(layer: &Tls) -> Result<EncodedLayer, crate::codec::Error> {
+        let registry = crate::protocol::builtin::registry().expect("built-in registry");
+        let packet = crate::Packet::new();
+        let build_context = crate::build::Context::default();
+        let context = LayerEncodeContext {
+            packet: &packet,
+            index: 0,
+            build_context: &build_context,
+            mode: crate::build::Mode::Strict,
+            registry: &registry,
+            child: None,
+            remaining_packet_bytes: 4096,
+        };
+        TlsCodec.encode(layer, &[], &context)
+    }
+
+    #[test]
+    fn a_dissected_layer_encodes_back_to_the_bytes_it_covered() {
+        let bytes = record(23, b"encrypted");
+        let layer = Tls::from_records(&bytes)
+            .expect("one complete record")
+            .layer;
+        let encoded = encode(&layer).expect("an unmodified layer encodes");
+        assert_eq!(encoded.prefix, bytes);
+        assert_eq!(layer.wire().as_ref(), &bytes[..]);
+    }
+
+    #[test]
+    fn changing_a_published_field_makes_the_layer_disagree_with_its_wire() {
+        let bytes = record(23, b"encrypted");
+        let mut layer = Tls::from_records(&bytes)
+            .expect("one complete record")
+            .layer;
+        layer.record_count = 7;
+        let Err(error) = encode(&layer) else {
+            panic!("a changed field cannot be encoded");
+        };
+        assert!(
+            error
+                .to_string()
+                .contains("no longer match the retained wire"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn tls_layers_cannot_be_built_from_fields() {
+        let error = TlsCodec
+            .make_layer(&BTreeMap::new())
+            .expect_err("TLS is dissection-only");
+        assert!(
+            matches!(error, crate::codec::Error::Unsupported { .. }),
+            "{error}"
+        );
+        assert!(error.to_string().contains("dissection-only"), "{error}");
     }
 }

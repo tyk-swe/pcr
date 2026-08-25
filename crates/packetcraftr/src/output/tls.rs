@@ -169,7 +169,9 @@ pub struct Session {
     /// Last capture frame that delivered handshake bytes for this session.
     pub last_frame: u64,
     /// Milliseconds between the frame completing the ClientHello and the frame
-    /// completing the ServerHello, when both were captured.
+    /// completing the ServerHello, when both were captured. Negative when the
+    /// ServerHello's frame is timestamped before the ClientHello's, which a
+    /// capture merged from several clocks can produce.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub handshake_rtt_ms: Option<f64>,
     /// The client's offer, absent only when the capture started after it.
@@ -181,7 +183,13 @@ pub struct Session {
     /// Whether the server asked the client to retry with different
     /// parameters. The retained fingerprints are always the first hello's.
     pub hello_retry: bool,
+    /// Alert records observed in the clear, in arrival order, at most
+    /// `MAX_ALERTS` of them.
     pub alerts: Vec<Alert>,
+    /// Alert records seen after `alerts` reached its ceiling, counted rather
+    /// than kept. Absent when nothing was dropped.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub alerts_dropped: u64,
     pub status: Status,
     /// Why the status is what it is, for the statuses that have a cause:
     /// `malformed`, `gap`, and `truncated`.
@@ -203,10 +211,19 @@ impl From<AnalysisSession> for Session {
             server: value.server.map(Server::from),
             hello_retry: value.hello_retry,
             alerts: value.alerts.into_iter().map(Alert::from).collect(),
+            alerts_dropped: value.alerts_dropped,
             status: value.status,
             reason: value.reason,
         }
     }
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde requires this signature"
+)]
+fn is_zero(value: &u64) -> bool {
+    *value == 0
 }
 
 /// Sessions per terminal status. Every status is reported, so a zero is a
@@ -223,18 +240,6 @@ pub struct StatusCounts {
 }
 
 impl StatusCounts {
-    fn count(&self, status: Status) -> u64 {
-        match status {
-            Status::Complete => self.complete,
-            Status::ClientOnly => self.client_only,
-            Status::Retry => self.retry,
-            Status::Alert => self.alert,
-            Status::Malformed => self.malformed,
-            Status::Gap => self.gap,
-            Status::Truncated => self.truncated,
-        }
-    }
-
     fn slot(&mut self, status: Status) -> &mut u64 {
         match status {
             Status::Complete => &mut self.complete,
@@ -302,12 +307,6 @@ impl Summary {
             buffer_limit_hits: analysis.buffer_limit_hits,
             udp_443_frames: analysis.udp_443_frames,
         }
-    }
-
-    /// Sessions reported under one status.
-    #[must_use]
-    pub fn status_count(&self, status: Status) -> u64 {
-        self.by_status.count(status)
     }
 }
 

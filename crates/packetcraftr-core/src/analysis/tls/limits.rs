@@ -19,9 +19,13 @@ const DEFAULT_MAX_BUFFERED_BYTES: usize = 64 * 1024 * 1024;
 /// A capture is untrusted input, so every buffer the collector keeps is
 /// bounded twice: per direction by [`Limits::max_direction_bytes`], and across
 /// the whole run by [`Limits::max_buffered_bytes`]. Sessions themselves are
-/// bounded by [`Limits::max_sessions`]. Reaching a ceiling degrades the
-/// affected sessions to a status that says so; it never fails the run and
-/// never allocates past the ceiling.
+/// bounded by [`Limits::max_sessions`], and the alert records one session
+/// retains by [`MAX_ALERTS`](super::MAX_ALERTS). Reaching a ceiling degrades
+/// the affected sessions to a status that says so and never fails the run.
+/// Handshake bytes are charged against both byte ceilings before they are
+/// buffered, and the retained alerts are charged as they are kept, so what a
+/// run holds is bounded by `max_buffered_bytes` plus the alerts of the one
+/// session that last added any.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Limits {
     /// Conversations tracked at once. Reaching it retires the oldest tracked
@@ -29,8 +33,9 @@ pub struct Limits {
     /// [`gap`](super::Status::Gap) and counting it in
     /// [`Summary::evicted_sessions`](super::Summary::evicted_sessions).
     pub max_sessions: usize,
-    /// Handshake bytes buffered across every tracked conversation. Reaching
-    /// it retires the oldest tracked conversations until the new bytes fit.
+    /// Handshake bytes buffered across every tracked conversation, including
+    /// the alert records each one retained. Reaching it retires the oldest
+    /// tracked conversations until the new bytes fit.
     pub max_buffered_bytes: usize,
     /// Handshake bytes buffered for one direction of one conversation.
     /// Defaults to [`MAX_DIRECTION_BUFFER`].

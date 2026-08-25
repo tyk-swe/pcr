@@ -11,6 +11,7 @@ use serde::Serialize;
 
 use crate::analysis::dedup::Deduplicator;
 use crate::analysis::reassembly::tcp::ScopedFlowKey;
+use crate::protocol::application::tls::escape_wire_text;
 use crate::protocol::application::tls::fingerprint::{Transport, ja3, ja3s, ja4};
 use crate::protocol::application::tls::model::{
     CONTENT_TYPE_ALERT, CONTENT_TYPE_APPLICATION_DATA, CONTENT_TYPE_CHANGE_CIPHER_SPEC,
@@ -18,8 +19,23 @@ use crate::protocol::application::tls::model::{
 };
 use crate::protocol::application::tls::parse::{Outcome, parse_handshake, parse_record};
 
+/// Alert level meaning the sender means to carry on.
+pub const ALERT_LEVEL_WARNING: u8 = 1;
+
 /// Alert level meaning the sender is closing the connection immediately.
-const ALERT_LEVEL_FATAL: u8 = 2;
+pub const ALERT_LEVEL_FATAL: u8 = 2;
+
+/// Alert records retained per session. A peer can send warning alerts for as
+/// long as the connection lives, so the ones past this ceiling are counted in
+/// [`Session::alerts_dropped`] rather than kept.
+pub const MAX_ALERTS: usize = 32;
+
+/// Bytes one retained alert charges against the aggregate buffer budget.
+const ALERT_CHARGE: usize = size_of::<Alert>();
+
+/// Why a direction stopped: the reasons reported when a ceiling is reached.
+const REASON_RECORD_CEILING: &str = "one direction's record buffer reached its ceiling";
+const REASON_HANDSHAKE_CEILING: &str = "one direction's handshake buffer reached its ceiling";
 
 /// One side of a TLS session.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -122,6 +138,8 @@ pub struct ClientSummary {
     /// The hello's `legacy_version` field, frozen at 0x0303 by TLS 1.3.
     pub legacy_version: u16,
     /// The offered server name, present only when it passed validation.
+    /// Escaped the way the per-frame layer escapes wire text: printable ASCII
+    /// stays, every other byte becomes `\\DDD`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sni: Option<String>,
     /// The raw `host_name` bytes, retained whenever the entry was present so
@@ -133,6 +151,7 @@ pub struct ClientSummary {
     pub sni_is_outer: bool,
     /// Whether an `encrypted_client_hello` extension was offered.
     pub ech: bool,
+    /// The offered ALPN protocols, in wire order, escaped like [`Self::sni`].
     pub alpn: Vec<String>,
     pub supported_versions: Vec<u16>,
     pub cipher_suites: Vec<u16>,
@@ -152,11 +171,15 @@ impl ClientSummary {
         let fingerprint = ja3(hello);
         Self {
             legacy_version: hello.legacy_version,
-            sni: hello.sni.clone(),
+            sni: hello.sni.as_deref().map(escape_wire_text),
             sni_raw: hello.sni_raw.clone(),
             sni_is_outer: hello.ech && hello.has_sni_extension,
             ech: hello.ech,
-            alpn: hello.alpn.clone(),
+            alpn: hello
+                .alpn
+                .iter()
+                .map(|name| escape_wire_text(name))
+                .collect(),
             supported_versions: hello.supported_versions.clone(),
             cipher_suites: hello.cipher_suites.clone(),
             supported_groups: hello.supported_groups.clone(),
@@ -176,8 +199,9 @@ pub struct ServerSummary {
     /// legacy version.
     pub selected_version: u16,
     pub cipher_suite: u16,
-    /// The selected ALPN protocol. TLS 1.3 moves ALPN into the encrypted
-    /// extensions, so this is populated for TLS 1.2 and below only.
+    /// The selected ALPN protocol, escaped the way the per-frame layer escapes
+    /// wire text. TLS 1.3 moves ALPN into the encrypted extensions, so this is
+    /// populated for TLS 1.2 and below only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub alpn: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -194,7 +218,7 @@ impl ServerSummary {
         Self {
             selected_version: hello.selected_version,
             cipher_suite: hello.cipher_suite,
-            alpn: hello.alpn.clone(),
+            alpn: hello.alpn.as_deref().map(escape_wire_text),
             key_share_group: hello.key_share_group,
             ja3s: fingerprint.md5,
             ja3s_raw: fingerprint.raw,
@@ -222,7 +246,9 @@ pub struct Session {
     /// Last capture frame that delivered handshake bytes for this session.
     pub last_frame: u64,
     /// Milliseconds between the frame completing the ClientHello and the
-    /// frame completing the ServerHello, when both were captured.
+    /// frame completing the ServerHello, when both were captured. Negative
+    /// when the ServerHello's frame is timestamped before the ClientHello's,
+    /// which a capture merged from several clocks can produce.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub handshake_rtt_ms: Option<f64>,
     /// The client's offer. Absent only when the capture started after it, in
@@ -235,13 +261,26 @@ pub struct Session {
     /// Whether the server asked the client to retry with different
     /// parameters. The retained fingerprints are always the first hello's.
     pub hello_retry: bool,
-    /// Alert records observed in the clear, in arrival order.
+    /// Alert records observed in the clear, in arrival order, at most
+    /// [`MAX_ALERTS`] of them.
     pub alerts: Vec<Alert>,
+    /// Alert records seen after [`Session::alerts`] reached [`MAX_ALERTS`],
+    /// counted rather than kept. Absent when nothing was dropped.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub alerts_dropped: u64,
     pub status: Status,
     /// Why the status is what it is, for the statuses that have a cause:
     /// `malformed`, `gap`, and `truncated`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde requires this signature"
+)]
+fn is_zero(value: &u64) -> bool {
+    *value == 0
 }
 
 /// What one fed chunk did to a session.
@@ -324,6 +363,7 @@ pub(super) struct Live {
     server_time: Option<SystemTime>,
     hello_retry: bool,
     alerts: Vec<Alert>,
+    alerts_dropped: u64,
 }
 
 impl Live {
@@ -344,12 +384,28 @@ impl Live {
             server_time: None,
             hello_retry: false,
             alerts: Vec::new(),
+            alerts_dropped: 0,
         }
     }
 
-    /// Bytes this session charges against the run's aggregate buffer budget.
+    /// Bytes this session charges against the run's aggregate buffer budget:
+    /// both directions' buffers plus the alerts it retained.
     pub(super) fn buffered(&self) -> usize {
-        self.directions[0].charged() + self.directions[1].charged()
+        self.directions[0]
+            .charged()
+            .saturating_add(self.directions[1].charged())
+            .saturating_add(self.alerts.len().saturating_mul(ALERT_CHARGE))
+    }
+
+    /// How much of a `length`-byte delivery this direction can still retain,
+    /// or `None` when the direction has stopped contributing handshake bytes
+    /// and will retain nothing at all.
+    pub(super) fn retainable(&self, direction: usize, length: usize, cap: usize) -> Option<usize> {
+        let state = self.directions.get(direction)?;
+        if state.done {
+            return None;
+        }
+        Some(length.min(cap.saturating_sub(state.charged())))
     }
 
     /// Whether anything of a handshake was assembled, which is what makes the
@@ -394,6 +450,24 @@ impl Live {
         self.last_frame = number;
     }
 
+    /// Stops a direction that cannot take `extra` more bytes without passing
+    /// its ceiling, and says why. `None` means the bytes fit.
+    fn refuse_past_ceiling(
+        &mut self,
+        direction: usize,
+        extra: usize,
+        cap: usize,
+        limit_hits: &mut u64,
+        reason: &'static str,
+    ) -> Option<Verdict> {
+        if self.directions[direction].charged().saturating_add(extra) <= cap {
+            return None;
+        }
+        *limit_hits += 1;
+        self.directions[direction].finish();
+        Some(finished(Status::Malformed, reason))
+    }
+
     /// Folds one direction's reassembled payload into the handshake state.
     ///
     /// Records are framed out of `chunk` without ever holding more than one
@@ -427,13 +501,14 @@ impl Live {
                         }
                     }
                     Outcome::NeedMore { .. } => {
-                        if self.directions[direction].charged() + rest.len() > cap {
-                            *limit_hits += 1;
-                            self.directions[direction].finish();
-                            return finished(
-                                Status::Malformed,
-                                "one direction's record buffer reached its ceiling",
-                            );
+                        if let Some(verdict) = self.refuse_past_ceiling(
+                            direction,
+                            rest.len(),
+                            cap,
+                            limit_hits,
+                            REASON_RECORD_CEILING,
+                        ) {
+                            return verdict;
                         }
                         self.directions[direction].partial.extend_from_slice(rest);
                         return Verdict::Open;
@@ -463,13 +538,14 @@ impl Live {
                     if taken == 0 {
                         return Verdict::Open;
                     }
-                    if self.directions[direction].charged() + taken > cap {
-                        *limit_hits += 1;
-                        self.directions[direction].finish();
-                        return finished(
-                            Status::Malformed,
-                            "one direction's record buffer reached its ceiling",
-                        );
+                    if let Some(verdict) = self.refuse_past_ceiling(
+                        direction,
+                        taken,
+                        cap,
+                        limit_hits,
+                        REASON_RECORD_CEILING,
+                    ) {
+                        return verdict;
                     }
                     let Some(taken_bytes) = rest.get(..taken) else {
                         return Verdict::Open;
@@ -496,13 +572,14 @@ impl Live {
     ) -> Verdict {
         match record.content_type {
             CONTENT_TYPE_HANDSHAKE => {
-                if self.directions[direction].charged() + record.body.len() > cap {
-                    *limit_hits += 1;
-                    self.directions[direction].finish();
-                    return finished(
-                        Status::Malformed,
-                        "one direction's handshake buffer reached its ceiling",
-                    );
+                if let Some(verdict) = self.refuse_past_ceiling(
+                    direction,
+                    record.body.len(),
+                    cap,
+                    limit_hits,
+                    REASON_HANDSHAKE_CEILING,
+                ) {
+                    return verdict;
                 }
                 self.directions[direction]
                     .messages
@@ -530,7 +607,13 @@ impl Live {
                     level: *level,
                     description: *description,
                 };
-                self.alerts.push(alert);
+                if self.alerts.len() < MAX_ALERTS {
+                    self.alerts.push(alert);
+                } else {
+                    // A peer can warn as often as it likes, so the ceiling is
+                    // what keeps the record finite; the rest are counted.
+                    self.alerts_dropped = self.alerts_dropped.saturating_add(1);
+                }
                 if alert.level == ALERT_LEVEL_FATAL {
                     self.directions[0].finish();
                     self.directions[1].finish();
@@ -673,11 +756,14 @@ impl Live {
         } else {
             self.first_flow.reverse()
         };
+        // A capture merged from several clocks can timestamp the answer
+        // before the question, which is reported as a negative round trip
+        // rather than hidden.
         let handshake_rtt_ms = match (self.client_time, self.server_time) {
-            (Some(client), Some(server)) => server
-                .duration_since(client)
-                .ok()
-                .map(|elapsed| elapsed.as_secs_f64() * 1_000.0),
+            (Some(client), Some(server)) => Some(match server.duration_since(client) {
+                Ok(elapsed) => elapsed.as_secs_f64() * 1_000.0,
+                Err(backwards) => -(backwards.duration().as_secs_f64() * 1_000.0),
+            }),
             _ => None,
         };
         Session {
@@ -698,6 +784,7 @@ impl Live {
             server: self.server,
             hello_retry: self.hello_retry,
             alerts: self.alerts,
+            alerts_dropped: self.alerts_dropped,
             status,
             reason,
         }

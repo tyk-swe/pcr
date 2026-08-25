@@ -46,7 +46,7 @@
 //! computed from is chosen by the peer, so treat a match as a hint about
 //! software identity, never as authentication.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 
 use serde::Serialize;
 
@@ -60,7 +60,10 @@ mod limits;
 mod session;
 
 pub use limits::{Limits, MAX_DIRECTION_BUFFER};
-pub use session::{Alert, ClientSummary, Endpoint, ServerSummary, Session, Status};
+pub use session::{
+    ALERT_LEVEL_FATAL, ALERT_LEVEL_WARNING, Alert, ClientSummary, Endpoint, MAX_ALERTS,
+    ServerSummary, Session, Status,
+};
 
 use session::{Live, Verdict};
 
@@ -97,7 +100,9 @@ pub struct Summary {
     pub by_status: BTreeMap<Status, u64>,
     /// TCP conversations this collector saw, whether or not they carried TLS.
     /// A capture with streams but no sessions means the traffic was not TLS,
-    /// or the handshake itself was not captured.
+    /// or the handshake itself was not captured. Counted as conversations are
+    /// first seen, which the pipeline indexes in first-frame order, so a
+    /// four-tuple reused after a close counts once.
     pub tcp_streams: u64,
     /// Sessions retired by a resource ceiling rather than by the capture.
     pub evicted_sessions: u64,
@@ -137,7 +142,11 @@ pub struct Collector {
     entries: HashMap<ScopedFlowKey, Entry>,
     /// Insertion rank to conversation, so the oldest is retired in O(log n).
     order: BTreeMap<u64, ScopedFlowKey>,
-    streams: HashSet<u64>,
+    /// Conversations seen, and the highest conversation index behind that
+    /// count. Stream indices are handed out in first-frame order, so counting
+    /// each rise is counting distinct conversations without a set of them.
+    streams: u64,
+    highest_stream: Option<u64>,
     next_order: u64,
     next_session: u64,
     buffered_bytes: usize,
@@ -156,7 +165,8 @@ impl Collector {
             limits,
             entries: HashMap::new(),
             order: BTreeMap::new(),
-            streams: HashSet::new(),
+            streams: 0,
+            highest_stream: None,
             next_order: 0,
             next_session: 0,
             buffered_bytes: 0,
@@ -178,6 +188,7 @@ impl Collector {
         let (Some(flow), Some(stream)) = (record.tcp_flow, record.tcp_stream) else {
             return events;
         };
+        self.note_stream(stream);
         let key = canonical(flow);
         let transport = transports(&record.decoded.packet).tcp;
         if let Some(transport) = &transport
@@ -244,7 +255,7 @@ impl Collector {
                 &mut events,
             );
         }
-        self.summary.tcp_streams = u64::try_from(self.streams.len()).unwrap_or(u64::MAX);
+        self.summary.tcp_streams = self.streams;
         (events, self.summary)
     }
 
@@ -345,14 +356,21 @@ impl Collector {
             let Some(payload) = deduplicated.filter(|payload| !payload.is_empty()) else {
                 continue;
             };
+            // A direction that has stopped contributing handshake bytes keeps
+            // none of this delivery, so it charges nothing and the frame is
+            // not part of the handshake this session reports.
+            let Some(charge) = live.retainable(direction, payload.len(), cap) else {
+                continue;
+            };
             live.note_delivery(record.number);
 
             // Room is made before any of the delivery is buffered, so the
-            // aggregate ceiling is never exceeded even transiently.
-            while self.buffered_bytes.saturating_add(payload.len()) > self.limits.max_buffered_bytes
+            // aggregate ceiling is never exceeded even transiently. Only what
+            // the direction can still retain is charged for.
+            while self.buffered_bytes.saturating_add(charge) > self.limits.max_buffered_bytes
                 && self.evict_oldest(Some(key), REASON_AGGREGATE_LIMIT, events)
             {}
-            if self.buffered_bytes.saturating_add(payload.len()) > self.limits.max_buffered_bytes {
+            if self.buffered_bytes.saturating_add(charge) > self.limits.max_buffered_bytes {
                 if self.retire(
                     key,
                     Status::Gap,
@@ -418,7 +436,6 @@ impl Collector {
         }
         let order = self.next_order;
         self.next_order = self.next_order.saturating_add(1);
-        self.streams.insert(stream);
         self.order.insert(order, key.clone());
         self.entries.insert(
             key.clone(),
@@ -427,6 +444,14 @@ impl Collector {
                 state: Tracked::Live(Box::new(Live::new(stream, flow))),
             },
         );
+    }
+
+    /// Counts a conversation the first time one of its frames is seen.
+    fn note_stream(&mut self, stream: u64) {
+        if self.highest_stream.is_none_or(|highest| stream > highest) {
+            self.highest_stream = Some(stream);
+            self.streams = self.streams.saturating_add(1);
+        }
     }
 
     /// Retires the oldest tracked conversation other than `protect`,
@@ -462,8 +487,12 @@ impl Collector {
     }
 
     /// Ends a tracked handshake, emitting it when it assembled anything.
-    /// The entry stays behind as closed, so late bytes on the four-tuple do
-    /// not manufacture a second session. Returns whether a session was
+    ///
+    /// A handshake that assembled something leaves the entry behind as closed,
+    /// so late bytes on the four-tuple do not manufacture a second session.
+    /// One that assembled nothing has nothing to protect and the entry is
+    /// dropped instead, so a conversation whose gap arrived before its hello
+    /// is tracked again from the next frame. Returns whether a session was
     /// emitted.
     fn retire(
         &mut self,
@@ -481,10 +510,18 @@ impl Collector {
         };
         self.buffered_bytes = self.buffered_bytes.saturating_sub(live.buffered());
         if !live.is_session() {
+            self.forget(key);
             return false;
         }
         self.emit(*live, status, reason, number, events);
         true
+    }
+
+    /// Drops an entry and its insertion rank, whatever state it is in.
+    fn forget(&mut self, key: &ScopedFlowKey) {
+        if let Some(entry) = self.entries.remove(key) {
+            self.order.remove(&entry.order);
+        }
     }
 
     fn emit(
@@ -522,9 +559,8 @@ impl Collector {
                 state: Tracked::Closed,
                 ..
             })
-        ) && let Some(entry) = self.entries.remove(key)
-        {
-            self.order.remove(&entry.order);
+        ) {
+            self.forget(key);
         }
     }
 }

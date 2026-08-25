@@ -15,11 +15,11 @@ use common::{
     CLIENT, SERVER, TcpSpec, client_tcp, reader, registry, server_tcp, tcp_frame, udp_frame,
 };
 use packetcraftr_core::analysis::tls::{
-    Collector, Limits as TlsLimits, MAX_DIRECTION_BUFFER, Session, SessionEvent, Status,
-    Summary as TlsSummary,
+    ALERT_LEVEL_FATAL, ALERT_LEVEL_WARNING, Collector, Limits as TlsLimits, MAX_ALERTS,
+    MAX_DIRECTION_BUFFER, Session, SessionEvent, Status, Summary as TlsSummary,
 };
 use packetcraftr_core::analysis::{Error, FrameRecord, Options, run};
-use packetcraftr_core::frame::Frame;
+use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::protocol::transport::Tcp;
 use packetcraftr_core::registry::Registry;
 use tls_frames::{
@@ -1088,6 +1088,449 @@ fn the_public_session_model_and_collector_keep_their_contracts() {
     let rendered = serde_json::to_value(&summary).expect("a summary serializes");
     assert_eq!(rendered["by_status"]["complete"], 1);
     assert_eq!(rendered["udp_443_frames"], 0);
+}
+
+/// One record with an arbitrary content type and body, which the fixtures do
+/// not build: they only produce the types the parser admits.
+fn raw_record(content_type: u8, body: &[u8]) -> Vec<u8> {
+    let mut out = vec![content_type];
+    out.extend_from_slice(&TLS_1_2.to_be_bytes());
+    out.extend_from_slice(
+        &u16::try_from(body.len())
+            .expect("record body fits")
+            .to_be_bytes(),
+    );
+    out.extend_from_slice(body);
+    out
+}
+
+#[test]
+fn a_record_the_parser_rejects_is_malformed_and_says_what_it_read() {
+    let mut capture = Capture::new();
+    let mut stream = Stream::new(40_000);
+    capture.open(&mut stream);
+    capture.client(
+        &mut stream,
+        &handshake_record(&client_hello(&ClientHelloSpec::default())),
+    );
+    // Content type 24 is outside the range TLS defines, so the record framer
+    // stops rather than guessing what follows it.
+    capture.client(&mut stream, &raw_record(24, &[0x00, 0x01]));
+    let (sessions, summary) = assemble_default(&capture);
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0].status, Status::Malformed);
+    assert!(
+        sessions[0]
+            .reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("content type")),
+        "reason: {:?}",
+        sessions[0].reason
+    );
+    assert_eq!(summary.by_status.get(&Status::Malformed), Some(&1));
+}
+
+#[test]
+fn a_hello_on_the_wrong_side_of_a_settled_conversation_is_malformed() {
+    // Both peers claim to be the client.
+    let mut capture = Capture::new();
+    let mut stream = Stream::new(40_000);
+    capture.open(&mut stream);
+    let hello = handshake_record(&client_hello(&ClientHelloSpec::default()));
+    capture.client(&mut stream, &hello);
+    capture.server(&mut stream, &hello);
+    let (sessions, _) = assemble_default(&capture);
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0].status, Status::Malformed);
+    assert!(
+        sessions[0]
+            .reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("both directions")),
+        "reason: {:?}",
+        sessions[0].reason
+    );
+
+    // The client's own direction answers itself.
+    let mut capture = Capture::new();
+    let mut stream = Stream::new(40_000);
+    capture.open(&mut stream);
+    capture.client(&mut stream, &hello);
+    capture.client(
+        &mut stream,
+        &handshake_record(&server_hello(&ServerHelloSpec::default())),
+    );
+    let (sessions, _) = assemble_default(&capture);
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0].status, Status::Malformed);
+    assert_eq!(
+        sessions[0].reason.as_deref(),
+        Some("ServerHello observed on the client's direction")
+    );
+    assert!(
+        sessions[0].server.is_none(),
+        "the contradicted hello is not reported as a decision"
+    );
+}
+
+#[test]
+fn a_second_change_cipher_spec_ends_what_one_direction_can_still_say() {
+    let mut capture = Capture::new();
+    let mut stream = Stream::new(40_000);
+    capture.open(&mut stream);
+    capture.client(&mut stream, &change_cipher_spec());
+    capture.client(&mut stream, &change_cipher_spec());
+    capture.client(
+        &mut stream,
+        &handshake_record(&client_hello(&ClientHelloSpec::default())),
+    );
+    capture.server(
+        &mut stream,
+        &handshake_record(&server_hello(&ServerHelloSpec::default())),
+    );
+    let (sessions, summary) = assemble_default(&capture);
+    assert!(
+        sessions
+            .iter()
+            .all(|session| session.status != Status::Complete),
+        "a hello after the second change_cipher_spec is not read"
+    );
+    assert!(sessions.iter().all(|session| session.client.is_none()));
+    assert_eq!(summary.by_status.get(&Status::Complete), None);
+}
+
+#[test]
+fn an_alert_record_too_short_to_read_is_ignored_rather_than_recorded() {
+    let mut capture = Capture::new();
+    let mut stream = Stream::new(40_000);
+    capture.open(&mut stream);
+    capture.client(
+        &mut stream,
+        &handshake_record(&client_hello(&ClientHelloSpec::default())),
+    );
+    // One byte: a level with no description, which says nothing to report.
+    capture.server(&mut stream, &raw_record(21, &[ALERT_LEVEL_FATAL]));
+    capture.server(
+        &mut stream,
+        &handshake_record(&server_hello(&ServerHelloSpec::default())),
+    );
+    let (sessions, _) = assemble_default(&capture);
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(
+        sessions[0].status,
+        Status::Complete,
+        "half an alert does not end the handshake"
+    );
+    assert!(sessions[0].alerts.is_empty());
+    assert_eq!(sessions[0].alerts_dropped, 0);
+}
+
+#[test]
+fn warning_alerts_past_the_ceiling_are_counted_rather_than_retained() {
+    let extra = 10;
+    let mut alerts = Vec::new();
+    for _ in 0..MAX_ALERTS + extra {
+        alerts.extend_from_slice(&alert(ALERT_LEVEL_WARNING, ALERT_CLOSE_NOTIFY));
+    }
+    let mut capture = Capture::new();
+    let mut stream = Stream::new(40_000);
+    capture.open(&mut stream);
+    capture.client(
+        &mut stream,
+        &handshake_record(&client_hello(&ClientHelloSpec::default())),
+    );
+    for segment in split(&alerts, 4) {
+        capture.server(&mut stream, &segment);
+    }
+    capture.server(
+        &mut stream,
+        &handshake_record(&server_hello(&ServerHelloSpec::default())),
+    );
+    let (sessions, _) = assemble_default(&capture);
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(
+        sessions[0].status,
+        Status::Complete,
+        "warning alerts do not decide the status"
+    );
+    assert_eq!(sessions[0].alerts.len(), MAX_ALERTS);
+    assert_eq!(
+        sessions[0].alerts_dropped,
+        u64::try_from(extra).expect("count fits")
+    );
+    assert!(
+        sessions[0]
+            .alerts
+            .iter()
+            .all(|alert| alert.level == ALERT_LEVEL_WARNING)
+    );
+    let rendered = serde_json::to_value(&sessions[0]).expect("a session serializes");
+    assert_eq!(rendered["alerts_dropped"], 10);
+}
+
+#[test]
+fn a_session_with_no_dropped_alerts_leaves_the_counter_out_of_the_record() {
+    let mut capture = Capture::new();
+    let mut stream = Stream::new(40_000);
+    capture.open(&mut stream);
+    complete_handshake(&mut capture, &mut stream, 1);
+    let (sessions, _) = assemble_default(&capture);
+    let rendered = serde_json::to_value(&sessions[0]).expect("a session serializes");
+    assert!(
+        rendered.get("alerts_dropped").is_none(),
+        "a counter at zero is not a field"
+    );
+}
+
+#[test]
+fn a_gap_before_any_hello_lets_the_next_handshake_on_the_four_tuple_assemble() {
+    let mut capture = Capture::new();
+    let mut stream = Stream::new(40_000);
+    capture.open(&mut stream);
+    // Server bytes past a hole, so the flow holds pending data no hello was
+    // ever read from; the reopen below evicts it and reports the gap.
+    capture.server_beyond(&mut stream, 32, b"beyond-the-hole");
+    capture.reopen(&mut stream, 90_000);
+    complete_handshake(&mut capture, &mut stream, 1);
+    let (sessions, summary) = assemble_default(&capture);
+    assert_eq!(
+        sessions.len(),
+        1,
+        "the gap assembled nothing; the handshake after it is the only session"
+    );
+    assert_eq!(sessions[0].status, Status::Complete);
+    assert_eq!(summary.sessions, 1);
+    assert_eq!(summary.by_status.get(&Status::Complete), Some(&1));
+    assert_eq!(summary.tcp_streams, 1);
+}
+
+#[test]
+fn a_snaplen_truncated_frame_mid_handshake_is_a_gap_rather_than_truncated() {
+    let mut capture = Capture::new();
+    let mut stream = Stream::new(40_000);
+    capture.open(&mut stream);
+    let hello = handshake_record(&client_hello(&ClientHelloSpec {
+        padding: 512,
+        ..ClientHelloSpec::default()
+    }));
+    let segments = split(&hello, 3);
+    capture.client(&mut stream, &segments[0]);
+    capture.client(&mut stream, &segments[1]);
+    // The middle segment as a capture with a short snaplen holds it: the last
+    // bytes were on the wire, so the stream moves on without them.
+    let cut = capture.frames.pop().expect("the segment was pushed");
+    let bytes = cut.bytes().slice(..cut.bytes().len() - 16);
+    capture.frames.push(
+        Frame::try_with_optional_timestamp(
+            cut.timestamp,
+            LinkType::IPV4,
+            u32::try_from(bytes.len()).expect("captured length fits"),
+            cut.original_length(),
+            bytes,
+        )
+        .expect("a snaplen-truncated frame is valid"),
+    );
+    capture.client(&mut stream, &segments[2]);
+    capture.server(
+        &mut stream,
+        &handshake_record(&server_hello(&ServerHelloSpec::default())),
+    );
+
+    let (sessions, summary) = assemble_default(&capture);
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(
+        sessions[0].status,
+        Status::Gap,
+        "bytes the file never held are missing bytes, not a capture that ended"
+    );
+    assert!(
+        sessions[0].client.is_none(),
+        "the hello the snaplen cut is never assembled"
+    );
+    assert!(sessions[0].server.is_some());
+    assert_eq!(summary.by_status.get(&Status::Truncated), None);
+    assert_eq!(summary.buffer_limit_hits, 0);
+}
+
+/// The start of a handshake record that declares far more body than it
+/// carries, so a direction holds `length` bytes it cannot yet frame.
+fn unfinished_record(length: usize) -> Vec<u8> {
+    let mut bytes = vec![22, 0x03, 0x03, 0x0f, 0xa0];
+    bytes.resize(length, 0x77);
+    bytes
+}
+
+#[test]
+fn a_conversation_retired_before_it_assembled_anything_is_tracked_again() {
+    // Both directions may hold a full direction's worth, so one conversation
+    // on its own can reach the aggregate ceiling with nothing to report.
+    let limits = TlsLimits {
+        max_buffered_bytes: 1_000,
+        max_direction_bytes: 1_000,
+        ..TlsLimits::default()
+    };
+    assert!(limits.validate().is_ok());
+    let mut capture = Capture::new();
+    let mut stream = Stream::new(40_000);
+    capture.open(&mut stream);
+    capture.client(&mut stream, &unfinished_record(900));
+    capture.server(&mut stream, &unfinished_record(900));
+    // No SYN retires the four-tuple: the next hello has to be enough.
+    complete_handshake(&mut capture, &mut stream, 1);
+    let (sessions, summary) = assemble(&capture, limits);
+    assert_eq!(
+        sessions.len(),
+        1,
+        "the retired conversation assembled nothing, the handshake after it did"
+    );
+    assert_eq!(sessions[0].status, Status::Complete);
+    assert_eq!(
+        summary.evicted_sessions, 0,
+        "nothing was assembled to evict"
+    );
+    assert_eq!(summary.tcp_streams, 1, "one conversation, counted once");
+}
+
+#[test]
+fn deliveries_to_a_finished_direction_never_evict_another_session() {
+    // Room for one hello in flight, and a delivery far larger than that.
+    let limits = TlsLimits {
+        max_buffered_bytes: 40_000,
+        max_direction_bytes: 40_000,
+        ..TlsLimits::default()
+    };
+    assert!(limits.validate().is_ok());
+    let hello = handshake_record(&client_hello(&ClientHelloSpec::default()));
+
+    let mut capture = Capture::new();
+    let mut talker = Stream::new(40_001);
+    let mut bystander = Stream::new(40_002);
+    capture.open(&mut talker);
+    capture.open(&mut bystander);
+    capture.client(&mut bystander, &hello);
+    capture.client(&mut talker, &hello);
+    // Encrypted traffic ends what the client's direction can contribute, so
+    // everything after it is charged to nothing.
+    capture.client(&mut talker, &application_data(1_000));
+    for _ in 0..3 {
+        capture.client(&mut talker, &application_data(50_000));
+    }
+    let (sessions, summary) = assemble(&capture, limits);
+    assert_eq!(
+        summary.evicted_sessions, 0,
+        "a finished direction charges nothing, so nothing is evicted for it"
+    );
+    assert_eq!(sessions.len(), 2);
+    assert!(
+        sessions
+            .iter()
+            .all(|session| session.status == Status::Truncated),
+        "both handshakes were still in flight when the capture ended"
+    );
+    let bystander = sessions
+        .iter()
+        .find(|session| session.client_endpoint.port == 40_002)
+        .expect("the bystander is still reported");
+    assert_eq!(bystander.status, Status::Truncated);
+}
+
+#[test]
+fn the_last_frame_of_a_session_is_the_last_one_that_carried_handshake_bytes() {
+    let mut capture = Capture::new();
+    let mut stream = Stream::new(40_000);
+    capture.open(&mut stream);
+    capture.client(
+        &mut stream,
+        &handshake_record(&client_hello(&ClientHelloSpec::default())),
+    );
+    capture.client(&mut stream, &application_data(64));
+    let handshake_frames = capture.frames.len();
+    for _ in 0..3 {
+        capture.client(&mut stream, &application_data(64));
+    }
+    let (sessions, _) = assemble_default(&capture);
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(
+        sessions[0].last_frame,
+        u64::try_from(handshake_frames).expect("frame count fits"),
+        "encrypted bytes after the handshake are not part of it"
+    );
+}
+
+#[test]
+fn wire_text_in_a_summary_is_escaped_the_way_the_per_frame_layer_escapes_it() {
+    let mut capture = Capture::new();
+    let mut stream = Stream::new(40_000);
+    capture.open(&mut stream);
+    capture.client(
+        &mut stream,
+        &handshake_record(&client_hello(&ClientHelloSpec {
+            alpn: vec!["h2 ja3=0000 x".to_owned(), "http/1.1\nsni=x".to_owned()],
+            ..ClientHelloSpec::default()
+        })),
+    );
+    capture.server(
+        &mut stream,
+        &handshake_record(&server_hello(&ServerHelloSpec {
+            selected_version: Some(TLS_1_2),
+            cipher_suite: TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+            key_share_group: None,
+            alpn: Some("http/1.1\nstatus=complete".to_owned()),
+            ..ServerHelloSpec::default()
+        })),
+    );
+    let (sessions, _) = assemble_default(&capture);
+    let client = sessions[0].client.as_ref().expect("client offer");
+    assert_eq!(
+        client.alpn,
+        ["h2\\032ja3=0000\\032x", "http/1.1\\010sni=x"],
+        "a newline cannot forge a line of one-line output"
+    );
+    let server = sessions[0].server.as_ref().expect("server decision");
+    assert_eq!(server.alpn.as_deref(), Some("http/1.1\\010status=complete"));
+}
+
+#[test]
+fn a_server_hello_timestamped_before_the_client_hello_reports_a_negative_round_trip() {
+    let registry = registry();
+    let base = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000);
+    let stream = Stream::new(40_000);
+    let hello = handshake_record(&client_hello(&ClientHelloSpec::default()));
+    let answer = handshake_record(&server_hello(&ServerHelloSpec::default()));
+    let mut capture = Capture {
+        registry: Arc::clone(&registry),
+        tick: 0,
+        frames: Vec::new(),
+    };
+    let client_spec = capture.client_spec(&stream, Tcp::ACK);
+    let mut server_spec = capture.server_spec(&stream, Tcp::ACK);
+    server_spec.acknowledgment = stream
+        .client_sequence
+        .wrapping_add(u32::try_from(hello.len()).expect("hello fits"));
+    // A capture merged from two clocks: the answer is stamped a quarter of a
+    // second before the question it answers.
+    capture.frames.push(tcp_frame(
+        &registry,
+        base + Duration::from_millis(500),
+        client_spec,
+        &hello,
+    ));
+    capture.frames.push(tcp_frame(
+        &registry,
+        base + Duration::from_millis(250),
+        server_spec,
+        &answer,
+    ));
+    let (sessions, _) = assemble_default(&capture);
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0].status, Status::Complete);
+    let elapsed = sessions[0]
+        .handshake_rtt_ms
+        .expect("both hellos carry capture times");
+    assert!(
+        (-250.5..=-249.5).contains(&elapsed),
+        "a backwards clock is reported, not hidden, got {elapsed}"
+    );
 }
 
 /// The client of the published example capture.

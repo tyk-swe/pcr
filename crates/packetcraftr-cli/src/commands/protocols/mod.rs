@@ -73,7 +73,16 @@ fn describe_protocol(name: &str, format: output::contract::Format) -> Result<(),
                 .collect()
         })
         .unwrap_or_default();
-    let detail = output::protocols::Detail::new(output::protocols::Summary::from(support), fields);
+    let bindings = registry
+        .parent_bindings(support.protocol)
+        .into_iter()
+        .map(|(parent, discriminator)| output::protocols::Binding {
+            parent: parent.as_str().to_owned(),
+            discriminator: discriminator.0,
+        })
+        .collect();
+    let detail =
+        output::protocols::Detail::new(output::protocols::Summary::from(support), fields, bindings);
     match format {
         output::contract::Format::Text => render_detail(&detail),
         output::contract::Format::Json => emit_aggregate(
@@ -96,6 +105,13 @@ fn render_detail(protocol: &output::protocols::Detail) -> Result<(), CliError> {
     ))?;
     write_stdout_line(format_args!("matcher: {}", protocol.matcher))?;
     write_stdout_line(format_args!("decode_only: {}", protocol.decode_only))?;
+    write_stdout_line(format_args!("bindings:"))?;
+    for binding in &protocol.bindings {
+        write_stdout_line(format_args!(
+            "  {} discriminator={}",
+            binding.parent, binding.discriminator
+        ))?;
+    }
     write_stdout_line(format_args!("fields:"))?;
     for field in &protocol.fields {
         write_stdout_line(format_args!(

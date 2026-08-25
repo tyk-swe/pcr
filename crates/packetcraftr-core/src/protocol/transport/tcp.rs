@@ -23,6 +23,23 @@ use super::super::network::resolve_envelope;
 
 const TCP_MIN_LEN: usize = 20;
 
+/// Child discriminators in dissection order, mirroring UDP: the destination
+/// port first, then the source port, then the zero fallback that reaches
+/// `raw`. Unlike UDP there is no content preference between the two endpoints;
+/// a TLS segment looks the same in both directions and the codec gates on the
+/// payload itself. A zero port never shadows the raw fallback.
+fn child_discriminators(source_port: u16, destination_port: u16) -> Vec<Discriminator> {
+    let mut next = Vec::with_capacity(3);
+    for port in [destination_port, source_port] {
+        let discriminator = Discriminator(u64::from(port));
+        if port != 0 && !next.contains(&discriminator) {
+            next.push(discriminator);
+        }
+    }
+    next.push(Discriminator(0));
+    next
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Tcp {
     pub source_port: u16,
@@ -238,10 +255,16 @@ impl LayerCodec for TcpCodec {
             }),
             consumed: header_len,
             payload_len,
+            // Both endpoints are offered before the raw fallback, exactly as
+            // UDP does, so a payload protocol bound to a well-known TCP port
+            // dissects in either direction.
             next: if payload_len == 0 {
                 Vec::new()
             } else {
-                vec![Discriminator(0)]
+                child_discriminators(
+                    u16::from_be_bytes([input[0], input[1]]),
+                    u16::from_be_bytes([input[2], input[3]]),
+                )
             },
             fields: tcp_layout(header_len),
             diagnostics,

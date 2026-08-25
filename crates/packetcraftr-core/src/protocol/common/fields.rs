@@ -197,6 +197,17 @@ where
         )
 }
 
+/// A `List` field value over decoded text, for decode-only layers whose
+/// repeated fields are strings.
+pub(crate) fn text_list(values: &[String]) -> FieldValue {
+    FieldValue::List(values.iter().cloned().map(FieldValue::Text).collect())
+}
+
+/// A `List` field value over decoded 16-bit code points.
+pub(crate) fn unsigned_list(values: &[u16]) -> FieldValue {
+    FieldValue::List(values.iter().copied().map(FieldValue::from).collect())
+}
+
 pub(crate) fn make_layer<L>(
     mut layer: L,
     fields: &BTreeMap<String, FieldValue>,

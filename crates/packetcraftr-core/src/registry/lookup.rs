@@ -110,6 +110,34 @@ impl Registry {
             .map(|binding| binding.discriminator)
     }
 
+    /// Every parent binding that selects `child`, as `(parent, discriminator)`
+    /// pairs sorted by parent then discriminator.
+    ///
+    /// This is the reverse of [`Self::child_for`] over the whole registry, and
+    /// answers the question a protocol reference cannot otherwise answer:
+    /// which ports or EtherTypes reach this protocol. Only winning bindings
+    /// appear; a binding another child outranks is not listed.
+    pub fn parent_bindings<Q>(&self, child: &Q) -> Vec<(&crate::layer::Id, Discriminator)>
+    where
+        crate::layer::Id: std::borrow::Borrow<Q>,
+        Q: Eq + std::hash::Hash + ?Sized,
+    {
+        let mut bindings: Vec<_> = self
+            .reverse_bindings
+            .iter()
+            .filter_map(|(parent, children)| Some((parent, children.get(child)?)))
+            .flat_map(|(parent, entries)| {
+                entries
+                    .iter()
+                    .map(move |entry| (parent, entry.discriminator))
+            })
+            .collect();
+        bindings
+            .sort_unstable_by(|left, right| left.0.cmp(right.0).then_with(|| left.1.cmp(&right.1)));
+        bindings.dedup();
+        bindings
+    }
+
     pub fn matcher<Q>(&self, protocol: &Q) -> Option<&Arc<dyn ResponseMatcher>>
     where
         crate::layer::Id: std::borrow::Borrow<Q>,

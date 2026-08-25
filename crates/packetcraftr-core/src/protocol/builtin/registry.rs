@@ -25,7 +25,7 @@ use tunnel::{
 
 use crate::semantics::{BuiltinProtocol, builtin_protocol_catalog};
 
-use application::DnsCodec;
+use application::{DnsCodec, TlsCodec};
 
 mod registration;
 
@@ -75,8 +75,66 @@ fn register_catalog(builder: &mut crate::registry::Builder) -> Result<(), crate:
 
 /// Build the default immutable registry without global mutable registration.
 pub fn registry() -> Result<crate::registry::Registry, crate::registry::Error> {
+    registry_with(|_builder| Ok(()))
+}
+
+/// Build the default registry, then let the caller add bindings before it is
+/// frozen.
+///
+/// The default registry is immutable once built, so a command that remaps a
+/// service onto a non-standard port — `--tls-port 4433` — needs the extra
+/// binding before [`crate::registry::Builder::build`]. `extra` sees a builder
+/// already carrying every built-in codec and binding, so it can bind, but not
+/// unbind, and a conflicting binding is reported as
+/// [`crate::registry::Error`].
+///
+/// ```
+/// use packetcraftr_core::protocol::builtin;
+///
+/// let registry = builtin::registry_with(|builder| {
+///     builder.bind("tcp", 4433, "tls", 100)?;
+///     Ok(())
+/// })
+/// .expect("extra binding is valid");
+/// assert_eq!(
+///     registry
+///         .child_for("tcp", packetcraftr_core::registry::Discriminator(4433))
+///         .map(|protocol| protocol.as_str()),
+///     Some("tls")
+/// );
+/// ```
+pub fn registry_with<F>(extra: F) -> Result<crate::registry::Registry, crate::registry::Error>
+where
+    F: FnOnce(&mut crate::registry::Builder) -> Result<(), crate::registry::Error>,
+{
     let mut builder = crate::registry::Registry::builder();
     register_catalog(&mut builder)?;
     registration::register(&mut builder)?;
+    extra(&mut builder)?;
     builder.build()
 }
+
+/// Build the default registry with extra TCP ports dissected as TLS.
+///
+/// The built-in ports stay bound; `ports` adds to them. Re-binding a port that
+/// is already TLS is accepted, so a caller need not filter the default list.
+///
+/// ```
+/// use packetcraftr_core::protocol::builtin;
+///
+/// let registry = builtin::registry_with_tls_ports(&[4433]).expect("extra TLS port");
+/// assert_eq!(
+///     registry
+///         .child_for("tcp", packetcraftr_core::registry::Discriminator(4433))
+///         .map(|protocol| protocol.as_str()),
+///     Some("tls")
+/// );
+/// ```
+pub fn registry_with_tls_ports(
+    ports: &[u16],
+) -> Result<crate::registry::Registry, crate::registry::Error> {
+    registry_with(|builder| registration::bind_tls_ports(builder, ports))
+}
+
+/// The TCP ports the default registry dissects as TLS.
+pub const TLS_TCP_PORTS: &[u16] = registration::TLS_TCP_PORTS;

@@ -8,3 +8,5 @@ pub mod tls;
 
 pub use dns::Dns;
 pub(crate) use dns::DnsCodec;
+pub use tls::codec::Tls;
+pub(crate) use tls::codec::TlsCodec;

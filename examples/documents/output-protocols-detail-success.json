@@ -26,6 +26,28 @@
         {"name": "source", "kind": "ipv4", "required": true, "derived": false, "description": "Source IPv4 address"},
         {"name": "destination", "kind": "ipv4", "required": true, "derived": false, "description": "Destination IPv4 address"},
         {"name": "options", "kind": "bytes", "required": false, "derived": false, "description": "Verbatim IPv4 option bytes"}
+      ],
+      "bindings": [
+        {"parent": "ah", "discriminator": 4},
+        {"parent": "bsd_loop", "discriminator": 4},
+        {"parent": "bsd_null", "discriminator": 4},
+        {"parent": "ethernet", "discriminator": 2048},
+        {"parent": "geneve", "discriminator": 2048},
+        {"parent": "gre", "discriminator": 2048},
+        {"parent": "ipv4", "discriminator": 4},
+        {"parent": "ipv6", "discriminator": 4},
+        {"parent": "ipv6_destination_options", "discriminator": 4},
+        {"parent": "ipv6_fragment", "discriminator": 4},
+        {"parent": "ipv6_hop_by_hop", "discriminator": 4},
+        {"parent": "ipv6_srh", "discriminator": 4},
+        {"parent": "linux_sll", "discriminator": 2048},
+        {"parent": "linux_sll2", "discriminator": 2048},
+        {"parent": "mpls", "discriminator": 260},
+        {"parent": "ppp", "discriminator": 33},
+        {"parent": "raw_ip", "discriminator": 4},
+        {"parent": "snap", "discriminator": 2048},
+        {"parent": "vlan", "discriminator": 2048},
+        {"parent": "vlan8021ad", "discriminator": 2048}
       ]
     }
   },

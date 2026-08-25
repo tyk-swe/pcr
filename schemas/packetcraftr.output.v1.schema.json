@@ -1598,7 +1598,8 @@
         "exact_round_trip",
         "matcher",
         "decode_only",
-        "fields"
+        "fields",
+        "bindings"
       ],
       "properties": {
         "protocol": {
@@ -1631,6 +1632,12 @@
           "type": "array",
           "items": {
             "$ref": "#/$defs/protocolField"
+          }
+        },
+        "bindings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/protocolBinding"
           }
         }
       },
@@ -1672,6 +1679,25 @@
         },
         "description": {
           "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "protocolBinding": {
+      "type": "object",
+      "required": [
+        "parent",
+        "discriminator"
+      ],
+      "properties": {
+        "parent": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Protocol whose binding reaches this one during dissection"
+        },
+        "discriminator": {
+          "$ref": "#/$defs/uint64",
+          "description": "Selector value the parent matches: a port, EtherType, or protocol number; zero is the parent's fallback"
         }
       },
       "additionalProperties": false

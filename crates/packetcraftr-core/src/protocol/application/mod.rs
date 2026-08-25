@@ -4,6 +4,7 @@
 //! Bounded application payload layers.
 
 mod dns;
+pub mod tls;
 
 pub use dns::Dns;
 pub(crate) use dns::DnsCodec;

@@ -8,16 +8,6 @@ use std::net::IpAddr;
 use super::Error;
 use super::link::{Capability, MacAddress};
 
-pub(crate) use self::Info as InterfaceInfo;
-#[cfg(any(
-    feature = "native-interfaces",
-    all(
-        feature = "native-route",
-        any(target_os = "linux", target_os = "macos", windows)
-    )
-))]
-pub(crate) use self::{Address as InterfaceAddress, Flags as InterfaceFlags};
-
 /// Stable operating-system interface identity.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Id {

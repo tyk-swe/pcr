@@ -12,7 +12,7 @@ use self::{
     worker::with_netlink,
 };
 use crate::{
-    interface::{Id as InterfaceId, InterfaceInfo},
+    interface::{self, Id as InterfaceId},
     route::{
         Decision, SystemError, find_interface, interface_decision, validate_preferred_source_family,
     },
@@ -21,7 +21,7 @@ use crate::{
 mod query;
 mod worker;
 
-pub(super) fn interfaces() -> Result<Vec<InterfaceInfo>, SystemError> {
+pub(super) fn interfaces() -> Result<Vec<interface::Info>, SystemError> {
     with_netlink(|handle| async move { query_interfaces(&handle).await })
 }
 

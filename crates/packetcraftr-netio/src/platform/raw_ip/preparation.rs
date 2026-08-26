@@ -9,8 +9,9 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use bytes::Bytes;
 
-use super::super::super::{Error as LiveIoError, transmit::Layer3Frame};
-use crate::{checksum, interface::Id as InterfaceId};
+use super::super::super::{Error, transmit::Layer3Frame};
+use crate::interface::Id as InterfaceId;
+use packetcraftr_core::protocol::checksum;
 
 const IPV4_MINIMUM_HEADER: usize = 20;
 const IPV6_HEADER: usize = 40;
@@ -23,7 +24,7 @@ pub(super) struct PreparedRawIp {
     pub(super) wire_bytes: Bytes,
 }
 
-pub(super) fn prepare(frame: Layer3Frame<'_>) -> Result<PreparedRawIp, LiveIoError> {
+pub(super) fn prepare(frame: Layer3Frame<'_>) -> Result<PreparedRawIp, Error> {
     let bytes = frame.bytes().clone();
     let plan = &frame.route().plan;
     if bytes.len() > plan.decision.mtu as usize {
@@ -92,7 +93,7 @@ pub(super) fn prepare(frame: Layer3Frame<'_>) -> Result<PreparedRawIp, LiveIoErr
     })
 }
 
-fn validate_ipv4(bytes: &[u8]) -> Result<(Ipv4Addr, Ipv4Addr), LiveIoError> {
+fn validate_ipv4(bytes: &[u8]) -> Result<(Ipv4Addr, Ipv4Addr), Error> {
     let header = bytes
         .first_chunk::<IPV4_MINIMUM_HEADER>()
         .ok_or_else(|| invalid_frame("truncated IPv4 header".to_owned()))?;
@@ -118,7 +119,7 @@ fn validate_ipv4(bytes: &[u8]) -> Result<(Ipv4Addr, Ipv4Addr), LiveIoError> {
         clippy::indexing_slicing,
         reason = "header_length was checked against bytes.len() above"
     )]
-    let header_checksum = checksum::compute(&bytes[..header_length]);
+    let header_checksum = checksum(&bytes[..header_length]);
     if header_checksum != 0 {
         return Err(invalid_frame(
             "IPv4 header checksum would be rewritten by the operating system".to_owned(),
@@ -132,7 +133,7 @@ fn validate_ipv4(bytes: &[u8]) -> Result<(Ipv4Addr, Ipv4Addr), LiveIoError> {
     Ok((source, destination))
 }
 
-fn validate_ipv6(bytes: &[u8]) -> Result<(Ipv6Addr, Ipv6Addr), LiveIoError> {
+fn validate_ipv6(bytes: &[u8]) -> Result<(Ipv6Addr, Ipv6Addr), Error> {
     let header = bytes
         .first_chunk::<IPV6_HEADER>()
         .ok_or_else(|| invalid_frame("truncated IPv6 header".to_owned()))?;
@@ -185,10 +186,10 @@ fn validate_windows_restrictions(
     bytes: &[u8],
     packet_source: IpAddr,
     interface_source: IpAddr,
-) -> Result<(), LiveIoError> {
+) -> Result<(), Error> {
     let protocol = upper_protocol(bytes)?;
     if protocol == 17 && packet_source != interface_source {
-        return Err(LiveIoError::Unsupported {
+        return Err(Error::Unsupported {
             message: "Windows client editions drop raw UDP with a source not assigned to a local interface"
                 .to_owned(),
         });
@@ -203,7 +204,7 @@ fn extension_header(bytes: &[u8], offset: usize) -> Option<[u8; 2]> {
 }
 
 #[cfg(windows)]
-pub(super) fn upper_protocol(bytes: &[u8]) -> Result<u8, LiveIoError> {
+pub(super) fn upper_protocol(bytes: &[u8]) -> Result<u8, Error> {
     let version = bytes
         .first()
         .ok_or_else(|| invalid_frame("packet is empty".to_owned()))?;
@@ -255,8 +256,8 @@ pub(super) fn upper_protocol(bytes: &[u8]) -> Result<u8, LiveIoError> {
     }
 }
 
-fn invalid_frame(message: String) -> LiveIoError {
-    LiveIoError::InvalidTransmissionFrame { message }
+fn invalid_frame(message: String) -> Error {
+    Error::InvalidTransmissionFrame { message }
 }
 
 #[cfg(test)]
@@ -286,7 +287,7 @@ mod tests {
 
     fn set_ipv4_checksum(bytes: &mut [u8]) {
         bytes[10..12].fill(0);
-        let checksum = checksum::compute(bytes);
+        let checksum = checksum(bytes);
         bytes[10..12].copy_from_slice(&checksum.to_be_bytes());
     }
 
@@ -303,9 +304,9 @@ mod tests {
         bytes
     }
 
-    fn invalid_message<T: std::fmt::Debug>(result: Result<T, LiveIoError>) -> String {
+    fn invalid_message<T: std::fmt::Debug>(result: Result<T, Error>) -> String {
         match result.expect_err("fixture must be rejected") {
-            LiveIoError::InvalidTransmissionFrame { message } => message,
+            Error::InvalidTransmissionFrame { message } => message,
             other => panic!("unexpected error: {other:?}"),
         }
     }

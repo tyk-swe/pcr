@@ -9,16 +9,16 @@ use pcap::{Capture, Error as PcapError};
 
 use super::capture::map_open_error;
 use crate::{
-    Error as LiveIoError,
+    Error,
     interface::Id as InterfaceId,
-    transmit::{IoSendReport, Layer2Frame, Submission},
+    transmit::{self, Layer2Frame, Submission},
 };
 
 const READ_TIMEOUT_MILLIS: i32 = 50;
 
-pub(crate) fn send_layer2(frame: Layer2Frame<'_>) -> Result<IoSendReport, LiveIoError> {
+pub(crate) fn send_layer2(frame: Layer2Frame<'_>) -> Result<transmit::Report, Error> {
     let interface = &frame.route().plan.decision.interface;
-    i32::try_from(frame.bytes().len()).map_err(|_| LiveIoError::InvalidTransmissionFrame {
+    i32::try_from(frame.bytes().len()).map_err(|_| Error::InvalidTransmissionFrame {
         message: format!(
             "Layer 2 frame length {} exceeds the libpcap signed-length limit",
             frame.bytes().len()
@@ -38,21 +38,21 @@ pub(crate) fn send_layer2(frame: Layer2Frame<'_>) -> Result<IoSendReport, LiveIo
     Ok(submission.complete(frame.bytes().len(), frame.bytes().clone()))
 }
 
-pub(super) fn map_send_error(interface: &InterfaceId, error: PcapError) -> LiveIoError {
+pub(super) fn map_send_error(interface: &InterfaceId, error: PcapError) -> Error {
     let message = error.to_string();
     let lower = message.to_ascii_lowercase();
     if lower.contains("permission denied")
         || lower.contains("operation not permitted")
         || lower.contains("access is denied")
     {
-        return LiveIoError::Privilege {
+        return Error::Privilege {
             message: format!(
                 "cannot inject on {} through libpcap: {message}; grant link-layer injection privileges",
                 interface.name
             ),
         };
     }
-    LiveIoError::Send {
+    Error::Send {
         message: format!("libpcap injection on {} failed: {message}", interface.name),
     }
 }

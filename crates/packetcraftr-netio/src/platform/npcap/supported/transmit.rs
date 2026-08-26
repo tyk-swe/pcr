@@ -11,15 +11,15 @@ use super::{
     handles::{PromiscuousMode, open_handle},
 };
 use crate::{
-    Error as LiveIoError,
-    transmit::{IoSendReport, Layer2Frame, Submission},
+    Error,
+    transmit::{self, Layer2Frame, Submission},
 };
 
 pub(in crate::platform::npcap) fn send_layer2(
     frame: Layer2Frame<'_>,
-) -> Result<IoSendReport, LiveIoError> {
+) -> Result<transmit::Report, Error> {
     let interface = &frame.route().plan.decision.interface;
-    let length = i32::try_from(frame.bytes().len()).map_err(|_| LiveIoError::Send {
+    let length = i32::try_from(frame.bytes().len()).map_err(|_| Error::Send {
         message: format!(
             "Layer 2 frame for {} exceeds Npcap's signed 32-bit send length",
             interface.name
@@ -36,14 +36,14 @@ pub(in crate::platform::npcap) fn send_layer2(
         let message = handle.error_message();
         let lower = message.to_ascii_lowercase();
         if is_permission_message(&lower) {
-            return Err(LiveIoError::Privilege {
+            return Err(Error::Privilege {
                 message: format!(
                     "cannot inject on {} through Npcap: {message}; run with packet capture privileges",
                     interface.name
                 ),
             });
         }
-        return Err(LiveIoError::Send {
+        return Err(Error::Send {
             message: format!(
                 "Npcap injection on {} failed with status {result}: {message}",
                 interface.name

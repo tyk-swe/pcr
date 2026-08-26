@@ -17,8 +17,8 @@ use super::{
     handles::{NpcapHandle, PromiscuousMode, open_handle},
 };
 use crate::{
-    Error as LiveIoError,
-    capture::{CaptureQueueLimits, Metadata as CaptureMetadata},
+    Error,
+    capture::{Limits, Metadata},
     interface::Id as InterfaceId,
     platform::live_capture::{
         CaptureInterrupt, NativeCaptureEvent, NativeCaptureParts, NativeCaptureSource,
@@ -30,13 +30,13 @@ use bytes::Bytes;
 
 pub(in crate::platform::npcap) fn open_capture(
     interface: &InterfaceId,
-    limits: CaptureQueueLimits,
+    limits: Limits,
     capture_filter: Option<&str>,
     netmask: Option<u32>,
     promiscuous: bool,
-) -> Result<NativeCaptureParts, LiveIoError> {
+) -> Result<NativeCaptureParts, Error> {
     let snap_length =
-        i32::try_from(limits.snap_length).map_err(|_| LiveIoError::InvalidCaptureQueueLimit {
+        i32::try_from(limits.snap_length).map_err(|_| Error::InvalidCaptureQueueLimit {
             field: "snap_length",
             value: limits.snap_length,
             reason: "Npcap snap length exceeds i32",
@@ -60,7 +60,7 @@ pub(in crate::platform::npcap) fn open_capture(
     let datalink = unsafe { (handle.api.pcap_datalink)(handle.raw.as_ptr()) };
     let link_type = u32::try_from(datalink)
         .map(canonical_link_type)
-        .map_err(|_| LiveIoError::Capture {
+        .map_err(|_| Error::Capture {
             message: format!(
                 "Npcap could not report the data-link type for {}: {}",
                 interface.name,
@@ -83,7 +83,7 @@ pub(in crate::platform::npcap) fn open_capture(
             snap_length,
         }),
         interrupt,
-        metadata: CaptureMetadata {
+        metadata: Metadata {
             interface: interface.clone(),
             link_type,
             snap_length,
@@ -96,8 +96,8 @@ fn install_capture_filter(
     interface: &InterfaceId,
     filter: &str,
     netmask: u32,
-) -> Result<(), LiveIoError> {
-    let filter = CString::new(filter).map_err(|_| LiveIoError::InvalidCaptureFilter {
+) -> Result<(), Error> {
+    let filter = CString::new(filter).map_err(|_| Error::InvalidCaptureFilter {
         interface: interface.name.clone(),
         message: "Npcap BPF expressions cannot contain an interior NUL byte".to_owned(),
     })?;
@@ -119,7 +119,7 @@ fn install_capture_filter(
     };
     if compile_status != 0 {
         let diagnostic = handle.error_message();
-        return Err(LiveIoError::InvalidCaptureFilter {
+        return Err(Error::InvalidCaptureFilter {
             interface: interface.name.clone(),
             message: format!("Npcap compilation failed: {diagnostic}"),
         });
@@ -134,7 +134,7 @@ fn install_capture_filter(
     unsafe { (handle.api.pcap_freecode)(&mut program) };
 
     if let Some(diagnostic) = diagnostic {
-        return Err(LiveIoError::CaptureFilterInstallation {
+        return Err(Error::CaptureFilterInstallation {
             interface: interface.name.clone(),
             message: format!("Npcap installation failed: {diagnostic}"),
         });
@@ -148,7 +148,7 @@ struct NpcapCaptureSource {
 }
 
 impl NativeCaptureSource for NpcapCaptureSource {
-    fn next_event(&mut self) -> Result<NativeCaptureEvent, LiveIoError> {
+    fn next_event(&mut self) -> Result<NativeCaptureEvent, Error> {
         let mut header = std::ptr::null_mut();
         let mut data = std::ptr::null();
         // SAFETY: header/data are writable out-pointers and the worker is the
@@ -161,7 +161,7 @@ impl NativeCaptureSource for NpcapCaptureSource {
         let observed_wall = SystemTime::now();
         match result {
             1 => {
-                let header = NonNull::new(header).ok_or_else(|| LiveIoError::Capture {
+                let header = NonNull::new(header).ok_or_else(|| Error::Capture {
                     message: "Npcap returned a packet without a header".to_owned(),
                 })?;
                 // SAFETY: a successful pcap_next_ex result guarantees the
@@ -175,7 +175,7 @@ impl NativeCaptureSource for NpcapCaptureSource {
                 let received_at = monotonic_packet_time(timestamp, observed_wall, observed_at);
                 let captured_length = header.captured_length as usize;
                 if captured_length > self.snap_length {
-                    return Err(LiveIoError::Capture {
+                    return Err(Error::Capture {
                         message: format!(
                             "Npcap returned {captured_length} bytes beyond configured snap length {}",
                             self.snap_length
@@ -183,7 +183,7 @@ impl NativeCaptureSource for NpcapCaptureSource {
                     });
                 }
                 if header.original_length < header.captured_length {
-                    return Err(LiveIoError::Capture {
+                    return Err(Error::Capture {
                         message: format!(
                             "Npcap returned captured length {} above original length {}",
                             header.captured_length, header.original_length
@@ -194,7 +194,7 @@ impl NativeCaptureSource for NpcapCaptureSource {
                     Bytes::new()
                 } else {
                     if data.is_null() {
-                        return Err(LiveIoError::Capture {
+                        return Err(Error::Capture {
                             message: "Npcap returned packet bytes through a null pointer"
                                 .to_owned(),
                         });
@@ -215,10 +215,10 @@ impl NativeCaptureSource for NpcapCaptureSource {
             }
             0 => Ok(NativeCaptureEvent::Timeout),
             PCAP_ERROR_BREAK => Ok(NativeCaptureEvent::Closed),
-            PCAP_ERROR => Err(LiveIoError::Capture {
+            PCAP_ERROR => Err(Error::Capture {
                 message: format!("Npcap receive failed: {}", self.handle.error_message()),
             }),
-            status => Err(LiveIoError::Capture {
+            status => Err(Error::Capture {
                 message: format!(
                     "Npcap receive returned unexpected status {status}: {}",
                     self.handle.error_message()
@@ -227,14 +227,14 @@ impl NativeCaptureSource for NpcapCaptureSource {
         }
     }
 
-    fn statistics(&mut self) -> Result<NativeCaptureStatistics, LiveIoError> {
+    fn statistics(&mut self) -> Result<NativeCaptureStatistics, Error> {
         let mut statistics = PcapStatistics::default();
         // SAFETY: the SDK-sized output structure is writable and the worker
         // exclusively operates this live capture handle.
         let result =
             unsafe { (self.handle.api.pcap_stats)(self.handle.raw.as_ptr(), &mut statistics) };
         if result != 0 {
-            return Err(LiveIoError::Capture {
+            return Err(Error::Capture {
                 message: format!(
                     "Npcap statistics failed with status {result}: {}",
                     self.handle.error_message()

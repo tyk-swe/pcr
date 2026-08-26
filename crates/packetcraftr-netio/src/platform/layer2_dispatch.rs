@@ -6,8 +6,8 @@
 #![forbid(unsafe_code)]
 
 use crate::{
-    Error as LiveIoError,
-    transmit::{IoSendReport, Layer2Frame},
+    Error,
+    transmit::{self, Layer2Frame},
 };
 
 #[cfg(all(
@@ -23,7 +23,7 @@ use super::npcap as layer2_backend;
     feature = "native-layer2",
     any(target_os = "linux", target_os = "macos", windows)
 ))]
-pub(crate) fn system_send_layer2(frame: Layer2Frame<'_>) -> Result<IoSendReport, LiveIoError> {
+pub(crate) fn system_send_layer2(frame: Layer2Frame<'_>) -> Result<transmit::Report, Error> {
     super::interface_identity::validate_current_interface_identity(
         &frame.route().plan.decision.interface,
     )?;
@@ -37,8 +37,8 @@ pub(crate) fn system_send_layer2(frame: Layer2Frame<'_>) -> Result<IoSendReport,
         not(any(target_os = "linux", target_os = "macos", windows))
     )
 ))]
-pub(crate) fn system_send_layer2(_frame: Layer2Frame<'_>) -> Result<IoSendReport, LiveIoError> {
-    Err(LiveIoError::Unsupported {
+pub(crate) fn system_send_layer2(_frame: Layer2Frame<'_>) -> Result<transmit::Report, Error> {
+    Err(Error::Unsupported {
         message: "enable the native-layer2 feature on a supported target for Layer 2 injection"
             .to_owned(),
     })

@@ -6,14 +6,14 @@
 use std::net::{IpAddr, Ipv4Addr};
 
 use crate::{
-    interface::{Id as InterfaceId, InterfaceAddress, InterfaceInfo},
+    interface::{self, Id as InterfaceId},
     platform::validate_native_interface,
 };
 
 use super::{Decision, Scope, SelectionReason, SystemError};
 
 pub(crate) struct NativeRouteSnapshot {
-    pub interface: InterfaceInfo,
+    pub interface: interface::Info,
     pub selected_source: Option<IpAddr>,
     pub next_hop: Option<IpAddr>,
     pub route_mtu: Option<u32>,
@@ -113,7 +113,7 @@ pub(crate) fn finish_route(
     clippy::arithmetic_side_effects,
     reason = "prefix_length above 30 is rejected above, so host bits stay within u32::BITS"
 )]
-fn is_interface_broadcast(destination: IpAddr, interface: &InterfaceInfo) -> bool {
+fn is_interface_broadcast(destination: IpAddr, interface: &interface::Info) -> bool {
     let IpAddr::V4(destination) = destination else {
         return false;
     };
@@ -134,7 +134,7 @@ fn is_interface_broadcast(destination: IpAddr, interface: &InterfaceInfo) -> boo
         })
 }
 
-pub(crate) fn interface_decision(interface: InterfaceInfo) -> Result<Decision, SystemError> {
+pub(crate) fn interface_decision(interface: interface::Info) -> Result<Decision, SystemError> {
     validate_interface(&interface)?;
     let mtu =
         interface
@@ -159,9 +159,9 @@ pub(crate) fn interface_decision(interface: InterfaceInfo) -> Result<Decision, S
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) fn find_interface(
-    interfaces: &[InterfaceInfo],
+    interfaces: &[interface::Info],
     requested: &InterfaceId,
-) -> Result<InterfaceInfo, SystemError> {
+) -> Result<interface::Info, SystemError> {
     if let Some(interface) = interfaces
         .iter()
         .find(|interface| interface.id == *requested)
@@ -233,7 +233,7 @@ fn validate_interface_hint(
     })
 }
 
-fn validate_interface(interface: &InterfaceInfo) -> Result<(), SystemError> {
+fn validate_interface(interface: &interface::Info) -> Result<(), SystemError> {
     validate_native_interface(interface).map_err(|message| SystemError::InvalidResponse { message })
 }
 
@@ -244,7 +244,7 @@ struct SourceAddressRank {
     scope_match: bool,
 }
 
-fn fallback_source(addresses: &[InterfaceAddress], destination: IpAddr) -> Option<IpAddr> {
+fn fallback_source(addresses: &[interface::Address], destination: IpAddr) -> Option<IpAddr> {
     let mut best: Option<(IpAddr, SourceAddressRank)> = None;
     for assigned in addresses {
         let address = assigned.address;
@@ -312,7 +312,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        interface::{Flags as InterfaceFlags, Id as InterfaceId},
+        interface::{self, Id as InterfaceId},
         link::{Capability, MacAddress},
     };
 
@@ -320,8 +320,8 @@ mod tests {
         IpAddr::V4(Ipv4Addr::new(a, b, c, d))
     }
 
-    fn interface() -> InterfaceInfo {
-        InterfaceInfo {
+    fn interface() -> interface::Info {
+        interface::Info {
             id: InterfaceId {
                 name: "fixture0".to_owned(),
                 index: 7,
@@ -329,23 +329,23 @@ mod tests {
             description: Some("fixture interface".to_owned()),
             mac_address: Some(MacAddress([0x02, 0, 0, 0, 0, 1])),
             addresses: vec![
-                InterfaceAddress {
+                interface::Address {
                     address: v4(10, 0, 0, 2),
                     prefix_length: 8,
                 },
-                InterfaceAddress {
+                interface::Address {
                     address: v4(10, 2, 3, 4),
                     prefix_length: 24,
                 },
-                InterfaceAddress {
+                interface::Address {
                     address: IpAddr::V6(Ipv6Addr::LOCALHOST),
                     prefix_length: 128,
                 },
             ],
-            flags: InterfaceFlags {
+            flags: interface::Flags {
                 up: true,
                 multicast: true,
-                ..InterfaceFlags::default()
+                ..interface::Flags::default()
             },
             mtu: Some(1_500),
             capability: Capability::Layer2AndLayer3,

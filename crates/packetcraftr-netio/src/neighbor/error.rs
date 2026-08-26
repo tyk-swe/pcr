@@ -13,7 +13,7 @@ use packetcraftr_core::{
 };
 
 use super::Request;
-use crate::{Error as LiveIoError, capture::Statistics, interface::Id as InterfaceId};
+use crate::{capture::Statistics, interface::Id as InterfaceId};
 
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -52,7 +52,7 @@ pub enum Error {
         interface: String,
         target: IpAddr,
         operation: &'static str,
-        source: LiveIoError,
+        source: crate::Error,
     },
     #[error(
         "neighbor resolution for {target} on {interface} completed but capture cleanup failed: {source}"
@@ -60,7 +60,7 @@ pub enum Error {
     Cleanup {
         interface: String,
         target: IpAddr,
-        source: LiveIoError,
+        source: crate::Error,
     },
     #[error(
         "neighbor resolution for {target} on {interface} failed and capture cleanup also failed: operation={operation}; cleanup={cleanup}"
@@ -69,7 +69,7 @@ pub enum Error {
         interface: String,
         target: IpAddr,
         operation: Box<Error>,
-        cleanup: LiveIoError,
+        cleanup: crate::Error,
     },
 }
 
@@ -138,7 +138,7 @@ pub(super) fn resolution_error(interface: &InterfaceId, target: IpAddr, message:
 pub(super) fn map_io_error(
     request: &Request,
     operation: &'static str,
-    error: LiveIoError,
+    error: crate::Error,
 ) -> Error {
     Error::Io {
         interface: request.interface.name.clone(),

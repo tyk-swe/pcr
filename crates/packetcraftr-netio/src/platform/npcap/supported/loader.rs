@@ -35,7 +35,7 @@ use super::{
     },
     error::{error_buffer_message, interface_conversion_error},
 };
-use crate::{Error as LiveIoError, interface::Id as InterfaceId};
+use crate::{Error, interface::Id as InterfaceId};
 
 pub(super) struct NpcapApi {
     // Keeps the DLL loaded while function pointers are used.
@@ -60,7 +60,7 @@ pub(super) struct NpcapApi {
 }
 
 impl NpcapApi {
-    fn load() -> Result<Self, LiveIoError> {
+    fn load() -> Result<Self, Error> {
         let path = npcap_library_path()?;
         // SAFETY: the path is obtained from the operating system rather than
         // process environment, and the flags restrict dependent DLL lookup to
@@ -71,7 +71,7 @@ impl NpcapApi {
                 LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32,
             )
         }
-        .map_err(|error| LiveIoError::MissingDependency {
+        .map_err(|error| Error::MissingDependency {
             dependency: NPCAP_DEPENDENCY,
             message: format!(
                 "could not load {}: {error}; install Npcap 1.88 for all users and restart PacketcraftR",
@@ -129,7 +129,7 @@ impl NpcapApi {
         // writable error buffer has PCAP_ERRBUF_SIZE bytes.
         let initialization = unsafe { pcap_init(PCAP_CHAR_ENC_UTF_8, error_buffer.as_mut_ptr()) };
         if initialization != 0 {
-            return Err(LiveIoError::MissingDependency {
+            return Err(Error::MissingDependency {
                 dependency: NPCAP_DEPENDENCY,
                 message: format!(
                     "pcap_init rejected UTF-8 mode: {}",
@@ -161,12 +161,12 @@ impl NpcapApi {
     }
 }
 
-pub(super) fn npcap_api() -> Result<Arc<NpcapApi>, LiveIoError> {
-    static API: OnceLock<Result<Arc<NpcapApi>, LiveIoError>> = OnceLock::new();
+pub(super) fn npcap_api() -> Result<Arc<NpcapApi>, Error> {
+    static API: OnceLock<Result<Arc<NpcapApi>, Error>> = OnceLock::new();
     API.get_or_init(|| NpcapApi::load().map(Arc::new)).clone()
 }
 
-pub(super) fn npcap_device_name(interface: &InterfaceId) -> Result<String, LiveIoError> {
+pub(super) fn npcap_device_name(interface: &InterfaceId) -> Result<String, Error> {
     let mut luid = NET_LUID_LH::default();
     // SAFETY: luid is writable and the interface index is a plain value.
     let index_result = unsafe { ConvertInterfaceIndexToLuid(interface.index, &mut luid) };
@@ -194,14 +194,14 @@ fn format_npcap_device(guid: GUID) -> String {
     format!(r"\Device\NPF_{{{guid:?}}}")
 }
 
-fn npcap_library_path() -> Result<PathBuf, LiveIoError> {
+fn npcap_library_path() -> Result<PathBuf, Error> {
     // A fixed maximum path buffer avoids environment-controlled DLL lookup.
     let mut windows_directory = vec![0_u16; 32_768];
     // SAFETY: the entire mutable UTF-16 buffer is provided to the system API,
     // which returns the number of initialized code units.
     let length = unsafe { GetSystemWindowsDirectoryW(Some(&mut windows_directory)) } as usize;
     if length == 0 || length >= windows_directory.len() {
-        return Err(LiveIoError::MissingDependency {
+        return Err(Error::MissingDependency {
             dependency: NPCAP_DEPENDENCY,
             message: "Windows did not return a valid system directory for secure DLL lookup"
                 .to_owned(),
@@ -215,12 +215,12 @@ fn npcap_library_path() -> Result<PathBuf, LiveIoError> {
     Ok(path)
 }
 
-unsafe fn load_symbol<T: Copy>(library: &Library, name: &'static [u8]) -> Result<T, LiveIoError> {
+unsafe fn load_symbol<T: Copy>(library: &Library, name: &'static [u8]) -> Result<T, Error> {
     // SAFETY: the caller supplies the exact SDK signature associated with this
     // NUL-terminated export name; the Library owner outlives T.
     unsafe { library.get::<T>(name) }
         .map(|symbol| *symbol)
-        .map_err(|error| LiveIoError::MissingDependency {
+        .map_err(|error| Error::MissingDependency {
             dependency: NPCAP_DEPENDENCY,
             message: format!(
                 "required SDK 1.16 symbol {} is unavailable: {error}",

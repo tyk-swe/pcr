@@ -93,7 +93,6 @@ impl super::builder::Builder {
         }
         Ok(super::lookup::Registry {
             codecs: self.codecs,
-            builtin_codecs: self.builtin_codecs,
             aliases: self.aliases,
             roots: self.roots,
             bindings: self.bindings,

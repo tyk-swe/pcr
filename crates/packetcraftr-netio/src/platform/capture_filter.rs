@@ -5,11 +5,11 @@
 
 #![forbid(unsafe_code)]
 
-use crate::{Error as LiveIoError, interface::Id as InterfaceId};
+use crate::{Error, interface::Id as InterfaceId};
 
-pub(super) fn validate(interface: &InterfaceId, source: &str) -> Result<(), LiveIoError> {
+pub(super) fn validate(interface: &InterfaceId, source: &str) -> Result<(), Error> {
     if has_symbolic_operand(source) {
-        return Err(LiveIoError::InvalidCaptureFilter {
+        return Err(Error::InvalidCaptureFilter {
             interface: interface.name.clone(),
             message: "symbolic names are disabled because native BPF compilation can resolve them; use numeric address, network, port, and protocol operands".to_owned(),
         });
@@ -209,7 +209,7 @@ mod tests {
 
         assert!(matches!(
             error,
-            LiveIoError::InvalidCaptureFilter {
+            Error::InvalidCaptureFilter {
                 interface: actual,
                 ..
             } if actual == interface.name

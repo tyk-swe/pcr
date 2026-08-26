@@ -16,9 +16,9 @@ use windows::Win32::NetworkManagement::IpHelper::{
 use windows::Win32::Networking::WinSock::AF_UNSPEC;
 
 use super::adapter::{BufferBounds, WindowsAdapter, parse_adapters};
-use crate::{interface::InterfaceInfo, route::SystemError};
+use crate::{interface, route::SystemError};
 
-pub(in crate::platform) fn interfaces() -> Result<Vec<InterfaceInfo>, SystemError> {
+pub(in crate::platform) fn interfaces() -> Result<Vec<interface::Info>, SystemError> {
     Ok(adapter_snapshots()?
         .into_iter()
         .map(|adapter| adapter.interface)

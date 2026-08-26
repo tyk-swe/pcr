@@ -24,7 +24,7 @@ use windows::Win32::{
 };
 
 use crate::{
-    interface::{Id as InterfaceId, InterfaceAddress, InterfaceFlags, InterfaceInfo},
+    interface::{self, Id as InterfaceId},
     link::{Capability, MacAddress},
     route::SystemError,
 };
@@ -32,7 +32,7 @@ use packetcraftr_core::frame::LinkType;
 
 #[derive(Clone)]
 pub(super) struct WindowsAdapter {
-    pub(super) interface: InterfaceInfo,
+    pub(super) interface: interface::Info,
     #[cfg(feature = "native-route")]
     pub(super) ipv4_index: u32,
     #[cfg(feature = "native-route")]
@@ -172,12 +172,12 @@ pub(super) fn parse_adapters(
             let ethernet = matches!(adapter.IfType, IF_TYPE_ETHERNET_CSMACD | IF_TYPE_IEEE80211)
                 && mac_address.is_some();
             interfaces.push(WindowsAdapter {
-                interface: InterfaceInfo {
+                interface: interface::Info {
                     id: InterfaceId { name, index },
                     description,
                     mac_address,
                     addresses: parse_unicast_addresses(adapter.FirstUnicastAddress, bounds)?,
-                    flags: InterfaceFlags {
+                    flags: interface::Flags {
                         up: adapter.OperStatus == IfOperStatusUp,
                         broadcast: ethernet,
                         loopback,
@@ -214,7 +214,7 @@ pub(super) fn parse_adapters(
 fn parse_unicast_addresses(
     mut current: *mut IP_ADAPTER_UNICAST_ADDRESS_LH,
     bounds: BufferBounds,
-) -> Result<Vec<InterfaceAddress>, SystemError> {
+) -> Result<Vec<interface::Address>, SystemError> {
     let mut addresses = Vec::new();
     for _ in 0..16_384 {
         if current.is_null() {
@@ -240,7 +240,7 @@ fn parse_unicast_addresses(
                     ),
                 });
             }
-            let assigned = InterfaceAddress {
+            let assigned = interface::Address {
                 address,
                 prefix_length: unicast.OnLinkPrefixLength,
             };

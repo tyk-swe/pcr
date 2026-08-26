@@ -11,11 +11,11 @@ use super::error::{map_io_error, resolution_error};
 use super::options::Options;
 use super::wire::is_unicast_mac;
 use super::{MAX_VLAN_TAGS as MAX_NEIGHBOR_VLAN_TAGS, Request as NeighborRequest};
-use crate::transmit::IoSendReport;
+use crate::transmit;
 use packetcraftr_core::frame::{Frame, LinkType};
 
 #[cfg(test)]
-use crate::Error as LiveIoError;
+use crate::Error;
 
 pub(super) fn validate_request(request: &NeighborRequest) -> Result<(), crate::neighbor::Error> {
     if request.interface_source.is_ipv4() != request.target.is_ipv4() {
@@ -96,7 +96,7 @@ pub(super) fn validate_captured_frame(
 pub(super) fn validate_neighbor_send(
     request: &NeighborRequest,
     expected: &Bytes,
-    report: &IoSendReport,
+    report: &transmit::Report,
 ) -> Result<(), crate::neighbor::Error> {
     report
         .validate_exact(expected)
@@ -278,7 +278,7 @@ mod tests {
             validate_neighbor_send(
                 &request,
                 &expected,
-                &IoSendReport::committed(3, expected.clone())
+                &transmit::Report::committed(3, expected.clone())
             )
             .is_ok()
         );
@@ -286,10 +286,10 @@ mod tests {
             validate_neighbor_send(
                 &request,
                 &expected,
-                &IoSendReport::committed(2, expected.clone())
+                &transmit::Report::committed(2, expected.clone())
             ),
             Err(crate::neighbor::Error::Io {
-                source: LiveIoError::PartialSend { .. },
+                source: Error::PartialSend { .. },
                 ..
             })
         ));
@@ -297,10 +297,10 @@ mod tests {
             validate_neighbor_send(
                 &request,
                 &expected,
-                &IoSendReport::committed(3, Bytes::from_static(&[3, 2, 1]))
+                &transmit::Report::committed(3, Bytes::from_static(&[3, 2, 1]))
             ),
             Err(crate::neighbor::Error::Io {
-                source: LiveIoError::InvalidSendEvidence { .. },
+                source: Error::InvalidSendEvidence { .. },
                 ..
             })
         ));

@@ -22,7 +22,7 @@ use rtnetlink::{
 
 use super::os_error;
 use crate::{
-    interface::{Id as InterfaceId, InterfaceAddress, InterfaceFlags, InterfaceInfo},
+    interface::{self, Id as InterfaceId},
     link::{Capability, MacAddress},
     route::{Decision, NativeRouteSnapshot, SelectionReason, SystemError, finish_route},
 };
@@ -126,13 +126,13 @@ fn route_selection_reason(kind: &RouteType, has_next_hop: bool) -> Option<Select
     }
 }
 
-pub(super) async fn query_interfaces(handle: &Handle) -> Result<Vec<InterfaceInfo>, SystemError> {
+pub(super) async fn query_interfaces(handle: &Handle) -> Result<Vec<interface::Info>, SystemError> {
     let mut interfaces = query_links(handle).await?;
     query_addresses(handle, &mut interfaces).await?;
     Ok(interfaces.into_values().collect())
 }
 
-async fn query_links(handle: &Handle) -> Result<BTreeMap<u32, InterfaceInfo>, SystemError> {
+async fn query_links(handle: &Handle) -> Result<BTreeMap<u32, interface::Info>, SystemError> {
     let mut links = handle.link().get().execute();
     let mut interfaces = BTreeMap::new();
     while let Some(message) = links
@@ -165,7 +165,7 @@ async fn query_links(handle: &Handle) -> Result<BTreeMap<u32, InterfaceInfo>, Sy
         let ethernet = message.header.link_layer_type == LinkLayerType::Ether;
         interfaces.insert(
             message.header.index,
-            InterfaceInfo {
+            interface::Info {
                 id: InterfaceId {
                     name,
                     index: message.header.index,
@@ -173,7 +173,7 @@ async fn query_links(handle: &Handle) -> Result<BTreeMap<u32, InterfaceInfo>, Sy
                 description,
                 mac_address,
                 addresses: Vec::new(),
-                flags: InterfaceFlags {
+                flags: interface::Flags {
                     up: message.header.flags.contains(LinkFlags::Up),
                     broadcast: message.header.flags.contains(LinkFlags::Broadcast),
                     loopback,
@@ -199,7 +199,7 @@ async fn query_links(handle: &Handle) -> Result<BTreeMap<u32, InterfaceInfo>, Sy
 
 async fn query_addresses(
     handle: &Handle,
-    interfaces: &mut BTreeMap<u32, InterfaceInfo>,
+    interfaces: &mut BTreeMap<u32, interface::Info>,
 ) -> Result<(), SystemError> {
     let mut addresses = handle.address().get().execute();
     while let Some(message) = addresses
@@ -227,7 +227,7 @@ async fn query_addresses(
                     })
             });
         if let Some(address) = address {
-            let assigned = InterfaceAddress {
+            let assigned = interface::Address {
                 address,
                 prefix_length: message.header.prefix_len,
             };

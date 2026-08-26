@@ -6,15 +6,15 @@
 #![forbid(unsafe_code)]
 
 use crate::{
-    Error as LiveIoError,
-    transmit::{IoSendReport, Layer3Frame},
+    Error,
+    transmit::{self, Layer3Frame},
 };
 
 #[cfg(all(
     feature = "native-layer3",
     any(target_os = "linux", target_os = "macos", windows)
 ))]
-pub(crate) fn system_send_layer3(frame: Layer3Frame<'_>) -> Result<IoSendReport, LiveIoError> {
+pub(crate) fn system_send_layer3(frame: Layer3Frame<'_>) -> Result<transmit::Report, Error> {
     super::interface_identity::validate_current_interface_identity(
         &frame.route().plan.decision.interface,
     )?;
@@ -25,8 +25,8 @@ pub(crate) fn system_send_layer3(frame: Layer3Frame<'_>) -> Result<IoSendReport,
     feature = "native-layer3",
     any(target_os = "linux", target_os = "macos", windows)
 )))]
-pub(crate) fn system_send_layer3(_frame: Layer3Frame<'_>) -> Result<IoSendReport, LiveIoError> {
-    Err(LiveIoError::Unsupported {
+pub(crate) fn system_send_layer3(_frame: Layer3Frame<'_>) -> Result<transmit::Report, Error> {
+    Err(Error::Unsupported {
         message:
             "enable the native-layer3 feature on Linux, macOS, or Windows for raw IP transmission"
                 .to_owned(),

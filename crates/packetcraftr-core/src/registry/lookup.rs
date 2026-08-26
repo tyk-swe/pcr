@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::sync::Arc;
 
@@ -14,7 +14,6 @@ use crate::matcher::ResponseMatcher;
 #[derive(Clone, Default)]
 pub struct Registry {
     pub(super) codecs: BTreeMap<crate::layer::Id, Arc<dyn LayerCodec>>,
-    pub(super) builtin_codecs: BTreeSet<crate::layer::Id>,
     pub(super) aliases: HashMap<String, crate::layer::Id>,
     pub(super) roots: HashMap<u32, crate::layer::Id>,
     pub(super) bindings: HashMap<crate::layer::Id, HashMap<Discriminator, Vec<ChildBinding>>>,
@@ -56,14 +55,6 @@ impl Registry {
         let normalized = name.trim().to_ascii_lowercase();
         let protocol = self.aliases.get(&normalized)?;
         self.codecs.get(protocol)
-    }
-
-    pub fn is_builtin_codec<Q>(&self, protocol: &Q) -> bool
-    where
-        crate::layer::Id: std::borrow::Borrow<Q>,
-        Q: Ord + ?Sized,
-    {
-        self.builtin_codecs.contains(protocol)
     }
 
     pub fn protocol_named(&self, name: &str) -> Option<&crate::layer::Id> {

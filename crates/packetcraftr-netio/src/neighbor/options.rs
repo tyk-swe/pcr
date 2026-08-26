@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use super::error::invalid_options;
-use crate::capture::{CaptureOverflowPolicy, CaptureQueueLimits};
+use crate::capture;
 
 const MAX_CONFIGURED_ATTEMPTS: u32 = 10;
 const MAX_CONFIGURED_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -65,11 +65,11 @@ impl Options {
                 "snap_length must be at least {MIN_NEIGHBOR_SNAPSHOT_LENGTH} bytes"
             )));
         }
-        CaptureQueueLimits {
+        capture::Limits {
             max_frames: self.max_capture_queue_frames,
             max_bytes: self.max_captured_bytes,
             snap_length: self.snap_length,
-            overflow_policy: CaptureOverflowPolicy::Fail,
+            overflow_policy: capture::OverflowPolicy::Fail,
         }
         .validate()
         .map_err(|error| invalid_options(error.to_string()))?;

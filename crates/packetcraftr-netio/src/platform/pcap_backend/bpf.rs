@@ -12,7 +12,7 @@ use std::{
 
 use pcap::{Activated, Capture};
 
-use crate::{Error as LiveIoError, interface::Id as InterfaceId};
+use crate::{Error, interface::Id as InterfaceId};
 
 #[link(name = "pcap")]
 unsafe extern "C" {
@@ -39,7 +39,7 @@ pub(super) fn install_capture_filter<T: Activated>(
     interface: &InterfaceId,
     filter: &str,
     netmask: u32,
-) -> Result<(), LiveIoError> {
+) -> Result<(), Error> {
     let mut program = compile_capture_filter(capture, interface, filter, netmask)?;
     let handle = capture.as_ptr().cast::<c_void>();
     // SAFETY: program was initialized by pcap_compile for this live handle,
@@ -62,9 +62,9 @@ pub(crate) fn compile_capture_filter<T: Activated>(
     interface: &InterfaceId,
     filter: &str,
     netmask: u32,
-) -> Result<PcapBpfProgram, LiveIoError> {
+) -> Result<PcapBpfProgram, Error> {
     let handle = capture.as_ptr().cast::<c_void>();
-    let c_filter = CString::new(filter).map_err(|_| LiveIoError::InvalidCaptureFilter {
+    let c_filter = CString::new(filter).map_err(|_| Error::InvalidCaptureFilter {
         interface: interface.name.clone(),
         message: "filter string contains interior null byte".to_owned(),
     })?;
@@ -108,8 +108,8 @@ fn read_pcap_error(handle: *mut c_void) -> String {
 pub(crate) fn map_filter_compile_error(
     interface: &InterfaceId,
     error: impl std::fmt::Display,
-) -> LiveIoError {
-    LiveIoError::InvalidCaptureFilter {
+) -> Error {
+    Error::InvalidCaptureFilter {
         interface: interface.name.clone(),
         message: format!("libpcap compilation failed: {error}"),
     }
@@ -118,8 +118,8 @@ pub(crate) fn map_filter_compile_error(
 pub(crate) fn map_filter_install_error(
     interface: &InterfaceId,
     error: impl std::fmt::Display,
-) -> LiveIoError {
-    LiveIoError::CaptureFilterInstallation {
+) -> Error {
+    Error::CaptureFilterInstallation {
         interface: interface.name.clone(),
         message: format!("libpcap installation failed: {error}"),
     }

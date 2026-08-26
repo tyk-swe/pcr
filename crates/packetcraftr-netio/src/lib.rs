@@ -8,7 +8,6 @@
 //! `packetcraftr`.
 
 pub mod capture;
-mod checksum;
 mod error;
 mod exchange;
 pub mod interface;

@@ -11,7 +11,7 @@ use packetcraftr_core::{
     layer::Id as LayerId,
 };
 use packetcraftr_netio::{
-    Error as LiveIoError, capture,
+    Error, capture,
     link::Mode,
     neighbor::Error as NeighborError,
     route::{Error as RouteError, SystemError},
@@ -328,7 +328,7 @@ fn neighbor_errors_keep_stable_classes_and_ordered_provider_causes() {
                 interface: "fixture0".to_owned(),
                 target: ipv4("192.0.2.9"),
                 operation: "sending request",
-                source: LiveIoError::Send {
+                source: Error::Send {
                     message: "send failed".to_owned(),
                 },
             },
@@ -340,7 +340,7 @@ fn neighbor_errors_keep_stable_classes_and_ordered_provider_causes() {
             NeighborError::Cleanup {
                 interface: "fixture0".to_owned(),
                 target: ipv4("192.0.2.9"),
-                source: LiveIoError::Capture {
+                source: Error::Capture {
                     message: "cleanup failed".to_owned(),
                 },
             },
@@ -353,7 +353,7 @@ fn neighbor_errors_keep_stable_classes_and_ordered_provider_causes() {
                 interface: "fixture0".to_owned(),
                 target: ipv4("192.0.2.9"),
                 operation: Box::new(not_found()),
-                cleanup: LiveIoError::Capture {
+                cleanup: Error::Capture {
                     message: "cleanup failed".to_owned(),
                 },
             },
@@ -373,7 +373,7 @@ fn neighbor_errors_keep_stable_classes_and_ordered_provider_causes() {
 
 #[test]
 fn live_io_mode_mismatch_display_names_both_modes() {
-    let error = LiveIoError::TransmissionModeMismatch {
+    let error = Error::TransmissionModeMismatch {
         expected: Mode::Layer2,
         actual: Mode::Layer3,
     };

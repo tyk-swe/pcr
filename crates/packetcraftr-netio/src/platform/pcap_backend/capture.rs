@@ -16,8 +16,8 @@ use pcap::{Active, Capture, Error as PcapError};
 
 use super::bpf::install_capture_filter;
 use crate::{
-    Error as LiveIoError,
-    capture::{CaptureQueueLimits, Metadata as CaptureMetadata},
+    Error,
+    capture::{Limits, Metadata},
     interface::Id as InterfaceId,
     platform::live_capture::{
         CaptureInterrupt, NativeCaptureEvent, NativeCaptureParts, NativeCaptureSource,
@@ -35,13 +35,13 @@ unsafe extern "C" {
 
 pub(crate) fn open_capture(
     interface: &InterfaceId,
-    limits: CaptureQueueLimits,
+    limits: Limits,
     capture_filter: Option<&str>,
     netmask: Option<u32>,
     promiscuous: bool,
-) -> Result<NativeCaptureParts, LiveIoError> {
+) -> Result<NativeCaptureParts, Error> {
     let snap_length =
-        i32::try_from(limits.snap_length).map_err(|_| LiveIoError::InvalidCaptureQueueLimit {
+        i32::try_from(limits.snap_length).map_err(|_| Error::InvalidCaptureQueueLimit {
             field: "snap_length",
             value: limits.snap_length,
             reason: "libpcap snap length exceeds i32",
@@ -65,7 +65,7 @@ pub(crate) fn open_capture(
     let datalink = capture.get_datalink().0;
     let link_type = u32::try_from(datalink)
         .map(canonical_link_type)
-        .map_err(|_| LiveIoError::Unsupported {
+        .map_err(|_| Error::Unsupported {
             message: format!(
                 "libpcap returned negative data-link type {datalink} for {}",
                 interface.name
@@ -87,7 +87,7 @@ pub(crate) fn open_capture(
             snap_length,
         }),
         interrupt,
-        metadata: CaptureMetadata {
+        metadata: Metadata {
             interface: interface.clone(),
             link_type,
             snap_length,
@@ -101,7 +101,7 @@ struct PcapCaptureSource {
 }
 
 impl NativeCaptureSource for PcapCaptureSource {
-    fn next_event(&mut self) -> Result<NativeCaptureEvent, LiveIoError> {
+    fn next_event(&mut self) -> Result<NativeCaptureEvent, Error> {
         match self.capture.next_packet() {
             Ok(packet) => {
                 // Monotonic first makes the paired-clock sampling skew conservative.
@@ -114,7 +114,7 @@ impl NativeCaptureSource for PcapCaptureSource {
                     system_time(packet.header.ts.tv_sec, i64::from(packet.header.ts.tv_usec))?;
                 let received_at = monotonic_packet_time(timestamp, observed_wall, observed_at);
                 if packet.data.len() > self.snap_length {
-                    return Err(LiveIoError::Capture {
+                    return Err(Error::Capture {
                         message: format!(
                             "libpcap returned {} bytes beyond configured snap length {}",
                             packet.data.len(),
@@ -123,7 +123,7 @@ impl NativeCaptureSource for PcapCaptureSource {
                     });
                 }
                 if packet.data.len() != packet.header.caplen as usize {
-                    return Err(LiveIoError::Capture {
+                    return Err(Error::Capture {
                         message: format!(
                             "libpcap packet data contains {} bytes but declares captured length {}",
                             packet.data.len(),
@@ -141,13 +141,13 @@ impl NativeCaptureSource for PcapCaptureSource {
             }
             Err(PcapError::TimeoutExpired) => Ok(NativeCaptureEvent::Timeout),
             Err(PcapError::NoMorePackets) => Ok(NativeCaptureEvent::Closed),
-            Err(error) => Err(LiveIoError::Capture {
+            Err(error) => Err(Error::Capture {
                 message: format!("libpcap receive failed: {error}"),
             }),
         }
     }
 
-    fn statistics(&mut self) -> Result<NativeCaptureStatistics, LiveIoError> {
+    fn statistics(&mut self) -> Result<NativeCaptureStatistics, Error> {
         self.capture
             .stats()
             .map(|statistics| NativeCaptureStatistics {
@@ -155,7 +155,7 @@ impl NativeCaptureSource for PcapCaptureSource {
                 network_dropped_frames: 0,
                 interface_dropped_frames: statistics.if_dropped,
             })
-            .map_err(|error| LiveIoError::Capture {
+            .map_err(|error| Error::Capture {
                 message: format!("libpcap statistics failed: {error}"),
             })
     }
@@ -169,14 +169,14 @@ impl CaptureInterrupt for PcapInterrupt {
     }
 }
 
-pub(super) fn map_open_error(interface: &InterfaceId, error: PcapError) -> LiveIoError {
+pub(super) fn map_open_error(interface: &InterfaceId, error: PcapError) -> Error {
     let message = error.to_string();
     let lower = message.to_ascii_lowercase();
     if lower.contains("permission denied")
         || lower.contains("operation not permitted")
         || lower.contains("access is denied")
     {
-        return LiveIoError::Privilege {
+        return Error::Privilege {
             message: format!(
                 "cannot open {} through libpcap: {message}; grant capture privileges (for example CAP_NET_RAW on Linux or BPF access on macOS)",
                 interface.name
@@ -187,12 +187,12 @@ pub(super) fn map_open_error(interface: &InterfaceId, error: PcapError) -> LiveI
         || lower.contains("not found")
         || lower.contains("does not exist")
     {
-        return LiveIoError::Device {
+        return Error::Device {
             interface: interface.name.clone(),
             message: format!("libpcap could not open this interface: {message}"),
         };
     }
-    LiveIoError::Capture {
+    Error::Capture {
         message: format!(
             "could not open {} through libpcap: {message}",
             interface.name

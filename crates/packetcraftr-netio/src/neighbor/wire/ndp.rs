@@ -8,7 +8,8 @@ use std::net::Ipv6Addr;
 use bytes::Bytes;
 
 use super::ethernet::{self, View};
-use crate::{checksum, link::MacAddress, neighbor::Request as NeighborRequest};
+use crate::{link::MacAddress, neighbor::Request as NeighborRequest};
+use packetcraftr_core::protocol::checksum_parts;
 
 pub(super) const IPV6_HEADER_LENGTH: usize = 40;
 pub(super) const SOLICITATION_LENGTH: usize = 32;
@@ -185,7 +186,7 @@ pub(super) fn icmpv6_checksum(source: Ipv6Addr, destination: Ipv6Addr, message: 
     let length = u32::try_from(message.len())
         .unwrap_or(u32::MAX)
         .to_be_bytes();
-    checksum::compute_parts(&[
+    checksum_parts(&[
         &source.octets(),
         &destination.octets(),
         &length,

@@ -10,8 +10,8 @@ use std::{
 };
 
 use crate::{
-    Error as LiveIoError,
-    capture::{CaptureOverflowPolicy, CaptureQueueLimits, CapturedFrame, Statistics},
+    Error,
+    capture::{Captured, Limits, OverflowPolicy, Statistics},
 };
 
 use super::NativeCaptureStatistics;
@@ -19,11 +19,11 @@ use super::NativeCaptureStatistics;
 pub(super) struct SharedCapture {
     pub(super) state: Mutex<CaptureState>,
     changed: Condvar,
-    limits: CaptureQueueLimits,
+    limits: Limits,
 }
 
 impl SharedCapture {
-    pub(super) fn new(limits: CaptureQueueLimits) -> Self {
+    pub(super) fn new(limits: Limits) -> Self {
         Self {
             state: Mutex::new(CaptureState::default()),
             changed: Condvar::new(),
@@ -31,8 +31,8 @@ impl SharedCapture {
         }
     }
 
-    pub(super) fn lock(&self) -> Result<MutexGuard<'_, CaptureState>, LiveIoError> {
-        self.state.lock().map_err(|_| LiveIoError::Capture {
+    pub(super) fn lock(&self) -> Result<MutexGuard<'_, CaptureState>, Error> {
+        self.state.lock().map_err(|_| Error::Capture {
             message: "native capture queue mutex was poisoned".to_owned(),
         })
     }
@@ -41,11 +41,11 @@ impl SharedCapture {
         &self,
         state: MutexGuard<'a, CaptureState>,
         timeout: Duration,
-    ) -> Result<(MutexGuard<'a, CaptureState>, bool), LiveIoError> {
+    ) -> Result<(MutexGuard<'a, CaptureState>, bool), Error> {
         self.changed
             .wait_timeout(state, timeout)
             .map(|(state, result)| (state, result.timed_out()))
-            .map_err(|_| LiveIoError::Capture {
+            .map_err(|_| Error::Capture {
                 message: "native capture queue mutex was poisoned".to_owned(),
             })
     }
@@ -60,7 +60,7 @@ impl SharedCapture {
         self.changed.notify_all();
     }
 
-    pub(super) fn set_error(&self, error: LiveIoError) {
+    pub(super) fn set_error(&self, error: Error) {
         let mut state = self
             .state
             .lock()
@@ -83,7 +83,7 @@ impl SharedCapture {
         self.changed.notify_all();
     }
 
-    pub(super) fn enqueue(&self, captured: CapturedFrame) -> Result<(), LiveIoError> {
+    pub(super) fn enqueue(&self, captured: Captured) -> Result<(), Error> {
         let mut state = self.lock()?;
         let frame_bytes = captured.frame.bytes().len();
         let mut queued_bytes = state.queued_bytes;
@@ -96,11 +96,11 @@ impl SharedCapture {
             .is_none_or(|bytes| bytes > self.limits.max_bytes);
         if would_exceed_frames || would_exceed_bytes {
             match self.limits.overflow_policy {
-                policy @ (CaptureOverflowPolicy::Fail | CaptureOverflowPolicy::DropNewest) => {
+                policy @ (OverflowPolicy::Fail | OverflowPolicy::DropNewest) => {
                     record_overflow(&mut statistics, 1, frame_bytes as u64)?;
                     state.statistics = statistics;
-                    return if policy == CaptureOverflowPolicy::Fail {
-                        Err(LiveIoError::CaptureQueueOverflow {
+                    return if policy == OverflowPolicy::Fail {
+                        Err(Error::CaptureQueueOverflow {
                             dropped_frames: statistics.dropped_frames,
                             dropped_bytes: statistics.dropped_bytes,
                             overflow_events: statistics.overflow_events,
@@ -109,7 +109,7 @@ impl SharedCapture {
                         Ok(())
                     };
                 }
-                CaptureOverflowPolicy::DropOldest => {
+                OverflowPolicy::DropOldest => {
                     let mut retained_frames = state.queue.len();
                     let mut retained_bytes = state.queued_bytes;
                     let mut drop_bytes = 0usize;
@@ -124,14 +124,14 @@ impl SharedCapture {
                         let bytes = dropped.frame.bytes().len();
                         retained_frames = retained_frames.saturating_sub(1);
                         retained_bytes = retained_bytes.checked_sub(bytes).ok_or_else(|| {
-                            LiveIoError::InvalidCaptureStatistics {
+                            Error::InvalidCaptureStatistics {
                                 message: "native capture queue byte accounting underflowed"
                                     .to_owned(),
                             }
                         })?;
                         drop_count = drop_count.saturating_add(1);
                         drop_bytes = drop_bytes.checked_add(bytes).ok_or_else(|| {
-                            LiveIoError::InvalidCaptureStatistics {
+                            Error::InvalidCaptureStatistics {
                                 message: "native capture dropped-byte accounting overflowed"
                                     .to_owned(),
                             }
@@ -152,7 +152,7 @@ impl SharedCapture {
             }
         }
         queued_bytes = queued_bytes.checked_add(frame_bytes).ok_or_else(|| {
-            LiveIoError::InvalidCaptureStatistics {
+            Error::InvalidCaptureStatistics {
                 message: "native capture queue byte accounting overflowed".to_owned(),
             }
         })?;
@@ -172,7 +172,7 @@ impl SharedCapture {
         &self,
         previous: NativeCaptureStatistics,
         current: NativeCaptureStatistics,
-    ) -> Result<(), LiveIoError> {
+    ) -> Result<(), Error> {
         let capture_drop_delta = current
             .capture_dropped_frames
             .wrapping_sub(previous.capture_dropped_frames) as u64;
@@ -186,7 +186,7 @@ impl SharedCapture {
         let total_drop_delta = capture_drop_delta
             .checked_add(network_drop_delta)
             .and_then(|total| total.checked_add(interface_drop_delta))
-            .ok_or_else(|| LiveIoError::InvalidCaptureStatistics {
+            .ok_or_else(|| Error::InvalidCaptureStatistics {
                 message: "native receiver drop delta overflowed".to_owned(),
             })?;
         if total_drop_delta == 0 {
@@ -214,8 +214,8 @@ pub(super) struct CaptureState {
     pub(super) ready: bool,
     pub(super) closed: bool,
     pub(super) error_observed: bool,
-    pub(super) error: Option<LiveIoError>,
-    pub(super) queue: VecDeque<CapturedFrame>,
+    pub(super) error: Option<Error>,
+    pub(super) queue: VecDeque<Captured>,
     pub(super) queued_bytes: usize,
     pub(super) statistics: Statistics,
 }
@@ -224,7 +224,7 @@ fn record_overflow(
     statistics: &mut Statistics,
     dropped_frames: u64,
     dropped_bytes: u64,
-) -> Result<(), LiveIoError> {
+) -> Result<(), Error> {
     increment(&mut statistics.overflow_events, 1, "overflow events")?;
     increment(
         &mut statistics.dropped_frames,
@@ -238,7 +238,7 @@ fn record_overflow(
     )
 }
 
-fn record_received(statistics: &mut Statistics, received_bytes: u64) -> Result<(), LiveIoError> {
+fn record_received(statistics: &mut Statistics, received_bytes: u64) -> Result<(), Error> {
     increment(&mut statistics.received_frames, 1, "received frames")?;
     increment(
         &mut statistics.received_bytes,
@@ -247,10 +247,10 @@ fn record_received(statistics: &mut Statistics, received_bytes: u64) -> Result<(
     )
 }
 
-fn increment(counter: &mut u64, value: u64, label: &str) -> Result<(), LiveIoError> {
+fn increment(counter: &mut u64, value: u64, label: &str) -> Result<(), Error> {
     *counter = counter
         .checked_add(value)
-        .ok_or_else(|| LiveIoError::InvalidCaptureStatistics {
+        .ok_or_else(|| Error::InvalidCaptureStatistics {
             message: format!("native capture {label} counter overflowed"),
         })?;
     Ok(())
@@ -265,15 +265,15 @@ mod tests {
 
     use super::*;
 
-    fn captured(bytes: &[u8]) -> CapturedFrame {
-        CapturedFrame::without_ingress_time(
+    fn captured(bytes: &[u8]) -> Captured {
+        Captured::without_ingress_time(
             Frame::new(SystemTime::UNIX_EPOCH, LinkType::ETHERNET, bytes.to_vec())
                 .expect("fixture frame"),
         )
     }
 
-    fn queue(policy: CaptureOverflowPolicy, max_frames: usize, max_bytes: usize) -> SharedCapture {
-        SharedCapture::new(CaptureQueueLimits {
+    fn queue(policy: OverflowPolicy, max_frames: usize, max_bytes: usize) -> SharedCapture {
+        SharedCapture::new(Limits {
             max_frames,
             max_bytes,
             snap_length: max_bytes,
@@ -284,15 +284,15 @@ mod tests {
     #[test]
     fn overflow_policies_distinguish_failure_drop_and_byte_bounded_eviction() {
         for policy in [
-            CaptureOverflowPolicy::Fail,
-            CaptureOverflowPolicy::DropNewest,
-            CaptureOverflowPolicy::DropOldest,
+            OverflowPolicy::Fail,
+            OverflowPolicy::DropNewest,
+            OverflowPolicy::DropOldest,
         ] {
             let queue = queue(policy, 2, 4);
             queue.enqueue(captured(&[1, 1])).expect("first frame");
             queue.enqueue(captured(&[2, 2])).expect("second frame");
             let result = queue.enqueue(captured(&[3, 3, 3]));
-            assert_eq!(result.is_err(), policy == CaptureOverflowPolicy::Fail);
+            assert_eq!(result.is_err(), policy == OverflowPolicy::Fail);
 
             let state = queue.lock().expect("queue state");
             let retained = state
@@ -300,7 +300,7 @@ mod tests {
                 .iter()
                 .map(|frame| frame.frame.bytes().to_vec())
                 .collect::<Vec<_>>();
-            let expected = if policy == CaptureOverflowPolicy::DropOldest {
+            let expected = if policy == OverflowPolicy::DropOldest {
                 (vec![vec![3, 3, 3]], 3, 7, 2, 4)
             } else {
                 (vec![vec![1, 1], vec![2, 2]], 2, 4, 1, 3)
@@ -320,7 +320,7 @@ mod tests {
 
     #[test]
     fn drop_oldest_retains_existing_frames_when_the_new_frame_cannot_fit_alone() {
-        let queue = queue(CaptureOverflowPolicy::DropOldest, 2, 4);
+        let queue = queue(OverflowPolicy::DropOldest, 2, 4);
         queue.enqueue(captured(&[1, 1])).expect("first frame");
         queue.enqueue(captured(&[2, 2])).expect("second frame");
 
@@ -340,7 +340,7 @@ mod tests {
 
     #[test]
     fn queue_state_transitions_are_monotonic_and_preserve_the_first_error() {
-        let queue = queue(CaptureOverflowPolicy::Fail, 1, 1);
+        let queue = queue(OverflowPolicy::Fail, 1, 1);
         let state = queue.lock().expect("queue state");
         let (state, _) = queue
             .wait_timeout(state, Duration::ZERO)
@@ -352,10 +352,10 @@ mod tests {
         drop(state);
 
         queue.set_ready();
-        queue.set_error(LiveIoError::Capture {
+        queue.set_error(Error::Capture {
             message: "first failure".to_owned(),
         });
-        queue.set_error(LiveIoError::Capture {
+        queue.set_error(Error::Capture {
             message: "later failure".to_owned(),
         });
         queue.close();
@@ -365,13 +365,13 @@ mod tests {
         assert!(state.closed);
         assert!(matches!(
             state.error.as_ref(),
-            Some(LiveIoError::Capture { message }) if message == "first failure"
+            Some(Error::Capture { message }) if message == "first failure"
         ));
     }
 
     #[test]
     fn queue_counter_overflow_does_not_partially_commit_a_frame_or_loss_event() {
-        let received = queue(CaptureOverflowPolicy::Fail, 1, 1);
+        let received = queue(OverflowPolicy::Fail, 1, 1);
         received
             .lock()
             .expect("queue state")
@@ -379,7 +379,7 @@ mod tests {
             .received_frames = u64::MAX;
         assert!(matches!(
             received.enqueue(captured(&[1])),
-            Err(LiveIoError::InvalidCaptureStatistics { .. })
+            Err(Error::InvalidCaptureStatistics { .. })
         ));
         {
             let state = received.lock().expect("queue state");
@@ -389,7 +389,7 @@ mod tests {
             assert_eq!(state.statistics.received_bytes, 0);
         }
 
-        let overflow = queue(CaptureOverflowPolicy::Fail, 1, 1);
+        let overflow = queue(OverflowPolicy::Fail, 1, 1);
         overflow.enqueue(captured(&[1])).expect("first frame");
         overflow
             .lock()
@@ -398,7 +398,7 @@ mod tests {
             .overflow_events = u64::MAX;
         assert!(matches!(
             overflow.enqueue(captured(&[2])),
-            Err(LiveIoError::InvalidCaptureStatistics { .. })
+            Err(Error::InvalidCaptureStatistics { .. })
         ));
         let state = overflow.lock().expect("queue state");
         assert_eq!(state.queue.len(), 1);
@@ -409,7 +409,7 @@ mod tests {
 
     #[test]
     fn native_drop_deltas_handle_counter_wrap_and_commit_atomically() {
-        let queue = queue(CaptureOverflowPolicy::Fail, 1, 1);
+        let queue = queue(OverflowPolicy::Fail, 1, 1);
         queue
             .add_native_drop_deltas(
                 NativeCaptureStatistics {
@@ -436,10 +436,7 @@ mod tests {
                 },
             )
             .expect_err("overflow must fail closed");
-        assert!(matches!(
-            error,
-            LiveIoError::InvalidCaptureStatistics { .. }
-        ));
+        assert!(matches!(error, Error::InvalidCaptureStatistics { .. }));
         let state = queue.lock().expect("queue state");
         assert_eq!(state.statistics.dropped_frames, u64::MAX);
         assert_eq!(state.statistics.receiver_dropped_frames, 3);
@@ -458,10 +455,7 @@ mod tests {
                 },
             )
             .expect_err("the second counter overflow must not commit the first");
-        assert!(matches!(
-            error,
-            LiveIoError::InvalidCaptureStatistics { .. }
-        ));
+        assert!(matches!(error, Error::InvalidCaptureStatistics { .. }));
         let state = queue.lock().expect("queue state");
         assert_eq!(state.statistics.dropped_frames, 0);
         assert_eq!(state.statistics.receiver_dropped_frames, u64::MAX);

@@ -12,7 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::{Error as LiveIoError, capture::CapturedFrame};
+use crate::{Error, capture::Captured};
 use packetcraftr_core::frame::{Frame, LinkType};
 
 use super::{NativeCaptureEvent, NativeCaptureSource, queue::SharedCapture};
@@ -69,7 +69,7 @@ pub(super) fn capture_worker(
                 ) {
                     Ok(frame) => frame,
                     Err(error) => {
-                        shared.set_error(LiveIoError::Capture {
+                        shared.set_error(Error::Capture {
                             message: format!("native capture returned an invalid frame: {error}"),
                         });
                         return;
@@ -77,7 +77,7 @@ pub(super) fn capture_worker(
                 };
                 frame.interface = Some(interface_index);
                 if let Err(error) =
-                    shared.enqueue(CapturedFrame::with_ingress_time(frame, packet.received_at))
+                    shared.enqueue(Captured::with_ingress_time(frame, packet.received_at))
                 {
                     shared.set_error(error);
                     return;
@@ -86,7 +86,7 @@ pub(super) fn capture_worker(
             Ok(NativeCaptureEvent::Timeout) => {}
             Ok(NativeCaptureEvent::Closed) if stop.load(Ordering::Acquire) => break,
             Ok(NativeCaptureEvent::Closed) => {
-                shared.set_error(LiveIoError::Capture {
+                shared.set_error(Error::Capture {
                     message: "native capture source closed unexpectedly".to_owned(),
                 });
                 return;

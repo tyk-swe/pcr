@@ -447,18 +447,8 @@ fn raw_segment(input: &[u8]) -> Result<DecodedLayerValue, crate::codec::Error> {
 mod tests {
     #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
+    use super::super::test_wire::{TLS_1_2, record};
     use super::*;
-
-    fn record(content_type: u8, body: &[u8]) -> Vec<u8> {
-        let mut bytes = vec![content_type, 0x03, 0x03];
-        bytes.extend_from_slice(
-            &u16::try_from(body.len())
-                .expect("test record body fits")
-                .to_be_bytes(),
-        );
-        bytes.extend_from_slice(body);
-        bytes
-    }
 
     #[test]
     fn a_segment_without_a_record_header_has_no_dissection() {
@@ -467,15 +457,15 @@ mod tests {
 
     #[test]
     fn a_truncated_first_record_yields_no_layer() {
-        let mut bytes = record(23, &[0; 40]);
+        let mut bytes = record(23, TLS_1_2, &[0; 40]);
         bytes.truncate(20);
         assert!(Tls::from_records(&bytes).is_none());
     }
 
     #[test]
     fn a_trailing_partial_record_marks_the_layer_incomplete() {
-        let mut bytes = record(23, b"first");
-        bytes.extend_from_slice(&record(23, b"second-record")[..6]);
+        let mut bytes = record(23, TLS_1_2, b"first");
+        bytes.extend_from_slice(&record(23, TLS_1_2, b"second-record")[..6]);
         let dissection = Tls::from_records(&bytes).expect("one complete record");
         assert!(dissection.layer.incomplete);
         assert_eq!(dissection.layer.record_count, 1);
@@ -494,7 +484,7 @@ mod tests {
     fn the_record_cap_stops_the_loop_and_reports_once() {
         let mut bytes = Vec::new();
         for _ in 0..MAX_RECORDS_PER_SEGMENT + 1 {
-            bytes.extend_from_slice(&record(23, b"x"));
+            bytes.extend_from_slice(&record(23, TLS_1_2, b"x"));
         }
         let dissection = Tls::from_records(&bytes).expect("capped records still dissect");
         assert_eq!(
@@ -517,7 +507,7 @@ mod tests {
     fn exactly_the_cap_reports_nothing() {
         let mut bytes = Vec::new();
         for _ in 0..MAX_RECORDS_PER_SEGMENT {
-            bytes.extend_from_slice(&record(23, b"x"));
+            bytes.extend_from_slice(&record(23, TLS_1_2, b"x"));
         }
         let dissection = Tls::from_records(&bytes).expect("capped records still dissect");
         assert_eq!(dissection.remainder, 0);
@@ -557,7 +547,7 @@ mod tests {
 
     #[test]
     fn a_dissected_layer_encodes_back_to_the_bytes_it_covered() {
-        let bytes = record(23, b"encrypted");
+        let bytes = record(23, TLS_1_2, b"encrypted");
         let layer = Tls::from_records(&bytes)
             .expect("one complete record")
             .layer;
@@ -568,7 +558,7 @@ mod tests {
 
     #[test]
     fn changing_a_published_field_makes_the_layer_disagree_with_its_wire() {
-        let bytes = record(23, b"encrypted");
+        let bytes = record(23, TLS_1_2, b"encrypted");
         let mut layer = Tls::from_records(&bytes)
             .expect("one complete record")
             .layer;

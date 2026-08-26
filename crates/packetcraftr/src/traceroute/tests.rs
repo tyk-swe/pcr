@@ -4,14 +4,11 @@
 // for library paths.
 #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
-use std::collections::VecDeque;
-use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, UNIX_EPOCH};
 
-use crate::target::{Error as TargetError, Resolver};
 use bytes::Bytes;
 use packetcraftr_core::error::{Classification, Classified, Kind};
 use packetcraftr_core::frame::{Frame, LinkType};
@@ -34,8 +31,8 @@ use super::model::{
 };
 use super::probe::probe_packet;
 use crate::authorization::Operation;
-use crate::clock::Clock;
 use crate::target::{Authorized, Authorizer, PolicyAuthorizer, Target};
+use crate::test_fixtures::{AddressListAuthorizer, NoopClock, ScriptedResolver};
 use crate::{BoundaryError, Stats, target::Family};
 
 fn udp_traceroute_request(target: Target) -> Request {
@@ -50,17 +47,6 @@ fn udp_traceroute_request(target: Target) -> Request {
         timeout: Duration::from_millis(10),
         probes_per_second: None,
         limits: Limits::default(),
-    }
-}
-
-#[derive(Default)]
-struct NoopClock;
-
-impl Clock for NoopClock {
-    type Error = Infallible;
-
-    fn sleep(&mut self, _delay: Duration) -> Result<(), Self::Error> {
-        Ok(())
     }
 }
 
@@ -81,53 +67,6 @@ impl Authorizer for FixedAuthorizer {
         self.operations
             .push((operation.packets, operation.wire_bytes));
         Ok(())
-    }
-}
-
-struct AddressListAuthorizer {
-    addresses: Vec<IpAddr>,
-}
-
-impl Authorizer for AddressListAuthorizer {
-    fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> {
-        Ok(Authorized {
-            declared: target.clone(),
-            addresses: self.addresses.clone(),
-        })
-    }
-
-    fn authorize_operation(&mut self, _operation: Operation<'_>) -> Result<(), BoundaryError> {
-        Ok(())
-    }
-}
-
-struct ScriptedResolver {
-    calls: Arc<AtomicUsize>,
-    answers: Mutex<VecDeque<Vec<IpAddr>>>,
-}
-
-impl ScriptedResolver {
-    fn new(answers: impl IntoIterator<Item = Vec<IpAddr>>) -> Self {
-        Self {
-            calls: Arc::new(AtomicUsize::new(0)),
-            answers: Mutex::new(answers.into_iter().collect()),
-        }
-    }
-}
-
-impl Resolver for ScriptedResolver {
-    fn resolve(
-        &self,
-        _hostname: &crate::target::Hostname,
-        _limit: usize,
-    ) -> Result<Vec<IpAddr>, TargetError> {
-        self.calls.fetch_add(1, Ordering::SeqCst);
-        Ok(self
-            .answers
-            .lock()
-            .expect("resolver lock")
-            .pop_front()
-            .expect("scripted resolver answer"))
     }
 }
 

@@ -4,7 +4,6 @@
 // for library paths.
 #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
-use std::convert::Infallible;
 use std::io::Cursor;
 use std::net::{IpAddr, Ipv6Addr};
 use std::time::{Duration, UNIX_EPOCH};
@@ -24,7 +23,7 @@ use super::model::{Limits, Options, Selector, Timing, Transmission, Transmitter}
 use super::wire::{replay_link_mode, replay_network_envelope, validate_transmission_evidence};
 use crate::BoundaryError;
 use crate::authorization::{Authorizer, Operation};
-use crate::clock::Clock;
+use crate::test_fixtures::RecordingClock;
 
 #[derive(Default)]
 struct RecordingAuthorizer {
@@ -94,20 +93,6 @@ impl Transmitter for RecordingTransmitter {
                 frame.bytes().clone(),
             ),
         })
-    }
-}
-
-#[derive(Default)]
-struct RecordingClock {
-    delays: Vec<Duration>,
-}
-
-impl Clock for RecordingClock {
-    type Error = Infallible;
-
-    fn sleep(&mut self, delay: Duration) -> Result<(), Self::Error> {
-        self.delays.push(delay);
-        Ok(())
     }
 }
 

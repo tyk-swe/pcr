@@ -9,9 +9,12 @@ unintended network access as potentially security-sensitive.
 Security fixes target `main` and the latest published release, currently the
 `0.5.0-beta.x` line. Older releases, stable or beta, are unsupported.
 
-Dependency advisories that need a written decision are tracked in
-[`docs/security/`](docs/security), one file per advisory, and `deny.toml`
-is the enforced policy.
+## Dependency advisories
+
+An unresolved advisory fails `cargo deny check` in CI. `deny.toml` is the
+enforced policy and carries no exceptions today. Do not add an `ignore` entry
+without a dated remediation plan in the pull request that adds it; the entry
+has no automatic expiry, so the date has to be policed by hand.
 
 ## Reporting a vulnerability
 

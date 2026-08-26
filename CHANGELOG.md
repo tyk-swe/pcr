@@ -99,8 +99,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CaptureRecord::frame`, `Client::exchange_for_workflow`,
   `DecodedLayerValue::payload_offset`, and `Packet::mutate_fixed_width_layer`
   were removed; use `parse_with_resource_limits` and the public `frame` field.
-- **Breaking:** Offline TCP and IP-fragment reassembly keys now include capture
-  scope identity.
+- **Breaking:** Offline TCP reassembly keys now include capture scope identity.
 - **Breaking:** Live I/O now uses opaque transmission receipts, ingress
   identity, and monotonic freshness; scan, traceroute, and DNS share one
   response-evidence type. Progressive callbacks cannot extend I/O past the
@@ -141,6 +140,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to take the first. A repeat that does not parse (a dangling `--output`, or
   an unknown value) leaves the earlier valid choice in place instead of
   downgrading the structured error to prose.
+- **Breaking:** `native-route` joins the default features of `packetcraftr` and
+  `packetcraftr-cli`. Unix interface enumeration now reads the same
+  operating-system route backend as route lookup, so `native-interfaces`
+  without `native-route` is a compile error there rather than a second
+  enumeration backend, and the `pnet_datalink` dependency is gone. Windows
+  keeps the two features separable.
+
+### Removed
+
+- **Breaking:** Removed offline IP-fragment reassembly:
+  `packetcraftr_core::analysis::reassembly::fragment` and the
+  `analysis::reassembly::Limits::{max_fragments_per_datagram, fragment_expiry}`
+  fields. No command reached it, and `follow` already documents that IP
+  fragments are not followed; TCP reassembly is unchanged.
+- **Breaking:** Removed `packetcraftr_core::decode::Options::verify_checksums`.
+  It was always `true`, and decoding verifies checksums as before.
+- **Breaking:** Removed
+  `packetcraftr_core::analysis::tls::Limits::max_direction_bytes`. The
+  per-direction handshake buffer is the fixed
+  `analysis::tls::MAX_DIRECTION_BUFFER`, and `max_buffered_bytes` still bounds
+  the run.
+- **Breaking:** Removed `packetcraftr_core` API that no product path reached:
+  `Packet::{insert_boxed, replace_boxed, get_all, by_protocol, by_protocol_mut,
+  all_by_protocol, edit, structurally_eq}`, `Error::ProtocolNotFound`,
+  `registry::{Registry::link_type_roots, Builder::register_codec}`,
+  `analysis::pcap::Writer::{frames_written, captured_bytes_written}`,
+  `document::Packet::{to_json_pretty, to_yaml}`,
+  `decode::Dissector::decode_with_root`, `protocol::support::CaptureByteOrder`
+  and `CaptureRoot::{byte_order, exact_round_trip}`,
+  `codec::LayerDecodeContext::{layer_index, absolute_offset}`, and
+  `template::Error::ExpansionOverflow`. The TLS helpers
+  `protocol::application::tls::{escape_wire_text, is_grease,
+  names::handshake_type_name}` narrowed to crate scope.
+- **Breaking:** Removed `packetcraftr::Client::plan_target` and
+  `packetcraftr::replay::run`; `replay::run_with_selector` is the entry point.
 
 ### Fixed
 
@@ -150,7 +184,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Human-readable runtime errors now include classification codes, causes, and
   remediation; structured CLI parse errors identify the actual command. The DNS
   text summary uses `response_code_name`.
-- Offline TCP and fragment analysis now isolates flows by PCAPNG interface and
+- Offline TCP analysis now isolates flows by PCAPNG interface and
   encapsulation path, fixes Fast Open retransmission and duplicate-ACK handling,
   indexes expiry deadlines, and accounts flow metadata against resource budgets.
 - **Breaking:** IPv4 broadcast routes remain broadcasts through native
@@ -174,9 +208,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   where no case built; the gate used to be skipped on that path.
 - A single neighbor-evidence frame larger than the capture byte budget is
   dropped and reported as truncation instead of panicking on an empty queue.
-- IPv4 fragment reassembly returns the new
-  `packetcraftr_core::analysis::reassembly::fragment::Error::InconsistentMergePlan`
-  where an inconsistent merge plan used to panic.
 - Library code no longer indexes or slices wire buffers without a bound check
   and no longer does unchecked arithmetic on offsets, lengths, or counters;
   the workspace now denies `clippy::indexing_slicing` and

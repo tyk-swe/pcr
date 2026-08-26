@@ -226,6 +226,46 @@ fn output_failure() -> BoundaryError {
     )
 }
 
+/// The client and policy the progressive workflow tests build their runs from.
+///
+/// The executor borrows the client and the authorizer borrows the policy, so
+/// the harness owns both and hands out the borrowed parts together.
+struct Harness {
+    state: Arc<IoState>,
+    client: Client<FakeRoutes, NoNeighbors, FakeIo>,
+    policy: policy::Policy,
+}
+
+impl Harness {
+    fn new(state: IoState) -> Self {
+        let state = Arc::new(state);
+        Self {
+            client: client(Arc::clone(&state)),
+            policy: traffic_policy(),
+            state,
+        }
+    }
+
+    fn parts(
+        &self,
+    ) -> (
+        Arc<packetcraftr::core::registry::Registry>,
+        ExchangeExecutor<'_, FakeRoutes, NoNeighbors, FakeIo>,
+        packetcraftr::target::PolicyAuthorizer<'_, NoResolver>,
+    ) {
+        (
+            Arc::clone(self.client.registry()),
+            ExchangeExecutor::new(&self.client, exchange_options()),
+            packetcraftr::target::PolicyAuthorizer::new(&self.policy, &NoResolver),
+        )
+    }
+}
+
+/// The probed host the workflow tests aim at, and the DNS server for the
+/// resolver test.
+const DESTINATION: IpAddr = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
+const DNS_SERVER: IpAddr = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 53));
+
 fn assert_one_clean_exchange(state: &IoState) {
     assert_eq!(
         *state.events.lock().unwrap(),
@@ -483,13 +523,9 @@ fn exchange_cleanup_failure_augments_the_output_error() {
 
 #[test]
 fn scan_sink_failure_stops_after_capture_shutdown() {
-    let state = Arc::new(IoState::default());
-    let client = client(Arc::clone(&state));
-    let registry = Arc::clone(client.registry());
-    let mut executor = ExchangeExecutor::new(&client, exchange_options());
-    let policy = traffic_policy();
-    let mut authorizer = packetcraftr::target::PolicyAuthorizer::new(&policy, &NoResolver);
-    let destination = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
+    let harness = Harness::new(IoState::default());
+    let (registry, mut executor, mut authorizer) = harness.parts();
+    let destination = DESTINATION;
     let mut request = scan::Request {
         target: Target::Address(destination),
         transport: scan::Transport::Tcp,
@@ -513,21 +549,17 @@ fn scan_sink_failure_stops_after_capture_shutdown() {
     .expect_err("sink failure must abort the second scan batch");
 
     assert!(matches!(error, scan::Error::Output { .. }), "{error:?}");
-    assert_one_clean_exchange(&state);
+    assert_one_clean_exchange(&harness.state);
 }
 
 #[test]
 fn later_capture_shutdown_failure_preserves_the_earlier_scan_event() {
-    let state = Arc::new(IoState {
+    let harness = Harness::new(IoState {
         fail_shutdown_at: 2,
         ..IoState::default()
     });
-    let client = client(Arc::clone(&state));
-    let registry = Arc::clone(client.registry());
-    let mut executor = ExchangeExecutor::new(&client, exchange_options());
-    let policy = traffic_policy();
-    let mut authorizer = packetcraftr::target::PolicyAuthorizer::new(&policy, &NoResolver);
-    let destination = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
+    let (registry, mut executor, mut authorizer) = harness.parts();
+    let destination = DESTINATION;
     let mut request = scan::Request {
         target: Target::Address(destination),
         transport: scan::Transport::Tcp,
@@ -558,7 +590,7 @@ fn later_capture_shutdown_failure_preserves_the_earlier_scan_event() {
     assert!(matches!(error, scan::Error::Execution { sequence: 1, .. }));
     assert_eq!(events.lock().unwrap().len(), 1);
     assert_eq!(
-        *state.events.lock().unwrap(),
+        *harness.state.events.lock().unwrap(),
         [
             "arm", "ready", "send", "shutdown", "arm", "ready", "send", "shutdown"
         ]
@@ -567,13 +599,9 @@ fn later_capture_shutdown_failure_preserves_the_earlier_scan_event() {
 
 #[test]
 fn traceroute_sink_failure_stops_after_capture_shutdown() {
-    let state = Arc::new(IoState::default());
-    let client = client(Arc::clone(&state));
-    let registry = Arc::clone(client.registry());
-    let mut executor = ExchangeExecutor::new(&client, exchange_options());
-    let policy = traffic_policy();
-    let mut authorizer = packetcraftr::target::PolicyAuthorizer::new(&policy, &NoResolver);
-    let destination = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
+    let harness = Harness::new(IoState::default());
+    let (registry, mut executor, mut authorizer) = harness.parts();
+    let destination = DESTINATION;
     let request = traceroute::Request {
         target: Target::Address(destination),
         strategy: traceroute::Strategy::Udp,
@@ -601,18 +629,14 @@ fn traceroute_sink_failure_stops_after_capture_shutdown() {
         matches!(error, traceroute::Error::Output { .. }),
         "{error:?}"
     );
-    assert_one_clean_exchange(&state);
+    assert_one_clean_exchange(&harness.state);
 }
 
 #[test]
 fn dns_sink_failure_stops_after_capture_shutdown() {
-    let state = Arc::new(IoState::default());
-    let client = client(Arc::clone(&state));
-    let registry = Arc::clone(client.registry());
-    let mut executor = ExchangeExecutor::new(&client, exchange_options());
-    let policy = traffic_policy();
-    let mut authorizer = packetcraftr::target::PolicyAuthorizer::new(&policy, &NoResolver);
-    let destination = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 53));
+    let harness = Harness::new(IoState::default());
+    let (registry, mut executor, mut authorizer) = harness.parts();
+    let destination = DNS_SERVER;
     let request = dns::Request {
         server: Target::Address(destination),
         address_family: packetcraftr::target::Family::Any,
@@ -639,5 +663,5 @@ fn dns_sink_failure_stops_after_capture_shutdown() {
     .expect_err("sink failure must abort the second DNS attempt");
 
     assert!(matches!(error, dns::Error::Output { .. }), "{error:?}");
-    assert_one_clean_exchange(&state);
+    assert_one_clean_exchange(&harness.state);
 }

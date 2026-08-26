@@ -52,6 +52,9 @@ pub mod traceroute;
 
 pub mod output;
 
+#[cfg(test)]
+mod test_fixtures;
+
 pub use client::Client;
 pub use error::Error;
 pub use evidence::SentPacket;

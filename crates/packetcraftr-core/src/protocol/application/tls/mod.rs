@@ -25,6 +25,8 @@ pub mod fingerprint;
 pub mod model;
 pub mod names;
 pub mod parse;
+#[cfg(test)]
+mod test_wire;
 
 pub use fingerprint::{Ja3, Transport, ja3, ja3s, ja4};
 pub use model::{ClientHello, Extension, Handshake, Record, ServerHello};

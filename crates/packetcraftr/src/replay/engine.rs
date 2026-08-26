@@ -53,24 +53,6 @@ impl Progress {
     }
 }
 
-pub fn run<R, A, T, C, F>(
-    reader: &mut Reader<R>,
-    options: &Options,
-    authorizer: &mut A,
-    transmitter: &mut T,
-    clock: &mut C,
-    emit: F,
-) -> Result<Summary, Error>
-where
-    R: Read,
-    A: Authorizer,
-    T: Transmitter,
-    C: Clock,
-    F: FnMut(FrameEvidence) -> Result<(), Error>,
-{
-    run_with_selector(reader, options, None, authorizer, transmitter, clock, emit)
-}
-
 /// Replays only the capture frames the selector keeps.
 ///
 /// # Panics

@@ -16,7 +16,10 @@ publish.workspace = true
 workspace = true
 
 [features]
-native-interfaces = ["dep:pnet_datalink", "dep:windows"]
+native-interfaces = ["dep:windows"]
+# `dep:socket2` covers the macOS AF_ROUTE socket in `platform/macos/query.rs`.
+# Cargo cannot scope a feature's dependency to one target, so Linux and Windows
+# route-only builds pull the (tiny) crate as well.
 native-route = [
     "dep:futures-util",
     "dep:libc",
@@ -32,9 +35,6 @@ native-layer3 = ["native-interfaces", "dep:socket2"]
 bytes.workspace = true
 packetcraftr-core.workspace = true
 thiserror.workspace = true
-
-[target.'cfg(not(windows))'.dependencies]
-pnet_datalink = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 futures-util = { workspace = true, optional = true }

@@ -16,10 +16,12 @@
 mod tls_vectors;
 
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use bytes::Bytes;
 use packetcraftr_core::field::FieldValue;
 use packetcraftr_core::filter::{Context as FilterContext, Filter};
+use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::Raw;
 use packetcraftr_core::protocol::application::Tls;
 use packetcraftr_core::protocol::builtin;
@@ -115,12 +117,14 @@ fn dissect(source_port: u16, destination_port: u16, payload: &[u8]) -> decode::D
     let built = builder
         .build(packet, build::Context::default(), build::Options::default())
         .expect("segment builds");
+    let frame = Frame::new(
+        SystemTime::UNIX_EPOCH,
+        LinkType::ETHERNET,
+        built.bytes.clone(),
+    )
+    .expect("segment frame");
     let decoded = decode::Dissector::new(Arc::clone(&registry))
-        .decode_with_root(
-            built.bytes.clone(),
-            "ethernet".into(),
-            decode::Options::default(),
-        )
+        .decode(frame, decode::Options::default())
         .expect("segment dissects");
     let rebuilt = builder
         .build(

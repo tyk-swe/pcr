@@ -42,15 +42,6 @@ mod npcap;
 ))]
 mod pcap_backend;
 #[cfg(all(
-    feature = "native-interfaces",
-    not(windows),
-    not(all(
-        feature = "native-route",
-        any(target_os = "linux", target_os = "macos")
-    ))
-))]
-mod pnet_enumeration;
-#[cfg(all(
     feature = "native-layer3",
     any(target_os = "linux", target_os = "macos", windows)
 ))]

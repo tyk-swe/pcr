@@ -18,7 +18,7 @@ use packetcraftr_netio::{
     transmit::Submission,
 };
 
-use super::engine::{run, run_with_selector};
+use super::engine::run_with_selector;
 use super::error::Error;
 use super::model::{Limits, Options, Selector, Timing, Transmission, Transmitter};
 use super::wire::{replay_link_mode, replay_network_envelope, validate_transmission_evidence};
@@ -306,9 +306,10 @@ fn replay_authorization_denial_has_no_later_io_side_effects() {
     };
     let mut transmitter = RecordingTransmitter::default();
     let mut clock = RecordingClock::default();
-    let error = run(
+    let error = run_with_selector(
         &mut reader,
         &replay_options(Timing::Immediate),
+        None,
         &mut authorizer,
         &mut transmitter,
         &mut clock,

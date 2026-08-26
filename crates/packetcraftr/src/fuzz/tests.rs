@@ -21,9 +21,10 @@ use crate::clock::Clock;
 use crate::{BoundaryError, Stats as ExecutionStats};
 
 use super::execution::add_execution_stats;
+use crate::authorization::{Authorizer, Operation};
+
 use super::{
-    Authorizer, Execution, ExecutionCase, Executor, LiveLimits, LiveOptions, Operation, Stats, run,
-    run_with_events,
+    Execution, ExecutionCase, Executor, LiveLimits, LiveOptions, Stats, run, run_with_events,
 };
 
 #[test]

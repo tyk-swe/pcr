@@ -53,7 +53,7 @@ mod model;
 mod tests;
 mod wire;
 
-pub use engine::{Collector, run, run_with_events};
+pub use engine::{run, run_with_events};
 pub use error::{Error, WireError};
 pub use model::{
     AttemptEvidence, Edns, EdnsOption, Event, EventContext, Exchange, Execution, Executor, Limits,

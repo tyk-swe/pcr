@@ -173,7 +173,7 @@ where
 }
 
 #[derive(Default)]
-pub struct Collector {
+pub(super) struct Collector {
     attempts: Vec<AttemptEvidence>,
     answers: Vec<Record>,
     authorities: Vec<Record>,
@@ -184,7 +184,7 @@ pub struct Collector {
 }
 
 impl Collector {
-    pub fn observe(&mut self, event: Event) {
+    pub(super) fn observe(&mut self, event: Event) {
         match event {
             Event::Attempt { evidence, .. } => self.attempts.push(evidence),
             Event::Record {
@@ -200,7 +200,7 @@ impl Collector {
         }
     }
 
-    pub fn finish(mut self, summary: Summary) -> Result {
+    pub(super) fn finish(mut self, summary: Summary) -> Result {
         let response = summary.response.map(|response| ValidatedResponse {
             metadata: response,
             answers: self.answers,

@@ -262,8 +262,12 @@ impl LayerCodec for ChildCodec {
 
 fn registry() -> packetcraftr_core::registry::Registry {
     let mut builder = packetcraftr_core::registry::Builder::new();
-    builder.register_codec(ProbeCodec).expect("register probe");
-    builder.register_codec(ChildCodec).expect("register child");
+    builder
+        .register_builtin_codec(ProbeCodec, ProbeCodec.aliases())
+        .expect("register probe");
+    builder
+        .register_builtin_codec(ChildCodec, ChildCodec.aliases())
+        .expect("register child");
     builder.bind_link_type(777, "probe").expect("bind root");
     builder.bind("probe", 7, "child", 10).expect("bind child");
     builder.build().expect("valid test registry")

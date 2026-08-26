@@ -27,8 +27,10 @@ cargo deny check
 ```
 
 Cargo runs doctests separately because nextest does not. No-default features
-keep native providers disabled, the default enables interface enumeration, and
-all features enable every native provider. The
+keep native providers disabled, the default enables interface enumeration and
+passive route lookup (Unix enumeration reads the same route backend, so
+`native-interfaces` requires `native-route` there), and all features enable
+every native provider. The
 [CI workflow](.github/workflows/ci.yml) is the authoritative check set. It
 runs all-feature tests on Linux only; macOS and Windows get an all-feature
 `cargo check`, since their capture backends need Npcap or a system libpcap.

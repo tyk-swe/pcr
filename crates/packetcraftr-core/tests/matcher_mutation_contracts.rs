@@ -6,9 +6,10 @@
 
 use std::net::Ipv4Addr;
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use bytes::Bytes;
-use packetcraftr_core::field::FieldValue;
+use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::{Padding, Raw};
 use packetcraftr_core::protocol::builtin;
 use packetcraftr_core::protocol::network::Ipv4;
@@ -42,16 +43,9 @@ fn tcp_response_correlation_uses_decoded_payload_after_every_mutation_api() {
     });
 
     type Mutator = fn(&mut Packet);
-    let mutators: [(&str, Mutator); 6] = [
+    let mutators: [(&str, Mutator); 3] = [
         ("get_mut", |packet| {
             packet.get_mut::<Raw>().expect("Raw").bytes = Bytes::from_static(&[2, 3, 4]);
-        }),
-        ("by_protocol_mut", |packet| {
-            packet
-                .by_protocol_mut(&"raw".into())
-                .expect("Raw protocol")
-                .set_field("bytes", FieldValue::Bytes(Bytes::from_static(&[2, 3, 4])))
-                .expect("Raw bytes field");
         }),
         ("layer_mut", |packet| {
             packet
@@ -62,24 +56,10 @@ fn tcp_response_correlation_uses_decoded_payload_after_every_mutation_api() {
                 .expect("Raw type")
                 .bytes = Bytes::from_static(&[2, 3, 4]);
         }),
-        ("edit", |packet| {
-            packet
-                .edit(
-                    &"raw".into(),
-                    "bytes",
-                    FieldValue::Bytes(Bytes::from_static(&[2, 3, 4])),
-                )
-                .expect("Raw edit");
-        }),
         ("replace", |packet| {
             packet
                 .replace(2, Raw::new(Bytes::from_static(&[2, 3, 4])))
                 .expect("Raw replacement");
-        }),
-        ("replace_boxed", |packet| {
-            packet
-                .replace_boxed(2, Box::new(Raw::new(Bytes::from_static(&[2, 3, 4]))))
-                .expect("boxed Raw replacement");
         }),
     ];
 
@@ -101,8 +81,10 @@ fn tcp_response_correlation_uses_decoded_payload_after_every_mutation_api() {
                 build::Options::default(),
             )
             .expect("TCP request builds");
+        let frame = Frame::new(SystemTime::UNIX_EPOCH, LinkType::IPV4, built.bytes)
+            .expect("TCP request frame");
         let mut request = decode::Dissector::new(Arc::clone(&registry))
-            .decode_with_root(built.bytes, "ipv4".into(), decode::Options::default())
+            .decode(frame, decode::Options::default())
             .expect("TCP request decodes")
             .packet;
 

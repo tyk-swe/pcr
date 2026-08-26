@@ -492,6 +492,14 @@ mod tests {
         assert_eq!(plan.mode, Mode::Layer3);
         assert!(!plan.synthesized_ethernet);
         assert_eq!(plan.neighbor_target, None);
+        assert_eq!(
+            plan.lookup_destination,
+            Some(IpAddr::V4(Ipv4Addr::new(10, 23, 0, 9)))
+        );
+        assert_eq!(
+            plan.packet_source,
+            Some(IpAddr::V4(Ipv4Addr::new(10, 23, 0, 2)))
+        );
 
         let mut ethernet = Packet::new();
         ethernet.push(Ethernet {
@@ -571,6 +579,7 @@ mod tests {
         .expect("limited broadcast plans");
         assert_eq!(plan.destination_mac, Some(MacAddress([0xff; 6])));
         assert_eq!(plan.neighbor_target, None);
+        assert!(!plan.needs_neighbor_resolution());
 
         let mut directed_route = decision(Capability::Layer2AndLayer3);
         directed_route.selection_reason = SelectionReason::Broadcast;
@@ -579,6 +588,7 @@ mod tests {
             .expect("subnet-directed broadcast plans");
         assert_eq!(plan.destination_mac, Some(MacAddress([0xff; 6])));
         assert_eq!(plan.neighbor_target, None);
+        assert!(!plan.needs_neighbor_resolution());
 
         let ipv4_multicast = ipv4_packet(Ipv4Addr::new(10, 23, 0, 2), Ipv4Addr::new(224, 0, 0, 1));
         let plan = super::plan(
@@ -591,6 +601,10 @@ mod tests {
         assert_eq!(
             plan.destination_mac,
             Some(MacAddress([0x01, 0x00, 0x5e, 0, 0, 1]))
+        );
+        assert_eq!(
+            plan.neighbor_target,
+            Some(IpAddr::V4(Ipv4Addr::new(224, 0, 0, 1)))
         );
         assert!(!plan.needs_neighbor_resolution());
 
@@ -612,6 +626,7 @@ mod tests {
             plan.destination_mac,
             Some(MacAddress([0x33, 0x33, 0, 0, 0, 1]))
         );
+        assert_eq!(plan.neighbor_target, Some(IpAddr::V6(group)));
         assert!(!plan.needs_neighbor_resolution());
     }
 
@@ -641,6 +656,7 @@ mod tests {
             &routes(Ok(decision(Capability::Layer2AndLayer3))),
         )
         .expect("an on-link destination plans");
+        assert_eq!(plan.destination_mac, None);
         assert_eq!(plan.neighbor_target, Some(IpAddr::V4(destination)));
         assert!(plan.needs_neighbor_resolution());
     }

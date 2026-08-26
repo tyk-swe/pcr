@@ -147,29 +147,6 @@ const ALERT_DESCRIPTIONS: &[(u8, &str)] = &[
     (120, "no_application_protocol"),
 ];
 
-/// Handshake message types from the IANA TLS HandshakeType registry.
-const HANDSHAKE_TYPES: &[(u8, &str)] = &[
-    (0, "hello_request"),
-    (1, "client_hello"),
-    (2, "server_hello"),
-    (3, "hello_verify_request"),
-    (4, "new_session_ticket"),
-    (5, "end_of_early_data"),
-    (8, "encrypted_extensions"),
-    (11, "certificate"),
-    (12, "server_key_exchange"),
-    (13, "certificate_request"),
-    (14, "server_hello_done"),
-    (15, "certificate_verify"),
-    (16, "client_key_exchange"),
-    (20, "finished"),
-    (21, "certificate_url"),
-    (22, "certificate_status"),
-    (24, "key_update"),
-    (25, "compressed_certificate"),
-    (254, "message_hash"),
-];
-
 /// Returns the registered name of a cipher suite, if it is a known one.
 #[must_use]
 pub fn cipher_suite_name(value: u16) -> Option<&'static str> {
@@ -194,12 +171,6 @@ pub fn alert_description_name(value: u8) -> Option<&'static str> {
     lookup(ALERT_DESCRIPTIONS, value)
 }
 
-/// Returns the registered name of a handshake type, if it is a known one.
-#[must_use]
-pub fn handshake_type_name(value: u8) -> Option<&'static str> {
-    lookup(HANDSHAKE_TYPES, value)
-}
-
 fn lookup<K: Copy + Ord>(table: &[(K, &'static str)], value: K) -> Option<&'static str> {
     table
         .binary_search_by_key(&value, |(key, _)| *key)
@@ -213,9 +184,8 @@ mod tests {
     #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
     use super::{
-        ALERT_DESCRIPTIONS, CIPHER_SUITES, HANDSHAKE_TYPES, NAMED_GROUPS, VERSIONS,
-        alert_description_name, cipher_suite_name, handshake_type_name, named_group_name,
-        version_name,
+        ALERT_DESCRIPTIONS, CIPHER_SUITES, NAMED_GROUPS, VERSIONS, alert_description_name,
+        cipher_suite_name, named_group_name, version_name,
     };
 
     fn assert_sorted<K: Copy + Ord + std::fmt::Debug>(name: &str, table: &[(K, &'static str)]) {
@@ -235,7 +205,6 @@ mod tests {
         assert_sorted("named group", NAMED_GROUPS);
         assert_sorted("version", VERSIONS);
         assert_sorted("alert", ALERT_DESCRIPTIONS);
-        assert_sorted("handshake type", HANDSHAKE_TYPES);
     }
 
     #[test]
@@ -252,7 +221,5 @@ mod tests {
         assert_eq!(version_name(0x0305), None);
         assert_eq!(alert_description_name(40), Some("handshake_failure"));
         assert_eq!(alert_description_name(200), None);
-        assert_eq!(handshake_type_name(1), Some("client_hello"));
-        assert_eq!(handshake_type_name(200), None);
     }
 }

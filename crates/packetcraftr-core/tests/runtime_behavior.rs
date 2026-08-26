@@ -25,6 +25,24 @@ use packetcraftr_core::{Packet, build, decode, document, expression, reflective_
 
 include!("common/runtime_fixture.rs");
 
+/// The link type the fixture registry binds to the `probe` root.
+const PROBE_LINK_TYPE: LinkType = LinkType(777);
+
+/// Protocol order plus every reflected field, the comparison the document
+/// projection preserves exactly.
+fn structure(packet: &Packet) -> document::Packet {
+    document::Packet::from_packet(packet)
+}
+
+fn decode_probe(
+    registry: &Arc<packetcraftr_core::registry::Registry>,
+    bytes: impl Into<Bytes>,
+    options: decode::Options,
+) -> Result<decode::DecodedPacket, decode::Error> {
+    let frame = Frame::new(SystemTime::UNIX_EPOCH, PROBE_LINK_TYPE, bytes)?;
+    decode::Dissector::new(Arc::clone(registry)).decode(frame, options)
+}
+
 fn assert_failed_packet_mutations(packet: &mut Packet) {
     let before_failed_mutations = packet.clone();
     assert!(
@@ -35,12 +53,11 @@ fn assert_failed_packet_mutations(packet: &mut Packet) {
     );
     assert!(packet.layer_mut(99).is_none());
     assert!(packet.get_mut::<Raw>().is_none());
-    assert!(packet.by_protocol_mut(&"absent".into()).is_none());
     assert!(matches!(
         packet.replace(99, Child::default()),
         Err(packetcraftr_core::Error::IndexOutOfBounds { index: 99, len: 4 })
     ));
-    assert!(packet.structurally_eq(&before_failed_mutations));
+    assert_eq!(structure(packet), structure(&before_failed_mutations));
     assert_eq!(packet.get::<Child>().map(|child| child.value), Some(10));
 }
 
@@ -53,10 +70,17 @@ fn packet_mutation_reflection_and_boundaries_are_consistent() {
         ..Probe::default()
     });
     assert_eq!(packet.len(), 2);
-    assert_eq!(packet.get_all::<Probe>().count(), 2);
     assert_eq!(
         packet
-            .all_by_protocol(&packetcraftr_core::layer::Id::new("probe"))
+            .iter()
+            .filter(|layer| layer.as_any().is::<Probe>())
+            .count(),
+        2
+    );
+    assert_eq!(
+        packet
+            .iter()
+            .filter(|layer| layer.protocol_id() == &packetcraftr_core::layer::Id::new("probe"))
             .count(),
         2
     );
@@ -106,38 +130,38 @@ fn packet_mutation_reflection_and_boundaries_are_consistent() {
     ));
 
     packet
-        .edit(&"probe".into(), "probe_value", 42_u8.into())
+        .get_mut::<Probe>()
+        .expect("probe layer")
+        .set_field("probe_value", 42_u8.into())
         .expect("edit reflected value");
     assert_eq!(
         packet
-            .by_protocol(&"probe".into())
+            .iter()
+            .find(|layer| layer.protocol_id() == &packetcraftr_core::layer::Id::new("probe"))
             .and_then(|layer| layer.field("probe_value")),
         Some(42_u8.into())
     );
     let before_failed_edits = packet.clone();
-    assert!(packet.by_protocol_mut(&"absent".into()).is_none());
     assert!(matches!(
-        packet.edit(&"absent".into(), "value", 1_u8.into()),
-        Err(packetcraftr_core::Error::ProtocolNotFound { .. })
+        packet
+            .get_mut::<Probe>()
+            .expect("probe layer")
+            .set_field("unknown", 1_u8.into()),
+        Err(FieldError::UnknownField { .. })
     ));
     assert!(matches!(
-        packet.edit(&"probe".into(), "unknown", 1_u8.into()),
-        Err(packetcraftr_core::Error::Field(
-            FieldError::UnknownField { .. }
-        ))
+        packet
+            .get_mut::<Probe>()
+            .expect("probe layer")
+            .set_field("value", FieldValue::Unsigned(256)),
+        Err(FieldError::OutOfRange { .. })
     ));
-    assert!(matches!(
-        packet.edit(&"probe".into(), "value", FieldValue::Unsigned(256)),
-        Err(packetcraftr_core::Error::Field(
-            FieldError::OutOfRange { .. }
-        ))
-    ));
-    assert!(packet.structurally_eq(&before_failed_edits));
+    assert_eq!(structure(&packet), structure(&before_failed_edits));
 
     let clone = packet.clone();
-    assert!(packet.structurally_eq(&clone));
+    assert_eq!(structure(&packet), structure(&clone));
     packet.get_mut::<Probe>().expect("probe layer").value = 43;
-    assert!(!packet.structurally_eq(&clone));
+    assert_ne!(structure(&packet), structure(&clone));
     assert!(format!("{packet:?}").contains("Probe"));
 
     let collected: Packet = [Child { value: 1 }, Child { value: 2 }]
@@ -474,8 +498,8 @@ fn expressions_and_documents_round_trip_and_enforce_resource_bounds() {
     let packet = parse_expression_fixture(&registry);
     let document = document::Packet::from_packet(&packet);
     document.validate_schema().expect("current schema");
-    let json = document.to_json_pretty().expect("JSON serialization");
-    let yaml = document.to_yaml().expect("YAML serialization");
+    let json = serde_json::to_string_pretty(&document).expect("JSON serialization");
+    let yaml = noyalib::to_string(&document).expect("YAML serialization");
     assert!(matches!(
         document::Packet::parse(&json, document::Format::Json, json.len() - 1),
         Err(document::Error::SizeLimit { .. })
@@ -496,11 +520,13 @@ fn expressions_and_documents_round_trip_and_enforce_resource_bounds() {
         document::Packet::parse(&yaml, document::Format::Yaml, yaml.len()).expect("YAML parse");
     assert_eq!(from_json, document);
     assert_eq!(from_yaml, document);
-    assert!(
-        document
-            .to_packet(&registry, 1)
-            .expect("document conversion")
-            .structurally_eq(&packet)
+    assert_eq!(
+        structure(
+            &document
+                .to_packet(&registry, 1)
+                .expect("document conversion")
+        ),
+        structure(&packet)
     );
 
     let mut wrong_schema = document.clone();
@@ -565,7 +591,6 @@ fn assert_registry_queries(registry: &packetcraftr_core::registry::Registry) {
         Some(Discriminator(7))
     );
     assert_eq!(registry.protocols().len(), 2);
-    assert_eq!(registry.link_type_roots().len(), 1);
     assert!(format!("{registry:?}").contains("binding_count"));
 }
 
@@ -592,12 +617,7 @@ fn build_and_decode_probe(
     assert_eq!(built.packet.encoded_payload_length(1), Some(0));
     assert_eq!(built.diagnostics[0].layer, Some(0));
 
-    let decoded = decode::Dissector::new(Arc::clone(registry))
-        .decode_with_root(
-            built.bytes.clone(),
-            "probe".into(),
-            decode::Options::default(),
-        )
+    let decoded = decode_probe(registry, built.bytes.clone(), decode::Options::default())
         .expect("bound packet decodes");
     assert_eq!(decoded.packet.len(), 2);
     assert_eq!(decoded.original.as_ref(), &[9, 4]);
@@ -612,21 +632,23 @@ fn assert_failed_packet_lookups(decoded: decode::DecodedPacket) {
     let before_failed_lookups = decoded.packet.clone();
     let mut failed_lookups = decoded.packet;
     assert!(failed_lookups.get_mut::<Raw>().is_none());
-    assert!(failed_lookups.by_protocol_mut(&"absent".into()).is_none());
     assert!(failed_lookups.layer_mut(99).is_none());
     assert!(matches!(
-        failed_lookups.insert_boxed(99, Box::new(Probe::default())),
+        failed_lookups.insert(99, Probe::default()),
         Err(packetcraftr_core::Error::IndexOutOfBounds { index: 99, len: 2 })
     ));
     assert!(matches!(
-        failed_lookups.replace_boxed(99, Box::new(Probe::default())),
+        failed_lookups.replace(99, Probe::default()),
         Err(packetcraftr_core::Error::IndexOutOfBounds { index: 99, len: 2 })
     ));
     assert!(matches!(
         failed_lookups.remove(99),
         Err(packetcraftr_core::Error::IndexOutOfBounds { index: 99, len: 2 })
     ));
-    assert!(failed_lookups.structurally_eq(&before_failed_lookups));
+    assert_eq!(
+        structure(&failed_lookups),
+        structure(&before_failed_lookups)
+    );
     assert_eq!(
         failed_lookups.encoded_payload_length(0),
         before_failed_lookups.encoded_payload_length(0)
@@ -707,9 +729,9 @@ fn assert_build_decode_limits(
         Err(build::Error::PacketSizeLimit { .. })
     ));
     assert!(matches!(
-        decode::Dissector::new(Arc::clone(registry)).decode_with_root(
+        decode_probe(
+            registry,
             vec![1],
-            "probe".into(),
             decode::Options {
                 max_layers: 0,
                 ..decode::Options::default()
@@ -718,9 +740,9 @@ fn assert_build_decode_limits(
         Err(decode::Error::LayerLimit { limit: 0 })
     ));
     assert!(matches!(
-        decode::Dissector::new(Arc::clone(registry)).decode_with_root(
+        decode_probe(
+            registry,
             vec![1, 2],
-            "probe".into(),
             decode::Options {
                 max_packet_size: 1,
                 ..decode::Options::default()
@@ -728,16 +750,7 @@ fn assert_build_decode_limits(
         ),
         Err(decode::Error::PacketSizeLimit { .. })
     ));
-    assert!(matches!(
-        decode::Dissector::new(Arc::clone(registry)).decode_with_root(
-            vec![1],
-            "missing".into(),
-            decode::Options::default(),
-        ),
-        Err(decode::Error::MissingRootCodec { .. })
-    ));
-    let malformed = decode::Dissector::new(Arc::clone(registry))
-        .decode_with_root(Vec::<u8>::new(), "probe".into(), decode::Options::default())
+    let malformed = decode_probe(registry, Vec::<u8>::new(), decode::Options::default())
         .expect("codec errors are preserved as malformed layers");
     assert!(malformed.packet.get::<Malformed>().is_some());
     assert_eq!(malformed.diagnostics[0].code, "decode.malformed_layer");
@@ -756,9 +769,11 @@ fn registry_build_decode_and_error_paths_are_bounded() {
 
 fn assert_registry_binding_conflicts() {
     let mut duplicate = packetcraftr_core::registry::Builder::new();
-    duplicate.register_codec(ProbeCodec).expect("first codec");
+    duplicate
+        .register_builtin_codec(ProbeCodec, ProbeCodec.aliases())
+        .expect("first codec");
     assert!(matches!(
-        duplicate.register_codec(ProbeCodec),
+        duplicate.register_builtin_codec(ProbeCodec, ProbeCodec.aliases()),
         Err(packetcraftr_core::registry::Error::DuplicateProtocol { .. })
     ));
 
@@ -774,8 +789,12 @@ fn assert_registry_binding_conflicts() {
     ));
 
     let mut bindings = packetcraftr_core::registry::Builder::new();
-    bindings.register_codec(ProbeCodec).expect("probe");
-    bindings.register_codec(ChildCodec).expect("child");
+    bindings
+        .register_builtin_codec(ProbeCodec, ProbeCodec.aliases())
+        .expect("probe");
+    bindings
+        .register_builtin_codec(ChildCodec, ChildCodec.aliases())
+        .expect("child");
     bindings.bind("probe", 7, "child", 1).expect("binding");
     assert!(matches!(
         bindings.bind("probe", 7, "probe", 1),
@@ -829,7 +848,9 @@ fn assert_filter_field_binding_conflicts() {
     ));
 
     let mut canonical = packetcraftr_core::registry::Builder::new();
-    canonical.register_codec(ProbeCodec).expect("probe");
+    canonical
+        .register_builtin_codec(ProbeCodec, ProbeCodec.aliases())
+        .expect("probe");
     canonical
         .bind_filter_field(
             "probe.value",
@@ -845,7 +866,9 @@ fn assert_filter_field_binding_conflicts() {
     ));
 
     let mut unknown = packetcraftr_core::registry::Builder::new();
-    unknown.register_codec(ProbeCodec).expect("probe");
+    unknown
+        .register_builtin_codec(ProbeCodec, ProbeCodec.aliases())
+        .expect("probe");
     unknown
         .bind_filter_field(
             "probe.nope",
@@ -861,7 +884,9 @@ fn assert_filter_field_binding_conflicts() {
     ));
 
     let mut wrong_kind = packetcraftr_core::registry::Builder::new();
-    wrong_kind.register_codec(ProbeCodec).expect("probe");
+    wrong_kind
+        .register_builtin_codec(ProbeCodec, ProbeCodec.aliases())
+        .expect("probe");
     wrong_kind
         .bind_filter_field(
             "probe.label.flag",

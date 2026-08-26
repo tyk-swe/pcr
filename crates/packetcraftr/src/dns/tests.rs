@@ -16,8 +16,9 @@ use packetcraftr_core::layer::Raw;
 use packetcraftr_core::protocol::{network::Ipv4, transport::Udp};
 use packetcraftr_core::{Packet, decode::DecodedPacket, frame::Frame, frame::LinkType};
 
+use crate::authorization::Operation;
 use crate::clock::Clock;
-use crate::target::{Authorized, Authorizer, Family, Operation, Target};
+use crate::target::{Authorized, Authorizer, Family, Target};
 use crate::{BoundaryError, Stats};
 
 use super::DEFAULT_DNS_SERVER_PORT;

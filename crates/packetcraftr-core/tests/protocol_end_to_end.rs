@@ -38,14 +38,36 @@ fn registry() -> Arc<Registry> {
     Arc::new(builtin::registry().expect("built-in registry"))
 }
 
+/// A spare link type these tests bind to an explicit root protocol so a
+/// dissection can start below the capture layer.
+const ROOT_LINK_TYPE: LinkType = LinkType(u32::MAX);
+
+fn rooted_registry(root: &str) -> Arc<Registry> {
+    Arc::new(
+        builtin::registry_with(|builder| {
+            builder.bind_link_type(ROOT_LINK_TYPE.0, root)?;
+            Ok(())
+        })
+        .unwrap_or_else(|error| panic!("{root} root binding: {error}")),
+    )
+}
+
+fn decode_from_root(
+    registry: &Arc<Registry>,
+    bytes: impl Into<Bytes>,
+    options: decode::Options,
+) -> Result<decode::DecodedPacket, decode::Error> {
+    let frame = Frame::new(SystemTime::UNIX_EPOCH, ROOT_LINK_TYPE, bytes)?;
+    decode::Dissector::new(Arc::clone(registry)).decode(frame, options)
+}
+
 fn round_trip(packet: Packet, root: &str) -> (build::BuiltPacket, decode::DecodedPacket) {
-    let registry = registry();
+    let registry = rooted_registry(root);
     let builder = build::Builder::new(Arc::clone(&registry));
     let built = builder
         .build(packet, build::Context::default(), build::Options::default())
         .unwrap_or_else(|error| panic!("{root} build: {error}"));
-    let decoded = decode::Dissector::new(Arc::clone(&registry))
-        .decode_with_root(built.bytes.clone(), root.into(), decode::Options::default())
+    let decoded = decode_from_root(&registry, built.bytes.clone(), decode::Options::default())
         .unwrap_or_else(|error| panic!("{root} decode: {error}"));
     let rebuilt = builder
         .build(
@@ -333,9 +355,12 @@ fn ipv4_source_route_transport_checksums_cover_route_states_and_nearest_envelope
         Some(0x8652),
         "the completed nearest IPv4 route must beat the outer remaining route"
     );
-    let decoded = decode::Dissector::new(registry)
-        .decode_with_root(nested.bytes, "ipv4".into(), decode::Options::default())
-        .expect("nested IPv4 source-route packet decodes");
+    let decoded = decode_from_root(
+        &rooted_registry("ipv4"),
+        nested.bytes,
+        decode::Options::default(),
+    )
+    .expect("nested IPv4 source-route packet decodes");
     assert!(
         !decoded
             .diagnostics
@@ -669,7 +694,14 @@ fn overlay_and_security_tunnel_stacks_round_trip() {
     mpls.push(ipv4([10, 1, 0, 1], [10, 1, 0, 2]));
     mpls.push(Icmpv4::default());
     let (_, decoded) = round_trip(mpls, "ethernet");
-    assert_eq!(decoded.packet.get_all::<Mpls>().count(), 2);
+    assert_eq!(
+        decoded
+            .packet
+            .iter()
+            .filter(|layer| layer.as_any().is::<Mpls>())
+            .count(),
+        2
+    );
 
     let mut pppoe = Packet::new();
     pppoe.push(Ethernet::default());
@@ -754,7 +786,6 @@ fn sctp_dns_and_malformed_inputs_cover_bounded_parsers() {
     pointer_loop[13] = 12;
     assert!(Dns::from_wire(pointer_loop).is_err());
 
-    let decoder = decode::Dissector::new(registry());
     for (root, bytes) in [
         ("ethernet", vec![0; 13]),
         ("ipv4", vec![0; 19]),
@@ -767,8 +798,7 @@ fn sctp_dns_and_malformed_inputs_cover_bounded_parsers() {
         ("vxlan", vec![0; 7]),
         ("gre", vec![0; 3]),
     ] {
-        let decoded = decoder
-            .decode_with_root(bytes, root.into(), decode::Options::default())
+        let decoded = decode_from_root(&rooted_registry(root), bytes, decode::Options::default())
             .unwrap_or_else(|error| panic!("{root} malformed preservation failed: {error}"));
         assert!(decoded.packet.get::<Malformed>().is_some(), "{root}");
         assert_eq!(
@@ -783,9 +813,12 @@ fn typed_child_without_payload_is_preserved_as_malformed() {
     let mut bytes = vec![0; 14];
     bytes[12..14].copy_from_slice(&0x0800_u16.to_be_bytes());
 
-    let decoded = decode::Dissector::new(registry())
-        .decode_with_root(bytes, "ethernet".into(), decode::Options::default())
-        .expect("empty typed child should be preserved");
+    let decoded = decode_from_root(
+        &rooted_registry("ethernet"),
+        bytes,
+        decode::Options::default(),
+    )
+    .expect("empty typed child should be preserved");
 
     assert_eq!(decoded.packet.len(), 2);
     let malformed = decoded
@@ -981,7 +1014,6 @@ fn corrupted_builtin_checksums_report_integrity_failures() {
 
     let registry = registry();
     let builder = build::Builder::new(Arc::clone(&registry));
-    let dissector = decode::Dissector::new(registry);
     let mut observed = BTreeSet::new();
 
     for (code, root, packet, corrupted_offset) in cases {
@@ -990,9 +1022,12 @@ fn corrupted_builtin_checksums_report_integrity_failures() {
             .unwrap_or_else(|error| panic!("{code} build: {error}"));
         let mut bytes = built.bytes.to_vec();
         bytes[corrupted_offset] ^= 0xff;
-        let decoded = dissector
-            .decode_with_root(Bytes::from(bytes), root.into(), decode::Options::default())
-            .unwrap_or_else(|error| panic!("{code} decode: {error}"));
+        let decoded = decode_from_root(
+            &rooted_registry(root),
+            Bytes::from(bytes),
+            decode::Options::default(),
+        )
+        .unwrap_or_else(|error| panic!("{code} decode: {error}"));
         let failures: Vec<&str> = decoded
             .diagnostics
             .iter()

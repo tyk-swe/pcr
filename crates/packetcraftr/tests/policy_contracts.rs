@@ -129,6 +129,10 @@ fn denied_resolved_address_never_reaches_route_neighbor_or_transmit_providers() 
         addresses: vec![IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))],
     };
     let route_calls = Arc::new(AtomicUsize::new(0));
+    let policy = policy::Policy {
+        allow_hostname_resolution: true,
+        ..policy::Policy::default()
+    };
     let client = Client::new(
         Arc::new(
             packetcraftr_core::protocol::builtin::registry().expect("built-ins must register"),
@@ -138,25 +142,28 @@ fn denied_resolved_address_never_reaches_route_neighbor_or_transmit_providers() 
         },
         NeverNeighbors,
         NeverTransmit,
-        policy::Policy {
-            allow_hostname_resolution: true,
-            ..policy::Policy::default()
-        },
+        policy.clone(),
     );
-    let mut packet = Packet::new();
-    packet.push(Raw::new(vec![1_u8]));
     let target = Target::from_str("example.test").expect("hostname must parse");
 
-    let error = client
-        .plan_target(
-            &packet,
-            &target,
-            &resolver,
-            &packetcraftr_netio::route::Options::default(),
-        )
+    let error = policy
+        .resolve_target(&target, &resolver)
         .expect_err("public resolved address must be denied");
     assert!(error.to_string().contains("denies public destination"));
     assert_eq!(resolver.calls.load(Ordering::SeqCst), 1);
+
+    // The same address is refused before any provider observes it, so a caller
+    // that resolves first and plans second cannot leak it to the network.
+    let mut packet = Packet::new();
+    packet.push(Raw::new(vec![1_u8]));
+    let error = client
+        .plan(
+            &packet,
+            Some(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))),
+            &packetcraftr_netio::route::Options::default(),
+        )
+        .expect_err("public destination must be denied");
+    assert!(error.to_string().contains("denies public destination"));
     assert_eq!(route_calls.load(Ordering::SeqCst), 0);
 }
 

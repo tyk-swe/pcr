@@ -6,10 +6,7 @@ use std::time::Instant;
 
 use super::pending::{commit::commit_push, plan_push};
 use super::state::{TcpFlowState, flow_memory_charge, retained_bytes};
-use super::{
-    Error, Event, Limits, Reassembler, ScopedFlowKey, Segment, TCP_FLOW_STATE_METADATA_CHARGE,
-    TCP_SERIAL_HALF_SPACE,
-};
+use super::{Error, Event, Limits, Reassembler, ScopedFlowKey, Segment, TCP_SERIAL_HALF_SPACE};
 
 impl Reassembler {
     pub fn new(limits: Limits) -> Self {
@@ -20,54 +17,6 @@ impl Reassembler {
             aggregate_bytes: 0,
             aggregate_memory_charge: 0,
         }
-    }
-
-    pub fn open_flow(
-        &mut self,
-        flow: ScopedFlowKey,
-        first_payload_sequence: u32,
-        now: Instant,
-    ) -> Result<(), Error> {
-        self.validate_limits()?;
-        if let Some(existing) = self.flows.get_mut(&flow)
-            && existing.base_sequence == first_payload_sequence
-        {
-            let previous_deadline = existing.deadline;
-            existing.last_update = existing.last_update.max(now);
-            existing.deadline = existing
-                .last_update
-                .checked_add(self.limits.tcp_idle_expiry);
-            let deadline = existing.deadline;
-            self.expiry.remove(previous_deadline, &flow);
-            self.expiry.insert(deadline, flow);
-            return Ok(());
-        }
-        let existing = self.flows.get(&flow);
-        if self
-            .flows
-            .len()
-            .saturating_sub(usize::from(existing.is_some()))
-            >= self.limits.max_flows
-        {
-            return Err(Error::FlowLimit {
-                limit: self.limits.max_flows,
-            });
-        }
-        let (aggregate_bytes, aggregate_memory_charge) =
-            self.plan_replacement_accounting(existing, TCP_FLOW_STATE_METADATA_CHARGE)?;
-
-        let last_update = existing.map_or(now, |state| state.last_update.max(now));
-        let previous_deadline = existing.and_then(|state| state.deadline);
-        let deadline = last_update.checked_add(self.limits.tcp_idle_expiry);
-        self.expiry.remove(previous_deadline, &flow);
-        self.flows.insert(
-            flow.clone(),
-            TcpFlowState::new(first_payload_sequence, last_update, deadline),
-        );
-        self.expiry.insert(deadline, flow);
-        self.aggregate_bytes = aggregate_bytes;
-        self.aggregate_memory_charge = aggregate_memory_charge;
-        Ok(())
     }
 
     /// Admits one segment, returning the events its arrival resolved.
@@ -104,7 +53,7 @@ impl Reassembler {
             }
 
             let (aggregate_bytes, aggregate_memory_charge) = if changes_generation {
-                self.plan_replacement_accounting(existing, 0)?
+                self.plan_replacement_accounting(existing)?
             } else {
                 (self.aggregate_bytes, self.aggregate_memory_charge)
             };
@@ -215,7 +164,6 @@ impl Reassembler {
     fn plan_replacement_accounting(
         &self,
         existing: Option<&TcpFlowState>,
-        replacement_memory_charge: usize,
     ) -> Result<(usize, usize), Error> {
         let accounting_error = || Error::AggregateByteLimit {
             limit: self.limits.max_aggregate_bytes,
@@ -233,7 +181,6 @@ impl Reassembler {
         let aggregate_memory_charge = self
             .aggregate_memory_charge
             .checked_sub(old_memory_charge)
-            .and_then(|charge| charge.checked_add(replacement_memory_charge))
             .ok_or_else(accounting_error)?;
         if aggregate_bytes > self.limits.max_aggregate_bytes
             || aggregate_memory_charge > self.limits.max_aggregate_bytes
@@ -301,6 +248,19 @@ mod tests {
     const IDLE_FLOW_COUNT: usize = 512;
     const ACTIVE_SEGMENT_COUNT: u32 = 4_096;
 
+    fn syn(flow: ScopedFlowKey) -> Segment {
+        Segment {
+            flow,
+            // A SYN one before zero anchors the flow's first payload byte at
+            // sequence zero.
+            sequence: u32::MAX,
+            payload: Bytes::new(),
+            syn: true,
+            fin: false,
+            rst: false,
+        }
+    }
+
     fn test_flow(source_port: u16) -> ScopedFlowKey {
         let scope = Interner::new()
             .intern(None, Vec::new())
@@ -329,12 +289,12 @@ mod tests {
         for index in 0..IDLE_FLOW_COUNT {
             let source_port = u16::try_from(10_000usize + index).expect("test port fits u16");
             reassembler
-                .open_flow(test_flow(source_port), 0, start)
+                .push(syn(test_flow(source_port)), start)
                 .expect("idle flow opens");
         }
         let active = test_flow(60_000);
         reassembler
-            .open_flow(active.clone(), 0, start)
+            .push(syn(active.clone()), start)
             .expect("active flow opens");
 
         for sequence in 0..ACTIVE_SEGMENT_COUNT {

@@ -1070,10 +1070,11 @@ fn the_public_session_model_and_collector_keep_their_contracts() {
 
     assert_eq!(Status::ALL.len(), 7);
     for status in Status::ALL {
-        assert_eq!(Status::from_name(status.as_str()), Some(status));
         assert_eq!(status.to_string(), status.as_str());
     }
-    assert_eq!(Status::from_name("nonsense"), None);
+    let names: std::collections::BTreeSet<&str> =
+        Status::ALL.iter().map(|status| status.as_str()).collect();
+    assert_eq!(names.len(), Status::ALL.len(), "status names stay distinct");
 
     let mut capture = Capture::new();
     let mut stream = Stream::new(40_000);

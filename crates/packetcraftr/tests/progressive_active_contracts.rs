@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use bytes::Bytes;
+use packetcraftr::authorization::NoResolver;
 use packetcraftr::core::error::{Classification, Classified, Kind};
 use packetcraftr::core::frame::LinkType;
 use packetcraftr::core::protocol::{network::Ipv4, transport::Udp};
@@ -22,7 +23,7 @@ use packetcraftr::netio::link::{Capability, Mode};
 use packetcraftr::netio::neighbor;
 use packetcraftr::netio::route::{Decision, Provider, Scope, SelectionReason};
 use packetcraftr::netio::transmit;
-use packetcraftr::target::{Hostname, Resolver, Target};
+use packetcraftr::target::Target;
 use packetcraftr::{BoundaryError, Client, ExchangeExecutor, clock, dns, policy, scan, traceroute};
 
 #[derive(Default)]
@@ -149,18 +150,6 @@ impl neighbor::Resolver for NoNeighbors {
         _request: &neighbor::Request,
     ) -> Result<neighbor::Resolution, neighbor::Error> {
         unreachable!("Layer 3 fixtures never resolve neighbors")
-    }
-}
-
-struct NoResolver;
-
-impl Resolver for NoResolver {
-    fn resolve(
-        &self,
-        _hostname: &Hostname,
-        _limit: usize,
-    ) -> Result<Vec<IpAddr>, packetcraftr::target::Error> {
-        unreachable!("address fixtures never resolve hostnames")
     }
 }
 

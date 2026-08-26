@@ -20,7 +20,7 @@ mod run;
 #[cfg(test)]
 mod tests;
 
-pub use crate::authorization::{Authorizer, Operation, PolicyAuthorizer};
+pub use crate::authorization::PolicyAuthorizer;
 pub use boundary::{Execution, ExecutionCase, Executor};
 pub use error::Error;
 pub use request::{LiveLimits, LiveOptions};

@@ -105,12 +105,6 @@ impl Status {
             Self::Truncated => "truncated",
         }
     }
-
-    /// Parses a status from its stable name.
-    #[must_use]
-    pub fn from_name(name: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|status| status.as_str() == name)
-    }
 }
 
 impl std::fmt::Display for Status {

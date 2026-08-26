@@ -30,8 +30,9 @@ use super::model::{
     Batch, Classification, Event, Execution, Executor, Limits, ProbeStatus, Request, Transport,
 };
 use super::probe::probe_packet;
+use crate::authorization::Operation;
 use crate::clock::Clock;
-use crate::target::{Authorized, Authorizer, Operation, PolicyAuthorizer, Target};
+use crate::target::{Authorized, Authorizer, PolicyAuthorizer, Target};
 use crate::{BoundaryError, Stats, target::Family};
 
 fn private_scan_policy() -> crate::policy::Policy {

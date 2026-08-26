@@ -149,7 +149,7 @@ where
 }
 
 #[derive(Default)]
-pub struct Collector {
+pub(super) struct Collector {
     hops: Vec<Hop>,
     hop_indices: HashMap<u8, usize>,
     undecoded: Vec<UndecodedEvidence>,
@@ -157,7 +157,7 @@ pub struct Collector {
 }
 
 impl Collector {
-    pub fn observe(&mut self, event: Event) {
+    pub(super) fn observe(&mut self, event: Event) {
         match event {
             Event::Probe { target: _, probe } => {
                 let hop_index = match self.hop_indices.get(&probe.hop_limit) {
@@ -185,7 +185,7 @@ impl Collector {
         }
     }
 
-    pub fn finish(mut self, summary: Summary) -> Result {
+    pub(super) fn finish(mut self, summary: Summary) -> Result {
         self.diagnostics.extend(summary.diagnostics);
         Result {
             target: summary.target,

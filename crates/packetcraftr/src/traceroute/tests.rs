@@ -33,8 +33,9 @@ use super::model::{
     ResponseKind, Strategy,
 };
 use super::probe::probe_packet;
+use crate::authorization::Operation;
 use crate::clock::Clock;
-use crate::target::{Authorized, Authorizer, Operation, PolicyAuthorizer, Target};
+use crate::target::{Authorized, Authorizer, PolicyAuthorizer, Target};
 use crate::{BoundaryError, Stats, target::Family};
 
 fn udp_traceroute_request(target: Target) -> Request {

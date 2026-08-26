@@ -6,9 +6,26 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::time::SystemTime;
 
+use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::protocol::{builtin, support::BUILTIN_PROTOCOLS};
+use packetcraftr_core::registry::Registry;
 use packetcraftr_core::{Packet, build, decode};
+
+/// A spare link type bound to an explicit root protocol so a dissection can
+/// start below the capture layer.
+const ROOT_LINK_TYPE: LinkType = LinkType(u32::MAX);
+
+fn rooted_registry(root: &str) -> Arc<Registry> {
+    Arc::new(
+        builtin::registry_with(|builder| {
+            builder.bind_link_type(ROOT_LINK_TYPE.0, root)?;
+            Ok(())
+        })
+        .unwrap_or_else(|error| panic!("{root} root binding: {error}")),
+    )
+}
 
 const REQUIRES_PACKET_CONTEXT_OR_CHILD: &[&str] = &[
     "bsd_loop", "bsd_null", "erspan", "esp", "icmpv6", "ipv6_srh", "llc", "padding", "pppoe",
@@ -58,7 +75,6 @@ fn constructible_defaults_either_build_standalone_or_require_declared_context() 
 fn exact_round_trip_builtins_decode_their_own_default_wire_image() {
     let registry = Arc::new(builtin::registry().expect("built-in registry should be valid"));
     let builder = build::Builder::new(Arc::clone(&registry));
-    let decoder = decode::Dissector::new(Arc::clone(&registry));
     let mut rejected = Vec::new();
     let mut round_trip_count = 0_usize;
 
@@ -79,12 +95,10 @@ fn exact_round_trip_builtins_decode_their_own_default_wire_image() {
             continue;
         };
         round_trip_count += 1;
-        let decoded = decoder
-            .decode_with_root(
-                first.bytes.clone(),
-                support.protocol.into(),
-                decode::Options::default(),
-            )
+        let frame = Frame::new(SystemTime::UNIX_EPOCH, ROOT_LINK_TYPE, first.bytes.clone())
+            .unwrap_or_else(|error| panic!("{} default frame failed: {error}", support.protocol));
+        let decoded = decode::Dissector::new(rooted_registry(support.protocol))
+            .decode(frame, decode::Options::default())
             .unwrap_or_else(|error| panic!("{} default decode failed: {error}", support.protocol));
         let rebuilt = builder
             .build(

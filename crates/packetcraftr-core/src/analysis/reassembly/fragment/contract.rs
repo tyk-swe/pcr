@@ -89,4 +89,6 @@ pub enum Error {
     },
     #[error("fragment extends beyond declared final datagram length {final_length}")]
     BeyondFinalLength { final_length: u32 },
+    #[error("fragment merge plan does not match the retained segment map")]
+    InconsistentMergePlan,
 }

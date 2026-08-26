@@ -124,7 +124,11 @@ fn commit_merge(
         return Ok(());
     }
 
-    let union_len = (plan.union_end - plan.union_start) as usize;
+    let union_len = plan
+        .union_end
+        .checked_sub(plan.union_start)
+        .and_then(|length| usize::try_from(length).ok())
+        .ok_or(Error::InconsistentMergePlan)?;
     let mut bytes = Vec::new();
     bytes
         .try_reserve_exact(union_len)
@@ -132,20 +136,38 @@ fn commit_merge(
             requested: union_len,
         })?;
     bytes.resize(union_len, 0);
-    let fragment_start = (offset - plan.union_start) as usize;
-    bytes[fragment_start..fragment_start + fragment.len()].copy_from_slice(&fragment);
+    let fragment_start = offset
+        .checked_sub(plan.union_start)
+        .and_then(|start| usize::try_from(start).ok())
+        .ok_or(Error::InconsistentMergePlan)?;
+    let fragment_end = fragment_start
+        .checked_add(fragment.len())
+        .ok_or(Error::InconsistentMergePlan)?;
+    bytes
+        .get_mut(fragment_start..fragment_end)
+        .ok_or(Error::InconsistentMergePlan)?
+        .copy_from_slice(&fragment);
     for index in 0..plan.affected_segment_count {
         let value = segments
             .remove(&current)
-            .expect("merge plan contains each affected segment");
-        let relative = (current - plan.union_start) as usize;
-        bytes[relative..relative + value.len()].copy_from_slice(&value);
-        if index + 1 < plan.affected_segment_count {
+            .ok_or(Error::InconsistentMergePlan)?;
+        let relative = current
+            .checked_sub(plan.union_start)
+            .and_then(|start| usize::try_from(start).ok())
+            .ok_or(Error::InconsistentMergePlan)?;
+        let end = relative
+            .checked_add(value.len())
+            .ok_or(Error::InconsistentMergePlan)?;
+        bytes
+            .get_mut(relative..end)
+            .ok_or(Error::InconsistentMergePlan)?
+            .copy_from_slice(&value);
+        if index.saturating_add(1) < plan.affected_segment_count {
             current = *segments
                 .range((Excluded(current), Unbounded))
                 .next()
                 .map(|(start, _)| start)
-                .expect("merge plan affected segments remain contiguous");
+                .ok_or(Error::InconsistentMergePlan)?;
         }
     }
     segments.insert(plan.union_start, Bytes::from(bytes));
@@ -161,4 +183,58 @@ fn copy_bytes(bytes: &[u8]) -> Result<Bytes, Error> {
         })?;
     copy.extend_from_slice(bytes);
     Ok(Bytes::from(copy))
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+
+    use super::*;
+
+    fn merge_plan(
+        first_affected: Option<u32>,
+        affected_segment_count: usize,
+        union_start: u32,
+        union_end: u32,
+    ) -> FragmentMergePlan {
+        FragmentMergePlan {
+            added_bytes: 4,
+            has_conflicting_overlap: false,
+            segment_count: 1,
+            first_affected,
+            affected_segment_count,
+            union_start,
+            union_end,
+        }
+    }
+
+    #[test]
+    fn commit_merge_reports_a_plan_whose_affected_segment_is_absent() {
+        let mut segments = BTreeMap::new();
+        segments.insert(8u32, Bytes::from_static(b"abcd"));
+
+        let result = commit_merge(
+            &mut segments,
+            4,
+            Bytes::from_static(b"wxyz"),
+            merge_plan(Some(0), 1, 0, 12),
+        );
+
+        assert_eq!(result, Err(Error::InconsistentMergePlan));
+    }
+
+    #[test]
+    fn commit_merge_reports_a_union_shorter_than_the_incoming_fragment() {
+        let mut segments = BTreeMap::new();
+        segments.insert(0u32, Bytes::from_static(b"ab"));
+
+        let result = commit_merge(
+            &mut segments,
+            0,
+            Bytes::from_static(b"wxyz"),
+            merge_plan(Some(0), 1, 0, 2),
+        );
+
+        assert_eq!(result, Err(Error::InconsistentMergePlan));
+    }
 }

@@ -67,8 +67,9 @@ impl Reassembler {
     ///
     /// # Panics
     ///
-    /// Panics only if reassembly loses a validated flow or planned segment;
-    /// input errors return [`enum@Error`].
+    /// Panics only if reassembly loses a validated flow between planning and
+    /// commit; an inconsistent merge plan and every input problem return
+    /// [`enum@Error`].
     pub fn push(&mut self, fragment: Fragment, now: Instant) -> Result<Option<Event>, Error> {
         match self.plan_fragment(&fragment)? {
             FragmentPlan::Complete => Ok(Some(Event::Complete(Datagram {

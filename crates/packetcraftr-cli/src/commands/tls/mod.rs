@@ -69,10 +69,14 @@ struct SniPattern {
 
 impl SniPattern {
     fn parse(pattern: &str) -> Result<Self, CliError> {
-        let leading = pattern.starts_with('*');
-        let rest = if leading { &pattern[1..] } else { pattern };
-        let trailing = rest.ends_with('*');
-        let literal = rest.strip_suffix('*').unwrap_or(rest);
+        let (leading, rest) = match pattern.strip_prefix('*') {
+            Some(rest) => (true, rest),
+            None => (false, pattern),
+        };
+        let (trailing, literal) = match rest.strip_suffix('*') {
+            Some(literal) => (true, literal),
+            None => (false, rest),
+        };
         if literal.contains('*') {
             return Err(CliError::new(
                 2,

@@ -19,6 +19,10 @@ use crate::errors::CliError;
 use crate::input::parse_target;
 use crate::rendering::NdjsonStream;
 
+/// A DNS exchange puts exactly one query on the wire per attempt, so the probe
+/// only ever needs room for one packet template.
+const MAX_TEMPLATE_PACKETS: usize = 1;
+
 pub(super) fn run(
     arguments: Args,
     format: output::contract::Format,
@@ -31,7 +35,7 @@ pub(super) fn run(
         arguments.route,
         arguments.policy,
         request.timeout,
-        1,
+        MAX_TEMPLATE_PACKETS,
         queue_limits,
     )?;
     target_workflow::run::<Dns>(&request, &mut probe, format, stream)

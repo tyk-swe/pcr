@@ -123,7 +123,11 @@ struct ResponseSections {
 }
 
 /// Advances a message offset, reporting truncation instead of wrapping.
-fn advance(offset: usize, delta: usize, field: &'static str) -> Result<usize, WireError> {
+pub(super) fn advance(
+    offset: usize,
+    delta: usize,
+    field: &'static str,
+) -> Result<usize, WireError> {
     offset
         .checked_add(delta)
         .ok_or(WireError::TruncatedField { field, offset })

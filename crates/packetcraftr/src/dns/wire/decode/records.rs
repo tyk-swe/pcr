@@ -11,14 +11,8 @@ use super::super::super::DNS_TYPE_OPT;
 use super::super::super::error::WireError;
 use super::super::super::model::{Edns, EdnsOption, Limits, Name, Record, RecordValue};
 use super::super::name::decode_name;
+use super::advance;
 use super::primitives::{read_u16, read_u32};
-
-/// Advances a message offset, reporting truncation instead of wrapping.
-fn advance(offset: usize, delta: usize, field: &'static str) -> Result<usize, WireError> {
-    offset
-        .checked_add(delta)
-        .ok_or(WireError::TruncatedField { field, offset })
-}
 
 pub(super) fn decode_records(
     message: &[u8],

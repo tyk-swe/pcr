@@ -133,6 +133,12 @@ impl Document {
                 });
             } else {
                 let protocol = layer.protocol_id().to_string();
+                // A derived field the codec leaves absent by default (an
+                // optional GRE checksum) must be spelled `auto` when present,
+                // or the omission would drop it from the wire.
+                let default_layer = registry
+                    .codec(layer.protocol_id())
+                    .and_then(|codec| codec.make_layer(&std::collections::BTreeMap::new()).ok());
                 let mut fields = Vec::new();
                 for field_schema in layer.schema().fields {
                     match field_schema.tier {
@@ -145,6 +151,14 @@ impl Document {
                             }
                         }
                         Tier::Derived => {
+                            if status == Minimized::Derived {
+                                let absent_by_default = default_layer
+                                    .as_ref()
+                                    .is_some_and(|layer| layer.field(field_schema.name).is_none());
+                                if absent_by_default && layer.field(field_schema.name).is_some() {
+                                    fields.push((field_schema.name.to_owned(), Value::Auto));
+                                }
+                            }
                             if status == Minimized::FullLiterals {
                                 if let Some(wire) = layer.wire_field(field_schema.name) {
                                     match wire {

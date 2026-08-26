@@ -274,14 +274,14 @@ where
                 .map(|built| built.packet.clone())
         })
         .collect::<Vec<_>>();
-    if !packets.is_empty() {
-        authorizer.authorize_operation(
-            &packets,
-            live.destination,
-            prepared.maximum_wire_bytes,
-            prepared.requires_malformed_live,
-        )?;
-    }
+    // Unconditional: a campaign with no buildable case still has to clear
+    // policy validation and the destination gate before anything else runs.
+    authorizer.authorize_operation(
+        &packets,
+        live.destination,
+        prepared.maximum_wire_bytes,
+        prepared.requires_malformed_live,
+    )?;
     Ok(())
 }
 
@@ -318,11 +318,24 @@ impl ExecutionPhase<'_> {
                 self.pace(built_ordinal, case.prepared.index, clock)?;
                 self.deadline.check().map_err(duration_limit)?;
                 self.execute_case(&mut case, executor)?;
-                built_ordinal += 1;
+                #[expect(
+                    clippy::arithmetic_side_effects,
+                    reason = "one increment per case in `cases`, so the ordinal cannot exceed \
+                              `cases.len()`"
+                )]
+                {
+                    built_ordinal += 1;
+                }
             }
+            #[expect(
+                clippy::indexing_slicing,
+                reason = "`diagnostic_start` is `self.diagnostics.len()` read at the top of this \
+                          iteration and the vector is only appended to, so the range is in bounds"
+            )]
+            let new_diagnostics = &self.diagnostics[diagnostic_start..];
             case.prepared
                 .diagnostics
-                .extend(self.diagnostics[diagnostic_start..].iter().cloned());
+                .extend(new_diagnostics.iter().cloned());
             emit(case, &self.deadline)?;
         }
         self.finish()

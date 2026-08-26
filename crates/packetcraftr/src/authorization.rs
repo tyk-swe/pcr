@@ -138,20 +138,44 @@ impl<R: Resolver> Authorizer for PolicyAuthorizer<'_, R> {
     }
 }
 
+/// Which of the two permissive-live approvals is missing.
+///
+/// Callers that phrase the refusal in their own words (replay names the capture
+/// bytes and the CLI flag) match on this instead of restating the check.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PermissiveLiveDenial {
+    /// The caller did not pass the per-operation opt-in for this run.
+    OperationOptIn,
+    /// The traffic policy does not stand behind permissively built bytes.
+    PolicyApproval,
+}
+
 /// The two independent approvals permissively built bytes need before they can
 /// reach the wire: the per-operation opt-in the caller passes for this run, and
 /// the traffic policy's own standing allowance.
+pub(crate) fn check_permissive_live(
+    policy: &crate::policy::Policy,
+    allow_permissive_live: bool,
+) -> Result<(), PermissiveLiveDenial> {
+    if !allow_permissive_live {
+        return Err(PermissiveLiveDenial::OperationOptIn);
+    }
+    if !policy.allow_permissive_packets {
+        return Err(PermissiveLiveDenial::PolicyApproval);
+    }
+    Ok(())
+}
+
+/// [`check_permissive_live`] phrased as the workflow error every caller but
+/// replay reports.
 pub(crate) fn authorize_permissive_live(
     policy: &crate::policy::Policy,
     allow_permissive_live: bool,
 ) -> Result<(), Error> {
-    if !allow_permissive_live {
-        return Err(Error::PermissiveLiveOptInRequired);
-    }
-    if !policy.allow_permissive_packets {
-        return Err(crate::policy::Error::PermissivePacket.into());
-    }
-    Ok(())
+    check_permissive_live(policy, allow_permissive_live).map_err(|denial| match denial {
+        PermissiveLiveDenial::OperationOptIn => Error::PermissiveLiveOptInRequired,
+        PermissiveLiveDenial::PolicyApproval => crate::policy::Error::PermissivePacket.into(),
+    })
 }
 
 impl<R, N, I> Client<R, N, I> {
@@ -214,5 +238,49 @@ impl<R, N, I> Client<R, N, I> {
         self.policy
             .authorize_packet_sources(&decoded.packet, route)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+
+    use packetcraftr_core::error::Classified;
+
+    use super::*;
+
+    /// A workflow authorizer that only approves operations, so the trait's
+    /// fail-closed resolution default is what answers a declared target.
+    struct OperationOnlyAuthorizer;
+
+    impl Authorizer for OperationOnlyAuthorizer {
+        fn authorize_operation(&mut self, _request: Operation<'_>) -> Result<(), BoundaryError> {
+            Ok(())
+        }
+    }
+
+    fn hostname_target() -> Target {
+        "documentation.invalid".parse().expect("hostname target")
+    }
+
+    #[test]
+    fn an_authorizer_without_a_resolver_refuses_to_resolve_a_declared_target() {
+        let error = OperationOnlyAuthorizer
+            .resolve_and_authorize(&hostname_target())
+            .expect_err("the default resolution seam is fail-closed");
+
+        assert_eq!(error.classification().code, "internal.target_resolution");
+    }
+
+    #[test]
+    fn the_packet_authorizer_resolves_no_hostname() {
+        let policy = crate::policy::Policy::default();
+
+        let error = PolicyAuthorizer::for_packets(&policy)
+            .resolve_and_authorize(&hostname_target())
+            .expect_err("a packet authorizer has no resolver to answer with");
+
+        assert_eq!(error.classification().code, "policy.hostname_resolution");
+        assert!(error.to_string().contains("documentation.invalid"));
     }
 }

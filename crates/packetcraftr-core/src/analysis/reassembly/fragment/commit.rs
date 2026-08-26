@@ -112,7 +112,7 @@ fn commit_merge(
     fragment: Bytes,
     plan: FragmentMergePlan,
 ) -> Result<(), Error> {
-    let Some(mut current) = plan.first_affected else {
+    let Some(first_affected) = plan.first_affected else {
         let replaced = segments.insert(offset, copy_bytes(&fragment)?);
         debug_assert!(replaced.is_none());
         debug_assert_eq!(segments.len(), plan.segment_count);
@@ -147,10 +147,20 @@ fn commit_merge(
         .get_mut(fragment_start..fragment_end)
         .ok_or(Error::InconsistentMergePlan)?
         .copy_from_slice(&fragment);
+    let mut current = first_affected;
+    // Validate the whole plan against a borrowed view of the map before any
+    // segment is removed. A plan that turns out to be inconsistent halfway
+    // through would otherwise leave the flow holding a partially merged map
+    // while the caller returns without updating its byte accounting.
+    let mut validated = Vec::new();
+    validated
+        .try_reserve_exact(plan.affected_segment_count)
+        .map_err(|_| Error::AllocationFailed {
+            requested: plan.affected_segment_count,
+        })?;
     for index in 0..plan.affected_segment_count {
-        let value = segments
-            .remove(&current)
-            .ok_or(Error::InconsistentMergePlan)?;
+        let value = segments.get(&current).ok_or(Error::InconsistentMergePlan)?;
+        validated.push(current);
         let relative = current
             .checked_sub(plan.union_start)
             .and_then(|start| usize::try_from(start).ok())
@@ -161,7 +171,7 @@ fn commit_merge(
         bytes
             .get_mut(relative..end)
             .ok_or(Error::InconsistentMergePlan)?
-            .copy_from_slice(&value);
+            .copy_from_slice(value);
         if index.saturating_add(1) < plan.affected_segment_count {
             current = *segments
                 .range((Excluded(current), Unbounded))
@@ -169,6 +179,12 @@ fn commit_merge(
                 .map(|(start, _)| start)
                 .ok_or(Error::InconsistentMergePlan)?;
         }
+    }
+
+    // Every key was found above and the map has not changed since, so the
+    // removals cannot fail; a key that is somehow gone changes nothing.
+    for start in validated {
+        segments.remove(&start);
     }
     segments.insert(plan.union_start, Bytes::from(bytes));
     debug_assert_eq!(segments.len(), plan.segment_count);
@@ -221,6 +237,41 @@ mod tests {
         );
 
         assert_eq!(result, Err(Error::InconsistentMergePlan));
+    }
+
+    #[test]
+    fn commit_merge_reports_a_union_that_ends_before_it_starts() {
+        let mut segments = BTreeMap::new();
+        segments.insert(0u32, Bytes::from_static(b"abcd"));
+
+        let result = commit_merge(
+            &mut segments,
+            0,
+            Bytes::from_static(b"wxyz"),
+            merge_plan(Some(0), 1, 8, 4),
+        );
+
+        assert_eq!(result, Err(Error::InconsistentMergePlan));
+    }
+
+    #[test]
+    fn commit_merge_leaves_the_map_untouched_when_a_later_segment_is_missing() {
+        let mut segments = BTreeMap::new();
+        segments.insert(0u32, Bytes::from_static(b"ab"));
+
+        let result = commit_merge(
+            &mut segments,
+            4,
+            Bytes::from_static(b"wxyz"),
+            merge_plan(Some(0), 2, 0, 8),
+        );
+
+        assert_eq!(result, Err(Error::InconsistentMergePlan));
+        let observed: Vec<(u32, usize)> = segments
+            .iter()
+            .map(|(start, value)| (*start, value.len()))
+            .collect();
+        assert_eq!(observed, [(0, 2)]);
     }
 
     #[test]

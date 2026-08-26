@@ -30,9 +30,10 @@ pub(super) fn from_env() -> Context {
 /// Reads the global options the way clap will read them: the last `--output`
 /// and `--color` win, and the first bare word is the subcommand.
 ///
-/// Only a value this scan understands replaces an earlier one. A dangling or
-/// unparsable repeat is left for clap to reject, and the format picked up so
-/// far still decides how that rejection is rendered.
+/// A value clap would reject leaves the earlier choice standing, so the
+/// rejection is rendered in the format asked for so far. Any format clap
+/// accepts wins, and one that cannot carry a structured document clears the
+/// choice so the rejection goes out as prose.
 fn parse(arguments: &[OsString]) -> Context {
     let mut context = Context::default();
     let mut saw_root_positional = false;
@@ -223,6 +224,21 @@ mod tests {
             Case {
                 arguments: &["packetcraftr", "--output=ndjson", "--output=hex", "build"],
                 format: None,
+                color: "auto",
+                command: Some(output::contract::Command::Build),
+            },
+            // The renamed variant is recognized under clap's name for it.
+            Case {
+                arguments: &["packetcraftr", "--output=json", "--output=pcapng", "build"],
+                format: None,
+                color: "auto",
+                command: Some(output::contract::Command::Build),
+            },
+            // clap is case-sensitive here, so a case-mismatched repeat is one
+            // it rejects and the earlier choice stands.
+            Case {
+                arguments: &["packetcraftr", "--output=json", "--output=JSON", "build"],
+                format: Some(MachineFormat::Json),
                 color: "auto",
                 command: Some(output::contract::Command::Build),
             },

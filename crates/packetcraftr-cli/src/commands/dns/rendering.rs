@@ -71,7 +71,11 @@ pub(super) fn render_text(
             response_code_name: result.response_code_name.as_deref().unwrap_or("none"),
             authoritative: optional_display(result.authoritative),
             truncated: optional_display(result.truncated),
-            accepted: result.answers.len() + result.authorities.len() + result.additionals.len(),
+            accepted: result
+                .answers
+                .len()
+                .saturating_add(result.authorities.len())
+                .saturating_add(result.additionals.len()),
             rejected: result.rejected_record_count,
             queries: stats.packets_completed,
             bytes: stats.bytes,
@@ -85,7 +89,7 @@ fn render_record(
     record: &output::dns::Record,
 ) -> Result<(), CliError> {
     let data = serde_json::to_string(&record.data)
-        .map_err(|error| CliError::new(4, format!("DNS output serialization failed: {error}")))?;
+        .map_err(|error| CliError::new(70, format!("DNS output serialization failed: {error}")))?;
     write_stdout_line(format_args!(
         "record section={} owner={} class={} ttl={} data={}",
         section, record.owner, record.class, record.ttl, data,
@@ -149,6 +153,8 @@ fn outcome_name(value: output::dns::Outcome) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+
     use std::net::{IpAddr, Ipv4Addr};
     use std::sync::Arc;
     use std::time::UNIX_EPOCH;

@@ -145,7 +145,7 @@ pub(super) fn read_bounded_file(
     kind: InputKind,
 ) -> Result<Vec<u8>, CliError> {
     let file = File::open(path)
-        .map_err(|source| CliError::new(2, format!("open {} failed: {source}", path.display())))?;
+        .map_err(|source| CliError::new(5, format!("open {} failed: {source}", path.display())))?;
     read_bounded(file, max_bytes, kind)
 }
 
@@ -205,7 +205,7 @@ fn read_bounded_allow_empty(
         .take(read_limit)
         .read_to_end(&mut bytes)
         .map_err(|source| {
-            CliError::new(2, format!("read {} input failed: {source}", kind.label()))
+            CliError::new(5, format!("read {} input failed: {source}", kind.label()))
         })?;
     if bytes.len() > max_bytes {
         return Err(CliError::new(

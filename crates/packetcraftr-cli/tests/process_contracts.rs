@@ -1,5 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+// Test code indexes fixtures and counts by hand; the fail-closed lints are
+// for library paths.
+#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 use std::io::{Cursor, Write};
 use std::process::{Command, Output, Stdio};
@@ -458,5 +461,29 @@ fn unsupported_output_formats_fail_before_a_capture_is_read() {
             "{rendered}"
         );
         assert!(rendered.contains("choose text, json, ndjson"), "{rendered}");
+    }
+}
+
+#[test]
+fn missing_input_file_reports_the_same_io_failure_for_every_reader() {
+    let missing = std::env::temp_dir().join("packetcraftr-does-not-exist.pcap");
+    let missing = missing.to_str().expect("temp path is UTF-8");
+    let commands: [&[&str]; 6] = [
+        &["--output", "json", "expert", missing],
+        &["--output", "json", "follow", missing, "--stream", "tcp:0"],
+        &["--output", "json", "stats", missing],
+        &["--output", "json", "tls", missing],
+        &["--output", "json", "build", "--packet-file", missing],
+        &["--output", "json", "dissect", "--file", missing],
+    ];
+    for arguments in commands {
+        let output = run(arguments);
+        assert_eq!(output.status.code(), Some(5), "{arguments:?}");
+        let error = parse_json(&output)["error"].clone();
+        assert_eq!(error["code"], "io.runtime", "{arguments:?}");
+        assert!(
+            error["message"].as_str().unwrap().starts_with("open "),
+            "{arguments:?}: {error}"
+        );
     }
 }

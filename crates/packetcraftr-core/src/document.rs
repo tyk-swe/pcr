@@ -8,6 +8,7 @@ mod error;
 mod parse;
 mod types;
 pub mod v2;
+pub mod v2_schema;
 mod visitor;
 
 pub use error::{Error, deprecated_schema_diagnostic};

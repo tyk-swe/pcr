@@ -36,6 +36,7 @@ mod read;
 mod replay;
 mod routes;
 mod scan;
+mod schema;
 mod send;
 mod stats;
 mod target_workflow;
@@ -104,30 +105,34 @@ pub(crate) enum Command {
     /// Enumerate passive interface-bound route decisions.
     #[command(after_long_help = routes::AFTER_LONG_HELP)]
     Routes,
+    /// Emit a JSON schema for packet contracts.
+    #[command(after_long_help = schema::arguments::AFTER_LONG_HELP)]
+    Schema(schema::arguments::Args),
 }
 
 impl Command {
-    pub(crate) const fn kind(&self) -> output::contract::Command {
+    pub(crate) const fn kind(&self) -> Option<output::contract::Command> {
         match self {
-            Self::Build(_) => output::contract::Command::Build,
-            Self::Dissect(_) => output::contract::Command::Dissect,
-            Self::Protocols(_) => output::contract::Command::Protocols,
-            Self::Read(_) => output::contract::Command::Read,
-            Self::Interfaces => output::contract::Command::Interfaces,
-            Self::Plan(_) => output::contract::Command::Plan,
-            Self::Send(_) => output::contract::Command::Send,
-            Self::Exchange(_) => output::contract::Command::Exchange,
-            Self::Capture(_) => output::contract::Command::Capture,
-            Self::Expert(_) => output::contract::Command::Expert,
-            Self::Follow(_) => output::contract::Command::Follow,
-            Self::Replay(_) => output::contract::Command::Replay,
-            Self::Scan(_) => output::contract::Command::Scan,
-            Self::Stats(_) => output::contract::Command::Stats,
-            Self::Tls(_) => output::contract::Command::Tls,
-            Self::Traceroute(_) => output::contract::Command::Traceroute,
-            Self::Dns(_) => output::contract::Command::Dns,
-            Self::Fuzz(_) => output::contract::Command::Fuzz,
-            Self::Routes => output::contract::Command::Routes,
+            Self::Build(_) => Some(output::contract::Command::Build),
+            Self::Dissect(_) => Some(output::contract::Command::Dissect),
+            Self::Protocols(_) => Some(output::contract::Command::Protocols),
+            Self::Read(_) => Some(output::contract::Command::Read),
+            Self::Interfaces => Some(output::contract::Command::Interfaces),
+            Self::Plan(_) => Some(output::contract::Command::Plan),
+            Self::Send(_) => Some(output::contract::Command::Send),
+            Self::Exchange(_) => Some(output::contract::Command::Exchange),
+            Self::Capture(_) => Some(output::contract::Command::Capture),
+            Self::Expert(_) => Some(output::contract::Command::Expert),
+            Self::Follow(_) => Some(output::contract::Command::Follow),
+            Self::Replay(_) => Some(output::contract::Command::Replay),
+            Self::Scan(_) => Some(output::contract::Command::Scan),
+            Self::Stats(_) => Some(output::contract::Command::Stats),
+            Self::Tls(_) => Some(output::contract::Command::Tls),
+            Self::Traceroute(_) => Some(output::contract::Command::Traceroute),
+            Self::Dns(_) => Some(output::contract::Command::Dns),
+            Self::Fuzz(_) => Some(output::contract::Command::Fuzz),
+            Self::Routes => Some(output::contract::Command::Routes),
+            Self::Schema(_) => None,
         }
     }
 
@@ -136,9 +141,9 @@ impl Command {
         format: output::contract::Format,
         stream: &mut StreamEncoder,
     ) -> Result<(), CliError> {
-        self.kind()
-            .require_format(format)
-            .map_err(CliError::classified)?;
+        if let Some(kind) = self.kind() {
+            kind.require_format(format).map_err(CliError::classified)?;
+        }
         match self {
             Self::Build(arguments) => build::run(arguments, format),
             Self::Dissect(arguments) => dissect::run(arguments, format),
@@ -159,6 +164,7 @@ impl Command {
             Self::Dns(arguments) => dns::run(arguments, format, stream),
             Self::Fuzz(arguments) => fuzz::run(arguments, format, stream),
             Self::Routes => routes::run(format),
+            Self::Schema(arguments) => schema::run(arguments, format),
         }
     }
 }

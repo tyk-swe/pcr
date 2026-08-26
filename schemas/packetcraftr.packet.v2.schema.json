@@ -1,0 +1,4054 @@
+{
+  "$comment": "SPDX-License-Identifier: AGPL-3.0-only",
+  "$defs": {
+    "ah": {
+      "additionalProperties": false,
+      "description": "AH",
+      "properties": {
+        "icv": {
+          "description": "Integrity check value, a multiple of 4 bytes; default 0x000000000000000000000000",
+          "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+          "type": "string",
+          "x-packetcraftr-tier": "optional"
+        },
+        "next_header": {
+          "description": "Protocol number of the authenticated payload; derived (auto)",
+          "oneOf": [
+            {
+              "oneOf": [
+                {
+                  "maximum": 255,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "const": "auto"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
+          "x-packetcraftr-tier": "derived"
+        },
+        "payload_length": {
+          "description": "Header length in 4-byte units minus two; derived (auto)",
+          "oneOf": [
+            {
+              "oneOf": [
+                {
+                  "maximum": 255,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "const": "auto"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
+          "x-packetcraftr-tier": "derived"
+        },
+        "reserved": {
+          "description": "Reserved 16 bits; default 0",
+          "oneOf": [
+            {
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "sequence": {
+          "description": "Anti-replay sequence number; default 0",
+          "oneOf": [
+            {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "spi": {
+          "description": "Security parameters index",
+          "oneOf": [
+            {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        }
+      },
+      "required": [
+        "spi"
+      ],
+      "type": "object"
+    },
+    "arp": {
+      "additionalProperties": false,
+      "description": "ARP",
+      "properties": {
+        "hardware_len": {
+          "description": "Hardware address length; derived (auto)",
+          "oneOf": [
+            {
+              "oneOf": [
+                {
+                  "maximum": 255,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "const": "auto"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
+          "x-packetcraftr-tier": "derived"
+        },
+        "hardware_type": {
+          "description": "Hardware address family",
+          "oneOf": [
+            {
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        },
+        "op": {
+          "description": "ARP operation; aliases: op",
+          "oneOf": [
+            {
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        },
+        "operation": {
+          "description": "ARP operation; aliases: op",
+          "oneOf": [
+            {
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        },
+        "protocol_len": {
+          "description": "Protocol address length; derived (auto)",
+          "oneOf": [
+            {
+              "oneOf": [
+                {
+                  "maximum": 255,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "const": "auto"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
+          "x-packetcraftr-tier": "derived"
+        },
+        "protocol_type": {
+          "description": "Protocol address family",
+          "oneOf": [
+            {
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        },
+        "sender_hardware": {
+          "description": "Sender hardware address; aliases: sha",
+          "pattern": "^[0-9a-fA-F]{2}([:-][0-9a-fA-F]{2}){5}$",
+          "type": "string",
+          "x-packetcraftr-tier": "required"
+        },
+        "sender_protocol": {
+          "description": "Sender IPv4 address; aliases: spa",
+          "format": "ipv4",
+          "type": "string",
+          "x-packetcraftr-tier": "required"
+        },
+        "sha": {
+          "description": "Sender hardware address; aliases: sha",
+          "pattern": "^[0-9a-fA-F]{2}([:-][0-9a-fA-F]{2}){5}$",
+          "type": "string",
+          "x-packetcraftr-tier": "required"
+        },
+        "spa": {
+          "description": "Sender IPv4 address; aliases: spa",
+          "format": "ipv4",
+          "type": "string",
+          "x-packetcraftr-tier": "required"
+        },
+        "target_hardware": {
+          "description": "Target hardware address; aliases: tha",
+          "pattern": "^[0-9a-fA-F]{2}([:-][0-9a-fA-F]{2}){5}$",
+          "type": "string",
+          "x-packetcraftr-tier": "required"
+        },
+        "target_protocol": {
+          "description": "Target IPv4 address; aliases: tpa",
+          "format": "ipv4",
+          "type": "string",
+          "x-packetcraftr-tier": "required"
+        },
+        "tha": {
+          "description": "Target hardware address; aliases: tha",
+          "pattern": "^[0-9a-fA-F]{2}([:-][0-9a-fA-F]{2}){5}$",
+          "type": "string",
+          "x-packetcraftr-tier": "required"
+        },
+        "tpa": {
+          "description": "Target IPv4 address; aliases: tpa",
+          "format": "ipv4",
+          "type": "string",
+          "x-packetcraftr-tier": "required"
+        }
+      },
+      "required": [
+        "hardware_type",
+        "protocol_type",
+        "operation",
+        "sender_hardware",
+        "sender_protocol",
+        "target_hardware",
+        "target_protocol"
+      ],
+      "type": "object"
+    },
+    "bsd_loop": {
+      "additionalProperties": false,
+      "description": "BSD LOOP",
+      "properties": {
+        "family": {
+          "description": "Address-family discriminator",
+          "oneOf": [
+            {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        }
+      },
+      "required": [
+        "family"
+      ],
+      "type": "object"
+    },
+    "bsd_null": {
+      "additionalProperties": false,
+      "description": "BSD NULL",
+      "properties": {
+        "byte_order": {
+          "description": "Host byte order used by the captured NULL header",
+          "type": "string",
+          "x-packetcraftr-tier": "required"
+        },
+        "family": {
+          "description": "Address-family discriminator",
+          "oneOf": [
+            {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        }
+      },
+      "required": [
+        "family",
+        "byte_order"
+      ],
+      "type": "object"
+    },
+    "dns": {
+      "additionalProperties": false,
+      "description": "DNS; decode-only; build rejects this layer",
+      "properties": {
+        "additional_count": {
+          "description": "Additional-record count; default 0",
+          "oneOf": [
+            {
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "answer_count": {
+          "description": "Answer count; default 0",
+          "oneOf": [
+            {
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "authenticated_data": {
+          "description": "Authenticated-data flag; default false",
+          "type": "boolean",
+          "x-packetcraftr-tier": "optional"
+        },
+        "authoritative_answer": {
+          "description": "Authoritative-answer flag; default false",
+          "type": "boolean",
+          "x-packetcraftr-tier": "optional"
+        },
+        "authority_count": {
+          "description": "Authority-record count; default 0",
+          "oneOf": [
+            {
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "checking_disabled": {
+          "description": "Checking-disabled flag; default false",
+          "type": "boolean",
+          "x-packetcraftr-tier": "optional"
+        },
+        "id": {
+          "description": "Transaction identifier; default 0",
+          "oneOf": [
+            {
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "opcode": {
+          "description": "Operation code; default 0",
+          "oneOf": [
+            {
+              "maximum": 15,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "qclass": {
+          "description": "Question class codes; default []",
+          "items": {
+            "oneOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+                "type": "string"
+              }
+            ]
+          },
+          "type": "array",
+          "x-packetcraftr-tier": "optional"
+        },
+        "qname": {
+          "description": "Question names; default []",
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "x-packetcraftr-tier": "optional"
+        },
+        "qtype": {
+          "description": "Question type codes; default []",
+          "items": {
+            "oneOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+                "type": "string"
+              }
+            ]
+          },
+          "type": "array",
+          "x-packetcraftr-tier": "optional"
+        },
+        "question_count": {
+          "description": "Question count; default 0",
+          "oneOf": [
+            {
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "rcode": {
+          "description": "Response code; default 0",
+          "oneOf": [
+            {
+              "maximum": 15,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "recursion_available": {
+          "description": "Recursion-available flag; default false",
+          "type": "boolean",
+          "x-packetcraftr-tier": "optional"
+        },
+        "recursion_desired": {
+          "description": "Recursion-desired flag; default false",
+          "type": "boolean",
+          "x-packetcraftr-tier": "optional"
+        },
+        "response": {
+          "description": "Query/response flag; default false",
+          "type": "boolean",
+          "x-packetcraftr-tier": "optional"
+        },
+        "truncated": {
+          "description": "Truncated response flag; default false",
+          "type": "boolean",
+          "x-packetcraftr-tier": "optional"
+        }
+      },
+      "type": "object",
+      "x-packetcraftr-decode-only": true
+    },
+    "erspan": {
+      "additionalProperties": false,
+      "description": "ERSPAN",
+      "properties": {
+        "cos": {
+          "description": "Class of service of the mirrored frame; default 0",
+          "oneOf": [
+            {
+              "maximum": 7,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "encapsulation": {
+          "description": "Type II trunk encapsulation; Type III bad/short frame bits; default 0",
+          "oneOf": [
+            {
+              "maximum": 3,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "flags": {
+          "description": "Type III flag half-word: P bit, frame type, hardware ID, direction, granularity, and the subheader O bit",
+          "oneOf": [
+            {
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "index_word": {
+          "description": "Type II reserved bits and port index, packed as the final word; default 0",
+          "oneOf": [
+            {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "session_id": {
+          "description": "10-bit monitoring-session identifier",
+          "oneOf": [
+            {
+              "maximum": 1023,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        },
+        "sgt": {
+          "description": "Type III security group tag",
+          "oneOf": [
+            {
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "subheader": {
+          "description": "Type III 8-byte platform-specific subheader",
+          "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+          "type": "string",
+          "x-packetcraftr-tier": "optional"
+        },
+        "timestamp": {
+          "description": "Type III wire-format timestamp",
+          "oneOf": [
+            {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "truncated": {
+          "description": "The mirrored frame was truncated by the session MTU; default false",
+          "type": "boolean",
+          "x-packetcraftr-tier": "optional"
+        },
+        "version": {
+          "description": "Header version: 1 is Type II, 2 is Type III",
+          "oneOf": [
+            {
+              "maximum": 15,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        },
+        "vlan": {
+          "description": "VLAN of the mirrored frame; default 0",
+          "oneOf": [
+            {
+              "maximum": 4095,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        }
+      },
+      "required": [
+        "version",
+        "session_id"
+      ],
+      "type": "object"
+    },
+    "esp": {
+      "additionalProperties": false,
+      "description": "ESP",
+      "properties": {
+        "sequence": {
+          "description": "Anti-replay sequence number; default 0",
+          "oneOf": [
+            {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "spi": {
+          "description": "Security parameters index",
+          "oneOf": [
+            {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        }
+      },
+      "required": [
+        "spi"
+      ],
+      "type": "object"
+    },
+    "ethernet": {
+      "additionalProperties": false,
+      "description": "Ethernet II",
+      "properties": {
+        "destination": {
+          "description": "Destination MAC address; aliases: dst",
+          "pattern": "^[0-9a-fA-F]{2}([:-][0-9a-fA-F]{2}){5}$",
+          "type": "string",
+          "x-packetcraftr-tier": "required"
+        },
+        "dst": {
+          "description": "Destination MAC address; aliases: dst",
+          "pattern": "^[0-9a-fA-F]{2}([:-][0-9a-fA-F]{2}){5}$",
+          "type": "string",
+          "x-packetcraftr-tier": "required"
+        },
+        "ether_type": {
+          "description": "EtherType discriminator; derived (auto)",
+          "oneOf": [
+            {
+              "oneOf": [
+                {
+                  "maximum": 65535,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "const": "auto"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
+          "x-packetcraftr-tier": "derived"
+        },
+        "source": {
+          "description": "Source MAC address; aliases: src",
+          "pattern": "^[0-9a-fA-F]{2}([:-][0-9a-fA-F]{2}){5}$",
+          "type": "string",
+          "x-packetcraftr-tier": "required"
+        },
+        "src": {
+          "description": "Source MAC address; aliases: src",
+          "pattern": "^[0-9a-fA-F]{2}([:-][0-9a-fA-F]{2}){5}$",
+          "type": "string",
+          "x-packetcraftr-tier": "required"
+        }
+      },
+      "required": [
+        "destination",
+        "source"
+      ],
+      "type": "object"
+    },
+    "geneve": {
+      "additionalProperties": false,
+      "description": "GENEVE",
+      "properties": {
+        "control": {
+          "description": "Control-packet O bit; default false",
+          "type": "boolean",
+          "x-packetcraftr-tier": "optional"
+        },
+        "critical": {
+          "description": "Critical-options-present C bit; default false",
+          "type": "boolean",
+          "x-packetcraftr-tier": "optional"
+        },
+        "options": {
+          "description": "Verbatim GENEVE option TLV bytes; default 0x",
+          "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+          "type": "string",
+          "x-packetcraftr-tier": "optional"
+        },
+        "protocol_type": {
+          "description": "EtherType of the encapsulated frame; derived (auto)",
+          "oneOf": [
+            {
+              "oneOf": [
+                {
+                  "maximum": 65535,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "const": "auto"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
+          "x-packetcraftr-tier": "derived"
+        },
+        "reserved1": {
+          "description": "Reserved 6 bits after the O and C bits; default 0",
+          "oneOf": [
+            {
+              "maximum": 63,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "reserved2": {
+          "description": "Reserved byte after the VNI; default 0",
+          "oneOf": [
+            {
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "version": {
+          "description": "2-bit GENEVE version; only version 0 is defined; default 0",
+          "oneOf": [
+            {
+              "maximum": 3,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "vni": {
+          "description": "24-bit virtual network identifier",
+          "oneOf": [
+            {
+              "maximum": 16777215,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        }
+      },
+      "required": [
+        "vni"
+      ],
+      "type": "object"
+    },
+    "gre": {
+      "additionalProperties": false,
+      "description": "GRE",
+      "properties": {
+        "checksum": {
+          "description": "Optional checksum over the GRE header and payload; derived (auto)",
+          "oneOf": [
+            {
+              "oneOf": [
+                {
+                  "maximum": 65535,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "const": "auto"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
+          "x-packetcraftr-tier": "derived"
+        },
+        "key": {
+          "description": "Optional GRE key",
+          "oneOf": [
+            {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "protocol_type": {
+          "description": "Encapsulated EtherType discriminator; derived (auto)",
+          "oneOf": [
+            {
+              "oneOf": [
+                {
+                  "maximum": 65535,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "const": "auto"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
+          "x-packetcraftr-tier": "derived"
+        },
+        "reserved_bits": {
+          "description": "Receiver-ignored GRE bits 6 through 12; default 0",
+          "oneOf": [
+            {
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "sequence": {
+          "description": "Optional GRE sequence number",
+          "oneOf": [
+            {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        }
+      },
+      "type": "object"
+    },
+    "icmpv4": {
+      "additionalProperties": false,
+      "description": "ICMPv4",
+      "properties": {
+        "body": {
+          "description": "Type-specific ICMP body; default 0x00000000",
+          "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+          "type": "string",
+          "x-packetcraftr-tier": "optional"
+        },
+        "checksum": {
+          "description": "ICMP checksum; derived (auto)",
+          "oneOf": [
+            {
+              "oneOf": [
+                {
+                  "maximum": 65535,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "const": "auto"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
+          "x-packetcraftr-tier": "derived"
+        },
+        "code": {
+          "description": "ICMP message code",
+          "oneOf": [
+            {
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        },
+        "type": {
+          "description": "ICMP message type",
+          "oneOf": [
+            {
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        }
+      },
+      "required": [
+        "type",
+        "code"
+      ],
+      "type": "object"
+    },
+    "icmpv6": {
+      "additionalProperties": false,
+      "description": "ICMPv6",
+      "properties": {
+        "body": {
+          "description": "Type-specific ICMP body; default 0x00000000",
+          "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+          "type": "string",
+          "x-packetcraftr-tier": "optional"
+        },
+        "checksum": {
+          "description": "ICMP checksum; derived (auto)",
+          "oneOf": [
+            {
+              "oneOf": [
+                {
+                  "maximum": 65535,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "const": "auto"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
+          "x-packetcraftr-tier": "derived"
+        },
+        "code": {
+          "description": "ICMP message code",
+          "oneOf": [
+            {
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        },
+        "type": {
+          "description": "ICMP message type",
+          "oneOf": [
+            {
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        }
+      },
+      "required": [
+        "type",
+        "code"
+      ],
+      "type": "object"
+    },
+    "igmp": {
+      "additionalProperties": false,
+      "description": "IGMP",
+      "properties": {
+        "body": {
+          "description": "Version- and type-specific IGMP body; default 0x00000000",
+          "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+          "type": "string",
+          "x-packetcraftr-tier": "optional"
+        },
+        "checksum": {
+          "description": "IGMP checksum; derived (auto)",
+          "oneOf": [
+            {
+              "oneOf": [
+                {
+                  "maximum": 65535,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "const": "auto"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
+          "x-packetcraftr-tier": "derived"
+        },
+        "code": {
+          "description": "Type-specific IGMP code or reserved octet",
+          "oneOf": [
+            {
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        },
+        "type": {
+          "description": "IGMP message type",
+          "oneOf": [
+            {
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        }
+      },
+      "required": [
+        "type",
+        "code"
+      ],
+      "type": "object"
+    },
+    "ipv4": {
+      "additionalProperties": false,
+      "description": "IPv4",
+      "properties": {
+        "checksum": {
+          "description": "IPv4 header checksum; derived (auto)",
+          "oneOf": [
+            {
+              "oneOf": [
+                {
+                  "maximum": 65535,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "const": "auto"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
+          "x-packetcraftr-tier": "derived"
+        },
+        "destination": {
+          "description": "Destination IPv4 address; aliases: dst",
+          "format": "ipv4",
+          "type": "string",
+          "x-packetcraftr-tier": "required"
+        },
+        "dont_fragment": {
+          "description": "Don't-fragment flag; default false",
+          "type": "boolean",
+          "x-packetcraftr-tier": "optional"
+        },
+        "dscp_ecn": {
+          "description": "DSCP and ECN octet; default 0",
+          "oneOf": [
+            {
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "dst": {
+          "description": "Destination IPv4 address; aliases: dst",
+          "format": "ipv4",
+          "type": "string",
+          "x-packetcraftr-tier": "required"
+        },
+        "fragment_offset": {
+          "description": "Fragment offset in eight-byte units; default 0",
+          "oneOf": [
+            {
+              "maximum": 8191,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "identification": {
+          "description": "Fragment identification; default 0",
+          "oneOf": [
+            {
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "more_fragments": {
+          "description": "More-fragments flag; default false",
+          "type": "boolean",
+          "x-packetcraftr-tier": "optional"
+        },
+        "options": {
+          "description": "Verbatim IPv4 option bytes; default 0x",
+          "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+          "type": "string",
+          "x-packetcraftr-tier": "optional"
+        },
+        "protocol": {
+          "description": "Next protocol discriminator; derived (auto)",
+          "oneOf": [
+            {
+              "oneOf": [
+                {
+                  "maximum": 255,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "const": "auto"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
+          "x-packetcraftr-tier": "derived"
+        },
+        "reserved_flag": {
+          "description": "Reserved IPv4 flag bit; default false",
+          "type": "boolean",
+          "x-packetcraftr-tier": "optional"
+        },
+        "source": {
+          "description": "Source IPv4 address; aliases: src",
+          "format": "ipv4",
+          "type": "string",
+          "x-packetcraftr-tier": "required"
+        },
+        "src": {
+          "description": "Source IPv4 address; aliases: src",
+          "format": "ipv4",
+          "type": "string",
+          "x-packetcraftr-tier": "required"
+        },
+        "total_length": {
+          "description": "IPv4 total length; derived (auto)",
+          "oneOf": [
+            {
+              "oneOf": [
+                {
+                  "maximum": 65535,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "const": "auto"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
+          "x-packetcraftr-tier": "derived"
+        },
+        "ttl": {
+          "description": "Time to live; default 64",
+          "oneOf": [
+            {
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        }
+      },
+      "required": [
+        "source",
+        "destination"
+      ],
+      "type": "object"
+    },
+    "ipv6": {
+      "additionalProperties": false,
+      "description": "IPv6",
+      "properties": {
+        "destination": {
+          "description": "Destination IPv6 address; aliases: dst",
+          "format": "ipv6",
+          "type": "string",
+          "x-packetcraftr-tier": "required"
+        },
+        "dst": {
+          "description": "Destination IPv6 address; aliases: dst",
+          "format": "ipv6",
+          "type": "string",
+          "x-packetcraftr-tier": "required"
+        },
+        "flow_label": {
+          "description": "IPv6 flow label; default 0",
+          "oneOf": [
+            {
+              "maximum": 1048575,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "hop_limit": {
+          "description": "Hop limit; default 64",
+          "oneOf": [
+            {
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "next_header": {
+          "description": "Next-header discriminator; derived (auto)",
+          "oneOf": [
+            {
+              "oneOf": [
+                {
+                  "maximum": 255,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "const": "auto"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
+          "x-packetcraftr-tier": "derived"
+        },
+        "payload_length": {
+          "description": "IPv6 payload length; derived (auto)",
+          "oneOf": [
+            {
+              "oneOf": [
+                {
+                  "maximum": 65535,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "const": "auto"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
+          "x-packetcraftr-tier": "derived"
+        },
+        "source": {
+          "description": "Source IPv6 address; aliases: src",
+          "format": "ipv6",
+          "type": "string",
+          "x-packetcraftr-tier": "required"
+        },
+        "src": {
+          "description": "Source IPv6 address; aliases: src",
+          "format": "ipv6",
+          "type": "string",
+          "x-packetcraftr-tier": "required"
+        },
+        "traffic_class": {
+          "description": "IPv6 traffic class; default 0",
+          "oneOf": [
+            {
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        }
+      },
+      "required": [
+        "source",
+        "destination"
+      ],
+      "type": "object"
+    },
+    "ipv6_destination_options": {
+      "additionalProperties": false,
+      "description": "IPv6 Destination Options",
+      "properties": {
+        "next_header": {
+          "description": "IPv6 next-header discriminator; derived (auto)",
+          "oneOf": [
+            {
+              "oneOf": [
+                {
+                  "maximum": 255,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "const": "auto"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
+          "x-packetcraftr-tier": "derived"
+        },
+        "options": {
+          "description": "Option bytes, padded to an eight-byte header boundary; default 0x",
+          "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+          "type": "string",
+          "x-packetcraftr-tier": "optional"
+        }
+      },
+      "type": "object"
+    },
+    "ipv6_fragment": {
+      "additionalProperties": false,
+      "description": "IPv6 Fragment",
+      "properties": {
+        "fragment_offset": {
+          "description": "Fragment offset in eight-byte units",
+          "oneOf": [
+            {
+              "maximum": 8191,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        },
+        "identification": {
+          "description": "Fragment identification",
+          "oneOf": [
+            {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        },
+        "more_fragments": {
+          "description": "More-fragments flag",
+          "type": "boolean",
+          "x-packetcraftr-tier": "required"
+        },
+        "next_header": {
+          "description": "IPv6 next-header discriminator; derived (auto)",
+          "oneOf": [
+            {
+              "oneOf": [
+                {
+                  "maximum": 255,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "const": "auto"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
+          "x-packetcraftr-tier": "derived"
+        }
+      },
+      "required": [
+        "fragment_offset",
+        "more_fragments",
+        "identification"
+      ],
+      "type": "object"
+    },
+    "ipv6_hop_by_hop": {
+      "additionalProperties": false,
+      "description": "IPv6 Hop-by-Hop Options",
+      "properties": {
+        "next_header": {
+          "description": "IPv6 next-header discriminator; derived (auto)",
+          "oneOf": [
+            {
+              "oneOf": [
+                {
+                  "maximum": 255,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "const": "auto"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
+          "x-packetcraftr-tier": "derived"
+        },
+        "options": {
+          "description": "Option bytes, padded to an eight-byte header boundary; default 0x",
+          "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+          "type": "string",
+          "x-packetcraftr-tier": "optional"
+        }
+      },
+      "type": "object"
+    },
+    "ipv6_srh": {
+      "additionalProperties": false,
+      "description": "IPv6 Segment Routing Header",
+      "properties": {
+        "flags": {
+          "description": "SRH flags; default 0",
+          "oneOf": [
+            {
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "last_entry": {
+          "description": "Highest segment-list index; derived (auto)",
+          "oneOf": [
+            {
+              "oneOf": [
+                {
+                  "maximum": 255,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "const": "auto"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
+          "x-packetcraftr-tier": "derived"
+        },
+        "next_header": {
+          "description": "IPv6 next-header discriminator; derived (auto)",
+          "oneOf": [
+            {
+              "oneOf": [
+                {
+                  "maximum": 255,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "const": "auto"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
+          "x-packetcraftr-tier": "derived"
+        },
+        "segments": {
+          "description": "Segments in visit order; aliases: segs",
+          "items": {
+            "format": "ipv6",
+            "type": "string"
+          },
+          "type": "array",
+          "x-packetcraftr-tier": "required"
+        },
+        "segments_left": {
+          "description": "Remaining segments; derived (auto)",
+          "oneOf": [
+            {
+              "oneOf": [
+                {
+                  "maximum": 255,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "const": "auto"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
+          "x-packetcraftr-tier": "derived"
+        },
+        "segs": {
+          "description": "Segments in visit order; aliases: segs",
+          "items": {
+            "format": "ipv6",
+            "type": "string"
+          },
+          "type": "array",
+          "x-packetcraftr-tier": "required"
+        },
+        "tag": {
+          "description": "SRH tag; default 0",
+          "oneOf": [
+            {
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "tlvs": {
+          "description": "TLV bytes following the segment list, including padding; default 0x",
+          "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+          "type": "string",
+          "x-packetcraftr-tier": "optional"
+        }
+      },
+      "required": [
+        "segments"
+      ],
+      "type": "object"
+    },
+    "l2tpv3": {
+      "additionalProperties": false,
+      "description": "L2TPv3",
+      "properties": {
+        "session_id": {
+          "description": "32-bit session identifier; zero is the control connection",
+          "oneOf": [
+            {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object"
+    },
+    "layer": {
+      "description": "One protocol layer keyed by canonical identifier or registered alias.",
+      "maxProperties": 1,
+      "minProperties": 1,
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "ah": {
+              "$ref": "#/$defs/ah"
+            }
+          },
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "arp": {
+              "$ref": "#/$defs/arp"
+            }
+          },
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "bsd_loop": {
+              "$ref": "#/$defs/bsd_loop"
+            }
+          },
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "bsd_null": {
+              "$ref": "#/$defs/bsd_null"
+            }
+          },
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "dns": {
+              "$ref": "#/$defs/dns"
+            }
+          },
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "erspan": {
+              "$ref": "#/$defs/erspan"
+            }
+          },
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "esp": {
+              "$ref": "#/$defs/esp"
+            }
+          },
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "ethernet": {
+              "$ref": "#/$defs/ethernet"
+            }
+          },
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "geneve": {
+              "$ref": "#/$defs/geneve"
+            }
+          },
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "gre": {
+              "$ref": "#/$defs/gre"
+            }
+          },
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "icmpv4": {
+              "$ref": "#/$defs/icmpv4"
+            }
+          },
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "icmpv6": {
+              "$ref": "#/$defs/icmpv6"
+            }
+          },
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "igmp": {
+              "$ref": "#/$defs/igmp"
+            }
+          },
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "ipv4": {
+              "$ref": "#/$defs/ipv4"
+            }
+          },
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "ipv6": {
+              "$ref": "#/$defs/ipv6"
+            }
+          },
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "ipv6_destination_options": {
+              "$ref": "#/$defs/ipv6_destination_options"
+            }
+          },
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "ipv6_fragment": {
+              "$ref": "#/$defs/ipv6_fragment"
+            }
+          },
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "ipv6_hop_by_hop": {
+              "$ref": "#/$defs/ipv6_hop_by_hop"
+            }
+          },
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "ipv6_srh": {
+              "$ref": "#/$defs/ipv6_srh"
+            }
+          },
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "l2tpv3": {
+              "$ref": "#/$defs/l2tpv3"
+            }
+          },
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "linux_sll": {
+              "$ref": "#/$defs/linux_sll"
+            }
+          },
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "linux_sll2": {
+              "$ref": "#/$defs/linux_sll2"
+            }
+          },
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "llc": {
+              "$ref": "#/$defs/llc"
+            }
+          },
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "malformed": {
+              "$ref": "#/$defs/malformed"
+            }
+          },
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "mpls": {
+              "$ref": "#/$defs/mpls"
+            }
+          },
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "padding": {
+              "$ref": "#/$defs/padding"
+            }
+          },
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "ppp": {
+              "$ref": "#/$defs/ppp"
+            }
+          },
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "pppoe": {
+              "$ref": "#/$defs/pppoe"
+            }
+          },
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "raw": {
+              "$ref": "#/$defs/raw"
+            }
+          },
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "sctp": {
+              "$ref": "#/$defs/sctp"
+            }
+          },
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "snap": {
+              "$ref": "#/$defs/snap"
+            }
+          },
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "tcp": {
+              "$ref": "#/$defs/tcp"
+            }
+          },
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "tls": {
+              "$ref": "#/$defs/tls"
+            }
+          },
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "udp": {
+              "$ref": "#/$defs/udp"
+            }
+          },
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "vlan": {
+              "$ref": "#/$defs/vlan"
+            }
+          },
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "vlan8021ad": {
+              "$ref": "#/$defs/vlan8021ad"
+            }
+          },
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "vxlan": {
+              "$ref": "#/$defs/vxlan"
+            }
+          },
+          "type": "object"
+        }
+      ],
+      "type": "object"
+    },
+    "linux_sll": {
+      "additionalProperties": false,
+      "description": "Linux cooked capture v1",
+      "properties": {
+        "address": {
+          "description": "Eight-byte link address slot; default 0x0000000000000000",
+          "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+          "type": "string",
+          "x-packetcraftr-tier": "optional"
+        },
+        "address_length": {
+          "description": "Link address length",
+          "oneOf": [
+            {
+              "maximum": 8,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        },
+        "arp_hardware_type": {
+          "description": "ARP hardware type",
+          "oneOf": [
+            {
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        },
+        "packet_type": {
+          "description": "Packet direction/type",
+          "oneOf": [
+            {
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        },
+        "protocol": {
+          "description": "Protocol discriminator; derived (auto)",
+          "oneOf": [
+            {
+              "oneOf": [
+                {
+                  "maximum": 65535,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "const": "auto"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
+          "x-packetcraftr-tier": "derived"
+        }
+      },
+      "required": [
+        "packet_type",
+        "arp_hardware_type",
+        "address_length"
+      ],
+      "type": "object"
+    },
+    "linux_sll2": {
+      "additionalProperties": false,
+      "description": "Linux cooked capture v2",
+      "properties": {
+        "address": {
+          "description": "Eight-byte link address slot; default 0x0000000000000000",
+          "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+          "type": "string",
+          "x-packetcraftr-tier": "optional"
+        },
+        "address_length": {
+          "description": "Link address length",
+          "oneOf": [
+            {
+              "maximum": 8,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        },
+        "arp_hardware_type": {
+          "description": "ARP hardware type",
+          "oneOf": [
+            {
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        },
+        "interface_index": {
+          "description": "Interface index; default 0",
+          "oneOf": [
+            {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "packet_type": {
+          "description": "Packet direction/type",
+          "oneOf": [
+            {
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        },
+        "protocol": {
+          "description": "Protocol discriminator; derived (auto)",
+          "oneOf": [
+            {
+              "oneOf": [
+                {
+                  "maximum": 65535,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "const": "auto"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
+          "x-packetcraftr-tier": "derived"
+        }
+      },
+      "required": [
+        "packet_type",
+        "arp_hardware_type",
+        "address_length"
+      ],
+      "type": "object"
+    },
+    "llc": {
+      "additionalProperties": false,
+      "description": "LLC",
+      "properties": {
+        "control": {
+          "description": "Control field: one byte for U format, two for I and S formats",
+          "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+          "type": "string",
+          "x-packetcraftr-tier": "required"
+        },
+        "dsap": {
+          "description": "Destination service access point",
+          "oneOf": [
+            {
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        },
+        "ssap": {
+          "description": "Source service access point",
+          "oneOf": [
+            {
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        }
+      },
+      "required": [
+        "dsap",
+        "ssap",
+        "control"
+      ],
+      "type": "object"
+    },
+    "malformed": {
+      "additionalProperties": false,
+      "description": "Malformed",
+      "properties": {
+        "bytes": {
+          "description": "Preserved malformed bytes; default 0x",
+          "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+          "type": "string",
+          "x-packetcraftr-tier": "optional"
+        },
+        "protocol": {
+          "description": "Intended protocol identifier",
+          "type": "string",
+          "x-packetcraftr-tier": "optional"
+        },
+        "reason": {
+          "description": "Decode or construction finding",
+          "type": "string",
+          "x-packetcraftr-tier": "required"
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "type": "object"
+    },
+    "mpls": {
+      "additionalProperties": false,
+      "description": "MPLS",
+      "properties": {
+        "bottom_of_stack": {
+          "description": "S bit: this entry is the bottom of the label stack; default true",
+          "type": "boolean",
+          "x-packetcraftr-tier": "optional"
+        },
+        "label": {
+          "description": "20-bit MPLS label",
+          "oneOf": [
+            {
+              "maximum": 1048575,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        },
+        "traffic_class": {
+          "description": "3-bit traffic class, historically the EXP bits; default 0",
+          "oneOf": [
+            {
+              "maximum": 7,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "ttl": {
+          "description": "Time to live; default 64",
+          "oneOf": [
+            {
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        }
+      },
+      "required": [
+        "label"
+      ],
+      "type": "object"
+    },
+    "padding": {
+      "additionalProperties": false,
+      "description": "Padding",
+      "properties": {
+        "bytes": {
+          "description": "Trailing padding bytes; default 0x",
+          "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+          "type": "string",
+          "x-packetcraftr-tier": "optional"
+        },
+        "outside_layer": {
+          "description": "First layer index whose declared length excludes the padding",
+          "oneOf": [
+            {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        }
+      },
+      "type": "object"
+    },
+    "ppp": {
+      "additionalProperties": false,
+      "description": "PPP",
+      "properties": {
+        "protocol": {
+          "description": "PPP protocol number selecting the payload; derived (auto)",
+          "oneOf": [
+            {
+              "oneOf": [
+                {
+                  "maximum": 65535,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "const": "auto"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
+          "x-packetcraftr-tier": "derived"
+        }
+      },
+      "type": "object"
+    },
+    "pppoe": {
+      "additionalProperties": false,
+      "description": "PPPoE",
+      "properties": {
+        "code": {
+          "description": "Stage code: zero for session data, a discovery code otherwise; default 0",
+          "oneOf": [
+            {
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "length": {
+          "description": "Payload length excluding the header; derived (auto)",
+          "oneOf": [
+            {
+              "oneOf": [
+                {
+                  "maximum": 65535,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "const": "auto"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
+          "x-packetcraftr-tier": "derived"
+        },
+        "session_id": {
+          "description": "Session identifier assigned during discovery",
+          "oneOf": [
+            {
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        },
+        "type": {
+          "description": "4-bit PPPoE type; only type 1 is defined; default 1; aliases: type_code",
+          "oneOf": [
+            {
+              "maximum": 15,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "type_code": {
+          "description": "4-bit PPPoE type; only type 1 is defined; default 1; aliases: type_code",
+          "oneOf": [
+            {
+              "maximum": 15,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "version": {
+          "description": "4-bit PPPoE version; only version 1 is defined; default 1",
+          "oneOf": [
+            {
+              "maximum": 15,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object"
+    },
+    "raw": {
+      "additionalProperties": false,
+      "description": "Raw",
+      "properties": {
+        "bytes": {
+          "description": "Verbatim bytes; default 0x",
+          "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+          "type": "string",
+          "x-packetcraftr-tier": "optional"
+        }
+      },
+      "type": "object"
+    },
+    "sctp": {
+      "additionalProperties": false,
+      "description": "SCTP",
+      "properties": {
+        "checksum": {
+          "description": "SCTP CRC32c checksum; derived (auto)",
+          "oneOf": [
+            {
+              "oneOf": [
+                {
+                  "maximum": 4294967295,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "const": "auto"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
+          "x-packetcraftr-tier": "derived"
+        },
+        "destination_port": {
+          "description": "SCTP destination port; aliases: dport",
+          "oneOf": [
+            {
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        },
+        "dport": {
+          "description": "SCTP destination port; aliases: dport",
+          "oneOf": [
+            {
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        },
+        "source_port": {
+          "description": "SCTP source port; aliases: sport",
+          "oneOf": [
+            {
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        },
+        "sport": {
+          "description": "SCTP source port; aliases: sport",
+          "oneOf": [
+            {
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        },
+        "verification_tag": {
+          "description": "SCTP verification tag; aliases: vtag",
+          "oneOf": [
+            {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        },
+        "vtag": {
+          "description": "SCTP verification tag; aliases: vtag",
+          "oneOf": [
+            {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        }
+      },
+      "required": [
+        "source_port",
+        "destination_port",
+        "verification_tag"
+      ],
+      "type": "object"
+    },
+    "snap": {
+      "additionalProperties": false,
+      "description": "SNAP",
+      "properties": {
+        "oui": {
+          "description": "Organizationally unique identifier; zero selects the EtherType space",
+          "oneOf": [
+            {
+              "maximum": 16777215,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        },
+        "protocol_id": {
+          "description": "Protocol identifier within the OUI's numbering; derived (auto)",
+          "oneOf": [
+            {
+              "oneOf": [
+                {
+                  "maximum": 65535,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "const": "auto"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
+          "x-packetcraftr-tier": "derived"
+        }
+      },
+      "required": [
+        "oui"
+      ],
+      "type": "object"
+    },
+    "tcp": {
+      "additionalProperties": false,
+      "description": "TCP",
+      "properties": {
+        "acknowledgment": {
+          "description": "Acknowledgment number; default 0",
+          "oneOf": [
+            {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "checksum": {
+          "description": "TCP checksum; derived (auto)",
+          "oneOf": [
+            {
+              "oneOf": [
+                {
+                  "maximum": 65535,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "const": "auto"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
+          "x-packetcraftr-tier": "derived"
+        },
+        "destination_port": {
+          "description": "TCP destination port; aliases: dport",
+          "oneOf": [
+            {
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        },
+        "dport": {
+          "description": "TCP destination port; aliases: dport",
+          "oneOf": [
+            {
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        },
+        "flags": {
+          "description": "Nine TCP control flags",
+          "oneOf": [
+            {
+              "maximum": 511,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        },
+        "options": {
+          "description": "Verbatim standard or unknown TCP options; default 0x",
+          "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+          "type": "string",
+          "x-packetcraftr-tier": "optional"
+        },
+        "reserved_bits": {
+          "description": "Three reserved TCP header bits; default 0",
+          "oneOf": [
+            {
+              "maximum": 7,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "sequence": {
+          "description": "Sequence number",
+          "oneOf": [
+            {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        },
+        "source_port": {
+          "description": "TCP source port; aliases: sport",
+          "oneOf": [
+            {
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        },
+        "sport": {
+          "description": "TCP source port; aliases: sport",
+          "oneOf": [
+            {
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        },
+        "urgent_pointer": {
+          "description": "Urgent pointer; default 0",
+          "oneOf": [
+            {
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "window": {
+          "description": "Receive window",
+          "oneOf": [
+            {
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        }
+      },
+      "required": [
+        "source_port",
+        "destination_port",
+        "sequence",
+        "flags",
+        "window"
+      ],
+      "type": "object"
+    },
+    "tls": {
+      "additionalProperties": false,
+      "description": "TLS; decode-only; build rejects this layer",
+      "properties": {
+        "alpn": {
+          "description": "Application protocols offered or selected",
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "x-packetcraftr-tier": "required"
+        },
+        "cipher_suite": {
+          "description": "Cipher suite selected by a ServerHello",
+          "oneOf": [
+            {
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        },
+        "cipher_suites": {
+          "description": "Cipher suites offered by a ClientHello",
+          "items": {
+            "oneOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+                "type": "string"
+              }
+            ]
+          },
+          "type": "array",
+          "x-packetcraftr-tier": "required"
+        },
+        "content_type": {
+          "description": "Record content type of the first record; default 0",
+          "oneOf": [
+            {
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "ech": {
+          "description": "Whether a ClientHello offered encrypted client hello; default false",
+          "type": "boolean",
+          "x-packetcraftr-tier": "optional"
+        },
+        "handshake_type": {
+          "description": "Handshake message type, when the whole message is in this segment",
+          "oneOf": [
+            {
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        },
+        "incomplete": {
+          "description": "Whether a record continues past this segment; default false",
+          "type": "boolean",
+          "x-packetcraftr-tier": "optional"
+        },
+        "ja3": {
+          "description": "Advisory JA3 fingerprint of a ClientHello (MD5 digest)",
+          "type": "string",
+          "x-packetcraftr-tier": "required"
+        },
+        "ja3_raw": {
+          "description": "Advisory JA3 fingerprint of a ClientHello before hashing",
+          "type": "string",
+          "x-packetcraftr-tier": "required"
+        },
+        "ja4": {
+          "description": "Advisory JA4 fingerprint of a ClientHello",
+          "type": "string",
+          "x-packetcraftr-tier": "required"
+        },
+        "key_share_group": {
+          "description": "Named group of a ServerHello key share",
+          "oneOf": [
+            {
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        },
+        "record_count": {
+          "description": "Complete records in this segment; default 0",
+          "oneOf": [
+            {
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "selected_version": {
+          "description": "Version selected by a ServerHello",
+          "oneOf": [
+            {
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        },
+        "sni": {
+          "description": "Validated server name offered by a ClientHello",
+          "type": "string",
+          "x-packetcraftr-tier": "required"
+        },
+        "sni_raw": {
+          "description": "Verbatim server name bytes in hexadecimal",
+          "type": "string",
+          "x-packetcraftr-tier": "required"
+        },
+        "supported_groups": {
+          "description": "Named groups offered by a ClientHello",
+          "items": {
+            "oneOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+                "type": "string"
+              }
+            ]
+          },
+          "type": "array",
+          "x-packetcraftr-tier": "required"
+        },
+        "supported_versions": {
+          "description": "Versions offered by a ClientHello",
+          "items": {
+            "oneOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+                "type": "string"
+              }
+            ]
+          },
+          "type": "array",
+          "x-packetcraftr-tier": "required"
+        },
+        "version": {
+          "description": "Legacy record version of the first record; default 0",
+          "oneOf": [
+            {
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        }
+      },
+      "required": [
+        "handshake_type",
+        "cipher_suite",
+        "selected_version",
+        "key_share_group",
+        "sni",
+        "sni_raw",
+        "ja3",
+        "ja3_raw",
+        "ja4",
+        "alpn",
+        "cipher_suites",
+        "supported_versions",
+        "supported_groups"
+      ],
+      "type": "object",
+      "x-packetcraftr-decode-only": true
+    },
+    "udp": {
+      "additionalProperties": false,
+      "description": "UDP",
+      "properties": {
+        "checksum": {
+          "description": "UDP checksum; derived (auto)",
+          "oneOf": [
+            {
+              "oneOf": [
+                {
+                  "maximum": 65535,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "const": "auto"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
+          "x-packetcraftr-tier": "derived"
+        },
+        "destination_port": {
+          "description": "UDP destination port; aliases: dport",
+          "oneOf": [
+            {
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        },
+        "dport": {
+          "description": "UDP destination port; aliases: dport",
+          "oneOf": [
+            {
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        },
+        "length": {
+          "description": "UDP datagram length; derived (auto)",
+          "oneOf": [
+            {
+              "oneOf": [
+                {
+                  "maximum": 65535,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "const": "auto"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
+          "x-packetcraftr-tier": "derived"
+        },
+        "source_port": {
+          "description": "UDP source port; aliases: sport",
+          "oneOf": [
+            {
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        },
+        "sport": {
+          "description": "UDP source port; aliases: sport",
+          "oneOf": [
+            {
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        }
+      },
+      "required": [
+        "source_port",
+        "destination_port"
+      ],
+      "type": "object"
+    },
+    "vlan": {
+      "additionalProperties": false,
+      "description": "IEEE 802.1Q VLAN",
+      "properties": {
+        "dei": {
+          "description": "Drop eligible indicator; default false; aliases: dei",
+          "type": "boolean",
+          "x-packetcraftr-tier": "optional"
+        },
+        "drop_eligible": {
+          "description": "Drop eligible indicator; default false; aliases: dei",
+          "type": "boolean",
+          "x-packetcraftr-tier": "optional"
+        },
+        "ether_type": {
+          "description": "Encapsulated EtherType; derived (auto)",
+          "oneOf": [
+            {
+              "oneOf": [
+                {
+                  "maximum": 65535,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "const": "auto"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
+          "x-packetcraftr-tier": "derived"
+        },
+        "pcp": {
+          "description": "IEEE 802.1 priority code point; default 0; aliases: pcp",
+          "oneOf": [
+            {
+              "maximum": 7,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "priority": {
+          "description": "IEEE 802.1 priority code point; default 0; aliases: pcp",
+          "oneOf": [
+            {
+              "maximum": 7,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "vid": {
+          "description": "VLAN identifier; aliases: vid",
+          "oneOf": [
+            {
+              "maximum": 4095,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        },
+        "vlan_id": {
+          "description": "VLAN identifier; aliases: vid",
+          "oneOf": [
+            {
+              "maximum": 4095,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        }
+      },
+      "required": [
+        "vlan_id"
+      ],
+      "type": "object"
+    },
+    "vlan8021ad": {
+      "additionalProperties": false,
+      "description": "IEEE 802.1ad Service VLAN",
+      "properties": {
+        "dei": {
+          "description": "Drop eligible indicator; default false; aliases: dei",
+          "type": "boolean",
+          "x-packetcraftr-tier": "optional"
+        },
+        "drop_eligible": {
+          "description": "Drop eligible indicator; default false; aliases: dei",
+          "type": "boolean",
+          "x-packetcraftr-tier": "optional"
+        },
+        "ether_type": {
+          "description": "Encapsulated EtherType; derived (auto)",
+          "oneOf": [
+            {
+              "oneOf": [
+                {
+                  "maximum": 65535,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "const": "auto"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
+          "x-packetcraftr-tier": "derived"
+        },
+        "pcp": {
+          "description": "IEEE 802.1 priority code point; default 0; aliases: pcp",
+          "oneOf": [
+            {
+              "maximum": 7,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "priority": {
+          "description": "IEEE 802.1 priority code point; default 0; aliases: pcp",
+          "oneOf": [
+            {
+              "maximum": 7,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "vid": {
+          "description": "VLAN identifier; aliases: vid",
+          "oneOf": [
+            {
+              "maximum": 4095,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        },
+        "vlan_id": {
+          "description": "VLAN identifier; aliases: vid",
+          "oneOf": [
+            {
+              "maximum": 4095,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        }
+      },
+      "required": [
+        "vlan_id"
+      ],
+      "type": "object"
+    },
+    "vxlan": {
+      "additionalProperties": false,
+      "description": "VXLAN",
+      "properties": {
+        "flags": {
+          "description": "VXLAN flag byte; only the VNI-valid bit 0x08 is defined",
+          "oneOf": [
+            {
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        },
+        "reserved1": {
+          "description": "Reserved 24 bits between the flags and the VNI; default 0",
+          "oneOf": [
+            {
+              "maximum": 16777215,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "reserved2": {
+          "description": "Reserved byte after the VNI; default 0",
+          "oneOf": [
+            {
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "optional"
+        },
+        "vni": {
+          "description": "24-bit VXLAN network identifier",
+          "oneOf": [
+            {
+              "maximum": 16777215,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^(0[xX][0-9a-fA-F]+|[0-9]+)$",
+              "type": "string"
+            }
+          ],
+          "x-packetcraftr-tier": "required"
+        }
+      },
+      "required": [
+        "flags",
+        "vni"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://raw.githubusercontent.com/tyk-swe/pcr/main/schemas/packetcraftr.packet.v2.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A runtime-neutral ordered packet stack. Protocol-specific field names and semantic constraints are generated from packetcraftr_core::registry::Registry.",
+  "properties": {
+    "layers": {
+      "description": "Layers in outermost-to-innermost wire order.",
+      "items": {
+        "$ref": "#/$defs/layer"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "schema": {
+      "const": "packetcraftr.packet/v2",
+      "description": "Packet document schema identifier."
+    }
+  },
+  "required": [
+    "schema",
+    "layers"
+  ],
+  "title": "PacketcraftR packet document v2",
+  "type": "object"
+}

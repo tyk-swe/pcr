@@ -138,7 +138,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   captured frames and bytes; the flags and defaults are unchanged.
 - When command-line parsing fails, the error envelope honours the last
   `--output`/`--color` given, as clap does for a parse that succeeds; it used
-  to take the first.
+  to take the first. A repeat that does not parse (a dangling `--output`, or
+  an unknown value) leaves the earlier valid choice in place instead of
+  downgrading the structured error to prose.
 
 ### Fixed
 
@@ -165,6 +167,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   record all report the same classes as the rest of the CLI: I/O failures exit
   5 with `io.runtime` (two of them used the `cli` class), and a serialization
   failure is `internal` (exit 70) rather than a missing native capability.
+  Scripts keyed on the old exit codes see 5 where they saw 2 for those two
+  I/O failures, and 70 where they saw 4 for the serialization failure; the
+  classification strings are unchanged.
 - `fuzz` consults the traffic policy before every live campaign, including one
   where no case built; the gate used to be skipped on that path.
 - A single neighbor-evidence frame larger than the capture byte budget is

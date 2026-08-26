@@ -28,6 +28,26 @@ packetcraftr --output json build \
   --packet-file examples/documents/packet-ipv4-udp.json
 ```
 
+Dissect, edit, and rebuild a packet:
+
+```console
+$ packetcraftr dissect --hex '020000000002020000000001080045000021000000004011f6c8c0000201c0000202c0000009000d77f468656c6c6f' --output document > pkt.yaml
+```
+
+Edit one field in `pkt.yaml`:
+
+```yaml
+  - ipv4:
+      destination: "192.0.2.3"
+```
+
+Rebuild the modified frame:
+
+```console
+$ packetcraftr build --packet-file pkt.yaml --output hex
+020000000002020000000001080045000021000000004011f6c7c0000201c0000203c0000009000d77f368656c6c6f
+```
+
 Use `packetcraftr --help`, `packetcraftr <COMMAND> --help`, and
 `packetcraftr protocols [PROTOCOL]` for the authoritative command and protocol
 catalog.
@@ -109,9 +129,16 @@ closed.
 
 ## Contracts
 
-- Packet JSON/YAML: [`packetcraftr.packet/v1`](schemas/packetcraftr.packet.v1.schema.json)
+- Packet JSON/YAML: [`packetcraftr.packet/v2`](schemas/packetcraftr.packet.v2.schema.json)
+- Legacy packet contract: [`packetcraftr.packet/v1`](schemas/packetcraftr.packet.v1.schema.json)
 - Structured command output: [`packetcraftr.output/v1`](schemas/packetcraftr.output.v1.schema.json)
 - Published packet and output examples: [`examples/documents`](examples/documents)
+
+A `packetcraftr.packet/v2` document is a list of single-key layers whose
+values are coerced by each field's declared kind, so a fixture spells only the
+fields that matter and the builder derives the rest. `docs/packet-v2.md`
+describes the shape, the three field tiers, and the error codes;
+`packetcraftr convert` rewrites v1 documents.
 
 Put the global `--output` option before the command, for example
 `packetcraftr --output json stats capture.pcapng`. Command-specific formats

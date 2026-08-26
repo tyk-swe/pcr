@@ -11,7 +11,7 @@ use serde::Serialize;
 
 use crate::analysis::dedup::Deduplicator;
 use crate::analysis::reassembly::tcp::ScopedFlowKey;
-use crate::protocol::application::tls::escape_wire_text;
+use crate::protocol::application::tls::codec::escape_wire_text;
 use crate::protocol::application::tls::fingerprint::{Transport, ja3, ja3s, ja4};
 use crate::protocol::application::tls::model::{
     CONTENT_TYPE_ALERT, CONTENT_TYPE_APPLICATION_DATA, CONTENT_TYPE_CHANGE_CIPHER_SPEC,
@@ -67,10 +67,10 @@ pub enum Status {
     /// encrypted and therefore invisible here.
     Alert,
     /// Record or handshake bytes could not be parsed, or one direction's
-    /// handshake buffer reached [`Limits::max_direction_bytes`]. The reason
-    /// says which.
+    /// handshake buffer reached [`MAX_DIRECTION_BUFFER`]. The reason says
+    /// which.
     ///
-    /// [`Limits::max_direction_bytes`]: super::Limits::max_direction_bytes
+    /// [`MAX_DIRECTION_BUFFER`]: super::MAX_DIRECTION_BUFFER
     Malformed,
     /// Handshake bytes were missing: TCP reassembly reported a gap or evicted
     /// the flow, a resource ceiling retired the session, or a ServerHello

@@ -15,7 +15,7 @@ use self::arguments::Args;
 use super::registry;
 use crate::errors::CliError;
 use crate::input::read_recipe;
-use crate::rendering::{NdjsonStream, emit_aggregate_with_stats};
+use crate::rendering::{StreamEncoder, emit_aggregate_with_stats};
 use crate::system::{client, exchange, validate_selector};
 
 use super::execution::Executor;
@@ -31,7 +31,7 @@ struct PreparedLive {
 pub(super) fn run(
     arguments: Args,
     format: output::contract::Format,
-    stream: &mut NdjsonStream,
+    stream: &mut StreamEncoder,
 ) -> Result<(), CliError> {
     let format = ToolFormat::narrow(output::contract::Command::Fuzz, format)?;
     let request = prepare_request(&arguments)?;
@@ -133,7 +133,7 @@ fn execute_and_render(
     registry: Arc<core::registry::Registry>,
     live: Option<PreparedLive>,
     format: ToolFormat,
-    stream: &mut NdjsonStream,
+    stream: &mut StreamEncoder,
 ) -> Result<(), CliError> {
     if let Some(live) = live {
         execute_live(request, packet, registry, live, format, stream)
@@ -147,7 +147,7 @@ fn execute_offline(
     packet: core::Packet,
     registry: Arc<core::registry::Registry>,
     format: ToolFormat,
-    stream: &NdjsonStream,
+    stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     let format = match format {
         ToolFormat::Ndjson => {
@@ -155,7 +155,7 @@ fn execute_offline(
             let summary = core::fuzz::run_with_events(&request, packet, registry, move |case| {
                 output::fuzz::Event::try_from_offline(case)
                     .map_err(CliError::classified)
-                    .and_then(|event| event_stream.emit_data(event, Vec::new()))
+                    .and_then(|event| Ok(event_stream.emit_data(event, Vec::new())?))
                     .map_err(CliError::into_boundary_error)
             })
             .map_err(CliError::classified)?;
@@ -176,7 +176,7 @@ fn execute_live(
     registry: Arc<core::registry::Registry>,
     live: PreparedLive,
     format: ToolFormat,
-    stream: &NdjsonStream,
+    stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     let mut executor = Executor {
         client: client(Arc::clone(&registry), live.policy.clone()),
@@ -199,7 +199,7 @@ fn execute_live(
                 move |case| {
                     output::fuzz::Event::try_from_live(case)
                         .map_err(CliError::classified)
-                        .and_then(|event| event_stream.emit_data(event, Vec::new()))
+                        .and_then(|event| Ok(event_stream.emit_data(event, Vec::new())?))
                         .map_err(CliError::into_boundary_error)
                 },
             )

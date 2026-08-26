@@ -23,7 +23,7 @@ pub const MAX_TRACEROUTE_DURATION: Duration = packetcraftr_netio::capture::MAX_T
 // The deliberately conservative value makes complete byte-policy approval
 // possible before any route, capture, neighbor, or send side effect.
 const MAX_TRACEROUTE_PROBE_BYTES: u64 = 14 + 40 + 20;
-const TRACEROUTE_SOURCE_PORT: u16 = 49_152;
+const TRACEROUTE_SOURCE_PORT: u16 = crate::probe::EPHEMERAL_SOURCE_PORT_BASE;
 const TRACEROUTE_EVIDENCE_DIAGNOSTICS: EvidenceDiagnosticDescriptor =
     EvidenceDiagnosticDescriptor::new("traceroute", "traceroute");
 

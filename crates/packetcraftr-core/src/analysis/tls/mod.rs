@@ -330,7 +330,7 @@ impl Collector {
         key: &ScopedFlowKey,
         events: &mut Vec<SessionEvent>,
     ) {
-        let cap = self.limits.max_direction_bytes;
+        let cap = MAX_DIRECTION_BUFFER;
         for event in record.tcp_events {
             let TcpEvent::Data {
                 flow: sender,

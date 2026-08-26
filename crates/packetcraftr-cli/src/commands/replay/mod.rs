@@ -19,7 +19,7 @@ use crate::command_options::OfflineCaptureLimitsArgs;
 use crate::errors::CliError;
 use crate::filtering::FrameSelector;
 use crate::input::{open_capture, validate_capture_stream_limits};
-use crate::rendering::NdjsonStream;
+use crate::rendering::StreamEncoder;
 
 use conversion::{interface, timing};
 
@@ -37,7 +37,7 @@ struct Prepared {
 pub(super) fn run(
     arguments: Args,
     format: output::contract::Format,
-    stream: &mut NdjsonStream,
+    stream: &mut StreamEncoder,
 ) -> Result<(), CliError> {
     let format = ExchangeFormat::narrow(output::contract::Command::Replay, format)?;
     let mut prepared = prepare(&arguments)?;

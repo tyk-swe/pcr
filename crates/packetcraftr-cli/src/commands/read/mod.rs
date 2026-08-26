@@ -25,7 +25,7 @@ use crate::command_options::OfflineCaptureLimitsArgs;
 use crate::errors::CliError;
 use crate::filtering::{self, Capabilities};
 use crate::input::{open_capture, validate_capture_stream_limits};
-use crate::rendering::{NdjsonStream, capture_file_format};
+use crate::rendering::{StreamEncoder, capture_file_format};
 
 use super::increment_counter;
 use rendering::render_record;
@@ -45,7 +45,7 @@ struct StreamState {
 pub(super) fn run(
     arguments: Args,
     format: output::contract::Format,
-    stream: &mut NdjsonStream,
+    stream: &mut StreamEncoder,
 ) -> Result<(), CliError> {
     let Args {
         path,
@@ -173,7 +173,7 @@ fn read_records(
     decoding: Option<&Decoding>,
     dissect: bool,
     format: FrameFormat,
-    stream: &mut NdjsonStream,
+    stream: &mut StreamEncoder,
 ) -> Result<(), CliError> {
     let mut state = StreamState::default();
     while let Some(frame) = reader.next_frame().map_err(CliError::classified)? {

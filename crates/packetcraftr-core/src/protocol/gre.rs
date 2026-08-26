@@ -175,7 +175,7 @@ impl LayerCodec for GreCodec {
     fn decode(
         &self,
         input: &[u8],
-        context: &LayerDecodeContext<'_>,
+        _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
         let Some(header) = input.first_chunk::<GRE_BASE_LEN>() else {
             return Err(truncated("gre", GRE_BASE_LEN, input.len()));
@@ -218,7 +218,7 @@ impl LayerCodec for GreCodec {
                 .at_field("reserved_bits"),
             );
         }
-        if checksum_value.is_some() && context.verify_checksums && checksum(input) != 0 {
+        if checksum_value.is_some() && checksum(input) != 0 {
             diagnostics.push(
                 Diagnostic::warning(GRE_CHECKSUM, "GRE checksum mismatch").at_field("checksum"),
             );

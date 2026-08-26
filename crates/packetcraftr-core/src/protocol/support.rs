@@ -7,8 +7,6 @@
 //! trips, response matching, and decode-only support. [`BUILTIN_CAPTURE_ROOTS`]
 //! lists the default registry's numeric capture bindings.
 
-//! Public built-in codec and capture-root capability tables.
-
 use crate::semantics::{BuiltinProtocol, builtin_protocol_catalog};
 
 /// One built-in codec row in the stable protocol contract.
@@ -23,24 +21,11 @@ pub struct Protocol {
     pub decode_only: bool,
 }
 
-/// Byte-order rule applied by a registered capture root.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CaptureByteOrder {
-    /// A captured host-order field is detected and preserved as little or big endian.
-    CapturedHost,
-    /// Multi-byte header fields use network byte order.
-    Network,
-    /// The encapsulated protocol defines its own byte order.
-    ProtocolDefined,
-}
-
 /// One numeric DLT/LINKTYPE binding in the default registry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CaptureRoot {
     pub link_type: u32,
     pub protocol: &'static str,
-    pub byte_order: CaptureByteOrder,
-    pub exact_round_trip: bool,
 }
 
 macro_rules! define_protocol_support {
@@ -75,16 +60,10 @@ macro_rules! define_protocol_support {
 
 builtin_protocol_catalog!(define_protocol_support);
 
-const fn capture_root(
-    link_type: u32,
-    protocol: BuiltinProtocol,
-    byte_order: CaptureByteOrder,
-) -> CaptureRoot {
+const fn capture_root(link_type: u32, protocol: BuiltinProtocol) -> CaptureRoot {
     CaptureRoot {
         link_type,
         protocol: protocol.as_str(),
-        byte_order,
-        exact_round_trip: true,
     }
 }
 
@@ -93,49 +72,22 @@ const fn capture_root(
 /// Capture topology remains separate from identity metadata, but every edge is
 /// typed so a protocol rename cannot silently leave a string binding behind.
 pub const BUILTIN_CAPTURE_ROOTS: &[CaptureRoot] = &[
-    capture_root(
-        crate::frame::LinkType::NULL.0,
-        BuiltinProtocol::BsdNull,
-        CaptureByteOrder::CapturedHost,
-    ),
+    capture_root(crate::frame::LinkType::NULL.0, BuiltinProtocol::BsdNull),
     capture_root(
         crate::frame::LinkType::ETHERNET.0,
         BuiltinProtocol::Ethernet,
-        CaptureByteOrder::ProtocolDefined,
     ),
-    capture_root(
-        crate::frame::LinkType::BSD_RAW.0,
-        BuiltinProtocol::RawIp,
-        CaptureByteOrder::ProtocolDefined,
-    ),
-    capture_root(
-        crate::frame::LinkType::RAW.0,
-        BuiltinProtocol::RawIp,
-        CaptureByteOrder::ProtocolDefined,
-    ),
-    capture_root(
-        crate::frame::LinkType::LOOP.0,
-        BuiltinProtocol::BsdLoop,
-        CaptureByteOrder::Network,
-    ),
+    capture_root(crate::frame::LinkType::BSD_RAW.0, BuiltinProtocol::RawIp),
+    capture_root(crate::frame::LinkType::RAW.0, BuiltinProtocol::RawIp),
+    capture_root(crate::frame::LinkType::LOOP.0, BuiltinProtocol::BsdLoop),
     capture_root(
         crate::frame::LinkType::LINUX_SLL.0,
         BuiltinProtocol::LinuxSll,
-        CaptureByteOrder::Network,
     ),
-    capture_root(
-        crate::frame::LinkType::IPV4.0,
-        BuiltinProtocol::Ipv4,
-        CaptureByteOrder::ProtocolDefined,
-    ),
-    capture_root(
-        crate::frame::LinkType::IPV6.0,
-        BuiltinProtocol::Ipv6,
-        CaptureByteOrder::ProtocolDefined,
-    ),
+    capture_root(crate::frame::LinkType::IPV4.0, BuiltinProtocol::Ipv4),
+    capture_root(crate::frame::LinkType::IPV6.0, BuiltinProtocol::Ipv6),
     capture_root(
         crate::frame::LinkType::LINUX_SLL2.0,
         BuiltinProtocol::LinuxSll2,
-        CaptureByteOrder::Network,
     ),
 ];

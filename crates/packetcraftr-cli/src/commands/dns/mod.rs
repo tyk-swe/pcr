@@ -17,7 +17,7 @@ use super::format::ToolFormat;
 use super::target_workflow::{self, Document, TargetWorkflow};
 use crate::errors::CliError;
 use crate::input::parse_target;
-use crate::rendering::NdjsonStream;
+use crate::rendering::StreamEncoder;
 
 /// A DNS exchange puts exactly one query on the wire per attempt, so the probe
 /// only ever needs room for one packet template.
@@ -26,7 +26,7 @@ const MAX_TEMPLATE_PACKETS: usize = 1;
 pub(super) fn run(
     arguments: Args,
     format: output::contract::Format,
-    stream: &mut NdjsonStream,
+    stream: &mut StreamEncoder,
 ) -> Result<(), CliError> {
     let format = ToolFormat::narrow(output::contract::Command::Dns, format)?;
     let queue_limits = arguments.limits.clone().into_limits();
@@ -109,7 +109,7 @@ impl TargetWorkflow for Dns {
         registry: &core::registry::Registry,
         executor: &mut Executor,
         clock: &mut impl packetcraftr::clock::Clock,
-        stream: &NdjsonStream,
+        stream: &StreamEncoder,
     ) -> Result<(), CliError> {
         let event_stream = stream.clone();
         let summary = packetcraftr::dns::run_with_events(

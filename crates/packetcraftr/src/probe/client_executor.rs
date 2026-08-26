@@ -2,6 +2,31 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use packetcraftr_core::Packet;
+use packetcraftr_core::error::BoundaryError;
+
+/// Stable failure coordinates for one workflow executor: the classification
+/// code and remediation every contract breach in that executor reports.
+#[derive(Clone, Copy)]
+pub(crate) struct ExecutorFault {
+    code: &'static str,
+    remediation: &'static str,
+}
+
+impl ExecutorFault {
+    pub(crate) const fn new(code: &'static str, remediation: &'static str) -> Self {
+        Self { code, remediation }
+    }
+
+    /// Reports invalid executor input as a caller validation failure.
+    pub(crate) fn invalid(self, message: impl Into<String>) -> BoundaryError {
+        BoundaryError::execution_validation(message, self.code, self.remediation)
+    }
+
+    /// Reports a broken executor contract as an internal invariant failure.
+    pub(crate) fn internal(self, message: impl Into<String>) -> BoundaryError {
+        BoundaryError::internal_execution(message, self.code, self.remediation)
+    }
+}
 
 /// Shared client and exchange options for live workflow executors.
 pub struct ExchangeExecutor<'a, R, N, I> {

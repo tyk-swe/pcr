@@ -15,7 +15,7 @@ use self::arguments::Args;
 use super::registry;
 use crate::errors::CliError;
 use crate::filtering::FrameSelector;
-use crate::rendering::NdjsonStream;
+use crate::rendering::StreamEncoder;
 use crate::system::resolve;
 
 use packetcraftr::policy::CaptureBudget;
@@ -25,7 +25,7 @@ use super::format::CaptureFormat;
 pub(super) fn run(
     arguments: Args,
     format: output::contract::Format,
-    stream: &mut NdjsonStream,
+    stream: &mut StreamEncoder,
 ) -> Result<(), CliError> {
     let format = CaptureFormat::narrow(output::contract::Command::Capture, format)?;
     let Args {

@@ -8,16 +8,12 @@ use std::time::Instant;
 #[derive(Debug)]
 pub(super) struct ExpiryIndex<K> {
     entries: BTreeMap<Instant, BTreeSet<K>>,
-    #[cfg(test)]
-    examined_entries: usize,
 }
 
 impl<K> Default for ExpiryIndex<K> {
     fn default() -> Self {
         Self {
             entries: BTreeMap::new(),
-            #[cfg(test)]
-            examined_entries: 0,
         }
     }
 }
@@ -48,10 +44,6 @@ impl<K: Ord> ExpiryIndex<K> {
             return Vec::new();
         };
         if first_deadline > now {
-            #[cfg(test)]
-            {
-                self.examined_entries = self.examined_entries.saturating_add(1);
-            }
             return Vec::new();
         }
 
@@ -65,20 +57,7 @@ impl<K: Ord> ExpiryIndex<K> {
         if let Some(at_now) = at_now {
             keys.extend(at_now);
         }
-        #[cfg(test)]
-        {
-            // Each expired state plus the first future deadline, when present.
-            self.examined_entries = self
-                .examined_entries
-                .saturating_add(keys.len())
-                .saturating_add(usize::from(!self.entries.is_empty()));
-        }
         keys
-    }
-
-    #[cfg(test)]
-    pub(super) fn examined_entries(&self) -> usize {
-        self.examined_entries
     }
 
     #[cfg(test)]

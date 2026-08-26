@@ -14,6 +14,7 @@ use crate::{
     semantics::BuiltinProtocol,
 };
 
+use super::super::application::DNS_HEADER_LEN;
 use super::super::common::{
     ValueExpectation, aliased_fields, invalid, make_layer, payload_without_padding, protocol,
     resolve_u16, strict_or_diagnostic, transport_checksum, transport_checksum_parts, truncated,
@@ -23,7 +24,6 @@ use super::super::network::resolve_envelope;
 use super::ports::child_discriminators;
 
 const UDP_LEN: usize = 8;
-const DNS_HEADER_LEN: usize = 12;
 const DNS_PORT: u16 = 53;
 const DNS_RESPONSE_FLAG: u16 = 0x8000;
 const DNS_RESERVED_Z_FLAG: u16 = 0x0040;
@@ -194,9 +194,7 @@ impl LayerCodec for UdpCodec {
         };
         let checksum_value = u16::from_be_bytes([header[6], header[7]]);
         let mut diagnostics = Vec::new();
-        if context.verify_checksums
-            && let Some(network) = context.network
-        {
+        if let Some(network) = context.network {
             if checksum_value == 0 {
                 if matches!(network.source, IpAddr::V6(_)) {
                     diagnostics.push(

@@ -54,22 +54,22 @@ use super::parse::{Outcome, looks_like_record_start, parse_handshake, parse_reco
 /// A hostile peer can pack thousands of one-byte records into a single
 /// segment; the cap keeps per-frame work linear in the segment length with a
 /// small constant.
-pub const MAX_RECORDS_PER_SEGMENT: usize = 64;
+pub(crate) const MAX_RECORDS_PER_SEGMENT: usize = 64;
 
 /// A record continues past the end of this segment.
-pub const RECORD_CONTINUES: &str = "tls.record_continues";
+pub(crate) const RECORD_CONTINUES: &str = "tls.record_continues";
 /// Bytes after the last complete record are not a parsable record.
-pub const RECORD_UNPARSED: &str = "tls.record_unparsed";
+pub(crate) const RECORD_UNPARSED: &str = "tls.record_unparsed";
 /// The segment holds more records than one frame publishes.
-pub const RECORDS_CAPPED: &str = "tls.records_capped";
+pub(crate) const RECORDS_CAPPED: &str = "tls.records_capped";
 /// A server name was offered but is not a usable host name.
-pub const SNI_INVALID: &str = "tls.sni_invalid";
+pub(crate) const SNI_INVALID: &str = "tls.sni_invalid";
 
 /// The complete TLS records carried by one TCP segment.
 ///
 /// The layer covers only whole records. A record continuing into the next
-/// segment, a malformed tail, and records past
-/// [`MAX_RECORDS_PER_SEGMENT`] all stay outside it, as a `raw` child.
+/// segment, a malformed tail, and records past the per-segment record cap all
+/// stay outside it, as a `raw` child.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Tls {
     /// Content type of the first record in the segment.
@@ -297,7 +297,7 @@ impl Tls {
 /// a `key=value` text line) becomes `\DDD` per byte. Unlike a
 /// DNS label, `.` is not a separator here and is kept verbatim.
 #[must_use]
-pub fn escape_wire_text(value: &str) -> String {
+pub(crate) fn escape_wire_text(value: &str) -> String {
     let mut escaped = String::with_capacity(value.len());
     for byte in value.bytes() {
         if (0x21..=0x7e).contains(&byte) && byte != b'\\' {

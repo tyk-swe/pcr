@@ -16,12 +16,12 @@ use super::format::ToolFormat;
 use super::target_workflow::{self, Document, TargetWorkflow};
 use crate::errors::CliError;
 use crate::input::parse_target;
-use crate::rendering::NdjsonStream;
+use crate::rendering::StreamEncoder;
 
 pub(super) fn run(
     arguments: Args,
     format: output::contract::Format,
-    stream: &mut NdjsonStream,
+    stream: &mut StreamEncoder,
 ) -> Result<(), CliError> {
     let format = ToolFormat::narrow(output::contract::Command::Traceroute, format)?;
     let queue_limits = arguments.limits.clone().into_limits();
@@ -115,7 +115,7 @@ impl TargetWorkflow for Traceroute {
         registry: &core::registry::Registry,
         executor: &mut Executor,
         clock: &mut impl packetcraftr::clock::Clock,
-        stream: &NdjsonStream,
+        stream: &StreamEncoder,
     ) -> Result<(), CliError> {
         let event_stream = stream.clone();
         let summary = packetcraftr::traceroute::run_with_events(

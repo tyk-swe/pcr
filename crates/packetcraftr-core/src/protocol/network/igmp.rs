@@ -135,13 +135,13 @@ impl LayerCodec for IgmpCodec {
     fn decode(
         &self,
         input: &[u8],
-        context: &LayerDecodeContext<'_>,
+        _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
         let Some(header) = input.first_chunk::<IGMP_MIN_LEN>() else {
             return Err(truncated("igmp", IGMP_MIN_LEN, input.len()));
         };
         let mut diagnostics = Vec::new();
-        if context.verify_checksums && checksum(input) != 0 {
+        if checksum(input) != 0 {
             diagnostics.push(
                 Diagnostic::warning(IGMP_CHECKSUM, "IGMP checksum mismatch").at_field("checksum"),
             );

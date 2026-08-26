@@ -4,6 +4,9 @@
 //! Versioned, render-neutral CLI output. Its types are separate from workflow
 //! results so both can evolve independently.
 
+#[macro_use]
+mod mirror;
+
 pub mod build;
 pub mod capture;
 pub mod contract;

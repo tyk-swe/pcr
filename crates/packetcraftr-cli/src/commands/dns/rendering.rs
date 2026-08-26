@@ -156,7 +156,7 @@ mod tests {
             evidence: dns::AttemptEvidence {
                 attempt,
                 server_address: address,
-                source_port: 49_152,
+                source_port: packetcraftr::EPHEMERAL_SOURCE_PORT_BASE,
                 status: dns::Outcome::Timeout,
                 sent_at: UNIX_EPOCH,
                 received_at: None,

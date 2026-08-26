@@ -27,7 +27,7 @@ use crate::semantics::{BuiltinProtocol, builtin_protocol_catalog};
 
 use application::{DnsCodec, TlsCodec};
 
-mod registration;
+pub(crate) mod registration;
 
 fn register_catalog(builder: &mut crate::registry::Builder) -> Result<(), crate::registry::Error> {
     macro_rules! register_matcher {
@@ -135,6 +135,3 @@ pub fn registry_with_tls_ports(
 ) -> Result<crate::registry::Registry, crate::registry::Error> {
     registry_with(|builder| registration::bind_tls_ports(builder, ports))
 }
-
-/// The TCP ports the default registry dissects as TLS.
-pub const TLS_TCP_PORTS: &[u16] = registration::TLS_TCP_PORTS;

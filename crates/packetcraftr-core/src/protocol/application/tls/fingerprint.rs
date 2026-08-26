@@ -89,7 +89,7 @@ impl Ja3 {
 /// GREASE values have both bytes equal and their low nibble set to `a`, which
 /// is the `0x?a?a` pattern JA3 and JA4 exclude.
 #[must_use]
-pub fn is_grease(value: u16) -> bool {
+fn is_grease(value: u16) -> bool {
     let high = value >> 8;
     let low = value & 0x00ff;
     high == low && high & 0x0f == 0x0a

@@ -22,6 +22,7 @@ use crate::materialize::{
     build_context, materialize_link_fields, materialize_link_structure, materialize_network_fields,
     require_fixed_width_link_materialization,
 };
+use crate::probe::runner::sink_observer;
 
 use super::SYNTHESIZED_ETHERNET_BYTES;
 use super::boundary::{Execution, ExecutionCase, Executor};
@@ -100,8 +101,7 @@ where
     C: Clock,
     F: FnMut(Case) -> std::result::Result<(), crate::BoundaryError> + Send + 'static,
 {
-    let sink =
-        packetcraftr_core::progress::Sink::new(emit).map_err(|source| Error::Output { source })?;
+    let observe = sink_observer(emit, duration_limit, |source| Error::Output { source })?;
     run_observed(
         RunInput {
             request,
@@ -112,15 +112,7 @@ where
         authorizer,
         executor,
         clock,
-        move |case, deadline| match sink.emit(case, deadline) {
-            Ok(()) => Ok(()),
-            Err(packetcraftr_core::progress::EmitError::Deadline(error)) => {
-                Err(duration_limit(error))
-            }
-            Err(packetcraftr_core::progress::EmitError::Output(source)) => {
-                Err(Error::Output { source })
-            }
-        },
+        observe,
     )
 }
 

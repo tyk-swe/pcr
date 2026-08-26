@@ -1019,14 +1019,13 @@ fn a_many_session_capture_stays_within_its_ceilings() {
 }
 
 #[test]
-fn tls_limits_reject_zero_and_contradictory_ceilings() {
+fn tls_limits_reject_zero_ceilings() {
     assert!(TlsLimits::default().validate().is_ok());
-    for field in ["max_sessions", "max_buffered_bytes", "max_direction_bytes"] {
+    for field in ["max_sessions", "max_buffered_bytes"] {
         let mut limits = TlsLimits::default();
         match field {
             "max_sessions" => limits.max_sessions = 0,
             "max_buffered_bytes" => limits.max_buffered_bytes = 0,
-            "max_direction_bytes" => limits.max_direction_bytes = 0,
             _ => unreachable!(),
         }
         assert!(
@@ -1037,18 +1036,6 @@ fn tls_limits_reject_zero_and_contradictory_ceilings() {
             "{field} must be rejected when zero"
         );
     }
-    assert!(matches!(
-        TlsLimits {
-            max_buffered_bytes: 1_024,
-            max_direction_bytes: 2_048,
-            ..TlsLimits::default()
-        }
-        .validate(),
-        Err(Error::InvalidLimit {
-            field: "max_direction_bytes",
-            ..
-        })
-    ));
 }
 
 #[test]
@@ -1399,7 +1386,6 @@ fn a_conversation_retired_before_it_assembled_anything_is_tracked_again() {
     // on its own can reach the aggregate ceiling with nothing to report.
     let limits = TlsLimits {
         max_buffered_bytes: 1_000,
-        max_direction_bytes: 1_000,
         ..TlsLimits::default()
     };
     assert!(limits.validate().is_ok());
@@ -1429,7 +1415,6 @@ fn deliveries_to_a_finished_direction_never_evict_another_session() {
     // Room for one hello in flight, and a delivery far larger than that.
     let limits = TlsLimits {
         max_buffered_bytes: 40_000,
-        max_direction_bytes: 40_000,
         ..TlsLimits::default()
     };
     assert!(limits.validate().is_ok());

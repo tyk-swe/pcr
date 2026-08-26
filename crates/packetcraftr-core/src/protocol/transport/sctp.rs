@@ -132,7 +132,7 @@ impl LayerCodec for SctpCodec {
     fn decode(
         &self,
         input: &[u8],
-        context: &LayerDecodeContext<'_>,
+        _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
         let Some(header) = input.first_chunk::<SCTP_HEADER_LEN>() else {
             return Err(truncated("sctp", SCTP_HEADER_LEN, input.len()));
@@ -150,16 +150,13 @@ impl LayerCodec for SctpCodec {
         if destination_port == 0 {
             warn_zero_port(&mut diagnostics, "destination_port", "destination");
         }
-        if context.verify_checksums {
-            let zero_checksum = [0_u8; 4];
-            let before_checksum = header.get(..8).unwrap_or_default();
-            let expected = crc32c_parts(&[before_checksum, &zero_checksum, chunks]);
-            if checksum != expected {
-                diagnostics.push(
-                    Diagnostic::warning(SCTP_CHECKSUM, "SCTP checksum mismatch")
-                        .at_field("checksum"),
-                );
-            }
+        let zero_checksum = [0_u8; 4];
+        let before_checksum = header.get(..8).unwrap_or_default();
+        let expected = crc32c_parts(&[before_checksum, &zero_checksum, chunks]);
+        if checksum != expected {
+            diagnostics.push(
+                Diagnostic::warning(SCTP_CHECKSUM, "SCTP checksum mismatch").at_field("checksum"),
+            );
         }
 
         Ok(DecodedLayerValue {

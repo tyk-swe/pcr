@@ -11,12 +11,13 @@ use packetcraftr_core::analysis::expert::{
 
 pub use packetcraftr_core::diagnostic::Severity;
 
-/// Transport namespace for a stream index; TCP and UDP indices are independent.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum StreamTransport {
-    Tcp,
-    Udp,
+mirror_enum! {
+    /// Transport namespace for a stream index; TCP and UDP indices are independent.
+    #[serde(rename_all = "snake_case")]
+    pub enum StreamTransport from AnalysisStreamTransport {
+        Tcp = Tcp,
+        Udp = Udp,
+    }
 }
 
 impl StreamTransport {
@@ -24,15 +25,6 @@ impl StreamTransport {
         match self {
             Self::Tcp => "tcp",
             Self::Udp => "udp",
-        }
-    }
-}
-
-impl From<AnalysisStreamTransport> for StreamTransport {
-    fn from(value: AnalysisStreamTransport) -> Self {
-        match value {
-            AnalysisStreamTransport::Tcp => Self::Tcp,
-            AnalysisStreamTransport::Udp => Self::Udp,
         }
     }
 }

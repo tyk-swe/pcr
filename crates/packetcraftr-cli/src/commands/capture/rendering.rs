@@ -17,8 +17,8 @@ use super::execution::{self, shutdown_after_error};
 use crate::errors::CliError;
 use crate::filtering::FrameSelector;
 use crate::rendering::{
-    CaptureWriter, NdjsonStream, capture_file_format, captured_frame_text, emit_stderr_message,
-    render_diagnostics_text, write_plain_line, write_stdout_line,
+    SourceCaptureWriter, StreamEncoder, capture_file_format, captured_frame_text,
+    emit_stderr_message, render_diagnostics_text, write_plain_line, write_stdout_line,
 };
 
 pub(super) fn render_text<C: net::capture::Session>(
@@ -77,7 +77,7 @@ pub(super) fn render_stream<C: net::capture::Session>(
     limits: net::capture::Limits,
     budget: CaptureBudget,
     selector: Option<&FrameSelector>,
-    stream: &mut NdjsonStream,
+    stream: &mut StreamEncoder,
 ) -> Result<(), CliError> {
     let outcome = execution::run(
         capture,
@@ -88,14 +88,14 @@ pub(super) fn render_stream<C: net::capture::Session>(
         |frame, source_frame| {
             let event = output::capture::Event::try_from_frame(source_frame, frame)
                 .map_err(CliError::classified)?;
-            stream.emit_data(event, Vec::new())
+            Ok(stream.emit_data(event, Vec::new())?)
         },
     )?;
-    stream.complete_with_stats(
+    Ok(stream.complete_with_stats(
         output::capture::Event::Complete,
         outcome.diagnostics,
         outcome.stats,
-    )
+    )?)
 }
 
 pub(super) fn render_capture<C: net::capture::Session>(
@@ -134,7 +134,7 @@ fn initialize_writer<W: Write>(
     format: capture::Format,
     metadata: &net::capture::Metadata,
     budget: CaptureBudget,
-) -> Result<(CaptureWriter<W>, Interface), CliError> {
+) -> Result<(SourceCaptureWriter<W>, Interface), CliError> {
     let snap_len = u32::try_from(metadata.snap_length).map_err(|_| {
         CliError::new(
             5,
@@ -166,7 +166,7 @@ fn initialize_writer<W: Write>(
         ),
     }
     .map_err(|source| CliError::new(5, format!("initialize capture output failed: {source}")))?;
-    let mut writer = CaptureWriter::for_source_interfaces(writer);
+    let mut writer = SourceCaptureWriter::new(writer);
     writer
         .add_source_interface(Some(metadata.interface.index), description.clone())
         .map_err(|source| {

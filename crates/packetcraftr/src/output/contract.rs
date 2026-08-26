@@ -12,79 +12,63 @@ use packetcraftr_core::error::{Classification, Classified, Kind};
 /// Version identifier emitted by every structured CLI record.
 pub const SCHEMA_V1: &str = "packetcraftr.output/v1";
 
-/// CLI command identifier frozen into the v1 output schema.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Command {
-    Build,
-    Dissect,
-    Plan,
-    Send,
-    Exchange,
-    Capture,
-    Expert,
-    Follow,
-    Read,
-    Replay,
-    Scan,
-    Stats,
-    Traceroute,
-    Dns,
-    Fuzz,
-    Interfaces,
-    Routes,
-    Protocols,
-    Tls,
+/// Declares the command vocabulary once: the enum, [`Command::ALL`], and
+/// [`Command::as_str`] all come from the single list below, in the canonical
+/// serialized order that `ALL` and the published examples are pinned to.
+macro_rules! commands {
+    (
+        $(#[$enum_attribute:meta])*
+        $visibility:vis enum $name:ident {
+            $( $variant:ident = $text:literal, )*
+        }
+    ) => {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
+        $(#[$enum_attribute])*
+        $visibility enum $name {
+            $( $variant, )*
+        }
+
+        impl $name {
+            /// Complete v1 command vocabulary in canonical serialized order.
+            pub const ALL: &'static [Self] = &[ $( Self::$variant, )* ];
+
+            /// The serialized name, byte-identical to what `ALL` publishes.
+            pub const fn as_str(self) -> &'static str {
+                match self {
+                    $( Self::$variant => $text, )*
+                }
+            }
+        }
+    };
+}
+
+commands! {
+    /// CLI command identifier frozen into the v1 output schema.
+    #[serde(rename_all = "snake_case")]
+    pub enum Command {
+        Build = "build",
+        Dissect = "dissect",
+        Protocols = "protocols",
+        Plan = "plan",
+        Send = "send",
+        Exchange = "exchange",
+        Capture = "capture",
+        Read = "read",
+        Replay = "replay",
+        Scan = "scan",
+        Stats = "stats",
+        Expert = "expert",
+        Follow = "follow",
+        Tls = "tls",
+        Traceroute = "traceroute",
+        Dns = "dns",
+        Fuzz = "fuzz",
+        Interfaces = "interfaces",
+        Routes = "routes",
+    }
 }
 
 impl Command {
-    /// Complete v1 command vocabulary in canonical serialized order.
-    pub const ALL: &'static [Self] = &[
-        Self::Build,
-        Self::Dissect,
-        Self::Protocols,
-        Self::Plan,
-        Self::Send,
-        Self::Exchange,
-        Self::Capture,
-        Self::Read,
-        Self::Replay,
-        Self::Scan,
-        Self::Stats,
-        Self::Expert,
-        Self::Follow,
-        Self::Tls,
-        Self::Traceroute,
-        Self::Dns,
-        Self::Fuzz,
-        Self::Interfaces,
-        Self::Routes,
-    ];
-
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Build => "build",
-            Self::Dissect => "dissect",
-            Self::Protocols => "protocols",
-            Self::Plan => "plan",
-            Self::Send => "send",
-            Self::Exchange => "exchange",
-            Self::Capture => "capture",
-            Self::Expert => "expert",
-            Self::Follow => "follow",
-            Self::Read => "read",
-            Self::Replay => "replay",
-            Self::Scan => "scan",
-            Self::Stats => "stats",
-            Self::Tls => "tls",
-            Self::Traceroute => "traceroute",
-            Self::Dns => "dns",
-            Self::Fuzz => "fuzz",
-            Self::Interfaces => "interfaces",
-            Self::Routes => "routes",
-        }
-    }
-
     /// Formats deliberately supported by this command contract.
     pub const fn formats(self) -> &'static [Format] {
         match self {

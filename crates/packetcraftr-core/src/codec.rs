@@ -73,9 +73,6 @@ impl EncodedLayer {
 
 pub struct LayerDecodeContext<'a> {
     pub registry: &'a Registry,
-    pub layer_index: usize,
-    pub absolute_offset: usize,
-    pub verify_checksums: bool,
     /// Whether bytes outside an IP-declared length may be link-layer padding.
     pub allow_trailing_padding: bool,
     /// Network pseudo-header context established by an enclosing IP codec.

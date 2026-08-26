@@ -6,7 +6,7 @@ use packetcraftr::{analysis, output};
 use crate::commands::format::FollowFormat;
 use crate::errors::CliError;
 use crate::rendering::{
-    NdjsonStream, emit_aggregate, emit_stderr_message, write_raw, write_stdout_line,
+    StreamEncoder, emit_aggregate, emit_stderr_message, write_raw, write_stdout_line,
 };
 
 use analysis::follow::{Chunk, Selector, Summary};
@@ -20,7 +20,7 @@ pub(super) fn render_record(
     format: FollowFormat,
     chunk: Chunk,
     state: &mut State,
-    stream: &mut NdjsonStream,
+    stream: &mut StreamEncoder,
 ) -> Result<(), CliError> {
     match format {
         FollowFormat::Text => write_stdout_line(format_args!(
@@ -43,7 +43,9 @@ pub(super) fn render_record(
             state.retained.push(chunk.into());
             Ok(())
         }
-        FollowFormat::Ndjson => stream.emit_data(output::follow::Chunk::from(chunk), Vec::new()),
+        FollowFormat::Ndjson => {
+            Ok(stream.emit_data(output::follow::Chunk::from(chunk), Vec::new())?)
+        }
     }
 }
 
@@ -90,9 +92,9 @@ pub(super) fn render_aggregate(
 pub(super) fn render_stream(
     selector: Selector,
     summary: Summary,
-    stream: &mut NdjsonStream,
+    stream: &mut StreamEncoder,
 ) -> Result<(), CliError> {
-    stream.complete(
+    Ok(stream.complete(
         output::follow::Result::from_summary(
             selector.transport.into(),
             selector.index,
@@ -100,7 +102,7 @@ pub(super) fn render_stream(
             Vec::new(),
         ),
         Vec::new(),
-    )
+    )?)
 }
 
 pub(super) fn render_payload_warning(summary: &Summary) -> Result<(), CliError> {

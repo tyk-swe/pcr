@@ -19,6 +19,7 @@ use crate::probe::evidence::{
     ResponseCandidate, UndecodedRetention, response_within_deadline, retain_evidence,
     update_best_candidate,
 };
+use crate::probe::runner::sink_observer;
 use crate::target::{Authorizer, approve_operation, resolve_selected};
 
 use super::error::Error;
@@ -28,7 +29,7 @@ use super::model::{
     Record, Request, Result, Section, Summary, UndecodedEvidence, ValidatedResponse,
 };
 use super::wire::{ResponseClassification, classify_response, encode_query};
-use super::{DNS_EPHEMERAL_SOURCE_PORT_BASE, DNS_EVIDENCE_DIAGNOSTICS, MAX_DNS_PROBE_OVERHEAD};
+use super::{DNS_EVIDENCE_DIAGNOSTICS, MAX_DNS_PROBE_OVERHEAD};
 
 /// Executes bounded DNS retries, repeating declared-name authorization,
 /// resolution, and resolved-answer authorization before each probe.
@@ -79,24 +80,12 @@ where
     C: Clock,
     F: FnMut(Event) -> std::result::Result<(), BoundaryError> + Send + 'static,
 {
-    let sink =
-        packetcraftr_core::progress::Sink::new(emit).map_err(|source| Error::Output { source })?;
-    run_observed(
-        request,
-        authorizer,
-        registry,
-        executor,
-        clock,
-        move |event, deadline| match sink.emit(event, deadline) {
-            Ok(()) => Ok(()),
-            Err(packetcraftr_core::progress::EmitError::Deadline(error)) => {
-                Err(duration_error(error.actual, error.limit))
-            }
-            Err(packetcraftr_core::progress::EmitError::Output(source)) => {
-                Err(Error::Output { source })
-            }
-        },
-    )
+    let observe = sink_observer(
+        emit,
+        |error| duration_error(error.actual, error.limit),
+        |source| Error::Output { source },
+    )?;
+    run_observed(request, authorizer, registry, executor, clock, observe)
 }
 
 fn run_observed<A, E, C, F>(
@@ -742,32 +731,8 @@ fn timeout_evidence(probe: &Probe, sent_at: SystemTime) -> AttemptEvidence {
     }
 }
 
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "range_start plus a remainder modulo width stays inside the u16 ephemeral port \
-              range the caller supplied"
-)]
 pub(super) fn dns_source_port(base: u16, attempt: u32) -> u16 {
-    let (range_start, width) = if base >= DNS_EPHEMERAL_SOURCE_PORT_BASE {
-        (
-            u32::from(DNS_EPHEMERAL_SOURCE_PORT_BASE),
-            u32::from(u16::MAX)
-                .saturating_sub(u32::from(DNS_EPHEMERAL_SOURCE_PORT_BASE))
-                .saturating_add(1),
-        )
-    } else {
-        (
-            1,
-            u32::from(DNS_EPHEMERAL_SOURCE_PORT_BASE).saturating_sub(1),
-        )
-    };
-    let offset = attempt.saturating_sub(1).checked_rem(width).unwrap_or(0);
-    let rotated = u32::from(base)
-        .saturating_sub(range_start)
-        .saturating_add(offset)
-        .checked_rem(width)
-        .unwrap_or(0);
-    range_start.saturating_add(rotated) as u16
+    crate::probe::ephemeral_source_port(base, u64::from(attempt.saturating_sub(1)))
 }
 
 fn dns_rate_delay(rate: Option<u32>) -> std::result::Result<Duration, Error> {

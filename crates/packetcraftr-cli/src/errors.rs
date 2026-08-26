@@ -98,6 +98,14 @@ impl CliError {
     }
 }
 
+/// The NDJSON encoder reports failures without an exit code, and every CLI
+/// failure path starts from a [`CliError`].
+impl From<output::envelope::EncodeError> for CliError {
+    fn from(error: output::envelope::EncodeError) -> Self {
+        Self::classified(error)
+    }
+}
+
 const fn exit_code_for_kind(kind: Kind) -> u8 {
     match kind {
         Kind::Cli => 2,
@@ -157,6 +165,22 @@ mod tests {
         assert_eq!(boundary.classification().code, "fixture.denied");
         assert_eq!(boundary.causes(), ["first cause", "second cause"]);
         assert_eq!(boundary.context().probe_sequence, Some(42));
+    }
+
+    #[test]
+    fn ndjson_encode_failures_keep_their_classification_and_exit_code() {
+        let write = output::envelope::EncodeError::Write {
+            sequence: 3,
+            source: std::io::Error::other("sink closed"),
+        };
+        let error = CliError::from(write);
+        assert_eq!(error.exit_code, 5);
+        assert_eq!(error.classification.code, "io.stdout");
+        assert!(error.message.contains("sequence 3"));
+
+        let terminated = CliError::from(output::envelope::EncodeError::Terminal);
+        assert_eq!(terminated.exit_code, 70);
+        assert_eq!(terminated.classification.code, "internal.ndjson_stream");
     }
 
     #[test]

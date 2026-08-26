@@ -439,9 +439,6 @@ mod tests {
         let registry = crate::protocol::builtin::registry().expect("built-in registry");
         let context = LayerDecodeContext {
             registry: &registry,
-            layer_index: 0,
-            absolute_offset: 0,
-            verify_checksums: true,
             allow_trailing_padding: false,
             network: None,
             discriminator: discriminator.map(Discriminator),

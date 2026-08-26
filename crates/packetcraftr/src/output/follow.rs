@@ -12,21 +12,13 @@ use packetcraftr_core::analysis::follow::{Chunk as AnalysisChunk, Direction as A
 use super::expert::StreamTransport;
 use super::hex::compact_hex;
 
-/// Who sent a chunk: the conversation's first captured sender is the
-/// client, its peer the server.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Direction {
-    Client,
-    Server,
-}
-
-impl From<AnalysisDirection> for Direction {
-    fn from(value: AnalysisDirection) -> Self {
-        match value {
-            AnalysisDirection::ClientToServer => Self::Client,
-            AnalysisDirection::ServerToClient => Self::Server,
-        }
+mirror_enum! {
+    /// Who sent a chunk: the conversation's first captured sender is the
+    /// client, its peer the server.
+    #[serde(rename_all = "snake_case")]
+    pub enum Direction from AnalysisDirection {
+        Client = ClientToServer,
+        Server = ServerToClient,
     }
 }
 

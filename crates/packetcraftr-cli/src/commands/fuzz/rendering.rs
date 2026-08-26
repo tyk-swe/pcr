@@ -5,8 +5,7 @@ use packetcraftr::{core, output};
 
 use crate::errors::CliError;
 use crate::rendering::{
-    NdjsonStream, captured_frame_text, render_diagnostics_text, render_output_diagnostics_text,
-    spaced_hex, write_stdout_line,
+    StreamEncoder, captured_frame_text, render_diagnostics_text, spaced_hex, write_stdout_line,
 };
 
 pub(super) fn render_text(
@@ -66,7 +65,7 @@ pub(super) fn render_text(
                 write_stdout_line(format_args!("  {kind} {}", captured_frame_text(frame)))?;
             }
         }
-        render_output_diagnostics_text(&case.diagnostics)?;
+        render_diagnostics_text(&case.diagnostics)?;
     }
     write_stdout_line(format_args!(
         "fuzz completed {} case(s), {} packet operation(s), {} byte(s)",
@@ -77,16 +76,16 @@ pub(super) fn render_text(
 
 pub(super) fn render_offline_complete(
     summary: core::fuzz::Summary,
-    stream: &NdjsonStream,
+    stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     let (event, diagnostics, stats) = output::fuzz::Event::complete_from_offline(summary);
-    stream.complete_with_stats(event, diagnostics, stats)
+    Ok(stream.complete_with_stats(event, diagnostics, stats)?)
 }
 
 pub(super) fn render_live_complete(
     summary: packetcraftr::fuzz::Summary,
-    stream: &NdjsonStream,
+    stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     let (event, diagnostics, stats) = output::fuzz::Event::complete_from_live(summary);
-    stream.complete_with_stats(event, diagnostics, stats)
+    Ok(stream.complete_with_stats(event, diagnostics, stats)?)
 }

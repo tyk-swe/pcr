@@ -30,21 +30,12 @@ impl From<InterfaceId> for Interface {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum LinkMode {
-    Auto,
-    Layer2,
-    Layer3,
-}
-
-impl From<NetworkLinkMode> for LinkMode {
-    fn from(value: NetworkLinkMode) -> Self {
-        match value {
-            NetworkLinkMode::Auto => Self::Auto,
-            NetworkLinkMode::Layer2 => Self::Layer2,
-            NetworkLinkMode::Layer3 => Self::Layer3,
-        }
+mirror_enum! {
+    #[serde(rename_all = "snake_case")]
+    pub enum LinkMode from NetworkLinkMode {
+        Auto = Auto,
+        Layer2 = Layer2,
+        Layer3 = Layer3,
     }
 }
 

@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use packetcraftr_netio::capture::{DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES};
 
 use crate::probe::Transport as ProbeTransport;
+use crate::probe::evidence::{check_limits, duration_violation};
 use crate::target::Family;
 use crate::target::Target;
 
@@ -73,35 +74,33 @@ impl Default for Limits {
 
 impl Limits {
     pub fn validate(self) -> std::result::Result<Self, Error> {
-        for (field, value, maximum) in [
-            ("max_probes", self.max_probes, MAX_TRACEROUTE_PROBES),
-            (
-                "max_evidence_frames",
+        check_limits(
+            &[
+                ("max_probes", self.max_probes, MAX_TRACEROUTE_PROBES),
+                (
+                    "max_evidence_frames",
+                    self.max_evidence_frames,
+                    DEFAULT_CAPTURE_QUEUE_FRAMES,
+                ),
+                (
+                    "max_evidence_bytes",
+                    self.max_evidence_bytes,
+                    DEFAULT_CAPTURE_QUEUE_BYTES,
+                ),
+            ],
+            &[(
+                "max_undecoded",
+                self.max_undecoded,
                 self.max_evidence_frames,
-                DEFAULT_CAPTURE_QUEUE_FRAMES,
-            ),
-            (
-                "max_evidence_bytes",
-                self.max_evidence_bytes,
-                DEFAULT_CAPTURE_QUEUE_BYTES,
-            ),
-        ] {
-            if value == 0 || value > maximum {
-                return Err(Error::InvalidLimit {
-                    field,
-                    value: u64::try_from(value).unwrap_or(u64::MAX),
-                    reason: format!("must be within 1..={maximum}"),
-                });
-            }
-        }
-        if self.max_undecoded > self.max_evidence_frames {
-            return Err(Error::InvalidLimit {
-                field: "max_undecoded",
-                value: u64::try_from(self.max_undecoded).unwrap_or(u64::MAX),
-                reason: "cannot exceed max_evidence_frames".to_owned(),
-            });
-        }
-        if self.max_duration.is_zero() || self.max_duration > MAX_TRACEROUTE_DURATION {
+                "cannot exceed max_evidence_frames",
+            )],
+            |field, value, reason| Error::InvalidLimit {
+                field,
+                value,
+                reason,
+            },
+        )?;
+        if duration_violation(self.max_duration, MAX_TRACEROUTE_DURATION) {
             return Err(Error::InvalidDuration {
                 value: self.max_duration,
                 maximum: MAX_TRACEROUTE_DURATION,

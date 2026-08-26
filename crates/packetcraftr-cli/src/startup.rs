@@ -12,8 +12,8 @@ use self::context::{MachineFormat, from_env};
 use super::cli::Cli;
 use super::errors::CliError;
 use super::rendering::{
-    NdjsonStream, emit_json, emit_stderr_document, emit_stderr_error, emit_stdout_document,
-    terminal_document,
+    StreamEncoder, emit_json, emit_stderr_document, emit_stderr_error, emit_stdout_document,
+    stdout_stream, terminal_document,
 };
 
 pub(crate) fn run() -> ExitCode {
@@ -35,8 +35,10 @@ pub(crate) fn run() -> ExitCode {
                         error.output_error(),
                     )),
                     MachineFormat::Ndjson => {
-                        let stream = NdjsonStream::stdout(context.command);
-                        stream.emit_error(error.output_error())
+                        let stream = stdout_stream(context.command);
+                        stream
+                            .emit_error(error.output_error())
+                            .map_err(CliError::from)
                     }
                 };
                 return match emitted {
@@ -61,7 +63,7 @@ pub(crate) fn run() -> ExitCode {
     cli.color.write_global();
     let format = output::contract::Format::from(cli.format);
     let command = cli.command.kind();
-    let mut stream = NdjsonStream::stdout(Some(command));
+    let mut stream = stdout_stream(Some(command));
     match cli.command.run(format, &mut stream) {
         Ok(()) => match require_success_terminal(format, &stream) {
             Ok(()) => ExitCode::SUCCESS,
@@ -73,7 +75,7 @@ pub(crate) fn run() -> ExitCode {
 
 fn require_success_terminal(
     format: output::contract::Format,
-    stream: &NdjsonStream,
+    stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     if format == output::contract::Format::Ndjson && !stream.is_terminal() {
         return Err(CliError::new(
@@ -88,7 +90,7 @@ fn command_failure(
     format: output::contract::Format,
     command: output::contract::Command,
     error: CliError,
-    stream: &mut NdjsonStream,
+    stream: &mut StreamEncoder,
 ) -> ExitCode {
     let exit_code = error.exit_code;
     let (emitted, report_write_error) = match format {
@@ -99,9 +101,12 @@ fn command_failure(
             )),
             true,
         ),
-        output::contract::Format::Ndjson if stream.is_open() => {
-            (stream.emit_error(error.output_error()), true)
-        }
+        output::contract::Format::Ndjson if stream.is_open() => (
+            stream
+                .emit_error(error.output_error())
+                .map_err(CliError::from),
+            true,
+        ),
         output::contract::Format::Ndjson => (emit_stderr_error(&error), false),
         _ => (emit_stderr_error(&error), false),
     };
@@ -120,7 +125,7 @@ mod tests {
 
     #[test]
     fn successful_ndjson_requires_a_terminal_record() {
-        let stream = NdjsonStream::new(
+        let stream = StreamEncoder::new(
             Some(output::contract::Command::Read),
             std::io::Cursor::new(Vec::new()),
         );

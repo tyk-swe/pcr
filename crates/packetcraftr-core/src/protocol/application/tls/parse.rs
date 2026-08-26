@@ -143,7 +143,7 @@ pub fn parse_handshake(input: &[u8]) -> Outcome<Handshake> {
 }
 
 /// Parses a ClientHello body: the bytes after the handshake header.
-pub fn parse_client_hello(body: &[u8]) -> Result<ClientHello, crate::codec::Error> {
+fn parse_client_hello(body: &[u8]) -> Result<ClientHello, crate::codec::Error> {
     let mut reader = Reader::new(body);
     let mut hello = ClientHello {
         legacy_version: reader.u16()?,
@@ -164,7 +164,7 @@ pub fn parse_client_hello(body: &[u8]) -> Result<ClientHello, crate::codec::Erro
 }
 
 /// Parses a ServerHello body: the bytes after the handshake header.
-pub fn parse_server_hello(body: &[u8]) -> Result<ServerHello, crate::codec::Error> {
+fn parse_server_hello(body: &[u8]) -> Result<ServerHello, crate::codec::Error> {
     let mut reader = Reader::new(body);
     let mut hello = ServerHello {
         legacy_version: reader.u16()?,

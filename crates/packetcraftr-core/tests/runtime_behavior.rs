@@ -362,33 +362,30 @@ fn field_values_raw_layers_and_diagnostics_have_stable_views() {
 }
 
 #[test]
-fn templates_expand_cartesian_axes_and_report_limits_and_edit_errors() {
+fn templates_expand_one_axis_and_report_limits_and_edit_errors() {
     let mut base = Packet::new();
     base.push(Probe::default());
     let template = template::Template::new(base)
-        .axis(0, "value", vec![10_u8.into(), 11_u8.into()])
-        .axis(
-            0,
-            "label",
-            vec![
-                FieldValue::Text("label-0".to_owned()),
-                FieldValue::Text("label-1".to_owned()),
-            ],
-        );
-    assert_eq!(template.expansion_len().expect("bounded product"), 4);
+        .axis(0, "label", vec![FieldValue::Text("replaced".to_owned())])
+        .axis(0, "value", vec![10_u8.into(), 11_u8.into(), 12_u8.into()]);
+    assert_eq!(
+        template.expansion_len().expect("bounded axis"),
+        3,
+        "a second axis replaces the first rather than multiplying with it"
+    );
     assert!(matches!(
-        template.expand(3),
+        template.expand(2),
         Err(template::Error::ExpansionLimit {
-            requested: 4,
-            limit: 3
+            requested: 3,
+            limit: 2
         })
     ));
     let expanded = template
-        .expand(4)
+        .expand(3)
         .expect("within limit")
         .collect::<Result<Vec<_>, _>>()
         .expect("valid edits");
-    let pairs = expanded
+    let values = expanded
         .iter()
         .map(|packet| {
             let layer = packet.get::<Probe>().expect("probe");
@@ -396,14 +393,14 @@ fn templates_expand_cartesian_axes_and_report_limits_and_edit_errors() {
         })
         .collect::<Vec<_>>();
     assert_eq!(
-        pairs,
-        [
-            (10, "label-0"),
-            (10, "label-1"),
-            (11, "label-0"),
-            (11, "label-1")
-        ]
+        values,
+        [(10, "probe"), (11, "probe"), (12, "probe")],
+        "only the surviving axis is applied; the replaced one leaves no trace"
     );
+
+    let axisless = template::Template::new(Packet::new());
+    assert_eq!(axisless.expansion_len().expect("one packet"), 1);
+    assert_eq!(axisless.expand(1).expect("one ordinal").len(), 1);
 
     let empty = template::Template::new(Packet::new()).axis(0, "value", Vec::new());
     assert_eq!(empty.expansion_len().expect("empty range"), 0);
@@ -483,7 +480,7 @@ fn parse_expression_fixture(registry: &packetcraftr_core::registry::Registry) ->
             "probe",
             registry,
             expression::Options {
-                max_nesting: expression::MAX_EXPRESSION_NESTING + 1,
+                max_nesting: 65,
                 ..expression::Options::default()
             },
         ),

@@ -37,6 +37,13 @@ pub enum Error {
     UnknownProtocol { layer: usize, name: String },
     #[error("duplicate field {field} at layer {layer}")]
     DuplicateField { layer: usize, field: String },
+    #[error("invalid value for {field} at layer {layer}: {source}")]
+    Value {
+        layer: usize,
+        field: String,
+        #[source]
+        source: crate::field::CoerceError,
+    },
     #[error("could not construct layer {name} at index {layer}: {source}")]
     Layer {
         layer: usize,
@@ -86,13 +93,17 @@ pub fn parse(input: &str, registry: &Registry, options: Options) -> Result<Packe
     let segments = split_top_level_bounded(input, '/', Some(options.max_layers))?;
     let mut packet = Packet::with_capacity(segments.len());
     for (layer_index, segment) in segments.into_iter().enumerate() {
-        let (name, fields) = parse_layer(segment, layer_index, options.max_nesting)?;
+        let (name, arguments) = parse_layer_header(segment)?;
         let codec = registry
             .codec_named(&name)
             .ok_or_else(|| Error::UnknownProtocol {
                 layer: layer_index,
                 name: name.clone(),
             })?;
+        let schema = registry
+            .schema(&codec.protocol_id())
+            .or_else(|| codec.published_schema());
+        let fields = parse_layer_fields(arguments, layer_index, options.max_nesting, schema)?;
         let layer = codec.make_layer(&fields).map_err(|source| Error::Layer {
             layer: layer_index,
             name: name.clone(),
@@ -110,11 +121,7 @@ pub fn parse(input: &str, registry: &Registry, options: Options) -> Result<Packe
     Ok(packet)
 }
 
-fn parse_layer(
-    segment: &str,
-    layer: usize,
-    max_nesting: usize,
-) -> Result<(String, BTreeMap<String, FieldValue>), Error> {
+fn parse_layer_header(segment: &str) -> Result<(String, &str), Error> {
     let segment = segment.trim();
     if segment.is_empty() {
         return Err(Error::Syntax {
@@ -123,7 +130,14 @@ fn parse_layer(
         });
     }
     let Some(open) = segment.find('(') else {
-        return Ok((segment.to_ascii_lowercase(), BTreeMap::new()));
+        let name = segment.to_ascii_lowercase();
+        if name.is_empty() {
+            return Err(Error::Syntax {
+                offset: 0,
+                message: "missing protocol name".to_owned(),
+            });
+        }
+        return Ok((name, ""));
     };
     if !segment.ends_with(')') {
         return Err(Error::Syntax {
@@ -131,18 +145,34 @@ fn parse_layer(
             message: "layer arguments must end with ')'".to_owned(),
         });
     }
-    let name = segment[..open].trim().to_ascii_lowercase();
+    let name = segment
+        .get(..open)
+        .map(str::trim)
+        .unwrap_or("")
+        .to_ascii_lowercase();
     if name.is_empty() {
         return Err(Error::Syntax {
             offset: 0,
             message: "missing protocol name".to_owned(),
         });
     }
-    let arguments = &segment[open.saturating_add(1)..segment.len().saturating_sub(1)];
+    let arguments = segment
+        .get(open.saturating_add(1)..segment.len().saturating_sub(1))
+        .unwrap_or("");
+    Ok((name, arguments))
+}
+
+fn parse_layer_fields(
+    arguments: &str,
+    layer: usize,
+    max_nesting: usize,
+    schema: Option<&crate::layer::Schema>,
+) -> Result<BTreeMap<String, FieldValue>, Error> {
     let mut fields = BTreeMap::new();
     if arguments.trim().is_empty() {
-        return Ok((name, fields));
+        return Ok(fields);
     }
+    let protocol_id = schema.map(|s| &s.protocol);
     for argument in split_top_level_bounded(arguments, ',', None)? {
         let Some((field, raw_value)) = split_assignment(argument)? else {
             return Err(Error::Syntax {
@@ -157,11 +187,124 @@ fn parse_layer(
                 message: "empty field name".to_owned(),
             });
         }
-        let value = parse_value_bounded(raw_value.trim(), 0, max_nesting)?;
+        let raw_value = raw_value.trim();
+        let field_schema = schema.and_then(|s| {
+            s.fields
+                .iter()
+                .find(|declared| declared.name.eq_ignore_ascii_case(&field))
+        });
+        let value = parse_field_value(
+            raw_value,
+            field_schema,
+            layer,
+            &field,
+            max_nesting,
+            protocol_id,
+        )?;
         if fields.insert(field.clone(), value).is_some() {
             return Err(Error::DuplicateField { layer, field });
         }
     }
+    Ok(fields)
+}
+
+fn parse_field_value(
+    input: &str,
+    field_schema: Option<&crate::layer::FieldSchema>,
+    layer: usize,
+    field_name: &str,
+    max_nesting: usize,
+    protocol_id: Option<&crate::layer::Id>,
+) -> Result<FieldValue, Error> {
+    if input.is_empty() {
+        return Err(Error::Syntax {
+            offset: 0,
+            message: "missing field value".to_owned(),
+        });
+    }
+    if input.starts_with('"') {
+        return parse_quoted(input).map(FieldValue::Text);
+    }
+    if input.starts_with('[') {
+        if let Some(schema) = field_schema
+            && schema.kind != crate::field::FieldKind::List
+        {
+            return Err(Error::Syntax {
+                offset: 0,
+                message: format!("field {field_name} does not accept a list"),
+            });
+        }
+        return parse_list_bounded(input, 0, max_nesting);
+    }
+    if let Some(hex_str) = input.strip_prefix("raw:") {
+        if field_schema.is_some_and(|schema| schema.derived) {
+            return crate::field::coerce_kind(
+                crate::field::FieldKind::Bytes,
+                None,
+                None,
+                false,
+                hex_str,
+            )
+            .map_err(|source| Error::Value {
+                layer,
+                field: field_name.to_owned(),
+                source,
+            });
+        }
+        return Err(Error::Syntax {
+            offset: 0,
+            message: format!("`raw:` is only valid on a derived field, got `{field_name}`"),
+        });
+    }
+    if let Some(schema) = field_schema {
+        return crate::field::coerce(schema, input).map_err(|source| Error::Value {
+            layer,
+            field: field_name.to_owned(),
+            source,
+        });
+    }
+    if protocol_id.is_some_and(|p| p.as_str() == "raw" || p.as_str() == "padding")
+        && (field_name == "text" || field_name == "hex")
+    {
+        return crate::field::coerce_kind(crate::field::FieldKind::Text, None, None, false, input)
+            .map_err(|source| Error::Value {
+                layer,
+                field: field_name.to_owned(),
+                source,
+            });
+    }
+    parse_value_bounded(input, 0, max_nesting)
+}
+
+fn parse_list_bounded(input: &str, depth: usize, max_nesting: usize) -> Result<FieldValue, Error> {
+    if depth >= max_nesting {
+        return Err(Error::NestingLimit { limit: max_nesting });
+    }
+    if !input.ends_with(']') {
+        return Err(Error::Syntax {
+            offset: 0,
+            message: "unterminated list".to_owned(),
+        });
+    }
+    let body = input.get(1..input.len().saturating_sub(1)).unwrap_or("");
+    if body.trim().is_empty() {
+        return Ok(FieldValue::List(Vec::new()));
+    }
+    let values = split_top_level_bounded(body, ',', None)?
+        .into_iter()
+        .map(|value| parse_value_bounded(value.trim(), depth.saturating_add(1), max_nesting))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(FieldValue::List(values))
+}
+
+#[cfg(test)]
+fn parse_layer(
+    segment: &str,
+    layer: usize,
+    max_nesting: usize,
+) -> Result<(String, BTreeMap<String, FieldValue>), Error> {
+    let (name, arguments) = parse_layer_header(segment)?;
+    let fields = parse_layer_fields(arguments, layer, max_nesting, None)?;
     Ok((name, fields))
 }
 
@@ -604,9 +747,14 @@ mod tests {
             parse("unknown_fixture", &registry, Options::default()),
             Err(Error::UnknownProtocol { layer: 0, .. })
         ));
+        // packet/v2 coercion
         assert!(matches!(
             parse("ipv4(source=not-an-address)", &registry, Options::default()),
-            Err(Error::Layer { layer: 0, .. })
+            Err(Error::Value {
+                layer: 0,
+                ref field,
+                ..
+            }) if field == "source"
         ));
     }
 

@@ -54,6 +54,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Expression values are coerced by the field's declared kind:
+
+  | Expression | Before | After |
+  | --- | --- | --- |
+  | `udp(dport=0x35)` | error | `53` |
+  | `raw(text=true)` | bool-error | text |
+  | `ipv4(ttl=0x40)` | error | `64` |
+  | `ipv6(source=fe80::1%eth0)` | text | error |
+
+  Every change is error→success except the zone-id row.
 - **Breaking:** TCP now dispatches children by port, as UDP already did, so
   frames on TCP ports 443, 465, 636, 853, 993, 995, and 8443 dissect as `tls`
   where they previously dissected as `raw`. Every observable consequence:

@@ -63,7 +63,7 @@ pub(crate) fn run() -> ExitCode {
     cli.color.write_global();
     let format = output::contract::Format::from(cli.format);
     let command = cli.command.kind();
-    let mut stream = stdout_stream(Some(command));
+    let mut stream = stdout_stream(command);
     match cli.command.run(format, &mut stream) {
         Ok(()) => match require_success_terminal(format, &stream) {
             Ok(()) => ExitCode::SUCCESS,
@@ -88,7 +88,7 @@ fn require_success_terminal(
 
 fn command_failure(
     format: output::contract::Format,
-    command: output::contract::Command,
+    command: Option<output::contract::Command>,
     error: CliError,
     stream: &mut StreamEncoder,
 ) -> ExitCode {
@@ -96,7 +96,7 @@ fn command_failure(
     let (emitted, report_write_error) = match format {
         output::contract::Format::Json => (
             emit_json(&output::envelope::AggregateError::error(
-                Some(command),
+                command,
                 error.output_error(),
             )),
             true,

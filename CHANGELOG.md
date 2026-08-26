@@ -14,6 +14,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `packetcraftr.packet/v2` documents in place via atomic temporary file renaming
   or to standard output, supporting individual files, directory trees, and
   standard input (`-`).
+- `--output document` on `dissect` and `read` emits v2 packet documents
+  (minimized by default, omitting auto-derived fields unless altered; bare
+  document on `dissect`, YAML stream with leading `---` before every frame on
+  `read`). `--full` on `dissect` and `read` emits every field and skips
+  minimization.
+- `--columns <path,...>` on `read` extracts projected field values per frame in
+  text mode (tab-separated lines with `-` for missing values) and NDJSON mode
+  (`columns: {"<path>": <FieldValue JSON>}`).
+- `protocols <PROTOCOL> --example` prints a minimal v2 YAML layer for a protocol
+  with placeholder values for required fields, or raw-byte fallback comments for
+  decode-only protocols. `protocols --output json` lists every protocol with its
+  aliases and `decode_only` flag.
+- New public Rust APIs: `packetcraftr_core::filter::FieldPath` with `parse` and
+  `evaluate` for resolving and evaluating field paths against decoded packets,
+  and `Format::Document` on `packetcraftr::output::contract::Format`.
+
 - `packetcraftr tls <CAPTURE>` assembles TLS handshake sessions from a
   capture file, joining each ClientHello to its ServerHello across TCP
   segmentation and reporting SNI, ALPN, offered and selected parameters,

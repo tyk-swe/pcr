@@ -94,8 +94,14 @@ narrowed_format! {
 
 narrowed_format! {
     narrow
-    /// Packet bytes with no live step: `build`, `dissect`.
+    /// Packet bytes with no live step: `build`.
     BuildFormat { Text, Json, Hex, Raw }
+}
+
+narrowed_format! {
+    narrow
+    /// Dissection output: `dissect`.
+    DissectFormat { Text, Json, Hex, Raw, Document }
 }
 
 narrowed_format! {
@@ -113,8 +119,14 @@ narrowed_format! {
 
 narrowed_format! {
     narrow wide
-    /// A frame source with no aggregate document: `capture`, `read`.
+    /// A frame source with no aggregate document: `capture`.
     CaptureFormat { Text, Ndjson, Hex, Pcap, PcapNg }
+}
+
+narrowed_format! {
+    narrow wide
+    /// Capture-file reader: `read`.
+    ReadFormat { Text, Ndjson, Hex, Pcap, PcapNg, Document }
 }
 
 narrowed_format! {
@@ -148,7 +160,7 @@ mod tests {
             output::contract::Command::Convert,
             AggregateFormat::ACCEPTED,
         ),
-        (output::contract::Command::Dissect, BuildFormat::ACCEPTED),
+        (output::contract::Command::Dissect, DissectFormat::ACCEPTED),
         (
             output::contract::Command::Protocols,
             AggregateFormat::ACCEPTED,
@@ -160,7 +172,7 @@ mod tests {
             ExchangeFormat::ACCEPTED,
         ),
         (output::contract::Command::Capture, CaptureFormat::ACCEPTED),
-        (output::contract::Command::Read, CaptureFormat::ACCEPTED),
+        (output::contract::Command::Read, ReadFormat::ACCEPTED),
         (output::contract::Command::Replay, ExchangeFormat::ACCEPTED),
         (output::contract::Command::Scan, ToolFormat::ACCEPTED),
         (output::contract::Command::Stats, AggregateFormat::ACCEPTED),
@@ -192,7 +204,7 @@ mod tests {
     /// The subsets a command narrows to a second time, once it has ruled one
     /// format out, paired with the subset they must stay inside.
     const NARROWER: &[(&[output::contract::Format], &[output::contract::Format])] = &[
-        (FrameFormat::ACCEPTED, CaptureFormat::ACCEPTED),
+        (FrameFormat::ACCEPTED, ReadFormat::ACCEPTED),
         (CollectedFormat::ACCEPTED, ExchangeFormat::ACCEPTED),
         (AggregateFormat::ACCEPTED, ToolFormat::ACCEPTED),
     ];

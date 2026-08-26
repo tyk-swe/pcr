@@ -49,6 +49,49 @@ impl Packet {
                 maximum: MAX_DOCUMENT_NESTING,
             });
         }
+        if super::v2::Document::detect_schema(input) == Some(super::v2::PACKET_DOCUMENT_SCHEMA_V2) {
+            let v2_doc = super::v2::Document::parse_with_resource_limits(
+                input,
+                format,
+                max_bytes,
+                max_layers,
+                max_nesting,
+            )?;
+            let layers = v2_doc
+                .layers
+                .into_iter()
+                .map(|l| {
+                    let fields = l
+                        .fields
+                        .into_iter()
+                        .map(|(k, v)| {
+                            let field_val = match v {
+                                super::v2::Value::Scalar(s)
+                                | super::v2::Value::ScalarTyped { text: s, .. } => {
+                                    FieldValue::Text(s)
+                                }
+                                super::v2::Value::Auto => FieldValue::Text("auto".to_owned()),
+                                super::v2::Value::Raw(bytes) => FieldValue::Bytes(bytes),
+                                super::v2::Value::List(items) => FieldValue::List(
+                                    items.into_iter().map(FieldValue::Text).collect(),
+                                ),
+                            };
+                            (k, field_val)
+                        })
+                        .collect();
+                    super::types::Layer {
+                        protocol: l.protocol,
+                        fields,
+                    }
+                })
+                .collect();
+            let doc = Self {
+                schema: super::v2::PACKET_DOCUMENT_SCHEMA_V2.to_owned(),
+                layers,
+            };
+            validate_value_nesting(&doc, max_nesting)?;
+            return Ok(doc);
+        }
         let seed = PacketSeed { max_layers };
         let document = match format {
             Format::Json => {

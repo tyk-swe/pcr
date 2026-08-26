@@ -724,3 +724,221 @@ fn protocol_discovery_lists_describes_and_rejects_names() {
             .contains("protocols")
     );
 }
+
+#[test]
+fn build_rejects_document_output() {
+    let output = run(&[
+        "--output",
+        "document",
+        "build",
+        "--packet",
+        "raw(text=hello)",
+    ]);
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("unsupported output format") || stderr.contains("cli.output_format"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn dissect_document_output_minimized_and_full() {
+    // 1. Minimized
+    let hex = UDP_CLIENT;
+    let output = run_success(&[
+        "--output",
+        "document",
+        "dissect",
+        "--hex",
+        hex,
+        "--link-type",
+        "228",
+    ]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("- ipv4:"), "{stdout}");
+    assert!(!stdout.contains("checksum:"), "{stdout}");
+    assert!(!stdout.contains("total_length:"), "{stdout}");
+    assert!(
+        !stdout.starts_with("---"),
+        "dissect should emit bare document without leading ---: {stdout}"
+    );
+
+    // 2. Full
+    let output_full = run_success(&[
+        "--output",
+        "document",
+        "dissect",
+        "--hex",
+        hex,
+        "--link-type",
+        "228",
+        "--full",
+    ]);
+    let stdout_full = String::from_utf8_lossy(&output_full.stdout);
+    assert!(stdout_full.contains("checksum:"), "{stdout_full}");
+    assert!(stdout_full.contains("total_length:"), "{stdout_full}");
+
+    // 3. Filtered out
+    let output_filtered = run_success(&[
+        "--output",
+        "document",
+        "dissect",
+        "--hex",
+        hex,
+        "--link-type",
+        "228",
+        "--filter",
+        "tcp",
+    ]);
+    let stdout_filtered = String::from_utf8_lossy(&output_filtered.stdout);
+    assert!(stdout_filtered.trim().is_empty(), "{stdout_filtered}");
+}
+
+#[test]
+fn dissect_document_tls_round_trip() {
+    let capture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/captures/tls-handshake.pcapng");
+    // Read the TLS frames from the capture
+    let doc_output = run_success(&[
+        "--output",
+        "document",
+        "read",
+        path_text(&capture_path),
+        "--filter",
+        "tls",
+    ]);
+    let stdout = String::from_utf8_lossy(&doc_output.stdout);
+    assert!(
+        stdout.contains("- raw:"),
+        "decode-only TLS layer emitted as raw: {stdout}"
+    );
+
+    // Take the first document
+    let docs = stdout
+        .split("\n---")
+        .map(|s| s.trim_start_matches("---").trim())
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>();
+    assert!(!docs.is_empty());
+    let first_doc = docs[0];
+
+    let temp_doc = tempfile::NamedTempFile::new().expect("temp doc creates");
+    std::fs::write(temp_doc.path(), first_doc).expect("write temp doc");
+
+    // Build the document back
+    let build_output = run_success(&["build", "--packet-file", path_text(temp_doc.path())]);
+    assert!(build_output.status.success());
+}
+
+#[test]
+fn read_document_output_and_stderr_summary() {
+    let capture = write_capture();
+    let output = run_success(&["--output", "document", "read", path_text(capture.path())]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // Every frame starts with ---
+    assert_eq!(stdout.matches("---").count(), 5);
+    assert!(
+        stderr.contains("minimized 5 frame(s), 0 with literal derived fields"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn read_columns_in_text_and_ndjson() {
+    // Build a capture with tunneling: ip#1.dst and ip#2.dst
+    let built = run_success(&[
+        "--output",
+        "hex",
+        "build",
+        "--packet",
+        "ipv4(src=10.0.0.1,dst=10.0.0.2)/ipv4(src=192.168.1.1,dst=192.168.1.2)/udp(sport=1000,dport=2000)/raw(text=tunnel)",
+    ]);
+    let hex = String::from_utf8_lossy(&built.stdout).trim().to_owned();
+    let capture = write_capture_frames(&[&hex]);
+
+    // 1. Text mode with #2 and missing field
+    let text_output = run_success(&[
+        "read",
+        path_text(capture.path()),
+        "--columns",
+        "ip#1.dst,ip#2.dst,udp.dstport,tcp.dstport",
+    ]);
+    let text_stdout = String::from_utf8_lossy(&text_output.stdout);
+    assert_eq!(text_stdout.trim(), "10.0.0.2\t192.168.1.2\t2000\t-");
+
+    // 2. NDJSON mode
+    let ndjson_output = run_success(&[
+        "--output",
+        "ndjson",
+        "read",
+        path_text(capture.path()),
+        "--columns",
+        "ip#1.dst,ip#2.dst,udp.dstport",
+    ]);
+    let records = parse_ndjson(&ndjson_output);
+    assert_eq!(records.len(), 2); // 1 frame event + 1 complete event
+    let frame_event = &records[0]["result"];
+    assert_eq!(frame_event["event"], "frame");
+    let columns = &frame_event["columns"];
+    assert_eq!(columns["ip#1.dst"]["value"], "10.0.0.2");
+    assert_eq!(columns["ip#2.dst"]["value"], "192.168.1.2");
+    assert_eq!(columns["udp.dstport"]["value"], 2000);
+
+    // 3. Unknown path fails with cli.unknown_path before reading capture
+    let bad_path = run(&[
+        "read",
+        path_text(capture.path()),
+        "--columns",
+        "ipv4.totally_fake_field",
+    ]);
+    assert_eq!(bad_path.status.code(), Some(2));
+    let bad_stderr = String::from_utf8_lossy(&bad_path.stderr);
+    assert!(
+        bad_stderr.contains("unknown path `ipv4.totally_fake_field`"),
+        "{bad_stderr}"
+    );
+    assert!(
+        bad_stderr.contains("packetcraftr protocols"),
+        "{bad_stderr}"
+    );
+}
+
+#[test]
+fn protocols_example_and_json_list() {
+    // 1. protocols ipv4 --example
+    let ipv4_ex = run_success(&["protocols", "ipv4", "--example"]);
+    let ipv4_stdout = String::from_utf8_lossy(&ipv4_ex.stdout);
+    assert!(ipv4_stdout.contains("- ipv4:"), "{ipv4_stdout}");
+    assert!(ipv4_stdout.contains("destination:"), "{ipv4_stdout}");
+
+    // 2. protocols tls --example (decode-only)
+    let tls_ex = run_success(&["protocols", "tls", "--example"]);
+    let tls_stdout = String::from_utf8_lossy(&tls_ex.stdout);
+    assert!(
+        tls_stdout.contains("# decode-only: dissect emits this layer as raw bytes"),
+        "{tls_stdout}"
+    );
+    assert!(tls_stdout.contains("- raw: {bytes: 0x}"), "{tls_stdout}");
+
+    // 3. protocols --output json (list form)
+    let list_json = run_success(&["--output", "json", "protocols"]);
+    let list_val = parse_json(&list_json);
+    let protocols = list_val["result"]["protocols"]
+        .as_array()
+        .expect("protocols list");
+    assert!(!protocols.is_empty());
+    let tls_proto = protocols
+        .iter()
+        .find(|p| p["protocol"] == "tls")
+        .expect("tls in list");
+    assert_eq!(tls_proto["decode_only"], true);
+    let ipv4_proto = protocols
+        .iter()
+        .find(|p| p["protocol"] == "ipv4")
+        .expect("ipv4 in list");
+    assert_eq!(ipv4_proto["decode_only"], false);
+    assert!(ipv4_proto["aliases"].is_array());
+}

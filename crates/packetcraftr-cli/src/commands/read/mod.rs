@@ -6,8 +6,10 @@
 pub(super) mod arguments;
 mod rendering;
 
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::io;
+use std::sync::Arc;
 
 use packetcraftr::{
     analysis::pcap::{Limits, Reader, rewrite},
@@ -19,13 +21,13 @@ use packetcraftr::{
 };
 
 use self::arguments::Args;
-use super::format::{CaptureFormat, FrameFormat};
+use super::format::{FrameFormat, ReadFormat};
 use super::registry_with_tls_ports;
 use crate::command_options::OfflineCaptureLimitsArgs;
 use crate::errors::CliError;
 use crate::filtering::{self, Capabilities};
 use crate::input::{open_capture, validate_capture_stream_limits};
-use crate::rendering::{StreamEncoder, capture_file_format};
+use crate::rendering::{StreamEncoder, capture_file_format, emit_stderr_message, write_plain_line};
 
 use super::increment_counter;
 use rendering::render_record;
@@ -33,6 +35,7 @@ use rendering::render_record;
 struct Decoding {
     decoder: core::decode::Dissector,
     filter: Option<core::filter::Filter>,
+    registry: Arc<core::registry::Registry>,
 }
 
 #[derive(Default)]
@@ -52,39 +55,82 @@ pub(super) fn run(
         limits,
         filter,
         dissect,
+        columns,
+        full,
         tls_ports,
     } = arguments;
-    let format = CaptureFormat::narrow(output::contract::Command::Read, format)?;
+    let format = ReadFormat::narrow(output::contract::Command::Read, format)?;
     validate_limits(limits)?;
     validate_dissect_format(dissect, format)?;
-    let decoding = prepare_decoding(filter.as_deref(), dissect, &tls_ports.ports)?;
+    validate_columns_format(!columns.is_empty(), format)?;
+
+    let registry = registry_with_tls_ports(&tls_ports.ports)?;
+    let mut parsed_columns = Vec::with_capacity(columns.len());
+    for col_str in &columns {
+        let field_path = core::filter::FieldPath::parse(col_str, &registry).map_err(|_| {
+            CliError::from_classification(
+                Classification::new(
+                    "cli.unknown_path",
+                    Kind::Cli,
+                    Some("run `packetcraftr protocols <P>` to list fields"),
+                ),
+                format!("unknown path `{col_str}`"),
+                Vec::new(),
+            )
+        })?;
+        parsed_columns.push((col_str.clone(), field_path));
+    }
+
+    let decoding = prepare_decoding(
+        filter.as_deref(),
+        dissect || format == ReadFormat::Document || !parsed_columns.is_empty(),
+        registry,
+    )?;
     let mut reader = open_capture(&path, limits)?;
     let stream_limits = Limits {
         max_frames: limits.max_frames,
         max_bytes: limits.max_bytes,
     };
 
-    let format = match format {
-        CaptureFormat::Pcap | CaptureFormat::PcapNg => {
-            return rewrite_capture(
-                &mut reader,
-                format.format(),
-                stream_limits,
-                filter.is_some(),
-            );
+    match format {
+        ReadFormat::Pcap | ReadFormat::PcapNg => rewrite_capture(
+            &mut reader,
+            format.format(),
+            stream_limits,
+            filter.is_some(),
+        ),
+        ReadFormat::Document => {
+            let decoding = decoding.expect("document mode requires decoding");
+            read_documents(&mut reader, limits, &decoding, full)
         }
-        CaptureFormat::Text => FrameFormat::Text,
-        CaptureFormat::Ndjson => FrameFormat::Ndjson,
-        CaptureFormat::Hex => FrameFormat::Hex,
-    };
-    read_records(
-        &mut reader,
-        limits,
-        decoding.as_ref(),
-        dissect,
-        format,
-        stream,
-    )
+        ReadFormat::Text => read_records(
+            &mut reader,
+            limits,
+            decoding.as_ref(),
+            dissect,
+            &parsed_columns,
+            FrameFormat::Text,
+            stream,
+        ),
+        ReadFormat::Ndjson => read_records(
+            &mut reader,
+            limits,
+            decoding.as_ref(),
+            dissect,
+            &parsed_columns,
+            FrameFormat::Ndjson,
+            stream,
+        ),
+        ReadFormat::Hex => read_records(
+            &mut reader,
+            limits,
+            decoding.as_ref(),
+            dissect,
+            &parsed_columns,
+            FrameFormat::Hex,
+            stream,
+        ),
+    }
 }
 
 fn validate_limits(limits: OfflineCaptureLimitsArgs) -> Result<(), CliError> {
@@ -96,8 +142,13 @@ fn validate_limits(limits: OfflineCaptureLimitsArgs) -> Result<(), CliError> {
     )
 }
 
-fn validate_dissect_format(dissect: bool, format: CaptureFormat) -> Result<(), CliError> {
-    if dissect && !matches!(format, CaptureFormat::Text | CaptureFormat::Ndjson) {
+fn validate_dissect_format(dissect: bool, format: ReadFormat) -> Result<(), CliError> {
+    if dissect
+        && !matches!(
+            format,
+            ReadFormat::Text | ReadFormat::Ndjson | ReadFormat::Document
+        )
+    {
         return Err(CliError::from_classification(
             Classification::new(
                 "cli.dissect_unsupported_format",
@@ -111,21 +162,36 @@ fn validate_dissect_format(dissect: bool, format: CaptureFormat) -> Result<(), C
     Ok(())
 }
 
+fn validate_columns_format(has_columns: bool, format: ReadFormat) -> Result<(), CliError> {
+    if has_columns && !matches!(format, ReadFormat::Text | ReadFormat::Ndjson) {
+        return Err(CliError::from_classification(
+            Classification::new(
+                "cli.columns_unsupported_format",
+                Kind::Cli,
+                Some("use --output text or --output ndjson with --columns"),
+            ),
+            format!("--columns has no effect on {} output", format.format()),
+            Vec::new(),
+        ));
+    }
+    Ok(())
+}
+
 fn prepare_decoding(
     filter: Option<&str>,
-    dissect: bool,
-    tls_ports: &[u16],
+    needs_decoding: bool,
+    registry: Arc<core::registry::Registry>,
 ) -> Result<Option<Decoding>, CliError> {
-    if filter.is_none() && !dissect {
+    if filter.is_none() && !needs_decoding {
         return Ok(None);
     }
-    let registry = registry_with_tls_ports(tls_ports)?;
     let filter = filter
         .map(|source| filtering::compile(source, &registry, Capabilities::frames_only()))
         .transpose()?;
     Ok(Some(Decoding {
-        decoder: core::decode::Dissector::new(registry),
+        decoder: core::decode::Dissector::new(Arc::clone(&registry)),
         filter,
+        registry,
     }))
 }
 
@@ -167,21 +233,121 @@ fn rewrite_capture(
         .map_err(CliError::classified)
 }
 
+fn read_documents(
+    reader: &mut Reader<File>,
+    limits: OfflineCaptureLimitsArgs,
+    decoding: &Decoding,
+    full: bool,
+) -> Result<(), CliError> {
+    let mut state = StreamState::default();
+    let mut minimized_count = 0_u64;
+    let mut full_literals_count = 0_u64;
+    while let Some(frame) = reader.next_frame().map_err(CliError::classified)? {
+        let source_frame = account_frame(&mut state, &frame, limits)?;
+        let decoded = decoding
+            .decoder
+            .decode(
+                frame.clone(),
+                core::decode::Options {
+                    max_packet_size: limits.max_frame_bytes,
+                    ..core::decode::Options::default()
+                },
+            )
+            .map_err(|source| CliError::new(3, source.to_string()))?;
+        if let Some(filter) = &decoding.filter {
+            validate_filter_timestamp(filter, &frame, source_frame)?;
+            if !filter
+                .matches(&core::filter::Context {
+                    decoded: &decoded,
+                    number: source_frame,
+                    tcp_stream: None,
+                    udp_stream: None,
+                })
+                .map_err(|source| CliError::new(3, source.to_string()))?
+            {
+                continue;
+            }
+        }
+        state.frames_matched = increment_counter(state.frames_matched, "read matched-frame count")?;
+        let (doc, status) =
+            core::document::v2::Document::from_decoded(&decoded, &decoding.registry, full);
+        match status {
+            core::document::v2::Minimized::Derived => {
+                minimized_count = increment_counter(minimized_count, "minimized frame count")?;
+            }
+            core::document::v2::Minimized::FullLiterals => {
+                full_literals_count =
+                    increment_counter(full_literals_count, "full literals frame count")?;
+            }
+            core::document::v2::Minimized::Skipped => {}
+        }
+        let yaml = doc
+            .to_yaml_string()
+            .map_err(|source| CliError::new(2, source.to_string()))?;
+        write_plain_line(format_args!("---\n{}", yaml.trim_end()))?;
+        for diag in &decoded.diagnostics {
+            emit_stderr_message(&format!(
+                "{:?} {}: {}",
+                diag.severity, diag.code, diag.message
+            ))?;
+        }
+    }
+    emit_stderr_message(&format!(
+        "minimized {minimized_count} frame(s), {full_literals_count} with literal derived fields"
+    ))?;
+    Ok(())
+}
+
 fn read_records(
     reader: &mut Reader<File>,
     limits: OfflineCaptureLimitsArgs,
     decoding: Option<&Decoding>,
     dissect: bool,
+    columns: &[(String, core::filter::FieldPath)],
     format: FrameFormat,
     stream: &mut StreamEncoder,
 ) -> Result<(), CliError> {
     let mut state = StreamState::default();
     while let Some(frame) = reader.next_frame().map_err(CliError::classified)? {
         let source_frame = account_frame(&mut state, &frame, limits)?;
-        let Some(event) = convert_frame(frame, source_frame, decoding, dissect, limits)? else {
+        let Some((event, decoded_opt)) =
+            convert_frame(frame, source_frame, decoding, dissect, limits)?
+        else {
             continue;
         };
-        render_record(&event, format, stream)?;
+        if !columns.is_empty() {
+            let decoded = decoded_opt
+                .as_ref()
+                .expect("columns evaluation requires decoded packet");
+            let context = core::filter::Context {
+                decoded,
+                number: source_frame,
+                tcp_stream: None,
+                udp_stream: None,
+            };
+            if format == FrameFormat::Text {
+                let mut col_values = Vec::with_capacity(columns.len());
+                for (_, path) in columns {
+                    let val_str = path
+                        .evaluate(&context)
+                        .map(|val| core::field::text_form(&val))
+                        .unwrap_or_else(|| "-".to_owned());
+                    col_values.push(val_str);
+                }
+                write_plain_line(format_args!("{}", col_values.join("\t")))?;
+            } else if format == FrameFormat::Ndjson {
+                let mut cols_map = BTreeMap::new();
+                for (name, path) in columns {
+                    if let Some(val) = path.evaluate(&context) {
+                        cols_map.insert(name.clone(), val);
+                    }
+                }
+                let event = event.with_columns(cols_map);
+                render_record(&event, format, stream)?;
+            }
+        } else {
+            render_record(&event, format, stream)?;
+        }
         state.frames_matched = increment_counter(state.frames_matched, "read matched-frame count")?;
     }
     if format == FrameFormat::Ndjson {
@@ -236,10 +402,10 @@ fn convert_frame(
     decoding: Option<&Decoding>,
     dissect: bool,
     limits: OfflineCaptureLimitsArgs,
-) -> Result<Option<output::read::Event>, CliError> {
+) -> Result<Option<(output::read::Event, Option<core::decode::DecodedPacket>)>, CliError> {
     let Some(decoding) = decoding else {
         return output::read::Event::try_from_frame(source_frame, frame)
-            .map(Some)
+            .map(|event| Some((event, None)))
             .map_err(CliError::classified);
     };
     let decoded = decoding
@@ -266,13 +432,13 @@ fn convert_frame(
             return Ok(None);
         }
     }
-    if dissect {
+    let event = if dissect {
         output::read::Event::try_from_decoded(source_frame, frame, &decoded)
     } else {
         output::read::Event::try_from_frame(source_frame, frame)
     }
-    .map(Some)
-    .map_err(CliError::classified)
+    .map_err(CliError::classified)?;
+    Ok(Some((event, Some(decoded))))
 }
 
 fn validate_filter_timestamp(

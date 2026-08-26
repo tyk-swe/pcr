@@ -228,16 +228,43 @@ fn project(
     Some(FieldValue::Bytes(bytes.slice(slice.start..end)))
 }
 
+pub(super) fn evaluate_field(field: &FieldRef, context: &Context<'_>) -> Option<FieldValue> {
+    match &field.source {
+        FieldSource::Frame(which) => frame_value(context, *which),
+        FieldSource::Stream(transport) => {
+            let stream = match transport {
+                StreamTransport::Tcp => context.tcp_stream,
+                StreamTransport::Udp => context.udp_stream,
+            };
+            stream.map(FieldValue::Unsigned)
+        }
+        FieldSource::Layer {
+            protocol,
+            occurrence,
+            access,
+        } => {
+            for layer in layers(context, protocol.as_str(), *occurrence) {
+                for name in access_fields(access) {
+                    let Some(value) = layer.field(name) else {
+                        continue;
+                    };
+                    let Some(value) = project(value, access, field.slice) else {
+                        continue;
+                    };
+                    return Some(value);
+                }
+            }
+            None
+        }
+    }
+}
+
 fn frame_value(context: &Context<'_>, which: FrameField) -> Option<FieldValue> {
     let frame = &context.decoded.frame;
     Some(match which {
         FrameField::Number => FieldValue::Unsigned(context.number),
         // Floor to whole Unix seconds, matching the capture and output layers.
-        FrameField::TimeEpoch => match frame
-            .timestamp
-            .expect("Filter::matches rejects unavailable required timestamps")
-            .duration_since(UNIX_EPOCH)
-        {
+        FrameField::TimeEpoch => match frame.timestamp?.duration_since(UNIX_EPOCH) {
             Ok(elapsed) => FieldValue::Unsigned(elapsed.as_secs()),
             Err(error) => {
                 let elapsed = error.duration();

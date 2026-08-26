@@ -63,3 +63,4 @@ pub use parser::{
     DEFAULT_MAX_FILTER_BYTES, MAX_FILTER_NESTING, MAX_FILTER_SET_MEMBERS, MAX_FILTER_TERMS,
     Options, Requirements,
 };
+pub use path::FieldPath;

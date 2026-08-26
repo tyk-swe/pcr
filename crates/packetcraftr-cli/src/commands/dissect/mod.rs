@@ -3,6 +3,7 @@
 
 pub(super) mod arguments;
 
+use std::sync::Arc;
 use std::time::SystemTime;
 
 use packetcraftr::{
@@ -20,11 +21,11 @@ use super::super::input::{InputKind, read_bounded_file, read_stdin_bounded};
 use super::super::rendering::{
     emit_aggregate, render_diagnostics_text, write_plain_line, write_raw, write_stdout_line,
 };
-use super::format::BuildFormat;
+use super::format::DissectFormat;
 use super::registry_with_tls_ports;
 
 pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
-    let format = BuildFormat::narrow(output::contract::Command::Dissect, format)?;
+    let format = DissectFormat::narrow(output::contract::Command::Dissect, format)?;
     let registry = registry_with_tls_ports(&arguments.tls_ports.ports)?;
     // A bad filter fails before any input is read, so it cannot leave the
     // command waiting on standard input for frame bytes it would never use.
@@ -47,7 +48,7 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
         }
         (Some(_), Some(_)) => unreachable!("clap enforces conflicts"),
     };
-    let decoded = core::decode::Dissector::new(registry)
+    let decoded = core::decode::Dissector::new(Arc::clone(&registry))
         .decode(
             Frame::new(SystemTime::now(), LinkType(arguments.link_type), bytes)
                 .map_err(|source| CliError::new(3, source.to_string()))?,
@@ -68,9 +69,21 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
             .map_err(|source| CliError::new(3, source.to_string()))?,
         None => true,
     };
+    if format == DissectFormat::Document {
+        if !kept {
+            return Ok(());
+        }
+        let (doc, _) =
+            core::document::v2::Document::from_decoded(&decoded, &registry, arguments.full);
+        let yaml = doc
+            .to_yaml_string()
+            .map_err(|source| CliError::new(2, source.to_string()))?;
+        write_plain_line(format_args!("{}", yaml.trim_end()))?;
+        return render_diagnostics_text(&decoded.diagnostics);
+    }
     let (result, diagnostics) = output::dissect::Result::from_decoded(decoded);
     match format {
-        BuildFormat::Text => {
+        DissectFormat::Text => {
             if !kept {
                 return Ok(());
             }
@@ -84,22 +97,23 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
             }
             render_diagnostics_text(&diagnostics)
         }
-        BuildFormat::Hex => {
+        DissectFormat::Hex => {
             if !kept {
                 return Ok(());
             }
             write_plain_line(format_args!("{}", result.bytes_hex))
         }
-        BuildFormat::Raw => {
+        DissectFormat::Raw => {
             if !kept {
                 return Ok(());
             }
             write_raw(result.bytes())
         }
-        BuildFormat::Json => emit_aggregate(
+        DissectFormat::Json => emit_aggregate(
             output::contract::Command::Dissect,
             output::dissect::AggregateResult::from_filter(kept, result),
             diagnostics,
         ),
+        DissectFormat::Document => unreachable!(),
     }
 }

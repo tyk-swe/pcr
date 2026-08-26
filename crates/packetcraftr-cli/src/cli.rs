@@ -7,13 +7,14 @@ use packetcraftr::output;
 use crate::commands::Command;
 
 const ROOT_AFTER_HELP: &str = r#"Output formats:
-  text    Human-readable summaries and diagnostics.
-  json    One aggregate JSON document.
-  ndjson  One JSON record per streamed event.
-  hex     Exact frame bytes as hexadecimal text.
-  raw     Exact frame bytes without text framing.
-  pcap    Classic PCAP capture bytes.
-  pcapng  PCAPNG capture bytes.
+  text      Human-readable summaries and diagnostics.
+  json      One aggregate JSON document.
+  ndjson    One JSON record per streamed event.
+  hex       Exact frame bytes as hexadecimal text.
+  raw       Exact frame bytes without text framing.
+  pcap      Classic PCAP capture bytes.
+  pcapng    PCAPNG capture bytes.
+  document  A v2 packet document (YAML stream).
 
 Output availability is command-specific. Machine formats never contain terminal colour codes.
 
@@ -70,6 +71,7 @@ pub(crate) enum Format {
     Pcap,
     #[value(name = "pcapng")]
     PcapNg,
+    Document,
 }
 
 impl std::fmt::Display for Format {
@@ -88,6 +90,7 @@ impl From<Format> for output::contract::Format {
             Format::Raw => Self::Raw,
             Format::Pcap => Self::Pcap,
             Format::PcapNg => Self::PcapNg,
+            Format::Document => Self::Document,
         }
     }
 }

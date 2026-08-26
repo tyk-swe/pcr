@@ -18,6 +18,7 @@ pub(super) fn render_record(
         source_frame,
         frame,
         decoded,
+        ..
     } = event
     else {
         unreachable!("read completion is rendered by the stream owner")

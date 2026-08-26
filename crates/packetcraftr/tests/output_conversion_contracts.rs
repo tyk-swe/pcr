@@ -119,6 +119,7 @@ fn packet_output_adapters_preserve_wire_data_and_separate_diagnostics() {
         source_frame,
         frame: raw_frame,
         decoded: raw_decoded,
+        columns: raw_columns,
     } = raw_record
     else {
         panic!("raw conversion must produce a frame event")
@@ -127,10 +128,13 @@ fn packet_output_adapters_preserve_wire_data_and_separate_diagnostics() {
         source_frame: dissected_source_frame,
         frame: dissected_frame,
         decoded: decoded_stack,
+        columns: dissected_columns,
     } = dissected_record
     else {
         panic!("dissected conversion must produce a frame event")
     };
+    assert!(raw_columns.is_none());
+    assert!(dissected_columns.is_none());
     assert_eq!(source_frame.get(), 7);
     assert_eq!(dissected_source_frame.get(), 7);
     assert!(raw_decoded.is_none());

@@ -73,7 +73,8 @@ impl Command {
     /// Formats deliberately supported by this command contract.
     pub const fn formats(self) -> &'static [Format] {
         match self {
-            Self::Build | Self::Dissect => BUILD_FORMATS,
+            Self::Build => BUILD_FORMATS,
+            Self::Dissect => DISSECT_FORMATS,
             Self::Protocols
             | Self::Plan
             | Self::Interfaces
@@ -82,7 +83,8 @@ impl Command {
             | Self::Convert => AGGREGATE_FORMATS,
             Self::Send => SEND_FORMATS,
             Self::Exchange => EXCHANGE_FORMATS,
-            Self::Capture | Self::Read => CAPTURE_FORMATS,
+            Self::Capture => CAPTURE_FORMATS,
+            Self::Read => READ_FORMATS,
             Self::Replay => REPLAY_FORMATS,
             Self::Follow => FOLLOW_FORMATS,
             Self::Scan | Self::Traceroute | Self::Dns | Self::Fuzz | Self::Expert | Self::Tls => {
@@ -123,6 +125,7 @@ pub enum Format {
     Pcap,
     #[serde(rename = "pcapng")]
     PcapNg,
+    Document,
 }
 
 impl Format {
@@ -135,6 +138,7 @@ impl Format {
             Self::Raw => "raw",
             Self::Pcap => "pcap",
             Self::PcapNg => "pcapng",
+            Self::Document => "document",
         }
     }
 }
@@ -154,6 +158,13 @@ pub enum Mode {
 }
 
 const BUILD_FORMATS: &[Format] = &[Format::Text, Format::Json, Format::Hex, Format::Raw];
+const DISSECT_FORMATS: &[Format] = &[
+    Format::Text,
+    Format::Json,
+    Format::Hex,
+    Format::Raw,
+    Format::Document,
+];
 const AGGREGATE_FORMATS: &[Format] = &[Format::Text, Format::Json];
 const SEND_FORMATS: &[Format] = &[
     Format::Text,
@@ -176,6 +187,14 @@ const CAPTURE_FORMATS: &[Format] = &[
     Format::Hex,
     Format::Pcap,
     Format::PcapNg,
+];
+const READ_FORMATS: &[Format] = &[
+    Format::Text,
+    Format::Ndjson,
+    Format::Hex,
+    Format::Pcap,
+    Format::PcapNg,
+    Format::Document,
 ];
 const REPLAY_FORMATS: &[Format] = &[
     Format::Text,

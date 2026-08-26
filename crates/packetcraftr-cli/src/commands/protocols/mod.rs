@@ -18,8 +18,13 @@ use super::registry;
 pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
     let format = AggregateFormat::narrow(output::contract::Command::Protocols, format)?;
     match arguments.protocol {
-        Some(name) => describe_protocol(&name, format),
-        None => list_protocols(format),
+        Some(name) => describe_protocol(&name, arguments.example, format),
+        None => {
+            if arguments.example {
+                return Err(CliError::new(2, "--example requires a protocol name"));
+            }
+            list_protocols(format)
+        }
     }
 }
 
@@ -52,7 +57,7 @@ fn list_protocols(format: AggregateFormat) -> Result<(), CliError> {
     }
 }
 
-fn describe_protocol(name: &str, format: AggregateFormat) -> Result<(), CliError> {
+fn describe_protocol(name: &str, example: bool, format: AggregateFormat) -> Result<(), CliError> {
     let support = support::BUILTIN_PROTOCOLS
         .iter()
         .find(|support| {
@@ -64,6 +69,9 @@ fn describe_protocol(name: &str, format: AggregateFormat) -> Result<(), CliError
         })
         .ok_or_else(|| unknown_protocol(name))?;
     let registry = registry()?;
+    if example {
+        return render_example(support, &registry);
+    }
     let fields = registry
         .schema(support.protocol)
         .map(|schema| {
@@ -91,6 +99,57 @@ fn describe_protocol(name: &str, format: AggregateFormat) -> Result<(), CliError
             output::protocols::DetailResult { protocol: detail },
             Vec::new(),
         ),
+    }
+}
+
+fn render_example(
+    support: &support::Protocol,
+    registry: &packetcraftr::core::registry::Registry,
+) -> Result<(), CliError> {
+    if support.decode_only {
+        write_stdout_line(format_args!(
+            "# decode-only: dissect emits this layer as raw bytes"
+        ))?;
+        write_stdout_line(format_args!("- raw: {{bytes: 0x}}"))?;
+        return Ok(());
+    }
+    let schema = registry.schema(support.protocol);
+    let mut req_fields = Vec::new();
+    if let Some(schema) = schema {
+        for field in schema.fields {
+            if field.tier == packetcraftr::core::layer::Tier::Required {
+                req_fields.push(format!(
+                    "{}: {}",
+                    field.name,
+                    placeholder_for_kind(field.kind)
+                ));
+            }
+        }
+    }
+    if req_fields.is_empty() {
+        write_stdout_line(format_args!("- {}: {{}}", support.protocol))?;
+    } else {
+        write_stdout_line(format_args!(
+            "- {}: {{{}}}",
+            support.protocol,
+            req_fields.join(", ")
+        ))?;
+    }
+    Ok(())
+}
+
+fn placeholder_for_kind(kind: packetcraftr::core::field::FieldKind) -> &'static str {
+    match kind {
+        packetcraftr::core::field::FieldKind::Bool => "false",
+        packetcraftr::core::field::FieldKind::Unsigned => "0",
+        packetcraftr::core::field::FieldKind::Signed => "0",
+        packetcraftr::core::field::FieldKind::Text => "\"\"",
+        packetcraftr::core::field::FieldKind::Bytes => "0x",
+        packetcraftr::core::field::FieldKind::Ipv4 => "192.0.2.1",
+        packetcraftr::core::field::FieldKind::Ipv6 => "2001:db8::1",
+        packetcraftr::core::field::FieldKind::Mac => "02:00:00:00:00:01",
+        packetcraftr::core::field::FieldKind::List => "[]",
+        _ => "0",
     }
 }
 

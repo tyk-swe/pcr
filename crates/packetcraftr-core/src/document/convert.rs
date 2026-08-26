@@ -38,6 +38,35 @@ impl Packet {
         registry: &Registry,
         max_layers: usize,
     ) -> Result<crate::Packet, Error> {
+        if self.schema == super::v2::PACKET_DOCUMENT_SCHEMA_V2 {
+            let v2_doc = super::v2::Document {
+                layers: self
+                    .layers
+                    .iter()
+                    .map(|l| super::v2::Layer {
+                        protocol: l.protocol.clone(),
+                        fields: l
+                            .fields
+                            .iter()
+                            .map(|(k, v)| {
+                                (
+                                    k.clone(),
+                                    match v {
+                                        crate::field::FieldValue::Text(t) => {
+                                            super::v2::Value::Scalar(t.clone())
+                                        }
+                                        other => {
+                                            super::v2::Value::Scalar(crate::field::text_form(other))
+                                        }
+                                    },
+                                )
+                            })
+                            .collect(),
+                    })
+                    .collect(),
+            };
+            return v2_doc.to_packet(registry, max_layers);
+        }
         self.validate_schema()?;
         if self.layers.len() > max_layers {
             return Err(Error::LayerLimit { limit: max_layers });

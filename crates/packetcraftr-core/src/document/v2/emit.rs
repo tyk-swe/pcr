@@ -26,7 +26,7 @@ impl Document {
     /// Emits a v2 document from a decoded packet with rebuild-and-compare minimization.
     pub fn from_decoded(
         decoded: &DecodedPacket,
-        registry: &Registry,
+        registry: &Arc<Registry>,
         full: bool,
     ) -> (Self, Minimized) {
         if full {
@@ -105,7 +105,7 @@ impl Document {
             }
         }
 
-        let builder = Builder::new(Arc::new(registry.clone()));
+        let builder = Builder::new(Arc::clone(registry));
         let build_result = builder.build(test_packet, Context::default(), Options::default());
 
         let status = match build_result {

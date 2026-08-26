@@ -65,3 +65,49 @@ Need a decision, not a mechanical edit.
 
 - Crates are `publish = false`; install is from a release archive or source.
   Publishing the AGPL crates is an owner decision.
+
+## packet/v2 follow-ups (0.7, from the 2026-08-26 eng review)
+
+Design: `docs/designs/packet-v2-contract.md`.
+
+### Structured list values
+
+**What:** A nested-map `FieldValue` variant plus `element` schema so a list can hold sub-fields (TCP options, IPv6 extension-header entries).
+**Why:** Options are opaque bytes today; a fixture cannot say `mss: 1460` and the schema cannot describe option sub-fields.
+**Context:** Deferred because no registry field produces a list of structs. Ten exhaustive `FieldValue` match sites plus the expression, filter, and fuzz engines change. Additive to v2 since unknown value forms are rejected. Start at `field.rs` and the first protocol that reflects structured options.
+**Effort:** L **Priority:** P2 **Depends on:** packet/v2 shipped.
+
+### Per-field derived verification
+
+**What:** A per-layer hook reporting what `auto` would produce for one field, so the emitter keeps only the mismatching derived field explicit.
+**Why:** The 0.6 minimizer is whole-packet rebuild-and-compare; one bad checksum makes every derived field in that packet explicit.
+**Context:** Chosen against in favour of the builder-as-oracle. Touches all 37 `reflective_layer!` sites and adds a second derivation path that must be tested against `encode`. Start at `layer/reflection.rs` and `protocol/support.rs` `resolve_u16`. Revisit only if all-or-nothing minimization is a complaint.
+**Effort:** L **Priority:** P3 **Depends on:** packet/v2 shipped.
+
+### Property-based round-trip generation
+
+**What:** Per-protocol generators feeding `bytes → dissect → v2 → build → bytes`.
+**Why:** The 0.6 corpus (builtin wire images, captures, end-to-end fixtures, seeded fuzz variants) is bounded by fixtures.
+**Context:** A `proptest` dependency goes through `cargo deny`; 37 generators; tune case counts under nextest's 15 s slow-timeout. Start from `tests/protocol_codec_matrix.rs` and the fuzz mutation value generators.
+**Effort:** M **Priority:** P3 **Depends on:** `document_v2_round_trip.rs`.
+
+### Document as the primitive: `diff`, `--set`, `test`
+
+**What:** Semantic diff of two v2 documents by field path, a `--set proto#N.field=value` patch on any document, and a `test cases/*.yaml` runner checking expected bytes and dissection.
+**Why:** One primitive replaces `Template` and ad-hoc fuzz axes; no tool in the space has a semantic packet diff.
+**Context:** Office-hours approach C, deferred to 0.7. `--set` reuses `filter::path` and the shared coercer from 0.6.
+**Effort:** XL **Priority:** P2 **Depends on:** packet/v2, `field::coerce`, `--columns`.
+
+### `--filter` on every capture-reading command
+
+**What:** The display-filter flag `read` has, on `stats`, `expert`, `follow`, and `tls`.
+**Why:** tshark parity.
+**Context:** Pulled out of 0.6 as unrelated to the contract break. Each collector needs a pre-filter hook; a per-frame filter can split a stream in `tls` and `follow`, so define that interaction first. Start at `commands/offline_analysis.rs` and the `StreamCollector` item above.
+**Effort:** M **Priority:** P3 **Depends on:** none.
+
+### Registry-driven output/v2 schema emitter
+
+**What:** `schema emit --contract output/v2` generated from typed output records, replacing the hand-maintained 119 KB file.
+**Why:** packet/v2 is generated in 0.6; output/v2 stays hand-edited, so the two contracts drift by different mechanisms.
+**Context:** Office-hours approach B, surfaced again by /autoplan on 2026-08-26. Needs shared output record types (frame, stream, finding, session) defined once; that design does not exist. Start after 0.6 from `crates/packetcraftr/src/output/`.
+**Effort:** L **Priority:** P3 **Depends on:** output/v2 shipped.

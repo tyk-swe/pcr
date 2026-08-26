@@ -31,7 +31,7 @@ use super::model::{
 };
 use super::probe::probe_packet;
 use crate::clock::Clock;
-use crate::target::{Authorized, Authorizer, PolicyAuthorizer, Target};
+use crate::target::{Authorized, Authorizer, Operation, PolicyAuthorizer, Target};
 use crate::{BoundaryError, Stats, target::Family};
 
 fn private_scan_policy() -> crate::policy::Policy {
@@ -90,11 +90,7 @@ impl Authorizer for AddressListAuthorizer {
         })
     }
 
-    fn authorize_operation(
-        &mut self,
-        _packets: u64,
-        _maximum_wire_bytes: u64,
-    ) -> Result<(), BoundaryError> {
+    fn authorize_operation(&mut self, _operation: Operation<'_>) -> Result<(), BoundaryError> {
         Ok(())
     }
 }

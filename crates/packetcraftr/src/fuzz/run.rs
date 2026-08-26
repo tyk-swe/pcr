@@ -24,7 +24,7 @@ use crate::materialize::{
 };
 
 use super::SYNTHESIZED_ETHERNET_BYTES;
-use super::boundary::{Authorizer, Execution, ExecutionCase, Executor};
+use super::boundary::{Execution, ExecutionCase, Executor};
 use super::error::{Error, duration_limit};
 use super::execution::{
     ExecutionEvidence, add_execution_stats, rate_delay, retain_evidence, validate_execution,
@@ -32,6 +32,7 @@ use super::execution::{
 };
 use super::request::LiveOptions;
 use super::result::{Case, CaseOutcome, Result, Stats, Summary};
+use crate::authorization::Authorizer;
 
 /// Builds and validates all cases offline, then authorizes and executes the campaign.
 pub fn run<A, E, C>(
@@ -276,12 +277,15 @@ where
         .collect::<Vec<_>>();
     // Unconditional: a campaign with no buildable case still has to clear
     // policy validation and the destination gate before anything else runs.
-    authorizer.authorize_operation(
-        &packets,
-        live.destination,
-        prepared.maximum_wire_bytes,
-        prepared.requires_malformed_live,
-    )?;
+    authorizer.authorize_operation(crate::authorization::Operation {
+        packets: prepared.built_case_count,
+        wire_bytes: prepared.maximum_wire_bytes,
+        declared: &packets,
+        destination: live.destination,
+        requires_permissive_live: prepared.requires_malformed_live,
+        allow_permissive_live: live.allow_malformed_live,
+        ..crate::authorization::Operation::default()
+    })?;
     Ok(())
 }
 

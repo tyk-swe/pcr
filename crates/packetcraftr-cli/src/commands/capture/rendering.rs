@@ -11,7 +11,9 @@ use packetcraftr::{
     core, netio as net, output,
 };
 
-use super::execution::{self, Budget, shutdown_after_error};
+use packetcraftr::policy::CaptureBudget;
+
+use super::execution::{self, shutdown_after_error};
 use crate::errors::CliError;
 use crate::filtering::FrameSelector;
 use crate::rendering::{
@@ -23,7 +25,7 @@ pub(super) fn render_text<C: net::capture::Session>(
     capture: C,
     timeout: Duration,
     limits: net::capture::Limits,
-    budget: Budget,
+    budget: CaptureBudget,
     selector: Option<&FrameSelector>,
 ) -> Result<(), CliError> {
     let outcome = execution::run(
@@ -59,7 +61,7 @@ pub(super) fn render_hex<C: net::capture::Session>(
     capture: C,
     timeout: Duration,
     limits: net::capture::Limits,
-    budget: Budget,
+    budget: CaptureBudget,
     selector: Option<&FrameSelector>,
 ) -> Result<(), CliError> {
     let outcome = execution::run(capture, timeout, limits, budget, selector, |frame, _| {
@@ -73,7 +75,7 @@ pub(super) fn render_stream<C: net::capture::Session>(
     capture: C,
     timeout: Duration,
     limits: net::capture::Limits,
-    budget: Budget,
+    budget: CaptureBudget,
     selector: Option<&FrameSelector>,
     stream: &mut NdjsonStream,
 ) -> Result<(), CliError> {
@@ -101,7 +103,7 @@ pub(super) fn render_capture<C: net::capture::Session>(
     format: output::contract::Format,
     timeout: Duration,
     limits: net::capture::Limits,
-    budget: Budget,
+    budget: CaptureBudget,
     selector: Option<&FrameSelector>,
 ) -> Result<(), CliError> {
     let format = match capture_file_format(format) {
@@ -131,7 +133,7 @@ fn initialize_writer<W: Write>(
     destination: W,
     format: capture::Format,
     metadata: &net::capture::Metadata,
-    budget: Budget,
+    budget: CaptureBudget,
 ) -> Result<(CaptureWriter<W>, Interface), CliError> {
     let snap_len = u32::try_from(metadata.snap_length).map_err(|_| {
         CliError::new(
@@ -172,8 +174,8 @@ fn initialize_writer<W: Write>(
         })?;
     writer
         .set_stream_limits(Limits {
-            max_frames: budget.max_frames,
-            max_bytes: budget.max_bytes,
+            max_frames: budget.max_frames(),
+            max_bytes: budget.max_bytes(),
         })
         .map_err(CliError::classified)?;
     Ok((writer, description))
@@ -272,14 +274,16 @@ mod tests {
         }
     }
 
-    fn settings() -> (net::capture::Limits, Budget) {
-        (
-            net::capture::Limits::default(),
-            Budget {
-                max_frames: 8,
-                max_bytes: 8,
-            },
-        )
+    fn settings() -> (net::capture::Limits, CaptureBudget) {
+        (net::capture::Limits::default(), budget(8, 8))
+    }
+
+    fn budget(max_frames: u64, max_bytes: u64) -> CaptureBudget {
+        CaptureBudget::new(&packetcraftr::policy::Policy {
+            max_packets_per_operation: max_frames,
+            max_bytes_per_operation: max_bytes,
+            ..packetcraftr::policy::Policy::default()
+        })
     }
 
     fn assert_matches_published_schema(records: &[Value]) {
@@ -300,10 +304,7 @@ mod tests {
         let mut capture = FakeSession::with_frames(0);
         capture.metadata.link_type = LinkType::LINUX_SLL2;
         capture.metadata.snap_length = 96;
-        let budget = Budget {
-            max_frames: 1,
-            max_bytes: 96,
-        };
+        let budget = budget(1, 96);
 
         for format in [capture::Format::Pcap, capture::Format::PcapNg] {
             let (mut writer, description) =

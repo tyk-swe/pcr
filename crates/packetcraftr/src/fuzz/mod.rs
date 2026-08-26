@@ -20,8 +20,8 @@ mod run;
 #[cfg(test)]
 mod tests;
 
-pub use boundary::{Authorizer, Execution, ExecutionCase, Executor};
-pub use client_executor::PolicyAuthorizer;
+pub use crate::authorization::{Authorizer, Operation, PolicyAuthorizer};
+pub use boundary::{Execution, ExecutionCase, Executor};
 pub use error::Error;
 pub use request::{LiveLimits, LiveOptions};
 pub use result::{Case, CaseOutcome, Result, Stats, Summary};

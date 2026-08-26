@@ -16,6 +16,19 @@ pub enum CaseOutcome {
     Timeout,
 }
 
+impl CaseOutcome {
+    /// The serialized name, for text output that must agree with JSON.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Built => "built",
+            Self::Rejected => "rejected",
+            Self::Response => "response",
+            Self::Timeout => "timeout",
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Case {
     pub prepared: packet_fuzz::Case,

@@ -208,14 +208,6 @@ pub struct Summary {
     pub scheduled_duration: Duration,
 }
 
-/// Prospective totals for the frame being authorized. They include only frames
-/// that reach the wire; skipped frames charge read-side budgets, not policy.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct AuthorizationContext {
-    pub packets: u64,
-    pub wire_bytes: u64,
-}
-
 /// Selects a one-based capture frame before byte accounting, authorization, delay,
 /// or transmission.
 ///
@@ -224,16 +216,6 @@ pub struct AuthorizationContext {
 pub trait Selector {
     /// Decides whether this frame proceeds to authorization and transmission.
     fn select(&mut self, number: u64, frame: &Frame) -> Result<bool, crate::BoundaryError>;
-}
-
-/// Explicit policy seam invoked before delay or transmission.
-pub trait Authorizer {
-    fn authorize_operation(
-        &mut self,
-        context: AuthorizationContext,
-        frame: &Frame,
-        mode: LinkMode,
-    ) -> Result<(), crate::BoundaryError>;
 }
 
 /// Exact-frame transmitter seam used by native and injected adapters.

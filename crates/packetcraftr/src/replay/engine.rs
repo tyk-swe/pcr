@@ -14,10 +14,10 @@ use crate::clock::Clock;
 
 use super::error::Error;
 use super::model::{
-    AuthorizationContext, Authorizer, FrameEvidence, Limits, Options, Selector, Summary, Timing,
-    Transmission, Transmitter,
+    FrameEvidence, Limits, Options, Selector, Summary, Timing, Transmission, Transmitter,
 };
 use super::wire::{replay_link_mode, validate_transmission_evidence};
+use crate::authorization::{Authorizer, Operation};
 
 #[derive(Default)]
 struct Progress {
@@ -128,10 +128,8 @@ where
             authorizer,
             &deadline,
             source_index,
-            AuthorizationContext {
-                packets: plan.next_completed,
-                wire_bytes: plan.next_bytes,
-            },
+            plan.next_completed,
+            plan.next_bytes,
             &read.frame,
             plan.mode,
         )?;
@@ -339,12 +337,18 @@ fn authorize_frame<A: Authorizer>(
     authorizer: &mut A,
     deadline: &Deadline,
     source_index: u64,
-    context: AuthorizationContext,
+    packets: u64,
+    wire_bytes: u64,
     frame: &Frame,
     mode: LinkMode,
 ) -> Result<(), Error> {
     enforce_deadline(deadline, source_index)?;
-    let authorization = authorizer.authorize_operation(context, frame, mode);
+    let authorization = authorizer.authorize_operation(Operation {
+        packets,
+        wire_bytes,
+        frame: Some((frame, mode)),
+        ..Operation::default()
+    });
     enforce_deadline(deadline, source_index)?;
     authorization.map_err(|source| Error::Authorization {
         source_index,

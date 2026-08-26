@@ -12,10 +12,11 @@ mod system_boundary;
 mod tests;
 mod wire;
 
+pub use crate::authorization::{Authorizer, Operation};
 pub use engine::{run, run_with_selector};
 pub use error::Error;
 pub use model::{
-    AuthorizationContext, Authorizer, FrameEvidence, Limits, MAX_REPLAY_DURATION, Options,
-    Selector, Summary, Timing, Transmission, Transmitter,
+    FrameEvidence, Limits, MAX_REPLAY_DURATION, Options, Selector, Summary, Timing, Transmission,
+    Transmitter,
 };
 pub use system_boundary::{SystemAuthorizer, SystemTransmitter};

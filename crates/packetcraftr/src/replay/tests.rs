@@ -20,29 +20,23 @@ use packetcraftr_netio::{
 
 use super::engine::{run, run_with_selector};
 use super::error::Error;
-use super::model::{
-    AuthorizationContext, Authorizer, Limits, Options, Selector, Timing, Transmission, Transmitter,
-};
+use super::model::{Limits, Options, Selector, Timing, Transmission, Transmitter};
 use super::wire::{replay_link_mode, replay_network_envelope, validate_transmission_evidence};
 use crate::BoundaryError;
+use crate::authorization::{Authorizer, Operation};
 use crate::clock::Clock;
 
 #[derive(Default)]
 struct RecordingAuthorizer {
     calls: usize,
-    contexts: Vec<AuthorizationContext>,
+    budgets: Vec<(u64, u64)>,
     deny: bool,
 }
 
 impl Authorizer for RecordingAuthorizer {
-    fn authorize_operation(
-        &mut self,
-        context: AuthorizationContext,
-        _frame: &Frame,
-        _mode: LinkMode,
-    ) -> Result<(), BoundaryError> {
+    fn authorize_operation(&mut self, operation: Operation<'_>) -> Result<(), BoundaryError> {
         self.calls += 1;
-        self.contexts.push(context);
+        self.budgets.push((operation.packets, operation.wire_bytes));
         if self.deny {
             Err(BoundaryError::new(
                 "denied by test policy",
@@ -369,19 +363,7 @@ fn replay_selector_skips_authorization_and_preserves_transmitted_spacing() {
     .unwrap();
 
     assert_eq!(selector.numbers, [1, 2, 3]);
-    assert_eq!(
-        authorizer.contexts,
-        [
-            AuthorizationContext {
-                packets: 1,
-                wire_bytes: 2,
-            },
-            AuthorizationContext {
-                packets: 2,
-                wire_bytes: 6,
-            },
-        ]
-    );
+    assert_eq!(authorizer.budgets, [(1, 2), (2, 6)]);
     assert_eq!(transmitter.transmission_calls, 2);
     assert_eq!(clock.delays, [Duration::ZERO, Duration::from_secs(2)]);
     assert_eq!(summary.frames_read, 3);

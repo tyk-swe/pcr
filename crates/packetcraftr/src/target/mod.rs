@@ -6,6 +6,6 @@
 mod contract;
 mod workflow;
 
+pub use crate::authorization::{Authorizer, NoResolver, Operation, PolicyAuthorizer};
 pub use contract::{Authorized, Error, Family, Hostname, Resolver, SystemResolver, Target};
-pub use workflow::{Authorizer, PolicyAuthorizer};
 pub(crate) use workflow::{approve_operation, resolve_selected};

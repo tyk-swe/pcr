@@ -17,7 +17,7 @@ use packetcraftr_core::protocol::{network::Ipv4, transport::Udp};
 use packetcraftr_core::{Packet, decode::DecodedPacket, frame::Frame, frame::LinkType};
 
 use crate::clock::Clock;
-use crate::target::{Authorized, Authorizer, Family, Target};
+use crate::target::{Authorized, Authorizer, Family, Operation, Target};
 use crate::{BoundaryError, Stats};
 
 use super::DEFAULT_DNS_SERVER_PORT;
@@ -45,11 +45,7 @@ impl Authorizer for SingleAddressAuthorizer {
         })
     }
 
-    fn authorize_operation(
-        &mut self,
-        _packets: u64,
-        _maximum_wire_bytes: u64,
-    ) -> Result<(), BoundaryError> {
+    fn authorize_operation(&mut self, _operation: Operation<'_>) -> Result<(), BoundaryError> {
         Ok(())
     }
 }

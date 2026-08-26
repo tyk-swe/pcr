@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::command_options::{CaptureLimitsArgs, TrafficBudgetArgs};
+use crate::command_options::{CaptureLimitsArgs, Captured, TrafficBudgetArgs};
 
 pub(crate) const AFTER_LONG_HELP: &str = r#"Live capture may require native features, dependencies, and privileges.
 
@@ -43,7 +43,7 @@ pub(crate) struct Args {
     #[command(flatten)]
     pub(crate) limits: CaptureLimitsArgs,
     #[command(flatten)]
-    pub(crate) budgets: TrafficBudgetArgs,
+    pub(crate) budgets: TrafficBudgetArgs<Captured>,
 }
 
 #[cfg(test)]

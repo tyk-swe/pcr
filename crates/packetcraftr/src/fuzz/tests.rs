@@ -22,7 +22,7 @@ use crate::{BoundaryError, Stats as ExecutionStats};
 
 use super::execution::add_execution_stats;
 use super::{
-    Authorizer, Execution, ExecutionCase, Executor, LiveLimits, LiveOptions, Stats, run,
+    Authorizer, Execution, ExecutionCase, Executor, LiveLimits, LiveOptions, Operation, Stats, run,
     run_with_events,
 };
 
@@ -156,13 +156,7 @@ fn execution_statistics_aggregation_is_complete_and_atomic() {
 struct AllowAll;
 
 impl Authorizer for AllowAll {
-    fn authorize_operation(
-        &mut self,
-        _packets: &[Packet],
-        _destination: Option<std::net::IpAddr>,
-        _maximum_wire_bytes: u64,
-        _requires_malformed_live: bool,
-    ) -> Result<(), BoundaryError> {
+    fn authorize_operation(&mut self, _operation: Operation<'_>) -> Result<(), BoundaryError> {
         Ok(())
     }
 }
@@ -536,13 +530,7 @@ struct DenyingAuthorizer {
 }
 
 impl Authorizer for DenyingAuthorizer {
-    fn authorize_operation(
-        &mut self,
-        _packets: &[Packet],
-        _destination: Option<std::net::IpAddr>,
-        _maximum_wire_bytes: u64,
-        _requires_malformed_live: bool,
-    ) -> Result<(), BoundaryError> {
+    fn authorize_operation(&mut self, _operation: Operation<'_>) -> Result<(), BoundaryError> {
         self.invocations += 1;
         Err(BoundaryError::from_error(
             crate::policy::Error::PublicDestination {

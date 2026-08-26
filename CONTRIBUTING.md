@@ -6,10 +6,11 @@ public issue.
 
 ## Setup and checks
 
-The workspace uses Rust 2024, pins Rust 1.97.1, and supports Rust 1.96 or newer.
-The project does not configure a compiler wrapper or linker, so Cargo and the
-Rust toolchain use their platform defaults. All-feature Linux builds also need
-libpcap development files. CI uses cargo-nextest 0.9.143.
+The workspace uses Rust 2024. `rust-toolchain.toml` pins the toolchain and
+`rust-version` in `Cargo.toml` is the MSRV; `.config/nextest.toml` names the
+cargo-nextest version. The project does not configure a compiler wrapper or
+linker, so Cargo and the Rust toolchain use their platform defaults.
+All-feature Linux builds also need libpcap development files.
 
 Use locked dependencies and run the checks that cover your change:
 
@@ -28,7 +29,9 @@ cargo deny check
 Cargo runs doctests separately because nextest does not. No-default features
 keep native providers disabled, the default enables interface enumeration, and
 all features enable every native provider. The
-[CI workflow](.github/workflows/ci.yml) is the authoritative check set.
+[CI workflow](.github/workflows/ci.yml) is the authoritative check set. It
+runs all-feature tests on Linux only; macOS and Windows get an all-feature
+`cargo check`, since their capture backends need Npcap or a system libpcap.
 
 ## Architecture
 
@@ -41,7 +44,8 @@ See [AGENTS.md](AGENTS.md) for ownership and coding rules.
 Keep `unsafe` inside `packetcraftr-netio/src/platform/` and give every unsafe
 block a specific `SAFETY` explanation. Avoid narrowing `as` conversions; use
 checked conversions or the repository's tightly scoped `#[expect]` convention
-with the bounding invariant stated.
+with the bounding invariant stated. The same applies to plain indexing and
+unchecked arithmetic, which the workspace lints deny in library code.
 
 ## Issues and pull requests
 

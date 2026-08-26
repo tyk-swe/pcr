@@ -36,6 +36,33 @@ them. Each is a candidate, not a commitment.
   capture, so the fingerprints are checked against something other than our own
   builder.
 
+## 0.6 output-contract break
+
+The v1 output contract is kept byte-stable through 0.5. These are the changes
+that wait for a deliberate, single contract bump; none of them is a cleanup to
+slip into an unrelated change.
+
+- Classification codes `cli.*` and `Kind::Cli` (`packetcraftr-core::error`)
+  name a consumer three layers up. They mean "caller or request error";
+  rename to `request.*` / `Kind::Request` and keep exit code 2.
+- Durations serialize as `std::time::Duration`'s `{secs, nanos}` object
+  (`$defs/duration` in the schema). The rest of the surface is
+  milliseconds-as-number (`--timeout-ms`, `handshake_rtt_ms`); switch to `*_ms`.
+- Schema descriptions name CLI flags (`--max-tls-sessions`, at the two
+  `tls` limit fields). Describe the field, not the flag.
+- `exchange --max-unsolicited` is the same concept as `--max-undecoded` on
+  `scan`, `dns`, and `traceroute`. Rename.
+- `tls --max-tls-buffer-bytes` / `--max-tls-sessions` carry the command name;
+  no other command does (`capture --max-frames`, not `--max-capture-frames`).
+  Drop the prefix.
+
+## Architecture
+
+- The four-crate topology (`core` → `netio` → `packetcraftr` → `cli`) from the
+  2026-08 consolidation is settled. Further moves need a reason, not a tidy-up.
+- `StreamCollector` trait (see TLS above): still waiting for the fourth
+  collector.
+
 ## Distribution
 
 - `cargo install packetcraftr-cli`: the workspace crates are `publish = false`,

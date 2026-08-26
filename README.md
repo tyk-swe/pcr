@@ -94,7 +94,7 @@ matching archive and `SHA256SUMS`, verify the checksum, then put
 - `pcap-free` archives include routing and raw Layer 3 without a libpcap/Npcap
   dependency.
 
-From source, install Rust 1.97.1. Rust 1.96 is the MSRV. All-feature Linux
+From source, install the toolchain named in `rust-toolchain.toml` (MSRV: `rust-version` in `Cargo.toml`). All-feature Linux
 builds also need libpcap development files such as `libpcap-dev`.
 
 ```console

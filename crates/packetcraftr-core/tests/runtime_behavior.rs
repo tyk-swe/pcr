@@ -697,7 +697,15 @@ fn parse_expression_fixture(registry: &packetcraftr_core::registry::Registry) ->
     );
     let error = expression::parse(expression, registry, expression::Options::default())
         .expect_err("incompatible custom byte fields should be rejected by the codec");
-    assert!(matches!(error, expression::Error::Layer { layer: 0, .. }));
+    // packet/v2 coercion
+    assert!(matches!(
+        error,
+        expression::Error::Value {
+            layer: 0,
+            ref field,
+            ..
+        } if field == "bytes"
+    ));
 
     let packet = expression::parse(
         "probe(value=42,enabled=true,label=hello,ipv4=192.0.2.1,ipv6=2001:db8::1,mac=00:11:22:33:44:55,wire=auto)",
@@ -1168,6 +1176,111 @@ fn assert_filter_field_binding_conflicts() {
         wrong_kind.build(),
         Err(packetcraftr_core::registry::Error::InvalidFilterField { .. })
     ));
+}
+
+#[test]
+fn expression_v2_coercion_repins() {
+    let registry = packetcraftr_core::protocol::builtin::registry().expect("built-in registry");
+
+    // udp(destination_port=0x35) -> 53
+    let packet = expression::parse(
+        "udp(destination_port=0x35)",
+        &registry,
+        expression::Options::default(),
+    )
+    .expect("udp with hex destination_port");
+    assert_eq!(
+        packet
+            .layer(0)
+            .expect("udp layer")
+            .field("destination_port"),
+        Some(FieldValue::Unsigned(53))
+    );
+
+    // udp(dport=0x35) -> 53
+    let packet_alias =
+        expression::parse("udp(dport=0x35)", &registry, expression::Options::default())
+            .expect("udp with aliased dport");
+    assert_eq!(
+        packet_alias
+            .layer(0)
+            .expect("udp layer")
+            .field("destination_port"),
+        Some(FieldValue::Unsigned(53))
+    );
+
+    // raw(text=true) -> Text "true"
+    let raw_packet = expression::parse("raw(text=true)", &registry, expression::Options::default())
+        .expect("raw with text=true");
+    assert_eq!(
+        raw_packet.layer(0).expect("raw layer").field("bytes"),
+        Some(FieldValue::Bytes(Bytes::from_static(b"true")))
+    );
+
+    // ipv4(destination=192.0.2.1)
+    let ip_packet = expression::parse(
+        "ipv4(destination=192.0.2.1)",
+        &registry,
+        expression::Options::default(),
+    )
+    .expect("ipv4 with destination");
+    assert_eq!(
+        ip_packet.layer(0).expect("ipv4 layer").field("destination"),
+        Some(FieldValue::Ipv4(Ipv4Addr::new(192, 0, 2, 1)))
+    );
+
+    // ipv4(ttl=300) -> error naming ttl
+    let ttl_err = expression::parse("ipv4(ttl=300)", &registry, expression::Options::default())
+        .expect_err("ttl 300 exceeds u8");
+    assert!(
+        ttl_err.to_string().contains("ttl"),
+        "expected error naming ttl, got: {ttl_err}"
+    );
+
+    // ethernet(ether_type=raw:0x0800) -> Raw bytes
+    let eth_packet = expression::parse(
+        "ethernet(ether_type=raw:0x0800)",
+        &registry,
+        expression::Options::default(),
+    )
+    .expect("ethernet with raw ether_type");
+    assert_eq!(
+        eth_packet
+            .layer(0)
+            .expect("ethernet layer")
+            .field("ether_type"),
+        Some(FieldValue::Bytes(Bytes::from_static(&[0x08, 0x00])))
+    );
+
+    // ipv4(checksum=auto) still Auto
+    let ip_auto = expression::parse(
+        "ipv4(checksum=auto)",
+        &registry,
+        expression::Options::default(),
+    )
+    .expect("ipv4 with checksum=auto");
+    assert_eq!(
+        ip_auto.layer(0).expect("ipv4 layer").field("checksum"),
+        Some(FieldValue::Text("auto".to_owned()))
+    );
+
+    // a list on a scalar field errors
+    let list_err = expression::parse(
+        "ipv4(ttl=[1, 2])",
+        &registry,
+        expression::Options::default(),
+    )
+    .expect_err("list on scalar field ttl");
+    assert!(
+        matches!(list_err, expression::Error::Syntax { .. }),
+        "expected syntax error, got: {list_err}"
+    );
+    assert!(
+        list_err
+            .to_string()
+            .contains("field ttl does not accept a list"),
+        "unexpected error message: {list_err}"
+    );
 }
 
 #[test]

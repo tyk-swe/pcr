@@ -5,9 +5,274 @@
 
 use std::fmt;
 use std::net::{Ipv4Addr, Ipv6Addr};
+use std::str::FromStr;
 
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[non_exhaustive]
+pub enum CoerceError {
+    #[error("expected {expected}, got `{got}`")]
+    ValueForm { expected: &'static str, got: String },
+    #[error("{got} is above the maximum {max}")]
+    OutOfRange { got: String, max: u64 },
+    #[error("`auto` is only valid on a derived field")]
+    AutoNotDerived,
+}
+
+/// Parses one v2 text form by declared kind. `element` is the list element kind; `max` bounds Unsigned values; `derived` allows the bare word `auto`.
+pub fn coerce_kind(
+    kind: FieldKind,
+    _element: Option<FieldKind>,
+    max: Option<u64>,
+    derived: bool,
+    text: &str,
+) -> Result<FieldValue, CoerceError> {
+    if kind == FieldKind::Text {
+        return Ok(FieldValue::Text(text.to_owned()));
+    }
+    if text.eq_ignore_ascii_case("auto") {
+        if derived {
+            return Ok(FieldValue::Text("auto".to_owned()));
+        }
+        return Err(CoerceError::AutoNotDerived);
+    }
+    match kind {
+        FieldKind::Bool => {
+            if text.eq_ignore_ascii_case("true") {
+                Ok(FieldValue::Bool(true))
+            } else if text.eq_ignore_ascii_case("false") {
+                Ok(FieldValue::Bool(false))
+            } else {
+                Err(CoerceError::ValueForm {
+                    expected: "a boolean (true/false)",
+                    got: text.to_owned(),
+                })
+            }
+        }
+        FieldKind::Unsigned => {
+            if text.is_empty()
+                || text.starts_with('+')
+                || text.starts_with('-')
+                || text.contains('_')
+            {
+                return Err(CoerceError::ValueForm {
+                    expected: "an unsigned integer (decimal or 0x hex)",
+                    got: text.to_owned(),
+                });
+            }
+            if let Some(hex) = text.strip_prefix("0x").or_else(|| text.strip_prefix("0X")) {
+                if hex.is_empty() || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+                    return Err(CoerceError::ValueForm {
+                        expected: "an unsigned integer (decimal or 0x hex)",
+                        got: text.to_owned(),
+                    });
+                }
+                match u64::from_str_radix(hex, 16) {
+                    Ok(val) => {
+                        if let Some(limit) = max
+                            && val > limit
+                        {
+                            return Err(CoerceError::OutOfRange {
+                                got: text.to_owned(),
+                                max: limit,
+                            });
+                        }
+                        Ok(FieldValue::Unsigned(val))
+                    }
+                    Err(_) => Err(CoerceError::ValueForm {
+                        expected: "an unsigned integer (decimal or 0x hex)",
+                        got: text.to_owned(),
+                    }),
+                }
+            } else {
+                if !text.chars().all(|c| c.is_ascii_digit()) {
+                    return Err(CoerceError::ValueForm {
+                        expected: "an unsigned integer (decimal or 0x hex)",
+                        got: text.to_owned(),
+                    });
+                }
+                match text.parse::<u64>() {
+                    Ok(val) => {
+                        if let Some(limit) = max
+                            && val > limit
+                        {
+                            return Err(CoerceError::OutOfRange {
+                                got: text.to_owned(),
+                                max: limit,
+                            });
+                        }
+                        Ok(FieldValue::Unsigned(val))
+                    }
+                    Err(_) => Err(CoerceError::ValueForm {
+                        expected: "an unsigned integer (decimal or 0x hex)",
+                        got: text.to_owned(),
+                    }),
+                }
+            }
+        }
+        FieldKind::Signed => {
+            if text.is_empty() || text.starts_with('+') || text.contains('_') {
+                return Err(CoerceError::ValueForm {
+                    expected: "a signed integer (decimal or 0x hex)",
+                    got: text.to_owned(),
+                });
+            }
+            let (neg, rest) = if let Some(stripped) = text.strip_prefix('-') {
+                (true, stripped)
+            } else {
+                (false, text)
+            };
+            if rest.is_empty() {
+                return Err(CoerceError::ValueForm {
+                    expected: "a signed integer (decimal or 0x hex)",
+                    got: text.to_owned(),
+                });
+            }
+            if let Some(hex) = rest.strip_prefix("0x").or_else(|| rest.strip_prefix("0X")) {
+                if hex.is_empty() || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+                    return Err(CoerceError::ValueForm {
+                        expected: "a signed integer (decimal or 0x hex)",
+                        got: text.to_owned(),
+                    });
+                }
+                match u64::from_str_radix(hex, 16) {
+                    Ok(val) => {
+                        if neg {
+                            if val == 1_u64 << 63 {
+                                Ok(FieldValue::Signed(i64::MIN))
+                            } else {
+                                let pos =
+                                    i64::try_from(val).map_err(|_| CoerceError::ValueForm {
+                                        expected: "a signed integer (decimal or 0x hex)",
+                                        got: text.to_owned(),
+                                    })?;
+                                let signed =
+                                    pos.checked_neg().ok_or_else(|| CoerceError::ValueForm {
+                                        expected: "a signed integer (decimal or 0x hex)",
+                                        got: text.to_owned(),
+                                    })?;
+                                Ok(FieldValue::Signed(signed))
+                            }
+                        } else {
+                            let signed =
+                                i64::try_from(val).map_err(|_| CoerceError::ValueForm {
+                                    expected: "a signed integer (decimal or 0x hex)",
+                                    got: text.to_owned(),
+                                })?;
+                            Ok(FieldValue::Signed(signed))
+                        }
+                    }
+                    Err(_) => Err(CoerceError::ValueForm {
+                        expected: "a signed integer (decimal or 0x hex)",
+                        got: text.to_owned(),
+                    }),
+                }
+            } else {
+                if !rest.chars().all(|c| c.is_ascii_digit()) {
+                    return Err(CoerceError::ValueForm {
+                        expected: "a signed integer (decimal or 0x hex)",
+                        got: text.to_owned(),
+                    });
+                }
+                match text.parse::<i64>() {
+                    Ok(val) => Ok(FieldValue::Signed(val)),
+                    Err(_) => Err(CoerceError::ValueForm {
+                        expected: "a signed integer (decimal or 0x hex)",
+                        got: text.to_owned(),
+                    }),
+                }
+            }
+        }
+        FieldKind::Text => Ok(FieldValue::Text(text.to_owned())),
+        FieldKind::Bytes => {
+            let Some(hex) = text.strip_prefix("0x").or_else(|| text.strip_prefix("0X")) else {
+                return Err(CoerceError::ValueForm {
+                    expected: "bytes as 0x followed by an even number of hex digits",
+                    got: text.to_owned(),
+                });
+            };
+            if hex.is_empty() {
+                return Ok(FieldValue::Bytes(Bytes::new()));
+            }
+            if hex.len() % 2 != 0 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+                return Err(CoerceError::ValueForm {
+                    expected: "bytes as 0x followed by an even number of hex digits",
+                    got: text.to_owned(),
+                });
+            }
+            let hex_bytes = hex.as_bytes();
+            let mut out = Vec::with_capacity(hex_bytes.len() / 2);
+            for chunk in hex_bytes.chunks_exact(2) {
+                if let (Some(&high), Some(&low)) = (chunk.first(), chunk.get(1)) {
+                    let h = hex_nibble(high).ok_or_else(|| CoerceError::ValueForm {
+                        expected: "bytes as 0x followed by an even number of hex digits",
+                        got: text.to_owned(),
+                    })?;
+                    let l = hex_nibble(low).ok_or_else(|| CoerceError::ValueForm {
+                        expected: "bytes as 0x followed by an even number of hex digits",
+                        got: text.to_owned(),
+                    })?;
+                    out.push((h << 4) | l);
+                }
+            }
+            Ok(FieldValue::Bytes(Bytes::from(out)))
+        }
+        FieldKind::Ipv4 => match Ipv4Addr::from_str(text) {
+            Ok(addr) => Ok(FieldValue::Ipv4(addr)),
+            Err(_) => Err(CoerceError::ValueForm {
+                expected: "an IPv4 address",
+                got: text.to_owned(),
+            }),
+        },
+        FieldKind::Ipv6 => {
+            if text.contains('%') {
+                return Err(CoerceError::ValueForm {
+                    expected: "an IPv6 address",
+                    got: text.to_owned(),
+                });
+            }
+            match Ipv6Addr::from_str(text) {
+                Ok(addr) => Ok(FieldValue::Ipv6(addr)),
+                Err(_) => Err(CoerceError::ValueForm {
+                    expected: "an IPv6 address",
+                    got: text.to_owned(),
+                }),
+            }
+        }
+        FieldKind::Mac => match parse_mac(text) {
+            Some(mac) => Ok(FieldValue::Mac(mac)),
+            None => Err(CoerceError::ValueForm {
+                expected: "a MAC address",
+                got: text.to_owned(),
+            }),
+        },
+        FieldKind::List => Err(CoerceError::ValueForm {
+            expected: "list",
+            got: text.to_owned(),
+        }),
+    }
+}
+
+#[expect(
+    clippy::arithmetic_side_effects,
+    reason = "each arm bounds value to its own ASCII range, so subtraction and addition stay inside u8"
+)]
+fn hex_nibble(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        b'A'..=b'F' => Some(value - b'A' + 10),
+        _ => None,
+    }
+}
+
+/// Schema-driven wrapper. This branch passes `element: None`, `max: None`, `derived: schema.derived`; the reflection branch fills in the new schema slots after merge.
+pub fn coerce(schema: &crate::layer::FieldSchema, text: &str) -> Result<FieldValue, CoerceError> {
+    coerce_kind(schema.kind, None, None, schema.derived, text)
+}
 
 /// A value whose wire representation may be derived, exact, or deliberately raw.
 ///

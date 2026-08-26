@@ -88,12 +88,17 @@ fn render_record(
     section: output::dns::Section,
     record: &output::dns::Record,
 ) -> Result<(), CliError> {
-    let data = serde_json::to_string(&record.data)
-        .map_err(|error| CliError::new(70, format!("DNS output serialization failed: {error}")))?;
+    let data = serde_json::to_string(&record.data).map_err(serialization_failure)?;
     write_stdout_line(format_args!(
         "record section={} owner={} class={} ttl={} data={}",
         section, record.owner, record.class, record.ttl, data,
     ))
+}
+
+/// Record data that already survived decoding cannot fail to serialize, so a
+/// failure here is an internal fault rather than anything the caller sent.
+fn serialization_failure(error: serde_json::Error) -> CliError {
+    CliError::new(70, format!("DNS output serialization failed: {error}"))
 }
 
 struct ResponseLine<'a> {
@@ -134,7 +139,7 @@ mod tests {
     use packetcraftr::dns;
 
     use super::super::Dns;
-    use super::{ResponseLine, response_summary};
+    use super::{ResponseLine, response_summary, serialization_failure};
     use crate::commands::target_workflow::TargetWorkflow as _;
     use crate::rendering::ndjson_test_support::{assert_contiguous, stream};
     use packetcraftr::output;
@@ -193,6 +198,20 @@ mod tests {
 
         assert!(summary.contains("response_code_name=NOERROR"));
         assert!(!summary.contains(" response_name="));
+    }
+
+    #[test]
+    fn record_serialization_failure_stays_an_internal_error() {
+        let error = serde_json::from_str::<serde_json::Value>("{").expect_err("truncated JSON");
+        let rendered = error.to_string();
+
+        let failure = serialization_failure(error);
+
+        assert_eq!(failure.exit_code, 70);
+        assert_eq!(
+            failure.message,
+            format!("DNS output serialization failed: {rendered}")
+        );
     }
 
     #[test]

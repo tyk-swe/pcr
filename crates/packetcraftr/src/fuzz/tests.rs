@@ -572,3 +572,42 @@ fn live_fuzz_consults_the_authorizer_exactly_once_before_any_execution() {
     assert_eq!(executor.executions, 0);
     assert_eq!(error.classification().code, "policy.public_destination");
 }
+
+#[test]
+fn live_fuzz_authorizes_a_campaign_where_no_case_built() {
+    let registry =
+        Arc::new(packetcraftr_core::protocol::builtin::registry().expect("built-in registry"));
+    let request = packet_fuzz::Request {
+        seed: 0x5eed,
+        cases: 4,
+        strategies: vec![packet_fuzz::Strategy::Malformed],
+        targets: vec!["1.length".parse().expect("derived length target")],
+        ..packet_fuzz::Request::default()
+    };
+    let offline =
+        packet_fuzz::run(&request, packet(), Arc::clone(&registry)).expect("offline campaign");
+    assert!(
+        offline.cases.iter().all(|case| case.built.is_none()),
+        "the fixture must reject every case so the campaign declares no packets"
+    );
+    let mut authorizer = DenyingAuthorizer { invocations: 0 };
+    let mut executor = CountingExecutor::default();
+
+    let error = run(
+        &request,
+        LiveOptions {
+            destination: Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 9))),
+            ..LiveOptions::default()
+        },
+        packet(),
+        registry,
+        &mut authorizer,
+        &mut executor,
+        &mut NoopClock,
+    )
+    .expect_err("a campaign with nothing to send is still authorized");
+
+    assert_eq!(authorizer.invocations, 1);
+    assert_eq!(executor.executions, 0);
+    assert_eq!(error.classification().code, "policy.public_destination");
+}

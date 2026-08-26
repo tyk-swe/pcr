@@ -84,3 +84,23 @@ pub struct Summary {
     pub diagnostics: Vec<Diagnostic>,
     pub stats: Stats,
 }
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+
+    use super::*;
+
+    #[test]
+    fn names_match_the_serialized_names() {
+        for outcome in [
+            CaseOutcome::Built,
+            CaseOutcome::Rejected,
+            CaseOutcome::Response,
+            CaseOutcome::Timeout,
+        ] {
+            let serialized = serde_json::to_value(outcome).expect("case outcome is a name");
+            assert_eq!(serialized.as_str(), Some(outcome.as_str()));
+        }
+    }
+}

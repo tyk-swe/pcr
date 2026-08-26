@@ -282,6 +282,55 @@ mod tests {
         assert_eq!(unrepresentable.exit_code, 70);
     }
 
+    /// A reader that dies partway through is an I/O failure, not a malformed
+    /// document: exit 5, with the byte count that made it through discarded.
+    #[test]
+    fn a_reader_that_fails_mid_read_is_reported_as_an_io_failure() {
+        struct BrokenReader {
+            delivered: bool,
+        }
+
+        impl Read for BrokenReader {
+            fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+                if self.delivered {
+                    return Err(io::Error::from(io::ErrorKind::BrokenPipe));
+                }
+                self.delivered = true;
+                let written = buffer.len().min(2);
+                buffer
+                    .get_mut(..written)
+                    .expect("the truncated prefix is in bounds")
+                    .fill(b'a');
+                Ok(written)
+            }
+        }
+
+        for kind in [InputKind::Recipe, InputKind::Frame] {
+            let required = read_bounded(BrokenReader { delivered: false }, 64, kind)
+                .expect_err("a broken reader must fail");
+            assert_eq!(required.exit_code, 5, "{kind:?}");
+            assert!(
+                required.message.starts_with("read "),
+                "{}",
+                required.message
+            );
+            assert!(
+                required.message.to_lowercase().contains("broken pipe"),
+                "{}",
+                required.message
+            );
+
+            let optional = read_bounded_allow_empty(BrokenReader { delivered: false }, 64, kind)
+                .expect_err("a broken reader must fail even where empty input is allowed");
+            assert_eq!(optional.exit_code, 5, "{kind:?}");
+            assert!(
+                optional.message.starts_with("read "),
+                "{}",
+                optional.message
+            );
+        }
+    }
+
     #[test]
     fn terminal_input_decision_is_immediate_and_command_specific() {
         let recipe = require_redirected_stdin(InputKind::Recipe, true)

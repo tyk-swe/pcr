@@ -465,8 +465,31 @@ fn unsupported_output_formats_fail_before_a_capture_is_read() {
 }
 
 #[test]
+fn dissect_rejects_byte_oriented_output_and_names_the_format() {
+    let capture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/captures/tls-handshake.pcapng");
+    let path = capture.to_str().expect("example capture path is UTF-8");
+
+    for format in ["hex", "pcap"] {
+        let refused = run(&["--output", format, "read", path, "--dissect"]);
+        assert_eq!(refused.status.code(), Some(2), "{format}");
+        assert!(refused.stdout.is_empty(), "{format}");
+        let rendered = String::from_utf8_lossy(&refused.stderr);
+        assert!(
+            rendered.contains("error[cli.dissect_unsupported_format]"),
+            "{format}: {rendered}"
+        );
+        assert!(
+            rendered.contains(&format!("--dissect has no effect on {format} output")),
+            "{format}: {rendered}"
+        );
+    }
+}
+
+#[test]
 fn missing_input_file_reports_the_same_io_failure_for_every_reader() {
-    let missing = std::env::temp_dir().join("packetcraftr-does-not-exist.pcap");
+    let absent = tempfile::TempDir::new().expect("temporary directory must open");
+    let missing = absent.path().join("packetcraftr-does-not-exist.pcap");
     let missing = missing.to_str().expect("temp path is UTF-8");
     let commands: [&[&str]; 6] = [
         &["--output", "json", "expert", missing],

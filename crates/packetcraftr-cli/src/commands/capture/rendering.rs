@@ -206,6 +206,7 @@ mod tests {
 
     use std::collections::VecDeque;
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::UNIX_EPOCH;
 
     use packetcraftr::core::frame::{Frame, LinkType};
@@ -219,6 +220,7 @@ mod tests {
         metadata: net::capture::Metadata,
         frames: VecDeque<Result<net::capture::Captured, net::Error>>,
         shutdown_error: Option<net::Error>,
+        shutdowns: Arc<AtomicUsize>,
     }
 
     impl FakeSession {
@@ -242,6 +244,7 @@ mod tests {
                 },
                 frames,
                 shutdown_error: None,
+                shutdowns: Arc::new(AtomicUsize::new(0)),
             }
         }
     }
@@ -263,6 +266,7 @@ mod tests {
         }
 
         fn shutdown(&mut self) -> Result<(), net::Error> {
+            self.shutdowns.fetch_add(1, Ordering::Relaxed);
             match self.shutdown_error.take() {
                 Some(error) => Err(error),
                 None => Ok(()),
@@ -391,6 +395,96 @@ mod tests {
         assert_eq!(records[1]["stats"]["packets_completed"], 1);
         assert_eq!(records[1]["stats"]["bytes"], 3);
         assert_matches_published_schema(&records);
+    }
+
+    /// The byte budget stops the capture where the frame budget still had
+    /// room, and the records emitted up to that point stay a clean prefix.
+    #[test]
+    fn capture_byte_budget_stops_the_stream_and_shuts_the_session_down() {
+        let limits = net::capture::Limits::default();
+        let capture = FakeSession::with_frames(4);
+        let shutdowns = Arc::clone(&capture.shutdowns);
+        let (mut stream, output) = stream(output::contract::Command::Capture);
+
+        let error = render_stream(
+            capture,
+            Duration::from_secs(1),
+            limits,
+            budget(8, 2),
+            None,
+            &mut stream,
+        )
+        .expect_err("the byte budget must stop the capture");
+
+        assert_eq!(error.classification.code, "policy.byte_limit");
+        assert_eq!(shutdowns.load(Ordering::Relaxed), 1);
+
+        let records = output.records();
+        assert_contiguous(&records);
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0]["result"]["source_frame"], 1);
+        assert_eq!(records[1]["result"]["source_frame"], 2);
+        assert_matches_published_schema(&records);
+    }
+
+    /// A spent frame budget is the capture finishing, not the capture failing.
+    #[test]
+    fn capture_frame_budget_ends_the_stream_without_an_error() {
+        let limits = net::capture::Limits::default();
+        let capture = FakeSession::with_frames(4);
+        let shutdowns = Arc::clone(&capture.shutdowns);
+        let (mut stream, output) = stream(output::contract::Command::Capture);
+
+        render_stream(
+            capture,
+            Duration::from_secs(1),
+            limits,
+            budget(1, 64),
+            None,
+            &mut stream,
+        )
+        .expect("a spent frame budget is a normal end");
+
+        assert_eq!(shutdowns.load(Ordering::Relaxed), 1);
+
+        let records = output.records();
+        assert_contiguous(&records);
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0]["result"]["source_frame"], 1);
+        assert_eq!(records[1]["result"]["event"], "complete");
+        assert_eq!(records[1]["stats"]["packets_attempted"], 1);
+        assert_eq!(records[1]["stats"]["packets_completed"], 1);
+        assert_matches_published_schema(&records);
+    }
+
+    /// A byte counter that would wrap is a budget the capture cannot pay from,
+    /// not an internal fault: it has to read as the same limit refusal.
+    #[test]
+    fn capture_byte_counter_overflow_reads_as_the_byte_limit() {
+        let limits = net::capture::Limits::default();
+        let mut budget = budget(8, u64::MAX);
+        budget
+            .account(u64::MAX)
+            .expect("the first charge fills the counter exactly");
+
+        let capture = FakeSession::with_frames(1);
+        let shutdowns = Arc::clone(&capture.shutdowns);
+        let (mut stream, output) = stream(output::contract::Command::Capture);
+
+        let error = render_stream(
+            capture,
+            Duration::from_secs(1),
+            limits,
+            budget,
+            None,
+            &mut stream,
+        )
+        .expect_err("the next byte cannot be charged");
+
+        assert_eq!(error.classification.code, "policy.byte_limit");
+        assert_ne!(error.exit_code, 70);
+        assert_eq!(shutdowns.load(Ordering::Relaxed), 1);
+        assert!(output.records().is_empty());
     }
 
     #[test]

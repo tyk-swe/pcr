@@ -13,6 +13,11 @@ use std::path::{Path, PathBuf};
 use packetcraftr::core::document::{DEFAULT_MAX_DOCUMENT_BYTES, Format, Packet};
 use serde_json::Value;
 
+/// The published packet examples, and how many of those are JSON. Both are
+/// exact: a new example has to be added here on purpose.
+const PUBLISHED_PACKET_EXAMPLES: usize = 4;
+const PUBLISHED_JSON_PACKET_EXAMPLES: usize = 3;
+
 fn examples_directory() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/documents")
 }
@@ -32,9 +37,10 @@ fn packet_examples() -> Vec<PathBuf> {
         })
         .collect::<Vec<_>>();
     examples.sort();
-    assert!(
-        examples.len() >= 4,
-        "expected the four published packet examples, found {examples:?}"
+    assert_eq!(
+        examples.len(),
+        PUBLISHED_PACKET_EXAMPLES,
+        "expected exactly {PUBLISHED_PACKET_EXAMPLES} published packet examples, found {examples:?}"
     );
     examples
 }
@@ -55,7 +61,7 @@ fn every_published_json_packet_example_validates_against_the_schema() {
     .expect("packet schema must be valid JSON");
     let validator = jsonschema::validator_for(&schema).expect("packet schema must compile");
 
-    let mut validated = 0;
+    let mut validated = 0_usize;
     for path in packet_examples() {
         if format_for(&path) != Format::Json {
             continue;
@@ -72,9 +78,9 @@ fn every_published_json_packet_example_validates_against_the_schema() {
         });
         validated += 1;
     }
-    assert!(
-        validated >= 3,
-        "expected at least three JSON packet examples"
+    assert_eq!(
+        validated, PUBLISHED_JSON_PACKET_EXAMPLES,
+        "expected exactly {PUBLISHED_JSON_PACKET_EXAMPLES} JSON packet examples, validated {validated}"
     );
 }
 

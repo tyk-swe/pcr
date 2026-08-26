@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -173,7 +174,7 @@ where
         capture
             .wait_ready(self.options.attempt_timeout)
             .map_err(|error| map_io_error(request, "waiting for capture readiness", error))?;
-        let mut captured = Vec::new();
+        let mut captured: VecDeque<Frame> = VecDeque::new();
         let mut captured_bytes = 0usize;
         let mut evidence_truncated = false;
         self.drain_pre_request(
@@ -233,7 +234,7 @@ where
                     return Ok(NeighborExchangeOutcome {
                         mac_address: Some(mac_address),
                         attempts: attempt,
-                        captured,
+                        captured: Vec::from(captured),
                         evidence_truncated,
                     });
                 }
@@ -249,7 +250,7 @@ where
         Ok(NeighborExchangeOutcome {
             mac_address: None,
             attempts: self.options.max_attempts,
-            captured,
+            captured: Vec::from(captured),
             evidence_truncated,
         })
     }
@@ -258,7 +259,7 @@ where
         &self,
         request: &Request,
         capture: &mut S,
-        captured: &mut Vec<Frame>,
+        captured: &mut VecDeque<Frame>,
         captured_bytes: &mut usize,
         evidence_truncated: &mut bool,
     ) -> Result<(), Error> {

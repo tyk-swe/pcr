@@ -70,7 +70,7 @@ impl CaptureBudget {
             .checked_add(1)
             .filter(|frames| *frames <= self.max_frames)
             .ok_or(Error::PacketLimit {
-                actual: self.max_frames.saturating_add(1),
+                actual: self.frames.saturating_add(1),
                 limit: self.max_frames,
             })?;
         let bytes = self
@@ -171,5 +171,39 @@ mod tests {
             })
         );
         assert_eq!(budget.frames(), u64::MAX);
+    }
+
+    #[test]
+    fn a_zero_budget_is_exhausted_before_the_first_frame() {
+        let mut budget = CaptureBudget::new(&policy(0, 0));
+        assert!(budget.is_exhausted());
+
+        assert_eq!(
+            budget.account(0),
+            Err(Error::PacketLimit {
+                actual: 1,
+                limit: 0
+            })
+        );
+        assert_eq!(budget.frames(), 0);
+        assert_eq!(budget.bytes(), 0);
+    }
+
+    #[test]
+    fn a_single_frame_budget_pays_for_exactly_one_one_byte_frame() {
+        let mut budget = CaptureBudget::new(&policy(1, 1));
+        assert!(!budget.is_exhausted());
+        budget.account(1).expect("the only affordable frame");
+
+        assert!(budget.is_exhausted());
+        assert_eq!(budget.frames(), 1);
+        assert_eq!(budget.bytes(), 1);
+        assert_eq!(
+            budget.account(1),
+            Err(Error::PacketLimit {
+                actual: 2,
+                limit: 1
+            })
+        );
     }
 }

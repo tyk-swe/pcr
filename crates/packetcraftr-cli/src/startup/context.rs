@@ -29,6 +29,10 @@ pub(super) fn from_env() -> Context {
 
 /// Reads the global options the way clap will read them: the last `--output`
 /// and `--color` win, and the first bare word is the subcommand.
+///
+/// Only a value this scan understands replaces an earlier one. A dangling or
+/// unparsable repeat is left for clap to reject, and the format picked up so
+/// far still decides how that rejection is rendered.
 fn parse(arguments: &[OsString]) -> Context {
     let mut context = Context::default();
     let mut saw_root_positional = false;
@@ -41,7 +45,9 @@ fn parse(arguments: &[OsString]) -> Context {
 
         if argument.as_os_str() == "--output" {
             let value = separate_option_value(arguments, index);
-            context.format = value.and_then(OsStr::to_str).and_then(parse_machine_format);
+            if let Some(parsed) = value.and_then(OsStr::to_str).and_then(parse_machine_format) {
+                context.format = Some(parsed);
+            }
             index = index
                 .saturating_add(usize::from(value.is_some()))
                 .saturating_add(1);
@@ -49,9 +55,9 @@ fn parse(arguments: &[OsString]) -> Context {
         }
         if argument.as_os_str() == "--color" {
             let value = separate_option_value(arguments, index);
-            context.color = value
-                .and_then(OsStr::to_str)
-                .map_or(ColorChoice::Auto, parse_color_choice);
+            if let Some(parsed) = value.and_then(OsStr::to_str).and_then(parse_color_choice) {
+                context.color = parsed;
+            }
             index = index
                 .saturating_add(usize::from(value.is_some()))
                 .saturating_add(1);
@@ -60,12 +66,16 @@ fn parse(arguments: &[OsString]) -> Context {
 
         let argument = argument.to_str();
         if let Some(value) = argument.and_then(|argument| argument.strip_prefix("--output=")) {
-            context.format = parse_machine_format(value);
+            if let Some(parsed) = parse_machine_format(value) {
+                context.format = Some(parsed);
+            }
             index = index.saturating_add(1);
             continue;
         }
         if let Some(value) = argument.and_then(|argument| argument.strip_prefix("--color=")) {
-            context.color = parse_color_choice(value);
+            if let Some(parsed) = parse_color_choice(value) {
+                context.color = parsed;
+            }
             index = index.saturating_add(1);
             continue;
         }
@@ -101,11 +111,12 @@ fn parse_machine_format(value: &str) -> Option<MachineFormat> {
     }
 }
 
-fn parse_color_choice(value: &str) -> ColorChoice {
+fn parse_color_choice(value: &str) -> Option<ColorChoice> {
     match value {
-        "always" => ColorChoice::Always,
-        "never" => ColorChoice::Never,
-        _ => ColorChoice::Auto,
+        "always" => Some(ColorChoice::Always),
+        "never" => Some(ColorChoice::Never),
+        "auto" => Some(ColorChoice::Auto),
+        _ => None,
     }
 }
 
@@ -181,6 +192,28 @@ mod tests {
                 format: Some(MachineFormat::Json),
                 color: "auto",
                 command: None,
+            },
+            // A dangling repeat is clap's to reject, and the error document
+            // still goes out in the format the earlier value asked for.
+            Case {
+                arguments: &["packetcraftr", "--output", "json", "build", "--output"],
+                format: Some(MachineFormat::Json),
+                color: "auto",
+                command: Some(output::contract::Command::Build),
+            },
+            Case {
+                arguments: &[
+                    "packetcraftr",
+                    "--output=json",
+                    "--output",
+                    "bogus",
+                    "--color=never",
+                    "--color=bogus",
+                    "build",
+                ],
+                format: Some(MachineFormat::Json),
+                color: "never",
+                command: Some(output::contract::Command::Build),
             },
         ];
 

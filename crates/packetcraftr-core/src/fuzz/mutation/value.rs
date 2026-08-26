@@ -261,6 +261,11 @@ fn bit_flip_value(original: &FieldValue, random: &mut SplitMix64, maximum: usize
         return FieldValue::Bytes(Bytes::from_static(&[1]));
     }
     if bytes.len() > maximum {
+        if maximum == 0 {
+            // A zero field budget leaves no byte to flip, so the bounded
+            // prefix is empty and the mutation reduces to the empty value.
+            return FieldValue::Bytes(Bytes::new());
+        }
         // Replacing an oversized value with a bounded prefix keeps allocation
         // within the mutation budget and makes the reduction explicit.
         #[expect(
@@ -298,6 +303,11 @@ fn malformed_value(
     limits: super::super::request::Limits,
 ) -> FieldValue {
     if kind == FieldKind::Unsigned {
+        if limits.max_field_bytes == 0 {
+            // No field budget leaves no room for a reflective type change, so
+            // the malformed value stays inside the numeric domain.
+            return FieldValue::Unsigned(random.next_u64() & u16::MAX as u64);
+        }
         if round & 1 == 0 {
             return FieldValue::Unsigned(random.next_u64() & u16::MAX as u64);
         }
@@ -632,6 +642,52 @@ mod tests {
             panic!("odd malformed round must change the reflective type")
         };
         assert!((1..=4).contains(&malformed.len()));
+    }
+
+    #[test]
+    fn a_zero_field_budget_leaves_bit_flip_and_malformed_mutations_bounded() {
+        let bytes = resolved(FieldKind::Bytes);
+        assert_eq!(
+            mutation_value(
+                Strategy::BitFlip,
+                &bytes,
+                &FieldValue::Bytes(Bytes::from_static(b"abc")),
+                5,
+                0,
+                limits(0, 2),
+            ),
+            FieldValue::Bytes(Bytes::new())
+        );
+
+        let unsigned = resolved(FieldKind::Unsigned);
+        for round in 0..4 {
+            assert!(
+                matches!(
+                    mutation_value(
+                        Strategy::Malformed,
+                        &unsigned,
+                        &FieldValue::Unsigned(1),
+                        5,
+                        round,
+                        limits(0, 2),
+                    ),
+                    FieldValue::Unsigned(0..=65_535)
+                ),
+                "round {round}"
+            );
+        }
+
+        assert_eq!(
+            mutation_value(
+                Strategy::Random,
+                &bytes,
+                &FieldValue::Bytes(Bytes::from_static(b"abc")),
+                5,
+                0,
+                limits(0, 2),
+            ),
+            FieldValue::Bytes(Bytes::new())
+        );
     }
 
     #[test]

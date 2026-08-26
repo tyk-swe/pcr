@@ -5,6 +5,8 @@
 
 #![forbid(unsafe_code)]
 
+use std::collections::VecDeque;
+
 use bytes::Bytes;
 
 use super::error::{map_io_error, resolution_error};
@@ -106,7 +108,7 @@ pub(super) fn validate_neighbor_send(
 pub(super) fn retain_evidence(
     frame: Frame,
     options: &Options,
-    captured: &mut Vec<Frame>,
+    captured: &mut VecDeque<Frame>,
     captured_bytes: &mut usize,
     truncated: &mut bool,
 ) {
@@ -119,25 +121,27 @@ pub(super) fn retain_evidence(
         return;
     }
     *captured_bytes = captured_bytes.saturating_add(frame.bytes().len());
-    captured.push(frame);
+    captured.push_back(frame);
 }
 
 pub(super) fn retain_matching_evidence(
     frame: Frame,
     options: &Options,
-    captured: &mut Vec<Frame>,
+    captured: &mut VecDeque<Frame>,
     captured_bytes: &mut usize,
     truncated: &mut bool,
 ) {
     let frame_length = frame.bytes().len();
-    let over_budget = |captured: &Vec<Frame>, captured_bytes: usize| {
+    let over_budget = |captured: &VecDeque<Frame>, captured_bytes: usize| {
         captured.len() >= options.max_capture_queue_frames
             || captured_bytes
                 .checked_add(frame_length)
                 .is_none_or(|total| total > options.max_captured_bytes)
     };
-    while !captured.is_empty() && over_budget(captured, *captured_bytes) {
-        let discarded = captured.remove(0);
+    while over_budget(captured, *captured_bytes) {
+        let Some(discarded) = captured.pop_front() else {
+            break;
+        };
         *captured_bytes = captured_bytes.saturating_sub(discarded.bytes().len());
         *truncated = true;
     }
@@ -148,7 +152,7 @@ pub(super) fn retain_matching_evidence(
         return;
     }
     *captured_bytes = captured_bytes.saturating_add(frame_length);
-    captured.push(frame);
+    captured.push_back(frame);
 }
 
 #[cfg(test)]
@@ -317,7 +321,7 @@ mod tests {
             max_captured_bytes: 4,
             snap_length: 128,
         };
-        let mut captured = Vec::new();
+        let mut captured = VecDeque::new();
         let mut bytes = 0;
         let mut truncated = false;
         retain_evidence(
@@ -370,7 +374,7 @@ mod tests {
             max_captured_bytes: 4,
             snap_length: 128,
         };
-        let mut captured = vec![frame(&[1, 2])];
+        let mut captured = VecDeque::from([frame(&[1, 2])]);
         let mut bytes = 2;
         let mut truncated = false;
         retain_matching_evidence(

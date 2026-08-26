@@ -57,7 +57,7 @@ pub(super) fn prepare(frame: Layer3Frame<'_>) -> Result<PreparedRawIp, Error> {
             (
                 IpAddr::V4(source),
                 IpAddr::V4(destination),
-                ipv4_submission(&bytes),
+                ipv4_submission(&bytes)?,
             )
         }
         6 => {
@@ -159,26 +159,30 @@ fn ipv6_address(bytes: &[u8]) -> Ipv6Addr {
 }
 
 #[cfg(target_os = "macos")]
-fn ipv4_submission(bytes: &Bytes) -> Bytes {
+fn ipv4_submission(bytes: &Bytes) -> Result<Bytes, Error> {
     macos_ipv4_submission(bytes)
 }
 
 #[cfg(not(target_os = "macos"))]
-fn ipv4_submission(bytes: &Bytes) -> Bytes {
-    bytes.clone()
+fn ipv4_submission(bytes: &Bytes) -> Result<Bytes, Error> {
+    Ok(bytes.clone())
 }
 
+/// Rewrites the two header fields the macOS raw IPv4 socket expects in host byte
+/// order. Callers must validate the packet first: a buffer shorter than the
+/// minimum header is rejected instead of being sent with big-endian fields the
+/// kernel would misread.
 #[cfg(target_os = "macos")]
-pub(super) fn macos_ipv4_submission(bytes: &Bytes) -> Bytes {
+pub(super) fn macos_ipv4_submission(bytes: &Bytes) -> Result<Bytes, Error> {
     let mut submission = bytes.to_vec();
     let Some(header) = submission.first_chunk_mut::<IPV4_MINIMUM_HEADER>() else {
-        return bytes.clone();
+        return Err(invalid_frame("truncated IPv4 header".to_owned()));
     };
     let total_length = u16::from_be_bytes([header[2], header[3]]);
     header[2..4].copy_from_slice(&total_length.to_ne_bytes());
     let flags_and_offset = u16::from_be_bytes([header[6], header[7]]);
     header[6..8].copy_from_slice(&flags_and_offset.to_ne_bytes());
-    Bytes::from(submission)
+    Ok(Bytes::from(submission))
 }
 
 #[cfg(windows)]

@@ -9,6 +9,10 @@ unintended network access as potentially security-sensitive.
 Security fixes target `main` and the latest published release, currently the
 `0.5.0-beta.x` line. Older releases, stable or beta, are unsupported.
 
+Dependency advisories that need a written decision are tracked in
+[`docs/security/`](docs/security), one file per advisory, and `deny.toml`
+is the enforced policy.
+
 ## Reporting a vulnerability
 
 Do not open a public issue or pull request. Email `mail@mail.tyk.sh` with the

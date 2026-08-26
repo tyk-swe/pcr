@@ -64,7 +64,9 @@ Each pull request should:
 - describe public API, schema/output, feature, and platform impact;
 - update `[Unreleased]` in `CHANGELOG.md` for user-visible changes;
 - update schemas and published examples together when a serialized contract
-  changes; and
+  changes;
+- record work you deliberately left out in [TODOS.md](TODOS.md), with the
+  change that deferred it; and
 - list the exact validation commands and outcomes.
 
 Review the full diff before requesting review. Cross-boundary changes need

@@ -37,7 +37,7 @@ impl Default for L2tpv3 {
 reflective_layer! {
     fn l2tpv3_schema() => { protocol: protocol("l2tpv3"), name: "L2TPv3" }
     impl L2tpv3 {
-        "session_id" => { kind: Unsigned, derived: false, required: true, description: "32-bit session identifier; zero is the control connection", reflect: session_id, layout: (0, 4) }
+        "session_id" => { kind: Unsigned, tier: Required, description: "32-bit session identifier; zero is the control connection", reflect: session_id, layout: (0, 4) }
     }
     layout pub(crate) fn l2tpv3_layout();
 }

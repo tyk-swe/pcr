@@ -56,13 +56,13 @@ reflective_layer! {
     fn probe_schema() => { protocol: packetcraftr_core::layer::Id::new("probe"), name: "Probe" }
     impl Probe {
         "value" | "probe_value" => {
-            kind: Unsigned, derived: false, required: true,
+            kind: Unsigned, tier: Required,
             description: "One-byte probe value",
             reflect: value,
             layout: (0, 1)
         },
         "enabled" => {
-            kind: Bool, derived: false, required: true,
+            kind: Bool, tier: Required,
             description: "Probe flag",
             get |layer| Some(packetcraftr_core::layer::reflect_get(&layer.enabled)),
             set |layer, value, name| packetcraftr_core::layer::reflect_set(
@@ -70,7 +70,7 @@ reflective_layer! {
             )
         },
         "label" => {
-            kind: Text, derived: false, required: true,
+            kind: Text, tier: Required,
             description: "Probe label",
             get |layer| Some(packetcraftr_core::layer::reflect_get(&layer.label)),
             set |layer, value, name| packetcraftr_core::layer::reflect_set(
@@ -78,7 +78,7 @@ reflective_layer! {
             )
         },
         "bytes" => {
-            kind: Bytes, derived: false, required: false,
+            kind: Bytes, tier: Optional, default: "0x",
             description: "Probe bytes",
             get |layer| Some(packetcraftr_core::layer::reflect_get(&layer.bytes)),
             set |layer, value, name| packetcraftr_core::layer::reflect_set(
@@ -86,7 +86,7 @@ reflective_layer! {
             )
         },
         "ipv4" => {
-            kind: Ipv4, derived: false, required: true,
+            kind: Ipv4, tier: Required,
             description: "Probe IPv4 address",
             get |layer| Some(packetcraftr_core::layer::reflect_get(&layer.ipv4)),
             set |layer, value, name| packetcraftr_core::layer::reflect_set(
@@ -94,7 +94,7 @@ reflective_layer! {
             )
         },
         "ipv6" => {
-            kind: Ipv6, derived: false, required: true,
+            kind: Ipv6, tier: Required,
             description: "Probe IPv6 address",
             get |layer| Some(packetcraftr_core::layer::reflect_get(&layer.ipv6)),
             set |layer, value, name| packetcraftr_core::layer::reflect_set(
@@ -102,7 +102,7 @@ reflective_layer! {
             )
         },
         "mac" => {
-            kind: Mac, derived: false, required: true,
+            kind: Mac, tier: Required,
             description: "Probe MAC address",
             get |layer| Some(packetcraftr_core::layer::reflect_get(&layer.mac)),
             set |layer, value, name| packetcraftr_core::layer::reflect_set(
@@ -110,7 +110,7 @@ reflective_layer! {
             )
         },
         "token" => {
-            kind: Bytes, derived: false, required: true,
+            kind: Bytes, tier: Required,
             description: "Eight-byte token",
             get |layer| Some(packetcraftr_core::layer::reflect_get(&layer.token)),
             set |layer, value, name| packetcraftr_core::layer::reflect_set(
@@ -118,12 +118,9 @@ reflective_layer! {
             )
         },
         "wire" => {
-            kind: Unsigned, derived: true, required: true,
+            kind: Unsigned, tier: Derived,
             description: "Derived wire value",
-            get |layer| Some(packetcraftr_core::layer::reflect_get(&layer.wire)),
-            set |layer, value, name| packetcraftr_core::layer::reflect_set(
-                &mut layer.wire, probe_schema(), name, value
-            )
+            wire: wire
         }
     }
     layout fn probe_layout();
@@ -138,7 +135,7 @@ reflective_layer! {
     fn child_schema() => { protocol: packetcraftr_core::layer::Id::new("child"), name: "Child" }
     impl Child {
         "value" => {
-            kind: Unsigned, derived: false, required: true,
+            kind: Unsigned, tier: Required,
             description: "Child value",
             get |layer| Some(packetcraftr_core::layer::reflect_get(&layer.value)),
             set |layer, value, name| packetcraftr_core::layer::reflect_set(

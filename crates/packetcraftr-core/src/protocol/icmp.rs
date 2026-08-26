@@ -67,29 +67,29 @@ macro_rules! icmp_reflection {
             fn $schema() => { protocol: protocol($protocol), name: $name }
             impl $ty {
                 "type" => {
-                    kind: Unsigned, derived: false, required: true,
+                    kind: Unsigned, tier: Required,
                     description: "ICMP message type",
                     reflect: icmp_type,
                     layout: (0, 1)
                 },
                 "code" => {
-                    kind: Unsigned, derived: false, required: true,
+                    kind: Unsigned, tier: Required,
                     description: "ICMP message code",
                     reflect: code,
                     layout: (1, 2)
                 },
                 "checksum" => {
-                    kind: Unsigned, derived: true, required: false,
+                    kind: Unsigned, tier: Derived,
                     description: "ICMP checksum",
-                    reflect: checksum,
+                    wire: checksum,
                     layout: (2, 4)
                 },
                 "body" => {
-                    kind: Bytes, derived: false, required: false,
+                    kind: Bytes, tier: Optional, default: "0x00000000",
                     description: "Type-specific ICMP body",
                     reflect: body,
                     layout: (4, 4_usize.saturating_add(body_len))
-                },
+                }
             }
             layout pub(crate) fn $layout(body_len: usize);
         }

@@ -76,28 +76,28 @@ impl Default for Udp {
 reflective_layer! {
     fn udp_schema() => { protocol: protocol("udp"), name: "UDP" }
     impl Udp {
-        "source_port" => {
-            kind: Unsigned, derived: false, required: true,
+        "source_port" | "sport" => {
+            kind: Unsigned, tier: Required,
             description: "UDP source port",
             reflect: source_port,
             layout: (0, 2)
         },
-        "destination_port" => {
-            kind: Unsigned, derived: false, required: true,
+        "destination_port" | "dport" => {
+            kind: Unsigned, tier: Required,
             description: "UDP destination port",
             reflect: destination_port,
             layout: (2, 4)
         },
         "length" => {
-            kind: Unsigned, derived: true, required: false,
+            kind: Unsigned, tier: Derived,
             description: "UDP datagram length",
-            reflect: length,
+            wire: length,
             layout: (4, 6)
         },
         "checksum" => {
-            kind: Unsigned, derived: true, required: false,
+            kind: Unsigned, tier: Derived,
             description: "UDP checksum",
-            reflect: checksum,
+            wire: checksum,
             layout: (6, 8)
         },
     }

@@ -43,24 +43,24 @@ impl Default for Sctp {
 reflective_layer! {
     fn sctp_schema() => { protocol: protocol("sctp"), name: "SCTP" }
     impl Sctp {
-        "source_port" => {
-            kind: Unsigned, derived: false, required: true, description: "SCTP source port",
+        "source_port" | "sport" => {
+            kind: Unsigned, tier: Required, description: "SCTP source port",
             reflect: source_port,
             layout: (0, 2)
         },
-        "destination_port" => {
-            kind: Unsigned, derived: false, required: true, description: "SCTP destination port",
+        "destination_port" | "dport" => {
+            kind: Unsigned, tier: Required, description: "SCTP destination port",
             reflect: destination_port,
             layout: (2, 4)
         },
-        "verification_tag" => {
-            kind: Unsigned, derived: false, required: true, description: "SCTP verification tag",
+        "verification_tag" | "vtag" => {
+            kind: Unsigned, tier: Required, description: "SCTP verification tag",
             reflect: verification_tag,
             layout: (4, 8)
         },
         "checksum" => {
-            kind: Unsigned, derived: true, required: false, description: "SCTP CRC32c checksum",
-            reflect: checksum,
+            kind: Unsigned, tier: Derived, description: "SCTP CRC32c checksum",
+            wire: checksum,
             layout: (8, 12)
         },
     }

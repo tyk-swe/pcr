@@ -2179,8 +2179,10 @@
       "required": [
         "name",
         "kind",
+        "tier",
         "required",
         "derived",
+        "aliases",
         "description"
       ],
       "properties": {
@@ -2202,11 +2204,46 @@
             "list"
           ]
         },
+        "tier": {
+          "type": "string",
+          "enum": [
+            "required",
+            "derived",
+            "optional"
+          ]
+        },
         "required": {
           "type": "boolean"
         },
         "derived": {
           "type": "boolean"
+        },
+        "default": {
+          "type": "string"
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "element": {
+          "type": "string",
+          "enum": [
+            "bool",
+            "unsigned",
+            "signed",
+            "text",
+            "bytes",
+            "ipv4",
+            "ipv6",
+            "mac",
+            "list"
+          ]
+        },
+        "max": {
+          "$ref": "#/$defs/uint64"
         },
         "description": {
           "type": "string"

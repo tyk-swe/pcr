@@ -62,10 +62,10 @@ macro_rules! declare_vlan_layer {
         reflective_layer! {
             fn $schema() => { protocol: protocol($protocol), name: $name }
             impl $ty {
-                "priority" => { kind: Unsigned, derived: false, required: false, description: "IEEE 802.1 priority code point", reflect_bounded: priority, 7_u64, layout: (0, 2) },
-                "drop_eligible" => { kind: Bool, derived: false, required: false, description: "Drop eligible indicator", reflect: drop_eligible, layout: (0, 2) },
-                "vlan_id" => { kind: Unsigned, derived: false, required: true, description: "VLAN identifier", reflect_bounded: vlan_id, 4095_u64, layout: (0, 2) },
-                "ether_type" => { kind: Unsigned, derived: true, required: false, description: "Encapsulated EtherType", reflect: ether_type, layout: (2, 4) },
+                "priority" | "pcp" => { kind: Unsigned, tier: Optional, default: "0", description: "IEEE 802.1 priority code point", reflect_bounded: priority, 7_u64, layout: (0, 2) },
+                "drop_eligible" | "dei" => { kind: Bool, tier: Optional, default: "false", description: "Drop eligible indicator", reflect: drop_eligible, layout: (0, 2) },
+                "vlan_id" | "vid" => { kind: Unsigned, tier: Required, description: "VLAN identifier", reflect_bounded: vlan_id, 4095_u64, layout: (0, 2) },
+                "ether_type" => { kind: Unsigned, tier: Derived, description: "Encapsulated EtherType", wire: ether_type, layout: (2, 4) },
             }
             layout pub(crate) fn $layout();
         }

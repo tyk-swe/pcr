@@ -62,11 +62,11 @@ impl Default for LinuxSll2 {
 reflective_layer! {
     fn linux_sll_schema() => { protocol: protocol("linux_sll"), name: "Linux cooked capture v1" }
     impl LinuxSll {
-        "protocol" => { kind: Unsigned, derived: true, required: false, description: "Protocol discriminator", reflect: protocol, layout: (14, 16) },
-        "packet_type" => { kind: Unsigned, derived: false, required: true, description: "Packet direction/type", reflect: packet_type, layout: (0, 2) },
-        "arp_hardware_type" => { kind: Unsigned, derived: false, required: true, description: "ARP hardware type", reflect: arp_hardware_type, layout: (2, 4) },
-        "address_length" => { kind: Unsigned, derived: false, required: true, description: "Link address length", reflect_bounded: address_length, 8_u64, layout: (4, 6) },
-        "address" => { kind: Bytes, derived: false, required: false, description: "Eight-byte link address slot", reflect: address, layout: (6, 14) },
+        "protocol" => { kind: Unsigned, tier: Derived, description: "Protocol discriminator", wire: protocol, layout: (14, 16) },
+        "packet_type" => { kind: Unsigned, tier: Required, description: "Packet direction/type", reflect: packet_type, layout: (0, 2) },
+        "arp_hardware_type" => { kind: Unsigned, tier: Required, description: "ARP hardware type", reflect: arp_hardware_type, layout: (2, 4) },
+        "address_length" => { kind: Unsigned, tier: Required, description: "Link address length", reflect_bounded: address_length, 8_u64, layout: (4, 6) },
+        "address" => { kind: Bytes, tier: Optional, default: "0x0000000000000000", description: "Eight-byte link address slot", reflect: address, layout: (6, 14) },
     }
     layout pub(crate) fn linux_sll_layout();
 }
@@ -74,12 +74,12 @@ reflective_layer! {
 reflective_layer! {
     fn linux_sll2_schema() => { protocol: protocol("linux_sll2"), name: "Linux cooked capture v2" }
     impl LinuxSll2 {
-        "protocol" => { kind: Unsigned, derived: true, required: false, description: "Protocol discriminator", reflect: protocol, layout: (0, 2) },
-        "packet_type" => { kind: Unsigned, derived: false, required: true, description: "Packet direction/type", reflect: packet_type, layout: (10, 11) },
-        "arp_hardware_type" => { kind: Unsigned, derived: false, required: true, description: "ARP hardware type", reflect: arp_hardware_type, layout: (8, 10) },
-        "interface_index" => { kind: Unsigned, derived: false, required: false, description: "Interface index", reflect: interface_index, layout: (4, 8) },
-        "address_length" => { kind: Unsigned, derived: false, required: true, description: "Link address length", reflect_bounded: address_length, 8_u64, layout: (11, 12) },
-        "address" => { kind: Bytes, derived: false, required: false, description: "Eight-byte link address slot", reflect: address, layout: (12, 20) },
+        "protocol" => { kind: Unsigned, tier: Derived, description: "Protocol discriminator", wire: protocol, layout: (0, 2) },
+        "packet_type" => { kind: Unsigned, tier: Required, description: "Packet direction/type", reflect: packet_type, layout: (10, 11) },
+        "arp_hardware_type" => { kind: Unsigned, tier: Required, description: "ARP hardware type", reflect: arp_hardware_type, layout: (8, 10) },
+        "interface_index" => { kind: Unsigned, tier: Optional, default: "0", description: "Interface index", reflect: interface_index, layout: (4, 8) },
+        "address_length" => { kind: Unsigned, tier: Required, description: "Link address length", reflect_bounded: address_length, 8_u64, layout: (11, 12) },
+        "address" => { kind: Bytes, tier: Optional, default: "0x0000000000000000", description: "Eight-byte link address slot", reflect: address, layout: (12, 20) },
     }
     layout pub(crate) fn linux_sll2_layout();
 }

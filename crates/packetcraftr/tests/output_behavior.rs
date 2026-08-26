@@ -11,7 +11,9 @@ use packetcraftr::core::error::{Classified, Kind};
 use packetcraftr::core::frame::{Direction as CaptureDirection, Frame, LinkType};
 use packetcraftr::core::protocol::support::BUILTIN_PROTOCOLS;
 use packetcraftr::core::{
-    diagnostic::Diagnostic, field::FieldKind as PacketFieldKind, layer::FieldSchema,
+    diagnostic::Diagnostic,
+    field::FieldKind as PacketFieldKind,
+    layer::{FieldSchema, Tier},
     layout::ByteRange,
 };
 use packetcraftr::netio::{
@@ -310,14 +312,19 @@ fn protocol_output_converts_every_field_kind_and_manifest_capability() {
     let schema = FieldSchema {
         name: "field_name",
         kind: PacketFieldKind::Unsigned,
-        derived: true,
-        required: false,
+        tier: Tier::Derived,
+        default: None,
+        aliases: &[],
+        element: None,
+        max: Some(255),
         description: "fixture field",
     };
     let field = Field::from(&schema);
     assert_eq!(field.name, "field_name");
+    assert_eq!(field.tier, "derived");
     assert!(field.derived);
     assert!(!field.required);
+    assert_eq!(field.max, Some(255));
 
     let summaries: Vec<Summary> = BUILTIN_PROTOCOLS.iter().map(Summary::from).collect();
     assert_eq!(summaries.len(), BUILTIN_PROTOCOLS.len());

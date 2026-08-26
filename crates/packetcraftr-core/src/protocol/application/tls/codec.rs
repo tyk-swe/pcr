@@ -324,27 +324,53 @@ fn optional_codes(values: &[u16]) -> Option<FieldValue> {
     (!values.is_empty()).then(|| unsigned_list(values))
 }
 
+impl Default for Tls {
+    fn default() -> Self {
+        Self {
+            content_type: 0,
+            version: 0,
+            record_count: 0,
+            handshake_type: None,
+            cipher_suite: None,
+            selected_version: None,
+            key_share_group: None,
+            incomplete: false,
+            ech: false,
+            sni: None,
+            sni_raw: None,
+            ja3: None,
+            ja3_raw: None,
+            ja4: None,
+            alpn: Vec::new(),
+            cipher_suites: Vec::new(),
+            supported_versions: Vec::new(),
+            supported_groups: Vec::new(),
+            wire: Bytes::new(),
+        }
+    }
+}
+
 reflective_layer! {
-    fn tls_schema() => { protocol: protocol("tls"), name: "TLS" }
+    fn tls_schema() => { protocol: protocol("tls"), name: "TLS", decode_only: true }
     impl Tls {
-        "content_type" => { kind: Unsigned, derived: false, required: false, description: "Record content type of the first record", get |layer| Some(FieldValue::from(layer.content_type)), set |_layer, _value, name| read_only(name), layout: (0, 1) },
-        "version" => { kind: Unsigned, derived: false, required: false, description: "Legacy record version of the first record", get |layer| Some(FieldValue::from(layer.version)), set |_layer, _value, name| read_only(name), layout: (1, 3) },
-        "record_count" => { kind: Unsigned, derived: false, required: false, description: "Complete records in this segment", get |layer| Some(FieldValue::from(layer.record_count)), set |_layer, _value, name| read_only(name) },
-        "handshake_type" => { kind: Unsigned, derived: false, required: false, description: "Handshake message type, when the whole message is in this segment", get |layer| layer.handshake_type.map(FieldValue::from), set |_layer, _value, name| read_only(name) },
-        "cipher_suite" => { kind: Unsigned, derived: false, required: false, description: "Cipher suite selected by a ServerHello", get |layer| layer.cipher_suite.map(FieldValue::from), set |_layer, _value, name| read_only(name) },
-        "selected_version" => { kind: Unsigned, derived: false, required: false, description: "Version selected by a ServerHello", get |layer| layer.selected_version.map(FieldValue::from), set |_layer, _value, name| read_only(name) },
-        "key_share_group" => { kind: Unsigned, derived: false, required: false, description: "Named group of a ServerHello key share", get |layer| layer.key_share_group.map(FieldValue::from), set |_layer, _value, name| read_only(name) },
-        "incomplete" => { kind: Bool, derived: false, required: false, description: "Whether a record continues past this segment", get |layer| Some(FieldValue::from(layer.incomplete)), set |_layer, _value, name| read_only(name) },
-        "ech" => { kind: Bool, derived: false, required: false, description: "Whether a ClientHello offered encrypted client hello", get |layer| Some(FieldValue::from(layer.ech)), set |_layer, _value, name| read_only(name) },
-        "sni" => { kind: Text, derived: false, required: false, description: "Validated server name offered by a ClientHello", get |layer| layer.sni.clone().map(FieldValue::Text), set |_layer, _value, name| read_only(name) },
-        "sni_raw" => { kind: Text, derived: false, required: false, description: "Verbatim server name bytes in hexadecimal", get |layer| layer.sni_raw.as_ref().map(|raw| FieldValue::Text(hex(raw))), set |_layer, _value, name| read_only(name) },
-        "ja3" => { kind: Text, derived: false, required: false, description: "Advisory JA3 fingerprint of a ClientHello (MD5 digest)", get |layer| layer.ja3.clone().map(FieldValue::Text), set |_layer, _value, name| read_only(name) },
-        "ja3_raw" => { kind: Text, derived: false, required: false, description: "Advisory JA3 fingerprint of a ClientHello before hashing", get |layer| layer.ja3_raw.clone().map(FieldValue::Text), set |_layer, _value, name| read_only(name) },
-        "ja4" => { kind: Text, derived: false, required: false, description: "Advisory JA4 fingerprint of a ClientHello", get |layer| layer.ja4.clone().map(FieldValue::Text), set |_layer, _value, name| read_only(name) },
-        "alpn" => { kind: List, derived: false, required: false, description: "Application protocols offered or selected", get |layer| optional_list(&layer.alpn), set |_layer, _value, name| read_only(name) },
-        "cipher_suites" => { kind: List, derived: false, required: false, description: "Cipher suites offered by a ClientHello", get |layer| optional_codes(&layer.cipher_suites), set |_layer, _value, name| read_only(name) },
-        "supported_versions" => { kind: List, derived: false, required: false, description: "Versions offered by a ClientHello", get |layer| optional_codes(&layer.supported_versions), set |_layer, _value, name| read_only(name) },
-        "supported_groups" => { kind: List, derived: false, required: false, description: "Named groups offered by a ClientHello", get |layer| optional_codes(&layer.supported_groups), set |_layer, _value, name| read_only(name) }
+        "content_type" => { kind: Unsigned, tier: Optional, default: "0", max: 255_u64, description: "Record content type of the first record", get |layer| Some(FieldValue::from(layer.content_type)), set |_layer, _value, name| read_only(name), layout: (0, 1) },
+        "version" => { kind: Unsigned, tier: Optional, default: "0", max: 65535_u64, description: "Legacy record version of the first record", get |layer| Some(FieldValue::from(layer.version)), set |_layer, _value, name| read_only(name), layout: (1, 3) },
+        "record_count" => { kind: Unsigned, tier: Optional, default: "0", max: 65535_u64, description: "Complete records in this segment", get |layer| Some(FieldValue::from(layer.record_count)), set |_layer, _value, name| read_only(name) },
+        "handshake_type" => { kind: Unsigned, tier: Required, max: 255_u64, description: "Handshake message type, when the whole message is in this segment", get |layer| layer.handshake_type.map(FieldValue::from), set |_layer, _value, name| read_only(name) },
+        "cipher_suite" => { kind: Unsigned, tier: Required, max: 65535_u64, description: "Cipher suite selected by a ServerHello", get |layer| layer.cipher_suite.map(FieldValue::from), set |_layer, _value, name| read_only(name) },
+        "selected_version" => { kind: Unsigned, tier: Required, max: 65535_u64, description: "Version selected by a ServerHello", get |layer| layer.selected_version.map(FieldValue::from), set |_layer, _value, name| read_only(name) },
+        "key_share_group" => { kind: Unsigned, tier: Required, max: 65535_u64, description: "Named group of a ServerHello key share", get |layer| layer.key_share_group.map(FieldValue::from), set |_layer, _value, name| read_only(name) },
+        "incomplete" => { kind: Bool, tier: Optional, default: "false", description: "Whether a record continues past this segment", get |layer| Some(FieldValue::from(layer.incomplete)), set |_layer, _value, name| read_only(name) },
+        "ech" => { kind: Bool, tier: Optional, default: "false", description: "Whether a ClientHello offered encrypted client hello", get |layer| Some(FieldValue::from(layer.ech)), set |_layer, _value, name| read_only(name) },
+        "sni" => { kind: Text, tier: Required, description: "Validated server name offered by a ClientHello", get |layer| layer.sni.clone().map(FieldValue::Text), set |_layer, _value, name| read_only(name) },
+        "sni_raw" => { kind: Text, tier: Required, description: "Verbatim server name bytes in hexadecimal", get |layer| layer.sni_raw.as_ref().map(|raw| FieldValue::Text(hex(raw))), set |_layer, _value, name| read_only(name) },
+        "ja3" => { kind: Text, tier: Required, description: "Advisory JA3 fingerprint of a ClientHello (MD5 digest)", get |layer| layer.ja3.clone().map(FieldValue::Text), set |_layer, _value, name| read_only(name) },
+        "ja3_raw" => { kind: Text, tier: Required, description: "Advisory JA3 fingerprint of a ClientHello before hashing", get |layer| layer.ja3_raw.clone().map(FieldValue::Text), set |_layer, _value, name| read_only(name) },
+        "ja4" => { kind: Text, tier: Required, description: "Advisory JA4 fingerprint of a ClientHello", get |layer| layer.ja4.clone().map(FieldValue::Text), set |_layer, _value, name| read_only(name) },
+        "alpn" => { kind: List, element: Text, tier: Required, description: "Application protocols offered or selected", get |layer| optional_list(&layer.alpn), set |_layer, _value, name| read_only(name) },
+        "cipher_suites" => { kind: List, element: Unsigned, tier: Required, description: "Cipher suites offered by a ClientHello", get |layer| optional_codes(&layer.cipher_suites), set |_layer, _value, name| read_only(name) },
+        "supported_versions" => { kind: List, element: Unsigned, tier: Required, description: "Versions offered by a ClientHello", get |layer| optional_codes(&layer.supported_versions), set |_layer, _value, name| read_only(name) },
+        "supported_groups" => { kind: List, element: Unsigned, tier: Required, description: "Named groups offered by a ClientHello", get |layer| optional_codes(&layer.supported_groups), set |_layer, _value, name| read_only(name) }
     }
     layout pub(crate) fn tls_layout();
 }

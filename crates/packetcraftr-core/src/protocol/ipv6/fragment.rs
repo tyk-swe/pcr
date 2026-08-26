@@ -39,10 +39,10 @@ impl Default for Fragment {
 reflective_layer! {
     fn fragment_schema() => { protocol: protocol("ipv6_fragment"), name: "IPv6 Fragment" }
     impl Fragment {
-        "next_header" => { kind: Unsigned, derived: true, required: false, description: "IPv6 next-header discriminator", reflect: next_header, layout: (0, 1) },
-        "fragment_offset" => { kind: Unsigned, derived: false, required: true, description: "Fragment offset in eight-byte units", reflect_bounded: fragment_offset, 0x1fff_u64, layout: (2, 4) },
-        "more_fragments" => { kind: Bool, derived: false, required: true, description: "More-fragments flag", reflect: more_fragments, layout: (2, 4) },
-        "identification" => { kind: Unsigned, derived: false, required: true, description: "Fragment identification", reflect: identification, layout: (4, 8) },
+        "next_header" => { kind: Unsigned, tier: Derived, description: "IPv6 next-header discriminator", wire: next_header, layout: (0, 1) },
+        "fragment_offset" => { kind: Unsigned, tier: Required, description: "Fragment offset in eight-byte units", reflect_bounded: fragment_offset, 0x1fff_u64, layout: (2, 4) },
+        "more_fragments" => { kind: Bool, tier: Required, description: "More-fragments flag", reflect: more_fragments, layout: (2, 4) },
+        "identification" => { kind: Unsigned, tier: Required, description: "Fragment identification", reflect: identification, layout: (4, 8) },
     }
     layout pub(crate) fn fragment_layout();
 }

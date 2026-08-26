@@ -70,14 +70,14 @@ impl Default for Geneve {
 reflective_layer! {
     fn geneve_schema() => { protocol: protocol("geneve"), name: "GENEVE" }
     impl Geneve {
-        "version" => { kind: Unsigned, derived: false, required: false, description: "2-bit GENEVE version; only version 0 is defined", reflect_bounded: version, 3_u64, layout: (0, 1) },
-        "control" => { kind: Bool, derived: false, required: false, description: "Control-packet O bit", reflect: control, layout: (1, 2) },
-        "critical" => { kind: Bool, derived: false, required: false, description: "Critical-options-present C bit", reflect: critical, layout: (1, 2) },
-        "reserved1" => { kind: Unsigned, derived: false, required: false, description: "Reserved 6 bits after the O and C bits", reflect_bounded: reserved1, 0x3f_u64, layout: (1, 2) },
-        "protocol_type" => { kind: Unsigned, derived: true, required: false, description: "EtherType of the encapsulated frame", reflect: protocol_type, layout: (2, 4) },
-        "vni" => { kind: Unsigned, derived: false, required: true, description: "24-bit virtual network identifier", reflect_bounded: vni, VNI_MAX, layout: (4, 7) },
-        "reserved2" => { kind: Unsigned, derived: false, required: false, description: "Reserved byte after the VNI", reflect: reserved2, layout: (7, 8) },
-        "options" => { kind: Bytes, derived: false, required: false, description: "Verbatim GENEVE option TLV bytes", reflect: options, layout: (GENEVE_BASE_LEN, options_end) },
+        "version" => { kind: Unsigned, tier: Optional, default: "0", description: "2-bit GENEVE version; only version 0 is defined", reflect_bounded: version, 3_u64, layout: (0, 1) },
+        "control" => { kind: Bool, tier: Optional, default: "false", description: "Control-packet O bit", reflect: control, layout: (1, 2) },
+        "critical" => { kind: Bool, tier: Optional, default: "false", description: "Critical-options-present C bit", reflect: critical, layout: (1, 2) },
+        "reserved1" => { kind: Unsigned, tier: Optional, default: "0", description: "Reserved 6 bits after the O and C bits", reflect_bounded: reserved1, 0x3f_u64, layout: (1, 2) },
+        "protocol_type" => { kind: Unsigned, tier: Derived, description: "EtherType of the encapsulated frame", wire: protocol_type, layout: (2, 4) },
+        "vni" => { kind: Unsigned, tier: Required, description: "24-bit virtual network identifier", reflect_bounded: vni, VNI_MAX, layout: (4, 7) },
+        "reserved2" => { kind: Unsigned, tier: Optional, default: "0", description: "Reserved byte after the VNI", reflect: reserved2, layout: (7, 8) },
+        "options" => { kind: Bytes, tier: Optional, default: "0x", description: "Verbatim GENEVE option TLV bytes", reflect: options, layout: (GENEVE_BASE_LEN, options_end) },
     }
     layout pub(crate) fn geneve_layout(options_end: usize);
 }

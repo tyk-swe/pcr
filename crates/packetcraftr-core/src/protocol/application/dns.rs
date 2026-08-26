@@ -269,6 +269,31 @@ fn format_name(labels: &[Vec<u8>]) -> String {
     name
 }
 
+impl Default for Dns {
+    fn default() -> Self {
+        Self {
+            id: 0,
+            response: false,
+            opcode: 0,
+            authoritative_answer: false,
+            truncated: false,
+            recursion_desired: false,
+            recursion_available: false,
+            authenticated_data: false,
+            checking_disabled: false,
+            rcode: 0,
+            question_count: 0,
+            answer_count: 0,
+            authority_count: 0,
+            additional_count: 0,
+            qnames: Vec::new(),
+            qtypes: Vec::new(),
+            qclasses: Vec::new(),
+            wire: Bytes::from_static(&[0; DNS_HEADER_LEN]),
+        }
+    }
+}
+
 fn read_only(field: &str) -> Result<(), FieldError> {
     Err(FieldError::ReadOnly {
         protocol: dns_schema().protocol.clone(),
@@ -277,25 +302,25 @@ fn read_only(field: &str) -> Result<(), FieldError> {
 }
 
 reflective_layer! {
-    fn dns_schema() => { protocol: protocol("dns"), name: "DNS" }
+    fn dns_schema() => { protocol: protocol("dns"), name: "DNS", decode_only: true }
     impl Dns {
-        "id" => { kind: Unsigned, derived: false, required: false, description: "Transaction identifier", get |layer| Some(FieldValue::from(layer.id)), set |_layer, _value, name| read_only(name), layout: (0, 2) },
-        "response" => { kind: Bool, derived: false, required: false, description: "Query/response flag", get |layer| Some(FieldValue::from(layer.response)), set |_layer, _value, name| read_only(name), layout: (2, 4) },
-        "opcode" => { kind: Unsigned, derived: false, required: false, description: "Operation code", get |layer| Some(FieldValue::from(layer.opcode)), set |_layer, _value, name| read_only(name), layout: (2, 4) },
-        "authoritative_answer" => { kind: Bool, derived: false, required: false, description: "Authoritative-answer flag", get |layer| Some(FieldValue::from(layer.authoritative_answer)), set |_layer, _value, name| read_only(name), layout: (2, 4) },
-        "truncated" => { kind: Bool, derived: false, required: false, description: "Truncated response flag", get |layer| Some(FieldValue::from(layer.truncated)), set |_layer, _value, name| read_only(name), layout: (2, 4) },
-        "recursion_desired" => { kind: Bool, derived: false, required: false, description: "Recursion-desired flag", get |layer| Some(FieldValue::from(layer.recursion_desired)), set |_layer, _value, name| read_only(name), layout: (2, 4) },
-        "recursion_available" => { kind: Bool, derived: false, required: false, description: "Recursion-available flag", get |layer| Some(FieldValue::from(layer.recursion_available)), set |_layer, _value, name| read_only(name), layout: (2, 4) },
-        "authenticated_data" => { kind: Bool, derived: false, required: false, description: "Authenticated-data flag", get |layer| Some(FieldValue::from(layer.authenticated_data)), set |_layer, _value, name| read_only(name), layout: (2, 4) },
-        "checking_disabled" => { kind: Bool, derived: false, required: false, description: "Checking-disabled flag", get |layer| Some(FieldValue::from(layer.checking_disabled)), set |_layer, _value, name| read_only(name), layout: (2, 4) },
-        "rcode" => { kind: Unsigned, derived: false, required: false, description: "Response code", get |layer| Some(FieldValue::from(layer.rcode)), set |_layer, _value, name| read_only(name), layout: (2, 4) },
-        "question_count" => { kind: Unsigned, derived: false, required: false, description: "Question count", get |layer| Some(FieldValue::from(layer.question_count)), set |_layer, _value, name| read_only(name), layout: (4, 6) },
-        "answer_count" => { kind: Unsigned, derived: false, required: false, description: "Answer count", get |layer| Some(FieldValue::from(layer.answer_count)), set |_layer, _value, name| read_only(name), layout: (6, 8) },
-        "authority_count" => { kind: Unsigned, derived: false, required: false, description: "Authority-record count", get |layer| Some(FieldValue::from(layer.authority_count)), set |_layer, _value, name| read_only(name), layout: (8, 10) },
-        "additional_count" => { kind: Unsigned, derived: false, required: false, description: "Additional-record count", get |layer| Some(FieldValue::from(layer.additional_count)), set |_layer, _value, name| read_only(name), layout: (10, 12) },
-        "qname" => { kind: List, derived: false, required: false, description: "Question names", get |layer| Some(text_list(&layer.qnames)), set |_layer, _value, name| read_only(name) },
-        "qtype" => { kind: List, derived: false, required: false, description: "Question type codes", get |layer| Some(unsigned_list(&layer.qtypes)), set |_layer, _value, name| read_only(name) },
-        "qclass" => { kind: List, derived: false, required: false, description: "Question class codes", get |layer| Some(unsigned_list(&layer.qclasses)), set |_layer, _value, name| read_only(name) }
+        "id" => { kind: Unsigned, tier: Optional, default: "0", max: 65535_u64, description: "Transaction identifier", get |layer| Some(FieldValue::from(layer.id)), set |_layer, _value, name| read_only(name), layout: (0, 2) },
+        "response" => { kind: Bool, tier: Optional, default: "false", description: "Query/response flag", get |layer| Some(FieldValue::from(layer.response)), set |_layer, _value, name| read_only(name), layout: (2, 4) },
+        "opcode" => { kind: Unsigned, tier: Optional, default: "0", max: 15_u64, description: "Operation code", get |layer| Some(FieldValue::from(layer.opcode)), set |_layer, _value, name| read_only(name), layout: (2, 4) },
+        "authoritative_answer" => { kind: Bool, tier: Optional, default: "false", description: "Authoritative-answer flag", get |layer| Some(FieldValue::from(layer.authoritative_answer)), set |_layer, _value, name| read_only(name), layout: (2, 4) },
+        "truncated" => { kind: Bool, tier: Optional, default: "false", description: "Truncated response flag", get |layer| Some(FieldValue::from(layer.truncated)), set |_layer, _value, name| read_only(name), layout: (2, 4) },
+        "recursion_desired" => { kind: Bool, tier: Optional, default: "false", description: "Recursion-desired flag", get |layer| Some(FieldValue::from(layer.recursion_desired)), set |_layer, _value, name| read_only(name), layout: (2, 4) },
+        "recursion_available" => { kind: Bool, tier: Optional, default: "false", description: "Recursion-available flag", get |layer| Some(FieldValue::from(layer.recursion_available)), set |_layer, _value, name| read_only(name), layout: (2, 4) },
+        "authenticated_data" => { kind: Bool, tier: Optional, default: "false", description: "Authenticated-data flag", get |layer| Some(FieldValue::from(layer.authenticated_data)), set |_layer, _value, name| read_only(name), layout: (2, 4) },
+        "checking_disabled" => { kind: Bool, tier: Optional, default: "false", description: "Checking-disabled flag", get |layer| Some(FieldValue::from(layer.checking_disabled)), set |_layer, _value, name| read_only(name), layout: (2, 4) },
+        "rcode" => { kind: Unsigned, tier: Optional, default: "0", max: 15_u64, description: "Response code", get |layer| Some(FieldValue::from(layer.rcode)), set |_layer, _value, name| read_only(name), layout: (2, 4) },
+        "question_count" => { kind: Unsigned, tier: Optional, default: "0", max: 65535_u64, description: "Question count", get |layer| Some(FieldValue::from(layer.question_count)), set |_layer, _value, name| read_only(name), layout: (4, 6) },
+        "answer_count" => { kind: Unsigned, tier: Optional, default: "0", max: 65535_u64, description: "Answer count", get |layer| Some(FieldValue::from(layer.answer_count)), set |_layer, _value, name| read_only(name), layout: (6, 8) },
+        "authority_count" => { kind: Unsigned, tier: Optional, default: "0", max: 65535_u64, description: "Authority-record count", get |layer| Some(FieldValue::from(layer.authority_count)), set |_layer, _value, name| read_only(name), layout: (8, 10) },
+        "additional_count" => { kind: Unsigned, tier: Optional, default: "0", max: 65535_u64, description: "Additional-record count", get |layer| Some(FieldValue::from(layer.additional_count)), set |_layer, _value, name| read_only(name), layout: (10, 12) },
+        "qname" => { kind: List, element: Text, tier: Optional, default: "[]", description: "Question names", get |layer| Some(text_list(&layer.qnames)), set |_layer, _value, name| read_only(name) },
+        "qtype" => { kind: List, element: Unsigned, tier: Optional, default: "[]", description: "Question type codes", get |layer| Some(unsigned_list(&layer.qtypes)), set |_layer, _value, name| read_only(name) },
+        "qclass" => { kind: List, element: Unsigned, tier: Optional, default: "[]", description: "Question class codes", get |layer| Some(unsigned_list(&layer.qclasses)), set |_layer, _value, name| read_only(name) }
     }
     layout pub(crate) fn dns_layout();
 }

@@ -79,12 +79,12 @@ impl Default for Ah {
 reflective_layer! {
     fn ah_schema() => { protocol: protocol("ah"), name: "AH" }
     impl Ah {
-        "next_header" => { kind: Unsigned, derived: true, required: false, description: "Protocol number of the authenticated payload", reflect: next_header, layout: (0, 1) },
-        "payload_length" => { kind: Unsigned, derived: true, required: false, description: "Header length in 4-byte units minus two", reflect: payload_length, layout: (1, 2) },
-        "reserved" => { kind: Unsigned, derived: false, required: false, description: "Reserved 16 bits", reflect: reserved, layout: (2, 4) },
-        "spi" => { kind: Unsigned, derived: false, required: true, description: "Security parameters index", reflect: spi, layout: (4, 8) },
-        "sequence" => { kind: Unsigned, derived: false, required: false, description: "Anti-replay sequence number", reflect: sequence, layout: (8, 12) },
-        "icv" => { kind: Bytes, derived: false, required: false, description: "Integrity check value, a multiple of 4 bytes", reflect: icv, layout: (AH_FIXED_LEN, header_len) },
+        "next_header" => { kind: Unsigned, tier: Derived, description: "Protocol number of the authenticated payload", wire: next_header, layout: (0, 1) },
+        "payload_length" => { kind: Unsigned, tier: Derived, description: "Header length in 4-byte units minus two", wire: payload_length, layout: (1, 2) },
+        "reserved" => { kind: Unsigned, tier: Optional, default: "0", description: "Reserved 16 bits", reflect: reserved, layout: (2, 4) },
+        "spi" => { kind: Unsigned, tier: Required, description: "Security parameters index", reflect: spi, layout: (4, 8) },
+        "sequence" => { kind: Unsigned, tier: Optional, default: "0", description: "Anti-replay sequence number", reflect: sequence, layout: (8, 12) },
+        "icv" => { kind: Bytes, tier: Optional, default: "0x000000000000000000000000", description: "Integrity check value, a multiple of 4 bytes", reflect: icv, layout: (AH_FIXED_LEN, header_len) },
     }
     layout pub(crate) fn ah_layout(header_len: usize);
 }

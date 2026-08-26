@@ -207,3 +207,31 @@ impl fmt::Display for FieldValue {
         }
     }
 }
+
+/// Returns the v2 text representation of a [`FieldValue`].
+pub fn text_form(value: &FieldValue) -> String {
+    match value {
+        FieldValue::Bool(value) => value.to_string(),
+        FieldValue::Unsigned(value) => value.to_string(),
+        FieldValue::Signed(value) => value.to_string(),
+        FieldValue::Text(value) => value.clone(),
+        FieldValue::Bytes(value) => {
+            let mut output = String::with_capacity(value.len().saturating_mul(2).saturating_add(2));
+            output.push_str("0x");
+            for byte in value {
+                use std::fmt::Write as _;
+                let _ = write!(output, "{byte:02x}");
+            }
+            output
+        }
+        FieldValue::Ipv4(value) => value.to_string(),
+        FieldValue::Ipv6(value) => value.to_string(),
+        FieldValue::Mac([b0, b1, b2, b3, b4, b5]) => {
+            format!("{b0:02x}:{b1:02x}:{b2:02x}:{b3:02x}:{b4:02x}:{b5:02x}")
+        }
+        FieldValue::List(values) => {
+            let elements = values.iter().map(text_form).collect::<Vec<_>>();
+            format!("[{}]", elements.join(","))
+        }
+    }
+}

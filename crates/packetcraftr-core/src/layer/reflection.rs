@@ -20,16 +20,20 @@ macro_rules! reflective_layer {
         fn $schema:ident() => {
             protocol: $protocol:expr_2021,
             name: $layer_name:literal
+            $(, decode_only: $decode_only:literal)? $(,)?
         }
         impl $ty:ty {
             $(
                 $field:literal $(| $alias:literal)* => {
                     kind: $kind:ident,
-                    derived: $derived:literal,
-                    required: $required:literal,
+                    $(element: $element:ident,)?
+                    tier: $tier:ident,
+                    $(default: $default:literal,)?
+                    $(max: $max:expr_2021,)?
                     description: $description:literal,
                     $(reflect: $member:ident)?
                     $(reflect_bounded: $bounded_member:ident, $maximum:tt)?
+                    $(wire: $wire_member:ident)?
                     $(
                         get |$getter:ident| $get:expr_2021,
                         set |$setter:ident, $value:ident, $field_name:ident| $set:expr_2021
@@ -43,21 +47,35 @@ macro_rules! reflective_layer {
         fn $schema() -> &'static $crate::layer::Schema {
             static SCHEMA: std::sync::OnceLock<$crate::layer::Schema> =
                 std::sync::OnceLock::new();
-            static FIELDS: &[$crate::layer::FieldSchema] = &[
-                $(
-                    $crate::layer::FieldSchema {
-                        name: $field,
-                        kind: $crate::field::FieldKind::$kind,
-                        derived: $derived,
-                        required: $required,
-                        description: $description,
-                    }
-                ),*
-            ];
-            SCHEMA.get_or_init(|| $crate::layer::Schema {
-                protocol: $protocol,
-                name: $layer_name,
-                fields: FIELDS,
+            SCHEMA.get_or_init(|| {
+                let fields: Vec<$crate::layer::FieldSchema> = vec![
+                    $(
+                        $crate::layer::FieldSchema {
+                            name: $field,
+                            kind: $crate::field::FieldKind::$kind,
+                            tier: $crate::layer::Tier::$tier,
+                            default: $crate::reflective_layer!(@opt_str $($default)?),
+                            aliases: &[$($alias),*],
+                            element: $crate::reflective_layer!(@opt_kind $($element)?),
+                            max: $crate::reflective_layer!(
+                                @max $ty;
+                                $(reflect $member)?
+                                $(reflect_bounded $bounded_member, $maximum)?
+                                $(wire $wire_member)?
+                                $(explicit $max)?
+                            ),
+                            description: $description,
+                        }
+                    ),*
+                ];
+                let leaked_fields: &'static [$crate::layer::FieldSchema] =
+                    Box::leak(fields.into_boxed_slice());
+                $crate::layer::Schema {
+                    protocol: $protocol,
+                    name: $layer_name,
+                    decode_only: false $(|| $decode_only)?,
+                    fields: leaked_fields,
+                }
             })
         }
 
@@ -85,6 +103,7 @@ macro_rules! reflective_layer {
                             @get self;
                             $(reflect $member)?
                             $(reflect_bounded $bounded_member)?
+                            $(wire $wire_member)?
                             $(explicit $getter => $get)?
                         ),
                     )*
@@ -103,6 +122,7 @@ macro_rules! reflective_layer {
                             @set self, value, name, $schema;
                             $(reflect $member)?
                             $(reflect_bounded $bounded_member, $maximum)?
+                            $(wire $wire_member)?
                             $(explicit $setter, $value, $field_name => $set)?
                         ),
                     )*
@@ -113,6 +133,17 @@ macro_rules! reflective_layer {
                 }
             }
 
+            fn wire_field(&self, name: &str) -> Option<$crate::field::WireValue<u64>> {
+                match name {
+                    $(
+                        $field $(| $alias)* => $crate::reflective_layer!(
+                            @wire self;
+                            $(wire $wire_member)?
+                        ),
+                    )*
+                    _ => None,
+                }
+            }
         }
 
         $vis fn $layout($($layout_arg: $layout_ty),*)
@@ -130,6 +161,36 @@ macro_rules! reflective_layer {
             fields
         }
     };
+    (@opt_str $val:literal) => {
+        Some($val)
+    };
+    (@opt_str) => {
+        None
+    };
+    (@opt_kind $elem:ident) => {
+        Some($crate::field::FieldKind::$elem)
+    };
+    (@opt_kind) => {
+        None
+    };
+    (@max $ty:ty; reflect $member:ident) => {
+        $crate::layer::reflective_max(|layer: &$ty| &layer.$member)
+    };
+    (@max $ty:ty; reflect_bounded $member:ident, $maximum:tt) => {
+        u64::try_from($maximum).ok()
+    };
+    (@max $ty:ty; wire $member:ident) => {
+        $crate::layer::reflective_max(|layer: &$ty| &layer.$member)
+    };
+    (@max $ty:ty; explicit $max:expr_2021) => {
+        u64::try_from($max).ok()
+    };
+    (@max $ty:ty; explicit) => {
+        None
+    };
+    (@max $ty:ty;) => {
+        None
+    };
     (@layout $field:literal) => {
         None
     };
@@ -143,6 +204,9 @@ macro_rules! reflective_layer {
         Some($crate::layer::reflect_get(&$layer.$member))
     };
     (@get $layer:expr; reflect_bounded $member:ident) => {
+        Some($crate::layer::reflect_get(&$layer.$member))
+    };
+    (@get $layer:expr; wire $member:ident) => {
         Some($crate::layer::reflect_get(&$layer.$member))
     };
     (@get $layer:expr; explicit $getter:ident => $get:expr_2021) => {{
@@ -163,6 +227,9 @@ macro_rules! reflective_layer {
             u64::from($maximum),
         )
     };
+    (@set $layer:expr, $value:expr, $name:expr, $schema:ident; wire $member:ident) => {
+        $crate::layer::reflect_set(&mut $layer.$member, $schema(), $name, $value)
+    };
     (@set $layer:expr, $input:expr, $name:expr, $schema:ident;
         explicit $setter:ident, $value:ident, $field_name:ident => $set:expr_2021
     ) => {{
@@ -171,6 +238,16 @@ macro_rules! reflective_layer {
         let $field_name = $name;
         $set
     }};
+    (@wire $layer:expr; wire $member:ident) => {
+        Some(match &$layer.$member {
+            $crate::field::WireValue::Auto => $crate::field::WireValue::Auto,
+            $crate::field::WireValue::Exact(v) => $crate::field::WireValue::Exact(u64::from(*v)),
+            $crate::field::WireValue::Raw(b) => $crate::field::WireValue::Raw(b.clone()),
+        })
+    };
+    (@wire $layer:expr;) => {
+        None
+    };
 }
 
 #[doc(hidden)]
@@ -182,8 +259,14 @@ pub enum ReflectiveFieldError {
 }
 
 pub trait ReflectiveField: Sized {
+    const MAX_VALUE: Option<u64> = None;
+
     fn reflective_value(&self) -> FieldValue;
     fn set_reflective_value(&mut self, value: FieldValue) -> Result<(), ReflectiveFieldError>;
+}
+
+pub fn reflective_max<L, T: ReflectiveField>(_: fn(&L) -> &T) -> Option<u64> {
+    T::MAX_VALUE
 }
 
 pub fn reflect_get<T: ReflectiveField>(value: &T) -> FieldValue {
@@ -235,6 +318,8 @@ macro_rules! unsigned_reflective_field {
     ($($ty:ty),+ $(,)?) => {
         $(
             impl ReflectiveField for $ty {
+                const MAX_VALUE: Option<u64> = Some(<$ty>::MAX as u64);
+
                 fn reflective_value(&self) -> FieldValue {
                     (*self).into()
                 }
@@ -364,6 +449,8 @@ impl ReflectiveField for [u8; 8] {
 macro_rules! wire_reflective_field {
     ($ty:ty) => {
         impl ReflectiveField for WireValue<$ty> {
+            const MAX_VALUE: Option<u64> = Some(<$ty>::MAX as u64);
+
             fn reflective_value(&self) -> FieldValue {
                 match self {
                     WireValue::Auto => FieldValue::Text("auto".to_owned()),

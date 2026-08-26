@@ -214,7 +214,7 @@ fn specs_for(
             })?;
         specs.push(FieldSpec {
             kind: declared.kind,
-            derived: declared.derived,
+            derived: declared.is_derived(),
         });
     }
     Ok(specs)
@@ -272,7 +272,7 @@ pub(super) fn resolve(path: &str, registry: &Registry, offset: usize) -> Result<
             slice: None,
             specs: vec![FieldSpec {
                 kind: declared.kind,
-                derived: declared.derived,
+                derived: declared.is_derived(),
             }],
             path: path.to_owned(),
         }));

@@ -53,13 +53,13 @@ impl Default for Ipv6 {
 reflective_layer! {
     fn ipv6_schema() => { protocol: protocol("ipv6"), name: "IPv6" }
     impl Ipv6 {
-        "traffic_class" => { kind: Unsigned, derived: false, required: false, description: "IPv6 traffic class", reflect: traffic_class, layout: (0, 4) },
-        "flow_label" => { kind: Unsigned, derived: false, required: false, description: "IPv6 flow label", reflect_bounded: flow_label, 0x000f_ffff_u64, layout: (0, 4) },
-        "payload_length" => { kind: Unsigned, derived: true, required: false, description: "IPv6 payload length", reflect: payload_length, layout: (4, 6) },
-        "next_header" => { kind: Unsigned, derived: true, required: false, description: "Next-header discriminator", reflect: next_header, layout: (6, 7) },
-        "hop_limit" => { kind: Unsigned, derived: false, required: true, description: "Hop limit", reflect: hop_limit, layout: (7, 8) },
-        "source" => { kind: Ipv6, derived: false, required: true, description: "Source IPv6 address", reflect: source, layout: (8, 24) },
-        "destination" => { kind: Ipv6, derived: false, required: true, description: "Destination IPv6 address", reflect: destination, layout: (24, 40) },
+        "traffic_class" => { kind: Unsigned, tier: Optional, default: "0", description: "IPv6 traffic class", reflect: traffic_class, layout: (0, 4) },
+        "flow_label" => { kind: Unsigned, tier: Optional, default: "0", description: "IPv6 flow label", reflect_bounded: flow_label, 0x000f_ffff_u64, layout: (0, 4) },
+        "payload_length" => { kind: Unsigned, tier: Derived, description: "IPv6 payload length", wire: payload_length, layout: (4, 6) },
+        "next_header" => { kind: Unsigned, tier: Derived, description: "Next-header discriminator", wire: next_header, layout: (6, 7) },
+        "hop_limit" => { kind: Unsigned, tier: Optional, default: "64", description: "Hop limit", reflect: hop_limit, layout: (7, 8) },
+        "source" | "src" => { kind: Ipv6, tier: Required, description: "Source IPv6 address", reflect: source, layout: (8, 24) },
+        "destination" | "dst" => { kind: Ipv6, tier: Required, description: "Destination IPv6 address", reflect: destination, layout: (24, 40) },
     }
     layout pub(crate) fn ipv6_layout();
 }

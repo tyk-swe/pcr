@@ -53,10 +53,10 @@ impl Default for Vxlan {
 reflective_layer! {
     fn vxlan_schema() => { protocol: protocol("vxlan"), name: "VXLAN" }
     impl Vxlan {
-        "flags" => { kind: Unsigned, derived: false, required: true, description: "VXLAN flag byte; only the VNI-valid bit 0x08 is defined", reflect: flags, layout: (0, 1) },
-        "reserved1" => { kind: Unsigned, derived: false, required: false, description: "Reserved 24 bits between the flags and the VNI", reflect_bounded: reserved1, VNI_MAX, layout: (1, 4) },
-        "vni" => { kind: Unsigned, derived: false, required: true, description: "24-bit VXLAN network identifier", reflect_bounded: vni, VNI_MAX, layout: (4, 7) },
-        "reserved2" => { kind: Unsigned, derived: false, required: false, description: "Reserved byte after the VNI", reflect: reserved2, layout: (7, 8) }
+        "flags" => { kind: Unsigned, tier: Required, description: "VXLAN flag byte; only the VNI-valid bit 0x08 is defined", reflect: flags, layout: (0, 1) },
+        "reserved1" => { kind: Unsigned, tier: Optional, default: "0", description: "Reserved 24 bits between the flags and the VNI", reflect_bounded: reserved1, VNI_MAX, layout: (1, 4) },
+        "vni" => { kind: Unsigned, tier: Required, description: "24-bit VXLAN network identifier", reflect_bounded: vni, VNI_MAX, layout: (4, 7) },
+        "reserved2" => { kind: Unsigned, tier: Optional, default: "0", description: "Reserved byte after the VNI", reflect: reserved2, layout: (7, 8) }
     }
     layout pub(crate) fn vxlan_layout();
 }

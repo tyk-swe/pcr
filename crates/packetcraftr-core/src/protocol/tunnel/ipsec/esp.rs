@@ -44,8 +44,8 @@ impl Default for Esp {
 reflective_layer! {
     fn esp_schema() => { protocol: protocol("esp"), name: "ESP" }
     impl Esp {
-        "spi" => { kind: Unsigned, derived: false, required: true, description: "Security parameters index", reflect: spi, layout: (0, 4) },
-        "sequence" => { kind: Unsigned, derived: false, required: false, description: "Anti-replay sequence number", reflect: sequence, layout: (4, 8) }
+        "spi" => { kind: Unsigned, tier: Required, description: "Security parameters index", reflect: spi, layout: (0, 4) },
+        "sequence" => { kind: Unsigned, tier: Optional, default: "0", description: "Anti-replay sequence number", reflect: sequence, layout: (4, 8) }
     }
     layout pub(crate) fn esp_layout();
 }

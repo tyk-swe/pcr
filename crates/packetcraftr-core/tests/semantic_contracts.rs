@@ -33,7 +33,7 @@ reflective_layer! {
     }
     impl RouteMimic {
         "destination" => {
-            kind: Ipv4, derived: false, required: true,
+            kind: Ipv4, tier: Required,
             description: "Field that must not opt an unknown protocol into route semantics",
             reflect: destination,
             layout: (0, 4)

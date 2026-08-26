@@ -78,8 +78,16 @@ impl FieldKind {
 pub struct Field {
     pub name: String,
     pub kind: FieldKind,
+    pub tier: String,
     pub required: bool,
     pub derived: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default: Option<String>,
+    pub aliases: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub element: Option<FieldKind>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max: Option<u64>,
     pub description: String,
 }
 
@@ -88,8 +96,21 @@ impl From<&FieldSchema> for Field {
         Self {
             name: value.name.to_owned(),
             kind: value.kind.into(),
-            required: value.required,
-            derived: value.derived,
+            tier: match value.tier {
+                packetcraftr_core::layer::Tier::Required => "required".to_owned(),
+                packetcraftr_core::layer::Tier::Derived => "derived".to_owned(),
+                packetcraftr_core::layer::Tier::Optional => "optional".to_owned(),
+            },
+            required: value.is_required(),
+            derived: value.is_derived(),
+            default: value.default.map(ToOwned::to_owned),
+            aliases: value
+                .aliases
+                .iter()
+                .map(|alias| (*alias).to_owned())
+                .collect(),
+            element: value.element.map(Into::into),
+            max: value.max,
             description: value.description.to_owned(),
         }
     }

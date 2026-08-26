@@ -43,25 +43,25 @@ reflective_layer! {
     fn igmp_schema() => { protocol: protocol("igmp"), name: "IGMP" }
     impl Igmp {
         "type" => {
-            kind: Unsigned, derived: false, required: true,
+            kind: Unsigned, tier: Required,
             description: "IGMP message type",
             reflect: igmp_type,
             layout: (0, 1)
         },
         "code" => {
-            kind: Unsigned, derived: false, required: true,
+            kind: Unsigned, tier: Required,
             description: "Type-specific IGMP code or reserved octet",
             reflect: code,
             layout: (1, 2)
         },
         "checksum" => {
-            kind: Unsigned, derived: true, required: false,
+            kind: Unsigned, tier: Derived,
             description: "IGMP checksum",
-            reflect: checksum,
+            wire: checksum,
             layout: (2, 4)
         },
         "body" => {
-            kind: Bytes, derived: false, required: false,
+            kind: Bytes, tier: Optional, default: "0x00000000",
             description: "Version- and type-specific IGMP body",
             reflect: body,
             layout: (4, body_len.saturating_add(4))

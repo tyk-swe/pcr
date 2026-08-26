@@ -59,10 +59,10 @@ impl Default for Mpls {
 reflective_layer! {
     fn mpls_schema() => { protocol: protocol("mpls"), name: "MPLS" }
     impl Mpls {
-        "label" => { kind: Unsigned, derived: false, required: true, description: "20-bit MPLS label", reflect_bounded: label, LABEL_MAX, layout: (0, 3) },
-        "traffic_class" => { kind: Unsigned, derived: false, required: false, description: "3-bit traffic class, historically the EXP bits", reflect_bounded: traffic_class, 7_u64, layout: (2, 3) },
-        "bottom_of_stack" => { kind: Bool, derived: false, required: false, description: "S bit: this entry is the bottom of the label stack", reflect: bottom_of_stack, layout: (2, 3) },
-        "ttl" => { kind: Unsigned, derived: false, required: false, description: "Time to live", reflect: ttl, layout: (3, 4) }
+        "label" => { kind: Unsigned, tier: Required, description: "20-bit MPLS label", reflect_bounded: label, LABEL_MAX, layout: (0, 3) },
+        "traffic_class" => { kind: Unsigned, tier: Optional, default: "0", description: "3-bit traffic class, historically the EXP bits", reflect_bounded: traffic_class, 7_u64, layout: (2, 3) },
+        "bottom_of_stack" => { kind: Bool, tier: Optional, default: "true", description: "S bit: this entry is the bottom of the label stack", reflect: bottom_of_stack, layout: (2, 3) },
+        "ttl" => { kind: Unsigned, tier: Optional, default: "64", description: "Time to live", reflect: ttl, layout: (3, 4) }
     }
     layout pub(crate) fn mpls_layout();
 }

@@ -71,9 +71,9 @@ impl Default for Llc {
 reflective_layer! {
     fn llc_schema() => { protocol: protocol("llc"), name: "LLC" }
     impl Llc {
-        "dsap" => { kind: Unsigned, derived: false, required: true, description: "Destination service access point", reflect: dsap, layout: (0, 1) },
-        "ssap" => { kind: Unsigned, derived: false, required: true, description: "Source service access point", reflect: ssap, layout: (1, 2) },
-        "control" => { kind: Bytes, derived: false, required: true, description: "Control field: one byte for U format, two for I and S formats", reflect: control, layout: (2, control_end) }
+        "dsap" => { kind: Unsigned, tier: Required, description: "Destination service access point", reflect: dsap, layout: (0, 1) },
+        "ssap" => { kind: Unsigned, tier: Required, description: "Source service access point", reflect: ssap, layout: (1, 2) },
+        "control" => { kind: Bytes, tier: Required, description: "Control field: one byte for U format, two for I and S formats", reflect: control, layout: (2, control_end) }
     }
     layout pub(crate) fn llc_layout(control_end: usize);
 }
@@ -237,8 +237,8 @@ impl Default for Snap {
 reflective_layer! {
     fn snap_schema() => { protocol: protocol("snap"), name: "SNAP" }
     impl Snap {
-        "oui" => { kind: Unsigned, derived: false, required: true, description: "Organizationally unique identifier; zero selects the EtherType space", reflect_bounded: oui, OUI_MAX, layout: (0, 3) },
-        "protocol_id" => { kind: Unsigned, derived: true, required: false, description: "Protocol identifier within the OUI's numbering", reflect: protocol_id, layout: (3, 5) },
+        "oui" => { kind: Unsigned, tier: Required, description: "Organizationally unique identifier; zero selects the EtherType space", reflect_bounded: oui, OUI_MAX, layout: (0, 3) },
+        "protocol_id" => { kind: Unsigned, tier: Derived, description: "Protocol identifier within the OUI's numbering", wire: protocol_id, layout: (3, 5) },
     }
     layout pub(crate) fn snap_layout();
 }

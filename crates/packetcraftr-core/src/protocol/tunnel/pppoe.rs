@@ -59,11 +59,11 @@ impl Default for Pppoe {
 reflective_layer! {
     fn pppoe_schema() => { protocol: protocol("pppoe"), name: "PPPoE" }
     impl Pppoe {
-        "version" => { kind: Unsigned, derived: false, required: false, description: "4-bit PPPoE version; only version 1 is defined", reflect_bounded: version, 0xf_u64, layout: (0, 1) },
-        "type" => { kind: Unsigned, derived: false, required: false, description: "4-bit PPPoE type; only type 1 is defined", reflect_bounded: type_code, 0xf_u64, layout: (0, 1) },
-        "code" => { kind: Unsigned, derived: false, required: false, description: "Stage code: zero for session data, a discovery code otherwise", reflect: code, layout: (1, 2) },
-        "session_id" => { kind: Unsigned, derived: false, required: true, description: "Session identifier assigned during discovery", reflect: session_id, layout: (2, 4) },
-        "length" => { kind: Unsigned, derived: true, required: false, description: "Payload length excluding the header", reflect: length, layout: (4, 6) },
+        "version" => { kind: Unsigned, tier: Optional, default: "1", description: "4-bit PPPoE version; only version 1 is defined", reflect_bounded: version, 0xf_u64, layout: (0, 1) },
+        "type" | "type_code" => { kind: Unsigned, tier: Optional, default: "1", description: "4-bit PPPoE type; only type 1 is defined", reflect_bounded: type_code, 0xf_u64, layout: (0, 1) },
+        "code" => { kind: Unsigned, tier: Optional, default: "0", description: "Stage code: zero for session data, a discovery code otherwise", reflect: code, layout: (1, 2) },
+        "session_id" => { kind: Unsigned, tier: Required, description: "Session identifier assigned during discovery", reflect: session_id, layout: (2, 4) },
+        "length" => { kind: Unsigned, tier: Derived, description: "Payload length excluding the header", wire: length, layout: (4, 6) },
     }
     layout pub(crate) fn pppoe_layout();
 }
@@ -305,7 +305,7 @@ impl Default for Ppp {
 reflective_layer! {
     fn ppp_schema() => { protocol: protocol("ppp"), name: "PPP" }
     impl Ppp {
-        "protocol" => { kind: Unsigned, derived: true, required: false, description: "PPP protocol number selecting the payload", reflect: protocol, layout: (0, 2) },
+        "protocol" => { kind: Unsigned, tier: Derived, description: "PPP protocol number selecting the payload", wire: protocol, layout: (0, 2) },
     }
     layout pub(crate) fn ppp_layout();
 }

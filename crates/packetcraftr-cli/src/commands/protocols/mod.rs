@@ -114,10 +114,20 @@ fn render_detail(protocol: &output::protocols::Detail) -> Result<(), CliError> {
     }
     write_stdout_line(format_args!("fields:"))?;
     for field in &protocol.fields {
+        let default_str = field.default.as_deref().unwrap_or("none");
+        let max_str = field
+            .max
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "none".to_owned());
+        let aliases_str = format!("[{}]", field.aliases.join(", "));
         write_stdout_line(format_args!(
-            "  {} kind={} required={} derived={} description={}",
+            "  {} kind={} tier={} default={} max={} aliases={} required={} derived={} description={}",
             field.name,
             field.kind.as_str(),
+            field.tier,
+            default_str,
+            max_str,
+            aliases_str,
             field.required,
             field.derived,
             field.description

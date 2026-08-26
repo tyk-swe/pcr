@@ -53,8 +53,8 @@ macro_rules! declare_options_layer {
         reflective_layer! {
             fn $schema() => { protocol: protocol($protocol), name: $name }
             impl $ty {
-                "next_header" => { kind: Unsigned, derived: true, required: false, description: "IPv6 next-header discriminator", reflect: next_header, layout: (0, 1) },
-                "options" => { kind: Bytes, derived: false, required: false, description: "Option bytes, padded to an eight-byte header boundary", reflect: options, layout: (2, header_len) },
+                "next_header" => { kind: Unsigned, tier: Derived, description: "IPv6 next-header discriminator", wire: next_header, layout: (0, 1) },
+                "options" => { kind: Bytes, tier: Optional, default: "0x", description: "Option bytes, padded to an eight-byte header boundary", reflect: options, layout: (2, header_len) },
             }
             layout pub(crate) fn $layout(header_len: usize);
         }

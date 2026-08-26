@@ -9,7 +9,7 @@ use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use super::super::field::{FieldKind, FieldValue};
+use super::super::field::{FieldKind, FieldValue, WireValue};
 use super::reflection::reflective_layer;
 
 /// An open, stable identifier for a protocol layer or codec.
@@ -57,6 +57,17 @@ impl fmt::Display for Id {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Tier {
+    /// Must be present after codec defaults; documents must spell it.
+    Required,
+    /// A wire value the builder computes (`auto`) unless a literal is given.
+    Derived,
+    /// Has a constant default (`FieldSchema::default`) when omitted.
+    Optional,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct FieldSchema {
     /// Stable reflective field name used by documents, expressions, and
@@ -65,17 +76,31 @@ pub struct FieldSchema {
     /// Nominal typed value accepted by the field. Derived wire values may also
     /// expose `"auto"` or raw bytes through [`FieldValue`].
     pub kind: FieldKind,
-    /// Whether the builder may derive this field from packet context.
-    pub derived: bool,
-    /// Whether [`Layer::field`] must return a value after codec defaults have
-    /// been applied.
-    ///
-    /// This does not require callers to spell the field in an expression or
-    /// document. Codec factories may supply a default, but constructed,
-    /// materialized, and decoded layers must expose every required field.
-    pub required: bool,
+    /// Whether the field is required, derived, or optional with a constant default.
+    pub tier: Tier,
+    /// v2 text form of the value `Layer::default()` produces. `Some` for an
+    /// Optional field with a constant default; `None` for Required and Derived
+    /// fields, and for Optional fields that are simply absent when omitted
+    /// (such as an optional GRE key).
+    pub default: Option<&'static str>,
+    /// Alternative spellings accepted on input; emission uses `name`.
+    pub aliases: &'static [&'static str],
+    /// Element kind for `FieldKind::List` fields; `None` otherwise.
+    pub element: Option<FieldKind>,
+    /// Inclusive upper bound for Unsigned fields (from the setter's integer type or the `reflect_bounded` maximum); `None` for other kinds.
+    pub max: Option<u64>,
     /// Human-readable field purpose.
     pub description: &'static str,
+}
+
+impl FieldSchema {
+    pub fn is_derived(&self) -> bool {
+        self.tier == Tier::Derived
+    }
+
+    pub fn is_required(&self) -> bool {
+        self.tier == Tier::Required
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -84,6 +109,8 @@ pub struct Schema {
     pub protocol: Id,
     /// Human-readable protocol name.
     pub name: &'static str,
+    /// Every setter is read-only; the layer decodes but cannot be built from a document.
+    pub decode_only: bool,
     /// Ordered reflective fields.
     pub fields: &'static [FieldSchema],
 }
@@ -115,11 +142,22 @@ pub trait Layer: Any + Send + Sync + fmt::Debug {
     fn as_any_mut(&mut self) -> &mut dyn Any;
     fn field(&self, name: &str) -> Option<FieldValue>;
     fn set_field(&mut self, name: &str, value: FieldValue) -> Result<(), FieldError>;
+    fn wire_field(&self, _name: &str) -> Option<WireValue<u64>> {
+        None
+    }
 
     /// Validates the stable required-field contract after codec defaults,
     /// materialization, or decoding.
     fn validate_required_fields(&self) -> Result<(), FieldError> {
-        for field in self.schema().fields.iter().filter(|field| field.required) {
+        if self.schema().decode_only {
+            return Ok(());
+        }
+        for field in self
+            .schema()
+            .fields
+            .iter()
+            .filter(|field| field.is_required())
+        {
             if self.field(field.name).is_none() {
                 return Err(FieldError::MissingRequired {
                     protocol: self.protocol_id().clone(),
@@ -159,7 +197,7 @@ reflective_layer! {
     fn raw_schema() => { protocol: Id::new("raw"), name: "Raw" }
     impl Raw {
         "bytes" => {
-            kind: Bytes, derived: false, required: false,
+            kind: Bytes, tier: Optional, default: "0x",
             description: "Verbatim bytes",
             reflect: bytes,
             layout: (0, length)
@@ -196,13 +234,13 @@ reflective_layer! {
     fn padding_schema() => { protocol: Id::new("padding"), name: "Padding" }
     impl Padding {
         "bytes" => {
-            kind: Bytes, derived: false, required: false,
+            kind: Bytes, tier: Optional, default: "0x",
             description: "Trailing padding bytes",
             reflect: bytes,
             layout: (0, length)
         },
         "outside_layer" => {
-            kind: Unsigned, derived: false, required: false,
+            kind: Unsigned, tier: Optional, max: u64::MAX,
             description: "First layer index whose declared length excludes the padding",
             get |layer| layer.outside_layer.map(FieldValue::from),
             set |layer, value, name| match value {
@@ -221,7 +259,7 @@ reflective_layer! {
     layout pub fn padding_layout(length: usize);
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Malformed {
     pub intended_protocol: Option<Id>,
     pub bytes: Bytes,
@@ -246,7 +284,7 @@ reflective_layer! {
     fn malformed_schema() => { protocol: Id::new("malformed"), name: "Malformed" }
     impl Malformed {
         "protocol" => {
-            kind: Text, derived: false, required: false,
+            kind: Text, tier: Optional,
             description: "Intended protocol identifier",
             get |layer| layer.intended_protocol.as_ref().map(|value| FieldValue::Text(value.to_string())),
             set |layer, value, name| match value {
@@ -255,13 +293,13 @@ reflective_layer! {
             }
         },
         "bytes" => {
-            kind: Bytes, derived: false, required: false,
+            kind: Bytes, tier: Optional, default: "0x",
             description: "Preserved malformed bytes",
             reflect: bytes,
             layout: (0, length)
         },
         "reason" => {
-            kind: Text, derived: false, required: true,
+            kind: Text, tier: Required,
             description: "Decode or construction finding",
             reflect: reason
         }

@@ -156,9 +156,9 @@ impl Default for Ethernet {
 reflective_layer! {
     fn ethernet_schema() => { protocol: protocol("ethernet"), name: "Ethernet II" }
     impl Ethernet {
-        "destination" => { kind: Mac, derived: false, required: true, description: "Destination MAC address", reflect: destination, layout: (0, 6) },
-        "source" => { kind: Mac, derived: false, required: true, description: "Source MAC address", reflect: source, layout: (6, 12) },
-        "ether_type" => { kind: Unsigned, derived: true, required: false, description: "EtherType discriminator", reflect: ether_type, layout: (12, 14) },
+        "destination" | "dst" => { kind: Mac, tier: Required, description: "Destination MAC address", reflect: destination, layout: (0, 6) },
+        "source" | "src" => { kind: Mac, tier: Required, description: "Source MAC address", reflect: source, layout: (6, 12) },
+        "ether_type" => { kind: Unsigned, tier: Derived, description: "EtherType discriminator", wire: ether_type, layout: (12, 14) },
     }
     layout pub(crate) fn ethernet_layout();
 }

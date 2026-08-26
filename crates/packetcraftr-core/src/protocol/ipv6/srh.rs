@@ -52,13 +52,13 @@ impl Default for SegmentRoutingHeader {
 reflective_layer! {
     fn srh_schema() => { protocol: protocol("ipv6_srh"), name: "IPv6 Segment Routing Header" }
     impl SegmentRoutingHeader {
-        "next_header" => { kind: Unsigned, derived: true, required: false, description: "IPv6 next-header discriminator", reflect: next_header, layout: (0, 1) },
-        "segments_left" => { kind: Unsigned, derived: true, required: false, description: "Remaining segments", reflect: segments_left, layout: (3, 4) },
-        "last_entry" => { kind: Unsigned, derived: true, required: false, description: "Highest segment-list index", reflect: last_entry, layout: (4, 5) },
-        "flags" => { kind: Unsigned, derived: false, required: false, description: "SRH flags", reflect: flags, layout: (5, 6) },
-        "tag" => { kind: Unsigned, derived: false, required: false, description: "SRH tag", reflect: tag, layout: (6, 8) },
-        "segments" => { kind: List, derived: false, required: true, description: "Segments in visit order", get |layer| Some(FieldValue::List(layer.segments.iter().copied().map(FieldValue::Ipv6).collect())), set |layer, value, name| match value { FieldValue::List(values) => { layer.segments = values.into_iter().map(|value| match value { FieldValue::Ipv6(value) => Ok(value), FieldValue::Text(value) => value.parse().map_err(|_| wrong_type(srh_schema(), name, "list of IPv6 addresses")), _ => Err(wrong_type(srh_schema(), name, "list of IPv6 addresses")) }).collect::<Result<Vec<_>, _>>()?; Ok(()) }, _ => Err(wrong_type(srh_schema(), name, "list")) }, layout: (8, segments_end) },
-        "tlvs" => { kind: Bytes, derived: false, required: false, description: "TLV bytes following the segment list, including padding", reflect: tlvs, layout: (segments_end, header_len) },
+        "next_header" => { kind: Unsigned, tier: Derived, description: "IPv6 next-header discriminator", wire: next_header, layout: (0, 1) },
+        "segments_left" => { kind: Unsigned, tier: Derived, description: "Remaining segments", wire: segments_left, layout: (3, 4) },
+        "last_entry" => { kind: Unsigned, tier: Derived, description: "Highest segment-list index", wire: last_entry, layout: (4, 5) },
+        "flags" => { kind: Unsigned, tier: Optional, default: "0", description: "SRH flags", reflect: flags, layout: (5, 6) },
+        "tag" => { kind: Unsigned, tier: Optional, default: "0", description: "SRH tag", reflect: tag, layout: (6, 8) },
+        "segments" | "segs" => { kind: List, element: Ipv6, tier: Required, description: "Segments in visit order", get |layer| Some(FieldValue::List(layer.segments.iter().copied().map(FieldValue::Ipv6).collect())), set |layer, value, name| match value { FieldValue::List(values) => { layer.segments = values.into_iter().map(|value| match value { FieldValue::Ipv6(value) => Ok(value), FieldValue::Text(value) => value.parse().map_err(|_| wrong_type(srh_schema(), name, "list of IPv6 addresses")), _ => Err(wrong_type(srh_schema(), name, "list of IPv6 addresses")) }).collect::<Result<Vec<_>, _>>()?; Ok(()) }, _ => Err(wrong_type(srh_schema(), name, "list")) }, layout: (8, segments_end) },
+        "tlvs" => { kind: Bytes, tier: Optional, default: "0x", description: "TLV bytes following the segment list, including padding", reflect: tlvs, layout: (segments_end, header_len) },
     }
     layout pub(crate) fn srh_layout(segments_end: usize, header_len: usize);
 }

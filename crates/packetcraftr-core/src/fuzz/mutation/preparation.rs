@@ -414,7 +414,7 @@ fn resolve_fields(
                     },
                     protocol: layer.protocol_id().to_string(),
                     kind: field.kind,
-                    is_derived: field.derived,
+                    is_derived: field.is_derived(),
                 });
             }
         }
@@ -465,7 +465,7 @@ fn resolve_fields(
             target: target.clone(),
             protocol: layer.protocol_id().to_string(),
             kind: schema.kind,
-            is_derived: schema.derived,
+            is_derived: schema.is_derived(),
         });
     }
     Ok(fields)

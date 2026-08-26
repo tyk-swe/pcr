@@ -68,19 +68,19 @@ impl Default for Ipv4 {
 reflective_layer! {
     fn ipv4_schema() => { protocol: protocol("ipv4"), name: "IPv4" }
     impl Ipv4 {
-        "dscp_ecn" => { kind: Unsigned, derived: false, required: false, description: "DSCP and ECN octet", reflect: dscp_ecn, layout: (1, 2) },
-        "total_length" => { kind: Unsigned, derived: true, required: false, description: "IPv4 total length", reflect: total_length, layout: (2, 4) },
-        "identification" => { kind: Unsigned, derived: false, required: false, description: "Fragment identification", reflect: identification, layout: (4, 6) },
-        "reserved_flag" => { kind: Bool, derived: false, required: false, description: "Reserved IPv4 flag bit", reflect: reserved_flag, layout: (6, 8) },
-        "dont_fragment" => { kind: Bool, derived: false, required: false, description: "Don't-fragment flag", reflect: dont_fragment, layout: (6, 8) },
-        "more_fragments" => { kind: Bool, derived: false, required: false, description: "More-fragments flag", reflect: more_fragments, layout: (6, 8) },
-        "fragment_offset" => { kind: Unsigned, derived: false, required: false, description: "Fragment offset in eight-byte units", reflect_bounded: fragment_offset, 0x1fff_u64, layout: (6, 8) },
-        "ttl" => { kind: Unsigned, derived: false, required: true, description: "Time to live", reflect: ttl, layout: (8, 9) },
-        "protocol" => { kind: Unsigned, derived: true, required: false, description: "Next protocol discriminator", reflect: protocol, layout: (9, 10) },
-        "checksum" => { kind: Unsigned, derived: true, required: false, description: "IPv4 header checksum", reflect: checksum, layout: (10, 12) },
-        "source" => { kind: Ipv4, derived: false, required: true, description: "Source IPv4 address", reflect: source, layout: (12, 16) },
-        "destination" => { kind: Ipv4, derived: false, required: true, description: "Destination IPv4 address", reflect: destination, layout: (16, 20) },
-        "options" => { kind: Bytes, derived: false, required: false, description: "Verbatim IPv4 option bytes", reflect: options, layout: (20, header_len) },
+        "dscp_ecn" => { kind: Unsigned, tier: Optional, default: "0", description: "DSCP and ECN octet", reflect: dscp_ecn, layout: (1, 2) },
+        "total_length" => { kind: Unsigned, tier: Derived, description: "IPv4 total length", wire: total_length, layout: (2, 4) },
+        "identification" => { kind: Unsigned, tier: Optional, default: "0", description: "Fragment identification", reflect: identification, layout: (4, 6) },
+        "reserved_flag" => { kind: Bool, tier: Optional, default: "false", description: "Reserved IPv4 flag bit", reflect: reserved_flag, layout: (6, 8) },
+        "dont_fragment" => { kind: Bool, tier: Optional, default: "false", description: "Don't-fragment flag", reflect: dont_fragment, layout: (6, 8) },
+        "more_fragments" => { kind: Bool, tier: Optional, default: "false", description: "More-fragments flag", reflect: more_fragments, layout: (6, 8) },
+        "fragment_offset" => { kind: Unsigned, tier: Optional, default: "0", description: "Fragment offset in eight-byte units", reflect_bounded: fragment_offset, 0x1fff_u64, layout: (6, 8) },
+        "ttl" => { kind: Unsigned, tier: Optional, default: "64", description: "Time to live", reflect: ttl, layout: (8, 9) },
+        "protocol" => { kind: Unsigned, tier: Derived, description: "Next protocol discriminator", wire: protocol, layout: (9, 10) },
+        "checksum" => { kind: Unsigned, tier: Derived, description: "IPv4 header checksum", wire: checksum, layout: (10, 12) },
+        "source" | "src" => { kind: Ipv4, tier: Required, description: "Source IPv4 address", reflect: source, layout: (12, 16) },
+        "destination" | "dst" => { kind: Ipv4, tier: Required, description: "Destination IPv4 address", reflect: destination, layout: (16, 20) },
+        "options" => { kind: Bytes, tier: Optional, default: "0x", description: "Verbatim IPv4 option bytes", reflect: options, layout: (20, header_len) },
     }
     layout pub(crate) fn ipv4_layout(header_len: usize);
 }

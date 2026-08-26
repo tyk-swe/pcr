@@ -112,7 +112,7 @@ layers:
 fn test_2_emit_parse_round_trip_and_stability() {
     let registry = test_registry();
 
-    let doc_str = "schema: packetcraftr.packet/v2\nlayers:\n  - ethernet: \n      destination: \"02:00:00:00:00:02\"\n      source: \"02:00:00:00:00:01\"\n  - ipv4: \n      identification: 4660\n      dont_fragment: true\n      source: \"192.0.2.1\"\n      destination: \"192.0.2.2\"\n  - udp: \n      source_port: 49152\n      destination_port: 9\n  - raw: \n      bytes: \"0x68656c6c6f\"";
+    let doc_str = "schema: packetcraftr.packet/v2\nlayers:\n  - ethernet:\n      destination: \"02:00:00:00:00:02\"\n      source: \"02:00:00:00:00:01\"\n  - ipv4:\n      identification: 4660\n      dont_fragment: true\n      source: \"192.0.2.1\"\n      destination: \"192.0.2.2\"\n  - udp:\n      source_port: 49152\n      destination_port: 9\n  - raw:\n      bytes: \"0x68656c6c6f\"\n";
 
     let parsed = Document::parse(doc_str, Format::Yaml, DEFAULT_MAX_DOCUMENT_BYTES)
         .expect("parse should succeed");

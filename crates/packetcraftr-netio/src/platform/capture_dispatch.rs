@@ -5,10 +5,12 @@
 
 #![forbid(unsafe_code)]
 
-use crate::{
-    Error as LiveIoError,
-    capture::{CaptureRequest, CaptureSession},
-};
+#[cfg(all(
+    feature = "native-layer2",
+    any(target_os = "linux", target_os = "macos", windows)
+))]
+use crate::interface;
+use crate::{Error, capture};
 
 #[cfg(all(feature = "native-layer2", windows))]
 use super::npcap as capture_backend;
@@ -20,8 +22,8 @@ use super::pcap_backend as capture_backend;
 
 #[cfg(feature = "native-layer2")]
 pub(crate) fn system_capture(
-    request: &CaptureRequest,
-) -> Result<Box<dyn CaptureSession>, LiveIoError> {
+    request: &capture::Request,
+) -> Result<Box<dyn capture::Session>, Error> {
     let validated_limits = request.limits.validate()?;
     #[cfg(any(target_os = "linux", target_os = "macos", windows))]
     {
@@ -46,7 +48,7 @@ pub(crate) fn system_capture(
     #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
     {
         let _ = (request, validated_limits);
-        Err(LiveIoError::Unsupported {
+        Err(Error::Unsupported {
             message: "native Layer 2 capture is unsupported on this target".to_owned(),
         })
     }
@@ -54,9 +56,9 @@ pub(crate) fn system_capture(
 
 #[cfg(not(feature = "native-layer2"))]
 pub(crate) fn system_capture(
-    _request: &CaptureRequest,
-) -> Result<Box<dyn CaptureSession>, LiveIoError> {
-    Err(LiveIoError::Unsupported {
+    _request: &capture::Request,
+) -> Result<Box<dyn capture::Session>, Error> {
+    Err(Error::Unsupported {
         message: "enable the native-layer2 feature for native packet capture".to_owned(),
     })
 }
@@ -65,7 +67,7 @@ pub(crate) fn system_capture(
     feature = "native-layer2",
     any(target_os = "linux", target_os = "macos", windows)
 ))]
-fn capture_netmask(interface: &crate::interface::InterfaceInfo) -> Option<u32> {
+fn capture_netmask(interface: &interface::Info) -> Option<u32> {
     let assigned = interface
         .addresses
         .iter()
@@ -85,17 +87,11 @@ mod tests {
     use packetcraftr_core::frame::LinkType;
 
     use super::*;
-    use crate::{
-        interface::{
-            Address as InterfaceAddress, Flags as InterfaceFlags, Id as InterfaceId,
-            Info as InterfaceInfo,
-        },
-        link::Capability,
-    };
+    use crate::{interface::Id as InterfaceId, link::Capability};
 
     #[test]
     fn capture_netmask_uses_the_first_ipv4_assignment() {
-        let interface = InterfaceInfo {
+        let interface = interface::Info {
             id: InterfaceId {
                 name: "fixture0".to_owned(),
                 index: 7,
@@ -103,16 +99,16 @@ mod tests {
             description: None,
             mac_address: None,
             addresses: vec![
-                InterfaceAddress {
+                interface::Address {
                     address: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
                     prefix_length: 8,
                 },
-                InterfaceAddress {
+                interface::Address {
                     address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2)),
                     prefix_length: 24,
                 },
             ],
-            flags: InterfaceFlags::default(),
+            flags: interface::Flags::default(),
             mtu: None,
             capability: Capability::Layer2AndLayer3,
             link_type: LinkType::ETHERNET,
@@ -121,7 +117,7 @@ mod tests {
         assert_eq!(capture_netmask(&interface), Some((u32::MAX << 24).to_be()));
 
         let mut ipv6_only = interface;
-        ipv6_only.addresses = vec![InterfaceAddress {
+        ipv6_only.addresses = vec![interface::Address {
             address: IpAddr::V6(Ipv6Addr::LOCALHOST),
             prefix_length: 128,
         }];

@@ -9,8 +9,9 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use bytes::Bytes;
 
-use super::super::super::{Error as LiveIoError, transmit::Layer3Frame};
-use crate::{checksum, interface::Id as InterfaceId};
+use super::super::super::{Error, transmit::Layer3Frame};
+use crate::interface::Id as InterfaceId;
+use packetcraftr_core::protocol::checksum;
 
 const IPV4_MINIMUM_HEADER: usize = 20;
 const IPV6_HEADER: usize = 40;
@@ -23,7 +24,7 @@ pub(super) struct PreparedRawIp {
     pub(super) wire_bytes: Bytes,
 }
 
-pub(super) fn prepare(frame: Layer3Frame<'_>) -> Result<PreparedRawIp, LiveIoError> {
+pub(super) fn prepare(frame: Layer3Frame<'_>) -> Result<PreparedRawIp, Error> {
     let bytes = frame.bytes().clone();
     let plan = &frame.route().plan;
     if bytes.len() > plan.decision.mtu as usize {
@@ -56,7 +57,7 @@ pub(super) fn prepare(frame: Layer3Frame<'_>) -> Result<PreparedRawIp, LiveIoErr
             (
                 IpAddr::V4(source),
                 IpAddr::V4(destination),
-                ipv4_submission(&bytes),
+                ipv4_submission(&bytes)?,
             )
         }
         6 => {
@@ -92,54 +93,59 @@ pub(super) fn prepare(frame: Layer3Frame<'_>) -> Result<PreparedRawIp, LiveIoErr
     })
 }
 
-fn validate_ipv4(bytes: &[u8]) -> Result<(Ipv4Addr, Ipv4Addr), LiveIoError> {
-    if bytes.len() < IPV4_MINIMUM_HEADER {
-        return Err(invalid_frame("truncated IPv4 header".to_owned()));
-    }
-    let header_length = usize::from(bytes[0] & 0x0f) * 4;
+fn validate_ipv4(bytes: &[u8]) -> Result<(Ipv4Addr, Ipv4Addr), Error> {
+    let header = bytes
+        .first_chunk::<IPV4_MINIMUM_HEADER>()
+        .ok_or_else(|| invalid_frame("truncated IPv4 header".to_owned()))?;
+    let header_length = usize::from(header[0] & 0x0f) * 4;
     if header_length < IPV4_MINIMUM_HEADER || header_length > bytes.len() {
         return Err(invalid_frame(format!(
             "invalid IPv4 header length {header_length}"
         )));
     }
-    let declared = usize::from(u16::from_be_bytes([bytes[2], bytes[3]]));
+    let declared = usize::from(u16::from_be_bytes([header[2], header[3]]));
     if declared != bytes.len() {
         return Err(invalid_frame(format!(
             "IPv4 total length {declared} differs from submitted {} bytes",
             bytes.len()
         )));
     }
-    if bytes[4..6] == [0, 0] {
+    if header[4..6] == [0, 0] {
         return Err(invalid_frame(
             "IPv4 identification is zero and would be replaced by the operating system".to_owned(),
         ));
     }
-    if checksum::compute(&bytes[..header_length]) != 0 {
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "header_length was checked against bytes.len() above"
+    )]
+    let header_checksum = checksum(&bytes[..header_length]);
+    if header_checksum != 0 {
         return Err(invalid_frame(
             "IPv4 header checksum would be rewritten by the operating system".to_owned(),
         ));
     }
-    let source = Ipv4Addr::new(bytes[12], bytes[13], bytes[14], bytes[15]);
-    let destination = Ipv4Addr::new(bytes[16], bytes[17], bytes[18], bytes[19]);
+    let source = Ipv4Addr::new(header[12], header[13], header[14], header[15]);
+    let destination = Ipv4Addr::new(header[16], header[17], header[18], header[19]);
     if destination.is_unspecified() {
         return Err(invalid_frame("IPv4 destination is unspecified".to_owned()));
     }
     Ok((source, destination))
 }
 
-fn validate_ipv6(bytes: &[u8]) -> Result<(Ipv6Addr, Ipv6Addr), LiveIoError> {
-    if bytes.len() < IPV6_HEADER {
-        return Err(invalid_frame("truncated IPv6 header".to_owned()));
-    }
-    let actual_payload = bytes.len() - IPV6_HEADER;
-    let declared_payload = usize::from(u16::from_be_bytes([bytes[4], bytes[5]]));
+fn validate_ipv6(bytes: &[u8]) -> Result<(Ipv6Addr, Ipv6Addr), Error> {
+    let header = bytes
+        .first_chunk::<IPV6_HEADER>()
+        .ok_or_else(|| invalid_frame("truncated IPv6 header".to_owned()))?;
+    let actual_payload = bytes.len().saturating_sub(IPV6_HEADER);
+    let declared_payload = usize::from(u16::from_be_bytes([header[4], header[5]]));
     if declared_payload != actual_payload {
         return Err(invalid_frame(format!(
             "IPv6 payload length {declared_payload} differs from submitted {actual_payload} bytes"
         )));
     }
-    let source = ipv6_address(&bytes[8..24]);
-    let destination = ipv6_address(&bytes[24..40]);
+    let source = ipv6_address(&header[8..24]);
+    let destination = ipv6_address(&header[24..40]);
     if destination.is_unspecified() {
         return Err(invalid_frame("IPv6 destination is unspecified".to_owned()));
     }
@@ -153,23 +159,30 @@ fn ipv6_address(bytes: &[u8]) -> Ipv6Addr {
 }
 
 #[cfg(target_os = "macos")]
-fn ipv4_submission(bytes: &Bytes) -> Bytes {
+fn ipv4_submission(bytes: &Bytes) -> Result<Bytes, Error> {
     macos_ipv4_submission(bytes)
 }
 
 #[cfg(not(target_os = "macos"))]
-fn ipv4_submission(bytes: &Bytes) -> Bytes {
-    bytes.clone()
+fn ipv4_submission(bytes: &Bytes) -> Result<Bytes, Error> {
+    Ok(bytes.clone())
 }
 
+/// Rewrites the two header fields the macOS raw IPv4 socket expects in host byte
+/// order. Callers must validate the packet first: a buffer shorter than the
+/// minimum header is rejected instead of being sent with big-endian fields the
+/// kernel would misread.
 #[cfg(target_os = "macos")]
-pub(super) fn macos_ipv4_submission(bytes: &Bytes) -> Bytes {
+pub(super) fn macos_ipv4_submission(bytes: &Bytes) -> Result<Bytes, Error> {
     let mut submission = bytes.to_vec();
-    let total_length = u16::from_be_bytes([submission[2], submission[3]]);
-    submission[2..4].copy_from_slice(&total_length.to_ne_bytes());
-    let flags_and_offset = u16::from_be_bytes([submission[6], submission[7]]);
-    submission[6..8].copy_from_slice(&flags_and_offset.to_ne_bytes());
-    Bytes::from(submission)
+    let Some(header) = submission.first_chunk_mut::<IPV4_MINIMUM_HEADER>() else {
+        return Err(invalid_frame("truncated IPv4 header".to_owned()));
+    };
+    let total_length = u16::from_be_bytes([header[2], header[3]]);
+    header[2..4].copy_from_slice(&total_length.to_ne_bytes());
+    let flags_and_offset = u16::from_be_bytes([header[6], header[7]]);
+    header[6..8].copy_from_slice(&flags_and_offset.to_ne_bytes());
+    Ok(Bytes::from(submission))
 }
 
 #[cfg(windows)]
@@ -177,10 +190,10 @@ fn validate_windows_restrictions(
     bytes: &[u8],
     packet_source: IpAddr,
     interface_source: IpAddr,
-) -> Result<(), LiveIoError> {
+) -> Result<(), Error> {
     let protocol = upper_protocol(bytes)?;
     if protocol == 17 && packet_source != interface_source {
-        return Err(LiveIoError::Unsupported {
+        return Err(Error::Unsupported {
             message: "Windows client editions drop raw UDP with a source not assigned to a local interface"
                 .to_owned(),
         });
@@ -188,18 +201,31 @@ fn validate_windows_restrictions(
     Ok(())
 }
 
+/// Reads the two-byte IPv6 extension-header prefix at `offset`.
 #[cfg(windows)]
-pub(super) fn upper_protocol(bytes: &[u8]) -> Result<u8, LiveIoError> {
-    if bytes[0] >> 4 == 4 {
-        return Ok(bytes[9]);
+fn extension_header(bytes: &[u8], offset: usize) -> Option<[u8; 2]> {
+    bytes.get(offset..)?.first_chunk::<2>().copied()
+}
+
+#[cfg(windows)]
+pub(super) fn upper_protocol(bytes: &[u8]) -> Result<u8, Error> {
+    let version = bytes
+        .first()
+        .ok_or_else(|| invalid_frame("packet is empty".to_owned()))?;
+    if version >> 4 == 4 {
+        return bytes
+            .get(9)
+            .copied()
+            .ok_or_else(|| invalid_frame("truncated IPv4 header".to_owned()));
     }
-    let mut next = bytes[6];
+    let mut next = *bytes
+        .get(6)
+        .ok_or_else(|| invalid_frame("truncated IPv6 header".to_owned()))?;
     let mut offset = IPV6_HEADER;
     loop {
         let header_length = match next {
             0 | 43 | 60 => {
-                let header = bytes
-                    .get(offset..offset + 2)
+                let header = extension_header(bytes, offset)
                     .ok_or_else(|| invalid_frame("truncated IPv6 extension header".to_owned()))?;
                 next = header[0];
                 usize::from(header[1])
@@ -214,7 +240,7 @@ pub(super) fn upper_protocol(bytes: &[u8]) -> Result<u8, LiveIoError> {
                 8
             }
             51 => {
-                let header = bytes.get(offset..offset + 2).ok_or_else(|| {
+                let header = extension_header(bytes, offset).ok_or_else(|| {
                     invalid_frame("truncated IPv6 authentication header".to_owned())
                 })?;
                 next = header[0];
@@ -234,12 +260,13 @@ pub(super) fn upper_protocol(bytes: &[u8]) -> Result<u8, LiveIoError> {
     }
 }
 
-fn invalid_frame(message: String) -> LiveIoError {
-    LiveIoError::InvalidTransmissionFrame { message }
+fn invalid_frame(message: String) -> Error {
+    Error::InvalidTransmissionFrame { message }
 }
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
     use super::*;
 
     const SOURCE_V4: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 1);
@@ -264,7 +291,7 @@ mod tests {
 
     fn set_ipv4_checksum(bytes: &mut [u8]) {
         bytes[10..12].fill(0);
-        let checksum = checksum::compute(bytes);
+        let checksum = checksum(bytes);
         bytes[10..12].copy_from_slice(&checksum.to_be_bytes());
     }
 
@@ -281,9 +308,9 @@ mod tests {
         bytes
     }
 
-    fn invalid_message<T: std::fmt::Debug>(result: Result<T, LiveIoError>) -> String {
+    fn invalid_message<T: std::fmt::Debug>(result: Result<T, Error>) -> String {
         match result.expect_err("fixture must be rejected") {
-            LiveIoError::InvalidTransmissionFrame { message } => message,
+            Error::InvalidTransmissionFrame { message } => message,
             other => panic!("unexpected error: {other:?}"),
         }
     }

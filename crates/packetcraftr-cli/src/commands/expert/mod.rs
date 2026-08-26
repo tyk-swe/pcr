@@ -9,6 +9,7 @@ use packetcraftr::{analysis, output};
 use self::arguments::{Args, Severity};
 use super::super::errors::CliError;
 use super::super::input::open_capture;
+use super::format::ToolFormat;
 use super::offline_analysis::{Prepared, prepare};
 use crate::rendering::NdjsonStream;
 
@@ -31,6 +32,7 @@ pub(super) fn run(
     format: output::contract::Format,
     stream: &mut NdjsonStream,
 ) -> Result<(), CliError> {
+    let format = ToolFormat::narrow(output::contract::Command::Expert, format)?;
     let Prepared {
         registry,
         filter,
@@ -67,9 +69,8 @@ pub(super) fn run(
     }
 
     match format {
-        output::contract::Format::Text => rendering::render_text(&summary, &state),
-        output::contract::Format::Json => rendering::render_aggregate(&summary, state),
-        output::contract::Format::Ndjson => rendering::render_stream(&summary, state, stream),
-        _ => unreachable!("the format contract admits only text, json, and ndjson"),
+        ToolFormat::Text => rendering::render_text(&summary, &state),
+        ToolFormat::Json => rendering::render_aggregate(&summary, state),
+        ToolFormat::Ndjson => rendering::render_stream(&summary, state, stream),
     }
 }

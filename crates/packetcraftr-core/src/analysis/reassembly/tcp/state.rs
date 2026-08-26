@@ -101,18 +101,25 @@ pub(super) fn emitted_history_conflicts(state: &TcpFlowState, offset: u64, paylo
     if overlap_start >= overlap_end {
         return false;
     }
-    let payload_start = (overlap_start - offset) as usize;
-    let history_start = (overlap_start - state.history_start_offset) as usize;
-    let length = (overlap_end - overlap_start) as usize;
+    let payload_start = overlap_start.saturating_sub(offset) as usize;
+    let history_start = overlap_start.saturating_sub(state.history_start_offset) as usize;
+    let length = overlap_end.saturating_sub(overlap_start) as usize;
+    let history_end = history_start.saturating_add(length);
+    let Some(payload_overlap) = payload
+        .get(payload_start..)
+        .and_then(|tail| tail.get(..length))
+    else {
+        return true;
+    };
     !state
         .emitted_history
-        .range(history_start..history_start + length)
-        .eq(payload[payload_start..payload_start + length].iter())
+        .range(history_start..history_end)
+        .eq(payload_overlap.iter())
 }
 
 pub(super) fn trim_emitted_history(state: &mut TcpFlowState, capacity: usize) {
     if state.emitted_history.len() > capacity {
-        let remove = state.emitted_history.len() - capacity;
+        let remove = state.emitted_history.len().saturating_sub(capacity);
         state.history_start_offset = state.history_start_offset.saturating_add(remove as u64);
         state.emitted_history.drain(..remove);
     }
@@ -174,14 +181,18 @@ pub(super) fn append_emitted_history(
         .min(capacity);
     let history_start_offset = output_end.saturating_sub(keep as u64);
     if !state.emitted_history.is_empty() && history_start_offset < output_start {
-        let old_start = (history_start_offset - state.history_start_offset) as usize;
+        let old_start = history_start_offset.saturating_sub(state.history_start_offset) as usize;
         state.emitted_history.drain(..old_start);
     } else {
         state.emitted_history.clear();
     }
     let output_skip = history_start_offset.saturating_sub(output_start) as usize;
-    state
-        .emitted_history
-        .extend(output[output_skip..].iter().copied());
+    state.emitted_history.extend(
+        output
+            .get(output_skip..)
+            .unwrap_or_default()
+            .iter()
+            .copied(),
+    );
     state.history_start_offset = history_start_offset;
 }

@@ -122,7 +122,7 @@ impl LayerCodec for AhCodec {
             reason = "the guard above rejects header_len > (0xff + 2) * 4, so the word count \
                       minus two fits the 8-bit payload-length field"
         )]
-        let expected_payload_length = (header_len / 4 - 2) as u8;
+        let expected_payload_length = (header_len / 4).saturating_sub(2) as u8;
 
         let (under_ipv6, mut diagnostics) = validate_context(layer, header_len, context)?;
         validate_auto_raw_discriminator(
@@ -188,22 +188,24 @@ impl LayerCodec for AhCodec {
         input: &[u8],
         context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
-        if input.len() < AH_FIXED_LEN {
+        let Some(fixed) = input.first_chunk::<AH_FIXED_LEN>() else {
             return Err(truncated("ah", AH_FIXED_LEN, input.len()));
-        }
-        let payload_length = input[1];
-        let header_len = (usize::from(payload_length) + 2) * 4;
+        };
+        let payload_length = fixed[1];
+        let header_len = usize::from(payload_length)
+            .saturating_add(2)
+            .saturating_mul(4);
         if header_len < AH_FIXED_LEN {
             return Err(invalid(
                 "ah",
                 format!("payload length {payload_length} is below the fixed header"),
             ));
         }
-        if input.len() < header_len {
+        let Some(icv) = input.get(AH_FIXED_LEN..header_len) else {
             return Err(truncated("ah", header_len, input.len()));
-        }
-        let next_header = input[0];
-        let reserved = u16::from_be_bytes([input[2], input[3]]);
+        };
+        let next_header = fixed[0];
+        let reserved = u16::from_be_bytes([fixed[2], fixed[3]]);
         let mut diagnostics = Vec::new();
         if reserved != 0 {
             diagnostics.push(
@@ -236,16 +238,16 @@ impl LayerCodec for AhCodec {
                 .at_field("next_header"),
             );
         }
-        let payload_len = input.len() - header_len;
+        let payload_len = input.len().saturating_sub(header_len);
         Ok(DecodedLayerValue {
             fields: ah_layout(header_len),
             layer: Box::new(Ah {
                 next_header: WireValue::Exact(next_header),
                 payload_length: WireValue::Exact(payload_length),
                 reserved,
-                spi: u32::from_be_bytes([input[4], input[5], input[6], input[7]]),
-                sequence: u32::from_be_bytes([input[8], input[9], input[10], input[11]]),
-                icv: Bytes::copy_from_slice(&input[AH_FIXED_LEN..header_len]),
+                spi: u32::from_be_bytes([fixed[4], fixed[5], fixed[6], fixed[7]]),
+                sequence: u32::from_be_bytes([fixed[8], fixed[9], fixed[10], fixed[11]]),
+                icv: Bytes::copy_from_slice(icv),
             }),
             consumed: header_len,
             payload_len,

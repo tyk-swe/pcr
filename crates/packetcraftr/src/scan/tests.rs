@@ -1,5 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+// Test code indexes fixtures and counts by hand; the fail-closed lints are
+// for library paths.
+#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 use std::collections::VecDeque;
 use std::convert::Infallible;
@@ -28,7 +31,7 @@ use super::model::{
 };
 use super::probe::probe_packet;
 use crate::clock::Clock;
-use crate::target::{Authorized, Authorizer, PolicyAuthorizer, Target};
+use crate::target::{Authorized, Authorizer, Operation, PolicyAuthorizer, Target};
 use crate::{BoundaryError, Stats, target::Family};
 
 fn private_scan_policy() -> crate::policy::Policy {
@@ -87,11 +90,7 @@ impl Authorizer for AddressListAuthorizer {
         })
     }
 
-    fn authorize_operation(
-        &mut self,
-        _packets: u64,
-        _maximum_wire_bytes: u64,
-    ) -> Result<(), BoundaryError> {
+    fn authorize_operation(&mut self, _operation: Operation<'_>) -> Result<(), BoundaryError> {
         Ok(())
     }
 }

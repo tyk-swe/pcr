@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -8,13 +9,10 @@ use bytes::Bytes;
 use packetcraftr_core::frame::Frame;
 
 use crate::{
-    capture::{
-        self, CaptureOverflowPolicy, CaptureProvider, CaptureQueueLimits, CaptureSession,
-        CapturedFrame, Statistics,
-    },
+    capture::{self, Session},
     link::{Capability, MacAddress, Mode},
     route::{Decision, Materialized, Plan, Scope, SelectionReason},
-    transmit::{self, Layer2Frame, Layer2Io},
+    transmit::{self, Layer2Frame},
 };
 
 use super::cache::{NeighborCache, NeighborCacheKey, NeighborExchangeOutcome};
@@ -66,8 +64,8 @@ pub type SystemResolver = ActiveResolver<transmit::SystemLayer2, capture::System
 
 impl<L, C> Resolver for ActiveResolver<L, C>
 where
-    L: Layer2Io,
-    C: CaptureProvider,
+    L: transmit::Layer2Sender,
+    C: capture::Provider,
 {
     fn resolve(&self, request: &Request) -> Result<Resolution, Error> {
         validate_request(request)?;
@@ -79,7 +77,7 @@ where
                 cache_hit: true,
                 captured: Vec::new(),
                 evidence_truncated: false,
-                capture_statistics: Statistics::default(),
+                capture_statistics: capture::Statistics::default(),
             });
         }
 
@@ -89,11 +87,11 @@ where
             plan: planned_route.clone(),
             neighbor_resolution: None,
         };
-        let limits = CaptureQueueLimits {
+        let limits = capture::Limits {
             max_frames: self.options.max_capture_queue_frames,
             max_bytes: self.options.max_captured_bytes,
             snap_length: self.options.snap_length,
-            overflow_policy: CaptureOverflowPolicy::Fail,
+            overflow_policy: capture::OverflowPolicy::Fail,
         };
         let capture_request = capture::Request {
             interface: request.interface.clone(),
@@ -163,10 +161,10 @@ where
 
 impl<L, C> ActiveResolver<L, C>
 where
-    L: Layer2Io,
-    C: CaptureProvider,
+    L: transmit::Layer2Sender,
+    C: capture::Provider,
 {
-    fn exchange<S: CaptureSession>(
+    fn exchange<S: Session>(
         &self,
         request: &Request,
         request_bytes: &Bytes,
@@ -176,7 +174,7 @@ where
         capture
             .wait_ready(self.options.attempt_timeout)
             .map_err(|error| map_io_error(request, "waiting for capture readiness", error))?;
-        let mut captured = Vec::new();
+        let mut captured: VecDeque<Frame> = VecDeque::new();
         let mut captured_bytes = 0usize;
         let mut evidence_truncated = false;
         self.drain_pre_request(
@@ -208,7 +206,7 @@ where
                 else {
                     break;
                 };
-                let CapturedFrame {
+                let capture::Captured {
                     frame, received_at, ..
                 } = captured_frame;
                 validate_captured_frame(request, &frame, self.options.snap_length)?;
@@ -236,7 +234,7 @@ where
                     return Ok(NeighborExchangeOutcome {
                         mac_address: Some(mac_address),
                         attempts: attempt,
-                        captured,
+                        captured: Vec::from(captured),
                         evidence_truncated,
                     });
                 }
@@ -252,16 +250,16 @@ where
         Ok(NeighborExchangeOutcome {
             mac_address: None,
             attempts: self.options.max_attempts,
-            captured,
+            captured: Vec::from(captured),
             evidence_truncated,
         })
     }
 
-    fn drain_pre_request<S: CaptureSession>(
+    fn drain_pre_request<S: Session>(
         &self,
         request: &Request,
         capture: &mut S,
-        captured: &mut Vec<Frame>,
+        captured: &mut VecDeque<Frame>,
         captured_bytes: &mut usize,
         evidence_truncated: &mut bool,
     ) -> Result<(), Error> {
@@ -315,6 +313,7 @@ fn discovery_route(request: &Request, destination_mac: MacAddress) -> Plan {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
     use std::collections::VecDeque;
     use std::net::{IpAddr, Ipv4Addr};
     use std::sync::{
@@ -323,9 +322,7 @@ mod tests {
     };
     use std::time::{Duration, SystemTime};
 
-    use crate::Error as LiveIoError;
     use crate::interface::Id as InterfaceId;
-    use crate::transmit::IoSendReport;
     use packetcraftr_core::frame::LinkType;
 
     use super::*;
@@ -335,10 +332,10 @@ mod tests {
         delay: Duration,
     }
 
-    impl Layer2Io for SlowLayer2 {
-        fn send_layer2(&self, frame: Layer2Frame<'_>) -> Result<IoSendReport, LiveIoError> {
+    impl transmit::Layer2Sender for SlowLayer2 {
+        fn send_layer2(&self, frame: Layer2Frame<'_>) -> Result<transmit::Report, crate::Error> {
             std::thread::sleep(self.delay);
-            Ok(IoSendReport::committed(
+            Ok(transmit::Report::committed(
                 frame.bytes().len(),
                 frame.bytes().clone(),
             ))
@@ -350,19 +347,19 @@ mod tests {
         timeouts: Arc<Mutex<Vec<Duration>>>,
     }
 
-    impl CaptureSession for ObservedCapture {
+    impl Session for ObservedCapture {
         fn metadata(&self) -> &capture::Metadata {
             &self.metadata
         }
 
-        fn wait_ready(&mut self, _timeout: Duration) -> Result<(), LiveIoError> {
+        fn wait_ready(&mut self, _timeout: Duration) -> Result<(), crate::Error> {
             Ok(())
         }
 
         fn next_captured_frame(
             &mut self,
             timeout: Duration,
-        ) -> Result<Option<CapturedFrame>, LiveIoError> {
+        ) -> Result<Option<capture::Captured>, crate::Error> {
             self.timeouts
                 .lock()
                 .expect("timeout observations")
@@ -370,12 +367,12 @@ mod tests {
             Ok(None)
         }
 
-        fn shutdown(&mut self) -> Result<(), LiveIoError> {
+        fn shutdown(&mut self) -> Result<(), crate::Error> {
             Ok(())
         }
 
-        fn statistics(&self) -> Statistics {
-            Statistics::default()
+        fn statistics(&self) -> capture::Statistics {
+            capture::Statistics::default()
         }
     }
 
@@ -387,7 +384,7 @@ mod tests {
     #[derive(Default)]
     struct FixtureLayer2State {
         sent: Mutex<Vec<(Bytes, Plan)>>,
-        failure: Mutex<Option<LiveIoError>>,
+        failure: Mutex<Option<crate::Error>>,
         operations: Option<Arc<Mutex<Vec<&'static str>>>>,
     }
 
@@ -412,8 +409,8 @@ mod tests {
         }
     }
 
-    impl Layer2Io for FixtureLayer2 {
-        fn send_layer2(&self, frame: Layer2Frame<'_>) -> Result<IoSendReport, LiveIoError> {
+    impl transmit::Layer2Sender for FixtureLayer2 {
+        fn send_layer2(&self, frame: Layer2Frame<'_>) -> Result<transmit::Report, crate::Error> {
             if let Some(operations) = &self.state.operations {
                 operations
                     .lock()
@@ -434,7 +431,7 @@ mod tests {
                 .lock()
                 .expect("fixture sends")
                 .push((frame.bytes().clone(), frame.route().plan.clone()));
-            Ok(IoSendReport::committed(
+            Ok(transmit::Report::committed(
                 frame.bytes().len(),
                 frame.bytes().clone(),
             ))
@@ -445,14 +442,16 @@ mod tests {
         Frame(Frame),
         MissingIngress(Frame),
         End,
-        Error(LiveIoError),
+        Error(crate::Error),
     }
 
     impl CaptureStep {
-        fn deliver(self) -> Result<Option<CapturedFrame>, LiveIoError> {
+        fn deliver(self) -> Result<Option<capture::Captured>, crate::Error> {
             match self {
-                Self::Frame(frame) => Ok(Some(CapturedFrame::new(frame, Instant::now()))),
-                Self::MissingIngress(frame) => Ok(Some(CapturedFrame::without_ingress_time(frame))),
+                Self::Frame(frame) => Ok(Some(capture::Captured::new(frame, Instant::now()))),
+                Self::MissingIngress(frame) => {
+                    Ok(Some(capture::Captured::without_ingress_time(frame)))
+                }
                 Self::End => Ok(None),
                 Self::Error(error) => Err(error),
             }
@@ -461,11 +460,11 @@ mod tests {
 
     struct FixtureCapture {
         metadata: capture::Metadata,
-        readiness: Result<(), LiveIoError>,
+        readiness: Result<(), crate::Error>,
         pre_request: VecDeque<CaptureStep>,
         responses: VecDeque<CaptureStep>,
-        cleanup: Result<(), LiveIoError>,
-        statistics: Statistics,
+        cleanup: Result<(), crate::Error>,
+        statistics: capture::Statistics,
         shutdowns: Arc<AtomicUsize>,
     }
 
@@ -481,25 +480,25 @@ mod tests {
                 pre_request: VecDeque::new(),
                 responses: VecDeque::from([CaptureStep::End]),
                 cleanup: Ok(()),
-                statistics: Statistics::default(),
+                statistics: capture::Statistics::default(),
                 shutdowns: Arc::new(AtomicUsize::new(0)),
             }
         }
     }
 
-    impl CaptureSession for FixtureCapture {
+    impl Session for FixtureCapture {
         fn metadata(&self) -> &capture::Metadata {
             &self.metadata
         }
 
-        fn wait_ready(&mut self, _timeout: Duration) -> Result<(), LiveIoError> {
+        fn wait_ready(&mut self, _timeout: Duration) -> Result<(), crate::Error> {
             self.readiness.clone()
         }
 
         fn next_captured_frame(
             &mut self,
             timeout: Duration,
-        ) -> Result<Option<CapturedFrame>, LiveIoError> {
+        ) -> Result<Option<capture::Captured>, crate::Error> {
             if timeout.is_zero() {
                 self.pre_request.pop_front().unwrap_or(CaptureStep::End)
             } else {
@@ -508,12 +507,12 @@ mod tests {
             .deliver()
         }
 
-        fn shutdown(&mut self) -> Result<(), LiveIoError> {
+        fn shutdown(&mut self) -> Result<(), crate::Error> {
             self.shutdowns.fetch_add(1, Ordering::SeqCst);
             self.cleanup.clone()
         }
 
-        fn statistics(&self) -> Statistics {
+        fn statistics(&self) -> capture::Statistics {
             self.statistics
         }
     }
@@ -525,7 +524,7 @@ mod tests {
 
     struct FixtureCaptureProviderState {
         capture: Mutex<Option<FixtureCapture>>,
-        failure: Option<LiveIoError>,
+        failure: Option<crate::Error>,
         requests: Mutex<Vec<capture::Request>>,
         arms: AtomicUsize,
         operations: Option<Arc<Mutex<Vec<&'static str>>>>,
@@ -559,7 +558,7 @@ mod tests {
             }
         }
 
-        fn failing(error: LiveIoError) -> Self {
+        fn failing(error: crate::Error) -> Self {
             Self {
                 state: Arc::new(FixtureCaptureProviderState {
                     capture: Mutex::new(None),
@@ -572,10 +571,10 @@ mod tests {
         }
     }
 
-    impl CaptureProvider for FixtureCaptureProvider {
+    impl capture::Provider for FixtureCaptureProvider {
         type Capture = FixtureCapture;
 
-        fn arm_capture(&self, request: &capture::Request) -> Result<Self::Capture, LiveIoError> {
+        fn arm_capture(&self, request: &capture::Request) -> Result<Self::Capture, crate::Error> {
             if let Some(operations) = &self.state.operations {
                 operations
                     .lock()
@@ -737,7 +736,7 @@ mod tests {
                 attempts: 2,
                 ref captured,
                 evidence_truncated: false,
-                capture_statistics: Statistics {
+                capture_statistics: capture::Statistics {
                     received_frames: 0,
                     ..
                 },
@@ -788,18 +787,18 @@ mod tests {
         let request = request();
         for (statistics, operation) in [
             (
-                Statistics {
+                capture::Statistics {
                     overflow_events: 1,
                     dropped_frames: 1,
                     dropped_bytes: 42,
-                    ..Statistics::default()
+                    ..capture::Statistics::default()
                 },
                 "checking capture completeness",
             ),
             (
-                Statistics {
+                capture::Statistics {
                     dropped_bytes: 1,
-                    ..Statistics::default()
+                    ..capture::Statistics::default()
                 },
                 "validating capture statistics",
             ),
@@ -829,7 +828,7 @@ mod tests {
     #[test]
     fn resolver_preserves_arm_operation_and_cleanup_failure_boundaries() {
         let request = request();
-        let arm_failure = LiveIoError::Capture {
+        let arm_failure = crate::Error::Capture {
             message: "arm failed".to_owned(),
         };
         let resolver = ActiveResolver::try_new(
@@ -847,7 +846,7 @@ mod tests {
             }) if source == arm_failure
         ));
 
-        let cleanup_failure = LiveIoError::Capture {
+        let cleanup_failure = crate::Error::Capture {
             message: "cleanup failed".to_owned(),
         };
         let mut capture = FixtureCapture::empty();
@@ -863,7 +862,7 @@ mod tests {
             Err(Error::Cleanup { source, .. }) if source == cleanup_failure
         ));
 
-        let readiness_failure = LiveIoError::CaptureReadiness {
+        let readiness_failure = crate::Error::CaptureReadiness {
             message: "not ready".to_owned(),
         };
         let mut capture = FixtureCapture::empty();
@@ -900,7 +899,7 @@ mod tests {
         let request = request();
         for (pre_request, responses, operation) in [
             (
-                VecDeque::from([CaptureStep::Error(LiveIoError::Capture {
+                VecDeque::from([CaptureStep::Error(crate::Error::Capture {
                     message: "drain failed".to_owned(),
                 })]),
                 VecDeque::new(),
@@ -908,7 +907,7 @@ mod tests {
             ),
             (
                 VecDeque::new(),
-                VecDeque::from([CaptureStep::Error(LiveIoError::Capture {
+                VecDeque::from([CaptureStep::Error(crate::Error::Capture {
                     message: "receive failed".to_owned(),
                 })]),
                 "receiving discovery response",
@@ -933,7 +932,7 @@ mod tests {
             ));
         }
 
-        let send_failure = LiveIoError::Send {
+        let send_failure = crate::Error::Send {
             message: "send failed".to_owned(),
         };
         let layer2 = FixtureLayer2::successful();

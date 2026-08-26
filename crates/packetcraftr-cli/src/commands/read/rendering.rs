@@ -3,6 +3,7 @@
 
 use packetcraftr::output;
 
+use crate::commands::format::FrameFormat;
 use crate::errors::CliError;
 use crate::rendering::{
     NdjsonStream, captured_frame_text, spaced_hex, write_plain_line, write_stdout_line,
@@ -10,7 +11,7 @@ use crate::rendering::{
 
 pub(super) fn render_record(
     event: &output::read::Event,
-    format: output::contract::Format,
+    format: FrameFormat,
     stream: &mut NdjsonStream,
 ) -> Result<(), CliError> {
     let output::read::Event::Frame {
@@ -22,7 +23,7 @@ pub(super) fn render_record(
         unreachable!("read completion is rendered by the stream owner")
     };
     match format {
-        output::contract::Format::Text => match decoded {
+        FrameFormat::Text => match decoded {
             None => write_stdout_line(format_args!(
                 "{source_frame}: {}",
                 captured_frame_text(frame)
@@ -42,8 +43,7 @@ pub(super) fn render_record(
                 spaced_hex(frame.bytes())
             )),
         },
-        output::contract::Format::Hex => write_plain_line(format_args!("{}", frame.bytes_hex())),
-        output::contract::Format::Ndjson => stream.emit_data(event, Vec::new()),
-        _ => unreachable!("read format is checked before command dispatch"),
+        FrameFormat::Hex => write_plain_line(format_args!("{}", frame.bytes_hex())),
+        FrameFormat::Ndjson => stream.emit_data(event, Vec::new()),
     }
 }

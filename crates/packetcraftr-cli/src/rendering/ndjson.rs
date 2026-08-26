@@ -8,6 +8,14 @@ use serde::Serialize;
 
 use super::super::errors::CliError;
 
+/// The NDJSON stream, with the classification the CLI needs.
+///
+/// [`output::envelope::StreamEncoder`] reports a write or serialization
+/// failure as an [`output::envelope::EncodeError`], which carries no exit
+/// code. Everything the CLI does with a failure — the exit code, the terminal
+/// report, the error record itself — starts from a [`CliError`], so the
+/// conversion belongs at this boundary rather than at each of the thirty-odd
+/// call sites.
 #[derive(Clone)]
 pub(crate) struct NdjsonStream {
     encoder: output::envelope::StreamEncoder,
@@ -73,48 +81,20 @@ impl NdjsonStream {
 
 #[cfg(test)]
 pub(crate) mod test_support {
-    use std::io;
-    use std::sync::{Arc, Mutex};
-
     use super::*;
 
-    #[derive(Clone, Default)]
-    pub(crate) struct SharedBuffer(Arc<Mutex<Vec<u8>>>);
-
-    impl SharedBuffer {
-        pub(crate) fn bytes(&self) -> Vec<u8> {
-            self.0.lock().expect("shared buffer lock").clone()
-        }
-
-        pub(crate) fn records(&self) -> Vec<serde_json::Value> {
-            crate::test_support::parse_ndjson(&self.bytes())
-        }
-    }
-
-    impl Write for SharedBuffer {
-        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-            self.0
-                .lock()
-                .expect("shared buffer lock")
-                .extend_from_slice(bytes);
-            Ok(bytes.len())
-        }
-
-        fn flush(&mut self) -> io::Result<()> {
-            Ok(())
-        }
-    }
+    pub(crate) use crate::test_support::{SharedBuffer, assert_contiguous};
 
     pub(crate) fn stream(command: output::contract::Command) -> (NdjsonStream, SharedBuffer) {
         let output = SharedBuffer::default();
         (NdjsonStream::new(Some(command), output.clone()), output)
     }
-
-    pub(crate) use crate::test_support::assert_contiguous;
 }
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+
     use std::io;
 
     use serde::ser::Error as _;

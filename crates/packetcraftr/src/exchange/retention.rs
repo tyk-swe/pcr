@@ -78,7 +78,14 @@ impl Accumulator {
         }
         if self.reserve_decoded_evidence(decoded.original.len(), options) {
             self.mark_record_retained(identity);
-            self.retained_unmatched += 1;
+            #[expect(
+                clippy::arithmetic_side_effects,
+                reason = "the early return above keeps `retained_unmatched` below \
+                          `max_unmatched_frames`, so the increment cannot overflow"
+            )]
+            {
+                self.retained_unmatched += 1;
+            }
             self.unsolicited
                 .push(UnsolicitedEvidence { decoded, freshness });
         }
@@ -105,7 +112,14 @@ impl Accumulator {
         }
         if self.reserve_decoded_evidence(frame.bytes().len(), options) {
             self.mark_record_retained(identity);
-            self.retained_unmatched += 1;
+            #[expect(
+                clippy::arithmetic_side_effects,
+                reason = "the early return above keeps `retained_unmatched` below \
+                          `max_unmatched_frames`, so the increment cannot overflow"
+            )]
+            {
+                self.retained_unmatched += 1;
+            }
             self.pending_events
                 .push(super::contract::Event::Undecoded { frame });
         }

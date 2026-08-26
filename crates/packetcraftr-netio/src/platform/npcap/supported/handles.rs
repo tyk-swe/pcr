@@ -18,7 +18,7 @@ use super::{
     error::{error_buffer_message, map_activation_error, map_open_message},
     loader::{NpcapApi, npcap_api, npcap_device_name},
 };
-use crate::{Error as LiveIoError, interface::Id as InterfaceId};
+use crate::{Error, interface::Id as InterfaceId};
 
 #[derive(Clone, Copy)]
 pub(super) enum PromiscuousMode {
@@ -77,10 +77,10 @@ pub(super) fn open_handle(
     interface: &InterfaceId,
     snap_length: c_int,
     promiscuous_mode: PromiscuousMode,
-) -> Result<Arc<NpcapHandle>, LiveIoError> {
+) -> Result<Arc<NpcapHandle>, Error> {
     let api = npcap_api()?;
     let device_name = npcap_device_name(interface)?;
-    let device_name = CString::new(device_name).map_err(|_| LiveIoError::Device {
+    let device_name = CString::new(device_name).map_err(|_| Error::Device {
         interface: interface.name.clone(),
         message: "Npcap device name contains an embedded NUL byte".to_owned(),
     })?;
@@ -145,14 +145,14 @@ fn set_integer_option(
     operation: &'static str,
     function: PcapSetInteger,
     value: c_int,
-) -> Result<(), LiveIoError> {
+) -> Result<(), Error> {
     // SAFETY: every supplied function is a pcap_set_* operation with this exact
     // ABI and the handle has not yet been activated.
     let result = unsafe { function(handle.raw.as_ptr(), value) };
     if result == 0 {
         Ok(())
     } else {
-        Err(LiveIoError::Capture {
+        Err(Error::Capture {
             message: format!(
                 "{operation} failed for {} with status {result}: {}",
                 interface.name,

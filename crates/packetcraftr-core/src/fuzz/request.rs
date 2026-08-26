@@ -202,14 +202,17 @@ impl Request {
                 reason: format!("at most {MAX_STRATEGIES} strategies may be selected"),
             });
         }
-        if self
-            .strategies
-            .iter()
-            .enumerate()
-            .any(|(index, strategy)| self.strategies[..index].contains(strategy))
-        {
+        if self.strategies.iter().enumerate().any(|(index, strategy)| {
+            self.strategies
+                .get(..index)
+                .is_some_and(|earlier| earlier.contains(strategy))
+        }) {
             return Err(Error::InvalidStrategies);
         }
+        #[expect(
+            clippy::arithmetic_side_effects,
+            reason = "the `cases == 0` check above has already returned"
+        )]
         let final_case_offset =
             u64::try_from(self.cases - 1).map_err(|_| Error::CaseIndexOverflow)?;
         self.first_case

@@ -78,7 +78,10 @@ pub(super) fn analyze_sender(
     };
 
     let end = tcp.sequence.wrapping_add(
-        u32::try_from(payload_len).unwrap_or(u32::MAX) + u32::from(syn) + u32::from(fin),
+        u32::try_from(payload_len)
+            .unwrap_or(u32::MAX)
+            .saturating_add(u32::from(syn))
+            .saturating_add(u32::from(fin)),
     );
     let in_flight = end.wrapping_sub(peer_ack);
     let handshake_seen = peer.syn_seen && flows.get(flow).is_some_and(|sender| sender.syn_seen);
@@ -143,7 +146,7 @@ pub(super) fn analyze_sender(
                 "{}:{} has sent {} byte(s) beyond the peer's {advertised}-byte receive window",
                 flow.flow.source,
                 flow.flow.source_port,
-                u64::from(in_flight) - advertised
+                u64::from(in_flight).saturating_sub(advertised)
             ),
         ));
     }
@@ -157,7 +160,7 @@ pub(super) fn scale(options: &[u8]) -> Option<u8> {
             [1, tail @ ..] => rest = tail,
             [3, 3, shift, ..] => return Some(*shift),
             [_, length, tail @ ..] if *length >= 2 => {
-                rest = tail.get(usize::from(*length) - 2..)?;
+                rest = tail.get(usize::from(*length).checked_sub(2)?..)?;
             }
             _ => return None,
         }

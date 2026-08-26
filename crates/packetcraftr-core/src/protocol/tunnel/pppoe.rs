@@ -125,17 +125,21 @@ impl LayerCodec for PppoeCodec {
         input: &[u8],
         context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
-        if input.len() < PPPOE_LEN {
+        let Some(header) = input.first_chunk::<PPPOE_LEN>() else {
             return Err(truncated("pppoe", PPPOE_LEN, input.len()));
-        }
-        let version = input[0] >> 4;
-        let type_code = input[0] & 0x0f;
-        let code = input[1];
-        let session_id = u16::from_be_bytes([input[2], input[3]]);
-        let length_field = u16::from_be_bytes([input[4], input[5]]);
+        };
+        let version = header[0] >> 4;
+        let type_code = header[0] & 0x0f;
+        let code = header[1];
+        let session_id = u16::from_be_bytes([header[2], header[3]]);
+        let length_field = u16::from_be_bytes([header[4], header[5]]);
         let length = usize::from(length_field);
-        if input.len() - PPPOE_LEN < length {
-            return Err(truncated("pppoe", PPPOE_LEN + length, input.len()));
+        if input.len().saturating_sub(PPPOE_LEN) < length {
+            return Err(truncated(
+                "pppoe",
+                PPPOE_LEN.saturating_add(length),
+                input.len(),
+            ));
         }
 
         let mut diagnostics = Vec::new();
@@ -365,11 +369,11 @@ impl LayerCodec for PppCodec {
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
-        if input.len() < PPP_LEN {
+        let Some(header) = input.first_chunk::<PPP_LEN>() else {
             return Err(truncated("ppp", PPP_LEN, input.len()));
-        }
-        let protocol_number = u16::from_be_bytes([input[0], input[1]]);
-        let payload_len = input.len() - PPP_LEN;
+        };
+        let protocol_number = u16::from_be_bytes([header[0], header[1]]);
+        let payload_len = input.len().saturating_sub(PPP_LEN);
         // Unregistered protocols — LCP, IPCP, CHAP — fall through to the
         // typed raw child rather than a diagnostic, mirroring UDP ports.
         let mut next = Vec::with_capacity(2);

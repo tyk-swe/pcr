@@ -145,7 +145,7 @@ pub(super) fn read_bounded_file(
     kind: InputKind,
 ) -> Result<Vec<u8>, CliError> {
     let file = File::open(path)
-        .map_err(|source| CliError::new(2, format!("open {} failed: {source}", path.display())))?;
+        .map_err(|source| CliError::new(5, format!("open {} failed: {source}", path.display())))?;
     read_bounded(file, max_bytes, kind)
 }
 
@@ -205,7 +205,7 @@ fn read_bounded_allow_empty(
         .take(read_limit)
         .read_to_end(&mut bytes)
         .map_err(|source| {
-            CliError::new(2, format!("read {} input failed: {source}", kind.label()))
+            CliError::new(5, format!("read {} input failed: {source}", kind.label()))
         })?;
     if bytes.len() > max_bytes {
         return Err(CliError::new(
@@ -280,6 +280,55 @@ mod tests {
             read_bounded_allow_empty(Cursor::new([]), usize::MAX, InputKind::Recipe)
                 .expect_err("the sentinel byte must be representable");
         assert_eq!(unrepresentable.exit_code, 70);
+    }
+
+    /// A reader that dies partway through is an I/O failure, not a malformed
+    /// document: exit 5, with the byte count that made it through discarded.
+    #[test]
+    fn a_reader_that_fails_mid_read_is_reported_as_an_io_failure() {
+        struct BrokenReader {
+            delivered: bool,
+        }
+
+        impl Read for BrokenReader {
+            fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+                if self.delivered {
+                    return Err(io::Error::from(io::ErrorKind::BrokenPipe));
+                }
+                self.delivered = true;
+                let written = buffer.len().min(2);
+                buffer
+                    .get_mut(..written)
+                    .expect("the truncated prefix is in bounds")
+                    .fill(b'a');
+                Ok(written)
+            }
+        }
+
+        for kind in [InputKind::Recipe, InputKind::Frame] {
+            let required = read_bounded(BrokenReader { delivered: false }, 64, kind)
+                .expect_err("a broken reader must fail");
+            assert_eq!(required.exit_code, 5, "{kind:?}");
+            assert!(
+                required.message.starts_with("read "),
+                "{}",
+                required.message
+            );
+            assert!(
+                required.message.to_lowercase().contains("broken pipe"),
+                "{}",
+                required.message
+            );
+
+            let optional = read_bounded_allow_empty(BrokenReader { delivered: false }, 64, kind)
+                .expect_err("a broken reader must fail even where empty input is allowed");
+            assert_eq!(optional.exit_code, 5, "{kind:?}");
+            assert!(
+                optional.message.starts_with("read "),
+                "{}",
+                optional.message
+            );
+        }
     }
 
     #[test]

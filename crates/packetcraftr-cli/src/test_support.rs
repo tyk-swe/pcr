@@ -1,9 +1,41 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+// Test code indexes fixtures and counts by hand; the fail-closed lints are
+// for library paths.
+#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
-use std::sync::OnceLock;
+use std::io::{self, Write};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use serde_json::Value;
+
+/// A writer the test can still read after handing it to an encoder.
+#[derive(Clone, Default)]
+pub(crate) struct SharedBuffer(Arc<Mutex<Vec<u8>>>);
+
+impl SharedBuffer {
+    pub(crate) fn bytes(&self) -> Vec<u8> {
+        self.0.lock().expect("shared buffer lock").clone()
+    }
+
+    pub(crate) fn records(&self) -> Vec<Value> {
+        parse_ndjson(&self.bytes())
+    }
+}
+
+impl Write for SharedBuffer {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.0
+            .lock()
+            .expect("shared buffer lock")
+            .extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
 
 pub(crate) fn parse_ndjson(bytes: &[u8]) -> Vec<Value> {
     std::str::from_utf8(bytes)

@@ -146,25 +146,25 @@ impl LayerCodec for FragmentCodec {
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
-        if input.len() < 8 {
+        let Some(header) = input.first_chunk::<8>() else {
             return Err(truncated("ipv6_fragment", 8, input.len()));
-        }
-        let offset_flags = u16::from_be_bytes([input[2], input[3]]);
-        if input[1] != 0 || offset_flags & 0x0006 != 0 {
+        };
+        let offset_flags = u16::from_be_bytes([header[2], header[3]]);
+        if header[1] != 0 || offset_flags & 0x0006 != 0 {
             return Err(invalid("ipv6_fragment", "reserved bits are non-zero"));
         }
         let fragment_offset = offset_flags >> 3;
         Ok(DecodedLayerValue {
             layer: Box::new(Fragment {
-                next_header: WireValue::Exact(input[0]),
+                next_header: WireValue::Exact(header[0]),
                 fragment_offset,
                 more_fragments: offset_flags & 1 != 0,
-                identification: u32::from_be_bytes([input[4], input[5], input[6], input[7]]),
+                identification: u32::from_be_bytes([header[4], header[5], header[6], header[7]]),
             }),
             consumed: 8,
-            payload_len: input.len() - 8,
+            payload_len: input.len().saturating_sub(8),
             next: if fragment_offset == 0 && offset_flags & 1 == 0 {
-                vec![Discriminator(u64::from(input[0]))]
+                vec![Discriminator(u64::from(header[0]))]
             } else {
                 // Non-atomic fragments retain opaque Raw payloads.
                 vec![Discriminator(255)]

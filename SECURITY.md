@@ -6,8 +6,12 @@ unintended network access as potentially security-sensitive.
 
 ## Supported versions
 
-Security fixes target `main` and, when practical, the latest stable `0.4.x`
-release. Published beta releases and older stable lines are unsupported.
+Security fixes target `main` and the latest published release, currently the
+`0.5.0-beta.x` line. Older releases, stable or beta, are unsupported.
+
+Dependency advisories that need a written decision are tracked in
+[`docs/security/`](docs/security), one file per advisory, and `deny.toml`
+is the enforced policy.
 
 ## Reporting a vulnerability
 

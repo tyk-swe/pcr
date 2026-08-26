@@ -39,7 +39,7 @@ pub fn outer_scope_len(packet: &Packet) -> usize {
         .position(|layer| {
             BuiltinProtocol::of(layer).is_some_and(BuiltinProtocol::is_encapsulation_boundary)
         })
-        .map_or(packet.len(), |boundary| boundary + 1)
+        .map_or(packet.len(), |boundary| boundary.saturating_add(1))
 }
 
 /// Layers of the directly transmitted packet, through its encapsulation boundary.
@@ -135,7 +135,7 @@ pub(super) fn ip_path_at(
         unreachable!("IPv6 field extraction returned a different family");
     };
     let mut segment_route = None;
-    for candidate_index in network_index + 1..upper_bound.min(packet.len()) {
+    for candidate_index in network_index.saturating_add(1)..upper_bound.min(packet.len()) {
         let candidate = packet
             .layer(candidate_index)
             .expect("bounded packet layer index");
@@ -165,6 +165,10 @@ pub(super) fn ip_path_at(
             .copied()
             .map(IpAddr::V6)
             .collect::<Vec<_>>();
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "validate_segment_route keeps active_index at or below segments.len() - 1"
+        )]
         let visited_destinations = route.segments[route.active_index..]
             .iter()
             .copied()
@@ -266,6 +270,10 @@ fn wire_u8_field(layer: &dyn Layer, field: &str, automatic: u8) -> Result<u8, Er
     match layer.field(field) {
         Some(FieldValue::Unsigned(value)) => u8::try_from(value)
             .map_err(|_| Error::field(layer.protocol_id(), field, "is outside the u8 range")),
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "the arm guard checks value.len() == 1"
+        )]
         Some(FieldValue::Bytes(value)) if value.len() == 1 => Ok(value[0]),
         Some(FieldValue::Text(value)) if value.eq_ignore_ascii_case("auto") => Ok(automatic),
         Some(_) => Err(Error::field(

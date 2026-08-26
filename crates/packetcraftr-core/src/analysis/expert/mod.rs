@@ -81,6 +81,10 @@ pub struct Summary {
 }
 
 impl Summary {
+    #[expect(
+        clippy::arithmetic_side_effects,
+        reason = "u64 finding counters cannot reach u64::MAX from a bounded frame count"
+    )]
     fn count(&mut self, finding: &Finding) {
         self.findings += 1;
         match finding.severity {

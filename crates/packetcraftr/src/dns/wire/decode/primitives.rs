@@ -8,10 +8,11 @@ pub(super) fn read_u16(
     offset: usize,
     field: &'static str,
 ) -> Result<u16, super::super::super::error::WireError> {
-    let bytes = message
+    let bytes: [u8; 2] = message
         .get(offset..offset.saturating_add(2))
+        .and_then(|slice| <[u8; 2]>::try_from(slice).ok())
         .ok_or(super::super::super::error::WireError::TruncatedField { field, offset })?;
-    Ok(u16::from_be_bytes([bytes[0], bytes[1]]))
+    Ok(u16::from_be_bytes(bytes))
 }
 
 pub(super) fn read_u32(
@@ -19,8 +20,9 @@ pub(super) fn read_u32(
     offset: usize,
     field: &'static str,
 ) -> Result<u32, super::super::super::error::WireError> {
-    let bytes = message
+    let bytes: [u8; 4] = message
         .get(offset..offset.saturating_add(4))
+        .and_then(|slice| <[u8; 4]>::try_from(slice).ok())
         .ok_or(super::super::super::error::WireError::TruncatedField { field, offset })?;
-    Ok(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+    Ok(u32::from_be_bytes(bytes))
 }

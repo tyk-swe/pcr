@@ -3,12 +3,12 @@
 
 use packetcraftr::{analysis, output};
 
+use crate::commands::format::FollowFormat;
 use crate::errors::CliError;
 use crate::rendering::{
     NdjsonStream, emit_aggregate, emit_stderr_message, write_raw, write_stdout_line,
 };
 
-use analysis::expert::StreamTransport;
 use analysis::follow::{Chunk, Selector, Summary};
 
 #[derive(Default)]
@@ -17,19 +17,19 @@ pub(super) struct State {
 }
 
 pub(super) fn render_record(
-    format: output::contract::Format,
+    format: FollowFormat,
     chunk: Chunk,
     state: &mut State,
     stream: &mut NdjsonStream,
 ) -> Result<(), CliError> {
     match format {
-        output::contract::Format::Text => write_stdout_line(format_args!(
+        FollowFormat::Text => write_stdout_line(format_args!(
             "{} #{} {}",
             direction_marker(&chunk),
             chunk.number,
             chunk.bytes.escape_ascii()
         )),
-        output::contract::Format::Hex => {
+        FollowFormat::Hex => {
             let rendered = output::follow::Chunk::from(chunk.clone());
             write_stdout_line(format_args!(
                 "{} #{} {}",
@@ -38,20 +38,17 @@ pub(super) fn render_record(
                 rendered.bytes_hex
             ))
         }
-        output::contract::Format::Raw => write_raw(&chunk.bytes),
-        output::contract::Format::Json => {
+        FollowFormat::Raw => write_raw(&chunk.bytes),
+        FollowFormat::Json => {
             state.retained.push(chunk.into());
             Ok(())
         }
-        output::contract::Format::Ndjson => {
-            stream.emit_data(output::follow::Chunk::from(chunk), Vec::new())
-        }
-        _ => unreachable!("the format contract admits only text, json, ndjson, hex, and raw"),
+        FollowFormat::Ndjson => stream.emit_data(output::follow::Chunk::from(chunk), Vec::new()),
     }
 }
 
 pub(super) fn render_text(selector: Selector, summary: &Summary) -> Result<(), CliError> {
-    let transport = transport_name(selector.transport);
+    let transport = output::expert::StreamTransport::from(selector.transport).as_str();
     match &summary.client_flow {
         Some(flow) => write_stdout_line(format_args!(
             "followed {transport} stream {}: client {}:{} sent {} byte(s), \
@@ -120,12 +117,5 @@ fn direction_marker(chunk: &Chunk) -> &'static str {
     match chunk.direction {
         analysis::follow::Direction::ClientToServer => ">",
         analysis::follow::Direction::ServerToClient => "<",
-    }
-}
-
-fn transport_name(transport: StreamTransport) -> &'static str {
-    match transport {
-        StreamTransport::Tcp => "tcp",
-        StreamTransport::Udp => "udp",
     }
 }

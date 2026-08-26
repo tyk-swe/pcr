@@ -30,12 +30,15 @@ pub fn decode_tcp_frame(
     transaction_id: u16,
     limits: Limits,
 ) -> Result<ValidatedResponse, WireError> {
-    let prefix = frame.get(..2).ok_or(WireError::MessageTooShort {
+    let prefix = frame.first_chunk::<2>().ok_or(WireError::MessageTooShort {
         actual: frame.len(),
         minimum: 2,
     })?;
-    let declared = usize::from(u16::from_be_bytes([prefix[0], prefix[1]]));
-    let payload = &frame[2..];
+    let declared = usize::from(u16::from_be_bytes(*prefix));
+    let payload = frame.get(2..).ok_or(WireError::MessageTooShort {
+        actual: frame.len(),
+        minimum: 2,
+    })?;
     if declared != payload.len() {
         return Err(WireError::TcpFrameLength {
             declared,
@@ -119,6 +122,13 @@ struct ResponseSections {
     edns: Option<Edns>,
 }
 
+/// Advances a message offset, reporting truncation instead of wrapping.
+fn advance(offset: usize, delta: usize, field: &'static str) -> Result<usize, WireError> {
+    offset
+        .checked_add(delta)
+        .ok_or(WireError::TruncatedField { field, offset })
+}
+
 fn validate_message_bounds(message: &[u8], limits: Limits) -> Result<(), WireError> {
     if message.len() < DNS_HEADER_BYTES {
         return Err(WireError::MessageTooShort {
@@ -183,7 +193,7 @@ fn decode_question(
         });
     }
     let actual_type = read_u16(message, offset, "question type")?;
-    offset += 2;
+    offset = advance(offset, 2, "question class")?;
     if actual_type != query_type.code() {
         return Err(WireError::QuestionTypeMismatch {
             expected: query_type.code(),
@@ -191,7 +201,7 @@ fn decode_question(
         });
     }
     let actual_class = read_u16(message, offset, "question class")?;
-    offset += 2;
+    offset = advance(offset, 2, "answer section")?;
     if actual_class != DNS_CLASS_IN {
         return Err(WireError::QuestionClassMismatch {
             actual: actual_class,
@@ -251,7 +261,7 @@ fn decode_sections(
     let (additionals, next) = decode_records(message, next, header.additional_count, limits)?;
     if next != message.len() {
         return Err(WireError::TrailingBytes {
-            remaining: message.len() - next,
+            remaining: message.len().saturating_sub(next),
         });
     }
     if answers

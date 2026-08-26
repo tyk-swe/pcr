@@ -16,7 +16,7 @@ pub(super) fn render_text(
 ) -> Result<(), CliError> {
     write_stdout_line(format_args!(
         "mode={} seed={} first_case={} generated={} built={} rejected={}",
-        mode_name(result.mode),
+        result.mode.as_str(),
         result.seed,
         result.first_case,
         result.cases_generated,
@@ -31,7 +31,7 @@ pub(super) fn render_text(
             case.mutation.strategy,
             case.mutation.layer,
             case.mutation.field,
-            outcome_name(case.outcome),
+            case.outcome.as_str(),
             case.frame.as_ref().map(|frame| frame.length).unwrap_or(0),
             case.reproduction.operation_seed,
             case.reproduction.case_index,
@@ -89,35 +89,4 @@ pub(super) fn render_live_complete(
 ) -> Result<(), CliError> {
     let (event, diagnostics, stats) = output::fuzz::Event::complete_from_live(summary);
     stream.complete_with_stats(event, diagnostics, stats)
-}
-
-fn mode_name(value: output::fuzz::Mode) -> &'static str {
-    match value {
-        output::fuzz::Mode::Offline => "offline",
-        output::fuzz::Mode::Live => "live",
-    }
-}
-
-fn outcome_name(value: output::fuzz::Outcome) -> &'static str {
-    match value {
-        output::fuzz::Outcome::Built => "built",
-        output::fuzz::Outcome::Rejected => "rejected",
-        output::fuzz::Outcome::Response => "response",
-        output::fuzz::Outcome::Timeout => "timeout",
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn human_labels_cover_every_fuzz_mode_and_outcome() {
-        assert_eq!(mode_name(output::fuzz::Mode::Offline), "offline");
-        assert_eq!(mode_name(output::fuzz::Mode::Live), "live");
-        assert_eq!(outcome_name(output::fuzz::Outcome::Built), "built");
-        assert_eq!(outcome_name(output::fuzz::Outcome::Rejected), "rejected");
-        assert_eq!(outcome_name(output::fuzz::Outcome::Response), "response");
-        assert_eq!(outcome_name(output::fuzz::Outcome::Timeout), "timeout");
-    }
 }

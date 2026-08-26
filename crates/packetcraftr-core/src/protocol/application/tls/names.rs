@@ -204,11 +204,14 @@ fn lookup<K: Copy + Ord>(table: &[(K, &'static str)], value: K) -> Option<&'stat
     table
         .binary_search_by_key(&value, |(key, _)| *key)
         .ok()
-        .map(|index| table[index].1)
+        .and_then(|index| table.get(index))
+        .map(|(_, name)| *name)
 }
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+
     use super::{
         ALERT_DESCRIPTIONS, CIPHER_SUITES, HANDSHAKE_TYPES, NAMED_GROUPS, VERSIONS,
         alert_description_name, cipher_suite_name, handshake_type_name, named_group_name,

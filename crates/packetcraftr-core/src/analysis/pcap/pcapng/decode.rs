@@ -74,7 +74,7 @@ impl PcapNgState {
 
     fn commit_block(&mut self, block_length: u32) {
         if let Some(remaining) = &mut self.remaining_in_section {
-            *remaining -= u64::from(block_length);
+            *remaining = remaining.saturating_sub(u64::from(block_length));
         }
     }
 

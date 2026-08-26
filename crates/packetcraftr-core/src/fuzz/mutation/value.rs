@@ -37,6 +37,10 @@ pub(super) fn mutation_value(
     }
 }
 
+#[expect(
+    clippy::indexing_slicing,
+    reason = "`index_from` reduces the selector below the length of the table it indexes"
+)]
 fn boundary_value(
     kind: FieldKind,
     original: &FieldValue,
@@ -137,6 +141,10 @@ pub(in crate::fuzz) fn random_value(
             let length = bounded_length(random, limits.max_field_bytes.min(256));
             let mut value = String::with_capacity(length);
             for _ in 0..length {
+                #[expect(
+                    clippy::arithmetic_side_effects,
+                    reason = "the printable offset is below 95, so `b' ' + offset` stays under u8::MAX"
+                )]
                 let character = match random.next_u64() % 20 {
                     0 => '\u{1b}',
                     1 => '\n',
@@ -166,6 +174,10 @@ pub(in crate::fuzz) fn random_value(
                 let mut output = Vec::with_capacity(count);
                 let mut bytes = 0_usize;
                 for _ in 0..count {
+                    #[expect(
+                        clippy::indexing_slicing,
+                        reason = "`index_below` reduces below `values.len()`, which the guard proves non-zero"
+                    )]
                     let value = &values[index_below(random, values.len())];
                     let remaining = limits
                         .max_field_bytes
@@ -228,7 +240,7 @@ pub(in crate::fuzz) fn bounded_value_size(
                     value,
                     remaining.saturating_sub(total),
                     max_list_items,
-                    depth + 1,
+                    depth.checked_add(1)?,
                 )?;
                 total = total.checked_add(value_size)?;
                 if total > remaining {
@@ -249,16 +261,37 @@ fn bit_flip_value(original: &FieldValue, random: &mut SplitMix64, maximum: usize
         return FieldValue::Bytes(Bytes::from_static(&[1]));
     }
     if bytes.len() > maximum {
+        if maximum == 0 {
+            // A zero field budget leaves no byte to flip, so the bounded
+            // prefix is empty and the mutation reduces to the empty value.
+            return FieldValue::Bytes(Bytes::new());
+        }
         // Replacing an oversized value with a bounded prefix keeps allocation
         // within the mutation budget and makes the reduction explicit.
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "the branch is entered only when `bytes.len() > maximum`"
+        )]
         let mut value = bytes[..maximum].to_vec();
         let index = index_below(random, value.len());
-        value[index] ^= 1 << (random.next_u64() % 8);
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "`index_below` reduces below `value.len()`"
+        )]
+        {
+            value[index] ^= 1 << (random.next_u64() % 8);
+        }
         return FieldValue::Bytes(Bytes::from(value));
     }
     let mut value = bytes.to_vec();
     let index = index_below(random, value.len());
-    value[index] ^= 1 << (random.next_u64() % 8);
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "`index_below` reduces below `value.len()`, which the emptiness check above proves non-zero"
+    )]
+    {
+        value[index] ^= 1 << (random.next_u64() % 8);
+    }
     FieldValue::Bytes(Bytes::from(value))
 }
 
@@ -270,9 +303,18 @@ fn malformed_value(
     limits: super::super::request::Limits,
 ) -> FieldValue {
     if kind == FieldKind::Unsigned {
+        if limits.max_field_bytes == 0 {
+            // No field budget leaves no room for a reflective type change, so
+            // the malformed value stays inside the numeric domain.
+            return FieldValue::Unsigned(random.next_u64() & u16::MAX as u64);
+        }
         if round & 1 == 0 {
             return FieldValue::Unsigned(random.next_u64() & u16::MAX as u64);
         }
+        #[expect(
+            clippy::arithmetic_side_effects,
+            reason = "`index_below` returns at most 3 here, so the increment cannot overflow"
+        )]
         let length = 1 + index_below(random, limits.max_field_bytes.min(4));
         return FieldValue::Bytes(Bytes::from(random.bytes(length)));
     }
@@ -283,7 +325,7 @@ fn bounded_length(random: &mut SplitMix64, maximum: usize) -> usize {
     if maximum == 0 {
         0
     } else {
-        index_below(random, maximum + 1)
+        index_below(random, maximum.saturating_add(1))
     }
 }
 
@@ -291,13 +333,21 @@ fn bounded_length(random: &mut SplitMix64, maximum: usize) -> usize {
 ///
 /// Every selector in this module indexes a slice this way, so the one narrowing
 /// conversion the reduction needs lives here rather than at each call site.
+///
+/// A zero bound has no valid index; validated [`Limits`] never produce one,
+/// and the reduction yields `0` rather than dividing by zero if one arrives.
+///
+/// [`Limits`]: super::super::request::Limits
 pub(super) fn index_from(word: u64, exclusive_maximum: usize) -> usize {
     debug_assert!(exclusive_maximum != 0);
+    let Some(remainder) = word.checked_rem(exclusive_maximum as u64) else {
+        return 0;
+    };
     #[expect(
         clippy::cast_possible_truncation,
-        reason = "the remainder is below exclusive_maximum, which is already a usize"
+        reason = "the remainder is below exclusive_maximum, which is a usize"
     )]
-    let index = (word % exclusive_maximum as u64) as usize;
+    let index = remainder as usize;
     index
 }
 
@@ -351,7 +401,13 @@ pub(super) fn shrink_values(value: &FieldValue, maximum: usize) -> Vec<FieldValu
         FieldValue::List(value) => {
             push(FieldValue::List(Vec::new()));
             if value.len() > 1 {
-                push(FieldValue::List(value[..value.len() / 2].to_vec()));
+                #[expect(
+                    clippy::indexing_slicing,
+                    reason = "`value.len() / 2` is below `value.len()`, which the guard proves is above 1"
+                )]
+                {
+                    push(FieldValue::List(value[..value.len() / 2].to_vec()));
+                }
             }
         }
     }
@@ -360,6 +416,8 @@ pub(super) fn shrink_values(value: &FieldValue, maximum: usize) -> Vec<FieldValu
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+
     use super::*;
     use crate::fuzz::request::{Limits, Strategy, Target};
 
@@ -584,6 +642,52 @@ mod tests {
             panic!("odd malformed round must change the reflective type")
         };
         assert!((1..=4).contains(&malformed.len()));
+    }
+
+    #[test]
+    fn a_zero_field_budget_leaves_bit_flip_and_malformed_mutations_bounded() {
+        let bytes = resolved(FieldKind::Bytes);
+        assert_eq!(
+            mutation_value(
+                Strategy::BitFlip,
+                &bytes,
+                &FieldValue::Bytes(Bytes::from_static(b"abc")),
+                5,
+                0,
+                limits(0, 2),
+            ),
+            FieldValue::Bytes(Bytes::new())
+        );
+
+        let unsigned = resolved(FieldKind::Unsigned);
+        for round in 0..4 {
+            assert!(
+                matches!(
+                    mutation_value(
+                        Strategy::Malformed,
+                        &unsigned,
+                        &FieldValue::Unsigned(1),
+                        5,
+                        round,
+                        limits(0, 2),
+                    ),
+                    FieldValue::Unsigned(0..=65_535)
+                ),
+                "round {round}"
+            );
+        }
+
+        assert_eq!(
+            mutation_value(
+                Strategy::Random,
+                &bytes,
+                &FieldValue::Bytes(Bytes::from_static(b"abc")),
+                5,
+                0,
+                limits(0, 2),
+            ),
+            FieldValue::Bytes(Bytes::new())
+        );
     }
 
     #[test]

@@ -24,7 +24,7 @@ use crate::materialize::{
 };
 
 use super::SYNTHESIZED_ETHERNET_BYTES;
-use super::boundary::{Authorizer, Execution, ExecutionCase, Executor};
+use super::boundary::{Execution, ExecutionCase, Executor};
 use super::error::{Error, duration_limit};
 use super::execution::{
     ExecutionEvidence, add_execution_stats, rate_delay, retain_evidence, validate_execution,
@@ -32,6 +32,7 @@ use super::execution::{
 };
 use super::request::LiveOptions;
 use super::result::{Case, CaseOutcome, Result, Stats, Summary};
+use crate::authorization::Authorizer;
 
 /// Builds and validates all cases offline, then authorizes and executes the campaign.
 pub fn run<A, E, C>(
@@ -274,14 +275,17 @@ where
                 .map(|built| built.packet.clone())
         })
         .collect::<Vec<_>>();
-    if !packets.is_empty() {
-        authorizer.authorize_operation(
-            &packets,
-            live.destination,
-            prepared.maximum_wire_bytes,
-            prepared.requires_malformed_live,
-        )?;
-    }
+    // Unconditional: a campaign with no buildable case still has to clear
+    // policy validation and the destination gate before anything else runs.
+    authorizer.authorize_operation(crate::authorization::Operation {
+        packets: prepared.built_case_count,
+        wire_bytes: prepared.maximum_wire_bytes,
+        declared: &packets,
+        destination: live.destination,
+        requires_permissive_live: prepared.requires_malformed_live,
+        allow_permissive_live: live.allow_malformed_live,
+        ..crate::authorization::Operation::default()
+    })?;
     Ok(())
 }
 
@@ -318,11 +322,24 @@ impl ExecutionPhase<'_> {
                 self.pace(built_ordinal, case.prepared.index, clock)?;
                 self.deadline.check().map_err(duration_limit)?;
                 self.execute_case(&mut case, executor)?;
-                built_ordinal += 1;
+                #[expect(
+                    clippy::arithmetic_side_effects,
+                    reason = "one increment per case in `cases`, so the ordinal cannot exceed \
+                              `cases.len()`"
+                )]
+                {
+                    built_ordinal += 1;
+                }
             }
+            #[expect(
+                clippy::indexing_slicing,
+                reason = "`diagnostic_start` is `self.diagnostics.len()` read at the top of this \
+                          iteration and the vector is only appended to, so the range is in bounds"
+            )]
+            let new_diagnostics = &self.diagnostics[diagnostic_start..];
             case.prepared
                 .diagnostics
-                .extend(self.diagnostics[diagnostic_start..].iter().cloned());
+                .extend(new_diagnostics.iter().cloned());
             emit(case, &self.deadline)?;
         }
         self.finish()

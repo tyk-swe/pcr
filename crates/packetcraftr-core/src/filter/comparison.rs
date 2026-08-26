@@ -60,7 +60,7 @@ fn prefix_mask_u32(prefix: u8) -> u32 {
     if prefix == 0 {
         0
     } else {
-        u32::MAX << (u32::BITS - u32::from(prefix))
+        u32::MAX << u32::BITS.saturating_sub(u32::from(prefix))
     }
 }
 
@@ -68,7 +68,7 @@ fn prefix_mask_u128(prefix: u8) -> u128 {
     if prefix == 0 {
         0
     } else {
-        u128::MAX << (u128::BITS - u32::from(prefix))
+        u128::MAX << u128::BITS.saturating_sub(u32::from(prefix))
     }
 }
 

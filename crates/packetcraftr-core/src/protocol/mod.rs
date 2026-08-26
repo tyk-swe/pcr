@@ -38,7 +38,7 @@ pub mod support;
 pub mod transport;
 pub mod tunnel;
 
-pub use common::ChecksumAccumulator;
+pub use common::{ChecksumAccumulator, checksum, checksum_parts};
 
 #[doc(hidden)]
 pub use matcher::{QuotedIcmpError, QuotedProbeTransport, quoted_icmp_error_kind};

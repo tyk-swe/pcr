@@ -245,6 +245,7 @@ impl Transmitter for SystemTransmitter {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
     use std::net::{IpAddr, Ipv4Addr};
     use std::time::UNIX_EPOCH;
 

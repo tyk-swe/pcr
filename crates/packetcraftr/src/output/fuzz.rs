@@ -21,6 +21,17 @@ pub enum Mode {
     Live,
 }
 
+impl Mode {
+    /// The serialized name, for text output that must agree with JSON.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Offline => "offline",
+            Self::Live => "live",
+        }
+    }
+}
+
 pub use crate::fuzz::CaseOutcome as Outcome;
 
 impl From<packet_fuzz::CaseOutcome> for Outcome {
@@ -400,6 +411,27 @@ fn complete(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn mode_and_outcome_names_match_their_serde_names() {
+        for mode in [Mode::Offline, Mode::Live] {
+            assert_eq!(
+                serde_json::to_value(mode).expect("mode serializes"),
+                mode.as_str()
+            );
+        }
+        for outcome in [
+            Outcome::Built,
+            Outcome::Rejected,
+            Outcome::Response,
+            Outcome::Timeout,
+        ] {
+            assert_eq!(
+                serde_json::to_value(outcome).expect("outcome serializes"),
+                outcome.as_str()
+            );
+        }
+    }
+
     use super::*;
 
     #[test]

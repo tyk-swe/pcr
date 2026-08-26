@@ -5,17 +5,19 @@
 
 #![forbid(unsafe_code)]
 
+use std::collections::VecDeque;
+
 use bytes::Bytes;
 
 use super::error::{map_io_error, resolution_error};
 use super::options::Options;
 use super::wire::is_unicast_mac;
 use super::{MAX_VLAN_TAGS as MAX_NEIGHBOR_VLAN_TAGS, Request as NeighborRequest};
-use crate::transmit::IoSendReport;
+use crate::transmit;
 use packetcraftr_core::frame::{Frame, LinkType};
 
 #[cfg(test)]
-use crate::Error as LiveIoError;
+use crate::Error;
 
 pub(super) fn validate_request(request: &NeighborRequest) -> Result<(), crate::neighbor::Error> {
     if request.interface_source.is_ipv4() != request.target.is_ipv4() {
@@ -96,7 +98,7 @@ pub(super) fn validate_captured_frame(
 pub(super) fn validate_neighbor_send(
     request: &NeighborRequest,
     expected: &Bytes,
-    report: &IoSendReport,
+    report: &transmit::Report,
 ) -> Result<(), crate::neighbor::Error> {
     report
         .validate_exact(expected)
@@ -106,41 +108,56 @@ pub(super) fn validate_neighbor_send(
 pub(super) fn retain_evidence(
     frame: Frame,
     options: &Options,
-    captured: &mut Vec<Frame>,
+    captured: &mut VecDeque<Frame>,
     captured_bytes: &mut usize,
     truncated: &mut bool,
 ) {
     if captured.len() >= options.max_capture_queue_frames
-        || *captured_bytes + frame.bytes().len() > options.max_captured_bytes
+        || captured_bytes
+            .checked_add(frame.bytes().len())
+            .is_none_or(|total| total > options.max_captured_bytes)
     {
         *truncated = true;
         return;
     }
-    *captured_bytes += frame.bytes().len();
-    captured.push(frame);
+    *captured_bytes = captured_bytes.saturating_add(frame.bytes().len());
+    captured.push_back(frame);
 }
 
 pub(super) fn retain_matching_evidence(
     frame: Frame,
     options: &Options,
-    captured: &mut Vec<Frame>,
+    captured: &mut VecDeque<Frame>,
     captured_bytes: &mut usize,
     truncated: &mut bool,
 ) {
     let frame_length = frame.bytes().len();
-    while captured.len() >= options.max_capture_queue_frames
-        || *captured_bytes + frame_length > options.max_captured_bytes
-    {
-        let discarded = captured.remove(0);
-        *captured_bytes -= discarded.bytes().len();
+    let over_budget = |captured: &VecDeque<Frame>, captured_bytes: usize| {
+        captured.len() >= options.max_capture_queue_frames
+            || captured_bytes
+                .checked_add(frame_length)
+                .is_none_or(|total| total > options.max_captured_bytes)
+    };
+    while over_budget(captured, *captured_bytes) {
+        let Some(discarded) = captured.pop_front() else {
+            break;
+        };
+        *captured_bytes = captured_bytes.saturating_sub(discarded.bytes().len());
         *truncated = true;
     }
-    *captured_bytes += frame_length;
-    captured.push(frame);
+    if over_budget(captured, *captured_bytes) {
+        // The frame alone exceeds the budget: dropping it is the only bounded
+        // outcome, and the caller learns about it through `truncated`.
+        *truncated = true;
+        return;
+    }
+    *captured_bytes = captured_bytes.saturating_add(frame_length);
+    captured.push_back(frame);
 }
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
     use std::time::{Duration, SystemTime};
 
@@ -265,7 +282,7 @@ mod tests {
             validate_neighbor_send(
                 &request,
                 &expected,
-                &IoSendReport::committed(3, expected.clone())
+                &transmit::Report::committed(3, expected.clone())
             )
             .is_ok()
         );
@@ -273,10 +290,10 @@ mod tests {
             validate_neighbor_send(
                 &request,
                 &expected,
-                &IoSendReport::committed(2, expected.clone())
+                &transmit::Report::committed(2, expected.clone())
             ),
             Err(crate::neighbor::Error::Io {
-                source: LiveIoError::PartialSend { .. },
+                source: Error::PartialSend { .. },
                 ..
             })
         ));
@@ -284,10 +301,10 @@ mod tests {
             validate_neighbor_send(
                 &request,
                 &expected,
-                &IoSendReport::committed(3, Bytes::from_static(&[3, 2, 1]))
+                &transmit::Report::committed(3, Bytes::from_static(&[3, 2, 1]))
             ),
             Err(crate::neighbor::Error::Io {
-                source: LiveIoError::InvalidSendEvidence { .. },
+                source: Error::InvalidSendEvidence { .. },
                 ..
             })
         ));
@@ -304,7 +321,7 @@ mod tests {
             max_captured_bytes: 4,
             snap_length: 128,
         };
-        let mut captured = Vec::new();
+        let mut captured = VecDeque::new();
         let mut bytes = 0;
         let mut truncated = false;
         retain_evidence(
@@ -343,6 +360,44 @@ mod tests {
         assert_eq!(captured.len(), 1);
         assert_eq!(captured[0].bytes().as_ref(), [9, 9, 9]);
         assert_eq!(bytes, 3);
+        assert!(truncated);
+    }
+
+    #[test]
+    fn matching_retention_drops_a_frame_that_alone_exceeds_the_byte_budget() {
+        let options = Options {
+            max_attempts: 1,
+            attempt_timeout: Duration::from_secs(1),
+            cache_ttl: Duration::from_secs(1),
+            max_cache_entries: 1,
+            max_capture_queue_frames: 2,
+            max_captured_bytes: 4,
+            snap_length: 128,
+        };
+        let mut captured = VecDeque::from([frame(&[1, 2])]);
+        let mut bytes = 2;
+        let mut truncated = false;
+        retain_matching_evidence(
+            frame(&[7, 7, 7, 7, 7]),
+            &options,
+            &mut captured,
+            &mut bytes,
+            &mut truncated,
+        );
+        assert!(captured.is_empty());
+        assert_eq!(bytes, 0);
+        assert!(truncated);
+
+        // The same oversized frame on an empty queue must not panic either.
+        truncated = false;
+        retain_matching_evidence(
+            frame(&[7, 7, 7, 7, 7]),
+            &options,
+            &mut captured,
+            &mut bytes,
+            &mut truncated,
+        );
+        assert!(captured.is_empty());
         assert!(truncated);
     }
 }

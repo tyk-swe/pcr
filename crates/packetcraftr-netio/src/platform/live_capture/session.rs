@@ -14,11 +14,8 @@ use std::{
 };
 
 use crate::{
-    Error as LiveIoError,
-    capture::{
-        CaptureQueueLimits, CaptureSession, CapturedFrame, MAX_TIMEOUT,
-        Metadata as CaptureMetadata, Statistics,
-    },
+    Error,
+    capture::{Captured, Limits, MAX_TIMEOUT, Metadata, Session, Statistics},
 };
 
 use super::{
@@ -29,45 +26,45 @@ use super::{
 
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(1);
 
-fn capture_deadline(timeout: Duration) -> Result<Instant, LiveIoError> {
+fn capture_deadline(timeout: Duration) -> Result<Instant, Error> {
     if timeout > MAX_TIMEOUT {
-        return Err(LiveIoError::InvalidCaptureTimeout {
+        return Err(Error::InvalidCaptureTimeout {
             timeout,
             maximum: MAX_TIMEOUT,
         });
     }
     Instant::now()
         .checked_add(timeout)
-        .ok_or(LiveIoError::InvalidCaptureTimeout {
+        .ok_or(Error::InvalidCaptureTimeout {
             timeout,
             maximum: MAX_TIMEOUT,
         })
 }
 
 pub(in crate::platform) struct NativeCaptureSession {
-    metadata: CaptureMetadata,
+    metadata: Metadata,
     shared: Arc<SharedCapture>,
     stop: Arc<AtomicBool>,
     interrupt: Option<Arc<dyn CaptureInterrupt>>,
     worker: Option<JoinHandle<()>>,
     shutdown_timeout: Duration,
     shutdown_attempted: bool,
-    shutdown_result: Option<Result<(), LiveIoError>>,
+    shutdown_result: Option<Result<(), Error>>,
 }
 
 impl NativeCaptureSession {
     pub(in crate::platform) fn spawn(
         parts: NativeCaptureParts,
-        limits: CaptureQueueLimits,
-    ) -> Result<Self, LiveIoError> {
+        limits: Limits,
+    ) -> Result<Self, Error> {
         Self::spawn_with_shutdown_timeout(parts, limits, SHUTDOWN_TIMEOUT)
     }
 
     fn spawn_with_shutdown_timeout(
         parts: NativeCaptureParts,
-        limits: CaptureQueueLimits,
+        limits: Limits,
         shutdown_timeout: Duration,
-    ) -> Result<Self, LiveIoError> {
+    ) -> Result<Self, Error> {
         let NativeCaptureParts {
             source,
             interrupt,
@@ -96,12 +93,12 @@ impl NativeCaptureSession {
                 }))
                 .is_err()
                 {
-                    panic_shared.set_error(LiveIoError::Capture {
+                    panic_shared.set_error(Error::Capture {
                         message: "native capture worker panicked".to_owned(),
                     });
                 }
             })
-            .map_err(|error| LiveIoError::Capture {
+            .map_err(|error| Error::Capture {
                 message: format!("could not start the owned capture worker: {error}"),
             })?;
         Ok(Self {
@@ -117,24 +114,24 @@ impl NativeCaptureSession {
     }
 }
 
-impl CaptureSession for NativeCaptureSession {
-    fn metadata(&self) -> &CaptureMetadata {
+impl Session for NativeCaptureSession {
+    fn metadata(&self) -> &Metadata {
         &self.metadata
     }
 
-    fn wait_ready(&mut self, timeout: Duration) -> Result<(), LiveIoError> {
+    fn wait_ready(&mut self, timeout: Duration) -> Result<(), Error> {
         let deadline = capture_deadline(timeout)?;
         let mut state = self.shared.lock()?;
         while !state.ready && !state.closed && state.error.is_none() {
             let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
-                return Err(LiveIoError::CaptureReadiness {
+                return Err(Error::CaptureReadiness {
                     message: "capture readiness deadline expired".to_owned(),
                 });
             };
             let (next, timed_out) = self.shared.wait_timeout(state, remaining)?;
             state = next;
             if timed_out && !state.ready && !state.closed && state.error.is_none() {
-                return Err(LiveIoError::CaptureReadiness {
+                return Err(Error::CaptureReadiness {
                     message: "capture readiness deadline expired".to_owned(),
                 });
             }
@@ -149,16 +146,13 @@ impl CaptureSession for NativeCaptureSession {
         } else if state.ready {
             Ok(())
         } else {
-            Err(LiveIoError::CaptureReadiness {
+            Err(Error::CaptureReadiness {
                 message: "native capture worker closed before reporting readiness".to_owned(),
             })
         }
     }
 
-    fn next_captured_frame(
-        &mut self,
-        timeout: Duration,
-    ) -> Result<Option<CapturedFrame>, LiveIoError> {
+    fn next_captured_frame(&mut self, timeout: Duration) -> Result<Option<Captured>, Error> {
         let deadline = capture_deadline(timeout)?;
         let mut state = self.shared.lock()?;
         loop {
@@ -166,7 +160,7 @@ impl CaptureSession for NativeCaptureSession {
                 let queued_bytes = state
                     .queued_bytes
                     .checked_sub(captured.frame.bytes().len())
-                    .ok_or_else(|| LiveIoError::InvalidCaptureStatistics {
+                    .ok_or_else(|| Error::InvalidCaptureStatistics {
                         message: "native capture queue byte accounting underflowed".to_owned(),
                     })?;
                 state.queued_bytes = queued_bytes;
@@ -190,7 +184,7 @@ impl CaptureSession for NativeCaptureSession {
         }
     }
 
-    fn shutdown(&mut self) -> Result<(), LiveIoError> {
+    fn shutdown(&mut self) -> Result<(), Error> {
         self.shutdown_with_timeout(self.shutdown_timeout)
     }
 
@@ -204,7 +198,7 @@ impl CaptureSession for NativeCaptureSession {
 }
 
 impl NativeCaptureSession {
-    fn shutdown_with_timeout(&mut self, timeout: Duration) -> Result<(), LiveIoError> {
+    fn shutdown_with_timeout(&mut self, timeout: Duration) -> Result<(), Error> {
         if let Some(result) = &self.shutdown_result {
             return result.clone();
         }
@@ -240,13 +234,13 @@ impl NativeCaptureSession {
 }
 
 enum JoinAttempt {
-    Finished(Result<(), LiveIoError>),
-    TimedOut(LiveIoError),
+    Finished(Result<(), Error>),
+    TimedOut(Error),
 }
 
 fn join_worker(worker: &mut Option<JoinHandle<()>>, timeout: Duration) -> JoinAttempt {
     let Some(deadline) = Instant::now().checked_add(timeout) else {
-        return JoinAttempt::TimedOut(LiveIoError::DeadlineExceeded {
+        return JoinAttempt::TimedOut(Error::DeadlineExceeded {
             operation: "shutting down native capture",
         });
     };
@@ -258,7 +252,7 @@ fn join_worker(worker: &mut Option<JoinHandle<()>>, timeout: Duration) -> JoinAt
             break;
         }
         let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
-            return JoinAttempt::TimedOut(LiveIoError::DeadlineExceeded {
+            return JoinAttempt::TimedOut(Error::DeadlineExceeded {
                 operation: "shutting down native capture",
             });
         };
@@ -270,7 +264,7 @@ fn join_worker(worker: &mut Option<JoinHandle<()>>, timeout: Duration) -> JoinAt
     let handle = worker
         .take()
         .expect("finished native capture worker handle disappeared");
-    JoinAttempt::Finished(handle.join().map_err(|_| LiveIoError::Capture {
+    JoinAttempt::Finished(handle.join().map_err(|_| Error::Capture {
         message: "native capture worker panicked during shutdown".to_owned(),
     }))
 }
@@ -307,12 +301,12 @@ mod tests {
     };
     use super::*;
     use crate::{
-        capture::{CaptureQueueLimits, Metadata as CaptureMetadata},
+        capture::{Limits, Metadata},
         interface::Id as InterfaceId,
     };
 
-    fn metadata(name: &str, index: u32) -> CaptureMetadata {
-        CaptureMetadata {
+    fn metadata(name: &str, index: u32) -> Metadata {
+        Metadata {
             interface: InterfaceId {
                 name: name.to_owned(),
                 index,
@@ -340,11 +334,11 @@ mod tests {
     }
 
     impl NativeCaptureSource for BlockingSource {
-        fn next_event(&mut self) -> Result<NativeCaptureEvent, LiveIoError> {
+        fn next_event(&mut self) -> Result<NativeCaptureEvent, Error> {
             if let Some(started) = self.started.take() {
                 let _ = started.send(());
             }
-            self.release.recv().map_err(|_| LiveIoError::Capture {
+            self.release.recv().map_err(|_| Error::Capture {
                 message: "fake capture release channel closed".to_owned(),
             })?;
             if let Some(finished) = self.finished.take() {
@@ -353,7 +347,7 @@ mod tests {
             Ok(NativeCaptureEvent::Closed)
         }
 
-        fn statistics(&mut self) -> Result<NativeCaptureStatistics, LiveIoError> {
+        fn statistics(&mut self) -> Result<NativeCaptureStatistics, Error> {
             Ok(NativeCaptureStatistics::default())
         }
     }
@@ -363,33 +357,33 @@ mod tests {
     }
 
     impl NativeCaptureSource for PanickingSource {
-        fn next_event(&mut self) -> Result<NativeCaptureEvent, LiveIoError> {
+        fn next_event(&mut self) -> Result<NativeCaptureEvent, Error> {
             if let Some(started) = self.started.take() {
                 let _ = started.send(());
             }
             panic!("fake capture worker panic");
         }
 
-        fn statistics(&mut self) -> Result<NativeCaptureStatistics, LiveIoError> {
+        fn statistics(&mut self) -> Result<NativeCaptureStatistics, Error> {
             Ok(NativeCaptureStatistics::default())
         }
     }
 
     struct ScriptedSource {
-        events: VecDeque<Result<NativeCaptureEvent, LiveIoError>>,
+        events: VecDeque<Result<NativeCaptureEvent, Error>>,
         finished: Option<Sender<()>>,
     }
 
     impl NativeCaptureSource for ScriptedSource {
-        fn next_event(&mut self) -> Result<NativeCaptureEvent, LiveIoError> {
+        fn next_event(&mut self) -> Result<NativeCaptureEvent, Error> {
             self.events.pop_front().unwrap_or_else(|| {
-                Err(LiveIoError::Capture {
+                Err(Error::Capture {
                     message: "scripted source exhausted".to_owned(),
                 })
             })
         }
 
-        fn statistics(&mut self) -> Result<NativeCaptureStatistics, LiveIoError> {
+        fn statistics(&mut self) -> Result<NativeCaptureStatistics, Error> {
             Ok(NativeCaptureStatistics::default())
         }
     }
@@ -403,7 +397,7 @@ mod tests {
     }
 
     fn scripted_session(
-        events: impl IntoIterator<Item = Result<NativeCaptureEvent, LiveIoError>>,
+        events: impl IntoIterator<Item = Result<NativeCaptureEvent, Error>>,
         interrupt: Arc<FakeInterrupt>,
     ) -> (NativeCaptureSession, Receiver<()>) {
         let (finished_sender, finished_receiver) = mpsc::channel();
@@ -417,7 +411,7 @@ mod tests {
                 interrupt,
                 metadata: metadata("scripted-capture", 9),
             },
-            CaptureQueueLimits::default(),
+            Limits::default(),
         )
         .expect("scripted capture worker should spawn");
         (session, finished_receiver)
@@ -454,7 +448,7 @@ mod tests {
                 interrupt: interrupt_for_parts,
                 metadata: metadata("fake-capture", 1),
             },
-            CaptureQueueLimits::default(),
+            Limits::default(),
             shutdown_timeout,
         )
         .expect("fake capture worker should spawn");
@@ -484,7 +478,7 @@ mod tests {
 
         assert!(matches!(
             session.shutdown(),
-            Err(LiveIoError::DeadlineExceeded {
+            Err(Error::DeadlineExceeded {
                 operation: "shutting down native capture"
             })
         ));
@@ -515,7 +509,7 @@ mod tests {
                 interrupt: interrupt_for_parts,
                 metadata: metadata("fake-panic", 2),
             },
-            CaptureQueueLimits::default(),
+            Limits::default(),
             Duration::from_millis(100),
         )
         .expect("fake capture worker should spawn");
@@ -532,7 +526,7 @@ mod tests {
         assert_eq!(first, second);
         assert!(matches!(
             first,
-            LiveIoError::Capture { ref message }
+            Error::Capture { ref message }
                 if message == "native capture worker panicked"
         ));
         assert!(session.worker.is_none());
@@ -543,7 +537,7 @@ mod tests {
     #[test]
     fn queued_frame_is_delivered_before_a_later_terminal_source_error() {
         let ingress = Instant::now();
-        let terminal = LiveIoError::Capture {
+        let terminal = Error::Capture {
             message: "source failed after one frame".to_owned(),
         };
         let interrupt = Arc::new(FakeInterrupt::default());
@@ -614,12 +608,12 @@ mod tests {
             .expect_err("invalid frame must fail closed");
         assert!(matches!(
             error,
-            LiveIoError::Capture { ref message }
+            Error::Capture { ref message }
                 if message.contains("native capture returned an invalid frame")
         ));
         assert!(matches!(
             session.next_captured_frame(Duration::ZERO),
-            Err(LiveIoError::Capture { .. })
+            Err(Error::Capture { .. })
         ));
         assert_eq!(session.statistics(), Statistics::default());
         session
@@ -632,7 +626,7 @@ mod tests {
         assert!(capture_deadline(MAX_TIMEOUT).is_ok());
         assert!(matches!(
             capture_deadline(MAX_TIMEOUT + Duration::from_nanos(1)),
-            Err(LiveIoError::InvalidCaptureTimeout {
+            Err(Error::InvalidCaptureTimeout {
                 maximum: MAX_TIMEOUT,
                 ..
             })
@@ -681,7 +675,7 @@ mod tests {
         wait_until_blocked(started_receiver);
         assert!(matches!(
             session.shutdown(),
-            Err(LiveIoError::DeadlineExceeded {
+            Err(Error::DeadlineExceeded {
                 operation: "shutting down native capture"
             })
         ));

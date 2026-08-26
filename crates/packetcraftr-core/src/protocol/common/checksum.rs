@@ -9,11 +9,14 @@ use crate::codec::NetworkEnvelope;
 
 use super::errors::invalid;
 
-pub(crate) fn checksum(bytes: &[u8]) -> u16 {
+/// Returns the 16-bit Internet Checksum (RFC 1071) of one contiguous slice.
+pub fn checksum(bytes: &[u8]) -> u16 {
     checksum_parts(&[bytes])
 }
 
-pub(crate) fn checksum_parts(parts: &[&[u8]]) -> u16 {
+/// Returns the Internet Checksum of `parts` read as one contiguous byte
+/// stream, so a part may end on an odd boundary.
+pub fn checksum_parts(parts: &[&[u8]]) -> u16 {
     let mut accumulator = ChecksumAccumulator::default();
     for part in parts {
         accumulator.add(part);
@@ -35,6 +38,10 @@ impl ChecksumAccumulator {
     /// RFC 1071 allows accumulating 16-bit big-endian words via 64-bit word additions because
     /// carry propagation in 64-bit addition matches ones' complement 16-bit word addition modulo (2^16 - 1).
     /// Using `u128` for `self.sum` prevents overflow during 64-bit chunk accumulation.
+    #[expect(
+        clippy::arithmetic_side_effects,
+        reason = "the u128 accumulator has room for far more than the 2^64 word additions a slice could contribute"
+    )]
     pub fn add(&mut self, bytes: &[u8]) {
         let mut bytes = bytes;
         if let Some(high) = self.pending_high_byte {
@@ -74,6 +81,10 @@ impl ChecksumAccumulator {
     }
 
     /// Finalizes and returns the 16-bit Internet Checksum.
+    #[expect(
+        clippy::arithmetic_side_effects,
+        reason = "the pending byte contributes at most 0xff00, which the u128 accumulator still has room for"
+    )]
     pub fn finish(self) -> u16 {
         let sum = self.sum
             + self
@@ -86,6 +97,10 @@ impl ChecksumAccumulator {
 #[expect(
     clippy::cast_possible_truncation,
     reason = "the loop only exits once sum >> 16 is zero, so sum is at most 0xffff"
+)]
+#[expect(
+    clippy::arithmetic_side_effects,
+    reason = "each addend is a masked or shifted half of sum, so every fold step stays below u128::MAX"
 )]
 fn fold_checksum(mut sum: u128) -> u16 {
     sum = (sum & 0xffff_ffff_ffff_ffff) + (sum >> 64);
@@ -144,5 +159,47 @@ pub(crate) fn network_from_addresses(source: IpAddr, destination: IpAddr) -> Net
     NetworkEnvelope {
         source,
         destination,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+    use super::{checksum, checksum_parts};
+
+    #[test]
+    fn known_ipv4_header_vector_matches_rfc_checksum() {
+        let mut header = [
+            0x45, 0x00, 0x00, 0x73, 0x00, 0x00, 0x40, 0x00, 0x40, 0x11, 0x00, 0x00, 0xc0, 0xa8,
+            0x00, 0x01, 0xc0, 0xa8, 0x00, 0xc7,
+        ];
+        assert_eq!(checksum(&header), 0xb861);
+
+        header[10..12].copy_from_slice(&0xb861_u16.to_be_bytes());
+        assert_eq!(checksum(&header), 0);
+    }
+
+    #[test]
+    fn known_icmpv6_neighbor_solicitation_vector_matches() {
+        let source = [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
+        let destination = [
+            0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0xff, 0, 0xab, 0xcd,
+        ];
+        let length = 32_u32.to_be_bytes();
+        let next_header = [0, 0, 0, 58];
+        let mut message: [u8; 32] = [
+            135, 0, 0, 0, 0, 0, 0, 0, 0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xab,
+            0xcd, 1, 1, 2, 0, 0, 0, 0, 1,
+        ];
+
+        assert_eq!(
+            checksum_parts(&[&source, &destination, &length, &next_header, &message]),
+            0xc48f
+        );
+        message[2..4].copy_from_slice(&0xc48f_u16.to_be_bytes());
+        assert_eq!(
+            checksum_parts(&[&source, &destination, &length, &next_header, &message]),
+            0
+        );
     }
 }

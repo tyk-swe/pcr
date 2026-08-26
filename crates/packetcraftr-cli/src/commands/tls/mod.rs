@@ -11,6 +11,7 @@ use packetcraftr::{analysis, output};
 use self::arguments::Args;
 use super::super::errors::CliError;
 use super::super::input::open_capture;
+use super::format::ToolFormat;
 use super::offline_analysis::{
     Prepared, StreamSelector, parse_stream_selector, prepare_with_tls_ports,
 };
@@ -68,13 +69,13 @@ struct SniPattern {
 
 impl SniPattern {
     fn parse(pattern: &str) -> Result<Self, CliError> {
-        let leading = pattern.starts_with('*');
-        let rest = if leading { &pattern[1..] } else { pattern };
-        let trailing = rest.ends_with('*');
-        let literal = if trailing {
-            &rest[..rest.len() - 1]
-        } else {
-            rest
+        let (leading, rest) = match pattern.strip_prefix('*') {
+            Some(rest) => (true, rest),
+            None => (false, pattern),
+        };
+        let (trailing, literal) = match rest.strip_suffix('*') {
+            Some(literal) => (true, literal),
+            None => (false, rest),
         };
         if literal.contains('*') {
             return Err(CliError::new(
@@ -108,6 +109,7 @@ pub(super) fn run(
     format: output::contract::Format,
     stream: &mut NdjsonStream,
 ) -> Result<(), CliError> {
+    let format = ToolFormat::narrow(output::contract::Command::Tls, format)?;
     let selected_stream = arguments
         .stream
         .as_deref()
@@ -193,12 +195,9 @@ pub(super) fn run(
         state.counts(),
     );
     match format {
-        output::contract::Format::Text => {
-            rendering::render_text(&state, &summary, &arguments.tls_ports.ports)
-        }
-        output::contract::Format::Json => rendering::render_aggregate(state, summary),
-        output::contract::Format::Ndjson => rendering::render_stream(summary, stream),
-        _ => unreachable!("the format contract admits only text, json, and ndjson"),
+        ToolFormat::Text => rendering::render_text(&state, &summary, &arguments.tls_ports.ports),
+        ToolFormat::Json => rendering::render_aggregate(state, summary),
+        ToolFormat::Ndjson => rendering::render_stream(summary, stream),
     }
 }
 

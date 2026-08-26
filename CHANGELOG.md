@@ -113,6 +113,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   interactive input fails immediately with command-specific guidance.
 - Machine-readable and hexadecimal output now stream directly from exact frame bytes
   without building duplicate representations.
+- **Breaking (Rust API):** the live workflows share one authorization seam.
+  `packetcraftr::authorization::{Authorizer, Operation, PolicyAuthorizer,
+  NoResolver}` replace the three `Authorizer` traits and two
+  `PolicyAuthorizer` types that `target`, `fuzz`, and `replay` each defined;
+  `replay::AuthorizationContext` is gone and
+  `fuzz::PolicyAuthorizer::new(&policy)` becomes
+  `PolicyAuthorizer::for_packets(&policy)`. The permissive-live two-key check
+  has one implementation and one message.
+- **Breaking (Rust API):** `packetcraftr_core::registry::Registry::is_builtin_codec`
+  is removed; nothing distinguished a built-in codec after registration.
+  `Builder::register_builtin_codec` stays and only means "register under
+  this alias list".
+- `packetcraftr::policy::CaptureBudget` charges a live capture's frames and
+  bytes against the policy's per-operation limits; the CLI used to do that
+  accounting privately, so library callers driving a capture had no budget.
+- `packetcraftr_core::protocol::{checksum, checksum_parts}` are public; the
+  native I/O crate's private copy is gone.
+- `scan::{Classification, ProbeStatus}`, `traceroute::{ProbeStatus,
+  ResponseKind, Completion}`, `dns::Outcome`, `output::fuzz::Mode`, and
+  `fuzz::CaseOutcome` gain `as_str()`, and the CLI's text output reads names
+  from them instead of keeping its own tables, so text and JSON cannot drift.
+- `capture --max-packets` and `--max-bytes` help text now says they bound
+  captured frames and bytes; the flags and defaults are unchanged.
+- When command-line parsing fails, the error envelope honours the last
+  `--output`/`--color` given, as clap does for a parse that succeeds; it used
+  to take the first. A repeat that does not parse (a dangling `--output`, or
+  an unknown value) leaves the earlier valid choice in place instead of
+  downgrading the structured error to prose.
 
 ### Fixed
 
@@ -135,6 +163,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before sends, and retain worker ownership through finite shutdown timeouts.
 - Byte-slice filters now reject upper bounds that cannot be represented instead
   of silently compiling them as empty ranges.
+- Opening a missing packet document, reading input, and serializing a DNS
+  record all report the same classes as the rest of the CLI: I/O failures exit
+  5 with `io.runtime` (two of them used the `cli` class), and a serialization
+  failure is `internal` (exit 70) rather than a missing native capability.
+  Scripts keyed on those failures see exit 5 and class `io` where they saw
+  exit 2 and class `cli`, and exit 70 and class `internal` where they saw
+  exit 4 and class `capability`.
+- `fuzz` consults the traffic policy before every live campaign, including one
+  where no case built; the gate used to be skipped on that path.
+- A single neighbor-evidence frame larger than the capture byte budget is
+  dropped and reported as truncation instead of panicking on an empty queue.
+- IPv4 fragment reassembly returns the new
+  `packetcraftr_core::analysis::reassembly::fragment::Error::InconsistentMergePlan`
+  where an inconsistent merge plan used to panic.
+- Library code no longer indexes or slices wire buffers without a bound check
+  and no longer does unchecked arithmetic on offsets, lengths, or counters;
+  the workspace now denies `clippy::indexing_slicing` and
+  `clippy::arithmetic_side_effects`. Malformed input on the affected paths
+  returns the parser's existing error where it could previously panic.
+
+### Security
+
+- Updated `rtnetlink` to 0.23, which drops the unmaintained `paste` crate
+  (RUSTSEC-2024-0436) and the last `thiserror` 1.x copy from the lock. The
+  `cargo deny` advisory exception is removed.
 
 ## [0.5.0-beta.1] - 2026-08-09
 

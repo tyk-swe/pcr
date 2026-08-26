@@ -4,27 +4,27 @@
 //! Tuple composition for capture-before-send exchanges.
 
 use super::Error;
-use super::capture::{CaptureProvider, CaptureRequest};
-use super::transmit::{IoSendReport, PacketIo, TransmissionFrame};
+use super::capture;
+use super::transmit;
 
-impl<S, C> PacketIo for (S, C)
+impl<S, C> transmit::Sender for (S, C)
 where
-    S: PacketIo,
+    S: transmit::Sender,
     C: Send + Sync,
 {
-    fn send(&self, frame: TransmissionFrame<'_>) -> Result<IoSendReport, Error> {
+    fn send(&self, frame: transmit::Frame<'_>) -> Result<transmit::Report, Error> {
         self.0.send(frame)
     }
 }
 
-impl<S, C> CaptureProvider for (S, C)
+impl<S, C> capture::Provider for (S, C)
 where
     S: Send + Sync,
-    C: CaptureProvider,
+    C: capture::Provider,
 {
     type Capture = C::Capture;
 
-    fn arm_capture(&self, request: &CaptureRequest) -> Result<Self::Capture, Error> {
+    fn arm_capture(&self, request: &capture::Request) -> Result<Self::Capture, Error> {
         self.1.arm_capture(request)
     }
 }

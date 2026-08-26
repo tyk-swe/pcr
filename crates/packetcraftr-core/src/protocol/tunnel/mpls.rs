@@ -136,29 +136,30 @@ impl LayerCodec for MplsCodec {
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
-        if input.len() < MPLS_LEN {
+        let Some(header) = input.first_chunk::<MPLS_LEN>() else {
             return Err(truncated("mpls", MPLS_LEN, input.len()));
-        }
-        let word = u32::from_be_bytes([input[0], input[1], input[2], input[3]]);
+        };
+        let word = u32::from_be_bytes(*header);
         let layer = Mpls {
             label: word >> 12,
             traffic_class: ((word >> 9) & 0x7) as u8,
             bottom_of_stack: word & 0x100 != 0,
             ttl: (word & 0xff) as u8,
         };
-        let payload_len = input.len() - MPLS_LEN;
+        let payload = input.get(MPLS_LEN..).unwrap_or_default();
+        let payload_len = payload.len();
         let next = if !layer.bottom_of_stack {
             // Advertised even with no bytes left, so a stack truncated before
             // its bottom entry surfaces as a missing required child rather
             // than dissecting as complete.
             vec![Discriminator(MPLS_NEXT_LABEL)]
-        } else if payload_len == 0 {
-            Vec::new()
-        } else {
+        } else if let Some(&first) = payload.first() {
             vec![
-                Discriminator(MPLS_BOTTOM_VERSION_BASE + u64::from(input[MPLS_LEN] >> 4)),
+                Discriminator(MPLS_BOTTOM_VERSION_BASE.saturating_add(u64::from(first >> 4))),
                 Discriminator(MPLS_BOTTOM_RAW),
             ]
+        } else {
+            Vec::new()
         };
         Ok(DecodedLayerValue {
             fields: mpls_layout(),

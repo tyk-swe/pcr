@@ -196,7 +196,7 @@ impl Tls {
         layer.apply_handshake(&records, &mut diagnostics);
         Some(Dissection {
             layer,
-            remainder: wire.len() - consumed,
+            remainder: wire.len().saturating_sub(consumed),
             diagnostics,
         })
     }
@@ -406,7 +406,7 @@ impl LayerCodec for TlsCodec {
         };
         Ok(DecodedLayerValue {
             layer: Box::new(layer),
-            consumed: input.len() - remainder,
+            consumed: input.len().saturating_sub(remainder),
             payload_len: remainder,
             next: if remainder == 0 {
                 Vec::new()
@@ -445,6 +445,8 @@ fn raw_segment(input: &[u8]) -> Result<DecodedLayerValue, crate::codec::Error> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+
     use super::*;
 
     fn record(content_type: u8, body: &[u8]) -> Vec<u8> {

@@ -452,7 +452,15 @@ where
                 self.summary.resolved_addresses.push(*address);
             }
         }
-        let address_index = (usize::try_from(attempt).unwrap_or(1) - 1) % addresses.len();
+        let address_index = usize::try_from(attempt)
+            .unwrap_or(1)
+            .saturating_sub(1)
+            .checked_rem(addresses.len())
+            .unwrap_or(0);
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "address_index is a remainder modulo addresses.len(), which is non-empty"
+        )]
         let server_address = addresses[address_index];
         let source_port = dns_source_port(self.request.source_port, attempt);
         Ok(Probe {
@@ -673,7 +681,12 @@ where
     }
 
     fn publish_diagnostics_since(&mut self, start: usize) -> std::result::Result<(), Error> {
-        let diagnostics = self.summary.diagnostics[start..].to_vec();
+        let diagnostics = self
+            .summary
+            .diagnostics
+            .get(start..)
+            .unwrap_or_default()
+            .to_vec();
         for diagnostic in diagnostics {
             self.publish(Event::Diagnostic(diagnostic))?;
         }
@@ -738,13 +751,23 @@ pub(super) fn dns_source_port(base: u16, attempt: u32) -> u16 {
     let (range_start, width) = if base >= DNS_EPHEMERAL_SOURCE_PORT_BASE {
         (
             u32::from(DNS_EPHEMERAL_SOURCE_PORT_BASE),
-            u32::from(u16::MAX) - u32::from(DNS_EPHEMERAL_SOURCE_PORT_BASE) + 1,
+            u32::from(u16::MAX)
+                .saturating_sub(u32::from(DNS_EPHEMERAL_SOURCE_PORT_BASE))
+                .saturating_add(1),
         )
     } else {
-        (1, u32::from(DNS_EPHEMERAL_SOURCE_PORT_BASE) - 1)
+        (
+            1,
+            u32::from(DNS_EPHEMERAL_SOURCE_PORT_BASE).saturating_sub(1),
+        )
     };
-    let offset = attempt.saturating_sub(1) % width;
-    (range_start + (u32::from(base) - range_start + offset) % width) as u16
+    let offset = attempt.saturating_sub(1).checked_rem(width).unwrap_or(0);
+    let rotated = u32::from(base)
+        .saturating_sub(range_start)
+        .saturating_add(offset)
+        .checked_rem(width)
+        .unwrap_or(0);
+    range_start.saturating_add(rotated) as u16
 }
 
 fn dns_rate_delay(rate: Option<u32>) -> std::result::Result<Duration, Error> {

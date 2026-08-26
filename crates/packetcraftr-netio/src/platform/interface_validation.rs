@@ -5,9 +5,9 @@
 
 #![forbid(unsafe_code)]
 
-use crate::interface::InterfaceInfo;
+use crate::interface;
 
-pub(crate) fn validate_native_interface(interface: &InterfaceInfo) -> Result<(), String> {
+pub(crate) fn validate_native_interface(interface: &interface::Info) -> Result<(), String> {
     if interface.id.name.is_empty() || interface.id.index == 0 {
         return Err("operating system returned an incomplete interface identity".to_owned());
     }
@@ -24,8 +24,8 @@ pub(crate) fn validate_native_interface(interface: &InterfaceInfo) -> Result<(),
 }
 
 pub(super) fn validate_native_interfaces(
-    interfaces: Vec<InterfaceInfo>,
-) -> Result<Vec<InterfaceInfo>, String> {
+    interfaces: Vec<interface::Info>,
+) -> Result<Vec<interface::Info>, String> {
     let mut identities = std::collections::HashSet::with_capacity(interfaces.len());
     for interface in &interfaces {
         validate_native_interface(interface)?;
@@ -47,12 +47,12 @@ mod tests {
 
     use super::*;
     use crate::{
-        interface::{Address as InterfaceAddress, Flags as InterfaceFlags, Id as InterfaceId},
+        interface::{self, Id as InterfaceId},
         link::Capability,
     };
 
-    fn interface(name: &str, index: u32, addresses: Vec<InterfaceAddress>) -> InterfaceInfo {
-        InterfaceInfo {
+    fn interface(name: &str, index: u32, addresses: Vec<interface::Address>) -> interface::Info {
+        interface::Info {
             id: InterfaceId {
                 name: name.to_owned(),
                 index,
@@ -60,7 +60,7 @@ mod tests {
             description: None,
             mac_address: None,
             addresses,
-            flags: InterfaceFlags::default(),
+            flags: interface::Flags::default(),
             mtu: Some(1_500),
             capability: Capability::Layer3,
             link_type: LinkType::RAW,
@@ -73,11 +73,11 @@ mod tests {
             "fixture0",
             7,
             vec![
-                InterfaceAddress {
+                interface::Address {
                     address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
                     prefix_length: 32,
                 },
-                InterfaceAddress {
+                interface::Address {
                     address: IpAddr::V6(Ipv6Addr::LOCALHOST),
                     prefix_length: 128,
                 },
@@ -98,7 +98,7 @@ mod tests {
             interface(
                 "fixture0",
                 7,
-                vec![InterfaceAddress {
+                vec![interface::Address {
                     address: IpAddr::V4(Ipv4Addr::LOCALHOST),
                     prefix_length: 33,
                 }],
@@ -106,7 +106,7 @@ mod tests {
             interface(
                 "fixture0",
                 7,
-                vec![InterfaceAddress {
+                vec![interface::Address {
                     address: IpAddr::V6(Ipv6Addr::LOCALHOST),
                     prefix_length: 129,
                 }],

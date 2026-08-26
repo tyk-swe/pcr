@@ -27,8 +27,8 @@ struct Tally {
 
 impl Tally {
     fn add(&mut self, bytes: u64) {
-        self.frames += 1;
-        self.bytes += bytes;
+        self.frames = self.frames.saturating_add(1);
+        self.bytes = self.bytes.saturating_add(bytes);
     }
 }
 
@@ -108,8 +108,8 @@ impl Collector {
             .ok_or(Error::TimestampUnavailable {
                 number: record.number,
             })?;
-        self.frames += 1;
-        self.bytes += bytes;
+        self.frames = self.frames.saturating_add(1);
+        self.bytes = self.bytes.saturating_add(bytes);
         self.observe_time(timestamp, bytes);
 
         // Protocol presence: once per distinct protocol per frame.
@@ -156,6 +156,10 @@ impl Collector {
 
         // Bucket timestamps before the capture origin at zero.
         let offset = timestamp.duration_since(origin).unwrap_or(Duration::ZERO);
+        #[expect(
+            clippy::arithmetic_side_effects,
+            reason = "the divisor is forced to at least 1 by `max(1)`"
+        )]
         let bucket = offset.as_nanos() / self.interval.as_nanos().max(1);
         self.io
             .entry(u64::try_from(bucket).unwrap_or(u64::MAX))

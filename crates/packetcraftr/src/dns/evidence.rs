@@ -49,8 +49,8 @@ pub(super) fn validate_dns_execution(
         .iter()
         .next()
         .filter(|layer| BuiltinProtocol::of(*layer) == Some(BuiltinProtocol::Ethernet))
-        .map_or(0, |_| 1);
-    if sent_packet.len() != network_index + 3
+        .map_or(0usize, |_| 1);
+    if sent_packet.len() != network_index.saturating_add(3)
         || !execution
             .sent
             .built()
@@ -63,7 +63,7 @@ pub(super) fn validate_dns_execution(
             .built()
             .packet
             .iter()
-            .nth(network_index + 1)
+            .nth(network_index.saturating_add(1))
             .is_some_and(|layer| BuiltinProtocol::of(layer) == Some(BuiltinProtocol::Udp))
         || dns_payload(sent_packet).as_deref() != Some(probe.query.as_ref())
         || network.destination != probe.server_address

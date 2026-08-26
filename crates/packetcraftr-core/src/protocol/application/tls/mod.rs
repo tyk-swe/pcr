@@ -38,7 +38,7 @@ pub use parse::{Outcome, looks_like_record_start, parse_handshake, parse_record}
 fn hex(bytes: &[u8]) -> String {
     use std::fmt::Write as _;
 
-    let mut text = String::with_capacity(bytes.len() * 2);
+    let mut text = String::with_capacity(bytes.len().saturating_mul(2));
     for byte in bytes {
         let _ = write!(text, "{byte:02x}");
     }

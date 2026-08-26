@@ -132,6 +132,10 @@ impl Builder {
                         index,
                         protocol: protocol.clone(),
                     })?;
+            #[expect(
+                clippy::arithmetic_side_effects,
+                reason = "`index` comes from enumerating `protocols`, so it is below its length"
+            )]
             let child = packet.layer(index + 1);
             payload_lengths.push(Some(bytes.len()));
             let remaining_packet_bytes = remaining_packet_bytes(&bytes, options)?;

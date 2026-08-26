@@ -9,6 +9,7 @@ use packetcraftr::{analysis, output};
 use self::arguments::{Args, Direction};
 use super::super::errors::CliError;
 use super::super::input::open_capture;
+use super::format::FollowFormat;
 use super::offline_analysis::{Prepared, StreamSelector, parse_stream_selector, prepare};
 use crate::rendering::NdjsonStream;
 
@@ -21,9 +22,10 @@ pub(super) fn run(
     format: output::contract::Format,
     stream: &mut NdjsonStream,
 ) -> Result<(), CliError> {
+    let format = FollowFormat::narrow(output::contract::Command::Follow, format)?;
     let StreamSelector { transport, index } = parse_stream_selector(&arguments.stream)?;
     let selector = Selector { transport, index };
-    if format == output::contract::Format::Raw && arguments.direction == Direction::Both {
+    if format == FollowFormat::Raw && arguments.direction == Direction::Both {
         return Err(CliError::new(
             2,
             "raw output interleaves both directions indistinguishably; \
@@ -72,13 +74,10 @@ pub(super) fn run(
     let summary = collector.finish(&run_summary.trailing_tcp_events);
 
     match format {
-        output::contract::Format::Text => rendering::render_text(selector, &summary),
-        output::contract::Format::Json => rendering::render_aggregate(selector, summary, state),
-        output::contract::Format::Ndjson => rendering::render_stream(selector, summary, stream),
-        output::contract::Format::Hex | output::contract::Format::Raw => {
-            rendering::render_payload_warning(&summary)
-        }
-        _ => unreachable!("the format contract admits only text, json, ndjson, hex, and raw"),
+        FollowFormat::Text => rendering::render_text(selector, &summary),
+        FollowFormat::Json => rendering::render_aggregate(selector, summary, state),
+        FollowFormat::Ndjson => rendering::render_stream(selector, summary, stream),
+        FollowFormat::Hex | FollowFormat::Raw => rendering::render_payload_warning(&summary),
     }
 }
 

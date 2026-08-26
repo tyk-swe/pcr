@@ -1,8 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+// Test code indexes fixtures and counts by hand; the fail-closed lints are
+// for library paths.
+#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::UNIX_EPOCH;
 
 use packetcraftr::{
@@ -14,7 +17,7 @@ mod process_support;
 mod support;
 
 use process_support::{append_truncated_record, decode_hex, run_with_stdin};
-use support::{assert_contiguous, parse_json, parse_ndjson, run, run_success};
+use support::{assert_contiguous, parse_json, parse_ndjson, path_text, run, run_success};
 
 const UDP_CLIENT: &str = "450000210000000040118e95c0000201c633640230390009000d9f8868656c6c6f";
 const UDP_SERVER: &str = "450000210000000040118e95c6336402c000020100093039000d957e776f726c64";
@@ -93,10 +96,6 @@ fn write_truncated_capture() -> tempfile::NamedTempFile {
     let mut file = write_capture();
     append_truncated_record(&mut file);
     file
-}
-
-fn path_text(path: &Path) -> &str {
-    path.to_str().expect("temporary path must be UTF-8")
 }
 
 #[test]
@@ -465,7 +464,12 @@ fn read_missing_filter_timestamp_uses_source_identity_and_next_envelope_position
 #[test]
 fn packet_documents_stdin_and_file_inputs_cover_offline_input_paths() {
     let documents = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/documents");
-    for document in ["packet-ipv4-udp.json", "packet-raw.yaml"] {
+    for document in [
+        "packet-gre-sctp.json",
+        "packet-igmp.json",
+        "packet-ipv4-udp.json",
+        "packet-raw.yaml",
+    ] {
         let path = documents.join(document);
         let output = run(&[
             "--output",

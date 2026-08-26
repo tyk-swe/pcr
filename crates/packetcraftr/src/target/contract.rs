@@ -139,6 +139,10 @@ impl Authorized {
         &self.addresses
     }
 
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "authorization only constructs `Authorized` with a non-empty address list"
+    )]
     pub fn selected_address(&self) -> IpAddr {
         self.addresses[0]
     }

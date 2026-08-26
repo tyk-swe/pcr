@@ -129,8 +129,20 @@ fn prepare_case(
         .ok_or(Error::CaseIndexOverflow)?;
     let seed = case_seed(request.seed, index);
     let selection_index = index_from(index, compatible_mutations.len());
+    #[expect(
+        clippy::arithmetic_side_effects,
+        reason = "`prepare` returns before preparing cases when `compatible_mutations` is empty"
+    )]
     let strategy_round = index / compatible_mutations.len() as u64;
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "`index_from` reduces below `compatible_mutations.len()`"
+    )]
     let (strategy, field_index) = compatible_mutations[selection_index];
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "every `compatible_mutations` entry stores an index into `inputs.fields`"
+    )]
     let field = &inputs.fields[field_index];
     let mut recipe = inputs.packet.clone();
     let original = recipe
@@ -257,7 +269,13 @@ fn build_case(
             }
             case.built = Some(built);
             case.outcome = super::super::result::CaseOutcome::Built;
-            counters.built_cases += 1;
+            #[expect(
+                clippy::arithmetic_side_effects,
+                reason = "a u64 case counter cannot reach u64::MAX from the validated case budget"
+            )]
+            {
+                counters.built_cases += 1;
+            }
             counters.built_bytes = next_built_bytes;
         }
         Err(source) => {
@@ -322,7 +340,7 @@ fn retained_case_value_bytes(
             .max_total_bytes
             .saturating_sub(usize::try_from(total).unwrap_or(usize::MAX));
         let size = bounded_value_size(value, remaining, limits.max_list_items, 0)
-            .ok_or(byte_limit(limit + 1, limit))?;
+            .ok_or(byte_limit(limit.saturating_add(1), limit))?;
         total = total
             .checked_add(size as u64)
             .ok_or(byte_limit(u64::MAX, limit))?;
@@ -347,7 +365,7 @@ fn packet_reflected_value_bytes(
                 .max_total_bytes
                 .saturating_sub(usize::try_from(total).unwrap_or(usize::MAX));
             let size = bounded_value_size(&value, remaining, limits.max_list_items, 0)
-                .ok_or(byte_limit(limit + 1, limit))?;
+                .ok_or(byte_limit(limit.saturating_add(1), limit))?;
             total = total
                 .checked_add(size as u64)
                 .ok_or(byte_limit(u64::MAX, limit))?;

@@ -106,7 +106,7 @@ impl LayerCodec for Ipv4Codec {
         let (source, destination) = resolve_addresses(layer, context);
         let (options, covered_payload_len, mut diagnostics) =
             prepare_payload(layer, payload, context)?;
-        let header_len = IPV4_MIN_LEN + options.len();
+        let header_len = IPV4_MIN_LEN.saturating_add(options.len());
         let total_expected = header_len
             .checked_add(covered_payload_len)
             .and_then(|value| u16::try_from(value).ok())
@@ -146,21 +146,23 @@ impl LayerCodec for Ipv4Codec {
 
         let ihl =
             u8::try_from(header_len / 4).map_err(|_| invalid("ipv4", "header length overflow"))?;
-        let mut prefix = vec![0u8; header_len];
-        prefix[0] = (4 << 4) | ihl;
-        prefix[1] = layer.dscp_ecn;
-        prefix[2..4].copy_from_slice(&total_length.to_be_bytes());
-        prefix[4..6].copy_from_slice(&layer.identification.to_be_bytes());
         let flags_offset = (if layer.reserved_flag { 1 << 15 } else { 0 })
             | (if layer.dont_fragment { 1 << 14 } else { 0 })
             | (if layer.more_fragments { 1 << 13 } else { 0 })
             | layer.fragment_offset;
-        prefix[6..8].copy_from_slice(&flags_offset.to_be_bytes());
-        prefix[8] = layer.ttl;
-        prefix[9] = next_protocol;
-        prefix[12..16].copy_from_slice(&source.octets());
-        prefix[16..20].copy_from_slice(&destination.octets());
-        prefix[20..].copy_from_slice(&options);
+        let mut prefix = Vec::with_capacity(header_len);
+        prefix.push((4 << 4) | ihl);
+        prefix.push(layer.dscp_ecn);
+        prefix.extend_from_slice(&total_length.to_be_bytes());
+        prefix.extend_from_slice(&layer.identification.to_be_bytes());
+        prefix.extend_from_slice(&flags_offset.to_be_bytes());
+        prefix.push(layer.ttl);
+        prefix.push(next_protocol);
+        // The checksum bytes stay zero while the header checksum is computed.
+        prefix.extend_from_slice(&[0, 0]);
+        prefix.extend_from_slice(&source.octets());
+        prefix.extend_from_slice(&destination.octets());
+        prefix.extend_from_slice(&options);
         let checksum_expected = checksum(&prefix);
         let (header_checksum, materialized_checksum) = resolve_u16(
             "ipv4",
@@ -170,7 +172,13 @@ impl LayerCodec for Ipv4Codec {
             context.mode,
             &mut diagnostics,
         )?;
-        prefix[10..12].copy_from_slice(&header_checksum.to_be_bytes());
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "the fixed twenty-byte prefix above always reserves bytes 10..12 for the checksum"
+        )]
+        {
+            prefix[10..12].copy_from_slice(&header_checksum.to_be_bytes());
+        }
 
         let mut materialized = layer.clone();
         materialized.total_length = materialized_total;
@@ -193,26 +201,28 @@ impl LayerCodec for Ipv4Codec {
         input: &[u8],
         context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
-        if input.len() < IPV4_MIN_LEN {
+        let Some(header) = input.first_chunk::<IPV4_MIN_LEN>() else {
             return Err(truncated("ipv4", IPV4_MIN_LEN, input.len()));
-        }
-        if input[0] >> 4 != 4 {
+        };
+        if header[0] >> 4 != 4 {
             return Err(invalid(
                 "ipv4",
-                format!("version is {}, not 4", input[0] >> 4),
+                format!("version is {}, not 4", header[0] >> 4),
             ));
         }
-        let ihl = usize::from(input[0] & 0x0f);
+        let ihl = usize::from(header[0] & 0x0f);
         if ihl < 5 {
             return Err(invalid("ipv4", format!("IHL {ihl} is below 5")));
         }
         let header_len = ihl
             .checked_mul(4)
             .ok_or_else(|| invalid("ipv4", "IHL overflow"))?;
-        if input.len() < header_len {
+        let (Some(full_header), Some(options)) =
+            (input.get(..header_len), input.get(IPV4_MIN_LEN..header_len))
+        else {
             return Err(truncated("ipv4", header_len, input.len()));
-        }
-        let total_length_field = u16::from_be_bytes([input[2], input[3]]);
+        };
+        let total_length_field = u16::from_be_bytes([header[2], header[3]]);
         let total_length = usize::from(total_length_field);
         if total_length < header_len {
             return Err(invalid(
@@ -223,15 +233,14 @@ impl LayerCodec for Ipv4Codec {
         if input.len() < total_length {
             return Err(truncated("ipv4", total_length, input.len()));
         }
-        let flags_offset = u16::from_be_bytes([input[6], input[7]]);
-        let next = input[9];
-        let source = Ipv4Addr::new(input[12], input[13], input[14], input[15]);
-        let destination = Ipv4Addr::new(input[16], input[17], input[18], input[19]);
-        let options = &input[20..header_len];
+        let flags_offset = u16::from_be_bytes([header[6], header[7]]);
+        let next = header[9];
+        let source = Ipv4Addr::new(header[12], header[13], header[14], header[15]);
+        let destination = Ipv4Addr::new(header[16], header[17], header[18], header[19]);
         let pseudo_header_destination = ipv4_source_route_destination(destination, options)
             .map_err(|error| invalid("ipv4", error.to_string()))?;
         let mut diagnostics = Vec::new();
-        if context.verify_checksums && checksum(&input[..header_len]) != 0 {
+        if context.verify_checksums && checksum(full_header) != 0 {
             diagnostics.push(
                 Diagnostic::warning(IPV4_CHECKSUM, "IPv4 header checksum mismatch")
                     .at_field("checksum"),
@@ -247,19 +256,19 @@ impl LayerCodec for Ipv4Codec {
                 .at_field("reserved_flag"),
             );
         }
-        let payload_len = total_length - header_len;
+        let payload_len = total_length.saturating_sub(header_len);
         Ok(DecodedLayerValue {
             layer: Box::new(Ipv4 {
-                dscp_ecn: input[1],
+                dscp_ecn: header[1],
                 total_length: WireValue::Exact(total_length_field),
-                identification: u16::from_be_bytes([input[4], input[5]]),
+                identification: u16::from_be_bytes([header[4], header[5]]),
                 reserved_flag: (flags_offset & 0x8000) != 0,
                 dont_fragment: (flags_offset & 0x4000) != 0,
                 more_fragments: (flags_offset & 0x2000) != 0,
                 fragment_offset,
-                ttl: input[8],
+                ttl: header[8],
                 protocol: WireValue::Exact(next),
-                checksum: WireValue::Exact(u16::from_be_bytes([input[10], input[11]])),
+                checksum: WireValue::Exact(u16::from_be_bytes([header[10], header[11]])),
                 source,
                 destination,
                 options: Bytes::copy_from_slice(options),
@@ -329,9 +338,9 @@ fn prepare_payload(
         );
     }
     let mut options = layer.options.to_vec();
-    let padding = (4 - (options.len() % 4)) % 4;
+    let padding = 4_usize.saturating_sub(options.len() % 4) % 4;
     if padding != 0 {
-        options.resize(options.len() + padding, 0);
+        options.resize(options.len().saturating_add(padding), 0);
         diagnostics.push(
             Diagnostic::warning(
                 "build.ipv4_options_padded",

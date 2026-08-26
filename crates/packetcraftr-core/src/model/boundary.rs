@@ -9,7 +9,7 @@ pub(super) fn check_padding_boundary_removal(layers: &[Box<dyn Layer>], index: u
             .as_any()
             .downcast_ref::<Padding>()
             .is_some_and(|padding| {
-                padding.outside_layer == Some(index) && index + 1 >= padding_index
+                padding.outside_layer == Some(index) && index.saturating_add(1) >= padding_index
             })
     })
 }
@@ -33,7 +33,7 @@ pub(super) fn shift_padding_for_remove(layers: &mut [Box<dyn Layer>], index: usi
             continue;
         };
         padding.outside_layer = match padding.outside_layer {
-            Some(outside_layer) if outside_layer > index => Some(outside_layer - 1),
+            Some(outside_layer) if outside_layer > index => Some(outside_layer.saturating_sub(1)),
             // The successor now occupies the removed index.
             Some(outside_layer) if outside_layer == index => Some(index),
             value => value,

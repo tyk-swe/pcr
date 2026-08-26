@@ -18,8 +18,13 @@ pub(super) fn build_batches(request: &Request, destination: IpAddr) -> Result<Ve
     let mut batches = Vec::with_capacity(request.hop_count());
     let mut sequence = 0_u64;
     for hop_limit in request.first_hop..=request.max_hops {
-        let mut probes =
-            Vec::with_capacity(usize::try_from(request.probes_per_hop).unwrap_or(usize::MAX));
+        let probe_capacity =
+            usize::try_from(request.probes_per_hop).map_err(|_| Error::InvalidLimit {
+                field: "probes_per_hop",
+                value: u64::from(request.probes_per_hop),
+                reason: "probes per hop exceeds addressable memory".to_owned(),
+            })?;
+        let mut probes = Vec::with_capacity(probe_capacity);
         for attempt in 1..=request.probes_per_hop {
             let destination_port = match request.strategy {
                 Strategy::Udp => Some(

@@ -11,6 +11,7 @@ use super::super::super::DNS_TYPE_OPT;
 use super::super::super::error::WireError;
 use super::super::super::model::{Edns, EdnsOption, Limits, Name, Record, RecordValue};
 use super::super::name::decode_name;
+use super::advance;
 use super::primitives::{read_u16, read_u32};
 
 pub(super) fn decode_records(
@@ -24,17 +25,15 @@ pub(super) fn decode_records(
         let (owner, next) = decode_name(message, offset, limits)?;
         offset = next;
         let type_code = read_u16(message, offset, "record type")?;
-        let class = read_u16(message, offset + 2, "record class")?;
-        let ttl = read_u32(message, offset + 4, "record TTL")?;
-        let rdata_length = usize::from(read_u16(message, offset + 8, "RDATA length")?);
-        let rdata_offset = offset + 10;
-        let rdata_end =
-            rdata_offset
-                .checked_add(rdata_length)
-                .ok_or(WireError::TruncatedField {
-                    field: "RDATA",
-                    offset: rdata_offset,
-                })?;
+        let class = read_u16(message, advance(offset, 2, "record class")?, "record class")?;
+        let ttl = read_u32(message, advance(offset, 4, "record TTL")?, "record TTL")?;
+        let rdata_length = usize::from(read_u16(
+            message,
+            advance(offset, 8, "RDATA length")?,
+            "RDATA length",
+        )?);
+        let rdata_offset = advance(offset, 10, "RDATA")?;
+        let rdata_end = advance(rdata_offset, rdata_length, "RDATA")?;
         message
             .get(rdata_offset..rdata_end)
             .ok_or(WireError::TruncatedField {
@@ -97,10 +96,18 @@ impl Rdata<'_> {
             primary_name_server,
             responsible_mailbox,
             serial: read_u32(self.message, next, "SOA serial")?,
-            refresh: read_u32(self.message, next + 4, "SOA refresh")?,
-            retry: read_u32(self.message, next + 8, "SOA retry")?,
-            expire: read_u32(self.message, next + 12, "SOA expire")?,
-            minimum: read_u32(self.message, next + 16, "SOA minimum")?,
+            refresh: read_u32(
+                self.message,
+                advance(next, 4, "SOA refresh")?,
+                "SOA refresh",
+            )?,
+            retry: read_u32(self.message, advance(next, 8, "SOA retry")?, "SOA retry")?,
+            expire: read_u32(self.message, advance(next, 12, "SOA expire")?, "SOA expire")?,
+            minimum: read_u32(
+                self.message,
+                advance(next, 16, "SOA minimum")?,
+                "SOA minimum",
+            )?,
         })
     }
 
@@ -109,7 +116,11 @@ impl Rdata<'_> {
             return Err(self.invalid("MX RDATA is shorter than preference plus name"));
         }
         let preference = read_u16(self.message, self.offset, "MX preference")?;
-        let (exchange, next) = decode_name(self.message, self.offset + 2, self.limits)?;
+        let (exchange, next) = decode_name(
+            self.message,
+            advance(self.offset, 2, "MX exchange")?,
+            self.limits,
+        )?;
         if next != self.end {
             return Err(self.invalid("MX name does not consume the declared RDATA"));
         }
@@ -129,8 +140,12 @@ impl Rdata<'_> {
                     limit: self.limits.max_txt_strings,
                 });
             }
+            #[expect(
+                clippy::indexing_slicing,
+                reason = "cursor is below bytes.len() from the loop condition"
+            )]
             let length = usize::from(self.bytes[cursor]);
-            cursor += 1;
+            cursor = cursor.saturating_add(1);
             let string = self
                 .bytes
                 .get(cursor..cursor.saturating_add(length))
@@ -144,7 +159,7 @@ impl Rdata<'_> {
                 });
             }
             strings.push(Bytes::copy_from_slice(string));
-            cursor += length;
+            cursor = cursor.saturating_add(length);
         }
         Ok(RecordValue::Txt(strings))
     }
@@ -154,9 +169,21 @@ impl Rdata<'_> {
             return Err(self.invalid("SRV RDATA is shorter than priority, weight, port, and name"));
         }
         let priority = read_u16(self.message, self.offset, "SRV priority")?;
-        let weight = read_u16(self.message, self.offset + 2, "SRV weight")?;
-        let port = read_u16(self.message, self.offset + 4, "SRV port")?;
-        let (target, next) = decode_name(self.message, self.offset + 6, self.limits)?;
+        let weight = read_u16(
+            self.message,
+            advance(self.offset, 2, "SRV weight")?,
+            "SRV weight",
+        )?;
+        let port = read_u16(
+            self.message,
+            advance(self.offset, 4, "SRV port")?,
+            "SRV port",
+        )?;
+        let (target, next) = decode_name(
+            self.message,
+            advance(self.offset, 6, "SRV target")?,
+            self.limits,
+        )?;
         if next != self.end {
             return Err(self.invalid("SRV name does not consume the declared RDATA"));
         }
@@ -235,9 +262,15 @@ fn decode_edns(class: u16, ttl: u32, rdata: &[u8]) -> Result<Edns, WireError> {
                 .ok_or_else(|| WireError::InvalidEdns {
                     message: format!("option header is truncated at RDATA byte {cursor}"),
                 })?;
-        let code = u16::from_be_bytes([header[0], header[1]]);
-        let length = usize::from(u16::from_be_bytes([header[2], header[3]]));
-        cursor += 4;
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "header is the four-byte slice returned by the get above"
+        )]
+        let (code, length) = (
+            u16::from_be_bytes([header[0], header[1]]),
+            usize::from(u16::from_be_bytes([header[2], header[3]])),
+        );
+        cursor = cursor.saturating_add(4);
         let data = rdata
             .get(cursor..cursor.saturating_add(length))
             .ok_or_else(|| WireError::InvalidEdns {
@@ -247,7 +280,7 @@ fn decode_edns(class: u16, ttl: u32, rdata: &[u8]) -> Result<Edns, WireError> {
             code,
             data: Bytes::copy_from_slice(data),
         });
-        cursor += length;
+        cursor = cursor.saturating_add(length);
     }
     Ok(Edns {
         udp_payload_size: class,

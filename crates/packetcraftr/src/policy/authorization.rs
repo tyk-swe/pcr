@@ -33,6 +33,7 @@ impl Policy {
 
     /// Applies the operation-wide packet and exact wire-byte budgets together.
     /// Callers provide prospective totals before starting live side effects.
+    ///
     /// Authorization seam used by the bounded workflows. Not part of the
     /// documented API.
     #[doc(hidden)]

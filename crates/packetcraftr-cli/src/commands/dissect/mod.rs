@@ -20,9 +20,11 @@ use super::super::input::{InputKind, read_bounded_file, read_stdin_bounded};
 use super::super::rendering::{
     emit_aggregate, render_diagnostics_text, write_plain_line, write_raw, write_stdout_line,
 };
+use super::format::BuildFormat;
 use super::registry_with_tls_ports;
 
 pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
+    let format = BuildFormat::narrow(output::contract::Command::Dissect, format)?;
     let registry = registry_with_tls_ports(&arguments.tls_ports.ports)?;
     // A bad filter fails before any input is read, so it cannot leave the
     // command waiting on standard input for frame bytes it would never use.
@@ -68,7 +70,7 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
     };
     let (result, diagnostics) = output::dissect::Result::from_decoded(decoded);
     match format {
-        output::contract::Format::Text => {
+        BuildFormat::Text => {
             if !kept {
                 return Ok(());
             }
@@ -82,23 +84,22 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
             }
             render_diagnostics_text(&diagnostics)
         }
-        output::contract::Format::Hex => {
+        BuildFormat::Hex => {
             if !kept {
                 return Ok(());
             }
             write_plain_line(format_args!("{}", result.bytes_hex))
         }
-        output::contract::Format::Raw => {
+        BuildFormat::Raw => {
             if !kept {
                 return Ok(());
             }
             write_raw(result.bytes())
         }
-        output::contract::Format::Json => emit_aggregate(
+        BuildFormat::Json => emit_aggregate(
             output::contract::Command::Dissect,
             output::dissect::AggregateResult::from_filter(kept, result),
             diagnostics,
         ),
-        _ => unreachable!("dissect format is checked before command dispatch"),
     }
 }

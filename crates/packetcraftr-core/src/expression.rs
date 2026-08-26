@@ -138,7 +138,7 @@ fn parse_layer(
             message: "missing protocol name".to_owned(),
         });
     }
-    let arguments = &segment[open + 1..segment.len() - 1];
+    let arguments = &segment[open.saturating_add(1)..segment.len().saturating_sub(1)];
     let mut fields = BTreeMap::new();
     if arguments.trim().is_empty() {
         return Ok((name, fields));
@@ -185,13 +185,13 @@ fn parse_value_bounded(input: &str, depth: usize, max_nesting: usize) -> Result<
                 message: "unterminated list".to_owned(),
             });
         }
-        let body = &input[1..input.len() - 1];
+        let body = &input[1..input.len().saturating_sub(1)];
         if body.trim().is_empty() {
             return Ok(FieldValue::List(Vec::new()));
         }
         let values = split_top_level_bounded(body, ',', None)?
             .into_iter()
-            .map(|value| parse_value_bounded(value.trim(), depth + 1, max_nesting))
+            .map(|value| parse_value_bounded(value.trim(), depth.saturating_add(1), max_nesting))
             .collect::<Result<Vec<_>, _>>()?;
         return Ok(FieldValue::List(values));
     }
@@ -235,7 +235,7 @@ fn parse_quoted(input: &str) -> Result<String, Error> {
     }
     let mut output = String::new();
     let mut escaped = false;
-    for (offset, character) in input[1..input.len() - 1].char_indices() {
+    for (offset, character) in input[1..input.len().saturating_sub(1)].char_indices() {
         if escaped {
             output.push(match character {
                 'n' => '\n',
@@ -245,7 +245,7 @@ fn parse_quoted(input: &str) -> Result<String, Error> {
                 '\\' => '\\',
                 other => {
                     return Err(Error::Syntax {
-                        offset: offset + 1,
+                        offset: offset.saturating_add(1),
                         message: format!("unsupported escape `\\{other}`"),
                     });
                 }
@@ -255,7 +255,7 @@ fn parse_quoted(input: &str) -> Result<String, Error> {
             escaped = true;
         } else if character == '"' {
             return Err(Error::Syntax {
-                offset: offset + 1,
+                offset: offset.saturating_add(1),
                 message: "unescaped quote in quoted string".to_owned(),
             });
         } else {
@@ -264,7 +264,7 @@ fn parse_quoted(input: &str) -> Result<String, Error> {
     }
     if escaped {
         return Err(Error::Syntax {
-            offset: input.len() - 1,
+            offset: input.len().saturating_sub(1),
             message: "trailing escape".to_owned(),
         });
     }
@@ -275,7 +275,9 @@ fn split_assignment(input: &str) -> Result<Option<(&str, &str)>, Error> {
     let mut scanner = TopLevelScanner::merging_brackets(input);
     loop {
         match scanner.next_top_level() {
-            Ok(Some((offset, '='))) => return Ok(Some((&input[..offset], &input[offset + 1..]))),
+            Ok(Some((offset, '='))) => {
+                return Ok(Some((&input[..offset], &input[offset.saturating_add(1)..])));
+            }
             Ok(Some(_)) => {}
             Ok(None) | Err(ScanFailure::Unterminated) => return Ok(None),
             Err(ScanFailure::Unbalanced { offset, .. }) => {
@@ -320,7 +322,7 @@ fn split_top_level_bounded(
             return Err(Error::LayerLimit { limit: maximum });
         }
         result.push(&input[start..offset]);
-        start = offset + character.len_utf8();
+        start = offset.saturating_add(character.len_utf8());
     }
     if let Some(maximum) = maximum_parts.filter(|maximum| result.len() >= *maximum) {
         return Err(Error::LayerLimit { limit: maximum });
@@ -381,7 +383,7 @@ impl<'a> TopLevelScanner<'a> {
             }
             let unbalanced = |character| ScanFailure::Unbalanced { offset, character };
             match character {
-                '(' => self.paren_depth += 1,
+                '(' => self.paren_depth = self.paren_depth.saturating_add(1),
                 ')' => {
                     let Some(depth) = self.paren_depth.checked_sub(1) else {
                         return Err(unbalanced(character));
@@ -390,9 +392,9 @@ impl<'a> TopLevelScanner<'a> {
                 }
                 '[' => {
                     if self.merge_brackets {
-                        self.paren_depth += 1;
+                        self.paren_depth = self.paren_depth.saturating_add(1);
                     } else {
-                        self.list_depth += 1;
+                        self.list_depth = self.list_depth.saturating_add(1);
                     }
                 }
                 ']' => {
@@ -436,6 +438,7 @@ fn strip_hex_prefix(input: &str) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
     use super::*;
 
     #[test]

@@ -104,7 +104,7 @@ fn normalize_payload<'a>(
     let sequence = segment.sequence.wrapping_add(u32::from(segment.syn));
     let expected = state.base_sequence.wrapping_add(state.next_offset as u32);
     let delta = i64::from(sequence.wrapping_sub(expected) as i32);
-    let absolute = i128::from(state.next_offset) + i128::from(delta);
+    let absolute = i128::from(state.next_offset).saturating_add(i128::from(delta));
     let fin_offset = if segment.fin {
         absolute
             .checked_add(segment.payload.len() as i128)
@@ -113,11 +113,15 @@ fn normalize_payload<'a>(
         None
     };
     let before_base = if absolute < 0 {
-        usize::try_from((-absolute).min(segment.payload.len() as i128))
+        usize::try_from(absolute.saturating_neg().min(segment.payload.len() as i128))
             .unwrap_or(segment.payload.len())
     } else {
         0
     };
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "before_base is clamped to segment.payload.len() just above"
+    )]
     let mut payload = &segment.payload[before_base..];
     let mut payload_start = before_base;
     let mut retransmitted = before_base;
@@ -126,16 +130,22 @@ fn normalize_payload<'a>(
         limit: limits.max_bytes_per_flow,
     })?;
     if offset < state.next_offset {
-        let consumed = usize::try_from((state.next_offset - offset).min(payload.len() as u64))
-            .unwrap_or(payload.len());
-        conflicting = emitted_history_conflicts(state, offset, &payload[..consumed]);
-        retransmitted += consumed;
+        let consumed = usize::try_from(
+            state
+                .next_offset
+                .saturating_sub(offset)
+                .min(payload.len() as u64),
+        )
+        .unwrap_or(payload.len());
+        let (overlap, rest) = payload.split_at(consumed.min(payload.len()));
+        conflicting = emitted_history_conflicts(state, offset, overlap);
+        retransmitted = retransmitted.saturating_add(consumed);
         payload_start = payload_start
             .checked_add(consumed)
             .ok_or(Error::FlowByteLimit {
                 limit: limits.max_bytes_per_flow,
             })?;
-        payload = &payload[consumed..];
+        payload = rest;
         offset = state.next_offset;
     }
     let remaining_end = validate_sequence_bounds(limits, state, offset, payload, fin_offset)?;
@@ -377,9 +387,9 @@ fn plan_pending_merge(
             let overlap_start = start.max(offset);
             let overlap_end = end.min(payload_end);
             if overlap_start < overlap_end {
-                let length = usize::try_from(overlap_end - overlap_start).ok()?;
-                let existing_start = usize::try_from(overlap_start - start).ok()?;
-                let payload_start = usize::try_from(overlap_start - offset).ok()?;
+                let length = usize::try_from(overlap_end.saturating_sub(overlap_start)).ok()?;
+                let existing_start = usize::try_from(overlap_start.saturating_sub(start)).ok()?;
+                let payload_start = usize::try_from(overlap_start.saturating_sub(offset)).ok()?;
                 let existing_end = existing_start.checked_add(length)?;
                 let payload_end = payload_start.checked_add(length)?;
                 overlapping_bytes = overlapping_bytes.checked_add(length)?;
@@ -459,7 +469,7 @@ fn materialize_pending_merge(
             // Retained bytes win overlaps, preserving the existing retransmission
             // semantics after conflict detection.
             bytes.get_mut(relative..end)?.copy_from_slice(value);
-            if index + 1 < plan.affected_segment_count {
+            if index.saturating_add(1) < plan.affected_segment_count {
                 current = existing
                     .range((std::ops::Bound::Excluded(start), std::ops::Bound::Unbounded))
                     .next()

@@ -30,8 +30,18 @@ impl SplitMix64 {
         let mut output = Vec::with_capacity(length);
         while output.len() < length {
             let bytes = self.next_u64().to_le_bytes();
+            #[expect(
+                clippy::arithmetic_side_effects,
+                reason = "the loop condition holds only while `output.len() < length`"
+            )]
             let remaining = length - output.len();
-            output.extend_from_slice(&bytes[..remaining.min(bytes.len())]);
+            #[expect(
+                clippy::indexing_slicing,
+                reason = "the end bound is clamped to `bytes.len()` by `min`"
+            )]
+            {
+                output.extend_from_slice(&bytes[..remaining.min(bytes.len())]);
+            }
         }
         output
     }

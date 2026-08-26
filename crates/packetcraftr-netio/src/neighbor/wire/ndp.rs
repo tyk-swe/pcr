@@ -8,7 +8,8 @@ use std::net::Ipv6Addr;
 use bytes::Bytes;
 
 use super::ethernet::{self, View};
-use crate::{checksum, link::MacAddress, neighbor::Request as NeighborRequest};
+use crate::{link::MacAddress, neighbor::Request as NeighborRequest};
+use packetcraftr_core::protocol::checksum_parts;
 
 pub(super) const IPV6_HEADER_LENGTH: usize = 40;
 pub(super) const SOLICITATION_LENGTH: usize = 32;
@@ -18,6 +19,7 @@ pub(super) const ADVERTISEMENT_TYPE: u8 = 136;
 pub(super) const SOURCE_LINK_LAYER_OPTION: u8 = 1;
 pub(super) const TARGET_LINK_LAYER_OPTION: u8 = 2;
 pub(super) const SOLICITED_ADVERTISEMENT_FLAG: u32 = 1 << 30;
+pub(super) const ADVERTISEMENT_HEADER_LENGTH: usize = 24;
 
 pub(super) fn build_solicitation(
     request: &NeighborRequest,
@@ -39,6 +41,10 @@ pub(super) fn build_solicitation(
     icmp.extend_from_slice(&[SOURCE_LINK_LAYER_OPTION, 1]);
     icmp.extend_from_slice(&request.interface_mac.0);
     let checksum = icmpv6_checksum(source, destination, &icmp);
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "icmp was just built with SOLICITATION_LENGTH bytes, so the checksum field exists"
+    )]
     icmp[2..4].copy_from_slice(&checksum.to_be_bytes());
 
     frame.extend_from_slice(&[0x60, 0, 0, 0]);
@@ -60,27 +66,30 @@ pub(super) fn match_advertisement(
     target: Ipv6Addr,
     ethernet: View<'_>,
 ) -> Option<MacAddress> {
-    if ethernet.payload.len() < IPV6_HEADER_LENGTH {
-        return None;
-    }
     let ipv6 = ethernet.payload;
-    if ipv6[0] >> 4 != 6 || ipv6[7] != 255 {
+    let header = ipv6.first_chunk::<IPV6_HEADER_LENGTH>()?;
+    if header[0] >> 4 != 6 || header[7] != 255 {
         return None;
     }
-    let payload_length = usize::from(u16::from_be_bytes([ipv6[4], ipv6[5]]));
+    let payload_length = usize::from(u16::from_be_bytes([header[4], header[5]]));
     let payload = ipv6.get(IPV6_HEADER_LENGTH..IPV6_HEADER_LENGTH + payload_length)?;
-    let icmp = upper_layer_icmpv6(ipv6[6], payload)?;
-    if icmp.len() < 24
-        || icmp[0] != ADVERTISEMENT_TYPE
-        || icmp[1] != 0
-        || u32::from_be_bytes([icmp[4], icmp[5], icmp[6], icmp[7]]) & SOLICITED_ADVERTISEMENT_FLAG
+    let icmp = upper_layer_icmpv6(header[6], payload)?;
+    let advertisement = icmp.first_chunk::<ADVERTISEMENT_HEADER_LENGTH>()?;
+    if advertisement[0] != ADVERTISEMENT_TYPE
+        || advertisement[1] != 0
+        || u32::from_be_bytes([
+            advertisement[4],
+            advertisement[5],
+            advertisement[6],
+            advertisement[7],
+        ]) & SOLICITED_ADVERTISEMENT_FLAG
             == 0
     {
         return None;
     }
-    let source = ipv6_address(&ipv6[8..24]);
-    let destination = ipv6_address(&ipv6[24..40]);
-    let advertised_target = ipv6_address(&icmp[8..24]);
+    let source = ipv6_address(&header[8..24]);
+    let destination = ipv6_address(&header[24..40]);
+    let advertised_target = ipv6_address(&advertisement[8..24]);
     if source.is_unspecified()
         || source.is_multicast()
         || destination != interface_source
@@ -91,28 +100,28 @@ pub(super) fn match_advertisement(
         return None;
     }
 
-    let mut option_offset = 24;
+    let mut option_offset = ADVERTISEMENT_HEADER_LENGTH;
     let mut target_mac = None;
     while option_offset < icmp.len() {
-        let header = icmp.get(option_offset..option_offset + 2)?;
-        let option_length = usize::from(header[1]) * 8;
+        let option_header = icmp.get(option_offset..)?.first_chunk::<2>()?;
+        let option_length = usize::from(option_header[1]) * 8;
         if option_length == 0 {
             return None;
         }
-        let option = icmp.get(option_offset..option_offset + option_length)?;
-        if header[0] == TARGET_LINK_LAYER_OPTION {
+        let option = icmp.get(option_offset..option_offset.checked_add(option_length)?)?;
+        if option_header[0] == TARGET_LINK_LAYER_OPTION {
             if option_length != 8 {
                 return None;
             }
             let mut mac = [0; 6];
-            mac.copy_from_slice(&option[2..8]);
+            mac.copy_from_slice(option.get(2..8)?);
             let mac = MacAddress(mac);
             if target_mac.is_some_and(|existing| existing != mac) {
                 return None;
             }
             target_mac = Some(mac);
         }
-        option_offset += option_length;
+        option_offset = option_offset.checked_add(option_length)?;
     }
     let target_mac = target_mac?;
     if target_mac != ethernet.source || !ethernet::is_unicast_mac(target_mac) {
@@ -126,13 +135,13 @@ pub(super) fn upper_layer_icmpv6(mut next_header: u8, mut payload: &[u8]) -> Opt
         match next_header {
             NEXT_HEADER_ICMP => return Some(payload),
             0 | 43 | 60 => {
-                let header = payload.get(..2)?;
+                let header = payload.first_chunk::<2>()?;
                 next_header = header[0];
                 let length = (usize::from(header[1]) + 1).checked_mul(8)?;
                 payload = payload.get(length..)?;
             }
             51 => {
-                let header = payload.get(..2)?;
+                let header = payload.first_chunk::<2>()?;
                 next_header = header[0];
                 let length = (usize::from(header[1]) + 2).checked_mul(4)?;
                 payload = payload.get(length..)?;
@@ -177,7 +186,7 @@ pub(super) fn icmpv6_checksum(source: Ipv6Addr, destination: Ipv6Addr, message: 
     let length = u32::try_from(message.len())
         .unwrap_or(u32::MAX)
         .to_be_bytes();
-    checksum::compute_parts(&[
+    checksum_parts(&[
         &source.octets(),
         &destination.octets(),
         &length,

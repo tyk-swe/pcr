@@ -126,9 +126,9 @@ impl LayerCodec for TcpCodec {
             );
         }
         let mut options = layer.options.to_vec();
-        let padding = (4 - (options.len() % 4)) % 4;
+        let padding = 4_usize.saturating_sub(options.len() % 4) % 4;
         if padding != 0 {
-            options.resize(options.len() + padding, 0);
+            options.resize(options.len().saturating_add(padding), 0);
             diagnostics.push(
                 Diagnostic::warning(
                     "build.tcp_options_padded",
@@ -137,26 +137,29 @@ impl LayerCodec for TcpCodec {
                 .at_field("options"),
             );
         }
-        let header_len = TCP_MIN_LEN + options.len();
+        let header_len = TCP_MIN_LEN.saturating_add(options.len());
         let data_offset =
             u8::try_from(header_len / 4).map_err(|_| invalid("tcp", "header length overflow"))?;
-        let mut prefix = vec![0_u8; header_len];
-        prefix[0..2].copy_from_slice(&layer.source_port.to_be_bytes());
-        prefix[2..4].copy_from_slice(&layer.destination_port.to_be_bytes());
-        prefix[4..8].copy_from_slice(&layer.sequence.to_be_bytes());
-        prefix[8..12].copy_from_slice(&layer.acknowledgment.to_be_bytes());
-        prefix[12] =
-            (data_offset << 4) | ((layer.reserved_bits & 7) << 1) | ((layer.flags >> 8) as u8 & 1);
         #[expect(
             clippy::cast_possible_truncation,
-            reason = "the 9-bit flags field is split deliberately: bit 8 goes into prefix[12] \
-                      above and the low 8 bits are this byte"
+            reason = "the 9-bit flags field is split deliberately: bit 8 goes into the byte at \
+                      offset 12 below and the low 8 bits are this byte"
         )]
         let flags_low = layer.flags as u8;
-        prefix[13] = flags_low;
-        prefix[14..16].copy_from_slice(&layer.window.to_be_bytes());
-        prefix[18..20].copy_from_slice(&layer.urgent_pointer.to_be_bytes());
-        prefix[20..].copy_from_slice(&options);
+        let mut prefix = Vec::with_capacity(header_len);
+        prefix.extend_from_slice(&layer.source_port.to_be_bytes());
+        prefix.extend_from_slice(&layer.destination_port.to_be_bytes());
+        prefix.extend_from_slice(&layer.sequence.to_be_bytes());
+        prefix.extend_from_slice(&layer.acknowledgment.to_be_bytes());
+        prefix.push(
+            (data_offset << 4) | ((layer.reserved_bits & 7) << 1) | ((layer.flags >> 8) as u8 & 1),
+        );
+        prefix.push(flags_low);
+        prefix.extend_from_slice(&layer.window.to_be_bytes());
+        // The checksum bytes stay zero while the segment checksum is computed.
+        prefix.extend_from_slice(&[0, 0]);
+        prefix.extend_from_slice(&layer.urgent_pointer.to_be_bytes());
+        prefix.extend_from_slice(&options);
         let covered_payload = payload_without_padding("tcp", payload, context)?;
         let network = resolve_envelope(context)?;
         let checksum_expected = transport_checksum_parts(network, 6, &[&prefix, covered_payload])?;
@@ -168,7 +171,13 @@ impl LayerCodec for TcpCodec {
             context.mode,
             &mut diagnostics,
         )?;
-        prefix[16..18].copy_from_slice(&checksum.to_be_bytes());
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "the fixed twenty-byte prefix above always reserves bytes 16..18 for the checksum"
+        )]
+        {
+            prefix[16..18].copy_from_slice(&checksum.to_be_bytes());
+        }
         let mut materialized = layer.clone();
         materialized.checksum = materialized_checksum;
         materialized.options = Bytes::from(options);
@@ -186,10 +195,10 @@ impl LayerCodec for TcpCodec {
         input: &[u8],
         context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
-        if input.len() < TCP_MIN_LEN {
+        let Some(header) = input.first_chunk::<TCP_MIN_LEN>() else {
             return Err(truncated("tcp", TCP_MIN_LEN, input.len()));
-        }
-        let data_offset = usize::from(input[12] >> 4);
+        };
+        let data_offset = usize::from(header[12] >> 4);
         if data_offset < 5 {
             return Err(invalid(
                 "tcp",
@@ -199,12 +208,12 @@ impl LayerCodec for TcpCodec {
         let header_len = data_offset
             .checked_mul(4)
             .ok_or_else(|| invalid("tcp", "data offset overflow"))?;
-        if input.len() < header_len {
+        let Some(options) = input.get(TCP_MIN_LEN..header_len) else {
             return Err(truncated("tcp", header_len, input.len()));
-        }
-        let checksum_value = u16::from_be_bytes([input[16], input[17]]);
+        };
+        let checksum_value = u16::from_be_bytes([header[16], header[17]]);
         let mut diagnostics = Vec::new();
-        let reserved_bits = (input[12] >> 1) & 7;
+        let reserved_bits = (header[12] >> 1) & 7;
         if reserved_bits != 0 {
             diagnostics.push(
                 Diagnostic::warning(
@@ -222,21 +231,21 @@ impl LayerCodec for TcpCodec {
                 Diagnostic::warning(TCP_CHECKSUM, "TCP checksum mismatch").at_field("checksum"),
             );
         }
-        let payload_len = input.len() - header_len;
-        let source_port = u16::from_be_bytes([input[0], input[1]]);
-        let destination_port = u16::from_be_bytes([input[2], input[3]]);
+        let payload_len = input.len().saturating_sub(header_len);
+        let source_port = u16::from_be_bytes([header[0], header[1]]);
+        let destination_port = u16::from_be_bytes([header[2], header[3]]);
         Ok(DecodedLayerValue {
             layer: Box::new(Tcp {
                 source_port,
                 destination_port,
-                sequence: u32::from_be_bytes([input[4], input[5], input[6], input[7]]),
-                acknowledgment: u32::from_be_bytes([input[8], input[9], input[10], input[11]]),
+                sequence: u32::from_be_bytes([header[4], header[5], header[6], header[7]]),
+                acknowledgment: u32::from_be_bytes([header[8], header[9], header[10], header[11]]),
                 reserved_bits,
-                flags: (u16::from(input[12] & 1) << 8) | u16::from(input[13]),
-                window: u16::from_be_bytes([input[14], input[15]]),
+                flags: (u16::from(header[12] & 1) << 8) | u16::from(header[13]),
+                window: u16::from_be_bytes([header[14], header[15]]),
                 checksum: WireValue::Exact(checksum_value),
-                urgent_pointer: u16::from_be_bytes([input[18], input[19]]),
-                options: Bytes::copy_from_slice(&input[20..header_len]),
+                urgent_pointer: u16::from_be_bytes([header[18], header[19]]),
+                options: Bytes::copy_from_slice(options),
             }),
             consumed: header_len,
             payload_len,
@@ -274,6 +283,8 @@ impl LayerCodec for TcpCodec {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+
     use super::child_discriminators;
     use crate::registry::Discriminator;
 

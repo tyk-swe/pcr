@@ -12,9 +12,11 @@ use self::arguments::{Args, Table};
 use super::super::errors::CliError;
 use super::super::input::open_capture;
 use super::super::rendering::{emit_aggregate, write_stdout_line};
+use super::format::AggregateFormat;
 use super::offline_analysis::{Prepared, prepare};
 
 pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
+    let format = AggregateFormat::narrow(output::contract::Command::Stats, format)?;
     // Stats assigns conversation indices, so stream-aware filters like
     // `tcp.stream == 7` are supported here.
     let Prepared {
@@ -43,8 +45,8 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
     let report = collector.finish();
 
     match format {
-        output::contract::Format::Text => render_text(arguments.table, &report, &summary),
-        output::contract::Format::Json => {
+        AggregateFormat::Text => render_text(arguments.table, &report, &summary),
+        AggregateFormat::Json => {
             let result = output::stats::Result::try_from_report(
                 arguments.table.into(),
                 &report,
@@ -53,7 +55,6 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
             .map_err(CliError::classified)?;
             emit_aggregate(output::contract::Command::Stats, result, Vec::new())
         }
-        _ => unreachable!("the format contract admits only text and json"),
     }
 }
 
@@ -75,10 +76,10 @@ fn render_text(
                     row.stream,
                     SocketAddr::new(row.address_a, row.port_a),
                     SocketAddr::new(row.address_b, row.port_b),
-                    row.frames_a_to_b + row.frames_b_to_a,
+                    row.frames_a_to_b.saturating_add(row.frames_b_to_a),
                     row.frames_a_to_b,
                     row.frames_b_to_a,
-                    row.bytes_a_to_b + row.bytes_b_to_a,
+                    row.bytes_a_to_b.saturating_add(row.bytes_b_to_a),
                     row.bytes_a_to_b,
                     row.bytes_b_to_a,
                     row.duration(),

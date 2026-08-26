@@ -30,6 +30,12 @@ cast_possible_truncation = "deny"
 cast_possible_wrap = "deny"
 cast_sign_loss = "deny"
 cast_precision_loss = "deny"
+# The cast lints only cover the narrowing step. Wire offsets and lengths also
+# reach slices and counters, so plain indexing and unchecked arithmetic on
+# library paths are denied too: either use `get`/`checked_*` or carry an
+# `#[expect]` naming the local invariant. Test code may opt out per module.
+indexing_slicing = "deny"
+arithmetic_side_effects = "deny"
 
 [workspace.dependencies]
 # `deny.toml` rejects wildcard dependencies, so each internal path dependency
@@ -59,7 +65,7 @@ libc = { version = "0.2", default-features = false }
 libloading = "0.8"
 pcap = { version = "2.4", default-features = false }
 pnet_datalink = { version = "0.35", default-features = false, features = ["std"] }
-rtnetlink = { version = "0.21", default-features = false, features = ["tokio_socket"] }
+rtnetlink = { version = "0.23", default-features = false, features = ["tokio_socket"] }
 socket2 = { version = "0.6", default-features = false, features = ["all"] }
 tokio = { version = "1", default-features = false, features = ["rt"] }
 windows = { version = "0.62", default-features = false, features = [

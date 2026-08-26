@@ -5,11 +5,19 @@ use std::ffi::{OsStr, OsString};
 
 use packetcraftr::output;
 
-use crate::cli::ColorChoice;
+use crate::cli::{ColorChoice, Format};
+
+/// The formats that can carry a structured error document. A clap failure is
+/// reported in one of these or, for everything else, as prose on stderr.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum MachineFormat {
+    Json,
+    Ndjson,
+}
 
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct Context {
-    pub(super) format: Option<output::contract::Format>,
+    pub(super) format: Option<MachineFormat>,
     pub(super) color: ColorChoice,
     pub(super) command: Option<output::contract::Command>,
 }
@@ -19,10 +27,15 @@ pub(super) fn from_env() -> Context {
     parse(&arguments)
 }
 
+/// Reads the global options the way clap will read them: the last `--output`
+/// and `--color` win, and the first bare word is the subcommand.
+///
+/// A value clap would reject leaves the earlier choice standing, so the
+/// rejection is rendered in the format asked for so far. Any format clap
+/// accepts wins, and one that cannot carry a structured document clears the
+/// choice so the rejection goes out as prose.
 fn parse(arguments: &[OsString]) -> Context {
     let mut context = Context::default();
-    let mut saw_format = false;
-    let mut saw_color = false;
     let mut saw_root_positional = false;
     let mut index = 1;
 
@@ -33,40 +46,38 @@ fn parse(arguments: &[OsString]) -> Context {
 
         if argument.as_os_str() == "--output" {
             let value = separate_option_value(arguments, index);
-            if !saw_format {
-                saw_format = true;
-                context.format = value.and_then(OsStr::to_str).and_then(parse_machine_format);
+            if let Some(parsed) = value.and_then(OsStr::to_str).and_then(parse_machine_format) {
+                context.format = parsed;
             }
-            index += usize::from(value.is_some()) + 1;
+            index = index
+                .saturating_add(usize::from(value.is_some()))
+                .saturating_add(1);
             continue;
         }
         if argument.as_os_str() == "--color" {
             let value = separate_option_value(arguments, index);
-            if !saw_color {
-                saw_color = true;
-                context.color = value
-                    .and_then(OsStr::to_str)
-                    .map_or(ColorChoice::Auto, parse_color_choice);
+            if let Some(parsed) = value.and_then(OsStr::to_str).and_then(parse_color_choice) {
+                context.color = parsed;
             }
-            index += usize::from(value.is_some()) + 1;
+            index = index
+                .saturating_add(usize::from(value.is_some()))
+                .saturating_add(1);
             continue;
         }
 
         let argument = argument.to_str();
         if let Some(value) = argument.and_then(|argument| argument.strip_prefix("--output=")) {
-            if !saw_format {
-                saw_format = true;
-                context.format = parse_machine_format(value);
+            if let Some(parsed) = parse_machine_format(value) {
+                context.format = parsed;
             }
-            index += 1;
+            index = index.saturating_add(1);
             continue;
         }
         if let Some(value) = argument.and_then(|argument| argument.strip_prefix("--color=")) {
-            if !saw_color {
-                saw_color = true;
-                context.color = parse_color_choice(value);
+            if let Some(parsed) = parse_color_choice(value) {
+                context.color = parsed;
             }
-            index += 1;
+            index = index.saturating_add(1);
             continue;
         }
 
@@ -76,7 +87,7 @@ fn parse(arguments: &[OsString]) -> Context {
             saw_root_positional = true;
             context.command = argument.and_then(parse_command);
         }
-        index += 1;
+        index = index.saturating_add(1);
     }
 
     context
@@ -84,7 +95,7 @@ fn parse(arguments: &[OsString]) -> Context {
 
 fn separate_option_value(arguments: &[OsString], option_index: usize) -> Option<&OsStr> {
     arguments
-        .get(option_index + 1)
+        .get(option_index.saturating_add(1))
         .map(OsString::as_os_str)
         .filter(|value| {
             !value
@@ -93,19 +104,24 @@ fn separate_option_value(arguments: &[OsString], option_index: usize) -> Option<
         })
 }
 
-fn parse_machine_format(value: &str) -> Option<output::contract::Format> {
-    match value {
-        "json" => Some(output::contract::Format::Json),
-        "ndjson" => Some(output::contract::Format::Ndjson),
-        _ => None,
-    }
+/// `None` for a value clap would reject, so the earlier choice stands;
+/// `Some(None)` for a format clap accepts that cannot carry a structured
+/// error document, so a parse failure is reported as prose.
+fn parse_machine_format(value: &str) -> Option<Option<MachineFormat>> {
+    let format = <Format as clap::ValueEnum>::from_str(value, false).ok()?;
+    Some(match format {
+        Format::Json => Some(MachineFormat::Json),
+        Format::Ndjson => Some(MachineFormat::Ndjson),
+        Format::Text | Format::Hex | Format::Raw | Format::Pcap | Format::PcapNg => None,
+    })
 }
 
-fn parse_color_choice(value: &str) -> ColorChoice {
+fn parse_color_choice(value: &str) -> Option<ColorChoice> {
     match value {
-        "always" => ColorChoice::Always,
-        "never" => ColorChoice::Never,
-        _ => ColorChoice::Auto,
+        "always" => Some(ColorChoice::Always),
+        "never" => Some(ColorChoice::Never),
+        "auto" => Some(ColorChoice::Auto),
+        _ => None,
     }
 }
 
@@ -120,11 +136,13 @@ fn parse_command(value: &str) -> Option<output::contract::Command> {
 mod tests {
     use super::*;
 
+    /// The startup scan runs before clap, so it has to agree with clap on
+    /// which repeat of a global option counts: the last one.
     #[test]
     fn startup_context_scans_global_options_without_guessing_commands() {
         struct Case {
             arguments: &'static [&'static str],
-            format: Option<output::contract::Format>,
+            format: Option<MachineFormat>,
             color: &'static str,
             command: Option<output::contract::Command>,
         }
@@ -138,7 +156,7 @@ mod tests {
                     "ndjson",
                     "--color=never",
                 ],
-                format: Some(output::contract::Format::Ndjson),
+                format: Some(MachineFormat::Ndjson),
                 color: "never",
                 command: Some(output::contract::Command::Protocols),
             },
@@ -152,8 +170,8 @@ mod tests {
                     "--color=never",
                     "build",
                 ],
-                format: Some(output::contract::Format::Json),
-                color: "always",
+                format: Some(MachineFormat::Ndjson),
+                color: "never",
                 command: Some(output::contract::Command::Build),
             },
             Case {
@@ -164,21 +182,79 @@ mod tests {
             },
             Case {
                 arguments: &["packetcraftr", "--output=ndjson", "tls", "capture.pcapng"],
-                format: Some(output::contract::Format::Ndjson),
+                format: Some(MachineFormat::Ndjson),
                 color: "auto",
                 command: Some(output::contract::Command::Tls),
             },
             Case {
                 arguments: &["packetcraftr", "--output=json", "invalid", "build"],
-                format: Some(output::contract::Format::Json),
+                format: Some(MachineFormat::Json),
                 color: "auto",
                 command: None,
             },
             Case {
                 arguments: &["packetcraftr", "--output=json", "--", "build"],
-                format: Some(output::contract::Format::Json),
+                format: Some(MachineFormat::Json),
                 color: "auto",
                 command: None,
+            },
+            // A dangling repeat is clap's to reject, and the error document
+            // still goes out in the format the earlier value asked for.
+            Case {
+                arguments: &["packetcraftr", "--output", "json", "build", "--output"],
+                format: Some(MachineFormat::Json),
+                color: "auto",
+                command: Some(output::contract::Command::Build),
+            },
+            // A later format clap accepts wins even when it cannot carry a
+            // structured document: the parse failure is then prose.
+            Case {
+                arguments: &[
+                    "packetcraftr",
+                    "--output",
+                    "json",
+                    "--output",
+                    "text",
+                    "build",
+                ],
+                format: None,
+                color: "auto",
+                command: Some(output::contract::Command::Build),
+            },
+            Case {
+                arguments: &["packetcraftr", "--output=ndjson", "--output=hex", "build"],
+                format: None,
+                color: "auto",
+                command: Some(output::contract::Command::Build),
+            },
+            // The renamed variant is recognized under clap's name for it.
+            Case {
+                arguments: &["packetcraftr", "--output=json", "--output=pcapng", "build"],
+                format: None,
+                color: "auto",
+                command: Some(output::contract::Command::Build),
+            },
+            // clap is case-sensitive here, so a case-mismatched repeat is one
+            // it rejects and the earlier choice stands.
+            Case {
+                arguments: &["packetcraftr", "--output=json", "--output=JSON", "build"],
+                format: Some(MachineFormat::Json),
+                color: "auto",
+                command: Some(output::contract::Command::Build),
+            },
+            Case {
+                arguments: &[
+                    "packetcraftr",
+                    "--output=json",
+                    "--output",
+                    "bogus",
+                    "--color=never",
+                    "--color=bogus",
+                    "build",
+                ],
+                format: Some(MachineFormat::Json),
+                color: "never",
+                command: Some(output::contract::Command::Build),
             },
         ];
 

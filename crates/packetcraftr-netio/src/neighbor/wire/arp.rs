@@ -32,10 +32,13 @@ pub(super) fn build_request(
     frame.extend_from_slice(&source.octets());
     frame.extend_from_slice(&[0; 6]);
     frame.extend_from_slice(&target.octets());
-    frame.resize(
-        ethernet::MINIMUM_WITHOUT_FCS + request.vlan_tags.len() * ethernet::VLAN_HEADER_LENGTH,
-        0,
-    );
+    #[expect(
+        clippy::arithmetic_side_effects,
+        reason = "vlan_tags is capped at MAX_VLAN_TAGS, so the padded length is a small sum"
+    )]
+    let padded_length =
+        ethernet::MINIMUM_WITHOUT_FCS + request.vlan_tags.len() * ethernet::VLAN_HEADER_LENGTH;
+    frame.resize(padded_length, 0);
     Bytes::from(frame)
 }
 
@@ -45,7 +48,7 @@ pub(super) fn match_response(
     target: Ipv4Addr,
     ethernet: View<'_>,
 ) -> Option<MacAddress> {
-    let arp = ethernet.payload.get(..PAYLOAD_LENGTH)?;
+    let arp = ethernet.payload.first_chunk::<PAYLOAD_LENGTH>()?;
     if arp[..8] != [0, 1, 0x08, 0, 6, 4, 0, 2] {
         return None;
     }

@@ -12,10 +12,8 @@ mod fields;
 mod payload;
 mod validation;
 
-pub use checksum::ChecksumAccumulator;
-pub(crate) use checksum::{
-    checksum, checksum_parts, network_from_addresses, transport_checksum, transport_checksum_parts,
-};
+pub use checksum::{ChecksumAccumulator, checksum, checksum_parts};
+pub(crate) use checksum::{network_from_addresses, transport_checksum, transport_checksum_parts};
 pub(crate) use errors::{
     binding_protocol, invalid, out_of_range, protocol, truncated, wrong_layer, wrong_type,
 };

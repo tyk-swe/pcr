@@ -1,5 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+// Test code indexes fixtures and counts by hand; the fail-closed lints are
+// for library paths.
+#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr};
@@ -14,7 +17,7 @@ use packetcraftr_core::protocol::{network::Ipv4, transport::Udp};
 use packetcraftr_core::{Packet, decode::DecodedPacket, frame::Frame, frame::LinkType};
 
 use crate::clock::Clock;
-use crate::target::{Authorized, Authorizer, Family, Target};
+use crate::target::{Authorized, Authorizer, Family, Operation, Target};
 use crate::{BoundaryError, Stats};
 
 use super::DEFAULT_DNS_SERVER_PORT;
@@ -42,11 +45,7 @@ impl Authorizer for SingleAddressAuthorizer {
         })
     }
 
-    fn authorize_operation(
-        &mut self,
-        _packets: u64,
-        _maximum_wire_bytes: u64,
-    ) -> Result<(), BoundaryError> {
+    fn authorize_operation(&mut self, _operation: Operation<'_>) -> Result<(), BoundaryError> {
         Ok(())
     }
 }

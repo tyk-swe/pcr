@@ -33,12 +33,15 @@ pub(super) fn parse_ipv4_source_routes(options: &[u8]) -> Result<ParsedIpv4Sourc
     let mut routes = ParsedIpv4SourceRoutes::default();
     let mut cursor = 0usize;
     while cursor < options.len() {
-        match options[cursor] {
+        let Some(&kind) = options.get(cursor) else {
+            break;
+        };
+        match kind {
             0 => break,
-            1 => cursor += 1,
+            1 => cursor = cursor.saturating_add(1),
             option => {
                 let length = options
-                    .get(cursor + 1)
+                    .get(cursor.saturating_add(1))
                     .copied()
                     .map(usize::from)
                     .ok_or_else(|| Error::new("IPv4 option is missing its length byte"))?;
@@ -52,22 +55,40 @@ pub(super) fn parse_ipv4_source_routes(options: &[u8]) -> Result<ParsedIpv4Sourc
                     .filter(|end| *end <= options.len())
                     .ok_or_else(|| Error::new(format!("IPv4 option {option} is truncated")))?;
                 if matches!(option, 131 | 137) {
-                    if length < 3 || !(length - 3).is_multiple_of(4) {
+                    if length < 3 || !length.saturating_sub(3).is_multiple_of(4) {
                         return Err(Error::new(format!(
                             "IPv4 source-route option {option} has invalid length {length}"
                         )));
                     }
+                    #[expect(
+                        clippy::indexing_slicing,
+                        clippy::arithmetic_side_effects,
+                        reason = "cursor + 2 < end <= options.len() because length >= 3"
+                    )]
                     let pointer = usize::from(options[cursor + 2]);
-                    if pointer < 4 || pointer > length + 1 || !(pointer - 4).is_multiple_of(4) {
+                    if pointer < 4
+                        || pointer > length.saturating_add(1)
+                        || !pointer.saturating_sub(4).is_multiple_of(4)
+                    {
                         return Err(Error::new(format!(
                             "IPv4 source-route option {option} has invalid pointer {pointer}"
                         )));
                     }
+                    #[expect(
+                        clippy::indexing_slicing,
+                        clippy::arithmetic_side_effects,
+                        reason = "cursor + 3 <= end <= options.len() because length >= 3, and chunks_exact(4) yields slices of length exactly 4"
+                    )]
                     for address in options[cursor + 3..end].chunks_exact(4) {
                         routes.declared.push(Ipv4Addr::new(
                             address[0], address[1], address[2], address[3],
                         ));
                     }
+                    #[expect(
+                        clippy::indexing_slicing,
+                        clippy::arithmetic_side_effects,
+                        reason = "4 <= pointer <= length + 1 puts cursor + pointer - 1 in cursor + 3..=end, and chunks_exact(4) yields slices of length exactly 4"
+                    )]
                     for address in options[cursor + pointer - 1..end].chunks_exact(4) {
                         routes.remaining.push(Ipv4Addr::new(
                             address[0], address[1], address[2], address[3],

@@ -111,7 +111,7 @@ fn layers<'a>(
         .enumerate()
         .filter_map(move |(index, layer)| match occurrence {
             // Occurrences are 1-based, so shift before comparing.
-            Some(wanted) if index + 1 != wanted => None,
+            Some(wanted) if index.saturating_add(1) != wanted => None,
             _ => Some(layer),
         })
 }

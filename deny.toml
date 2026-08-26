@@ -11,9 +11,9 @@ targets = [
 yanked = "deny"
 unmaintained = "all"
 unsound = "all"
-ignore = [
-    { id = "RUSTSEC-2024-0436", reason = "paste 1.0.15 is an unmaintained build-time transitive dependency of rtnetlink/netlink-packet-core; exact lockfile exception expires 2026-10-12" },
-]
+# No advisory exceptions. RUSTSEC-2024-0436 (`paste`) was closed by the
+# rtnetlink 0.23 / netlink-packet-core 0.9 update; see docs/security/.
+ignore = []
 
 [licenses]
 confidence-threshold = 0.8
@@ -32,8 +32,6 @@ highlight = "simplest-path"
 skip = [
     { name = "bitflags", version = "=1.3.2" },
     { name = "syn", version = "=2.0.119" },
-    { name = "thiserror", version = "=1.0.69" },
-    { name = "thiserror-impl", version = "=1.0.69" },
     { name = "windows-sys", version = "=0.36.1" },
 ]
 

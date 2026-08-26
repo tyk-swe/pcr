@@ -52,9 +52,9 @@ impl Dns {
     pub fn from_wire(wire: impl Into<Bytes>) -> Result<Self, crate::codec::Error> {
         let wire = wire.into();
         let input = wire.as_ref();
-        let header = input
-            .get(..DNS_HEADER_LEN)
-            .ok_or_else(|| truncated("dns", DNS_HEADER_LEN, input.len()))?;
+        let Some(header) = input.first_chunk::<DNS_HEADER_LEN>() else {
+            return Err(truncated("dns", DNS_HEADER_LEN, input.len()));
+        };
         let flags = u16::from_be_bytes([header[2], header[3]]);
         let question_count = u16::from_be_bytes([header[4], header[5]]);
         let answer_count = u16::from_be_bytes([header[6], header[7]]);
@@ -116,8 +116,12 @@ impl Dns {
 }
 
 fn read_u16(input: &[u8], cursor: &mut usize) -> Result<u16, crate::codec::Error> {
-    let bytes = take(input, *cursor, 2)?;
-    *cursor = checked_end(*cursor, 2)?;
+    let end = checked_end(*cursor, 2)?;
+    let bytes = input
+        .get(*cursor..end)
+        .and_then(<[u8]>::first_chunk::<2>)
+        .ok_or_else(|| truncated("dns", end, input.len()))?;
+    *cursor = end;
     Ok(u16::from_be_bytes([bytes[0], bytes[1]]))
 }
 
@@ -223,11 +227,11 @@ fn parse_name(input: &[u8], start: usize) -> Result<(usize, String), crate::code
                     ));
                 }
                 let label = take(input, cursor, label_len)?;
-                expanded_len = expanded_len.checked_add(label_len + 1).ok_or(
-                    crate::codec::Error::LengthOverflow {
+                expanded_len = expanded_len
+                    .checked_add(label_len.saturating_add(1))
+                    .ok_or(crate::codec::Error::LengthOverflow {
                         protocol: protocol("dns"),
-                    },
-                )?;
+                    })?;
                 if expanded_len > MAX_EXPANDED_NAME_LEN {
                     return Err(invalid(
                         "dns",

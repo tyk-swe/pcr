@@ -65,6 +65,10 @@ pub enum Error {
     },
 }
 
+/// A `cli.*` code means "caller or request error": the request that reached a
+/// workflow was not something the workflow could run. The name points at the
+/// consumer rather than the fault; renaming it to `request.*` is a v1 output
+/// contract break and waits for 0.6 (see TODOS.md).
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
@@ -137,7 +141,14 @@ impl Classified for Error {
             Self::OperationAndCaptureShutdown { operation, .. } => operation.context(),
             Self::ExchangeOutput { source } => source.context(),
             Self::ExchangeOutputAndCaptureShutdown { output, .. } => output.context(),
-            _ => Context::default(),
+            Self::Build(_)
+            | Self::PermissiveLiveOptInRequired
+            | Self::InvalidExchangeEvents { .. }
+            | Self::HeterogeneousExchangeRoute
+            | Self::Template { .. }
+            | Self::PacketMaterialization { .. }
+            | Self::PacketExceedsMtu { .. }
+            | Self::InvalidExchangeOption { .. } => Context::default(),
         }
     }
 
@@ -161,7 +172,14 @@ impl Classified for Error {
                 causes.push(shutdown.to_string());
                 causes
             }
-            _ => Vec::new(),
+            Self::Build(_)
+            | Self::PermissiveLiveOptInRequired
+            | Self::InvalidExchangeEvents { .. }
+            | Self::HeterogeneousExchangeRoute
+            | Self::Template { .. }
+            | Self::PacketMaterialization { .. }
+            | Self::PacketExceedsMtu { .. }
+            | Self::InvalidExchangeOption { .. } => Vec::new(),
         }
     }
 }

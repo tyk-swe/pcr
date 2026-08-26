@@ -72,6 +72,10 @@ pub(super) fn parse_route_addresses(
             });
         }
         let padded_end = offset.checked_add(stride);
+        #[expect(
+            clippy::arithmetic_side_effects,
+            reason = "index comes from enumerate over output, whose length is RTAX_MAX"
+        )]
         let has_later_address = ((index + 1)..address_slots).any(|later| mask & (1 << later) != 0);
         let next_offset = match padded_end {
             Some(end) if end <= bytes.len() => end,
@@ -86,7 +90,7 @@ pub(super) fn parse_route_addresses(
                 });
             }
         };
-        *slot = sockaddr_ip(&bytes[offset..address_end]);
+        *slot = bytes.get(offset..address_end).and_then(sockaddr_ip);
         offset = next_offset;
     }
     Ok(output)
@@ -98,6 +102,6 @@ pub(super) fn roundup(length: usize) -> usize {
     if length == 0 {
         alignment
     } else {
-        (length + alignment - 1) & !(alignment - 1)
+        length.next_multiple_of(alignment)
     }
 }

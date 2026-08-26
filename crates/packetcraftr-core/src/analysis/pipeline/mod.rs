@@ -135,7 +135,7 @@ where
         {
             continue;
         }
-        frames_matched += 1;
+        frames_matched = frames_matched.saturating_add(1);
 
         let tcp_events = reassembly_dispatch.dispatch(
             &decoded,

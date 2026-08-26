@@ -1,1 +1,13 @@
 /target/
+
+# Editor and tool residue
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# Coverage and test reports written outside target/
+*.profraw
+*.profdata
+junit.xml

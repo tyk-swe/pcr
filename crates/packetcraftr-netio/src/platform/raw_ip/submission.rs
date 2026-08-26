@@ -23,7 +23,7 @@ use windows::Win32::Networking::WinSock::{
 };
 
 use super::preparation::PreparedRawIp;
-use crate::Error as LiveIoError;
+use crate::Error;
 use crate::interface::Id as InterfaceId;
 
 const IPPROTO_RAW: i32 = 255;
@@ -171,9 +171,9 @@ fn socket_address(address: IpAddr, interface_index: u32) -> SockAddr {
 }
 
 #[cfg(target_os = "macos")]
-pub(super) fn validate_platform_support(packet: &PreparedRawIp) -> Result<(), LiveIoError> {
+pub(super) fn validate_platform_support(packet: &PreparedRawIp) -> Result<(), Error> {
     if packet.destination.is_ipv6() {
-        return Err(LiveIoError::Unsupported {
+        return Err(Error::Unsupported {
             message: "Darwin raw IPv6 sockets synthesize the IPv6 header and do not support IPV6_HDRINCL; exact complete-header transmission requires an explicit Layer 2 path"
                 .to_owned(),
         });
@@ -185,16 +185,16 @@ pub(super) fn raw_error(operation: &'static str, source: io::Error) -> RawSocket
     RawSocketError { operation, source }
 }
 
-pub(super) fn map_raw_error(interface: &InterfaceId, error: RawSocketError) -> LiveIoError {
+pub(super) fn map_raw_error(interface: &InterfaceId, error: RawSocketError) -> Error {
     let message = format!("{}: {}", error.operation, error.source);
     match error.source.kind() {
-        io::ErrorKind::PermissionDenied => LiveIoError::Privilege { message },
-        io::ErrorKind::Unsupported => LiveIoError::Unsupported { message },
-        io::ErrorKind::NotFound => LiveIoError::Device {
+        io::ErrorKind::PermissionDenied => Error::Privilege { message },
+        io::ErrorKind::Unsupported => Error::Unsupported { message },
+        io::ErrorKind::NotFound => Error::Device {
             interface: interface.name.clone(),
             message,
         },
-        _ => LiveIoError::Send { message },
+        _ => Error::Send { message },
     }
 }
 
@@ -329,10 +329,10 @@ mod tests {
             );
             assert!(error.to_string().contains("binding fixture socket"));
             let actual = match error {
-                LiveIoError::Privilege { .. } => "privilege",
-                LiveIoError::Unsupported { .. } => "unsupported",
-                LiveIoError::Device { ref interface, .. } if interface == "fixture0" => "device",
-                LiveIoError::Send { .. } => "send",
+                Error::Privilege { .. } => "privilege",
+                Error::Unsupported { .. } => "unsupported",
+                Error::Device { ref interface, .. } if interface == "fixture0" => "device",
+                Error::Send { .. } => "send",
                 other => panic!("unexpected mapping: {other:?}"),
             };
             assert_eq!(actual, expected);

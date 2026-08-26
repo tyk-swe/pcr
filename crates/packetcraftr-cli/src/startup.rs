@@ -8,7 +8,7 @@ use std::process::ExitCode;
 use clap::Parser;
 use packetcraftr::output;
 
-use self::context::from_env;
+use self::context::{MachineFormat, from_env};
 use super::cli::Cli;
 use super::errors::CliError;
 use super::rendering::{
@@ -30,17 +30,14 @@ pub(crate) fn run() -> ExitCode {
             {
                 let error = CliError::new(code, message);
                 let emitted = match format {
-                    output::contract::Format::Json => {
-                        emit_json(&output::envelope::AggregateError::error(
-                            context.command,
-                            error.output_error(),
-                        ))
-                    }
-                    output::contract::Format::Ndjson => {
+                    MachineFormat::Json => emit_json(&output::envelope::AggregateError::error(
+                        context.command,
+                        error.output_error(),
+                    )),
+                    MachineFormat::Ndjson => {
                         let stream = NdjsonStream::stdout(context.command);
                         stream.emit_error(error.output_error())
                     }
-                    _ => unreachable!("startup context returns only structured formats"),
                 };
                 return match emitted {
                     Ok(()) => ExitCode::from(code),

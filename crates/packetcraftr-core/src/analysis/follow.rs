@@ -97,7 +97,10 @@ impl Collector {
                 } = event
                     && (*flow == client || *flow == client.reverse())
                 {
-                    self.summary.undelivered_bytes += *pending_bytes as u64;
+                    self.summary.undelivered_bytes = self
+                        .summary
+                        .undelivered_bytes
+                        .saturating_add(*pending_bytes as u64);
                 }
             }
         }
@@ -118,7 +121,10 @@ impl Collector {
                         flow,
                         pending_bytes,
                     } if *flow == client || *flow == client.reverse() => {
-                        self.summary.undelivered_bytes += *pending_bytes as u64;
+                        self.summary.undelivered_bytes = self
+                            .summary
+                            .undelivered_bytes
+                            .saturating_add(*pending_bytes as u64);
                         self.dedup.mark_evicted(flow, &client);
                     }
                     TcpEvent::Closed { flow, reset: false }
@@ -149,7 +155,7 @@ impl Collector {
             .expect("client flow was established");
 
         self.dedup.observe_syn(flow, &client, transport.layer);
-        self.summary.frames += 1;
+        self.summary.frames = self.summary.frames.saturating_add(1);
         let mut chunks = Vec::new();
         for event in record.tcp_events {
             if let TcpEvent::Data {
@@ -200,7 +206,7 @@ impl Collector {
             .client_flow
             .clone()
             .expect("client flow was established");
-        self.summary.frames += 1;
+        self.summary.frames = self.summary.frames.saturating_add(1);
         let direction = if *flow == client {
             Direction::ClientToServer
         } else {
@@ -222,6 +228,6 @@ impl Collector {
             Direction::ClientToServer => &mut self.summary.client_bytes,
             Direction::ServerToClient => &mut self.summary.server_bytes,
         };
-        *counter += length as u64;
+        *counter = counter.saturating_add(length as u64);
     }
 }

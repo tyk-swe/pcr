@@ -150,10 +150,11 @@ fn match_sctp(
 }
 
 fn tcp_payload_length(packet: &Packet, tcp_layer_index: usize) -> Option<u32> {
+    let first_child_index = tcp_layer_index.checked_add(1)?;
     if let Some(encoded_length) = packet.encoded_payload_length(tcp_layer_index) {
         let trailing_padding = packet
             .iter()
-            .skip(tcp_layer_index + 1)
+            .skip(first_child_index)
             .rev()
             .take_while(|layer| BuiltinProtocol::of(*layer) == Some(BuiltinProtocol::Padding))
             .filter(|layer| {
@@ -173,7 +174,7 @@ fn tcp_payload_length(packet: &Packet, tcp_layer_index: usize) -> Option<u32> {
     }
 
     let mut payload_length = 0_u32;
-    for layer in packet.iter().skip(tcp_layer_index + 1) {
+    for layer in packet.iter().skip(first_child_index) {
         match BuiltinProtocol::of(layer) {
             Some(BuiltinProtocol::Padding) => break,
             Some(BuiltinProtocol::Raw) => {

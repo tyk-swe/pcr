@@ -11,7 +11,9 @@ use packetcraftr::{
     core, netio as net, output,
 };
 
-use super::execution::{self, Budget, shutdown_after_error};
+use packetcraftr::policy::CaptureBudget;
+
+use super::execution::{self, shutdown_after_error};
 use crate::errors::CliError;
 use crate::filtering::FrameSelector;
 use crate::rendering::{
@@ -23,7 +25,7 @@ pub(super) fn render_text<C: net::capture::Session>(
     capture: C,
     timeout: Duration,
     limits: net::capture::Limits,
-    budget: Budget,
+    budget: CaptureBudget,
     selector: Option<&FrameSelector>,
 ) -> Result<(), CliError> {
     let outcome = execution::run(
@@ -59,7 +61,7 @@ pub(super) fn render_hex<C: net::capture::Session>(
     capture: C,
     timeout: Duration,
     limits: net::capture::Limits,
-    budget: Budget,
+    budget: CaptureBudget,
     selector: Option<&FrameSelector>,
 ) -> Result<(), CliError> {
     let outcome = execution::run(capture, timeout, limits, budget, selector, |frame, _| {
@@ -73,7 +75,7 @@ pub(super) fn render_stream<C: net::capture::Session>(
     capture: C,
     timeout: Duration,
     limits: net::capture::Limits,
-    budget: Budget,
+    budget: CaptureBudget,
     selector: Option<&FrameSelector>,
     stream: &mut NdjsonStream,
 ) -> Result<(), CliError> {
@@ -101,7 +103,7 @@ pub(super) fn render_capture<C: net::capture::Session>(
     format: output::contract::Format,
     timeout: Duration,
     limits: net::capture::Limits,
-    budget: Budget,
+    budget: CaptureBudget,
     selector: Option<&FrameSelector>,
 ) -> Result<(), CliError> {
     let format = match capture_file_format(format) {
@@ -131,7 +133,7 @@ fn initialize_writer<W: Write>(
     destination: W,
     format: capture::Format,
     metadata: &net::capture::Metadata,
-    budget: Budget,
+    budget: CaptureBudget,
 ) -> Result<(CaptureWriter<W>, Interface), CliError> {
     let snap_len = u32::try_from(metadata.snap_length).map_err(|_| {
         CliError::new(
@@ -172,8 +174,8 @@ fn initialize_writer<W: Write>(
         })?;
     writer
         .set_stream_limits(Limits {
-            max_frames: budget.max_frames,
-            max_bytes: budget.max_bytes,
+            max_frames: budget.max_frames(),
+            max_bytes: budget.max_bytes(),
         })
         .map_err(CliError::classified)?;
     Ok((writer, description))
@@ -200,8 +202,11 @@ fn render_diagnostics(diagnostics: &[core::diagnostic::Diagnostic]) -> Result<()
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+
     use std::collections::VecDeque;
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::UNIX_EPOCH;
 
     use packetcraftr::core::frame::{Frame, LinkType};
@@ -215,6 +220,7 @@ mod tests {
         metadata: net::capture::Metadata,
         frames: VecDeque<Result<net::capture::Captured, net::Error>>,
         shutdown_error: Option<net::Error>,
+        shutdowns: Arc<AtomicUsize>,
     }
 
     impl FakeSession {
@@ -238,6 +244,7 @@ mod tests {
                 },
                 frames,
                 shutdown_error: None,
+                shutdowns: Arc::new(AtomicUsize::new(0)),
             }
         }
     }
@@ -259,6 +266,7 @@ mod tests {
         }
 
         fn shutdown(&mut self) -> Result<(), net::Error> {
+            self.shutdowns.fetch_add(1, Ordering::Relaxed);
             match self.shutdown_error.take() {
                 Some(error) => Err(error),
                 None => Ok(()),
@@ -270,14 +278,16 @@ mod tests {
         }
     }
 
-    fn settings() -> (net::capture::Limits, Budget) {
-        (
-            net::capture::Limits::default(),
-            Budget {
-                max_frames: 8,
-                max_bytes: 8,
-            },
-        )
+    fn settings() -> (net::capture::Limits, CaptureBudget) {
+        (net::capture::Limits::default(), budget(8, 8))
+    }
+
+    fn budget(max_frames: u64, max_bytes: u64) -> CaptureBudget {
+        CaptureBudget::new(&packetcraftr::policy::Policy {
+            max_packets_per_operation: max_frames,
+            max_bytes_per_operation: max_bytes,
+            ..packetcraftr::policy::Policy::default()
+        })
     }
 
     fn assert_matches_published_schema(records: &[Value]) {
@@ -298,10 +308,7 @@ mod tests {
         let mut capture = FakeSession::with_frames(0);
         capture.metadata.link_type = LinkType::LINUX_SLL2;
         capture.metadata.snap_length = 96;
-        let budget = Budget {
-            max_frames: 1,
-            max_bytes: 96,
-        };
+        let budget = budget(1, 96);
 
         for format in [capture::Format::Pcap, capture::Format::PcapNg] {
             let (mut writer, description) =
@@ -388,6 +395,96 @@ mod tests {
         assert_eq!(records[1]["stats"]["packets_completed"], 1);
         assert_eq!(records[1]["stats"]["bytes"], 3);
         assert_matches_published_schema(&records);
+    }
+
+    /// The byte budget stops the capture where the frame budget still had
+    /// room, and the records emitted up to that point stay a clean prefix.
+    #[test]
+    fn capture_byte_budget_stops_the_stream_and_shuts_the_session_down() {
+        let limits = net::capture::Limits::default();
+        let capture = FakeSession::with_frames(4);
+        let shutdowns = Arc::clone(&capture.shutdowns);
+        let (mut stream, output) = stream(output::contract::Command::Capture);
+
+        let error = render_stream(
+            capture,
+            Duration::from_secs(1),
+            limits,
+            budget(8, 2),
+            None,
+            &mut stream,
+        )
+        .expect_err("the byte budget must stop the capture");
+
+        assert_eq!(error.classification.code, "policy.byte_limit");
+        assert_eq!(shutdowns.load(Ordering::Relaxed), 1);
+
+        let records = output.records();
+        assert_contiguous(&records);
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0]["result"]["source_frame"], 1);
+        assert_eq!(records[1]["result"]["source_frame"], 2);
+        assert_matches_published_schema(&records);
+    }
+
+    /// A spent frame budget is the capture finishing, not the capture failing.
+    #[test]
+    fn capture_frame_budget_ends_the_stream_without_an_error() {
+        let limits = net::capture::Limits::default();
+        let capture = FakeSession::with_frames(4);
+        let shutdowns = Arc::clone(&capture.shutdowns);
+        let (mut stream, output) = stream(output::contract::Command::Capture);
+
+        render_stream(
+            capture,
+            Duration::from_secs(1),
+            limits,
+            budget(1, 64),
+            None,
+            &mut stream,
+        )
+        .expect("a spent frame budget is a normal end");
+
+        assert_eq!(shutdowns.load(Ordering::Relaxed), 1);
+
+        let records = output.records();
+        assert_contiguous(&records);
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0]["result"]["source_frame"], 1);
+        assert_eq!(records[1]["result"]["event"], "complete");
+        assert_eq!(records[1]["stats"]["packets_attempted"], 1);
+        assert_eq!(records[1]["stats"]["packets_completed"], 1);
+        assert_matches_published_schema(&records);
+    }
+
+    /// A byte counter that would wrap is a budget the capture cannot pay from,
+    /// not an internal fault: it has to read as the same limit refusal.
+    #[test]
+    fn capture_byte_counter_overflow_reads_as_the_byte_limit() {
+        let limits = net::capture::Limits::default();
+        let mut budget = budget(8, u64::MAX);
+        budget
+            .account(u64::MAX)
+            .expect("the first charge fills the counter exactly");
+
+        let capture = FakeSession::with_frames(1);
+        let shutdowns = Arc::clone(&capture.shutdowns);
+        let (mut stream, output) = stream(output::contract::Command::Capture);
+
+        let error = render_stream(
+            capture,
+            Duration::from_secs(1),
+            limits,
+            budget,
+            None,
+            &mut stream,
+        )
+        .expect_err("the next byte cannot be charged");
+
+        assert_eq!(error.classification.code, "policy.byte_limit");
+        assert_ne!(error.exit_code, 70);
+        assert_eq!(shutdowns.load(Ordering::Relaxed), 1);
+        assert!(output.records().is_empty());
     }
 
     #[test]

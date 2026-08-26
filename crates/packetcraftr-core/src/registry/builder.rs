@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use super::binding::{ChildBinding, Discriminator, FilterFieldBinding};
@@ -13,7 +13,6 @@ use crate::matcher::ResponseMatcher;
 #[derive(Default)]
 pub struct Builder {
     pub(super) codecs: BTreeMap<crate::layer::Id, Arc<dyn LayerCodec>>,
-    pub(super) builtin_codecs: BTreeSet<crate::layer::Id>,
     pub(super) aliases: HashMap<String, crate::layer::Id>,
     pub(super) roots: HashMap<u32, crate::layer::Id>,
     pub(super) bindings: HashMap<crate::layer::Id, HashMap<Discriminator, Vec<ChildBinding>>>,
@@ -31,9 +30,12 @@ impl Builder {
         C: LayerCodec + 'static,
     {
         let aliases = codec.aliases();
-        self.register_codec_with_origin(Arc::new(codec), false, aliases)
+        self.register_codec_with_aliases(Arc::new(codec), aliases)
     }
 
+    /// Registers a codec under an explicit alias list instead of the one the
+    /// codec advertises. The built-in registry uses it; it carries no other
+    /// distinction.
     pub fn register_builtin_codec<C>(
         &mut self,
         codec: C,
@@ -42,13 +44,12 @@ impl Builder {
     where
         C: LayerCodec + 'static,
     {
-        self.register_codec_with_origin(Arc::new(codec), true, aliases)
+        self.register_codec_with_aliases(Arc::new(codec), aliases)
     }
 
-    pub(super) fn register_codec_with_origin(
+    pub(super) fn register_codec_with_aliases(
         &mut self,
         codec: Arc<dyn LayerCodec>,
-        builtin: bool,
         advertised_aliases: &[&str],
     ) -> Result<&mut Self, Error> {
         let protocol = codec.protocol_id();
@@ -72,9 +73,6 @@ impl Builder {
         }
         for alias in aliases {
             self.aliases.insert(alias, protocol.clone());
-        }
-        if builtin {
-            self.builtin_codecs.insert(protocol.clone());
         }
         self.codecs.insert(protocol, codec);
         Ok(self)

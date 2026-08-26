@@ -13,6 +13,7 @@ use super::super::rendering::{
     write_raw, write_stdout_line,
 };
 use super::super::system::{client, prepare_route};
+use super::format::SendFormat;
 use super::registry;
 
 pub(super) const AFTER_LONG_HELP: &str = r#"Live transmission is policy-gated and may require native features, dependencies, and privileges.
@@ -21,6 +22,7 @@ Example:
   packetcraftr send --packet 'ipv4(dst=192.0.2.1)/icmpv4(type=8,code=0)'"#;
 
 pub(super) fn run(arguments: SendArgs, format: output::contract::Format) -> Result<(), CliError> {
+    let format = SendFormat::narrow(output::contract::Command::Send, format)?;
     let SendArgs {
         route,
         mode,
@@ -48,7 +50,7 @@ pub(super) fn run(arguments: SendArgs, format: output::contract::Format) -> Resu
     let (result, diagnostics, stats) =
         output::send::Result::try_from_report(report).map_err(CliError::classified)?;
     match format {
-        output::contract::Format::Text => {
+        SendFormat::Text => {
             write_stdout_line(format_args!(
                 "sent {} bytes via {} (index {}, {:?})",
                 result.frame.length,
@@ -58,16 +60,13 @@ pub(super) fn run(arguments: SendArgs, format: output::contract::Format) -> Resu
             ))?;
             render_diagnostics_text(&diagnostics)
         }
-        output::contract::Format::Json => {
+        SendFormat::Json => {
             emit_aggregate_with_stats(output::contract::Command::Send, result, diagnostics, stats)
         }
-        output::contract::Format::Hex => {
-            write_plain_line(format_args!("{}", result.frame.bytes_hex()))
+        SendFormat::Hex => write_plain_line(format_args!("{}", result.frame.bytes_hex())),
+        SendFormat::Raw => write_raw(result.frame.bytes()),
+        SendFormat::Pcap | SendFormat::PcapNg => {
+            write_capture_file(format.format(), [capture_frame])
         }
-        output::contract::Format::Raw => write_raw(result.frame.bytes()),
-        output::contract::Format::Pcap | output::contract::Format::PcapNg => {
-            write_capture_file(format, [capture_frame])
-        }
-        _ => unreachable!("send format is checked before command dispatch"),
     }
 }

@@ -6,16 +6,16 @@
 #![forbid(unsafe_code)]
 
 use crate::{
-    interface::{Id as InterfaceId, InterfaceAddress, InterfaceFlags, InterfaceInfo},
+    interface::{self, Id as InterfaceId},
     link::{Capability, MacAddress},
 };
 use packetcraftr_core::frame::LinkType;
 
-pub(super) fn interfaces() -> Vec<InterfaceInfo> {
+pub(super) fn interfaces() -> Vec<interface::Info> {
     pnet_datalink::interfaces()
         .into_iter()
         .map(|interface| {
-            let flags = InterfaceFlags {
+            let flags = interface::Flags {
                 up: interface.is_up(),
                 broadcast: interface.is_broadcast(),
                 loopback: interface.is_loopback(),
@@ -28,12 +28,12 @@ pub(super) fn interfaces() -> Vec<InterfaceInfo> {
             let addresses = interface
                 .ips
                 .into_iter()
-                .map(|network| InterfaceAddress {
+                .map(|network| interface::Address {
                     address: network.ip(),
                     prefix_length: network.prefix(),
                 })
                 .collect();
-            InterfaceInfo {
+            interface::Info {
                 id: InterfaceId {
                     name: interface.name,
                     index: interface.index,

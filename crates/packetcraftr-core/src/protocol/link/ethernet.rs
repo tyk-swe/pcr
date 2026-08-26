@@ -21,7 +21,16 @@ use super::super::common::{
 use super::llc::{LLC_FRAME_DISCRIMINATOR, MAX_FRAME_LENGTH};
 
 const ETHERNET_LEN: usize = 14;
+const MAC_LEN: usize = 6;
 const LINK_RAW_FALLBACK_DISCRIMINATOR: u16 = MAX_FRAME_LENGTH + 1;
+
+/// Reads the fixed-size chunk of `input` that starts at `offset`.
+fn ethernet_chunk<const N: usize>(input: &[u8], offset: usize) -> Option<[u8; N]> {
+    input
+        .get(offset..)
+        .and_then(<[u8]>::first_chunk::<N>)
+        .copied()
+}
 
 /// The 802.3 length-versus-EtherType split shared by Ethernet II and the
 /// VLAN tags: a value at or below 1500 is a payload length framing an LLC
@@ -39,7 +48,11 @@ pub(super) fn link_payload_selection(
     if ether_type <= MAX_FRAME_LENGTH {
         let length = usize::from(ether_type);
         if length > available {
-            return Err(truncated(name, header_len + length, header_len + available));
+            return Err(truncated(
+                name,
+                header_len.saturating_add(length),
+                header_len.saturating_add(available),
+            ));
         }
         // A zero-length frame is complete: there is no LLC header to select.
         let next = if length == 0 {
@@ -224,18 +237,18 @@ impl LayerCodec for EthernetCodec {
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
-        if input.len() < ETHERNET_LEN {
+        let (Some(destination), Some(source), Some(ether_type)) = (
+            ethernet_chunk::<MAC_LEN>(input, 0),
+            ethernet_chunk::<MAC_LEN>(input, MAC_LEN),
+            ethernet_chunk::<2>(input, 12),
+        ) else {
             return Err(truncated("ethernet", ETHERNET_LEN, input.len()));
-        }
-        let mut destination = [0; 6];
-        destination.copy_from_slice(&input[..6]);
-        let mut source = [0; 6];
-        source.copy_from_slice(&input[6..12]);
-        let ether_type = u16::from_be_bytes([input[12], input[13]]);
+        };
+        let ether_type = u16::from_be_bytes(ether_type);
         let (payload_len, next) = link_payload_selection(
             "ethernet",
             ether_type,
-            input.len() - ETHERNET_LEN,
+            input.len().saturating_sub(ETHERNET_LEN),
             ETHERNET_LEN,
         )?;
         Ok(DecodedLayerValue {

@@ -8,8 +8,8 @@
 #![cfg_attr(not(windows), forbid(unsafe_code))]
 
 use super::super::{
-    Error as LiveIoError,
-    transmit::{IoSendReport, Layer3Frame, Submission},
+    Error,
+    transmit::{self, Layer3Frame, Submission},
 };
 
 use preparation::prepare;
@@ -20,7 +20,7 @@ use submission::{map_raw_error, send};
 mod preparation;
 mod submission;
 
-pub(super) fn send_layer3(frame: Layer3Frame<'_>) -> Result<IoSendReport, LiveIoError> {
+pub(super) fn send_layer3(frame: Layer3Frame<'_>) -> Result<transmit::Report, Error> {
     let packet = prepare(frame)?;
     #[cfg(target_os = "macos")]
     validate_platform_support(&packet)?;
@@ -28,7 +28,7 @@ pub(super) fn send_layer3(frame: Layer3Frame<'_>) -> Result<IoSendReport, LiveIo
     let actual = send(&packet).map_err(|error| map_raw_error(&packet.interface, error))?;
     let expected = packet.submission.len();
     if actual != expected {
-        return Err(LiveIoError::PartialSend { expected, actual });
+        return Err(Error::PartialSend { expected, actual });
     }
     Ok(submission.complete(packet.wire_bytes.len(), packet.wire_bytes))
 }

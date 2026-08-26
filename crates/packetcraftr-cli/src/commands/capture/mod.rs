@@ -18,13 +18,16 @@ use crate::filtering::FrameSelector;
 use crate::rendering::NdjsonStream;
 use crate::system::resolve;
 
-use execution::Budget;
+use packetcraftr::policy::CaptureBudget;
+
+use super::format::CaptureFormat;
 
 pub(super) fn run(
     arguments: Args,
     format: output::contract::Format,
     stream: &mut NdjsonStream,
 ) -> Result<(), CliError> {
+    let format = CaptureFormat::narrow(output::contract::Command::Capture, format)?;
     let Args {
         interface,
         promiscuous,
@@ -51,7 +54,7 @@ pub(super) fn run(
     let interface = resolve(Some(interface), &net::interface::SystemProvider)?
         .expect("required capture interface must resolve to an identity");
     let policy = budgets.into_policy();
-    let budget = Budget::from(&policy);
+    let budget = CaptureBudget::new(&policy);
     let request = net::capture::Request {
         interface,
         limits,
@@ -63,18 +66,22 @@ pub(super) fn run(
         .map_err(CliError::classified)?;
 
     match format {
-        output::contract::Format::Text => {
+        CaptureFormat::Text => {
             rendering::render_text(capture, timeout, limits, budget, selector.as_ref())
         }
-        output::contract::Format::Hex => {
+        CaptureFormat::Hex => {
             rendering::render_hex(capture, timeout, limits, budget, selector.as_ref())
         }
-        output::contract::Format::Ndjson => {
+        CaptureFormat::Ndjson => {
             rendering::render_stream(capture, timeout, limits, budget, selector.as_ref(), stream)
         }
-        output::contract::Format::Pcap | output::contract::Format::PcapNg => {
-            rendering::render_capture(capture, format, timeout, limits, budget, selector.as_ref())
-        }
-        _ => unreachable!("capture format is checked before command dispatch"),
+        CaptureFormat::Pcap | CaptureFormat::PcapNg => rendering::render_capture(
+            capture,
+            format.format(),
+            timeout,
+            limits,
+            budget,
+            selector.as_ref(),
+        ),
     }
 }

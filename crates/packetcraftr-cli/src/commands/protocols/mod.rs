@@ -12,16 +12,18 @@ use packetcraftr::{
 use self::arguments::Args;
 use super::super::errors::CliError;
 use super::super::rendering::{emit_aggregate, write_stdout_line};
+use super::format::AggregateFormat;
 use super::registry;
 
 pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
+    let format = AggregateFormat::narrow(output::contract::Command::Protocols, format)?;
     match arguments.protocol {
         Some(name) => describe_protocol(&name, format),
         None => list_protocols(format),
     }
 }
 
-fn list_protocols(format: output::contract::Format) -> Result<(), CliError> {
+fn list_protocols(format: AggregateFormat) -> Result<(), CliError> {
     let result = output::protocols::ListResult {
         protocols: support::BUILTIN_PROTOCOLS
             .iter()
@@ -29,7 +31,7 @@ fn list_protocols(format: output::contract::Format) -> Result<(), CliError> {
             .collect(),
     };
     match format {
-        output::contract::Format::Text => {
+        AggregateFormat::Text => {
             for protocol in &result.protocols {
                 write_stdout_line(format_args!(
                     "{} aliases=[{}] build={} dissect={} exact_round_trip={} matcher={} decode_only={}",
@@ -44,14 +46,13 @@ fn list_protocols(format: output::contract::Format) -> Result<(), CliError> {
             }
             Ok(())
         }
-        output::contract::Format::Json => {
+        AggregateFormat::Json => {
             emit_aggregate(output::contract::Command::Protocols, result, Vec::new())
         }
-        _ => unreachable!("protocols format is checked before command dispatch"),
     }
 }
 
-fn describe_protocol(name: &str, format: output::contract::Format) -> Result<(), CliError> {
+fn describe_protocol(name: &str, format: AggregateFormat) -> Result<(), CliError> {
     let support = support::BUILTIN_PROTOCOLS
         .iter()
         .find(|support| {
@@ -84,13 +85,12 @@ fn describe_protocol(name: &str, format: output::contract::Format) -> Result<(),
     let detail =
         output::protocols::Detail::new(output::protocols::Summary::from(support), fields, bindings);
     match format {
-        output::contract::Format::Text => render_detail(&detail),
-        output::contract::Format::Json => emit_aggregate(
+        AggregateFormat::Text => render_detail(&detail),
+        AggregateFormat::Json => emit_aggregate(
             output::contract::Command::Protocols,
             output::protocols::DetailResult { protocol: detail },
             Vec::new(),
         ),
-        _ => unreachable!("protocols format is checked before command dispatch"),
     }
 }
 

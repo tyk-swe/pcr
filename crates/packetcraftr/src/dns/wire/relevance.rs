@@ -60,13 +60,13 @@ fn accepted_answers(
     let mut changed = true;
     while changed {
         changed = false;
-        for (index, record) in answers.iter().enumerate() {
+        for (record, accepted) in answers.iter().zip(accepted_answers.iter_mut()) {
             if record.class != DNS_CLASS_IN || !relevant_names.contains(&record.owner) {
                 continue;
             }
             let type_code = record.value.type_code();
             if type_code == QueryType::Cname.code() {
-                accepted_answers[index] = true;
+                *accepted = true;
                 if let RecordValue::Cname(target) = &record.value
                     && !relevant_names.contains(target)
                 {
@@ -74,7 +74,7 @@ fn accepted_answers(
                     changed = true;
                 }
             } else if query_type == QueryType::Any || type_code == query_type.code() {
-                accepted_answers[index] = true;
+                *accepted = true;
             }
         }
     }
@@ -83,7 +83,7 @@ fn accepted_answers(
 
 fn accepted_authorities(relevant_names: &[Name], authorities: &[Record]) -> Vec<bool> {
     let mut accepted_authorities = vec![false; authorities.len()];
-    for (index, record) in authorities.iter().enumerate() {
+    for (record, accepted) in authorities.iter().zip(accepted_authorities.iter_mut()) {
         let relevant_owner = relevant_names
             .iter()
             .any(|name| is_same_or_ancestor(&record.owner, name));
@@ -91,7 +91,7 @@ fn accepted_authorities(relevant_names: &[Name], authorities: &[Record]) -> Vec<
             && relevant_owner
             && matches!(record.value, RecordValue::Ns(_) | RecordValue::Soa { .. })
         {
-            accepted_authorities[index] = true;
+            *accepted = true;
         }
     }
     accepted_authorities
@@ -104,17 +104,13 @@ fn referenced_names(
     accepted_authorities: &[bool],
 ) -> Vec<Name> {
     let mut references = Vec::new();
-    for (index, record) in answers.iter().enumerate() {
-        if accepted_answers[index]
-            && let Some(name) = record.value.referenced_name()
-        {
+    for (record, accepted) in answers.iter().zip(accepted_answers.iter().copied()) {
+        if accepted && let Some(name) = record.value.referenced_name() {
             push_unique(&mut references, name);
         }
     }
-    for (index, record) in authorities.iter().enumerate() {
-        if accepted_authorities[index]
-            && let Some(name) = record.value.referenced_name()
-        {
+    for (record, accepted) in authorities.iter().zip(accepted_authorities.iter().copied()) {
+        if accepted && let Some(name) = record.value.referenced_name() {
             push_unique(&mut references, name);
         }
     }
@@ -140,7 +136,7 @@ struct RejectionAudit {
 
 impl RejectionAudit {
     fn reject(&mut self, section: Section, index: usize, record: &Record, reason: &str) {
-        self.count += 1;
+        self.count = self.count.saturating_add(1);
         if self.records.len() < self.limit {
             self.records.push(RejectedRecord {
                 section,
@@ -167,8 +163,12 @@ fn audit_rejected_records(
         count: 0,
         limit,
     };
-    for (index, record) in answers.iter().enumerate() {
-        if !accepted_answers[index] {
+    for (index, (record, accepted)) in answers
+        .iter()
+        .zip(accepted_answers.iter().copied())
+        .enumerate()
+    {
+        if !accepted {
             audit.reject(
                 Section::Answer,
                 index,
@@ -180,8 +180,12 @@ fn audit_rejected_records(
             );
         }
     }
-    for (index, record) in authorities.iter().enumerate() {
-        if !accepted_authorities[index] {
+    for (index, (record, accepted)) in authorities
+        .iter()
+        .zip(accepted_authorities.iter().copied())
+        .enumerate()
+    {
+        if !accepted {
             audit.reject(
                 Section::Authority,
                 index,
@@ -193,8 +197,12 @@ fn audit_rejected_records(
             );
         }
     }
-    for (index, record) in additionals.iter().enumerate() {
-        if !accepted_additionals[index] {
+    for (index, (record, accepted)) in additionals
+        .iter()
+        .zip(accepted_additionals.iter().copied())
+        .enumerate()
+    {
+        if !accepted {
             audit.reject(
                 Section::Additional,
                 index,
@@ -212,8 +220,8 @@ fn audit_rejected_records(
 fn retain_accepted(records: Vec<Record>, accepted: &[bool]) -> Vec<Record> {
     records
         .into_iter()
-        .enumerate()
-        .filter_map(|(index, record)| accepted[index].then_some(record))
+        .zip(accepted.iter().copied())
+        .filter_map(|(record, accepted)| accepted.then_some(record))
         .collect()
 }
 

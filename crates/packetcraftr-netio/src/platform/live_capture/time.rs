@@ -5,7 +5,7 @@
 
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use crate::Error as LiveIoError;
+use crate::Error;
 
 #[expect(
     clippy::cast_sign_loss,
@@ -15,9 +15,9 @@ use crate::Error as LiveIoError;
 pub(in crate::platform) fn system_time(
     seconds: i64,
     microseconds: i64,
-) -> Result<SystemTime, LiveIoError> {
+) -> Result<SystemTime, Error> {
     if !(0..1_000_000).contains(&microseconds) {
-        return Err(LiveIoError::Capture {
+        return Err(Error::Capture {
             message: format!("native capture timestamp has invalid microseconds {microseconds}"),
         });
     }
@@ -31,7 +31,7 @@ pub(in crate::platform) fn system_time(
             .checked_sub(Duration::from_secs(seconds.unsigned_abs()))
             .and_then(|time| time.checked_add(fractional))
     }
-    .ok_or_else(|| LiveIoError::Capture {
+    .ok_or_else(|| Error::Capture {
         message: "native capture timestamp is outside SystemTime range".to_owned(),
     })
 }
@@ -62,7 +62,7 @@ mod tests {
         for invalid in [-1, 1_000_000] {
             assert!(matches!(
                 system_time(0, invalid),
-                Err(LiveIoError::Capture { .. })
+                Err(Error::Capture { .. })
             ));
         }
 

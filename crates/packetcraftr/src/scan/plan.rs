@@ -73,11 +73,28 @@ pub(super) fn worst_case_duration(
                 actual: Duration::MAX,
                 limit: request.limits.max_duration,
             })?;
+    #[expect(
+        clippy::arithmetic_side_effects,
+        reason = "`Limits::validate` rejects a zero `batch_size`, so the remainder cannot divide \
+                  by zero"
+    )]
     let final_batch_size = endpoints_per_address % request.limits.batch_size;
     let delay =
         (0..batch_count.saturating_sub(1)).try_fold(Duration::ZERO, |total, batch_index| {
+            #[expect(
+                clippy::arithmetic_side_effects,
+                reason = "`batch_count` is a multiple of `batches_per_attempt`, so this range is \
+                          empty when `batches_per_attempt` is zero; `position` is below it and \
+                          therefore below usize::MAX"
+            )]
             let position = batch_index % batches_per_attempt;
-            let probes = if position + 1 == batches_per_attempt && final_batch_size != 0 {
+            #[expect(
+                clippy::arithmetic_side_effects,
+                reason = "`position` is a remainder modulo `batches_per_attempt`, so it is below \
+                          usize::MAX and the increment cannot overflow"
+            )]
+            let is_final_batch = position + 1 == batches_per_attempt;
+            let probes = if is_final_batch && final_batch_size != 0 {
                 final_batch_size
             } else {
                 request.limits.batch_size

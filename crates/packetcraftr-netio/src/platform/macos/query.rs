@@ -148,7 +148,11 @@ fn build_route_request(
     // SAFETY: `getpid` has no preconditions.
     let pid = unsafe { libc::getpid() };
     let destination_address = encode_sockaddr(destination)?;
-    let message_length = size_of::<libc::rt_msghdr>() + roundup(destination_address.len());
+    let message_length = size_of::<libc::rt_msghdr>()
+        .checked_add(roundup(destination_address.len()))
+        .ok_or_else(|| SystemError::InvalidResponse {
+            message: "macOS route request exceeded the routing-socket limit".to_owned(),
+        })?;
     let wire_message_length =
         u16::try_from(message_length).map_err(|_| SystemError::InvalidResponse {
             message: "macOS route request exceeded the routing-socket limit".to_owned(),
@@ -275,14 +279,19 @@ fn read_route_response(
                 std::io::Error::from_raw_os_error(response_header.rtm_errno),
             ));
         }
-        let addresses = parse_route_addresses(
-            &bytes[size_of::<libc::rt_msghdr>()..declared],
-            response_header.rtm_addrs,
-        )?;
+        let payload = bytes
+            .get(size_of::<libc::rt_msghdr>()..declared)
+            .ok_or_else(|| SystemError::InvalidResponse {
+                message: "macOS route response had an invalid message length".to_owned(),
+            })?;
+        let addresses = parse_route_addresses(payload, response_header.rtm_addrs)?;
         return Ok(RouteResponse {
             header: response_header,
-            gateway: addresses[libc::RTAX_GATEWAY as usize],
-            selected_source: addresses[libc::RTAX_IFA as usize],
+            gateway: addresses
+                .get(libc::RTAX_GATEWAY as usize)
+                .copied()
+                .flatten(),
+            selected_source: addresses.get(libc::RTAX_IFA as usize).copied().flatten(),
         });
     }
     Err(SystemError::InvalidResponse {

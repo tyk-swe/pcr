@@ -64,7 +64,7 @@ reflective_layer! {
             kind: Bytes, derived: false, required: false,
             description: "Version- and type-specific IGMP body",
             reflect: body,
-            layout: (4, 4 + body_len)
+            layout: (4, body_len.saturating_add(4))
         },
     }
     layout pub(crate) fn igmp_layout(body_len: usize);
@@ -113,7 +113,13 @@ impl LayerCodec for IgmpCodec {
             context.mode,
             &mut diagnostics,
         )?;
-        prefix[2..4].copy_from_slice(&checksum.to_be_bytes());
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "`prefix` starts with the four-byte IGMP header and the guard above rejects \
+                      any message shorter than eight bytes"
+        )]
+        let checksum_slot = &mut prefix[2..4];
+        checksum_slot.copy_from_slice(&checksum.to_be_bytes());
 
         let mut materialized = layer.clone();
         materialized.checksum = materialized_checksum;
@@ -131,26 +137,29 @@ impl LayerCodec for IgmpCodec {
         input: &[u8],
         context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
-        if input.len() < IGMP_MIN_LEN {
+        let Some(header) = input.first_chunk::<IGMP_MIN_LEN>() else {
             return Err(truncated("igmp", IGMP_MIN_LEN, input.len()));
-        }
+        };
         let mut diagnostics = Vec::new();
         if context.verify_checksums && checksum(input) != 0 {
             diagnostics.push(
                 Diagnostic::warning(IGMP_CHECKSUM, "IGMP checksum mismatch").at_field("checksum"),
             );
         }
+        let body = input
+            .get(IGMP_HEADER_LEN..)
+            .ok_or_else(|| truncated("igmp", IGMP_MIN_LEN, input.len()))?;
         Ok(DecodedLayerValue {
             layer: Box::new(Igmp {
-                igmp_type: input[0],
-                code: input[1],
-                checksum: WireValue::Exact(u16::from_be_bytes([input[2], input[3]])),
-                body: Bytes::copy_from_slice(&input[IGMP_HEADER_LEN..]),
+                igmp_type: header[0],
+                code: header[1],
+                checksum: WireValue::Exact(u16::from_be_bytes([header[2], header[3]])),
+                body: Bytes::copy_from_slice(body),
             }),
             consumed: input.len(),
             payload_len: 0,
             next: Vec::new(),
-            fields: igmp_layout(input.len() - IGMP_HEADER_LEN),
+            fields: igmp_layout(body.len()),
             diagnostics,
             stop: true,
             network: None,

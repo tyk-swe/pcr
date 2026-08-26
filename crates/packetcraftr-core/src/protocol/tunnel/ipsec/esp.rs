@@ -130,10 +130,10 @@ impl LayerCodec for EspCodec {
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
-        if input.len() < ESP_LEN {
+        let Some(header) = input.first_chunk::<ESP_LEN>() else {
             return Err(truncated("esp", ESP_LEN, input.len()));
-        }
-        let payload_len = input.len() - ESP_LEN;
+        };
+        let payload_len = input.len().saturating_sub(ESP_LEN);
         let mut diagnostics = Vec::new();
         if payload_len < 2 {
             diagnostics.push(
@@ -147,8 +147,8 @@ impl LayerCodec for EspCodec {
         Ok(DecodedLayerValue {
             fields: esp_layout(),
             layer: Box::new(Esp {
-                spi: u32::from_be_bytes([input[0], input[1], input[2], input[3]]),
-                sequence: u32::from_be_bytes([input[4], input[5], input[6], input[7]]),
+                spi: u32::from_be_bytes([header[0], header[1], header[2], header[3]]),
+                sequence: u32::from_be_bytes([header[4], header[5], header[6], header[7]]),
             }),
             consumed: ESP_LEN,
             payload_len,

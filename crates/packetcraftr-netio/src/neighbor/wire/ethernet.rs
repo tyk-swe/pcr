@@ -33,9 +33,12 @@ pub(super) fn prefix(
     tags: &[NeighborVlanTag],
     payload_type: u16,
 ) -> Vec<u8> {
-    let mut frame = Vec::with_capacity(
-        HEADER_LENGTH + tags.len() * VLAN_HEADER_LENGTH + super::arp::PAYLOAD_LENGTH,
-    );
+    #[expect(
+        clippy::arithmetic_side_effects,
+        reason = "tags is capped at MAX_VLAN_TAGS, so the capacity is a small constant sum"
+    )]
+    let capacity = HEADER_LENGTH + tags.len() * VLAN_HEADER_LENGTH + super::arp::PAYLOAD_LENGTH;
+    let mut frame = Vec::with_capacity(capacity);
     frame.extend_from_slice(&destination.0);
     frame.extend_from_slice(&source.0);
     frame.extend_from_slice(
@@ -49,6 +52,10 @@ pub(super) fn prefix(
             | (if tag.drop_eligible { 1 << 12 } else { 0 })
             | tag.vlan_id;
         frame.extend_from_slice(&tci.to_be_bytes());
+        #[expect(
+            clippy::arithmetic_side_effects,
+            reason = "index is below tags.len() from the enumerate, so index + 1 cannot overflow"
+        )]
         let next = tags
             .get(index + 1)
             .map_or(payload_type, |next| next.kind.ether_type());
@@ -58,22 +65,20 @@ pub(super) fn prefix(
 }
 
 pub(super) fn parse(bytes: &[u8]) -> Option<View<'_>> {
-    if bytes.len() < HEADER_LENGTH {
-        return None;
-    }
+    let header = bytes.first_chunk::<HEADER_LENGTH>()?;
     let mut destination = [0; 6];
-    destination.copy_from_slice(&bytes[..6]);
+    destination.copy_from_slice(&header[..6]);
     let mut source = [0; 6];
-    source.copy_from_slice(&bytes[6..12]);
-    let mut ether_type = u16::from_be_bytes([bytes[12], bytes[13]]);
+    source.copy_from_slice(&header[6..12]);
+    let mut ether_type = u16::from_be_bytes([header[12], header[13]]);
     let mut offset = HEADER_LENGTH;
     let mut vlan_tags = Vec::new();
     while matches!(ether_type, ETHERTYPE_VLAN | ETHERTYPE_SERVICE_VLAN) {
         if vlan_tags.len() >= MAX_NEIGHBOR_VLAN_TAGS {
             return None;
         }
-        let header = bytes.get(offset..offset + VLAN_HEADER_LENGTH)?;
-        let tci = u16::from_be_bytes([header[0], header[1]]);
+        let tag_header = bytes.get(offset..)?.first_chunk::<VLAN_HEADER_LENGTH>()?;
+        let tci = u16::from_be_bytes([tag_header[0], tag_header[1]]);
         vlan_tags.push(NeighborVlanTag {
             kind: if ether_type == ETHERTYPE_SERVICE_VLAN {
                 NeighborVlanKind::Ieee8021Ad
@@ -84,15 +89,15 @@ pub(super) fn parse(bytes: &[u8]) -> Option<View<'_>> {
             drop_eligible: (tci & 0x1000) != 0,
             vlan_id: tci & 0x0fff,
         });
-        ether_type = u16::from_be_bytes([header[2], header[3]]);
-        offset += VLAN_HEADER_LENGTH;
+        ether_type = u16::from_be_bytes([tag_header[2], tag_header[3]]);
+        offset = offset.checked_add(VLAN_HEADER_LENGTH)?;
     }
     Some(View {
         destination: MacAddress(destination),
         source: MacAddress(source),
         vlan_tags,
         ether_type,
-        payload: &bytes[offset..],
+        payload: bytes.get(offset..)?,
     })
 }
 

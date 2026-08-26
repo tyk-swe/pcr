@@ -154,21 +154,23 @@ impl LayerCodec for ErspanCodec {
         input: &[u8],
         context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
-        if input.len() < ERSPAN_II_LEN {
+        let Some(base) = input.first_chunk::<ERSPAN_II_LEN>() else {
             return Err(truncated("erspan", ERSPAN_II_LEN, input.len()));
-        }
-        let first = u16::from_be_bytes([input[0], input[1]]);
+        };
+        let first = u16::from_be_bytes([base[0], base[1]]);
         let version = (first >> 12) as u8;
+        let mut type3_header = None;
         let header_len = match version {
             1 => ERSPAN_II_LEN,
             2 => {
-                if input.len() < ERSPAN_III_LEN {
+                let Some(header) = input.first_chunk::<ERSPAN_III_LEN>() else {
                     return Err(truncated("erspan", ERSPAN_III_LEN, input.len()));
-                }
+                };
+                type3_header = Some(header);
                 // The flag word's O bit places an 8-byte subheader before
                 // the mirrored frame.
-                if u16::from_be_bytes([input[10], input[11]]) & SUBHEADER_FLAG != 0 {
-                    ERSPAN_III_LEN + SUBHEADER_LEN
+                if u16::from_be_bytes([header[10], header[11]]) & SUBHEADER_FLAG != 0 {
+                    ERSPAN_III_LEN.saturating_add(SUBHEADER_LEN)
                 } else {
                     ERSPAN_III_LEN
                 }
@@ -183,7 +185,7 @@ impl LayerCodec for ErspanCodec {
         if input.len() < header_len {
             return Err(truncated("erspan", header_len, input.len()));
         }
-        let second = u16::from_be_bytes([input[2], input[3]]);
+        let second = u16::from_be_bytes([base[2], base[3]]);
 
         let mut diagnostics = Vec::new();
         // The GRE protocol type is authoritative for the expected header
@@ -202,21 +204,26 @@ impl LayerCodec for ErspanCodec {
                 .at_field("version"),
             );
         }
-        let (index_word, type3) = if version == 1 {
-            (
-                u32::from_be_bytes([input[4], input[5], input[6], input[7]]),
-                None,
-            )
-        } else {
+        let (index_word, type3) = if let Some(header) = type3_header {
             (
                 0,
                 Some(ErspanType3 {
-                    timestamp: u32::from_be_bytes([input[4], input[5], input[6], input[7]]),
-                    sgt: u16::from_be_bytes([input[8], input[9]]),
-                    flags: u16::from_be_bytes([input[10], input[11]]),
-                    subheader: (header_len > ERSPAN_III_LEN)
-                        .then(|| Bytes::copy_from_slice(&input[ERSPAN_III_LEN..header_len])),
+                    timestamp: u32::from_be_bytes([header[4], header[5], header[6], header[7]]),
+                    sgt: u16::from_be_bytes([header[8], header[9]]),
+                    flags: u16::from_be_bytes([header[10], header[11]]),
+                    subheader: if header_len > ERSPAN_III_LEN {
+                        input
+                            .get(ERSPAN_III_LEN..header_len)
+                            .map(Bytes::copy_from_slice)
+                    } else {
+                        None
+                    },
                 }),
+            )
+        } else {
+            (
+                u32::from_be_bytes([base[4], base[5], base[6], base[7]]),
+                None,
             )
         };
         let layer = Erspan {
@@ -229,7 +236,7 @@ impl LayerCodec for ErspanCodec {
             index_word,
             type3,
         };
-        let payload_len = input.len() - header_len;
+        let payload_len = input.len().saturating_sub(header_len);
         let fields = erspan_layout(&layer);
         Ok(DecodedLayerValue {
             fields,
@@ -264,7 +271,7 @@ fn validate_shape(
                 .as_ref()
                 .and_then(|type3| type3.subheader.as_ref())
                 .map_or(0, Bytes::len);
-            ERSPAN_III_LEN + subheader_len
+            ERSPAN_III_LEN.saturating_add(subheader_len)
         }
         other => {
             return Err(invalid(
@@ -388,7 +395,7 @@ fn erspan_layout(layer: &Erspan) -> Vec<crate::layout::FieldLayout> {
                 name: "subheader".to_owned(),
                 range: crate::layout::ByteRange::new(
                     ERSPAN_III_LEN,
-                    ERSPAN_III_LEN + SUBHEADER_LEN,
+                    ERSPAN_III_LEN.saturating_add(SUBHEADER_LEN),
                 ),
             });
         }
@@ -398,6 +405,8 @@ fn erspan_layout(layer: &Erspan) -> Vec<crate::layout::FieldLayout> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+
     use super::*;
     use crate::Packet;
     use crate::protocol::link::Ethernet;

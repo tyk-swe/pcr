@@ -16,6 +16,19 @@ pub enum CaseOutcome {
     Timeout,
 }
 
+impl CaseOutcome {
+    /// The serialized name, for text output that must agree with JSON.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Built => "built",
+            Self::Rejected => "rejected",
+            Self::Response => "response",
+            Self::Timeout => "timeout",
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Case {
     pub prepared: packet_fuzz::Case,
@@ -70,4 +83,24 @@ pub struct Summary {
     pub first_case: u64,
     pub diagnostics: Vec<Diagnostic>,
     pub stats: Stats,
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+
+    use super::*;
+
+    #[test]
+    fn names_match_the_serialized_names() {
+        for outcome in [
+            CaseOutcome::Built,
+            CaseOutcome::Rejected,
+            CaseOutcome::Response,
+            CaseOutcome::Timeout,
+        ] {
+            let serialized = serde_json::to_value(outcome).expect("case outcome is a name");
+            assert_eq!(serialized.as_str(), Some(outcome.as_str()));
+        }
+    }
 }

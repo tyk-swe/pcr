@@ -10,11 +10,6 @@ use super::Error;
 use super::link::Mode;
 use super::route::Materialized;
 
-pub(crate) use self::{
-    Frame as TransmissionFrame, Layer2Sender as Layer2Io, Report as IoSendReport,
-    Sender as PacketIo,
-};
-
 /// Complete Layer 2 frame with a verified Layer 2 route.
 #[derive(Clone, Copy, Debug)]
 pub struct Layer2Frame<'a> {

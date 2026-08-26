@@ -1,14 +1,25 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+// Shared by several test binaries; each one uses a different subset.
+#![allow(dead_code)]
+// Test code indexes fixtures and counts by hand; the fail-closed lints are
+// for library paths.
+#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
+use std::path::Path;
 use std::process::{Command, Output};
 
+use packetcraftr::output;
 use serde_json::Value;
 
 #[path = "../../src/test_support.rs"]
 mod shared;
 
-pub(crate) use shared::{assert_contiguous, schema_validator};
+pub(crate) use shared::{SharedBuffer, assert_contiguous, schema_validator};
+
+pub(crate) fn path_text(path: &Path) -> &str {
+    path.to_str().expect("temporary path must be UTF-8")
+}
 
 pub(crate) fn run(arguments: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_packetcraftr"))
@@ -54,4 +65,15 @@ pub(crate) fn parse_ndjson(output: &Output) -> Vec<Value> {
             .expect("NDJSON record must match the published schema");
     }
     records
+}
+
+/// An NDJSON encoder writing into a buffer the caller can read back.
+pub(crate) fn stream(
+    command: output::contract::Command,
+) -> (output::envelope::StreamEncoder, SharedBuffer) {
+    let buffer = SharedBuffer::default();
+    (
+        output::envelope::StreamEncoder::new(Some(command), buffer.clone()),
+        buffer,
+    )
 }

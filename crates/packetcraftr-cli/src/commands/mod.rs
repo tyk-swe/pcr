@@ -1,7 +1,14 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Command-line slices that own their arguments, conversion, execution, and rendering.
+//! One module per CLI command, plus the pieces several of them share.
+//!
+//! A command that fits in one screen stays in one file (`interfaces.rs`,
+//! `routes.rs`, `send.rs`). A command splits into `arguments.rs`, `rendering.rs`,
+//! and sometimes `conversion.rs` once those parts stop fitting together, which
+//! is most of the live and capture-reading commands. [`format`] narrows the
+//! global `--output` choice to what each command publishes; [`execution`] and
+//! [`target_workflow`] hold what the probing commands share.
 
 use std::sync::Arc;
 
@@ -19,6 +26,7 @@ mod exchange;
 mod execution;
 mod expert;
 mod follow;
+mod format;
 mod fuzz;
 mod interfaces;
 mod offline_analysis;
@@ -30,6 +38,7 @@ mod routes;
 mod scan;
 mod send;
 mod stats;
+mod target_workflow;
 mod tls;
 mod traceroute;
 

@@ -115,11 +115,15 @@ where
         check_deadline(deadline, L::duration_error)?;
         let sequence = batch.sequence();
         if batch_index != 0 {
-            let delay = rate_delay(
-                batches[batch_index - 1].probe_count(),
-                config.probes_per_second,
-            )
-            .ok_or_else(|| L::rate_error(config.probes_per_second))?;
+            #[expect(
+                clippy::indexing_slicing,
+                clippy::arithmetic_side_effects,
+                reason = "`batch_index` is non-zero here and comes from an enumerate over \
+                          `batches`, so `batch_index - 1` is a valid index"
+            )]
+            let previous_probe_count = batches[batch_index - 1].probe_count();
+            let delay = rate_delay(previous_probe_count, config.probes_per_second)
+                .ok_or_else(|| L::rate_error(config.probes_per_second))?;
             check_deadline(deadline, L::duration_error)?;
             deadline
                 .start_accounting(delay)

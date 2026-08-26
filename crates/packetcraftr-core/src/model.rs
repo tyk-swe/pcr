@@ -152,7 +152,7 @@ impl Packet {
             .iter()
             .position(|layer| layer.as_any().is::<T>())?;
         self.invalidate_encoded_payload_lengths();
-        self.layers[index].as_any_mut().downcast_mut::<T>()
+        self.layers.get_mut(index)?.as_any_mut().downcast_mut::<T>()
     }
 
     pub fn get_all<T: Layer + 'static>(&self) -> impl Iterator<Item = &T> {
@@ -179,7 +179,7 @@ impl Packet {
             .iter()
             .position(|layer| layer.protocol_id() == protocol)?;
         self.invalidate_encoded_payload_lengths();
-        Some(self.layers[index].as_mut())
+        Some(self.layers.get_mut(index)?.as_mut())
     }
 
     pub fn all_by_protocol<'a>(
@@ -205,7 +205,7 @@ impl Packet {
             return None;
         }
         self.invalidate_encoded_payload_lengths();
-        Some(self.layers[index].as_mut())
+        Some(self.layers.get_mut(index)?.as_mut())
     }
 
     pub fn iter(&self) -> impl ExactSizeIterator<Item = &dyn Layer> + DoubleEndedIterator {

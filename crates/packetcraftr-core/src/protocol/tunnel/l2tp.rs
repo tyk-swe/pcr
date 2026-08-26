@@ -97,14 +97,14 @@ impl LayerCodec for L2tpv3Codec {
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
-        if input.len() < L2TPV3_LEN {
+        let Some(header) = input.first_chunk::<L2TPV3_LEN>() else {
             return Err(truncated("l2tpv3", L2TPV3_LEN, input.len()));
-        }
-        let payload_len = input.len() - L2TPV3_LEN;
+        };
+        let payload_len = input.len().saturating_sub(L2TPV3_LEN);
         Ok(DecodedLayerValue {
             fields: l2tpv3_layout(),
             layer: Box::new(L2tpv3 {
-                session_id: u32::from_be_bytes([input[0], input[1], input[2], input[3]]),
+                session_id: u32::from_be_bytes(*header),
             }),
             consumed: L2TPV3_LEN,
             payload_len,

@@ -15,7 +15,7 @@ pub(crate) fn payload_without_padding<'a>(
     let trailing = context
         .packet
         .iter()
-        .skip(context.index + 1)
+        .skip(context.index.saturating_add(1))
         .rev()
         .take_while(|layer| layer.as_any().is::<Padding>())
         .filter(|layer| {
@@ -40,5 +40,10 @@ pub(crate) fn payload_without_padding<'a>(
         .len()
         .checked_sub(trailing)
         .ok_or_else(|| invalid(name, "trailing padding exceeds encoded payload"))?;
-    Ok(&payload[..covered])
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "covered comes from payload.len().checked_sub, so it is at most payload.len()"
+    )]
+    let covered_payload = &payload[..covered];
+    Ok(covered_payload)
 }

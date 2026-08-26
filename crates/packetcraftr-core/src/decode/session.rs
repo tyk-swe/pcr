@@ -129,8 +129,14 @@ impl<'registry> DecodeSession<'registry> {
         cursor: &DecodeCursor,
         allow_link_padding: bool,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "cursor byte ranges are derived from the original buffer's own length and \
+                      validated by validate_layer before the traversal advances"
+        )]
+        let input = &self.original[cursor.bytes.clone()];
         codec.decode(
-            &self.original[cursor.bytes.clone()],
+            input,
             &LayerDecodeContext {
                 registry: self.registry,
                 layer_index: self.packet.len(),
@@ -251,7 +257,7 @@ impl<'registry> DecodeSession<'registry> {
         if layer.payload_end == cursor.bytes.end {
             return;
         }
-        let byte_count = cursor.bytes.end - layer.payload_end;
+        let byte_count = cursor.bytes.end.saturating_sub(layer.payload_end);
         self.trailing.push(TrailingBytes {
             offset: layer.payload_end,
             bytes: slice_original(&self.original, layer.payload_end, byte_count),

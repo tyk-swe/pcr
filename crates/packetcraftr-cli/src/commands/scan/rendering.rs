@@ -5,7 +5,7 @@ use packetcraftr::{core, output};
 
 use crate::errors::CliError;
 use crate::rendering::{
-    NdjsonStream, captured_frame_text, comma_separated, optional_display, output_timestamp_text,
+    captured_frame_text, comma_separated, optional_display, output_timestamp_text,
     render_diagnostics_text, render_optional, write_stdout_line,
 };
 
@@ -29,15 +29,15 @@ pub(super) fn render_text(
             "{} {} classification={}",
             endpoint.address,
             endpoint_name,
-            classification_name(endpoint.classification)
+            endpoint.classification.as_str()
         ))?;
         for evidence in &endpoint.probes {
             write_stdout_line(format_args!(
                 "  sequence={} attempt={} status={} classification={} sent={} received={} responder={} latency={} reason={}",
                 evidence.sequence,
                 evidence.attempt,
-                probe_status_name(evidence.status),
-                classification_name(evidence.classification),
+                evidence.status.as_str(),
+                evidence.classification.as_str(),
                 output_timestamp_text(evidence.sent_at),
                 render_optional(evidence.received_at, output_timestamp_text),
                 optional_display(evidence.responder),
@@ -61,49 +61,18 @@ pub(super) fn render_text(
     render_diagnostics_text(&diagnostics)
 }
 
-fn classification_name(value: output::scan::Classification) -> &'static str {
-    match value {
-        output::scan::Classification::Open => "open",
-        output::scan::Classification::Closed => "closed",
-        output::scan::Classification::Filtered => "filtered",
-        output::scan::Classification::Unreachable => "unreachable",
-        output::scan::Classification::Unknown => "unknown",
-        output::scan::Classification::Timeout => "timeout",
-    }
-}
-
-fn probe_status_name(value: output::scan::ProbeStatus) -> &'static str {
-    match value {
-        output::scan::ProbeStatus::Response => "response",
-        output::scan::ProbeStatus::Timeout => "timeout",
-    }
-}
-
-pub(super) fn render_event(
-    event: packetcraftr::scan::Event,
-    stream: &NdjsonStream,
-) -> Result<(), CliError> {
-    let (event, diagnostics) =
-        output::scan::Event::try_from_scan(event).map_err(CliError::classified)?;
-    stream.emit_data(event, diagnostics)
-}
-
-pub(super) fn render_complete(
-    summary: packetcraftr::scan::Summary,
-    stream: &NdjsonStream,
-) -> Result<(), CliError> {
-    let (event, diagnostics, stats) = output::scan::Event::complete_from_scan(summary);
-    stream.complete_with_stats(event, diagnostics, stats)
-}
-
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+
     use std::net::{IpAddr, Ipv4Addr};
     use std::time::UNIX_EPOCH;
 
     use packetcraftr::scan;
 
+    use super::super::Scan;
     use super::*;
+    use crate::commands::target_workflow::TargetWorkflow as _;
     use crate::rendering::ndjson_test_support::{assert_contiguous, stream};
 
     fn probe_event(sequence: u64, port: u16) -> scan::Event {
@@ -140,9 +109,9 @@ mod tests {
     #[test]
     fn scan_stream_positions_ignore_probe_ids_and_end_once() {
         let (sink, output) = stream(output::contract::Command::Scan);
-        render_event(probe_event(70_000, 80), &sink).unwrap();
-        render_event(probe_event(9, 81), &sink).unwrap();
-        render_complete(summary(), &sink).unwrap();
+        Scan::emit_event(probe_event(70_000, 80), &sink).unwrap();
+        Scan::emit_event(probe_event(9, 81), &sink).unwrap();
+        Scan::emit_complete(summary(), &sink).unwrap();
 
         let records = output.records();
         assert_contiguous(&records);

@@ -181,6 +181,11 @@ impl Collector {
                 index
             }
         };
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "`index` is either a live entry from `endpoint_indices` or the index of the \
+                      endpoint just pushed, so it is below `endpoints.len()`"
+        )]
         let endpoint = &mut self.endpoints[index];
         if evidence.classification.rank() > endpoint.classification.rank() {
             endpoint.classification = evidence.classification;
@@ -583,6 +588,11 @@ where
         start: usize,
         deadline: &Deadline,
     ) -> std::result::Result<(), Error> {
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "`start` is a `diagnostics.len()` snapshot taken before pushing to the same \
+                      append-only vector, so the range is in bounds"
+        )]
         let diagnostics = self.state.diagnostics[start..].to_vec();
         for diagnostic in diagnostics {
             (self.emit)(Event::Diagnostic(diagnostic), deadline)?;
@@ -600,6 +610,11 @@ fn scan_duration_error(actual: Duration, limit: Duration) -> Error {
 }
 
 impl ProbeBatch for Batch {
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "batches are built from non-empty chunks of endpoint ports, so every batch \
+                  carries at least one probe"
+    )]
     fn sequence(&self) -> u64 {
         self.probes[0].sequence
     }

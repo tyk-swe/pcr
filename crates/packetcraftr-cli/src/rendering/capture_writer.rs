@@ -140,6 +140,8 @@ impl<W: Write> CaptureWriter<W> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+
     use std::io::Cursor;
     use std::time::UNIX_EPOCH;
 

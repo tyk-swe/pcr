@@ -7,81 +7,38 @@ pub(super) mod arguments;
 mod conversion;
 mod rendering;
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use packetcraftr::{core, netio as net, output};
 
 use self::arguments::Args;
-use super::registry;
+use super::execution::Executor;
+use super::format::ToolFormat;
+use super::target_workflow::{self, Document, TargetWorkflow};
 use crate::errors::CliError;
 use crate::input::parse_target;
-use crate::rendering::{NdjsonStream, emit_aggregate_with_stats};
-use crate::system::{client, exchange, validate_selector};
+use crate::rendering::NdjsonStream;
 
-use super::execution::Executor;
+/// A DNS exchange puts exactly one query on the wire per attempt, so the probe
+/// only ever needs room for one packet template.
+const MAX_TEMPLATE_PACKETS: usize = 1;
 
 pub(super) fn run(
     arguments: Args,
     format: output::contract::Format,
     stream: &mut NdjsonStream,
 ) -> Result<(), CliError> {
+    let format = ToolFormat::narrow(output::contract::Command::Dns, format)?;
     let queue_limits = arguments.limits.clone().into_limits();
     let request = prepare_request(&arguments, queue_limits)?;
-    let policy = arguments.policy.clone().into_policy();
-    policy.validate().map_err(CliError::classified)?;
-    validate_selector(arguments.route.interface.as_deref()).map(|_| ())?;
-    let registry = registry()?;
-    let exchange = prepare_exchange(&arguments, &request, queue_limits)?;
-    let mut executor = Executor {
-        client: client(Arc::clone(&registry), policy.clone()),
-        exchange,
-        interface: arguments.route.interface,
-    };
-    let resolver = packetcraftr::target::SystemResolver;
-    let mut authorizer = packetcraftr::target::PolicyAuthorizer::new(&policy, &resolver);
-    let mut clock = packetcraftr::clock::SystemClock;
-    match format {
-        output::contract::Format::Text | output::contract::Format::Json => {
-            let result = packetcraftr::dns::run(
-                &request,
-                &mut authorizer,
-                &registry,
-                &mut executor,
-                &mut clock,
-            )
-            .map_err(CliError::classified)?;
-            let (result, diagnostics, stats) =
-                output::dns::Result::try_from_dns(result).map_err(CliError::classified)?;
-            if format == output::contract::Format::Text {
-                rendering::render_text(result, diagnostics, stats)
-            } else {
-                emit_aggregate_with_stats(
-                    output::contract::Command::Dns,
-                    result,
-                    diagnostics,
-                    stats,
-                )
-            }
-        }
-        output::contract::Format::Ndjson => {
-            let event_stream = stream.clone();
-            let summary = packetcraftr::dns::run_with_events(
-                &request,
-                &mut authorizer,
-                &registry,
-                &mut executor,
-                &mut clock,
-                move |event| {
-                    rendering::render_event(event, &event_stream)
-                        .map_err(CliError::into_boundary_error)
-                },
-            )
-            .map_err(CliError::classified)?;
-            rendering::render_complete(summary, stream)
-        }
-        _ => unreachable!("dns format is checked before command dispatch"),
-    }
+    let mut probe = target_workflow::prepare(
+        arguments.route,
+        arguments.policy,
+        request.timeout,
+        MAX_TEMPLATE_PACKETS,
+        queue_limits,
+    )?;
+    target_workflow::run::<Dns>(&request, &mut probe, format, stream)
 }
 
 fn prepare_request(
@@ -120,24 +77,72 @@ fn prepare_request(
     Ok(request)
 }
 
-fn prepare_exchange(
-    arguments: &Args,
-    request: &packetcraftr::dns::Request,
-    queue_limits: net::capture::Limits,
-) -> Result<packetcraftr::exchange::Options, CliError> {
-    exchange::options(
-        packetcraftr::send::Options {
-            destination: None,
-            plan: net::route::Options {
-                link_mode: arguments.route.link_mode.into(),
-                interface: None,
-                preferred_source: arguments.route.source,
+/// The `dns` workflow.
+pub(super) struct Dns;
+
+impl TargetWorkflow for Dns {
+    const COMMAND: output::contract::Command = output::contract::Command::Dns;
+
+    type Request = packetcraftr::dns::Request;
+    type Event = packetcraftr::dns::Event;
+    type Summary = packetcraftr::dns::Summary;
+    type Document = output::dns::Result;
+    type Record = output::dns::Event;
+
+    fn execute(
+        request: &Self::Request,
+        authorizer: &mut impl packetcraftr::target::Authorizer,
+        registry: &core::registry::Registry,
+        executor: &mut Executor,
+        clock: &mut impl packetcraftr::clock::Clock,
+    ) -> Result<Document<Self::Document>, CliError> {
+        let result = packetcraftr::dns::run(request, authorizer, registry, executor, clock)
+            .map_err(CliError::classified)?;
+        let (result, diagnostics, stats) =
+            output::dns::Result::try_from_dns(result).map_err(CliError::classified)?;
+        Ok(Document::new(result, diagnostics, stats))
+    }
+
+    fn stream(
+        request: &Self::Request,
+        authorizer: &mut impl packetcraftr::target::Authorizer,
+        registry: &core::registry::Registry,
+        executor: &mut Executor,
+        clock: &mut impl packetcraftr::clock::Clock,
+        stream: &NdjsonStream,
+    ) -> Result<(), CliError> {
+        let event_stream = stream.clone();
+        let summary = packetcraftr::dns::run_with_events(
+            request,
+            authorizer,
+            registry,
+            executor,
+            clock,
+            move |event| {
+                Self::emit_event(event, &event_stream).map_err(CliError::into_boundary_error)
             },
-            build: core::build::Options::default(),
-            allow_permissive_live: false,
-        },
-        request.timeout,
-        1,
-        queue_limits,
-    )
+        )
+        .map_err(CliError::classified)?;
+        Self::emit_complete(summary, stream)
+    }
+
+    fn render_text(document: Document<Self::Document>) -> Result<(), CliError> {
+        rendering::render_text(document.result, document.diagnostics, document.stats)
+    }
+
+    fn convert_event(
+        event: Self::Event,
+    ) -> Result<(Self::Record, Vec<core::diagnostic::Diagnostic>), CliError> {
+        output::dns::Event::try_from_dns(event).map_err(CliError::classified)
+    }
+
+    fn convert_complete(
+        summary: Self::Summary,
+    ) -> (
+        Self::Record,
+        Vec<core::diagnostic::Diagnostic>,
+        output::envelope::Stats,
+    ) {
+        output::dns::Event::complete_from_dns(summary)
+    }
 }

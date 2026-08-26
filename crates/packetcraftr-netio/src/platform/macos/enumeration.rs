@@ -13,13 +13,13 @@ use std::ptr;
 
 use super::parser::sockaddr_ip;
 use crate::{
-    interface::{Id as InterfaceId, InterfaceAddress, InterfaceFlags, InterfaceInfo},
+    interface::{self, Id as InterfaceId},
     link::{Capability, MacAddress},
     route::SystemError,
 };
 use packetcraftr_core::frame::LinkType;
 
-pub(in crate::platform) fn interfaces() -> Result<Vec<InterfaceInfo>, SystemError> {
+pub(in crate::platform) fn interfaces() -> Result<Vec<interface::Info>, SystemError> {
     let mut head = ptr::null_mut();
     // SAFETY: `head` is a valid output pointer and a successful call owns a
     // linked list that remains valid until the matching `freeifaddrs` below.
@@ -27,7 +27,7 @@ pub(in crate::platform) fn interfaces() -> Result<Vec<InterfaceInfo>, SystemErro
         return Err(last_os_error("getifaddrs"));
     }
     let guard = IfAddrsGuard(head);
-    let mut by_index = BTreeMap::<u32, InterfaceInfo>::new();
+    let mut by_index = BTreeMap::<u32, interface::Info>::new();
     let mut current = guard.0;
     while !current.is_null() {
         // SAFETY: every node is part of the live list owned by `guard`.
@@ -41,7 +41,7 @@ pub(in crate::platform) fn interfaces() -> Result<Vec<InterfaceInfo>, SystemErro
             let index = unsafe { libc::if_nametoindex(entry.ifa_name) };
             if index != 0 {
                 let flags = entry.ifa_flags;
-                let interface = by_index.entry(index).or_insert_with(|| InterfaceInfo {
+                let interface = by_index.entry(index).or_insert_with(|| interface::Info {
                     id: InterfaceId {
                         name: name.clone(),
                         index,
@@ -75,7 +75,7 @@ pub(in crate::platform) fn interfaces() -> Result<Vec<InterfaceInfo>, SystemErro
                                     sockaddr_prefix(entry.ifa_netmask, ip)
                                         .unwrap_or(if ip.is_ipv4() { 32 } else { 128 })
                                 };
-                                let assigned = InterfaceAddress {
+                                let assigned = interface::Address {
                                     address: ip,
                                     prefix_length,
                                 };
@@ -115,8 +115,8 @@ impl Drop for IfAddrsGuard {
     }
 }
 
-fn interface_flags(flags: libc::c_uint) -> InterfaceFlags {
-    InterfaceFlags {
+fn interface_flags(flags: libc::c_uint) -> interface::Flags {
+    interface::Flags {
         up: flags & libc::IFF_UP as u32 != 0,
         broadcast: flags & libc::IFF_BROADCAST as u32 != 0,
         loopback: flags & libc::IFF_LOOPBACK as u32 != 0,
@@ -179,6 +179,10 @@ fn link_address(address: *const libc::sockaddr, length: usize) -> Option<MacAddr
     if link.sdl_alen != 6 {
         return None;
     }
+    #[expect(
+        clippy::arithmetic_side_effects,
+        reason = "sdl_data is a field of sockaddr_dl, so its length never exceeds the struct size"
+    )]
     let data_offset = size_of::<libc::sockaddr_dl>() - link.sdl_data.len();
     let address_offset = data_offset.checked_add(usize::from(link.sdl_nlen))?;
     if address_offset.checked_add(6)? > length {

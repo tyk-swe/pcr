@@ -126,7 +126,12 @@ fn validate_attached_srh(packet: &Packet, srh_index: usize) -> Result<(), Error>
     for (network_index, candidate) in packet.iter().enumerate().take(srh_index).rev() {
         match BuiltinProtocol::of(candidate) {
             Some(BuiltinProtocol::Ipv6) => {
-                ip_path_at(packet, network_index, srh_index + 1, BuiltinProtocol::Ipv6)?;
+                ip_path_at(
+                    packet,
+                    network_index,
+                    srh_index.saturating_add(1),
+                    BuiltinProtocol::Ipv6,
+                )?;
                 return Ok(());
             }
             Some(protocol) if protocol.is_ipv6_extension() => {}

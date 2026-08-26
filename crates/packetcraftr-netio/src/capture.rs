@@ -10,11 +10,6 @@ use super::Error;
 use super::interface::Id as InterfaceId;
 use packetcraftr_core::frame::{DEFAULT_SIZE_LIMIT, Frame as CaptureFrame, LinkType};
 
-pub(crate) use self::{
-    Captured as CapturedFrame, Limits as CaptureQueueLimits,
-    OverflowPolicy as CaptureOverflowPolicy, Provider as CaptureProvider,
-    Request as CaptureRequest, Session as CaptureSession,
-};
 /// Aggregate backend capture-queue capacity used by default.
 pub const DEFAULT_CAPTURE_QUEUE_FRAMES: usize = 4_096;
 /// Aggregate backend capture-queue byte capacity used by default.
@@ -145,14 +140,14 @@ pub struct Metadata {
     pub snap_length: usize,
 }
 
-/// Capture evidence with an optional monotonic ingress marker. Wall-clock time is
-/// output-only; freshness and latency use `received_at` to avoid reordering.
 /// Opaque identity assigned exactly once when a record enters capture.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct RecordIdentity(u64);
 
 static NEXT_RECORD_ID: AtomicU64 = AtomicU64::new(1);
 
+/// Capture evidence with an optional monotonic ingress marker. Wall-clock time is
+/// output-only; freshness and latency use `received_at` to avoid reordering.
 #[derive(Clone, Debug)]
 pub struct Captured {
     identity: RecordIdentity,

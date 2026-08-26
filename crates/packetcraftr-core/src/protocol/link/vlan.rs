@@ -159,13 +159,17 @@ fn decode_vlan(
     layout: fn() -> Vec<crate::layout::FieldLayout>,
     layer: impl FnOnce(u8, bool, u16, WireValue<u16>) -> Box<dyn Layer>,
 ) -> Result<DecodedLayerValue, crate::codec::Error> {
-    if input.len() < VLAN_LEN {
+    let Some(header) = input.first_chunk::<VLAN_LEN>() else {
         return Err(truncated(name, VLAN_LEN, input.len()));
-    }
-    let tci = u16::from_be_bytes([input[0], input[1]]);
-    let ether_type = u16::from_be_bytes([input[2], input[3]]);
-    let (payload_len, next) =
-        link_payload_selection(name, ether_type, input.len() - VLAN_LEN, VLAN_LEN)?;
+    };
+    let tci = u16::from_be_bytes([header[0], header[1]]);
+    let ether_type = u16::from_be_bytes([header[2], header[3]]);
+    let (payload_len, next) = link_payload_selection(
+        name,
+        ether_type,
+        input.len().saturating_sub(VLAN_LEN),
+        VLAN_LEN,
+    )?;
     Ok(DecodedLayerValue {
         layer: layer(
             ((tci >> 13) & 7) as u8,

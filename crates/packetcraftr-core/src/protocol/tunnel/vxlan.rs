@@ -110,10 +110,12 @@ impl LayerCodec for VxlanCodec {
             )?;
         }
 
+        let [_, reserved1_hi, reserved1_mid, reserved1_lo] = layer.reserved1.to_be_bytes();
+        let [_, vni_hi, vni_mid, vni_lo] = layer.vni.to_be_bytes();
         let mut prefix = Vec::with_capacity(VXLAN_LEN);
         prefix.push(layer.flags);
-        prefix.extend_from_slice(&layer.reserved1.to_be_bytes()[1..]);
-        prefix.extend_from_slice(&layer.vni.to_be_bytes()[1..]);
+        prefix.extend_from_slice(&[reserved1_hi, reserved1_mid, reserved1_lo]);
+        prefix.extend_from_slice(&[vni_hi, vni_mid, vni_lo]);
         prefix.push(layer.reserved2);
         Ok(EncodedLayer {
             prefix,
@@ -129,13 +131,13 @@ impl LayerCodec for VxlanCodec {
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
-        if input.len() < VXLAN_LEN {
+        let Some(header) = input.first_chunk::<VXLAN_LEN>() else {
             return Err(truncated("vxlan", VXLAN_LEN, input.len()));
-        }
-        let flags = input[0];
-        let reserved1 = u32::from_be_bytes([0, input[1], input[2], input[3]]);
-        let vni = u32::from_be_bytes([0, input[4], input[5], input[6]]);
-        let reserved2 = input[7];
+        };
+        let flags = header[0];
+        let reserved1 = u32::from_be_bytes([0, header[1], header[2], header[3]]);
+        let vni = u32::from_be_bytes([0, header[4], header[5], header[6]]);
+        let reserved2 = header[7];
 
         let mut diagnostics = Vec::new();
         if flags != VNI_VALID_FLAG {
@@ -159,7 +161,7 @@ impl LayerCodec for VxlanCodec {
             reserved1,
             reserved2,
         };
-        let payload_len = input.len() - VXLAN_LEN;
+        let payload_len = input.len().saturating_sub(VXLAN_LEN);
         Ok(DecodedLayerValue {
             fields: vxlan_layout(),
             layer: Box::new(layer),

@@ -5,11 +5,11 @@
 
 #![forbid(unsafe_code)]
 
-use crate::{Error as LiveIoError, interface::Id as InterfaceId};
+use crate::{Error, interface::Id as InterfaceId};
 
-pub(super) fn validate(interface: &InterfaceId, source: &str) -> Result<(), LiveIoError> {
+pub(super) fn validate(interface: &InterfaceId, source: &str) -> Result<(), Error> {
     if has_symbolic_operand(source) {
-        return Err(LiveIoError::InvalidCaptureFilter {
+        return Err(Error::InvalidCaptureFilter {
             interface: interface.name.clone(),
             message: "symbolic names are disabled because native BPF compilation can resolve them; use numeric address, network, port, and protocol operands".to_owned(),
         });
@@ -17,6 +17,14 @@ pub(super) fn validate(interface: &InterfaceId, source: &str) -> Result<(), Live
     Ok(())
 }
 
+#[expect(
+    clippy::indexing_slicing,
+    reason = "indices stay below bytes.len() and every str slice boundary is an ASCII byte"
+)]
+#[expect(
+    clippy::arithmetic_side_effects,
+    reason = "offset and end only advance by one within bytes.len(), which cannot overflow usize"
+)]
 fn has_symbolic_operand(source: &str) -> bool {
     let bytes = source.as_bytes();
     let mut offset = 0;
@@ -160,6 +168,7 @@ fn is_bpf_keyword(atom: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
     use super::*;
 
     #[test]
@@ -200,7 +209,7 @@ mod tests {
 
         assert!(matches!(
             error,
-            LiveIoError::InvalidCaptureFilter {
+            Error::InvalidCaptureFilter {
                 interface: actual,
                 ..
             } if actual == interface.name

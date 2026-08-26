@@ -21,6 +21,16 @@ use super::super::common::{
 };
 
 const ARP_ETHERNET_IPV4_LEN: usize = 28;
+/// The fixed head that names the address families and their lengths.
+const ARP_HEAD_LEN: usize = 8;
+
+/// Reads the fixed-size chunk of `input` that starts at `offset`.
+fn arp_chunk<const N: usize>(input: &[u8], offset: usize) -> Option<[u8; N]> {
+    input
+        .get(offset..)
+        .and_then(<[u8]>::first_chunk::<N>)
+        .copied()
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Arp {
@@ -145,13 +155,13 @@ impl LayerCodec for ArpCodec {
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
-        if input.len() < 8 {
-            return Err(truncated("arp", 8, input.len()));
-        }
-        let hardware_len = input[4];
-        let protocol_len = input[5];
-        let hardware_type = u16::from_be_bytes([input[0], input[1]]);
-        let protocol_type = u16::from_be_bytes([input[2], input[3]]);
+        let Some(head) = input.first_chunk::<ARP_HEAD_LEN>() else {
+            return Err(truncated("arp", ARP_HEAD_LEN, input.len()));
+        };
+        let hardware_len = head[4];
+        let protocol_len = head[5];
+        let hardware_type = u16::from_be_bytes([head[0], head[1]]);
+        let protocol_type = u16::from_be_bytes([head[2], head[3]]);
         if hardware_type != 1 || protocol_type != 0x0800 || hardware_len != 6 || protocol_len != 4 {
             return Err(crate::codec::Error::Unsupported {
                 protocol: protocol("arp"),
@@ -160,23 +170,30 @@ impl LayerCodec for ArpCodec {
                 ),
             });
         }
-        if input.len() < ARP_ETHERNET_IPV4_LEN {
+        let (
+            Some(sender_hardware),
+            Some(sender_protocol),
+            Some(target_hardware),
+            Some(target_protocol),
+        ) = (
+            arp_chunk::<6>(input, 8),
+            arp_chunk::<4>(input, 14),
+            arp_chunk::<6>(input, 18),
+            arp_chunk::<4>(input, 24),
+        )
+        else {
             return Err(truncated("arp", ARP_ETHERNET_IPV4_LEN, input.len()));
-        }
-        let mut sender_hardware = [0; 6];
-        sender_hardware.copy_from_slice(&input[8..14]);
-        let mut target_hardware = [0; 6];
-        target_hardware.copy_from_slice(&input[18..24]);
+        };
         let layer = Arp {
             hardware_type,
             protocol_type,
             hardware_len: WireValue::Exact(hardware_len),
             protocol_len: WireValue::Exact(protocol_len),
-            operation: u16::from_be_bytes([input[6], input[7]]),
+            operation: u16::from_be_bytes([head[6], head[7]]),
             sender_hardware,
-            sender_protocol: Ipv4Addr::new(input[14], input[15], input[16], input[17]),
+            sender_protocol: Ipv4Addr::from(sender_protocol),
             target_hardware,
-            target_protocol: Ipv4Addr::new(input[24], input[25], input[26], input[27]),
+            target_protocol: Ipv4Addr::from(target_protocol),
         };
         Ok(DecodedLayerValue {
             layer: Box::new(layer),

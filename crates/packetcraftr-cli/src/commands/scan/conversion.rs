@@ -31,7 +31,7 @@ pub(crate) fn expand_port_specs(
         if distinct >= limit {
             return Err(packetcraftr::scan::Error::InvalidLimit {
                 field: "ports",
-                value: distinct + 1,
+                value: distinct.saturating_add(1),
                 reason: format!("exceeds max_ports={max_ports}"),
             });
         }
@@ -53,6 +53,8 @@ pub(crate) fn expand_port_specs(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+
     use super::*;
 
     #[test]

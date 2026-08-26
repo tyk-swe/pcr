@@ -34,20 +34,26 @@ pub fn parse_hex(input: &str) -> Result<Bytes, crate::codec::Error> {
     }
     let digits = compact.as_bytes();
     let mut bytes = Vec::with_capacity(digits.len() / 2);
-    for offset in (0..digits.len()).step_by(2) {
-        let high = hex_nibble(digits[offset]).ok_or_else(|| crate::codec::Error::Invalid {
+    let mut offset = 0_usize;
+    while let Some(pair) = digits.get(offset..).and_then(<[u8]>::first_chunk::<2>) {
+        let high = hex_nibble(pair[0]).ok_or_else(|| crate::codec::Error::Invalid {
             protocol: protocol.clone(),
             message: format!("invalid hex at byte {offset}"),
         })?;
-        let low = hex_nibble(digits[offset + 1]).ok_or_else(|| crate::codec::Error::Invalid {
+        let low = hex_nibble(pair[1]).ok_or_else(|| crate::codec::Error::Invalid {
             protocol: protocol.clone(),
-            message: format!("invalid hex at byte {}", offset + 1),
+            message: format!("invalid hex at byte {}", offset.saturating_add(1)),
         })?;
         bytes.push((high << 4) | low);
+        offset = offset.saturating_add(2);
     }
     Ok(Bytes::from(bytes))
 }
 
+#[expect(
+    clippy::arithmetic_side_effects,
+    reason = "each arm bounds value to its own ASCII range, so the subtraction and the plus ten stay inside u8"
+)]
 fn hex_nibble(value: u8) -> Option<u8> {
     match value {
         b'0'..=b'9' => Some(value - b'0'),

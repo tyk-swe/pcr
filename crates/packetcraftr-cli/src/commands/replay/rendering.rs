@@ -241,6 +241,10 @@ fn classic_writer<W: Write>(
             },
         ));
     }
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "the format is checked to be classic pcap above, which always exposes its single global interface"
+    )]
     let interface = reader.interfaces()[0].clone();
     let snap_length = usize::try_from(interface.snap_len)
         .map_err(|_| CliError::new(2, "capture snap length exceeds the platform size limit"))?;
@@ -285,6 +289,8 @@ fn stats(summary: &packetcraftr::replay::Summary, elapsed: Duration) -> output::
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+
     use std::convert::Infallible;
     use std::io::{self, Cursor};
     use std::time::UNIX_EPOCH;
@@ -304,9 +310,7 @@ mod tests {
     impl packetcraftr::replay::Authorizer for FakeAuthorizer {
         fn authorize_operation(
             &mut self,
-            _context: packetcraftr::replay::AuthorizationContext,
-            _frame: &Frame,
-            _mode: net::link::Mode,
+            _request: packetcraftr::replay::Operation<'_>,
         ) -> Result<(), packetcraftr::BoundaryError> {
             self.calls += 1;
             if self.deny_on == Some(self.calls) {

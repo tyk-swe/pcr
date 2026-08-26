@@ -11,9 +11,7 @@ use std::time::{Instant, SystemTime};
 use bytes::Bytes;
 use packetcraftr_core::frame::LinkType;
 
-use crate::{
-    Error as LiveIoError, capture::Metadata as CaptureMetadata, interface::Id as InterfaceId,
-};
+use crate::{Error, capture::Metadata, interface::Id as InterfaceId};
 
 pub(super) use session::NativeCaptureSession;
 pub(super) use time::{monotonic_packet_time, system_time};
@@ -46,8 +44,8 @@ pub(super) enum NativeCaptureEvent {
 }
 
 pub(super) trait NativeCaptureSource: Send {
-    fn next_event(&mut self) -> Result<NativeCaptureEvent, LiveIoError>;
-    fn statistics(&mut self) -> Result<NativeCaptureStatistics, LiveIoError>;
+    fn next_event(&mut self) -> Result<NativeCaptureEvent, Error>;
+    fn statistics(&mut self) -> Result<NativeCaptureStatistics, Error>;
 }
 
 pub(super) trait CaptureInterrupt: Send + Sync {
@@ -93,15 +91,15 @@ pub(super) fn validate_effective_snapshot_length(
     interface: &InterfaceId,
     requested: usize,
     reported: i32,
-) -> Result<usize, LiveIoError> {
-    let effective = usize::try_from(reported).map_err(|_| LiveIoError::Capture {
+) -> Result<usize, Error> {
+    let effective = usize::try_from(reported).map_err(|_| Error::Capture {
         message: format!(
             "{backend} returned invalid snapshot length {reported} for {}",
             interface.name
         ),
     })?;
     if effective == 0 {
-        return Err(LiveIoError::Capture {
+        return Err(Error::Capture {
             message: format!(
                 "{backend} returned zero snapshot length for {}",
                 interface.name
@@ -109,7 +107,7 @@ pub(super) fn validate_effective_snapshot_length(
         });
     }
     if effective > requested {
-        return Err(LiveIoError::Capture {
+        return Err(Error::Capture {
             message: format!(
                 "{backend} effective snapshot length {effective} exceeds configured maximum {requested} for {}",
                 interface.name
@@ -122,7 +120,7 @@ pub(super) fn validate_effective_snapshot_length(
 pub(super) struct NativeCaptureParts {
     pub source: Box<dyn NativeCaptureSource>,
     pub interrupt: Arc<dyn CaptureInterrupt>,
-    pub metadata: CaptureMetadata,
+    pub metadata: Metadata,
 }
 
 #[cfg(test)]
@@ -168,7 +166,7 @@ mod tests {
         for reported in [-1, 0, 65] {
             assert!(matches!(
                 validate_effective_snapshot_length("fixture", &interface(), 64, reported),
-                Err(LiveIoError::Capture { .. })
+                Err(Error::Capture { .. })
             ));
         }
     }

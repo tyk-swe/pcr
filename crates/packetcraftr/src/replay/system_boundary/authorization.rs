@@ -12,7 +12,8 @@ use packetcraftr_netio::link::Mode;
 
 use crate::BoundaryError;
 
-use super::super::model::{AuthorizationContext, Authorizer};
+use crate::authorization::{Authorizer, Operation, PermissiveLiveDenial, check_permissive_live};
+
 use super::super::wire::replay_network_envelope;
 
 /// Validates complete capture evidence, applies policy to raw routing destinations
@@ -136,25 +137,30 @@ impl SystemAuthorizer {
                 Vec::new(),
             ));
         }
-        if rebuilt.requires_live_opt_in && !self.allow_malformed_live {
-            return Err(BoundaryError::new(
-                "permissive or malformed captured bytes require --allow-malformed-live",
-                Classification::new(
-                    "policy.permissive_live_opt_in",
-                    Kind::Policy,
-                    Some(
-                        "set the per-operation malformed-live opt-in in addition to policy approval",
-                    ),
-                ),
-                Vec::new(),
-            ));
-        }
-        if rebuilt.requires_live_opt_in && !self.policy.allow_permissive_packets {
-            return Err(BoundaryError::from_error(
-                crate::policy::Error::PermissivePacket,
-            ));
+        if rebuilt.requires_live_opt_in {
+            check_permissive_live(&self.policy, self.allow_malformed_live)
+                .map_err(permissive_live_error)?;
         }
         Ok(())
+    }
+}
+
+/// Replay reports the missing opt-in in its own words: it refuses captured
+/// bytes, not a packet it built, and it names the flag that unblocks them.
+fn permissive_live_error(denial: PermissiveLiveDenial) -> BoundaryError {
+    match denial {
+        PermissiveLiveDenial::OperationOptIn => BoundaryError::new(
+            "permissive or malformed captured bytes require --allow-malformed-live",
+            Classification::new(
+                "policy.permissive_live_opt_in",
+                Kind::Policy,
+                Some("set the per-operation malformed-live opt-in in addition to policy approval"),
+            ),
+            Vec::new(),
+        ),
+        PermissiveLiveDenial::PolicyApproval => {
+            BoundaryError::from_error(crate::policy::Error::PermissivePacket)
+        }
     }
 }
 
@@ -197,15 +203,21 @@ fn validate_network_frame(frame: &Frame, mode: Mode) -> Result<(), BoundaryError
 }
 
 impl Authorizer for SystemAuthorizer {
-    fn authorize_operation(
-        &mut self,
-        context: AuthorizationContext,
-        frame: &Frame,
-        mode: Mode,
-    ) -> Result<(), BoundaryError> {
+    fn authorize_operation(&mut self, operation: Operation<'_>) -> Result<(), BoundaryError> {
         self.policy
-            .authorize_operation(context.packets, context.wire_bytes)
+            .authorize_operation(operation.packets, operation.wire_bytes)
             .map_err(BoundaryError::from_error)?;
+        let Some((frame, mode)) = operation.frame else {
+            return Err(BoundaryError::new(
+                "replay authorization requires an exact frame",
+                Classification::new(
+                    "internal.replay_frame",
+                    Kind::Internal,
+                    Some("submit the exact captured frame with the operation it authorizes"),
+                ),
+                Vec::new(),
+            ));
+        };
         self.authorize_frame(frame, mode)
     }
 }
@@ -301,26 +313,22 @@ mod tests {
         let mut authorizer = SystemAuthorizer::new(policy, false);
 
         let packet_error = authorizer
-            .authorize_operation(
-                AuthorizationContext {
-                    packets: 2,
-                    wire_bytes: 1,
-                },
-                &invalid_frame,
-                Mode::Layer2,
-            )
+            .authorize_operation(Operation {
+                packets: 2,
+                wire_bytes: 1,
+                frame: Some((&invalid_frame, Mode::Layer2)),
+                ..Operation::default()
+            })
             .expect_err("packet budget must fail first");
         assert_eq!(packet_error.classification().code, "policy.packet_limit");
 
         let byte_error = authorizer
-            .authorize_operation(
-                AuthorizationContext {
-                    packets: 1,
-                    wire_bytes: 3,
-                },
-                &invalid_frame,
-                Mode::Layer2,
-            )
+            .authorize_operation(Operation {
+                packets: 1,
+                wire_bytes: 3,
+                frame: Some((&invalid_frame, Mode::Layer2)),
+                ..Operation::default()
+            })
             .expect_err("byte budget must fail before unsupported link type");
         assert_eq!(byte_error.classification().code, "policy.byte_limit");
     }
@@ -398,6 +406,40 @@ mod tests {
         SystemAuthorizer::new(policy, true)
             .authorize_frame(&frame, Mode::Layer3)
             .expect("both explicit approvals authorize the exact malformed bytes");
+    }
+
+    #[test]
+    fn the_missing_replay_opt_in_keeps_its_published_message_and_remediation() {
+        let frame = raw_frame(&built_ipv4(true));
+
+        let error = SystemAuthorizer::new(crate::policy::Policy::default(), false)
+            .authorize_frame(&frame, Mode::Layer3)
+            .expect_err("operation opt-in is mandatory");
+
+        assert_eq!(
+            error.to_string(),
+            "permissive or malformed captured bytes require --allow-malformed-live"
+        );
+        assert_eq!(
+            error.classification().remediation,
+            Some("set the per-operation malformed-live opt-in in addition to policy approval")
+        );
+    }
+
+    #[test]
+    fn replay_authorization_refuses_an_operation_with_no_frame() {
+        let mut authorizer = SystemAuthorizer::new(crate::policy::Policy::default(), false);
+
+        let error = authorizer
+            .authorize_operation(Operation {
+                packets: 1,
+                wire_bytes: 1,
+                ..Operation::default()
+            })
+            .expect_err("a frameless replay operation cannot be authorized");
+
+        assert_eq!(error.classification().kind, Kind::Internal);
+        assert_eq!(error.classification().code, "internal.replay_frame");
     }
 
     #[test]

@@ -33,7 +33,7 @@ impl<C: Session> Transaction<C> {
             self.send_one(io, send_index, emit)?;
             self.ensure_send_deadline()?;
 
-            let more_requests = send_index + 1 < self.prepared.len();
+            let more_requests = send_index.saturating_add(1) < self.prepared.len();
             let outcome = self.drain(
                 more_requests.then_some(self.deadline),
                 workflow_matcher,
@@ -56,6 +56,11 @@ impl<C: Session> Transaction<C> {
         I: PacketIo,
         F: FnMut(Event) -> Result<(), crate::BoundaryError>,
     {
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "`send_index` is produced by `0..self.prepared.len()` in `send_requests`, the \
+                      only caller"
+        )]
         let prepared = &self.prepared[send_index];
         let built = &prepared.built;
         let route = &prepared.route;

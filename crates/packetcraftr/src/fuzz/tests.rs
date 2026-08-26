@@ -1,5 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+// Test code indexes fixtures and counts by hand; the fail-closed lints are
+// for library paths.
+#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr};
@@ -19,7 +22,7 @@ use crate::{BoundaryError, Stats as ExecutionStats};
 
 use super::execution::add_execution_stats;
 use super::{
-    Authorizer, Execution, ExecutionCase, Executor, LiveLimits, LiveOptions, Stats, run,
+    Authorizer, Execution, ExecutionCase, Executor, LiveLimits, LiveOptions, Operation, Stats, run,
     run_with_events,
 };
 
@@ -153,13 +156,7 @@ fn execution_statistics_aggregation_is_complete_and_atomic() {
 struct AllowAll;
 
 impl Authorizer for AllowAll {
-    fn authorize_operation(
-        &mut self,
-        _packets: &[Packet],
-        _destination: Option<std::net::IpAddr>,
-        _maximum_wire_bytes: u64,
-        _requires_malformed_live: bool,
-    ) -> Result<(), BoundaryError> {
+    fn authorize_operation(&mut self, _operation: Operation<'_>) -> Result<(), BoundaryError> {
         Ok(())
     }
 }
@@ -526,4 +523,91 @@ fn live_fuzz_rejects_substituted_authorized_case() {
 
     assert_eq!(error.classification().code, "internal.fuzz_evidence");
     assert!(error.to_string().contains("substituted bytes"));
+}
+
+struct DenyingAuthorizer {
+    invocations: usize,
+}
+
+impl Authorizer for DenyingAuthorizer {
+    fn authorize_operation(&mut self, _operation: Operation<'_>) -> Result<(), BoundaryError> {
+        self.invocations += 1;
+        Err(BoundaryError::from_error(
+            crate::policy::Error::PublicDestination {
+                destination: IpAddr::V4(Ipv4Addr::new(203, 0, 113, 9)),
+            },
+        ))
+    }
+}
+
+#[test]
+fn live_fuzz_consults_the_authorizer_exactly_once_before_any_execution() {
+    let registry =
+        Arc::new(packetcraftr_core::protocol::builtin::registry().expect("built-in registry"));
+    let request = packet_fuzz::Request {
+        seed: 0x5eed,
+        cases: 4,
+        strategies: vec![packet_fuzz::Strategy::BitFlip],
+        targets: vec!["2.bytes".parse().expect("raw field target")],
+        ..packet_fuzz::Request::default()
+    };
+    let mut authorizer = DenyingAuthorizer { invocations: 0 };
+    let mut executor = CountingExecutor::default();
+
+    let error = run(
+        &request,
+        LiveOptions {
+            destination: Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 9))),
+            ..LiveOptions::default()
+        },
+        packet(),
+        registry,
+        &mut authorizer,
+        &mut executor,
+        &mut NoopClock,
+    )
+    .expect_err("a denied campaign must not run");
+
+    assert_eq!(authorizer.invocations, 1);
+    assert_eq!(executor.executions, 0);
+    assert_eq!(error.classification().code, "policy.public_destination");
+}
+
+#[test]
+fn live_fuzz_authorizes_a_campaign_where_no_case_built() {
+    let registry =
+        Arc::new(packetcraftr_core::protocol::builtin::registry().expect("built-in registry"));
+    let request = packet_fuzz::Request {
+        seed: 0x5eed,
+        cases: 4,
+        strategies: vec![packet_fuzz::Strategy::Malformed],
+        targets: vec!["1.length".parse().expect("derived length target")],
+        ..packet_fuzz::Request::default()
+    };
+    let offline =
+        packet_fuzz::run(&request, packet(), Arc::clone(&registry)).expect("offline campaign");
+    assert!(
+        offline.cases.iter().all(|case| case.built.is_none()),
+        "the fixture must reject every case so the campaign declares no packets"
+    );
+    let mut authorizer = DenyingAuthorizer { invocations: 0 };
+    let mut executor = CountingExecutor::default();
+
+    let error = run(
+        &request,
+        LiveOptions {
+            destination: Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 9))),
+            ..LiveOptions::default()
+        },
+        packet(),
+        registry,
+        &mut authorizer,
+        &mut executor,
+        &mut NoopClock,
+    )
+    .expect_err("a campaign with nothing to send is still authorized");
+
+    assert_eq!(authorizer.invocations, 1);
+    assert_eq!(executor.executions, 0);
+    assert_eq!(error.classification().code, "policy.public_destination");
 }

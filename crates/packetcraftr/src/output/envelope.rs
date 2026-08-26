@@ -64,7 +64,7 @@ pub struct CaptureStats {
     pub dropped_frames: u64,
     pub dropped_bytes: u64,
     pub overflow_events: u64,
-    #[serde(default, skip_serializing_if = "is_zero")]
+    #[serde(skip_serializing_if = "is_zero")]
     pub receiver_dropped_frames: u64,
 }
 

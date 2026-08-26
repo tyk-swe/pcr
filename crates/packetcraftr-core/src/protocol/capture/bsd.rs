@@ -214,12 +214,11 @@ pub(crate) fn decode_family(
         FamilyHeader::Null => "bsd_null",
         FamilyHeader::Loop => "bsd_loop",
     };
-    if input.len() < 4 {
+    let Some(bytes) = input.first_chunk::<4>() else {
         return Err(truncated(name, 4, input.len()));
-    }
-    let bytes = [input[0], input[1], input[2], input[3]];
-    let big = u32::from_be_bytes(bytes);
-    let little = u32::from_le_bytes(bytes);
+    };
+    let big = u32::from_be_bytes(*bytes);
+    let little = u32::from_le_bytes(*bytes);
     let (family, byte_order) = match header {
         FamilyHeader::Loop => (big, ByteOrder::Big),
         FamilyHeader::Null if matches!(little, 2 | 10 | 24 | 28 | 30) => {
@@ -234,7 +233,7 @@ pub(crate) fn decode_family(
     Ok(DecodedLayerValue {
         layer,
         consumed: 4,
-        payload_len: input.len() - 4,
+        payload_len: input.len().saturating_sub(4),
         next: vec![Discriminator(family_discriminator(family))],
         fields: match header {
             FamilyHeader::Loop => loop_layout(),

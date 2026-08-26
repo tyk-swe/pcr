@@ -111,12 +111,14 @@ pub(super) fn retain_evidence(
     truncated: &mut bool,
 ) {
     if captured.len() >= options.max_capture_queue_frames
-        || *captured_bytes + frame.bytes().len() > options.max_captured_bytes
+        || captured_bytes
+            .checked_add(frame.bytes().len())
+            .is_none_or(|total| total > options.max_captured_bytes)
     {
         *truncated = true;
         return;
     }
-    *captured_bytes += frame.bytes().len();
+    *captured_bytes = captured_bytes.saturating_add(frame.bytes().len());
     captured.push(frame);
 }
 
@@ -128,19 +130,30 @@ pub(super) fn retain_matching_evidence(
     truncated: &mut bool,
 ) {
     let frame_length = frame.bytes().len();
-    while captured.len() >= options.max_capture_queue_frames
-        || *captured_bytes + frame_length > options.max_captured_bytes
-    {
+    let over_budget = |captured: &Vec<Frame>, captured_bytes: usize| {
+        captured.len() >= options.max_capture_queue_frames
+            || captured_bytes
+                .checked_add(frame_length)
+                .is_none_or(|total| total > options.max_captured_bytes)
+    };
+    while !captured.is_empty() && over_budget(captured, *captured_bytes) {
         let discarded = captured.remove(0);
-        *captured_bytes -= discarded.bytes().len();
+        *captured_bytes = captured_bytes.saturating_sub(discarded.bytes().len());
         *truncated = true;
     }
-    *captured_bytes += frame_length;
+    if over_budget(captured, *captured_bytes) {
+        // The frame alone exceeds the budget: dropping it is the only bounded
+        // outcome, and the caller learns about it through `truncated`.
+        *truncated = true;
+        return;
+    }
+    *captured_bytes = captured_bytes.saturating_add(frame_length);
     captured.push(frame);
 }
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
     use std::time::{Duration, SystemTime};
 
@@ -343,6 +356,44 @@ mod tests {
         assert_eq!(captured.len(), 1);
         assert_eq!(captured[0].bytes().as_ref(), [9, 9, 9]);
         assert_eq!(bytes, 3);
+        assert!(truncated);
+    }
+
+    #[test]
+    fn matching_retention_drops_a_frame_that_alone_exceeds_the_byte_budget() {
+        let options = Options {
+            max_attempts: 1,
+            attempt_timeout: Duration::from_secs(1),
+            cache_ttl: Duration::from_secs(1),
+            max_cache_entries: 1,
+            max_capture_queue_frames: 2,
+            max_captured_bytes: 4,
+            snap_length: 128,
+        };
+        let mut captured = vec![frame(&[1, 2])];
+        let mut bytes = 2;
+        let mut truncated = false;
+        retain_matching_evidence(
+            frame(&[7, 7, 7, 7, 7]),
+            &options,
+            &mut captured,
+            &mut bytes,
+            &mut truncated,
+        );
+        assert!(captured.is_empty());
+        assert_eq!(bytes, 0);
+        assert!(truncated);
+
+        // The same oversized frame on an empty queue must not panic either.
+        truncated = false;
+        retain_matching_evidence(
+            frame(&[7, 7, 7, 7, 7]),
+            &options,
+            &mut captured,
+            &mut bytes,
+            &mut truncated,
+        );
+        assert!(captured.is_empty());
         assert!(truncated);
     }
 }

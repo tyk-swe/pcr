@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 
 use packetcraftr::{analysis, output};
 
+use crate::commands::format::ToolFormat;
 use crate::errors::CliError;
 use crate::rendering::{NdjsonStream, emit_aggregate, write_stdout_line};
 
@@ -35,13 +36,13 @@ impl State {
 }
 
 pub(super) fn render_record(
-    format: output::contract::Format,
+    format: ToolFormat,
     finding: output::expert::Finding,
     state: &mut State,
     stream: &mut NdjsonStream,
 ) -> Result<(), CliError> {
     match format {
-        output::contract::Format::Text => match (finding.transport, finding.stream) {
+        ToolFormat::Text => match (finding.transport, finding.stream) {
             (Some(transport), Some(stream)) => write_stdout_line(format_args!(
                 "#{} {:?} {} ({} stream {stream}): {}",
                 finding.frame,
@@ -55,12 +56,11 @@ pub(super) fn render_record(
                 finding.frame, finding.severity, finding.code, finding.message
             )),
         },
-        output::contract::Format::Json => {
+        ToolFormat::Json => {
             state.retained.push(finding);
             Ok(())
         }
-        output::contract::Format::Ndjson => stream.emit_data(finding, Vec::new()),
-        _ => unreachable!("the format contract admits only text, json, and ndjson"),
+        ToolFormat::Ndjson => stream.emit_data(finding, Vec::new()),
     }
 }
 

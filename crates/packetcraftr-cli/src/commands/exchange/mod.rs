@@ -12,6 +12,7 @@ use packetcraftr::{core, output};
 use self::arguments::Args;
 use super::super::errors::CliError;
 use super::super::system::{client, prepare_route};
+use super::format::{CollectedFormat, ExchangeFormat};
 use super::registry;
 use crate::command_options::SendArgs;
 use crate::rendering::NdjsonStream;
@@ -21,6 +22,7 @@ pub(super) fn run(
     format: output::contract::Format,
     stream: &mut NdjsonStream,
 ) -> Result<(), CliError> {
+    let format = ExchangeFormat::narrow(output::contract::Command::Exchange, format)?;
     let Args {
         send,
         timeout_ms,
@@ -62,27 +64,32 @@ pub(super) fn run(
     };
     let client = client(Arc::clone(&registry), request.policy);
     let template = core::template::Template::new(request.packet);
-    if format == output::contract::Format::Ndjson {
-        let event_stream = stream.clone();
-        let summary = client
-            .exchange_with_events(&template, options, move |event| {
-                output::exchange::Event::try_from_exchange(event)
-                    .map_err(CliError::classified)
-                    .and_then(|(event, diagnostics)| event_stream.emit_data(event, diagnostics))
-                    .map_err(CliError::into_boundary_error)
-            })
-            .map_err(CliError::classified)?;
-        return rendering::render_complete(summary, stream);
-    }
+    let format = match format {
+        ExchangeFormat::Ndjson => {
+            let event_stream = stream.clone();
+            let summary = client
+                .exchange_with_events(&template, options, move |event| {
+                    output::exchange::Event::try_from_exchange(event)
+                        .map_err(CliError::classified)
+                        .and_then(|(event, diagnostics)| event_stream.emit_data(event, diagnostics))
+                        .map_err(CliError::into_boundary_error)
+                })
+                .map_err(CliError::classified)?;
+            return rendering::render_complete(summary, stream);
+        }
+        ExchangeFormat::Text => CollectedFormat::Text,
+        ExchangeFormat::Json => CollectedFormat::Json,
+        ExchangeFormat::Pcap => CollectedFormat::Pcap,
+        ExchangeFormat::PcapNg => CollectedFormat::PcapNg,
+    };
     let result = client
         .exchange(&template, options)
         .map_err(CliError::classified)?;
     match format {
-        output::contract::Format::Text => rendering::render_text(&result),
-        output::contract::Format::Json => rendering::render_aggregate(result),
-        output::contract::Format::Pcap | output::contract::Format::PcapNg => {
-            rendering::render_capture(&result, format)
+        CollectedFormat::Text => rendering::render_text(&result),
+        CollectedFormat::Json => rendering::render_aggregate(result),
+        CollectedFormat::Pcap | CollectedFormat::PcapNg => {
+            rendering::render_capture(&result, format.format())
         }
-        _ => unreachable!("exchange format is checked before command dispatch"),
     }
 }

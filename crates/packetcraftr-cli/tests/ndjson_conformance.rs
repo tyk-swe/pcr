@@ -11,9 +11,9 @@ use std::time::{Duration, UNIX_EPOCH};
 use packetcraftr::{core, output};
 use serde_json::{Value, json};
 
-use crate::errors::CliError;
-use crate::rendering::NdjsonStream;
-use crate::rendering::ndjson_test_support::{assert_contiguous, stream};
+mod support;
+
+use support::{assert_contiguous, schema_validator, stream};
 
 const COMPLETION_FIXTURES: &[(output::contract::Command, bool, &str)] = &[
     (
@@ -95,7 +95,7 @@ fn validate_typed_event<T: serde::Serialize>(
     sink.emit_data(event, diagnostics)
         .expect("typed production event must render");
     let records = bytes.records();
-    validate_records(crate::test_support::schema_validator(), &records);
+    validate_records(schema_validator(), &records);
     assert_eq!(records.len(), 1);
     assert_eq!(records[0]["status"], "success");
 }
@@ -127,7 +127,7 @@ fn published_completion_fixtures_are_schema_valid() {
         complete(&sink, requires_terminal_stats, result(document))
             .expect("published completion must render");
         let records = bytes.records();
-        validate_records(crate::test_support::schema_validator(), &records);
+        validate_records(schema_validator(), &records);
         assert_eq!(records.len(), 1, "{command:?}");
         assert_eq!(records[0]["status"], "success", "{command:?}");
     }
@@ -481,10 +481,10 @@ fn validate_exchange_event_variants() {
 }
 
 fn complete(
-    sink: &NdjsonStream,
+    sink: &output::envelope::StreamEncoder,
     requires_terminal_stats: bool,
     result: Value,
-) -> Result<(), CliError> {
+) -> Result<(), output::envelope::EncodeError> {
     if requires_terminal_stats {
         sink.complete_with_stats(result, Vec::new(), output::envelope::Stats::default())
     } else {
@@ -504,22 +504,24 @@ fn cleanup_failure_augments_the_primary_error_at_the_next_position() {
         Vec::new(),
     )
     .unwrap();
-    let primary = CliError::from_classification(
+    // The shape `CliError::with_cleanup` produces: the primary failure, with
+    // the shutdown failure appended as a second cause.
+    let cleanup = packetcraftr::netio::Error::Capture {
+        message: "cleanup failure".to_owned(),
+    };
+    let primary = output::envelope::Error::new(
         packetcraftr::core::error::Classification::new(
             "io.primary",
             packetcraftr::core::error::Kind::Io,
             None,
         ),
-        "primary capture failure",
-        vec!["primary cause".to_owned()],
-    )
-    .with_cleanup(packetcraftr::netio::Error::Capture {
-        message: "cleanup failure".to_owned(),
-    });
-    sink.emit_error(primary.output_error()).unwrap();
+        format!("primary capture failure; capture shutdown also failed: {cleanup}"),
+        vec!["primary cause".to_owned(), cleanup.to_string()],
+    );
+    sink.emit_error(primary).unwrap();
 
     let records = output.records();
-    validate_records(crate::test_support::schema_validator(), &records);
+    validate_records(schema_validator(), &records);
     assert_eq!(records[1]["sequence"], 1);
     assert_eq!(records[1]["error"]["code"], "io.primary");
     assert_eq!(records[1]["error"]["causes"][0], "primary cause");

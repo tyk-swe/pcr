@@ -12,9 +12,11 @@ use super::super::rendering::{
     emit_aggregate, render_diagnostics_text, spaced_hex, write_plain_line, write_raw,
     write_stdout_line,
 };
+use super::format::BuildFormat;
 use super::registry;
 
 pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
+    let format = BuildFormat::narrow(output::contract::Command::Build, format)?;
     let registry = registry()?;
     let packet = read_recipe(arguments.recipe, &registry)?;
     let built = core::build::Builder::new(registry)
@@ -29,16 +31,13 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
         .map_err(|source| CliError::new(3, source.to_string()))?;
     let (result, diagnostics) = output::build::Result::from_built(built);
     match format {
-        output::contract::Format::Text => {
+        BuildFormat::Text => {
             write_stdout_line(format_args!("built {} bytes", result.length))?;
             write_stdout_line(format_args!("{}", spaced_hex(result.bytes())))?;
             render_diagnostics_text(&diagnostics)
         }
-        output::contract::Format::Hex => write_plain_line(format_args!("{}", result.bytes_hex)),
-        output::contract::Format::Raw => write_raw(result.bytes()),
-        output::contract::Format::Json => {
-            emit_aggregate(output::contract::Command::Build, result, diagnostics)
-        }
-        _ => unreachable!("build format is checked before command dispatch"),
+        BuildFormat::Hex => write_plain_line(format_args!("{}", result.bytes_hex)),
+        BuildFormat::Raw => write_raw(result.bytes()),
+        BuildFormat::Json => emit_aggregate(output::contract::Command::Build, result, diagnostics),
     }
 }

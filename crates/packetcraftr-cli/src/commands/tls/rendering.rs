@@ -3,6 +3,7 @@
 
 use packetcraftr::{analysis, core, output};
 
+use crate::commands::format::ToolFormat;
 use crate::errors::CliError;
 use crate::rendering::{NdjsonStream, comma_separated, emit_aggregate, write_stdout_line};
 
@@ -56,7 +57,7 @@ impl State {
 }
 
 pub(super) fn render_session(
-    format: output::contract::Format,
+    format: ToolFormat,
     session: analysis::tls::Session,
     state: &mut State,
     stream: &mut NdjsonStream,
@@ -64,17 +65,12 @@ pub(super) fn render_session(
     let session = Session::from(session);
     state.select();
     match format {
-        output::contract::Format::Text => {
-            write_stdout_line(format_args!("{}", session_line(&session)))
-        }
-        output::contract::Format::Json => {
+        ToolFormat::Text => write_stdout_line(format_args!("{}", session_line(&session))),
+        ToolFormat::Json => {
             state.retain(session);
             Ok(())
         }
-        output::contract::Format::Ndjson => {
-            stream.emit_data(output::tls::Event::session(session), Vec::new())
-        }
-        _ => unreachable!("the format contract admits only text, json, and ndjson"),
+        ToolFormat::Ndjson => stream.emit_data(output::tls::Event::session(session), Vec::new()),
     }
 }
 

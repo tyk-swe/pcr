@@ -5,7 +5,7 @@ use packetcraftr::{core, output};
 
 use crate::errors::CliError;
 use crate::rendering::{
-    NdjsonStream, captured_frame_text, comma_separated, optional_display, output_timestamp_text,
+    captured_frame_text, comma_separated, optional_display, output_timestamp_text,
     render_diagnostics_text, render_optional, write_stdout_line,
 };
 
@@ -29,11 +29,10 @@ pub(super) fn render_text(
                 "  sequence={} attempt={} status={} response={} sent={} received={} responder={} latency={} port={} reason={}",
                 probe.sequence,
                 probe.attempt,
-                probe_status_name(probe.status),
+                probe.status.as_str(),
                 probe
                     .response_kind
-                    .map(response_kind_name)
-                    .unwrap_or("none"),
+                    .map_or("none", output::traceroute::ResponseKind::as_str),
                 output_timestamp_text(probe.sent_at),
                 render_optional(probe.received_at, output_timestamp_text),
                 optional_display(probe.responder),
@@ -55,53 +54,12 @@ pub(super) fn render_text(
     }
     write_stdout_line(format_args!(
         "trace completion={} hops={} probes={} bytes={}",
-        completion_name(result.completion),
+        result.completion.as_str(),
         result.hops.len(),
         stats.packets_completed,
         stats.bytes
     ))?;
     render_diagnostics_text(&diagnostics)
-}
-
-fn probe_status_name(value: output::traceroute::ProbeStatus) -> &'static str {
-    match value {
-        output::traceroute::ProbeStatus::Response => "response",
-        output::traceroute::ProbeStatus::Timeout => "timeout",
-    }
-}
-
-fn response_kind_name(value: output::traceroute::ResponseKind) -> &'static str {
-    match value {
-        output::traceroute::ResponseKind::Intermediate => "intermediate",
-        output::traceroute::ResponseKind::DestinationReached => "destination_reached",
-        output::traceroute::ResponseKind::Unreachable => "unreachable",
-    }
-}
-
-fn completion_name(value: output::traceroute::Completion) -> &'static str {
-    match value {
-        output::traceroute::Completion::DestinationReached => "destination_reached",
-        output::traceroute::Completion::Unreachable => "unreachable",
-        output::traceroute::Completion::MaximumHops => "maximum_hops",
-        output::traceroute::Completion::Timeout => "timeout",
-    }
-}
-
-pub(super) fn render_event(
-    event: packetcraftr::traceroute::Event,
-    stream: &NdjsonStream,
-) -> Result<(), CliError> {
-    let (event, diagnostics) =
-        output::traceroute::Event::try_from_traceroute(event).map_err(CliError::classified)?;
-    stream.emit_data(event, diagnostics)
-}
-
-pub(super) fn render_complete(
-    summary: packetcraftr::traceroute::Summary,
-    stream: &NdjsonStream,
-) -> Result<(), CliError> {
-    let (event, diagnostics, stats) = output::traceroute::Event::complete_from_traceroute(summary);
-    stream.complete_with_stats(event, diagnostics, stats)
 }
 
 #[cfg(test)]
@@ -113,7 +71,9 @@ mod tests {
 
     use packetcraftr::traceroute;
 
+    use super::super::Traceroute;
     use super::*;
+    use crate::commands::target_workflow::TargetWorkflow as _;
     use crate::rendering::ndjson_test_support::{assert_contiguous, stream};
 
     fn probe_event(sequence: u64, hop_limit: u8) -> traceroute::Event {
@@ -156,9 +116,9 @@ mod tests {
     #[test]
     fn traceroute_stream_positions_ignore_probe_and_hop_ids() {
         let (sink, output) = stream(output::contract::Command::Traceroute);
-        render_event(probe_event(4_000_000_000, 200), &sink).unwrap();
-        render_event(probe_event(3, 2), &sink).unwrap();
-        render_complete(summary(), &sink).unwrap();
+        Traceroute::emit_event(probe_event(4_000_000_000, 200), &sink).unwrap();
+        Traceroute::emit_event(probe_event(3, 2), &sink).unwrap();
+        Traceroute::emit_complete(summary(), &sink).unwrap();
 
         let records = output.records();
         assert_contiguous(&records);

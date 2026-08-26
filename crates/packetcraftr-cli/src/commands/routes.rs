@@ -6,12 +6,14 @@ use packetcraftr::{netio as net, output};
 
 use super::super::errors::CliError;
 use super::super::rendering::{emit_aggregate, optional_display, write_stdout_line};
+use super::format::AggregateFormat;
 
 pub(super) const AFTER_LONG_HELP: &str = r#"Examples:
   packetcraftr routes
   packetcraftr --output json routes"#;
 
 pub(super) fn run(format: output::contract::Format) -> Result<(), CliError> {
+    let format = AggregateFormat::narrow(output::contract::Command::Routes, format)?;
     let interfaces = net::interface::SystemProvider
         .interfaces()
         .map_err(CliError::classified)?;
@@ -38,7 +40,7 @@ pub(super) fn run(format: output::contract::Format) -> Result<(), CliError> {
         routes: routes.into_iter().map(Into::into).collect(),
     };
     match format {
-        output::contract::Format::Text => {
+        AggregateFormat::Text => {
             for route in result.routes {
                 write_stdout_line(format_args!(
                     "{} (index {}): source={} mtu={} capability={:?} link_type={}",
@@ -52,9 +54,8 @@ pub(super) fn run(format: output::contract::Format) -> Result<(), CliError> {
             }
             Ok(())
         }
-        output::contract::Format::Json => {
+        AggregateFormat::Json => {
             emit_aggregate(output::contract::Command::Routes, result, Vec::new())
         }
-        _ => unreachable!("routes format is checked before command dispatch"),
     }
 }

@@ -9,12 +9,13 @@
 use std::path::Path;
 use std::process::{Command, Output};
 
+use packetcraftr::output;
 use serde_json::Value;
 
 #[path = "../../src/test_support.rs"]
 mod shared;
 
-pub(crate) use shared::{assert_contiguous, schema_validator};
+pub(crate) use shared::{SharedBuffer, assert_contiguous, schema_validator};
 
 pub(crate) fn path_text(path: &Path) -> &str {
     path.to_str().expect("temporary path must be UTF-8")
@@ -64,4 +65,15 @@ pub(crate) fn parse_ndjson(output: &Output) -> Vec<Value> {
             .expect("NDJSON record must match the published schema");
     }
     records
+}
+
+/// An NDJSON encoder writing into a buffer the caller can read back.
+pub(crate) fn stream(
+    command: output::contract::Command,
+) -> (output::envelope::StreamEncoder, SharedBuffer) {
+    let buffer = SharedBuffer::default();
+    (
+        output::envelope::StreamEncoder::new(Some(command), buffer.clone()),
+        buffer,
+    )
 }

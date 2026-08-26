@@ -13,6 +13,7 @@ use std::time::Duration;
 use packetcraftr::{analysis::pcap::Reader, netio as net, output};
 
 use self::arguments::Args;
+use super::format::ExchangeFormat;
 use super::registry;
 use crate::command_options::OfflineCaptureLimitsArgs;
 use crate::errors::CliError;
@@ -38,6 +39,7 @@ pub(super) fn run(
     format: output::contract::Format,
     stream: &mut NdjsonStream,
 ) -> Result<(), CliError> {
+    let format = ExchangeFormat::narrow(output::contract::Command::Replay, format)?;
     let mut prepared = prepare(&arguments)?;
     let filtered = prepared.filter.is_some();
     let selector = prepared
@@ -45,7 +47,7 @@ pub(super) fn run(
         .as_mut()
         .map(|selector| selector as &mut dyn packetcraftr::replay::Selector);
     match format {
-        output::contract::Format::Text => rendering::render_text(
+        ExchangeFormat::Text => rendering::render_text(
             &mut prepared.reader,
             &prepared.options,
             selector,
@@ -54,7 +56,7 @@ pub(super) fn run(
             &mut prepared.clock,
             filtered,
         ),
-        output::contract::Format::Json => rendering::render_aggregate(
+        ExchangeFormat::Json => rendering::render_aggregate(
             &mut prepared.reader,
             &prepared.options,
             selector,
@@ -63,7 +65,7 @@ pub(super) fn run(
             &mut prepared.clock,
             prepared.requested_interface,
         ),
-        output::contract::Format::Ndjson => rendering::render_stream(
+        ExchangeFormat::Ndjson => rendering::render_stream(
             &mut prepared.reader,
             &prepared.options,
             selector,
@@ -72,21 +74,18 @@ pub(super) fn run(
             &mut prepared.clock,
             stream,
         ),
-        output::contract::Format::Pcap | output::contract::Format::PcapNg => {
-            rendering::render_capture(
-                &mut prepared.reader,
-                &prepared.options,
-                selector,
-                &mut prepared.authorizer,
-                &mut prepared.transmitter,
-                &mut prepared.clock,
-                rendering::CaptureSettings {
-                    format,
-                    max_interfaces: prepared.max_interfaces,
-                },
-            )
-        }
-        _ => unreachable!("replay format is checked before command dispatch"),
+        ExchangeFormat::Pcap | ExchangeFormat::PcapNg => rendering::render_capture(
+            &mut prepared.reader,
+            &prepared.options,
+            selector,
+            &mut prepared.authorizer,
+            &mut prepared.transmitter,
+            &mut prepared.clock,
+            rendering::CaptureSettings {
+                format: format.format(),
+                max_interfaces: prepared.max_interfaces,
+            },
+        ),
     }
 }
 

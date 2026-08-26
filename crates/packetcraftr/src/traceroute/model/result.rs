@@ -20,6 +20,16 @@ pub enum ProbeStatus {
     Timeout,
 }
 
+impl ProbeStatus {
+    /// The name the CLI prints, identical to the serialized one.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Response => "response",
+            Self::Timeout => "timeout",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ResponseKind {
@@ -29,6 +39,15 @@ pub enum ResponseKind {
 }
 
 impl ResponseKind {
+    /// The name the CLI prints, identical to the serialized one.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Intermediate => "intermediate",
+            Self::DestinationReached => "destination_reached",
+            Self::Unreachable => "unreachable",
+        }
+    }
+
     pub(in crate::traceroute) const fn rank(self) -> u8 {
         match self {
             Self::Intermediate => 1,
@@ -45,6 +64,18 @@ pub enum Completion {
     Unreachable,
     MaximumHops,
     Timeout,
+}
+
+impl Completion {
+    /// The name the CLI prints, identical to the serialized one.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::DestinationReached => "destination_reached",
+            Self::Unreachable => "unreachable",
+            Self::MaximumHops => "maximum_hops",
+            Self::Timeout => "timeout",
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -111,4 +142,36 @@ pub struct Summary {
     pub completion: Completion,
     pub diagnostics: Vec<Diagnostic>,
     pub stats: Stats,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// One vocabulary: what the CLI prints for a hop is what the JSON document
+    /// calls it.
+    #[test]
+    fn names_match_the_serialized_names() {
+        for status in [ProbeStatus::Response, ProbeStatus::Timeout] {
+            let serialized = serde_json::to_value(status).expect("probe status is a name");
+            assert_eq!(serialized.as_str(), Some(status.as_str()));
+        }
+        for kind in [
+            ResponseKind::Intermediate,
+            ResponseKind::DestinationReached,
+            ResponseKind::Unreachable,
+        ] {
+            let serialized = serde_json::to_value(kind).expect("response kind is a name");
+            assert_eq!(serialized.as_str(), Some(kind.as_str()));
+        }
+        for completion in [
+            Completion::DestinationReached,
+            Completion::Unreachable,
+            Completion::MaximumHops,
+            Completion::Timeout,
+        ] {
+            let serialized = serde_json::to_value(completion).expect("completion is a name");
+            assert_eq!(serialized.as_str(), Some(completion.as_str()));
+        }
+    }
 }

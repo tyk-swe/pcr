@@ -310,9 +310,7 @@ mod tests {
     impl packetcraftr::replay::Authorizer for FakeAuthorizer {
         fn authorize_operation(
             &mut self,
-            _context: packetcraftr::replay::AuthorizationContext,
-            _frame: &Frame,
-            _mode: net::link::Mode,
+            _request: packetcraftr::replay::Operation<'_>,
         ) -> Result<(), packetcraftr::BoundaryError> {
             self.calls += 1;
             if self.deny_on == Some(self.calls) {

@@ -19,6 +19,7 @@ use packetcraftr::{
 };
 
 use self::arguments::Args;
+use super::format::{CaptureFormat, FrameFormat};
 use super::registry_with_tls_ports;
 use crate::command_options::OfflineCaptureLimitsArgs;
 use crate::errors::CliError;
@@ -53,6 +54,7 @@ pub(super) fn run(
         dissect,
         tls_ports,
     } = arguments;
+    let format = CaptureFormat::narrow(output::contract::Command::Read, format)?;
     validate_limits(limits)?;
     validate_dissect_format(dissect, format)?;
     let decoding = prepare_decoding(filter.as_deref(), dissect, &tls_ports.ports)?;
@@ -62,12 +64,19 @@ pub(super) fn run(
         max_bytes: limits.max_bytes,
     };
 
-    if matches!(
-        format,
-        output::contract::Format::Pcap | output::contract::Format::PcapNg
-    ) {
-        return rewrite_capture(&mut reader, format, stream_limits, filter.is_some());
-    }
+    let format = match format {
+        CaptureFormat::Pcap | CaptureFormat::PcapNg => {
+            return rewrite_capture(
+                &mut reader,
+                format.format(),
+                stream_limits,
+                filter.is_some(),
+            );
+        }
+        CaptureFormat::Text => FrameFormat::Text,
+        CaptureFormat::Ndjson => FrameFormat::Ndjson,
+        CaptureFormat::Hex => FrameFormat::Hex,
+    };
     read_records(
         &mut reader,
         limits,
@@ -87,23 +96,15 @@ fn validate_limits(limits: OfflineCaptureLimitsArgs) -> Result<(), CliError> {
     )
 }
 
-fn validate_dissect_format(
-    dissect: bool,
-    format: output::contract::Format,
-) -> Result<(), CliError> {
-    if dissect
-        && !matches!(
-            format,
-            output::contract::Format::Text | output::contract::Format::Ndjson
-        )
-    {
+fn validate_dissect_format(dissect: bool, format: CaptureFormat) -> Result<(), CliError> {
+    if dissect && !matches!(format, CaptureFormat::Text | CaptureFormat::Ndjson) {
         return Err(CliError::from_classification(
             Classification::new(
                 "cli.dissect_unsupported_format",
                 Kind::Cli,
                 Some("use --output text or --output ndjson to show the layer stack"),
             ),
-            format!("--dissect has no effect on {format} output"),
+            format!("--dissect has no effect on {} output", format.format()),
             Vec::new(),
         ));
     }
@@ -171,7 +172,7 @@ fn read_records(
     limits: OfflineCaptureLimitsArgs,
     decoding: Option<&Decoding>,
     dissect: bool,
-    format: output::contract::Format,
+    format: FrameFormat,
     stream: &mut NdjsonStream,
 ) -> Result<(), CliError> {
     let mut state = StreamState::default();
@@ -183,7 +184,7 @@ fn read_records(
         render_record(&event, format, stream)?;
         state.frames_matched = increment_counter(state.frames_matched, "read matched-frame count")?;
     }
-    if format == output::contract::Format::Ndjson {
+    if format == FrameFormat::Ndjson {
         stream.complete(
             output::read::Event::Complete {
                 frames_read: state.frames_read,

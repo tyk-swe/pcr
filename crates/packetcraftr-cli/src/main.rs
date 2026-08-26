@@ -13,8 +13,6 @@ mod commands;
 mod errors;
 mod filtering;
 mod input;
-#[cfg(test)]
-mod ndjson_conformance;
 mod rendering;
 mod startup;
 mod system;

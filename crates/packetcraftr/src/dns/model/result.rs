@@ -297,6 +297,20 @@ pub enum Outcome {
     NetworkFailure,
 }
 
+impl Outcome {
+    /// The name the CLI prints, identical to the serialized one.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Response => "response",
+            Self::Truncated => "truncated",
+            Self::Timeout => "timeout",
+            Self::Unrelated => "unrelated",
+            Self::DecodeFailure => "decode_failure",
+            Self::NetworkFailure => "network_failure",
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct AttemptEvidence {
     pub attempt: u32,
@@ -374,4 +388,26 @@ pub struct Summary {
     pub response: Option<ResponseMetadata>,
     pub diagnostics: Vec<Diagnostic>,
     pub stats: Stats,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// One vocabulary: what the CLI prints for an attempt is what the JSON
+    /// document calls it.
+    #[test]
+    fn outcome_names_match_the_serialized_names() {
+        for outcome in [
+            Outcome::Response,
+            Outcome::Truncated,
+            Outcome::Timeout,
+            Outcome::Unrelated,
+            Outcome::DecodeFailure,
+            Outcome::NetworkFailure,
+        ] {
+            let serialized = serde_json::to_value(outcome).expect("outcome is a name");
+            assert_eq!(serialized.as_str(), Some(outcome.as_str()));
+        }
+    }
 }

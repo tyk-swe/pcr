@@ -25,6 +25,18 @@ pub enum Classification {
 }
 
 impl Classification {
+    /// The name the CLI prints, identical to the serialized one.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Open => "open",
+            Self::Closed => "closed",
+            Self::Filtered => "filtered",
+            Self::Unreachable => "unreachable",
+            Self::Unknown => "unknown",
+            Self::Timeout => "timeout",
+        }
+    }
+
     pub(in crate::scan) fn rank(self) -> u8 {
         match self {
             Self::Open => 6,
@@ -42,6 +54,16 @@ impl Classification {
 pub enum ProbeStatus {
     Response,
     Timeout,
+}
+
+impl ProbeStatus {
+    /// The name the CLI prints, identical to the serialized one.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Response => "response",
+            Self::Timeout => "timeout",
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -98,4 +120,31 @@ pub struct Summary {
     pub resolved_addresses: Vec<IpAddr>,
     pub diagnostics: Vec<Diagnostic>,
     pub stats: Stats,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// One vocabulary: what the CLI prints for a probe is what the JSON
+    /// document calls it.
+    #[test]
+    fn names_match_the_serialized_names() {
+        for classification in [
+            Classification::Open,
+            Classification::Closed,
+            Classification::Filtered,
+            Classification::Unreachable,
+            Classification::Unknown,
+            Classification::Timeout,
+        ] {
+            let serialized =
+                serde_json::to_value(classification).expect("classification is a name");
+            assert_eq!(serialized.as_str(), Some(classification.as_str()));
+        }
+        for status in [ProbeStatus::Response, ProbeStatus::Timeout] {
+            let serialized = serde_json::to_value(status).expect("probe status is a name");
+            assert_eq!(serialized.as_str(), Some(status.as_str()));
+        }
+    }
 }

@@ -11,9 +11,11 @@ use self::arguments::Args;
 use super::super::errors::CliError;
 use super::super::rendering::{emit_aggregate, optional_display, write_stdout_line};
 use super::super::system::{client, prepare_route};
+use super::format::AggregateFormat;
 use super::registry;
 
 pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
+    let format = AggregateFormat::narrow(output::contract::Command::Plan, format)?;
     let Args { route, policy } = arguments;
     let registry = registry()?;
     let request = prepare_route(route, policy.into_policy(), &registry)?;
@@ -23,11 +25,10 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
         .map_err(CliError::classified)?;
     let result = output::plan::Result { plan: route.into() };
     match format {
-        output::contract::Format::Text => render_text(&result.plan),
-        output::contract::Format::Json => {
+        AggregateFormat::Text => render_text(&result.plan),
+        AggregateFormat::Json => {
             emit_aggregate(output::contract::Command::Plan, result, Vec::new())
         }
-        _ => unreachable!("plan format is checked before command dispatch"),
     }
 }
 

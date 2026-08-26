@@ -5,7 +5,7 @@ use packetcraftr::{core, output};
 
 use crate::errors::CliError;
 use crate::rendering::{
-    NdjsonStream, captured_frame_text, comma_separated, optional_display, output_timestamp_text,
+    captured_frame_text, comma_separated, optional_display, output_timestamp_text,
     render_diagnostics_text, render_optional, write_stdout_line,
 };
 
@@ -23,7 +23,7 @@ pub(super) fn render_text(
         result.query_type,
         result.transaction_id,
         result.transport,
-        outcome_name(result.outcome),
+        result.outcome.as_str(),
     ))?;
     for attempt in &result.attempts {
         write_stdout_line(format_args!(
@@ -31,7 +31,7 @@ pub(super) fn render_text(
             attempt.attempt,
             attempt.server_address,
             attempt.source_port,
-            outcome_name(attempt.status),
+            attempt.status.as_str(),
             output_timestamp_text(attempt.sent_at),
             render_optional(attempt.received_at, output_timestamp_text),
             render_optional(attempt.latency, |value| format!("{value:?}")),
@@ -96,23 +96,6 @@ fn render_record(
     ))
 }
 
-pub(super) fn render_event(
-    event: packetcraftr::dns::Event,
-    stream: &NdjsonStream,
-) -> Result<(), CliError> {
-    let (event, diagnostics) =
-        output::dns::Event::try_from_dns(event).map_err(CliError::classified)?;
-    stream.emit_data(event, diagnostics)
-}
-
-pub(super) fn render_complete(
-    summary: packetcraftr::dns::Summary,
-    stream: &NdjsonStream,
-) -> Result<(), CliError> {
-    let (event, diagnostics, stats) = output::dns::Event::complete_from_dns(summary);
-    stream.complete_with_stats(event, diagnostics, stats)
-}
-
 struct ResponseLine<'a> {
     response_code: String,
     response_code_name: &'a str,
@@ -140,17 +123,6 @@ fn response_summary(summary: ResponseLine<'_>) -> String {
     )
 }
 
-fn outcome_name(value: output::dns::Outcome) -> &'static str {
-    match value {
-        output::dns::Outcome::Response => "response",
-        output::dns::Outcome::Truncated => "truncated",
-        output::dns::Outcome::Timeout => "timeout",
-        output::dns::Outcome::Unrelated => "unrelated",
-        output::dns::Outcome::DecodeFailure => "decode_failure",
-        output::dns::Outcome::NetworkFailure => "network_failure",
-    }
-}
-
 #[cfg(test)]
 mod tests {
     #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
@@ -161,8 +133,9 @@ mod tests {
 
     use packetcraftr::dns;
 
+    use super::super::Dns;
     use super::{ResponseLine, response_summary};
-    use super::{render_complete, render_event};
+    use crate::commands::target_workflow::TargetWorkflow as _;
     use crate::rendering::ndjson_test_support::{assert_contiguous, stream};
     use packetcraftr::output;
 
@@ -225,9 +198,9 @@ mod tests {
     #[test]
     fn dns_stream_positions_ignore_noncontiguous_attempt_ids() {
         let (sink, output) = stream(output::contract::Command::Dns);
-        render_event(attempt_event(31), &sink).unwrap();
-        render_event(attempt_event(2), &sink).unwrap();
-        render_complete(summary(), &sink).unwrap();
+        Dns::emit_event(attempt_event(31), &sink).unwrap();
+        Dns::emit_event(attempt_event(2), &sink).unwrap();
+        Dns::emit_complete(summary(), &sink).unwrap();
 
         let records = output.records();
         assert_contiguous(&records);

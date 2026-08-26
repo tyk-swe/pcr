@@ -2291,6 +2291,12 @@
             },
             "decoded": {
               "$ref": "#/$defs/decodedStack"
+            },
+            "columns": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/fieldValue"
+              }
             }
           },
           "additionalProperties": false

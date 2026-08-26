@@ -410,3 +410,62 @@ pub(super) fn attach_slice(
     field.specs = vec![FieldSpec::synthetic(FieldKind::Bytes)];
     Ok(())
 }
+
+/// A parsed field path that can be evaluated against a packet context.
+#[derive(Clone, Debug)]
+pub struct FieldPath {
+    field: FieldRef,
+}
+
+impl FieldPath {
+    /// Parses a field path against the registry.
+    pub fn parse(path: &str, registry: &Registry) -> Result<Self, Error> {
+        let (stripped, slice) = if let Some(bracket_pos) = path.find('[') {
+            if !path.ends_with(']') {
+                return Err(Error::Syntax {
+                    offset: bracket_pos,
+                    message: "unclosed `[` in field slice".to_owned(),
+                });
+            }
+            let inner_end = path.len().saturating_sub(1);
+            let inner_start = bracket_pos.saturating_add(1);
+            let prefix = path.get(..bracket_pos).unwrap_or("");
+            let slice_content = path.get(inner_start..inner_end).unwrap_or("");
+            (prefix, Some((slice_content, bracket_pos)))
+        } else {
+            (path, None)
+        };
+
+        let resolved = resolve(stripped, registry, 0)?;
+        let mut field_ref = match resolved {
+            Resolved::Field(field) => field,
+            Resolved::Layer { .. } => {
+                return Err(Error::UnknownField {
+                    offset: 0,
+                    path: path.to_owned(),
+                });
+            }
+        };
+
+        if let Some((slice_contents, offset)) = slice {
+            attach_slice(&mut field_ref, slice_contents, offset)?;
+        }
+
+        Ok(Self { field: field_ref })
+    }
+
+    /// Evaluates the path against a packet context.
+    #[must_use]
+    pub fn evaluate(
+        &self,
+        context: &super::eval::Context<'_>,
+    ) -> Option<super::super::field::FieldValue> {
+        super::eval::evaluate_field(&self.field, context)
+    }
+
+    /// Returns the original path string.
+    #[must_use]
+    pub fn path(&self) -> &str {
+        &self.field.path
+    }
+}

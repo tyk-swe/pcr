@@ -7,6 +7,7 @@ use crate::command_options::{OfflineCaptureLimitsArgs, TlsPortArgs};
 
 pub(crate) const AFTER_LONG_HELP: &str = r#"Examples:
   packetcraftr read capture.pcapng --max-frames 100
+  packetcraftr --output document read capture.pcapng --max-frames 10
   packetcraftr --output ndjson read capture.pcap
   packetcraftr read capture.pcapng --filter 'tcp.flags.syn == 1 && !tcp.flags.ack' --dissect
   packetcraftr read capture.pcapng --tls-port 4433 --filter 'tls.sni contains "example"' --dissect
@@ -32,6 +33,12 @@ pub(crate) struct Args {
     /// Include each frame's dissected layer stack in the output.
     #[arg(long)]
     pub(crate) dissect: bool,
+    /// Emit specified column values in order for each frame (comma-separated paths).
+    #[arg(long, value_delimiter = ',')]
+    pub(crate) columns: Vec<String>,
+    /// Emit every field in document output, skipping minimization.
+    #[arg(long)]
+    pub(crate) full: bool,
     #[command(flatten)]
     pub(crate) tls_ports: TlsPortArgs,
 }

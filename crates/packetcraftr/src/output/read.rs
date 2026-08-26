@@ -3,7 +3,10 @@
 
 //! Stream output for the `read` command.
 
+use std::collections::BTreeMap;
+
 use packetcraftr_core::decode::DecodedPacket;
+use packetcraftr_core::field::FieldValue;
 use packetcraftr_core::frame::Frame as CaptureFrame;
 use serde::Serialize;
 
@@ -21,6 +24,8 @@ pub enum Event {
         frame: Captured,
         #[serde(skip_serializing_if = "Option::is_none")]
         decoded: Option<Stack>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        columns: Option<BTreeMap<String, FieldValue>>,
     },
     Complete {
         frames_read: u64,
@@ -38,6 +43,7 @@ impl Event {
             source_frame: source_frame.try_into()?,
             frame: Captured::try_from_frame(frame)?,
             decoded: None,
+            columns: None,
         })
     }
 
@@ -51,6 +57,15 @@ impl Event {
             source_frame: source_frame.try_into()?,
             frame: Captured::try_from_frame(frame)?,
             decoded: Some(Stack::from_decoded(decoded)),
+            columns: None,
         })
+    }
+
+    #[must_use]
+    pub fn with_columns(mut self, cols: BTreeMap<String, FieldValue>) -> Self {
+        if let Self::Frame { columns, .. } = &mut self {
+            *columns = Some(cols);
+        }
+        self
     }
 }

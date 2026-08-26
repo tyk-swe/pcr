@@ -156,7 +156,9 @@ fn commit_merge(
     validated
         .try_reserve_exact(plan.affected_segment_count)
         .map_err(|_| Error::AllocationFailed {
-            requested: plan.affected_segment_count,
+            requested: plan
+                .affected_segment_count
+                .saturating_mul(std::mem::size_of::<u32>()),
         })?;
     for index in 0..plan.affected_segment_count {
         let value = segments.get(&current).ok_or(Error::InconsistentMergePlan)?;

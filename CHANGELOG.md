@@ -167,9 +167,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   record all report the same classes as the rest of the CLI: I/O failures exit
   5 with `io.runtime` (two of them used the `cli` class), and a serialization
   failure is `internal` (exit 70) rather than a missing native capability.
-  Scripts keyed on the old exit codes see 5 where they saw 2 for those two
-  I/O failures, and 70 where they saw 4 for the serialization failure; the
-  classification strings are unchanged.
+  Scripts keyed on those failures see exit 5 and class `io` where they saw
+  exit 2 and class `cli`, and exit 70 and class `internal` where they saw
+  exit 4 and class `capability`.
 - `fuzz` consults the traffic policy before every live campaign, including one
   where no case built; the gate used to be skipped on that path.
 - A single neighbor-evidence frame larger than the capture byte budget is

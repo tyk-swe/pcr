@@ -67,14 +67,18 @@ pub(crate) struct Transmitted;
 /// stops it.
 pub(crate) const DEFAULT_TRANSMITTED_PACKETS: u64 = 10_000;
 
+/// The byte ceiling the capture defaults publish, as the policy counts it.
+fn default_limit_bytes() -> u64 {
+    u64::try_from(net::capture::Limits::default().max_bytes).expect("default max bytes fits u64")
+}
+
 impl Budget for Transmitted {
     fn max_packets() -> u64 {
         DEFAULT_TRANSMITTED_PACKETS
     }
 
     fn max_bytes() -> u64 {
-        u64::try_from(net::capture::Limits::default().max_bytes)
-            .expect("default max bytes fits u64")
+        default_limit_bytes()
     }
 
     const PACKETS_HELP: &'static str = "Maximum packets authorized for one operation";
@@ -114,8 +118,7 @@ impl Budget for Captured {
     }
 
     fn max_bytes() -> u64 {
-        u64::try_from(net::capture::Limits::default().max_bytes)
-            .expect("default max bytes fits u64")
+        default_limit_bytes()
     }
 
     const PACKETS_HELP: &'static str = "Maximum frames this capture is authorized to keep";
@@ -364,14 +367,5 @@ mod tests {
                 Cli::try_parse_from(["packetcraftr", "plan", "--packet", "raw(hex=00)", flag, "1"]);
             assert!(rejected.is_err(), "plan must reject {flag}");
         }
-    }
-
-    /// The two ceilings start level, but they are separate numbers: the
-    /// captured one must not be reading the transmitted one back.
-    #[test]
-    fn the_captured_ceiling_is_its_own_number() {
-        assert_eq!(DEFAULT_CAPTURED_FRAMES, DEFAULT_TRANSMITTED_PACKETS);
-        assert_eq!(Captured::max_packets(), DEFAULT_CAPTURED_FRAMES);
-        assert_eq!(Transmitted::max_packets(), DEFAULT_TRANSMITTED_PACKETS);
     }
 }

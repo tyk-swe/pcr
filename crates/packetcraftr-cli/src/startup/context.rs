@@ -5,7 +5,7 @@ use std::ffi::{OsStr, OsString};
 
 use packetcraftr::output;
 
-use crate::cli::ColorChoice;
+use crate::cli::{ColorChoice, Format};
 
 /// The formats that can carry a structured error document. A clap failure is
 /// reported in one of these or, for everything else, as prose on stderr.
@@ -46,7 +46,7 @@ fn parse(arguments: &[OsString]) -> Context {
         if argument.as_os_str() == "--output" {
             let value = separate_option_value(arguments, index);
             if let Some(parsed) = value.and_then(OsStr::to_str).and_then(parse_machine_format) {
-                context.format = Some(parsed);
+                context.format = parsed;
             }
             index = index
                 .saturating_add(usize::from(value.is_some()))
@@ -67,7 +67,7 @@ fn parse(arguments: &[OsString]) -> Context {
         let argument = argument.to_str();
         if let Some(value) = argument.and_then(|argument| argument.strip_prefix("--output=")) {
             if let Some(parsed) = parse_machine_format(value) {
-                context.format = Some(parsed);
+                context.format = parsed;
             }
             index = index.saturating_add(1);
             continue;
@@ -103,12 +103,16 @@ fn separate_option_value(arguments: &[OsString], option_index: usize) -> Option<
         })
 }
 
-fn parse_machine_format(value: &str) -> Option<MachineFormat> {
-    match value {
-        "json" => Some(MachineFormat::Json),
-        "ndjson" => Some(MachineFormat::Ndjson),
-        _ => None,
-    }
+/// `None` for a value clap would reject, so the earlier choice stands;
+/// `Some(None)` for a format clap accepts that cannot carry a structured
+/// error document, so a parse failure is reported as prose.
+fn parse_machine_format(value: &str) -> Option<Option<MachineFormat>> {
+    let format = <Format as clap::ValueEnum>::from_str(value, false).ok()?;
+    Some(match format {
+        Format::Json => Some(MachineFormat::Json),
+        Format::Ndjson => Some(MachineFormat::Ndjson),
+        Format::Text | Format::Hex | Format::Raw | Format::Pcap | Format::PcapNg => None,
+    })
 }
 
 fn parse_color_choice(value: &str) -> Option<ColorChoice> {
@@ -198,6 +202,27 @@ mod tests {
             Case {
                 arguments: &["packetcraftr", "--output", "json", "build", "--output"],
                 format: Some(MachineFormat::Json),
+                color: "auto",
+                command: Some(output::contract::Command::Build),
+            },
+            // A later format clap accepts wins even when it cannot carry a
+            // structured document: the parse failure is then prose.
+            Case {
+                arguments: &[
+                    "packetcraftr",
+                    "--output",
+                    "json",
+                    "--output",
+                    "text",
+                    "build",
+                ],
+                format: None,
+                color: "auto",
+                command: Some(output::contract::Command::Build),
+            },
+            Case {
+                arguments: &["packetcraftr", "--output=ndjson", "--output=hex", "build"],
+                format: None,
                 color: "auto",
                 command: Some(output::contract::Command::Build),
             },

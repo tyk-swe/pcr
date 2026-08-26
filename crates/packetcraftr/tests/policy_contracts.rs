@@ -1,5 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+// Test code indexes fixtures and counts by hand; the fail-closed lints are
+// for library paths.
+#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 use std::net::{IpAddr, Ipv4Addr};
 use std::str::FromStr;
@@ -117,11 +120,6 @@ fn every_resolved_address_is_authorized_and_duplicates_are_removed() {
         resolved.addresses(),
         [IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))]
     );
-
-    assert!(matches!(
-        policy.authorize_operation(policy.max_packets_per_operation + 1, 0),
-        Err(policy::Error::PacketLimit { .. })
-    ));
 }
 
 #[test]

@@ -1,21 +1,20 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+// Test code indexes fixtures and counts by hand; the fail-closed lints are
+// for library paths.
+#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 //! Contracts for the `tls` command and the `--tls-port` remap it shares with
 //! `read` and `dissect`.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 mod support;
 #[path = "support/tls_capture.rs"]
 mod tls_capture;
 
-use support::{assert_contiguous, parse_json, parse_ndjson, run, run_success};
+use support::{assert_contiguous, parse_json, parse_ndjson, path_text, run, run_success};
 use tls_capture::{Handshake, client_hello_frame_hex, write_capture, write_capture_with_udp_443};
-
-fn path_text(path: &Path) -> &str {
-    path.to_str().expect("temporary path must be UTF-8")
-}
 
 /// The capture published for the README and `--help` examples.
 fn published_capture() -> PathBuf {

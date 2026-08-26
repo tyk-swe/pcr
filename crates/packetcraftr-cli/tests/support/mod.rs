@@ -1,6 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+// Shared by several test binaries; each one uses a different subset.
+#![allow(dead_code)]
+// Test code indexes fixtures and counts by hand; the fail-closed lints are
+// for library paths.
+#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
+use std::path::Path;
 use std::process::{Command, Output};
 
 use serde_json::Value;
@@ -9,6 +15,10 @@ use serde_json::Value;
 mod shared;
 
 pub(crate) use shared::{assert_contiguous, schema_validator};
+
+pub(crate) fn path_text(path: &Path) -> &str {
+    path.to_str().expect("temporary path must be UTF-8")
+}
 
 pub(crate) fn run(arguments: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_packetcraftr"))

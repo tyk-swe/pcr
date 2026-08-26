@@ -19,6 +19,11 @@ use super::model::{Probe, Transport};
 
 const SCAN_UDP_SOURCE_PORT_BASE: u16 = 49_152;
 
+#[expect(
+    clippy::arithmetic_side_effects,
+    reason = "`width` is the constant 16_384: the ephemeral range is fixed and non-empty, so the \
+              remainder is below `width` and the base plus that remainder cannot exceed u16::MAX"
+)]
 fn scan_udp_source_port(attempt: u32) -> u16 {
     let width = u32::from(u16::MAX) - u32::from(SCAN_UDP_SOURCE_PORT_BASE) + 1;
     let offset = attempt.saturating_sub(1) % width;

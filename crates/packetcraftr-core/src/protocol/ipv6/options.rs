@@ -111,7 +111,7 @@ where
         .checked_add(2)
         .ok_or_else(|| invalid(name, "option length overflow"))?;
     let header_len = unpadded
-        .checked_add((8 - unpadded % 8) % 8)
+        .checked_next_multiple_of(8)
         .ok_or_else(|| invalid(name, "option padding overflow"))?;
     if header_len > 2_048 {
         return Err(invalid(
@@ -119,18 +119,22 @@ where
             "options header exceeds 2048-byte secure default",
         ));
     }
-    let hdr_ext_len = u8::try_from(header_len / 8 - 1)
+    let hdr_ext_len = u8::try_from((header_len / 8).saturating_sub(1))
         .map_err(|_| invalid(name, "options header length cannot be represented"))?;
-    let mut prefix = vec![0u8; header_len];
-    prefix[0] = next;
-    prefix[1] = hdr_ext_len;
-    prefix[2..2 + options.len()].copy_from_slice(options);
+    let mut prefix = Vec::with_capacity(header_len);
+    prefix.push(next);
+    prefix.push(hdr_ext_len);
+    prefix.extend_from_slice(options);
+    prefix.resize(header_len, 0);
     let mut materialized = layer.clone_box();
     materialized.set_field("next_header", FieldValue::Unsigned(u64::from(next)))?;
-    materialized.set_field(
-        "options",
-        FieldValue::Bytes(Bytes::copy_from_slice(&prefix[2..header_len])),
-    )?;
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "`prefix` was resized to `header_len`, which is the option length plus the \
+                  two-byte fixed header rounded up to an eight-byte boundary"
+    )]
+    let padded_options = Bytes::copy_from_slice(&prefix[2..header_len]);
+    materialized.set_field("options", FieldValue::Bytes(padded_options))?;
     Ok(EncodedLayer {
         prefix,
         suffix: Vec::new(),
@@ -149,23 +153,24 @@ fn decode_options<L>(
 where
     L: Layer + 'static,
 {
-    if input.len() < 8 {
+    let Some(header) = input.first_chunk::<8>() else {
         return Err(truncated(name, 8, input.len()));
-    }
-    let header_len = (usize::from(input[1]) + 1)
+    };
+    let header_len = usize::from(header[1])
+        .saturating_add(1)
         .checked_mul(8)
         .ok_or_else(|| invalid(name, "header length overflow"))?;
     if input.len() < header_len {
         return Err(truncated(name, header_len, input.len()));
     }
+    let options = input
+        .get(2..header_len)
+        .ok_or_else(|| truncated(name, header_len, input.len()))?;
     Ok(DecodedLayerValue {
-        layer: Box::new(make(
-            input[0],
-            Bytes::copy_from_slice(&input[2..header_len]),
-        )),
+        layer: Box::new(make(header[0], Bytes::copy_from_slice(options))),
         consumed: header_len,
-        payload_len: input.len() - header_len,
-        next: vec![Discriminator(u64::from(input[0]))],
+        payload_len: input.len().saturating_sub(header_len),
+        next: vec![Discriminator(u64::from(header[0]))],
         fields: layout(header_len),
         diagnostics: Vec::new(),
         stop: input.len() == header_len,

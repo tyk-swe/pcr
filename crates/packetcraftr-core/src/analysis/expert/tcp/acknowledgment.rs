@@ -41,7 +41,7 @@ pub(super) fn observe_duplicate(
             && sent.acknowledgment == Some(tcp.acknowledgment)
             && sent.window == Some(tcp.window)
         {
-            sent.duplicate_acks += 1;
+            sent.duplicate_acks = sent.duplicate_acks.saturating_add(1);
             let count = sent.duplicate_acks;
             findings.push(new_finding(
                 Severity::Warning,

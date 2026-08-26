@@ -32,6 +32,11 @@ pub(crate) fn rate_delay(items: usize, rate: Option<u32>) -> Option<Duration> {
         return Some(Duration::ZERO);
     };
     let rate = u128::from(rate);
+    #[expect(
+        clippy::arithmetic_side_effects,
+        reason = "`rate` cannot be zero here: `rate.checked_sub(1)` short-circuits with `?` \
+                  when it is"
+    )]
     let nanos = u128::try_from(items)
         .unwrap_or(u128::MAX)
         .checked_mul(1_000_000_000)?
@@ -51,6 +56,7 @@ pub(crate) fn check_deadline<E>(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
     use super::*;
 
     #[test]

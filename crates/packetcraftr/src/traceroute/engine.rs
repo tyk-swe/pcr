@@ -172,7 +172,13 @@ impl Collector {
                         index
                     }
                 };
-                self.hops[hop_index].probes.push(probe);
+                #[expect(
+                    clippy::indexing_slicing,
+                    reason = "`hop_index` is either a live entry from `hop_indices` or the index \
+                              of the hop just pushed, so it is below `hops.len()`"
+                )]
+                let hop = &mut self.hops[hop_index];
+                hop.probes.push(probe);
             }
             Event::Undecoded(evidence) => self.undecoded.push(evidence),
             Event::Diagnostic(diagnostic) => self.diagnostics.push(diagnostic),
@@ -406,7 +412,12 @@ where
         enforce_deadline(deadline)?;
         let mut response_selector = ResponseSelector::new(&mut responses);
         let terminal = self.process_probes(batch, &sent, &mut response_selector, deadline)?;
-        self.retain_undecoded(batch_undecoded, batch.probes[0].hop_limit, deadline)?;
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "every hop batch is built with at least one probe per hop limit"
+        )]
+        let hop_limit = batch.probes[0].hop_limit;
+        self.retain_undecoded(batch_undecoded, hop_limit, deadline)?;
         Ok(terminal)
     }
 
@@ -557,6 +568,11 @@ where
         start: usize,
         deadline: &Deadline,
     ) -> std::result::Result<(), Error> {
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "`start` is a `diagnostics.len()` snapshot taken before pushing to the same \
+                      append-only vector, so the range is in bounds"
+        )]
         let diagnostics = self.state.diagnostics[start..].to_vec();
         for diagnostic in diagnostics {
             (self.emit)(Event::Diagnostic(diagnostic), deadline)?;
@@ -574,6 +590,10 @@ fn traceroute_duration_error(actual: Duration, limit: Duration) -> Error {
 }
 
 impl ProbeBatch for Batch {
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "every hop batch is built with at least one probe per hop limit"
+    )]
     fn sequence(&self) -> u64 {
         self.probes[0].sequence
     }

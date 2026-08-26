@@ -224,7 +224,7 @@ unsafe fn load_symbol<T: Copy>(library: &Library, name: &'static [u8]) -> Result
             dependency: NPCAP_DEPENDENCY,
             message: format!(
                 "required SDK 1.16 symbol {} is unavailable: {error}",
-                String::from_utf8_lossy(&name[..name.len().saturating_sub(1)])
+                String::from_utf8_lossy(name.split_last().map_or(name, |(_, head)| head))
             ),
         })
 }

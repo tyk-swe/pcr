@@ -37,7 +37,9 @@ fn parse(arguments: &[OsString]) -> Context {
                 saw_format = true;
                 context.format = value.and_then(OsStr::to_str).and_then(parse_machine_format);
             }
-            index += usize::from(value.is_some()) + 1;
+            index = index
+                .saturating_add(usize::from(value.is_some()))
+                .saturating_add(1);
             continue;
         }
         if argument.as_os_str() == "--color" {
@@ -48,7 +50,9 @@ fn parse(arguments: &[OsString]) -> Context {
                     .and_then(OsStr::to_str)
                     .map_or(ColorChoice::Auto, parse_color_choice);
             }
-            index += usize::from(value.is_some()) + 1;
+            index = index
+                .saturating_add(usize::from(value.is_some()))
+                .saturating_add(1);
             continue;
         }
 
@@ -58,7 +62,7 @@ fn parse(arguments: &[OsString]) -> Context {
                 saw_format = true;
                 context.format = parse_machine_format(value);
             }
-            index += 1;
+            index = index.saturating_add(1);
             continue;
         }
         if let Some(value) = argument.and_then(|argument| argument.strip_prefix("--color=")) {
@@ -66,7 +70,7 @@ fn parse(arguments: &[OsString]) -> Context {
                 saw_color = true;
                 context.color = parse_color_choice(value);
             }
-            index += 1;
+            index = index.saturating_add(1);
             continue;
         }
 
@@ -76,7 +80,7 @@ fn parse(arguments: &[OsString]) -> Context {
             saw_root_positional = true;
             context.command = argument.and_then(parse_command);
         }
-        index += 1;
+        index = index.saturating_add(1);
     }
 
     context
@@ -84,7 +88,7 @@ fn parse(arguments: &[OsString]) -> Context {
 
 fn separate_option_value(arguments: &[OsString], option_index: usize) -> Option<&OsStr> {
     arguments
-        .get(option_index + 1)
+        .get(option_index.saturating_add(1))
         .map(OsString::as_os_str)
         .filter(|value| {
             !value

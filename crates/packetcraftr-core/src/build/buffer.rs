@@ -21,6 +21,10 @@ impl PacketBuffer {
         self.end.saturating_sub(self.start)
     }
 
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "`start <= end <= storage.len()` is the buffer invariant every wrap restores"
+    )]
     pub(super) fn as_slice(&self) -> &[u8] {
         &self.storage[self.start..self.end]
     }
@@ -55,11 +59,34 @@ impl PacketBuffer {
             return Ok(());
         }
 
+        #[expect(
+            clippy::arithmetic_side_effects,
+            reason = "the branch above returns unless `self.start >= prefix.len()`"
+        )]
         let start = self.start - prefix.len();
-        self.storage[start..self.start].copy_from_slice(prefix);
-        self.storage[self.end..self.end + suffix.len()].copy_from_slice(suffix);
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "`start <= self.start <= storage.len()` from the subtraction above"
+        )]
+        {
+            self.storage[start..self.start].copy_from_slice(prefix);
+        }
+        #[expect(
+            clippy::indexing_slicing,
+            clippy::arithmetic_side_effects,
+            reason = "the branch above returns unless `storage.len() - self.end >= suffix.len()`"
+        )]
+        {
+            self.storage[self.end..self.end + suffix.len()].copy_from_slice(suffix);
+        }
         self.start = start;
-        self.end += suffix.len();
+        #[expect(
+            clippy::arithmetic_side_effects,
+            reason = "the branch above returns unless `storage.len() - self.end >= suffix.len()`"
+        )]
+        {
+            self.end += suffix.len();
+        }
         Ok(())
     }
 
@@ -85,8 +112,14 @@ impl PacketBuffer {
             .checked_add(suffix.len())
             .ok_or(Error::LengthOverflow)?;
         self.storage.copy_within(self.start..self.end, prefix_end);
-        self.storage[start..prefix_end].copy_from_slice(prefix);
-        self.storage[payload_end..end].copy_from_slice(suffix);
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "`end = start + total` and `start = (storage.len() - total) / 2`, so `end <= storage.len()`"
+        )]
+        {
+            self.storage[start..prefix_end].copy_from_slice(prefix);
+            self.storage[payload_end..end].copy_from_slice(suffix);
+        }
         self.start = start;
         self.end = end;
         Ok(())
@@ -110,6 +143,10 @@ impl PacketBuffer {
         }
 
         let mut storage = allocate_zeroed(capacity)?;
+        #[expect(
+            clippy::arithmetic_side_effects,
+            reason = "the branch above returns unless `capacity >= total`"
+        )]
         let spare = capacity - total;
         let start = match (prefix.is_empty(), suffix.is_empty()) {
             (false, true) => spare,
@@ -125,15 +162,25 @@ impl PacketBuffer {
         let end = payload_end
             .checked_add(suffix.len())
             .ok_or(Error::LengthOverflow)?;
-        storage[start..prefix_end].copy_from_slice(prefix);
-        storage[prefix_end..payload_end].copy_from_slice(self.as_slice());
-        storage[payload_end..end].copy_from_slice(suffix);
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "`end = start + total` with `start <= capacity - total` and `storage.len() == capacity`"
+        )]
+        {
+            storage[start..prefix_end].copy_from_slice(prefix);
+            storage[prefix_end..payload_end].copy_from_slice(self.as_slice());
+            storage[payload_end..end].copy_from_slice(suffix);
+        }
         self.storage = storage;
         self.start = start;
         self.end = end;
         Ok(())
     }
 
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "`start <= end <= storage.len()` is the buffer invariant every wrap restores"
+    )]
     pub(super) fn into_bytes(self) -> Bytes {
         if self.start == 0 && self.end == self.storage.len() {
             return Bytes::from(self.storage);
@@ -155,6 +202,8 @@ fn allocate_zeroed(capacity: usize) -> Result<Vec<u8>, Error> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+
     use super::*;
 
     #[test]

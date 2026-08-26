@@ -179,6 +179,10 @@ fn link_address(address: *const libc::sockaddr, length: usize) -> Option<MacAddr
     if link.sdl_alen != 6 {
         return None;
     }
+    #[expect(
+        clippy::arithmetic_side_effects,
+        reason = "sdl_data is a field of sockaddr_dl, so its length never exceeds the struct size"
+    )]
     let data_offset = size_of::<libc::sockaddr_dl>() - link.sdl_data.len();
     let address_offset = data_offset.checked_add(usize::from(link.sdl_nlen))?;
     if address_offset.checked_add(6)? > length {

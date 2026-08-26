@@ -146,23 +146,23 @@ impl LayerCodec for Ipv6Codec {
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
-        if input.len() < IPV6_LEN {
+        let Some(header) = input.first_chunk::<IPV6_LEN>() else {
             return Err(truncated("ipv6", IPV6_LEN, input.len()));
-        }
-        if input[0] >> 4 != 6 {
+        };
+        if header[0] >> 4 != 6 {
             return Err(invalid(
                 "ipv6",
-                format!("version is {}, not 6", input[0] >> 4),
+                format!("version is {}, not 6", header[0] >> 4),
             ));
         }
-        let payload_length_field = u16::from_be_bytes([input[4], input[5]]);
+        let payload_length_field = u16::from_be_bytes([header[4], header[5]]);
         let payload_length = usize::from(payload_length_field);
         // A jumbogram must start with a Hop-by-Hop header carrying the Jumbo
         // Payload option. With any other next header, the declared IPv6
         // payload is empty and any remaining capture bytes are outside it;
         // the dissector will classify them as link padding or a malformed
         // trailer according to the enclosing link context.
-        if payload_length == 0 && input.len() > IPV6_LEN && input[6] == 0 {
+        if payload_length == 0 && input.len() > IPV6_LEN && header[6] == 0 {
             return Err(crate::codec::Error::Unsupported {
                 protocol: protocol("ipv6"),
                 message: "IPv6 jumbogram payload requires a Hop-by-Hop Jumbo Payload option"
@@ -175,21 +175,25 @@ impl LayerCodec for Ipv6Codec {
         if input.len() < required {
             return Err(truncated("ipv6", required, input.len()));
         }
-        let first = u32::from_be_bytes([input[0], input[1], input[2], input[3]]);
-        let mut source_bytes = [0; 16];
-        source_bytes.copy_from_slice(&input[8..24]);
-        let source = Ipv6Addr::from(source_bytes);
-        let mut destination_bytes = [0; 16];
-        destination_bytes.copy_from_slice(&input[24..40]);
-        let destination = Ipv6Addr::from(destination_bytes);
-        let next = input[6];
+        let first = u32::from_be_bytes([header[0], header[1], header[2], header[3]]);
+        let source_bytes = input
+            .get(8..)
+            .and_then(<[u8]>::first_chunk::<16>)
+            .ok_or_else(|| truncated("ipv6", IPV6_LEN, input.len()))?;
+        let source = Ipv6Addr::from(*source_bytes);
+        let destination_bytes = input
+            .get(24..)
+            .and_then(<[u8]>::first_chunk::<16>)
+            .ok_or_else(|| truncated("ipv6", IPV6_LEN, input.len()))?;
+        let destination = Ipv6Addr::from(*destination_bytes);
+        let next = header[6];
         Ok(DecodedLayerValue {
             layer: Box::new(Ipv6 {
                 traffic_class: ((first >> 20) & 0xff) as u8,
                 flow_label: first & 0x000f_ffff,
                 payload_length: WireValue::Exact(payload_length_field),
                 next_header: WireValue::Exact(next),
-                hop_limit: input[7],
+                hop_limit: header[7],
                 source,
                 destination,
             }),
@@ -226,7 +230,7 @@ fn resolve_addresses(
     let active_segment = context
         .packet
         .iter()
-        .skip(context.index + 1)
+        .skip(context.index.saturating_add(1))
         .take_while(|candidate| is_ipv6_extension_layer(*candidate))
         .find_map(|candidate| {
             let routing = candidate
@@ -238,7 +242,9 @@ fn resolve_addresses(
                 WireValue::Exact(value) => usize::from(value).min(last),
                 WireValue::Raw(_) => return None,
             };
-            routing.segments.get(last - segments_left).copied()
+            last.checked_sub(segments_left)
+                .and_then(|index| routing.segments.get(index))
+                .copied()
         });
     let mut diagnostics = Vec::new();
     if let Some(active) = active_segment

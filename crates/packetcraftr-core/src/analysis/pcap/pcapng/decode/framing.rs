@@ -57,8 +57,22 @@ pub(super) fn read<'a, R: Read>(
         state.account_metadata(block_length_usize, options)?;
     }
 
-    read_exact_vec(reader, scratch, block_length_usize - 8, "pcapng block")?;
-    let body_length = scratch.len() - 4;
+    let payload_length = block_length_usize
+        .checked_sub(8)
+        .ok_or(Error::InvalidBlockLength {
+            length: block_length,
+        })?;
+    read_exact_vec(reader, scratch, payload_length, "pcapng block")?;
+    let body_length = scratch
+        .len()
+        .checked_sub(4)
+        .ok_or(Error::InvalidBlockLength {
+            length: block_length,
+        })?;
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "`body_length` is `scratch.len() - 4`, so the trailing four bytes are in bounds"
+    )]
     let trailing_length = decode_u32(state.endianness, &scratch[body_length..])?;
     if trailing_length != block_length {
         return Err(Error::BlockLengthMismatch {
@@ -68,9 +82,14 @@ pub(super) fn read<'a, R: Read>(
     }
     state.commit_block(block_length);
     let raw = raw_block(&raw_header, scratch, block_length_usize)?;
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "`body_length` is `scratch.len() - 4`, so the body prefix is in bounds"
+    )]
+    let body = &scratch[..body_length];
     Ok(FramedBlock {
         block_type,
-        body: &scratch[..body_length],
+        body,
         raw,
     })
 }

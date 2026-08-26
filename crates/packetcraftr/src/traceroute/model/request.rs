@@ -200,6 +200,11 @@ impl Request {
         Ok(())
     }
 
+    #[expect(
+        clippy::arithmetic_side_effects,
+        reason = "`validate` rejects `max_hops < first_hop`, so the u8 subtraction cannot \
+                  underflow, and a u8 widened to usize leaves room for the increment"
+    )]
     pub(in crate::traceroute) fn hop_count(&self) -> usize {
         usize::from(self.max_hops - self.first_hop) + 1
     }

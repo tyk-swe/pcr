@@ -92,7 +92,7 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
             reason = "the guard above rejects an empty segment list and any list longer than \
                       127, so the decremented length is at most 126"
         )]
-        let expected_last = (layer.segments.len() - 1) as u8;
+        let expected_last = layer.segments.len().saturating_sub(1) as u8;
         let mut diagnostics = Vec::new();
         let expectation = expected_discriminator("ipv6_srh", context, 59_u8);
         validate_auto_raw_discriminator(
@@ -140,7 +140,7 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
             &mut diagnostics,
         )?;
         let (segments_end, header_len) = srh_lengths(layer)?;
-        let hdr_ext_len = u8::try_from(header_len / 8 - 1)
+        let hdr_ext_len = u8::try_from((header_len / 8).saturating_sub(1))
             .map_err(|_| invalid("ipv6_srh", "SRH length cannot be represented"))?;
         let mut prefix = Vec::with_capacity(header_len);
         prefix.extend_from_slice(&[next, hdr_ext_len, 4, segments_left, last_entry, 0]);
@@ -154,7 +154,13 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
         materialized.next_header = materialized_next;
         materialized.segments_left = materialized_left;
         materialized.last_entry = materialized_last;
-        materialized.tlvs = Bytes::copy_from_slice(&prefix[segments_end..]);
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "`prefix` was resized to `header_len`, which `srh_lengths` guarantees is at \
+                      least `segments_end`"
+        )]
+        let tlvs = Bytes::copy_from_slice(&prefix[segments_end..]);
+        materialized.tlvs = tlvs;
         Ok(EncodedLayer {
             prefix,
             suffix: Vec::new(),
@@ -169,43 +175,47 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
         input: &[u8],
         context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
-        if input.len() < 8 {
+        let Some(header) = input.first_chunk::<8>() else {
             return Err(truncated("ipv6_srh", 8, input.len()));
-        }
-        if input[2] == 0 {
+        };
+        if header[2] == 0 {
             return Err(crate::codec::Error::Unsupported {
                 protocol: protocol("ipv6_srh"),
                 message: "IPv6 routing type 0 is prohibited".to_owned(),
             });
         }
-        if input[2] != 4 {
+        if header[2] != 4 {
             return Err(crate::codec::Error::Unsupported {
                 protocol: protocol("ipv6_srh"),
-                message: format!("unsupported routing type {}", input[2]),
+                message: format!("unsupported routing type {}", header[2]),
             });
         }
-        let header_len = (usize::from(input[1]) + 1)
+        let header_len = usize::from(header[1])
+            .saturating_add(1)
             .checked_mul(8)
             .ok_or_else(|| invalid("ipv6_srh", "header length overflow"))?;
         if input.len() < header_len {
             return Err(truncated("ipv6_srh", header_len, input.len()));
         }
-        let count = usize::from(input[4]) + 1;
+        let count = usize::from(header[4]).saturating_add(1);
         let segments_end = count
             .checked_mul(16)
             .and_then(|length| length.checked_add(8))
             .ok_or_else(|| invalid("ipv6_srh", "segment-list length overflow"))?;
-        if header_len < segments_end || input[3] > input[4] {
+        if header_len < segments_end || header[3] > header[4] {
             return Err(invalid(
                 "ipv6_srh",
                 "Last Entry or Segments Left is inconsistent",
             ));
         }
-        if input[5] != 0 {
+        if header[5] != 0 {
             return Err(invalid("ipv6_srh", "unsupported flags are non-zero"));
         }
+        let segment_bytes = input
+            .get(8..segments_end)
+            .ok_or_else(|| truncated("ipv6_srh", segments_end, input.len()))?;
         let mut wire_segments = Vec::with_capacity(count);
-        for chunk in input[8..segments_end].chunks_exact(16) {
+        for chunk in segment_bytes.chunks_exact(16) {
             let mut bytes = [0u8; 16];
             bytes.copy_from_slice(chunk);
             wire_segments.push(Ipv6Addr::from(bytes));
@@ -215,23 +225,26 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
             .last()
             .copied()
             .ok_or_else(|| invalid("ipv6_srh", "segment list is empty"))?;
+        let tlv_bytes = input
+            .get(segments_end..header_len)
+            .ok_or_else(|| truncated("ipv6_srh", header_len, input.len()))?;
         let network = context.network.map(|network| NetworkEnvelope {
             source: network.source,
             destination: IpAddr::V6(final_destination),
         });
         Ok(DecodedLayerValue {
             layer: Box::new(SegmentRoutingHeader {
-                next_header: WireValue::Exact(input[0]),
-                segments_left: WireValue::Exact(input[3]),
-                last_entry: WireValue::Exact(input[4]),
-                flags: input[5],
-                tag: u16::from_be_bytes([input[6], input[7]]),
+                next_header: WireValue::Exact(header[0]),
+                segments_left: WireValue::Exact(header[3]),
+                last_entry: WireValue::Exact(header[4]),
+                flags: header[5],
+                tag: u16::from_be_bytes([header[6], header[7]]),
                 segments: wire_segments,
-                tlvs: Bytes::copy_from_slice(&input[segments_end..header_len]),
+                tlvs: Bytes::copy_from_slice(tlv_bytes),
             }),
             consumed: header_len,
-            payload_len: input.len() - header_len,
-            next: vec![Discriminator(u64::from(input[0]))],
+            payload_len: input.len().saturating_sub(header_len),
+            next: vec![Discriminator(u64::from(header[0]))],
             fields: srh_layout(segments_end, header_len),
             diagnostics: Vec::new(),
             stop: input.len() == header_len,
@@ -261,7 +274,7 @@ fn srh_lengths(layer: &SegmentRoutingHeader) -> Result<(usize, usize), crate::co
         .checked_add(layer.tlvs.len())
         .ok_or_else(|| invalid("ipv6_srh", "SRH TLV length overflow"))?;
     let header_len = unpadded_len
-        .checked_add((8 - unpadded_len % 8) % 8)
+        .checked_next_multiple_of(8)
         .ok_or_else(|| invalid("ipv6_srh", "SRH padding overflow"))?;
     Ok((segments_end, header_len))
 }

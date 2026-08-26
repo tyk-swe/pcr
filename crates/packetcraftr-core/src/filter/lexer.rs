@@ -71,16 +71,15 @@ pub(super) fn tokenize(source: &str) -> Result<Vec<Spanned>, Error> {
     let bytes = source.as_bytes();
     let mut tokens = Vec::new();
     let mut index = 0;
-    while index < bytes.len() {
+    while let Some(&byte) = bytes.get(index) {
         let offset = index;
-        let byte = bytes[index];
         if byte.is_ascii_whitespace() {
-            index += 1;
+            index = index.saturating_add(1);
             continue;
         }
         let token = match byte {
             b'(' | b')' | b'{' | b'}' | b',' => {
-                index += 1;
+                index = index.saturating_add(1);
                 match byte {
                     b'(' => Token::LeftParen,
                     b')' => Token::RightParen,
@@ -101,14 +100,14 @@ pub(super) fn tokenize(source: &str) -> Result<Vec<Spanned>, Error> {
             }
             b'&' | b'|' => {
                 let expected = byte;
-                if bytes.get(index + 1) != Some(&expected) {
+                if bytes.get(index.saturating_add(1)) != Some(&expected) {
                     let symbol = char::from(expected);
                     return Err(syntax(
                         offset,
                         format!("expected `{symbol}{symbol}`, not a single `{symbol}`"),
                     ));
                 }
-                index += 2;
+                index = index.saturating_add(2);
                 if expected == b'&' {
                     Token::And
                 } else {
@@ -116,24 +115,24 @@ pub(super) fn tokenize(source: &str) -> Result<Vec<Spanned>, Error> {
                 }
             }
             b'=' => {
-                if bytes.get(index + 1) != Some(&b'=') {
+                if bytes.get(index.saturating_add(1)) != Some(&b'=') {
                     return Err(syntax(offset, "expected `==`, not a single `=`"));
                 }
-                index += 2;
+                index = index.saturating_add(2);
                 Token::Compare(CompareOperator::Equal)
             }
             b'!' => {
-                if bytes.get(index + 1) == Some(&b'=') {
-                    index += 2;
+                if bytes.get(index.saturating_add(1)) == Some(&b'=') {
+                    index = index.saturating_add(2);
                     Token::Compare(CompareOperator::NotEqual)
                 } else {
-                    index += 1;
+                    index = index.saturating_add(1);
                     Token::Not
                 }
             }
             b'>' | b'<' => {
-                let inclusive = bytes.get(index + 1) == Some(&b'=');
-                index += if inclusive { 2 } else { 1 };
+                let inclusive = bytes.get(index.saturating_add(1)) == Some(&b'=');
+                index = index.saturating_add(if inclusive { 2 } else { 1 });
                 Token::Compare(match (byte, inclusive) {
                     (b'>', false) => CompareOperator::Greater,
                     (b'>', true) => CompareOperator::GreaterOrEqual,
@@ -143,8 +142,8 @@ pub(super) fn tokenize(source: &str) -> Result<Vec<Spanned>, Error> {
             }
             byte if is_word_byte(byte) => {
                 let start = index;
-                while index < bytes.len() && is_word_byte(bytes[index]) {
-                    index += 1;
+                while bytes.get(index).is_some_and(|&byte| is_word_byte(byte)) {
+                    index = index.saturating_add(1);
                 }
                 let word = &source[start..index];
                 keyword(word).unwrap_or_else(|| Token::Word(word.to_owned()))
@@ -184,36 +183,43 @@ fn keyword(word: &str) -> Option<Token> {
 /// Reads a `[..]` suffix, returning its contents and the index after the `]`.
 /// Slice contents are parsed later, once the field it applies to is known.
 fn read_slice(bytes: &[u8], open: usize) -> Result<(String, usize), Error> {
-    let start = open + 1;
+    let start = open.saturating_add(1);
     let mut index = start;
-    while index < bytes.len() && bytes[index] != b']' {
-        if bytes[index] == b'[' {
+    while let Some(&byte) = bytes.get(index) {
+        if byte == b']' {
+            break;
+        }
+        if byte == b'[' {
             return Err(syntax(index, "byte slices do not nest"));
         }
-        index += 1;
+        index = index.saturating_add(1);
     }
     if index >= bytes.len() {
         return Err(syntax(open, "unterminated byte slice, expected `]`"));
     }
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "start <= index <= bytes.len(): index starts at start and only advances while it addresses a byte"
+    )]
     let contents = String::from_utf8(bytes[start..index].to_vec())
         .map_err(|_| syntax(open, "byte slice bounds must be ASCII"))?;
-    Ok((contents, index + 1))
+    Ok((contents, index.saturating_add(1)))
 }
 
 /// Reads a double-quoted string, honouring `\\` and `\"` escapes.
 fn read_quoted(source: &str, open: usize) -> Result<(String, usize), Error> {
     let bytes = source.as_bytes();
     let mut contents = Vec::new();
-    let mut index = open + 1;
-    while index < bytes.len() {
-        match bytes[index] {
+    let mut index = open.saturating_add(1);
+    while let Some(&byte) = bytes.get(index) {
+        match byte {
             b'"' => {
                 let text = String::from_utf8(contents)
                     .map_err(|_| syntax(open, "quoted text must be valid UTF-8"))?;
-                return Ok((text, index + 1));
+                return Ok((text, index.saturating_add(1)));
             }
             b'\\' => {
-                let Some(escaped) = bytes.get(index + 1) else {
+                let Some(escaped) = bytes.get(index.saturating_add(1)) else {
                     return Err(syntax(index, "trailing escape in quoted text"));
                 };
                 match escaped {
@@ -225,11 +231,11 @@ fn read_quoted(source: &str, open: usize) -> Result<(String, usize), Error> {
                         ));
                     }
                 }
-                index += 2;
+                index = index.saturating_add(2);
             }
             other => {
                 contents.push(other);
-                index += 1;
+                index = index.saturating_add(1);
             }
         }
     }

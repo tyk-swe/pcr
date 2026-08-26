@@ -178,24 +178,28 @@ impl<'a> Compiler<'a> {
     }
 
     fn consume_operand(&mut self) -> Result<(), Error> {
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "compile only dispatches here while self.index < self.tokens.len()"
+        )]
         let Spanned { token, offset } = &self.tokens[self.index];
         match token {
             Token::LeftParen => {
-                self.depth += 1;
+                self.depth = self.depth.saturating_add(1);
                 if self.depth > self.options.max_nesting {
                     return Err(Error::NestingLimit {
                         limit: self.options.max_nesting,
                     });
                 }
                 self.operators.push(Pending::LeftParen);
-                self.index += 1;
+                self.index = self.index.saturating_add(1);
             }
             Token::Not => {
                 self.operators.push(Pending::Operator(Op::Not));
-                self.index += 1;
+                self.index = self.index.saturating_add(1);
             }
             Token::Word(_) => {
-                self.terms += 1;
+                self.terms = self.terms.saturating_add(1);
                 if self.terms > self.options.max_terms {
                     return Err(Error::TermLimit {
                         limit: self.options.max_terms,
@@ -223,6 +227,10 @@ impl<'a> Compiler<'a> {
     }
 
     fn consume_operator(&mut self) -> Result<(), Error> {
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "compile only dispatches here while self.index < self.tokens.len()"
+        )]
         let Spanned { token, offset } = &self.tokens[self.index];
         match token {
             Token::And | Token::Or => {
@@ -242,7 +250,7 @@ impl<'a> Compiler<'a> {
                 }
                 self.operators.push(Pending::Operator(incoming));
                 self.expect_operand = true;
-                self.index += 1;
+                self.index = self.index.saturating_add(1);
             }
             Token::RightParen => {
                 if self.depth == 0 {
@@ -263,8 +271,8 @@ impl<'a> Compiler<'a> {
                         }
                     }
                 }
-                self.depth -= 1;
-                self.index += 1;
+                self.depth = self.depth.saturating_sub(1);
+                self.index = self.index.saturating_add(1);
             }
             other => {
                 return Err(Error::Syntax {
@@ -321,7 +329,7 @@ fn parse_predicate(
     }) = tokens.get(index)
     {
         path::attach_slice(&mut field, contents, *offset)?;
-        index += 1;
+        index = index.saturating_add(1);
     }
     record_requirements(&field, requirements);
     parse_field_predicate(tokens, index, field, options)
@@ -333,6 +341,10 @@ enum Subject {
 }
 
 fn parse_subject(tokens: &[Spanned], start: usize, registry: &Registry) -> Result<Subject, Error> {
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "start is the index of the Word token consume_operand already read"
+    )]
     let Spanned { token, offset } = &tokens[start];
     let offset = *offset;
     let Token::Word(word) = token else {
@@ -342,7 +354,7 @@ fn parse_subject(tokens: &[Spanned], start: usize, registry: &Registry) -> Resul
         });
     };
     let resolved = path::resolve(word, registry, offset)?;
-    let index = start + 1;
+    let index = start.saturating_add(1);
 
     let field = match resolved {
         Resolved::Layer {
@@ -403,7 +415,7 @@ fn parse_field_predicate(
             token: Token::Compare(operator),
             offset: operator_offset,
         }) => {
-            let (value, next) = parse_literal(tokens, index + 1, *operator_offset)?;
+            let (value, next) = parse_literal(tokens, index.saturating_add(1), *operator_offset)?;
             check_literal(&field, &value, *operator_offset)?;
             // Prefixes support membership only.
             if value.is_prefix()
@@ -428,14 +440,20 @@ fn parse_field_predicate(
             token: Token::Contains,
             offset: operator_offset,
         }) => {
-            let (needle, next) = parse_literal(tokens, index + 1, *operator_offset)?;
+            let (needle, next) = parse_literal(tokens, index.saturating_add(1), *operator_offset)?;
             check_searchable(&field, &needle, *operator_offset)?;
             Ok((Predicate::Contains { field, needle }, next))
         }
         Some(Spanned {
             token: Token::In,
             offset: operator_offset,
-        }) => parse_membership(tokens, index + 1, field, options, *operator_offset),
+        }) => parse_membership(
+            tokens,
+            index.saturating_add(1),
+            field,
+            options,
+            *operator_offset,
+        ),
         _ => {
             let flag = field.is_flag();
             Ok((Predicate::Bare { field, flag }, index))
@@ -469,7 +487,7 @@ fn parse_membership(
             next,
         ));
     }
-    let mut index = start + 1;
+    let mut index = start.saturating_add(1);
     let mut values = Vec::new();
     loop {
         let Some(current) = tokens.get(index) else {
@@ -479,7 +497,7 @@ fn parse_membership(
             });
         };
         if matches!(current.token, Token::RightBrace) {
-            index += 1;
+            index = index.saturating_add(1);
             break;
         }
         if !values.is_empty() {
@@ -489,7 +507,7 @@ fn parse_membership(
                     message: "expected `,` or `}` in a set".to_owned(),
                 });
             }
-            index += 1;
+            index = index.saturating_add(1);
         }
         let member_offset = tokens.get(index).map_or(offset, |token| token.offset);
         let (value, next) = parse_literal(tokens, index, offset)?;
@@ -534,7 +552,7 @@ fn parse_literal(
             });
         }
     };
-    Ok((value, index + 1))
+    Ok((value, index.saturating_add(1)))
 }
 
 /// Rejects a literal that no value of the field's declared kinds could match.
@@ -609,6 +627,8 @@ fn describe(token: &Token) -> String {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+
     use super::*;
 
     fn registry() -> Registry {

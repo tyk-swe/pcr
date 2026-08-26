@@ -131,7 +131,7 @@ pub(crate) fn dns_payload(packet: &Packet) -> Option<Bytes> {
     let source_port = udp.field("source_port")?.as_u64()?;
     let destination_port = udp.field("destination_port")?.as_u64()?;
     let port_53 = source_port == 53 || destination_port == 53;
-    let payload = packet.layer(udp_index + 1)?;
+    let payload = packet.layer(udp_index.checked_add(1)?)?;
     match BuiltinProtocol::of(payload) {
         Some(BuiltinProtocol::Dns) if port_53 => payload
             .as_any()

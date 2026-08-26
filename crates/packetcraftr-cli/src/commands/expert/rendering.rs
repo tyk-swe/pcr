@@ -19,6 +19,10 @@ pub(super) struct State {
 }
 
 impl State {
+    #[expect(
+        clippy::arithmetic_side_effects,
+        reason = "u64 severity counters cannot reach u64::MAX from a bounded finding count"
+    )]
     pub(super) fn count(&mut self, finding: &analysis::expert::Finding) {
         self.findings += 1;
         match finding.severity {

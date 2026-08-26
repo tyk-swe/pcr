@@ -52,7 +52,11 @@ fn decode_interface(
     options: &ReaderOptions,
 ) -> Result<CaptureRecord, Error> {
     let description = parse_interface_description(body, state.endianness)?;
-    let parsed_options = parse_options(&body[8..], state.endianness, "pcapng interface options")?;
+    let option_bytes = body.get(8..).ok_or(Error::InvalidData {
+        format: Format::PcapNg,
+        reason: "interface description block is shorter than 8 bytes",
+    })?;
+    let parsed_options = parse_options(option_bytes, state.endianness, "pcapng interface options")?;
     let local_id = u32::try_from(state.interfaces.len()).map_err(|_| Error::InterfaceLimit {
         limit: options.max_interfaces_per_section,
     })?;
@@ -102,8 +106,8 @@ fn decode_packet(
     };
     let interface_id = match block_type {
         PCAPNG_SIMPLE_PACKET_BLOCK => 0,
-        PCAPNG_PACKET_BLOCK => u32::from(decode_u16(state.endianness, &body[..2])?),
-        _ => decode_u32(state.endianness, &body[..4])?,
+        PCAPNG_PACKET_BLOCK => u32::from(decode_u16(state.endianness, body)?),
+        _ => decode_u32(state.endianness, body)?,
     };
     let parsed_options = parse_options(
         packet_options(block_type, body, state.endianness)?,
@@ -143,7 +147,7 @@ fn decode_metadata(
                     reason: "interface statistics block is shorter than four bytes",
                 });
             }
-            let interface_id = decode_u32(state.endianness, &body[..4])?;
+            let interface_id = decode_u32(state.endianness, body)?;
             if interface_id as usize >= state.interfaces.len() {
                 return Err(Error::UndefinedInterface {
                     interface: interface_id,
@@ -171,7 +175,11 @@ fn packet_options(block_type: u32, body: &[u8], endianness: Endianness) -> Resul
     if block_type == PCAPNG_SIMPLE_PACKET_BLOCK {
         return Ok(&[]);
     }
-    let captured_length = decode_u32(endianness, &body[12..16])?;
+    let length_bytes = body.get(12..).ok_or(Error::InvalidData {
+        format: Format::PcapNg,
+        reason: "packet block is shorter than 20 bytes",
+    })?;
+    let captured_length = decode_u32(endianness, length_bytes)?;
     let offset = 20_usize
         .checked_add(align_to_usize(captured_length as usize)?)
         .ok_or(Error::InvalidData {

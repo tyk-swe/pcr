@@ -111,15 +111,15 @@ fn validate_json_container_depth(input: &str, max_nesting: usize) -> Result<(), 
     let bytes = input.as_bytes();
     let mut depth = 0_usize;
     let mut index = 0_usize;
-    while index < bytes.len() {
-        match bytes[index] {
+    while let Some(byte) = bytes.get(index).copied() {
+        match byte {
             b'"' => {
-                index += 1;
-                while index < bytes.len() {
-                    match bytes[index] {
+                index = index.saturating_add(1);
+                while let Some(quoted) = bytes.get(index).copied() {
+                    match quoted {
                         b'\\' => index = index.saturating_add(2),
                         b'"' => break,
-                        _ => index += 1,
+                        _ => index = index.saturating_add(1),
                     }
                 }
             }
@@ -132,7 +132,7 @@ fn validate_json_container_depth(input: &str, max_nesting: usize) -> Result<(), 
             b'}' | b']' => depth = depth.saturating_sub(1),
             _ => {}
         }
-        index += 1;
+        index = index.saturating_add(1);
     }
     Ok(())
 }
@@ -171,7 +171,7 @@ fn validate_value_nesting(document: &Packet, maximum: usize) -> Result<(), Error
         if depth >= maximum {
             return Err(Error::NestingLimit { limit: maximum });
         }
-        pending.extend(values.iter().map(|value| (value, depth + 1)));
+        pending.extend(values.iter().map(|value| (value, depth.saturating_add(1))));
     }
     Ok(())
 }

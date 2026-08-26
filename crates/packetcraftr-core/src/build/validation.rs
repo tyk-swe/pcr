@@ -40,8 +40,12 @@ fn validate_adjacent_bindings(
 ) -> Result<(), Error> {
     let mut previous_binding = None;
     for index in 0..packet.len().saturating_sub(1) {
-        let parent = &protocols[index];
-        let child = &protocols[index + 1];
+        #[expect(
+            clippy::indexing_slicing,
+            clippy::arithmetic_side_effects,
+            reason = "`protocols.len() == packet.len()` and `index + 1` stays below that length"
+        )]
+        let (parent, child) = (&protocols[index], &protocols[index + 1]);
         let discriminator = match previous_binding {
             Some((previous_parent, previous_child, discriminator))
                 if previous_parent == parent && previous_child == child =>
@@ -106,15 +110,36 @@ fn validate_padding(
             outside_layer,
         });
     }
-    let outside_protocol = &protocols[outside_layer];
+    let Some(outside_protocol) = protocols.get(outside_layer) else {
+        return Err(Error::InvalidPaddingBoundary {
+            index,
+            outside_layer,
+        });
+    };
     let outside_builtin = BuiltinProtocol::from_id(outside_protocol);
+    let child_layer = outside_layer
+        .checked_add(1)
+        .ok_or(Error::InvalidPaddingBoundary {
+            index,
+            outside_layer,
+        })?;
+    let Some(declared_child) = protocols.get(child_layer) else {
+        return Err(Error::InvalidPaddingBoundary {
+            index,
+            outside_layer,
+        });
+    };
     let child_protocol = packet
-        .layer(outside_layer + 1)
+        .layer(child_layer)
         .and_then(|child| child.as_any().downcast_ref::<Malformed>())
         .and_then(|child| child.intended_protocol.as_ref())
-        .unwrap_or(&protocols[outside_layer + 1]);
+        .unwrap_or(declared_child);
     let link_declares_length = || match outside.field("ether_type") {
         Some(FieldValue::Unsigned(value)) => value <= 1500,
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "the guard admits this arm only when `value.len() == 2`"
+        )]
         Some(FieldValue::Bytes(value)) if value.len() == 2 => {
             u16::from_be_bytes([value[0], value[1]]) <= 1500
         }

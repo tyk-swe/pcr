@@ -47,8 +47,7 @@ pub(super) fn adapter_snapshots() -> Result<Vec<WindowsAdapter>, SystemError> {
     for _ in 0..4 {
         let word_count = usize::try_from(required)
             .ok()
-            .and_then(|bytes| bytes.checked_add(align_of::<usize>() - 1))
-            .map(|bytes| bytes / align_of::<usize>())
+            .map(|bytes| bytes.div_ceil(align_of::<usize>()))
             .filter(|words| *words != 0)
             .ok_or_else(|| SystemError::InvalidResponse {
                 message: "Windows reported an invalid adapter buffer size".to_owned(),

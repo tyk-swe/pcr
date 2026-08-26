@@ -113,6 +113,10 @@ pub(in crate::analysis::pcap) fn read_next_pcap_record<R: Read>(
         captured_length as usize,
         "pcap packet data",
     )?;
+    #[expect(
+        clippy::arithmetic_side_effects,
+        reason = "the microsecond fraction is rejected above unless it is below 1_000_000, so scaling it by 1_000 stays within u32"
+    )]
     let nanoseconds = match precision {
         TimestampPrecision::Microseconds => fraction * 1_000,
         TimestampPrecision::Nanoseconds => fraction,
@@ -130,7 +134,7 @@ pub(in crate::analysis::pcap) fn read_next_pcap_record<R: Read>(
         original_length,
         Bytes::copy_from_slice(&bytes),
     )?;
-    let mut raw = Vec::with_capacity(PCAP_RECORD_HEADER_LEN + bytes.len());
+    let mut raw = Vec::with_capacity(PCAP_RECORD_HEADER_LEN.saturating_add(bytes.len()));
     raw.extend_from_slice(&header);
     raw.extend_from_slice(&bytes);
     Ok(Some(CaptureRecord {

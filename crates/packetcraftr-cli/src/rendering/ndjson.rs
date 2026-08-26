@@ -115,6 +115,8 @@ pub(crate) mod test_support {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+
     use std::io;
 
     use serde::ser::Error as _;

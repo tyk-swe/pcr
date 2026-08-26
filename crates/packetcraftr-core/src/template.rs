@@ -69,8 +69,22 @@ impl Template {
             let mut divisor = total;
             for axis in &self.axes {
                 let length = axis.values.len();
-                divisor /= length;
+                #[expect(
+                    clippy::arithmetic_side_effects,
+                    reason = "total is the product of the axis lengths, so it is zero unless every length is non-zero and the closure never runs for a zero total"
+                )]
+                {
+                    divisor /= length;
+                }
+                #[expect(
+                    clippy::arithmetic_side_effects,
+                    reason = "divisor stays a non-zero divisor of total while length is non-zero"
+                )]
                 let index = (ordinal / divisor) % length;
+                #[expect(
+                    clippy::indexing_slicing,
+                    reason = "index is a remainder modulo length, so it is below axis.values.len()"
+                )]
                 let value = axis.values[index].clone();
                 let packet_len = packet.len();
                 let layer = packet.layer_mut(axis.layer).ok_or(Error::LayerIndex {

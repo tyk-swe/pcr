@@ -88,7 +88,7 @@ macro_rules! icmp_reflection {
                     kind: Bytes, derived: false, required: false,
                     description: "Type-specific ICMP body",
                     reflect: body,
-                    layout: (4, 4 + body_len)
+                    layout: (4, 4_usize.saturating_add(body_len))
                 },
             }
             layout pub(crate) fn $layout(body_len: usize);
@@ -135,7 +135,13 @@ impl LayerCodec for Icmpv4Codec {
             context.mode,
             &mut diagnostics,
         )?;
-        prefix[2..4].copy_from_slice(&checksum.to_be_bytes());
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "prefix begins with the four-byte ICMP header pushed above"
+        )]
+        {
+            prefix[2..4].copy_from_slice(&checksum.to_be_bytes());
+        }
         let mut materialized = layer.clone();
         materialized.checksum = materialized_checksum;
         Ok(EncodedLayer {
@@ -152,9 +158,10 @@ impl LayerCodec for Icmpv4Codec {
         input: &[u8],
         context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
-        if input.len() < ICMP_MIN_LEN {
+        let Some(header) = input.first_chunk::<ICMP_MIN_LEN>() else {
             return Err(truncated("icmpv4", ICMP_MIN_LEN, input.len()));
-        }
+        };
+        let body = input.get(ICMP_MIN_LEN..).unwrap_or_default();
         let mut diagnostics = Vec::new();
         if context.verify_checksums && checksum(input) != 0 {
             diagnostics.push(
@@ -164,15 +171,15 @@ impl LayerCodec for Icmpv4Codec {
         }
         Ok(DecodedLayerValue {
             layer: Box::new(Icmpv4 {
-                icmp_type: input[0],
-                code: input[1],
-                checksum: WireValue::Exact(u16::from_be_bytes([input[2], input[3]])),
-                body: Bytes::copy_from_slice(&input[4..]),
+                icmp_type: header[0],
+                code: header[1],
+                checksum: WireValue::Exact(u16::from_be_bytes([header[2], header[3]])),
+                body: Bytes::copy_from_slice(body),
             }),
             consumed: input.len(),
             payload_len: 0,
             next: Vec::new(),
-            fields: icmpv4_layout(input.len() - ICMP_MIN_LEN),
+            fields: icmpv4_layout(body.len()),
             diagnostics,
             stop: true,
             network: None,
@@ -224,7 +231,13 @@ impl LayerCodec for Icmpv6Codec {
             context.mode,
             &mut diagnostics,
         )?;
-        prefix[2..4].copy_from_slice(&checksum.to_be_bytes());
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "prefix begins with the four-byte ICMP header pushed above"
+        )]
+        {
+            prefix[2..4].copy_from_slice(&checksum.to_be_bytes());
+        }
         let mut materialized = layer.clone();
         materialized.checksum = materialized_checksum;
         Ok(EncodedLayer {
@@ -241,9 +254,10 @@ impl LayerCodec for Icmpv6Codec {
         input: &[u8],
         context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
-        if input.len() < ICMP_MIN_LEN {
+        let Some(header) = input.first_chunk::<ICMP_MIN_LEN>() else {
             return Err(truncated("icmpv6", ICMP_MIN_LEN, input.len()));
-        }
+        };
+        let body = input.get(ICMP_MIN_LEN..).unwrap_or_default();
         let mut diagnostics = Vec::new();
         if context.verify_checksums
             && let Some(network) = context.network
@@ -256,15 +270,15 @@ impl LayerCodec for Icmpv6Codec {
         }
         Ok(DecodedLayerValue {
             layer: Box::new(Icmpv6 {
-                icmp_type: input[0],
-                code: input[1],
-                checksum: WireValue::Exact(u16::from_be_bytes([input[2], input[3]])),
-                body: Bytes::copy_from_slice(&input[4..]),
+                icmp_type: header[0],
+                code: header[1],
+                checksum: WireValue::Exact(u16::from_be_bytes([header[2], header[3]])),
+                body: Bytes::copy_from_slice(body),
             }),
             consumed: input.len(),
             payload_len: 0,
             next: Vec::new(),
-            fields: icmpv6_layout(input.len() - ICMP_MIN_LEN),
+            fields: icmpv6_layout(body.len()),
             diagnostics,
             stop: true,
             network: None,

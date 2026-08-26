@@ -66,21 +66,23 @@ pub(crate) fn transports(packet: &Packet) -> Transports<'_> {
             let source = IpAddr::V4(ipv4.source);
             let destination = IpAddr::V4(ipv4.destination);
             let (first, second) = ordered(source, destination);
+            let path_index = path.len();
             path.push(EncapsulationIdentifier::Network { first, second });
             network = Some(Network {
                 source,
                 destination,
-                path_index: path.len() - 1,
+                path_index,
             });
         } else if let Some(ipv6) = layer.as_any().downcast_ref::<Ipv6>() {
             let source = IpAddr::V6(ipv6.source);
             let destination = IpAddr::V6(ipv6.destination);
             let (first, second) = ordered(source, destination);
+            let path_index = path.len();
             path.push(EncapsulationIdentifier::Network { first, second });
             network = Some(Network {
                 source,
                 destination,
-                path_index: path.len() - 1,
+                path_index,
             });
         } else if let Some(vlan) = layer.as_any().downcast_ref::<Vlan>() {
             path.push(EncapsulationIdentifier::Vlan {
@@ -179,7 +181,12 @@ pub(crate) fn transport_payload(decoded: &DecodedPacket, transport_index: usize)
     };
     let start = tcp_layout.range.end;
     let mut end = start;
-    for (index, layer) in decoded.packet.iter().enumerate().skip(transport_index + 1) {
+    for (index, layer) in decoded
+        .packet
+        .iter()
+        .enumerate()
+        .skip(transport_index.saturating_add(1))
+    {
         if let Some(padding) = layer.as_any().downcast_ref::<Padding>()
             && padding
                 .outside_layer

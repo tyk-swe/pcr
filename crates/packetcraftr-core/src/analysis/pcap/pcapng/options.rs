@@ -22,16 +22,23 @@ where
 {
     let mut offset = 0_usize;
     while offset < options.len() {
-        if options.len() - offset < 4 {
+        let header_end = offset.checked_add(4).ok_or(Error::InvalidData {
+            format: Format::PcapNg,
+            reason: "option length overflow",
+        })?;
+        let Some(header) = options
+            .get(offset..header_end)
+            .and_then(|bytes| <[u8; 4]>::try_from(bytes).ok())
+        else {
             return Err(Error::Truncated {
                 context,
-                expected: offset + 4,
+                expected: header_end,
                 actual: options.len(),
             });
-        }
-        let code = decode_u16(endianness, &options[offset..offset + 2])?;
-        let length = usize::from(decode_u16(endianness, &options[offset + 2..offset + 4])?);
-        offset += 4;
+        };
+        let code = decode_u16(endianness, &header)?;
+        let length = usize::from(decode_u16(endianness, &header[2..])?);
+        offset = header_end;
         if code == PCAPNG_OPTION_END {
             if length != 0 {
                 return Err(Error::InvalidData {
@@ -39,7 +46,10 @@ where
                     reason: "end-of-options marker has a non-zero length",
                 });
             }
-            if options[offset..].iter().any(|byte| *byte != 0) {
+            if options
+                .get(offset..)
+                .is_some_and(|trailing| trailing.iter().any(|byte| *byte != 0))
+            {
                 return Err(Error::InvalidData {
                     format: Format::PcapNg,
                     reason: "non-zero bytes follow the end-of-options marker",
@@ -61,7 +71,16 @@ where
                 actual: options.len(),
             });
         }
-        visitor(code, &options[offset..offset + length])?;
+        let value_end = offset.checked_add(length).ok_or(Error::InvalidData {
+            format: Format::PcapNg,
+            reason: "option length overflow",
+        })?;
+        let value = options.get(offset..value_end).ok_or(Error::Truncated {
+            context,
+            expected: value_end,
+            actual: options.len(),
+        })?;
+        visitor(code, value)?;
         offset = end;
     }
     Ok(())

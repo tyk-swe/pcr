@@ -200,6 +200,8 @@ fn render_diagnostics(diagnostics: &[core::diagnostic::Diagnostic]) -> Result<()
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+
     use std::collections::VecDeque;
     use std::sync::Arc;
     use std::time::UNIX_EPOCH;

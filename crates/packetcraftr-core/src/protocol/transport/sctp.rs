@@ -134,15 +134,15 @@ impl LayerCodec for SctpCodec {
         input: &[u8],
         context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
-        if input.len() < SCTP_HEADER_LEN {
+        let Some(header) = input.first_chunk::<SCTP_HEADER_LEN>() else {
             return Err(truncated("sctp", SCTP_HEADER_LEN, input.len()));
-        }
-        validate_chunks(&input[SCTP_HEADER_LEN..], false)
-            .map_err(|message| invalid("sctp", message))?;
+        };
+        let chunks = input.get(SCTP_HEADER_LEN..).unwrap_or_default();
+        validate_chunks(chunks, false).map_err(|message| invalid("sctp", message))?;
 
-        let source_port = u16::from_be_bytes([input[0], input[1]]);
-        let destination_port = u16::from_be_bytes([input[2], input[3]]);
-        let checksum = u32::from_le_bytes([input[8], input[9], input[10], input[11]]);
+        let source_port = u16::from_be_bytes([header[0], header[1]]);
+        let destination_port = u16::from_be_bytes([header[2], header[3]]);
+        let checksum = u32::from_le_bytes([header[8], header[9], header[10], header[11]]);
         let mut diagnostics = Vec::new();
         if source_port == 0 {
             warn_zero_port(&mut diagnostics, "source_port", "source");
@@ -152,7 +152,8 @@ impl LayerCodec for SctpCodec {
         }
         if context.verify_checksums {
             let zero_checksum = [0_u8; 4];
-            let expected = crc32c_parts(&[&input[..8], &zero_checksum, &input[SCTP_HEADER_LEN..]]);
+            let before_checksum = header.get(..8).unwrap_or_default();
+            let expected = crc32c_parts(&[before_checksum, &zero_checksum, chunks]);
             if checksum != expected {
                 diagnostics.push(
                     Diagnostic::warning(SCTP_CHECKSUM, "SCTP checksum mismatch")
@@ -165,11 +166,11 @@ impl LayerCodec for SctpCodec {
             layer: Box::new(Sctp {
                 source_port,
                 destination_port,
-                verification_tag: u32::from_be_bytes([input[4], input[5], input[6], input[7]]),
+                verification_tag: u32::from_be_bytes([header[4], header[5], header[6], header[7]]),
                 checksum: WireValue::Exact(checksum),
             }),
             consumed: SCTP_HEADER_LEN,
-            payload_len: input.len() - SCTP_HEADER_LEN,
+            payload_len: input.len().saturating_sub(SCTP_HEADER_LEN),
             next: vec![Discriminator(0)],
             fields: sctp_layout(),
             diagnostics,
@@ -233,18 +234,18 @@ fn validate_chunks(payload: &[u8], require_zero_padding: bool) -> Result<(), Str
     let mut chunk_count = 0_usize;
     let mut unbundleable = None;
     while cursor < payload.len() {
-        let remaining = payload.len() - cursor;
-        if remaining < CHUNK_HEADER_LEN {
+        let remaining = payload.len().saturating_sub(cursor);
+        let Some(chunk_header) = payload
+            .get(cursor..)
+            .and_then(<[u8]>::first_chunk::<CHUNK_HEADER_LEN>)
+        else {
             return Err(format!(
                 "chunk at payload offset {cursor} has a truncated header ({remaining} byte(s) remain)"
             ));
-        }
+        };
 
-        let chunk_type = payload[cursor];
-        let chunk_len = usize::from(u16::from_be_bytes([
-            payload[cursor + 2],
-            payload[cursor + 3],
-        ]));
+        let chunk_type = chunk_header[0];
+        let chunk_len = usize::from(u16::from_be_bytes([chunk_header[2], chunk_header[3]]));
         if chunk_len < CHUNK_HEADER_LEN {
             return Err(format!(
                 "chunk at payload offset {cursor} has length {chunk_len}, below {CHUNK_HEADER_LEN}"
@@ -263,24 +264,26 @@ fn validate_chunks(payload: &[u8], require_zero_padding: bool) -> Result<(), Str
         if padded_len > remaining {
             return Err(format!(
                 "chunk at payload offset {cursor} is missing {} byte(s) of alignment padding",
-                padded_len - remaining
+                padded_len.saturating_sub(remaining)
             ));
         }
+        let padding_start = cursor.saturating_add(chunk_len);
+        let padding_end = cursor.saturating_add(padded_len);
         if require_zero_padding
-            && payload[cursor + chunk_len..cursor + padded_len]
-                .iter()
-                .any(|byte| *byte != 0)
+            && payload
+                .get(padding_start..padding_end)
+                .is_some_and(|padding| padding.iter().any(|byte| *byte != 0))
         {
             return Err(format!(
                 "chunk at payload offset {cursor} has non-zero alignment padding"
             ));
         }
 
-        chunk_count += 1;
+        chunk_count = chunk_count.saturating_add(1);
         if matches!(chunk_type, 1 | 2 | 14) {
             unbundleable = Some(chunk_type);
         }
-        cursor += padded_len;
+        cursor = cursor.saturating_add(padded_len);
     }
 
     if chunk_count > 1
@@ -308,17 +311,23 @@ const fn crc32c_table() -> [u32; 256] {
             reason = "the loop condition bounds index by table.len(), which is 256"
         )]
         let mut remainder = index as u32;
-        let mut bit = 0;
+        let mut bit = 0_u32;
         while bit < 8 {
             remainder = if remainder & 1 == 0 {
                 remainder >> 1
             } else {
                 (remainder >> 1) ^ CRC32C_POLYNOMIAL
             };
-            bit += 1;
+            bit = bit.saturating_add(1);
         }
-        table[index] = remainder;
-        index += 1;
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "the while condition bounds index below table.len()"
+        )]
+        {
+            table[index] = remainder;
+        }
+        index = index.saturating_add(1);
     }
     table
 }
@@ -328,7 +337,12 @@ fn crc32c_parts(parts: &[&[u8]]) -> u32 {
     for part in parts {
         for byte in *part {
             let index = ((remainder ^ u32::from(*byte)) & 0xff) as usize;
-            remainder = (remainder >> 8) ^ CRC32C_TABLE[index];
+            #[expect(
+                clippy::indexing_slicing,
+                reason = "the 0xff mask bounds index below 256, the length of CRC32C_TABLE"
+            )]
+            let entry = CRC32C_TABLE[index];
+            remainder = (remainder >> 8) ^ entry;
         }
     }
     !remainder

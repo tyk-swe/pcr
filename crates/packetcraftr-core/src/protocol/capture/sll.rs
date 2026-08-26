@@ -154,26 +154,26 @@ impl LayerCodec for LinuxSllCodec {
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
-        if input.len() < 16 {
+        let Some(header) = input.first_chunk::<16>() else {
             return Err(truncated("linux_sll", 16, input.len()));
-        }
-        let address_length = u16::from_be_bytes([input[4], input[5]]);
+        };
+        let address_length = u16::from_be_bytes([header[4], header[5]]);
         if address_length > 8 {
             return Err(invalid("linux_sll", "address length exceeds slot"));
         }
         let mut address = [0; 8];
-        address.copy_from_slice(&input[6..14]);
-        let protocol_value = u16::from_be_bytes([input[14], input[15]]);
+        address.copy_from_slice(&header[6..14]);
+        let protocol_value = u16::from_be_bytes([header[14], header[15]]);
         Ok(DecodedLayerValue {
             layer: Box::new(LinuxSll {
-                packet_type: u16::from_be_bytes([input[0], input[1]]),
-                arp_hardware_type: u16::from_be_bytes([input[2], input[3]]),
+                packet_type: u16::from_be_bytes([header[0], header[1]]),
+                arp_hardware_type: u16::from_be_bytes([header[2], header[3]]),
                 address_length,
                 address,
                 protocol: WireValue::Exact(protocol_value),
             }),
             consumed: 16,
-            payload_len: input.len() - 16,
+            payload_len: input.len().saturating_sub(16),
             next: vec![Discriminator(protocol_value.into())],
             fields: linux_sll_layout(),
             diagnostics: Vec::new(),
@@ -256,29 +256,29 @@ impl LayerCodec for LinuxSll2Codec {
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
-        if input.len() < 20 {
+        let Some(header) = input.first_chunk::<20>() else {
             return Err(truncated("linux_sll2", 20, input.len()));
-        }
-        if input[2] != 0 || input[3] != 0 {
+        };
+        if header[2] != 0 || header[3] != 0 {
             return Err(invalid("linux_sll2", "reserved field is non-zero"));
         }
-        if input[11] > 8 {
+        if header[11] > 8 {
             return Err(invalid("linux_sll2", "address length exceeds slot"));
         }
-        let protocol_value = u16::from_be_bytes([input[0], input[1]]);
+        let protocol_value = u16::from_be_bytes([header[0], header[1]]);
         let mut address = [0; 8];
-        address.copy_from_slice(&input[12..20]);
+        address.copy_from_slice(&header[12..20]);
         Ok(DecodedLayerValue {
             layer: Box::new(LinuxSll2 {
                 protocol: WireValue::Exact(protocol_value),
-                interface_index: u32::from_be_bytes([input[4], input[5], input[6], input[7]]),
-                arp_hardware_type: u16::from_be_bytes([input[8], input[9]]),
-                packet_type: input[10],
-                address_length: input[11],
+                interface_index: u32::from_be_bytes([header[4], header[5], header[6], header[7]]),
+                arp_hardware_type: u16::from_be_bytes([header[8], header[9]]),
+                packet_type: header[10],
+                address_length: header[11],
                 address,
             }),
             consumed: 20,
-            payload_len: input.len() - 20,
+            payload_len: input.len().saturating_sub(20),
             next: vec![Discriminator(protocol_value.into())],
             fields: linux_sll2_layout(),
             diagnostics: Vec::new(),

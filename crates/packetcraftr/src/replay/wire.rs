@@ -50,18 +50,28 @@ pub(super) fn replay_network_envelope(frame: &Frame) -> Result<NetworkEnvelope, 
     }
     match version {
         4 if bytes.len() >= 20 => {
-            let source = Ipv4Addr::new(bytes[12], bytes[13], bytes[14], bytes[15]);
-            let destination = Ipv4Addr::new(bytes[16], bytes[17], bytes[18], bytes[19]);
+            let source: [u8; 4] = bytes
+                .get(12..16)
+                .and_then(|octets| octets.try_into().ok())
+                .ok_or_else(|| invalid("replay frame has a truncated IPv4 header".to_owned()))?;
+            let destination: [u8; 4] = bytes
+                .get(16..20)
+                .and_then(|octets| octets.try_into().ok())
+                .ok_or_else(|| invalid("replay frame has a truncated IPv4 header".to_owned()))?;
             Ok(NetworkEnvelope {
-                source: IpAddr::V4(source),
-                destination: IpAddr::V4(destination),
+                source: IpAddr::V4(Ipv4Addr::from(source)),
+                destination: IpAddr::V4(Ipv4Addr::from(destination)),
             })
         }
         6 if bytes.len() >= 40 => {
-            let mut source = [0_u8; 16];
-            let mut destination = [0_u8; 16];
-            source.copy_from_slice(&bytes[8..24]);
-            destination.copy_from_slice(&bytes[24..40]);
+            let source: [u8; 16] = bytes
+                .get(8..24)
+                .and_then(|octets| octets.try_into().ok())
+                .ok_or_else(|| invalid("replay frame has a truncated IPv6 header".to_owned()))?;
+            let destination: [u8; 16] = bytes
+                .get(24..40)
+                .and_then(|octets| octets.try_into().ok())
+                .ok_or_else(|| invalid("replay frame has a truncated IPv6 header".to_owned()))?;
             Ok(NetworkEnvelope {
                 source: IpAddr::V6(Ipv6Addr::from(source)),
                 destination: IpAddr::V6(Ipv6Addr::from(destination)),

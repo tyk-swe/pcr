@@ -48,6 +48,11 @@ pub(in crate::analysis::pcap) fn read_section_header_after_type<R: Read>(
     read_section_header_with_length(reader, length, max_size, None, scratch)
 }
 
+#[expect(
+    clippy::indexing_slicing,
+    reason = "`block_length >= 28` is checked before `scratch` is filled, so `scratch` holds at \
+              least sixteen bytes and `footer_offset` is `scratch.len() - 4`"
+)]
 pub(in crate::analysis::pcap) fn read_section_header_with_length<R: Read>(
     reader: &mut R,
     raw_length: [u8; 4],
@@ -86,9 +91,18 @@ pub(in crate::analysis::pcap) fn read_section_header_with_length<R: Read>(
         });
     }
 
-    let remaining_length = block_length_usize - 12;
+    let remaining_length = block_length_usize
+        .checked_sub(12)
+        .ok_or(Error::InvalidBlockLength {
+            length: block_length,
+        })?;
     read_exact_vec(reader, scratch, remaining_length, "pcapng section header")?;
-    let footer_offset = scratch.len() - 4;
+    let footer_offset = scratch
+        .len()
+        .checked_sub(4)
+        .ok_or(Error::InvalidBlockLength {
+            length: block_length,
+        })?;
     let trailing_length = decode_u32(endianness, &scratch[footer_offset..])?;
     if trailing_length != block_length {
         return Err(Error::BlockLengthMismatch {

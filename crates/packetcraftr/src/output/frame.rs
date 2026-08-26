@@ -92,6 +92,12 @@ impl Timestamp {
             // floor seconds. `i64::MAX` seconds plus a fraction therefore
             // maps to `(i64::MIN, positive nanos)`, which is still inside the
             // v1 signed-seconds range.
+            #[expect(
+                clippy::arithmetic_side_effects,
+                reason = "`seconds` is below `MAX_SIGNED_SECONDS` here, the equal case having \
+                          been taken above, so `signed_seconds + 1` and its negation both stay \
+                          inside `i64`"
+            )]
             let unix_seconds = if seconds == MAX_SIGNED_SECONDS {
                 i64::MIN
             } else {
@@ -103,9 +109,15 @@ impl Timestamp {
                 let signed_seconds = seconds as i64;
                 -(signed_seconds + 1)
             };
+            #[expect(
+                clippy::arithmetic_side_effects,
+                reason = "`subsec_nanos` is always below 1_000_000_000, so the subtraction cannot \
+                          underflow"
+            )]
+            let nanoseconds = 1_000_000_000 - duration.subsec_nanos();
             Ok(Self {
                 unix_seconds,
-                nanoseconds: 1_000_000_000 - duration.subsec_nanos(),
+                nanoseconds,
             })
         }
     }

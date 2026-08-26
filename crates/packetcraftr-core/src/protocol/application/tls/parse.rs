@@ -81,7 +81,7 @@ pub fn parse_record(input: &[u8]) -> Outcome<Record> {
         Ok(header) => header,
         Err(error) => return Outcome::Malformed(error),
     };
-    let total = RECORD_HEADER_LEN + header.length;
+    let total = RECORD_HEADER_LEN.saturating_add(header.length);
     let Some(body) = input.get(RECORD_HEADER_LEN..total) else {
         return Outcome::NeedMore { minimum: total };
     };
@@ -120,7 +120,7 @@ pub fn parse_handshake(input: &[u8]) -> Outcome<Handshake> {
             format!("handshake body of {length} bytes exceeds the limit of {MAX_HANDSHAKE_BODY}"),
         ));
     }
-    let total = HANDSHAKE_HEADER_LEN + length;
+    let total = HANDSHAKE_HEADER_LEN.saturating_add(length);
     let Some(body) = input.get(HANDSHAKE_HEADER_LEN..total) else {
         return Outcome::NeedMore { minimum: total };
     };
@@ -480,10 +480,15 @@ fn u16_list(input: &[u8], limit: usize, what: &str) -> Result<Vec<u16>, Error> {
             format!("{what} list of {count} entries exceeds the limit of {limit}"),
         ));
     }
-    Ok(input
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "chunks_exact(2) yields slices of length exactly 2"
+    )]
+    let values = input
         .chunks_exact(2)
         .map(|pair| u16::from_be_bytes([pair[0], pair[1]]))
-        .collect())
+        .collect();
+    Ok(values)
 }
 
 struct Reader<'a> {
@@ -522,13 +527,19 @@ impl<'a> Reader<'a> {
         Ok(slice)
     }
 
+    /// Takes a fixed-size field, so callers can index the array without bounds checks.
+    fn array<const N: usize>(&mut self) -> Result<&'a [u8; N], Error> {
+        let bytes = self.take(N)?;
+        <&[u8; N]>::try_from(bytes)
+            .map_err(|_| invalid("tls", format!("handshake field is not {N} bytes")))
+    }
+
     fn u8(&mut self) -> Result<u8, Error> {
-        Ok(self.take(1)?[0])
+        Ok(self.array::<1>()?[0])
     }
 
     fn u16(&mut self) -> Result<u16, Error> {
-        let bytes = self.take(2)?;
-        Ok(u16::from_be_bytes([bytes[0], bytes[1]]))
+        Ok(u16::from_be_bytes(*self.array::<2>()?))
     }
 
     fn random(&mut self) -> Result<[u8; 32], Error> {
@@ -549,6 +560,8 @@ impl<'a> Reader<'a> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+
     use super::super::model::{
         CONTENT_TYPE_APPLICATION_DATA, CONTENT_TYPE_HANDSHAKE, HANDSHAKE_CLIENT_HELLO,
         HANDSHAKE_SERVER_HELLO, HELLO_RETRY_REQUEST_RANDOM, Handshake, MAX_ALPN, MAX_CIPHER_SUITES,

@@ -116,6 +116,7 @@ pub(super) fn is_unicast_mac(address: MacAddress) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
     use std::time::SystemTime;
 
     use super::*;

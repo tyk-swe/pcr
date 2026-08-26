@@ -109,6 +109,10 @@ pub(crate) fn finish_route(
     })
 }
 
+#[expect(
+    clippy::arithmetic_side_effects,
+    reason = "prefix_length above 30 is rejected above, so host bits stay within u32::BITS"
+)]
 fn is_interface_broadcast(destination: IpAddr, interface: &InterfaceInfo) -> bool {
     let IpAddr::V4(destination) = destination else {
         return false;
@@ -267,6 +271,10 @@ fn fallback_source(addresses: &[InterfaceAddress], destination: IpAddr) -> Optio
     best.map(|(address, _)| address)
 }
 
+#[expect(
+    clippy::arithmetic_side_effects,
+    reason = "the match guards bound prefix_length to 32 and 128, so neither subtraction underflows"
+)]
 fn prefix_matches(source: IpAddr, destination: IpAddr, prefix_length: u8) -> bool {
     match (source, destination) {
         (IpAddr::V4(source), IpAddr::V4(destination)) if prefix_length <= 32 => {
@@ -297,6 +305,7 @@ fn address_scope(address: IpAddr) -> u8 {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
     use std::net::{Ipv4Addr, Ipv6Addr};
 
     use packetcraftr_core::frame::LinkType;

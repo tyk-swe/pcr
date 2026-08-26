@@ -181,7 +181,7 @@ impl Collector {
             && (flow.flow.source_port == QUIC_UDP_PORT
                 || flow.flow.destination_port == QUIC_UDP_PORT)
         {
-            self.summary.udp_443_frames += 1;
+            self.summary.udp_443_frames = self.summary.udp_443_frames.saturating_add(1);
         }
         self.fold_reassembly_events(record.tcp_events, record.number, &mut events);
 
@@ -378,7 +378,7 @@ impl Collector {
                     record.number,
                     events,
                 ) {
-                    self.summary.evicted_sessions += 1;
+                    self.summary.evicted_sessions = self.summary.evicted_sessions.saturating_add(1);
                 }
                 return;
             }
@@ -394,7 +394,8 @@ impl Collector {
                 .buffered_bytes
                 .saturating_sub(before)
                 .saturating_add(after);
-            self.summary.buffer_limit_hits += limit_hits;
+            self.summary.buffer_limit_hits =
+                self.summary.buffer_limit_hits.saturating_add(limit_hits);
             if let Verdict::Finished { status, reason } = verdict {
                 self.retire(key, status, reason, record.number, events);
             }
@@ -481,7 +482,7 @@ impl Collector {
         if let Tracked::Live(live) = entry.state {
             self.buffered_bytes = self.buffered_bytes.saturating_sub(live.buffered());
             if live.is_session() {
-                self.summary.evicted_sessions += 1;
+                self.summary.evicted_sessions = self.summary.evicted_sessions.saturating_add(1);
                 let number = live.last_frame();
                 self.emit(*live, Status::Gap, Some(reason.to_owned()), number, events);
             }
@@ -537,8 +538,9 @@ impl Collector {
     ) {
         let index = self.next_session;
         self.next_session = self.next_session.saturating_add(1);
-        self.summary.sessions += 1;
-        *self.summary.by_status.entry(status).or_default() += 1;
+        self.summary.sessions = self.summary.sessions.saturating_add(1);
+        let by_status = self.summary.by_status.entry(status).or_default();
+        *by_status = by_status.saturating_add(1);
         events.push(SessionEvent {
             number,
             session: live.into_session(index, status, reason),

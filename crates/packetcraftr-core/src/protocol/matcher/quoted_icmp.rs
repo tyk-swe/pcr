@@ -105,10 +105,12 @@ fn directly_received_icmp(response: &Packet) -> Option<(BuiltinProtocol, &dyn La
     if icmp_index <= outer_network_index {
         return None;
     }
+    let nested_start = outer_network_index.checked_add(1)?;
+    let nested_len = icmp_index.checked_sub(nested_start)?;
     let directly_nested = response
         .iter()
-        .skip(outer_network_index + 1)
-        .take(icmp_index - outer_network_index - 1)
+        .skip(nested_start)
+        .take(nested_len)
         .all(|layer| BuiltinProtocol::of(layer).is_some_and(BuiltinProtocol::is_ipv6_extension));
     if !directly_nested {
         return None;
@@ -225,11 +227,15 @@ fn quoted_probe_matches(
             let Some(FieldValue::Bytes(body)) = layer.field("body") else {
                 return false;
             };
-            quoted.payload.len() >= 8
-                && quoted.payload[0] == icmp_type
-                && quoted.payload[1] == code
-                && body.len() >= 4
-                && quoted.payload[4..8] == body[..4]
+            let Some(quoted_echo) = quoted.payload.first_chunk::<8>() else {
+                return false;
+            };
+            let Some(body_identity) = body.first_chunk::<4>() else {
+                return false;
+            };
+            quoted_echo[0] == icmp_type
+                && quoted_echo[1] == code
+                && quoted_echo[4..8] == body_identity[..]
         }
     }
 }
@@ -278,40 +284,43 @@ const MAX_QUOTED_IPV6_EXTENSION_HEADERS: usize = 16;
 fn parse_quoted_probe(bytes: &[u8]) -> Option<QuotedProbe<'_>> {
     match bytes.first()? >> 4 {
         4 => {
-            if bytes.len() < 20 {
+            let header = bytes.first_chunk::<20>()?;
+            let header_len = usize::from(header[0] & 0x0f).checked_mul(4)?;
+            let minimum_len = header_len.checked_add(8)?;
+            if header_len < 20 || bytes.len() < minimum_len {
                 return None;
             }
-            let header_len = usize::from(bytes[0] & 0x0f).checked_mul(4)?;
-            if header_len < 20 || bytes.len() < header_len + 8 {
+            let total_length = usize::from(u16::from_be_bytes([header[2], header[3]]));
+            if total_length < minimum_len {
                 return None;
             }
-            let total_length = usize::from(u16::from_be_bytes([bytes[2], bytes[3]]));
-            if total_length < header_len + 8 {
-                return None;
-            }
-            let fragment_offset = u16::from_be_bytes([bytes[6], bytes[7]]) & 0x1fff;
+            let fragment_offset = u16::from_be_bytes([header[6], header[7]]) & 0x1fff;
             if fragment_offset != 0 {
                 return None;
             }
             Some(QuotedProbe {
-                source: IpAddr::V4(Ipv4Addr::new(bytes[12], bytes[13], bytes[14], bytes[15])),
-                destination: IpAddr::V4(Ipv4Addr::new(bytes[16], bytes[17], bytes[18], bytes[19])),
-                protocol: bytes[9],
-                payload: &bytes[header_len..total_length.min(bytes.len())],
+                source: IpAddr::V4(Ipv4Addr::new(
+                    header[12], header[13], header[14], header[15],
+                )),
+                destination: IpAddr::V4(Ipv4Addr::new(
+                    header[16], header[17], header[18], header[19],
+                )),
+                protocol: header[9],
+                payload: bytes.get(header_len..total_length.min(bytes.len()))?,
             })
         }
         6 => {
-            if bytes.len() < IPV6_HEADER_LEN {
-                return None;
-            }
-            let payload_length = usize::from(u16::from_be_bytes([bytes[4], bytes[5]]));
+            let header = bytes.first_chunk::<IPV6_HEADER_LEN>()?;
+            let payload_length = usize::from(u16::from_be_bytes([header[4], header[5]]));
             let end = IPV6_HEADER_LEN
                 .checked_add(payload_length)?
                 .min(bytes.len());
-            let (protocol, payload) = parse_quoted_ipv6_payload(bytes, bytes[6], end)?;
+            let (protocol, payload) = parse_quoted_ipv6_payload(bytes, header[6], end)?;
             Some(QuotedProbe {
-                source: IpAddr::V6(Ipv6Addr::from(<[u8; 16]>::try_from(&bytes[8..24]).ok()?)),
-                destination: IpAddr::V6(Ipv6Addr::from(<[u8; 16]>::try_from(&bytes[24..40]).ok()?)),
+                source: IpAddr::V6(Ipv6Addr::from(<[u8; 16]>::try_from(&header[8..24]).ok()?)),
+                destination: IpAddr::V6(Ipv6Addr::from(
+                    <[u8; 16]>::try_from(&header[24..40]).ok()?,
+                )),
                 protocol,
                 payload,
             })
@@ -332,7 +341,9 @@ fn parse_quoted_ipv6_payload(bytes: &[u8], mut protocol: u8, end: usize) -> Opti
                     return None;
                 }
                 let next = *header.first()?;
-                let header_len = (usize::from(*header.get(1)?) + 1).checked_mul(8)?;
+                let header_len = usize::from(*header.get(1)?)
+                    .checked_add(1)?
+                    .checked_mul(8)?;
                 if header_len < 8 || header.len() < header_len {
                     return None;
                 }
@@ -342,14 +353,15 @@ fn parse_quoted_ipv6_payload(bytes: &[u8], mut protocol: u8, end: usize) -> Opti
             // Fragment. Only atomic and first fragments can quote a transport
             // key at the start of this payload.
             44 => {
-                if extension_count >= MAX_QUOTED_IPV6_EXTENSION_HEADERS || header.len() < 8 {
+                if extension_count >= MAX_QUOTED_IPV6_EXTENSION_HEADERS {
                     return None;
                 }
-                let offset_and_flags = u16::from_be_bytes([header[2], header[3]]);
+                let fragment = header.first_chunk::<8>()?;
+                let offset_and_flags = u16::from_be_bytes([fragment[2], fragment[3]]);
                 if offset_and_flags & 0xfffe != 0 {
                     return None;
                 }
-                protocol = header[0];
+                protocol = fragment[0];
                 8
             }
             // Authentication Header. Its length is measured in 32-bit words
@@ -359,7 +371,9 @@ fn parse_quoted_ipv6_payload(bytes: &[u8], mut protocol: u8, end: usize) -> Opti
                     return None;
                 }
                 let next = *header.first()?;
-                let header_len = (usize::from(*header.get(1)?) + 2).checked_mul(4)?;
+                let header_len = usize::from(*header.get(1)?)
+                    .checked_add(2)?
+                    .checked_mul(4)?;
                 if header_len < 12 || header.len() < header_len {
                     return None;
                 }
@@ -369,7 +383,7 @@ fn parse_quoted_ipv6_payload(bytes: &[u8], mut protocol: u8, end: usize) -> Opti
             _ => break,
         };
         offset = offset.checked_add(header_len)?;
-        extension_count += 1;
+        extension_count = extension_count.checked_add(1)?;
     }
     if end.checked_sub(offset)? < MIN_QUOTED_TRANSPORT_LEN {
         return None;

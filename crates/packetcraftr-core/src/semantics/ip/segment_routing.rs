@@ -24,7 +24,7 @@ pub fn validate_segment_route(
     if segments.is_empty() || segments.len() > 127 {
         return Err(Error::new("SRH requires 1..=127 IPv6 segments"));
     }
-    let expected_last = u8::try_from(segments.len() - 1)
+    let expected_last = u8::try_from(segments.len().saturating_sub(1))
         .map_err(|_| Error::new("SRH segment count cannot be represented"))?;
     if last_entry != expected_last {
         return Err(Error::new(format!(
@@ -39,7 +39,11 @@ pub fn validate_segment_route(
     if flags != 0 {
         return Err(Error::new("unsupported SRH flags are non-zero"));
     }
-    let active_index = usize::from(last_entry - segments_left);
+    let active_index = usize::from(last_entry.saturating_sub(segments_left));
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "segments_left <= last_entry == segments.len() - 1 is checked above"
+    )]
     let active_destination = segments[active_index];
     if !header_destination.is_unspecified() && header_destination != active_destination {
         return Err(Error::new(format!(

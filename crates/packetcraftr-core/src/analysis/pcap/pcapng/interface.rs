@@ -25,14 +25,24 @@ pub(in crate::analysis::pcap) fn parse_interface_description(
             reason: "interface description block is shorter than 8 bytes",
         });
     }
-    let link_type = LinkType(u32::from(decode_u16(endianness, &body[0..2])?));
-    let snap_len = decode_u32(endianness, &body[4..8])?;
+    let link_type = LinkType(u32::from(decode_u16(endianness, body)?));
+    let snap_len = decode_u32(
+        endianness,
+        body.get(4..).ok_or(Error::InvalidData {
+            format: Format::PcapNg,
+            reason: "interface description block is shorter than 8 bytes",
+        })?,
+    )?;
     let mut timestamp_resolution = DEFAULT_TIMESTAMP_RESOLUTION;
     let mut timestamp_offset = 0_i64;
     let mut saw_timestamp_resolution = false;
     let mut saw_timestamp_offset = false;
+    let option_bytes = body.get(8..).ok_or(Error::InvalidData {
+        format: Format::PcapNg,
+        reason: "interface description block is shorter than 8 bytes",
+    })?;
     visit_options(
-        &body[8..],
+        option_bytes,
         endianness,
         "pcapng interface options",
         |code, value| {
@@ -45,13 +55,12 @@ pub(in crate::analysis::pcap) fn parse_interface_description(
                         });
                     }
                     saw_timestamp_resolution = true;
-                    if value.len() != 1 {
+                    let &[resolution] = value else {
                         return Err(Error::InvalidData {
                             format: Format::PcapNg,
                             reason: "if_tsresol option must contain one byte",
                         });
-                    }
-                    let resolution = value[0];
+                    };
                     timestamp_resolution = if resolution & 0x80 == 0 {
                         TimestampResolution::Decimal(resolution)
                     } else {

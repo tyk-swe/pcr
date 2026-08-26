@@ -39,7 +39,8 @@ pub fn canonical_query_name(value: &str) -> Result<String, crate::dns::WireError
             });
         }
         wire_length = wire_length
-            .checked_add(label.len() + 1)
+            .checked_add(label.len())
+            .and_then(|length| length.checked_add(1))
             .ok_or(crate::dns::WireError::NameTooLong)?;
     }
     if wire_length > 255 {
@@ -80,8 +81,9 @@ pub(super) fn decode_name(
                 offset: cursor,
             })?;
         if length & 0xc0 == 0xc0 {
-            let second = *message
-                .get(cursor + 1)
+            let second = *cursor
+                .checked_add(1)
+                .and_then(|next| message.get(next))
                 .ok_or(crate::dns::WireError::TruncatedPointer { offset: cursor })?;
             let pointer = usize::from((u16::from(length & 0x3f) << 8) | u16::from(second));
             if pointer >= message.len() {
@@ -99,7 +101,7 @@ pub(super) fn decode_name(
                     pointer,
                 });
             }
-            pointer_count += 1;
+            pointer_count = pointer_count.saturating_add(1);
             if pointer_count > limits.max_name_pointers {
                 return Err(crate::dns::WireError::PointerLimit {
                     limit: limits.max_name_pointers,
@@ -109,14 +111,18 @@ pub(super) fn decode_name(
                 return Err(crate::dns::WireError::PointerLoop { offset: pointer });
             }
             visited.push(pointer);
-            resume.get_or_insert(cursor + 2);
+            let resume_offset = cursor
+                .checked_add(2)
+                .ok_or(crate::dns::WireError::TruncatedPointer { offset: cursor })?;
+            resume.get_or_insert(resume_offset);
             cursor = pointer;
             continue;
         }
         if length & 0xc0 != 0 {
             return Err(crate::dns::WireError::ReservedLabelLength { offset: cursor });
         }
-        cursor += 1;
+        let length_offset = cursor;
+        cursor = cursor.saturating_add(1);
         if length == 0 {
             let next = resume.unwrap_or(cursor);
             return Ok((crate::dns::Name { labels }, next));
@@ -124,29 +130,33 @@ pub(super) fn decode_name(
         let length = usize::from(length);
         if length > 63 {
             return Err(crate::dns::WireError::LabelTooLong {
-                offset: cursor - 1,
+                offset: length_offset,
                 actual: length,
             });
         }
-        let label = message.get(cursor..cursor.saturating_add(length)).ok_or(
-            crate::dns::WireError::TruncatedField {
-                field: "name label",
-                offset: cursor,
-            },
-        )?;
+        let label_end = cursor.saturating_add(length);
+        let label =
+            message
+                .get(cursor..label_end)
+                .ok_or(crate::dns::WireError::TruncatedField {
+                    field: "name label",
+                    offset: cursor,
+                })?;
         wire_length = wire_length
-            .checked_add(length + 1)
+            .checked_add(length)
+            .and_then(|length| length.checked_add(1))
             .ok_or(crate::dns::WireError::NameTooLong)?;
         if wire_length > 255 {
             return Err(crate::dns::WireError::NameTooLong);
         }
         labels.push(Bytes::copy_from_slice(label));
-        cursor += length;
+        cursor = label_end;
     }
 }
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
     use super::*;
 
     #[test]

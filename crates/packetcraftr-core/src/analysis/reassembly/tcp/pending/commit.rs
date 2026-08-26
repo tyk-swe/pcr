@@ -95,7 +95,7 @@ fn commit_flow_push(
         history_replacement,
         ..
     } = plan;
-    retransmitted += merge.overlapping_bytes;
+    retransmitted = retransmitted.saturating_add(merge.overlapping_bytes);
     conflicting |= merge.has_conflicting_overlap;
 
     state.last_update = state.last_update.max(now);
@@ -144,7 +144,7 @@ fn commit_flow_push(
             state.pending_bytes = state.pending_bytes.saturating_sub(bytes.len());
             continue;
         }
-        let skip = usize::try_from(state.next_offset - start)
+        let skip = usize::try_from(state.next_offset.saturating_sub(start))
             .expect("pending entry skip fits its byte length");
         let output = bytes.slice(skip..);
         state.pending_bytes = state.pending_bytes.saturating_sub(bytes.len());
@@ -197,7 +197,7 @@ fn apply_pending_merge(state: &mut TcpFlowState, merge: PendingMergePlan) {
                 .pending
                 .remove(&start)
                 .expect("pending merge entry was validated while planning");
-            if index + 1 < affected_segment_count {
+            if index.saturating_add(1) < affected_segment_count {
                 current = state
                     .pending
                     .range((std::ops::Bound::Excluded(start), std::ops::Bound::Unbounded))

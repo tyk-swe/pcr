@@ -122,14 +122,14 @@ impl SharedCapture {
                             break;
                         }
                         let bytes = dropped.frame.bytes().len();
-                        retained_frames -= 1;
+                        retained_frames = retained_frames.saturating_sub(1);
                         retained_bytes = retained_bytes.checked_sub(bytes).ok_or_else(|| {
                             LiveIoError::InvalidCaptureStatistics {
                                 message: "native capture queue byte accounting underflowed"
                                     .to_owned(),
                             }
                         })?;
-                        drop_count += 1;
+                        drop_count = drop_count.saturating_add(1);
                         drop_bytes = drop_bytes.checked_add(bytes).ok_or_else(|| {
                             LiveIoError::InvalidCaptureStatistics {
                                 message: "native capture dropped-byte accounting overflowed"
@@ -258,6 +258,7 @@ fn increment(counter: &mut u64, value: u64, label: &str) -> Result<(), LiveIoErr
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
     use std::time::SystemTime;
 
     use packetcraftr_core::frame::{Frame, LinkType};

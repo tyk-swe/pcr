@@ -24,9 +24,9 @@ pub(super) fn validate_execution(
     .map_err(|error| Error::InvalidEvidence {
         sequence: error
             .request_index()
-            .map_or(batch.probes[0].sequence, |index| {
-                batch.probes[index].sequence
-            }),
+            .and_then(|index| batch.probes.get(index))
+            .or_else(|| batch.probes.first())
+            .map_or(0, |probe| probe.sequence),
         message: format_exchange_evidence_error(error, "hop batch", "traceroute"),
     })
 }

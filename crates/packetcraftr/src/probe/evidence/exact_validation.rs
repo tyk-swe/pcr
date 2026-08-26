@@ -250,8 +250,8 @@ where
         max_captured_bytes,
     )?;
 
-    for (request_index, sent) in execution.sent.iter().enumerate() {
-        if !sent_packet_matches(&batch.probes[request_index], &sent.built().packet) {
+    for (request_index, (sent, probe)) in execution.sent.iter().zip(&batch.probes).enumerate() {
+        if !sent_packet_matches(probe, &sent.built().packet) {
             return Err(ExchangeEvidenceError::SentPacketMismatch { request_index });
         }
     }

@@ -211,7 +211,10 @@ fn update_next_sequences(
     if keep_alive || (payload_len == 0 && !syn && !fin) {
         return;
     }
-    let advance = u32::try_from(payload_len).unwrap_or(u32::MAX) + u32::from(syn) + u32::from(fin);
+    let advance = u32::try_from(payload_len)
+        .unwrap_or(u32::MAX)
+        .saturating_add(u32::from(syn))
+        .saturating_add(u32::from(fin));
     let end = tcp.sequence.wrapping_add(advance);
     sent.next_sequence = Some(match sent.next_sequence {
         Some(next) if end.wrapping_sub(next) >= 0x8000_0000 => next,
@@ -280,6 +283,8 @@ pub(super) fn finish(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+
     use super::retransmission_overlap;
 
     #[test]

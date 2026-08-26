@@ -270,7 +270,11 @@ fn wide_string(
             message: "Windows adapter string pointed outside its response buffer".to_owned(),
         });
     }
-    let available = (bounds.end - pointer as usize) / size_of::<u16>();
+    let available = bounds
+        .end
+        .saturating_sub(pointer as usize)
+        .checked_div(size_of::<u16>())
+        .unwrap_or(0);
     // SAFETY: the checked pointer is aligned and `available` ends at the
     // response buffer boundary. We search only this initialized range.
     let units = unsafe { std::slice::from_raw_parts(pointer, available) };
@@ -282,7 +286,9 @@ fn wide_string(
                 message: "Windows adapter string was not terminated within its response buffer"
                     .to_owned(),
             })?;
-    Ok(String::from_utf16(&units[..length]).ok())
+    Ok(units
+        .get(..length)
+        .and_then(|units| String::from_utf16(units).ok()))
 }
 
 fn socket_address_ip(

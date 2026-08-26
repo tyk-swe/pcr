@@ -151,10 +151,22 @@ impl<C: Session> Transaction<C> {
     where
         F: FnMut(super::Event) -> Result<(), crate::BoundaryError>,
     {
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "`published_diagnostics` only ever counts diagnostics already emitted \
+                      from this append-only vector, so it stays within `diagnostics.len()`"
+        )]
         let diagnostics = self.captured.diagnostics[self.published_diagnostics..].to_vec();
         for diagnostic in diagnostics {
             emit(super::Event::Diagnostic(diagnostic)).map_err(OperationError::output)?;
-            self.published_diagnostics += 1;
+            #[expect(
+                clippy::arithmetic_side_effects,
+                reason = "one increment per diagnostic in the vector, so the count cannot exceed \
+                          `diagnostics.len()`"
+            )]
+            {
+                self.published_diagnostics += 1;
+            }
         }
         Ok(())
     }

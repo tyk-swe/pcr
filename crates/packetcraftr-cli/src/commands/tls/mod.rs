@@ -71,11 +71,7 @@ impl SniPattern {
         let leading = pattern.starts_with('*');
         let rest = if leading { &pattern[1..] } else { pattern };
         let trailing = rest.ends_with('*');
-        let literal = if trailing {
-            &rest[..rest.len() - 1]
-        } else {
-            rest
-        };
+        let literal = rest.strip_suffix('*').unwrap_or(rest);
         if literal.contains('*') {
             return Err(CliError::new(
                 2,

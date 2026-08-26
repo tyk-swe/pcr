@@ -180,7 +180,9 @@ impl Reassembler {
                             .segments
                             .last_key_value()
                             .is_some_and(|(offset, bytes)| {
-                                u64::from(*offset) + bytes.len() as u64 > u64::from(end)
+                                u64::from(*offset)
+                                    .checked_add(bytes.len() as u64)
+                                    .is_none_or(|last_end| last_end > u64::from(end))
                             })
                     });
                     if prior_fragment_extends_past_end {
@@ -231,12 +233,18 @@ impl Reassembler {
                 limit: self.limits.max_aggregate_bytes,
             });
         }
+        let fragment_count =
+            previous_fragment_count
+                .checked_add(1)
+                .ok_or(Error::AggregateByteLimit {
+                    limit: self.limits.max_aggregate_bytes,
+                })?;
         Ok(FragmentAccountingPlan {
             stored_bytes,
             aggregate_bytes,
             new_memory_charge,
             aggregate_memory_charge,
-            fragment_count: previous_fragment_count + 1,
+            fragment_count,
         })
     }
 }
@@ -288,14 +296,26 @@ pub(super) fn plan_fragment_merge(
             let overlap_start = start.max(offset);
             let overlap_end = end.min(new_end);
             if overlap_start < overlap_end {
-                let length = (overlap_end - overlap_start) as usize;
-                let existing_start = (overlap_start - start) as usize;
-                let fragment_start = (overlap_start - offset) as usize;
+                let length = overlap_end.saturating_sub(overlap_start) as usize;
+                let existing_start = overlap_start.saturating_sub(start) as usize;
+                let fragment_start = overlap_start.saturating_sub(offset) as usize;
                 overlapping_bytes = overlapping_bytes
                     .checked_add(length)
                     .ok_or(Error::OffsetOverflow)?;
-                let existing_overlap = &existing_bytes[existing_start..existing_start + length];
-                let fragment_overlap = &fragment[fragment_start..fragment_start + length];
+                let existing_end = existing_start.saturating_add(length);
+                let fragment_end = fragment_start.saturating_add(length);
+                #[expect(
+                    clippy::indexing_slicing,
+                    reason = "length is the clamped overlap of the two ranges, so both windows \
+                              stay inside their own slice"
+                )]
+                let existing_overlap = &existing_bytes[existing_start..existing_end];
+                #[expect(
+                    clippy::indexing_slicing,
+                    reason = "length is the clamped overlap of the two ranges, so both windows \
+                              stay inside their own slice"
+                )]
+                let fragment_overlap = &fragment[fragment_start..fragment_end];
                 if existing_overlap != fragment_overlap {
                     plan.has_conflicting_overlap = true;
                     if policy == OverlapPolicy::RejectConflicting {
@@ -311,7 +331,7 @@ pub(super) fn plan_fragment_merge(
                             .position(|(left, right)| left != right)
                             .unwrap_or(0) as u32;
                         return Err(Error::ConflictingOverlap {
-                            offset: overlap_start + mismatch,
+                            offset: overlap_start.saturating_add(mismatch),
                         });
                     }
                 }

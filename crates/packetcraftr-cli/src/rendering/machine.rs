@@ -75,8 +75,8 @@ pub(crate) fn output_timestamp_text(timestamp: output::frame::Timestamp) -> Stri
     // OutputTimestamp uses the canonical floor-seconds representation, so
     // (-3, 750_000_000) is -2.25 seconds rather than -3.75 seconds. Convert
     // that pair to conventional signed decimal notation for human output.
-    let whole_seconds = -(timestamp.unix_seconds + 1);
-    let fractional = 1_000_000_000 - timestamp.nanoseconds;
+    let whole_seconds = timestamp.unix_seconds.saturating_add(1).saturating_neg();
+    let fractional = 1_000_000_000_u32.saturating_sub(timestamp.nanoseconds);
     format!("-{whole_seconds}.{fractional:09}")
 }
 

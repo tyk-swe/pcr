@@ -17,7 +17,11 @@ pub fn encode_query(
     recursion_desired: bool,
 ) -> Result<Bytes, super::super::error::WireError> {
     let query_name = canonical_query_name(query_name)?;
-    let mut message = Vec::with_capacity(DNS_HEADER_BYTES + query_name.len() + 5);
+    let mut message = Vec::with_capacity(
+        DNS_HEADER_BYTES
+            .saturating_add(query_name.len())
+            .saturating_add(5),
+    );
     message.extend_from_slice(&transaction_id.to_be_bytes());
     let flags = if recursion_desired {
         DNS_FLAG_RECURSION_DESIRED

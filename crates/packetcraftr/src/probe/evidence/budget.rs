@@ -141,7 +141,14 @@ impl<'a> UndecodedRetention<'a> {
                 self.max_evidence_bytes,
                 self.diagnostics,
             ) {
-                *self.retained_count += 1;
+                #[expect(
+                    clippy::arithmetic_side_effects,
+                    reason = "`retain_evidence` returns false once the count reaches \
+                              `max_evidence_frames`, so the increment cannot overflow"
+                )]
+                {
+                    *self.retained_count += 1;
+                }
                 emit(map(frame))?;
             }
             emit_diagnostics_since(
@@ -162,7 +169,13 @@ fn emit_diagnostics_since<T, E>(
     map: &mut impl FnMut(Diagnostic) -> T,
     emit: &mut impl FnMut(T) -> Result<(), E>,
 ) -> Result<(), E> {
-    for diagnostic in diagnostics[start..].iter().cloned() {
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "`start` is a `diagnostics.len()` snapshot taken by the caller before appending \
+                  to the same append-only slice, so the range is in bounds"
+    )]
+    let since = &diagnostics[start..];
+    for diagnostic in since.iter().cloned() {
         emit(map(diagnostic))?;
     }
     Ok(())

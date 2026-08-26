@@ -71,10 +71,10 @@ impl ResponseMatcher for EchoMatcher {
             let Some(FieldValue::Bytes(response_body)) = response_layer.field("body") else {
                 return MatchResult::no_match();
             };
-            if request_body.len() < 4
-                || response_body.len() < 4
-                || request_body[..4] != response_body[..4]
-            {
+            let Some(request_identity) = request_body.first_chunk::<4>() else {
+                return MatchResult::no_match();
+            };
+            if Some(request_identity) != response_body.first_chunk::<4>() {
                 return MatchResult::no_match();
             }
         }

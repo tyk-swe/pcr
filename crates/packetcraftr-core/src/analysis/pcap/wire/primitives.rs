@@ -74,7 +74,12 @@ pub(in crate::analysis::pcap) fn read_exact_or_eof<R: Read>(
 ) -> Result<bool, Error> {
     let mut offset = 0;
     while offset < buffer.len() {
-        match reader.read(&mut buffer[offset..]) {
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "`offset < buffer.len()` is the loop condition"
+        )]
+        let unfilled = &mut buffer[offset..];
+        match reader.read(unfilled) {
             Ok(0) if offset == 0 => return Ok(false),
             Ok(0) => {
                 return Err(Error::Truncated {
@@ -83,7 +88,7 @@ pub(in crate::analysis::pcap) fn read_exact_or_eof<R: Read>(
                     actual: offset,
                 });
             }
-            Ok(read) => offset += read,
+            Ok(read) => offset = offset.saturating_add(read),
             Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
             Err(error) => return Err(Error::Io(error)),
         }
@@ -169,8 +174,14 @@ pub(in crate::analysis::pcap) fn write_padding<W: Write>(
     writer: &mut W,
     unpadded_length: u32,
 ) -> Result<(), Error> {
-    let padding = (4 - (unpadded_length % 4)) % 4;
-    writer.write_all(&[0_u8; 3][..padding as usize])?;
+    const ZEROS: [u8; 3] = [0; 3];
+    let padding: &[u8] = match unpadded_length % 4 {
+        1 => &ZEROS[..3],
+        2 => &ZEROS[..2],
+        3 => &ZEROS[..1],
+        _ => &[],
+    };
+    writer.write_all(padding)?;
     Ok(())
 }
 

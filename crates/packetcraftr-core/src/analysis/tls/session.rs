@@ -320,7 +320,7 @@ struct DirectionState {
 
 impl DirectionState {
     fn charged(&self) -> usize {
-        self.partial.len() + self.messages.len()
+        self.partial.len().saturating_add(self.messages.len())
     }
 
     /// Stops buffering and releases the buffers.
@@ -452,6 +452,10 @@ impl Live {
 
     /// Stops a direction that cannot take `extra` more bytes without passing
     /// its ceiling, and says why. `None` means the bytes fit.
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "`direction` is 0 or 1: it only ever comes from `direction_of`, and `directions` holds exactly two entries"
+    )]
     fn refuse_past_ceiling(
         &mut self,
         direction: usize,
@@ -463,7 +467,7 @@ impl Live {
         if self.directions[direction].charged().saturating_add(extra) <= cap {
             return None;
         }
-        *limit_hits += 1;
+        *limit_hits = limit_hits.saturating_add(1);
         self.directions[direction].finish();
         Some(finished(Status::Malformed, reason))
     }
@@ -473,6 +477,10 @@ impl Live {
     /// Records are framed out of `chunk` without ever holding more than one
     /// record's worth of unframed bytes, so a single large delivery cannot
     /// push a direction past its ceiling on its own.
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "`direction` is 0 or 1: it only ever comes from `direction_of`, and `directions` holds exactly two entries"
+    )]
     pub(super) fn feed(
         &mut self,
         direction: usize,
@@ -563,6 +571,10 @@ impl Live {
         }
     }
 
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "`direction` is 0 or 1: it only ever comes from `direction_of`, and `directions` holds exactly two entries"
+    )]
     fn apply_record(
         &mut self,
         direction: usize,
@@ -643,6 +655,10 @@ impl Live {
         }
     }
 
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "`direction` is 0 or 1: it only ever comes from `direction_of`, and `directions` holds exactly two entries"
+    )]
     fn drain_messages(&mut self, direction: usize) -> Verdict {
         loop {
             let outcome = parse_handshake(&self.directions[direction].messages);
@@ -708,6 +724,10 @@ impl Live {
         Verdict::Open
     }
 
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "`direction` is 0 or 1: it only ever comes from `direction_of`, and `directions` holds exactly two entries"
+    )]
     fn apply_server_hello(&mut self, direction: usize, hello: &ServerHello) -> Verdict {
         if self.role(direction) == Role::Client {
             if self.swapped || self.client.is_some() {
@@ -716,7 +736,7 @@ impl Live {
                     "ServerHello observed on the client's direction",
                 );
             }
-            self.client_direction = 1 - direction;
+            self.client_direction = 1_usize.saturating_sub(direction);
             self.swapped = true;
         }
         if hello.is_hello_retry_request {

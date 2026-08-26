@@ -112,7 +112,7 @@ impl LayerCodec for LlcCodec {
                 ),
             ));
         }
-        let header_len = 2 + layer.control.len();
+        let header_len = layer.control.len().saturating_add(2);
         ensure_encode_budget("llc", header_len, context)?;
 
         let mut diagnostics = Vec::new();
@@ -161,28 +161,28 @@ impl LayerCodec for LlcCodec {
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
-        if input.len() < LLC_MIN_LEN {
+        let Some(head) = input.first_chunk::<LLC_MIN_LEN>() else {
             return Err(truncated("llc", LLC_MIN_LEN, input.len()));
-        }
-        let control_len = if input[2] & U_FORMAT_MASK == U_FORMAT_MASK {
+        };
+        let control_len: usize = if head[2] & U_FORMAT_MASK == U_FORMAT_MASK {
             1
         } else {
             2
         };
-        let header_len = 2 + control_len;
-        if input.len() < header_len {
+        let header_len = control_len.saturating_add(2);
+        let Some(control) = input.get(2..header_len) else {
             return Err(truncated("llc", header_len, input.len()));
-        }
-        let dsap = input[0];
-        let ssap = input[1];
-        let payload_len = input.len() - header_len;
+        };
+        let dsap = head[0];
+        let ssap = head[1];
+        let payload_len = input.len().saturating_sub(header_len);
         let sap_pair = (u64::from(dsap) << 8) | u64::from(ssap);
         // Unregistered SAP pairs fall through to the typed raw child, like
         // UDP ports and PPP protocol numbers. Only an unnumbered-information
         // frame carries an upper protocol's payload; everything else is LLC
         // control traffic and stays opaque.
         let mut next = Vec::with_capacity(2);
-        if sap_pair != 0 && is_ui_control(&input[2..header_len]) {
+        if sap_pair != 0 && is_ui_control(control) {
             next.push(Discriminator(sap_pair));
         }
         next.push(Discriminator(0));
@@ -191,7 +191,7 @@ impl LayerCodec for LlcCodec {
             layer: Box::new(Llc {
                 dsap,
                 ssap,
-                control: Bytes::copy_from_slice(&input[2..header_len]),
+                control: Bytes::copy_from_slice(control),
             }),
             consumed: header_len,
             payload_len,
@@ -327,7 +327,10 @@ impl LayerCodec for SnapCodec {
         )?;
 
         let mut prefix = Vec::with_capacity(SNAP_LEN);
-        prefix.extend_from_slice(&layer.oui.to_be_bytes()[1..]);
+        // The OUI is 24 bits, so the high byte of the big-endian word is
+        // dropped; the range guard above proves it is zero.
+        let [_, oui_high, oui_mid, oui_low] = layer.oui.to_be_bytes();
+        prefix.extend_from_slice(&[oui_high, oui_mid, oui_low]);
         prefix.extend_from_slice(&protocol_id.to_be_bytes());
         Ok(EncodedLayer {
             prefix,
@@ -346,12 +349,12 @@ impl LayerCodec for SnapCodec {
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
-        if input.len() < SNAP_LEN {
+        let Some(header) = input.first_chunk::<SNAP_LEN>() else {
             return Err(truncated("snap", SNAP_LEN, input.len()));
-        }
-        let oui = u32::from_be_bytes([0, input[0], input[1], input[2]]);
-        let protocol_id = u16::from_be_bytes([input[3], input[4]]);
-        let payload_len = input.len() - SNAP_LEN;
+        };
+        let oui = u32::from_be_bytes([0, header[0], header[1], header[2]]);
+        let protocol_id = u16::from_be_bytes([header[3], header[4]]);
+        let payload_len = input.len().saturating_sub(SNAP_LEN);
         Ok(DecodedLayerValue {
             fields: snap_layout(),
             layer: Box::new(Snap {

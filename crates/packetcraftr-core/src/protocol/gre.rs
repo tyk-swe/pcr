@@ -30,6 +30,10 @@ const MUST_DISCARD_FLAGS: u16 = 0x0c00;
 const IGNORED_RESERVED_FLAGS: u16 = 0x03f8;
 const VERSION_MASK: u16 = 0x0007;
 
+#[expect(
+    clippy::arithmetic_side_effects,
+    reason = "at most GRE_BASE_LEN plus three GRE_OPTION_LEN options, so the sum is 16 at the largest"
+)]
 fn gre_header_len(checksum: bool, key: bool, sequence: bool) -> usize {
     GRE_BASE_LEN
         + usize::from(checksum) * GRE_OPTION_LEN
@@ -144,7 +148,13 @@ impl LayerCodec for GreCodec {
                 context.mode,
                 &mut diagnostics,
             )?;
-            prefix[4..6].copy_from_slice(&checksum.to_be_bytes());
+            #[expect(
+                clippy::indexing_slicing,
+                reason = "layer.checksum is Some here, so encode_prefix reserved bytes 4..6 for the checksum"
+            )]
+            {
+                prefix[4..6].copy_from_slice(&checksum.to_be_bytes());
+            }
             Some(materialized)
         } else {
             None
@@ -167,10 +177,10 @@ impl LayerCodec for GreCodec {
         input: &[u8],
         context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
-        if input.len() < GRE_BASE_LEN {
+        let Some(header) = input.first_chunk::<GRE_BASE_LEN>() else {
             return Err(truncated("gre", GRE_BASE_LEN, input.len()));
-        }
-        let flags = u16::from_be_bytes([input[0], input[1]]);
+        };
+        let flags = u16::from_be_bytes([header[0], header[1]]);
         let version = flags & VERSION_MASK;
         if version != 0 {
             return Err(crate::codec::Error::Unsupported {
@@ -194,7 +204,7 @@ impl LayerCodec for GreCodec {
             });
         }
 
-        let protocol_type = u16::from_be_bytes([input[2], input[3]]);
+        let protocol_type = u16::from_be_bytes([header[2], header[3]]);
         let (header_len, checksum_value, key, sequence) = decode_options(input, flags)?;
 
         let mut diagnostics = Vec::new();
@@ -220,7 +230,7 @@ impl LayerCodec for GreCodec {
             sequence,
             reserved_bits,
         };
-        let payload_len = input.len() - header_len;
+        let payload_len = input.len().saturating_sub(header_len);
         Ok(DecodedLayerValue {
             fields: gre_layout(&layer),
             layer: Box::new(layer),
@@ -280,36 +290,38 @@ fn decode_options(input: &[u8], flags: u16) -> Result<DecodedOptions, crate::cod
     }
     let mut cursor = GRE_BASE_LEN;
     let checksum_value = if checksum_present {
-        let value = u16::from_be_bytes([input[cursor], input[cursor + 1]]);
-        if input[cursor + 2] != 0 || input[cursor + 3] != 0 {
+        let option = gre_option(input, cursor)?;
+        let value = u16::from_be_bytes([option[0], option[1]]);
+        if option[2] != 0 || option[3] != 0 {
             return Err(invalid("gre", "reserved1 field is non-zero"));
         }
-        cursor += GRE_OPTION_LEN;
+        cursor = cursor.saturating_add(GRE_OPTION_LEN);
         Some(WireValue::Exact(value))
     } else {
         None
     };
     let key = if key_present {
-        let value = u32::from_be_bytes([
-            input[cursor],
-            input[cursor + 1],
-            input[cursor + 2],
-            input[cursor + 3],
-        ]);
-        cursor += GRE_OPTION_LEN;
-        Some(value)
+        let option = gre_option(input, cursor)?;
+        cursor = cursor.saturating_add(GRE_OPTION_LEN);
+        Some(u32::from_be_bytes(option))
     } else {
         None
     };
-    let sequence = sequence_present.then(|| {
-        u32::from_be_bytes([
-            input[cursor],
-            input[cursor + 1],
-            input[cursor + 2],
-            input[cursor + 3],
-        ])
-    });
+    let sequence = if sequence_present {
+        Some(u32::from_be_bytes(gre_option(input, cursor)?))
+    } else {
+        None
+    };
     Ok((header_len, checksum_value, key, sequence))
+}
+
+/// Reads the four-byte GRE option that starts at `cursor`.
+fn gre_option(input: &[u8], cursor: usize) -> Result<[u8; GRE_OPTION_LEN], crate::codec::Error> {
+    input
+        .get(cursor..)
+        .and_then(<[u8]>::first_chunk::<GRE_OPTION_LEN>)
+        .copied()
+        .ok_or_else(|| truncated("gre", cursor.saturating_add(GRE_OPTION_LEN), input.len()))
 }
 
 fn gre_layout(layer: &Gre) -> Vec<crate::layout::FieldLayout> {
@@ -317,18 +329,26 @@ fn gre_layout(layer: &Gre) -> Vec<crate::layout::FieldLayout> {
     let mut fields = gre_static_layout();
     let mut cursor = GRE_BASE_LEN;
     if layer.checksum.is_some() {
-        fields.push(gre_dynamic_field("checksum", cursor, cursor + 2));
-        cursor += GRE_OPTION_LEN;
+        fields.push(gre_dynamic_field(
+            "checksum",
+            cursor,
+            cursor.saturating_add(2),
+        ));
+        cursor = cursor.saturating_add(GRE_OPTION_LEN);
     }
     if layer.key.is_some() {
-        fields.push(gre_dynamic_field("key", cursor, cursor + GRE_OPTION_LEN));
-        cursor += GRE_OPTION_LEN;
+        fields.push(gre_dynamic_field(
+            "key",
+            cursor,
+            cursor.saturating_add(GRE_OPTION_LEN),
+        ));
+        cursor = cursor.saturating_add(GRE_OPTION_LEN);
     }
     if layer.sequence.is_some() {
         fields.push(gre_dynamic_field(
             "sequence",
             cursor,
-            cursor + GRE_OPTION_LEN,
+            cursor.saturating_add(GRE_OPTION_LEN),
         ));
     }
     fields

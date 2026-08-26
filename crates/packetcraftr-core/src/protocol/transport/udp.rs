@@ -44,7 +44,13 @@ fn dns_response_prefers_source_port(source_port: u16, payload: &[u8]) -> bool {
     if source_port != DNS_PORT || payload.len() < DNS_HEADER_LEN {
         return false;
     }
-    let flags = u16::from_be_bytes([payload[2], payload[3]]);
+    let Some(flags) = payload
+        .get(2..)
+        .and_then(<[u8]>::first_chunk::<2>)
+        .map(|bytes| u16::from_be_bytes(*bytes))
+    else {
+        return false;
+    };
     flags & DNS_RESPONSE_FLAG != 0 && flags & DNS_RESERVED_Z_FLAG == 0
 }
 
@@ -172,10 +178,10 @@ impl LayerCodec for UdpCodec {
         input: &[u8],
         context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
-        if input.len() < UDP_LEN {
+        let Some(header) = input.first_chunk::<UDP_LEN>() else {
             return Err(truncated("udp", UDP_LEN, input.len()));
-        }
-        let length_field = u16::from_be_bytes([input[4], input[5]]);
+        };
+        let length_field = u16::from_be_bytes([header[4], header[5]]);
         let length = usize::from(length_field);
         if length < UDP_LEN {
             return Err(invalid(
@@ -183,10 +189,10 @@ impl LayerCodec for UdpCodec {
                 format!("length {length} is below {UDP_LEN}"),
             ));
         }
-        if input.len() < length {
+        let Some(datagram) = input.get(..length) else {
             return Err(truncated("udp", length, input.len()));
-        }
-        let checksum_value = u16::from_be_bytes([input[6], input[7]]);
+        };
+        let checksum_value = u16::from_be_bytes([header[6], header[7]]);
         let mut diagnostics = Vec::new();
         if context.verify_checksums
             && let Some(network) = context.network
@@ -198,15 +204,15 @@ impl LayerCodec for UdpCodec {
                             .at_field("checksum"),
                     );
                 }
-            } else if transport_checksum(network, 17, &input[..length])? != 0 {
+            } else if transport_checksum(network, 17, datagram)? != 0 {
                 diagnostics.push(
                     Diagnostic::warning(UDP_CHECKSUM, "UDP checksum mismatch").at_field("checksum"),
                 );
             }
         }
-        let payload_len = length - UDP_LEN;
-        let source_port = u16::from_be_bytes([input[0], input[1]]);
-        let destination_port = u16::from_be_bytes([input[2], input[3]]);
+        let payload_len = length.saturating_sub(UDP_LEN);
+        let source_port = u16::from_be_bytes([header[0], header[1]]);
+        let destination_port = u16::from_be_bytes([header[2], header[3]]);
         Ok(DecodedLayerValue {
             layer: Box::new(Udp {
                 source_port,
@@ -225,7 +231,7 @@ impl LayerCodec for UdpCodec {
                 child_discriminators(preferred_ports(
                     source_port,
                     destination_port,
-                    &input[UDP_LEN..length],
+                    datagram.get(UDP_LEN..).unwrap_or_default(),
                 ))
             },
             fields: udp_layout(),

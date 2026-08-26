@@ -58,7 +58,7 @@ pub(crate) fn resolve_envelope(
             // Only routing headers inside the nearest IPv6 envelope can
             // replace its pseudo-header destination. An SRH belonging to an
             // outer tunnel must not affect an encapsulated transport.
-            let segment_routing_destination = ((index + 1)..context.index)
+            let segment_routing_destination = (index.saturating_add(1)..context.index)
                 .filter_map(|candidate_index| context.packet.layer(candidate_index))
                 .take_while(|candidate| is_ipv6_extension_layer(*candidate))
                 .filter_map(|candidate| {

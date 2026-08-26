@@ -66,7 +66,8 @@ impl Name {
                 });
             }
             wire_length = wire_length
-                .checked_add(label.len() + 1)
+                .checked_add(label.len())
+                .and_then(|length| length.checked_add(1))
                 .ok_or(WireError::NameTooLong)?;
         }
         if wire_length > 255 {

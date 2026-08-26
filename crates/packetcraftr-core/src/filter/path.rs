@@ -145,10 +145,11 @@ fn split_occurrence(path: &str, offset: usize) -> Result<(String, Option<usize>)
                 .to_owned(),
         });
     }
-    let end = path[marker + 1..]
+    let digits_start = marker.saturating_add(1);
+    let end = path[digits_start..]
         .find('.')
-        .map_or(path.len(), |index| marker + 1 + index);
-    let digits = &path[marker + 1..end];
+        .map_or(path.len(), |index| digits_start.saturating_add(index));
+    let digits = &path[digits_start..end];
     let occurrence: usize = digits.parse().map_err(|_| Error::Syntax {
         offset,
         message: format!("layer occurrence `{digits}` is not a number"),

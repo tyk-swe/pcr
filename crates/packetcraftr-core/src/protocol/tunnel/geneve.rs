@@ -97,13 +97,15 @@ fn parse_option_chain(options: &[u8]) -> Option<OptionChain> {
     };
     let mut cursor = 0_usize;
     while cursor < options.len() {
-        if options.len() - cursor < OPTION_HEADER_LEN {
-            return None;
-        }
-        chain.critical |= options[cursor + 2] & CRITICAL_OPTION_FLAG != 0;
-        chain.reserved_bits |= options[cursor + 3] & 0xe0 != 0;
-        let data_len = usize::from(options[cursor + 3] & 0x1f) * 4;
-        cursor += OPTION_HEADER_LEN + data_len;
+        let header = options
+            .get(cursor..)
+            .and_then(<[u8]>::first_chunk::<OPTION_HEADER_LEN>)?;
+        chain.critical |= header[2] & CRITICAL_OPTION_FLAG != 0;
+        chain.reserved_bits |= header[3] & 0xe0 != 0;
+        let data_len = usize::from(header[3] & 0x1f).saturating_mul(4);
+        cursor = cursor
+            .checked_add(OPTION_HEADER_LEN)?
+            .checked_add(data_len)?;
         if cursor > options.len() {
             return None;
         }
@@ -164,7 +166,8 @@ impl LayerCodec for GeneveCodec {
             (u8::from(layer.control) << 7) | (u8::from(layer.critical) << 6) | layer.reserved1,
         );
         prefix.extend_from_slice(&protocol_type.to_be_bytes());
-        prefix.extend_from_slice(&layer.vni.to_be_bytes()[1..]);
+        let [_, vni_hi, vni_mid, vni_lo] = layer.vni.to_be_bytes();
+        prefix.extend_from_slice(&[vni_hi, vni_mid, vni_lo]);
         prefix.push(layer.reserved2);
         prefix.extend_from_slice(&layer.options);
 
@@ -184,28 +187,28 @@ impl LayerCodec for GeneveCodec {
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
-        if input.len() < GENEVE_BASE_LEN {
+        let Some(header) = input.first_chunk::<GENEVE_BASE_LEN>() else {
             return Err(truncated("geneve", GENEVE_BASE_LEN, input.len()));
-        }
-        let version = input[0] >> 6;
+        };
+        let version = header[0] >> 6;
         if version != 0 {
             return Err(crate::codec::Error::Unsupported {
                 protocol: protocol("geneve"),
                 message: format!("GENEVE version {version} is not supported"),
             });
         }
-        let options_len = usize::from(input[0] & 0x3f) * 4;
-        let header_len = GENEVE_BASE_LEN + options_len;
-        if input.len() < header_len {
+        let options_len = usize::from(header[0] & 0x3f).saturating_mul(4);
+        let header_len = GENEVE_BASE_LEN.saturating_add(options_len);
+        let Some(option_bytes) = input.get(GENEVE_BASE_LEN..header_len) else {
             return Err(truncated("geneve", header_len, input.len()));
-        }
-        let control = input[1] & 0x80 != 0;
-        let critical = input[1] & 0x40 != 0;
-        let reserved1 = input[1] & 0x3f;
-        let protocol_type = u16::from_be_bytes([input[2], input[3]]);
-        let vni = u32::from_be_bytes([0, input[4], input[5], input[6]]);
-        let reserved2 = input[7];
-        let options = Bytes::copy_from_slice(&input[GENEVE_BASE_LEN..header_len]);
+        };
+        let control = header[1] & 0x80 != 0;
+        let critical = header[1] & 0x40 != 0;
+        let reserved1 = header[1] & 0x3f;
+        let protocol_type = u16::from_be_bytes([header[2], header[3]]);
+        let vni = u32::from_be_bytes([0, header[4], header[5], header[6]]);
+        let reserved2 = header[7];
+        let options = Bytes::copy_from_slice(option_bytes);
 
         let mut diagnostics = Vec::new();
         if reserved1 != 0 || reserved2 != 0 {
@@ -257,7 +260,7 @@ impl LayerCodec for GeneveCodec {
             reserved2,
             options,
         };
-        let payload_len = input.len() - header_len;
+        let payload_len = input.len().saturating_sub(header_len);
         Ok(DecodedLayerValue {
             fields: geneve_layout(header_len),
             layer: Box::new(layer),
@@ -364,6 +367,8 @@ fn validate_option_chain(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+
     use super::*;
     use crate::Packet;
 

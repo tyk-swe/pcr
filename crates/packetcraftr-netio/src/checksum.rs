@@ -24,6 +24,7 @@ pub(crate) fn compute_parts(parts: &[&[u8]]) -> u16 {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
     use super::*;
 
     #[test]

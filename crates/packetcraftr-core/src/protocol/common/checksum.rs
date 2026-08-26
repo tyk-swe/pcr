@@ -35,6 +35,10 @@ impl ChecksumAccumulator {
     /// RFC 1071 allows accumulating 16-bit big-endian words via 64-bit word additions because
     /// carry propagation in 64-bit addition matches ones' complement 16-bit word addition modulo (2^16 - 1).
     /// Using `u128` for `self.sum` prevents overflow during 64-bit chunk accumulation.
+    #[expect(
+        clippy::arithmetic_side_effects,
+        reason = "the u128 accumulator has room for far more than the 2^64 word additions a slice could contribute"
+    )]
     pub fn add(&mut self, bytes: &[u8]) {
         let mut bytes = bytes;
         if let Some(high) = self.pending_high_byte {
@@ -74,6 +78,10 @@ impl ChecksumAccumulator {
     }
 
     /// Finalizes and returns the 16-bit Internet Checksum.
+    #[expect(
+        clippy::arithmetic_side_effects,
+        reason = "the pending byte contributes at most 0xff00, which the u128 accumulator still has room for"
+    )]
     pub fn finish(self) -> u16 {
         let sum = self.sum
             + self
@@ -86,6 +94,10 @@ impl ChecksumAccumulator {
 #[expect(
     clippy::cast_possible_truncation,
     reason = "the loop only exits once sum >> 16 is zero, so sum is at most 0xffff"
+)]
+#[expect(
+    clippy::arithmetic_side_effects,
+    reason = "each addend is a masked or shifted half of sum, so every fold step stays below u128::MAX"
 )]
 fn fold_checksum(mut sum: u128) -> u16 {
     sum = (sum & 0xffff_ffff_ffff_ffff) + (sum >> 64);

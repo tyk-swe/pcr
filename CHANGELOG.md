@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `packetcraftr convert [--to packet/v2] [--check] [--stdout] <paths...>`
+  rewrites `packetcraftr.packet/v1` documents into minimized
+  `packetcraftr.packet/v2` documents in place via atomic temporary file renaming
+  or to standard output, supporting individual files, directory trees, and
+  standard input (`-`).
 - `packetcraftr tls <CAPTURE>` assembles TLS handshake sessions from a
   capture file, joining each ClientHello to its ServerHello across TCP
   segmentation and reporting SNI, ALPN, offered and selected parameters,
@@ -223,6 +228,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the workspace now denies `clippy::indexing_slicing` and
   `clippy::arithmetic_side_effects`. Malformed input on the affected paths
   returns the parser's existing error where it could previously panic.
+
+### Deprecated
+
+- `packetcraftr.packet/v1` packet documents are deprecated in favor of
+  `packetcraftr.packet/v2`. Reading a v1 document emits a
+  `document.deprecated_schema` warning directing users to `packetcraftr convert`.
 
 ### Security
 

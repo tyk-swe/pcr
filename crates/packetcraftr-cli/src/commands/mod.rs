@@ -20,6 +20,7 @@ use crate::rendering::StreamEncoder;
 
 mod build;
 mod capture;
+mod convert;
 mod dissect;
 mod dns;
 mod exchange;
@@ -48,6 +49,9 @@ pub(crate) enum Command {
     /// Build exact packet bytes from an expression or document.
     #[command(after_long_help = build::arguments::AFTER_LONG_HELP)]
     Build(build::arguments::Args),
+    /// Convert v1 packet documents to v2 format.
+    #[command(after_long_help = convert::arguments::AFTER_LONG_HELP)]
+    Convert(convert::arguments::Args),
     /// Decode a frame with bounded, registry-driven dissection.
     #[command(after_long_help = dissect::arguments::AFTER_LONG_HELP)]
     Dissect(dissect::arguments::Args),
@@ -114,6 +118,7 @@ impl Command {
     pub(crate) const fn kind(&self) -> Option<output::contract::Command> {
         match self {
             Self::Build(_) => Some(output::contract::Command::Build),
+            Self::Convert(_) => Some(output::contract::Command::Convert),
             Self::Dissect(_) => Some(output::contract::Command::Dissect),
             Self::Protocols(_) => Some(output::contract::Command::Protocols),
             Self::Read(_) => Some(output::contract::Command::Read),
@@ -146,6 +151,7 @@ impl Command {
         }
         match self {
             Self::Build(arguments) => build::run(arguments, format),
+            Self::Convert(arguments) => convert::run(arguments, format),
             Self::Dissect(arguments) => dissect::run(arguments, format),
             Self::Protocols(arguments) => protocols::run(arguments, format),
             Self::Read(arguments) => read::run(arguments, format, stream),

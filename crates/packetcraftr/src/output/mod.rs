@@ -10,6 +10,7 @@ mod mirror;
 pub mod build;
 pub mod capture;
 pub mod contract;
+pub mod convert;
 pub mod dissect;
 pub mod dns;
 pub mod envelope;

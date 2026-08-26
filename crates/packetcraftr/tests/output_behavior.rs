@@ -40,6 +40,7 @@ use support::SharedWriter;
 fn command_format_matrix_display_and_errors_cover_the_full_vocabulary() {
     let expected_commands = [
         "build",
+        "convert",
         "dissect",
         "protocols",
         "plan",

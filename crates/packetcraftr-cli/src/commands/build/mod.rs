@@ -18,7 +18,7 @@ use super::registry;
 pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
     let format = BuildFormat::narrow(output::contract::Command::Build, format)?;
     let registry = registry()?;
-    let packet = read_recipe(arguments.recipe, &registry)?;
+    let (packet, recipe_diagnostics) = read_recipe(arguments.recipe, &registry)?;
     let built = core::build::Builder::new(registry)
         .build(
             packet,
@@ -29,7 +29,8 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
             },
         )
         .map_err(|source| CliError::new(3, source.to_string()))?;
-    let (result, diagnostics) = output::build::Result::from_built(built);
+    let (result, mut diagnostics) = output::build::Result::from_built(built);
+    diagnostics.splice(0..0, recipe_diagnostics);
     match format {
         BuildFormat::Text => {
             write_stdout_line(format_args!("built {} bytes", result.length))?;

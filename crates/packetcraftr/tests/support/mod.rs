@@ -63,7 +63,7 @@ pub(crate) fn packet_schema_validator() -> &'static jsonschema::Validator {
     static VALIDATOR: OnceLock<jsonschema::Validator> = OnceLock::new();
     VALIDATOR.get_or_init(|| {
         let schema: Value = serde_json::from_str(include_str!(
-            "../../../../schemas/packetcraftr.packet.v1.schema.json"
+            "../../../../schemas/packetcraftr.packet.v2.schema.json"
         ))
         .expect("published packet schema must be JSON");
         jsonschema::validator_for(&schema).expect("published packet schema must compile")

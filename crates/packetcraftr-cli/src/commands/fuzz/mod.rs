@@ -37,8 +37,16 @@ pub(super) fn run(
     let request = prepare_request(&arguments)?;
     let live = prepare_live(&arguments, &request)?;
     let registry = registry()?;
-    let packet = read_recipe(arguments.recipe, &registry)?;
-    execute_and_render(request, packet, registry, live, format, stream)
+    let (packet, recipe_diagnostics) = read_recipe(arguments.recipe, &registry)?;
+    execute_and_render(
+        request,
+        packet,
+        recipe_diagnostics,
+        registry,
+        live,
+        format,
+        stream,
+    )
 }
 
 fn prepare_request(arguments: &Args) -> Result<core::fuzz::Request, CliError> {
@@ -130,21 +138,38 @@ fn prepare_live(
 fn execute_and_render(
     request: core::fuzz::Request,
     packet: core::Packet,
+    recipe_diagnostics: Vec<core::diagnostic::Diagnostic>,
     registry: Arc<core::registry::Registry>,
     live: Option<PreparedLive>,
     format: ToolFormat,
     stream: &mut StreamEncoder,
 ) -> Result<(), CliError> {
     if let Some(live) = live {
-        execute_live(request, packet, registry, live, format, stream)
+        execute_live(
+            request,
+            packet,
+            recipe_diagnostics,
+            registry,
+            live,
+            format,
+            stream,
+        )
     } else {
-        execute_offline(request, packet, registry, format, stream)
+        execute_offline(
+            request,
+            packet,
+            recipe_diagnostics,
+            registry,
+            format,
+            stream,
+        )
     }
 }
 
 fn execute_offline(
     request: core::fuzz::Request,
     packet: core::Packet,
+    recipe_diagnostics: Vec<core::diagnostic::Diagnostic>,
     registry: Arc<core::registry::Registry>,
     format: ToolFormat,
     stream: &StreamEncoder,
@@ -165,14 +190,16 @@ fn execute_offline(
         ToolFormat::Json => AggregateFormat::Json,
     };
     let result = core::fuzz::run(&request, packet, registry).map_err(CliError::classified)?;
-    let (result, diagnostics, stats) =
+    let (result, mut diagnostics, stats) =
         output::fuzz::Result::try_from_offline(result).map_err(CliError::classified)?;
+    diagnostics.splice(0..0, recipe_diagnostics);
     render_collected(result, diagnostics, stats, format)
 }
 
 fn execute_live(
     request: core::fuzz::Request,
     packet: core::Packet,
+    recipe_diagnostics: Vec<core::diagnostic::Diagnostic>,
     registry: Arc<core::registry::Registry>,
     live: PreparedLive,
     format: ToolFormat,
@@ -219,8 +246,9 @@ fn execute_live(
         &mut clock,
     )
     .map_err(CliError::classified)?;
-    let (result, diagnostics, stats) =
+    let (result, mut diagnostics, stats) =
         output::fuzz::Result::try_from_live(result).map_err(CliError::classified)?;
+    diagnostics.splice(0..0, recipe_diagnostics);
     render_collected(result, diagnostics, stats, format)
 }
 

@@ -15,6 +15,7 @@ pub(crate) struct Prepared {
     pub(crate) destination: Option<IpAddr>,
     pub(crate) options: net::route::Options,
     pub(crate) policy: packetcraftr::policy::Policy,
+    pub(crate) diagnostics: Vec<core::diagnostic::Diagnostic>,
 }
 
 pub(crate) fn prepare_route(
@@ -27,7 +28,7 @@ pub(crate) fn prepare_route(
         destination,
         route,
     } = arguments;
-    let packet = read_recipe(recipe, registry)?;
+    let (packet, diagnostics) = read_recipe(recipe, registry)?;
     policy.validate().map_err(CliError::classified)?;
     // This check intentionally precedes interface discovery and route lookup.
     policy
@@ -44,6 +45,7 @@ pub(crate) fn prepare_route(
             preferred_source: route.source,
         },
         policy,
+        diagnostics,
     })
 }
 

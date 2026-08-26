@@ -144,6 +144,10 @@ mod tests {
     /// published formats it must equal.
     const SUBSETS: &[(output::contract::Command, &[output::contract::Format])] = &[
         (output::contract::Command::Build, BuildFormat::ACCEPTED),
+        (
+            output::contract::Command::Convert,
+            AggregateFormat::ACCEPTED,
+        ),
         (output::contract::Command::Dissect, BuildFormat::ACCEPTED),
         (
             output::contract::Command::Protocols,

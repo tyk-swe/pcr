@@ -40,6 +40,7 @@
           "enum": [
             null,
             "build",
+            "convert",
             "dissect",
             "protocols",
             "plan",
@@ -135,6 +136,9 @@
           "oneOf": [
             {
               "$ref": "#/$defs/buildSuccess"
+            },
+            {
+              "$ref": "#/$defs/convertSuccess"
             },
             {
               "$ref": "#/$defs/dissectSuccess"
@@ -329,6 +333,21 @@
         },
         "result": {
           "$ref": "#/$defs/buildResult"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ]
+    },
+    "convertSuccess": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "convert"
+        },
+        "result": {
+          "$ref": "#/$defs/convertResult"
         }
       },
       "required": [
@@ -1958,6 +1977,49 @@
         },
         "requires_live_opt_in": {
           "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "convertResult": {
+      "type": "object",
+      "description": "Aggregate result of converting packet documents to v2 format.",
+      "required": [
+        "converted",
+        "unchanged",
+        "failed"
+      ],
+      "properties": {
+        "converted": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "unchanged": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "failed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "path",
+              "error"
+            ],
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "error": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
         }
       },
       "additionalProperties": false

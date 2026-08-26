@@ -64,6 +64,7 @@ fn published_example_names() -> BTreeSet<String> {
 fn expected_kinds(command: Command) -> &'static [&'static str] {
     match command {
         Command::Build
+        | Command::Convert
         | Command::Dissect
         | Command::Protocols
         | Command::Plan

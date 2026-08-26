@@ -47,6 +47,7 @@ commands! {
     #[serde(rename_all = "snake_case")]
     pub enum Command {
         Build = "build",
+        Convert = "convert",
         Dissect = "dissect",
         Protocols = "protocols",
         Plan = "plan",
@@ -73,9 +74,12 @@ impl Command {
     pub const fn formats(self) -> &'static [Format] {
         match self {
             Self::Build | Self::Dissect => BUILD_FORMATS,
-            Self::Protocols | Self::Plan | Self::Interfaces | Self::Routes | Self::Stats => {
-                AGGREGATE_FORMATS
-            }
+            Self::Protocols
+            | Self::Plan
+            | Self::Interfaces
+            | Self::Routes
+            | Self::Stats
+            | Self::Convert => AGGREGATE_FORMATS,
             Self::Send => SEND_FORMATS,
             Self::Exchange => EXCHANGE_FORMATS,
             Self::Capture | Self::Read => CAPTURE_FORMATS,

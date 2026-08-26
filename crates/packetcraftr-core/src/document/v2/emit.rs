@@ -217,7 +217,15 @@ impl Document {
             .strip_prefix("---\n")
             .or_else(|| text.strip_prefix("--- "))
             .unwrap_or(&text);
-        Ok(bare.to_owned())
+        // The YAML writer leaves a space after a key whose value starts on
+        // the next line; trim it so emitted files have no trailing blanks.
+        let mut trimmed = bare
+            .lines()
+            .map(str::trim_end)
+            .collect::<Vec<_>>()
+            .join("\n");
+        trimmed.push('\n');
+        Ok(trimmed)
     }
 }
 

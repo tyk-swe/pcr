@@ -164,9 +164,12 @@ impl Classified for Error {
 }
 
 /// Structured warning emitted when a v1 packet document is processed.
-pub fn deprecated_schema_diagnostic() -> crate::diagnostic::Diagnostic {
+pub fn deprecated_schema_diagnostic(target: &str) -> crate::diagnostic::Diagnostic {
+    let target = if target.is_empty() { "<path>" } else { target };
     crate::diagnostic::Diagnostic::warning(
         "document.deprecated_schema",
-        "packetcraftr.packet/v1 is deprecated; run `packetcraftr convert <file>` to rewrite it as packet/v2",
+        format!(
+            "packetcraftr.packet/v1 is deprecated; run `packetcraftr convert {target}` to rewrite it as packetcraftr.packet/v2"
+        ),
     )
 }

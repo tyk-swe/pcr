@@ -9,7 +9,9 @@ use packetcraftr::output;
 
 use self::arguments::Args;
 use super::super::errors::CliError;
-use super::super::rendering::{emit_aggregate, optional_display, write_stdout_line};
+use super::super::rendering::{
+    emit_aggregate, optional_display, render_diagnostics_text, write_stdout_line,
+};
 use super::super::system::{client, prepare_route};
 use super::format::AggregateFormat;
 use super::registry;
@@ -25,9 +27,12 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
         .map_err(CliError::classified)?;
     let result = output::plan::Result { plan: route.into() };
     match format {
-        AggregateFormat::Text => render_text(&result.plan),
+        AggregateFormat::Text => {
+            render_text(&result.plan)?;
+            render_diagnostics_text(&request.diagnostics)
+        }
         AggregateFormat::Json => {
-            emit_aggregate(output::contract::Command::Plan, result, Vec::new())
+            emit_aggregate(output::contract::Command::Plan, result, request.diagnostics)
         }
     }
 }

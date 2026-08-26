@@ -1,0 +1,14 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "convert",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "converted": [
+      "examples/documents/packet-ipv4-udp.json"
+    ],
+    "unchanged": [],
+    "failed": []
+  },
+  "diagnostics": []
+}

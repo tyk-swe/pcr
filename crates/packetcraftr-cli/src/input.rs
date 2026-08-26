@@ -68,7 +68,7 @@ fn require_redirected_stdin(kind: InputKind, stdin_is_terminal: bool) -> Result<
 pub(super) fn read_recipe(
     arguments: RecipeArgs,
     registry: &core::registry::Registry,
-) -> Result<Packet, CliError> {
+) -> Result<(Packet, Vec<core::diagnostic::Diagnostic>), CliError> {
     let RecipeArgs {
         packet,
         packet_file,
@@ -113,22 +113,51 @@ pub(super) fn read_recipe(
                 .then_some(core::document::Format::Yaml)
         });
     if let Some(format) = format {
-        return core::document::Packet::parse_with_resource_limits(
-            &input,
-            format,
-            core::document::DEFAULT_MAX_DOCUMENT_BYTES,
-            core::build::DEFAULT_MAX_LAYERS,
-            core::document::DEFAULT_MAX_DOCUMENT_NESTING,
-        )
-        .and_then(|document| document.to_packet(registry, core::build::DEFAULT_MAX_LAYERS))
-        .map_err(|source| CliError::new(2, source.to_string()));
+        if core::document::v2::Document::detect_schema(&input)
+            == Some(core::document::PACKET_DOCUMENT_SCHEMA_V1)
+        {
+            let doc = core::document::Packet::parse_with_resource_limits(
+                &input,
+                format,
+                core::document::DEFAULT_MAX_DOCUMENT_BYTES,
+                core::build::DEFAULT_MAX_LAYERS,
+                core::document::DEFAULT_MAX_DOCUMENT_NESTING,
+            )
+            .map_err(CliError::classified)?;
+            let packet = doc
+                .to_packet(registry, core::build::DEFAULT_MAX_LAYERS)
+                .map_err(CliError::classified)?;
+            let target = path
+                .as_deref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "-".to_owned());
+            let diagnostics = vec![core::document::deprecated_schema_diagnostic(&target)];
+            return Ok((packet, diagnostics));
+        } else {
+            let doc = core::document::v2::Document::parse_with_resource_limits(
+                &input,
+                format,
+                core::document::DEFAULT_MAX_DOCUMENT_BYTES,
+                core::build::DEFAULT_MAX_LAYERS,
+                core::document::DEFAULT_MAX_DOCUMENT_NESTING,
+            )
+            .map_err(CliError::classified)?;
+            let packet = doc
+                .to_packet(registry, core::build::DEFAULT_MAX_LAYERS)
+                .map_err(CliError::classified)?;
+            return Ok((packet, Vec::new()));
+        }
     }
     parse_expression(&input, registry)
 }
 
-fn parse_expression(input: &str, registry: &core::registry::Registry) -> Result<Packet, CliError> {
-    core::expression::parse(input, registry, core::expression::Options::default())
-        .map_err(|source| CliError::new(2, source.to_string()))
+fn parse_expression(
+    input: &str,
+    registry: &core::registry::Registry,
+) -> Result<(Packet, Vec<core::diagnostic::Diagnostic>), CliError> {
+    let packet = core::expression::parse(input, registry, core::expression::Options::default())
+        .map_err(|source| CliError::new(2, source.to_string()))?;
+    Ok((packet, Vec::new()))
 }
 
 fn document_format_from_path(path: &Path) -> Option<core::document::Format> {

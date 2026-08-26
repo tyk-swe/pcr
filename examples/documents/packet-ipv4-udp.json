@@ -1,92 +1,29 @@
 {
-  "schema": "packetcraftr.packet/v1",
+  "schema": "packetcraftr.packet/v2",
   "layers": [
     {
-      "protocol": "ethernet",
-      "fields": {
-        "destination": {
-          "type": "mac",
-          "value": [2, 0, 0, 0, 0, 2]
-        },
-        "source": {
-          "type": "mac",
-          "value": [2, 0, 0, 0, 0, 1]
-        },
-        "ether_type": {
-          "type": "text",
-          "value": "auto"
-        }
+      "ethernet": {
+        "destination": "02:00:00:00:00:02",
+        "source": "02:00:00:00:00:01"
       }
     },
     {
-      "protocol": "ipv4",
-      "fields": {
-        "total_length": {
-          "type": "text",
-          "value": "auto"
-        },
-        "identification": {
-          "type": "unsigned",
-          "value": 4660
-        },
-        "dont_fragment": {
-          "type": "bool",
-          "value": true
-        },
-        "ttl": {
-          "type": "unsigned",
-          "value": 64
-        },
-        "protocol": {
-          "type": "text",
-          "value": "auto"
-        },
-        "checksum": {
-          "type": "text",
-          "value": "auto"
-        },
-        "source": {
-          "type": "ipv4",
-          "value": "192.0.2.1"
-        },
-        "destination": {
-          "type": "ipv4",
-          "value": "192.0.2.2"
-        },
-        "options": {
-          "type": "bytes",
-          "value": []
-        }
+      "ipv4": {
+        "identification": 4660,
+        "dont_fragment": true,
+        "source": "192.0.2.1",
+        "destination": "192.0.2.2"
       }
     },
     {
-      "protocol": "udp",
-      "fields": {
-        "source_port": {
-          "type": "unsigned",
-          "value": 49152
-        },
-        "destination_port": {
-          "type": "unsigned",
-          "value": 9
-        },
-        "length": {
-          "type": "text",
-          "value": "auto"
-        },
-        "checksum": {
-          "type": "text",
-          "value": "auto"
-        }
+      "udp": {
+        "source_port": 49152,
+        "destination_port": 9
       }
     },
     {
-      "protocol": "raw",
-      "fields": {
-        "bytes": {
-          "type": "bytes",
-          "value": [104, 101, 108, 108, 111]
-        }
+      "raw": {
+        "bytes": "0x68656c6c6f"
       }
     }
   ]

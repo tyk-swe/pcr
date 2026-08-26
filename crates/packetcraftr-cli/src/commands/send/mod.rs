@@ -47,8 +47,9 @@ pub(super) fn run(arguments: SendArgs, format: output::contract::Format) -> Resu
         )
         .map_err(CliError::classified)?;
     let capture_frame = report.sent.frame().clone();
-    let (result, diagnostics, stats) =
+    let (result, mut diagnostics, stats) =
         output::send::Result::try_from_report(report).map_err(CliError::classified)?;
+    diagnostics.splice(0..0, request.diagnostics);
     match format {
         SendFormat::Text => {
             write_stdout_line(format_args!(

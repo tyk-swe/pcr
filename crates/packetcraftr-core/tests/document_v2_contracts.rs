@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
-use std::path::Path;
 use std::sync::Arc;
 use std::time::SystemTime;
 
@@ -61,11 +60,42 @@ layers:
         .build(pkt_json, Context::default(), Options::default())
         .expect("build json packet should succeed");
 
-    let v1_path =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/documents/packet-ipv4-udp.json");
-    let v1_content = std::fs::read_to_string(&v1_path)
-        .unwrap_or_else(|e| panic!("failed to read {}: {e}", v1_path.display()));
-    let v1_doc = V1Packet::parse(&v1_content, Format::Json, DEFAULT_MAX_DOCUMENT_BYTES)
+    let v1_content = r#"{
+  "schema": "packetcraftr.packet/v1",
+  "layers": [
+    {
+      "protocol": "ethernet",
+      "fields": {
+        "destination": { "type": "mac", "value": [2, 0, 0, 0, 0, 2] },
+        "source": { "type": "mac", "value": [2, 0, 0, 0, 0, 1] }
+      }
+    },
+    {
+      "protocol": "ipv4",
+      "fields": {
+        "identification": { "type": "unsigned", "value": 4660 },
+        "dont_fragment": { "type": "bool", "value": true },
+        "ttl": { "type": "unsigned", "value": 64 },
+        "source": { "type": "ipv4", "value": "192.0.2.1" },
+        "destination": { "type": "ipv4", "value": "192.0.2.2" }
+      }
+    },
+    {
+      "protocol": "udp",
+      "fields": {
+        "source_port": { "type": "unsigned", "value": 49152 },
+        "destination_port": { "type": "unsigned", "value": 9 }
+      }
+    },
+    {
+      "protocol": "raw",
+      "fields": {
+        "bytes": { "type": "bytes", "value": [104, 101, 108, 108, 111] }
+      }
+    }
+  ]
+}"#;
+    let v1_doc = V1Packet::parse(v1_content, Format::Json, DEFAULT_MAX_DOCUMENT_BYTES)
         .expect("v1 json parse should succeed");
     let v1_pkt = v1_doc
         .to_packet(&registry, DEFAULT_MAX_LAYERS)
@@ -466,46 +496,156 @@ fn test_7_upgrade_all_v1_documents() {
     let registry = test_registry();
     let builder = Builder::new(Arc::clone(&registry));
 
-    let example_files = [
-        "../../examples/documents/packet-ipv4-udp.json",
-        "../../examples/documents/packet-gre-sctp.json",
-        "../../examples/documents/packet-igmp.json",
-        "../../examples/documents/packet-raw.yaml",
+    let v1_documents = [
+        (
+            "packet-ipv4-udp.json",
+            Format::Json,
+            r#"{
+  "schema": "packetcraftr.packet/v1",
+  "layers": [
+    {
+      "protocol": "ethernet",
+      "fields": {
+        "destination": { "type": "mac", "value": [2, 0, 0, 0, 0, 2] },
+        "source": { "type": "mac", "value": [2, 0, 0, 0, 0, 1] }
+      }
+    },
+    {
+      "protocol": "ipv4",
+      "fields": {
+        "identification": { "type": "unsigned", "value": 4660 },
+        "dont_fragment": { "type": "bool", "value": true },
+        "ttl": { "type": "unsigned", "value": 64 },
+        "source": { "type": "ipv4", "value": "192.0.2.1" },
+        "destination": { "type": "ipv4", "value": "192.0.2.2" }
+      }
+    },
+    {
+      "protocol": "udp",
+      "fields": {
+        "source_port": { "type": "unsigned", "value": 49152 },
+        "destination_port": { "type": "unsigned", "value": 9 }
+      }
+    },
+    {
+      "protocol": "raw",
+      "fields": {
+        "bytes": { "type": "bytes", "value": [104, 101, 108, 108, 111] }
+      }
+    }
+  ]
+}"#,
+        ),
+        (
+            "packet-gre-sctp.json",
+            Format::Json,
+            r#"{
+  "schema": "packetcraftr.packet/v1",
+  "layers": [
+    {
+      "protocol": "ipv4",
+      "fields": {
+        "source": { "type": "ipv4", "value": "192.0.2.1" },
+        "destination": { "type": "ipv4", "value": "192.0.2.2" }
+      }
+    },
+    {
+      "protocol": "gre",
+      "fields": {
+        "key": { "type": "unsigned", "value": 287454020 },
+        "sequence": { "type": "unsigned", "value": 7 }
+      }
+    },
+    {
+      "protocol": "ipv6",
+      "fields": {
+        "source": { "type": "ipv6", "value": "2001:db8::1" },
+        "destination": { "type": "ipv6", "value": "2001:db8::2" }
+      }
+    },
+    {
+      "protocol": "sctp",
+      "fields": {
+        "source_port": { "type": "unsigned", "value": 40000 },
+        "destination_port": { "type": "unsigned", "value": 5000 },
+        "verification_tag": { "type": "unsigned", "value": 0 }
+      }
+    },
+    {
+      "protocol": "raw",
+      "fields": {
+        "bytes": {
+          "type": "bytes",
+          "value": [
+            1, 0, 0, 20, 17, 34, 51, 68, 0, 1, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0
+          ]
+        }
+      }
+    }
+  ]
+}"#,
+        ),
+        (
+            "packet-igmp.json",
+            Format::Json,
+            r#"{
+  "schema": "packetcraftr.packet/v1",
+  "layers": [
+    {
+      "protocol": "ipv4",
+      "fields": {
+        "source": { "type": "ipv4", "value": "192.0.2.1" },
+        "destination": { "type": "ipv4", "value": "224.0.0.1" },
+        "ttl": { "type": "unsigned", "value": 1 }
+      }
+    },
+    {
+      "protocol": "igmp",
+      "fields": {
+        "type": { "type": "unsigned", "value": 17 },
+        "code": { "type": "unsigned", "value": 0 },
+        "body": { "type": "bytes", "value": [224, 0, 0, 1] }
+      }
+    }
+  ]
+}"#,
+        ),
+        (
+            "packet-raw.yaml",
+            Format::Yaml,
+            r#"schema: packetcraftr.packet/v1
+layers:
+  - protocol: raw
+    fields:
+      bytes:
+        value: [222, 173, 190, 239]
+        type: bytes
+"#,
+        ),
     ];
 
-    for rel_path in example_files {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(rel_path);
-        let content = std::fs::read_to_string(&path)
-            .unwrap_or_else(|e| panic!("failed reading {}: {e}", path.display()));
-        let format = if rel_path.ends_with(".yaml") || rel_path.ends_with(".yml") {
-            Format::Yaml
-        } else {
-            Format::Json
-        };
-
-        let v1_doc = V1Packet::parse(&content, format, DEFAULT_MAX_DOCUMENT_BYTES)
-            .unwrap_or_else(|e| panic!("failed parsing v1 doc {}: {e}", path.display()));
+    for (name, format, content) in v1_documents {
+        let v1_doc = V1Packet::parse(content, format, DEFAULT_MAX_DOCUMENT_BYTES)
+            .unwrap_or_else(|e| panic!("failed parsing v1 doc {name}: {e}"));
         let v1_pkt = v1_doc
             .to_packet(&registry, DEFAULT_MAX_LAYERS)
-            .unwrap_or_else(|e| panic!("failed converting v1 pkt {}: {e}", path.display()));
+            .unwrap_or_else(|e| panic!("failed converting v1 pkt {name}: {e}"));
         let v1_built = builder
             .build(v1_pkt, Context::default(), Options::default())
-            .unwrap_or_else(|e| panic!("failed building v1 pkt {}: {e}", path.display()));
+            .unwrap_or_else(|e| panic!("failed building v1 pkt {name}: {e}"));
 
         let v2_doc = Document::from_v1(&v1_doc, &registry)
-            .unwrap_or_else(|e| panic!("failed upgrading v1 to v2 {}: {e}", path.display()));
+            .unwrap_or_else(|e| panic!("failed upgrading v1 to v2 {name}: {e}"));
         let v2_pkt = v2_doc
             .to_packet(&registry, DEFAULT_MAX_LAYERS)
-            .unwrap_or_else(|e| panic!("failed converting v2 pkt {}: {e}", path.display()));
+            .unwrap_or_else(|e| panic!("failed converting v2 pkt {name}: {e}"));
         let v2_built = builder
             .build(v2_pkt, Context::default(), Options::default())
-            .unwrap_or_else(|e| panic!("failed building v2 pkt {}: {e}", path.display()));
+            .unwrap_or_else(|e| panic!("failed building v2 pkt {name}: {e}"));
 
         assert_eq!(
-            v2_built.bytes,
-            v1_built.bytes,
-            "mismatch in bytes for {}",
-            path.display()
+            v2_built.bytes, v1_built.bytes,
+            "mismatch in bytes for {name}"
         );
     }
 }

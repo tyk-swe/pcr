@@ -1,7 +1,4 @@
-schema: packetcraftr.packet/v1
+schema: packetcraftr.packet/v2
 layers:
-  - protocol: raw
-    fields:
-      bytes:
-        value: [222, 173, 190, 239]
-        type: bytes
+  - raw:
+      bytes: "0xdeadbeef"

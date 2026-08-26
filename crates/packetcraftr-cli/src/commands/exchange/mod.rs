@@ -84,9 +84,10 @@ pub(super) fn run(
         ExchangeFormat::Pcap => CollectedFormat::Pcap,
         ExchangeFormat::PcapNg => CollectedFormat::PcapNg,
     };
-    let result = client
+    let mut result = client
         .exchange(&template, options)
         .map_err(CliError::classified)?;
+    result.diagnostics.splice(0..0, request.diagnostics);
     match format {
         CollectedFormat::Text => rendering::render_text(&result),
         CollectedFormat::Json => rendering::render_aggregate(result),

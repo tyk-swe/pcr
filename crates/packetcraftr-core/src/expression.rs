@@ -189,9 +189,13 @@ fn parse_layer_fields(
         }
         let raw_value = raw_value.trim();
         let field_schema = schema.and_then(|s| {
-            s.fields
-                .iter()
-                .find(|declared| declared.name.eq_ignore_ascii_case(&field))
+            s.fields.iter().find(|declared| {
+                declared.name.eq_ignore_ascii_case(&field)
+                    || declared
+                        .aliases
+                        .iter()
+                        .any(|alias| alias.eq_ignore_ascii_case(&field))
+            })
         });
         let value = parse_field_value(
             raw_value,
@@ -234,10 +238,23 @@ fn parse_field_value(
                 message: format!("field {field_name} does not accept a list"),
             });
         }
-        return parse_list_bounded(input, 0, max_nesting);
+        return parse_list_bounded(
+            input,
+            0,
+            max_nesting,
+            field_schema.and_then(|schema| schema.element),
+        )
+        .map_err(|source| match source {
+            ListError::Expression(error) => error,
+            ListError::Coerce(source) => Error::Value {
+                layer,
+                field: field_name.to_owned(),
+                source,
+            },
+        });
     }
     if let Some(hex_str) = input.strip_prefix("raw:") {
-        if field_schema.is_some_and(|schema| schema.derived) {
+        if field_schema.is_some_and(|schema| schema.is_derived()) {
             return crate::field::coerce_kind(
                 crate::field::FieldKind::Bytes,
                 None,
@@ -276,15 +293,32 @@ fn parse_field_value(
     parse_value_bounded(input, 0, max_nesting)
 }
 
-fn parse_list_bounded(input: &str, depth: usize, max_nesting: usize) -> Result<FieldValue, Error> {
+enum ListError {
+    Expression(Error),
+    Coerce(crate::field::CoerceError),
+}
+
+impl From<Error> for ListError {
+    fn from(error: Error) -> Self {
+        Self::Expression(error)
+    }
+}
+
+fn parse_list_bounded(
+    input: &str,
+    depth: usize,
+    max_nesting: usize,
+    element: Option<crate::field::FieldKind>,
+) -> Result<FieldValue, ListError> {
     if depth >= max_nesting {
-        return Err(Error::NestingLimit { limit: max_nesting });
+        return Err(Error::NestingLimit { limit: max_nesting }.into());
     }
     if !input.ends_with(']') {
         return Err(Error::Syntax {
             offset: 0,
             message: "unterminated list".to_owned(),
-        });
+        }
+        .into());
     }
     let body = input.get(1..input.len().saturating_sub(1)).unwrap_or("");
     if body.trim().is_empty() {
@@ -292,7 +326,12 @@ fn parse_list_bounded(input: &str, depth: usize, max_nesting: usize) -> Result<F
     }
     let values = split_top_level_bounded(body, ',', None)?
         .into_iter()
-        .map(|value| parse_value_bounded(value.trim(), depth.saturating_add(1), max_nesting))
+        .map(|value| match element {
+            Some(kind) => crate::field::coerce_kind(kind, None, None, false, value.trim())
+                .map_err(ListError::Coerce),
+            None => parse_value_bounded(value.trim(), depth.saturating_add(1), max_nesting)
+                .map_err(ListError::Expression),
+        })
         .collect::<Result<Vec<_>, _>>()?;
     Ok(FieldValue::List(values))
 }

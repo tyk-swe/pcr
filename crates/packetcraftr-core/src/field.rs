@@ -25,7 +25,7 @@ pub enum CoerceError {
 /// Parses one v2 text form by declared kind. `element` is the list element kind; `max` bounds Unsigned values; `derived` allows the bare word `auto`.
 pub fn coerce_kind(
     kind: FieldKind,
-    _element: Option<FieldKind>,
+    element: Option<FieldKind>,
     max: Option<u64>,
     derived: bool,
     text: &str,
@@ -249,10 +249,17 @@ pub fn coerce_kind(
                 got: text.to_owned(),
             }),
         },
-        FieldKind::List => Err(CoerceError::ValueForm {
-            expected: "list",
-            got: text.to_owned(),
-        }),
+        FieldKind::List => {
+            // A list field spelled as one scalar is a single-element list
+            // when an element kind is known; otherwise it is a form error.
+            let Some(element) = element else {
+                return Err(CoerceError::ValueForm {
+                    expected: "list",
+                    got: text.to_owned(),
+                });
+            };
+            coerce_kind(element, None, None, false, text).map(|value| FieldValue::List(vec![value]))
+        }
     }
 }
 
@@ -269,9 +276,16 @@ fn hex_nibble(value: u8) -> Option<u8> {
     }
 }
 
-/// Schema-driven wrapper. This branch passes `element: None`, `max: None`, `derived: schema.derived`; the reflection branch fills in the new schema slots after merge.
+/// Parses one v2 text form using the field's declared kind, element kind,
+/// maximum, and tier.
 pub fn coerce(schema: &crate::layer::FieldSchema, text: &str) -> Result<FieldValue, CoerceError> {
-    coerce_kind(schema.kind, None, None, schema.derived, text)
+    coerce_kind(
+        schema.kind,
+        schema.element,
+        schema.max,
+        schema.is_derived(),
+        text,
+    )
 }
 
 /// A value whose wire representation may be derived, exact, or deliberately raw.

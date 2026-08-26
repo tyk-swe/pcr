@@ -6,7 +6,7 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 
 use bytes::Bytes;
 use packetcraftr_core::field::{CoerceError, FieldKind, FieldValue, coerce, coerce_kind};
-use packetcraftr_core::layer::FieldSchema;
+use packetcraftr_core::layer::{FieldSchema, Tier};
 
 #[test]
 fn unsigned_coercion_supports_decimal_and_hex_with_range_checks() {
@@ -313,8 +313,11 @@ fn schema_wrapper_coerces_according_to_field_schema() {
     let schema_derived = FieldSchema {
         name: "checksum",
         kind: FieldKind::Unsigned,
-        derived: true,
-        required: false,
+        tier: Tier::Derived,
+        default: None,
+        aliases: &[],
+        element: None,
+        max: Some(u64::from(u16::MAX)),
         description: "Checksum",
     };
     assert_eq!(
@@ -329,8 +332,11 @@ fn schema_wrapper_coerces_according_to_field_schema() {
     let schema_exact = FieldSchema {
         name: "ttl",
         kind: FieldKind::Unsigned,
-        derived: false,
-        required: true,
+        tier: Tier::Required,
+        default: None,
+        aliases: &[],
+        element: None,
+        max: Some(u64::from(u8::MAX)),
         description: "TTL",
     };
     assert_eq!(

@@ -3,7 +3,6 @@
 
 use std::fmt;
 
-use super::field::FieldValue;
 use super::layer::Layer;
 
 mod boundary;
@@ -77,14 +76,6 @@ impl Packet {
     where
         L: Layer + 'static,
     {
-        self.insert_boxed(index, Box::new(layer))
-    }
-
-    pub fn insert_boxed(
-        &mut self,
-        index: usize,
-        layer: Box<dyn Layer>,
-    ) -> Result<&mut Self, Error> {
         if index > self.layers.len() {
             return Err(Error::IndexOutOfBounds {
                 index,
@@ -92,7 +83,7 @@ impl Packet {
             });
         }
         boundary::shift_padding_for_insert(&mut self.layers, index);
-        self.layers.insert(index, layer);
+        self.layers.insert(index, Box::new(layer));
         self.invalidate_encoded_payload_lengths();
         Ok(self)
     }
@@ -117,14 +108,7 @@ impl Packet {
     where
         L: Layer + 'static,
     {
-        self.replace_boxed(index, Box::new(layer))
-    }
-
-    pub fn replace_boxed(
-        &mut self,
-        index: usize,
-        mut layer: Box<dyn Layer>,
-    ) -> Result<Box<dyn Layer>, Error> {
+        let mut layer: Box<dyn Layer> = Box::new(layer);
         let len = self.layers.len();
         let slot = self
             .layers
@@ -155,42 +139,6 @@ impl Packet {
         self.layers.get_mut(index)?.as_any_mut().downcast_mut::<T>()
     }
 
-    pub fn get_all<T: Layer + 'static>(&self) -> impl Iterator<Item = &T> {
-        self.layers
-            .iter()
-            .filter_map(|layer| layer.as_any().downcast_ref::<T>())
-    }
-
-    pub fn by_protocol(&self, protocol: &super::layer::Id) -> Option<&dyn Layer> {
-        self.layers
-            .iter()
-            .map(Box::as_ref)
-            .find(|layer| layer.protocol_id() == protocol)
-    }
-
-    /// Returns the first layer with `protocol` for mutation.
-    ///
-    /// Obtaining mutable layer access invalidates cached encoded payload
-    /// lengths before the reference is returned. A failed protocol lookup
-    /// does not change the packet.
-    pub fn by_protocol_mut(&mut self, protocol: &super::layer::Id) -> Option<&mut dyn Layer> {
-        let index = self
-            .layers
-            .iter()
-            .position(|layer| layer.protocol_id() == protocol)?;
-        self.invalidate_encoded_payload_lengths();
-        Some(self.layers.get_mut(index)?.as_mut())
-    }
-
-    pub fn all_by_protocol<'a>(
-        &'a self,
-        protocol: &'a super::layer::Id,
-    ) -> impl Iterator<Item = &'a dyn Layer> + 'a {
-        self.layers
-            .iter()
-            .filter_map(move |layer| (layer.protocol_id() == protocol).then_some(layer.as_ref()))
-    }
-
     pub fn layer(&self, index: usize) -> Option<&dyn Layer> {
         self.layers.get(index).map(Box::as_ref)
     }
@@ -210,37 +158,6 @@ impl Packet {
 
     pub fn iter(&self) -> impl ExactSizeIterator<Item = &dyn Layer> + DoubleEndedIterator {
         self.layers.iter().map(Box::as_ref)
-    }
-
-    /// Edits a reflected field, invalidating cached encoded payload lengths
-    /// before the field mutation is attempted.
-    pub fn edit(
-        &mut self,
-        protocol: &super::layer::Id,
-        field: &str,
-        value: FieldValue,
-    ) -> Result<(), Error> {
-        let layer = self
-            .by_protocol_mut(protocol)
-            .ok_or_else(|| Error::ProtocolNotFound {
-                protocol: protocol.clone(),
-            })?;
-        layer.set_field(field, value)?;
-        Ok(())
-    }
-
-    /// Compares protocol order and every reflected field.
-    pub fn structurally_eq(&self, other: &Self) -> bool {
-        self.len() == other.len()
-            && self.iter().zip(other.iter()).all(|(left, right)| {
-                left.protocol_id() == right.protocol_id()
-                    && left.schema() == right.schema()
-                    && left
-                        .schema()
-                        .fields
-                        .iter()
-                        .all(|field| left.field(field.name) == right.field(field.name))
-            })
     }
 
     /// Returns the cached number of encoded bytes after the layer at `index`.

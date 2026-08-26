@@ -71,22 +71,14 @@ rather than a mechanical edit.
   Options: document per-field ownership and assert on unexpected
   combinations, or split the seam into per-shape request types so an unread
   field fails to compile.
-- `fuzz`, `replay`, and `target` re-export the authorization types verbatim,
-  so one seam has four import paths. Drop the re-exports or deprecate them.
 - The narrowed format enums in `commands/format.rs` have no conversion between
   them; four call sites hand-write a variant-for-variant match to re-narrow.
   Teach `narrowed_format!` to generate the mapping.
-- The ephemeral source-port base 49_152 is declared twice and the rotation
-  over that range is written three ways (`scan/probe.rs`, `dns/engine.rs`, the
-  CLI's `dns/conversion.rs`). One constant, one helper.
 - The deny sweep covers `[]` and arithmetic but not the panicking range APIs
   (`Vec::drain`, `slice::chunks`, `Bytes::slice`). Two sit behind a
   `debug_assert!` or validation in another function
   (`analysis/reassembly/tcp/state.rs` `drain(..old_start)`, `scan/plan.rs`
   `chunks(batch_size)`). Decide whether to guard them or lint them.
-- `packetcraftr-cli/tests/ndjson_conformance.rs` reproduces the message
-  template of `CliError::with_cleanup` as a literal instead of calling it;
-  the composition is no longer covered by that test.
 
 ## Architecture
 

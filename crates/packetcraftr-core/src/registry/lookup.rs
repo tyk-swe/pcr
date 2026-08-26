@@ -65,13 +65,6 @@ impl Registry {
         self.roots.get(&link_type)
     }
 
-    /// All registered numeric capture roots. Iterator order is unspecified.
-    pub fn link_type_roots(&self) -> impl ExactSizeIterator<Item = (u32, &crate::layer::Id)> {
-        self.roots
-            .iter()
-            .map(|(link_type, protocol)| (*link_type, protocol))
-    }
-
     pub fn child_for<Q>(
         &self,
         parent: &Q,

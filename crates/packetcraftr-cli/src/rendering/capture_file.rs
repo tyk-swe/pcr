@@ -10,7 +10,7 @@ use packetcraftr::{
 };
 
 use super::super::errors::CliError;
-use super::CaptureWriter;
+use super::LinkCaptureWriter;
 
 pub(crate) fn capture_file_format(format: output::contract::Format) -> Result<Format, CliError> {
     match format {
@@ -47,7 +47,7 @@ fn encode(
         Format::PcapNg => Writer::pcapng(Vec::new()),
     }
     .map_err(|source| CliError::new(5, format!("initialize capture output failed: {source}")))?;
-    let mut output = CaptureWriter::for_link_types(writer);
+    let mut output = LinkCaptureWriter::new(writer);
     for frame in std::iter::once(first).chain(frames) {
         output
             .write_link_mapped(frame)

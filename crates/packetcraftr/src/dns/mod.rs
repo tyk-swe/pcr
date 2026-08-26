@@ -10,7 +10,7 @@ use crate::probe::evidence::EvidenceDiagnosticDescriptor;
 
 pub const DNS_HEADER_BYTES: usize = 12;
 pub const DEFAULT_DNS_SERVER_PORT: u16 = 53;
-pub const DNS_EPHEMERAL_SOURCE_PORT_BASE: u16 = 49_152;
+pub const DNS_EPHEMERAL_SOURCE_PORT_BASE: u16 = crate::EPHEMERAL_SOURCE_PORT_BASE;
 pub const DEFAULT_DNS_ATTEMPTS: u32 = 1;
 pub const DEFAULT_MAX_DNS_RECORDS: usize = 512;
 pub const DEFAULT_MAX_DNS_NAME_POINTERS: usize = 32;
@@ -53,7 +53,7 @@ mod model;
 mod tests;
 mod wire;
 
-pub use engine::{Collector, run, run_with_events};
+pub use engine::{run, run_with_events};
 pub use error::{Error, WireError};
 pub use model::{
     AttemptEvidence, Edns, EdnsOption, Event, EventContext, Exchange, Execution, Executor, Limits,

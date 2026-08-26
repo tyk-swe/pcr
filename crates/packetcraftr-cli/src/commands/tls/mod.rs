@@ -15,7 +15,7 @@ use super::format::ToolFormat;
 use super::offline_analysis::{
     Prepared, StreamSelector, parse_stream_selector, prepare_with_tls_ports,
 };
-use crate::rendering::NdjsonStream;
+use crate::rendering::StreamEncoder;
 
 use analysis::expert::StreamTransport;
 use analysis::tls::{Collector, Limits as TlsLimits, Status};
@@ -107,7 +107,7 @@ impl SniPattern {
 pub(super) fn run(
     arguments: Args,
     format: output::contract::Format,
-    stream: &mut NdjsonStream,
+    stream: &mut StreamEncoder,
 ) -> Result<(), CliError> {
     let format = ToolFormat::narrow(output::contract::Command::Tls, format)?;
     let selected_stream = arguments
@@ -132,7 +132,6 @@ pub(super) fn run(
     let tls_limits = TlsLimits {
         max_sessions: arguments.max_tls_sessions,
         max_buffered_bytes: arguments.max_tls_buffer_bytes,
-        ..TlsLimits::default()
     };
     if arguments.max_tls_buffer_bytes != 0
         && arguments.max_tls_buffer_bytes < analysis::tls::MAX_DIRECTION_BUFFER
@@ -203,8 +202,8 @@ pub(super) fn run(
 
 /// Rejects a whole-run buffer ceiling that one direction alone could fill.
 ///
-/// The core check reports this as `max_direction_bytes`, an internal field no
-/// flag sets, so the flag that did set it is named here instead.
+/// The per-direction buffer is a core constant rather than a limit any flag
+/// sets, so the error names the flag that set the ceiling instead.
 fn buffer_floor_error(value: usize) -> CliError {
     CliError::classified(analysis::Error::InvalidLimit {
         field: "--max-tls-buffer-bytes",

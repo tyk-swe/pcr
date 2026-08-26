@@ -5,7 +5,7 @@ use packetcraftr::output;
 
 use crate::errors::CliError;
 use crate::rendering::{
-    NdjsonStream, emit_aggregate_with_stats, render_diagnostics_text, write_capture_file,
+    StreamEncoder, emit_aggregate_with_stats, render_diagnostics_text, write_capture_file,
     write_stdout_line,
 };
 
@@ -60,8 +60,8 @@ pub(super) fn render_aggregate(result: packetcraftr::exchange::Result) -> Result
 
 pub(super) fn render_complete(
     summary: packetcraftr::exchange::Summary,
-    stream: &NdjsonStream,
+    stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     let (event, diagnostics, stats) = output::exchange::Event::complete_from_exchange(summary);
-    stream.complete_with_stats(event, diagnostics, stats)
+    Ok(stream.complete_with_stats(event, diagnostics, stats)?)
 }

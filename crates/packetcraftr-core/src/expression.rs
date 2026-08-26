@@ -14,9 +14,9 @@ use crate::Packet;
 use crate::field::{FieldValue, parse_mac};
 use crate::registry::Registry;
 
-pub const DEFAULT_MAX_EXPRESSION_BYTES: usize = 1024 * 1024;
+const DEFAULT_MAX_EXPRESSION_BYTES: usize = 1024 * 1024;
 /// Absolute recursive list nesting accepted by the expression parser.
-pub const MAX_EXPRESSION_NESTING: usize = 64;
+const MAX_EXPRESSION_NESTING: usize = 64;
 
 #[derive(Debug, Error)]
 #[non_exhaustive]

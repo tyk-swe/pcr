@@ -13,7 +13,7 @@ mod tests;
 mod wire;
 
 pub use crate::authorization::{Authorizer, Operation};
-pub use engine::{run, run_with_selector};
+pub use engine::run_with_selector;
 pub use error::Error;
 pub use model::{
     FrameEvidence, Limits, MAX_REPLAY_DURATION, Options, Selector, Summary, Timing, Transmission,

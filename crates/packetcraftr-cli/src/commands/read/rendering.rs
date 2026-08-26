@@ -6,13 +6,13 @@ use packetcraftr::output;
 use crate::commands::format::FrameFormat;
 use crate::errors::CliError;
 use crate::rendering::{
-    NdjsonStream, captured_frame_text, spaced_hex, write_plain_line, write_stdout_line,
+    StreamEncoder, captured_frame_text, spaced_hex, write_plain_line, write_stdout_line,
 };
 
 pub(super) fn render_record(
     event: &output::read::Event,
     format: FrameFormat,
-    stream: &mut NdjsonStream,
+    stream: &mut StreamEncoder,
 ) -> Result<(), CliError> {
     let output::read::Event::Frame {
         source_frame,
@@ -44,6 +44,6 @@ pub(super) fn render_record(
             )),
         },
         FrameFormat::Hex => write_plain_line(format_args!("{}", frame.bytes_hex())),
-        FrameFormat::Ndjson => stream.emit_data(event, Vec::new()),
+        FrameFormat::Ndjson => Ok(stream.emit_data(event, Vec::new())?),
     }
 }

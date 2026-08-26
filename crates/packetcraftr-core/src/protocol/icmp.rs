@@ -156,14 +156,14 @@ impl LayerCodec for Icmpv4Codec {
     fn decode(
         &self,
         input: &[u8],
-        context: &LayerDecodeContext<'_>,
+        _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
         let Some(header) = input.first_chunk::<ICMP_MIN_LEN>() else {
             return Err(truncated("icmpv4", ICMP_MIN_LEN, input.len()));
         };
         let body = input.get(ICMP_MIN_LEN..).unwrap_or_default();
         let mut diagnostics = Vec::new();
-        if context.verify_checksums && checksum(input) != 0 {
+        if checksum(input) != 0 {
             diagnostics.push(
                 Diagnostic::warning(ICMPV4_CHECKSUM, "ICMPv4 checksum mismatch")
                     .at_field("checksum"),
@@ -259,8 +259,7 @@ impl LayerCodec for Icmpv6Codec {
         };
         let body = input.get(ICMP_MIN_LEN..).unwrap_or_default();
         let mut diagnostics = Vec::new();
-        if context.verify_checksums
-            && let Some(network) = context.network
+        if let Some(network) = context.network
             && transport_checksum(network, 58, input)? != 0
         {
             diagnostics.push(

@@ -223,8 +223,7 @@ impl LayerCodec for TcpCodec {
                 .at_field("reserved_bits"),
             );
         }
-        if context.verify_checksums
-            && let Some(network) = context.network
+        if let Some(network) = context.network
             && transport_checksum(network, 6, input)? != 0
         {
             diagnostics.push(

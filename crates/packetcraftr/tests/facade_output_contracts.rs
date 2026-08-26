@@ -13,9 +13,11 @@ use packetcraftr::{
 };
 use serde_json::{Value, json};
 use std::fs;
-use std::io::Write;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+
+mod support;
+
+use support::{SharedWriter, output_schema, output_schema_validator};
 
 #[test]
 fn facade_reexports_domains_and_command_formats_are_complete() {
@@ -55,36 +57,9 @@ fn aggregate_and_stream_envelopes_keep_version_and_discriminators() {
     assert_eq!(stream["sequence"], 7);
 }
 
-#[derive(Clone, Default)]
-struct SharedWriter(Arc<Mutex<Vec<u8>>>);
-
-impl SharedWriter {
-    fn records(&self) -> Vec<Value> {
-        std::str::from_utf8(&self.0.lock().unwrap())
-            .unwrap()
-            .lines()
-            .map(|line| serde_json::from_str(line).unwrap())
-            .collect()
-    }
-}
-
-impl Write for SharedWriter {
-    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        self.0.lock().unwrap().extend_from_slice(bytes);
-        Ok(bytes.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
 #[test]
 fn current_schema_and_published_examples_use_output_v1() {
-    let schema: Value = serde_json::from_str(include_str!(
-        "../../../schemas/packetcraftr.output.v1.schema.json"
-    ))
-    .expect("output schema must be valid JSON");
+    let schema = output_schema();
     assert_eq!(
         schema["$defs"]["baseEnvelope"]["properties"]["schema"]["const"],
         SCHEMA_V1
@@ -127,11 +102,7 @@ fn current_schema_and_published_examples_use_output_v1() {
 
 #[test]
 fn every_published_output_example_validates_against_the_schema() {
-    let schema: Value = serde_json::from_str(include_str!(
-        "../../../schemas/packetcraftr.output.v1.schema.json"
-    ))
-    .expect("output schema must be valid JSON");
-    let validator = jsonschema::validator_for(&schema).expect("output schema must compile");
+    let validator = output_schema_validator();
     let directory = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/documents");
     let mut examples = fs::read_dir(directory)
         .expect("published examples directory must exist")

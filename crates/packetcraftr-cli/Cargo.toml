@@ -12,7 +12,7 @@ publish.workspace = true
 workspace = true
 
 [features]
-default = ["native-interfaces"]
+default = ["native-interfaces", "native-route"]
 native-interfaces = ["packetcraftr/native-interfaces"]
 native-route = ["packetcraftr/native-route"]
 native-layer2 = ["packetcraftr/native-layer2"]

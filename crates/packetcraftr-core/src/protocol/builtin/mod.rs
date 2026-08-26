@@ -15,4 +15,5 @@
 mod filter;
 mod registry;
 
-pub use registry::{TLS_TCP_PORTS, registry, registry_with, registry_with_tls_ports};
+pub use registry::registration::TLS_TCP_PORTS;
+pub use registry::{registry, registry_with, registry_with_tls_ports};

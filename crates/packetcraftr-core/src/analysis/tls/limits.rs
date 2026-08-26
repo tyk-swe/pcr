@@ -17,8 +17,8 @@ const DEFAULT_MAX_BUFFERED_BYTES: usize = 64 * 1024 * 1024;
 /// Finite resource ceilings for one TLS session assembly pass.
 ///
 /// A capture is untrusted input, so every buffer the collector keeps is
-/// bounded twice: per direction by [`Limits::max_direction_bytes`], and across
-/// the whole run by [`Limits::max_buffered_bytes`]. Sessions themselves are
+/// bounded twice: per direction by [`MAX_DIRECTION_BUFFER`], and across the
+/// whole run by [`Limits::max_buffered_bytes`]. Sessions themselves are
 /// bounded by [`Limits::max_sessions`], and the alert records one session
 /// retains by [`MAX_ALERTS`](super::MAX_ALERTS). Reaching a ceiling degrades
 /// the affected sessions to a status that says so and never fails the run.
@@ -37,9 +37,6 @@ pub struct Limits {
     /// the alert records each one retained. Reaching it retires the oldest
     /// tracked conversations until the new bytes fit.
     pub max_buffered_bytes: usize,
-    /// Handshake bytes buffered for one direction of one conversation.
-    /// Defaults to [`MAX_DIRECTION_BUFFER`].
-    pub max_direction_bytes: usize,
 }
 
 impl Default for Limits {
@@ -47,7 +44,6 @@ impl Default for Limits {
         Self {
             max_sessions: DEFAULT_MAX_SESSIONS,
             max_buffered_bytes: DEFAULT_MAX_BUFFERED_BYTES,
-            max_direction_bytes: MAX_DIRECTION_BUFFER,
         }
     }
 }
@@ -59,7 +55,6 @@ impl Limits {
         for (field, value) in [
             ("max_sessions", self.max_sessions),
             ("max_buffered_bytes", self.max_buffered_bytes),
-            ("max_direction_bytes", self.max_direction_bytes),
         ] {
             if value == 0 {
                 return Err(Error::InvalidLimit {
@@ -68,13 +63,6 @@ impl Limits {
                     reason: "must be non-zero",
                 });
             }
-        }
-        if self.max_direction_bytes > self.max_buffered_bytes {
-            return Err(Error::InvalidLimit {
-                field: "max_direction_bytes",
-                value: u64::try_from(self.max_direction_bytes).unwrap_or(u64::MAX),
-                reason: "cannot exceed max_buffered_bytes",
-            });
         }
         Ok(())
     }

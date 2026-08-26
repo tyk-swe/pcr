@@ -199,7 +199,7 @@ impl LayerCodec for Ipv4Codec {
     fn decode(
         &self,
         input: &[u8],
-        context: &LayerDecodeContext<'_>,
+        _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
         let Some(header) = input.first_chunk::<IPV4_MIN_LEN>() else {
             return Err(truncated("ipv4", IPV4_MIN_LEN, input.len()));
@@ -240,7 +240,7 @@ impl LayerCodec for Ipv4Codec {
         let pseudo_header_destination = ipv4_source_route_destination(destination, options)
             .map_err(|error| invalid("ipv4", error.to_string()))?;
         let mut diagnostics = Vec::new();
-        if context.verify_checksums && checksum(full_header) != 0 {
+        if checksum(full_header) != 0 {
             diagnostics.push(
                 Diagnostic::warning(IPV4_CHECKSUM, "IPv4 header checksum mismatch")
                     .at_field("checksum"),

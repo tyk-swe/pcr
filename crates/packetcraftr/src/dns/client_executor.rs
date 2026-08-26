@@ -3,11 +3,21 @@
 
 use crate::BoundaryError;
 use crate::ExchangeExecutor;
+use crate::probe::client_executor::ExecutorFault;
 use crate::probe::{self, Transport as ProbeTransport};
 
 use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Sender as PacketIo};
 
 use super::model::{Exchange, Execution, Executor};
+
+const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
+    "cli.dns_executor",
+    "use one bounded UDP DNS query and retain at least one response",
+);
+const RESULT_FAULT: ExecutorFault = ExecutorFault::new(
+    "internal.dns_executor",
+    "treat the DNS operation as incomplete because client evidence was inconsistent",
+);
 
 /// Executes one DNS query through the client's capture-ready exchange
 /// lifecycle.
@@ -19,12 +29,10 @@ where
 {
     fn execute(&mut self, exchange: &Exchange) -> Result<Execution, BoundaryError> {
         if exchange.max_responses == 0 {
-            return Err(invalid_client_execution(
-                "DNS exchange must retain at least one response",
-            ));
+            return Err(EXECUTOR_FAULT.invalid("DNS exchange must retain at least one response"));
         }
         if exchange.max_responses > self.options.max_responses {
-            return Err(invalid_client_execution(format!(
+            return Err(EXECUTOR_FAULT.invalid(format!(
                 "DNS exchange requests {} responses but the client is bounded to {}",
                 exchange.max_responses, self.options.max_responses
             )));
@@ -57,12 +65,11 @@ where
             stats,
         } = result;
         if sent.len() != 1 {
-            return Err(invalid_client_result(
-                "single-query DNS exchange returned an invalid sent-evidence count",
-            ));
+            return Err(RESULT_FAULT
+                .internal("single-query DNS exchange returned an invalid sent-evidence count"));
         }
         if responses.iter().any(|response| response.request_index != 0) {
-            return Err(invalid_client_result(
+            return Err(RESULT_FAULT.internal(
                 "single-query DNS exchange returned a response for an unknown request index",
             ));
         }
@@ -76,20 +83,4 @@ where
             stats,
         })
     }
-}
-
-fn invalid_client_execution(message: impl Into<String>) -> BoundaryError {
-    BoundaryError::execution_validation(
-        message,
-        "cli.dns_executor",
-        "use one bounded UDP DNS query and retain at least one response",
-    )
-}
-
-fn invalid_client_result(message: impl Into<String>) -> BoundaryError {
-    BoundaryError::internal_execution(
-        message,
-        "internal.dns_executor",
-        "treat the DNS operation as incomplete because client evidence was inconsistent",
-    )
 }

@@ -33,8 +33,6 @@ platform checks, schema/example checks, and documentation checks. -->
 
 ## Checklist
 
-- [ ] The change has one primary responsibility.
-- [ ] Public API, output, feature, and platform effects are disclosed above.
 - [ ] User-visible changes are recorded under `[Unreleased]`, or omission is explained.
 - [ ] Schemas and examples are synchronized where applicable.
 - [ ] Relevant CODEOWNERS reviewers are requested.

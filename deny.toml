@@ -12,7 +12,7 @@ yanked = "deny"
 unmaintained = "all"
 unsound = "all"
 # No advisory exceptions. RUSTSEC-2024-0436 (`paste`) was closed by the
-# rtnetlink 0.23 / netlink-packet-core 0.9 update; see docs/security/.
+# rtnetlink 0.23 / netlink-packet-core 0.9 update.
 ignore = []
 
 [licenses]

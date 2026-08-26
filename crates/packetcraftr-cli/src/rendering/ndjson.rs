@@ -1,82 +1,17 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::io::{self, Write};
+//! The NDJSON stream every structured command writes through.
 
-use packetcraftr::{core, output};
-use serde::Serialize;
+use std::io;
 
-use super::super::errors::CliError;
+use packetcraftr::output;
 
-/// The NDJSON stream, with the classification the CLI needs.
-///
-/// [`output::envelope::StreamEncoder`] reports a write or serialization
-/// failure as an [`output::envelope::EncodeError`], which carries no exit
-/// code. Everything the CLI does with a failure — the exit code, the terminal
-/// report, the error record itself — starts from a [`CliError`], so the
-/// conversion belongs at this boundary rather than at each of the thirty-odd
-/// call sites.
-#[derive(Clone)]
-pub(crate) struct NdjsonStream {
-    encoder: output::envelope::StreamEncoder,
-}
+pub(crate) use packetcraftr::output::envelope::StreamEncoder;
 
-impl NdjsonStream {
-    pub(crate) fn stdout(command: Option<output::contract::Command>) -> Self {
-        Self::new(command, io::stdout())
-    }
-
-    pub(crate) fn new(
-        command: Option<output::contract::Command>,
-        writer: impl Write + Send + 'static,
-    ) -> Self {
-        Self {
-            encoder: output::envelope::StreamEncoder::new(command, writer),
-        }
-    }
-
-    pub(crate) fn emit_data<T: Serialize>(
-        &self,
-        result: T,
-        diagnostics: Vec<core::diagnostic::Diagnostic>,
-    ) -> Result<(), CliError> {
-        self.encoder
-            .emit_data(result, diagnostics)
-            .map_err(CliError::classified)
-    }
-
-    pub(crate) fn complete<T: Serialize>(
-        &self,
-        result: T,
-        diagnostics: Vec<core::diagnostic::Diagnostic>,
-    ) -> Result<(), CliError> {
-        self.encoder
-            .complete(result, diagnostics)
-            .map_err(CliError::classified)
-    }
-
-    pub(crate) fn complete_with_stats<T: Serialize>(
-        &self,
-        result: T,
-        diagnostics: Vec<core::diagnostic::Diagnostic>,
-        stats: output::envelope::Stats,
-    ) -> Result<(), CliError> {
-        self.encoder
-            .complete_with_stats(result, diagnostics, stats)
-            .map_err(CliError::classified)
-    }
-
-    pub(crate) fn emit_error(&self, error: output::envelope::Error) -> Result<(), CliError> {
-        self.encoder.emit_error(error).map_err(CliError::classified)
-    }
-
-    pub(crate) fn is_open(&self) -> bool {
-        self.encoder.is_open()
-    }
-
-    pub(crate) fn is_terminal(&self) -> bool {
-        self.encoder.is_terminal()
-    }
+/// Opens the process-wide NDJSON stream on stdout.
+pub(crate) fn stdout_stream(command: Option<output::contract::Command>) -> StreamEncoder {
+    StreamEncoder::new(command, io::stdout())
 }
 
 #[cfg(test)]
@@ -85,9 +20,9 @@ pub(crate) mod test_support {
 
     pub(crate) use crate::test_support::{SharedBuffer, assert_contiguous};
 
-    pub(crate) fn stream(command: output::contract::Command) -> (NdjsonStream, SharedBuffer) {
+    pub(crate) fn stream(command: output::contract::Command) -> (StreamEncoder, SharedBuffer) {
         let output = SharedBuffer::default();
-        (NdjsonStream::new(Some(command), output.clone()), output)
+        (StreamEncoder::new(Some(command), output.clone()), output)
     }
 }
 
@@ -95,10 +30,13 @@ pub(crate) mod test_support {
 mod tests {
     #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
-    use std::io;
+    use std::io::Write;
 
+    use serde::Serialize;
     use serde::ser::Error as _;
     use serde_json::json;
+
+    use crate::errors::CliError;
 
     use super::test_support::{SharedBuffer, assert_contiguous, stream};
     use super::*;
@@ -220,7 +158,7 @@ mod tests {
             .emit_data(FailingSerialization, Vec::new())
             .expect_err("serialization must fail");
 
-        assert!(error.message.contains("sequence 1"));
+        assert!(error.to_string().contains("sequence 1"));
         assert!(stream.is_open());
         assert_eq!(output.records().len(), 1);
         stream
@@ -259,13 +197,13 @@ mod tests {
             output: buffer.clone(),
             flushes: 0,
         };
-        let stream = NdjsonStream::new(Some(output::contract::Command::Capture), writer);
+        let stream = StreamEncoder::new(Some(output::contract::Command::Capture), writer);
         stream.emit_data(json!({"value": 0}), Vec::new()).unwrap();
         let error = stream
             .emit_data(json!({"value": 1}), Vec::new())
             .expect_err("second flush must fail");
 
-        assert!(error.message.contains("sequence 1"));
+        assert!(error.to_string().contains("sequence 1"));
         assert!(!stream.is_open());
         assert!(!stream.is_terminal());
         let records = buffer.records();

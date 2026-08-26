@@ -11,11 +11,11 @@ mod ndjson;
 mod style;
 
 pub(crate) use capture_file::{capture_file_format, write_capture_file, write_raw};
-pub(crate) use capture_writer::CaptureWriter;
+pub(crate) use capture_writer::{LinkCaptureWriter, SourceCaptureWriter};
 
 pub(crate) use human::{
     emit_stderr_document, emit_stderr_error, emit_stderr_message, emit_stdout_document,
-    render_diagnostics_text, render_output_diagnostics_text, write_plain_line, write_stdout_line,
+    render_diagnostics_text, write_plain_line, write_stdout_line,
 };
 
 pub(crate) use machine::{
@@ -23,7 +23,7 @@ pub(crate) use machine::{
     optional_display, output_timestamp_text, render_optional, spaced_hex,
 };
 
-pub(crate) use ndjson::NdjsonStream;
+pub(crate) use ndjson::{StreamEncoder, stdout_stream};
 
 #[cfg(test)]
 pub(crate) use ndjson::test_support as ndjson_test_support;

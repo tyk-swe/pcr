@@ -25,17 +25,8 @@ impl Builder {
         Self::default()
     }
 
-    pub fn register_codec<C>(&mut self, codec: C) -> Result<&mut Self, Error>
-    where
-        C: LayerCodec + 'static,
-    {
-        let aliases = codec.aliases();
-        self.register_codec_with_aliases(Arc::new(codec), aliases)
-    }
-
     /// Registers a codec under an explicit alias list instead of the one the
-    /// codec advertises. The built-in registry uses it; it carries no other
-    /// distinction.
+    /// codec advertises.
     pub fn register_builtin_codec<C>(
         &mut self,
         codec: C,

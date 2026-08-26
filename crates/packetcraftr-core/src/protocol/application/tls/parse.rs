@@ -143,7 +143,7 @@ pub fn parse_handshake(input: &[u8]) -> Outcome<Handshake> {
 }
 
 /// Parses a ClientHello body: the bytes after the handshake header.
-pub fn parse_client_hello(body: &[u8]) -> Result<ClientHello, crate::codec::Error> {
+fn parse_client_hello(body: &[u8]) -> Result<ClientHello, crate::codec::Error> {
     let mut reader = Reader::new(body);
     let mut hello = ClientHello {
         legacy_version: reader.u16()?,
@@ -164,7 +164,7 @@ pub fn parse_client_hello(body: &[u8]) -> Result<ClientHello, crate::codec::Erro
 }
 
 /// Parses a ServerHello body: the bytes after the handshake header.
-pub fn parse_server_hello(body: &[u8]) -> Result<ServerHello, crate::codec::Error> {
+fn parse_server_hello(body: &[u8]) -> Result<ServerHello, crate::codec::Error> {
     let mut reader = Reader::new(body);
     let mut hello = ServerHello {
         legacy_version: reader.u16()?,
@@ -567,52 +567,12 @@ mod tests {
         HANDSHAKE_SERVER_HELLO, HELLO_RETRY_REQUEST_RANDOM, Handshake, MAX_ALPN, MAX_CIPHER_SUITES,
         MAX_EXTENSION_LEN, MAX_EXTENSIONS, MAX_HANDSHAKE_BODY, MAX_RECORD_BODY, RECORD_HEADER_LEN,
     };
+    use crate::fuzz::execution::SplitMix64;
+
+    use super::super::test_wire::{
+        extension, handshake_message, record, u16_bytes, vector8, vector16,
+    };
     use super::{Outcome, looks_like_record_start, parse_handshake, parse_record, u16_list};
-
-    fn record(content_type: u8, version: u16, body: &[u8]) -> Vec<u8> {
-        let mut bytes = vec![content_type];
-        bytes.extend_from_slice(&version.to_be_bytes());
-        let length = u16::try_from(body.len()).expect("test record body fits in u16");
-        bytes.extend_from_slice(&length.to_be_bytes());
-        bytes.extend_from_slice(body);
-        bytes
-    }
-
-    fn handshake_message(kind: u8, body: &[u8]) -> Vec<u8> {
-        let mut bytes = vec![kind];
-        let length = u32::try_from(body.len()).expect("test handshake body fits in u24");
-        bytes.extend_from_slice(&length.to_be_bytes()[1..]);
-        bytes.extend_from_slice(body);
-        bytes
-    }
-
-    fn vector8(body: &[u8]) -> Vec<u8> {
-        let mut bytes = vec![u8::try_from(body.len()).expect("test vector fits in u8")];
-        bytes.extend_from_slice(body);
-        bytes
-    }
-
-    fn vector16(body: &[u8]) -> Vec<u8> {
-        let mut bytes = u16::try_from(body.len())
-            .expect("test vector fits in u16")
-            .to_be_bytes()
-            .to_vec();
-        bytes.extend_from_slice(body);
-        bytes
-    }
-
-    fn u16_bytes(values: &[u16]) -> Vec<u8> {
-        values
-            .iter()
-            .flat_map(|value| value.to_be_bytes())
-            .collect()
-    }
-
-    fn extension(kind: u16, body: &[u8]) -> Vec<u8> {
-        let mut bytes = kind.to_be_bytes().to_vec();
-        bytes.extend_from_slice(&vector16(body));
-        bytes
-    }
 
     fn client_hello_body(
         legacy_version: u16,
@@ -1158,19 +1118,6 @@ mod tests {
         );
     }
 
-    /// A cheap deterministic generator: no dependency, and a failure reproduces
-    /// from the seed printed in the assertion.
-    struct XorShift(u64);
-
-    impl XorShift {
-        fn next(&mut self) -> u64 {
-            self.0 ^= self.0 << 13;
-            self.0 ^= self.0 >> 7;
-            self.0 ^= self.0 << 17;
-            self.0
-        }
-    }
-
     #[test]
     fn mutated_handshake_bytes_never_panic() {
         let seed = client_hello(&[
@@ -1189,22 +1136,23 @@ mod tests {
             ),
         ]);
         let framed = record(CONTENT_TYPE_HANDSHAKE, 0x0303, &seed);
-        let mut random = XorShift(0x5eed_1234_abcd_0001);
+        // Deterministic: a failure reproduces from this seed.
+        let mut random = SplitMix64::new(0x5eed_1234_abcd_0001);
 
         for iteration in 0..2_000u32 {
             let mut bytes = framed.clone();
-            let mutations = 1 + usize::try_from(random.next() % 4).expect("small count fits");
+            let mutations = 1 + usize::try_from(random.next_u64() % 4).expect("small count fits");
             for _ in 0..mutations {
-                let index = usize::try_from(random.next() % 64).expect("small index fits")
+                let index = usize::try_from(random.next_u64() % 64).expect("small index fits")
                     * bytes.len()
                     / 64;
-                let value = u8::try_from(random.next() % 256).expect("byte value fits");
+                let value = u8::try_from(random.next_u64() % 256).expect("byte value fits");
                 if let Some(slot) = bytes.get_mut(index) {
                     *slot = value;
                 }
             }
-            if random.next().is_multiple_of(3) {
-                let keep = usize::try_from(random.next() % 64).expect("small length fits")
+            if random.next_u64().is_multiple_of(3) {
+                let keep = usize::try_from(random.next_u64() % 64).expect("small length fits")
                     * bytes.len()
                     / 64;
                 bytes.truncate(keep);

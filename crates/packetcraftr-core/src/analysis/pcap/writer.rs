@@ -234,14 +234,6 @@ impl<W: Write> Writer<W> {
         self.stream_limits
     }
 
-    pub fn frames_written(&self) -> u64 {
-        self.frames_written
-    }
-
-    pub fn captured_bytes_written(&self) -> u64 {
-        self.captured_bytes_written
-    }
-
     /// Adds a PCAPNG interface using the writer's configured size limit as
     /// its snap length and returns its numeric interface ID.
     pub fn add_interface(&mut self, link_type: LinkType) -> Result<u32, Error> {

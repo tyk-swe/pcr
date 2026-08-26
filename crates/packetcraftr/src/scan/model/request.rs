@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use packetcraftr_core::template::DEFAULT_MAX_TEMPLATE_PACKETS;
 use packetcraftr_netio::capture::{DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES};
 
+use crate::probe::evidence::{check_limits, duration_violation};
 use crate::target::Family;
 use crate::target::Target;
 
@@ -77,53 +78,49 @@ impl Default for Limits {
 
 impl Limits {
     pub fn validate(self) -> std::result::Result<Self, Error> {
-        for (field, value, maximum) in [
-            ("max_ports", self.max_ports, usize::from(u16::MAX) + 1),
-            ("max_probes", self.max_probes, MAX_SCAN_PROBES),
-            ("batch_size", self.batch_size, MAX_SCAN_PROBES),
-            (
-                "max_evidence_frames",
-                self.max_evidence_frames,
-                DEFAULT_CAPTURE_QUEUE_FRAMES,
-            ),
-            (
-                "max_evidence_bytes",
-                self.max_evidence_bytes,
-                DEFAULT_CAPTURE_QUEUE_BYTES,
-            ),
-        ] {
-            if value == 0 || value > maximum {
-                return Err(Error::InvalidLimit {
-                    field,
-                    value: u64::try_from(value).unwrap_or(u64::MAX),
-                    reason: format!("must be within 1..={maximum}"),
-                });
-            }
-        }
-        if self.batch_size > self.max_probes {
-            return Err(Error::InvalidLimit {
-                field: "batch_size",
-                value: u64::try_from(self.batch_size).unwrap_or(u64::MAX),
-                reason: "cannot exceed max_probes".to_owned(),
-            });
-        }
-        if self.batch_size > self.max_evidence_frames {
-            return Err(Error::InvalidLimit {
-                field: "batch_size",
-                value: u64::try_from(self.batch_size).unwrap_or(u64::MAX),
-                reason:
-                    "cannot exceed max_evidence_frames because every probe may receive a response"
-                        .to_owned(),
-            });
-        }
-        if self.max_undecoded > self.max_evidence_frames {
-            return Err(Error::InvalidLimit {
-                field: "max_undecoded",
-                value: u64::try_from(self.max_undecoded).unwrap_or(u64::MAX),
-                reason: "cannot exceed max_evidence_frames".to_owned(),
-            });
-        }
-        if self.max_duration.is_zero() || self.max_duration > MAX_SCAN_DURATION {
+        check_limits(
+            &[
+                ("max_ports", self.max_ports, usize::from(u16::MAX) + 1),
+                ("max_probes", self.max_probes, MAX_SCAN_PROBES),
+                ("batch_size", self.batch_size, MAX_SCAN_PROBES),
+                (
+                    "max_evidence_frames",
+                    self.max_evidence_frames,
+                    DEFAULT_CAPTURE_QUEUE_FRAMES,
+                ),
+                (
+                    "max_evidence_bytes",
+                    self.max_evidence_bytes,
+                    DEFAULT_CAPTURE_QUEUE_BYTES,
+                ),
+            ],
+            &[
+                (
+                    "batch_size",
+                    self.batch_size,
+                    self.max_probes,
+                    "cannot exceed max_probes",
+                ),
+                (
+                    "batch_size",
+                    self.batch_size,
+                    self.max_evidence_frames,
+                    "cannot exceed max_evidence_frames because every probe may receive a response",
+                ),
+                (
+                    "max_undecoded",
+                    self.max_undecoded,
+                    self.max_evidence_frames,
+                    "cannot exceed max_evidence_frames",
+                ),
+            ],
+            |field, value, reason| Error::InvalidLimit {
+                field,
+                value,
+                reason,
+            },
+        )?;
+        if duration_violation(self.max_duration, MAX_SCAN_DURATION) {
             return Err(Error::InvalidDuration {
                 value: self.max_duration,
                 maximum: MAX_SCAN_DURATION,

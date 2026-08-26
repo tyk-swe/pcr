@@ -14,7 +14,9 @@ use packetcraftr_core::{diagnostic::Diagnostic, registry::Registry};
 use crate::clock::Clock;
 use crate::evidence::Budget;
 use crate::probe::evidence::{ResponseSelector, UndecodedRetention, retain_evidence};
-use crate::probe::runner::{ProbeBatch, ProbeLifecycle, ProbeRunConfig, run_batches};
+use crate::probe::runner::{
+    ProbeBatch, ProbeLifecycle, ProbeRunConfig, run_batches, sink_observer,
+};
 use crate::target::{Authorizer, approve_operation, resolve_selected};
 use crate::{BoundaryError, SentPacket};
 
@@ -78,24 +80,12 @@ where
     C: Clock,
     F: FnMut(Event) -> std::result::Result<(), BoundaryError> + Send + 'static,
 {
-    let sink =
-        packetcraftr_core::progress::Sink::new(emit).map_err(|source| Error::Output { source })?;
-    run_observed(
-        request,
-        authorizer,
-        registry,
-        executor,
-        clock,
-        move |event, deadline| match sink.emit(event, deadline) {
-            Ok(()) => Ok(()),
-            Err(packetcraftr_core::progress::EmitError::Deadline(error)) => {
-                Err(traceroute_duration_error(error.actual, error.limit))
-            }
-            Err(packetcraftr_core::progress::EmitError::Output(source)) => {
-                Err(Error::Output { source })
-            }
-        },
-    )
+    let observe = sink_observer(
+        emit,
+        |error| traceroute_duration_error(error.actual, error.limit),
+        |source| Error::Output { source },
+    )?;
+    run_observed(request, authorizer, registry, executor, clock, observe)
 }
 
 fn run_observed<A, E, C, F>(
@@ -149,7 +139,7 @@ where
 }
 
 #[derive(Default)]
-pub struct Collector {
+pub(super) struct Collector {
     hops: Vec<Hop>,
     hop_indices: HashMap<u8, usize>,
     undecoded: Vec<UndecodedEvidence>,
@@ -157,7 +147,7 @@ pub struct Collector {
 }
 
 impl Collector {
-    pub fn observe(&mut self, event: Event) {
+    pub(super) fn observe(&mut self, event: Event) {
         match event {
             Event::Probe { target: _, probe } => {
                 let hop_index = match self.hop_indices.get(&probe.hop_limit) {
@@ -185,7 +175,7 @@ impl Collector {
         }
     }
 
-    pub fn finish(mut self, summary: Summary) -> Result {
+    pub(super) fn finish(mut self, summary: Summary) -> Result {
         self.diagnostics.extend(summary.diagnostics);
         Result {
             target: summary.target,

@@ -13,6 +13,8 @@ use std::path::{Path, PathBuf};
 use packetcraftr::core::document::{DEFAULT_MAX_DOCUMENT_BYTES, Format, Packet};
 use serde_json::Value;
 
+mod support;
+
 /// The published packet examples, and how many of those are JSON. Both are
 /// exact: a new example has to be added here on purpose.
 const PUBLISHED_PACKET_EXAMPLES: usize = 4;
@@ -55,11 +57,7 @@ fn format_for(path: &Path) -> Format {
 
 #[test]
 fn every_published_json_packet_example_validates_against_the_schema() {
-    let schema: Value = serde_json::from_str(include_str!(
-        "../../../schemas/packetcraftr.packet.v1.schema.json"
-    ))
-    .expect("packet schema must be valid JSON");
-    let validator = jsonschema::validator_for(&schema).expect("packet schema must compile");
+    let validator = support::packet_schema_validator();
 
     let mut validated = 0_usize;
     for path in packet_examples() {

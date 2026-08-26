@@ -52,6 +52,9 @@ pub mod traceroute;
 
 pub mod output;
 
+#[cfg(test)]
+mod test_fixtures;
+
 pub use client::Client;
 pub use error::Error;
 pub use evidence::SentPacket;
@@ -60,6 +63,7 @@ pub use packetcraftr_core::analysis;
 pub use packetcraftr_core::error::BoundaryError;
 pub use packetcraftr_netio as netio;
 pub use probe::client_executor::ExchangeExecutor;
+pub use probe::{EPHEMERAL_SOURCE_PORT_BASE, ephemeral_source_port};
 pub use stats::Stats;
 
 fn live_timestamp(frame: &packetcraftr_core::frame::Frame) -> std::time::SystemTime {

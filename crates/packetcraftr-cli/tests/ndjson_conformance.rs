@@ -13,6 +13,12 @@ use serde_json::{Value, json};
 
 mod support;
 
+// The CLI ships no library target, so compile its error module into this test
+// binary to exercise the real cleanup composition.
+#[allow(dead_code)]
+#[path = "../src/errors.rs"]
+mod cli_errors;
+
 use support::{assert_contiguous, schema_validator, stream};
 
 const COMPLETION_FIXTURES: &[(output::contract::Command, bool, &str)] = &[
@@ -504,21 +510,26 @@ fn cleanup_failure_augments_the_primary_error_at_the_next_position() {
         Vec::new(),
     )
     .unwrap();
-    // The shape `CliError::with_cleanup` produces: the primary failure, with
-    // the shutdown failure appended as a second cause.
     let cleanup = packetcraftr::netio::Error::Capture {
         message: "cleanup failure".to_owned(),
     };
-    let primary = output::envelope::Error::new(
+    // Composed by the renderer under test rather than restated here, so the
+    // record covers what `CliError::with_cleanup` actually produces.
+    let primary = cli_errors::CliError::from_classification(
         packetcraftr::core::error::Classification::new(
             "io.primary",
             packetcraftr::core::error::Kind::Io,
             None,
         ),
-        format!("primary capture failure; capture shutdown also failed: {cleanup}"),
-        vec!["primary cause".to_owned(), cleanup.to_string()],
+        "primary capture failure",
+        vec!["primary cause".to_owned()],
+    )
+    .with_cleanup(cleanup.clone());
+    assert_eq!(
+        primary.message,
+        format!("primary capture failure; capture shutdown also failed: {cleanup}")
     );
-    sink.emit_error(primary).unwrap();
+    sink.emit_error(primary.output_error()).unwrap();
 
     let records = output.records();
     validate_records(schema_validator(), &records);

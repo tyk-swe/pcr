@@ -39,19 +39,22 @@ impl From<&support::Protocol> for Summary {
     }
 }
 
-/// Stable reflective field type owned by the output-v1 contract.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FieldKind {
-    Bool,
-    Unsigned,
-    Signed,
-    Text,
-    Bytes,
-    Ipv4,
-    Ipv6,
-    Mac,
-    List,
+mirror_enum! {
+    /// Stable reflective field type owned by the output-v1 contract.
+    #[serde(rename_all = "snake_case")]
+    pub enum FieldKind from CoreFieldKind {
+        Bool = Bool,
+        Unsigned = Unsigned,
+        Signed = Signed,
+        Text = Text,
+        Bytes = Bytes,
+        Ipv4 = Ipv4,
+        Ipv6 = Ipv6,
+        Mac = Mac,
+        List = List,
+    }
+    // v1 pins this value set; new kinds require a schema revision and explicit arm.
+    unmatched value => unreachable!("field kind {value:?} has no v1 output representation"),
 }
 
 impl FieldKind {
@@ -66,24 +69,6 @@ impl FieldKind {
             Self::Ipv6 => "ipv6",
             Self::Mac => "mac",
             Self::List => "list",
-        }
-    }
-}
-
-impl From<CoreFieldKind> for FieldKind {
-    fn from(value: CoreFieldKind) -> Self {
-        match value {
-            CoreFieldKind::Bool => Self::Bool,
-            CoreFieldKind::Unsigned => Self::Unsigned,
-            CoreFieldKind::Signed => Self::Signed,
-            CoreFieldKind::Text => Self::Text,
-            CoreFieldKind::Bytes => Self::Bytes,
-            CoreFieldKind::Ipv4 => Self::Ipv4,
-            CoreFieldKind::Ipv6 => Self::Ipv6,
-            CoreFieldKind::Mac => Self::Mac,
-            CoreFieldKind::List => Self::List,
-            // v1 pins this value set; new kinds require a schema revision and explicit arm.
-            _ => unreachable!("field kind {value:?} has no v1 output representation"),
         }
     }
 }

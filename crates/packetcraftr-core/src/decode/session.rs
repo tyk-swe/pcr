@@ -139,9 +139,6 @@ impl<'registry> DecodeSession<'registry> {
             input,
             &LayerDecodeContext {
                 registry: self.registry,
-                layer_index: self.packet.len(),
-                absolute_offset: cursor.bytes.start,
-                verify_checksums: self.options.verify_checksums,
                 allow_trailing_padding: allow_link_padding,
                 network: self.traversal.network(),
                 discriminator: cursor.discriminator,

@@ -26,19 +26,11 @@ pub enum Table {
     Io,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Transport {
-    Tcp,
-    Udp,
-}
-
-impl From<TransportKind> for Transport {
-    fn from(value: TransportKind) -> Self {
-        match value {
-            TransportKind::Tcp => Self::Tcp,
-            TransportKind::Udp => Self::Udp,
-        }
+mirror_enum! {
+    #[serde(rename_all = "snake_case")]
+    pub enum Transport from TransportKind {
+        Tcp = Tcp,
+        Udp = Udp,
     }
 }
 

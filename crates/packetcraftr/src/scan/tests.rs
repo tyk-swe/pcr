@@ -4,14 +4,11 @@
 // for library paths.
 #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
-use std::collections::VecDeque;
-use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, UNIX_EPOCH};
 
-use crate::target::{Error as TargetError, Resolver};
 use bytes::Bytes;
 use packetcraftr_core::error::{Classification as ErrorClassification, Kind};
 use packetcraftr_core::frame::{Frame, LinkType};
@@ -30,8 +27,8 @@ use super::model::{
     Batch, Classification, Event, Execution, Executor, Limits, ProbeStatus, Request, Transport,
 };
 use super::probe::probe_packet;
-use crate::clock::Clock;
-use crate::target::{Authorized, Authorizer, Operation, PolicyAuthorizer, Target};
+use crate::target::{PolicyAuthorizer, Target};
+use crate::test_fixtures::{AddressListAuthorizer, NoopClock, RecordingClock, ScriptedResolver};
 use crate::{BoundaryError, Stats, target::Family};
 
 fn private_scan_policy() -> crate::policy::Policy {
@@ -52,76 +49,6 @@ fn tcp_scan_request(target: Target) -> Request {
         timeout: Duration::from_millis(1),
         probes_per_second: None,
         limits: Limits::default(),
-    }
-}
-
-#[derive(Default)]
-struct NoopClock;
-
-impl Clock for NoopClock {
-    type Error = Infallible;
-
-    fn sleep(&mut self, _delay: Duration) -> Result<(), Self::Error> {
-        Ok(())
-    }
-}
-
-#[derive(Default)]
-struct RecordingClock(Vec<Duration>);
-
-impl Clock for RecordingClock {
-    type Error = Infallible;
-
-    fn sleep(&mut self, delay: Duration) -> Result<(), Self::Error> {
-        self.0.push(delay);
-        Ok(())
-    }
-}
-
-struct AddressListAuthorizer {
-    addresses: Vec<IpAddr>,
-}
-
-impl Authorizer for AddressListAuthorizer {
-    fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> {
-        Ok(Authorized {
-            declared: target.clone(),
-            addresses: self.addresses.clone(),
-        })
-    }
-
-    fn authorize_operation(&mut self, _operation: Operation<'_>) -> Result<(), BoundaryError> {
-        Ok(())
-    }
-}
-
-struct ScriptedResolver {
-    calls: Arc<AtomicUsize>,
-    answers: Mutex<VecDeque<Vec<IpAddr>>>,
-}
-
-impl ScriptedResolver {
-    fn new(answers: impl IntoIterator<Item = Vec<IpAddr>>) -> Self {
-        Self {
-            calls: Arc::new(AtomicUsize::new(0)),
-            answers: Mutex::new(answers.into_iter().collect()),
-        }
-    }
-}
-
-impl Resolver for ScriptedResolver {
-    fn resolve(
-        &self,
-        _hostname: &crate::target::Hostname,
-        _limit: usize,
-    ) -> Result<Vec<IpAddr>, TargetError> {
-        self.calls.fetch_add(1, Ordering::SeqCst);
-        Ok(self
-            .answers
-            .lock()
-            .expect("resolver lock")
-            .pop_front()
-            .expect("scripted resolver answer"))
     }
 }
 
@@ -321,7 +248,7 @@ fn scan_batching_attempts_rate_and_timeout_evidence_are_deterministic() {
             (2, vec![Some(82), Some(83)]),
         ]
     );
-    assert_eq!(clock.0, vec![Duration::from_secs(1); 3]);
+    assert_eq!(clock.delays, vec![Duration::from_secs(1); 3]);
     assert_eq!(result.endpoints.len(), 4);
     assert!(result.endpoints.iter().all(|endpoint| {
         endpoint.classification == Classification::Timeout

@@ -32,22 +32,13 @@ impl From<packetcraftr_netio::interface::Flags> for Flags {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Capability {
-    Layer2,
-    Layer3,
-    #[serde(rename = "layer2_and3")]
-    Layer2AndLayer3,
-}
-
-impl From<LinkCapability> for Capability {
-    fn from(value: LinkCapability) -> Self {
-        match value {
-            LinkCapability::Layer2 => Self::Layer2,
-            LinkCapability::Layer3 => Self::Layer3,
-            LinkCapability::Layer2AndLayer3 => Self::Layer2AndLayer3,
-        }
+mirror_enum! {
+    #[serde(rename_all = "snake_case")]
+    pub enum Capability from LinkCapability {
+        Layer2 = Layer2,
+        Layer3 = Layer3,
+        #[serde(rename = "layer2_and3")]
+        Layer2AndLayer3 = Layer2AndLayer3,
     }
 }
 
@@ -103,67 +94,35 @@ impl From<packetcraftr_netio::interface::Id> for InterfaceId {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SelectionReason {
-    Local,
-    OnLink,
-    Broadcast,
-    Gateway,
-    InterfaceOnly,
-}
-
-impl From<packetcraftr_netio::route::SelectionReason> for SelectionReason {
-    fn from(value: packetcraftr_netio::route::SelectionReason) -> Self {
-        match value {
-            packetcraftr_netio::route::SelectionReason::Local => Self::Local,
-            packetcraftr_netio::route::SelectionReason::OnLink => Self::OnLink,
-            packetcraftr_netio::route::SelectionReason::Broadcast => Self::Broadcast,
-            packetcraftr_netio::route::SelectionReason::Gateway => Self::Gateway,
-            packetcraftr_netio::route::SelectionReason::InterfaceOnly => Self::InterfaceOnly,
-        }
+mirror_enum! {
+    #[serde(rename_all = "snake_case")]
+    pub enum SelectionReason from packetcraftr_netio::route::SelectionReason {
+        Local = Local,
+        OnLink = OnLink,
+        Broadcast = Broadcast,
+        Gateway = Gateway,
+        InterfaceOnly = InterfaceOnly,
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Scope {
-    Host,
-    Link,
-    Private,
-    Global,
-    Multicast,
-    Unspecified,
-}
-
-impl From<packetcraftr_netio::route::Scope> for Scope {
-    fn from(value: packetcraftr_netio::route::Scope) -> Self {
-        match value {
-            packetcraftr_netio::route::Scope::Host => Self::Host,
-            packetcraftr_netio::route::Scope::Link => Self::Link,
-            packetcraftr_netio::route::Scope::Private => Self::Private,
-            packetcraftr_netio::route::Scope::Global => Self::Global,
-            packetcraftr_netio::route::Scope::Multicast => Self::Multicast,
-            packetcraftr_netio::route::Scope::Unspecified => Self::Unspecified,
-        }
+mirror_enum! {
+    #[serde(rename_all = "snake_case")]
+    pub enum Scope from packetcraftr_netio::route::Scope {
+        Host = Host,
+        Link = Link,
+        Private = Private,
+        Global = Global,
+        Multicast = Multicast,
+        Unspecified = Unspecified,
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Mode {
-    Auto,
-    Layer2,
-    Layer3,
-}
-
-impl From<LinkMode> for Mode {
-    fn from(value: LinkMode) -> Self {
-        match value {
-            LinkMode::Auto => Self::Auto,
-            LinkMode::Layer2 => Self::Layer2,
-            LinkMode::Layer3 => Self::Layer3,
-        }
+mirror_enum! {
+    #[serde(rename_all = "snake_case")]
+    pub enum Mode from LinkMode {
+        Auto = Auto,
+        Layer2 = Layer2,
+        Layer3 = Layer3,
     }
 }
 
@@ -190,19 +149,11 @@ impl fmt::Display for MacAddress {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum VlanKind {
-    Ieee8021Q,
-    Ieee8021Ad,
-}
-
-impl From<packetcraftr_netio::neighbor::VlanKind> for VlanKind {
-    fn from(value: packetcraftr_netio::neighbor::VlanKind) -> Self {
-        match value {
-            packetcraftr_netio::neighbor::VlanKind::Ieee8021Q => Self::Ieee8021Q,
-            packetcraftr_netio::neighbor::VlanKind::Ieee8021Ad => Self::Ieee8021Ad,
-        }
+mirror_enum! {
+    #[serde(rename_all = "snake_case")]
+    pub enum VlanKind from packetcraftr_netio::neighbor::VlanKind {
+        Ieee8021Q = Ieee8021Q,
+        Ieee8021Ad = Ieee8021Ad,
     }
 }
 

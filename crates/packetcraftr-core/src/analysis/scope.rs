@@ -3,9 +3,8 @@
 
 //! Exact capture-domain identities shared by indexing and reassembly.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::net::IpAddr;
-use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -54,25 +53,8 @@ pub enum EncapsulationIdentifier {
     },
 }
 
-/// An exact, shared encapsulation descriptor.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct InternedEncapsulationPath(Arc<[EncapsulationIdentifier]>);
-
-impl InternedEncapsulationPath {
-    #[must_use]
-    pub fn as_slice(&self) -> &[EncapsulationIdentifier] {
-        &self.0
-    }
-}
-
-/// Exact capture domain before it is reduced to a compact [`ScopeId`].
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct FlowScope {
-    pub interface: Option<GlobalInterfaceId>,
-    pub encapsulation: InternedEncapsulationPath,
-}
-
-/// Run-local compact identity of one exact [`FlowScope`].
+/// Run-local compact identity of one exact capture domain: an interface and
+/// the ordered encapsulation path enclosing a flow.
 ///
 /// All keys offered to one index or reassembler must use IDs issued by the
 /// same [`Interner`].
@@ -98,9 +80,8 @@ pub enum Error {
 /// Exact interner for semantic encapsulation paths and capture scopes.
 #[derive(Debug, Default)]
 pub struct Interner {
-    paths: HashSet<InternedEncapsulationPath>,
-    scopes: HashMap<FlowScope, ScopeId>,
-    descriptors: Vec<FlowScope>,
+    scopes: HashMap<(Option<GlobalInterfaceId>, Vec<EncapsulationIdentifier>), ScopeId>,
+    next: u32,
 }
 
 impl Interner {
@@ -115,42 +96,15 @@ impl Interner {
         interface: Option<GlobalInterfaceId>,
         encapsulation: Vec<EncapsulationIdentifier>,
     ) -> Result<ScopeId, Error> {
-        let candidate = InternedEncapsulationPath(Arc::from(encapsulation));
-        let encapsulation = match self.paths.get(&candidate) {
-            Some(existing) => existing.clone(),
-            None => {
-                self.paths.insert(candidate.clone());
-                candidate
-            }
-        };
-        let scope = FlowScope {
-            interface,
-            encapsulation,
-        };
+        let scope = (interface, encapsulation);
         if let Some(id) = self.scopes.get(&scope) {
             return Ok(*id);
         }
-        let id = ScopeId(u32::try_from(self.descriptors.len()).map_err(|_| Error::Capacity)?);
-        self.scopes.insert(scope.clone(), id);
-        self.descriptors.push(scope);
+        let next = self.next.checked_add(1).ok_or(Error::Capacity)?;
+        let id = ScopeId(self.next);
+        self.next = next;
+        self.scopes.insert(scope, id);
         Ok(id)
-    }
-
-    #[must_use]
-    pub fn get(&self, id: ScopeId) -> Option<&FlowScope> {
-        usize::try_from(id.0)
-            .ok()
-            .and_then(|index| self.descriptors.get(index))
-    }
-
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.descriptors.len()
-    }
-
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.descriptors.is_empty()
     }
 }
 
@@ -171,9 +125,8 @@ mod tests {
     }
 
     #[test]
-    fn exact_scope_reuses_both_identity_and_interned_path() {
+    fn exact_scope_reuses_its_identity() {
         let mut interner = Interner::new();
-        assert!(interner.is_empty());
 
         let first = interner
             .intern(Some(7), tunnel_path(42))
@@ -184,14 +137,6 @@ mod tests {
 
         assert_eq!(first, repeated);
         assert_eq!(first.get(), 0);
-        assert_eq!(interner.len(), 1);
-        assert_eq!(
-            interner.get(first).expect("assigned scope exists"),
-            &FlowScope {
-                interface: Some(7),
-                encapsulation: InternedEncapsulationPath(Arc::from(tunnel_path(42))),
-            }
-        );
     }
 
     #[test]
@@ -211,22 +156,11 @@ mod tests {
             [base.get(), other_interface.get(), other_tunnel.get()],
             [0, 1, 2]
         );
-        assert_eq!(interner.len(), 3);
-        assert_eq!(interner.get(ScopeId(u32::MAX)), None);
-
-        let first = &interner
-            .get(base)
-            .expect("base scope exists")
-            .encapsulation
-            .0;
-        let second = &interner
-            .get(other_interface)
-            .expect("second scope exists")
-            .encapsulation
-            .0;
-        assert!(
-            Arc::ptr_eq(first, second),
-            "equal paths should share storage"
+        assert_eq!(
+            interner
+                .intern(Some(1), tunnel_path(10))
+                .expect("base scope is still interned"),
+            base
         );
     }
 }

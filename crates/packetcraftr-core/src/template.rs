@@ -21,20 +21,18 @@ struct TemplateAxis {
 #[derive(Clone, Debug)]
 pub struct Template {
     base: Packet,
-    axes: Vec<TemplateAxis>,
+    axis: Option<TemplateAxis>,
 }
 
 impl Template {
     pub fn new(base: Packet) -> Self {
-        Self {
-            base,
-            axes: Vec::new(),
-        }
+        Self { base, axis: None }
     }
 
+    /// Sets the single field the template varies, replacing any earlier axis.
     #[must_use]
     pub fn axis(mut self, layer: usize, field: impl Into<String>, values: Vec<FieldValue>) -> Self {
-        self.axes.push(TemplateAxis {
+        self.axis = Some(TemplateAxis {
             layer,
             field: field.into(),
             values,
@@ -42,15 +40,10 @@ impl Template {
         self
     }
 
+    /// Number of packets this template expands to: one per axis value, or one
+    /// packet when no axis is set.
     pub fn expansion_len(&self) -> Result<usize, Error> {
-        if self.axes.is_empty() {
-            return Ok(1);
-        }
-        self.axes.iter().try_fold(1usize, |product, axis| {
-            product
-                .checked_mul(axis.values.len())
-                .ok_or(Error::ExpansionOverflow)
-        })
+        Ok(self.axis.as_ref().map_or(1, |axis| axis.values.len()))
     }
 
     pub fn expand(
@@ -66,39 +59,27 @@ impl Template {
         }
         Ok((0..total).map(move |ordinal| {
             let mut packet = self.base.clone();
-            let mut divisor = total;
-            for axis in &self.axes {
-                let length = axis.values.len();
-                #[expect(
-                    clippy::arithmetic_side_effects,
-                    reason = "total is the product of the axis lengths, so it is zero unless every length is non-zero and the closure never runs for a zero total"
-                )]
-                {
-                    divisor /= length;
-                }
-                #[expect(
-                    clippy::arithmetic_side_effects,
-                    reason = "divisor stays a non-zero divisor of total while length is non-zero"
-                )]
-                let index = (ordinal / divisor) % length;
-                #[expect(
-                    clippy::indexing_slicing,
-                    reason = "index is a remainder modulo length, so it is below axis.values.len()"
-                )]
-                let value = axis.values[index].clone();
-                let packet_len = packet.len();
-                let layer = packet.layer_mut(axis.layer).ok_or(Error::LayerIndex {
-                    index: axis.layer,
-                    len: packet_len,
+            // Absent only when the template varies nothing, which expands to
+            // the base packet alone.
+            let Some((axis, value)) = self
+                .axis
+                .as_ref()
+                .and_then(|axis| Some((axis, axis.values.get(ordinal)?)))
+            else {
+                return Ok(packet);
+            };
+            let packet_len = packet.len();
+            let layer = packet.layer_mut(axis.layer).ok_or(Error::LayerIndex {
+                index: axis.layer,
+                len: packet_len,
+            })?;
+            layer
+                .set_field(&axis.field, value.clone())
+                .map_err(|source| Error::Field {
+                    layer: axis.layer,
+                    field: axis.field.clone(),
+                    source,
                 })?;
-                layer
-                    .set_field(&axis.field, value)
-                    .map_err(|source| Error::Field {
-                        layer: axis.layer,
-                        field: axis.field.clone(),
-                        source,
-                    })?;
-            }
             Ok(packet)
         }))
     }
@@ -107,8 +88,6 @@ impl Template {
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum Error {
-    #[error("template expansion arithmetic overflow")]
-    ExpansionOverflow,
     #[error("template expands to {requested} packets, exceeding limit {limit}")]
     ExpansionLimit { requested: usize, limit: usize },
     #[error("template layer index {index} is outside packet length {len}")]

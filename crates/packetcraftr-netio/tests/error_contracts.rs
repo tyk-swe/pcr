@@ -4,7 +4,7 @@
 // for library paths.
 #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
-use std::{fmt, net::IpAddr};
+use std::{fmt, net::IpAddr, time::Duration};
 
 use packetcraftr_core::{
     error::{Classification, Classified, Kind},
@@ -368,6 +368,189 @@ fn neighbor_errors_keep_stable_classes_and_ordered_provider_causes() {
         let causes = error.causes();
         let causes = causes.iter().map(String::as_str).collect::<Vec<_>>();
         assert_eq!(causes.as_slice(), expected_causes, "{error}");
+    }
+}
+
+#[test]
+fn live_io_errors_keep_stable_classes_for_every_public_failure_variant() {
+    let cases = [
+        (
+            Error::Unsupported {
+                message: "fixture".to_owned(),
+            },
+            "capability.unsupported",
+            Kind::Capability,
+        ),
+        (
+            Error::InterfaceDiscovery {
+                message: "fixture".to_owned(),
+            },
+            "io.interface_discovery",
+            Kind::Io,
+        ),
+        (
+            Error::MissingDependency {
+                dependency: "fixture",
+                message: "fixture".to_owned(),
+            },
+            "capability.missing_dependency",
+            Kind::Capability,
+        ),
+        (
+            Error::Device {
+                interface: "fixture0".to_owned(),
+                message: "fixture".to_owned(),
+            },
+            "io.device",
+            Kind::Io,
+        ),
+        (
+            Error::Privilege {
+                message: "fixture".to_owned(),
+            },
+            "capability.privilege",
+            Kind::Capability,
+        ),
+        (
+            Error::Send {
+                message: "fixture".to_owned(),
+            },
+            "io.send",
+            Kind::Io,
+        ),
+        (
+            Error::TransmissionModeMismatch {
+                expected: Mode::Layer2,
+                actual: Mode::Layer3,
+            },
+            "internal.live_io_invariant",
+            Kind::Internal,
+        ),
+        (
+            Error::PartialSend {
+                expected: 2,
+                actual: 1,
+            },
+            "io.partial_send",
+            Kind::Io,
+        ),
+        (
+            Error::InvalidSendReport {
+                bytes_sent: 2,
+                wire_bytes: 1,
+            },
+            "internal.live_io_invariant",
+            Kind::Internal,
+        ),
+        (
+            Error::InvalidSendEvidence {
+                message: "fixture".to_owned(),
+            },
+            "internal.live_io_invariant",
+            Kind::Internal,
+        ),
+        (
+            Error::Encapsulation {
+                message: "fixture".to_owned(),
+            },
+            "packet.encapsulation",
+            Kind::Packet,
+        ),
+        (
+            Error::InvalidCaptureTimeout {
+                timeout: Duration::ZERO,
+                maximum: capture::MAX_TIMEOUT,
+            },
+            "cli.capture_timeout",
+            Kind::Cli,
+        ),
+        (
+            Error::InvalidTransmissionFrame {
+                message: "fixture".to_owned(),
+            },
+            "packet.transmission_frame",
+            Kind::Packet,
+        ),
+        (
+            Error::Capture {
+                message: "fixture".to_owned(),
+            },
+            "io.capture",
+            Kind::Io,
+        ),
+        (
+            Error::InvalidCaptureFilter {
+                interface: "fixture0".to_owned(),
+                message: "fixture".to_owned(),
+            },
+            "cli.capture_filter",
+            Kind::Cli,
+        ),
+        (
+            Error::CaptureFilterInstallation {
+                interface: "fixture0".to_owned(),
+                message: "fixture".to_owned(),
+            },
+            "io.capture_filter",
+            Kind::Io,
+        ),
+        (
+            Error::CaptureReadiness {
+                message: "fixture".to_owned(),
+            },
+            "io.capture_readiness",
+            Kind::Io,
+        ),
+        (
+            Error::DeadlineExceeded {
+                operation: "fixture operation",
+            },
+            "io.deadline_exceeded",
+            Kind::Io,
+        ),
+        (
+            Error::InvalidCaptureQueueLimit {
+                field: "max_frames",
+                value: 0,
+                reason: "fixture",
+            },
+            "cli.capture_limit",
+            Kind::Cli,
+        ),
+        (
+            Error::CaptureQueueOverflow {
+                dropped_frames: 1,
+                dropped_bytes: 2,
+                overflow_events: 1,
+            },
+            "io.capture_overflow",
+            Kind::Io,
+        ),
+        (
+            Error::CaptureEvidenceLoss {
+                dropped_frames: 1,
+                dropped_bytes: 2,
+                receiver_dropped_frames: 1,
+            },
+            "io.capture_evidence_loss",
+            Kind::Io,
+        ),
+        (
+            Error::InvalidCaptureStatistics {
+                message: "fixture".to_owned(),
+            },
+            "internal.live_io_invariant",
+            Kind::Internal,
+        ),
+        (
+            Error::UnresolvedLinkMode,
+            "internal.live_io_invariant",
+            Kind::Internal,
+        ),
+    ];
+
+    for (error, code, kind) in cases {
+        assert_contract(&error, code, kind);
     }
 }
 

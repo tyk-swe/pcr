@@ -15,12 +15,12 @@ use super::super::system::{client, prepare_route};
 use super::format::{CollectedFormat, ExchangeFormat};
 use super::registry;
 use crate::command_options::SendArgs;
-use crate::rendering::NdjsonStream;
+use crate::rendering::StreamEncoder;
 
 pub(super) fn run(
     arguments: Args,
     format: output::contract::Format,
-    stream: &mut NdjsonStream,
+    stream: &mut StreamEncoder,
 ) -> Result<(), CliError> {
     let format = ExchangeFormat::narrow(output::contract::Command::Exchange, format)?;
     let Args {
@@ -71,7 +71,9 @@ pub(super) fn run(
                 .exchange_with_events(&template, options, move |event| {
                     output::exchange::Event::try_from_exchange(event)
                         .map_err(CliError::classified)
-                        .and_then(|(event, diagnostics)| event_stream.emit_data(event, diagnostics))
+                        .and_then(|(event, diagnostics)| {
+                            Ok(event_stream.emit_data(event, diagnostics)?)
+                        })
                         .map_err(CliError::into_boundary_error)
                 })
                 .map_err(CliError::classified)?;

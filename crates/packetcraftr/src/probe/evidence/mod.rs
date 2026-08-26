@@ -12,10 +12,12 @@ pub(crate) use exact_validation::{
     validate_batch_exchange_evidence, validate_capture_statistics_evidence,
     validate_response_frames_and_deadlines, validate_sent_byte_accounting,
 };
+pub(crate) use limits::{check_limits, duration_violation};
 
 mod budget;
 mod candidate_selection;
 mod exact_validation;
+mod limits;
 
 #[cfg(test)]
 mod tests;

@@ -10,10 +10,6 @@ use std::time::{Duration, Instant};
 use bytes::Bytes;
 use packetcraftr_core::analysis::reassembly::{
     Limits,
-    fragment::{
-        DatagramKey, Error as FragmentError, Event as FragmentEvent, Fragment, OverlapPolicy,
-        Reassembler as FragmentReassembler, ScopedDatagramKey,
-    },
     tcp::{
         Error as TcpError, Event as TcpEvent, FlowKey, Reassembler as TcpReassembler,
         ScopedFlowKey, Segment,
@@ -25,32 +21,6 @@ fn scope() -> ScopeId {
     packetcraftr_core::analysis::scope::Interner::new()
         .intern(None, Vec::new())
         .expect("one scope fits")
-}
-
-fn datagram(identification: u32) -> ScopedDatagramKey {
-    ScopedDatagramKey {
-        scope: scope(),
-        datagram: DatagramKey {
-            source: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
-            destination: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2)),
-            identification,
-            next_header: 17,
-        },
-    }
-}
-
-fn fragment(
-    key: ScopedDatagramKey,
-    offset: u32,
-    more_fragments: bool,
-    bytes: &'static [u8],
-) -> Fragment {
-    Fragment {
-        key,
-        offset,
-        more_fragments,
-        bytes: Bytes::from_static(bytes),
-    }
 }
 
 fn flow(source_port: u16) -> ScopedFlowKey {
@@ -83,281 +53,37 @@ fn segment(
     }
 }
 
-#[test]
-fn a_single_final_fragment_completes_without_retained_state() {
-    let now = Instant::now();
-    let key = datagram(1);
-    let mut reassembler = FragmentReassembler::new(Limits::default(), OverlapPolicy::KeepFirst);
-    let event = reassembler
-        .push(fragment(key.clone(), 0, false, b"whole"), now)
-        .expect("single fragment is valid")
-        .expect("single final fragment completes");
-    let FragmentEvent::Complete(datagram) = event else {
-        panic!("expected completion");
-    };
-    assert_eq!(datagram.key, key);
-    assert_eq!(datagram.bytes.as_ref(), b"whole");
-    assert_eq!(datagram.fragment_count, 1);
-    assert!(!datagram.had_conflicting_overlap);
-    assert_eq!(reassembler.flow_count(), 0);
-    assert_eq!(reassembler.aggregate_bytes(), 0);
-    assert_eq!(reassembler.aggregate_memory_charge(), 0);
-}
-
-#[test]
-fn fragment_shape_and_wire_range_validation_is_atomic() {
-    let now = Instant::now();
-    let key = datagram(2);
-    let mut reassembler = FragmentReassembler::new(Limits::default(), OverlapPolicy::default());
-    assert_eq!(
-        reassembler.push(fragment(key.clone(), 0, false, b""), now),
-        Err(FragmentError::EmptyFragment)
-    );
-    assert_eq!(
-        reassembler.push(fragment(key.clone(), 0, true, b"seven!!"), now),
-        Err(FragmentError::UnalignedNonFinalFragment { length: 7 })
-    );
-    assert_eq!(
-        reassembler.push(fragment(key.clone(), 1, false, b"x"), now),
-        Err(FragmentError::UnalignedFragmentOffset { offset: 1 })
-    );
-    assert_eq!(
-        reassembler.push(fragment(key, u32::MAX - 7, false, b"0123456789abcdef"), now),
-        Err(FragmentError::OffsetOverflow)
-    );
-    assert_eq!(reassembler.flow_count(), 0);
-    assert_eq!(reassembler.aggregate_bytes(), 0);
-}
-
-#[test]
-fn fragment_flow_fragment_byte_and_aggregate_limits_are_independent() {
-    let now = Instant::now();
-    let mut per_flow = FragmentReassembler::new(
-        Limits {
-            max_bytes_per_flow: 7,
-            ..Limits::default()
-        },
-        OverlapPolicy::default(),
-    );
-    assert_eq!(
-        per_flow.push(fragment(datagram(3), 0, true, b"12345678"), now),
-        Err(FragmentError::FlowByteLimit { limit: 7 })
-    );
-
-    let mut flows = FragmentReassembler::new(
-        Limits {
-            max_flows: 0,
-            ..Limits::default()
-        },
-        OverlapPolicy::default(),
-    );
-    assert_eq!(
-        flows.push(fragment(datagram(4), 0, true, b"12345678"), now),
-        Err(FragmentError::FlowLimit { limit: 0 })
-    );
-
-    let mut fragments = FragmentReassembler::new(
-        Limits {
-            max_fragments_per_datagram: 0,
-            ..Limits::default()
-        },
-        OverlapPolicy::default(),
-    );
-    assert_eq!(
-        fragments.push(fragment(datagram(5), 0, false, b"x"), now),
-        Err(FragmentError::FragmentLimit { limit: 0 })
-    );
-
-    let mut aggregate = FragmentReassembler::new(
-        Limits {
-            max_aggregate_bytes: 100,
-            ..Limits::default()
-        },
-        OverlapPolicy::default(),
-    );
-    assert_eq!(
-        aggregate.push(fragment(datagram(6), 0, true, b"12345678"), now),
-        Err(FragmentError::AggregateByteLimit { limit: 100 })
-    );
-    assert_eq!(aggregate.aggregate_memory_charge(), 0);
-
-    let mut count = FragmentReassembler::new(
-        Limits {
-            max_fragments_per_datagram: 1,
-            ..Limits::default()
-        },
-        OverlapPolicy::default(),
-    );
-    count
-        .push(fragment(datagram(7), 0, true, b"12345678"), now)
-        .expect("first fragment fits");
-    assert_eq!(
-        count.push(fragment(datagram(7), 8, false, b"x"), now),
-        Err(FragmentError::FragmentLimit { limit: 1 })
-    );
-}
-
-#[test]
-fn keep_first_records_conflict_but_preserves_retained_bytes() {
-    let now = Instant::now();
-    let key = datagram(8);
-    let mut reassembler = FragmentReassembler::new(Limits::default(), OverlapPolicy::KeepFirst);
-    reassembler
-        .push(fragment(key.clone(), 0, true, b"abcdefgh"), now)
-        .expect("first fragment retained");
-    let memory = reassembler.aggregate_memory_charge();
-    assert_eq!(reassembler.aggregate_bytes(), 8);
-    assert!(memory > reassembler.aggregate_bytes());
-    reassembler
-        .push(fragment(key.clone(), 0, true, b"ABCDEFGH"), now)
-        .expect("keep-first accepts conflict");
-    assert_eq!(reassembler.aggregate_bytes(), 8);
-    let event = reassembler
-        .push(fragment(key, 8, false, b"ijk"), now)
-        .expect("final fragment accepted")
-        .expect("datagram completes");
-    let FragmentEvent::Complete(datagram) = event else {
-        panic!("expected completion");
-    };
-    assert_eq!(datagram.bytes.as_ref(), b"abcdefghijk");
-    assert_eq!(datagram.fragment_count, 3);
-    assert!(datagram.had_conflicting_overlap);
-}
-
-#[test]
-fn reject_conflicting_accepts_identical_overlap_and_pinpoints_mismatch() {
-    let now = Instant::now();
-    let key = datagram(9);
-    let mut reassembler =
-        FragmentReassembler::new(Limits::default(), OverlapPolicy::RejectConflicting);
-    reassembler
-        .push(fragment(key.clone(), 0, true, b"abcdefgh"), now)
-        .expect("first fragment retained");
-    reassembler
-        .push(fragment(key.clone(), 0, true, b"abcdefgh"), now)
-        .expect("identical overlap accepted");
-    assert_eq!(
-        reassembler.push(fragment(key.clone(), 0, true, b"abcXefgh"), now),
-        Err(FragmentError::ConflictingOverlap { offset: 3 })
-    );
-    let event = reassembler
-        .push(fragment(key, 8, false, b"z"), now)
-        .expect("final fragment accepted")
-        .expect("datagram completes");
-    let FragmentEvent::Complete(datagram) = event else {
-        panic!("expected completion");
-    };
-    assert_eq!(datagram.fragment_count, 3);
-    assert!(!datagram.had_conflicting_overlap);
-}
-
-#[test]
-fn final_fragment_length_is_immutable_and_bounds_every_later_range() {
-    let now = Instant::now();
-    let key = datagram(10);
-    let mut reassembler = FragmentReassembler::new(Limits::default(), OverlapPolicy::KeepFirst);
-    reassembler
-        .push(fragment(key.clone(), 8, false, b"ijkl"), now)
-        .expect("out-of-order final retained");
-    assert_eq!(
-        reassembler.push(fragment(key.clone(), 8, false, b"ij"), now),
-        Err(FragmentError::ConflictingFinalLength {
-            existing_length: 12,
-            new_length: 10
-        })
-    );
-    assert_eq!(
-        reassembler.push(fragment(key, 8, true, b"ijklmnop"), now),
-        Err(FragmentError::BeyondFinalLength { final_length: 12 })
-    );
-
-    let key = datagram(11);
-    let mut reassembler = FragmentReassembler::new(Limits::default(), OverlapPolicy::KeepFirst);
-    reassembler
-        .push(fragment(key.clone(), 8, true, b"ijklmnop"), now)
-        .expect("long non-final retained");
-    assert_eq!(
-        reassembler.push(fragment(key, 8, false, b"ijkl"), now),
-        Err(FragmentError::BeyondFinalLength { final_length: 12 })
-    );
-}
-
-#[test]
-fn fragment_expiry_uses_latest_capture_time_and_flush_resets_accounting() {
-    let now = Instant::now();
-    let mut reassembler = FragmentReassembler::new(
-        Limits {
-            fragment_expiry: Duration::from_secs(2),
-            ..Limits::default()
-        },
-        OverlapPolicy::default(),
-    );
-    reassembler
-        .push(fragment(datagram(20), 0, true, b"abcdefgh"), now)
-        .expect("first flow retained");
-    reassembler
-        .push(
-            fragment(datagram(21), 0, true, b"abcdefgh"),
-            now + Duration::from_secs(1),
-        )
-        .expect("second flow retained");
-    assert_eq!(reassembler.expire(now + Duration::from_secs(2)).len(), 1);
-    assert_eq!(reassembler.flow_count(), 1);
-    assert!(reassembler.aggregate_bytes() > 0);
-    let flushed = reassembler.flush();
-    assert_eq!(flushed.len(), 1);
-    assert!(matches!(
-        &flushed[0],
-        FragmentEvent::Expired {
+/// Anchors a flow at `first_payload_sequence` with a bare SYN, the way a
+/// capture opens a conversation.
+fn open(
+    reassembler: &mut TcpReassembler,
+    key: ScopedFlowKey,
+    first_payload_sequence: u32,
+    now: Instant,
+) -> Result<(), TcpError> {
+    let events = reassembler.push(
+        segment(
             key,
-            received_bytes: 8,
-            fragment_count: 1
-        } if key.datagram.identification == 21
-    ));
-    assert_eq!(reassembler.flow_count(), 0);
-    assert_eq!(reassembler.aggregate_bytes(), 0);
-    assert_eq!(reassembler.aggregate_memory_charge(), 0);
-
-    let key = datagram(22);
-    reassembler
-        .push(
-            fragment(key.clone(), 0, true, b"abcdefgh"),
-            now + Duration::from_secs(10),
-        )
-        .expect("flow retained");
-    reassembler
-        .push(fragment(key, 0, true, b"abcdefgh"), now)
-        .expect("older timestamp cannot rewind last update");
-    assert!(reassembler.expire(now + Duration::from_secs(11)).is_empty());
-    assert_eq!(reassembler.expire(now + Duration::from_secs(12)).len(), 1);
+            first_payload_sequence.wrapping_sub(1),
+            b"",
+            true,
+            false,
+            false,
+        ),
+        now,
+    )?;
+    assert!(events.is_empty(), "a bare SYN resolves nothing");
+    Ok(())
 }
 
 #[test]
 fn equal_deadline_expiry_events_use_stable_keys() {
     let now = Instant::now();
-    let mut fragments = FragmentReassembler::new(Limits::default(), OverlapPolicy::default());
-    fragments
-        .push(fragment(datagram(31), 0, true, b"abcdefgh"), now)
-        .expect("higher datagram retained");
-    fragments
-        .push(fragment(datagram(30), 0, true, b"abcdefgh"), now)
-        .expect("lower datagram retained");
-    let events = fragments.expire(now + Limits::default().fragment_expiry);
-    assert!(matches!(
-        events.as_slice(),
-        [
-            FragmentEvent::Expired { key: first, .. },
-            FragmentEvent::Expired { key: second, .. }
-        ] if first.datagram.identification == 30 && second.datagram.identification == 31
-    ));
-
     let higher = flow(20_000);
     let lower = flow(10_000);
     let mut tcp = TcpReassembler::new(Limits::default());
-    tcp.open_flow(higher.clone(), 0, now)
-        .expect("higher flow opens");
-    tcp.open_flow(lower.clone(), 0, now)
-        .expect("lower flow opens");
+    open(&mut tcp, higher.clone(), 0, now).expect("higher flow opens");
+    open(&mut tcp, lower.clone(), 0, now).expect("lower flow opens");
     let events = tcp.expire(now + Limits::default().tcp_idle_expiry);
     assert!(matches!(
         events.as_slice(),
@@ -386,7 +112,7 @@ fn tcp_empty_ack_is_ignored_and_invalid_window_is_rejected() {
         ..Limits::default()
     });
     assert_eq!(
-        invalid.open_flow(key.clone(), 1, now),
+        open(&mut invalid, key.clone(), 1, now),
         Err(TcpError::InvalidWindowLimit {
             limit: 1usize << 31
         })
@@ -408,21 +134,21 @@ fn tcp_flow_opening_replacement_and_limits_have_stable_queries() {
         max_flows: 1,
         ..Limits::default()
     });
-    reassembler
-        .open_flow(first.clone(), 100, now)
-        .expect("first flow opens");
-    reassembler
-        .open_flow(first.clone(), 100, now + Duration::from_secs(1))
-        .expect("same generation is idempotent");
+    open(&mut reassembler, first.clone(), 100, now).expect("first flow opens");
+    open(
+        &mut reassembler,
+        first.clone(),
+        100,
+        now + Duration::from_secs(1),
+    )
+    .expect("same generation is idempotent");
     assert_eq!(reassembler.flow_base_sequence(&first), Some(100));
     assert_eq!(reassembler.flow_next_sequence(&first), Some(100));
     assert!(!reassembler.flow_observed_payload(&first));
-    reassembler
-        .open_flow(first.clone(), 200, now)
-        .expect("same tuple can replace its generation");
+    open(&mut reassembler, first.clone(), 200, now).expect("same tuple can replace its generation");
     assert_eq!(reassembler.flow_base_sequence(&first), Some(200));
     assert_eq!(
-        reassembler.open_flow(second, 1, now),
+        open(&mut reassembler, second, 1, now),
         Err(TcpError::FlowLimit { limit: 1 })
     );
     assert!(reassembler.evict_flow(&flow(65_000)).is_empty());
@@ -448,16 +174,14 @@ fn tcp_flow_state_metadata_is_bounded_and_only_charged_while_retained() {
         ..Limits::default()
     });
 
-    reassembler
-        .open_flow(first.clone(), 100, now)
+    open(&mut reassembler, first.clone(), 100, now)
         .expect("one empty flow state fits the aggregate budget");
     assert_eq!(reassembler.aggregate_bytes(), 0);
     assert_eq!(reassembler.aggregate_memory_charge(), 256);
-    reassembler
-        .open_flow(first.clone(), 101, now)
+    open(&mut reassembler, first.clone(), 101, now)
         .expect("replacement reuses the existing flow's metadata budget");
     assert_eq!(
-        reassembler.open_flow(second.clone(), 200, now),
+        open(&mut reassembler, second.clone(), 200, now),
         Err(TcpError::AggregateByteLimit { limit: 256 })
     );
     assert_eq!(reassembler.flow_count(), 1);
@@ -580,9 +304,7 @@ fn tcp_out_of_order_merging_keeps_first_and_delivers_one_contiguous_stream() {
     let now = Instant::now();
     let key = flow(10_004);
     let mut reassembler = TcpReassembler::new(Limits::default());
-    reassembler
-        .open_flow(key.clone(), 100, now)
-        .expect("flow opens");
+    open(&mut reassembler, key.clone(), 100, now).expect("flow opens");
     assert!(
         reassembler
             .push(segment(key.clone(), 104, b"ef", false, false, false), now)
@@ -626,9 +348,7 @@ fn tcp_segment_window_and_aggregate_limits_fail_without_mutating_delivery() {
         max_tcp_segments_per_flow: 1,
         ..Limits::default()
     });
-    segment_limit
-        .open_flow(key.clone(), 100, now)
-        .expect("flow opens");
+    open(&mut segment_limit, key.clone(), 100, now).expect("flow opens");
     segment_limit
         .push(segment(key.clone(), 104, b"a", false, false, false), now)
         .expect("first pending segment fits");
@@ -642,7 +362,7 @@ fn tcp_segment_window_and_aggregate_limits_fail_without_mutating_delivery() {
         max_bytes_per_flow: 4,
         ..Limits::default()
     });
-    window.open_flow(key.clone(), 100, now).expect("flow opens");
+    open(&mut window, key.clone(), 100, now).expect("flow opens");
     assert_eq!(
         window.push(segment(key.clone(), 105, b"x", false, false, false), now),
         Err(TcpError::FlowByteLimit { limit: 4 })
@@ -673,9 +393,7 @@ fn tcp_fin_and_reset_close_generations_and_final_sequence_is_immutable() {
     let now = Instant::now();
     let key = flow(10_006);
     let mut complete = TcpReassembler::new(Limits::default());
-    complete
-        .open_flow(key.clone(), 100, now)
-        .expect("flow opens");
+    open(&mut complete, key.clone(), 100, now).expect("flow opens");
     let events = complete
         .push(segment(key.clone(), 100, b"abc", false, true, false), now)
         .expect("contiguous FIN closes");
@@ -702,9 +420,7 @@ fn tcp_fin_and_reset_close_generations_and_final_sequence_is_immutable() {
     assert_eq!(complete.flow_count(), 0);
 
     let mut bounded = TcpReassembler::new(Limits::default());
-    bounded
-        .open_flow(key.clone(), 100, now)
-        .expect("flow opens");
+    open(&mut bounded, key.clone(), 100, now).expect("flow opens");
     bounded
         .push(segment(key.clone(), 105, b"", false, true, false), now)
         .expect("out-of-order FIN pins final offset");
@@ -747,9 +463,13 @@ fn tcp_syn_payload_wraps_sequence_and_expiry_emits_gap_then_eviction() {
     assert_eq!(reassembler.flow_next_sequence(&wrapped), Some(2));
 
     let pending = flow(10_008);
-    reassembler
-        .open_flow(pending.clone(), 100, now + Duration::from_secs(1))
-        .expect("second flow opens");
+    open(
+        &mut reassembler,
+        pending.clone(),
+        100,
+        now + Duration::from_secs(1),
+    )
+    .expect("second flow opens");
     reassembler
         .push(
             segment(pending.clone(), 105, b"late", false, false, false),
@@ -788,12 +508,8 @@ fn tcp_flush_is_directionally_sorted_and_reverse_is_an_involution() {
     let lower = flow(10_000);
     assert_eq!(higher.reverse().reverse(), higher);
     let mut reassembler = TcpReassembler::new(Limits::default());
-    reassembler
-        .open_flow(higher.clone(), 1, now)
-        .expect("higher flow opens");
-    reassembler
-        .open_flow(lower.clone(), 1, now)
-        .expect("lower flow opens");
+    open(&mut reassembler, higher.clone(), 1, now).expect("higher flow opens");
+    open(&mut reassembler, lower.clone(), 1, now).expect("lower flow opens");
     let events = reassembler.flush();
     assert_eq!(events.len(), 2);
     assert!(matches!(&events[0], TcpEvent::Evicted { flow, .. } if flow == &lower));

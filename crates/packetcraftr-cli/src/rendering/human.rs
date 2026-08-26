@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::fmt::Write as _;
+use std::fmt::{self, Write as _};
 use std::io::{self, Write};
 
 use packetcraftr::{core, output};
@@ -11,25 +11,51 @@ use super::style::{
     error_style, style_document, style_human_line, terminal_document, terminal_safe,
 };
 
-pub(crate) fn render_diagnostics_text(
-    diagnostics: &[core::diagnostic::Diagnostic],
-) -> Result<(), CliError> {
-    for diagnostic in diagnostics {
-        write_stdout_line(format_args!(
-            "{:?} {}: {}",
-            diagnostic.severity, diagnostic.code, diagnostic.message
-        ))?;
-    }
-    Ok(())
+/// The diagnostic fields the human renderer prints.
+///
+/// The core and envelope diagnostics carry the same three fields under
+/// different types, and both render identically.
+pub(crate) trait DiagnosticLine {
+    fn severity(&self) -> &dyn fmt::Debug;
+    fn code(&self) -> &str;
+    fn message(&self) -> &str;
 }
 
-pub(crate) fn render_output_diagnostics_text(
-    diagnostics: &[output::envelope::Diagnostic],
-) -> Result<(), CliError> {
+impl DiagnosticLine for core::diagnostic::Diagnostic {
+    fn severity(&self) -> &dyn fmt::Debug {
+        &self.severity
+    }
+
+    fn code(&self) -> &str {
+        &self.code
+    }
+
+    fn message(&self) -> &str {
+        &self.message
+    }
+}
+
+impl DiagnosticLine for output::envelope::Diagnostic {
+    fn severity(&self) -> &dyn fmt::Debug {
+        &self.severity
+    }
+
+    fn code(&self) -> &str {
+        &self.code
+    }
+
+    fn message(&self) -> &str {
+        &self.message
+    }
+}
+
+pub(crate) fn render_diagnostics_text(diagnostics: &[impl DiagnosticLine]) -> Result<(), CliError> {
     for diagnostic in diagnostics {
         write_stdout_line(format_args!(
             "{:?} {}: {}",
-            diagnostic.severity, diagnostic.code, diagnostic.message
+            diagnostic.severity(),
+            diagnostic.code(),
+            diagnostic.message()
         ))?;
     }
     Ok(())

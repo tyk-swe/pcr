@@ -9,16 +9,20 @@ pub(super) fn case_seed(operation_seed: u64, case_index: u64) -> u64 {
     random.next_u64()
 }
 
-pub(super) struct SplitMix64 {
+/// SplitMix64: the one deterministic generator this crate uses.
+///
+/// The fuzz engine seeds cases with it, and the TLS parser's mutation test
+/// reuses it rather than hand-rolling another.
+pub(crate) struct SplitMix64 {
     state: u64,
 }
 
 impl SplitMix64 {
-    pub(super) fn new(seed: u64) -> Self {
+    pub(crate) fn new(seed: u64) -> Self {
         Self { state: seed }
     }
 
-    pub(super) fn next_u64(&mut self) -> u64 {
+    pub(crate) fn next_u64(&mut self) -> u64 {
         self.state = self.state.wrapping_add(SPLITMIX_INCREMENT);
         let mut value = self.state;
         value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);

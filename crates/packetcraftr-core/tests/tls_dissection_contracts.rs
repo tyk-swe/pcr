@@ -15,11 +15,21 @@
 #[path = "common/tls_vectors.rs"]
 mod tls_vectors;
 
+#[expect(
+    dead_code,
+    reason = "the shared frame builders cover every TLS test; this file needs \
+              only a hello and an application-data record"
+)]
+#[path = "common/tls_frames.rs"]
+mod tls_frames;
+
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use bytes::Bytes;
 use packetcraftr_core::field::FieldValue;
 use packetcraftr_core::filter::{Context as FilterContext, Filter};
+use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::Raw;
 use packetcraftr_core::protocol::application::Tls;
 use packetcraftr_core::protocol::builtin;
@@ -29,6 +39,7 @@ use packetcraftr_core::protocol::transport::Tcp;
 use packetcraftr_core::registry::Registry;
 use packetcraftr_core::{Packet, build, decode};
 
+use tls_frames::{ClientHelloSpec, application_data, client_hello, handshake_record};
 use tls_vectors::{CLIENT_HELLO_VECTORS, SERVER_HELLO_VECTORS, decode_hex};
 
 /// The ports the default registry binds to TLS.
@@ -50,46 +61,16 @@ fn server_hello_record() -> Vec<u8> {
     decode_hex(SERVER_HELLO_VECTORS[0].record_hex)
 }
 
-fn vector16(body: &[u8]) -> Vec<u8> {
-    let mut bytes = u16::try_from(body.len())
-        .expect("vector fits in u16")
-        .to_be_bytes()
-        .to_vec();
-    bytes.extend_from_slice(body);
-    bytes
-}
-
-/// A ClientHello record whose only extension is `server_name`, so a test can
-/// choose exactly which name bytes the dissector sees.
-fn client_hello_record_with_server_name(name: &[u8]) -> Vec<u8> {
-    let mut entry = vec![0_u8];
-    entry.extend_from_slice(&vector16(name));
-    let mut extensions = 0x0000_u16.to_be_bytes().to_vec();
-    extensions.extend_from_slice(&vector16(&vector16(&entry)));
-
-    let mut body = 0x0303_u16.to_be_bytes().to_vec();
-    body.extend_from_slice(&[0x11; 32]);
-    body.push(0);
-    body.extend_from_slice(&vector16(&0x1301_u16.to_be_bytes()));
-    body.extend_from_slice(&[1, 0]);
-    body.extend_from_slice(&vector16(&extensions));
-
-    let length = u32::try_from(body.len()).expect("hello body fits in u24");
-    let mut message = vec![1_u8];
-    message.extend_from_slice(&length.to_be_bytes()[1..]);
-    message.extend_from_slice(&body);
-
-    let mut record = vec![22_u8, 0x03, 0x03];
-    record.extend_from_slice(&vector16(&message));
-    record
-}
-
-/// One application-data record with `body` as its payload.
-fn application_record(body: &[u8]) -> Vec<u8> {
-    let mut bytes = vec![23, 0x03, 0x03];
-    bytes.extend_from_slice(&u16::try_from(body.len()).expect("body fits").to_be_bytes());
-    bytes.extend_from_slice(body);
-    bytes
+/// A ClientHello record whose `server_name` carries exactly `name`, so a test
+/// can choose which name bytes the dissector sees.
+fn client_hello_record_with_server_name(name: &str) -> Vec<u8> {
+    handshake_record(&client_hello(&ClientHelloSpec {
+        sni: Some(name.to_owned()),
+        alpn: Vec::new(),
+        supported_groups: Vec::new(),
+        key_share_groups: Vec::new(),
+        ..ClientHelloSpec::default()
+    }))
 }
 
 /// Builds `eth/ipv4/tcp/raw(payload)`, dissects it, and asserts the exact
@@ -115,12 +96,14 @@ fn dissect(source_port: u16, destination_port: u16, payload: &[u8]) -> decode::D
     let built = builder
         .build(packet, build::Context::default(), build::Options::default())
         .expect("segment builds");
+    let frame = Frame::new(
+        SystemTime::UNIX_EPOCH,
+        LinkType::ETHERNET,
+        built.bytes.clone(),
+    )
+    .expect("segment frame");
     let decoded = decode::Dissector::new(Arc::clone(&registry))
-        .decode_with_root(
-            built.bytes.clone(),
-            "ethernet".into(),
-            decode::Options::default(),
-        )
+        .decode(frame, decode::Options::default())
         .expect("segment dissects");
     let rebuilt = builder
         .build(
@@ -282,7 +265,7 @@ fn a_server_name_that_is_not_a_host_name_is_reported_and_left_unpublished() {
     let decoded = dissect(
         CLIENT_PORT,
         443,
-        &client_hello_record_with_server_name(b"192.0.2.10"),
+        &client_hello_record_with_server_name("192.0.2.10"),
     );
     assert_eq!(protocols(&decoded), vec!["ethernet", "ipv4", "tcp", "tls"]);
     assert_eq!(diagnostic_codes(&decoded), vec!["tls.sni_invalid"]);
@@ -371,7 +354,7 @@ fn a_plausible_header_with_no_complete_record_stays_raw() {
 #[test]
 fn a_segment_ending_mid_record_is_incomplete_with_a_raw_tail() {
     let mut segment = client_hello_record();
-    let tail = application_record(b"second record body");
+    let tail = application_data(18);
     segment.extend_from_slice(&tail[..7]);
     let decoded = dissect(CLIENT_PORT, 443, &segment);
     assert_eq!(
@@ -401,7 +384,7 @@ fn a_segment_ending_mid_record_is_incomplete_with_a_raw_tail() {
 
 #[test]
 fn an_unparsable_tail_after_a_complete_record_is_reported_as_information() {
-    let mut segment = application_record(b"first record body");
+    let mut segment = application_data(17);
     segment.extend_from_slice(b"\x00\x00\x00\x00\x00\x00\x00\x00");
     let decoded = dissect(CLIENT_PORT, 443, &segment);
     assert_eq!(
@@ -423,7 +406,7 @@ fn an_unparsable_tail_after_a_complete_record_is_reported_as_information() {
 fn records_past_the_cap_become_a_raw_tail() {
     let mut segment = Vec::new();
     for _ in 0..65 {
-        segment.extend_from_slice(&application_record(b"x"));
+        segment.extend_from_slice(&application_data(1));
     }
     let decoded = dissect(CLIENT_PORT, 443, &segment);
     assert_eq!(
@@ -450,7 +433,7 @@ fn tls_fields_resolve_through_the_display_filter_language() {
     assert!(!matches(&hello, "tls.cipher_suite == 4865"));
 
     let mut truncated = client_hello_record();
-    truncated.extend_from_slice(&application_record(b"tail")[..4]);
+    truncated.extend_from_slice(&application_data(4)[..4]);
     let partial = dissect(CLIENT_PORT, 443, &truncated);
     assert!(matches(&partial, "tls.incomplete"));
 
@@ -464,7 +447,7 @@ fn round_trips_hold_for_tls_and_non_tls_payloads_on_a_bound_port() {
     // `dissect` asserts build(dissect(x)) == x for every case; these are the
     // shapes the round trip must cover on a port that now dissects as TLS.
     let mut two_records = client_hello_record();
-    two_records.extend_from_slice(&application_record(b"encrypted"));
+    two_records.extend_from_slice(&application_data(9));
     for payload in [
         client_hello_record(),
         server_hello_record(),
@@ -480,7 +463,7 @@ fn round_trips_hold_for_tls_and_non_tls_payloads_on_a_bound_port() {
 #[test]
 fn two_complete_records_in_one_segment_are_one_layer() {
     let mut segment = client_hello_record();
-    segment.extend_from_slice(&application_record(b"encrypted"));
+    segment.extend_from_slice(&application_data(9));
     let decoded = dissect(CLIENT_PORT, 443, &segment);
     assert_eq!(protocols(&decoded), vec!["ethernet", "ipv4", "tcp", "tls"]);
     assert_eq!(

@@ -5,9 +5,10 @@
 
 use std::time::Duration;
 
-use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::budget::{Deadline, DeadlineExceeded};
 use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::frame::Frame;
+use packetcraftr_core::progress::{EmitError, Sink};
 use packetcraftr_core::{decode::DecodedPacket, diagnostic::Diagnostic};
 
 use crate::clock::{Clock, check_deadline, rate_delay};
@@ -61,6 +62,30 @@ impl Execution {
             stats,
         }
     }
+}
+
+/// Wraps a caller's progressive callback in a bounded [`Sink`] and adapts both
+/// of its failures into the workflow's own error type, so every `run_with_events`
+/// entry point differs only in those two constructors.
+pub(crate) fn sink_observer<T, E>(
+    emit: impl FnMut(T) -> Result<(), BoundaryError> + Send + 'static,
+    on_deadline: impl Fn(DeadlineExceeded) -> E,
+    on_output: impl Fn(BoundaryError) -> E,
+) -> Result<impl FnMut(T, &Deadline) -> Result<(), E>, E>
+where
+    T: Send + 'static,
+{
+    let sink = match Sink::new(emit) {
+        Ok(sink) => sink,
+        Err(source) => return Err(on_output(source)),
+    };
+    Ok(
+        move |event, deadline: &Deadline| match sink.emit(event, deadline) {
+            Ok(()) => Ok(()),
+            Err(EmitError::Deadline(error)) => Err(on_deadline(error)),
+            Err(EmitError::Output(source)) => Err(on_output(source)),
+        },
+    )
 }
 
 pub(crate) trait ProbeBatch {

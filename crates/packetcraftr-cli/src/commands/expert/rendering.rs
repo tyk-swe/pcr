@@ -7,7 +7,7 @@ use packetcraftr::{analysis, output};
 
 use crate::commands::format::ToolFormat;
 use crate::errors::CliError;
-use crate::rendering::{NdjsonStream, emit_aggregate, write_stdout_line};
+use crate::rendering::{StreamEncoder, emit_aggregate, write_stdout_line};
 
 #[derive(Debug, Default)]
 pub(super) struct State {
@@ -39,7 +39,7 @@ pub(super) fn render_record(
     format: ToolFormat,
     finding: output::expert::Finding,
     state: &mut State,
-    stream: &mut NdjsonStream,
+    stream: &mut StreamEncoder,
 ) -> Result<(), CliError> {
     match format {
         ToolFormat::Text => match (finding.transport, finding.stream) {
@@ -60,7 +60,7 @@ pub(super) fn render_record(
             state.retained.push(finding);
             Ok(())
         }
-        ToolFormat::Ndjson => stream.emit_data(finding, Vec::new()),
+        ToolFormat::Ndjson => Ok(stream.emit_data(finding, Vec::new())?),
     }
 }
 
@@ -87,9 +87,9 @@ pub(super) fn render_aggregate(summary: &analysis::Summary, state: State) -> Res
 pub(super) fn render_stream(
     summary: &analysis::Summary,
     state: State,
-    stream: &mut NdjsonStream,
+    stream: &mut StreamEncoder,
 ) -> Result<(), CliError> {
-    stream.complete(result(summary, state, false), Vec::new())
+    Ok(stream.complete(result(summary, state, false), Vec::new())?)
 }
 
 fn result(

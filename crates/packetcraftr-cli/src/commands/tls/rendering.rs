@@ -5,7 +5,7 @@ use packetcraftr::{analysis, core, output};
 
 use crate::commands::format::ToolFormat;
 use crate::errors::CliError;
-use crate::rendering::{NdjsonStream, comma_separated, emit_aggregate, write_stdout_line};
+use crate::rendering::{StreamEncoder, comma_separated, emit_aggregate, write_stdout_line};
 
 use analysis::tls::{ALERT_LEVEL_FATAL, ALERT_LEVEL_WARNING};
 use output::tls::{Client, Server, Session, Summary};
@@ -60,7 +60,7 @@ pub(super) fn render_session(
     format: ToolFormat,
     session: analysis::tls::Session,
     state: &mut State,
-    stream: &mut NdjsonStream,
+    stream: &mut StreamEncoder,
 ) -> Result<(), CliError> {
     let session = Session::from(session);
     state.select();
@@ -70,7 +70,9 @@ pub(super) fn render_session(
             state.retain(session);
             Ok(())
         }
-        ToolFormat::Ndjson => stream.emit_data(output::tls::Event::session(session), Vec::new()),
+        ToolFormat::Ndjson => {
+            Ok(stream.emit_data(output::tls::Event::session(session), Vec::new())?)
+        }
     }
 }
 
@@ -99,8 +101,8 @@ pub(super) fn render_aggregate(state: State, summary: Summary) -> Result<(), Cli
     )
 }
 
-pub(super) fn render_stream(summary: Summary, stream: &mut NdjsonStream) -> Result<(), CliError> {
-    stream.complete(output::tls::Event::complete(summary), Vec::new())
+pub(super) fn render_stream(summary: Summary, stream: &mut StreamEncoder) -> Result<(), CliError> {
+    Ok(stream.complete(output::tls::Event::complete(summary), Vec::new())?)
 }
 
 /// The single line for selectors that kept none of the sessions that were

@@ -249,7 +249,12 @@ fn pcap_writer_options_and_metadata_rejections_are_atomic() {
             ..
         })
     ));
-    assert_eq!(writer.frames_written(), 0);
+    writer
+        .set_stream_limits(Limits {
+            max_frames: 0,
+            max_bytes: 0,
+        })
+        .expect("no rejected frame reached the output");
 }
 
 fn assert_invalid_pcap_writer_options() {
@@ -314,8 +319,6 @@ fn writer_stream_limits_account_only_committed_output() {
     writer.set_stream_limits(limits).expect("fresh limits fit");
     assert_eq!(writer.stream_limits(), limits);
     writer.write_frame(&first).expect("first frame fits");
-    assert_eq!(writer.frames_written(), 1);
-    assert_eq!(writer.captured_bytes_written(), 3);
     assert!(matches!(
         writer.write_frame(&second),
         Err(Error::StreamByteLimitExceeded {
@@ -323,7 +326,6 @@ fn writer_stream_limits_account_only_committed_output() {
             limit: 4
         })
     ));
-    assert_eq!(writer.frames_written(), 1);
     assert!(matches!(
         writer.set_stream_limits(Limits {
             max_frames: 0,
@@ -406,8 +408,22 @@ fn pcapng_round_trip_preserves_interfaces_directions_and_signed_time() {
         writer
             .write_frame(&outbound)
             .expect("missing link type gets an automatic interface");
-        assert_eq!(writer.frames_written(), 2);
-        assert_eq!(writer.captured_bytes_written(), 7);
+        assert!(matches!(
+            writer.set_stream_limits(Limits {
+                max_frames: 2,
+                max_bytes: 6,
+            }),
+            Err(Error::StreamByteLimitExceeded {
+                actual: 7,
+                limit: 6
+            })
+        ));
+        writer
+            .set_stream_limits(Limits {
+                max_frames: 2,
+                max_bytes: 7,
+            })
+            .expect("both frames and all seven captured bytes are committed");
         writer.flush().expect("memory flush succeeds");
 
         let bytes = writer.into_inner();

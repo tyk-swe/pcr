@@ -4,9 +4,7 @@
 // for library paths.
 #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
-use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, UNIX_EPOCH};
 
 use packetcraftr::core::error::{Classified, Kind};
@@ -31,6 +29,10 @@ use packetcraftr::output::{
     protocols::{Binding, Detail, Field, FieldKind, Summary},
 };
 use serde_json::json;
+
+mod support;
+
+use support::SharedWriter;
 
 #[test]
 fn command_format_matrix_display_and_errors_cover_the_full_vocabulary() {
@@ -220,30 +222,6 @@ fn domain_failures_preserve_typed_error_context() {
         message: "failed".to_owned(),
     });
     assert_eq!(fuzz.context.case_index, Some(11));
-}
-
-#[derive(Clone, Default)]
-struct SharedWriter(Arc<Mutex<Vec<u8>>>);
-
-impl SharedWriter {
-    fn records(&self) -> Vec<serde_json::Value> {
-        std::str::from_utf8(&self.0.lock().unwrap())
-            .unwrap()
-            .lines()
-            .map(|line| serde_json::from_str(line).unwrap())
-            .collect()
-    }
-}
-
-impl Write for SharedWriter {
-    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        self.0.lock().unwrap().extend_from_slice(bytes);
-        Ok(bytes.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
 }
 
 #[test]

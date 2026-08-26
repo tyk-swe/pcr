@@ -3,11 +3,17 @@
 
 use crate::BoundaryError;
 use crate::ExchangeExecutor;
+use crate::probe::client_executor::ExecutorFault;
 use packetcraftr_core::field::FieldValue;
 use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Sender as PacketIo};
 
 use super::classification::classify_response;
 use super::model::{Batch, Execution, Executor, Transport};
+
+const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
+    "cli.scan_executor",
+    "use homogeneous bounded scan batches and retain at least one response per probe",
+);
 
 /// Executes homogeneous scan batches through the client's capture-ready
 /// exchange lifecycle.
@@ -21,23 +27,21 @@ where
         let first = batch
             .probes
             .first()
-            .ok_or_else(|| invalid_client_execution("scan executor received an empty batch"))?;
+            .ok_or_else(|| EXECUTOR_FAULT.invalid("scan executor received an empty batch"))?;
         if batch.probes.iter().any(|probe| {
             probe.address != first.address
                 || probe.transport != first.transport
                 || probe.attempt != first.attempt
         }) {
-            return Err(invalid_client_execution(
-                "scan executor batches must share address, transport, and attempt",
-            ));
+            return Err(EXECUTOR_FAULT
+                .invalid("scan executor batches must share address, transport, and attempt"));
         }
         if first.transport == Transport::Icmp && batch.probes.len() != 1 {
-            return Err(invalid_client_execution(
-                "ICMP batches must contain exactly one uniquely identified echo probe",
-            ));
+            return Err(EXECUTOR_FAULT
+                .invalid("ICMP batches must contain exactly one uniquely identified echo probe"));
         }
         if self.options.max_responses < batch.probes.len() {
-            return Err(invalid_client_execution(format!(
+            return Err(EXECUTOR_FAULT.invalid(format!(
                 "max_responses={} is smaller than scan batch size {}",
                 self.options.max_responses,
                 batch.probes.len()
@@ -54,9 +58,8 @@ where
                         .port
                         .map(|port| FieldValue::Unsigned(u64::from(port)))
                         .ok_or_else(|| {
-                            invalid_client_execution(
-                                "portless probes cannot form a multi-packet batch",
-                            )
+                            EXECUTOR_FAULT
+                                .invalid("portless probes cannot form a multi-packet batch")
                         })
                 })
                 .collect::<Result<Vec<_>, _>>()?;
@@ -76,12 +79,4 @@ where
         )?;
         Ok(Execution::from_exchange(batch.permit, exchange))
     }
-}
-
-fn invalid_client_execution(message: impl Into<String>) -> BoundaryError {
-    BoundaryError::execution_validation(
-        message,
-        "cli.scan_executor",
-        "use homogeneous bounded scan batches and retain at least one response per probe",
-    )
 }

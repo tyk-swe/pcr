@@ -1,19 +1,16 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Bounded IPv4/IPv6 fragment and TCP stream reassembly algorithms.
+//! Bounded TCP stream reassembly.
 //!
-//! These are standalone algorithms, not a capture or decode pipeline. Map
-//! decoded layers into [`fragment::Fragment`] or [`tcp::Segment`], then push
-//! each value into the corresponding reassembler.
+//! This is a standalone algorithm, not a capture or decode pipeline. Map
+//! decoded layers into [`tcp::Segment`], then push each value into the
+//! reassembler.
 //!
-//! For TCP, [`tcp::ScopedFlowKey`] qualifies the endpoint tuple with an exact
-//! capture scope; [`tcp::Segment`] adds sequence state, exact payload bytes,
-//! and control flags. [`fragment::ScopedDatagramKey`] does the same for an IP
-//! fragment identity. Convert IPv4's eight-byte offset units to bytes. IPv6
-//! supplies the equivalent values from its fragment extension header.
+//! [`tcp::ScopedFlowKey`] qualifies the endpoint tuple with an exact capture
+//! scope; [`tcp::Segment`] adds sequence state, exact payload bytes, and
+//! control flags.
 
-pub mod fragment;
 pub mod tcp;
 
 mod expiry;

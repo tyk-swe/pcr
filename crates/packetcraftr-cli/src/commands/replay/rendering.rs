@@ -12,7 +12,7 @@ use packetcraftr::{
 
 use crate::errors::CliError;
 use crate::rendering::{
-    CaptureWriter, NdjsonStream, capture_file_format, emit_aggregate_with_stats, spaced_hex,
+    SourceCaptureWriter, StreamEncoder, capture_file_format, emit_aggregate_with_stats, spaced_hex,
     write_stdout_line,
 };
 
@@ -99,7 +99,7 @@ pub(super) fn render_stream<R, A, T, C>(
     authorizer: &mut A,
     transmitter: &mut T,
     clock: &mut C,
-    stream: &mut NdjsonStream,
+    stream: &mut StreamEncoder,
 ) -> Result<(), CliError>
 where
     R: Read,
@@ -125,7 +125,7 @@ where
         options.link_mode,
         Vec::new(),
     );
-    stream.complete_with_stats(result, Vec::new(), stats)
+    Ok(stream.complete_with_stats(result, Vec::new(), stats)?)
 }
 
 pub(super) fn render_capture(
@@ -188,13 +188,13 @@ fn render_record(
 }
 
 fn render_stream_record(
-    stream: &mut NdjsonStream,
+    stream: &mut StreamEncoder,
     evidence: packetcraftr::replay::FrameEvidence,
 ) -> Result<(), packetcraftr::replay::Error> {
     let source_index = evidence.source_index;
     let result = output_frame(evidence)?;
     stream.emit_data(result, Vec::new()).map_err(|error| {
-        packetcraftr::replay::Error::output_at_source_index(source_index, error.message)
+        packetcraftr::replay::Error::output_at_source_index(source_index, error.to_string())
     })
 }
 
@@ -204,7 +204,7 @@ fn capture_writer<W: Write>(
     format: Format,
     limits: packetcraftr::replay::Limits,
     max_interfaces: usize,
-) -> Result<CaptureWriter<W>, CliError> {
+) -> Result<SourceCaptureWriter<W>, CliError> {
     let writer = match format {
         Format::Pcap => classic_writer(reader, destination, format, limits)?,
         Format::PcapNg => Writer::pcapng_with_options(
@@ -217,7 +217,7 @@ fn capture_writer<W: Write>(
         )
         .map_err(CliError::classified)?,
     };
-    let mut writer = CaptureWriter::for_source_interfaces(writer);
+    let mut writer = SourceCaptureWriter::new(writer);
     writer
         .set_stream_limits(Limits {
             max_frames: limits.max_frames,
@@ -262,7 +262,7 @@ fn classic_writer<W: Write>(
 }
 
 fn render_capture_record<W: Write>(
-    writer: &mut CaptureWriter<W>,
+    writer: &mut SourceCaptureWriter<W>,
     evidence: packetcraftr::replay::FrameEvidence,
 ) -> Result<(), packetcraftr::replay::Error> {
     let source_index = evidence.source_index;
@@ -420,7 +420,7 @@ mod tests {
         reader: &mut Reader<Cursor<Vec<u8>>>,
         selector: Selector<'_>,
         authorizer: &mut FakeAuthorizer,
-        stream: &mut NdjsonStream,
+        stream: &mut StreamEncoder,
     ) -> Result<(), CliError> {
         render_stream(
             reader,
@@ -496,7 +496,7 @@ mod tests {
 
     #[test]
     fn replay_output_failure_retains_source_frame_context_and_remediation() {
-        let mut stream = NdjsonStream::new(Some(output::contract::Command::Replay), FailingWriter);
+        let mut stream = StreamEncoder::new(Some(output::contract::Command::Replay), FailingWriter);
         let mut selector = OnlyFrame(43);
         let error = render_fixture(
             &mut reader(43),

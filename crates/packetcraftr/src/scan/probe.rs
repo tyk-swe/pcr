@@ -13,22 +13,18 @@ use packetcraftr_core::protocol::{
 };
 use packetcraftr_core::{Packet, semantics::BuiltinProtocol};
 
-use crate::probe::{nonzero_ipv4_identification, packet_shape_matches};
+use crate::probe::{
+    EPHEMERAL_SOURCE_PORT_BASE, ephemeral_source_port, nonzero_ipv4_identification,
+    packet_shape_matches,
+};
 
 use super::model::{Probe, Transport};
 
-const SCAN_UDP_SOURCE_PORT_BASE: u16 = 49_152;
-
-#[expect(
-    clippy::arithmetic_side_effects,
-    reason = "`width` is the constant 16_384: the ephemeral range is fixed and non-empty, so the \
-              remainder is below `width` and the base plus that remainder cannot exceed u16::MAX"
-)]
 fn scan_udp_source_port(attempt: u32) -> u16 {
-    let width = u32::from(u16::MAX) - u32::from(SCAN_UDP_SOURCE_PORT_BASE) + 1;
-    let offset = attempt.saturating_sub(1) % width;
-    u16::try_from(u32::from(SCAN_UDP_SOURCE_PORT_BASE) + offset)
-        .expect("ephemeral source-port arithmetic must remain within u16")
+    ephemeral_source_port(
+        EPHEMERAL_SOURCE_PORT_BASE,
+        u64::from(attempt.saturating_sub(1)),
+    )
 }
 
 #[expect(

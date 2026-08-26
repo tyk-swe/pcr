@@ -21,7 +21,7 @@ use super::format::ToolFormat;
 use super::registry;
 use crate::command_options::{HostnamePolicyArgs, RouteSelectionArgs};
 use crate::errors::CliError;
-use crate::rendering::{NdjsonStream, emit_aggregate_with_stats};
+use crate::rendering::{StreamEncoder, emit_aggregate_with_stats};
 use crate::system::{client, exchange, validate_selector};
 
 /// One probing workflow: the library entry points and the output types they
@@ -54,7 +54,7 @@ pub(super) trait TargetWorkflow {
         registry: &core::registry::Registry,
         executor: &mut Executor,
         clock: &mut impl packetcraftr::clock::Clock,
-        stream: &NdjsonStream,
+        stream: &StreamEncoder,
     ) -> Result<(), CliError>;
 
     /// The human report for one completed run.
@@ -73,15 +73,15 @@ pub(super) trait TargetWorkflow {
     );
 
     /// Writes one event as an NDJSON record.
-    fn emit_event(event: Self::Event, stream: &NdjsonStream) -> Result<(), CliError> {
+    fn emit_event(event: Self::Event, stream: &StreamEncoder) -> Result<(), CliError> {
         let (record, diagnostics) = Self::convert_event(event)?;
-        stream.emit_data(record, diagnostics)
+        Ok(stream.emit_data(record, diagnostics)?)
     }
 
     /// Writes the terminal completion record.
-    fn emit_complete(summary: Self::Summary, stream: &NdjsonStream) -> Result<(), CliError> {
+    fn emit_complete(summary: Self::Summary, stream: &StreamEncoder) -> Result<(), CliError> {
         let (record, diagnostics, stats) = Self::convert_complete(summary);
-        stream.complete_with_stats(record, diagnostics, stats)
+        Ok(stream.complete_with_stats(record, diagnostics, stats)?)
     }
 }
 
@@ -112,7 +112,7 @@ pub(super) fn run<W: TargetWorkflow>(
     request: &W::Request,
     probe: &mut Probe,
     format: ToolFormat,
-    stream: &mut NdjsonStream,
+    stream: &mut StreamEncoder,
 ) -> Result<(), CliError> {
     let resolver = packetcraftr::target::SystemResolver;
     let mut authorizer = packetcraftr::target::PolicyAuthorizer::new(&probe.policy, &resolver);

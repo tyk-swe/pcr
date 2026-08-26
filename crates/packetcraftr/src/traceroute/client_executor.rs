@@ -3,11 +3,17 @@
 
 use crate::BoundaryError;
 use crate::ExchangeExecutor;
+use crate::probe::client_executor::ExecutorFault;
 
 use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Sender as PacketIo};
 
 use super::classification::classify_response;
 use super::model::{Batch, Execution, Executor, Strategy};
+
+const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
+    "cli.traceroute_executor",
+    "use homogeneous bounded hop batches and retain at least one response per probe",
+);
 
 /// Executes homogeneous traceroute hop batches through the client's
 /// capture-ready exchange lifecycle.
@@ -19,7 +25,7 @@ where
 {
     fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
         let first = batch.probes.first().ok_or_else(|| {
-            invalid_client_execution("traceroute executor received an empty hop batch")
+            EXECUTOR_FAULT.invalid("traceroute executor received an empty hop batch")
         })?;
         if batch
             .probes
@@ -30,9 +36,8 @@ where
                 _ => false,
             })
         {
-            return Err(invalid_client_execution(
-                "traceroute probe strategy and destination port are inconsistent",
-            ));
+            return Err(EXECUTOR_FAULT
+                .invalid("traceroute probe strategy and destination port are inconsistent"));
         }
         if batch.probes.iter().any(|probe| {
             probe.address != first.address
@@ -41,12 +46,12 @@ where
                 || (probe.strategy == Strategy::Tcp
                     && probe.destination_port != first.destination_port)
         }) {
-            return Err(invalid_client_execution(
+            return Err(EXECUTOR_FAULT.invalid(
                 "traceroute batches must share address, strategy, hop limit, and TCP destination port",
             ));
         }
         if self.options.max_responses < batch.probes.len() {
-            return Err(invalid_client_execution(format!(
+            return Err(EXECUTOR_FAULT.invalid(format!(
                 "max_responses={} is smaller than traceroute hop batch size {}",
                 self.options.max_responses,
                 batch.probes.len()
@@ -70,7 +75,7 @@ where
                         .nth(1)
                         .and_then(|layer| layer.field(varying_field))
                         .ok_or_else(|| {
-                            invalid_client_execution(format!(
+                            EXECUTOR_FAULT.invalid(format!(
                                 "{} probe has no {varying_field} correlation field",
                                 probe.strategy
                             ))
@@ -95,12 +100,4 @@ where
         let execution = Execution::from_exchange(batch.permit, exchange);
         Ok(execution)
     }
-}
-
-fn invalid_client_execution(message: impl Into<String>) -> BoundaryError {
-    BoundaryError::execution_validation(
-        message,
-        "cli.traceroute_executor",
-        "use homogeneous bounded hop batches and retain at least one response per probe",
-    )
 }

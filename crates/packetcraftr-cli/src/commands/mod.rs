@@ -16,7 +16,7 @@ use clap::Subcommand;
 use packetcraftr::{core, output};
 
 use crate::errors::CliError;
-use crate::rendering::NdjsonStream;
+use crate::rendering::StreamEncoder;
 
 mod build;
 mod capture;
@@ -134,7 +134,7 @@ impl Command {
     pub(super) fn run(
         self,
         format: output::contract::Format,
-        stream: &mut NdjsonStream,
+        stream: &mut StreamEncoder,
     ) -> Result<(), CliError> {
         self.kind()
             .require_format(format)

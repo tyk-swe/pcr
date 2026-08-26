@@ -11,7 +11,7 @@ use super::super::errors::CliError;
 use super::super::input::open_capture;
 use super::format::ToolFormat;
 use super::offline_analysis::{Prepared, prepare};
-use crate::rendering::NdjsonStream;
+use crate::rendering::StreamEncoder;
 
 fn matches_selector(
     finding: &analysis::expert::Finding,
@@ -30,7 +30,7 @@ fn matches_selector(
 pub(super) fn run(
     arguments: Args,
     format: output::contract::Format,
-    stream: &mut NdjsonStream,
+    stream: &mut StreamEncoder,
 ) -> Result<(), CliError> {
     let format = ToolFormat::narrow(output::contract::Command::Expert, format)?;
     let Prepared {

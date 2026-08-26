@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 
 use packetcraftr_netio::capture::{DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES};
 
+use crate::probe::evidence::check_limits;
+
 use super::{MAX_RATE, error::Error};
 
 /// Bounds exact response evidence retained by a live fuzz campaign.
@@ -28,26 +30,26 @@ impl Default for LiveLimits {
 
 impl LiveLimits {
     pub fn validate(self) -> Result<Self, Error> {
-        for (field, value, maximum) in [
-            (
-                "max_evidence_frames",
-                self.max_evidence_frames,
-                DEFAULT_CAPTURE_QUEUE_FRAMES,
-            ),
-            (
-                "max_evidence_bytes",
-                self.max_evidence_bytes,
-                DEFAULT_CAPTURE_QUEUE_BYTES,
-            ),
-        ] {
-            if value == 0 || value > maximum {
-                return Err(Error::InvalidLimit {
-                    field,
-                    value: u64::try_from(value).unwrap_or(u64::MAX),
-                    reason: format!("must be within 1..={maximum}"),
-                });
-            }
-        }
+        check_limits(
+            &[
+                (
+                    "max_evidence_frames",
+                    self.max_evidence_frames,
+                    DEFAULT_CAPTURE_QUEUE_FRAMES,
+                ),
+                (
+                    "max_evidence_bytes",
+                    self.max_evidence_bytes,
+                    DEFAULT_CAPTURE_QUEUE_BYTES,
+                ),
+            ],
+            &[],
+            |field, value, reason| Error::InvalidLimit {
+                field,
+                value,
+                reason,
+            },
+        )?;
         Ok(self)
     }
 }

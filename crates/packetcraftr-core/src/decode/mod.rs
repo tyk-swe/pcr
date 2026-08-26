@@ -5,18 +5,13 @@
 
 use std::sync::Arc;
 
-use bytes::Bytes;
-
 use crate::diagnostic::Diagnostic;
-use crate::frame::{Frame, LinkType};
+use crate::frame::Frame;
 
 use crate::registry::Registry;
 
 use fallback::raw_decoded_frame;
 use session::DecodeSession;
-
-/// Synthetic link type used when decoding bytes from an explicit root protocol.
-const SYNTHETIC_LINK_TYPE: LinkType = LinkType(u32::MAX);
 
 mod error;
 mod fallback;
@@ -61,39 +56,6 @@ impl Dissector {
                 ),
             ));
         };
-        self.decode_from_root(frame, root, options)
-    }
-
-    pub fn decode_with_root(
-        &self,
-        bytes: impl Into<Bytes>,
-        root: crate::layer::Id,
-        options: Options,
-    ) -> std::result::Result<DecodedPacket, Error> {
-        let bytes = bytes.into();
-        if bytes.len() > options.max_packet_size {
-            return Err(Error::PacketSizeLimit {
-                actual: bytes.len(),
-                limit: options.max_packet_size,
-            });
-        }
-        let frame = Frame::new(
-            std::time::SystemTime::UNIX_EPOCH,
-            SYNTHETIC_LINK_TYPE,
-            bytes,
-        )?;
-        if options.max_layers == 0 {
-            return Err(Error::LayerLimit { limit: 0 });
-        }
-        self.decode_from_root(frame, root, options)
-    }
-
-    fn decode_from_root(
-        &self,
-        frame: Frame,
-        root: crate::layer::Id,
-        options: Options,
-    ) -> std::result::Result<DecodedPacket, Error> {
         DecodeSession::new(&self.registry, frame, root, options).run()
     }
 }

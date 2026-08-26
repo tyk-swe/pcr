@@ -4,7 +4,6 @@
 // for library paths.
 #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
-use std::convert::Infallible;
 use std::io::Cursor;
 use std::net::{IpAddr, Ipv6Addr};
 use std::time::{Duration, UNIX_EPOCH};
@@ -18,13 +17,13 @@ use packetcraftr_netio::{
     transmit::Submission,
 };
 
-use super::engine::{run, run_with_selector};
+use super::engine::run_with_selector;
 use super::error::Error;
 use super::model::{Limits, Options, Selector, Timing, Transmission, Transmitter};
 use super::wire::{replay_link_mode, replay_network_envelope, validate_transmission_evidence};
 use crate::BoundaryError;
 use crate::authorization::{Authorizer, Operation};
-use crate::clock::Clock;
+use crate::test_fixtures::RecordingClock;
 
 #[derive(Default)]
 struct RecordingAuthorizer {
@@ -94,20 +93,6 @@ impl Transmitter for RecordingTransmitter {
                 frame.bytes().clone(),
             ),
         })
-    }
-}
-
-#[derive(Default)]
-struct RecordingClock {
-    delays: Vec<Duration>,
-}
-
-impl Clock for RecordingClock {
-    type Error = Infallible;
-
-    fn sleep(&mut self, delay: Duration) -> Result<(), Self::Error> {
-        self.delays.push(delay);
-        Ok(())
     }
 }
 
@@ -306,9 +291,10 @@ fn replay_authorization_denial_has_no_later_io_side_effects() {
     };
     let mut transmitter = RecordingTransmitter::default();
     let mut clock = RecordingClock::default();
-    let error = run(
+    let error = run_with_selector(
         &mut reader,
         &replay_options(Timing::Immediate),
+        None,
         &mut authorizer,
         &mut transmitter,
         &mut clock,

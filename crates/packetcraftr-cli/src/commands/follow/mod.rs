@@ -11,7 +11,7 @@ use super::super::errors::CliError;
 use super::super::input::open_capture;
 use super::format::FollowFormat;
 use super::offline_analysis::{Prepared, StreamSelector, parse_stream_selector, prepare};
-use crate::rendering::NdjsonStream;
+use crate::rendering::StreamEncoder;
 
 use analysis::expert::StreamTransport;
 use analysis::follow::{Chunk, Collector, Selector};
@@ -20,7 +20,7 @@ use rendering::State;
 pub(super) fn run(
     arguments: Args,
     format: output::contract::Format,
-    stream: &mut NdjsonStream,
+    stream: &mut StreamEncoder,
 ) -> Result<(), CliError> {
     let format = FollowFormat::narrow(output::contract::Command::Follow, format)?;
     let StreamSelector { transport, index } = parse_stream_selector(&arguments.stream)?;

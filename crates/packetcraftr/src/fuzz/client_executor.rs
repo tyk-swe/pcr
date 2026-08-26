@@ -5,9 +5,15 @@ use std::time::Duration;
 
 use crate::BoundaryError;
 use crate::ExchangeExecutor;
+use crate::probe::client_executor::ExecutorFault;
 use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Sender as PacketIo};
 
 use super::boundary::{Execution, ExecutionCase, Executor};
+
+const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
+    "internal.fuzz_executor",
+    "execute exactly one bounded fuzz case per capture-ready exchange",
+);
 
 /// Executes one generated fuzz case through the client's capture-ready
 /// exchange lifecycle.
@@ -42,7 +48,7 @@ where
             stats,
         } = exchange;
         if sent.len() != 1 {
-            return Err(invalid_client_execution(format!(
+            return Err(EXECUTOR_FAULT.internal(format!(
                 "expected one sent receipt, received {}",
                 sent.len()
             )));
@@ -65,12 +71,4 @@ where
             stats,
         })
     }
-}
-
-fn invalid_client_execution(message: impl Into<String>) -> BoundaryError {
-    BoundaryError::internal_execution(
-        message,
-        "internal.fuzz_executor",
-        "execute exactly one bounded fuzz case per capture-ready exchange",
-    )
 }

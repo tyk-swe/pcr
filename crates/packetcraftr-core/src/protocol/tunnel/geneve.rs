@@ -13,6 +13,8 @@ use crate::{
     registry::Discriminator,
 };
 
+use super::vxlan::VNI_MAX;
+
 use super::super::common::{
     ensure_encode_budget, expected_discriminator, invalid, make_layer, protocol, resolve_u16,
     strict_or_diagnostic, truncated, validate_auto_raw_discriminator,
@@ -24,7 +26,6 @@ const GENEVE_BASE_LEN: usize = 8;
 const GENEVE_MAX_OPTIONS_LEN: usize = 0x3f * 4;
 const OPTION_HEADER_LEN: usize = 4;
 const CRITICAL_OPTION_FLAG: u8 = 0x80;
-const VNI_MAX: u32 = 0x00ff_ffff;
 
 /// GENEVE encapsulation header (RFC 8926).
 ///
@@ -396,9 +397,6 @@ mod tests {
         let registry = crate::protocol::builtin::registry().expect("built-in registry");
         let context = LayerDecodeContext {
             registry: &registry,
-            layer_index: 0,
-            absolute_offset: 0,
-            verify_checksums: true,
             allow_trailing_padding: false,
             network: None,
             discriminator: None,

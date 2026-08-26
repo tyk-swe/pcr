@@ -4,7 +4,6 @@
 // for library paths.
 #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
-use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 use std::time::Duration;
@@ -17,13 +16,14 @@ use packetcraftr_core::protocol::{network::Ipv4, transport::Udp};
 use packetcraftr_core::{Packet, layer::Raw};
 use packetcraftr_netio::{capture::Statistics as CaptureStatistics, transmit::Submission};
 
-use crate::clock::Clock;
+use crate::test_fixtures::NoopClock;
 use crate::{BoundaryError, Stats as ExecutionStats};
 
 use super::execution::add_execution_stats;
+use crate::authorization::{Authorizer, Operation};
+
 use super::{
-    Authorizer, Execution, ExecutionCase, Executor, LiveLimits, LiveOptions, Operation, Stats, run,
-    run_with_events,
+    Execution, ExecutionCase, Executor, LiveLimits, LiveOptions, Stats, run, run_with_events,
 };
 
 #[test]
@@ -255,17 +255,6 @@ impl Executor for SubstitutingFuzzExecutor {
             undecoded: Vec::new(),
             diagnostics: Vec::new(),
         })
-    }
-}
-
-#[derive(Default)]
-struct NoopClock;
-
-impl Clock for NoopClock {
-    type Error = Infallible;
-
-    fn sleep(&mut self, _delay: Duration) -> Result<(), Self::Error> {
-        Ok(())
     }
 }
 

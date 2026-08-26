@@ -18,7 +18,7 @@ use super::super::common::{
     ensure_encode_budget, invalid, protocol, text_list, truncated, unsigned_list, wrong_layer,
 };
 
-const DNS_HEADER_LEN: usize = 12;
+pub(crate) const DNS_HEADER_LEN: usize = 12;
 const MAX_QUESTIONS: usize = 64;
 const MAX_NAME_POINTERS: usize = 32;
 const MAX_EXPANDED_NAME_LEN: usize = 255;

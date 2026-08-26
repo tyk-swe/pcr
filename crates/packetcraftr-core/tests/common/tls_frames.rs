@@ -42,15 +42,10 @@ const EXTENSION_PADDING: u16 = 0x0015;
 /// What a synthetic ClientHello offers.
 #[derive(Clone, Debug)]
 pub(crate) struct ClientHelloSpec {
-    pub(crate) legacy_version: u16,
     pub(crate) random: [u8; 32],
-    pub(crate) session_id: Vec<u8>,
-    pub(crate) cipher_suites: Vec<u16>,
     pub(crate) sni: Option<String>,
     pub(crate) alpn: Vec<String>,
-    pub(crate) supported_versions: Vec<u16>,
     pub(crate) supported_groups: Vec<u16>,
-    pub(crate) signature_algorithms: Vec<u16>,
     pub(crate) key_share_groups: Vec<u16>,
     pub(crate) encrypted_client_hello: bool,
     /// Bytes of padding extension, to make a hello span more segments.
@@ -60,20 +55,10 @@ pub(crate) struct ClientHelloSpec {
 impl Default for ClientHelloSpec {
     fn default() -> Self {
         Self {
-            legacy_version: TLS_1_2,
             random: [0x11; 32],
-            session_id: vec![0x22; 32],
-            cipher_suites: vec![
-                TLS_AES_128_GCM_SHA256,
-                0x1302,
-                0x1303,
-                TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-            ],
             sni: Some("api.example.test".to_owned()),
             alpn: vec!["h2".to_owned(), "http/1.1".to_owned()],
-            supported_versions: vec![TLS_1_3, TLS_1_2],
             supported_groups: vec![X25519, 0x0017],
-            signature_algorithms: vec![0x0403, 0x0804, 0x0401],
             key_share_groups: vec![X25519],
             encrypted_client_hello: false,
             padding: 0,
@@ -151,11 +136,21 @@ fn record(content_type: u8, body: &[u8]) -> Vec<u8> {
 }
 
 /// Builds a ClientHello handshake message.
+///
+/// The legacy version, session ID, offered ciphers, offered versions, and
+/// signature algorithms are the same in every hello a test builds, so they are
+/// fixed here rather than spelled out on the spec.
 pub(crate) fn client_hello(spec: &ClientHelloSpec) -> Vec<u8> {
-    let mut body = spec.legacy_version.to_be_bytes().to_vec();
+    let cipher_suites = [
+        TLS_AES_128_GCM_SHA256,
+        0x1302,
+        0x1303,
+        TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+    ];
+    let mut body = TLS_1_2.to_be_bytes().to_vec();
     body.extend_from_slice(&spec.random);
-    body.extend_from_slice(&vector8(&spec.session_id));
-    body.extend_from_slice(&vector16(&u16_list(&spec.cipher_suites)));
+    body.extend_from_slice(&vector8(&[0x22; 32]));
+    body.extend_from_slice(&vector16(&u16_list(&cipher_suites)));
     body.extend_from_slice(&vector8(&[0]));
 
     let mut extensions = Vec::new();
@@ -178,18 +173,14 @@ pub(crate) fn client_hello(spec: &ClientHelloSpec) -> Vec<u8> {
             &vector16(&u16_list(&spec.supported_groups)),
         ));
     }
-    if !spec.signature_algorithms.is_empty() {
-        extensions.extend_from_slice(&extension(
-            SIGNATURE_ALGORITHMS,
-            &vector16(&u16_list(&spec.signature_algorithms)),
-        ));
-    }
-    if !spec.supported_versions.is_empty() {
-        extensions.extend_from_slice(&extension(
-            SUPPORTED_VERSIONS,
-            &vector8(&u16_list(&spec.supported_versions)),
-        ));
-    }
+    extensions.extend_from_slice(&extension(
+        SIGNATURE_ALGORITHMS,
+        &vector16(&u16_list(&[0x0403, 0x0804, 0x0401])),
+    ));
+    extensions.extend_from_slice(&extension(
+        SUPPORTED_VERSIONS,
+        &vector8(&u16_list(&[TLS_1_3, TLS_1_2])),
+    ));
     if !spec.key_share_groups.is_empty() {
         let shares = spec
             .key_share_groups

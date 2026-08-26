@@ -4,14 +4,13 @@
 use std::net::IpAddr;
 use std::time::Instant;
 
-use packetcraftr_core::{Packet, semantics::BuiltinProtocol};
+use packetcraftr_core::Packet;
 use packetcraftr_netio::{
     Error as LiveIoError, route::plan as plan_route, transmit::Sender as PacketIo,
 };
 
 use crate::Client;
 use crate::Error;
-use crate::target::{Authorized, Error as TargetError, Family, Resolver, Target};
 
 pub(crate) fn ensure_preparation_deadline(deadline: Instant) -> Result<(), Error> {
     if deadline.checked_duration_since(Instant::now()).is_none() {
@@ -29,35 +28,6 @@ where
     N: packetcraftr_netio::neighbor::Resolver,
     I: PacketIo,
 {
-    /// planning. A denied hostname never reaches `resolver`; if any resolved
-    /// address is denied, no route-provider method is called.
-    pub fn plan_target<H: Resolver>(
-        &self,
-        packet: &Packet,
-        target: &Target,
-        resolver: &H,
-        options: &packetcraftr_netio::route::Options,
-    ) -> Result<(Authorized, packetcraftr_netio::route::Plan), Error> {
-        let resolved = self.policy.resolve_target(target, resolver)?;
-        let packet_ip_version = packet
-            .iter()
-            .find_map(|layer| match BuiltinProtocol::of(layer) {
-                Some(BuiltinProtocol::Ipv4) => Some(Family::Ipv4),
-                Some(BuiltinProtocol::Ipv6) => Some(Family::Ipv6),
-                _ => None,
-            });
-        let selected = match packet_ip_version {
-            Some(version) => resolved.address_for_family(version).ok_or(
-                TargetError::AddressFamilyUnavailable {
-                    family: version.label(),
-                },
-            )?,
-            None => resolved.selected_address(),
-        };
-        let plan = self.plan(packet, Some(selected), options)?;
-        Ok((resolved, plan))
-    }
-
     /// Passive dry planning: route/source/interface lookup only.
     pub fn plan(
         &self,

@@ -28,7 +28,7 @@
 
 # GitHub uses only the last matching CODEOWNERS pattern. Keep every owner for
 # this contract-and-catalog overlap on the same line.
-/crates/packetcraftr-core/src/protocol/support/manifest.rs @tyk-swe @rkdxodud-tyk
+/crates/packetcraftr-core/src/protocol/support.rs @tyk-swe @rkdxodud-tyk
 
 # Workspace-wide dependency, feature, lint, and profile policy.
 /Cargo.toml @tyk-swe

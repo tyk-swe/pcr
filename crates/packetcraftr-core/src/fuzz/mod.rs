@@ -29,7 +29,7 @@ const SPLITMIX_INCREMENT: u64 = 0x9e37_79b9_7f4a_7c15;
 const CASE_DOMAIN: u64 = 0xd1b5_4a32_d192_ed03;
 
 mod error;
-mod execution;
+pub(crate) mod execution;
 mod mutation;
 mod request;
 mod result;

@@ -5,7 +5,7 @@ interoperability testing, and authorized network diagnostics. It provides
 exact packet construction, bounded dissection, capture-file I/O, offline
 analysis, and policy-gated live networking.
 
-Current release: pre-1.0 beta `0.5.0-beta.1`. Rust APIs and versioned
+Current release: pre-1.0 beta `0.5.0-beta.2`. Rust APIs and versioned
 serialized contracts may change between beta releases; review the
 [changelog](CHANGELOG.md) before upgrading.
 

@@ -908,7 +908,7 @@ checksum = "1a80800c0488c3a21695ea981a54918fbb37abf04f4d0720c453632255e2ff0e"
 
 [[package]]
 name = "packetcraftr"
-version = "0.5.0-beta.1"
+version = "0.5.0-beta.2"
 dependencies = [
  "bytes",
  "jsonschema",
@@ -921,7 +921,7 @@ dependencies = [
 
 [[package]]
 name = "packetcraftr-cli"
-version = "0.5.0-beta.1"
+version = "0.5.0-beta.2"
 dependencies = [
  "anstream",
  "clap",
@@ -934,7 +934,7 @@ dependencies = [
 
 [[package]]
 name = "packetcraftr-core"
-version = "0.5.0-beta.1"
+version = "0.5.0-beta.2"
 dependencies = [
  "bytes",
  "md-5",
@@ -947,7 +947,7 @@ dependencies = [
 
 [[package]]
 name = "packetcraftr-netio"
-version = "0.5.0-beta.1"
+version = "0.5.0-beta.2"
 dependencies = [
  "bytes",
  "futures-util",

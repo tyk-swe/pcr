@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "3"
 
 [workspace.package]
-version = "0.5.0-beta.1"
+version = "0.5.0-beta.2"
 edition = "2024"
 rust-version = "1.96"
 license = "AGPL-3.0-only"
@@ -40,9 +40,9 @@ arithmetic_side_effects = "deny"
 [workspace.dependencies]
 # `deny.toml` rejects wildcard dependencies, so each internal path dependency
 # pins the shared workspace version. Bump these with `workspace.package.version`.
-packetcraftr = { path = "crates/packetcraftr", version = "0.5.0-beta.1", default-features = false }
-packetcraftr-core = { path = "crates/packetcraftr-core", version = "0.5.0-beta.1" }
-packetcraftr-netio = { path = "crates/packetcraftr-netio", version = "0.5.0-beta.1" }
+packetcraftr = { path = "crates/packetcraftr", version = "0.5.0-beta.2", default-features = false }
+packetcraftr-core = { path = "crates/packetcraftr-core", version = "0.5.0-beta.2" }
+packetcraftr-netio = { path = "crates/packetcraftr-netio", version = "0.5.0-beta.2" }
 
 anstream = "1"
 bytes = { version = "1", features = ["serde"] }

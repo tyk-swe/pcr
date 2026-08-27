@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0-beta.2] - 2026-08-27
+
 ### Added
 
 - `packetcraftr tls <CAPTURE>` assembles TLS handshake sessions from a
@@ -764,7 +766,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Established the original PacketcraftR packet, capture, native networking,
   session, workflow, library, and CLI baseline.
 
-[Unreleased]: https://github.com/tyk-swe/pcr/compare/v0.5.0-beta.1...HEAD
+[Unreleased]: https://github.com/tyk-swe/pcr/compare/v0.5.0-beta.2...HEAD
+[0.5.0-beta.2]: https://github.com/tyk-swe/pcr/compare/v0.5.0-beta.1...v0.5.0-beta.2
 [0.5.0-beta.1]: https://github.com/tyk-swe/pcr/compare/v0.4.0...v0.5.0-beta.1
 [0.4.0]: https://github.com/tyk-swe/pcr/compare/v0.4.0-beta.2...v0.4.0
 [0.4.0-beta.2]: https://github.com/tyk-swe/pcr/compare/v0.4.0-beta.1...v0.4.0-beta.2

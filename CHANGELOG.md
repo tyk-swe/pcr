@@ -75,6 +75,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** 0.6 is the one planned contract break. In one release:
+  `packetcraftr.packet/v2` becomes the packet document format (v1 is still
+  read, with a `document.deprecated_schema` warning, and `convert` rewrites
+  it); `packetcraftr.output/v2` replaces output/v1 with no overlap (0.6 never
+  emits v1); expression values are coerced by the field's declared kind; and
+  `FieldSchema.derived`/`required` give way to `FieldSchema.tier`. No field
+  changed tier in this release (the audit in
+  `docs/designs/packet-v2-field-audit.md` confirmed every rule-computed field
+  was already derived), so strict-mode literal checks cover the same fields
+  as 0.5.
+
 - **Breaking:** Bumped structured CLI output contract to `packetcraftr.output/v2`:
   - `Kind::Cli` (`Kind::as_str` `"cli"`) renamed to `Kind::Request` (`"request"`); error classification code prefix renamed from `cli.*` to `request.*` (exit code remains 2).
   - Every duration and interval field previously serialized as `{secs, nanos}` (`$defs/duration`) is now serialized as an integer millisecond `*_ms` field (sub-millisecond durations are truncated to whole milliseconds).

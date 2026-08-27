@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use packetcraftr_core::error::{Classification, Classified, Kind};
 
 /// Version identifier emitted by every structured CLI record.
-pub const SCHEMA_V1: &str = "packetcraftr.output/v1";
+pub const SCHEMA_V2: &str = "packetcraftr.output/v2";
 
 /// Declares the command vocabulary once: the enum, [`Command::ALL`], and
 /// [`Command::as_str`] all come from the single list below, in the canonical
@@ -257,8 +257,8 @@ impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
             Self::UnsupportedFormat { .. } => Classification::new(
-                "cli.output_format",
-                Kind::Cli,
+                "request.output_format",
+                Kind::Request,
                 Some("choose one of the formats listed for this command"),
             ),
             Self::TimestampOutOfRange => Classification::new(

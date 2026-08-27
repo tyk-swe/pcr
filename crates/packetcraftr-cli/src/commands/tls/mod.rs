@@ -130,13 +130,13 @@ pub(super) fn run(
             .collect(),
     };
     let tls_limits = TlsLimits {
-        max_sessions: arguments.max_tls_sessions,
-        max_buffered_bytes: arguments.max_tls_buffer_bytes,
+        max_sessions: arguments.max_sessions,
+        max_buffered_bytes: arguments.max_buffer_bytes,
     };
-    if arguments.max_tls_buffer_bytes != 0
-        && arguments.max_tls_buffer_bytes < analysis::tls::MAX_DIRECTION_BUFFER
+    if arguments.max_buffer_bytes != 0
+        && arguments.max_buffer_bytes < analysis::tls::MAX_DIRECTION_BUFFER
     {
-        return Err(buffer_floor_error(arguments.max_tls_buffer_bytes));
+        return Err(buffer_floor_error(arguments.max_buffer_bytes));
     }
     tls_limits.validate().map_err(CliError::classified)?;
 
@@ -161,7 +161,7 @@ pub(super) fn run(
         limits,
     };
     let mut collector = Collector::new(tls_limits);
-    let mut state = State::new(arguments.max_tls_sessions);
+    let mut state = State::new(arguments.max_sessions);
     let run_summary = analysis::run(&mut reader, registry, &options, |record| {
         for event in collector.observe(&record) {
             if selector.matches(&event.session) {
@@ -206,7 +206,7 @@ pub(super) fn run(
 /// sets, so the error names the flag that set the ceiling instead.
 fn buffer_floor_error(value: usize) -> CliError {
     CliError::classified(analysis::Error::InvalidLimit {
-        field: "--max-tls-buffer-bytes",
+        field: "--max-buffer-bytes",
         value: u64::try_from(value).unwrap_or(u64::MAX),
         reason: "cannot be below the per-direction handshake buffer of 135168 bytes",
     })
@@ -273,7 +273,7 @@ mod tests {
         let error = buffer_floor_error(1_024);
         assert_eq!(error.exit_code, 2);
         assert!(
-            error.message.contains("--max-tls-buffer-bytes=1024"),
+            error.message.contains("--max-buffer-bytes=1024"),
             "{}",
             error.message
         );

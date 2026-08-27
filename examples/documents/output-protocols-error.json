@@ -1,11 +1,11 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "protocols",
   "mode": "aggregate",
   "status": "error",
   "error": {
-    "code": "cli.protocol",
-    "kind": "cli",
+    "code": "request.protocol",
+    "kind": "request",
     "message": "unknown built-in protocol 'unknown'",
     "causes": [],
     "remediation": "run `packetcraftr protocols` to list built-in protocols"

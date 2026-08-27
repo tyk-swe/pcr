@@ -382,8 +382,8 @@ fn public_errors_retain_stable_policy_and_target_classification() {
                 hostname: "bad".to_owned(),
                 reason: "fixture",
             }),
-            "cli.live_target",
-            Kind::Cli,
+            "request.live_target",
+            Kind::Request,
         ),
         (
             Box::new(TargetError::Resolver {

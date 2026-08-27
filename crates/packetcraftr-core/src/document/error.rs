@@ -98,65 +98,67 @@ impl Classified for Error {
             Self::SizeLimit { .. }
             | Self::LayerLimit { .. }
             | Self::NestingLimit { .. }
-            | Self::InvalidLimit { .. } => {
-                Classification::new("document.limit", Kind::Cli, Some("adjust resource limits"))
-            }
+            | Self::InvalidLimit { .. } => Classification::new(
+                "document.limit",
+                Kind::Request,
+                Some("adjust resource limits"),
+            ),
             Self::Parse { .. } => {
-                Classification::new("document.parse", Kind::Cli, Some("fix document syntax"))
+                Classification::new("document.parse", Kind::Request, Some("fix document syntax"))
             }
             Self::Schema { .. } | Self::UnknownSchema { .. } => Classification::new(
                 "document.unknown_schema",
-                Kind::Cli,
+                Kind::Request,
                 Some("specify schema: packetcraftr.packet/v2"),
             ),
             Self::LayerShape { .. } => Classification::new(
                 "document.layer_shape",
-                Kind::Cli,
+                Kind::Request,
                 Some("format each layer as a single-key map"),
             ),
             Self::UnknownProtocol { .. } => Classification::new(
                 "document.unknown_protocol",
-                Kind::Cli,
+                Kind::Request,
                 Some("use a supported protocol identifier"),
             ),
             Self::UnknownField { .. } => Classification::new(
                 "document.unknown_field",
-                Kind::Cli,
+                Kind::Request,
                 Some("use declared protocol field names"),
             ),
             Self::DuplicateField { .. } => Classification::new(
                 "document.duplicate_field",
-                Kind::Cli,
+                Kind::Request,
                 Some("specify each field at most once"),
             ),
             Self::ValueForm { .. } | Self::OutOfRange { .. } => Classification::new(
                 "document.value_form",
-                Kind::Cli,
+                Kind::Request,
                 Some("match the field's declared data kind"),
             ),
             Self::AutoNotDerived { .. } => Classification::new(
                 "document.auto_not_derived",
-                Kind::Cli,
+                Kind::Request,
                 Some("provide an explicit literal value"),
             ),
             Self::MissingRequired { .. } => Classification::new(
                 "document.missing_required",
-                Kind::Cli,
+                Kind::Request,
                 Some("supply all required layer fields"),
             ),
             Self::DecodeOnly { .. } => Classification::new(
                 "document.decode_only",
-                Kind::Cli,
+                Kind::Request,
                 Some("replace decode-only layers with raw"),
             ),
             Self::Layer { .. } => Classification::new(
                 "document.layer",
-                Kind::Cli,
+                Kind::Request,
                 Some("correct invalid layer field configuration"),
             ),
             Self::Serialize { .. } => Classification::new(
                 "document.serialize",
-                Kind::Cli,
+                Kind::Request,
                 Some("ensure document values are serializable"),
             ),
         }

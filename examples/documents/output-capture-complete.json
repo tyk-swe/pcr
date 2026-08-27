@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "capture",
   "mode": "stream",
   "status": "success",
@@ -12,10 +12,7 @@
     "packets_attempted": 100,
     "packets_completed": 1,
     "bytes": 8042,
-    "elapsed": {
-      "secs": 0,
-      "nanos": 250000
-    },
+    "elapsed_ms": 0,
     "capture": {
       "received_frames": 100,
       "received_bytes": 8042,

@@ -57,8 +57,8 @@ fn route_errors_keep_stable_classes_for_every_public_failure_variant() {
         (RouteError::MissingDestination, "packet.plan", Kind::Packet),
         (
             RouteError::MissingLayer2Interface,
-            "cli.interface_required",
-            Kind::Cli,
+            "request.interface_required",
+            Kind::Request,
         ),
         (
             RouteError::InterfaceLookupUnsupported {
@@ -311,8 +311,8 @@ fn neighbor_errors_keep_stable_classes_and_ordered_provider_causes() {
             NeighborError::InvalidOptions {
                 message: "fixture".to_owned(),
             },
-            "cli.neighbor_limit",
-            Kind::Cli,
+            "request.neighbor_limit",
+            Kind::Request,
             NO_CAUSES,
         ),
         (
@@ -461,8 +461,8 @@ fn live_io_errors_keep_stable_classes_for_every_public_failure_variant() {
                 timeout: Duration::ZERO,
                 maximum: capture::MAX_TIMEOUT,
             },
-            "cli.capture_timeout",
-            Kind::Cli,
+            "request.capture_timeout",
+            Kind::Request,
         ),
         (
             Error::InvalidTransmissionFrame {
@@ -483,8 +483,8 @@ fn live_io_errors_keep_stable_classes_for_every_public_failure_variant() {
                 interface: "fixture0".to_owned(),
                 message: "fixture".to_owned(),
             },
-            "cli.capture_filter",
-            Kind::Cli,
+            "request.capture_filter",
+            Kind::Request,
         ),
         (
             Error::CaptureFilterInstallation {
@@ -514,8 +514,8 @@ fn live_io_errors_keep_stable_classes_for_every_public_failure_variant() {
                 value: 0,
                 reason: "fixture",
             },
-            "cli.capture_limit",
-            Kind::Cli,
+            "request.capture_limit",
+            Kind::Request,
         ),
         (
             Error::CaptureQueueOverflow {

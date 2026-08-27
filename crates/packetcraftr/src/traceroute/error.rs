@@ -55,8 +55,8 @@ impl Classified for Error {
             | Self::InvalidPort { .. }
             | Self::InvalidTimeout { .. }
             | Self::InvalidDuration { .. } => Classification::new(
-                "cli.traceroute_limit",
-                Kind::Cli,
+                "request.traceroute_limit",
+                Kind::Request,
                 Some(
                     "use finite non-zero hops, attempts, timeouts, rates, ports, and evidence limits",
                 ),

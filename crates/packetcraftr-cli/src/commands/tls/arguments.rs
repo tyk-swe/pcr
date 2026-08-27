@@ -25,7 +25,7 @@ Selectors run on assembled sessions, not on frames, so there is deliberately no 
 
 The per-frame 'tls' layer is a different view: read --filter 'tls.sni contains "x"' sees only the hellos that fit in a single segment, and 'tls.incomplete' filters the frames whose record continues into the next one. Use this command for the assembled answer.
 
-Text prints each selected session as it is assembled and leaves none out. JSON holds every selected session in memory to emit one document, bounded by --max-tls-sessions, and reports what that bound left out as sessions_omitted. NDJSON streams each session as it completes and is the format for large captures.
+Text prints each selected session as it is assembled and leaves none out. JSON holds every selected session in memory to emit one document, bounded by --max-sessions, and reports what that bound left out as sessions_omitted. NDJSON streams each session as it completes and is the format for large captures.
 
 Examples:
   packetcraftr tls examples/captures/tls-handshake.pcapng
@@ -92,11 +92,11 @@ pub(crate) struct Args {
     /// The smallest accepted value is 135168, which one direction of one
     /// conversation may buffer on its own.
     #[arg(long, default_value_t = TlsLimits::default().max_buffered_bytes)]
-    pub(crate) max_tls_buffer_bytes: usize,
+    pub(crate) max_buffer_bytes: usize,
     /// Maximum TLS conversations tracked at once, and sessions retained by
     /// the JSON document. Text and NDJSON report every selected session.
     #[arg(long, default_value_t = TlsLimits::default().max_sessions)]
-    pub(crate) max_tls_sessions: usize,
+    pub(crate) max_sessions: usize,
     #[command(flatten)]
     pub(crate) limits: OfflineLimitsArgs,
 }

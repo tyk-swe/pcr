@@ -282,7 +282,7 @@ fn stats(summary: &packetcraftr::replay::Summary, elapsed: Duration) -> output::
         packets_attempted: summary.frames_read,
         packets_completed: summary.frames_transmitted,
         bytes: summary.bytes_transmitted,
-        elapsed,
+        elapsed_ms: u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX),
         capture: net::capture::Statistics::default().into(),
     }
 }

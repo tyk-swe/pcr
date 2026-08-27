@@ -145,12 +145,12 @@ fn capture_errors_expose_stable_classifications_and_causes() {
     let policy = Error::MetadataBlockLimit { limit: 1 }.classification();
     assert_eq!(policy.kind, Kind::Policy);
     assert_eq!(policy.code, "policy.capture_stream_limit");
-    let cli = Error::InvalidTimestampResolution {
+    let request = Error::InvalidTimestampResolution {
         base: 10,
         exponent: 2,
     }
     .classification();
-    assert_eq!(cli.kind, Kind::Cli);
+    assert_eq!(request.kind, Kind::Request);
     let io = Error::Io(io::Error::other("disk gone"));
     assert_eq!(io.classification().kind, Kind::Io);
     assert_eq!(io.causes(), vec!["disk gone"]);

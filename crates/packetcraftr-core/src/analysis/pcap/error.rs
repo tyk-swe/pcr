@@ -111,13 +111,13 @@ impl Classified for Error {
                 ),
             ),
             Self::InvalidTimestampResolution { .. } => Classification::new(
-                "cli.capture_option",
-                Kind::Cli,
+                "request.capture_option",
+                Kind::Request,
                 Some("use a supported finite capture timestamp or replay timing option"),
             ),
             Self::WrongWriterFormat { .. } => Classification::new(
-                "cli.capture_option",
-                Kind::Cli,
+                "request.capture_option",
+                Kind::Request,
                 Some("call the writer method that matches the writer's configured format"),
             ),
             Self::TimestampUnavailable { .. } => Classification::new(

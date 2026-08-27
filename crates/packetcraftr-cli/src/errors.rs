@@ -18,7 +18,7 @@ pub(super) struct CliError {
 impl CliError {
     pub(super) fn new(exit_code: u8, message: impl Into<String>) -> Self {
         let kind = match exit_code {
-            2 => Kind::Cli,
+            2 => Kind::Request,
             3 => Kind::Packet,
             4 => Kind::Capability,
             5 => Kind::Io,
@@ -30,7 +30,7 @@ impl CliError {
             message: message.into(),
             classification: Classification::new(
                 match kind {
-                    Kind::Cli => "cli.error",
+                    Kind::Request => "request.error",
                     Kind::Packet => "packet.error",
                     Kind::Capability => "capability.unavailable",
                     Kind::Io => "io.runtime",
@@ -108,7 +108,7 @@ impl From<output::envelope::EncodeError> for CliError {
 
 const fn exit_code_for_kind(kind: Kind) -> u8 {
     match kind {
-        Kind::Cli => 2,
+        Kind::Request => 2,
         Kind::Packet => 3,
         Kind::Capability => 4,
         Kind::Io => 5,
@@ -124,7 +124,7 @@ mod tests {
     #[test]
     fn numeric_exit_codes_map_to_stable_classifications() {
         let cases = [
-            (2, Kind::Cli, "cli.error"),
+            (2, Kind::Request, "request.error"),
             (3, Kind::Packet, "packet.error"),
             (4, Kind::Capability, "capability.unavailable"),
             (5, Kind::Io, "io.runtime"),

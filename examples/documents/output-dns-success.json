@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "dns",
   "mode": "aggregate",
   "status": "success",
@@ -62,10 +62,7 @@
           "unix_seconds": 1770000000,
           "nanoseconds": 5000000
         },
-        "latency": {
-          "secs": 0,
-          "nanos": 5000000
-        },
+        "latency_ms": 5,
         "response_code": 0,
         "reason": "validated DNS response with code no_error"
       }
@@ -77,10 +74,7 @@
     "packets_attempted": 1,
     "packets_completed": 1,
     "bytes": 58,
-    "elapsed": {
-      "secs": 0,
-      "nanos": 5000000
-    },
+    "elapsed_ms": 5,
     "capture": {
       "received_frames": 1,
       "received_bytes": 96,

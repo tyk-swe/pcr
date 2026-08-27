@@ -4,7 +4,6 @@
 //! Aggregate and streaming DNS command result contracts.
 
 use std::net::IpAddr;
-use std::time::Duration;
 
 use packetcraftr_core::diagnostic::Diagnostic;
 use serde::Serialize;
@@ -189,7 +188,7 @@ fn try_from_attempt(evidence: crate::dns::AttemptEvidence) -> std::result::Resul
         status: evidence.status,
         sent_at: evidence.sent_at.try_into()?,
         received_at: evidence.received_at.map(Timestamp::try_from).transpose()?,
-        latency: evidence.latency,
+        latency_ms: super::super::optional_duration_ms(evidence.latency),
         frame: evidence
             .response
             .map(Captured::try_from_frame)
@@ -218,7 +217,7 @@ pub struct Attempt {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub received_at: Option<Timestamp>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub latency: Option<Duration>,
+    pub latency_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub frame: Option<Captured>,
     #[serde(skip_serializing_if = "Option::is_none")]

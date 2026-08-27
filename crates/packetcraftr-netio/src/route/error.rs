@@ -82,8 +82,8 @@ impl Classified for Error {
         match self {
             Self::RouteLookup { failure, .. } | Self::InterfaceLookup { failure, .. } => *failure,
             Self::MissingLayer2Interface => Classification::new(
-                "cli.interface_required",
-                Kind::Cli,
+                "request.interface_required",
+                Kind::Request,
                 Some("select an explicit interface for a destination-free Layer 2 packet"),
             ),
             Self::InterfaceLookupUnsupported { .. }

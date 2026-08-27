@@ -75,6 +75,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** Bumped structured CLI output contract to `packetcraftr.output/v2`:
+  - `Kind::Cli` (`Kind::as_str` `"cli"`) renamed to `Kind::Request` (`"request"`); error classification code prefix renamed from `cli.*` to `request.*` (exit code remains 2).
+  - Every duration and interval field previously serialized as `{secs, nanos}` (`$defs/duration`) is now serialized as an integer millisecond `*_ms` field (sub-millisecond durations are truncated to whole milliseconds).
+  - Embedded packet documents (`result.packet`, `result.dissection.packet`, fuzz `recipe`/`decoded`) now adhere to `packetcraftr.packet/v2`.
+  - Flags and options renamed to drop redundant command prefixes and align names:
+
+  | Target / Surface | Before | After |
+  | --- | --- | --- |
+  | Error kind | `cli` | `request` |
+  | Error code prefix | `cli.*` | `request.*` |
+  | Stats elapsed duration | `elapsed` (`{secs, nanos}`) | `elapsed_ms` (integer) |
+  | Exchange latency | `latency` (`{secs, nanos}`) | `latency_ms` (integer) |
+  | Scan latency | `latency` (`{secs, nanos}`) | `latency_ms` (integer) |
+  | Traceroute latency | `latency` (`{secs, nanos}`) | `latency_ms` (integer) |
+  | DNS attempt latency | `latency` (`{secs, nanos}`) | `latency_ms` (integer) |
+  | Stats conversation duration | `duration` (`{secs, nanos}`) | `duration_ms` (integer) |
+  | Stats I/O interval | `interval` (`{secs, nanos}`) | `interval_ms` (integer) |
+  | Stats I/O bucket offset | `offset` (`{secs, nanos}`) | `offset_ms` (integer) |
+  | Replay scheduled duration | `scheduled_duration` (`{secs, nanos}`) | `scheduled_duration_ms` (integer) |
+  | Replay scheduled delay | `scheduled_delay` (`{secs, nanos}`) | `scheduled_delay_ms` (integer) |
+  | `exchange` CLI flag | `--max-unsolicited` | `--max-undecoded` |
+  | `tls` CLI flag | `--max-tls-buffer-bytes` | `--max-buffer-bytes` |
+  | `tls` CLI flag | `--max-tls-sessions` | `--max-sessions` |
+
+  There is no semantic overlap or compatibility shim for the v1 output contract; consumers should update to `packetcraftr.output/v2`.
+
 - Expression values are coerced by the field's declared kind:
 
   | Expression | Before | After |

@@ -47,7 +47,11 @@ impl InputKind {
 
 fn missing_input_error(kind: InputKind) -> CliError {
     CliError::from_classification(
-        Classification::new("cli.input_source", Kind::Cli, Some(kind.remediation())),
+        Classification::new(
+            "request.input_source",
+            Kind::Request,
+            Some(kind.remediation()),
+        ),
         format!(
             "{} input is required: provide {}",
             kind.label(),
@@ -254,8 +258,8 @@ pub(super) fn validate_capture_stream_limits(
     if max_frames == 0 || max_bytes == 0 || max_frame_bytes == 0 || max_interfaces == 0 {
         return Err(CliError::from_classification(
             Classification::new(
-                "cli.capture_limit",
-                Kind::Cli,
+                "request.capture_limit",
+                Kind::Request,
                 Some("use finite non-zero capture frame, byte, packet, and interface limits"),
             ),
             "capture stream limits must be non-zero",
@@ -265,8 +269,8 @@ pub(super) fn validate_capture_stream_limits(
     if u64::try_from(max_frame_bytes).unwrap_or(u64::MAX) > max_bytes {
         return Err(CliError::from_classification(
             Classification::new(
-                "cli.capture_limit",
-                Kind::Cli,
+                "request.capture_limit",
+                Kind::Request,
                 Some("set max-frame-bytes no higher than the aggregate max-bytes budget"),
             ),
             format!("max-frame-bytes {max_frame_bytes} exceeds max-bytes {max_bytes}"),
@@ -364,7 +368,7 @@ mod tests {
     fn terminal_input_decision_is_immediate_and_command_specific() {
         let recipe = require_redirected_stdin(InputKind::Recipe, true)
             .expect_err("recipe terminal input must be rejected");
-        assert_eq!(recipe.classification.code, "cli.input_source");
+        assert_eq!(recipe.classification.code, "request.input_source");
         assert_eq!(recipe.exit_code, 2);
         assert!(recipe.message.contains("--packet"));
         assert!(recipe.message.contains("--packet-file"));
@@ -372,7 +376,7 @@ mod tests {
 
         let frame = require_redirected_stdin(InputKind::Frame, true)
             .expect_err("frame terminal input must be rejected");
-        assert_eq!(frame.classification.code, "cli.input_source");
+        assert_eq!(frame.classification.code, "request.input_source");
         assert_eq!(frame.exit_code, 2);
         assert!(frame.message.contains("--hex"));
         assert!(frame.message.contains("--file"));
@@ -392,7 +396,7 @@ mod tests {
             let error = validate_capture_stream_limits(limits.0, limits.1, limits.2, limits.3)
                 .expect_err("every capture bound must be non-zero");
             assert_eq!(error.exit_code, 2, "limits={limits:?}");
-            assert_eq!(error.classification.code, "cli.capture_limit");
+            assert_eq!(error.classification.code, "request.capture_limit");
         }
 
         let error = validate_capture_stream_limits(1, 7, 8, 1)

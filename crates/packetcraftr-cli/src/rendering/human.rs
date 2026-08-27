@@ -160,7 +160,7 @@ mod tests {
     #[test]
     fn classified_errors_render_causes_and_remediation_in_order() {
         let error = CliError::from_classification(
-            Classification::new("cli.fixture", Kind::Cli, Some("try again")),
+            Classification::new("request.fixture", Kind::Request, Some("try again")),
             "primary failure",
             vec!["first cause".to_owned(), "second cause".to_owned()],
         );
@@ -168,7 +168,7 @@ mod tests {
         assert_eq!(
             plain(&error),
             concat!(
-                "error[cli.fixture]: primary failure\n",
+                "error[request.fixture]: primary failure\n",
                 "caused by: first cause\n",
                 "caused by: second cause\n",
                 "help: try again",
@@ -190,18 +190,18 @@ mod tests {
     #[test]
     fn empty_causes_and_remediation_do_not_create_empty_sections() {
         let error = CliError::from_classification(
-            Classification::new("cli.fixture", Kind::Cli, Some("  ")),
+            Classification::new("request.fixture", Kind::Request, Some("  ")),
             "primary failure",
             vec![String::new(), "\t".to_owned()],
         );
 
-        assert_eq!(plain(&error), "error[cli.fixture]: primary failure");
+        assert_eq!(plain(&error), "error[request.fixture]: primary failure");
     }
 
     #[test]
     fn fallback_classifications_from_numeric_exit_codes_are_rendered() {
         for (exit_code, code) in [
-            (2, "cli.error"),
+            (2, "request.error"),
             (3, "packet.error"),
             (4, "capability.unavailable"),
             (5, "io.runtime"),
@@ -217,8 +217,8 @@ mod tests {
     fn terminal_safety_applies_to_every_rendered_error_field() {
         let error = CliError::from_classification(
             Classification::new(
-                "cli.\u{202e}code\x1b",
-                Kind::Cli,
+                "request.\u{202e}code\x1b",
+                Kind::Request,
                 Some("help:\t\u{2066}now\r\n"),
             ),
             "primary\n\t\u{200f}\x1bmessage",
@@ -228,7 +228,7 @@ mod tests {
         assert_eq!(
             plain(&error),
             concat!(
-                "error[cli.\\u{202e}code\\u{1b}]: ",
+                "error[request.\\u{202e}code\\u{1b}]: ",
                 "primary\\n\\t\\u{200f}\\u{1b}message\n",
                 "caused by: cause\\r\\n\\u{200b}one\n",
                 "caused by: cause two\n",
@@ -240,7 +240,7 @@ mod tests {
     #[test]
     fn identical_primary_causes_are_not_rendered_twice() {
         let error = CliError::from_classification(
-            Classification::new("cli.fixture", Kind::Cli, None),
+            Classification::new("request.fixture", Kind::Request, None),
             "same message",
             vec![
                 "same message".to_owned(),
@@ -251,14 +251,14 @@ mod tests {
 
         assert_eq!(
             plain(&error),
-            "error[cli.fixture]: same message\ncaused by: retained cause",
+            "error[request.fixture]: same message\ncaused by: retained cause",
         );
     }
 
     #[test]
     fn disabled_or_noninteractive_streams_strip_renderer_styles() {
         let error = CliError::from_classification(
-            Classification::new("cli.fixture", Kind::Cli, Some("try again")),
+            Classification::new("request.fixture", Kind::Request, Some("try again")),
             "primary failure",
             vec!["cause".to_owned()],
         );

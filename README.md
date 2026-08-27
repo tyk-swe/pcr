@@ -109,8 +109,8 @@ closed.
 
 ## Contracts
 
-- Packet JSON/YAML: [`packetcraftr.packet/v1`](schemas/packetcraftr.packet.v1.schema.json)
-- Structured command output: [`packetcraftr.output/v1`](schemas/packetcraftr.output.v1.schema.json)
+- Packet JSON/YAML: [`packetcraftr.packet/v2`](schemas/packetcraftr.packet.v2.schema.json)
+- Structured command output: [`packetcraftr.output/v2`](schemas/packetcraftr.output.v2.schema.json)
 - Published packet and output examples: [`examples/documents`](examples/documents)
 
 Put the global `--output` option before the command, for example

@@ -716,7 +716,7 @@ fn protocol_discovery_lists_describes_and_rejects_names() {
     let unknown = run(&["--output", "json", "protocols", "definitely-not-a-protocol"]);
     assert_eq!(unknown.status.code(), Some(2));
     let value = parse_json(&unknown);
-    assert_eq!(value["error"]["code"], "cli.protocol");
+    assert_eq!(value["error"]["code"], "request.protocol");
     assert!(
         value["error"]["remediation"]
             .as_str()
@@ -737,7 +737,7 @@ fn build_rejects_document_output() {
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("unsupported output format") || stderr.contains("cli.output_format"),
+        stderr.contains("unsupported output format") || stderr.contains("request.output_format"),
         "{stderr}"
     );
 }

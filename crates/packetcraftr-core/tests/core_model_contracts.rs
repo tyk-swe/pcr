@@ -209,9 +209,9 @@ fn boundary_error_new_preserves_the_supplied_contract() {
 #[test]
 fn boundary_constructors_distinguish_validation_from_internal_failures() {
     let validation =
-        BoundaryError::execution_validation("bad request", "cli.test", "change the request");
-    assert_eq!(validation.classification().kind, Kind::Cli);
-    assert_eq!(validation.classification().code, "cli.test");
+        BoundaryError::execution_validation("bad request", "request.test", "change the request");
+    assert_eq!(validation.classification().kind, Kind::Request);
+    assert_eq!(validation.classification().code, "request.test");
     assert_eq!(
         validation.classification().remediation,
         Some("change the request")
@@ -230,7 +230,7 @@ fn boundary_constructors_distinguish_validation_from_internal_failures() {
 #[test]
 fn every_error_kind_has_a_stable_machine_name() {
     let cases = [
-        (Kind::Cli, "cli"),
+        (Kind::Request, "request"),
         (Kind::Packet, "packet"),
         (Kind::Capability, "capability"),
         (Kind::Io, "io"),

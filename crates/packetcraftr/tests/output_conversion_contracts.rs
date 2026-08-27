@@ -277,7 +277,7 @@ fn stats_conversation_output_preserves_source_fields() {
         (conversation.frames_b_to_a, conversation.bytes_b_to_a),
         (4, 201)
     );
-    assert_eq!(conversation.duration, Duration::from_millis(3_250));
+    assert_eq!(conversation.duration_ms, 3_250);
 }
 
 #[test]
@@ -308,11 +308,11 @@ fn stats_protocol_output_preserves_source_fields() {
         .expect("protocol table is present");
     assert_eq!(
         (
-            protocols[0].protocol.as_str(),
+            &protocols[0].protocol,
             protocols[0].frames,
             protocols[0].bytes
         ),
-        ("ipv4", 7, 321)
+        (&"ipv4".to_owned(), 7, 321)
     );
 }
 
@@ -341,14 +341,14 @@ fn stats_io_output_preserves_interval_and_buckets() {
         .expect("I/O report converts")
         .io
         .expect("I/O table is present");
-    assert_eq!(io.interval, Duration::from_secs(2));
+    assert_eq!(io.interval_ms, 2_000);
     assert_eq!(
         (
-            io.buckets[0].offset,
+            io.buckets[0].offset_ms,
             io.buckets[0].frames,
             io.buckets[0].bytes
         ),
-        (Duration::from_secs(2), 5, 240)
+        (2_000, 5, 240)
     );
 }
 

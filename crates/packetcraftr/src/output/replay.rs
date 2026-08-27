@@ -3,13 +3,12 @@
 
 //! Structured capture-replay output.
 
-use std::time::Duration;
-
 use serde::Serialize;
 
 use packetcraftr_netio::{interface::Id as InterfaceId, link::Mode as NetworkLinkMode};
 
 use super::contract::Error;
+use super::duration_ms;
 use super::frame::Captured;
 
 pub use crate::replay::Timing;
@@ -51,7 +50,7 @@ pub struct Result {
     pub frames_transmitted: u64,
     #[serde(rename = "bytes_completed")]
     pub bytes_transmitted: u64,
-    pub scheduled_duration: Duration,
+    pub scheduled_duration_ms: u64,
     pub frames: Vec<Frame>,
 }
 
@@ -70,7 +69,7 @@ impl Result {
             frames_read: summary.frames_read,
             frames_transmitted: summary.frames_transmitted,
             bytes_transmitted: summary.bytes_transmitted,
-            scheduled_duration: summary.scheduled_duration,
+            scheduled_duration_ms: duration_ms(summary.scheduled_duration),
             frames,
         }
     }
@@ -83,7 +82,7 @@ pub struct Frame {
     pub source_index: u64,
     pub interface: Interface,
     pub link_mode: LinkMode,
-    pub scheduled_delay: Duration,
+    pub scheduled_delay_ms: u64,
     pub bytes_sent: u64,
     pub frame: Captured,
     pub transmitted: bool,
@@ -97,7 +96,7 @@ impl Frame {
             source_index: evidence.source_index,
             interface: evidence.transmission().interface.clone().into(),
             link_mode: evidence.link_mode.into(),
-            scheduled_delay: evidence.scheduled_delay,
+            scheduled_delay_ms: duration_ms(evidence.scheduled_delay),
             bytes_sent: u64::try_from(evidence.transmission().report.bytes_sent())
                 .unwrap_or(u64::MAX),
             frame: Captured::try_from_frame(evidence.frame)?,

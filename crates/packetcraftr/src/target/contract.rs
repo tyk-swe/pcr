@@ -181,8 +181,8 @@ impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
             Self::InvalidHostname { .. } | Self::InvalidAddressLimit { .. } => Classification::new(
-                "cli.live_target",
-                Kind::Cli,
+                "request.live_target",
+                Kind::Request,
                 Some("use a valid IP address or bounded ASCII DNS hostname"),
             ),
             Self::Resolver { .. } | Self::NoAddresses { .. } => Classification::new(

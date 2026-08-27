@@ -1,11 +1,11 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "follow",
   "mode": "aggregate",
   "status": "error",
   "error": {
-    "code": "cli.error",
-    "kind": "cli",
+    "code": "request.error",
+    "kind": "request",
     "message": "invalid --stream 'bogus:0': expected tcp:INDEX or udp:INDEX",
     "causes": []
   },

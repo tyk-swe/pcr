@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "build",
   "mode": "aggregate",
   "status": "success",
@@ -7,15 +7,11 @@
     "bytes_hex": "deadbeef",
     "length": 4,
     "packet": {
-      "schema": "packetcraftr.packet/v1",
+      "schema": "packetcraftr.packet/v2",
       "layers": [
         {
-          "protocol": "raw",
-          "fields": {
-            "bytes": {
-              "type": "bytes",
-              "value": [222, 173, 190, 239]
-            }
+          "raw": {
+            "bytes": "0xdeadbeef"
           }
         }
       ]

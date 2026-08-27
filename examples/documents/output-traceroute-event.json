@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "traceroute",
   "mode": "stream",
   "sequence": 0,
@@ -25,10 +25,7 @@
         "unix_seconds": 1770000000,
         "nanoseconds": 4000000
       },
-      "latency": {
-        "secs": 0,
-        "nanos": 4000000
-      },
+      "latency_ms": 4,
       "reason": "ICMPv4 time exceeded before reaching the endpoint"
     }
   },

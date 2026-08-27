@@ -112,7 +112,7 @@ fn offline_build_supports_json_hex_and_raw_without_terminal_style() {
     ]);
     assert_no_terminal_style(&json_output.stdout);
     let value = parse_json(&json_output);
-    assert_eq!(value["schema"], "packetcraftr.output/v1");
+    assert_eq!(value["schema"], "packetcraftr.output/v2");
     assert_eq!(value["result"]["bytes_hex"], "68656c6c6f");
 
     let hex = run_success(&["--output", "hex", "build", "--packet", "raw(text=hello)"]);
@@ -131,7 +131,7 @@ fn invalid_input_has_a_structured_exit_code() {
     assert_no_terminal_style(&invalid.stdout);
     let value = parse_json(&invalid);
     assert_eq!(value["status"], "error");
-    assert_eq!(value["error"]["kind"], "cli");
+    assert_eq!(value["error"]["kind"], "request");
 }
 
 #[test]
@@ -181,7 +181,7 @@ fn redirected_empty_stdin_reports_command_specific_input_options() {
     let recipe = run_with_stdin(&["--output", "json", "build"], &[]);
     assert_eq!(recipe.status.code(), Some(2));
     let recipe_error = parse_json(&recipe)["error"].clone();
-    assert_eq!(recipe_error["code"], "cli.input_source");
+    assert_eq!(recipe_error["code"], "request.input_source");
     assert!(
         recipe_error["message"]
             .as_str()
@@ -199,7 +199,7 @@ fn redirected_empty_stdin_reports_command_specific_input_options() {
     let frame = run_with_stdin(&["--output", "json", "dissect"], &[]);
     assert_eq!(frame.status.code(), Some(2));
     let frame_error = parse_json(&frame)["error"].clone();
-    assert_eq!(frame_error["code"], "cli.input_source");
+    assert_eq!(frame_error["code"], "request.input_source");
     assert!(frame_error["message"].as_str().unwrap().contains("--hex"));
     assert!(frame_error["message"].as_str().unwrap().contains("--file"));
     assert!(
@@ -257,7 +257,7 @@ fn explicit_files_ignore_an_unrelated_open_stdin_pipe() {
 #[test]
 fn human_runtime_errors_include_actionable_classification_and_help() {
     let expected = concat!(
-        "error[cli.protocol]: unknown built-in protocol 'tcpc'\n",
+        "error[request.protocol]: unknown built-in protocol 'tcpc'\n",
         "help: run `packetcraftr protocols` to list built-in protocols\n",
     );
 
@@ -290,7 +290,7 @@ fn clap_failures_preserve_unambiguous_invocation_context() {
         assert_eq!(failure.status.code(), Some(2), "{arguments:?}");
         let value = parse_json(&failure);
         assert_eq!(value["command"].as_str(), expected_command, "{arguments:?}");
-        assert_eq!(value["error"]["kind"], "cli", "{arguments:?}");
+        assert_eq!(value["error"]["kind"], "request", "{arguments:?}");
     }
 
     let failure = run(&["protocols", "--output", "ndjson", "--color", "invalid"]);
@@ -301,7 +301,7 @@ fn clap_failures_preserve_unambiguous_invocation_context() {
     let value: Value = serde_json::from_str(&text).expect("error NDJSON must parse");
     assert_eq!(value["command"], "protocols");
     assert_eq!(value["sequence"], 0);
-    assert_eq!(value["error"]["kind"], "cli");
+    assert_eq!(value["error"]["kind"], "request");
 }
 
 #[test]
@@ -476,7 +476,7 @@ fn dissect_rejects_byte_oriented_output_and_names_the_format() {
         assert!(refused.stdout.is_empty(), "{format}");
         let rendered = String::from_utf8_lossy(&refused.stderr);
         assert!(
-            rendered.contains("error[cli.dissect_unsupported_format]"),
+            rendered.contains("error[request.dissect_unsupported_format]"),
             "{format}: {rendered}"
         );
         assert!(

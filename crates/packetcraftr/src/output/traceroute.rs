@@ -4,7 +4,6 @@
 //! Structured traceroute output.
 
 use std::net::IpAddr;
-use std::time::Duration;
 
 use serde::Serialize;
 
@@ -13,6 +12,7 @@ use packetcraftr_core::diagnostic::Diagnostic as PacketDiagnostic;
 use super::contract::Error;
 use super::envelope::Stats;
 use super::frame::{Captured, Timestamp};
+use crate::output::optional_duration_ms;
 
 pub use crate::traceroute::{Completion, ProbeStatus, ResponseKind};
 
@@ -34,7 +34,7 @@ pub struct Probe {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub received_at: Option<Timestamp>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub latency: Option<Duration>,
+    pub latency_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub frame: Option<Captured>,
     pub reason: String,
@@ -202,7 +202,7 @@ fn try_from_probe(probe: crate::traceroute::ProbeEvidence) -> std::result::Resul
         responder: probe.responder,
         sent_at: probe.sent_at.try_into()?,
         received_at: probe.received_at.map(Timestamp::try_from).transpose()?,
-        latency: probe.latency,
+        latency_ms: optional_duration_ms(probe.latency),
         frame: probe.response.map(Captured::try_from_frame).transpose()?,
         reason: probe.reason,
     })

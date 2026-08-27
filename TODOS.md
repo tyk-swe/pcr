@@ -28,23 +28,6 @@ Items left out of a shipped change on purpose. Candidates, not commitments.
 - A JA3 MD5 / JA4 vector from a real full ClientHello, so the fingerprints are
   checked against something other than our own builder.
 
-## 0.6 output-contract break
-
-The v1 contract is byte-stable through 0.5 (serialized documents,
-classification codes, exit codes, flag names, defaults; help strings are not
-covered). These wait for one deliberate bump:
-
-- Rename `cli.*` / `Kind::Cli` (`packetcraftr-core::error`) to `request.*` /
-  `Kind::Request`; keep exit code 2.
-- Durations serialize as `{secs, nanos}` (`$defs/duration`); the rest of the
-  surface is `*_ms`. Switch.
-- Schema descriptions at the two `tls` limit fields name `--max-tls-sessions`.
-  Describe the field, not the flag.
-- `exchange --max-unsolicited` → `--max-undecoded`, matching `scan`, `dns`,
-  `traceroute`.
-- Drop command names from flags: `tls --max-tls-buffer-bytes`,
-  `--max-tls-sessions`, `capture --max-captured-bytes`.
-
 ## Review follow-ups (2026-08-26 recovery pass)
 
 Need a decision, not a mechanical edit.

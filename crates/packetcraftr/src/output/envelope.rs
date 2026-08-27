@@ -7,14 +7,14 @@ use std::fmt;
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use serde::Serialize;
 
 use packetcraftr_core::diagnostic::Diagnostic as PacketDiagnostic;
 use packetcraftr_core::error::{Classification, Classified, Context, Kind};
 
-use super::contract::{Command, Mode, SCHEMA_V1};
+use super::contract::{Command, Mode, SCHEMA_V2};
+use super::duration_ms;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Error {
@@ -85,13 +85,13 @@ impl From<packetcraftr_netio::capture::Statistics> for CaptureStats {
     }
 }
 
-/// Output-v1 operation statistics carried by structured envelopes.
+/// Output-v2 operation statistics carried by structured envelopes.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct Stats {
     pub packets_attempted: u64,
     pub packets_completed: u64,
     pub bytes: u64,
-    pub elapsed: Duration,
+    pub elapsed_ms: u64,
     pub capture: CaptureStats,
 }
 
@@ -101,7 +101,7 @@ impl From<crate::Stats> for Stats {
             packets_attempted: value.packets_attempted,
             packets_completed: value.packets_completed,
             bytes: value.bytes,
-            elapsed: value.elapsed,
+            elapsed_ms: duration_ms(value.elapsed),
             capture: value.capture.into(),
         }
     }
@@ -113,7 +113,7 @@ impl From<&crate::fuzz::Stats> for Stats {
             packets_attempted: value.packets_attempted,
             packets_completed: value.packets_completed,
             bytes: value.bytes,
-            elapsed: value.elapsed,
+            elapsed_ms: duration_ms(value.elapsed),
             capture: value.capture.into(),
         }
     }
@@ -125,7 +125,7 @@ impl From<&packetcraftr_core::fuzz::Stats> for Stats {
             packets_attempted: value.packets_attempted,
             packets_completed: value.packets_completed,
             bytes: value.bytes,
-            elapsed: value.elapsed,
+            elapsed_ms: duration_ms(value.elapsed),
             capture: CaptureStats::default(),
         }
     }
@@ -199,7 +199,7 @@ pub struct Aggregate<T> {
 impl<T> Aggregate<T> {
     pub fn success(command: Command, result: T, diagnostics: Vec<PacketDiagnostic>) -> Self {
         Self {
-            schema: SCHEMA_V1,
+            schema: SCHEMA_V2,
             command: Some(command),
             mode: Mode::Aggregate,
             payload: OutputPayload::Success { result },
@@ -218,7 +218,7 @@ impl<T> Aggregate<T> {
 impl Aggregate<()> {
     pub fn error(command: Option<Command>, error: Error) -> Self {
         Self {
-            schema: SCHEMA_V1,
+            schema: SCHEMA_V2,
             command,
             mode: Mode::Aggregate,
             payload: OutputPayload::Error { error },
@@ -253,7 +253,7 @@ impl<T> Stream<T> {
         diagnostics: Vec<PacketDiagnostic>,
     ) -> Self {
         Self {
-            schema: SCHEMA_V1,
+            schema: SCHEMA_V2,
             command: Some(command),
             mode: Mode::Stream,
             sequence,
@@ -265,7 +265,7 @@ impl<T> Stream<T> {
 
     fn error(command: Option<Command>, sequence: u64, error: Error) -> Self {
         Self {
-            schema: SCHEMA_V1,
+            schema: SCHEMA_V2,
             command,
             mode: Mode::Stream,
             sequence,

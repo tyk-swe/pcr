@@ -104,7 +104,7 @@ fn scan_output_preserves_endpoint_identity_and_port_absence() {
         "destination_port",
         "responder",
         "received_at",
-        "latency",
+        "latency_ms",
         "frame",
     ] {
         assert!(timeout.get(absent).is_none(), "{absent} must be omitted");
@@ -132,7 +132,7 @@ fn scan_output_preserves_endpoint_identity_and_port_absence() {
     assert!(undecoded.get("port").is_none());
 
     let schema: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../schemas/packetcraftr.output.v1.schema.json"
+        "../../../schemas/packetcraftr.output.v2.schema.json"
     ))
     .expect("output schema must be valid JSON");
     assert_eq!(

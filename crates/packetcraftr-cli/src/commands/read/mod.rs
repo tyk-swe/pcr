@@ -70,8 +70,8 @@ pub(super) fn run(
         let field_path = core::filter::FieldPath::parse(col_str, &registry).map_err(|_| {
             CliError::from_classification(
                 Classification::new(
-                    "cli.unknown_path",
-                    Kind::Cli,
+                    "request.unknown_path",
+                    Kind::Request,
                     Some("run `packetcraftr protocols <P>` to list fields"),
                 ),
                 format!("unknown path `{col_str}`"),
@@ -151,8 +151,8 @@ fn validate_dissect_format(dissect: bool, format: ReadFormat) -> Result<(), CliE
     {
         return Err(CliError::from_classification(
             Classification::new(
-                "cli.dissect_unsupported_format",
-                Kind::Cli,
+                "request.dissect_unsupported_format",
+                Kind::Request,
                 Some("use --output text or --output ndjson to show the layer stack"),
             ),
             format!("--dissect has no effect on {} output", format.format()),
@@ -166,8 +166,8 @@ fn validate_columns_format(has_columns: bool, format: ReadFormat) -> Result<(), 
     if has_columns && !matches!(format, ReadFormat::Text | ReadFormat::Ndjson) {
         return Err(CliError::from_classification(
             Classification::new(
-                "cli.columns_unsupported_format",
-                Kind::Cli,
+                "request.columns_unsupported_format",
+                Kind::Request,
                 Some("use --output text or --output ndjson with --columns"),
             ),
             format!("--columns has no effect on {} output", format.format()),
@@ -204,8 +204,8 @@ fn rewrite_capture(
     if filtered {
         return Err(CliError::from_classification(
             Classification::new(
-                "cli.capture_rewrite_filter",
-                Kind::Cli,
+                "request.capture_rewrite_filter",
+                Kind::Request,
                 Some("use text, hex, or ndjson output to filter frames"),
             ),
             "capture rewriting cannot filter records without discarding source structure",
@@ -216,8 +216,8 @@ fn rewrite_capture(
     if format != reader.format() {
         return Err(CliError::from_classification(
             Classification::new(
-                "cli.capture_rewrite_format",
-                Kind::Cli,
+                "request.capture_rewrite_format",
+                Kind::Request,
                 Some("select the capture output format matching the input capture"),
             ),
             format!(

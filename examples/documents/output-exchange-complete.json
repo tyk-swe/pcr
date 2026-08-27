@@ -1,19 +1,22 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "exchange",
   "mode": "stream",
   "sequence": 3,
   "status": "success",
   "result": {
     "event": "complete",
-    "unanswered": [1, 2]
+    "unanswered": [
+      1,
+      2
+    ]
   },
   "diagnostics": [],
   "stats": {
     "packets_attempted": 3,
     "packets_completed": 3,
     "bytes": 12,
-    "elapsed": { "secs": 3, "nanos": 0 },
+    "elapsed_ms": 3000,
     "capture": {
       "received_frames": 1,
       "received_bytes": 4,

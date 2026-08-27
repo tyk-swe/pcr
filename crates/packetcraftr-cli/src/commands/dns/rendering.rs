@@ -34,7 +34,7 @@ pub(super) fn render_text(
             attempt.status.as_str(),
             output_timestamp_text(attempt.sent_at),
             render_optional(attempt.received_at, output_timestamp_text),
-            render_optional(attempt.latency, |value| format!("{value:?}")),
+            render_optional(attempt.latency_ms, |value| format!("{value:?}")),
             optional_display(attempt.response_code),
             attempt.reason,
         ))?;

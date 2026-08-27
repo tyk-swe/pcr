@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/tyk-swe/pcr/main/schemas/packetcraftr.output.v1.schema.json",
+  "$id": "https://raw.githubusercontent.com/tyk-swe/pcr/main/schemas/packetcraftr.output.v2.schema.json",
   "$comment": "SPDX-License-Identifier: AGPL-3.0-only",
-  "title": "PacketcraftR CLI output envelope v1",
+  "title": "PacketcraftR CLI output envelope v2",
   "description": "One typed aggregate JSON result or one independently valid NDJSON stream record.",
   "oneOf": [
     {
@@ -30,7 +30,7 @@
       ],
       "properties": {
         "schema": {
-          "const": "packetcraftr.output/v1"
+          "const": "packetcraftr.output/v2"
         },
         "command": {
           "type": [
@@ -556,26 +556,26 @@
             ],
             "not": {
               "anyOf": [
-              {
-                "required": [
-                  "endpoints"
-                ]
-              },
-              {
-                "required": [
-                  "protocols"
-                ]
-              },
-              {
-                "required": [
-                  "ports"
-                ]
-              },
-              {
-                "required": [
-                  "io"
-                ]
-              }
+                {
+                  "required": [
+                    "endpoints"
+                  ]
+                },
+                {
+                  "required": [
+                    "protocols"
+                  ]
+                },
+                {
+                  "required": [
+                    "ports"
+                  ]
+                },
+                {
+                  "required": [
+                    "io"
+                  ]
+                }
               ]
             }
           }
@@ -594,26 +594,26 @@
             ],
             "not": {
               "anyOf": [
-              {
-                "required": [
-                  "conversations"
-                ]
-              },
-              {
-                "required": [
-                  "protocols"
-                ]
-              },
-              {
-                "required": [
-                  "ports"
-                ]
-              },
-              {
-                "required": [
-                  "io"
-                ]
-              }
+                {
+                  "required": [
+                    "conversations"
+                  ]
+                },
+                {
+                  "required": [
+                    "protocols"
+                  ]
+                },
+                {
+                  "required": [
+                    "ports"
+                  ]
+                },
+                {
+                  "required": [
+                    "io"
+                  ]
+                }
               ]
             }
           }
@@ -632,26 +632,26 @@
             ],
             "not": {
               "anyOf": [
-              {
-                "required": [
-                  "conversations"
-                ]
-              },
-              {
-                "required": [
-                  "endpoints"
-                ]
-              },
-              {
-                "required": [
-                  "ports"
-                ]
-              },
-              {
-                "required": [
-                  "io"
-                ]
-              }
+                {
+                  "required": [
+                    "conversations"
+                  ]
+                },
+                {
+                  "required": [
+                    "endpoints"
+                  ]
+                },
+                {
+                  "required": [
+                    "ports"
+                  ]
+                },
+                {
+                  "required": [
+                    "io"
+                  ]
+                }
               ]
             }
           }
@@ -670,26 +670,26 @@
             ],
             "not": {
               "anyOf": [
-              {
-                "required": [
-                  "conversations"
-                ]
-              },
-              {
-                "required": [
-                  "endpoints"
-                ]
-              },
-              {
-                "required": [
-                  "protocols"
-                ]
-              },
-              {
-                "required": [
-                  "io"
-                ]
-              }
+                {
+                  "required": [
+                    "conversations"
+                  ]
+                },
+                {
+                  "required": [
+                    "endpoints"
+                  ]
+                },
+                {
+                  "required": [
+                    "protocols"
+                  ]
+                },
+                {
+                  "required": [
+                    "io"
+                  ]
+                }
               ]
             }
           }
@@ -708,26 +708,26 @@
             ],
             "not": {
               "anyOf": [
-              {
-                "required": [
-                  "conversations"
-                ]
-              },
-              {
-                "required": [
-                  "endpoints"
-                ]
-              },
-              {
-                "required": [
-                  "protocols"
-                ]
-              },
-              {
-                "required": [
-                  "ports"
-                ]
-              }
+                {
+                  "required": [
+                    "conversations"
+                  ]
+                },
+                {
+                  "required": [
+                    "endpoints"
+                  ]
+                },
+                {
+                  "required": [
+                    "protocols"
+                  ]
+                },
+                {
+                  "required": [
+                    "ports"
+                  ]
+                }
               ]
             }
           }
@@ -750,7 +750,7 @@
         "bytes_b_to_a",
         "first_timestamp",
         "last_timestamp",
-        "duration"
+        "duration_ms"
       ],
       "properties": {
         "transport": {
@@ -796,8 +796,9 @@
         "last_timestamp": {
           "$ref": "#/$defs/timestamp"
         },
-        "duration": {
-          "$ref": "#/$defs/duration"
+        "duration_ms": {
+          "description": "Duration between the first and last observed frame in milliseconds. Sub-millisecond precision is truncated to whole milliseconds.",
+          "$ref": "#/$defs/uint64"
         }
       },
       "additionalProperties": false
@@ -882,18 +883,19 @@
     "statsIo": {
       "type": "object",
       "required": [
-        "interval",
+        "interval_ms",
         "buckets"
       ],
       "properties": {
-        "interval": {
-          "$ref": "#/$defs/duration"
-        },
         "buckets": {
           "type": "array",
           "items": {
             "$ref": "#/$defs/statsIoBucket"
           }
+        },
+        "interval_ms": {
+          "description": "Bucket interval duration in milliseconds. Sub-millisecond precision is truncated to whole milliseconds.",
+          "$ref": "#/$defs/uint64"
         }
       },
       "additionalProperties": false
@@ -901,18 +903,19 @@
     "statsIoBucket": {
       "type": "object",
       "required": [
-        "offset",
+        "offset_ms",
         "frames",
         "bytes"
       ],
       "properties": {
-        "offset": {
-          "$ref": "#/$defs/duration"
-        },
         "frames": {
           "$ref": "#/$defs/uint64"
         },
         "bytes": {
+          "$ref": "#/$defs/uint64"
+        },
+        "offset_ms": {
+          "description": "Bucket start offset from capture start in milliseconds. Sub-millisecond precision is truncated to whole milliseconds.",
           "$ref": "#/$defs/uint64"
         }
       },
@@ -1250,7 +1253,7 @@
       ],
       "properties": {
         "sessions": {
-          "description": "Sessions in first-seen order, bounded by --max-tls-sessions; summary.sessions_omitted reports what that ceiling left out.",
+          "description": "Sessions in first-seen order, bounded by the retained session limit; summary.sessions_omitted reports what that ceiling left out.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/tlsSessionRecord"
@@ -2536,7 +2539,7 @@
         "frames_attempted",
         "frames_completed",
         "bytes_completed",
-        "scheduled_duration",
+        "scheduled_duration_ms",
         "frames"
       ],
       "properties": {
@@ -2565,14 +2568,15 @@
         "bytes_completed": {
           "$ref": "#/$defs/uint64"
         },
-        "scheduled_duration": {
-          "$ref": "#/$defs/duration"
-        },
         "frames": {
           "type": "array",
           "items": {
             "$ref": "#/$defs/replayFrameResult"
           }
+        },
+        "scheduled_duration_ms": {
+          "description": "Scheduled transmission duration in milliseconds. Sub-millisecond precision is truncated to whole milliseconds.",
+          "$ref": "#/$defs/uint64"
         }
       },
       "additionalProperties": false
@@ -2892,7 +2896,7 @@
             "event",
             "request_index",
             "response",
-            "latency"
+            "latency_ms"
           ],
           "properties": {
             "event": {
@@ -2904,8 +2908,9 @@
             "response": {
               "$ref": "#/$defs/decodedFrame"
             },
-            "latency": {
-              "$ref": "#/$defs/duration"
+            "latency_ms": {
+              "description": "Response round-trip latency in milliseconds. Sub-millisecond precision is truncated to whole milliseconds.",
+              "$ref": "#/$defs/uint64"
             }
           },
           "additionalProperties": false
@@ -2998,7 +3003,7 @@
         "source_sequence",
         "interface",
         "link_mode",
-        "scheduled_delay",
+        "scheduled_delay_ms",
         "bytes_sent",
         "frame",
         "transmitted"
@@ -3013,9 +3018,6 @@
         "link_mode": {
           "$ref": "#/$defs/linkMode"
         },
-        "scheduled_delay": {
-          "$ref": "#/$defs/duration"
-        },
         "bytes_sent": {
           "$ref": "#/$defs/uint64"
         },
@@ -3024,6 +3026,10 @@
         },
         "transmitted": {
           "type": "boolean"
+        },
+        "scheduled_delay_ms": {
+          "description": "Scheduled delay before sending this frame in milliseconds. Sub-millisecond precision is truncated to whole milliseconds.",
+          "$ref": "#/$defs/uint64"
         }
       },
       "additionalProperties": false
@@ -3508,31 +3514,17 @@
       ],
       "properties": {
         "schema": {
-          "const": "packetcraftr.packet/v1"
+          "const": "packetcraftr.packet/v2"
         },
         "layers": {
           "type": "array",
           "items": {
             "type": "object",
-            "required": [
-              "protocol"
-            ],
-            "properties": {
-              "protocol": {
-                "type": "string",
-                "minLength": 1
-              },
-              "fields": {
-                "type": "object",
-                "propertyNames": {
-                  "minLength": 1
-                },
-                "additionalProperties": {
-                  "$ref": "#/$defs/fieldValue"
-                }
-              }
-            },
-            "additionalProperties": false
+            "minProperties": 1,
+            "maxProperties": 1,
+            "additionalProperties": {
+              "type": "object"
+            }
           }
         }
       },
@@ -4129,7 +4121,7 @@
       "required": [
         "request_index",
         "response",
-        "latency"
+        "latency_ms"
       ],
       "properties": {
         "request_index": {
@@ -4138,8 +4130,9 @@
         "response": {
           "$ref": "#/$defs/decodedFrame"
         },
-        "latency": {
-          "$ref": "#/$defs/duration"
+        "latency_ms": {
+          "description": "Response round-trip latency in milliseconds. Sub-millisecond precision is truncated to whole milliseconds.",
+          "$ref": "#/$defs/uint64"
         }
       },
       "additionalProperties": false
@@ -4254,15 +4247,16 @@
         "received_at": {
           "$ref": "#/$defs/timestamp"
         },
-        "latency": {
-          "$ref": "#/$defs/duration"
-        },
         "frame": {
           "$ref": "#/$defs/frame"
         },
         "reason": {
           "type": "string",
           "minLength": 1
+        },
+        "latency_ms": {
+          "description": "Probe response latency in milliseconds. Sub-millisecond precision is truncated to whole milliseconds.",
+          "$ref": "#/$defs/uint64"
         }
       },
       "additionalProperties": false
@@ -4355,15 +4349,16 @@
         "received_at": {
           "$ref": "#/$defs/timestamp"
         },
-        "latency": {
-          "$ref": "#/$defs/duration"
-        },
         "frame": {
           "$ref": "#/$defs/frame"
         },
         "reason": {
           "type": "string",
           "minLength": 1
+        },
+        "latency_ms": {
+          "description": "Probe response latency in milliseconds. Sub-millisecond precision is truncated to whole milliseconds.",
+          "$ref": "#/$defs/uint64"
         }
       },
       "allOf": [
@@ -4472,9 +4467,6 @@
         "received_at": {
           "$ref": "#/$defs/timestamp"
         },
-        "latency": {
-          "$ref": "#/$defs/duration"
-        },
         "frame": {
           "$ref": "#/$defs/frame"
         },
@@ -4486,6 +4478,10 @@
         "reason": {
           "type": "string",
           "minLength": 1
+        },
+        "latency_ms": {
+          "description": "Attempt latency in milliseconds. Sub-millisecond precision is truncated to whole milliseconds.",
+          "$ref": "#/$defs/uint64"
         }
       },
       "additionalProperties": false
@@ -4952,33 +4948,51 @@
       "allOf": [
         {
           "if": {
-            "required": ["outcome"],
+            "required": [
+              "outcome"
+            ],
             "properties": {
               "outcome": {
-                "enum": ["built", "response", "timeout"]
+                "enum": [
+                  "built",
+                  "response",
+                  "timeout"
+                ]
               }
             }
           },
           "then": {
-            "required": ["frame", "requires_live_opt_in"]
+            "required": [
+              "frame",
+              "requires_live_opt_in"
+            ]
           }
         },
         {
           "if": {
-            "required": ["outcome"],
+            "required": [
+              "outcome"
+            ],
             "properties": {
               "outcome": {
-                "enum": ["response", "timeout"]
+                "enum": [
+                  "response",
+                  "timeout"
+                ]
               }
             }
           },
           "then": {
-            "required": ["sent"]
+            "required": [
+              "sent"
+            ]
           }
         },
         {
           "if": {
-            "required": ["outcome"],
+            "required": [
+              "outcome"
+            ],
             "properties": {
               "outcome": {
                 "const": "rejected"
@@ -4986,7 +5000,9 @@
             }
           },
           "then": {
-            "required": ["error"]
+            "required": [
+              "error"
+            ]
           }
         }
       ],
@@ -5063,27 +5079,46 @@
       "oneOf": [
         {
           "type": "object",
-          "required": ["type", "value"],
+          "required": [
+            "type",
+            "value"
+          ],
           "properties": {
-            "type": { "const": "bool" },
-            "value": { "type": "boolean" }
+            "type": {
+              "const": "bool"
+            },
+            "value": {
+              "type": "boolean"
+            }
           },
           "additionalProperties": false
         },
         {
           "type": "object",
-          "required": ["type", "value"],
+          "required": [
+            "type",
+            "value"
+          ],
           "properties": {
-            "type": { "const": "unsigned" },
-            "value": { "$ref": "#/$defs/uint64" }
+            "type": {
+              "const": "unsigned"
+            },
+            "value": {
+              "$ref": "#/$defs/uint64"
+            }
           },
           "additionalProperties": false
         },
         {
           "type": "object",
-          "required": ["type", "value"],
+          "required": [
+            "type",
+            "value"
+          ],
           "properties": {
-            "type": { "const": "signed" },
+            "type": {
+              "const": "signed"
+            },
             "value": {
               "type": "integer",
               "minimum": -9223372036854775808,
@@ -5094,18 +5129,30 @@
         },
         {
           "type": "object",
-          "required": ["type", "value"],
+          "required": [
+            "type",
+            "value"
+          ],
           "properties": {
-            "type": { "const": "text" },
-            "value": { "type": "string" }
+            "type": {
+              "const": "text"
+            },
+            "value": {
+              "type": "string"
+            }
           },
           "additionalProperties": false
         },
         {
           "type": "object",
-          "required": ["type", "value"],
+          "required": [
+            "type",
+            "value"
+          ],
           "properties": {
-            "type": { "const": "bytes" },
+            "type": {
+              "const": "bytes"
+            },
             "value": {
               "type": "array",
               "items": {
@@ -5119,27 +5166,48 @@
         },
         {
           "type": "object",
-          "required": ["type", "value"],
+          "required": [
+            "type",
+            "value"
+          ],
           "properties": {
-            "type": { "const": "ipv4" },
-            "value": { "type": "string", "format": "ipv4" }
+            "type": {
+              "const": "ipv4"
+            },
+            "value": {
+              "type": "string",
+              "format": "ipv4"
+            }
           },
           "additionalProperties": false
         },
         {
           "type": "object",
-          "required": ["type", "value"],
+          "required": [
+            "type",
+            "value"
+          ],
           "properties": {
-            "type": { "const": "ipv6" },
-            "value": { "type": "string", "format": "ipv6" }
+            "type": {
+              "const": "ipv6"
+            },
+            "value": {
+              "type": "string",
+              "format": "ipv6"
+            }
           },
           "additionalProperties": false
         },
         {
           "type": "object",
-          "required": ["type", "value"],
+          "required": [
+            "type",
+            "value"
+          ],
           "properties": {
-            "type": { "const": "mac" },
+            "type": {
+              "const": "mac"
+            },
             "value": {
               "type": "array",
               "minItems": 6,
@@ -5155,12 +5223,19 @@
         },
         {
           "type": "object",
-          "required": ["type", "value"],
+          "required": [
+            "type",
+            "value"
+          ],
           "properties": {
-            "type": { "const": "list" },
+            "type": {
+              "const": "list"
+            },
             "value": {
               "type": "array",
-              "items": { "$ref": "#/$defs/fieldValue" }
+              "items": {
+                "$ref": "#/$defs/fieldValue"
+              }
             }
           },
           "additionalProperties": false
@@ -5216,7 +5291,7 @@
         "kind": {
           "type": "string",
           "enum": [
-            "cli",
+            "request",
             "packet",
             "capability",
             "io",
@@ -5288,7 +5363,7 @@
         "packets_attempted",
         "packets_completed",
         "bytes",
-        "elapsed",
+        "elapsed_ms",
         "capture"
       ],
       "properties": {
@@ -5301,11 +5376,12 @@
         "bytes": {
           "$ref": "#/$defs/uint64"
         },
-        "elapsed": {
-          "$ref": "#/$defs/duration"
-        },
         "capture": {
           "$ref": "#/$defs/captureStatistics"
+        },
+        "elapsed_ms": {
+          "description": "Total elapsed execution time in milliseconds. Sub-millisecond precision is truncated to whole milliseconds.",
+          "$ref": "#/$defs/uint64"
         }
       },
       "additionalProperties": false
@@ -5338,24 +5414,6 @@
         },
         "receiver_dropped_frames": {
           "$ref": "#/$defs/uint64"
-        }
-      },
-      "additionalProperties": false
-    },
-    "duration": {
-      "type": "object",
-      "required": [
-        "secs",
-        "nanos"
-      ],
-      "properties": {
-        "secs": {
-          "$ref": "#/$defs/uint64"
-        },
-        "nanos": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 999999999
         }
       },
       "additionalProperties": false

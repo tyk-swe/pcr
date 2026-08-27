@@ -1,11 +1,11 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "expert",
   "mode": "aggregate",
   "status": "error",
   "error": {
-    "code": "cli.filter",
-    "kind": "cli",
+    "code": "request.filter",
+    "kind": "request",
     "message": "unknown display filter field nope at byte 0",
     "causes": [],
     "remediation": "run `packetcraftr protocols <PROTOCOL>` to list the fields a protocol exposes"

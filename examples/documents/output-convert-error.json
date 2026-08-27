@@ -1,11 +1,11 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "convert",
   "mode": "aggregate",
   "status": "error",
   "error": {
-    "code": "cli.argument",
-    "kind": "cli",
+    "code": "request.argument",
+    "kind": "request",
     "message": "unsupported target schema `packet/v3`; only `packet/v2` is supported",
     "causes": [],
     "remediation": "specify --to packet/v2"

@@ -11,7 +11,7 @@ use super::classification::classify_response;
 use super::model::{Batch, Execution, Executor, Strategy};
 
 const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
-    "cli.traceroute_executor",
+    "request.traceroute_executor",
     "use homogeneous bounded hop batches and retain at least one response per probe",
 );
 

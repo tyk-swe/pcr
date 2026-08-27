@@ -5,9 +5,9 @@
 
 use packetcraftr_core::diagnostic::Diagnostic;
 use serde::Serialize;
-use std::time::Duration;
 
 use crate::output::contract::Error;
+use crate::output::duration_ms;
 use crate::output::envelope::Stats;
 use crate::output::frame::{Captured, Decoded, Wire};
 
@@ -15,7 +15,7 @@ use crate::output::frame::{Captured, Decoded, Wire};
 pub struct Response {
     pub request_index: u64,
     pub response: Decoded,
-    pub latency: Duration,
+    pub latency_ms: u64,
 }
 
 /// Aggregate result of `exchange`; diagnostics and statistics live in the envelope.
@@ -85,7 +85,7 @@ pub enum Event {
     Response {
         request_index: u64,
         response: Decoded,
-        latency: Duration,
+        latency_ms: u64,
     },
     Unanswered {
         request_index: u64,
@@ -126,7 +126,7 @@ impl Event {
                     Self::Response {
                         request_index: response.request_index,
                         response: response.response,
-                        latency: response.latency,
+                        latency_ms: response.latency_ms,
                     },
                     Vec::new(),
                 )
@@ -185,7 +185,7 @@ fn response_output(response: crate::exchange::Response) -> std::result::Result<R
     Ok(Response {
         request_index: request_index(response.request_index),
         response: Decoded::try_from_decoded(response.response)?,
-        latency: response.latency,
+        latency_ms: duration_ms(response.latency),
     })
 }
 

@@ -237,6 +237,18 @@ impl<'de> DeserializeSeed<'de> for V2DocumentSeed {
     }
 }
 
+impl<'de> serde::Deserialize<'de> for Document {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        V2DocumentSeed {
+            max_layers: crate::build::DEFAULT_MAX_LAYERS,
+        }
+        .deserialize(deserializer)
+    }
+}
+
 struct V2DocumentVisitor {
     max_layers: usize,
 }

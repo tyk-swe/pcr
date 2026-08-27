@@ -11,7 +11,7 @@ use super::classification::classify_response;
 use super::model::{Batch, Execution, Executor, Transport};
 
 const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
-    "cli.scan_executor",
+    "request.scan_executor",
     "use homogeneous bounded scan batches and retain at least one response per probe",
 );
 

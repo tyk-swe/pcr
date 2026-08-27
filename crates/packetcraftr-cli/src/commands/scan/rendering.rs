@@ -41,7 +41,7 @@ pub(super) fn render_text(
                 output_timestamp_text(evidence.sent_at),
                 render_optional(evidence.received_at, output_timestamp_text),
                 optional_display(evidence.responder),
-                render_optional(evidence.latency, |value| format!("{value:?}")),
+                render_optional(evidence.latency_ms, |value| format!("{value:?}")),
                 evidence.reason,
             ))?;
             if let Some(frame) = &evidence.frame {

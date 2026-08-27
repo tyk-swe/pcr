@@ -70,8 +70,8 @@ impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
             Self::InvalidLimit { .. } => Classification::new(
-                "cli.analysis_limit",
-                Kind::Cli,
+                "request.analysis_limit",
+                Kind::Request,
                 Some("use finite non-zero analysis frame, byte, flow, and duration limits"),
             ),
             Self::Capture { source, .. } => source.classification(),
@@ -104,9 +104,11 @@ impl Classified for Error {
                 Kind::Packet,
                 Some("remove frame.time_epoch from the filter or use timestamped packet blocks"),
             ),
-            Self::Filter { .. } => {
-                Classification::new("cli.filter", Kind::Cli, Some("repair the display filter"))
-            }
+            Self::Filter { .. } => Classification::new(
+                "request.filter",
+                Kind::Request,
+                Some("repair the display filter"),
+            ),
             Self::StreamLimit { .. } | Self::Scope { .. } | Self::DurationLimit { .. } => {
                 resource_limit()
             }

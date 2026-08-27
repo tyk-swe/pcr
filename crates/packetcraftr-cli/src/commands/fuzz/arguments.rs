@@ -46,13 +46,13 @@ impl From<Strategy> for core::fuzz::Strategy {
     mut_arg("timeout_ms", |arg| arg.requires("live")),
     mut_arg("rate", |arg| arg.requires("live")),
     mut_arg("max_queue_frames", |arg| arg.requires("live")),
-    mut_arg("max_captured_bytes", |arg| arg.requires("live")),
     mut_arg("snap_length", |arg| arg.requires("live")),
     mut_arg("overflow_policy", |arg| arg.requires("live")),
     mut_arg("allow_public_destinations", |arg| arg.requires("live")),
     mut_arg("allow_permissive_packets", |arg| arg.requires("live")),
     mut_arg("allow_source_spoofing", |arg| arg.requires("live")),
     mut_arg("max_packets", |arg| arg.requires("live")),
+    mut_arg("max_captured_bytes", |arg| arg.requires("live")),
     mut_arg("max_bytes", |arg| arg.requires("live"))
 )]
 pub(crate) struct Args {

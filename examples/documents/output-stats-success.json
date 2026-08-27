@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "stats",
   "mode": "aggregate",
   "status": "success",
@@ -36,10 +36,7 @@
           "unix_seconds": 1,
           "nanoseconds": 0
         },
-        "duration": {
-          "secs": 1,
-          "nanos": 0
-        }
+        "duration_ms": 1000
       },
       {
         "transport": "udp",
@@ -60,10 +57,7 @@
           "unix_seconds": 2,
           "nanoseconds": 0
         },
-        "duration": {
-          "secs": 0,
-          "nanos": 0
-        }
+        "duration_ms": 0
       }
     ]
   },

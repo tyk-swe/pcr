@@ -4,15 +4,14 @@
 //! Structured capture-statistics output.
 
 use std::net::IpAddr;
-use std::time::Duration;
-
-use serde::Serialize;
 
 use packetcraftr_core::analysis::stats::{
     ConversationStat, EndpointStat, IoBucketStat, PortStat, ProtocolStat, TransportKind,
 };
+use serde::Serialize;
 
 use super::contract::Error;
+use super::duration_ms;
 use super::frame::Timestamp;
 
 /// Which statistics table a result carries.
@@ -55,7 +54,7 @@ pub struct Conversation {
     pub bytes_b_to_a: u64,
     pub first_timestamp: Timestamp,
     pub last_timestamp: Timestamp,
-    pub duration: Duration,
+    pub duration_ms: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -77,7 +76,7 @@ pub struct Port {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct IoBucket {
-    pub offset: Duration,
+    pub offset_ms: u64,
     pub frames: u64,
     pub bytes: u64,
 }
@@ -85,7 +84,7 @@ pub struct IoBucket {
 /// The I/O series with the bucket width it was computed under.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Io {
-    pub interval: Duration,
+    pub interval_ms: u64,
     pub buckets: Vec<IoBucket>,
 }
 
@@ -155,7 +154,7 @@ impl Result {
             }
             Table::Io => {
                 result.io = Some(Io {
-                    interval: report.interval,
+                    interval_ms: duration_ms(report.interval),
                     buckets: report.io.iter().map(convert_bucket).collect(),
                 });
             }
@@ -184,7 +183,7 @@ fn convert_conversation(row: &ConversationStat) -> std::result::Result<Conversat
         bytes_b_to_a: row.bytes_b_to_a,
         first_timestamp: row.first_timestamp.try_into()?,
         last_timestamp: row.last_timestamp.try_into()?,
-        duration: row.duration(),
+        duration_ms: duration_ms(row.duration()),
     })
 }
 
@@ -217,7 +216,7 @@ fn convert_port(row: &PortStat) -> Port {
 
 fn convert_bucket(row: &IoBucketStat) -> IoBucket {
     IoBucket {
-        offset: row.offset,
+        offset_ms: duration_ms(row.offset),
         frames: row.frames,
         bytes: row.bytes,
     }

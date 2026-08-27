@@ -247,7 +247,7 @@ impl Serialize for Captured {
 /// it twice.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Stack {
-    pub packet: packetcraftr_core::document::Packet,
+    pub packet: packetcraftr_core::document::v2::Document,
     pub layout: PacketLayout,
     pub diagnostics: Vec<Diagnostic>,
 }
@@ -255,7 +255,7 @@ pub struct Stack {
 impl Stack {
     pub fn from_decoded(decoded: &DecodedPacket) -> Self {
         Self {
-            packet: packetcraftr_core::document::Packet::from_packet(&decoded.packet),
+            packet: packetcraftr_core::document::v2::Document::from_packet(&decoded.packet),
             layout: decoded.layout.clone(),
             diagnostics: decoded
                 .diagnostics
@@ -271,7 +271,7 @@ impl Stack {
 #[derive(Clone, Debug, Serialize)]
 pub struct Decoded {
     pub frame: Captured,
-    pub packet: packetcraftr_core::document::Packet,
+    pub packet: packetcraftr_core::document::v2::Document,
     pub layout: PacketLayout,
     pub diagnostics: Vec<Diagnostic>,
 }
@@ -287,7 +287,7 @@ impl Decoded {
         } = decoded;
         Ok(Self {
             frame: Captured::try_from_frame(frame)?,
-            packet: packetcraftr_core::document::Packet::from_packet(&packet),
+            packet: packetcraftr_core::document::v2::Document::from_packet(&packet),
             layout,
             diagnostics: diagnostics.into_iter().map(Into::into).collect(),
         })

@@ -4,15 +4,14 @@
 //! Structured scan output.
 
 use std::net::IpAddr;
-use std::time::Duration;
-
-use serde::Serialize;
 
 use packetcraftr_core::diagnostic::Diagnostic as PacketDiagnostic;
+use serde::Serialize;
 
 use super::contract::Error;
 use super::envelope::Stats;
 use super::frame::{Captured, Timestamp};
+use crate::output::optional_duration_ms;
 
 pub use crate::scan::{Classification, ProbeStatus};
 
@@ -33,7 +32,7 @@ pub struct Probe {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub received_at: Option<Timestamp>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub latency: Option<Duration>,
+    pub latency_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub frame: Option<Captured>,
     pub reason: String,
@@ -172,7 +171,7 @@ fn try_from_probe(evidence: crate::scan::ProbeEvidence) -> std::result::Result<P
         responder: evidence.responder,
         sent_at: evidence.sent_at.try_into()?,
         received_at: evidence.received_at.map(Timestamp::try_from).transpose()?,
-        latency: evidence.latency,
+        latency_ms: optional_duration_ms(evidence.latency),
         frame: evidence
             .response
             .map(Captured::try_from_frame)

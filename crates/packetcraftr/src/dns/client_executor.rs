@@ -11,7 +11,7 @@ use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Sender 
 use super::model::{Exchange, Execution, Executor};
 
 const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
-    "cli.dns_executor",
+    "request.dns_executor",
     "use one bounded UDP DNS query and retain at least one response",
 );
 const RESULT_FAULT: ExecutorFault = ExecutorFault::new(

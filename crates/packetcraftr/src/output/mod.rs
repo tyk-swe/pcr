@@ -32,3 +32,13 @@ pub mod send;
 pub mod stats;
 pub mod tls;
 pub mod traceroute;
+
+#[inline]
+pub(crate) fn duration_ms(duration: std::time::Duration) -> u64 {
+    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+}
+
+#[inline]
+pub(crate) fn optional_duration_ms(duration: Option<std::time::Duration>) -> Option<u64> {
+    duration.map(duration_ms)
+}

@@ -134,8 +134,8 @@ impl Classified for Error {
                 Kind::Io,
                 "inspect the capture device state and native backend diagnostic before retrying",
             ),
-            Self::InvalidCaptureFilter { .. } => classified_cli(
-                "cli.capture_filter",
+            Self::InvalidCaptureFilter { .. } => classified_request(
+                "request.capture_filter",
                 "use a valid libpcap/Npcap BPF capture-filter expression",
             ),
             Self::CaptureFilterInstallation { .. } => classified(
@@ -163,12 +163,12 @@ impl Classified for Error {
                 Kind::Io,
                 "treat the capture as incomplete; inspect receiver-drop counters and reduce native capture pressure before retrying",
             ),
-            Self::InvalidCaptureQueueLimit { .. } => classified_cli(
-                "cli.capture_limit",
+            Self::InvalidCaptureQueueLimit { .. } => classified_request(
+                "request.capture_limit",
                 "use non-zero capture limits whose snap length fits the aggregate byte ceiling",
             ),
-            Self::InvalidCaptureTimeout { .. } => classified_cli(
-                "cli.capture_timeout",
+            Self::InvalidCaptureTimeout { .. } => classified_request(
+                "request.capture_timeout",
                 "use a finite capture wait no longer than the documented one-hour maximum",
             ),
             Self::InvalidTransmissionFrame { .. } => classified(
@@ -198,6 +198,6 @@ fn classified(code: &'static str, kind: Kind, remediation: &'static str) -> Clas
     Classification::new(code, kind, Some(remediation))
 }
 
-fn classified_cli(code: &'static str, remediation: &'static str) -> Classification {
-    classified(code, Kind::Cli, remediation)
+fn classified_request(code: &'static str, remediation: &'static str) -> Classification {
+    classified(code, Kind::Request, remediation)
 }

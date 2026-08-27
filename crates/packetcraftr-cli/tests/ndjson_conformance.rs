@@ -303,7 +303,7 @@ fn production_typed_event_variants_are_schema_valid() {
                 index: 1,
             },
             link_mode: output::replay::LinkMode::Layer3,
-            scheduled_delay: Duration::ZERO,
+            scheduled_delay_ms: 0,
             bytes_sent: 1,
             frame: output::frame::Captured::try_from_frame(frame(&[1])).unwrap(),
             transmitted: true,

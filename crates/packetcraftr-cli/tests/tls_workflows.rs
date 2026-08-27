@@ -286,7 +286,7 @@ fn the_retention_ceiling_reports_what_it_left_out() {
         "json",
         "tls",
         path,
-        "--max-tls-sessions",
+        "--max-sessions",
         "2",
     ]));
     assert_eq!(
@@ -302,14 +302,14 @@ fn the_retention_ceiling_reports_what_it_left_out() {
         "ndjson",
         "tls",
         path,
-        "--max-tls-sessions",
+        "--max-sessions",
         "2",
     ]));
     assert_eq!(records.len(), 4);
     assert_eq!(records[3]["result"]["sessions_omitted"], 0);
 
     // Text writes each session as it completes, so it omits none either.
-    let rendered = text(&run_success(&["tls", path, "--max-tls-sessions", "2"]));
+    let rendered = text(&run_success(&["tls", path, "--max-sessions", "2"]));
     let lines = rendered.lines().collect::<Vec<_>>();
     assert_eq!(lines.len(), 4, "{rendered}");
     for sni in ["api.example.test", "files.example.test", "www.example.test"] {
@@ -404,8 +404,8 @@ fn dissect_reads_a_remapped_port_as_tls_only_when_the_flag_is_given() {
 fn limit_failures_are_reported_before_any_capture_is_read() {
     let missing = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("does-not-exist.pcapng");
     for arguments in [
-        vec!["tls", path_text(&missing), "--max-tls-sessions", "0"],
-        vec!["tls", path_text(&missing), "--max-tls-buffer-bytes", "0"],
+        vec!["tls", path_text(&missing), "--max-sessions", "0"],
+        vec!["tls", path_text(&missing), "--max-buffer-bytes", "0"],
     ] {
         let output = run(&arguments);
         assert!(!output.status.success(), "{arguments:?}");
@@ -418,13 +418,10 @@ fn limit_failures_are_reported_before_any_capture_is_read() {
 
     // The floor is the per-direction buffer, and the flag that set it is the
     // one named back.
-    let floored = run(&["tls", path_text(&missing), "--max-tls-buffer-bytes", "1024"]);
+    let floored = run(&["tls", path_text(&missing), "--max-buffer-bytes", "1024"]);
     assert_eq!(floored.status.code(), Some(2));
     let rendered = String::from_utf8_lossy(&floored.stderr);
-    assert!(
-        rendered.contains("--max-tls-buffer-bytes=1024"),
-        "{rendered}"
-    );
+    assert!(rendered.contains("--max-buffer-bytes=1024"), "{rendered}");
     assert!(rendered.contains("135168"), "{rendered}");
     assert!(
         !rendered.contains("max_direction_bytes"),

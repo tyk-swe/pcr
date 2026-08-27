@@ -26,7 +26,11 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
     let format = AggregateFormat::narrow(output::contract::Command::Convert, format)?;
     if arguments.to != "packet/v2" && arguments.to != "packetcraftr.packet/v2" {
         return Err(CliError::from_classification(
-            Classification::new("cli.argument", Kind::Cli, Some("specify --to packet/v2")),
+            Classification::new(
+                "request.argument",
+                Kind::Request,
+                Some("specify --to packet/v2"),
+            ),
             format!(
                 "unsupported target schema `{}`; only `packet/v2` is supported",
                 arguments.to

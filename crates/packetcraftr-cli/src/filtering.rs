@@ -53,8 +53,8 @@ pub(crate) fn compile(
     if filter.requirements().stream_index && !capabilities.stream_index {
         return Err(CliError::from_classification(
             Classification::new(
-                "cli.filter_unsupported_field",
-                Kind::Cli,
+                "request.filter_unsupported_field",
+                Kind::Request,
                 Some(
                     "use `follow`, `stats`, or `expert` for stream-aware filters, \
                      or filter on header fields instead",
@@ -161,7 +161,7 @@ fn cli_error(error: packetcraftr::core::filter::Error) -> CliError {
         _ => "check the filter syntax; see `packetcraftr read --help` for examples",
     };
     CliError::from_classification(
-        Classification::new("cli.filter", Kind::Cli, Some(remediation)),
+        Classification::new("request.filter", Kind::Request, Some(remediation)),
         error.to_string(),
         Vec::new(),
     )
@@ -186,7 +186,10 @@ mod tests {
 
         let error = compile("udp.stream == 1", &registry, Capabilities::frames_only())
             .expect_err("frame-only commands lack stream indices");
-        assert_eq!(error.classification.code, "cli.filter_unsupported_field");
+        assert_eq!(
+            error.classification.code,
+            "request.filter_unsupported_field"
+        );
         assert!(
             error
                 .classification
@@ -262,11 +265,11 @@ mod tests {
             .expect_err("stream field rejected under frames_only capability");
         assert_eq!(
             stream_error.classification.code,
-            "cli.filter_unsupported_field"
+            "request.filter_unsupported_field"
         );
 
         let syntax_error = FrameSelector::compile_optional(Some("(ethernet"), &registry, 14)
             .expect_err("malformed filter rejected");
-        assert_eq!(syntax_error.classification.code, "cli.filter");
+        assert_eq!(syntax_error.classification.code, "request.filter");
     }
 }

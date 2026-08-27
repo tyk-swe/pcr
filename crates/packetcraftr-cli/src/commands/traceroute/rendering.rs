@@ -36,7 +36,7 @@ pub(super) fn render_text(
                 output_timestamp_text(probe.sent_at),
                 render_optional(probe.received_at, output_timestamp_text),
                 optional_display(probe.responder),
-                render_optional(probe.latency, |value| format!("{value:?}")),
+                render_optional(probe.latency_ms, |value| format!("{value:?}")),
                 optional_display(probe.destination_port),
                 probe.reason,
             ))?;

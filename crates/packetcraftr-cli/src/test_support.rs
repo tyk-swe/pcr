@@ -59,7 +59,7 @@ pub(crate) fn schema_validator() -> &'static jsonschema::Validator {
     static VALIDATOR: OnceLock<jsonschema::Validator> = OnceLock::new();
     VALIDATOR.get_or_init(|| {
         let schema: Value = serde_json::from_str(include_str!(
-            "../../../schemas/packetcraftr.output.v1.schema.json"
+            "../../../schemas/packetcraftr.output.v2.schema.json"
         ))
         .expect("published output schema must be JSON");
         jsonschema::validator_for(&schema).expect("published output schema must compile")

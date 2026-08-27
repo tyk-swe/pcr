@@ -103,8 +103,8 @@ fn command_format_matrix_display_and_errors_cover_the_full_vocabulary() {
         format: Format::Raw,
     };
     assert!(unsupported.to_string().contains("choose text, json"));
-    assert_eq!(unsupported.classification().code, "cli.output_format");
-    assert_eq!(unsupported.classification().kind, Kind::Cli);
+    assert_eq!(unsupported.classification().code, "request.output_format");
+    assert_eq!(unsupported.classification().kind, Kind::Request);
 
     for (error, message, code, kind) in [
         (

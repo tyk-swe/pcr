@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "exchange",
   "mode": "stream",
   "sequence": 2,
@@ -18,15 +18,11 @@
         "bytes_hex": "01020304"
       },
       "packet": {
-        "schema": "packetcraftr.packet/v1",
+        "schema": "packetcraftr.packet/v2",
         "layers": [
           {
-            "protocol": "raw",
-            "fields": {
-              "bytes": {
-                "type": "bytes",
-                "value": [1, 2, 3, 4]
-              }
+            "raw": {
+              "bytes": "0x01020304"
             }
           }
         ]

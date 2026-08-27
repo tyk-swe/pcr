@@ -7,7 +7,7 @@
 use packetcraftr::{
     core::protocol,
     output::{
-        contract::{Command, Format, SCHEMA_V1},
+        contract::{Command, Format, SCHEMA_V2},
         envelope::{Aggregate, StreamEncoder},
     },
 };
@@ -38,7 +38,7 @@ fn aggregate_and_stream_envelopes_keep_version_and_discriminators() {
         Vec::new(),
     ))
     .expect("aggregate must serialize");
-    assert_eq!(aggregate["schema"], SCHEMA_V1);
+    assert_eq!(aggregate["schema"], SCHEMA_V2);
     assert_eq!(aggregate["command"], "protocols");
     assert_eq!(aggregate["mode"], "aggregate");
     assert_eq!(aggregate["status"], "success");
@@ -52,17 +52,17 @@ fn aggregate_and_stream_envelopes_keep_version_and_discriminators() {
             .expect("stream must serialize");
     }
     let stream = output.records().pop().expect("eighth record");
-    assert_eq!(stream["schema"], SCHEMA_V1);
+    assert_eq!(stream["schema"], SCHEMA_V2);
     assert_eq!(stream["mode"], "stream");
     assert_eq!(stream["sequence"], 7);
 }
 
 #[test]
-fn current_schema_and_published_examples_use_output_v1() {
+fn current_schema_and_published_examples_use_output_v2() {
     let schema = output_schema();
     assert_eq!(
         schema["$defs"]["baseEnvelope"]["properties"]["schema"]["const"],
-        SCHEMA_V1
+        SCHEMA_V2
     );
     assert!(
         schema["$defs"]["baseEnvelope"]["properties"]["sequence"]["description"]
@@ -92,7 +92,7 @@ fn current_schema_and_published_examples_use_output_v1() {
         include_str!("../../../examples/documents/output-follow-event.json"),
     ] {
         let value: Value = serde_json::from_str(document).expect("example must be valid JSON");
-        assert_eq!(value["schema"], SCHEMA_V1);
+        assert_eq!(value["schema"], SCHEMA_V2);
         assert!(matches!(
             value["status"].as_str(),
             Some("success" | "error")

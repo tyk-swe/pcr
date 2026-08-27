@@ -42,7 +42,11 @@ fn fuzz_targets_have_an_unambiguous_layer_field_grammar() {
 #[test]
 fn fuzz_failures_retain_stable_boundary_classifications() {
     let cases = [
-        (fuzz::Error::InvalidStrategies, "cli.fuzz_limit", Kind::Cli),
+        (
+            fuzz::Error::InvalidStrategies,
+            "request.fuzz_limit",
+            Kind::Request,
+        ),
         (
             fuzz::Error::InvalidBasePacket {
                 message: "bad base".to_owned(),

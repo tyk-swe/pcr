@@ -4,7 +4,7 @@
 //! Declaration of output enums that mirror an upstream enum one variant at a
 //! time.
 
-/// Declares an output-v1 enum and its `From<Source>` conversion from a single
+/// Declares an output enum and its `From<Source>` conversion from a single
 /// variant list.
 ///
 /// Each entry reads `OutputVariant = SourceVariant`, so the output name is free

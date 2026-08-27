@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "exchange",
   "mode": "aggregate",
   "status": "success",
@@ -11,7 +11,9 @@
       }
     ],
     "responses": [],
-    "unanswered": [0],
+    "unanswered": [
+      0
+    ],
     "unsolicited": [],
     "undecoded": []
   },
@@ -20,10 +22,7 @@
     "packets_attempted": 1,
     "packets_completed": 1,
     "bytes": 4,
-    "elapsed": {
-      "secs": 0,
-      "nanos": 0
-    },
+    "elapsed_ms": 0,
     "capture": {
       "received_frames": 0,
       "received_bytes": 0,

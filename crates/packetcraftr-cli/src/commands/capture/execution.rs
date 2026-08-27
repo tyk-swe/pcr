@@ -144,7 +144,7 @@ fn finish<C: net::capture::Session>(
             packets_attempted: progress.budget.frames(),
             packets_completed: progress.frames_matched,
             bytes: progress.budget.bytes(),
-            elapsed: progress.started.elapsed(),
+            elapsed_ms: u64::try_from(progress.started.elapsed().as_millis()).unwrap_or(u64::MAX),
             capture: statistics.into(),
         },
     })

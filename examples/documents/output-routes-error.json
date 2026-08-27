@@ -1,12 +1,12 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "routes",
   "mode": "stream",
   "sequence": 0,
   "status": "error",
   "error": {
-    "code": "cli.output_format",
-    "kind": "cli",
+    "code": "request.output_format",
+    "kind": "request",
     "message": "routes does not support ndjson output; choose text, json",
     "causes": [],
     "remediation": "choose one of the formats listed for this command"

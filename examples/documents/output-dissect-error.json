@@ -1,11 +1,11 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "dissect",
   "mode": "aggregate",
   "status": "error",
   "error": {
-    "code": "cli.error",
-    "kind": "cli",
+    "code": "request.error",
+    "kind": "request",
     "message": "invalid raw layer: invalid hex at byte 0",
     "causes": []
   },

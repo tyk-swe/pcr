@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "scan",
   "mode": "aggregate",
   "status": "success",
@@ -39,10 +39,7 @@
     "packets_attempted": 1,
     "packets_completed": 1,
     "bytes": 40,
-    "elapsed": {
-      "secs": 1,
-      "nanos": 0
-    },
+    "elapsed_ms": 1000,
     "capture": {
       "received_frames": 0,
       "received_bytes": 0,

@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "dns",
   "mode": "stream",
   "sequence": 4,
@@ -32,10 +32,7 @@
     "packets_attempted": 2,
     "packets_completed": 2,
     "bytes": 116,
-    "elapsed": {
-      "secs": 1,
-      "nanos": 5000000
-    },
+    "elapsed_ms": 1005,
     "capture": {
       "received_frames": 1,
       "received_bytes": 86,

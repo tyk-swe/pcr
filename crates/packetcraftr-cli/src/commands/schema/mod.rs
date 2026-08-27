@@ -28,7 +28,7 @@ pub(crate) fn run(arguments: Args, _format: output::contract::Format) -> Result<
             other => Err(CliError::from_classification(
                 Classification::new(
                     "request.unknown_contract",
-                    Kind::Cli,
+                    Kind::Request,
                     Some("supported contracts are packet/v1 and packet/v2"),
                 ),
                 format!(

@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "replay",
   "mode": "stream",
   "status": "success",
@@ -11,10 +11,7 @@
       "index": 2
     },
     "link_mode": "auto",
-    "scheduled_delay": {
-      "secs": 0,
-      "nanos": 0
-    },
+    "scheduled_delay_ms": 0,
     "bytes_sent": 4,
     "frame": {
       "timestamp": {

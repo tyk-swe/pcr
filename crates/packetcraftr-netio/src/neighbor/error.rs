@@ -94,8 +94,8 @@ impl Classified for Error {
                 ),
             ),
             Self::InvalidOptions { .. } => Classification::new(
-                "cli.neighbor_limit",
-                Kind::Cli,
+                "request.neighbor_limit",
+                Kind::Request,
                 Some(
                     "use finite non-zero neighbor attempts, timeouts, cache limits, and capture bounds",
                 ),

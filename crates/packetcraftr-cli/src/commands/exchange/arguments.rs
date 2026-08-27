@@ -20,7 +20,7 @@ pub(crate) struct Args {
     pub(crate) max_responses: usize,
     /// Maximum unmatched decoded or undecodable frames retained across the exchange.
     #[arg(
-        long = "max-unsolicited",
+        long = "max-undecoded",
         default_value_t = packetcraftr::exchange::DEFAULT_MAX_UNMATCHED_FRAMES
     )]
     pub(crate) max_unmatched_frames: usize,

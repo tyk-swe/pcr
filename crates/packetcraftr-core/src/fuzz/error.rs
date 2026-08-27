@@ -50,8 +50,8 @@ impl Classified for Error {
             | Self::CaseIndexOverflow
             | Self::InvalidDuration { .. }
             | Self::InvalidTarget { .. } => Classification::new(
-                "cli.fuzz_limit",
-                Kind::Cli,
+                "request.fuzz_limit",
+                Kind::Request,
                 Some(
                     "use valid layer.field targets and finite non-zero case, byte, field, list, shrink, and duration limits",
                 ),

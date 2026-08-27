@@ -79,9 +79,8 @@ impl Context {
 #[serde(rename_all = "snake_case")]
 pub enum Kind {
     /// A caller or request error: the input or the invocation was wrong, not
-    /// the packet or the environment. The serialized name stays `cli` until
-    /// the 0.6 contract break.
-    Cli,
+    /// the packet or the environment.
+    Request,
     Packet,
     Capability,
     Io,
@@ -92,7 +91,7 @@ pub enum Kind {
 impl Kind {
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::Cli => "cli",
+            Self::Request => "request",
             Self::Packet => "packet",
             Self::Capability => "capability",
             Self::Io => "io",

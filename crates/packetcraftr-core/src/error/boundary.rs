@@ -95,7 +95,7 @@ impl BoundaryError {
         code: &'static str,
         remediation: &'static str,
     ) -> Self {
-        Self::execution_error(message, code, Kind::Cli, remediation)
+        Self::execution_error(message, code, Kind::Request, remediation)
     }
 
     fn execution_error(

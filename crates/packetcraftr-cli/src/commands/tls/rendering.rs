@@ -13,7 +13,7 @@ use output::tls::{Client, Server, Session, Summary};
 /// What has been reported so far.
 ///
 /// The retention ceiling is a property of the JSON document, which has to hold
-/// every session in memory before it can be written: past `--max-tls-sessions`
+/// every session in memory before it can be written: past `--max-sessions`
 /// the document keeps the sessions it already has and says in the summary how
 /// many it left out. Text and NDJSON write each session as it completes, so
 /// neither holds anything and neither ever leaves a session out.

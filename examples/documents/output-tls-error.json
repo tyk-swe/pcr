@@ -1,11 +1,11 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "tls",
   "mode": "aggregate",
   "status": "error",
   "error": {
-    "code": "cli.error",
-    "kind": "cli",
+    "code": "request.error",
+    "kind": "request",
     "message": "invalid --stream 'udp:3': TLS sessions are assembled from TCP streams only; UDP port 443 is QUIC, which this command does not read",
     "causes": []
   },

@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "exchange",
   "mode": "stream",
   "sequence": 1,
@@ -19,15 +19,11 @@
         "bytes_hex": "deadbeef"
       },
       "packet": {
-        "schema": "packetcraftr.packet/v1",
+        "schema": "packetcraftr.packet/v2",
         "layers": [
           {
-            "protocol": "raw",
-            "fields": {
-              "bytes": {
-                "type": "bytes",
-                "value": [222, 173, 190, 239]
-              }
+            "raw": {
+              "bytes": "0xdeadbeef"
             }
           }
         ]
@@ -55,10 +51,7 @@
       },
       "diagnostics": []
     },
-    "latency": {
-      "secs": 0,
-      "nanos": 4000000
-    }
+    "latency_ms": 4
   },
   "diagnostics": []
 }

@@ -65,10 +65,8 @@ pub enum Error {
     },
 }
 
-/// A `cli.*` code means "caller or request error": the request that reached a
-/// workflow was not something the workflow could run. The name points at the
-/// consumer rather than the fault; renaming it to `request.*` is a v1 output
-/// contract break and waits for 0.6 (see TODOS.md).
+/// A `request.*` code means "caller or request error": the request that reached a
+/// workflow was not something the workflow could run.
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
@@ -100,8 +98,8 @@ impl Classified for Error {
                 Some("collect every exchange event once in publication order"),
             ),
             Self::HeterogeneousExchangeRoute => Classification::new(
-                "cli.heterogeneous_exchange_route",
-                Kind::Cli,
+                "request.heterogeneous_exchange_route",
+                Kind::Request,
                 Some("split the exchange so every packet uses the same interface and link mode"),
             ),
             Self::Template { .. } => Classification::new(
@@ -122,8 +120,8 @@ impl Classified for Error {
                 Some("reduce the network packet or apply an explicit fragmentation transform"),
             ),
             Self::InvalidExchangeOption { .. } => Classification::new(
-                "cli.exchange_limit",
-                Kind::Cli,
+                "request.exchange_limit",
+                Kind::Request,
                 Some(
                     "use finite exchange timeout and retention limits no larger than the aggregate capture ceiling",
                 ),

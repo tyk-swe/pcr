@@ -84,11 +84,11 @@ pub struct Case {
     pub mutation: Mutation,
     pub reproduction: Reproduction,
     pub shrink_values: Vec<packetcraftr_core::field::FieldValue>,
-    pub recipe: packetcraftr_core::document::Packet,
+    pub recipe: packetcraftr_core::document::v2::Document,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub frame: Option<Wire>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub decoded: Option<packetcraftr_core::document::Packet>,
+    pub decoded: Option<packetcraftr_core::document::v2::Document>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub requires_live_opt_in: Option<bool>,
     pub outcome: Outcome,
@@ -305,7 +305,7 @@ fn convert_case(
     let requires_live_opt_in = built.as_ref().map(|built| built.requires_live_opt_in);
     let decoded = decoded
         .as_ref()
-        .map(|decoded| packetcraftr_core::document::Packet::from_packet(&decoded.packet));
+        .map(|decoded| packetcraftr_core::document::v2::Document::from_packet(&decoded.packet));
     Ok(Case {
         index,
         seed,
@@ -316,7 +316,7 @@ fn convert_case(
             case_seed: seed,
         },
         shrink_values,
-        recipe: packetcraftr_core::document::Packet::from_packet(&recipe),
+        recipe: packetcraftr_core::document::v2::Document::from_packet(&recipe),
         frame,
         decoded,
         requires_live_opt_in,

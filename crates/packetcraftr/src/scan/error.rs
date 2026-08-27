@@ -58,8 +58,8 @@ impl Classified for Error {
             | Self::InvalidPorts { .. }
             | Self::InvalidTimeout { .. }
             | Self::InvalidDuration { .. } => ErrorClassification::new(
-                "cli.scan_limit",
-                Kind::Cli,
+                "request.scan_limit",
+                Kind::Request,
                 Some(
                     "use finite non-zero scan ports, attempts, timeouts, batches, rate, and evidence limits",
                 ),

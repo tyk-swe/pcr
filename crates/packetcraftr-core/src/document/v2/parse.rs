@@ -20,24 +20,48 @@ const LAYER_SHAPE_PREFIX: &str = "$__packetcraftr_layer_shape:";
 
 impl Document {
     /// Detects the declared document schema string cheaply without parsing full payloads.
+    ///
+    /// Scans every occurrence of the substring `schema` rather than stopping at the
+    /// first one, and skips any occurrence that is merely the tail of a longer
+    /// identifier: an unrelated key or string value containing that substring
+    /// earlier in the document (e.g. `options_schema`, or free text that mentions
+    /// "schema") must not shadow the real top-level key.
     pub fn detect_schema(input: &str) -> Option<&str> {
         let trimmed = input.trim_start();
-        if let Some(idx) = trimmed.find("schema") {
-            let after = trimmed.get(idx.saturating_add(6)..)?;
+        let mut search_start = 0_usize;
+        while let Some(rel_idx) = trimmed.get(search_start..)?.find("schema") {
+            let idx = search_start.saturating_add(rel_idx);
+            search_start = idx.saturating_add(1);
+            // Reject a match that is merely the tail of a longer identifier
+            // (e.g. `options_schema`): a real `schema` key is not preceded by
+            // another identifier character.
+            let preceded_by_identifier_char = trimmed
+                .get(..idx)
+                .and_then(|s| s.chars().next_back())
+                .is_some_and(|c| c.is_alphanumeric() || c == '_');
+            if preceded_by_identifier_char {
+                continue;
+            }
+            let Some(after) = trimmed.get(idx.saturating_add(6)..) else {
+                continue;
+            };
             let after_trimmed = after.trim_start();
             let after_colon = if let Some(stripped) = after_trimmed.strip_prefix(':') {
                 stripped.trim_start()
             } else if let Some(stripped) = after_trimmed.strip_prefix("\":") {
                 stripped.trim_start()
-            } else {
-                let stripped = after_trimmed.strip_prefix("\" :")?;
+            } else if let Some(stripped) = after_trimmed.strip_prefix("\" :") {
                 stripped.trim_start()
+            } else {
+                continue;
             };
             let unquoted = after_colon.strip_prefix('"').unwrap_or(after_colon);
             let end_idx = unquoted
                 .find(|c: char| c.is_whitespace() || c == '"' || c == ',' || c == '}' || c == '#')
                 .unwrap_or(unquoted.len());
-            let val = unquoted.get(..end_idx)?;
+            let Some(val) = unquoted.get(..end_idx) else {
+                continue;
+            };
             if !val.is_empty() {
                 return Some(val);
             }

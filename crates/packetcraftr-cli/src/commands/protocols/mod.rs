@@ -70,7 +70,7 @@ fn describe_protocol(name: &str, example: bool, format: AggregateFormat) -> Resu
         .ok_or_else(|| unknown_protocol(name))?;
     let registry = registry()?;
     if example {
-        return render_example(support, &registry);
+        return render_example(support, &registry, format);
     }
     let fields = registry
         .schema(support.protocol)
@@ -105,13 +105,35 @@ fn describe_protocol(name: &str, example: bool, format: AggregateFormat) -> Resu
 fn render_example(
     support: &support::Protocol,
     registry: &packetcraftr::core::registry::Registry,
+    format: AggregateFormat,
 ) -> Result<(), CliError> {
+    let example = build_example(support, registry);
+    match format {
+        AggregateFormat::Text => {
+            for line in example.lines() {
+                write_stdout_line(format_args!("{line}"))?;
+            }
+            Ok(())
+        }
+        AggregateFormat::Json => emit_aggregate(
+            output::contract::Command::Protocols,
+            output::protocols::ExampleResult {
+                protocol: support.protocol.to_owned(),
+                decode_only: support.decode_only,
+                example,
+            },
+            Vec::new(),
+        ),
+    }
+}
+
+fn build_example(
+    support: &support::Protocol,
+    registry: &packetcraftr::core::registry::Registry,
+) -> String {
     if support.decode_only {
-        write_stdout_line(format_args!(
-            "# decode-only: dissect emits this layer as raw bytes"
-        ))?;
-        write_stdout_line(format_args!("- raw: {{bytes: 0x}}"))?;
-        return Ok(());
+        return "# decode-only: dissect emits this layer as raw bytes\n- raw: {bytes: 0x}"
+            .to_owned();
     }
     let schema = registry.schema(support.protocol);
     let mut req_fields = Vec::new();
@@ -127,15 +149,10 @@ fn render_example(
         }
     }
     if req_fields.is_empty() {
-        write_stdout_line(format_args!("- {}: {{}}", support.protocol))?;
+        format!("- {}: {{}}", support.protocol)
     } else {
-        write_stdout_line(format_args!(
-            "- {}: {{{}}}",
-            support.protocol,
-            req_fields.join(", ")
-        ))?;
+        format!("- {}: {{{}}}", support.protocol, req_fields.join(", "))
     }
-    Ok(())
 }
 
 fn placeholder_for_kind(kind: packetcraftr::core::field::FieldKind) -> &'static str {

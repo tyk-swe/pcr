@@ -49,8 +49,13 @@ impl Document {
                         }
                     }
                     Tier::Optional => {
+                        let list_text;
                         let text = match &value {
                             Value::Scalar(s) | Value::ScalarTyped { text: s, .. } => s.as_str(),
+                            Value::List(items) => {
+                                list_text = format!("[{}]", items.join(","));
+                                list_text.as_str()
+                            }
                             _ => "",
                         };
                         if let Some(default_str) = field_schema.default

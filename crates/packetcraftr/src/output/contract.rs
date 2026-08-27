@@ -239,7 +239,7 @@ impl fmt::Display for Error {
                 Ok(())
             }
             Self::TimestampOutOfRange => {
-                formatter.write_str("capture timestamp is outside the signed v1 output range")
+                formatter.write_str("capture timestamp is outside the signed output range")
             }
             Self::InvalidSourceFrame => {
                 formatter.write_str("source frame must be a non-zero unsigned 64-bit position")

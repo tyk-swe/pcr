@@ -2113,6 +2113,9 @@
         },
         {
           "$ref": "#/$defs/protocolDetailResult"
+        },
+        {
+          "$ref": "#/$defs/protocolExampleResult"
         }
       ]
     },
@@ -2139,6 +2142,27 @@
       "properties": {
         "protocol": {
           "$ref": "#/$defs/protocolDetail"
+        }
+      },
+      "additionalProperties": false
+    },
+    "protocolExampleResult": {
+      "type": "object",
+      "required": [
+        "protocol",
+        "decode_only",
+        "example"
+      ],
+      "properties": {
+        "protocol": {
+          "type": "string",
+          "minLength": 1
+        },
+        "decode_only": {
+          "type": "boolean"
+        },
+        "example": {
+          "type": "string"
         }
       },
       "additionalProperties": false

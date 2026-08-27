@@ -88,7 +88,7 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
                         if format == AggregateFormat::Text {
                             write_stdout_line(format_args!("already v2 -"))?;
                         }
-                    } else if arguments.stdout || !arguments.check {
+                    } else if format == AggregateFormat::Text {
                         write_plain_line(format_args!("{content}"))?;
                     }
                 } else if detected == Some(PACKET_DOCUMENT_SCHEMA_V1) {
@@ -146,7 +146,7 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
                         if format == AggregateFormat::Text {
                             write_stdout_line(format_args!("would convert -"))?;
                         }
-                    } else {
+                    } else if format == AggregateFormat::Text {
                         write_plain_line(format_args!("{converted_text}"))?;
                     }
                 } else {
@@ -246,7 +246,9 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
                             write_stdout_line(format_args!("would convert {path_str}"))?;
                         }
                     } else if arguments.stdout {
-                        write_plain_line(format_args!("{converted_text}"))?;
+                        if format == AggregateFormat::Text {
+                            write_plain_line(format_args!("{converted_text}"))?;
+                        }
                     } else {
                         temp_counter = temp_counter.saturating_add(1);
                         let parent = path.parent().unwrap_or_else(|| Path::new("."));

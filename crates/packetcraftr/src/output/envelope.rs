@@ -56,7 +56,7 @@ impl Error {
     }
 }
 
-/// Output-v1 live-capture counters.
+/// Live-capture counters.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct CaptureStats {
     pub received_frames: u64,
@@ -133,7 +133,7 @@ impl From<&packetcraftr_core::fuzz::Stats> for Stats {
 
 pub use packetcraftr_core::diagnostic::Severity as DiagnosticSeverity;
 
-/// Output-v1 byte range used by diagnostics.
+/// Byte range used by diagnostics.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct DiagnosticRange {
     pub start: usize,
@@ -149,7 +149,7 @@ impl From<packetcraftr_core::layout::ByteRange> for DiagnosticRange {
     }
 }
 
-/// Output-v1 diagnostic record.
+/// Diagnostic record.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Diagnostic {
     pub code: String,

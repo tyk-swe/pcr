@@ -71,7 +71,7 @@ pub fn emit(registry: &Registry) -> Value {
 
     let mut layers_prop = Map::new();
     layers_prop.insert("type".to_string(), Value::String("array".to_string()));
-    layers_prop.insert("minItems".to_string(), Value::from(1));
+    layers_prop.insert("minItems".to_string(), Value::from(0));
     layers_prop.insert(
         "description".to_string(),
         Value::String("Layers in outermost-to-innermost wire order.".to_string()),
@@ -238,14 +238,21 @@ fn emit_field_schema(field: &FieldSchema) -> Map<String, Value> {
         Value::String(tier_str.to_string()),
     );
 
-    if field.tier == Tier::Derived {
+    // `Document::from_document_value` (document/v2/model.rs) accepts `{raw: 0x..}`
+    // on any Bytes-kind field, and `auto` on any Derived-tier field of any kind;
+    // the generated schema must allow the same shapes it will later parse.
+    let allow_raw = field.tier == Tier::Derived || field.kind == FieldKind::Bytes;
+    let allow_auto = field.tier == Tier::Derived;
+
+    if allow_raw || allow_auto {
         let base = base_kind_schema(field.kind, field.element, field.max);
-        let auto_schema = {
+        let mut variants = vec![Value::Object(base)];
+        if allow_auto {
             let mut m = Map::new();
             m.insert("const".to_string(), Value::String("auto".to_string()));
-            Value::Object(m)
-        };
-        let raw_schema = {
+            variants.push(Value::Object(m));
+        }
+        if allow_raw {
             let mut m = Map::new();
             m.insert("type".to_string(), Value::String("object".to_string()));
             m.insert(
@@ -262,13 +269,9 @@ fn emit_field_schema(field: &FieldSchema) -> Map<String, Value> {
             let mut props = Map::new();
             props.insert("raw".to_string(), Value::Object(raw_prop));
             m.insert("properties".to_string(), Value::Object(props));
-            Value::Object(m)
-        };
-
-        field_map.insert(
-            "oneOf".to_string(),
-            Value::Array(vec![Value::Object(base), auto_schema, raw_schema]),
-        );
+            variants.push(Value::Object(m));
+        }
+        field_map.insert("oneOf".to_string(), Value::Array(variants));
     } else {
         let base = base_kind_schema(field.kind, field.element, field.max);
         for (key, val) in base {

@@ -40,7 +40,7 @@ impl From<&support::Protocol> for Summary {
 }
 
 mirror_enum! {
-    /// Stable reflective field type owned by the output-v1 contract.
+    /// Stable reflective field type owned by the output contract.
     #[serde(rename_all = "snake_case")]
     pub enum FieldKind from CoreFieldKind {
         Bool = Bool,
@@ -53,8 +53,8 @@ mirror_enum! {
         Mac = Mac,
         List = List,
     }
-    // v1 pins this value set; new kinds require a schema revision and explicit arm.
-    unmatched value => unreachable!("field kind {value:?} has no v1 output representation"),
+    // This pins the output contract's value set; new kinds require a schema revision and explicit arm.
+    unmatched value => unreachable!("field kind {value:?} has no output representation"),
 }
 
 impl FieldKind {
@@ -167,4 +167,13 @@ pub struct ListResult {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct DetailResult {
     pub protocol: Detail,
+}
+
+/// Aggregate result of `protocols <name> --example`: a minimal document
+/// snippet that builds this protocol's layer.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ExampleResult {
+    pub protocol: String,
+    pub decode_only: bool,
+    pub example: String,
 }

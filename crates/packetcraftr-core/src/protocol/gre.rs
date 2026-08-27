@@ -69,7 +69,7 @@ reflective_layer! {
         "checksum" => { kind: Unsigned, tier: Derived, max: 65535_u64, description: "Optional checksum over the GRE header and payload", get |layer| layer.checksum.as_ref().map(reflect_get), set |layer, value, name| { let mut checksum = layer.checksum.clone().unwrap_or_default(); reflect_set(&mut checksum, gre_schema(), name, value)?; layer.checksum = Some(checksum); Ok(()) } },
         "key" => { kind: Unsigned, tier: Optional, max: 4294967295_u64, description: "Optional GRE key", get |layer| layer.key.map(FieldValue::from), set |layer, value, name| { let mut key = layer.key.unwrap_or_default(); reflect_set(&mut key, gre_schema(), name, value)?; layer.key = Some(key); Ok(()) } },
         "sequence" => { kind: Unsigned, tier: Optional, max: 4294967295_u64, description: "Optional GRE sequence number", get |layer| layer.sequence.map(FieldValue::from), set |layer, value, name| { let mut sequence = layer.sequence.unwrap_or_default(); reflect_set(&mut sequence, gre_schema(), name, value)?; layer.sequence = Some(sequence); Ok(()) } },
-        "reserved_bits" => { kind: Unsigned, tier: Optional, default: "0", description: "Receiver-ignored GRE bits 6 through 12", reflect: reserved_bits, layout: (0, 2) },
+        "reserved_bits" => { kind: Unsigned, tier: Optional, default: "0", description: "Receiver-ignored GRE bits 6 through 12", reflect_bounded: reserved_bits, 0x7f_u64, layout: (0, 2) },
     }
     layout pub(crate) fn gre_static_layout();
 }

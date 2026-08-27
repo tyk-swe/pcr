@@ -942,3 +942,25 @@ fn protocols_example_and_json_list() {
     assert_eq!(ipv4_proto["decode_only"], false);
     assert!(ipv4_proto["aliases"].is_array());
 }
+
+#[test]
+fn protocols_example_honors_output_json() {
+    let ipv4_ex_json = run_success(&["--output", "json", "protocols", "ipv4", "--example"]);
+    let ipv4_val = parse_json(&ipv4_ex_json);
+    assert_eq!(ipv4_val["result"]["protocol"], "ipv4");
+    assert_eq!(ipv4_val["result"]["decode_only"], false);
+    let ipv4_example = ipv4_val["result"]["example"]
+        .as_str()
+        .expect("example text");
+    assert!(ipv4_example.contains("- ipv4:"), "{ipv4_example}");
+
+    let tls_ex_json = run_success(&["--output", "json", "protocols", "tls", "--example"]);
+    let tls_val = parse_json(&tls_ex_json);
+    assert_eq!(tls_val["result"]["protocol"], "tls");
+    assert_eq!(tls_val["result"]["decode_only"], true);
+    let tls_example = tls_val["result"]["example"].as_str().expect("example text");
+    assert!(
+        tls_example.contains("# decode-only: dissect emits this layer as raw bytes"),
+        "{tls_example}"
+    );
+}

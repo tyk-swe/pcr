@@ -76,21 +76,21 @@ The following protocol layers have setters that return `FieldError::ReadOnly` ex
 | `tls` | `content_type` | derived=false, required=false | `Optional` | `"0"` | 255 | - | Record content type |
 | `tls` | `version` | derived=false, required=false | `Optional` | `"0"` | 65535 | - | Record version |
 | `tls` | `record_count` | derived=false, required=false | `Optional` | `"0"` | 65535 | - | Complete records in segment |
-| `tls` | `handshake_type` | derived=false, required=false | `Required` | - | 255 | - | Handshake message type |
-| `tls` | `cipher_suite` | derived=false, required=false | `Required` | - | 65535 | - | Selected cipher suite |
-| `tls` | `selected_version` | derived=false, required=false | `Required` | - | 65535 | - | Selected version |
-| `tls` | `key_share_group` | derived=false, required=false | `Required` | - | 65535 | - | Key share group |
+| `tls` | `handshake_type` | derived=false, required=false | `Optional` | - | 255 | - | Handshake message type; absent outside handshake records |
+| `tls` | `cipher_suite` | derived=false, required=false | `Optional` | - | 65535 | - | Selected cipher suite; absent outside ServerHello |
+| `tls` | `selected_version` | derived=false, required=false | `Optional` | - | 65535 | - | Selected version; absent outside ServerHello |
+| `tls` | `key_share_group` | derived=false, required=false | `Optional` | - | 65535 | - | Key share group; absent outside ServerHello |
 | `tls` | `incomplete` | derived=false, required=false | `Optional` | `"false"` | - | - | Incomplete record flag |
 | `tls` | `ech` | derived=false, required=false | `Optional` | `"false"` | - | - | Encrypted client hello flag |
-| `tls` | `sni` | derived=false, required=false | `Required` | - | - | - | Server name indication |
-| `tls` | `sni_raw` | derived=false, required=false | `Required` | - | - | - | Raw SNI bytes |
-| `tls` | `ja3` | derived=false, required=false | `Required` | - | - | - | JA3 fingerprint hash |
-| `tls` | `ja3_raw` | derived=false, required=false | `Required` | - | - | - | JA3 fingerprint string |
-| `tls` | `ja4` | derived=false, required=false | `Required` | - | - | - | JA4 fingerprint string |
-| `tls` | `alpn` | derived=false, required=false | `Required` | - | - | Text | ALPN protocol list |
-| `tls` | `cipher_suites` | derived=false, required=false | `Required` | - | - | Unsigned | Client cipher suites list |
-| `tls` | `supported_versions` | derived=false, required=false | `Required` | - | - | Unsigned | Supported versions list |
-| `tls` | `supported_groups` | derived=false, required=false | `Required` | - | - | Unsigned | Supported groups list |
+| `tls` | `sni` | derived=false, required=false | `Optional` | - | - | - | Server name indication; absent outside ClientHello |
+| `tls` | `sni_raw` | derived=false, required=false | `Optional` | - | - | - | Raw SNI bytes; absent outside ClientHello |
+| `tls` | `ja3` | derived=false, required=false | `Optional` | - | - | - | JA3 fingerprint hash; absent outside ClientHello |
+| `tls` | `ja3_raw` | derived=false, required=false | `Optional` | - | - | - | JA3 fingerprint string; absent outside ClientHello |
+| `tls` | `ja4` | derived=false, required=false | `Optional` | - | - | - | JA4 fingerprint string; absent outside ClientHello |
+| `tls` | `alpn` | derived=false, required=false | `Optional` | - | - | Text | ALPN protocol list; absent outside ClientHello/ServerHello |
+| `tls` | `cipher_suites` | derived=false, required=false | `Optional` | - | - | Unsigned | Client cipher suites list; absent outside ClientHello |
+| `tls` | `supported_versions` | derived=false, required=false | `Optional` | - | - | Unsigned | Supported versions list; absent outside ClientHello |
+| `tls` | `supported_groups` | derived=false, required=false | `Optional` | - | - | Unsigned | Supported groups list; absent outside ClientHello |
 | `bsd_loop` | `family` | derived=false, required=true | `Required` | - | 4294967295 | - | Address-family discriminator |
 | `bsd_null` | `family` | derived=false, required=true | `Required` | - | 4294967295 | - | Address-family discriminator |
 | `bsd_null` | `byte_order` | derived=false, required=true | `Required` | - | - | - | Byte order ("little" or "big") |
@@ -107,9 +107,9 @@ The following protocol layers have setters that return `FieldError::ReadOnly` ex
 | `linux_sll2` | `address` | derived=false, required=false | `Optional` | `"0x0000000000000000"` | - | - | Eight-byte link address slot |
 | `gre` | `protocol_type` | derived=true, required=false | `Derived` | - | 65535 | - | Encapsulated EtherType (wire) |
 | `gre` | `checksum` | derived=true, required=false | `Derived` | - | 65535 | - | Optional GRE checksum (derived when enabled) |
-| `gre` | `key` | derived=false, required=false | `Optional` | `"0"` | 4294967295 | - | Optional GRE key (None in default) |
-| `gre` | `sequence` | derived=false, required=false | `Optional` | `"0"` | 4294967295 | - | Optional GRE sequence (None in default) |
-| `gre` | `reserved_bits` | derived=false, required=false | `Optional` | `"0"` | 255 | - | Reserved bits 6-12 |
+| `gre` | `key` | derived=false, required=false | `Optional` | - | 4294967295 | - | Optional GRE key (None in default) |
+| `gre` | `sequence` | derived=false, required=false | `Optional` | - | 4294967295 | - | Optional GRE sequence (None in default) |
+| `gre` | `reserved_bits` | derived=false, required=false | `Optional` | `"0"` | 127 | - | Reserved bits 6-12, bounded by 7 bits |
 | `icmpv4` | `type` | derived=false, required=true | `Required` | - | 255 | - | ICMP message type |
 | `icmpv4` | `code` | derived=false, required=true | `Required` | - | 255 | - | ICMP message code |
 | `icmpv4` | `checksum` | derived=true, required=false | `Derived` | - | 65535 | - | ICMP checksum (wire) |
@@ -207,10 +207,10 @@ The following protocol layers have setters that return `FieldError::ReadOnly` ex
 | `erspan` | `truncated` | derived=false, required=false | `Optional` | `"false"` | - | - | Truncated flag |
 | `erspan` | `session_id` | derived=false, required=true | `Required` | - | 1023 | - | Session ID (bounded 0x3ff) |
 | `erspan` | `index_word` | derived=false, required=false | `Optional` | `"0"` | 4294967295 | - | Port index word |
-| `erspan` | `timestamp` | derived=false, required=false | `Optional` | `"0"` | 4294967295 | - | Type III timestamp (None in default) |
-| `erspan` | `sgt` | derived=false, required=false | `Optional` | `"0"` | 65535 | - | Type III SGT (None in default) |
-| `erspan` | `flags` | derived=false, required=false | `Optional` | `"0"` | 65535 | - | Type III flags (None in default) |
-| `erspan` | `subheader` | derived=false, required=false | `Optional` | `"0x"` | - | - | Type III 8-byte subheader (None in default) |
+| `erspan` | `timestamp` | derived=false, required=false | `Optional` | - | 4294967295 | - | Type III timestamp (None in default) |
+| `erspan` | `sgt` | derived=false, required=false | `Optional` | - | 65535 | - | Type III SGT (None in default) |
+| `erspan` | `flags` | derived=false, required=false | `Optional` | - | 65535 | - | Type III flags (None in default) |
+| `erspan` | `subheader` | derived=false, required=false | `Optional` | - | - | - | Type III 8-byte subheader (None in default) |
 | `geneve` | `version` | derived=false, required=false | `Optional` | `"0"` | 3 | - | Version (bounded 3) |
 | `geneve` | `control` | derived=false, required=false | `Optional` | `"false"` | - | - | Control packet bit |
 | `geneve` | `critical` | derived=false, required=false | `Optional` | `"false"` | - | - | Critical options bit |

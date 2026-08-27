@@ -12,7 +12,21 @@ use super::super::errors::CliError;
 use super::super::rendering::write_raw;
 use super::registry;
 
-pub(crate) fn run(arguments: Args, _format: output::contract::Format) -> Result<(), CliError> {
+pub(crate) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
+    if !matches!(
+        format,
+        output::contract::Format::Text | output::contract::Format::Json
+    ) {
+        return Err(CliError::from_classification(
+            Classification::new(
+                "request.output_format",
+                Kind::Request,
+                Some("schema does not support this output format; choose text or json"),
+            ),
+            format!("schema does not support {format} output; choose text, json"),
+            Vec::new(),
+        ));
+    }
     match arguments.command {
         SchemaCommand::Emit(emit_args) => match emit_args.contract.as_str() {
             "packet/v2" => {

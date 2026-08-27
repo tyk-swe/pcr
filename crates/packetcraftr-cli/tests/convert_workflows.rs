@@ -5,7 +5,9 @@
 #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 use std::fs;
+use std::io::Write as _;
 use std::path::PathBuf;
+use std::process::{Command, Stdio};
 
 mod support;
 use support::{parse_json, run, run_success};
@@ -307,4 +309,52 @@ fn convert_stdout_flag_outputs_converted_document_to_stdout() {
     // File itself should still be v1
     let disk_content = fs::read_to_string(&v1_path).expect("read");
     assert!(disk_content.contains(r#""schema": "packetcraftr.packet/v1""#));
+}
+
+#[test]
+fn convert_stdout_with_json_format_emits_only_the_json_envelope() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let v1_path = dir.path().join("packet.json");
+    fs::write(&v1_path, V1_IPV4_UDP).expect("write v1");
+
+    let output = run_success(&[
+        "--output",
+        "json",
+        "convert",
+        "--stdout",
+        v1_path.to_str().unwrap(),
+    ]);
+    // If the raw converted document text leaked onto stdout ahead of the
+    // envelope, this would fail to parse as one JSON value.
+    let value = parse_json(&output);
+    assert_eq!(
+        value["result"]["converted"][0],
+        v1_path.to_str().unwrap()
+    );
+}
+
+#[test]
+fn convert_stdin_with_json_format_emits_only_the_json_envelope() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_packetcraftr"))
+        .args(["--output", "json", "convert", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("CLI process must start");
+    child
+        .stdin
+        .take()
+        .expect("stdin must be piped")
+        .write_all(V1_IPV4_UDP.as_bytes())
+        .expect("write stdin");
+    let output = child.wait_with_output().expect("process must finish");
+    assert!(
+        output.status.success(),
+        "convert - failed: stdout={:?}, stderr={:?}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+    let value = parse_json(&output);
+    assert_eq!(value["result"]["converted"][0], "-");
 }

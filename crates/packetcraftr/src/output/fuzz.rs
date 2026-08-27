@@ -13,7 +13,7 @@ use super::contract::Error as ContractError;
 use super::envelope::{Diagnostic, Error as OutputError, Stats};
 use super::frame::{Captured, Wire};
 
-/// Output-v1 fuzz execution mode.
+/// Fuzz execution mode.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Mode {
@@ -45,7 +45,7 @@ impl From<packet_fuzz::CaseOutcome> for Outcome {
 
 pub use packet_fuzz::Strategy;
 
-/// Output-v1 description of one deterministic field mutation.
+/// Description of one deterministic field mutation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Mutation {
     pub layer: usize,
@@ -69,7 +69,7 @@ impl From<packet_fuzz::Mutation> for Mutation {
     }
 }
 
-/// Output-v1 deterministic reproduction coordinates.
+/// Deterministic reproduction coordinates.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct Reproduction {
     pub operation_seed: u64,

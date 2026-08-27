@@ -7,8 +7,25 @@
       "properties": {
         "icv": {
           "description": "Integrity check value, a multiple of 4 bytes; default 0x000000000000000000000000",
-          "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
-          "type": "string",
+          "oneOf": [
+            {
+              "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+              "type": "string"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
           "x-packetcraftr-tier": "optional"
         },
         "next_header": {
@@ -668,8 +685,25 @@
         },
         "subheader": {
           "description": "Type III 8-byte platform-specific subheader",
-          "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
-          "type": "string",
+          "oneOf": [
+            {
+              "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+              "type": "string"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
           "x-packetcraftr-tier": "optional"
         },
         "timestamp": {
@@ -855,8 +889,25 @@
         },
         "options": {
           "description": "Verbatim GENEVE option TLV bytes; default 0x",
-          "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
-          "type": "string",
+          "oneOf": [
+            {
+              "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+              "type": "string"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
           "x-packetcraftr-tier": "optional"
         },
         "protocol_type": {
@@ -1053,7 +1104,7 @@
           "description": "Receiver-ignored GRE bits 6 through 12; default 0",
           "oneOf": [
             {
-              "maximum": 255,
+              "maximum": 127,
               "minimum": 0,
               "type": "integer"
             },
@@ -1088,8 +1139,25 @@
       "properties": {
         "body": {
           "description": "Type-specific ICMP body; default 0x00000000",
-          "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
-          "type": "string",
+          "oneOf": [
+            {
+              "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+              "type": "string"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
           "x-packetcraftr-tier": "optional"
         },
         "checksum": {
@@ -1170,8 +1238,25 @@
       "properties": {
         "body": {
           "description": "Type-specific ICMP body; default 0x00000000",
-          "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
-          "type": "string",
+          "oneOf": [
+            {
+              "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+              "type": "string"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
           "x-packetcraftr-tier": "optional"
         },
         "checksum": {
@@ -1252,8 +1337,25 @@
       "properties": {
         "body": {
           "description": "Version- and type-specific IGMP body; default 0x00000000",
-          "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
-          "type": "string",
+          "oneOf": [
+            {
+              "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+              "type": "string"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
           "x-packetcraftr-tier": "optional"
         },
         "checksum": {
@@ -1436,8 +1538,25 @@
         },
         "options": {
           "description": "Verbatim IPv4 option bytes; default 0x",
-          "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
-          "type": "string",
+          "oneOf": [
+            {
+              "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+              "type": "string"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
           "x-packetcraftr-tier": "optional"
         },
         "protocol": {
@@ -1740,8 +1859,25 @@
         },
         "options": {
           "description": "Option bytes, padded to an eight-byte header boundary; default 0x",
-          "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
-          "type": "string",
+          "oneOf": [
+            {
+              "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+              "type": "string"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
           "x-packetcraftr-tier": "optional"
         }
       },
@@ -1870,8 +2006,25 @@
         },
         "options": {
           "description": "Option bytes, padded to an eight-byte header boundary; default 0x",
-          "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
-          "type": "string",
+          "oneOf": [
+            {
+              "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+              "type": "string"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
           "x-packetcraftr-tier": "optional"
         }
       },
@@ -2036,8 +2189,25 @@
         },
         "tlvs": {
           "description": "TLV bytes following the segment list, including padding; default 0x",
-          "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
-          "type": "string",
+          "oneOf": [
+            {
+              "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+              "type": "string"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
           "x-packetcraftr-tier": "optional"
         }
       },
@@ -2418,8 +2588,25 @@
       "properties": {
         "address": {
           "description": "Eight-byte link address slot; default 0x0000000000000000",
-          "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
-          "type": "string",
+          "oneOf": [
+            {
+              "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+              "type": "string"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
           "x-packetcraftr-tier": "optional"
         },
         "address_length": {
@@ -2516,8 +2703,25 @@
       "properties": {
         "address": {
           "description": "Eight-byte link address slot; default 0x0000000000000000",
-          "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
-          "type": "string",
+          "oneOf": [
+            {
+              "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+              "type": "string"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
           "x-packetcraftr-tier": "optional"
         },
         "address_length": {
@@ -2629,8 +2833,25 @@
       "properties": {
         "control": {
           "description": "Control field: one byte for U format, two for I and S formats",
-          "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
-          "type": "string",
+          "oneOf": [
+            {
+              "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+              "type": "string"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
           "x-packetcraftr-tier": "required"
         },
         "dsap": {
@@ -2677,8 +2898,25 @@
       "properties": {
         "bytes": {
           "description": "Preserved malformed bytes; default 0x",
-          "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
-          "type": "string",
+          "oneOf": [
+            {
+              "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+              "type": "string"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
           "x-packetcraftr-tier": "optional"
         },
         "protocol": {
@@ -2763,8 +3001,25 @@
       "properties": {
         "bytes": {
           "description": "Trailing padding bytes; default 0x",
-          "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
-          "type": "string",
+          "oneOf": [
+            {
+              "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+              "type": "string"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
           "x-packetcraftr-tier": "optional"
         },
         "outside_layer": {
@@ -2953,8 +3208,25 @@
       "properties": {
         "bytes": {
           "description": "Verbatim bytes; default 0x",
-          "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
-          "type": "string",
+          "oneOf": [
+            {
+              "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+              "type": "string"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
           "x-packetcraftr-tier": "optional"
         }
       },
@@ -3258,8 +3530,25 @@
         },
         "options": {
           "description": "Verbatim standard or unknown TCP options; default 0x",
-          "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
-          "type": "string",
+          "oneOf": [
+            {
+              "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+              "type": "string"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "raw": {
+                  "pattern": "^0[xX]([0-9a-fA-F]{2})*$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "raw"
+              ],
+              "type": "object"
+            }
+          ],
           "x-packetcraftr-tier": "optional"
         },
         "reserved_bits": {
@@ -3372,7 +3661,7 @@
             "type": "string"
           },
           "type": "array",
-          "x-packetcraftr-tier": "required"
+          "x-packetcraftr-tier": "optional"
         },
         "cipher_suite": {
           "description": "Cipher suite selected by a ServerHello",
@@ -3387,7 +3676,7 @@
               "type": "string"
             }
           ],
-          "x-packetcraftr-tier": "required"
+          "x-packetcraftr-tier": "optional"
         },
         "cipher_suites": {
           "description": "Cipher suites offered by a ClientHello",
@@ -3404,7 +3693,7 @@
             ]
           },
           "type": "array",
-          "x-packetcraftr-tier": "required"
+          "x-packetcraftr-tier": "optional"
         },
         "content_type": {
           "description": "Record content type of the first record; default 0",
@@ -3439,7 +3728,7 @@
               "type": "string"
             }
           ],
-          "x-packetcraftr-tier": "required"
+          "x-packetcraftr-tier": "optional"
         },
         "incomplete": {
           "description": "Whether a record continues past this segment; default false",
@@ -3449,17 +3738,17 @@
         "ja3": {
           "description": "Advisory JA3 fingerprint of a ClientHello (MD5 digest)",
           "type": "string",
-          "x-packetcraftr-tier": "required"
+          "x-packetcraftr-tier": "optional"
         },
         "ja3_raw": {
           "description": "Advisory JA3 fingerprint of a ClientHello before hashing",
           "type": "string",
-          "x-packetcraftr-tier": "required"
+          "x-packetcraftr-tier": "optional"
         },
         "ja4": {
           "description": "Advisory JA4 fingerprint of a ClientHello",
           "type": "string",
-          "x-packetcraftr-tier": "required"
+          "x-packetcraftr-tier": "optional"
         },
         "key_share_group": {
           "description": "Named group of a ServerHello key share",
@@ -3474,7 +3763,7 @@
               "type": "string"
             }
           ],
-          "x-packetcraftr-tier": "required"
+          "x-packetcraftr-tier": "optional"
         },
         "record_count": {
           "description": "Complete records in this segment; default 0",
@@ -3504,17 +3793,17 @@
               "type": "string"
             }
           ],
-          "x-packetcraftr-tier": "required"
+          "x-packetcraftr-tier": "optional"
         },
         "sni": {
           "description": "Validated server name offered by a ClientHello",
           "type": "string",
-          "x-packetcraftr-tier": "required"
+          "x-packetcraftr-tier": "optional"
         },
         "sni_raw": {
           "description": "Verbatim server name bytes in hexadecimal",
           "type": "string",
-          "x-packetcraftr-tier": "required"
+          "x-packetcraftr-tier": "optional"
         },
         "supported_groups": {
           "description": "Named groups offered by a ClientHello",
@@ -3531,7 +3820,7 @@
             ]
           },
           "type": "array",
-          "x-packetcraftr-tier": "required"
+          "x-packetcraftr-tier": "optional"
         },
         "supported_versions": {
           "description": "Versions offered by a ClientHello",
@@ -3548,7 +3837,7 @@
             ]
           },
           "type": "array",
-          "x-packetcraftr-tier": "required"
+          "x-packetcraftr-tier": "optional"
         },
         "version": {
           "description": "Legacy record version of the first record; default 0",
@@ -3566,21 +3855,6 @@
           "x-packetcraftr-tier": "optional"
         }
       },
-      "required": [
-        "handshake_type",
-        "cipher_suite",
-        "selected_version",
-        "key_share_group",
-        "sni",
-        "sni_raw",
-        "ja3",
-        "ja3_raw",
-        "ja4",
-        "alpn",
-        "cipher_suites",
-        "supported_versions",
-        "supported_groups"
-      ],
       "type": "object",
       "x-packetcraftr-decode-only": true
     },
@@ -4037,7 +4311,7 @@
       "items": {
         "$ref": "#/$defs/layer"
       },
-      "minItems": 1,
+      "minItems": 0,
       "type": "array"
     },
     "schema": {

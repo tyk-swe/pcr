@@ -91,15 +91,17 @@ fn document_output_timing_is_within_bound_of_ndjson() {
         "document output must contain exactly {frame_count} `---` separators, found {separator_count}"
     );
 
-    // Assert document wall time <= 3x ndjson wall time
-    let max_allowed_ms = ndjson_duration.as_millis().saturating_mul(3).max(100);
+    // Assert document output is actually faster than ndjson --dissect, not just
+    // within some multiple of it: a bound above 1x would still pass if document
+    // output regressed to be slower, the opposite of what this test guards.
+    let max_allowed_ms = ndjson_duration.as_millis().max(100);
     eprintln!(
         "20k frames: ndjson={:?}, document={:?}, max_allowed_ms={max_allowed_ms}ms",
         ndjson_duration, doc_duration
     );
     assert!(
         doc_duration.as_millis() <= max_allowed_ms,
-        "document wall time ({:?}) exceeded 3x ndjson wall time ({:?})",
+        "document wall time ({:?}) was not faster than ndjson wall time ({:?})",
         doc_duration,
         ndjson_duration
     );

@@ -109,7 +109,7 @@ fn command_format_matrix_display_and_errors_cover_the_full_vocabulary() {
     for (error, message, code, kind) in [
         (
             ContractError::TimestampOutOfRange,
-            "outside the signed v1 output range",
+            "outside the signed output range",
             "packet.timestamp_range",
             Kind::Packet,
         ),

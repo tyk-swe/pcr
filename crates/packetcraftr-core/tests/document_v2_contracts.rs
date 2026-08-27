@@ -649,3 +649,29 @@ layers:
         );
     }
 }
+
+#[test]
+fn test_8_detect_schema_skips_an_unrelated_earlier_schema_substring() {
+    let json = r#"{
+  "options_schema": "not-the-real-one",
+  "schema": "packetcraftr.packet/v2",
+  "layers": []
+}"#;
+    assert_eq!(
+        Document::detect_schema(json),
+        Some("packetcraftr.packet/v2"),
+        "an earlier `schema` substring inside an unrelated key must not shadow the real one"
+    );
+
+    let yaml = "options_schema: not-the-real-one\nschema: packetcraftr.packet/v2\nlayers: []\n";
+    assert_eq!(
+        Document::detect_schema(yaml),
+        Some("packetcraftr.packet/v2"),
+        "same check for YAML"
+    );
+
+    assert_eq!(
+        Document::detect_schema("just a schema-like string with no colon"),
+        None
+    );
+}

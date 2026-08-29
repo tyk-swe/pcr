@@ -13,6 +13,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   peak-RSS measurement harnesses.
 - `DocumentLimits` and `Packet::parse_with_limits`, enforcing matching bounded
   JSON/YAML semantics before retained values are allocated.
+- Weekly dependency-policy checks and a portable smoke check for the
+  repository-backed Quick Start commands.
 
 ### Changed
 
@@ -26,6 +28,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 - **Breaking (library):** authorization requests are complete `Operation` enum
   variants built from `WireBudget`, `DeclaredPackets`, `ReplayFrame`, and
   `PermissiveLive`; incomplete/default requests are no longer representable.
+- **Breaking (library):** replay transmitters return the passively selected
+  `route::Plan` from interface validation, and replay authorizers explicitly
+  approve that final wire route before pacing or transmission.
 - **Breaking (library):** `Packet::parse_with_resource_limits` became
   `parse_with_limits`, and packet documents no longer implement
   `serde::Deserialize` directly.
@@ -34,6 +39,15 @@ All notable changes to PacketcraftR are documented here. The format follows
 - Native feature implications and the pcap-free CI profile are explicit.
   Progressive callback deadlines and native-worker cleanup now remain bounded
   without releasing state still owned by timed-out workers.
+- Release archives include the packet and output schemas and exercise packaged
+  protocol listing plus exact build/dissect behavior before publication.
+
+### Fixed
+
+- Replay applies final-wire source ownership policy after passive route and
+  interface selection, requiring `--allow-source-spoofing` for captured IP or
+  Ethernet sources the selected route does not own.
+- The Quick Start capture commands use the published TLS fixture.
 
 ## [0.5.0-beta.2] - 2026-08-27
 

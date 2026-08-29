@@ -116,13 +116,15 @@ jobs:
         run: rustup toolchain install
       - uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc # v2.86.7
         with:
-          tool: cargo-deny
+          tool: cargo-deny@0.20.2
       - name: Check formatting
         run: |
           cargo fmt --all -- --check
           cargo fmt --manifest-path fuzz/Cargo.toml -- --check
       - name: Check dangerous range APIs
         run: bash scripts/check-dangerous-ranges.sh
+      - name: Smoke-test repository Quick Start
+        run: bash scripts/check-quick-start.sh
       - name: Run Clippy
         run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
       - name: Build API documentation

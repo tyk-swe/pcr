@@ -22,7 +22,8 @@ packetcraftr protocols
 packetcraftr --output hex build --packet 'raw(text=hello)'
 packetcraftr --output json dissect --link-type 228 \
   --hex '450000210000000040118e95c0000201c633640230390009000d9f8868656c6c6f'
-packetcraftr --output ndjson read capture.pcapng --max-frames 100
+packetcraftr --output ndjson read examples/captures/tls-handshake.pcapng \
+  --max-frames 100
 packetcraftr tls examples/captures/tls-handshake.pcapng
 packetcraftr --output json build \
   --packet-file examples/documents/packet-ipv4-udp.json

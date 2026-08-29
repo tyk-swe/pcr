@@ -209,6 +209,7 @@ jobs:
           cp LICENSE "$staging/LICENSE"
           cp README.md "$staging/README.md"
           cp CHANGELOG.md "$staging/CHANGELOG.md"
+          cp -R schemas "$staging/schemas"
           tar -C "$RUNNER_TEMP" -czf "$RUNNER_TEMP/$ARCHIVE_BASENAME.tar.gz" \
             "$ARCHIVE_BASENAME"
       - if: runner.os == 'Windows'
@@ -223,6 +224,7 @@ jobs:
           Copy-Item "LICENSE" $staging
           Copy-Item "README.md" $staging
           Copy-Item "CHANGELOG.md" $staging
+          Copy-Item "schemas" (Join-Path $staging "schemas") -Recurse
           Compress-Archive -Path $staging -DestinationPath $archive
       - if: runner.os != 'Windows'
         name: Smoke-test Unix archive
@@ -234,10 +236,28 @@ jobs:
           tar -C "$extraction" -xzf "$RUNNER_TEMP/$ARCHIVE_BASENAME.tar.gz"
           executable="$extraction/$ARCHIVE_BASENAME/packetcraftr"
           test -x "$executable"
-          for document in LICENSE README.md CHANGELOG.md; do
+          for document in \
+            LICENSE \
+            README.md \
+            CHANGELOG.md \
+            schemas/packetcraftr.packet.v1.schema.json \
+            schemas/packetcraftr.output.v1.schema.json
+          do
             test -s "$extraction/$ARCHIVE_BASENAME/$document"
           done
           test "$("$executable" --version)" = "packetcraftr $VERSION"
+          protocols="$("$executable" protocols)"
+          test -n "$protocols"
+          expected=450000210000000040118e95c0000201c633640230390009000d9f8868656c6c6f
+          built="$(
+            "$executable" --output hex build \
+              --packet 'ipv4(src=192.0.2.1,dst=198.51.100.2)/udp(sport=12345,dport=9)/raw(text=hello)'
+          )"
+          test "$built" = "$expected"
+          dissected="$(
+            "$executable" --output hex dissect --link-type 228 --hex "$built"
+          )"
+          test "$dissected" = "$built"
       - if: runner.os == 'Windows'
         name: Smoke-test Windows archive
         shell: pwsh
@@ -251,7 +271,13 @@ jobs:
           if (-not (Test-Path -PathType Leaf $executable)) {
             throw "packaged executable is missing"
           }
-          foreach ($document in @("LICENSE", "README.md", "CHANGELOG.md")) {
+          foreach ($document in @(
+            "LICENSE",
+            "README.md",
+            "CHANGELOG.md",
+            "schemas/packetcraftr.packet.v1.schema.json",
+            "schemas/packetcraftr.output.v1.schema.json"
+          )) {
             $documentPath = Join-Path $extraction "$($env:ARCHIVE_BASENAME)/$document"
             if (
               -not (Test-Path -PathType Leaf $documentPath) -or
@@ -266,6 +292,26 @@ jobs:
           }
           if ($reportedVersion -ne "packetcraftr $env:VERSION") {
             throw "unexpected packaged version: $reportedVersion"
+          }
+          $protocols = (& $executable protocols | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($protocols)) {
+            throw "packaged executable failed to list protocols"
+          }
+          $expected = "450000210000000040118e95c0000201c633640230390009000d9f8868656c6c6f"
+          $built = (
+            & $executable --output hex build `
+              --packet "ipv4(src=192.0.2.1,dst=198.51.100.2)/udp(sport=12345,dport=9)/raw(text=hello)" |
+              Out-String
+          ).Trim()
+          if ($LASTEXITCODE -ne 0 -or $built -ne $expected) {
+            throw "packaged executable produced unexpected build bytes: $built"
+          }
+          $dissected = (
+            & $executable --output hex dissect --link-type 228 --hex $built |
+              Out-String
+          ).Trim()
+          if ($LASTEXITCODE -ne 0 -or $dissected -ne $built) {
+            throw "packaged executable did not preserve exact dissect bytes: $dissected"
           }
       - if: runner.os == 'Linux' && matrix.variant.name == 'all-features'
         name: Verify full Linux binary links libpcap

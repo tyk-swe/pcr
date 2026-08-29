@@ -66,9 +66,7 @@ pub enum Error {
 }
 
 /// A `cli.*` code means "caller or request error": the request that reached a
-/// workflow was not something the workflow could run. The name points at the
-/// consumer rather than the fault; renaming it to `request.*` is a v1 output
-/// contract break and waits for 0.6 (see *Planned for 0.6* in CHANGELOG.md).
+/// workflow was not something the workflow could run.
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {

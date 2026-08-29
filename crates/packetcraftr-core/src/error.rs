@@ -78,9 +78,8 @@ impl Context {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Kind {
-    /// A caller or request error: the input or the invocation was wrong, not
-    /// the packet or the environment. The serialized name stays `cli` until
-    /// the 0.6 contract break.
+    /// A caller or request error: the input or invocation was wrong, not the
+    /// packet or environment.
     Cli,
     Packet,
     Capability,

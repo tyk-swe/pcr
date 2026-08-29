@@ -43,9 +43,7 @@ credentials, public-target details, or exploit information.
 On top of the pull request rules in AGENTS.md:
 
 - keep mechanical refactoring separate from behavior changes;
-- record work you deliberately left out in the pull request description, and
-  list any deferred output-contract break under *Planned for 0.6* in
-  [CHANGELOG.md](CHANGELOG.md);
+- record work you deliberately left out in the pull request description;
 - review the full diff yourself first, and get review from every affected
   owner on a cross-boundary change; and
 - cover the relevant unavailable-backend, permission, stale-interface,

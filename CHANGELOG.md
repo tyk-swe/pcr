@@ -6,18 +6,6 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ## [Unreleased]
 
-### Planned for 0.6 (output-contract break)
-
-The v1 serialized documents, classification and exit codes, flag names, and
-defaults remain stable through 0.5. The next deliberate contract bump will:
-
-- Rename `cli.*` / `Kind::Cli` to `request.*` / `Kind::Request` while keeping
-  exit code 2.
-- Serialize durations as `*_ms` instead of `{secs, nanos}`.
-- Correct the two TLS limit descriptions that name `--max-tls-sessions`.
-- Rename `exchange --max-unsolicited` to `--max-undecoded`.
-- Shorten the TLS and capture limit flag names that repeat their command.
-
 ### Added
 
 - Eight implementation fuzz targets, property coverage for document, capture,

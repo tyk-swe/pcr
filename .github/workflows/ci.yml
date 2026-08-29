@@ -132,7 +132,21 @@ jobs:
       - name: Run doctests
         run: cargo test --locked --workspace --all-features --doc
       - name: Check dependency policy
-        run: cargo deny check
+        run: |
+          cargo deny check
+          cargo deny --manifest-path fuzz/Cargo.toml check advisories
+
+  features:
+    name: Feature matrix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Linux native dependencies
+        run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+      - name: Check every supported feature profile
+        run: bash scripts/check-features.sh
 
   msrv:
     name: MSRV (${{ matrix.name }})

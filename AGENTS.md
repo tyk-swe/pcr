@@ -17,6 +17,8 @@ The toolchain is pinned in `rust-toolchain.toml`; the MSRV is `rust-version` in 
 - `RUSTDOCFLAGS="-D warnings" cargo doc --locked --workspace --all-features --no-deps`: CI fails on rustdoc warnings.
 - `cargo fmt --all -- --check`; `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`: check style and lints.
 - `cargo deny check`: enforce dependency policy.
+- `./scripts/check-features.sh`: `cargo check` every supported feature profile; CI runs it on Linux.
+- `cargo bench -p packetcraftr-core`; `./scripts/measure-memory.sh`: non-gating Criterion benchmarks and Linux peak-RSS profiling.
 
 ## Coding Style & Naming Conventions
 

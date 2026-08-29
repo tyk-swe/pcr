@@ -15,7 +15,8 @@ mod validation;
 pub use checksum::{ChecksumAccumulator, checksum, checksum_parts};
 pub(crate) use checksum::{network_from_addresses, transport_checksum, transport_checksum_parts};
 pub(crate) use errors::{
-    binding_protocol, invalid, out_of_range, protocol, truncated, wrong_layer, wrong_type,
+    binding_protocol, invalid, out_of_range, protocol, read_only, truncated, wrong_layer,
+    wrong_type,
 };
 pub(crate) use fields::{
     ValueExpectation, aliased_fields, expected_discriminator, expected_discriminator_for_value,

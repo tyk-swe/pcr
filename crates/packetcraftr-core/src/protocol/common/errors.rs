@@ -57,3 +57,13 @@ pub(crate) fn out_of_range(schema: &'static crate::layer::Schema, field: &str) -
         field: field.to_owned(),
     }
 }
+
+pub(crate) fn read_only(
+    schema: &'static crate::layer::Schema,
+    field: &str,
+) -> Result<(), FieldError> {
+    Err(FieldError::ReadOnly {
+        protocol: schema.protocol.clone(),
+        field: field.to_owned(),
+    })
+}

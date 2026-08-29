@@ -28,8 +28,8 @@ pub struct SystemAuthorizer {
 }
 
 impl SystemAuthorizer {
-    /// Authorizes replay against `registry`, the same registry the caller
-    /// decodes and filters captured frames with.
+    /// Uses `registry` for the caller's normal decode/rebuild round trip.
+    /// Destination policy is applied through an independent built-in decoder.
     pub fn new(
         registry: Arc<Registry>,
         policy: crate::policy::Policy,
@@ -50,13 +50,11 @@ impl SystemAuthorizer {
         validate_complete_frame(frame)?;
         self.validate_link_type(frame)?;
         validate_network_frame(frame, mode)?;
-        let decoded =
-            authorize_wire(&self.registry, &self.policy, frame.clone(), None).map_err(|error| {
-                match error {
-                    WireAuthorizationError::Decode(source) => decode_error(source),
-                    WireAuthorizationError::Policy(error) => BoundaryError::from_error(error),
-                }
-            })?;
+        authorize_wire(&self.policy, frame.clone(), None).map_err(|error| match error {
+            WireAuthorizationError::Decode(source) => decode_error(source),
+            WireAuthorizationError::Policy(error) => BoundaryError::from_error(error),
+        })?;
+        let decoded = self.decode_frame(frame)?;
         let rebuilt = self.rebuild_frame(&decoded)?;
         self.validate_rebuild(frame, &rebuilt)
     }
@@ -79,7 +77,6 @@ impl SystemAuthorizer {
         ))
     }
 
-    #[cfg(test)]
     fn decode_frame(&self, frame: &Frame) -> Result<decode::DecodedPacket, BoundaryError> {
         decode::Dissector::new(Arc::clone(&self.registry))
             .decode(frame.clone(), decode::Options::default())
@@ -233,13 +230,20 @@ impl Authorizer for SystemAuthorizer {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::net::Ipv4Addr;
     use std::sync::Arc;
     use std::time::UNIX_EPOCH;
 
     use packetcraftr_core::Packet;
     use packetcraftr_core::build::{Builder, BuiltPacket};
+    use packetcraftr_core::codec::{
+        DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext,
+    };
     use packetcraftr_core::error::Classified;
+    use packetcraftr_core::field::FieldValue;
+    use packetcraftr_core::frame::LinkType;
+    use packetcraftr_core::layer::{Layer, Raw, raw_layout};
     use packetcraftr_core::protocol::{icmp::Icmpv4, network::Ipv4};
 
     use super::*;
@@ -247,6 +251,63 @@ mod tests {
 
     fn registry() -> Arc<Registry> {
         Arc::new(packetcraftr_core::protocol::builtin::registry().expect("built-in registry"))
+    }
+
+    /// A caller codec that preserves every root byte while exposing no IP
+    /// semantics to consumers of its decoded packet.
+    #[derive(Clone, Copy, Debug)]
+    struct OpaqueRawCodec;
+
+    impl LayerCodec for OpaqueRawCodec {
+        fn protocol_id(&self) -> packetcraftr_core::layer::Id {
+            "raw".into()
+        }
+
+        fn encode(
+            &self,
+            layer: &dyn Layer,
+            _payload: &[u8],
+            _context: &LayerEncodeContext<'_>,
+        ) -> Result<EncodedLayer, packetcraftr_core::codec::Error> {
+            let raw = layer.as_any().downcast_ref::<Raw>().ok_or_else(|| {
+                packetcraftr_core::codec::Error::WrongLayer {
+                    expected: "raw".into(),
+                    actual: layer.protocol_id().clone(),
+                }
+            })?;
+            let mut encoded = EncodedLayer::header(raw.bytes.to_vec(), Box::new(raw.clone()));
+            encoded.fields = raw_layout(raw.bytes.len());
+            Ok(encoded)
+        }
+
+        fn decode(
+            &self,
+            input: &[u8],
+            _context: &LayerDecodeContext<'_>,
+        ) -> Result<DecodedLayerValue, packetcraftr_core::codec::Error> {
+            let mut decoded =
+                DecodedLayerValue::terminal(Box::new(Raw::new(input.to_vec())), input.len());
+            decoded.fields = raw_layout(input.len());
+            Ok(decoded)
+        }
+
+        fn make_layer(
+            &self,
+            _fields: &BTreeMap<String, FieldValue>,
+        ) -> Result<Box<dyn Layer>, packetcraftr_core::codec::Error> {
+            Ok(Box::new(Raw::default()))
+        }
+    }
+
+    fn opaque_raw_registry() -> Arc<Registry> {
+        let mut builder = Registry::builder();
+        builder
+            .register_builtin_codec(OpaqueRawCodec, &[])
+            .expect("opaque codec registration");
+        builder
+            .bind_link_type(LinkType::RAW.0, "raw")
+            .expect("opaque raw root binding");
+        Arc::new(builder.build().expect("opaque registry"))
     }
 
     fn built_ipv4(reserved_flag: bool) -> BuiltPacket {
@@ -308,6 +369,50 @@ mod tests {
         SystemAuthorizer::new(registry(), policy, true)
             .authorize_frame(&frame, Mode::Layer3)
             .expect("exact replay with both explicit live approvals");
+    }
+
+    #[test]
+    fn caller_codec_cannot_hide_a_public_destination_from_replay_policy() {
+        let mut packet = Packet::new();
+        packet
+            .push(Ipv4 {
+                source: Ipv4Addr::new(192, 0, 2, 1),
+                destination: Ipv4Addr::new(224, 0, 0, 251),
+                ..Ipv4::default()
+            })
+            .push(Icmpv4::default());
+        let built = Builder::new(registry())
+            .build(packet, build::Context::default(), build::Options::default())
+            .expect("public-destination fixture builds");
+        let frame = raw_frame(&built);
+        let policy = crate::policy::Policy {
+            allow_permissive_packets: true,
+            ..crate::policy::Policy::default()
+        };
+        let authorizer = SystemAuthorizer::new(opaque_raw_registry(), policy, true);
+
+        let caller_decoded = authorizer
+            .decode_frame(&frame)
+            .expect("caller codec decodes the root opaquely");
+        assert_eq!(caller_decoded.packet.len(), 1);
+        assert!(
+            caller_decoded
+                .packet
+                .layer(0)
+                .is_some_and(|layer| layer.as_any().is::<Raw>())
+        );
+        let caller_rebuilt = authorizer
+            .rebuild_frame(&caller_decoded)
+            .expect("caller codec rebuilds its opaque layer");
+        authorizer
+            .validate_rebuild(&frame, &caller_rebuilt)
+            .expect("caller codec round trip is exact");
+
+        let error = authorizer
+            .authorize_frame(&frame, Mode::Layer3)
+            .expect_err("trusted policy decoding must still see the public destination");
+        assert_eq!(error.classification().code, "policy.public_destination");
+        assert!(error.to_string().contains("224.0.0.251"));
     }
 
     #[test]

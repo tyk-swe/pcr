@@ -42,7 +42,7 @@ bump:
 ### Changed
 
 - **Breaking (library):** `packetcraftr::fuzz::run` and `run_with_events` take a public `fuzz::RunInput { request, live, packet, registry }` instead of four positional arguments, removing the `too_many_arguments` lint escape. CLI behaviour and output are unchanged.
-- **Breaking (library):** `packetcraftr::replay::SystemAuthorizer::new` takes the `Arc<Registry>` the caller already decodes and filters with, instead of building a private built-in registry and documenting a panic. Live `Client` final-wire authorization now decodes with the client's own registry (previously a private built-in copy) through one shared `authorize_wire` step; every existing caller passed a built-in registry, so observable behaviour is unchanged.
+- **Breaking (library):** `packetcraftr::replay::SystemAuthorizer::new` takes the `Arc<Registry>` the caller already decodes and filters with for its exact decode/rebuild round trip, instead of building a private built-in registry and documenting a panic. Replay and live `Client` final-wire destination/source policy remain independently decoded through a trusted built-in registry, so caller codecs cannot conceal network addresses from authorization.
 - **Breaking (library):** `packetcraftr::authorization::Operation` is now an
   enum of complete request shapes (`Budgeted`, `Declared`, `Replay`) built
   from `WireBudget`, `DeclaredPackets`, `ReplayFrame`, and `PermissiveLive`

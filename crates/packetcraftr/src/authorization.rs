@@ -11,7 +11,7 @@
 //! [`crate::policy::Policy`] gives.
 
 use std::net::IpAddr;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::frame::{Frame, LinkType};
@@ -417,15 +417,6 @@ impl<R, N, I> Client<R, N, I> {
             LinkMode::Layer3 => LinkType::RAW,
             LinkMode::Auto => return Err(LiveIoError::UnresolvedLinkMode.into()),
         };
-        if self.registry.root_for_link_type(link_type.0).is_none() {
-            return Err(crate::policy::Error::InvalidPacketSemantics {
-                reason: format!(
-                    "final-wire authorization does not support link type {}",
-                    link_type.0
-                ),
-            }
-            .into());
-        }
         let frame = Frame::new(
             std::time::SystemTime::UNIX_EPOCH,
             link_type,
@@ -434,19 +425,17 @@ impl<R, N, I> Client<R, N, I> {
         .map_err(|error| crate::policy::Error::InvalidPacketSemantics {
             reason: error.to_string(),
         })?;
-        authorize_wire(&self.registry, &self.policy, frame, Some(route)).map_err(
-            |error| -> Error {
-                match error {
-                    WireAuthorizationError::Decode(error) => {
-                        crate::policy::Error::InvalidPacketSemantics {
-                            reason: error.to_string(),
-                        }
+        authorize_wire(&self.policy, frame, Some(route)).map_err(|error| -> Error {
+            match error {
+                WireAuthorizationError::Decode(error) => {
+                    crate::policy::Error::InvalidPacketSemantics {
+                        reason: error.to_string(),
                     }
-                    WireAuthorizationError::Policy(error) => error,
                 }
-                .into()
-            },
-        )?;
+                WireAuthorizationError::Policy(error) => error,
+            }
+            .into()
+        })?;
         Ok(())
     }
 }
@@ -459,15 +448,38 @@ pub(crate) enum WireAuthorizationError {
     Policy(crate::policy::Error),
 }
 
-/// Decodes the bytes that will actually reach the wire with the workflow's own
+/// Decodes the bytes that will actually reach the wire with a trusted built-in
 /// registry and applies destination (and, given a route, source) policy to the
-/// decoded packet. Callers classify decode failures in their own vocabulary.
+/// decoded packet. Caller registries remain outside this policy trust boundary.
+/// Callers classify decode failures in their own vocabulary.
 pub(crate) fn authorize_wire(
-    registry: &Arc<Registry>,
     policy: &crate::policy::Policy,
     frame: Frame,
     route: Option<&packetcraftr_netio::route::Plan>,
-) -> Result<packetcraftr_core::decode::DecodedPacket, WireAuthorizationError> {
+) -> Result<(), WireAuthorizationError> {
+    static REGISTRY: OnceLock<Result<Arc<Registry>, String>> = OnceLock::new();
+    let registry = REGISTRY
+        .get_or_init(|| {
+            packetcraftr_core::protocol::builtin::registry()
+                .map(Arc::new)
+                .map_err(|error| error.to_string())
+        })
+        .as_ref()
+        .map_err(|reason| {
+            WireAuthorizationError::Policy(crate::policy::Error::InvalidPacketSemantics {
+                reason: reason.clone(),
+            })
+        })?;
+    if registry.root_for_link_type(frame.link_type.0).is_none() {
+        return Err(WireAuthorizationError::Policy(
+            crate::policy::Error::InvalidPacketSemantics {
+                reason: format!(
+                    "trusted wire authorization does not support link type {}",
+                    frame.link_type.0
+                ),
+            },
+        ));
+    }
     let decoded = Dissector::new(Arc::clone(registry))
         .decode(frame, packetcraftr_core::decode::Options::default())
         .map_err(WireAuthorizationError::Decode)?;
@@ -479,7 +491,7 @@ pub(crate) fn authorize_wire(
             .authorize_packet_sources(&decoded.packet, route)
             .map_err(WireAuthorizationError::Policy)?;
     }
-    Ok(decoded)
+    Ok(())
 }
 
 #[cfg(test)]

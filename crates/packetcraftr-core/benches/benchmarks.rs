@@ -315,7 +315,7 @@ fn bench_tcp_reassembly(c: &mut Criterion) {
 }
 
 fn client_hello_record_from_capture() -> Bytes {
-    let capture = include_bytes!("../../../fuzz/corpora/pcapng_parse/tls-handshake.pcapng");
+    let capture = include_bytes!("../../../examples/captures/tls-handshake.pcapng");
     let reader = Reader::new(Cursor::new(capture.as_slice())).expect("TLS benchmark capture");
     for frame in reader {
         let frame = frame.expect("TLS benchmark frame");

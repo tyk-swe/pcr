@@ -43,9 +43,14 @@ jobs:
         run: |
           corpus=()
           dictionary=()
-          if [[ -d "corpora/${{ matrix.target }}" ]]; then
-            corpus+=("corpora/${{ matrix.target }}")
-          fi
+          mkdir -p "corpora/${{ matrix.target }}"
+          corpus+=("corpora/${{ matrix.target }}")
+          # Published examples double as seeds; they are pinned to the
+          # schemas by the example matrix tests, so they cannot rot.
+          case "${{ matrix.target }}" in
+            packet_document_json) corpus+=("../examples/documents") ;;
+            pcapng_parse) corpus+=("../examples/captures") ;;
+          esac
           case "${{ matrix.target }}" in
             packet_document_json) dictionary+=("-dict=dictionaries/json.dict") ;;
             packet_document_yaml) dictionary+=("-dict=dictionaries/yaml.dict") ;;

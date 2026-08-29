@@ -26,16 +26,30 @@ use packetcraftr_core::protocol::builtin;
 /// The checked-in seed corpus for one fuzz target; a missing corpus is a
 /// harness defect, not an empty smoke test.
 fn corpus(target: &str) -> std::path::PathBuf {
+    seed_dir(Path::new("fuzz/corpora").join(target))
+}
+
+/// The published examples that seed a fuzz target instead of a corpus copy,
+/// so the seeds cannot drift from the documents the schemas pin.
+fn published_examples(kind: &str) -> std::path::PathBuf {
+    seed_dir(Path::new("examples").join(kind))
+}
+
+fn seed_dir(relative: std::path::PathBuf) -> std::path::PathBuf {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../fuzz/corpora")
-        .join(target);
-    assert!(path.is_dir(), "missing fuzz corpus {}", path.display());
+        .join("../..")
+        .join(relative);
+    assert!(
+        path.is_dir(),
+        "missing fuzz seed directory {}",
+        path.display()
+    );
     path
 }
 
 #[test]
 fn smoke_test_json_packet_documents() {
-    let corpus_dir = corpus("packet_document_json");
+    let corpus_dir = published_examples("documents");
     let mut checked = 0_usize;
     {
         for entry in fs::read_dir(corpus_dir)
@@ -108,7 +122,7 @@ fn smoke_test_yaml_packet_documents() {
 
 #[test]
 fn smoke_test_pcapng_captures() {
-    let corpus_dir = corpus("pcapng_parse");
+    let corpus_dir = published_examples("captures");
     let mut checked = 0_usize;
     {
         for entry in fs::read_dir(corpus_dir)

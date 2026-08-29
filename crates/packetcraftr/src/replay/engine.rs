@@ -8,7 +8,9 @@ use std::time::{Duration, SystemTime};
 use packetcraftr_core::analysis::pcap::{Format, Interface, Reader};
 use packetcraftr_core::budget::{Deadline, DeadlineExceeded};
 use packetcraftr_core::frame::Frame;
-use packetcraftr_netio::{interface::Id as InterfaceId, link::Mode as LinkMode};
+use packetcraftr_netio::{
+    interface::Id as InterfaceId, link::Mode as LinkMode, route::Plan as RoutePlan,
+};
 
 use crate::clock::Clock;
 
@@ -115,7 +117,7 @@ where
             &read.frame,
             plan.mode,
         )?;
-        let interface = validate_interface(
+        let route = validate_interface(
             transmitter,
             options,
             &deadline,
@@ -123,12 +125,13 @@ where
             plan.mode,
             &read.frame,
         )?;
+        authorize_final_wire(authorizer, &deadline, source_index, &read.frame, &route)?;
         pace(clock, &mut deadline, source_index, plan.delay)?;
         let transmission = transmit_frame(
             transmitter,
             &deadline,
             source_index,
-            &interface,
+            &route.decision.interface,
             plan.mode,
             &read.frame,
         )?;
@@ -344,11 +347,27 @@ fn validate_interface<T: Transmitter>(
     source_index: u64,
     mode: LinkMode,
     frame: &Frame,
-) -> Result<InterfaceId, Error> {
+) -> Result<RoutePlan, Error> {
     enforce_deadline(deadline, source_index)?;
     let interface = transmitter.validate_interface(&options.interface, mode, frame);
     enforce_deadline(deadline, source_index)?;
     interface.map_err(|source| Error::Transmission {
+        source_index,
+        source,
+    })
+}
+
+fn authorize_final_wire<A: Authorizer>(
+    authorizer: &mut A,
+    deadline: &Deadline,
+    source_index: u64,
+    frame: &Frame,
+    route: &RoutePlan,
+) -> Result<(), Error> {
+    enforce_deadline(deadline, source_index)?;
+    let authorization = authorizer.authorize_final_wire(frame, route);
+    enforce_deadline(deadline, source_index)?;
+    authorization.map_err(|source| Error::Authorization {
         source_index,
         source,
     })

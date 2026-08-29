@@ -226,12 +226,23 @@ impl Authorizer for SystemAuthorizer {
             )),
         }
     }
+
+    fn authorize_final_wire(
+        &mut self,
+        frame: &Frame,
+        route: &packetcraftr_netio::route::Plan,
+    ) -> Result<(), BoundaryError> {
+        authorize_wire(&self.policy, frame.clone(), Some(route)).map_err(|error| match error {
+            WireAuthorizationError::Decode(source) => decode_error(source),
+            WireAuthorizationError::Policy(error) => BoundaryError::from_error(error),
+        })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
-    use std::net::Ipv4Addr;
+    use std::net::{IpAddr, Ipv4Addr};
     use std::sync::Arc;
     use std::time::UNIX_EPOCH;
 
@@ -244,7 +255,10 @@ mod tests {
     use packetcraftr_core::field::FieldValue;
     use packetcraftr_core::frame::LinkType;
     use packetcraftr_core::layer::{Layer, Raw, raw_layout};
-    use packetcraftr_core::protocol::{icmp::Icmpv4, network::Ipv4};
+    use packetcraftr_core::protocol::{icmp::Icmpv4, link::Ethernet, network::Ipv4};
+    use packetcraftr_netio::interface::Id as InterfaceId;
+    use packetcraftr_netio::link::{Capability as LinkCapability, MacAddress};
+    use packetcraftr_netio::route::{Decision, Plan, Scope, SelectionReason};
 
     use super::*;
     use crate::authorization::{DeclaredPackets, PermissiveLive, ReplayFrame, WireBudget};
@@ -345,6 +359,59 @@ mod tests {
         .expect("bounded raw frame")
     }
 
+    fn ethernet_frame(source_mac: [u8; 6], source_ip: Ipv4Addr) -> Frame {
+        let mut packet = Packet::new();
+        packet
+            .push(Ethernet {
+                source: source_mac,
+                destination: [0x02, 0, 0, 0, 0, 2],
+                ..Ethernet::default()
+            })
+            .push(Ipv4 {
+                source: source_ip,
+                destination: Ipv4Addr::new(192, 0, 2, 2),
+                ..Ipv4::default()
+            })
+            .push(Icmpv4::default());
+        let built = Builder::new(registry())
+            .build(packet, build::Context::default(), build::Options::default())
+            .expect("Ethernet replay fixture builds");
+        Frame::new(UNIX_EPOCH, LinkType::ETHERNET, built.bytes)
+            .expect("bounded Ethernet replay fixture")
+    }
+
+    fn replay_route(mode: Mode, link_type: LinkType, selected_source: Ipv4Addr) -> Plan {
+        let source_mac = MacAddress([0x02, 0, 0, 0, 0, 1]);
+        Plan {
+            decision: Decision {
+                interface: InterfaceId {
+                    name: "fixture0".to_owned(),
+                    index: 7,
+                },
+                source_mac: Some(source_mac),
+                selected_source: Some(IpAddr::V4(selected_source)),
+                preferred_source: None,
+                next_hop: None,
+                selection_reason: SelectionReason::InterfaceOnly,
+                destination_scope: Scope::Link,
+                mtu: 1_500,
+                capability: LinkCapability::Layer2AndLayer3,
+                link_type,
+            },
+            mode,
+            lookup_destination: None,
+            final_destination: None,
+            visited_destinations: Vec::new(),
+            packet_source: Some(IpAddr::V4(selected_source)),
+            neighbor_source: None,
+            neighbor_target: None,
+            destination_mac: None,
+            source_mac: Some(source_mac),
+            neighbor_vlan_tags: Vec::new(),
+            synthesized_ethernet: false,
+        }
+    }
+
     #[test]
     fn exact_complete_documentation_frame_is_authorized_with_replay_opt_ins() {
         let built = built_ipv4(false);
@@ -369,6 +436,96 @@ mod tests {
         SystemAuthorizer::new(registry(), policy, true)
             .authorize_frame(&frame, Mode::Layer3)
             .expect("exact replay with both explicit live approvals");
+    }
+
+    #[test]
+    fn final_wire_replay_rejects_foreign_raw_ip_source_unless_explicitly_allowed() {
+        let frame = raw_frame(&built_ipv4(false));
+        let route = replay_route(Mode::Layer3, LinkType::RAW, Ipv4Addr::new(192, 0, 2, 99));
+
+        let error = SystemAuthorizer::new(registry(), crate::policy::Policy::default(), false)
+            .authorize_final_wire(&frame, &route)
+            .expect_err("foreign raw IP source must be rejected by default");
+        assert_eq!(error.classification().code, "policy.source_ownership");
+
+        let policy = crate::policy::Policy {
+            allow_source_spoofing: true,
+            ..crate::policy::Policy::default()
+        };
+        SystemAuthorizer::new(registry(), policy, false)
+            .authorize_final_wire(&frame, &route)
+            .expect("explicit source-spoofing approval permits the raw IP source");
+    }
+
+    #[test]
+    fn final_wire_replay_rejects_foreign_ethernet_source_unless_explicitly_allowed() {
+        let frame = ethernet_frame([0x02, 0, 0, 0, 0, 9], Ipv4Addr::new(192, 0, 2, 1));
+        let route = replay_route(
+            Mode::Layer2,
+            LinkType::ETHERNET,
+            Ipv4Addr::new(192, 0, 2, 1),
+        );
+
+        let error = SystemAuthorizer::new(registry(), crate::policy::Policy::default(), false)
+            .authorize_final_wire(&frame, &route)
+            .expect_err("foreign Ethernet source must be rejected by default");
+        assert_eq!(error.classification().code, "policy.source_ownership");
+
+        let policy = crate::policy::Policy {
+            allow_source_spoofing: true,
+            ..crate::policy::Policy::default()
+        };
+        SystemAuthorizer::new(registry(), policy, false)
+            .authorize_final_wire(&frame, &route)
+            .expect("explicit source-spoofing approval permits the Ethernet source");
+    }
+
+    #[test]
+    fn final_wire_replay_does_not_replace_an_unspecified_captured_source() {
+        let frame = ethernet_frame([0x02, 0, 0, 0, 0, 1], Ipv4Addr::UNSPECIFIED);
+        let mut route = replay_route(
+            Mode::Layer2,
+            LinkType::ETHERNET,
+            Ipv4Addr::new(192, 0, 2, 1),
+        );
+        route.packet_source = None;
+
+        let error = SystemAuthorizer::new(registry(), crate::policy::Policy::default(), false)
+            .authorize_final_wire(&frame, &route)
+            .expect_err("the exact unspecified source requires spoofing approval");
+        assert_eq!(error.classification().code, "policy.source_ownership");
+    }
+
+    #[test]
+    fn final_wire_replay_does_not_replace_a_zero_captured_source_mac() {
+        let frame = ethernet_frame([0; 6], Ipv4Addr::new(192, 0, 2, 1));
+        let mut route = replay_route(
+            Mode::Layer2,
+            LinkType::ETHERNET,
+            Ipv4Addr::new(192, 0, 2, 1),
+        );
+        route.source_mac = None;
+
+        let error = SystemAuthorizer::new(registry(), crate::policy::Policy::default(), false)
+            .authorize_final_wire(&frame, &route)
+            .expect_err("the exact zero source MAC requires spoofing approval");
+        assert_eq!(error.classification().code, "policy.source_ownership");
+    }
+
+    #[test]
+    fn final_wire_replay_accepts_a_secondary_selected_interface_ip_source() {
+        let secondary = Ipv4Addr::new(192, 0, 2, 9);
+        let frame = ethernet_frame([0x02, 0, 0, 0, 0, 1], secondary);
+        let mut route = replay_route(
+            Mode::Layer2,
+            LinkType::ETHERNET,
+            Ipv4Addr::new(192, 0, 2, 1),
+        );
+        route.decision.preferred_source = Some(IpAddr::V4(secondary));
+
+        SystemAuthorizer::new(registry(), crate::policy::Policy::default(), false)
+            .authorize_final_wire(&frame, &route)
+            .expect("an IP source owned by the selected interface is not spoofing");
     }
 
     #[test]

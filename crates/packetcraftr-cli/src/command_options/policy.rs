@@ -192,6 +192,8 @@ pub(crate) struct ReplayPolicyArgs {
     #[command(flatten)]
     permissive_packet: PermissivePacketArgs,
     #[command(flatten)]
+    source_spoofing: SourceSpoofingArgs,
+    #[command(flatten)]
     budgets: TrafficBudgetArgs<Streamed>,
 }
 
@@ -280,6 +282,7 @@ impl ReplayPolicyArgs {
         let mut policy = packetcraftr::policy::Policy::default();
         self.public_destination.apply_to(&mut policy);
         self.permissive_packet.apply_to(&mut policy);
+        self.source_spoofing.apply_to(&mut policy);
         self.budgets.apply_to(&mut policy);
         policy
     }
@@ -353,6 +356,36 @@ mod tests {
             captured,
         );
         assert_eq!(captured, (DEFAULT_CAPTURED_FRAMES, transmitted.1));
+    }
+
+    #[test]
+    fn replay_source_spoofing_requires_its_explicit_policy_opt_in() {
+        let default = Cli::try_parse_from([
+            "packetcraftr",
+            "replay",
+            "capture.pcapng",
+            "--interface",
+            "7",
+        ])
+        .expect("replay defaults parse");
+        let Command::Replay(default) = default.command else {
+            panic!("replay command")
+        };
+        assert!(!default.policy.into_policy().allow_source_spoofing);
+
+        let opted_in = Cli::try_parse_from([
+            "packetcraftr",
+            "replay",
+            "capture.pcapng",
+            "--interface",
+            "7",
+            "--allow-source-spoofing",
+        ])
+        .expect("replay source-spoofing opt-in parses");
+        let Command::Replay(opted_in) = opted_in.command else {
+            panic!("replay command")
+        };
+        assert!(opted_in.policy.into_policy().allow_source_spoofing);
     }
 
     /// `plan` never transmits, so the flags that would authorize traffic are

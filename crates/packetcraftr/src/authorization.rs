@@ -257,6 +257,29 @@ pub trait Authorizer {
     /// Approves the complete operation before it can produce live side effects.
     fn authorize_operation(&mut self, request: Operation<'_>) -> Result<(), BoundaryError>;
 
+    /// Applies policy that depends on the passively selected final route.
+    ///
+    /// Replay uses this after destination and budget authorization, but before
+    /// intentional delay or transmission, so captured sources are checked
+    /// against the interface and route that will actually be used. The
+    /// default is deliberately fail-closed for injected authorizers that do
+    /// not make that route-aware decision.
+    fn authorize_final_wire(
+        &mut self,
+        _frame: &Frame,
+        _route: &packetcraftr_netio::route::Plan,
+    ) -> Result<(), BoundaryError> {
+        Err(BoundaryError::new(
+            "this authorizer does not authorize final wire routes",
+            packetcraftr_core::error::Classification::new(
+                "internal.final_wire_authorization",
+                packetcraftr_core::error::Kind::Internal,
+                Some("route final wire bytes through a route-aware authorizer"),
+            ),
+            Vec::new(),
+        ))
+    }
+
     /// Resolves a declared target and authorizes every address it yields.
     ///
     /// Workflows that never take a declared target (fuzz and replay work from
@@ -448,15 +471,9 @@ pub(crate) enum WireAuthorizationError {
     Policy(crate::policy::Error),
 }
 
-/// Decodes the bytes that will actually reach the wire with a trusted built-in
-/// registry and applies destination (and, given a route, source) policy to the
-/// decoded packet. Caller registries remain outside this policy trust boundary.
-/// Callers classify decode failures in their own vocabulary.
-pub(crate) fn authorize_wire(
-    policy: &crate::policy::Policy,
+pub(crate) fn decode_wire(
     frame: Frame,
-    route: Option<&packetcraftr_netio::route::Plan>,
-) -> Result<(), WireAuthorizationError> {
+) -> Result<packetcraftr_core::decode::DecodedPacket, WireAuthorizationError> {
     static REGISTRY: OnceLock<Result<Arc<Registry>, String>> = OnceLock::new();
     let registry = REGISTRY
         .get_or_init(|| {
@@ -480,9 +497,21 @@ pub(crate) fn authorize_wire(
             },
         ));
     }
-    let decoded = Dissector::new(Arc::clone(registry))
+    Dissector::new(Arc::clone(registry))
         .decode(frame, packetcraftr_core::decode::Options::default())
-        .map_err(WireAuthorizationError::Decode)?;
+        .map_err(WireAuthorizationError::Decode)
+}
+
+/// Decodes the bytes that will actually reach the wire with a trusted built-in
+/// registry and applies destination (and, given a route, source) policy to the
+/// decoded packet. Caller registries remain outside this policy trust boundary.
+/// Callers classify decode failures in their own vocabulary.
+pub(crate) fn authorize_wire(
+    policy: &crate::policy::Policy,
+    frame: Frame,
+    route: Option<&packetcraftr_netio::route::Plan>,
+) -> Result<(), WireAuthorizationError> {
+    let decoded = decode_wire(frame)?;
     policy
         .authorize_packet_destinations(&decoded.packet)
         .map_err(WireAuthorizationError::Policy)?;

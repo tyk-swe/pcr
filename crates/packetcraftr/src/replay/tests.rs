@@ -13,7 +13,10 @@ use packetcraftr_core::analysis::pcap::{Reader, Writer};
 use packetcraftr_core::error::{Classification, Kind};
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_netio::{
-    Error as LiveIoError, interface::Id as InterfaceId, link::Mode as LinkMode,
+    Error as LiveIoError,
+    interface::Id as InterfaceId,
+    link::{Capability as LinkCapability, MacAddress, Mode as LinkMode},
+    route::{Decision, Plan as RoutePlan, Scope, SelectionReason},
     transmit::Submission,
 };
 
@@ -28,8 +31,10 @@ use crate::test_fixtures::RecordingClock;
 #[derive(Default)]
 struct RecordingAuthorizer {
     calls: usize,
+    final_wire_calls: usize,
     budgets: Vec<(u64, u64)>,
     deny: bool,
+    deny_final_wire: bool,
 }
 
 impl Authorizer for RecordingAuthorizer {
@@ -51,6 +56,23 @@ impl Authorizer for RecordingAuthorizer {
             Ok(())
         }
     }
+
+    fn authorize_final_wire(
+        &mut self,
+        _frame: &Frame,
+        _route: &RoutePlan,
+    ) -> Result<(), BoundaryError> {
+        self.final_wire_calls += 1;
+        if self.deny_final_wire {
+            Err(BoundaryError::new(
+                "final wire route denied by test policy",
+                Classification::new("policy.source_ownership", Kind::Policy, None),
+                Vec::new(),
+            ))
+        } else {
+            Ok(())
+        }
+    }
 }
 
 #[derive(Default)]
@@ -65,11 +87,11 @@ impl Transmitter for RecordingTransmitter {
     fn validate_interface(
         &mut self,
         interface: &InterfaceId,
-        _mode: LinkMode,
-        _frame: &Frame,
-    ) -> Result<InterfaceId, LiveIoError> {
+        mode: LinkMode,
+        frame: &Frame,
+    ) -> Result<RoutePlan, LiveIoError> {
         self.validation_calls += 1;
-        Ok(interface.clone())
+        Ok(test_route(interface, mode, frame.link_type))
     }
 
     fn transmit(
@@ -118,6 +140,36 @@ fn test_interface() -> InterfaceId {
     InterfaceId {
         name: "test0".to_owned(),
         index: 7,
+    }
+}
+
+fn test_route(interface: &InterfaceId, mode: LinkMode, link_type: LinkType) -> RoutePlan {
+    let selected_source = "192.0.2.1".parse().expect("fixture source");
+    let source_mac = MacAddress([0x02, 0, 0, 0, 0, 1]);
+    RoutePlan {
+        decision: Decision {
+            interface: interface.clone(),
+            source_mac: Some(source_mac),
+            selected_source: Some(selected_source),
+            preferred_source: None,
+            next_hop: None,
+            selection_reason: SelectionReason::InterfaceOnly,
+            destination_scope: Scope::Link,
+            mtu: 1_500,
+            capability: LinkCapability::Layer2AndLayer3,
+            link_type,
+        },
+        mode,
+        lookup_destination: None,
+        final_destination: None,
+        visited_destinations: Vec::new(),
+        packet_source: Some(selected_source),
+        neighbor_source: None,
+        neighbor_target: None,
+        destination_mac: None,
+        source_mac: Some(source_mac),
+        neighbor_vlan_tags: Vec::new(),
+        synthesized_ethernet: false,
     }
 }
 
@@ -315,7 +367,43 @@ fn replay_authorization_denial_has_no_later_io_side_effects() {
         }
     ));
     assert_eq!(authorizer.calls, 1);
+    assert_eq!(authorizer.final_wire_calls, 0);
     assert_eq!(transmitter.validation_calls, 0);
+    assert_eq!(transmitter.transmission_calls, 0);
+    assert!(clock.delays.is_empty());
+}
+
+#[test]
+fn replay_final_wire_denial_happens_after_passive_route_selection_and_before_send() {
+    let mut reader = capture_reader(LinkType::ETHERNET, &[(Duration::ZERO, &[1])]);
+    let mut authorizer = RecordingAuthorizer {
+        deny_final_wire: true,
+        ..RecordingAuthorizer::default()
+    };
+    let mut transmitter = RecordingTransmitter::default();
+    let mut clock = RecordingClock::default();
+
+    let error = run_with_selector(
+        &mut reader,
+        &replay_options(Timing::Immediate),
+        None,
+        &mut authorizer,
+        &mut transmitter,
+        &mut clock,
+        |_| Ok(()),
+    )
+    .expect_err("final wire authorization must reject the selected route");
+
+    assert!(matches!(
+        error,
+        Error::Authorization {
+            source_index: 0,
+            ..
+        }
+    ));
+    assert_eq!(authorizer.calls, 1);
+    assert_eq!(authorizer.final_wire_calls, 1);
+    assert_eq!(transmitter.validation_calls, 1);
     assert_eq!(transmitter.transmission_calls, 0);
     assert!(clock.delays.is_empty());
 }

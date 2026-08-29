@@ -5,6 +5,7 @@
 
 use packetcraftr_core::codec::NetworkEnvelope;
 use packetcraftr_core::frame::Frame;
+use packetcraftr_core::semantics;
 use packetcraftr_netio::route::Provider;
 use packetcraftr_netio::{
     Error as LiveIoError,
@@ -22,12 +23,14 @@ use packetcraftr_netio::{
 
 use super::super::model::{Transmission, Transmitter};
 use super::super::wire::{map_replay_route_error, replay_network_envelope};
+use crate::authorization::decode_wire;
 
 /// Production replay transmitter backed by the system interface, route, and
 /// Layer 2/Layer 3 providers.
 pub struct SystemTransmitter {
     validated_interface: Option<InterfaceInfo>,
     validated_network: Option<(Frame, NetworkEnvelope)>,
+    validated_route: Option<(Frame, packetcraftr_netio::route::Plan)>,
     packet_io: DispatchPacketIo<SystemLayer2Io, SystemLayer3Io>,
 }
 
@@ -36,6 +39,7 @@ impl SystemTransmitter {
         Self {
             validated_interface: None,
             validated_network: None,
+            validated_route: None,
             packet_io: DispatchPacketIo::new(SystemLayer2Io, SystemLayer3Io),
         }
     }
@@ -45,7 +49,8 @@ impl SystemTransmitter {
         requested: &InterfaceId,
         mode: LinkMode,
         frame: &Frame,
-    ) -> Result<InterfaceId, LiveIoError> {
+    ) -> Result<packetcraftr_netio::route::Plan, LiveIoError> {
+        self.validated_route = None;
         self.validated_network = match mode {
             LinkMode::Layer3 => Some((frame.clone(), replay_network_envelope(frame)?)),
             LinkMode::Layer2 | LinkMode::Auto => None,
@@ -74,7 +79,11 @@ impl SystemTransmitter {
             }
             self.validated_interface = Some(selected);
         }
-        let selected = self.validated_interface.as_ref().expect("validated above");
+        let selected = self
+            .validated_interface
+            .as_ref()
+            .expect("validated above")
+            .clone();
         let supported = match mode {
             LinkMode::Layer2 => matches!(
                 selected.capability,
@@ -103,7 +112,9 @@ impl SystemTransmitter {
                 ),
             });
         }
-        Ok(selected.id.clone())
+        let route = self.materialized_route(&selected, mode, frame)?.plan;
+        self.validated_route = Some((frame.clone(), route.clone()));
+        Ok(route)
     }
 
     fn materialized_route(
@@ -113,31 +124,38 @@ impl SystemTransmitter {
         frame: &Frame,
     ) -> Result<packetcraftr_netio::route::Materialized, LiveIoError> {
         let plan = match mode {
-            LinkMode::Layer2 => packetcraftr_netio::route::Plan {
-                decision: packetcraftr_netio::route::Decision {
-                    interface: interface.id.clone(),
-                    source_mac: interface.mac_address,
-                    selected_source: interface.addresses.first().map(|value| value.address),
-                    preferred_source: None,
-                    next_hop: None,
-                    selection_reason: packetcraftr_netio::route::SelectionReason::InterfaceOnly,
-                    destination_scope: packetcraftr_netio::route::Scope::Link,
-                    mtu: interface.mtu.unwrap_or(u32::MAX),
-                    capability: interface.capability,
-                    link_type: interface.link_type,
-                },
-                mode,
-                lookup_destination: None,
-                final_destination: None,
-                visited_destinations: Vec::new(),
-                packet_source: None,
-                neighbor_source: None,
-                neighbor_target: None,
-                destination_mac: None,
-                source_mac: interface.mac_address,
-                neighbor_vlan_tags: Vec::new(),
-                synthesized_ethernet: false,
-            },
+            LinkMode::Layer2 => {
+                let selected_source = interface.addresses.first().map(|value| value.address);
+                packetcraftr_netio::route::Plan {
+                    decision: packetcraftr_netio::route::Decision {
+                        interface: interface.id.clone(),
+                        source_mac: interface.mac_address,
+                        selected_source,
+                        preferred_source: interface_owned_packet_source(interface, frame),
+                        next_hop: None,
+                        selection_reason: packetcraftr_netio::route::SelectionReason::InterfaceOnly,
+                        destination_scope: packetcraftr_netio::route::Scope::Link,
+                        mtu: interface.mtu.unwrap_or(u32::MAX),
+                        capability: interface.capability,
+                        link_type: interface.link_type,
+                    },
+                    mode,
+                    lookup_destination: None,
+                    final_destination: None,
+                    visited_destinations: Vec::new(),
+                    // Layer 2 replay sends the captured bytes unchanged, so
+                    // there is no materialized packet source.
+                    packet_source: None,
+                    neighbor_source: None,
+                    neighbor_target: None,
+                    destination_mac: None,
+                    // Layer 2 replay sends the captured bytes unchanged, so
+                    // there is no materialized packet source MAC.
+                    source_mac: None,
+                    neighbor_vlan_tags: Vec::new(),
+                    synthesized_ethernet: false,
+                }
+            }
             LinkMode::Layer3 => {
                 let network = self
                     .validated_network
@@ -147,8 +165,17 @@ impl SystemTransmitter {
                     .ok_or_else(|| LiveIoError::InvalidTransmissionFrame {
                         message: "frame was not validated before replay transmission".to_owned(),
                     })?;
+                let preferred_source = interface
+                    .addresses
+                    .iter()
+                    .any(|address| address.address == network.source)
+                    .then_some(network.source);
                 let route = packetcraftr_netio::route::SystemProvider
-                    .lookup_with_preferences(network.destination, Some(&interface.id), None)
+                    .lookup_with_preferences(
+                        network.destination,
+                        Some(&interface.id),
+                        preferred_source,
+                    )
                     .map_err(map_replay_route_error)?;
                 if route.interface != interface.id {
                     return Err(LiveIoError::Device {
@@ -195,6 +222,20 @@ impl SystemTransmitter {
     }
 }
 
+fn interface_owned_packet_source(
+    interface: &InterfaceInfo,
+    frame: &Frame,
+) -> Option<std::net::IpAddr> {
+    let decoded = decode_wire(frame.clone()).ok()?;
+    let source = semantics::outer_ip_path(&decoded.packet).ok()??.source;
+    (!source.is_unspecified()
+        && interface
+            .addresses
+            .iter()
+            .any(|address| address.address == source))
+    .then_some(source)
+}
+
 fn requested_interface_matches(actual: &InterfaceId, requested: &InterfaceId) -> bool {
     !(requested.index == 0 && requested.name.is_empty())
         && (requested.index == 0 || actual.index == requested.index)
@@ -213,7 +254,7 @@ impl Transmitter for SystemTransmitter {
         interface: &InterfaceId,
         mode: LinkMode,
         frame: &Frame,
-    ) -> Result<InterfaceId, LiveIoError> {
+    ) -> Result<packetcraftr_netio::route::Plan, LiveIoError> {
         self.resolve(interface, mode, frame)
     }
 
@@ -223,6 +264,9 @@ impl Transmitter for SystemTransmitter {
         mode: LinkMode,
         frame: &Frame,
     ) -> Result<Transmission, LiveIoError> {
+        if mode == LinkMode::Auto {
+            return Err(LiveIoError::UnresolvedLinkMode);
+        }
         let selected = self
             .validated_interface
             .as_ref()
@@ -232,7 +276,20 @@ impl Transmitter for SystemTransmitter {
                 interface: interface.name.clone(),
                 message: "interface was not validated before replay transmission".to_owned(),
             })?;
-        let route = self.materialized_route(&selected, mode, frame)?;
+        let plan = self
+            .validated_route
+            .as_ref()
+            .filter(|(validated, plan)| {
+                validated == frame && plan.mode == mode && plan.decision.interface == *interface
+            })
+            .map(|(_, plan)| plan.clone())
+            .ok_or_else(|| LiveIoError::InvalidTransmissionFrame {
+                message: "route was not validated before replay transmission".to_owned(),
+            })?;
+        let route = packetcraftr_netio::route::Materialized {
+            plan,
+            neighbor_resolution: None,
+        };
         let report = self
             .packet_io
             .send(TransmissionFrame::try_new(frame.bytes(), &route)?)?;
@@ -247,9 +304,13 @@ impl Transmitter for SystemTransmitter {
 mod tests {
     #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
     use std::net::{IpAddr, Ipv4Addr};
+    use std::sync::Arc;
     use std::time::UNIX_EPOCH;
 
+    use packetcraftr_core::Packet;
+    use packetcraftr_core::build::{Builder, Context, Options};
     use packetcraftr_core::frame::LinkType;
+    use packetcraftr_core::protocol::{icmp::Icmpv4, link::Ethernet, network::Ipv4};
     use packetcraftr_netio::interface::{Address, Flags};
     use packetcraftr_netio::link::MacAddress;
 
@@ -297,6 +358,29 @@ mod tests {
         Frame::new(UNIX_EPOCH, LinkType::RAW, bytes).expect("bounded raw IPv4 fixture")
     }
 
+    fn ethernet_ipv4_frame(source: Ipv4Addr) -> Frame {
+        let mut packet = Packet::new();
+        packet
+            .push(Ethernet {
+                source: INTERFACE_MAC.0,
+                destination: [0x02, 0, 0, 0, 0, 2],
+                ..Ethernet::default()
+            })
+            .push(Ipv4 {
+                source,
+                destination: Ipv4Addr::new(192, 0, 2, 2),
+                ..Ipv4::default()
+            })
+            .push(Icmpv4::default());
+        let registry =
+            Arc::new(packetcraftr_core::protocol::builtin::registry().expect("built-in registry"));
+        let built = Builder::new(registry)
+            .build(packet, Context::default(), Options::default())
+            .expect("Ethernet fixture builds");
+        Frame::new(UNIX_EPOCH, LinkType::ETHERNET, built.bytes)
+            .expect("bounded Ethernet IPv4 fixture")
+    }
+
     #[test]
     fn interface_matching_supports_exact_name_or_index_but_rejects_an_empty_selector() {
         let actual = InterfaceId {
@@ -335,38 +419,19 @@ mod tests {
     }
 
     #[test]
-    fn cached_interface_validation_accepts_layer2_and_layer3_without_system_lookup() {
+    fn cached_layer2_interface_validation_returns_the_passive_route() {
         let selected = interface(LinkCapability::Layer2AndLayer3, LinkType::ETHERNET);
         let requested = selected.id.clone();
         let mut transmitter = transmitter_with_cached_interface(selected);
 
-        assert_eq!(
-            transmitter
-                .validate_interface(
-                    &requested,
-                    LinkMode::Layer2,
-                    &ethernet_frame(LinkType::ETHERNET),
-                )
-                .expect("matching cached Layer 2 interface"),
-            requested
-        );
+        let frame = ethernet_frame(LinkType::ETHERNET);
+        let route = transmitter
+            .validate_interface(&requested, LinkMode::Layer2, &frame)
+            .expect("matching cached Layer 2 interface");
+        assert_eq!(route.decision.interface, requested);
+        assert_eq!(route.mode, LinkMode::Layer2);
         assert!(transmitter.validated_network.is_none());
-
-        assert_eq!(
-            transmitter
-                .validate_interface(&requested, LinkMode::Layer3, &ipv4_frame())
-                .expect("matching cached Layer 3 interface"),
-            requested
-        );
-        let (_, envelope) = transmitter
-            .validated_network
-            .as_ref()
-            .expect("Layer 3 envelope is retained for route materialization");
-        assert_eq!(envelope.source, IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)));
-        assert_eq!(
-            envelope.destination,
-            IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2))
-        );
+        assert!(transmitter.validated_route.is_some());
     }
 
     #[test]
@@ -447,7 +512,8 @@ mod tests {
         assert_eq!(route.plan.decision.mtu, 1_400);
         assert_eq!(route.plan.decision.link_type, LinkType::ETHERNET);
         assert_eq!(route.plan.mode, LinkMode::Layer2);
-        assert_eq!(route.plan.source_mac, Some(INTERFACE_MAC));
+        assert!(route.plan.source_mac.is_none());
+        assert!(route.plan.packet_source.is_none());
         assert!(route.plan.lookup_destination.is_none());
         assert!(route.plan.final_destination.is_none());
         assert!(route.plan.visited_destinations.is_empty());
@@ -459,6 +525,27 @@ mod tests {
             .materialized_route(&without_mtu, LinkMode::Layer2, &frame)
             .expect("missing native MTU uses the unbounded model value");
         assert_eq!(route.plan.decision.mtu, u32::MAX);
+    }
+
+    #[test]
+    fn layer2_route_recognizes_any_selected_interface_ip_address_as_owned() {
+        let mut selected = interface(LinkCapability::Layer2AndLayer3, LinkType::ETHERNET);
+        let secondary = Ipv4Addr::new(192, 0, 2, 9);
+        selected.addresses.push(Address {
+            address: IpAddr::V4(secondary),
+            prefix_length: 24,
+        });
+        let transmitter = transmitter_with_cached_interface(selected.clone());
+
+        let route = transmitter
+            .materialized_route(&selected, LinkMode::Layer2, &ethernet_ipv4_frame(secondary))
+            .expect("Layer 2 route is passive");
+
+        assert_eq!(
+            route.plan.decision.preferred_source,
+            Some(IpAddr::V4(secondary))
+        );
+        assert!(route.plan.packet_source.is_none());
     }
 
     #[test]

@@ -15,8 +15,9 @@ pub struct Policy {
     pub allow_hostname_resolution: bool,
     pub allow_permissive_packets: bool,
     /// Single opt-in for an explicit outer IP or Ethernet source the selected
-    /// interface does not own. Replay transmits captured sources verbatim and
-    /// does not consult it.
+    /// interface or final route does not own. Replay transmits captured
+    /// sources verbatim and therefore applies this check after passive route
+    /// selection and before transmission.
     pub allow_source_spoofing: bool,
     pub max_packets_per_operation: u64,
     pub max_bytes_per_operation: u64,

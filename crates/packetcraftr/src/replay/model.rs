@@ -10,7 +10,7 @@ use packetcraftr_core::analysis::pcap::{
 use packetcraftr_core::frame::Frame;
 use packetcraftr_netio::{
     Error as LiveIoError, interface::Id as InterfaceId, link::Mode as LinkMode,
-    transmit::Report as IoSendReport,
+    route::Plan as RoutePlan, transmit::Report as IoSendReport,
 };
 use serde::{Deserialize, Serialize};
 
@@ -220,13 +220,14 @@ pub trait Selector {
 
 /// Exact-frame transmitter seam used by native and injected adapters.
 pub trait Transmitter {
-    /// Resolve and validate the concrete interface before any intentional delay.
+    /// Resolve and validate the concrete interface and passively select the
+    /// final route before any intentional delay.
     fn validate_interface(
         &mut self,
         interface: &InterfaceId,
         mode: LinkMode,
         frame: &Frame,
-    ) -> Result<InterfaceId, LiveIoError>;
+    ) -> Result<RoutePlan, LiveIoError>;
 
     fn transmit(
         &mut self,

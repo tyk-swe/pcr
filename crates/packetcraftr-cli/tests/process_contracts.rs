@@ -326,6 +326,14 @@ fn runtime_stream_error_follows_every_preserved_record() {
     );
 }
 
+// These commands intentionally name a public destination. Keep them in the
+// feature profile where the CLI has no native I/O implementation to invoke.
+#[cfg(not(any(
+    feature = "native-interfaces",
+    feature = "native-route",
+    feature = "native-layer2",
+    feature = "native-layer3"
+)))]
 #[test]
 fn progressive_live_commands_emit_one_sequence_zero_error_when_preparation_fails() {
     let commands: &[&[&str]] = &[

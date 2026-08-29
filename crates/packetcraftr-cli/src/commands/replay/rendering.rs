@@ -332,6 +332,14 @@ mod tests {
             }
             Ok(())
         }
+
+        fn authorize_final_wire(
+            &mut self,
+            _frame: &Frame,
+            _route: &net::route::Plan,
+        ) -> Result<(), packetcraftr::BoundaryError> {
+            Ok(())
+        }
     }
 
     #[derive(Default)]
@@ -341,10 +349,36 @@ mod tests {
         fn validate_interface(
             &mut self,
             interface: &net::interface::Id,
-            _mode: net::link::Mode,
-            _frame: &Frame,
-        ) -> Result<net::interface::Id, net::Error> {
-            Ok(interface.clone())
+            mode: net::link::Mode,
+            frame: &Frame,
+        ) -> Result<net::route::Plan, net::Error> {
+            let selected_source = "192.0.2.1".parse().expect("fixture source");
+            let source_mac = net::link::MacAddress([0x02, 0, 0, 0, 0, 1]);
+            Ok(net::route::Plan {
+                decision: net::route::Decision {
+                    interface: interface.clone(),
+                    source_mac: Some(source_mac),
+                    selected_source: Some(selected_source),
+                    preferred_source: None,
+                    next_hop: None,
+                    selection_reason: net::route::SelectionReason::InterfaceOnly,
+                    destination_scope: net::route::Scope::Link,
+                    mtu: 1_500,
+                    capability: net::link::Capability::Layer2AndLayer3,
+                    link_type: frame.link_type,
+                },
+                mode,
+                lookup_destination: None,
+                final_destination: None,
+                visited_destinations: Vec::new(),
+                packet_source: Some(selected_source),
+                neighbor_source: None,
+                neighbor_target: None,
+                destination_mac: None,
+                source_mac: Some(source_mac),
+                neighbor_vlan_tags: Vec::new(),
+                synthesized_ethernet: false,
+            })
         }
 
         fn transmit(

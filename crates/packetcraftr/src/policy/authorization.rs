@@ -98,8 +98,13 @@ impl Policy {
         let source_mac = semantics::outer_layers(packet)
             .find_map(|layer| layer.as_any().downcast_ref::<Ethernet>())
             .map(|ethernet| MacAddress(ethernet.source))
-            .filter(|source| source.0 != [0; 6])
-            .or(plan.source_mac);
+            .map_or(plan.source_mac, |source| {
+                if source.0 == [0; 6] {
+                    plan.source_mac.or(Some(source))
+                } else {
+                    Some(source)
+                }
+            });
         let foreign_ip = packet_source.filter(|source| {
             Some(*source) != decision.selected_source && Some(*source) != decision.preferred_source
         });

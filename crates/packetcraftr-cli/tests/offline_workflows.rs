@@ -570,6 +570,14 @@ fn format_and_limit_failures_are_reported_before_offline_work() {
     }
 }
 
+// These commands intentionally name a public destination. Keep them in the
+// feature profile where the CLI has no native I/O implementation to invoke.
+#[cfg(not(any(
+    feature = "native-interfaces",
+    feature = "native-route",
+    feature = "native-layer2",
+    feature = "native-layer3"
+)))]
 #[test]
 fn destination_bearing_live_commands_keep_public_destinations_behind_policy() {
     let commands: &[&[&str]] = &[

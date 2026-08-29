@@ -8,6 +8,8 @@ on:
     paths:
       - "fuzz/**"
       - "crates/packetcraftr-core/**"
+      - "examples/documents/**"
+      - "examples/captures/**"
 
 permissions:
   contents: read

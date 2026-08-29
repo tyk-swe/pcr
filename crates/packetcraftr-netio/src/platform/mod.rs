@@ -49,6 +49,14 @@ mod raw_ip;
 mod route_dispatch;
 #[cfg(all(windows, any(feature = "native-interfaces", feature = "native-route")))]
 mod windows;
+#[cfg(any(
+    all(target_os = "linux", feature = "native-route"),
+    all(
+        feature = "native-layer2",
+        any(target_os = "linux", target_os = "macos", windows)
+    )
+))]
+mod worker_reaper;
 
 pub(crate) use capture_dispatch::system_capture;
 pub(crate) use interface_dispatch::system_interfaces;

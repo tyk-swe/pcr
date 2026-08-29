@@ -55,7 +55,11 @@ impl Authorizer for AddressListAuthorizer {
         })
     }
 
-    fn authorize_operation(&mut self, _operation: Operation<'_>) -> Result<(), BoundaryError> {
+    fn authorize_operation(&mut self, operation: Operation<'_>) -> Result<(), BoundaryError> {
+        assert!(
+            matches!(operation, Operation::Budgeted(_)),
+            "target workflows submit budget-only requests, got {operation:?}"
+        );
         Ok(())
     }
 }

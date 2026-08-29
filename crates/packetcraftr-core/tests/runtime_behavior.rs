@@ -771,12 +771,14 @@ fn expressions_and_documents_round_trip_and_enforce_resource_bounds() {
         Err(document::Error::SizeLimit { .. })
     ));
     assert!(matches!(
-        document::Packet::parse_with_resource_limits(
+        document::Packet::parse_with_limits(
             &json,
             document::Format::Json,
-            json.len(),
-            0,
-            document::DEFAULT_MAX_DOCUMENT_NESTING,
+            &document::DocumentLimits {
+                max_input_bytes: json.len(),
+                max_layers: 0,
+                ..document::DocumentLimits::DEFAULT
+            },
         ),
         Err(document::Error::LayerLimit { limit: 0 })
     ));
@@ -817,12 +819,13 @@ fn expressions_and_documents_round_trip_and_enforce_resource_bounds() {
         Err(document::Error::UnknownProtocol { .. })
     ));
     assert!(matches!(
-        document::Packet::parse_with_resource_limits(
+        document::Packet::parse_with_limits(
             &json,
             document::Format::Json,
-            json.len(),
-            packetcraftr_core::build::DEFAULT_MAX_LAYERS,
-            document::MAX_DOCUMENT_NESTING + 1,
+            &document::DocumentLimits {
+                max_nesting: document::MAX_DOCUMENT_NESTING + 1,
+                ..document::DocumentLimits::DEFAULT
+            },
         ),
         Err(document::Error::InvalidLimit { .. })
     ));

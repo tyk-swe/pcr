@@ -1,0 +1,37 @@
+name: Coverage
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  coverage:
+    name: Code Coverage (cargo-llvm-cov)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Linux native dependencies
+        run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+      - uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc # v2.86.7
+        with:
+          tool: cargo-llvm-cov,nextest@0.9.143
+      - name: Generate code coverage report
+        run: cargo llvm-cov --locked --workspace --all-features --lcov --output-path lcov.info
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: lcov-report
+          path: lcov.info
+          if-no-files-found: error

@@ -201,7 +201,7 @@ pub(crate) fn transport_payload(decoded: &DecodedPacket, transport_index: usize)
     let start = start.min(decoded.original.len());
     let end = end.min(decoded.original.len());
     if end > start {
-        decoded.original.slice(start..end)
+        crate::byte_slice::checked_slice(&decoded.original, start, end).unwrap_or_default()
     } else {
         Bytes::new()
     }

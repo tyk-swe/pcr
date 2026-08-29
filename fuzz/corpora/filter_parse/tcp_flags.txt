@@ -1,0 +1,1 @@
+tcp.flags.syn && !tcp.flags.ack

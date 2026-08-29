@@ -14,13 +14,16 @@ Run the checks from AGENTS.md that cover your change, with locked
 dependencies. The project does not configure a compiler wrapper or linker, so
 Cargo and the Rust toolchain use their platform defaults.
 
-The feature profiles differ: no-default features keep native providers
-disabled, the default enables interface enumeration and passive route lookup
-(Unix enumeration reads the same route backend, so `native-interfaces`
-requires `native-route` there), and all features enable every native provider.
+The feature profiles differ: `no-default-features` keeps native providers
+disabled; the default enables interface enumeration and passive route lookup;
+`native-interfaces` directly encodes its dependency on `native-route`; `native-layer2`
+and `native-layer3` both imply `native-interfaces` and `native-route`.
+The `pcap-free` profile (`--no-default-features --features native-route,native-layer3`)
+supports routing and raw layer 3 without libpcap. All features enable every native provider.
+Use `./scripts/check-features.sh` to check the supported public feature matrix.
 The [CI workflow](.github/workflows/ci.yml) is the authoritative check set;
-macOS and Windows skip the all-feature test run because their capture backends
-need Npcap or a system libpcap.
+macOS and Windows test `no-default`, `default`, and `pcap-free`, while their
+all-feature builds run `cargo check`.
 
 ## Architecture
 

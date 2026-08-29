@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- GitHub Artifact Attestations signed with Sigstore for all release archives, verifiable with `gh attestation verify`.
+- Eight implementation fuzz targets covering JSON/YAML packet documents, PCAP/PCAPNG parsing, packet decoding and reflective access, TCP reassembly, TLS handshake assembly, and display filter compilation.
+- Property tests covering document roundtrips, TCP reassembly overlap and ordering, capture consistency, layout arithmetic, and filter evaluation safety.
+- Non-gating Criterion benchmark suite and reproducible Linux Peak-RSS memory profiling harness.
+
+- `packetcraftr_core::document::DocumentLimits` and `Packet::parse_with_limits`:
+  semantic width and cardinality limits (fields per layer, total field-value
+  nodes, list items per list and in aggregate, protocol, field-name, text and
+  byte-value widths, and total retained payload bytes) enforced inside both the
+  JSON and YAML deserializers before the bounded item is allocated. Both formats
+  accept exactly the same documents; a rejection names the exceeded limit
+  through `document::Error::ResourceLimit` and `document::Error::limit()`.
+  `Packet::parse` keeps its signature and now applies `DocumentLimits::DEFAULT`
+  beyond the byte ceiling.
+
+### Changed
+
+- **Breaking (library):** `packetcraftr::authorization::Operation` is now an
+  enum of complete request shapes (`Budgeted`, `Declared`, `Replay`) built
+  from `WireBudget`, `DeclaredPackets`, `ReplayFrame`, and `PermissiveLive`
+  with every-argument constructors and no `Default`. Forgetting a budget, a
+  destination, the permissive-live position, or the replay frame no longer
+  compiles into a permissive value, and adding a requirement fails every
+  construction site. `PolicyAuthorizer` rejects replay requests and
+  `replay::SystemAuthorizer` rejects budget-only and declared-packet requests
+  with the classified `internal.unsupported_operation` error (replacing the
+  unreachable `internal.replay_frame` code).
+- **Breaking (library):** `document::Packet::parse_with_resource_limits` is
+  replaced by `parse_with_limits(input, format, &DocumentLimits)`, and
+  `document::Packet`/`document::Layer` no longer implement `serde::Deserialize`
+  directly; the budgeted parser is the only deserialization path.
+- Capture-file stdout rendering now completes encoding in an anonymous
+  temporary file before copying to stdout, avoiding a capture-sized encoded
+  `Vec` while preserving the pre-copy transactional boundary.
+- Hardened Cargo feature contracts: `native-interfaces` now explicitly depends on `native-route`, and `native-layer2`/`native-layer3` imply both, making standalone capability selections compile-valid without hidden dependency failures while preserving the `pcap-free` release profile.
+- Normal CI now tests the exact `pcap-free` release profile (`--no-default-features --features native-route,native-layer3`) across Linux, macOS, and Windows.
+- Hardened Claude GitHub Actions workflows with minimum permissions, concurrency groups, full commit SHA pinning, and trust gates for issue/PR comment triggers.
+- Progressive callback deadlines now bound publisher waiting rather than
+  claiming to terminate callback code. Callbacks may outlive an operation, but
+  a process-wide worker budget prevents unbounded thread creation and reports
+  classified exhaustion.
+- Timed-out native capture and Linux route workers now transfer their complete
+  lifetime ownership to one bounded shared reaper. Cleanup capacity is reserved
+  before worker creation; catastrophic queue or receiver failure retains the
+  complete bundle instead of panicking or releasing native state early.
+
 ## [0.5.0-beta.2] - 2026-08-27
 
 ### Added

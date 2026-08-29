@@ -64,19 +64,15 @@ pub(super) fn run(
         max_bytes: limits.max_bytes,
     };
 
-    let format = match format {
-        CaptureFormat::Pcap | CaptureFormat::PcapNg => {
-            return rewrite_capture(
-                &mut reader,
-                format.format(),
-                stream_limits,
-                filter.is_some(),
-            );
-        }
-        CaptureFormat::Text => FrameFormat::Text,
-        CaptureFormat::Ndjson => FrameFormat::Ndjson,
-        CaptureFormat::Hex => FrameFormat::Hex,
-    };
+    if matches!(format, CaptureFormat::Pcap | CaptureFormat::PcapNg) {
+        return rewrite_capture(
+            &mut reader,
+            format.format(),
+            stream_limits,
+            filter.is_some(),
+        );
+    }
+    let format = FrameFormat::narrow_from(output::contract::Command::Read, format)?;
     read_records(
         &mut reader,
         limits,

@@ -3,7 +3,7 @@
   "$id": "https://raw.githubusercontent.com/tyk-swe/pcr/main/schemas/packetcraftr.packet.v1.schema.json",
   "$comment": "SPDX-License-Identifier: AGPL-3.0-only",
   "title": "PacketcraftR packet document v1",
-  "description": "A runtime-neutral ordered packet stack. Protocol-specific field names and semantic constraints are supplied by packetcraftr_core::registry::Registry; this schema validates the stable packetcraftr_core::document::Packet and tagged packetcraftr_core::field::FieldValue representation.",
+  "description": "A runtime-neutral ordered packet stack. Protocol-specific field names and semantic constraints are supplied by packetcraftr_core::registry::Registry; this schema validates the stable packetcraftr_core::document::Packet and tagged packetcraftr_core::field::FieldValue representation. Parsers additionally enforce packetcraftr_core::document::DocumentLimits (layer count, list nesting, fields per layer, node and list-item counts, name, text, byte-value and total payload widths) identically for JSON and YAML.",
   "type": "object",
   "required": [
     "schema",

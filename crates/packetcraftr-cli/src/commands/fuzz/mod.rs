@@ -149,21 +149,18 @@ fn execute_offline(
     format: ToolFormat,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    let format = match format {
-        ToolFormat::Ndjson => {
-            let event_stream = stream.clone();
-            let summary = core::fuzz::run_with_events(&request, packet, registry, move |case| {
-                output::fuzz::Event::try_from_offline(case)
-                    .map_err(CliError::classified)
-                    .and_then(|event| Ok(event_stream.emit_data(event, Vec::new())?))
-                    .map_err(CliError::into_boundary_error)
-            })
-            .map_err(CliError::classified)?;
-            return rendering::render_offline_complete(summary, stream);
-        }
-        ToolFormat::Text => AggregateFormat::Text,
-        ToolFormat::Json => AggregateFormat::Json,
-    };
+    if format == ToolFormat::Ndjson {
+        let event_stream = stream.clone();
+        let summary = core::fuzz::run_with_events(&request, packet, registry, move |case| {
+            output::fuzz::Event::try_from_offline(case)
+                .map_err(CliError::classified)
+                .and_then(|event| Ok(event_stream.emit_data(event, Vec::new())?))
+                .map_err(CliError::into_boundary_error)
+        })
+        .map_err(CliError::classified)?;
+        return rendering::render_offline_complete(summary, stream);
+    }
+    let format = AggregateFormat::narrow_from(output::contract::Command::Fuzz, format)?;
     let result = core::fuzz::run(&request, packet, registry).map_err(CliError::classified)?;
     let (result, diagnostics, stats) =
         output::fuzz::Result::try_from_offline(result).map_err(CliError::classified)?;
@@ -185,30 +182,27 @@ fn execute_live(
     };
     let mut authorizer = packetcraftr::fuzz::PolicyAuthorizer::for_packets(&live.policy);
     let mut clock = packetcraftr::clock::SystemClock;
-    let format = match format {
-        ToolFormat::Ndjson => {
-            let event_stream = stream.clone();
-            let summary = packetcraftr::fuzz::run_with_events(
-                &request,
-                live.options,
-                packet,
-                registry,
-                &mut authorizer,
-                &mut executor,
-                &mut clock,
-                move |case| {
-                    output::fuzz::Event::try_from_live(case)
-                        .map_err(CliError::classified)
-                        .and_then(|event| Ok(event_stream.emit_data(event, Vec::new())?))
-                        .map_err(CliError::into_boundary_error)
-                },
-            )
-            .map_err(CliError::classified)?;
-            return rendering::render_live_complete(summary, stream);
-        }
-        ToolFormat::Text => AggregateFormat::Text,
-        ToolFormat::Json => AggregateFormat::Json,
-    };
+    if format == ToolFormat::Ndjson {
+        let event_stream = stream.clone();
+        let summary = packetcraftr::fuzz::run_with_events(
+            &request,
+            live.options,
+            packet,
+            registry,
+            &mut authorizer,
+            &mut executor,
+            &mut clock,
+            move |case| {
+                output::fuzz::Event::try_from_live(case)
+                    .map_err(CliError::classified)
+                    .and_then(|event| Ok(event_stream.emit_data(event, Vec::new())?))
+                    .map_err(CliError::into_boundary_error)
+            },
+        )
+        .map_err(CliError::classified)?;
+        return rendering::render_live_complete(summary, stream);
+    }
+    let format = AggregateFormat::narrow_from(output::contract::Command::Fuzz, format)?;
     let result = packetcraftr::fuzz::run(
         &request,
         live.options,

@@ -64,26 +64,21 @@ pub(super) fn run(
     };
     let client = client(Arc::clone(&registry), request.policy);
     let template = core::template::Template::new(request.packet);
-    let format = match format {
-        ExchangeFormat::Ndjson => {
-            let event_stream = stream.clone();
-            let summary = client
-                .exchange_with_events(&template, options, move |event| {
-                    output::exchange::Event::try_from_exchange(event)
-                        .map_err(CliError::classified)
-                        .and_then(|(event, diagnostics)| {
-                            Ok(event_stream.emit_data(event, diagnostics)?)
-                        })
-                        .map_err(CliError::into_boundary_error)
-                })
-                .map_err(CliError::classified)?;
-            return rendering::render_complete(summary, stream);
-        }
-        ExchangeFormat::Text => CollectedFormat::Text,
-        ExchangeFormat::Json => CollectedFormat::Json,
-        ExchangeFormat::Pcap => CollectedFormat::Pcap,
-        ExchangeFormat::PcapNg => CollectedFormat::PcapNg,
-    };
+    if format == ExchangeFormat::Ndjson {
+        let event_stream = stream.clone();
+        let summary = client
+            .exchange_with_events(&template, options, move |event| {
+                output::exchange::Event::try_from_exchange(event)
+                    .map_err(CliError::classified)
+                    .and_then(
+                        |(event, diagnostics)| Ok(event_stream.emit_data(event, diagnostics)?),
+                    )
+                    .map_err(CliError::into_boundary_error)
+            })
+            .map_err(CliError::classified)?;
+        return rendering::render_complete(summary, stream);
+    }
+    let format = CollectedFormat::narrow_from(output::contract::Command::Exchange, format)?;
     let result = client
         .exchange(&template, options)
         .map_err(CliError::classified)?;

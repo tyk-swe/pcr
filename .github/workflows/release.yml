@@ -290,6 +290,8 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       VERSION: ${{ needs.preflight.outputs.version }}
@@ -362,6 +364,12 @@ jobs:
               done > SHA256SUMS
             sha256sum --check SHA256SUMS
           )
+      - name: Attest release archives
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip
       - name: Compose release notes
         shell: bash
         run: |
@@ -377,11 +385,14 @@ jobs:
             Layer 3 support without Layer 2 capture/injection or a libpcap/Npcap
             runtime dependency.
 
-          ### Checksums
+          ### Checksums and Provenance
 
           Download `SHA256SUMS` with the archives and verify it with
           `sha256sum --check SHA256SUMS` (or `shasum -a 256 -c SHA256SUMS` on
           macOS).
+
+          Verify GitHub artifact attestations with:
+          `gh attestation verify packetcraftr-v<version>-<target>-<variant>.<ext> --owner tyk-swe`
           EOF
       - name: Create GitHub release
         shell: bash

@@ -127,7 +127,8 @@ impl Deduplicator {
                     // Ends at or before the edge: wholly re-delivered.
                     return None;
                 } else {
-                    bytes.slice(usize::try_from(overlap).unwrap_or(bytes.len())..)
+                    let start = usize::try_from(overlap).unwrap_or(bytes.len());
+                    crate::byte_slice::checked_slice(bytes, start, bytes.len())?
                 }
             }
             None => bytes.clone(),

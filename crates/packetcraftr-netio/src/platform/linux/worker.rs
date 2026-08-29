@@ -15,7 +15,12 @@ use std::{
 use rtnetlink::{Handle, new_connection};
 
 use super::os_error;
-use crate::route::SystemError;
+use crate::{
+    platform::worker_reaper::{
+        ReapTask, ReaperClient, ReaperPermit, TransferOutcome, shared_reaper,
+    },
+    route::SystemError,
+};
 
 const NETLINK_OPERATION_TIMEOUT: Duration = Duration::from_secs(2);
 const NETLINK_RESPONSE_TIMEOUT: Duration = Duration::from_secs(3);
@@ -27,6 +32,19 @@ where
     Fut: Future<Output = Result<T, SystemError>> + Send + 'static,
     T: Send + 'static,
 {
+    let reaper = shared_reaper().map_err(|error| SystemError::OperatingSystem {
+        operation: "initialize native worker cleanup",
+        message: error.to_string(),
+    })?;
+    let permit = reaper
+        .reserve()
+        .map_err(|error| SystemError::OperatingSystem {
+            operation: "reserve native worker cleanup",
+            message: format!(
+                "shared native worker cleanup capacity {} is exhausted",
+                error.capacity
+            ),
+        })?;
     // ponytail: one worker per call; restore namespace-local reuse only if route benchmarks show
     // startup dominates.
     let (setup, setup_receiver) = mpsc::sync_channel(1);
@@ -38,15 +56,17 @@ where
 
     match setup_receiver.recv_timeout(NETLINK_OPERATION_TIMEOUT) {
         Ok(Ok(())) => {}
-        Ok(Err(error)) => return finish_failed_start(worker, error),
+        Ok(Err(error)) => return finish_failed_start(worker, permit, &reaper, error),
         Err(mpsc::RecvTimeoutError::Disconnected) => {
             return finish_failed_start(
                 worker,
+                permit,
+                &reaper,
                 netlink_channel_error("setup response channel closed"),
             );
         }
         Err(mpsc::RecvTimeoutError::Timeout) => {
-            transfer_netlink_worker(worker);
+            let _ = transfer_netlink_worker(worker, permit, &reaper);
             return Err(netlink_timeout("initialize netlink"));
         }
     }
@@ -54,20 +74,25 @@ where
     let result = match response_receiver.recv_timeout(NETLINK_RESPONSE_TIMEOUT) {
         Ok(result) => result,
         Err(mpsc::RecvTimeoutError::Disconnected) => {
-            join_netlink_worker(worker, NETLINK_RESPONSE_TIMEOUT)?;
+            join_netlink_worker(worker, permit, &reaper, NETLINK_RESPONSE_TIMEOUT)?;
             return Err(netlink_channel_error("response channel closed"));
         }
         Err(mpsc::RecvTimeoutError::Timeout) => {
-            transfer_netlink_worker(worker);
+            let _ = transfer_netlink_worker(worker, permit, &reaper);
             return Err(netlink_timeout("wait for netlink response"));
         }
     };
-    join_netlink_worker(worker, NETLINK_RESPONSE_TIMEOUT)?;
+    join_netlink_worker(worker, permit, &reaper, NETLINK_RESPONSE_TIMEOUT)?;
     result
 }
 
-fn finish_failed_start<T>(worker: JoinHandle<()>, error: SystemError) -> Result<T, SystemError> {
-    join_netlink_worker(worker, NETLINK_RESPONSE_TIMEOUT)?;
+fn finish_failed_start<T>(
+    worker: JoinHandle<()>,
+    permit: ReaperPermit,
+    reaper: &ReaperClient,
+    error: SystemError,
+) -> Result<T, SystemError> {
+    join_netlink_worker(worker, permit, reaper, NETLINK_RESPONSE_TIMEOUT)?;
     Err(error)
 }
 
@@ -119,31 +144,40 @@ where
         .map_err(|_| netlink_timeout("execute netlink operation"))?
 }
 
-fn join_netlink_worker(worker: JoinHandle<()>, timeout: Duration) -> Result<(), SystemError> {
+fn join_netlink_worker(
+    worker: JoinHandle<()>,
+    permit: ReaperPermit,
+    reaper: &ReaperClient,
+    timeout: Duration,
+) -> Result<(), SystemError> {
     let Some(deadline) = Instant::now().checked_add(timeout) else {
-        transfer_netlink_worker(worker);
+        let _ = transfer_netlink_worker(worker, permit, reaper);
         return Err(netlink_timeout("shut down netlink worker"));
     };
     while !worker.is_finished() {
         let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
-            transfer_netlink_worker(worker);
+            let _ = transfer_netlink_worker(worker, permit, reaper);
             return Err(netlink_timeout("shut down netlink worker"));
         };
         thread::park_timeout(remaining.min(NETLINK_REAPER_POLL_INTERVAL));
     }
-    worker.join().map_err(|_| netlink_worker_panicked())
+    let result = worker.join().map_err(|_| netlink_worker_panicked());
+    drop(permit);
+    result
 }
 
-fn transfer_netlink_worker(worker: JoinHandle<()>) {
-    let _ = thread::Builder::new()
-        .name("packetcraftr-netlink-reaper".to_owned())
-        .spawn(move || {
-            while !worker.is_finished() {
-                thread::park_timeout(NETLINK_REAPER_POLL_INTERVAL);
-            }
-            let _ = worker.join();
-        })
-        .expect("could not start the Linux netlink worker reaper");
+fn transfer_netlink_worker(
+    worker: JoinHandle<()>,
+    permit: ReaperPermit,
+    reaper: &ReaperClient,
+) -> TransferOutcome {
+    reaper.transfer(ReapTask::new(move || {
+        let _permit = permit;
+        while !worker.is_finished() {
+            thread::park_timeout(NETLINK_REAPER_POLL_INTERVAL);
+        }
+        let _ = worker.join();
+    }))
 }
 
 fn netlink_worker_panicked() -> SystemError {
@@ -174,6 +208,7 @@ mod tests {
     };
 
     use super::*;
+    use crate::platform::worker_reaper::test_support::client_with_receiver;
 
     #[test]
     fn operation_and_join_waits_are_bounded() {
@@ -199,13 +234,19 @@ mod tests {
                 thread::park_timeout(Duration::from_millis(1));
             }
         });
+        let (reaper, receiver) = client_with_receiver(1, 1);
+        let permit = reaper.reserve().expect("test reaper reservation");
         assert!(matches!(
-            join_netlink_worker(worker, Duration::ZERO),
+            join_netlink_worker(worker, permit, &reaper, Duration::ZERO),
             Err(SystemError::OperatingSystem {
                 operation: "shut down netlink worker",
                 ..
             })
         ));
         release.store(true, Ordering::Release);
+        let task = receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("timed-out worker transferred to the reaper");
+        task.run();
     }
 }

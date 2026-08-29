@@ -63,10 +63,10 @@ where
 
 /// Executes one approved scan and publishes each final probe outcome and
 /// retained undecoded frame before beginning later batches. The callback runs
-/// on a bounded worker; a callback that does not return cannot keep live I/O
-/// armed beyond `max_duration`. Confirmed sends in the current batch are not
-/// undone, callback failure prevents later batches, and a worker that outlives
-/// the deadline may finish after this function returns and must own its state.
+/// on a process-budgeted worker; `max_duration` bounds publisher waiting and
+/// live I/O, not arbitrary callback execution. Confirmed sends in the current
+/// batch are not undone, callback failure prevents later batches, and a
+/// callback may finish after this function returns while holding its permit.
 pub fn run_with_events<A, E, C, F>(
     request: &Request,
     authorizer: &mut A,

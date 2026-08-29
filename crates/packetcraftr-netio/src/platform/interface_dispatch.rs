@@ -35,17 +35,8 @@ pub(crate) fn system_interfaces() -> Result<Vec<interface::Info>, Error> {
     })
 }
 
-// Unix interface enumeration shares the native route backend, so the two
-// features are only separable on Windows.
-#[cfg(all(
-    feature = "native-interfaces",
-    not(windows),
-    not(feature = "native-route")
-))]
-compile_error!(
-    "`native-interfaces` needs `native-route` on Unix targets: interface enumeration reads the \
-     same operating-system route backend. Enable the `native-route` feature."
-);
+// Unix interface enumeration shares the native route backend; native-interfaces
+// depends directly on native-route in Cargo.toml.
 
 #[cfg(all(
     any(feature = "native-interfaces", feature = "native-route"),

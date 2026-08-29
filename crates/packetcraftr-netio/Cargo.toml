@@ -16,7 +16,7 @@ publish.workspace = true
 workspace = true
 
 [features]
-native-interfaces = ["dep:windows"]
+native-interfaces = ["native-route", "dep:windows"]
 # `dep:socket2` covers the macOS AF_ROUTE socket in `platform/macos/query.rs`.
 # Cargo cannot scope a feature's dependency to one target, so Linux and Windows
 # route-only builds pull the (tiny) crate as well.

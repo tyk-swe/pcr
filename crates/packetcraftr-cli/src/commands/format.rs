@@ -79,6 +79,34 @@ macro_rules! narrowed_format {
     };
 }
 
+/// Generates a fallible subset conversion from one exhaustive mapping.
+///
+/// Both accepted and rejected source variants are listed so adding a source
+/// format makes this match non-exhaustive until this one mapping is updated.
+macro_rules! narrowed_conversion {
+    ($source:ident => $target:ident {
+        accept { $($accepted:ident),+ $(,)? }
+        reject { $($rejected:ident),+ $(,)? }
+    }) => {
+        impl $target {
+            pub(crate) fn narrow_from(
+                command: output::contract::Command,
+                source: $source,
+            ) -> Result<Self, CliError> {
+                match source {
+                    $($source::$accepted => Ok(Self::$accepted),)+
+                    $($source::$rejected => Err(CliError::classified(
+                        output::contract::Error::UnsupportedFormat {
+                            command,
+                            format: output::contract::Format::$rejected,
+                        },
+                    )),)+
+                }
+            }
+        }
+    };
+}
+
 narrowed_format! {
     narrow
     /// One aggregate answer: `interfaces`, `routes`, `plan`, `protocols`, `stats`.
@@ -134,6 +162,27 @@ narrowed_format! {
     narrow
     /// Reassembled conversation payload: `follow`.
     FollowFormat { Text, Json, Ndjson, Hex, Raw }
+}
+
+narrowed_conversion! {
+    ExchangeFormat => CollectedFormat {
+        accept { Text, Json, Pcap, PcapNg }
+        reject { Ndjson }
+    }
+}
+
+narrowed_conversion! {
+    CaptureFormat => FrameFormat {
+        accept { Text, Ndjson, Hex }
+        reject { Pcap, PcapNg }
+    }
+}
+
+narrowed_conversion! {
+    ToolFormat => AggregateFormat {
+        accept { Text, Json }
+        reject { Ndjson }
+    }
 }
 
 #[cfg(test)]
@@ -219,5 +268,55 @@ mod tests {
             .expect("scan publishes ndjson"),
             ToolFormat::Ndjson
         );
+    }
+
+    #[test]
+    fn generated_subset_conversions_cover_every_source_variant() {
+        for (source, expected) in [
+            (ExchangeFormat::Text, Some(CollectedFormat::Text)),
+            (ExchangeFormat::Json, Some(CollectedFormat::Json)),
+            (ExchangeFormat::Ndjson, None),
+            (ExchangeFormat::Pcap, Some(CollectedFormat::Pcap)),
+            (ExchangeFormat::PcapNg, Some(CollectedFormat::PcapNg)),
+        ] {
+            assert_eq!(
+                CollectedFormat::narrow_from(output::contract::Command::Exchange, source).ok(),
+                expected
+            );
+        }
+
+        for (source, expected) in [
+            (CaptureFormat::Text, Some(FrameFormat::Text)),
+            (CaptureFormat::Ndjson, Some(FrameFormat::Ndjson)),
+            (CaptureFormat::Hex, Some(FrameFormat::Hex)),
+            (CaptureFormat::Pcap, None),
+            (CaptureFormat::PcapNg, None),
+        ] {
+            assert_eq!(
+                FrameFormat::narrow_from(output::contract::Command::Read, source).ok(),
+                expected
+            );
+        }
+
+        for (source, expected) in [
+            (ToolFormat::Text, Some(AggregateFormat::Text)),
+            (ToolFormat::Json, Some(AggregateFormat::Json)),
+            (ToolFormat::Ndjson, None),
+        ] {
+            let conversion = AggregateFormat::narrow_from(output::contract::Command::Fuzz, source);
+            assert_eq!(conversion.ok(), expected);
+        }
+    }
+
+    #[test]
+    fn generated_invalid_conversions_keep_the_contract_error() {
+        let error = CollectedFormat::narrow_from(
+            output::contract::Command::Exchange,
+            ExchangeFormat::Ndjson,
+        )
+        .expect_err("ndjson is streamed, not collected");
+        assert_eq!(error.exit_code, 2);
+        assert_eq!(error.classification.code, "cli.output_format");
+        assert!(error.message.contains("ndjson"));
     }
 }

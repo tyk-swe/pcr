@@ -9,7 +9,7 @@ use super::{Family, Target};
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::BoundaryError;
 
-use crate::authorization::{Authorizer, Operation};
+use crate::authorization::{Authorizer, Operation, WireBudget};
 use crate::clock::check_deadline;
 
 pub(crate) struct SelectedTargets {
@@ -64,11 +64,10 @@ where
     E: From<BoundaryError>,
 {
     check_deadline(deadline, &mut duration_error)?;
-    let approval = authorizer.authorize_operation(Operation {
+    let approval = authorizer.authorize_operation(Operation::Budgeted(WireBudget::new(
         packets,
-        wire_bytes: maximum_wire_bytes,
-        ..Operation::default()
-    });
+        maximum_wire_bytes,
+    )));
     check_deadline(deadline, &mut duration_error)?;
     approval.map_err(E::from)
 }

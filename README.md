@@ -94,6 +94,16 @@ matching archive and `SHA256SUMS`, verify the checksum, then put
 - `pcap-free` archives include routing and raw Layer 3 without a libpcap/Npcap
   dependency.
 
+### Verifying Provenance
+
+Releases produced by the current workflow provide GitHub Artifact Attestations
+signed with Sigstore. After downloading an archive, verify it with the GitHub
+CLI, replacing the placeholder with its filename:
+
+```console
+gh attestation verify packetcraftr-vVERSION-TARGET-VARIANT.EXT --owner tyk-swe
+```
+
 From source, install the toolchain named in `rust-toolchain.toml` (MSRV: `rust-version` in `Cargo.toml`). All-feature Linux
 builds also need libpcap development files such as `libpcap-dev`.
 
@@ -102,16 +112,26 @@ cargo build --locked --release -p packetcraftr-cli
 ./target/release/packetcraftr --help
 ```
 
-Add `--no-default-features` for an offline-only build or `--all-features` for
-all native capabilities. The Cargo manifests and command help are authoritative
-for feature selection. Missing features, dependencies, or OS privileges fail
-closed.
+Supported feature profiles:
+- Offline-only: `--no-default-features`
+- Default (interface enumeration + passive routing): `""`
+- Pcap-free (routing + raw Layer 3): `--no-default-features --features native-route,native-layer3`
+- Full native capabilities (capture + injection + routing): `--all-features`
+
+Run `./scripts/check-features.sh` to validate the supported feature matrix across all targets.
+The Cargo manifests and command help are authoritative for feature selection. Missing features,
+dependencies, or OS privileges fail closed.
 
 ## Contracts
 
 - Packet JSON/YAML: [`packetcraftr.packet/v1`](schemas/packetcraftr.packet.v1.schema.json)
 - Structured command output: [`packetcraftr.output/v1`](schemas/packetcraftr.output.v1.schema.json)
 - Published packet and output examples: [`examples/documents`](examples/documents)
+
+Packet documents are parsed under `packetcraftr_core::document::DocumentLimits`
+(input bytes, layers, list nesting, fields per layer, node and list-item
+counts, and name, text, byte-value, and total payload widths). JSON and YAML
+share one envelope, and a rejection names the limit it exceeded.
 
 Put the global `--output` option before the command, for example
 `packetcraftr --output json stats capture.pcapng`. Command-specific formats

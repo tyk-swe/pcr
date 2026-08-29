@@ -38,8 +38,7 @@ pub(in crate::analysis::reassembly::tcp) fn commit_push(
     let direct_payload = plan
         .direct_payload
         .as_ref()
-        .map(|range| payload.slice(range.clone()));
-
+        .and_then(|range| crate::byte_slice::checked_slice(&payload, range.start, range.end));
     let (replacement, mut events) = if changes_generation {
         let mut state = TcpFlowState::new(first_payload_sequence, last_update, deadline);
         let events = commit_flow_push(
@@ -146,7 +145,8 @@ fn commit_flow_push(
         }
         let skip = usize::try_from(state.next_offset.saturating_sub(start))
             .expect("pending entry skip fits its byte length");
-        let output = bytes.slice(skip..);
+        let output =
+            crate::byte_slice::checked_slice(&bytes, skip, bytes.len()).unwrap_or_default();
         state.pending_bytes = state.pending_bytes.saturating_sub(bytes.len());
         emit_data(state, flow, output, max_bytes_per_flow, &mut events);
     }

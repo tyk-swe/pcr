@@ -1,0 +1,64 @@
+[package]
+name = "packetcraftr-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+packetcraftr-core = { path = "../crates/packetcraftr-core" }
+bytes = "1"
+serde_json = "1"
+
+[[bin]]
+name = "packet_document_json"
+path = "fuzz_targets/packet_document_json.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "packet_document_yaml"
+path = "fuzz_targets/packet_document_yaml.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "pcap_parse"
+path = "fuzz_targets/pcap_parse.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "pcapng_parse"
+path = "fuzz_targets/pcapng_parse.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "packet_decode"
+path = "fuzz_targets/packet_decode.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tcp_reassembly"
+path = "fuzz_targets/tcp_reassembly.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tls_assembly"
+path = "fuzz_targets/tls_assembly.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "filter_parse"
+path = "fuzz_targets/filter_parse.rs"
+test = false
+doc = false

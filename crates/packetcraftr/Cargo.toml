@@ -13,7 +13,7 @@ workspace = true
 
 [features]
 default = ["native-interfaces", "native-route"]
-native-interfaces = ["packetcraftr-netio/native-interfaces"]
+native-interfaces = ["native-route", "packetcraftr-netio/native-interfaces"]
 native-route = ["packetcraftr-netio/native-route"]
 native-layer2 = ["packetcraftr-netio/native-layer2"]
 native-layer3 = ["packetcraftr-netio/native-layer3"]

@@ -63,11 +63,11 @@ pub fn run(
 /// Generates each deterministic case once and publishes it as soon as its
 /// offline outcome is final.
 ///
-/// The callback runs on a bounded worker. Each result is acknowledged before
-/// generation continues, callback failure aborts later cases, and callback
-/// backpressure is charged to `request.limits.max_duration`. A callback that
-/// does not return is detached when the deadline expires, so it must own its
-/// state and tolerate finishing after this function returns.
+/// The callback runs on a process-budgeted worker. Each result is acknowledged
+/// before generation continues, callback failure aborts later cases, and the
+/// deadline bounds publisher waiting for callback backpressure. It does not
+/// terminate callback code: a callback may finish after this function returns
+/// and holds one process-wide worker permit until then.
 pub fn run_with_events<F>(
     request: &super::request::Request,
     packet: Packet,

@@ -113,12 +113,10 @@ pub(super) fn read_recipe(
                 .then_some(core::document::Format::Yaml)
         });
     if let Some(format) = format {
-        return core::document::Packet::parse_with_resource_limits(
+        return core::document::Packet::parse_with_limits(
             &input,
             format,
-            core::document::DEFAULT_MAX_DOCUMENT_BYTES,
-            core::build::DEFAULT_MAX_LAYERS,
-            core::document::DEFAULT_MAX_DOCUMENT_NESTING,
+            &core::document::DocumentLimits::DEFAULT,
         )
         .and_then(|document| document.to_packet(registry, core::build::DEFAULT_MAX_LAYERS))
         .map_err(|source| CliError::new(2, source.to_string()));

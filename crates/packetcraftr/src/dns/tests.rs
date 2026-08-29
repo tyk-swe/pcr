@@ -34,7 +34,11 @@ impl Authorizer for SingleAddressAuthorizer {
         })
     }
 
-    fn authorize_operation(&mut self, _operation: Operation<'_>) -> Result<(), BoundaryError> {
+    fn authorize_operation(&mut self, operation: Operation<'_>) -> Result<(), BoundaryError> {
+        assert!(
+            matches!(operation, Operation::Budgeted(_)),
+            "dns submits a budget-only request, got {operation:?}"
+        );
         Ok(())
     }
 }

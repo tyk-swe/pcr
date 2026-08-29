@@ -12,7 +12,9 @@ use packetcraftr_netio::link::Mode;
 
 use crate::BoundaryError;
 
-use crate::authorization::{Authorizer, Operation, PermissiveLiveDenial, check_permissive_live};
+use crate::authorization::{
+    Authorizer, Operation, PermissiveLiveDenial, check_permissive_live, unsupported_operation,
+};
 
 use super::super::wire::replay_network_envelope;
 
@@ -203,22 +205,22 @@ fn validate_network_frame(frame: &Frame, mode: Mode) -> Result<(), BoundaryError
 }
 
 impl Authorizer for SystemAuthorizer {
+    /// Budgets are checked before the frame is decoded or rebuilt, so a
+    /// request that exceeds policy never reaches the expensive round trip.
+    /// Shapes without an exact frame are rejected: replay cannot be
+    /// authorized from a budget or a declared packet list.
     fn authorize_operation(&mut self, operation: Operation<'_>) -> Result<(), BoundaryError> {
+        let budget = operation.budget();
         self.policy
-            .authorize_operation(operation.packets, operation.wire_bytes)
+            .authorize_operation(budget.packets(), budget.wire_bytes())
             .map_err(BoundaryError::from_error)?;
-        let Some((frame, mode)) = operation.frame else {
-            return Err(BoundaryError::new(
-                "replay authorization requires an exact frame",
-                Classification::new(
-                    "internal.replay_frame",
-                    Kind::Internal,
-                    Some("submit the exact captured frame with the operation it authorizes"),
-                ),
-                Vec::new(),
-            ));
-        };
-        self.authorize_frame(frame, mode)
+        match operation {
+            Operation::Replay(replay) => self.authorize_frame(replay.frame(), replay.mode()),
+            Operation::Budgeted(_) | Operation::Declared(_) => Err(unsupported_operation(
+                "the replay system authorizer",
+                &operation,
+            )),
+        }
     }
 }
 
@@ -234,6 +236,7 @@ mod tests {
     use packetcraftr_core::protocol::{icmp::Icmpv4, network::Ipv4};
 
     use super::*;
+    use crate::authorization::{DeclaredPackets, PermissiveLive, ReplayFrame, WireBudget};
 
     fn built_ipv4(reserved_flag: bool) -> BuiltPacket {
         let mut packet = Packet::new();
@@ -313,22 +316,20 @@ mod tests {
         let mut authorizer = SystemAuthorizer::new(policy, false);
 
         let packet_error = authorizer
-            .authorize_operation(Operation {
-                packets: 2,
-                wire_bytes: 1,
-                frame: Some((&invalid_frame, Mode::Layer2)),
-                ..Operation::default()
-            })
+            .authorize_operation(Operation::Replay(ReplayFrame::new(
+                WireBudget::new(2, 1),
+                &invalid_frame,
+                Mode::Layer2,
+            )))
             .expect_err("packet budget must fail first");
         assert_eq!(packet_error.classification().code, "policy.packet_limit");
 
         let byte_error = authorizer
-            .authorize_operation(Operation {
-                packets: 1,
-                wire_bytes: 3,
-                frame: Some((&invalid_frame, Mode::Layer2)),
-                ..Operation::default()
-            })
+            .authorize_operation(Operation::Replay(ReplayFrame::new(
+                WireBudget::new(1, 3),
+                &invalid_frame,
+                Mode::Layer2,
+            )))
             .expect_err("byte budget must fail before unsupported link type");
         assert_eq!(byte_error.classification().code, "policy.byte_limit");
     }
@@ -431,15 +432,27 @@ mod tests {
         let mut authorizer = SystemAuthorizer::new(crate::policy::Policy::default(), false);
 
         let error = authorizer
-            .authorize_operation(Operation {
-                packets: 1,
-                wire_bytes: 1,
-                ..Operation::default()
-            })
+            .authorize_operation(Operation::Budgeted(WireBudget::new(1, 1)))
             .expect_err("a frameless replay operation cannot be authorized");
 
         assert_eq!(error.classification().kind, Kind::Internal);
-        assert_eq!(error.classification().code, "internal.replay_frame");
+        assert_eq!(
+            error.classification().code,
+            "internal.unsupported_operation"
+        );
+
+        let declared = authorizer
+            .authorize_operation(Operation::Declared(DeclaredPackets::new(
+                WireBudget::new(1, 1),
+                &[],
+                None,
+                PermissiveLive::NotRequired,
+            )))
+            .expect_err("a declared-packet list is not an exact frame");
+        assert_eq!(
+            declared.classification().code,
+            "internal.unsupported_operation"
+        );
     }
 
     #[test]

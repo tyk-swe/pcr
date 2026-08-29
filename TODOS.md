@@ -45,22 +45,6 @@ covered). These wait for one deliberate bump:
 - Drop command names from flags: `tls --max-tls-buffer-bytes`,
   `--max-tls-sessions`, `capture --max-captured-bytes`.
 
-## Review follow-ups (2026-08-26 recovery pass)
-
-Need a decision, not a mechanical edit.
-
-- `authorization::Operation` derives `Default` and every call site ends in
-  `..Operation::default()`, so a forgotten field takes the permissive value.
-  Either document per-field ownership and assert on unexpected combinations,
-  or split into per-shape request types so an unread field fails to compile.
-- The narrowed format enums in `commands/format.rs` have no conversions; four
-  call sites hand-write the re-narrowing match. Have `narrowed_format!`
-  generate it.
-- The deny sweep skips panicking range APIs (`Vec::drain`, `slice::chunks`,
-  `Bytes::slice`). `reassembly/tcp/state.rs` `drain(..old_start)` and
-  `scan/plan.rs` `chunks(batch_size)` rely on a `debug_assert!` or upstream
-  validation. Guard them or lint them.
-
 ## Distribution
 
 - Crates are `publish = false`; install is from a release archive or source.

@@ -225,7 +225,11 @@ fn project(
     if slice.start > end {
         return None;
     }
-    Some(FieldValue::Bytes(bytes.slice(slice.start..end)))
+    Some(FieldValue::Bytes(crate::byte_slice::checked_slice(
+        &bytes,
+        slice.start,
+        end,
+    )?))
 }
 
 fn frame_value(context: &Context<'_>, which: FrameField) -> Option<FieldValue> {

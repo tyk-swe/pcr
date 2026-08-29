@@ -33,7 +33,7 @@ use super::execution::{
 };
 use super::request::LiveOptions;
 use super::result::{Case, CaseOutcome, Result, Stats, Summary};
-use crate::authorization::Authorizer;
+use crate::authorization::{Authorizer, DeclaredPackets, Operation, PermissiveLive, WireBudget};
 
 /// Builds and validates all cases offline, then authorizes and executes the campaign.
 pub fn run<A, E, C>(
@@ -76,11 +76,11 @@ where
 }
 
 /// Executes one fully authorized campaign and publishes cases in deterministic
-/// case order as soon as each live outcome is final. The bounded callback
-/// worker acknowledges every case before later transmission, preserves its
-/// classification on failure, and cannot keep live I/O armed beyond the
-/// campaign deadline. A callback that outlives the deadline may finish after
-/// this function returns and must therefore own its state.
+/// case order as soon as each live outcome is final. The process-budgeted
+/// callback worker acknowledges every case before later transmission and
+/// preserves its classification on failure. The campaign deadline bounds
+/// publisher waiting and live I/O, not callback execution; an outliving
+/// callback holds its worker permit until it returns.
 #[expect(
     clippy::too_many_arguments,
     reason = "live fuzz execution requires the request, approved I/O boundaries, clock, and progressive sink"
@@ -269,15 +269,19 @@ where
         .collect::<Vec<_>>();
     // Unconditional: a campaign with no buildable case still has to clear
     // policy validation and the destination gate before anything else runs.
-    authorizer.authorize_operation(crate::authorization::Operation {
-        packets: prepared.built_case_count,
-        wire_bytes: prepared.maximum_wire_bytes,
-        declared: &packets,
-        destination: live.destination,
-        requires_permissive_live: prepared.requires_malformed_live,
-        allow_permissive_live: live.allow_malformed_live,
-        ..crate::authorization::Operation::default()
-    })?;
+    let permissive_live = if prepared.requires_malformed_live {
+        PermissiveLive::Required {
+            allowed: live.allow_malformed_live,
+        }
+    } else {
+        PermissiveLive::NotRequired
+    };
+    authorizer.authorize_operation(Operation::Declared(DeclaredPackets::new(
+        WireBudget::new(prepared.built_case_count, prepared.maximum_wire_bytes),
+        &packets,
+        live.destination,
+        permissive_live,
+    )))?;
     Ok(())
 }
 

@@ -62,10 +62,10 @@ where
 
 /// Executes one approved trace and publishes each final probe outcome and
 /// retained undecoded frame before starting a later hop. The callback runs on
-/// a bounded worker and cannot extend live I/O beyond `max_duration`.
-/// Confirmed sends in the current hop are not undone, callback failure prevents
-/// later hops, and a worker that outlives the deadline may finish after this
-/// function returns and must own its state.
+/// a process-budgeted worker. `max_duration` bounds publisher waiting and live
+/// I/O, not arbitrary callback execution. Confirmed sends in the current hop
+/// are not undone, callback failure prevents later hops, and a callback may
+/// finish after this function returns while holding its permit.
 pub fn run_with_events<A, E, C, F>(
     request: &Request,
     authorizer: &mut A,

@@ -17,7 +17,7 @@ use super::model::{
     FrameEvidence, Limits, Options, Selector, Summary, Timing, Transmission, Transmitter,
 };
 use super::wire::{replay_link_mode, validate_transmission_evidence};
-use crate::authorization::{Authorizer, Operation};
+use crate::authorization::{Authorizer, Operation, ReplayFrame, WireBudget};
 
 #[derive(Default)]
 struct Progress {
@@ -325,12 +325,11 @@ fn authorize_frame<A: Authorizer>(
     mode: LinkMode,
 ) -> Result<(), Error> {
     enforce_deadline(deadline, source_index)?;
-    let authorization = authorizer.authorize_operation(Operation {
-        packets,
-        wire_bytes,
-        frame: Some((frame, mode)),
-        ..Operation::default()
-    });
+    let authorization = authorizer.authorize_operation(Operation::Replay(ReplayFrame::new(
+        WireBudget::new(packets, wire_bytes),
+        frame,
+        mode,
+    )));
     enforce_deadline(deadline, source_index)?;
     authorization.map_err(|source| Error::Authorization {
         source_index,

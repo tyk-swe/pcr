@@ -121,7 +121,9 @@ pub(super) fn trim_emitted_history(state: &mut TcpFlowState, capacity: usize) {
     if state.emitted_history.len() > capacity {
         let remove = state.emitted_history.len().saturating_sub(capacity);
         state.history_start_offset = state.history_start_offset.saturating_add(remove as u64);
-        state.emitted_history.drain(..remove);
+        if !checked_drain_prefix(&mut state.emitted_history, remove) {
+            state.emitted_history.clear();
+        }
     }
 }
 
@@ -182,7 +184,9 @@ pub(super) fn append_emitted_history(
     let history_start_offset = output_end.saturating_sub(keep as u64);
     if !state.emitted_history.is_empty() && history_start_offset < output_start {
         let old_start = history_start_offset.saturating_sub(state.history_start_offset) as usize;
-        state.emitted_history.drain(..old_start);
+        if !checked_drain_prefix(&mut state.emitted_history, old_start) {
+            state.emitted_history.clear();
+        }
     } else {
         state.emitted_history.clear();
     }
@@ -195,4 +199,29 @@ pub(super) fn append_emitted_history(
             .copied(),
     );
     state.history_start_offset = history_start_offset;
+}
+
+fn checked_drain_prefix<T>(values: &mut VecDeque<T>, end: usize) -> bool {
+    if end > values.len() {
+        return false;
+    }
+    values.drain(..end);
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::checked_drain_prefix;
+    use std::collections::VecDeque;
+
+    #[test]
+    fn drain_endpoint_at_length_succeeds_and_one_past_is_rejected() {
+        let mut exact = VecDeque::from([1, 2, 3]);
+        assert!(checked_drain_prefix(&mut exact, 3));
+        assert!(exact.is_empty());
+
+        let mut past = VecDeque::from([1, 2, 3]);
+        assert!(!checked_drain_prefix(&mut past, 4));
+        assert_eq!(past, VecDeque::from([1, 2, 3]));
+    }
 }

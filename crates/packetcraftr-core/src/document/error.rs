@@ -3,6 +3,8 @@
 
 use thiserror::Error;
 
+use super::types::{DocumentLimits, Limit};
+
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum Error {
@@ -22,6 +24,8 @@ pub enum Error {
     LayerLimit { limit: usize },
     #[error("packet document field nesting exceeds configured limit {limit}")]
     NestingLimit { limit: usize },
+    #[error("packet document exceeds configured limit {limit}={maximum}")]
+    ResourceLimit { limit: Limit, maximum: usize },
     #[error("packet document limit {field}={value} exceeds stable maximum {maximum}")]
     InvalidLimit {
         field: &'static str,
@@ -42,4 +46,36 @@ pub enum Error {
         format: &'static str,
         message: String,
     },
+}
+
+impl Error {
+    /// The configured limit this error reports, if it is a resource rejection.
+    #[must_use]
+    pub const fn limit(&self) -> Option<Limit> {
+        match self {
+            Self::SizeLimit { .. } => Some(Limit::InputBytes),
+            Self::LayerLimit { .. } => Some(Limit::Layers),
+            Self::NestingLimit { .. } => Some(Limit::Nesting),
+            Self::ResourceLimit { limit, .. } => Some(*limit),
+            _ => None,
+        }
+    }
+
+    pub(super) fn exceeded(limit: Limit, limits: &DocumentLimits) -> Self {
+        let maximum = limits.maximum(limit);
+        match limit {
+            Limit::Layers => Self::LayerLimit { limit: maximum },
+            Limit::Nesting => Self::NestingLimit { limit: maximum },
+            Limit::InputBytes
+            | Limit::FieldsPerLayer
+            | Limit::TotalNodes
+            | Limit::ListItems
+            | Limit::TotalListItems
+            | Limit::ProtocolNameBytes
+            | Limit::FieldNameBytes
+            | Limit::TextBytes
+            | Limit::ByteValueBytes
+            | Limit::TotalPayloadBytes => Self::ResourceLimit { limit, maximum },
+        }
+    }
 }

@@ -30,21 +30,29 @@ pub(super) fn render_capture(
     result: &packetcraftr::exchange::Result,
     format: output::contract::Format,
 ) -> Result<(), CliError> {
-    let mut frames = result
-        .sent
-        .iter()
-        .map(|sent| sent.frame().clone())
-        .chain(
-            result
-                .responses
-                .iter()
-                .map(|response| response.response.frame.clone()),
-        )
-        .chain(result.unsolicited.iter().map(|packet| packet.frame.clone()))
-        .chain(result.undecoded.iter().cloned())
-        .collect::<Vec<_>>();
+    let frames = stable_timestamp_order(
+        result
+            .sent
+            .iter()
+            .map(|sent| sent.frame())
+            .chain(
+                result
+                    .responses
+                    .iter()
+                    .map(|response| &response.response.frame),
+            )
+            .chain(result.unsolicited.iter().map(|packet| &packet.frame))
+            .chain(result.undecoded.iter()),
+    );
+    write_capture_file(format, frames.into_iter().cloned())
+}
+
+fn stable_timestamp_order<'a>(
+    frames: impl IntoIterator<Item = &'a packetcraftr::core::frame::Frame>,
+) -> Vec<&'a packetcraftr::core::frame::Frame> {
+    let mut frames = frames.into_iter().collect::<Vec<_>>();
     frames.sort_by_key(|frame| frame.timestamp);
-    write_capture_file(format, frames)
+    frames
 }
 
 pub(super) fn render_aggregate(result: packetcraftr::exchange::Result) -> Result<(), CliError> {
@@ -64,4 +72,27 @@ pub(super) fn render_complete(
 ) -> Result<(), CliError> {
     let (event, diagnostics, stats) = output::exchange::Event::complete_from_exchange(summary);
     Ok(stream.complete_with_stats(event, diagnostics, stats)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::UNIX_EPOCH;
+
+    use packetcraftr::core::frame::{Frame, LinkType};
+
+    use super::stable_timestamp_order;
+
+    #[test]
+    fn equal_timestamps_keep_source_tie_order() {
+        let frames = [1_u8, 2, 3]
+            .map(|byte| Frame::new(UNIX_EPOCH, LinkType::IPV4, vec![byte]).expect("fixture frame"));
+        let ordered = stable_timestamp_order(frames.iter());
+        assert_eq!(
+            ordered
+                .iter()
+                .filter_map(|frame| frame.bytes().first().copied())
+                .collect::<Vec<_>>(),
+            [1, 2, 3]
+        );
+    }
 }

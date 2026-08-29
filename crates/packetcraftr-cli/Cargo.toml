@@ -13,7 +13,7 @@ workspace = true
 
 [features]
 default = ["native-interfaces", "native-route"]
-native-interfaces = ["packetcraftr/native-interfaces"]
+native-interfaces = ["native-route", "packetcraftr/native-interfaces"]
 native-route = ["packetcraftr/native-route"]
 native-layer2 = ["packetcraftr/native-layer2"]
 native-layer3 = ["packetcraftr/native-layer3"]
@@ -24,10 +24,10 @@ clap.workspace = true
 packetcraftr.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+tempfile.workspace = true
 
 [dev-dependencies]
 jsonschema.workspace = true
-tempfile.workspace = true
 
 [[bin]]
 name = "packetcraftr"

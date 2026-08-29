@@ -35,7 +35,12 @@ struct RecordingAuthorizer {
 impl Authorizer for RecordingAuthorizer {
     fn authorize_operation(&mut self, operation: Operation<'_>) -> Result<(), BoundaryError> {
         self.calls += 1;
-        self.budgets.push((operation.packets, operation.wire_bytes));
+        let budget = operation.budget();
+        self.budgets.push((budget.packets(), budget.wire_bytes()));
+        assert!(
+            matches!(operation, Operation::Replay(_)),
+            "replay must submit an exact frame, got {operation:?}"
+        );
         if self.deny {
             Err(BoundaryError::new(
                 "denied by test policy",

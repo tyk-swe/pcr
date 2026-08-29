@@ -6,8 +6,9 @@
 //! Scan, DNS, traceroute, fuzz, and replay all ask the same question before
 //! they can produce traffic: may this operation run, with these packets, this
 //! destination, and this many wire bytes? [`Authorizer`] is that question,
-//! [`Operation`] is what a workflow can say about its operation, and
-//! [`PolicyAuthorizer`] is the answer a [`crate::policy::Policy`] gives.
+//! [`Operation`] is the complete, shape-specific statement a workflow makes
+//! about its operation, and [`PolicyAuthorizer`] is the answer a
+//! [`crate::policy::Policy`] gives.
 
 use std::net::IpAddr;
 use std::sync::{Arc, OnceLock};
@@ -21,26 +22,231 @@ use crate::Client;
 use crate::Error;
 use crate::target::{Authorized, Resolver, Target};
 
-/// What a workflow declares about the operation it wants to run. Each workflow
-/// fills in the fields its operation can produce and leaves the rest at their
-/// defaults, so an authorizer never has to guess what was not said.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Operation<'a> {
+/// The packet and wire-byte budget every live operation must declare before
+/// it can produce traffic.
+///
+/// Both counts are mandatory: there is no default and no constructor that
+/// supplies one for the caller, so a workflow that cannot state its budget
+/// cannot build a request.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WireBudget {
+    packets: u64,
+    wire_bytes: u64,
+}
+
+impl WireBudget {
+    /// Prospective packets that reach the wire and the conservative total of
+    /// their wire bytes.
+    #[must_use]
+    pub const fn new(packets: u64, wire_bytes: u64) -> Self {
+        Self {
+            packets,
+            wire_bytes,
+        }
+    }
+
     /// Prospective count of packets that reach the wire.
-    pub packets: u64,
+    #[must_use]
+    pub const fn packets(&self) -> u64 {
+        self.packets
+    }
+
     /// Prospective wire bytes, counted conservatively.
-    pub wire_bytes: u64,
+    #[must_use]
+    pub const fn wire_bytes(&self) -> u64 {
+        self.wire_bytes
+    }
+}
+
+/// Whether an operation would put permissively built or malformed bytes on
+/// the wire, and if so whether the caller passed the per-operation opt-in.
+///
+/// A workflow must say one or the other; the permissive case cannot be
+/// reached by leaving a flag unset.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PermissiveLive {
+    /// Every packet builds strictly; no opt-in is involved.
+    NotRequired,
+    /// At least one packet needs the permissive-live opt-in, which the caller
+    /// did (`allowed: true`) or did not (`allowed: false`) pass for this run.
+    Required {
+        /// The caller passed the per-operation opt-in for those bytes.
+        allowed: bool,
+    },
+}
+
+/// A declared-packet operation: the fuzz workflow, which knows every packet it
+/// may transmit, the route destination it chose, and whether any case builds
+/// permissively.
+#[derive(Clone, Copy, Debug)]
+pub struct DeclaredPackets<'a> {
+    budget: WireBudget,
+    packets: &'a [Packet],
+    destination: Option<IpAddr>,
+    permissive_live: PermissiveLive,
+}
+
+impl<'a> DeclaredPackets<'a> {
+    /// Every argument is required. `destination` is the route destination
+    /// chosen outside the packets themselves, or `None` when the workflow
+    /// routes from the packets alone; the caller states that explicitly.
+    #[must_use]
+    pub const fn new(
+        budget: WireBudget,
+        packets: &'a [Packet],
+        destination: Option<IpAddr>,
+        permissive_live: PermissiveLive,
+    ) -> Self {
+        Self {
+            budget,
+            packets,
+            destination,
+            permissive_live,
+        }
+    }
+
+    #[must_use]
+    pub const fn budget(&self) -> WireBudget {
+        self.budget
+    }
+
     /// Packets whose declared destinations must be authorized before a route,
     /// capture, neighbor, or transmission provider can observe them.
-    pub declared: &'a [Packet],
+    #[must_use]
+    pub const fn packets(&self) -> &'a [Packet] {
+        self.packets
+    }
+
     /// A route destination chosen outside the packets themselves.
-    pub destination: Option<IpAddr>,
-    /// One exact frame, with the link mode it would be transmitted in.
-    pub frame: Option<(&'a Frame, LinkMode)>,
-    /// The operation would put permissively built or malformed bytes on the wire.
-    pub requires_permissive_live: bool,
-    /// The caller passed the per-operation opt-in for those bytes.
-    pub allow_permissive_live: bool,
+    #[must_use]
+    pub const fn destination(&self) -> Option<IpAddr> {
+        self.destination
+    }
+
+    #[must_use]
+    pub const fn permissive_live(&self) -> PermissiveLive {
+        self.permissive_live
+    }
+}
+
+/// A replay operation: one exact captured frame with the link mode it would
+/// be transmitted in.
+#[derive(Clone, Copy, Debug)]
+pub struct ReplayFrame<'a> {
+    budget: WireBudget,
+    frame: &'a Frame,
+    mode: LinkMode,
+}
+
+impl<'a> ReplayFrame<'a> {
+    #[must_use]
+    pub const fn new(budget: WireBudget, frame: &'a Frame, mode: LinkMode) -> Self {
+        Self {
+            budget,
+            frame,
+            mode,
+        }
+    }
+
+    #[must_use]
+    pub const fn budget(&self) -> WireBudget {
+        self.budget
+    }
+
+    /// The exact frame that would reach the wire.
+    #[must_use]
+    pub const fn frame(&self) -> &'a Frame {
+        self.frame
+    }
+
+    /// The link mode the frame would be transmitted in.
+    #[must_use]
+    pub const fn mode(&self) -> LinkMode {
+        self.mode
+    }
+}
+
+/// What a workflow declares about the operation it wants to run.
+///
+/// There is deliberately no `Default` and no permissive fallback:
+///
+/// ```compile_fail,E0599
+/// let _ = packetcraftr::authorization::Operation::default();
+/// ```
+///
+/// Budget fields cannot be left out or filled from a default either:
+///
+/// ```compile_fail
+/// let _ = packetcraftr::authorization::WireBudget { packets: 1, ..Default::default() };
+/// ```
+///
+/// A declared-packet request must state its destination and permissive-live
+/// position even when both are "none":
+///
+/// ```compile_fail,E0061
+/// use packetcraftr::authorization::{DeclaredPackets, WireBudget};
+/// let packets: Vec<packetcraftr::core::Packet> = Vec::new();
+/// let _ = DeclaredPackets::new(WireBudget::new(1, 1), &packets);
+/// ```
+///
+/// Each variant is a complete request shape: every field a shape needs is a
+/// constructor argument, no field has a default, and an authorizer matches
+/// the shapes exhaustively. Adding a requirement to a shape, or a new shape,
+/// therefore fails to compile at every construction site and every
+/// authorizer until each says what it does with it.
+#[derive(Clone, Copy, Debug)]
+pub enum Operation<'a> {
+    /// A target workflow (scan, DNS, traceroute) whose destinations were
+    /// already authorized through [`Authorizer::resolve_and_authorize`]; only
+    /// the budget remains to be approved.
+    Budgeted(WireBudget),
+    /// A workflow that declares the exact packets it may transmit.
+    Declared(DeclaredPackets<'a>),
+    /// A replay of one exact captured frame.
+    Replay(ReplayFrame<'a>),
+}
+
+impl Operation<'_> {
+    /// The budget every shape carries.
+    #[must_use]
+    pub const fn budget(&self) -> WireBudget {
+        match self {
+            Self::Budgeted(budget) => *budget,
+            Self::Declared(declared) => declared.budget,
+            Self::Replay(replay) => replay.budget,
+        }
+    }
+
+    /// Stable name of the shape, for authorizers that reject one explicitly.
+    #[must_use]
+    pub const fn shape(&self) -> &'static str {
+        match self {
+            Self::Budgeted(_) => "budgeted",
+            Self::Declared(_) => "declared-packet",
+            Self::Replay(_) => "replay",
+        }
+    }
+}
+
+/// The refusal an authorizer returns for a request shape it does not handle.
+///
+/// Every authorizer matches [`Operation`] exhaustively; the variants it cannot
+/// judge are rejected through this classified internal error rather than
+/// approved by ignoring what they carry.
+#[must_use]
+pub fn unsupported_operation(authorizer: &'static str, request: &Operation<'_>) -> BoundaryError {
+    BoundaryError::new(
+        format!(
+            "{authorizer} does not authorize {} operations",
+            request.shape()
+        ),
+        packetcraftr_core::error::Classification::new(
+            "internal.unsupported_operation",
+            packetcraftr_core::error::Kind::Internal,
+            Some("route this operation through the authorizer built for its workflow"),
+        ),
+        Vec::new(),
+    )
 }
 
 /// Policy and resolution seam shared by every live workflow.
@@ -111,24 +317,34 @@ impl<'a> PolicyAuthorizer<'a, NoResolver> {
 impl<R: Resolver> Authorizer for PolicyAuthorizer<'_, R> {
     fn authorize_operation(&mut self, request: Operation<'_>) -> Result<(), BoundaryError> {
         self.policy.validate().map_err(BoundaryError::from_error)?;
+        let budget = request.budget();
         self.policy
-            .authorize_operation(request.packets, request.wire_bytes)
+            .authorize_operation(budget.packets(), budget.wire_bytes())
             .map_err(BoundaryError::from_error)?;
-        if request.requires_permissive_live {
-            authorize_permissive_live(self.policy, request.allow_permissive_live)
-                .map_err(BoundaryError::from_error)?;
+        match request {
+            Operation::Budgeted(_) => Ok(()),
+            Operation::Declared(declared) => {
+                if let PermissiveLive::Required { allowed } = declared.permissive_live() {
+                    authorize_permissive_live(self.policy, allowed)
+                        .map_err(BoundaryError::from_error)?;
+                }
+                if let Some(destination) = declared.destination() {
+                    self.policy
+                        .authorize_destination(destination)
+                        .map_err(BoundaryError::from_error)?;
+                }
+                for packet in declared.packets() {
+                    self.policy
+                        .authorize_packet_destinations(packet)
+                        .map_err(BoundaryError::from_error)?;
+                }
+                Ok(())
+            }
+            // Exact-frame replay needs the decode/rebuild round trip only the
+            // replay system authorizer performs; approving the budget alone
+            // would silently skip it.
+            Operation::Replay(_) => Err(unsupported_operation("the policy authorizer", &request)),
         }
-        if let Some(destination) = request.destination {
-            self.policy
-                .authorize_destination(destination)
-                .map_err(BoundaryError::from_error)?;
-        }
-        for packet in request.declared {
-            self.policy
-                .authorize_packet_destinations(packet)
-                .map_err(BoundaryError::from_error)?;
-        }
-        Ok(())
     }
 
     fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> {
@@ -270,6 +486,161 @@ mod tests {
             .expect_err("the default resolution seam is fail-closed");
 
         assert_eq!(error.classification().code, "internal.target_resolution");
+    }
+
+    fn documentation_packet() -> Packet {
+        let mut packet = Packet::new();
+        packet
+            .push(packetcraftr_core::protocol::network::Ipv4 {
+                source: std::net::Ipv4Addr::new(192, 0, 2, 1),
+                destination: std::net::Ipv4Addr::new(192, 0, 2, 2),
+                ..packetcraftr_core::protocol::network::Ipv4::default()
+            })
+            .push(packetcraftr_core::protocol::transport::Udp::default());
+        packet
+    }
+
+    #[test]
+    fn every_shape_carries_its_budget() {
+        let packets = vec![documentation_packet()];
+        let frame = Frame::new(std::time::UNIX_EPOCH, LinkType::RAW, vec![0x45_u8; 20])
+            .expect("fixture frame");
+        let budget = WireBudget::new(3, 40);
+        let shapes = [
+            Operation::Budgeted(budget),
+            Operation::Declared(DeclaredPackets::new(
+                budget,
+                &packets,
+                None,
+                PermissiveLive::NotRequired,
+            )),
+            Operation::Replay(ReplayFrame::new(budget, &frame, LinkMode::Layer3)),
+        ];
+        for shape in shapes {
+            assert_eq!(shape.budget(), budget);
+            assert_eq!(shape.budget().packets(), 3);
+            assert_eq!(shape.budget().wire_bytes(), 40);
+        }
+        let Operation::Replay(replay) = shapes[2] else {
+            panic!("replay shape")
+        };
+        assert_eq!(replay.mode(), LinkMode::Layer3);
+        assert_eq!(replay.frame().bytes().len(), 20);
+    }
+
+    #[test]
+    fn the_policy_authorizer_rejects_replay_requests_explicitly() {
+        let policy = crate::policy::Policy::default();
+        let frame = Frame::new(std::time::UNIX_EPOCH, LinkType::RAW, vec![0x45_u8; 20])
+            .expect("fixture frame");
+
+        let error = PolicyAuthorizer::for_packets(&policy)
+            .authorize_operation(Operation::Replay(ReplayFrame::new(
+                WireBudget::new(1, 20),
+                &frame,
+                LinkMode::Layer3,
+            )))
+            .expect_err("policy authorization cannot stand in for the replay round trip");
+
+        assert_eq!(
+            error.classification().code,
+            "internal.unsupported_operation"
+        );
+        assert!(error.to_string().contains("replay"));
+    }
+
+    #[test]
+    fn budget_rejection_precedes_destination_and_permissive_checks() {
+        let policy = crate::policy::Policy {
+            max_packets_per_operation: 1,
+            max_bytes_per_operation: 10,
+            ..crate::policy::Policy::default()
+        };
+        let packets = vec![documentation_packet()];
+        let public = std::net::IpAddr::V4(std::net::Ipv4Addr::new(224, 0, 0, 251));
+        let mut authorizer = PolicyAuthorizer::for_packets(&policy);
+
+        let packet_error = authorizer
+            .authorize_operation(Operation::Declared(DeclaredPackets::new(
+                WireBudget::new(2, 1),
+                &packets,
+                Some(public),
+                PermissiveLive::Required { allowed: false },
+            )))
+            .expect_err("packet budget fails first");
+        assert_eq!(packet_error.classification().code, "policy.packet_limit");
+
+        let byte_error = authorizer
+            .authorize_operation(Operation::Declared(DeclaredPackets::new(
+                WireBudget::new(1, 11),
+                &packets,
+                Some(public),
+                PermissiveLive::Required { allowed: false },
+            )))
+            .expect_err("byte budget fails before the destination gate");
+        assert_eq!(byte_error.classification().code, "policy.byte_limit");
+
+        let budget_only = authorizer
+            .authorize_operation(Operation::Budgeted(WireBudget::new(2, 1)))
+            .expect_err("budget-only requests are budgeted too");
+        assert_eq!(budget_only.classification().code, "policy.packet_limit");
+    }
+
+    #[test]
+    fn declared_requests_state_destination_and_permissive_live_explicitly() {
+        let policy = crate::policy::Policy::default();
+        let packets = vec![documentation_packet()];
+        // Multicast counts as public under the policy and never names a host.
+        let public = std::net::IpAddr::V4(std::net::Ipv4Addr::new(224, 0, 0, 251));
+        let mut authorizer = PolicyAuthorizer::for_packets(&policy);
+
+        authorizer
+            .authorize_operation(Operation::Declared(DeclaredPackets::new(
+                WireBudget::new(1, 1),
+                &packets,
+                None,
+                PermissiveLive::NotRequired,
+            )))
+            .expect("documentation packets with no chosen destination");
+
+        let destination_error = authorizer
+            .authorize_operation(Operation::Declared(DeclaredPackets::new(
+                WireBudget::new(1, 1),
+                &packets,
+                Some(public),
+                PermissiveLive::NotRequired,
+            )))
+            .expect_err("a public chosen destination is refused");
+        assert_eq!(
+            destination_error.classification().code,
+            "policy.public_destination"
+        );
+
+        let opt_in_error = authorizer
+            .authorize_operation(Operation::Declared(DeclaredPackets::new(
+                WireBudget::new(1, 1),
+                &packets,
+                None,
+                PermissiveLive::Required { allowed: false },
+            )))
+            .expect_err("permissive bytes need the per-operation opt-in");
+        assert_eq!(
+            opt_in_error.classification().code,
+            Error::PermissiveLiveOptInRequired.classification().code
+        );
+
+        let policy_error = authorizer
+            .authorize_operation(Operation::Declared(DeclaredPackets::new(
+                WireBudget::new(1, 1),
+                &packets,
+                None,
+                PermissiveLive::Required { allowed: true },
+            )))
+            .expect_err("the opt-in alone does not override the policy");
+        assert_eq!(
+            policy_error.classification().code,
+            crate::policy::Error::PermissivePacket.classification().code
+        );
     }
 
     #[test]

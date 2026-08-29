@@ -64,8 +64,13 @@ impl Authorizer for FixedAuthorizer {
     }
 
     fn authorize_operation(&mut self, operation: Operation<'_>) -> Result<(), BoundaryError> {
+        assert!(
+            matches!(operation, Operation::Budgeted(_)),
+            "target workflows submit budget-only requests, got {operation:?}"
+        );
+        let budget = operation.budget();
         self.operations
-            .push((operation.packets, operation.wire_bytes));
+            .push((budget.packets(), budget.wire_bytes()));
         Ok(())
     }
 }

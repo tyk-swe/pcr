@@ -62,10 +62,10 @@ where
 
 /// Executes one approved DNS retry sequence and publishes attempts, accepted
 /// and rejected records, and retained undecoded evidence as they become final.
-/// The callback runs on a bounded worker and cannot extend live I/O beyond
-/// `max_duration`. Callback failure prevents later retries; a worker that
-/// outlives the deadline may finish after this function returns and must own
-/// its state.
+/// The callback runs on a process-budgeted worker. `max_duration` bounds
+/// publisher waiting and live I/O, not arbitrary callback execution. Callback
+/// failure prevents later retries; a callback may finish after this function
+/// returns and holds one process-wide worker permit until then.
 pub fn run_with_events<A, E, C, F>(
     request: &Request,
     authorizer: &mut A,

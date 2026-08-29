@@ -84,10 +84,10 @@ fn bytes_layer_layout(
 }
 
 pub(super) fn slice_original(original: &Bytes, offset: usize, length: usize) -> Bytes {
-    let end = offset
+    offset
         .checked_add(length)
-        .expect("decoder cursor ranges were validated before preserving bytes");
-    original.slice(offset..end)
+        .and_then(|end| crate::byte_slice::checked_slice(original, offset, end))
+        .unwrap_or_default()
 }
 
 pub(super) fn append_missing_required_layer(

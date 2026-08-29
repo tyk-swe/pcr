@@ -12,7 +12,7 @@ mod system_boundary;
 mod tests;
 mod wire;
 
-pub use crate::authorization::{Authorizer, Operation};
+pub use crate::authorization::{Authorizer, Operation, ReplayFrame, WireBudget};
 pub use engine::run_with_selector;
 pub use error::Error;
 pub use model::{

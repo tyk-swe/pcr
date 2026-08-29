@@ -1,0 +1,44 @@
+{
+  "schema": "packetcraftr.packet/v1",
+  "layers": [
+    {
+      "protocol": "ipv4",
+      "fields": {
+        "source": { "type": "ipv4", "value": "192.0.2.1" },
+        "destination": { "type": "ipv4", "value": "192.0.2.2" }
+      }
+    },
+    {
+      "protocol": "gre",
+      "fields": {
+        "checksum": { "type": "text", "value": "auto" },
+        "key": { "type": "unsigned", "value": 287454020 },
+        "sequence": { "type": "unsigned", "value": 7 }
+      }
+    },
+    {
+      "protocol": "ipv6",
+      "fields": {
+        "source": { "type": "ipv6", "value": "2001:db8::1" },
+        "destination": { "type": "ipv6", "value": "2001:db8::2" }
+      }
+    },
+    {
+      "protocol": "sctp",
+      "fields": {
+        "source_port": { "type": "unsigned", "value": 40000 },
+        "destination_port": { "type": "unsigned", "value": 5000 },
+        "verification_tag": { "type": "unsigned", "value": 0 }
+      }
+    },
+    {
+      "protocol": "raw",
+      "fields": {
+        "bytes": {
+          "type": "bytes",
+          "value": [1, 0, 0, 20, 17, 34, 51, 68, 0, 1, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0]
+        }
+      }
+    }
+  ]
+}

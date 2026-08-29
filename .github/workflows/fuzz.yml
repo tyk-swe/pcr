@@ -1,0 +1,66 @@
+name: Fuzz Smoke
+
+on:
+  schedule:
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "fuzz/**"
+      - "crates/packetcraftr-core/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fuzz-smoke:
+    name: Fuzz Smoke (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - packet_document_json
+          - packet_document_yaml
+          - pcap_parse
+          - pcapng_parse
+          - packet_decode
+          - tcp_reassembly
+          - tls_assembly
+          - filter_parse
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install nightly toolchain for libfuzzer
+        run: rustup toolchain install nightly --component llvm-tools-preview
+      - uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc # v2.86.7
+        with:
+          tool: cargo-fuzz
+      - name: Run fuzz target bounded (30s)
+        run: |
+          corpus=()
+          dictionary=()
+          if [[ -d "corpora/${{ matrix.target }}" ]]; then
+            corpus+=("corpora/${{ matrix.target }}")
+          fi
+          case "${{ matrix.target }}" in
+            packet_document_json) dictionary+=("-dict=dictionaries/json.dict") ;;
+            packet_document_yaml) dictionary+=("-dict=dictionaries/yaml.dict") ;;
+            tls_assembly) dictionary+=("-dict=dictionaries/tls.dict") ;;
+            filter_parse) dictionary+=("-dict=dictionaries/filter.dict") ;;
+          esac
+          cargo +nightly fuzz run "${{ matrix.target }}" "${corpus[@]}" -- "${dictionary[@]}" -max_total_time=30
+        working-directory: fuzz
+      - name: Upload artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-artifacts-${{ matrix.target }}
+          path: |
+            fuzz/artifacts/${{ matrix.target }}/*
+            fuzz/crash-*
+          if-no-files-found: ignore
+          retention-days: 7

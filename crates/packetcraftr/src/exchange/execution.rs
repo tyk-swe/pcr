@@ -36,10 +36,10 @@ where
     ///
     /// Confirmed sends are published before later requests, capture evidence
     /// when its classification is final, and unanswered requests after capture
-    /// shutdown. The callback runs on a one-event worker; failure aborts later
-    /// work and backpressure cannot exceed the exchange timeout. A callback
-    /// that outlives that timeout may finish after this method returns and must
-    /// own its state.
+    /// shutdown. The callback runs on a process-budgeted one-event worker;
+    /// failure aborts later work, and the timeout bounds publisher waiting, not
+    /// arbitrary callback execution. A callback may finish after this method
+    /// returns and holds one process-wide worker permit until then.
     pub fn exchange_with_events<F>(
         &self,
         template: &packetcraftr_core::template::Template,

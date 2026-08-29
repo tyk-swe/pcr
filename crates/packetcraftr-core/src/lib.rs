@@ -13,6 +13,7 @@
 pub mod analysis;
 pub mod budget;
 pub mod build;
+mod byte_slice;
 pub mod codec;
 pub mod decode;
 pub mod diagnostic;

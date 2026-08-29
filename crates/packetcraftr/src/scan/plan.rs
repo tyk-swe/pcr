@@ -14,11 +14,12 @@ pub(super) fn build_batches(
     addresses: &[IpAddr],
     endpoint_ports: &[Option<u16>],
 ) -> Result<Vec<Batch>, Error> {
+    let batch_size = checked_batch_size(request)?;
     let mut batches = Vec::new();
     let mut sequence = 0_u64;
     for address in addresses {
         for attempt in 1..=request.attempts {
-            for chunk in endpoint_ports.chunks(request.limits.batch_size) {
+            for chunk in endpoint_ports.chunks(batch_size) {
                 let probes = chunk
                     .iter()
                     .map(|port| {
@@ -53,7 +54,8 @@ pub(super) fn worst_case_duration(
     address_count: usize,
     endpoints_per_address: usize,
 ) -> Result<Duration, Error> {
-    let batches_per_attempt = endpoints_per_address.div_ceil(request.limits.batch_size);
+    let batch_size = checked_batch_size(request)?;
+    let batches_per_attempt = endpoints_per_address.div_ceil(batch_size);
     let batch_count = address_count
         .checked_mul(usize::try_from(request.attempts).unwrap_or(usize::MAX))
         .and_then(|count| count.checked_mul(batches_per_attempt))
@@ -75,10 +77,9 @@ pub(super) fn worst_case_duration(
             })?;
     #[expect(
         clippy::arithmetic_side_effects,
-        reason = "`Limits::validate` rejects a zero `batch_size`, so the remainder cannot divide \
-                  by zero"
+        reason = "checked_batch_size returned a non-zero divisor"
     )]
-    let final_batch_size = endpoints_per_address % request.limits.batch_size;
+    let final_batch_size = endpoints_per_address % batch_size;
     let delay =
         (0..batch_count.saturating_sub(1)).try_fold(Duration::ZERO, |total, batch_index| {
             #[expect(
@@ -97,7 +98,7 @@ pub(super) fn worst_case_duration(
             let probes = if is_final_batch && final_batch_size != 0 {
                 final_batch_size
             } else {
-                request.limits.batch_size
+                batch_size
             };
             total
                 .checked_add(rate_delay(probes, request.probes_per_second)?)
@@ -114,10 +115,62 @@ pub(super) fn worst_case_duration(
         })
 }
 
+fn checked_batch_size(request: &Request) -> Result<usize, Error> {
+    if request.limits.batch_size == 0 {
+        return Err(Error::InvalidLimit {
+            field: "batch_size",
+            value: 0,
+            reason: "must be non-zero".to_owned(),
+        });
+    }
+    Ok(request.limits.batch_size)
+}
+
 fn rate_delay(probes: usize, rate: Option<u32>) -> Result<Duration, Error> {
     crate::clock::rate_delay(probes, rate).ok_or(Error::InvalidLimit {
         field: "probes_per_second",
         value: u64::from(rate.unwrap_or_default()),
         reason: "rate-delay arithmetic overflowed".to_owned(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::target::{Family, Target};
+
+    use super::*;
+
+    #[test]
+    fn zero_batch_size_is_rejected_inside_planning() {
+        let address = "192.0.2.1".parse().expect("documentation address");
+        let request = Request {
+            target: Target::Address(address),
+            transport: super::super::model::Transport::Tcp,
+            address_family: Family::Any,
+            ports: vec![80],
+            attempts: 1,
+            timeout: Duration::from_millis(1),
+            probes_per_second: None,
+            limits: super::super::model::Limits {
+                batch_size: 0,
+                ..super::super::model::Limits::default()
+            },
+        };
+        assert!(matches!(
+            build_batches(&request, &[address], &[Some(80)]),
+            Err(Error::InvalidLimit {
+                field: "batch_size",
+                value: 0,
+                ..
+            })
+        ));
+        assert!(matches!(
+            worst_case_duration(&request, 1, 1),
+            Err(Error::InvalidLimit {
+                field: "batch_size",
+                value: 0,
+                ..
+            })
+        ));
+    }
 }

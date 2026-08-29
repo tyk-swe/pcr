@@ -4,6 +4,7 @@
 //! Native source event loop.
 
 use std::{
+    panic::{AssertUnwindSafe, catch_unwind},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -16,6 +17,7 @@ use crate::{Error, capture::Captured};
 use packetcraftr_core::frame::{Frame, LinkType};
 
 use super::{NativeCaptureEvent, NativeCaptureSource, queue::SharedCapture};
+use crate::platform::worker_reaper::{ReapTask, ReaperClient, ReaperPermit, TransferOutcome};
 
 const STATISTICS_INTERVAL: Duration = Duration::from_millis(250);
 const REAPER_POLL_INTERVAL: Duration = Duration::from_millis(10);
@@ -24,20 +26,26 @@ pub(super) fn transfer_capture_worker(
     worker: JoinHandle<()>,
     stop: Arc<AtomicBool>,
     interrupt: Option<Arc<dyn super::CaptureInterrupt>>,
-) {
-    let _ = thread::Builder::new()
-        .name("packetcraftr-capture-reaper".to_owned())
-        .spawn(move || {
-            stop.store(true, Ordering::Release);
-            while !worker.is_finished() {
-                if let Some(interrupt) = &interrupt {
-                    interrupt.interrupt();
-                }
-                thread::park_timeout(REAPER_POLL_INTERVAL);
+    permit: ReaperPermit,
+    reaper: &ReaperClient,
+) -> TransferOutcome {
+    reaper.transfer(ReapTask::new(move || {
+        // The permit and interrupt are intentionally captured by this task so
+        // neither can be released before the worker has actually stopped.
+        let _permit = permit;
+        stop.store(true, Ordering::Release);
+        while !worker.is_finished() {
+            if let Some(interrupt) = &interrupt {
+                // CaptureInterrupt is an internal native boundary, but keeping
+                // its panic contained prevents a defective implementation from
+                // abandoning the complete ownership bundle.
+                let _ = catch_unwind(AssertUnwindSafe(|| interrupt.interrupt()));
             }
-            let _ = worker.join();
-        })
-        .expect("could not start the native capture worker reaper");
+            thread::park_timeout(REAPER_POLL_INTERVAL);
+        }
+        let _ = worker.join();
+        drop(interrupt);
+    }))
 }
 
 pub(super) fn capture_worker(

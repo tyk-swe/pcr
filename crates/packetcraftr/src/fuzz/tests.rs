@@ -156,7 +156,14 @@ fn execution_statistics_aggregation_is_complete_and_atomic() {
 struct AllowAll;
 
 impl Authorizer for AllowAll {
-    fn authorize_operation(&mut self, _operation: Operation<'_>) -> Result<(), BoundaryError> {
+    fn authorize_operation(&mut self, operation: Operation<'_>) -> Result<(), BoundaryError> {
+        // The fuzz workflow always states its packets, its chosen destination,
+        // and its permissive-live position; a budget-only request would skip
+        // the destination gate.
+        assert!(
+            matches!(operation, Operation::Declared(_)),
+            "fuzz submits a declared-packet request, got {operation:?}"
+        );
         Ok(())
     }
 }

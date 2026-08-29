@@ -388,8 +388,10 @@ pub(super) fn shrink_values(value: &FieldValue, maximum: usize) -> Vec<FieldValu
         }
         FieldValue::Bytes(value) => {
             push(FieldValue::Bytes(Bytes::new()));
-            if value.len() > 1 {
-                push(FieldValue::Bytes(value.slice(..value.len() / 2)));
+            if value.len() > 1
+                && let Some(shrunk) = crate::byte_slice::checked_slice(value, 0, value.len() / 2)
+            {
+                push(FieldValue::Bytes(shrunk));
             }
             if !value.is_empty() {
                 push(FieldValue::Bytes(Bytes::from(vec![0; value.len()])))

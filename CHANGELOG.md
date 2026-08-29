@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned for 0.6 (output-contract break)
+
+The v1 contract (serialized documents, classification codes, exit codes, flag
+names, defaults) stays byte-stable through 0.5. These wait for one deliberate
+bump:
+
+- Rename `cli.*` / `Kind::Cli` to `request.*` / `Kind::Request`; keep exit code 2.
+- Serialize durations as `*_ms` instead of `{secs, nanos}` (`$defs/duration`).
+- Describe the field, not the flag, in the two `tls` limit schema descriptions
+  that name `--max-tls-sessions`.
+- Rename `exchange --max-unsolicited` to `--max-undecoded`, matching `scan`,
+  `dns`, and `traceroute`.
+- Drop command names from `tls --max-tls-buffer-bytes`, `--max-tls-sessions`,
+  and `capture --max-captured-bytes`.
+
 ### Added
 
 - GitHub Artifact Attestations signed with Sigstore for all release archives, verifiable with `gh attestation verify`.
@@ -26,6 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking (library):** `packetcraftr::fuzz::run` and `run_with_events` take a public `fuzz::RunInput { request, live, packet, registry }` instead of four positional arguments, removing the `too_many_arguments` lint escape. CLI behaviour and output are unchanged.
+- **Breaking (library):** `packetcraftr::replay::SystemAuthorizer::new` takes the `Arc<Registry>` the caller already decodes and filters with, instead of building a private built-in registry and documenting a panic. Live `Client` final-wire authorization now decodes with the client's own registry (previously a private built-in copy) through one shared `authorize_wire` step; every existing caller passed a built-in registry, so observable behaviour is unchanged.
 - **Breaking (library):** `packetcraftr::authorization::Operation` is now an
   enum of complete request shapes (`Budgeted`, `Declared`, `Replay`) built
   from `WireBudget`, `DeclaredPackets`, `ReplayFrame`, and `PermissiveLive`

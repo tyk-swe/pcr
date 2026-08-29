@@ -123,4 +123,47 @@ mod tests {
             })
         ));
     }
+
+    #[test]
+    fn canonical_flow_is_direction_neutral_across_families_and_port_ties() {
+        let scope = Interner::new()
+            .intern(None, Vec::new())
+            .expect("empty scope fits");
+        let same_host = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1));
+        let cases = [
+            flow(10_000, 443),
+            flow(443, 10_000),
+            ScopedFlowKey {
+                scope,
+                flow: FlowKey {
+                    source: same_host,
+                    source_port: 40_000,
+                    destination: same_host,
+                    destination_port: 443,
+                },
+            },
+            ScopedFlowKey {
+                scope,
+                flow: FlowKey {
+                    source: IpAddr::V6(std::net::Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)),
+                    source_port: 1,
+                    destination: IpAddr::V6(std::net::Ipv6Addr::new(
+                        0x2001, 0xdb8, 0, 0, 0, 0, 0, 2,
+                    )),
+                    destination_port: 65_535,
+                },
+            },
+        ];
+        for case in &cases {
+            assert_eq!(
+                CanonicalFlow::from_flow(case),
+                CanonicalFlow::from_flow(&case.reverse()),
+                "both directions of {case:?} must share one identity"
+            );
+            let mut index = StreamIndex::default();
+            let forward = index.assign(case, 1, 8).expect("fits");
+            let backward = index.assign(&case.reverse(), 2, 8).expect("fits");
+            assert_eq!(forward, backward);
+        }
+    }
 }

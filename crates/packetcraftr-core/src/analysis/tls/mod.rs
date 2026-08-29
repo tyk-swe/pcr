@@ -51,7 +51,7 @@ use std::collections::{BTreeMap, HashMap};
 use serde::Serialize;
 
 use crate::analysis::adapter::transports;
-use crate::analysis::dedup::Direction;
+use crate::analysis::conversation_index::CanonicalFlow;
 use crate::analysis::pipeline::FrameRecord;
 use crate::analysis::reassembly::tcp::{Event as TcpEvent, ScopedFlowKey};
 use crate::protocol::transport::Tcp;
@@ -139,9 +139,9 @@ enum Tracked {
 #[derive(Debug)]
 pub struct Collector {
     limits: Limits,
-    entries: HashMap<ScopedFlowKey, Entry>,
+    entries: HashMap<CanonicalFlow, Entry>,
     /// Insertion rank to conversation, so the oldest is retired in O(log n).
-    order: BTreeMap<u64, ScopedFlowKey>,
+    order: BTreeMap<u64, CanonicalFlow>,
     /// Conversations seen, and the highest conversation index behind that
     /// count. Stream indices are handed out in first-frame order, so counting
     /// each rise is counting distinct conversations without a set of them.
@@ -189,7 +189,7 @@ impl Collector {
             return events;
         };
         self.note_stream(stream);
-        let key = canonical(flow);
+        let key = CanonicalFlow::from_flow(flow);
         let transport = transports(&record.decoded.packet).tcp;
         if let Some(transport) = &transport
             && transport.layer.flags & Tcp::SYN != 0
@@ -233,7 +233,7 @@ impl Collector {
         let mut events = Vec::new();
         for event in trailing {
             if let TcpEvent::Gap { flow, .. } = event {
-                let key = canonical(flow);
+                let key = CanonicalFlow::from_flow(flow);
                 let number = self.last_frame(&key);
                 self.retire(
                     &key,
@@ -274,7 +274,7 @@ impl Collector {
     ) {
         for event in tcp_events {
             if let TcpEvent::Gap { flow, .. } = event {
-                let key = canonical(flow);
+                let key = CanonicalFlow::from_flow(flow);
                 self.retire(
                     &key,
                     Status::Gap,
@@ -286,7 +286,7 @@ impl Collector {
         }
         for event in tcp_events {
             if let TcpEvent::Closed { flow, reset } = event {
-                let key = canonical(flow);
+                let key = CanonicalFlow::from_flow(flow);
                 let Some(live) = self.live_mut(&key) else {
                     continue;
                 };
@@ -304,7 +304,7 @@ impl Collector {
         }
         for event in tcp_events {
             if let TcpEvent::Evicted { flow, .. } = event {
-                let key = canonical(flow);
+                let key = CanonicalFlow::from_flow(flow);
                 let Some(live) = self.live_mut(&key) else {
                     self.discard_closed(&key);
                     continue;
@@ -327,7 +327,7 @@ impl Collector {
     fn fold_deliveries(
         &mut self,
         record: &FrameRecord<'_>,
-        key: &ScopedFlowKey,
+        key: &CanonicalFlow,
         events: &mut Vec<SessionEvent>,
     ) {
         let cap = MAX_DIRECTION_BUFFER;
@@ -350,9 +350,9 @@ impl Collector {
             let Some(direction) = live.direction_of(sender) else {
                 continue;
             };
-            let deduplicated =
-                live.dedup()
-                    .deduplicate(dedup_direction(direction), *sequence, bytes);
+            let deduplicated = live
+                .dedup()
+                .deduplicate(direction.dedup(), *sequence, bytes);
             let Some(payload) = deduplicated.filter(|payload| !payload.is_empty()) else {
                 continue;
             };
@@ -402,7 +402,7 @@ impl Collector {
         }
     }
 
-    fn live_mut(&mut self, key: &ScopedFlowKey) -> Option<&mut Live> {
+    fn live_mut(&mut self, key: &CanonicalFlow) -> Option<&mut Live> {
         match self.entries.get_mut(key) {
             Some(Entry {
                 state: Tracked::Live(live),
@@ -412,7 +412,7 @@ impl Collector {
         }
     }
 
-    fn last_frame(&self, key: &ScopedFlowKey) -> u64 {
+    fn last_frame(&self, key: &CanonicalFlow) -> u64 {
         match self.entries.get(key) {
             Some(Entry {
                 state: Tracked::Live(live),
@@ -425,7 +425,7 @@ impl Collector {
     /// Starts tracking a conversation, making room for it first.
     fn track(
         &mut self,
-        key: &ScopedFlowKey,
+        key: &CanonicalFlow,
         stream: u64,
         flow: ScopedFlowKey,
         events: &mut Vec<SessionEvent>,
@@ -463,7 +463,7 @@ impl Collector {
     /// was retired.
     fn evict_oldest(
         &mut self,
-        protect: Option<&ScopedFlowKey>,
+        protect: Option<&CanonicalFlow>,
         reason: &str,
         events: &mut Vec<SessionEvent>,
     ) -> bool {
@@ -500,7 +500,7 @@ impl Collector {
     /// emitted.
     fn retire(
         &mut self,
-        key: &ScopedFlowKey,
+        key: &CanonicalFlow,
         status: Status,
         reason: Option<String>,
         number: u64,
@@ -522,7 +522,7 @@ impl Collector {
     }
 
     /// Drops an entry and its insertion rank, whatever state it is in.
-    fn forget(&mut self, key: &ScopedFlowKey) {
+    fn forget(&mut self, key: &CanonicalFlow) {
         if let Some(entry) = self.entries.remove(key) {
             self.order.remove(&entry.order);
         }
@@ -550,7 +550,7 @@ impl Collector {
     /// Closes a conversation. One that assembled nothing is forgotten
     /// outright, so a later hello on the same four-tuple is tracked again;
     /// one that did leaves a closed marker until a new connection opens.
-    fn discard(&mut self, key: &ScopedFlowKey) {
+    fn discard(&mut self, key: &CanonicalFlow) {
         if let Some(entry) = self.entries.get_mut(key)
             && let Tracked::Live(live) = std::mem::replace(&mut entry.state, Tracked::Closed)
         {
@@ -562,7 +562,7 @@ impl Collector {
     }
 
     /// Drops a closed entry so the four-tuple can carry a new session.
-    fn discard_closed(&mut self, key: &ScopedFlowKey) {
+    fn discard_closed(&mut self, key: &CanonicalFlow) {
         if matches!(
             self.entries.get(key),
             Some(Entry {
@@ -572,25 +572,5 @@ impl Collector {
         ) {
             self.forget(key);
         }
-    }
-}
-
-/// The direction-independent identity of a conversation.
-fn canonical(flow: &ScopedFlowKey) -> ScopedFlowKey {
-    let reverse = flow.reverse();
-    if *flow <= reverse {
-        flow.clone()
-    } else {
-        reverse
-    }
-}
-
-/// The deduplicator's view of a captured direction, which never moves even
-/// when the client and server roles are swapped.
-fn dedup_direction(direction: usize) -> Direction {
-    if direction == 0 {
-        Direction::ClientToServer
-    } else {
-        Direction::ServerToClient
     }
 }

@@ -43,7 +43,7 @@ fn arb_field_value() -> impl Strategy<Value = FieldValue> {
         any::<bool>().prop_map(FieldValue::Bool),
         (0..=i64::MAX as u64).prop_map(FieldValue::Unsigned),
         any::<i64>().prop_map(FieldValue::Signed),
-        // A lone "-" is excluded: noyalib 0.0.17 serializes it unquoted, which
+        // A lone "-" is excluded: noyalib 0.0.28 serializes it unquoted, which
         // its own parser then reads as a block-sequence entry. The CLI never
         // emits YAML, so this is a fixture constraint, not a parser gap.
         "[a-zA-Z0-9_-]{1,30}"

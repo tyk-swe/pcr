@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use packetcraftr::core::error::Kind;
+
 use std::time::{Duration, Instant};
 
 use packetcraftr::policy::CaptureBudget;
@@ -117,7 +119,7 @@ where
 fn account(progress: &mut Progress, frame: &Frame) -> Result<(), CliError> {
     let frame_bytes = u64::try_from(frame.bytes().len()).map_err(|_| {
         CliError::new(
-            70,
+            Kind::Internal,
             "captured frame length exceeds the byte-accounting domain",
         )
     })?;

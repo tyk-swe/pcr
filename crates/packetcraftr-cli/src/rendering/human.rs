@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use packetcraftr::core::error::Kind;
+
 use std::fmt::{self, Write as _};
 use std::io::{self, Write};
 
@@ -72,7 +74,7 @@ pub(crate) fn write_plain_line(arguments: std::fmt::Arguments<'_>) -> Result<(),
         .write_fmt(arguments)
         .and_then(|()| stdout.write_all(b"\n"))
         .and_then(|()| stdout.flush())
-        .map_err(|source| CliError::new(5, format!("write stdout failed: {source}")))
+        .map_err(|source| CliError::new(Kind::Io, format!("write stdout failed: {source}")))
 }
 
 pub(crate) fn emit_stdout_document(message: &str) -> Result<(), CliError> {
@@ -123,14 +125,14 @@ fn write_human_stdout(rendered: &str, append_newline: bool) -> Result<(), CliErr
     let stdout = anstream::stdout();
     let mut stdout = stdout.lock();
     write_terminated(&mut stdout, rendered, append_newline)
-        .map_err(|source| CliError::new(5, format!("write stdout failed: {source}")))
+        .map_err(|source| CliError::new(Kind::Io, format!("write stdout failed: {source}")))
 }
 
 fn write_human_stderr(rendered: &str, append_newline: bool) -> Result<(), CliError> {
     let stderr = anstream::stderr();
     let mut stderr = stderr.lock();
     write_terminated(&mut stderr, rendered, append_newline)
-        .map_err(|source| CliError::new(5, format!("write stderr failed: {source}")))
+        .map_err(|source| CliError::new(Kind::Io, format!("write stderr failed: {source}")))
 }
 
 fn write_terminated(
@@ -199,16 +201,16 @@ mod tests {
     }
 
     #[test]
-    fn fallback_classifications_from_numeric_exit_codes_are_rendered() {
-        for (exit_code, code) in [
-            (2, "cli.error"),
-            (3, "packet.error"),
-            (4, "capability.unavailable"),
-            (5, "io.runtime"),
-            (6, "policy.denied"),
-            (70, "internal.error"),
+    fn fallback_classifications_for_every_kind_are_rendered() {
+        for (kind, code) in [
+            (Kind::Cli, "cli.error"),
+            (Kind::Packet, "packet.error"),
+            (Kind::Capability, "capability.unavailable"),
+            (Kind::Io, "io.runtime"),
+            (Kind::Policy, "policy.denied"),
+            (Kind::Internal, "internal.error"),
         ] {
-            let error = CliError::new(exit_code, "fallback failure");
+            let error = CliError::new(kind, "fallback failure");
             assert_eq!(plain(&error), format!("error[{code}]: fallback failure"));
         }
     }

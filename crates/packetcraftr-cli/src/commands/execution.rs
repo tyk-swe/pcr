@@ -7,22 +7,22 @@
 use std::time::Duration;
 
 use crate::errors::CliError;
-use crate::system::{Client, Exchange, resolve};
+use crate::system::{Client, Exchange, InterfaceSelector, resolve};
 
 pub(super) struct Executor {
     pub(super) client: Client,
     pub(super) exchange: packetcraftr::exchange::Options,
-    pub(super) interface: Option<String>,
+    /// Resolved against the system provider on first execution.
+    pub(super) interface: Option<InterfaceSelector>,
 }
 
 impl Executor {
     fn prepared(&mut self) -> Result<Exchange<'_>, CliError> {
-        if let Some(selector) = &self.interface {
-            self.exchange.send.plan.interface = resolve(
-                Some(selector.clone()),
+        if let Some(selector) = self.interface.take() {
+            self.exchange.send.plan.interface = Some(resolve(
+                selector,
                 &packetcraftr::netio::interface::SystemProvider,
-            )?;
-            self.interface = None;
+            )?);
         }
         Ok(packetcraftr::ExchangeExecutor::new(
             &self.client,

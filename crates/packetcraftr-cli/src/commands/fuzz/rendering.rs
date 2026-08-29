@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use packetcraftr::core::error::Kind;
+
 use packetcraftr::{core, output};
 
 use crate::errors::CliError;
@@ -36,10 +38,16 @@ pub(super) fn render_text(
             case.reproduction.case_index,
         ))?;
         let original = serde_json::to_string(&case.mutation.original).map_err(|source| {
-            CliError::new(70, format!("serialize fuzz mutation failed: {source}"))
+            CliError::new(
+                Kind::Internal,
+                format!("serialize fuzz mutation failed: {source}"),
+            )
         })?;
         let value = serde_json::to_string(&case.mutation.value).map_err(|source| {
-            CliError::new(70, format!("serialize fuzz mutation failed: {source}"))
+            CliError::new(
+                Kind::Internal,
+                format!("serialize fuzz mutation failed: {source}"),
+            )
         })?;
         write_stdout_line(format_args!("  original={original} value={value}"))?;
         if let Some(frame) = &case.frame {

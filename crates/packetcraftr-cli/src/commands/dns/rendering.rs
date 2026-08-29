@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use packetcraftr::core::error::Kind;
+
 use packetcraftr::{core, output};
 
 use crate::errors::CliError;
@@ -98,7 +100,10 @@ fn render_record(
 /// Record data that already survived decoding cannot fail to serialize, so a
 /// failure here is an internal fault rather than anything the caller sent.
 fn serialization_failure(error: serde_json::Error) -> CliError {
-    CliError::new(70, format!("DNS output serialization failed: {error}"))
+    CliError::new(
+        Kind::Internal,
+        format!("DNS output serialization failed: {error}"),
+    )
 }
 
 struct ResponseLine<'a> {

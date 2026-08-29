@@ -10,6 +10,8 @@
 //! global `--output` choice to what each command publishes; [`execution`] and
 //! [`target_workflow`] hold what the probing commands share.
 
+use packetcraftr::core::error::Kind;
+
 use std::sync::Arc;
 
 use clap::Subcommand;
@@ -176,12 +178,15 @@ fn registry_with_tls_ports(ports: &[u16]) -> Result<Arc<core::registry::Registry
     core::protocol::builtin::registry_with_tls_ports(ports)
         .map(Arc::new)
         .map_err(|source| {
-            CliError::new(70, format!("built-in registry invariant failed: {source}"))
+            CliError::new(
+                Kind::Internal,
+                format!("built-in registry invariant failed: {source}"),
+            )
         })
 }
 
 fn increment_counter(value: u64, counter: &'static str) -> Result<u64, CliError> {
     value
         .checked_add(1)
-        .ok_or_else(|| CliError::new(70, format!("{counter} overflowed")))
+        .ok_or_else(|| CliError::new(Kind::Internal, format!("{counter} overflowed")))
 }

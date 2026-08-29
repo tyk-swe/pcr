@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use packetcraftr::core::error::Kind;
+
 pub(super) mod arguments;
 mod rendering;
 
@@ -27,7 +29,7 @@ pub(super) fn run(
     let selector = Selector { transport, index };
     if format == FollowFormat::Raw && arguments.direction == Direction::Both {
         return Err(CliError::new(
-            2,
+            Kind::Cli,
             "raw output interleaves both directions indistinguishably; \
              choose --direction client or --direction server",
         ));

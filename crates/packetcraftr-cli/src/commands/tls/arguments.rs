@@ -4,7 +4,13 @@
 use std::path::PathBuf;
 
 use clap::{ArgAction, ValueEnum};
-use packetcraftr::analysis::tls::{Limits as TlsLimits, Status as AnalysisStatus};
+use packetcraftr::analysis::tls::{
+    Limits as TlsLimits, MAX_DIRECTION_BUFFER, Status as AnalysisStatus,
+};
+
+// The `--max-tls-buffer-bytes` help text below spells out the floor; keep it
+// honest when the core constant moves.
+const _: () = assert!(MAX_DIRECTION_BUFFER == 135_168);
 
 use crate::command_options::{OfflineLimitsArgs, TlsPortArgs};
 

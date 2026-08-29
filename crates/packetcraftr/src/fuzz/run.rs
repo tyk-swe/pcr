@@ -37,10 +37,7 @@ use crate::authorization::{Authorizer, DeclaredPackets, Operation, PermissiveLiv
 
 /// Builds and validates all cases offline, then authorizes and executes the campaign.
 pub fn run<A, E, C>(
-    request: &packet_fuzz::Request,
-    live: LiveOptions,
-    packet: Packet,
-    registry: Arc<Registry>,
+    input: RunInput<'_>,
     authorizer: &mut A,
     executor: &mut E,
     clock: &mut C,
@@ -51,21 +48,10 @@ where
     C: Clock,
 {
     let mut cases = Vec::new();
-    let summary = run_observed(
-        RunInput {
-            request,
-            live,
-            packet,
-            registry,
-        },
-        authorizer,
-        executor,
-        clock,
-        |case, _| {
-            cases.push(case);
-            Ok(())
-        },
-    )?;
+    let summary = run_observed(input, authorizer, executor, clock, |case, _| {
+        cases.push(case);
+        Ok(())
+    })?;
     Ok(Result {
         seed: summary.seed,
         first_case: summary.first_case,
@@ -81,15 +67,8 @@ where
 /// preserves its classification on failure. The campaign deadline bounds
 /// publisher waiting and live I/O, not callback execution; an outliving
 /// callback holds its worker permit until it returns.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "live fuzz execution requires the request, approved I/O boundaries, clock, and progressive sink"
-)]
 pub fn run_with_events<A, E, C, F>(
-    request: &packet_fuzz::Request,
-    live: LiveOptions,
-    packet: Packet,
-    registry: Arc<Registry>,
+    input: RunInput<'_>,
     authorizer: &mut A,
     executor: &mut E,
     clock: &mut C,
@@ -102,25 +81,20 @@ where
     F: FnMut(Case) -> std::result::Result<(), crate::BoundaryError> + Send + 'static,
 {
     let observe = sink_observer(emit, duration_limit, |source| Error::Output { source })?;
-    run_observed(
-        RunInput {
-            request,
-            live,
-            packet,
-            registry,
-        },
-        authorizer,
-        executor,
-        clock,
-        observe,
-    )
+    run_observed(input, authorizer, executor, clock, observe)
 }
 
-struct RunInput<'a> {
-    request: &'a packet_fuzz::Request,
-    live: LiveOptions,
-    packet: Packet,
-    registry: Arc<Registry>,
+/// The validated campaign request together with the packet, registry, and
+/// live options every execution path needs.
+pub struct RunInput<'a> {
+    /// The offline campaign definition.
+    pub request: &'a packet_fuzz::Request,
+    /// Pacing, timeout, and retention limits for live execution.
+    pub live: LiveOptions,
+    /// The template packet every case mutates.
+    pub packet: Packet,
+    /// The registry used to build and decode cases.
+    pub registry: Arc<Registry>,
 }
 
 fn run_observed<A, E, C, F>(

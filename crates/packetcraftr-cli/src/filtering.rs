@@ -112,7 +112,7 @@ impl FrameSelector {
                     ..core::decode::Options::default()
                 },
             )
-            .map_err(|source| CliError::new(3, source.to_string()))?;
+            .map_err(|source| CliError::new(Kind::Packet, source.to_string()))?;
         self.filter
             .matches(&Context {
                 decoded: &decoded,

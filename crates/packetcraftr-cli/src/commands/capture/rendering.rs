@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use packetcraftr::core::error::Kind;
+
 use std::io::{self, Write};
 use std::time::Duration;
 
@@ -120,12 +122,14 @@ pub(super) fn render_capture<C: net::capture::Session>(
     let outcome = execution::run(capture, timeout, limits, budget, selector, |frame, _| {
         writer
             .write_source_frame(source_id, description.clone(), frame)
-            .map_err(|source| CliError::new(5, format!("write capture output failed: {source}")))
+            .map_err(|source| {
+                CliError::new(Kind::Io, format!("write capture output failed: {source}"))
+            })
     })?;
     writer
         .into_inner()
         .flush()
-        .map_err(|source| CliError::new(5, format!("write stdout failed: {source}")))?;
+        .map_err(|source| CliError::new(Kind::Io, format!("write stdout failed: {source}")))?;
     render_diagnostics(&outcome.diagnostics)
 }
 
@@ -136,8 +140,7 @@ fn initialize_writer<W: Write>(
     budget: CaptureBudget,
 ) -> Result<(SourceCaptureWriter<W>, Interface), CliError> {
     let snap_len = u32::try_from(metadata.snap_length).map_err(|_| {
-        CliError::new(
-            5,
+        CliError::new(Kind::Io,
             "initialize capture output failed: backend snapshot length exceeds the capture-file domain",
         )
     })?;
@@ -165,12 +168,20 @@ fn initialize_writer<W: Write>(
             },
         ),
     }
-    .map_err(|source| CliError::new(5, format!("initialize capture output failed: {source}")))?;
+    .map_err(|source| {
+        CliError::new(
+            Kind::Io,
+            format!("initialize capture output failed: {source}"),
+        )
+    })?;
     let mut writer = SourceCaptureWriter::new(writer);
     writer
         .add_source_interface(Some(metadata.interface.index), description.clone())
         .map_err(|source| {
-            CliError::new(5, format!("initialize capture output failed: {source}"))
+            CliError::new(
+                Kind::Io,
+                format!("initialize capture output failed: {source}"),
+            )
         })?;
     writer
         .set_stream_limits(Limits {
@@ -183,8 +194,7 @@ fn initialize_writer<W: Write>(
 
 fn pcapng_max_size(snap_length: usize) -> Result<usize, CliError> {
     snap_length.checked_add(47).ok_or_else(|| {
-        CliError::new(
-            5,
+        CliError::new(Kind::Io,
             "initialize capture output failed: backend snapshot length cannot fit a PCAPNG packet block",
         )
     })

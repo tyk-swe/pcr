@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use packetcraftr::core::error::Kind;
+
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::time::{Duration, Instant};
@@ -246,8 +248,12 @@ fn classic_writer<W: Write>(
         reason = "the format is checked to be classic pcap above, which always exposes its single global interface"
     )]
     let interface = reader.interfaces()[0].clone();
-    let snap_length = usize::try_from(interface.snap_len)
-        .map_err(|_| CliError::new(2, "capture snap length exceeds the platform size limit"))?;
+    let snap_length = usize::try_from(interface.snap_len).map_err(|_| {
+        CliError::new(
+            Kind::Cli,
+            "capture snap length exceeds the platform size limit",
+        )
+    })?;
     Writer::pcap_with_options(
         destination,
         interface.link_type,

@@ -29,6 +29,7 @@ pub(crate) mod test_support {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+    use packetcraftr::core::error::Kind;
 
     use std::io::Write;
 
@@ -72,7 +73,7 @@ mod tests {
 
     #[test]
     fn errors_use_the_next_unwritten_position() {
-        let fixture_error = || CliError::new(5, "fixture failed").output_error();
+        let fixture_error = || CliError::new(Kind::Io, "fixture failed").output_error();
 
         let (empty, empty_output) = stream(output::contract::Command::Capture);
         empty.emit_error(fixture_error()).unwrap();
@@ -121,14 +122,14 @@ mod tests {
         );
         assert!(
             success_stream
-                .emit_error(CliError::new(5, "late").output_error())
+                .emit_error(CliError::new(Kind::Io, "late").output_error())
                 .is_err()
         );
         assert_eq!(output.bytes(), terminal);
 
         let (error_stream, output) = stream(output::contract::Command::Follow);
         error_stream
-            .emit_error(CliError::new(5, "terminal").output_error())
+            .emit_error(CliError::new(Kind::Io, "terminal").output_error())
             .unwrap();
         let terminal = output.bytes();
         assert!(
@@ -162,7 +163,7 @@ mod tests {
         assert!(stream.is_open());
         assert_eq!(output.records().len(), 1);
         stream
-            .emit_error(CliError::new(70, "serialization failed").output_error())
+            .emit_error(CliError::new(Kind::Internal, "serialization failed").output_error())
             .unwrap();
         let records = output.records();
         assert_contiguous(&records);
@@ -211,7 +212,7 @@ mod tests {
         assert_eq!(records.len(), 2);
         assert!(
             stream
-                .emit_error(CliError::new(5, "late").output_error())
+                .emit_error(CliError::new(Kind::Io, "late").output_error())
                 .is_err()
         );
         assert_eq!(buffer.records(), records);

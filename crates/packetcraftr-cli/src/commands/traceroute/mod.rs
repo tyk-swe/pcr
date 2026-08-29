@@ -3,6 +3,8 @@
 
 //! Traceroute CLI command logic.
 
+use packetcraftr::core::error::Kind;
+
 pub(super) mod arguments;
 mod rendering;
 
@@ -28,7 +30,7 @@ pub(super) fn run(
     let request = prepare_request(&arguments, queue_limits)?;
     let max_template_packets = usize::try_from(arguments.attempts).map_err(|_| {
         CliError::new(
-            2,
+            Kind::Cli,
             "traceroute attempt count exceeds the platform size limit",
         )
     })?;

@@ -3,6 +3,10 @@
 
 //! TLS session assembly CLI command.
 
+use std::sync::OnceLock;
+
+use packetcraftr::core::error::Kind;
+
 pub(super) mod arguments;
 mod rendering;
 
@@ -79,7 +83,7 @@ impl SniPattern {
         };
         if literal.contains('*') {
             return Err(CliError::new(
-                2,
+                Kind::Cli,
                 format!(
                     "invalid --sni '{pattern}': '*' is supported only at the start, \
                      the end, or both"
@@ -205,10 +209,17 @@ pub(super) fn run(
 /// The per-direction buffer is a core constant rather than a limit any flag
 /// sets, so the error names the flag that set the ceiling instead.
 fn buffer_floor_error(value: usize) -> CliError {
+    static REASON: OnceLock<String> = OnceLock::new();
+    let reason = REASON.get_or_init(|| {
+        format!(
+            "cannot be below the per-direction handshake buffer of {} bytes",
+            analysis::tls::MAX_DIRECTION_BUFFER
+        )
+    });
     CliError::classified(analysis::Error::InvalidLimit {
         field: "--max-tls-buffer-bytes",
         value: u64::try_from(value).unwrap_or(u64::MAX),
-        reason: "cannot be below the per-direction handshake buffer of 135168 bytes",
+        reason,
     })
 }
 
@@ -218,7 +229,7 @@ fn parse_tcp_stream_selector(spec: &str) -> Result<u64, CliError> {
     match transport {
         StreamTransport::Tcp => Ok(index),
         StreamTransport::Udp => Err(CliError::new(
-            2,
+            Kind::Cli,
             format!(
                 "invalid --stream '{spec}': TLS sessions are assembled from TCP streams only; \
                  UDP port 443 is QUIC, which this command does not read"
@@ -234,7 +245,7 @@ fn parse_tcp_stream_selector(spec: &str) -> Result<u64, CliError> {
 fn missing_stream_error(index: u64, arguments: &Args) -> Result<CliError, CliError> {
     let streams = count_tcp_streams(arguments)?;
     Ok(CliError::new(
-        2,
+        Kind::Cli,
         match streams {
             0 => format!("--stream tcp:{index} is not present (the capture has no TCP streams)"),
             count => format!("--stream tcp:{index} is not present (0..{count})"),

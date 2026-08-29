@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use packetcraftr::core::error::Kind;
+
 mod context;
 
 use std::process::ExitCode;
@@ -28,7 +30,10 @@ pub(crate) fn run() -> ExitCode {
             if error.use_stderr()
                 && let Some(format) = context.format
             {
-                let error = CliError::new(code, message);
+                // clap exits 2 for usage errors; anything else is unexpected.
+                // The process exit code stays clap's either way.
+                let kind = if code == 2 { Kind::Cli } else { Kind::Internal };
+                let error = CliError::new(kind, message);
                 let emitted = match format {
                     MachineFormat::Json => emit_json(&output::envelope::AggregateError::error(
                         context.command,
@@ -79,7 +84,7 @@ fn require_success_terminal(
 ) -> Result<(), CliError> {
     if format == output::contract::Format::Ndjson && !stream.is_terminal() {
         return Err(CliError::new(
-            70,
+            Kind::Internal,
             "NDJSON command returned without a terminal completion record",
         ));
     }

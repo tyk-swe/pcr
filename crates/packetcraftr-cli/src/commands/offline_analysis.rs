@@ -3,6 +3,8 @@
 
 //! Shared, bounded setup for offline analysis commands.
 
+use packetcraftr::core::error::Kind;
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -87,7 +89,7 @@ pub(crate) struct StreamSelector {
 pub(crate) fn parse_stream_selector(spec: &str) -> Result<StreamSelector, CliError> {
     let invalid = || {
         CliError::new(
-            2,
+            Kind::Cli,
             format!("invalid --stream '{spec}': expected tcp:INDEX or udp:INDEX"),
         )
     };

@@ -34,7 +34,9 @@ pub(crate) fn prepare_route(
         .authorize_packet_destinations(&packet)
         .map_err(CliError::classified)?;
     let destination = resolve_destination(destination, &packet, &policy)?;
-    let interface = interface::resolve(route.interface, &net::interface::SystemProvider)?;
+    let interface = interface::InterfaceSelector::parse_optional(route.interface.as_deref())?
+        .map(|selector| interface::resolve(selector, &net::interface::SystemProvider))
+        .transpose()?;
     Ok(Prepared {
         packet,
         destination,

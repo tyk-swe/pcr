@@ -25,4 +25,4 @@ pub use boundary::{Execution, ExecutionCase, Executor};
 pub use error::Error;
 pub use request::{LiveLimits, LiveOptions};
 pub use result::{Case, CaseOutcome, Result, Stats, Summary};
-pub use run::{run, run_with_events};
+pub use run::{RunInput, run, run_with_events};

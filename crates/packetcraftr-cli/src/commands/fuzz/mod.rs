@@ -3,6 +3,8 @@
 
 //! Fuzz CLI command logic.
 
+use packetcraftr::core::error::Kind;
+
 pub(super) mod arguments;
 mod rendering;
 
@@ -16,7 +18,7 @@ use super::registry;
 use crate::errors::CliError;
 use crate::input::read_recipe;
 use crate::rendering::{StreamEncoder, emit_aggregate_with_stats};
-use crate::system::{client, exchange, validate_selector};
+use crate::system::{InterfaceSelector, client, exchange};
 
 use super::execution::Executor;
 use super::format::{AggregateFormat, ToolFormat};
@@ -25,7 +27,7 @@ struct PreparedLive {
     options: packetcraftr::fuzz::LiveOptions,
     policy: packetcraftr::policy::Policy,
     exchange: packetcraftr::exchange::Options,
-    interface: Option<String>,
+    interface: Option<InterfaceSelector>,
 }
 
 pub(super) fn run(
@@ -48,7 +50,7 @@ fn prepare_request(arguments: &Args) -> Result<core::fuzz::Request, CliError> {
         .map(|field| {
             field
                 .parse::<core::fuzz::Target>()
-                .map_err(|source| CliError::new(2, source.to_string()))
+                .map_err(|source| CliError::new(Kind::Cli, source.to_string()))
         })
         .collect::<Result<Vec<_>, _>>()?;
     let request = core::fuzz::Request {
@@ -103,7 +105,7 @@ fn prepare_live(
     .map_err(CliError::classified)?;
     let policy = arguments.policy.clone().into_policy();
     policy.validate().map_err(CliError::classified)?;
-    validate_selector(arguments.route.interface.as_deref()).map(|_| ())?;
+    let interface = InterfaceSelector::parse_optional(arguments.route.interface.as_deref())?;
     let exchange = exchange::options(
         packetcraftr::send::Options {
             destination: arguments.destination,
@@ -123,7 +125,7 @@ fn prepare_live(
         options,
         policy,
         exchange,
-        interface: arguments.route.interface.clone(),
+        interface,
     }))
 }
 
@@ -185,10 +187,12 @@ fn execute_live(
     if format == ToolFormat::Ndjson {
         let event_stream = stream.clone();
         let summary = packetcraftr::fuzz::run_with_events(
-            &request,
-            live.options,
-            packet,
-            registry,
+            packetcraftr::fuzz::RunInput {
+                request: &request,
+                live: live.options,
+                packet,
+                registry,
+            },
             &mut authorizer,
             &mut executor,
             &mut clock,
@@ -204,10 +208,12 @@ fn execute_live(
     }
     let format = AggregateFormat::narrow_from(output::contract::Command::Fuzz, format)?;
     let result = packetcraftr::fuzz::run(
-        &request,
-        live.options,
-        packet,
-        registry,
+        packetcraftr::fuzz::RunInput {
+            request: &request,
+            live: live.options,
+            packet,
+            registry,
+        },
         &mut authorizer,
         &mut executor,
         &mut clock,

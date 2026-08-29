@@ -26,7 +26,7 @@ pub(crate) fn capture_file_format(format: output::contract::Format) -> Result<Fo
         output::contract::Format::Pcap => Ok(Format::Pcap),
         output::contract::Format::PcapNg => Ok(Format::PcapNg),
         _ => Err(CliError::new(
-            70,
+            Kind::Internal,
             "capture-file renderer received a non-capture format",
         )),
     }
@@ -55,7 +55,7 @@ fn write_capture_file_with(
     let mut frames = frames.into_iter();
     let first = frames.next().ok_or_else(|| {
         CliError::new(
-            2,
+            Kind::Cli,
             "capture-file output requires at least one captured or transmitted frame",
         )
     })?;
@@ -88,9 +88,12 @@ fn copy_spool(spool: &mut dyn Read, destination: &mut dyn Write) -> Result<(), C
         if read == 0 {
             break;
         }
-        let bytes = buffer
-            .get(..read)
-            .ok_or_else(|| CliError::new(70, "temporary capture read exceeded the copy buffer"))?;
+        let bytes = buffer.get(..read).ok_or_else(|| {
+            CliError::new(
+                Kind::Internal,
+                "temporary capture read exceeded the copy buffer",
+            )
+        })?;
         destination
             .write_all(bytes)
             .map_err(|source| stdout_error("write stdout failed", source))?;
@@ -105,7 +108,10 @@ fn initialize_error(source: CaptureError) -> CliError {
         CaptureError::Io(source) => {
             capture_io_error("initialize temporary capture output failed", source)
         }
-        source => CliError::new(5, format!("initialize capture output failed: {source}")),
+        source => CliError::new(
+            Kind::Io,
+            format!("initialize capture output failed: {source}"),
+        ),
     }
 }
 
@@ -114,7 +120,7 @@ fn write_error(source: CaptureError) -> CliError {
         CaptureError::Io(source) => {
             capture_io_error("write temporary capture output failed", source)
         }
-        source => CliError::new(5, format!("write capture output failed: {source}")),
+        source => CliError::new(Kind::Io, format!("write capture output failed: {source}")),
     }
 }
 
@@ -147,7 +153,7 @@ pub(crate) fn write_raw(bytes: &[u8]) -> Result<(), CliError> {
     stdout
         .write_all(bytes)
         .and_then(|()| stdout.flush())
-        .map_err(|source| CliError::new(5, format!("write stdout failed: {source}")))
+        .map_err(|source| CliError::new(Kind::Io, format!("write stdout failed: {source}")))
 }
 
 #[cfg(test)]

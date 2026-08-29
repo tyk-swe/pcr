@@ -22,7 +22,7 @@ use super::registry;
 use crate::command_options::{HostnamePolicyArgs, RouteSelectionArgs};
 use crate::errors::CliError;
 use crate::rendering::{StreamEncoder, emit_aggregate_with_stats};
-use crate::system::{client, exchange, validate_selector};
+use crate::system::{InterfaceSelector, client, exchange};
 
 /// One probing workflow: the library entry points and the output types they
 /// convert into.
@@ -170,7 +170,7 @@ pub(super) fn prepare(
 ) -> Result<Probe, CliError> {
     let policy = policy.into_policy();
     policy.validate().map_err(CliError::classified)?;
-    validate_selector(route.interface.as_deref()).map(|_| ())?;
+    let interface = InterfaceSelector::parse_optional(route.interface.as_deref())?;
     let registry = registry()?;
     let exchange = exchange::options(
         packetcraftr::send::Options {
@@ -190,7 +190,7 @@ pub(super) fn prepare(
     let executor = Executor {
         client: client(Arc::clone(&registry), policy.clone()),
         exchange,
-        interface: route.interface,
+        interface,
     };
     Ok(Probe {
         policy,

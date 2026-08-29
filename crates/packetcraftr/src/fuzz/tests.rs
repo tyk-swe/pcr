@@ -23,7 +23,8 @@ use super::execution::add_execution_stats;
 use crate::authorization::{Authorizer, Operation};
 
 use super::{
-    Execution, ExecutionCase, Executor, LiveLimits, LiveOptions, Stats, run, run_with_events,
+    Execution, ExecutionCase, Executor, LiveLimits, LiveOptions, RunInput, Stats, run,
+    run_with_events,
 };
 
 #[test]
@@ -64,10 +65,12 @@ fn aggregate_live_fuzz_validates_case_count_before_collecting() {
     let mut executor = CountingExecutor::default();
 
     let error = run(
-        &request,
-        LiveOptions::default(),
-        packet(),
-        registry,
+        RunInput {
+            request: &request,
+            live: LiveOptions::default(),
+            packet: packet(),
+            registry,
+        },
         &mut authorizer,
         &mut executor,
         &mut NoopClock,
@@ -375,13 +378,15 @@ fn live_execution_uses_the_identical_packet_campaign() {
     let mut authorizer = AllowAll;
     let mut executor = RebuildingExecutor;
     let live = run(
-        &request,
-        LiveOptions {
-            timeout: Duration::from_millis(1),
-            ..LiveOptions::default()
+        RunInput {
+            request: &request,
+            live: LiveOptions {
+                timeout: Duration::from_millis(1),
+                ..LiveOptions::default()
+            },
+            packet: packet(),
+            registry,
         },
-        packet(),
-        registry,
         &mut authorizer,
         &mut executor,
         &mut NoopClock,
@@ -420,13 +425,15 @@ fn live_fuzz_sink_failure_prevents_later_case_execution() {
     let observed = Arc::clone(&emitted);
 
     let error = run_with_events(
-        &request,
-        LiveOptions {
-            timeout: Duration::from_millis(1),
-            ..LiveOptions::default()
+        RunInput {
+            request: &request,
+            live: LiveOptions {
+                timeout: Duration::from_millis(1),
+                ..LiveOptions::default()
+            },
+            packet: packet(),
+            registry,
         },
-        packet(),
-        registry,
         &mut authorizer,
         &mut executor,
         &mut NoopClock,
@@ -465,13 +472,15 @@ fn live_fuzz_accepts_route_materialized_case() {
         registry: Arc::clone(&registry),
     };
     let live = run(
-        &request,
-        LiveOptions {
-            timeout: Duration::from_millis(1),
-            ..LiveOptions::default()
+        RunInput {
+            request: &request,
+            live: LiveOptions {
+                timeout: Duration::from_millis(1),
+                ..LiveOptions::default()
+            },
+            packet: route_materialized_packet(),
+            registry,
         },
-        route_materialized_packet(),
-        registry,
         &mut authorizer,
         &mut executor,
         &mut NoopClock,
@@ -504,13 +513,15 @@ fn live_fuzz_rejects_substituted_authorized_case() {
     let mut authorizer = AllowAll;
     let mut executor = SubstitutingFuzzExecutor;
     let error = run(
-        &request,
-        LiveOptions {
-            timeout: Duration::from_millis(1),
-            ..LiveOptions::default()
+        RunInput {
+            request: &request,
+            live: LiveOptions {
+                timeout: Duration::from_millis(1),
+                ..LiveOptions::default()
+            },
+            packet: packet(),
+            registry,
         },
-        packet(),
-        registry,
         &mut authorizer,
         &mut executor,
         &mut NoopClock,
@@ -551,13 +562,15 @@ fn live_fuzz_consults_the_authorizer_exactly_once_before_any_execution() {
     let mut executor = CountingExecutor::default();
 
     let error = run(
-        &request,
-        LiveOptions {
-            destination: Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 9))),
-            ..LiveOptions::default()
+        RunInput {
+            request: &request,
+            live: LiveOptions {
+                destination: Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 9))),
+                ..LiveOptions::default()
+            },
+            packet: packet(),
+            registry,
         },
-        packet(),
-        registry,
         &mut authorizer,
         &mut executor,
         &mut NoopClock,
@@ -590,13 +603,15 @@ fn live_fuzz_authorizes_a_campaign_where_no_case_built() {
     let mut executor = CountingExecutor::default();
 
     let error = run(
-        &request,
-        LiveOptions {
-            destination: Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 9))),
-            ..LiveOptions::default()
+        RunInput {
+            request: &request,
+            live: LiveOptions {
+                destination: Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 9))),
+                ..LiveOptions::default()
+            },
+            packet: packet(),
+            registry,
         },
-        packet(),
-        registry,
         &mut authorizer,
         &mut executor,
         &mut NoopClock,

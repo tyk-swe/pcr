@@ -83,7 +83,7 @@ pub(super) fn read_recipe(
                 InputKind::Recipe,
             )?;
             let input = String::from_utf8(bytes).map_err(|source| {
-                CliError::new(2, format!("packet document is not UTF-8: {source}"))
+                CliError::new(Kind::Cli, format!("packet document is not UTF-8: {source}"))
             })?;
             (input, Some(path))
         }
@@ -93,7 +93,7 @@ pub(super) fn read_recipe(
                 InputKind::Recipe,
             )?;
             let input = String::from_utf8(bytes).map_err(|source| {
-                CliError::new(2, format!("stdin recipe is not UTF-8: {source}"))
+                CliError::new(Kind::Cli, format!("stdin recipe is not UTF-8: {source}"))
             })?;
             (input, None)
         }
@@ -119,14 +119,14 @@ pub(super) fn read_recipe(
             &core::document::DocumentLimits::DEFAULT,
         )
         .and_then(|document| document.to_packet(registry, core::build::DEFAULT_MAX_LAYERS))
-        .map_err(|source| CliError::new(2, source.to_string()));
+        .map_err(|source| CliError::new(Kind::Cli, source.to_string()));
     }
     parse_expression(&input, registry)
 }
 
 fn parse_expression(input: &str, registry: &core::registry::Registry) -> Result<Packet, CliError> {
     core::expression::parse(input, registry, core::expression::Options::default())
-        .map_err(|source| CliError::new(2, source.to_string()))
+        .map_err(|source| CliError::new(Kind::Cli, source.to_string()))
 }
 
 fn document_format_from_path(path: &Path) -> Option<core::document::Format> {
@@ -142,8 +142,12 @@ pub(super) fn read_bounded_file(
     max_bytes: usize,
     kind: InputKind,
 ) -> Result<Vec<u8>, CliError> {
-    let file = File::open(path)
-        .map_err(|source| CliError::new(5, format!("open {} failed: {source}", path.display())))?;
+    let file = File::open(path).map_err(|source| {
+        CliError::new(
+            Kind::Io,
+            format!("open {} failed: {source}", path.display()),
+        )
+    })?;
     read_bounded(file, max_bytes, kind)
 }
 
@@ -163,8 +167,12 @@ pub(super) fn open_capture(
     path: &Path,
     limits: OfflineCaptureLimitsArgs,
 ) -> Result<Reader<File>, CliError> {
-    let file = File::open(path)
-        .map_err(|source| CliError::new(5, format!("open {} failed: {source}", path.display())))?;
+    let file = File::open(path).map_err(|source| {
+        CliError::new(
+            Kind::Io,
+            format!("open {} failed: {source}", path.display()),
+        )
+    })?;
     Reader::with_options(
         file,
         ReaderOptions {
@@ -194,7 +202,7 @@ fn read_bounded_allow_empty(
         .and_then(|value| u64::try_from(value).ok())
         .ok_or_else(|| {
             CliError::new(
-                70,
+                Kind::Internal,
                 format!("{} input byte limit cannot be represented", kind.label()),
             )
         })?;
@@ -203,11 +211,14 @@ fn read_bounded_allow_empty(
         .take(read_limit)
         .read_to_end(&mut bytes)
         .map_err(|source| {
-            CliError::new(5, format!("read {} input failed: {source}", kind.label()))
+            CliError::new(
+                Kind::Io,
+                format!("read {} input failed: {source}", kind.label()),
+            )
         })?;
     if bytes.len() > max_bytes {
         return Err(CliError::new(
-            2,
+            Kind::Cli,
             format!("{} input exceeds {max_bytes} byte limit", kind.label()),
         ));
     }

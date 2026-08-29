@@ -16,30 +16,13 @@ pub(super) struct CliError {
 }
 
 impl CliError {
-    pub(super) fn new(exit_code: u8, message: impl Into<String>) -> Self {
-        let kind = match exit_code {
-            2 => Kind::Cli,
-            3 => Kind::Packet,
-            4 => Kind::Capability,
-            5 => Kind::Io,
-            6 => Kind::Policy,
-            _ => Kind::Internal,
-        };
+    /// A CLI-originated failure with the fallback classification for `kind`;
+    /// the exit code follows from the kind.
+    pub(super) fn new(kind: Kind, message: impl Into<String>) -> Self {
         Self {
-            exit_code,
+            exit_code: exit_code_for_kind(kind),
             message: message.into(),
-            classification: Classification::new(
-                match kind {
-                    Kind::Cli => "cli.error",
-                    Kind::Packet => "packet.error",
-                    Kind::Capability => "capability.unavailable",
-                    Kind::Io => "io.runtime",
-                    Kind::Policy => "policy.denied",
-                    Kind::Internal => "internal.error",
-                },
-                kind,
-                None,
-            ),
+            classification: Classification::new(fallback_code(kind), kind, None),
             context: None,
             causes: Vec::new(),
         }
@@ -106,6 +89,17 @@ impl From<output::envelope::EncodeError> for CliError {
     }
 }
 
+const fn fallback_code(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Cli => "cli.error",
+        Kind::Packet => "packet.error",
+        Kind::Capability => "capability.unavailable",
+        Kind::Io => "io.runtime",
+        Kind::Policy => "policy.denied",
+        Kind::Internal => "internal.error",
+    }
+}
+
 const fn exit_code_for_kind(kind: Kind) -> u8 {
     match kind {
         Kind::Cli => 2,
@@ -122,21 +116,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn numeric_exit_codes_map_to_stable_classifications() {
+    fn kinds_map_to_stable_exit_codes_and_classifications() {
         let cases = [
-            (2, Kind::Cli, "cli.error"),
-            (3, Kind::Packet, "packet.error"),
-            (4, Kind::Capability, "capability.unavailable"),
-            (5, Kind::Io, "io.runtime"),
-            (6, Kind::Policy, "policy.denied"),
-            (1, Kind::Internal, "internal.error"),
-            (70, Kind::Internal, "internal.error"),
+            (Kind::Cli, 2, "cli.error"),
+            (Kind::Packet, 3, "packet.error"),
+            (Kind::Capability, 4, "capability.unavailable"),
+            (Kind::Io, 5, "io.runtime"),
+            (Kind::Policy, 6, "policy.denied"),
+            (Kind::Internal, 70, "internal.error"),
         ];
 
-        for (exit_code, kind, code) in cases {
-            let error = CliError::new(exit_code, "failure");
-            assert_eq!(error.classification.kind, kind, "exit {exit_code}");
-            assert_eq!(error.classification.code, code, "exit {exit_code}");
+        for (kind, exit_code, code) in cases {
+            let error = CliError::new(kind, "failure");
+            assert_eq!(error.exit_code, exit_code, "kind {kind:?}");
+            assert_eq!(error.classification.kind, kind, "kind {kind:?}");
+            assert_eq!(error.classification.code, code, "kind {kind:?}");
         }
     }
 
@@ -188,7 +182,7 @@ mod tests {
         let cleanup = net::Error::Capture {
             message: "receiver stopped".to_owned(),
         };
-        let error = CliError::new(5, "capture failed").with_cleanup(cleanup.clone());
+        let error = CliError::new(Kind::Io, "capture failed").with_cleanup(cleanup.clone());
         assert_eq!(
             error.message,
             format!("capture failed; capture shutdown also failed: {cleanup}")

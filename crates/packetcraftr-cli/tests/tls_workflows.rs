@@ -425,7 +425,10 @@ fn limit_failures_are_reported_before_any_capture_is_read() {
         rendered.contains("--max-tls-buffer-bytes=1024"),
         "{rendered}"
     );
-    assert!(rendered.contains("135168"), "{rendered}");
+    assert!(
+        rendered.contains(&packetcraftr::core::analysis::tls::MAX_DIRECTION_BUFFER.to_string()),
+        "{rendered}"
+    );
     assert!(
         !rendered.contains("max_direction_bytes"),
         "the internal field name never reaches the user: {rendered}"

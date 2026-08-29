@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use packetcraftr::core::error::Kind;
+
 pub(super) mod arguments;
 
 use std::time::SystemTime;
@@ -35,7 +37,7 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
         .transpose()?;
     let bytes = match (arguments.hex, arguments.file) {
         (Some(value), None) => core::protocol::raw::parse_hex(&value)
-            .map_err(|source| CliError::new(2, source.to_string()))?
+            .map_err(|source| CliError::new(Kind::Cli, source.to_string()))?
             .to_vec(),
         (None, Some(path)) => read_bounded_file(
             &path,
@@ -50,10 +52,10 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
     let decoded = core::decode::Dissector::new(registry)
         .decode(
             Frame::new(SystemTime::now(), LinkType(arguments.link_type), bytes)
-                .map_err(|source| CliError::new(3, source.to_string()))?,
+                .map_err(|source| CliError::new(Kind::Packet, source.to_string()))?,
             core::decode::Options::default(),
         )
-        .map_err(|source| CliError::new(3, source.to_string()))?;
+        .map_err(|source| CliError::new(Kind::Packet, source.to_string()))?;
     // The filter selects emission, not validity: a frame it rejects is still
     // decoded successfully, while an unsupported output format is refused
     // whether or not the frame matched.
@@ -65,7 +67,7 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
                 tcp_stream: None,
                 udp_stream: None,
             })
-            .map_err(|source| CliError::new(3, source.to_string()))?,
+            .map_err(|source| CliError::new(Kind::Packet, source.to_string()))?,
         None => true,
     };
     let (result, diagnostics) = output::dissect::Result::from_decoded(decoded);

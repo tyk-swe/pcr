@@ -247,7 +247,7 @@ fn convert_frame(
                 ..core::decode::Options::default()
             },
         )
-        .map_err(|source| CliError::new(3, source.to_string()))?;
+        .map_err(|source| CliError::new(Kind::Packet, source.to_string()))?;
     if let Some(filter) = &decoding.filter {
         validate_filter_timestamp(filter, &frame, source_frame)?;
         if !filter
@@ -257,7 +257,7 @@ fn convert_frame(
                 tcp_stream: None,
                 udp_stream: None,
             })
-            .map_err(|source| CliError::new(3, source.to_string()))?
+            .map_err(|source| CliError::new(Kind::Packet, source.to_string()))?
         {
             return Ok(None);
         }

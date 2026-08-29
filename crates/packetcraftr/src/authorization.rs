@@ -11,7 +11,7 @@
 //! [`crate::policy::Policy`] gives.
 
 use std::net::IpAddr;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::frame::{Frame, LinkType};
@@ -417,18 +417,7 @@ impl<R, N, I> Client<R, N, I> {
             LinkMode::Layer3 => LinkType::RAW,
             LinkMode::Auto => return Err(LiveIoError::UnresolvedLinkMode.into()),
         };
-        static REGISTRY: OnceLock<Result<Arc<Registry>, String>> = OnceLock::new();
-        let registry = REGISTRY
-            .get_or_init(|| {
-                packetcraftr_core::protocol::builtin::registry()
-                    .map(Arc::new)
-                    .map_err(|error| error.to_string())
-            })
-            .as_ref()
-            .map_err(|reason| crate::policy::Error::InvalidPacketSemantics {
-                reason: reason.clone(),
-            })?;
-        if registry.root_for_link_type(link_type.0).is_none() {
+        if self.registry.root_for_link_type(link_type.0).is_none() {
             return Err(crate::policy::Error::InvalidPacketSemantics {
                 reason: format!(
                     "final-wire authorization does not support link type {}",
@@ -445,16 +434,52 @@ impl<R, N, I> Client<R, N, I> {
         .map_err(|error| crate::policy::Error::InvalidPacketSemantics {
             reason: error.to_string(),
         })?;
-        let decoded = Dissector::new(Arc::clone(registry))
-            .decode(frame, packetcraftr_core::decode::Options::default())
-            .map_err(|error| crate::policy::Error::InvalidPacketSemantics {
-                reason: error.to_string(),
-            })?;
-        self.policy.authorize_packet_destinations(&decoded.packet)?;
-        self.policy
-            .authorize_packet_sources(&decoded.packet, route)?;
+        authorize_wire(&self.registry, &self.policy, frame, Some(route)).map_err(
+            |error| -> Error {
+                match error {
+                    WireAuthorizationError::Decode(error) => {
+                        crate::policy::Error::InvalidPacketSemantics {
+                            reason: error.to_string(),
+                        }
+                    }
+                    WireAuthorizationError::Policy(error) => error,
+                }
+                .into()
+            },
+        )?;
         Ok(())
     }
+}
+
+/// Why the final wire bytes were refused: they did not decode, or they
+/// decoded to packets the policy does not permit.
+#[derive(Debug)]
+pub(crate) enum WireAuthorizationError {
+    Decode(packetcraftr_core::decode::Error),
+    Policy(crate::policy::Error),
+}
+
+/// Decodes the bytes that will actually reach the wire with the workflow's own
+/// registry and applies destination (and, given a route, source) policy to the
+/// decoded packet. Callers classify decode failures in their own vocabulary.
+pub(crate) fn authorize_wire(
+    registry: &Arc<Registry>,
+    policy: &crate::policy::Policy,
+    frame: Frame,
+    route: Option<&packetcraftr_netio::route::Plan>,
+) -> Result<packetcraftr_core::decode::DecodedPacket, WireAuthorizationError> {
+    let decoded = Dissector::new(Arc::clone(registry))
+        .decode(frame, packetcraftr_core::decode::Options::default())
+        .map_err(WireAuthorizationError::Decode)?;
+    policy
+        .authorize_packet_destinations(&decoded.packet)
+        .map_err(WireAuthorizationError::Policy)?;
+    if let Some(route) = route {
+        policy
+            .authorize_packet_sources(&decoded.packet, route)
+            .map_err(WireAuthorizationError::Policy)?;
+    }
+    Ok(decoded)
 }
 
 #[cfg(test)]

@@ -13,7 +13,8 @@ use packetcraftr_netio::link::Mode;
 use crate::BoundaryError;
 
 use crate::authorization::{
-    Authorizer, Operation, PermissiveLiveDenial, check_permissive_live, unsupported_operation,
+    Authorizer, Operation, PermissiveLiveDenial, WireAuthorizationError, authorize_wire,
+    check_permissive_live, unsupported_operation,
 };
 
 use super::super::wire::replay_network_envelope;
@@ -27,16 +28,16 @@ pub struct SystemAuthorizer {
 }
 
 impl SystemAuthorizer {
-    /// # Panics
-    ///
-    /// Panics if the statically defined built-in protocol registry is invalid.
-    pub fn new(policy: crate::policy::Policy, allow_malformed_live: bool) -> Self {
+    /// Authorizes replay against `registry`, the same registry the caller
+    /// decodes and filters captured frames with.
+    pub fn new(
+        registry: Arc<Registry>,
+        policy: crate::policy::Policy,
+        allow_malformed_live: bool,
+    ) -> Self {
         Self {
             policy,
-            registry: Arc::new(
-                packetcraftr_core::protocol::builtin::registry()
-                    .expect("the built-in protocol registry must be valid"),
-            ),
+            registry,
             allow_malformed_live,
         }
     }
@@ -49,10 +50,13 @@ impl SystemAuthorizer {
         validate_complete_frame(frame)?;
         self.validate_link_type(frame)?;
         validate_network_frame(frame, mode)?;
-        let decoded = self.decode_frame(frame)?;
-        self.policy
-            .authorize_packet_destinations(&decoded.packet)
-            .map_err(BoundaryError::from_error)?;
+        let decoded =
+            authorize_wire(&self.registry, &self.policy, frame.clone(), None).map_err(|error| {
+                match error {
+                    WireAuthorizationError::Decode(source) => decode_error(source),
+                    WireAuthorizationError::Policy(error) => BoundaryError::from_error(error),
+                }
+            })?;
         let rebuilt = self.rebuild_frame(&decoded)?;
         self.validate_rebuild(frame, &rebuilt)
     }
@@ -75,21 +79,11 @@ impl SystemAuthorizer {
         ))
     }
 
+    #[cfg(test)]
     fn decode_frame(&self, frame: &Frame) -> Result<decode::DecodedPacket, BoundaryError> {
         decode::Dissector::new(Arc::clone(&self.registry))
             .decode(frame.clone(), decode::Options::default())
-            .map_err(|source| {
-                BoundaryError::with_source(
-                    source.to_string(),
-                    Classification::new(
-                        "packet.decode",
-                        Kind::Packet,
-                        Some("repair the frame or link type before authorizing live replay"),
-                    ),
-                    Vec::new(),
-                    source,
-                )
-            })
+            .map_err(decode_error)
     }
 
     fn rebuild_frame(
@@ -145,6 +139,19 @@ impl SystemAuthorizer {
         }
         Ok(())
     }
+}
+
+fn decode_error(source: decode::Error) -> BoundaryError {
+    BoundaryError::with_source(
+        source.to_string(),
+        Classification::new(
+            "packet.decode",
+            Kind::Packet,
+            Some("repair the frame or link type before authorizing live replay"),
+        ),
+        Vec::new(),
+        source,
+    )
 }
 
 /// Replay reports the missing opt-in in its own words: it refuses captured
@@ -238,6 +245,10 @@ mod tests {
     use super::*;
     use crate::authorization::{DeclaredPackets, PermissiveLive, ReplayFrame, WireBudget};
 
+    fn registry() -> Arc<Registry> {
+        Arc::new(packetcraftr_core::protocol::builtin::registry().expect("built-in registry"))
+    }
+
     fn built_ipv4(reserved_flag: bool) -> BuiltPacket {
         let mut packet = Packet::new();
         packet
@@ -248,22 +259,20 @@ mod tests {
                 ..Ipv4::default()
             })
             .push(Icmpv4::default());
-        Builder::new(Arc::new(
-            packetcraftr_core::protocol::builtin::registry().expect("built-in registry"),
-        ))
-        .build(
-            packet,
-            build::Context::default(),
-            build::Options {
-                mode: if reserved_flag {
-                    build::Mode::Permissive
-                } else {
-                    build::Mode::Strict
+        Builder::new(registry())
+            .build(
+                packet,
+                build::Context::default(),
+                build::Options {
+                    mode: if reserved_flag {
+                        build::Mode::Permissive
+                    } else {
+                        build::Mode::Strict
+                    },
+                    ..build::Options::default()
                 },
-                ..build::Options::default()
-            },
-        )
-        .expect("fixture packet builds")
+            )
+            .expect("fixture packet builds")
     }
 
     fn raw_frame(built: &BuiltPacket) -> Frame {
@@ -280,7 +289,8 @@ mod tests {
         let built = built_ipv4(false);
         assert!(!built.requires_live_opt_in);
         let frame = raw_frame(&built);
-        let inspecting_authorizer = SystemAuthorizer::new(crate::policy::Policy::default(), false);
+        let inspecting_authorizer =
+            SystemAuthorizer::new(registry(), crate::policy::Policy::default(), false);
         let decoded = inspecting_authorizer
             .decode_frame(&frame)
             .expect("fixture decodes");
@@ -295,7 +305,7 @@ mod tests {
             allow_permissive_packets: true,
             ..crate::policy::Policy::default()
         };
-        SystemAuthorizer::new(policy, true)
+        SystemAuthorizer::new(registry(), policy, true)
             .authorize_frame(&frame, Mode::Layer3)
             .expect("exact replay with both explicit live approvals");
     }
@@ -313,7 +323,7 @@ mod tests {
             max_bytes_per_operation: 2,
             ..crate::policy::Policy::default()
         };
-        let mut authorizer = SystemAuthorizer::new(policy, false);
+        let mut authorizer = SystemAuthorizer::new(registry(), policy, false);
 
         let packet_error = authorizer
             .authorize_operation(Operation::Replay(ReplayFrame::new(
@@ -344,7 +354,7 @@ mod tests {
             vec![0x45_u8],
         )
         .expect("valid truncated capture record");
-        let authorizer = SystemAuthorizer::new(crate::policy::Policy::default(), false);
+        let authorizer = SystemAuthorizer::new(registry(), crate::policy::Policy::default(), false);
         let error = authorizer
             .authorize_frame(&truncated, Mode::Layer3)
             .expect_err("truncated evidence cannot be replayed");
@@ -384,7 +394,7 @@ mod tests {
         let frame = raw_frame(&built);
 
         let missing_operation_opt_in =
-            SystemAuthorizer::new(crate::policy::Policy::default(), false)
+            SystemAuthorizer::new(registry(), crate::policy::Policy::default(), false)
                 .authorize_frame(&frame, Mode::Layer3)
                 .expect_err("operation opt-in is mandatory");
         assert_eq!(
@@ -392,9 +402,10 @@ mod tests {
             "policy.permissive_live_opt_in"
         );
 
-        let missing_policy_opt_in = SystemAuthorizer::new(crate::policy::Policy::default(), true)
-            .authorize_frame(&frame, Mode::Layer3)
-            .expect_err("policy opt-in is independently mandatory");
+        let missing_policy_opt_in =
+            SystemAuthorizer::new(registry(), crate::policy::Policy::default(), true)
+                .authorize_frame(&frame, Mode::Layer3)
+                .expect_err("policy opt-in is independently mandatory");
         assert_eq!(
             missing_policy_opt_in.classification().code,
             "policy.permissive_packet"
@@ -404,7 +415,7 @@ mod tests {
             allow_permissive_packets: true,
             ..crate::policy::Policy::default()
         };
-        SystemAuthorizer::new(policy, true)
+        SystemAuthorizer::new(registry(), policy, true)
             .authorize_frame(&frame, Mode::Layer3)
             .expect("both explicit approvals authorize the exact malformed bytes");
     }
@@ -413,7 +424,7 @@ mod tests {
     fn the_missing_replay_opt_in_keeps_its_published_message_and_remediation() {
         let frame = raw_frame(&built_ipv4(true));
 
-        let error = SystemAuthorizer::new(crate::policy::Policy::default(), false)
+        let error = SystemAuthorizer::new(registry(), crate::policy::Policy::default(), false)
             .authorize_frame(&frame, Mode::Layer3)
             .expect_err("operation opt-in is mandatory");
 
@@ -429,7 +440,8 @@ mod tests {
 
     #[test]
     fn replay_authorization_refuses_an_operation_with_no_frame() {
-        let mut authorizer = SystemAuthorizer::new(crate::policy::Policy::default(), false);
+        let mut authorizer =
+            SystemAuthorizer::new(registry(), crate::policy::Policy::default(), false);
 
         let error = authorizer
             .authorize_operation(Operation::Budgeted(WireBudget::new(1, 1)))
@@ -464,7 +476,7 @@ mod tests {
             vec![0_u8; built.bytes.len()],
         )
         .expect("same-width fixture frame");
-        let authorizer = SystemAuthorizer::new(crate::policy::Policy::default(), false);
+        let authorizer = SystemAuthorizer::new(registry(), crate::policy::Policy::default(), false);
 
         let error = authorizer
             .validate_rebuild(&different_frame, &built)

@@ -8,6 +8,7 @@ mod conversion;
 mod rendering;
 
 use std::fs::File;
+use std::sync::Arc;
 use std::time::Duration;
 
 use packetcraftr::{analysis::pcap::Reader, netio as net, output};
@@ -132,6 +133,7 @@ fn prepare(arguments: &Args) -> Result<Prepared, CliError> {
             limits,
         },
         authorizer: packetcraftr::replay::SystemAuthorizer::new(
+            Arc::clone(&registry),
             policy,
             arguments.allow_malformed_live,
         ),

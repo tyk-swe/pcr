@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use packetcraftr::core::error::Kind;
+
 pub(super) mod arguments;
 
 use packetcraftr::{core, output};
@@ -28,7 +30,7 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
                 ..core::build::Options::default()
             },
         )
-        .map_err(|source| CliError::new(3, source.to_string()))?;
+        .map_err(|source| CliError::new(Kind::Packet, source.to_string()))?;
     let (result, diagnostics) = output::build::Result::from_built(built);
     match format {
         BuildFormat::Text => {

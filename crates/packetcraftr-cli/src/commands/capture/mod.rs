@@ -16,7 +16,7 @@ use super::registry;
 use crate::errors::CliError;
 use crate::filtering::FrameSelector;
 use crate::rendering::StreamEncoder;
-use crate::system::resolve;
+use crate::system::{InterfaceSelector, resolve};
 
 use packetcraftr::policy::CaptureBudget;
 
@@ -51,8 +51,10 @@ pub(super) fn run(
     let registry = registry()?;
     let selector =
         FrameSelector::compile_optional(filter.as_deref(), &registry, limits.snap_length)?;
-    let interface = resolve(Some(interface), &net::interface::SystemProvider)?
-        .expect("required capture interface must resolve to an identity");
+    let interface = resolve(
+        InterfaceSelector::parse(&interface)?,
+        &net::interface::SystemProvider,
+    )?;
     let policy = budgets.into_policy();
     let budget = CaptureBudget::new(&policy);
     let request = net::capture::Request {

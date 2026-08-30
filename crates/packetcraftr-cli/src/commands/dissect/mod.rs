@@ -63,6 +63,7 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
         Some(filter) => filter
             .matches(&core::filter::Context {
                 decoded: &decoded,
+                derived: &[],
                 number: 1,
                 tcp_stream: None,
                 udp_stream: None,

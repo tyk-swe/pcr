@@ -476,7 +476,8 @@
             "endpoints",
             "protocols",
             "ports",
-            "io"
+            "io",
+            "fragments"
           ]
         },
         "frames_read": {
@@ -520,6 +521,10 @@
         },
         "io": {
           "$ref": "#/$defs/statsIo"
+        },
+        "fragments": {
+          "description": "Capture-global fragment accounting; derived bytes are separate from the physical matched frame and byte totals.",
+          "$ref": "#/$defs/ipReassemblyReport"
         }
       },
       "allOf": [
@@ -555,6 +560,11 @@
               {
                 "required": [
                   "io"
+                ]
+              },
+              {
+                "required": [
+                  "fragments"
                 ]
               }
               ]
@@ -594,6 +604,11 @@
                 "required": [
                   "io"
                 ]
+              },
+              {
+                "required": [
+                  "fragments"
+                ]
               }
               ]
             }
@@ -631,6 +646,11 @@
               {
                 "required": [
                   "io"
+                ]
+              },
+              {
+                "required": [
+                  "fragments"
                 ]
               }
               ]
@@ -670,6 +690,11 @@
                 "required": [
                   "io"
                 ]
+              },
+              {
+                "required": [
+                  "fragments"
+                ]
               }
               ]
             }
@@ -708,7 +733,55 @@
                 "required": [
                   "ports"
                 ]
+              },
+              {
+                "required": [
+                  "fragments"
+                ]
               }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "table": {
+                "const": "fragments"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "fragments"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "conversations"
+                  ]
+                },
+                {
+                  "required": [
+                    "endpoints"
+                  ]
+                },
+                {
+                  "required": [
+                    "protocols"
+                  ]
+                },
+                {
+                  "required": [
+                    "ports"
+                  ]
+                },
+                {
+                  "required": [
+                    "io"
+                  ]
+                }
               ]
             }
           }
@@ -899,6 +972,402 @@
       },
       "additionalProperties": false
     },
+    "ipDatagramKey": {
+      "description": "Capture-scoped identity of one fragmented IPv4 or IPv6 datagram.",
+      "type": "object",
+      "required": [
+        "family",
+        "scope",
+        "source",
+        "destination",
+        "identification"
+      ],
+      "properties": {
+        "family": {
+          "enum": [
+            "ipv4",
+            "ipv6"
+          ]
+        },
+        "scope": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "source": {
+          "$ref": "#/$defs/ipAddress"
+        },
+        "destination": {
+          "$ref": "#/$defs/ipAddress"
+        },
+        "identification": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "protocol": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "family": {
+                "const": "ipv4"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "protocol"
+            ],
+            "properties": {
+              "source": {
+                "type": "string",
+                "format": "ipv4"
+              },
+              "destination": {
+                "type": "string",
+                "format": "ipv4"
+              },
+              "identification": {
+                "maximum": 65535
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "source": {
+                "type": "string",
+                "format": "ipv6"
+              },
+              "destination": {
+                "type": "string",
+                "format": "ipv6"
+              }
+            },
+            "not": {
+              "required": [
+                "protocol"
+              ]
+            }
+          }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "ipCompletedDatagramOutcome": {
+      "type": "object",
+      "required": [
+        "status",
+        "key",
+        "fragment_count",
+        "unique_bytes",
+        "final_payload_length",
+        "datagram_bytes",
+        "duplicate_fragments",
+        "overlap_bytes"
+      ],
+      "properties": {
+        "status": {
+          "const": "completed"
+        },
+        "key": {
+          "$ref": "#/$defs/ipDatagramKey"
+        },
+        "fragment_count": {
+          "$ref": "#/$defs/uint64"
+        },
+        "unique_bytes": {
+          "$ref": "#/$defs/uint64"
+        },
+        "final_payload_length": {
+          "$ref": "#/$defs/uint64"
+        },
+        "datagram_bytes": {
+          "$ref": "#/$defs/uint64"
+        },
+        "duplicate_fragments": {
+          "$ref": "#/$defs/uint64"
+        },
+        "overlap_bytes": {
+          "$ref": "#/$defs/uint64"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ipIncompleteDatagramOutcome": {
+      "type": "object",
+      "required": [
+        "status",
+        "key",
+        "reason",
+        "fragment_count",
+        "unique_bytes",
+        "duplicate_fragments",
+        "overlap_bytes"
+      ],
+      "properties": {
+        "status": {
+          "const": "incomplete"
+        },
+        "key": {
+          "$ref": "#/$defs/ipDatagramKey"
+        },
+        "reason": {
+          "enum": [
+            "idle_expired",
+            "end_of_capture"
+          ]
+        },
+        "fragment_count": {
+          "$ref": "#/$defs/uint64"
+        },
+        "unique_bytes": {
+          "$ref": "#/$defs/uint64"
+        },
+        "known_final_length": {
+          "$ref": "#/$defs/uint64"
+        },
+        "duplicate_fragments": {
+          "$ref": "#/$defs/uint64"
+        },
+        "overlap_bytes": {
+          "$ref": "#/$defs/uint64"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ipDatagramOutcome": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ipCompletedDatagramOutcome"
+        },
+        {
+          "$ref": "#/$defs/ipIncompleteDatagramOutcome"
+        }
+      ]
+    },
+    "ipReassemblyFamilyCounters": {
+      "type": "object",
+      "required": [
+        "family",
+        "physical_fragments",
+        "atomic_fragments",
+        "admitted_fragments",
+        "duplicate_fragments",
+        "overlap_resolved_fragments",
+        "completing_fragments",
+        "completed_datagrams",
+        "incomplete_datagrams",
+        "idle_expired_datagrams",
+        "end_of_capture_datagrams",
+        "overlap_bytes",
+        "derived_datagram_bytes",
+        "derived_payload_bytes"
+      ],
+      "properties": {
+        "family": {
+          "enum": [
+            "ipv4",
+            "ipv6"
+          ]
+        },
+        "physical_fragments": {
+          "$ref": "#/$defs/uint64"
+        },
+        "atomic_fragments": {
+          "$ref": "#/$defs/uint64"
+        },
+        "admitted_fragments": {
+          "$ref": "#/$defs/uint64"
+        },
+        "duplicate_fragments": {
+          "$ref": "#/$defs/uint64"
+        },
+        "overlap_resolved_fragments": {
+          "$ref": "#/$defs/uint64"
+        },
+        "completing_fragments": {
+          "$ref": "#/$defs/uint64"
+        },
+        "completed_datagrams": {
+          "$ref": "#/$defs/uint64"
+        },
+        "incomplete_datagrams": {
+          "$ref": "#/$defs/uint64"
+        },
+        "idle_expired_datagrams": {
+          "$ref": "#/$defs/uint64"
+        },
+        "end_of_capture_datagrams": {
+          "$ref": "#/$defs/uint64"
+        },
+        "overlap_bytes": {
+          "$ref": "#/$defs/uint64"
+        },
+        "derived_datagram_bytes": {
+          "$ref": "#/$defs/uint64"
+        },
+        "derived_payload_bytes": {
+          "$ref": "#/$defs/uint64"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ipReassemblyReport": {
+      "description": "Capture-global fragment counters and bounded completed or incomplete datagram outcomes.",
+      "type": "object",
+      "required": [
+        "families",
+        "outcomes",
+        "outcomes_omitted"
+      ],
+      "properties": {
+        "families": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/ipReassemblyFamilyCounters"
+                },
+                {
+                  "properties": {
+                    "family": {
+                      "const": "ipv4"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/ipReassemblyFamilyCounters"
+                },
+                {
+                  "properties": {
+                    "family": {
+                      "const": "ipv6"
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "outcomes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ipDatagramOutcome"
+          }
+        },
+        "outcomes_omitted": {
+          "$ref": "#/$defs/uint64"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ipOverlapResolvedEvent": {
+      "type": "object",
+      "required": [
+        "event",
+        "frame",
+        "key",
+        "policy",
+        "affected_bytes",
+        "fragment_count",
+        "unique_bytes"
+      ],
+      "properties": {
+        "event": {
+          "const": "ip_overlap_resolved"
+        },
+        "frame": {
+          "$ref": "#/$defs/sourceFrame"
+        },
+        "key": {
+          "$ref": "#/$defs/ipDatagramKey"
+        },
+        "policy": {
+          "enum": [
+            "reject",
+            "first",
+            "last"
+          ]
+        },
+        "affected_bytes": {
+          "$ref": "#/$defs/uint64"
+        },
+        "fragment_count": {
+          "$ref": "#/$defs/uint64"
+        },
+        "unique_bytes": {
+          "$ref": "#/$defs/uint64"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ipDatagramCompletedEvent": {
+      "type": "object",
+      "required": [
+        "event",
+        "frame",
+        "outcome"
+      ],
+      "properties": {
+        "event": {
+          "const": "ip_datagram_completed"
+        },
+        "frame": {
+          "$ref": "#/$defs/sourceFrame"
+        },
+        "outcome": {
+          "$ref": "#/$defs/ipCompletedDatagramOutcome"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ipDatagramIncompleteEvent": {
+      "type": "object",
+      "required": [
+        "event",
+        "frame",
+        "outcome"
+      ],
+      "properties": {
+        "event": {
+          "const": "ip_datagram_incomplete"
+        },
+        "frame": {
+          "$ref": "#/$defs/sourceFrame"
+        },
+        "outcome": {
+          "$ref": "#/$defs/ipIncompleteDatagramOutcome"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ipReassemblyEvent": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ipOverlapResolvedEvent"
+        },
+        {
+          "$ref": "#/$defs/ipDatagramCompletedEvent"
+        },
+        {
+          "$ref": "#/$defs/ipDatagramIncompleteEvent"
+        }
+      ]
+    },
     "expertSuccess": {
       "type": "object",
       "properties": {
@@ -936,6 +1405,9 @@
         },
         {
           "$ref": "#/$defs/expertResult"
+        },
+        {
+          "$ref": "#/$defs/ipReassemblyEvent"
         }
       ]
     },
@@ -961,6 +1433,9 @@
         },
         {
           "$ref": "#/$defs/followResult"
+        },
+        {
+          "$ref": "#/$defs/ipReassemblyEvent"
         }
       ]
     },
@@ -973,7 +1448,8 @@
         "warnings",
         "notes",
         "codes",
-        "findings"
+        "findings",
+        "ip_reassembly"
       ],
       "properties": {
         "frames_read": {
@@ -1002,6 +1478,9 @@
           "items": {
             "$ref": "#/$defs/expertFinding"
           }
+        },
+        "ip_reassembly": {
+          "$ref": "#/$defs/ipReassemblyReport"
         }
       },
       "additionalProperties": false
@@ -1094,7 +1573,8 @@
         "client_bytes",
         "server_bytes",
         "undelivered_bytes",
-        "chunks"
+        "chunks",
+        "ip_reassembly"
       ],
       "properties": {
         "transport": {
@@ -1129,6 +1609,9 @@
           "items": {
             "$ref": "#/$defs/followChunk"
           }
+        },
+        "ip_reassembly": {
+          "$ref": "#/$defs/ipReassemblyReport"
         }
       },
       "dependentRequired": {
@@ -1219,6 +1702,9 @@
         },
         {
           "$ref": "#/$defs/tlsCompleteEvent"
+        },
+        {
+          "$ref": "#/$defs/ipReassemblyEvent"
         }
       ]
     },
@@ -1653,7 +2139,8 @@
         "sessions_evicted",
         "sessions_omitted",
         "buffer_limit_hits",
-        "udp_443_frames"
+        "udp_443_frames",
+        "ip_reassembly"
       ],
       "properties": {
         "frames_read": {
@@ -1691,6 +2178,9 @@
         "udp_443_frames": {
           "description": "UDP frames seen on port 443, which are most likely QUIC. TLS over QUIC is out of scope, so this is how under-reporting stays visible.",
           "$ref": "#/$defs/uint64"
+        },
+        "ip_reassembly": {
+          "$ref": "#/$defs/ipReassemblyReport"
         }
       }
     },

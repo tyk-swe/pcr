@@ -19,13 +19,29 @@ use super::super::command_options::OfflineLimitsArgs;
 use super::super::errors::CliError;
 use super::super::filtering::{self, Capabilities};
 use super::super::input::validate_capture_stream_limits;
+use super::super::rendering::StreamEncoder;
 use super::registry_with_tls_ports;
 
 /// Validated, I/O-free analysis state.
 pub(super) struct Prepared {
     pub(super) registry: Arc<Registry>,
     pub(super) filter: Option<Filter>,
+    pub(super) ip_overlap: analysis::reassembly::ip::OverlapPolicy,
     pub(super) limits: analysis::Limits,
+}
+
+impl Prepared {
+    /// Analysis options carrying every prepared analysis-wide setting, so a
+    /// new knob needs no per-command plumbing. Commands choose only whether
+    /// the run drives TCP reassembly.
+    pub(super) fn options(&self, tcp_events: bool) -> analysis::Options<'_> {
+        analysis::Options {
+            filter: self.filter.as_ref(),
+            tcp_events,
+            ip_overlap: self.ip_overlap,
+            limits: self.limits.clone(),
+        }
+    }
 }
 
 /// Validates capture bounds, prepares registry/filter state, then validates
@@ -48,6 +64,7 @@ pub(super) fn prepare_with_tls_ports(
     tls_ports: &[u16],
 ) -> Result<Prepared, CliError> {
     let capture = limits.capture;
+    let ip_overlap = limits.ip_overlap.into();
     validate_capture_stream_limits(
         capture.max_frames,
         capture.max_bytes,
@@ -63,6 +80,12 @@ pub(super) fn prepare_with_tls_ports(
         max_bytes: capture.max_bytes,
         max_frame_bytes: capture.max_frame_bytes,
         max_flows: limits.max_flows,
+        max_ip_datagrams: limits.max_ip_datagrams,
+        max_ip_fragments_per_datagram: limits.max_ip_fragments_per_datagram,
+        max_ip_bytes_per_datagram: limits.max_ip_bytes_per_datagram,
+        max_ip_reassembly_bytes: limits.max_ip_reassembly_bytes,
+        max_ip_outcomes: limits.max_ip_outcomes,
+        ip_idle_expiry: Duration::from_millis(limits.ip_idle_expiry_ms),
         max_duration: Duration::from_millis(limits.max_duration_ms),
     };
     limits.validate().map_err(CliError::classified)?;
@@ -70,6 +93,7 @@ pub(super) fn prepare_with_tls_ports(
     Ok(Prepared {
         registry,
         filter,
+        ip_overlap,
         limits,
     })
 }
@@ -101,4 +125,24 @@ pub(crate) fn parse_stream_selector(spec: &str) -> Result<StreamSelector, CliErr
     };
     let index = index.parse::<u64>().map_err(|_| invalid())?;
     Ok(StreamSelector { transport, index })
+}
+
+/// Sink for IP reassembly lifecycle events, which only the NDJSON stream
+/// carries. The other formats fold the same information into their terminal
+/// `ip_reassembly` report, so they drop the per-event record here.
+pub(super) fn ip_event_sink(
+    ndjson: bool,
+    stream: StreamEncoder,
+) -> impl FnMut(analysis::IpEventRecord) -> Result<(), packetcraftr::BoundaryError> {
+    move |event| {
+        if ndjson {
+            stream
+                .emit_data(
+                    packetcraftr::output::reassembly::Event::from(event),
+                    Vec::new(),
+                )
+                .map_err(|error| CliError::from(error).into_boundary_error())?;
+        }
+        Ok(())
+    }
 }

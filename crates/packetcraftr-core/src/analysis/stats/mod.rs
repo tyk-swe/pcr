@@ -10,6 +10,7 @@ use std::time::{Duration, SystemTime};
 use crate::protocol::network::{Ipv4, Ipv6};
 
 use crate::analysis::Error;
+use crate::analysis::IpReassemblyReport;
 use crate::analysis::conversation_index::CanonicalFlow;
 use crate::analysis::pipeline::FrameRecord;
 use crate::analysis::reassembly::tcp::ScopedFlowKey;
@@ -54,10 +55,11 @@ struct EndpointTally {
 
 /// Accumulates statistics from analysis frame records.
 ///
-/// Every table is keyed by values a frame carries, so retained state grows
-/// with distinct keys and never faster than the pipeline's frame budget;
+/// Every physical table is keyed by values a frame carries, so retained state
+/// grows with distinct keys and never faster than the pipeline's frame budget;
 /// conversations are additionally bounded by the pipeline's flow budget,
-/// which fails closed before this collector would see a new index.
+/// which fails closed before this collector would see a new index. Bounded,
+/// capture-global fragment accounting is attached only when the pass finishes.
 #[derive(Debug)]
 pub struct Collector {
     interval: Duration,
@@ -206,8 +208,11 @@ impl Collector {
         }
     }
 
-    /// Finishes the pass and produces every table in its stable order.
-    pub fn finish(self) -> Report {
+    /// Finishes the pass and attaches capture-global IP fragment accounting.
+    ///
+    /// Physical frame and byte totals remain those observed by this collector;
+    /// derived datagram and payload bytes live only in `ip_reassembly`.
+    pub fn finish(self, ip_reassembly: IpReassemblyReport) -> Report {
         let mut protocols = self
             .protocols
             .into_iter()
@@ -291,6 +296,7 @@ impl Collector {
             endpoints,
             ports,
             io,
+            ip_reassembly,
         }
     }
 }

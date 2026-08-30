@@ -392,6 +392,7 @@ fn bench_filter_evaluation(c: &mut Criterion) {
 
     let context = FilterContext {
         decoded: &decoded,
+        derived: &[],
         number: 1,
         tcp_stream: None,
         udp_stream: None,

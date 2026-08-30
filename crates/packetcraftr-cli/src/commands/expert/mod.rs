@@ -10,7 +10,7 @@ use self::arguments::{Args, Severity};
 use super::super::errors::CliError;
 use super::super::input::open_capture;
 use super::format::ToolFormat;
-use super::offline_analysis::{Prepared, prepare};
+use super::offline_analysis::prepare;
 use crate::rendering::StreamEncoder;
 
 fn matches_selector(
@@ -33,31 +33,29 @@ pub(super) fn run(
     stream: &mut StreamEncoder,
 ) -> Result<(), CliError> {
     let format = ToolFormat::narrow(output::contract::Command::Expert, format)?;
-    let Prepared {
-        registry,
-        filter,
-        limits,
-    } = prepare(arguments.limits, arguments.filter.as_deref())?;
+    let prepared = prepare(arguments.limits, arguments.filter.as_deref())?;
     let mut reader = open_capture(&arguments.path, arguments.limits.capture)?;
 
-    let options = analysis::Options {
-        filter: filter.as_ref(),
-        // Expert needs the reassembler's byte-exact retransmission evidence.
-        tcp_events: true,
-        limits,
-    };
+    // Expert needs the reassembler's byte-exact retransmission evidence.
+    let options = prepared.options(true);
     let mut collector = analysis::expert::Collector::new();
     let mut state = rendering::State::default();
-    let outcome = analysis::run(&mut reader, registry, &options, |record| {
-        for finding in collector.observe(&record) {
-            if matches_selector(&finding, arguments.min_severity, &arguments.codes) {
-                state.count(&finding);
-                rendering::render_record(format, finding.into(), &mut state, stream)
-                    .map_err(CliError::into_boundary_error)?;
+    let outcome = analysis::run_with_ip_events(
+        &mut reader,
+        prepared.registry.clone(),
+        &options,
+        super::offline_analysis::ip_event_sink(format == ToolFormat::Ndjson, stream.clone()),
+        |record| {
+            for finding in collector.observe(&record) {
+                if matches_selector(&finding, arguments.min_severity, &arguments.codes) {
+                    state.count(&finding);
+                    rendering::render_record(format, finding.into(), &mut state, stream)
+                        .map_err(CliError::into_boundary_error)?;
+                }
             }
-        }
-        Ok(())
-    });
+            Ok(())
+        },
+    );
     let summary = outcome.map_err(CliError::classified)?;
     let (trailing, _expert_summary) =
         collector.finish(&summary.trailing_tcp_events, summary.frames_read);

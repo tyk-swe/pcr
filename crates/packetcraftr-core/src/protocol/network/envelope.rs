@@ -24,6 +24,30 @@ pub(super) fn is_ipv6_extension_layer(layer: &dyn Layer) -> bool {
     )
 }
 
+/// Extension headers whose wire encoding carries its own length, so a chain
+/// walk can step over them: Hop-by-Hop (0), Routing (43), AH (51), and
+/// Destination Options (60).
+pub(crate) const fn is_walkable_ipv6_extension(next_header: u8) -> bool {
+    matches!(next_header, 0 | 43 | 51 | 60)
+}
+
+/// Wire length of one walkable extension header, from the protocol number
+/// that selected it and its Hdr Ext Len byte. Hop-by-Hop, Routing, and
+/// Destination Options count 8-byte units excluding the first; AH counts
+/// 4-byte words minus two and can never be shorter than its 12 fixed bytes.
+pub(crate) fn ipv6_extension_header_length(next_header: u8, encoded_length: u8) -> Option<usize> {
+    match next_header {
+        0 | 43 | 60 => usize::from(encoded_length)
+            .checked_add(1)
+            .and_then(|units| units.checked_mul(8)),
+        51 => usize::from(encoded_length)
+            .checked_add(2)
+            .and_then(|words| words.checked_mul(4))
+            .filter(|length| *length >= 12),
+        _ => None,
+    }
+}
+
 pub(crate) fn resolve_envelope(
     context: &LayerEncodeContext<'_>,
 ) -> Result<NetworkEnvelope, crate::codec::Error> {

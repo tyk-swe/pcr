@@ -254,7 +254,7 @@ impl StatusCounts {
 }
 
 /// Terminal counters for one assembly pass.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct Summary {
     pub frames_read: u64,
     pub frames_matched: u64,
@@ -279,6 +279,7 @@ pub struct Summary {
     /// UDP frames seen on port 443, which are most likely QUIC. TLS over QUIC
     /// is out of scope, so this is how under-reporting stays visible.
     pub udp_443_frames: u64,
+    pub ip_reassembly: super::reassembly::Report,
 }
 
 impl Summary {
@@ -290,6 +291,7 @@ impl Summary {
         frames_read: u64,
         frames_matched: u64,
         selected: SelectionCounts,
+        ip_reassembly: &packetcraftr_core::analysis::IpReassemblyReport,
     ) -> Self {
         let mut by_status = StatusCounts::default();
         for (status, count) in analysis.by_status {
@@ -306,6 +308,7 @@ impl Summary {
             sessions_omitted: selected.omitted,
             buffer_limit_hits: analysis.buffer_limit_hits,
             udp_443_frames: analysis.udp_443_frames,
+            ip_reassembly: super::reassembly::Report::from_analysis(ip_reassembly),
         }
     }
 }

@@ -7,6 +7,7 @@ use std::time::Duration;
 use thiserror::Error;
 
 use crate::analysis::pcap::Error as CaptureError;
+use crate::analysis::reassembly::ip::Error as IpError;
 use crate::analysis::reassembly::tcp::Error as TcpError;
 
 use crate::error::{Classification, Classified, Kind};
@@ -32,6 +33,18 @@ pub enum Error {
         #[source]
         source: crate::decode::Error,
     },
+    #[error("derived IP datagram construction failed at frame {number}: {source}")]
+    DerivedFrame {
+        number: u64,
+        #[source]
+        source: crate::frame::Error,
+    },
+    #[error("derived IP datagram dissection failed at frame {number}: {source}")]
+    DerivedDecode {
+        number: u64,
+        #[source]
+        source: crate::decode::Error,
+    },
     #[error("display filter failed at frame {number}: {source}")]
     Filter {
         number: u64,
@@ -51,6 +64,12 @@ pub enum Error {
         number: u64,
         #[source]
         source: crate::analysis::reassembly::tcp::Error,
+    },
+    #[error("IP reassembly failed at frame {number}: {source}")]
+    IpReassembly {
+        number: u64,
+        #[source]
+        source: crate::analysis::reassembly::ip::Error,
     },
     #[error("analysis ran {actual:?}, exceeding the configured duration of {limit:?}")]
     DurationLimit { actual: Duration, limit: Duration },
@@ -81,10 +100,15 @@ impl Classified for Error {
                 source: crate::decode::Error::PacketSizeLimit { .. },
                 ..
             } => resource_limit(),
-            Self::Decode { .. } => Classification::new(
+            Self::Decode { .. } | Self::DerivedDecode { .. } => Classification::new(
                 "packet.decode",
                 Kind::Packet,
                 Some("repair the frame or raise the per-frame byte limit it was read under"),
+            ),
+            Self::DerivedFrame { .. } => Classification::new(
+                "internal.derived_frame",
+                Kind::Internal,
+                Some("report the capture and command as an internal reconstruction failure"),
             ),
             Self::TimestampRange { .. } => Classification::new(
                 "packet.timestamp",
@@ -107,9 +131,18 @@ impl Classified for Error {
             Self::Filter { .. } => {
                 Classification::new("cli.filter", Kind::Cli, Some("repair the display filter"))
             }
-            Self::StreamLimit { .. } | Self::Scope { .. } | Self::DurationLimit { .. } => {
-                resource_limit()
-            }
+            Self::StreamLimit { .. } | Self::DurationLimit { .. } => resource_limit(),
+            Self::Scope {
+                source:
+                    crate::analysis::scope::Error::Capacity
+                    | crate::analysis::scope::Error::Limit { .. },
+                ..
+            } => resource_limit(),
+            Self::Scope { .. } => Classification::new(
+                "internal.scope_composition",
+                Kind::Internal,
+                Some("report the capture and command as an internal scope-composition failure"),
+            ),
             // Reassembly fails for two distinct reasons: a finite budget was
             // exhausted, or the capture itself carries conflicting data. Only
             // the former is answered by raising budgets.
@@ -122,6 +155,10 @@ impl Classified for Error {
                 | TcpError::InvalidWindowLimit { .. } => resource_limit(),
                 _ => malformed_reassembly(),
             },
+            Self::IpReassembly { source, .. } => match source {
+                IpError::Resource(_) => ip_resource_limit(),
+                IpError::Malformed(_) => malformed_reassembly(),
+            },
             Self::Sink { source, .. } => source.classification(),
         }
     }
@@ -130,9 +167,12 @@ impl Classified for Error {
         match self {
             Self::Capture { source, .. } => vec![source.to_string()],
             Self::Decode { source, .. } => vec![source.to_string()],
+            Self::DerivedFrame { source, .. } => vec![source.to_string()],
+            Self::DerivedDecode { source, .. } => vec![source.to_string()],
             Self::Filter { source, .. } => vec![source.to_string()],
             Self::Scope { source, .. } => vec![source.to_string()],
             Self::Reassembly { source, .. } => vec![source.to_string()],
+            Self::IpReassembly { source, .. } => vec![source.to_string()],
             Self::Sink { source, .. } => source.causes(),
             _ => Vec::new(),
         }
@@ -144,6 +184,17 @@ fn resource_limit() -> Classification {
         "policy.analysis_resource_limit",
         Kind::Policy,
         Some("narrow the input with a filter or deliberately raise the finite analysis budget"),
+    )
+}
+
+fn ip_resource_limit() -> Classification {
+    Classification::new(
+        "policy.analysis_resource_limit",
+        Kind::Policy,
+        Some(
+            "trim or pre-filter the capture, or deliberately raise the relevant finite \
+             --max-ip-* analysis budget",
+        ),
     )
 }
 

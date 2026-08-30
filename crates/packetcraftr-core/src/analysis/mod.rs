@@ -14,8 +14,12 @@
 //! analysis needs no live-traffic authorization gate.
 //!
 //! Conversation indices are assigned over the whole capture before filtering,
-//! so they remain stable across commands. Reassembly consumes only matched
-//! frames, keeping a filtered run scoped to the selected conversations.
+//! so they remain stable across commands. IP fragments update capture-global
+//! bounded state before filtering. On a completing physical frame, display
+//! filters retain that frame's decoded layers and facts while also seeing the
+//! reconstructed datagram's child layers and derived transport index. TCP
+//! reassembly still consumes only matched frames, keeping its stream buffers
+//! scoped to the filter.
 
 mod adapter;
 mod conversation_index;
@@ -31,4 +35,7 @@ pub mod stats;
 pub mod tls;
 
 pub use error::Error;
-pub use pipeline::{FrameRecord, Limits, Options, Summary, run};
+pub use pipeline::{
+    DerivedDatagram, FrameRecord, IpCounters, IpDatagramOutcome, IpEvent, IpEventRecord,
+    IpFamilyCounters, IpReassemblyReport, Limits, Options, Summary, run, run_with_ip_events,
+};

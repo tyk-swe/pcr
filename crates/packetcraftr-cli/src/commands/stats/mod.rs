@@ -13,44 +13,37 @@ use super::super::errors::CliError;
 use super::super::input::open_capture;
 use super::super::rendering::{emit_aggregate, write_stdout_line};
 use super::format::AggregateFormat;
-use super::offline_analysis::{Prepared, prepare};
+use super::offline_analysis::prepare;
 
 pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
     let format = AggregateFormat::narrow(output::contract::Command::Stats, format)?;
     // Stats assigns conversation indices, so stream-aware filters like
     // `tcp.stream == 7` are supported here.
-    let Prepared {
-        registry,
-        filter,
-        limits,
-    } = prepare(arguments.limits, arguments.filter.as_deref())?;
+    let prepared = prepare(arguments.limits, arguments.filter.as_deref())?;
     let mut collector =
         analysis::stats::Collector::new(Duration::from_millis(arguments.interval_ms))
             .map_err(CliError::classified)?;
 
     let mut reader = open_capture(&arguments.path, arguments.limits.capture)?;
 
-    let options = analysis::Options {
-        filter: filter.as_ref(),
-        tcp_events: false,
-        limits,
-    };
-    let summary = analysis::run(&mut reader, registry, &options, |record| {
+    let options = prepared.options(false);
+    let summary = analysis::run(&mut reader, prepared.registry.clone(), &options, |record| {
         collector
             .observe(&record)
             .expect("the analysis pipeline supplies timestamped statistics records");
         Ok(())
     })
     .map_err(CliError::classified)?;
-    let report = collector.finish();
+    let frames_read = summary.frames_read;
+    let report = collector.finish(summary.ip_reassembly);
 
     match format {
-        AggregateFormat::Text => render_text(arguments.table, &report, &summary),
+        AggregateFormat::Text => render_text(arguments.table, &report, frames_read),
         AggregateFormat::Json => {
             let result = output::stats::Result::try_from_report(
                 arguments.table.into(),
                 &report,
-                summary.frames_read,
+                frames_read,
             )
             .map_err(CliError::classified)?;
             emit_aggregate(output::contract::Command::Stats, result, Vec::new())
@@ -61,11 +54,11 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
 fn render_text(
     table: Table,
     report: &analysis::stats::Report,
-    summary: &analysis::Summary,
+    frames_read: u64,
 ) -> Result<(), CliError> {
     write_stdout_line(format_args!(
         "matched {} of {} frame(s), {} byte(s)",
-        report.frames, summary.frames_read, report.bytes
+        report.frames, frames_read, report.bytes
     ))?;
     match table {
         Table::Conversations => {
@@ -124,6 +117,82 @@ fn render_text(
                 ))?;
             }
         }
+        Table::Fragments => render_fragments(&report.ip_reassembly)?,
+    }
+    Ok(())
+}
+
+fn render_fragments(report: &analysis::IpReassemblyReport) -> Result<(), CliError> {
+    write_stdout_line(format_args!(
+        "fragment accounting is capture-global; display filters apply only downstream, and derived bytes are excluded from physical matched totals"
+    ))?;
+    for (family, counters) in [
+        ("ipv4", &report.counters.ipv4),
+        ("ipv6", &report.counters.ipv6),
+    ] {
+        write_stdout_line(format_args!(
+            "{family}: physical fragments {} (atomic {}, admitted {}, duplicate {}, overlap-resolved {}, completing {}), datagrams {} complete / {} incomplete ({} idle-expired / {} end-of-capture), overlap bytes {}, derived datagram bytes {}, derived payload bytes {}",
+            counters.physical_fragments,
+            counters.atomic_fragments,
+            counters.admitted_fragments,
+            counters.duplicate_fragments,
+            counters.overlap_resolved_fragments,
+            counters.completing_fragments,
+            counters.completed_datagrams,
+            counters.incomplete_datagrams,
+            counters.idle_expired_datagrams,
+            counters.end_of_capture_datagrams,
+            counters.overlap_bytes,
+            counters.derived_datagram_bytes,
+            counters.derived_payload_bytes,
+        ))?;
+    }
+    for outcome in &report.outcomes {
+        match outcome {
+            analysis::IpDatagramOutcome::Completed {
+                key,
+                fragment_count,
+                unique_bytes,
+                final_payload_length,
+                datagram_bytes,
+                duplicate_fragments,
+                overlap_bytes,
+            } => write_stdout_line(format_args!(
+                "{}: complete, fragments {}, unique bytes {}, final payload bytes {}, datagram bytes {}, duplicate fragments {}, overlap bytes {}",
+                output::reassembly::DatagramKey::from(key),
+                fragment_count,
+                unique_bytes,
+                final_payload_length,
+                datagram_bytes,
+                duplicate_fragments,
+                overlap_bytes,
+            ))?,
+            analysis::IpDatagramOutcome::Incomplete {
+                key,
+                reason,
+                fragment_count,
+                unique_bytes,
+                known_final_length,
+                duplicate_fragments,
+                overlap_bytes,
+            } => write_stdout_line(format_args!(
+                "{}: incomplete ({}), fragments {}, unique bytes {}, known final payload bytes {}, duplicate fragments {}, overlap bytes {}",
+                output::reassembly::DatagramKey::from(key),
+                output::reassembly::IncompleteReason::from(*reason),
+                fragment_count,
+                unique_bytes,
+                known_final_length
+                    .map_or_else(|| "unknown".to_owned(), |length| length.to_string()),
+                duplicate_fragments,
+                overlap_bytes,
+            ))?,
+        }
+    }
+    if report.outcomes_omitted != 0 {
+        write_stdout_line(format_args!(
+            "{} additional datagram outcome(s) omitted by the retention ceiling",
+            report.outcomes_omitted
+        ))?;
     }
     Ok(())
 }

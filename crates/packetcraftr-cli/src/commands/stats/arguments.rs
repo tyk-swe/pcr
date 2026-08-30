@@ -11,8 +11,11 @@ pub(crate) const AFTER_LONG_HELP: &str = r#"Statistics are computed offline over
 
 Conversation (stream) indices are assigned in first-seen order over the whole capture before any --filter runs, so the index one invocation reports names the same conversation in every other invocation, and stream-aware filters such as 'tcp.stream == 7' are supported.
 
+The fragments table reports capture-global IPv4 and IPv6 reassembly because every physical fragment must advance the same bounded state even when --filter narrows downstream frames. Its derived datagram and payload bytes are separate from the physical matched frame and byte totals.
+
 Examples:
   packetcraftr stats capture.pcapng --table conversations
+  packetcraftr stats capture.pcapng --table fragments
   packetcraftr stats capture.pcapng --table protocols --filter 'ip.src in 10.0.0.0/8'
   packetcraftr --output json stats capture.pcapng --table io --interval-ms 100"#;
 
@@ -23,6 +26,7 @@ pub(crate) enum Table {
     Protocols,
     Ports,
     Io,
+    Fragments,
 }
 
 impl From<Table> for packetcraftr::output::stats::Table {
@@ -33,6 +37,7 @@ impl From<Table> for packetcraftr::output::stats::Table {
             Table::Protocols => Self::Protocols,
             Table::Ports => Self::Ports,
             Table::Io => Self::Io,
+            Table::Fragments => Self::Fragments,
         }
     }
 }

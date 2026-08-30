@@ -1,0 +1,24 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "tls",
+  "mode": "stream",
+  "sequence": 0,
+  "status": "success",
+  "result": {
+    "event": "ip_overlap_resolved",
+    "frame": 4,
+    "key": {
+      "family": "ipv4",
+      "scope": 0,
+      "source": "192.0.2.1",
+      "destination": "198.51.100.2",
+      "identification": 42,
+      "protocol": 6
+    },
+    "policy": "last",
+    "affected_bytes": 8,
+    "fragment_count": 2,
+    "unique_bytes": 24
+  },
+  "diagnostics": []
+}

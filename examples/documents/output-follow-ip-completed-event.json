@@ -1,0 +1,29 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "follow",
+  "mode": "stream",
+  "sequence": 0,
+  "status": "success",
+  "result": {
+    "event": "ip_datagram_completed",
+    "frame": 2,
+    "outcome": {
+      "status": "completed",
+      "key": {
+        "family": "ipv4",
+        "scope": 0,
+        "source": "192.0.2.1",
+        "destination": "198.51.100.2",
+        "identification": 42,
+        "protocol": 17
+      },
+      "fragment_count": 2,
+      "unique_bytes": 24,
+      "final_payload_length": 24,
+      "datagram_bytes": 44,
+      "duplicate_fragments": 0,
+      "overlap_bytes": 0
+    }
+  },
+  "diagnostics": []
+}

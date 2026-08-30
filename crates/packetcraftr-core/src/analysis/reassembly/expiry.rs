@@ -40,24 +40,35 @@ impl<K: Ord> ExpiryIndex<K> {
 
     /// Removes deadlines through `now`, ordered by deadline and then stable key.
     pub(super) fn take_expired(&mut self, now: Instant) -> Vec<K> {
+        let mut keys = Vec::new();
+        self.drain_expired(now, |key| keys.push(key));
+        keys
+    }
+
+    /// Removes deadlines through `now`, visiting each key in deadline and
+    /// then stable-key order without first collecting an unbounded key list.
+    pub(super) fn drain_expired<F>(&mut self, now: Instant, mut visit: F)
+    where
+        F: FnMut(K),
+    {
         let Some((&first_deadline, _)) = self.entries.first_key_value() else {
-            return Vec::new();
+            return;
         };
         if first_deadline > now {
-            return Vec::new();
+            return;
         }
 
         let mut future = self.entries.split_off(&now);
         let at_now = future.remove(&now);
         let expired = std::mem::replace(&mut self.entries, future);
-        let mut keys = expired
-            .into_values()
-            .flat_map(BTreeSet::into_iter)
-            .collect::<Vec<_>>();
-        if let Some(at_now) = at_now {
-            keys.extend(at_now);
+        for key in expired.into_values().flat_map(BTreeSet::into_iter) {
+            visit(key);
         }
-        keys
+        if let Some(at_now) = at_now {
+            for key in at_now {
+                visit(key);
+            }
+        }
     }
 
     #[cfg(test)]

@@ -336,6 +336,7 @@ proptest! {
 
         let context = FilterContext {
             decoded: &decoded,
+            derived: &[],
             number: 1,
             tcp_stream: None,
             udp_stream: None,

@@ -12,7 +12,7 @@ use self::arguments::{Args, Direction};
 use super::super::errors::CliError;
 use super::super::input::open_capture;
 use super::format::FollowFormat;
-use super::offline_analysis::{Prepared, StreamSelector, parse_stream_selector, prepare};
+use super::offline_analysis::{StreamSelector, parse_stream_selector, prepare};
 use crate::rendering::StreamEncoder;
 
 use analysis::expert::StreamTransport;
@@ -45,40 +45,41 @@ pub(super) fn run(
         },
         selector.index
     );
-    let Prepared {
-        registry,
-        filter,
-        limits,
-    } = prepare(arguments.limits, Some(&source))?;
-    let filter = filter.expect("follow always prepares a stream filter");
+    let prepared = prepare(arguments.limits, Some(&source))?;
     let mut reader = open_capture(&arguments.path, arguments.limits.capture)?;
 
-    let options = analysis::Options {
-        filter: Some(&filter),
-        // Only TCP needs reassembly; UDP chunks come straight from frames.
-        tcp_events: selector.transport == StreamTransport::Tcp,
-        limits,
-    };
+    // Only TCP needs reassembly; UDP chunks come straight from frames.
+    let options = prepared.options(selector.transport == StreamTransport::Tcp);
     let mut collector = Collector::new(selector);
     let direction = arguments.direction;
     let mut state = State::default();
-    let run_summary = analysis::run(&mut reader, registry, &options, |record| {
-        for chunk in collector.observe(&record) {
-            if !direction_matches(direction, &chunk) {
-                continue;
+    let run_summary = analysis::run_with_ip_events(
+        &mut reader,
+        prepared.registry.clone(),
+        &options,
+        super::offline_analysis::ip_event_sink(format == FollowFormat::Ndjson, stream.clone()),
+        |record| {
+            for chunk in collector.observe(&record) {
+                if !direction_matches(direction, &chunk) {
+                    continue;
+                }
+                rendering::render_record(format, chunk, &mut state, stream)
+                    .map_err(CliError::into_boundary_error)?;
             }
-            rendering::render_record(format, chunk, &mut state, stream)
-                .map_err(CliError::into_boundary_error)?;
-        }
-        Ok(())
-    })
+            Ok(())
+        },
+    )
     .map_err(CliError::classified)?;
     let summary = collector.finish(&run_summary.trailing_tcp_events);
 
     match format {
         FollowFormat::Text => rendering::render_text(selector, &summary),
-        FollowFormat::Json => rendering::render_aggregate(selector, summary, state),
-        FollowFormat::Ndjson => rendering::render_stream(selector, summary, stream),
+        FollowFormat::Json => {
+            rendering::render_aggregate(selector, summary, state, &run_summary.ip_reassembly)
+        }
+        FollowFormat::Ndjson => {
+            rendering::render_stream(selector, summary, &run_summary.ip_reassembly, stream)
+        }
         FollowFormat::Hex | FollowFormat::Raw => rendering::render_payload_warning(&summary),
     }
 }

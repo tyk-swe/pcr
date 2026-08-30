@@ -1,0 +1,28 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "expert",
+  "mode": "stream",
+  "sequence": 0,
+  "status": "success",
+  "result": {
+    "event": "ip_datagram_incomplete",
+    "frame": 7,
+    "outcome": {
+      "status": "incomplete",
+      "key": {
+        "family": "ipv6",
+        "scope": 1,
+        "source": "2001:db8::1",
+        "destination": "2001:db8::2",
+        "identification": 70000
+      },
+      "reason": "idle_expired",
+      "fragment_count": 3,
+      "unique_bytes": 32,
+      "known_final_length": 48,
+      "duplicate_fragments": 1,
+      "overlap_bytes": 0
+    }
+  },
+  "diagnostics": []
+}

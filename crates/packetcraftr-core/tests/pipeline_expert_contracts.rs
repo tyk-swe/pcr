@@ -196,6 +196,35 @@ fn analysis_errors_keep_policy_packet_and_boundary_classifications_distinct() {
         source: tcp::Error::FlowByteLimit { limit: 8 },
     };
     assert_eq!(bounded.classification().kind, Kind::Policy);
+    let bounded_ip = Error::IpReassembly {
+        number: 3,
+        source: packetcraftr_core::analysis::reassembly::ip::ResourceError::AggregateMemoryLimit {
+            limit: 8,
+        }
+        .into(),
+    };
+    let remediation = bounded_ip
+        .classification()
+        .remediation
+        .expect("IP resource failures have remediation");
+    assert!(remediation.contains("trim or pre-filter the capture"));
+    assert!(remediation.contains("--max-ip-*"));
+    let bounded_scope = Error::Scope {
+        number: 3,
+        source: packetcraftr_core::analysis::scope::Error::Limit { limit: 8 },
+    };
+    assert_eq!(bounded_scope.classification().kind, Kind::Policy);
+    for source in [
+        packetcraftr_core::analysis::scope::Error::Unknown { scope: 7 },
+        packetcraftr_core::analysis::scope::Error::ReplayMismatch { scope: 7 },
+    ] {
+        let invariant = Error::Scope { number: 3, source };
+        assert_eq!(invariant.classification().kind, Kind::Internal);
+        assert_eq!(
+            invariant.classification().code,
+            "internal.scope_composition"
+        );
+    }
     let sink = Error::Sink {
         number: 4,
         source: BoundaryError::execution_validation("bad sink", "test.sink", "repair it"),

@@ -16,6 +16,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use packetcraftr::analysis::pcap::{Format as CaptureFormat, Writer};
+use packetcraftr::core::field::WireValue;
 use packetcraftr::core::frame::{Frame, LinkType};
 use packetcraftr::core::protocol::application::tls::model::extension::{
     ALPN, KEY_SHARE, SERVER_NAME, SIGNATURE_ALGORITHMS, SUPPORTED_GROUPS, SUPPORTED_VERSIONS,
@@ -80,6 +81,60 @@ impl Handshake {
 /// Writes a PCAPNG capture holding one TCP conversation per handshake.
 pub(crate) fn write_capture(handshakes: &[Handshake]) -> tempfile::NamedTempFile {
     write_capture_with_udp_443(handshakes, 0)
+}
+
+/// Writes one complete TLS handshake whose two data-bearing TCP segments are
+/// each split across two IPv4 fragments.
+pub(crate) fn write_fragmented_capture() -> tempfile::NamedTempFile {
+    let registry = registry();
+    let handshake = Handshake::complete(40_000, 443, "api.example.test");
+    let mut file = tempfile::NamedTempFile::new().expect("temporary capture must open");
+    {
+        let mut writer = Writer::new(&mut file, CaptureFormat::PcapNg, LinkType::IPV4)
+            .expect("PCAPNG writer must initialize");
+        let mut identification = 100_u16;
+        for (offset, spec, payload) in conversation(&handshake)
+            .into_iter()
+            .filter(|(_, _, payload)| !payload.is_empty())
+        {
+            let timestamp = SystemTime::UNIX_EPOCH + Duration::from_millis(offset);
+            let complete = frame(&registry, timestamp, spec, &payload);
+            let ip_payload = complete
+                .bytes()
+                .get(20..)
+                .expect("fixture uses a fixed IPv4 header");
+            let first_length = 64;
+            assert!(ip_payload.len() > first_length, "hello spans fragments");
+            for fragment in [
+                fragment_frame(
+                    &registry,
+                    timestamp,
+                    spec,
+                    identification,
+                    0,
+                    true,
+                    &ip_payload[..first_length],
+                ),
+                fragment_frame(
+                    &registry,
+                    timestamp + Duration::from_millis(1),
+                    spec,
+                    identification,
+                    u16::try_from(first_length / 8).expect("fragment offset fits"),
+                    false,
+                    &ip_payload[first_length..],
+                ),
+            ] {
+                writer
+                    .write_frame(&fragment)
+                    .expect("fragmented TLS frame must write");
+            }
+            identification = identification.saturating_add(1);
+        }
+        writer.flush().expect("fragmented capture must flush");
+    }
+    file.flush().expect("fragmented capture must flush");
+    file
 }
 
 /// Writes the same capture with `udp_443_frames` UDP datagrams on port 443
@@ -178,6 +233,7 @@ fn build(registry: &Arc<Registry>, packet: Packet) -> Vec<u8> {
 }
 
 /// One TCP segment's header fields.
+#[derive(Clone, Copy)]
 struct Segment {
     from_client: bool,
     source_port: u16,
@@ -286,6 +342,36 @@ fn frame(registry: &Arc<Registry>, timestamp: SystemTime, spec: Segment, payload
     }
     Frame::new(timestamp, LinkType::IPV4, build(registry, packet))
         .expect("fixture frame must be valid")
+}
+
+#[allow(clippy::too_many_arguments)]
+fn fragment_frame(
+    registry: &Arc<Registry>,
+    timestamp: SystemTime,
+    spec: Segment,
+    identification: u16,
+    fragment_offset: u16,
+    more_fragments: bool,
+    payload: &[u8],
+) -> Frame {
+    let (source, destination) = if spec.from_client {
+        (CLIENT, SERVER)
+    } else {
+        (SERVER, CLIENT)
+    };
+    let mut packet = Packet::new();
+    packet.push(Ipv4 {
+        identification,
+        more_fragments,
+        fragment_offset,
+        protocol: WireValue::Exact(6),
+        source,
+        destination,
+        ..Ipv4::default()
+    });
+    packet.push(Raw::new(payload.to_vec()));
+    Frame::new(timestamp, LinkType::IPV4, build(registry, packet))
+        .expect("fragmented TLS fixture frame must be valid")
 }
 
 fn vector8(body: &[u8]) -> Vec<u8> {

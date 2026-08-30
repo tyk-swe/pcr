@@ -88,6 +88,16 @@ capture.pcapng`. Supported formats depend on the command and include `text`,
 combinations fail explicitly. Streaming NDJSON ends with one completion record
 or one typed error.
 
+Offline `stats`, `expert`, `follow`, and `tls` perform bounded, capture-global
+IPv4 and IPv6 fragment reassembly before downstream transport indexing. A
+completed datagram is a derived view attached to the physical fragment that
+completed it: `frame.*` fields and physical frame/byte totals remain captured
+facts, while reconstructed child layers can satisfy display filters and join
+TCP or UDP conversations. `stats --table fragments` reports physical fragment
+and derived-datagram accounting separately. The shared `--ip-overlap`,
+`--ip-idle-expiry-ms`, and `--max-ip-*` options make overlap behavior, expiry,
+and every retained-state ceiling explicit.
+
 ## Library
 
 Rust users normally depend on the `packetcraftr` facade. It re-exports packet

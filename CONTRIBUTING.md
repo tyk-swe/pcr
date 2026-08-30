@@ -25,6 +25,16 @@ The [CI workflow](.github/workflows/ci.yml) is the authoritative check set;
 macOS and Windows test `no-default`, `default`, and `pcap-free`, while their
 all-feature builds run `cargo check`.
 
+The fuzz harness is a standalone workspace. Bounded nightly smoke runs are
+registered in [fuzz.yml](.github/workflows/fuzz.yml). For example, format it
+and exercise the IP offset map, overlap policies, reconstruction metadata, and
+limits from the repository root:
+
+```console
+cargo fmt --manifest-path fuzz/Cargo.toml -- --check
+cargo +nightly fuzz run ip_reassembly fuzz/corpora/ip_reassembly -- -max_total_time=30
+```
+
 ## Architecture
 
 Cargo manifests and `cargo metadata` are the source of truth for packages,

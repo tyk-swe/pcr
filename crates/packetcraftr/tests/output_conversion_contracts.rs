@@ -5,7 +5,7 @@
 #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 use std::collections::BTreeMap;
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 
@@ -17,9 +17,17 @@ use packetcraftr::core::analysis::expert::{
 use packetcraftr::core::analysis::follow::{
     Chunk as AnalysisChunk, Direction as AnalysisDirection,
 };
+use packetcraftr::core::analysis::reassembly::ip::{
+    DatagramKey as AnalysisDatagramKey, IncompleteReason,
+    Ipv4DatagramKey as AnalysisIpv4DatagramKey, Ipv6DatagramKey as AnalysisIpv6DatagramKey,
+};
 use packetcraftr::core::analysis::reassembly::tcp::FlowKey;
+use packetcraftr::core::analysis::scope::Interner;
 use packetcraftr::core::analysis::stats::{
     ConversationStat, EndpointStat, IoBucketStat, PortStat, ProtocolStat, TransportKind,
+};
+use packetcraftr::core::analysis::{
+    IpCounters, IpDatagramOutcome, IpFamilyCounters, IpReassemblyReport,
 };
 use packetcraftr::core::diagnostic::Diagnostic;
 use packetcraftr::core::frame::{Direction as CaptureDirection, Frame, LinkType};
@@ -163,6 +171,10 @@ fn packet_output_adapters_preserve_wire_data_and_separate_diagnostics() {
 fn representative_stats_report() -> packetcraftr::core::analysis::stats::Report {
     let first = UNIX_EPOCH + Duration::from_secs(5);
     let last = first + Duration::from_millis(3_250);
+    let mut scopes = Interner::new();
+    let scope = scopes
+        .intern(None, Vec::new())
+        .expect("representative scope fits");
     packetcraftr::core::analysis::stats::Report {
         interval: Duration::from_secs(2),
         frames: 7,
@@ -206,6 +218,59 @@ fn representative_stats_report() -> packetcraftr::core::analysis::stats::Report 
             frames: 5,
             bytes: 240,
         }],
+        ip_reassembly: IpReassemblyReport {
+            counters: IpCounters {
+                ipv4: IpFamilyCounters {
+                    physical_fragments: 3,
+                    admitted_fragments: 3,
+                    completing_fragments: 1,
+                    completed_datagrams: 1,
+                    overlap_bytes: 2,
+                    derived_datagram_bytes: 44,
+                    derived_payload_bytes: 24,
+                    ..IpFamilyCounters::default()
+                },
+                ipv6: IpFamilyCounters {
+                    physical_fragments: 1,
+                    admitted_fragments: 1,
+                    incomplete_datagrams: 1,
+                    end_of_capture_datagrams: 1,
+                    ..IpFamilyCounters::default()
+                },
+            },
+            outcomes: vec![
+                IpDatagramOutcome::Completed {
+                    key: AnalysisDatagramKey::Ipv4(AnalysisIpv4DatagramKey {
+                        scope,
+                        source: Ipv4Addr::new(192, 0, 2, 1),
+                        destination: Ipv4Addr::new(198, 51, 100, 2),
+                        identification: 42,
+                        protocol: 17,
+                    }),
+                    fragment_count: 3,
+                    unique_bytes: 24,
+                    final_payload_length: 24,
+                    datagram_bytes: 44,
+                    duplicate_fragments: 1,
+                    overlap_bytes: 2,
+                },
+                IpDatagramOutcome::Incomplete {
+                    key: AnalysisDatagramKey::Ipv6(AnalysisIpv6DatagramKey {
+                        scope,
+                        source: Ipv6Addr::LOCALHOST,
+                        destination: "2001:db8::2".parse().expect("documentation address"),
+                        identification: 7,
+                    }),
+                    reason: IncompleteReason::EndOfCapture,
+                    fragment_count: 1,
+                    unique_bytes: 16,
+                    known_final_length: None,
+                    duplicate_fragments: 0,
+                    overlap_bytes: 0,
+                },
+            ],
+            outcomes_omitted: 2,
+        },
     }
 }
 
@@ -218,6 +283,7 @@ fn stats_output_selects_exactly_one_requested_table() {
         (stats::Table::Protocols, "protocols"),
         (stats::Table::Ports, "ports"),
         (stats::Table::Io, "io"),
+        (stats::Table::Fragments, "fragments"),
     ];
 
     for (table, expected_key) in cases {
@@ -235,7 +301,14 @@ fn stats_output_selects_exactly_one_requested_table() {
                 .unix_seconds,
             5
         );
-        for key in ["conversations", "endpoints", "protocols", "ports", "io"] {
+        for key in [
+            "conversations",
+            "endpoints",
+            "protocols",
+            "ports",
+            "io",
+            "fragments",
+        ] {
             assert_eq!(
                 value.get(key).is_some(),
                 key == expected_key,
@@ -243,6 +316,37 @@ fn stats_output_selects_exactly_one_requested_table() {
             );
         }
     }
+}
+
+#[test]
+fn stats_fragment_output_preserves_family_counters_outcomes_and_omissions() {
+    let report = representative_stats_report();
+    let fragments = stats::Result::try_from_report(stats::Table::Fragments, &report, 9)
+        .expect("fragment report converts")
+        .fragments
+        .expect("fragment table is present");
+
+    assert_eq!(fragments.families.len(), 2);
+    assert_eq!(fragments.families[0].physical_fragments, 3);
+    assert_eq!(fragments.families[0].completed_datagrams, 1);
+    assert_eq!(fragments.families[0].derived_datagram_bytes, 44);
+    assert_eq!(fragments.families[0].derived_payload_bytes, 24);
+    assert_eq!(fragments.families[1].incomplete_datagrams, 1);
+    assert_eq!(fragments.families[1].end_of_capture_datagrams, 1);
+    assert_eq!(fragments.outcomes_omitted, 2);
+    assert_eq!(fragments.outcomes.len(), 2);
+
+    let value = serde_json::to_value(&fragments).expect("fragment output serializes");
+    assert_eq!(value["families"][0]["family"], "ipv4");
+    assert_eq!(value["families"][1]["family"], "ipv6");
+    assert_eq!(value["outcomes"][0]["status"], "completed");
+    assert_eq!(value["outcomes"][0]["key"]["family"], "ipv4");
+    assert_eq!(value["outcomes"][0]["key"]["scope"], 0);
+    assert_eq!(value["outcomes"][0]["key"]["protocol"], 17);
+    assert_eq!(value["outcomes"][1]["status"], "incomplete");
+    assert_eq!(value["outcomes"][1]["reason"], "end_of_capture");
+    assert_eq!(value["outcomes"][1]["key"]["family"], "ipv6");
+    assert!(value["outcomes"][1].get("known_final_length").is_none());
 }
 
 #[test]
@@ -397,6 +501,7 @@ fn expert_output_preserves_finding_severity_streams_and_code_order() {
         12,
         11,
         findings,
+        &IpReassemblyReport::default(),
     );
     let expert_json = serde_json::to_value(&expert_result).expect("expert output serializes");
     assert_eq!(expert_result.codes[0].code, "capture.note");
@@ -441,6 +546,7 @@ fn follow_output_preserves_flow_directions_bytes_and_missing_endpoints() {
             undelivered_bytes: 4,
         },
         chunks,
+        &IpReassemblyReport::default(),
     );
 
     assert_eq!(followed.client.expect("client endpoint").port, 40_000);
@@ -455,6 +561,7 @@ fn follow_output_preserves_flow_directions_bytes_and_missing_endpoints() {
         99,
         packetcraftr::core::analysis::follow::Summary::default(),
         Vec::new(),
+        &IpReassemblyReport::default(),
     );
     assert!(empty.client.is_none() && empty.server.is_none());
     assert_eq!(

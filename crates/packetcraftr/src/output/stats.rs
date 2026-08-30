@@ -24,6 +24,7 @@ pub enum Table {
     Protocols,
     Ports,
     Io,
+    Fragments,
 }
 
 mirror_enum! {
@@ -94,7 +95,8 @@ pub struct Io {
 pub struct Result {
     pub table: Table,
     /// Frames the capture yielded, matched or not, and the frames the
-    /// filter kept; the tables describe only the matched frames.
+    /// filter kept. Physical tables describe matched frames; fragment
+    /// reassembly accounting remains capture-global across the filter.
     pub frames_read: u64,
     pub frames_matched: u64,
     pub bytes_matched: u64,
@@ -112,6 +114,8 @@ pub struct Result {
     pub ports: Option<Vec<Port>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub io: Option<Io>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fragments: Option<super::reassembly::Report>,
 }
 
 impl Result {
@@ -133,6 +137,7 @@ impl Result {
             protocols: None,
             ports: None,
             io: None,
+            fragments: None,
         };
         match table {
             Table::Conversations => {
@@ -158,6 +163,11 @@ impl Result {
                     interval: report.interval,
                     buckets: report.io.iter().map(convert_bucket).collect(),
                 });
+            }
+            Table::Fragments => {
+                result.fragments = Some(super::reassembly::Report::from_analysis(
+                    &report.ip_reassembly,
+                ));
             }
         }
         Ok(result)

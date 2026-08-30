@@ -116,6 +116,7 @@ impl FrameSelector {
         self.filter
             .matches(&Context {
                 decoded: &decoded,
+                derived: &[],
                 number: source_frame,
                 tcp_stream: None,
                 udp_stream: None,

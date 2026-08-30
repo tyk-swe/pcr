@@ -8,12 +8,17 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Added
 
+- Bounded, capture-global IPv4 and IPv6 fragment reassembly with explicit
+  `reject`, `first`, and `last` overlap policies; separate physical/derived
+  accounting; derived transport participation in filters, stream indexing,
+  follow, TLS, and expert analysis; incomplete idle/EOF outcomes; shared CLI
+  ceilings; and a dedicated fuzz target.
 - Bounded DNS UDP-to-TCP fallback: one validated truncated UDP response may
   continue over length-prefixed TCP to the same reauthorized numeric server
   within the original attempt deadline. `packetcraftr dns --udp-only` retains
   the prior UDP-only diagnostic behavior and is required for scoped IPv6
   link-local servers.
-- Eight implementation fuzz targets, property coverage for document, capture,
+- Nine implementation fuzz targets, property coverage for document, capture,
   filter, layout, reassembly, and TLS behavior, plus non-gating Criterion and
   peak-RSS measurement harnesses.
 - `DocumentLimits` and `Packet::parse_with_limits`, enforcing matching bounded
@@ -23,6 +28,11 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- **Breaking (library/output):** analysis, filter, and reassembly options and
+  records gained required IP-fragment limits, overlap policy, physical/derived
+  views, counters, and lifecycle variants; public struct literals and
+  structured follow, stats, TLS, and expert consumers must handle the new
+  fields and events.
 - **Breaking (library/output):** `dns::Request` now declares `tcp_fallback`;
   DNS attempt events identify their transport and optional source port, while
   aggregate/completion output reports `fallback_attempted` and the optional

@@ -117,11 +117,12 @@ impl Collector {
 
     /// Folds one matched frame, returning the findings it revealed.
     pub fn observe(&mut self, record: &FrameRecord<'_>) -> Vec<Finding> {
-        let frame_transports = transports(&record.decoded.packet);
-        let mut findings = finding::from_diagnostics(record, &frame_transports);
+        let decoded = record.tcp_decoded;
+        let frame_transports = transports(&decoded.packet);
+        let mut findings = finding::from_diagnostics(record);
         self.reconcile_tcp_evictions(record.tcp_events);
         if let (Some(transport), Some(flow)) = (frame_transports.tcp, record.tcp_flow) {
-            let payload_len = transport_payload(record.decoded, transport.index).len();
+            let payload_len = transport_payload(decoded, transport.index).len();
             self.observe_tcp(record, flow, transport.layer, payload_len, &mut findings);
         }
 

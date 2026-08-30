@@ -21,6 +21,11 @@ use super::path::{ByteSlice, FieldAccess, FieldRef, FieldSource, FrameField, Str
 pub struct Context<'a> {
     /// The dissected packet, including its originating frame.
     pub decoded: &'a DecodedPacket,
+    /// Completed IP datagrams attached to the same physical frame, ordered
+    /// from outermost to innermost; empty for an unfragmented frame. Layer
+    /// predicates see only the layers each completion newly exposed, while
+    /// frame facts and physical fragment layers remain sourced from `decoded`.
+    pub derived: &'a [DerivedPacket<'a>],
     /// Position of this frame in the stream, counted from 1.
     pub number: u64,
     /// Conversation index of the frame's innermost TCP flow, when the caller
@@ -32,6 +37,14 @@ pub struct Context<'a> {
     /// `udp.stream` never observes a TCP index on an encapsulated frame that
     /// belongs to both kinds of conversation.
     pub udp_stream: Option<u64>,
+}
+
+/// One reconstructed packet view and the number of its leading layers that
+/// were already visible in the view which supplied its fragments.
+#[derive(Clone, Copy, Debug)]
+pub struct DerivedPacket<'a> {
+    pub decoded: &'a DecodedPacket,
+    pub replayed_prefix_layers: usize,
 }
 
 /// Runs a compiled program over one packet.
@@ -107,6 +120,13 @@ fn layers<'a>(
         .decoded
         .packet
         .iter()
+        .chain(context.derived.iter().flat_map(|derived| {
+            derived
+                .decoded
+                .packet
+                .iter()
+                .skip(derived.replayed_prefix_layers)
+        }))
         .filter(move |layer| layer.protocol_id().as_str() == protocol)
         .enumerate()
         .filter_map(move |(index, layer)| match occurrence {

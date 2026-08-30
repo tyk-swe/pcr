@@ -342,6 +342,128 @@ fn production_typed_event_variants_are_schema_valid() {
     validate_exchange_event_variants();
 }
 
+fn ip_reassembly_events() -> [output::reassembly::Event; 3] {
+    let ipv4 = output::reassembly::DatagramKey {
+        family: output::reassembly::Family::Ipv4,
+        scope: 0,
+        source: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
+        destination: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2)),
+        identification: 42,
+        protocol: Some(17),
+    };
+    let ipv6 = output::reassembly::DatagramKey {
+        family: output::reassembly::Family::Ipv6,
+        scope: 1,
+        source: "2001:db8::1".parse().expect("documentation address"),
+        destination: "2001:db8::2".parse().expect("documentation address"),
+        identification: 70_000,
+        protocol: None,
+    };
+    [
+        output::reassembly::Event::IpDatagramCompleted {
+            frame: 2,
+            outcome: output::reassembly::DatagramOutcome::Completed {
+                key: ipv4.clone(),
+                fragment_count: 2,
+                unique_bytes: 24,
+                final_payload_length: 24,
+                datagram_bytes: 44,
+                duplicate_fragments: 0,
+                overlap_bytes: 0,
+            },
+        },
+        output::reassembly::Event::IpDatagramIncomplete {
+            frame: 7,
+            outcome: output::reassembly::DatagramOutcome::Incomplete {
+                key: ipv6,
+                reason: output::reassembly::IncompleteReason::IdleExpired,
+                fragment_count: 3,
+                unique_bytes: 32,
+                known_final_length: Some(48),
+                duplicate_fragments: 1,
+                overlap_bytes: 0,
+            },
+        },
+        output::reassembly::Event::IpOverlapResolved {
+            frame: 8,
+            key: ipv4,
+            policy: output::reassembly::OverlapPolicy::Last,
+            affected_bytes: 8,
+            fragment_count: 3,
+            unique_bytes: 24,
+        },
+    ]
+}
+
+fn validate_ip_event_stream<T: serde::Serialize>(command: output::contract::Command, terminal: T) {
+    let (sink, bytes) = stream(command);
+    for event in ip_reassembly_events() {
+        sink.emit_data(event, Vec::new())
+            .expect("IP lifecycle event must render");
+    }
+    sink.complete(terminal, Vec::new())
+        .expect("terminal report must render");
+
+    let records = bytes.records();
+    validate_records(schema_validator(), &records);
+    assert_eq!(records.len(), 4);
+    assert_eq!(records[0]["result"]["event"], "ip_datagram_completed");
+    assert_eq!(records[1]["result"]["event"], "ip_datagram_incomplete");
+    assert_eq!(records[2]["result"]["event"], "ip_overlap_resolved");
+    assert!(records[3]["result"]["ip_reassembly"].is_object());
+    assert_eq!(
+        records[3]["result"]["ip_reassembly"]["families"][0]["family"],
+        "ipv4"
+    );
+    assert_eq!(
+        records[3]["result"]["ip_reassembly"]["families"][1]["family"],
+        "ipv6"
+    );
+    assert!(sink.is_terminal());
+    assert!(
+        sink.emit_data(ip_reassembly_events()[0].clone(), Vec::new())
+            .is_err(),
+        "a second terminal tail must not be writable"
+    );
+    assert_eq!(bytes.records(), records);
+}
+
+#[test]
+fn ip_reassembly_events_and_terminal_reports_are_valid_for_every_offline_stream() {
+    validate_ip_event_stream(
+        output::contract::Command::Follow,
+        output::follow::Result {
+            transport: output::expert::StreamTransport::Udp,
+            stream: 0,
+            client: None,
+            server: None,
+            frames: 0,
+            client_bytes: 0,
+            server_bytes: 0,
+            undelivered_bytes: 0,
+            chunks: Vec::new(),
+            ip_reassembly: output::reassembly::Report::default(),
+        },
+    );
+    validate_ip_event_stream(
+        output::contract::Command::Expert,
+        output::expert::Result {
+            frames_read: 0,
+            frames_matched: 0,
+            errors: 0,
+            warnings: 0,
+            notes: 0,
+            codes: Vec::new(),
+            findings: Vec::new(),
+            ip_reassembly: output::reassembly::Report::default(),
+        },
+    );
+    validate_ip_event_stream(
+        output::contract::Command::Tls,
+        output::tls::Event::complete(output::tls::Summary::default()),
+    );
+}
+
 /// A minimal session record: the shape a `gap` session takes when the capture
 /// started after the ClientHello, so the optional halves are exercised too.
 fn tls_session_event() -> output::tls::Event {

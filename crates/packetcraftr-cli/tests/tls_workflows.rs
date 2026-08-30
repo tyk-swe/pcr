@@ -14,7 +14,10 @@ mod support;
 mod tls_capture;
 
 use support::{assert_contiguous, parse_json, parse_ndjson, path_text, run, run_success};
-use tls_capture::{Handshake, client_hello_frame_hex, write_capture, write_capture_with_udp_443};
+use tls_capture::{
+    Handshake, client_hello_frame_hex, write_capture, write_capture_with_udp_443,
+    write_fragmented_capture,
+};
 
 /// The capture published for the README and `--help` examples.
 fn published_capture() -> PathBuf {
@@ -85,6 +88,39 @@ fn the_published_capture_assembles_one_complete_session_in_every_format() {
     assert_eq!(records[0]["result"]["client"]["sni"], "api.example.test");
     assert_eq!(records[1]["result"]["event"], "complete");
     assert_eq!(records[1]["result"]["sessions"], 1);
+}
+
+#[test]
+fn fragmented_tls_ndjson_orders_ip_completion_before_session_and_terminal() {
+    let capture = write_fragmented_capture();
+    let records = parse_ndjson(&run_success(&[
+        "--output",
+        "ndjson",
+        "tls",
+        path_text(capture.path()),
+    ]));
+    assert_contiguous(&records);
+    assert_eq!(records.len(), 4);
+    assert_eq!(records[0]["result"]["event"], "ip_datagram_completed");
+    assert_eq!(records[0]["result"]["frame"], 2);
+    assert_eq!(records[1]["result"]["event"], "ip_datagram_completed");
+    assert_eq!(records[1]["result"]["frame"], 4);
+    assert_eq!(records[2]["result"]["event"], "session");
+    assert_eq!(records[2]["result"]["status"], "complete");
+    assert_eq!(records[3]["result"]["event"], "complete");
+    assert_eq!(records[3]["result"]["sessions"], 1);
+    assert_eq!(
+        records[3]["result"]["ip_reassembly"]["families"][0]["completed_datagrams"],
+        2
+    );
+    assert_eq!(
+        records
+            .iter()
+            .filter(|record| record["result"]["event"] == "complete")
+            .count(),
+        1,
+        "TLS emits one terminal record"
+    );
 }
 
 #[test]

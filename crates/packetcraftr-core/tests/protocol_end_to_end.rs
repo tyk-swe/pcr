@@ -422,6 +422,7 @@ fn assert_negative_filters(registry: &Registry, decoded: &decode::DecodedPacket)
             !filter
                 .matches(&FilterContext {
                     decoded,
+                    derived: &[],
                     number: 7,
                     tcp_stream: None,
                     udp_stream: Some(3),
@@ -479,6 +480,7 @@ fn ethernet_ipv4_udp_raw_round_trip_exercises_filter_language() {
         filter
             .matches(&FilterContext {
                 decoded: &decoded,
+                derived: &[],
                 number: 7,
                 tcp_stream: None,
                 udp_stream: Some(3),
@@ -490,6 +492,7 @@ fn ethernet_ipv4_udp_raw_round_trip_exercises_filter_language() {
     assert!(matches!(
         filter.matches(&FilterContext {
             decoded: &decoded,
+            derived: &[],
             number: 9,
             tcp_stream: None,
             udp_stream: Some(3),

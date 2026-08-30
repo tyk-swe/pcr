@@ -35,6 +35,13 @@
 //! applies to either-field paths: `tcp.port != 80` holds when *either* endpoint
 //! is not port 80. Use `tcp.srcport` or `tcp.dstport` when direction matters.
 //!
+//! The offline analysis pipeline may attach a completed IP datagram to the
+//! physical fragment that completed it. In that context, layer predicates see
+//! the physical decoded stack followed by reconstructed child layers (without
+//! duplicating the reconstructed base IP header). Reserved `frame.*` facts
+//! always describe the physical capture record, and the derived TCP or UDP
+//! conversation index is attributed to that same completing frame.
+//!
 //! Filters have no regular-expression operator. Use `contains` for substrings
 //! and byte-slice equality for prefixes. A `contains` needle must be a byte run
 //! (`47:45`) or quoted text (`"GE"`), not an ambiguous bare number.
@@ -57,7 +64,7 @@ mod parser;
 mod path;
 
 pub use error::Error;
-pub use eval::Context;
+pub use eval::{Context, DerivedPacket};
 pub use model::Filter;
 pub use parser::{
     DEFAULT_MAX_FILTER_BYTES, MAX_FILTER_NESTING, MAX_FILTER_SET_MEMBERS, MAX_FILTER_TERMS,

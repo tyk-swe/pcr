@@ -6,6 +6,8 @@
 use std::net::IpAddr;
 use std::time::{Duration, SystemTime};
 
+use crate::analysis::IpReassemblyReport;
+
 /// Which transport a conversation or port tally belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TransportKind {
@@ -110,4 +112,9 @@ pub struct Report {
     pub ports: Vec<PortStat>,
     /// Non-empty buckets in time order, offset from the first matched frame.
     pub io: Vec<IoBucketStat>,
+    /// Capture-global fragment accounting, intentionally independent of the
+    /// downstream display filter because every physical fragment must update
+    /// reassembly state. This never contributes synthesized frames or derived
+    /// bytes to [`Self::frames`] or [`Self::bytes`].
+    pub ip_reassembly: IpReassemblyReport,
 }

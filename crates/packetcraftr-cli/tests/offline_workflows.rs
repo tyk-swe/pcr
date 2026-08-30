@@ -6,11 +6,17 @@
 
 use std::io::Write;
 use std::path::PathBuf;
-use std::time::UNIX_EPOCH;
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use packetcraftr::{
     analysis::pcap::{Format as CaptureFormat, Writer},
-    core::frame::{Frame, LinkType},
+    core::{
+        Packet,
+        field::WireValue,
+        frame::{Frame, LinkType},
+        layer::Raw,
+        protocol::{ipv6::Fragment as Ipv6Fragment, network::Ipv6},
+    },
 };
 #[path = "support/process.rs"]
 mod process_support;
@@ -27,12 +33,22 @@ const TCP_SERVER: &str =
     "450000280000000040068e99c6336402c0000201005030390000000a000000045012100083040000";
 const TCP_DATA: &str =
     "4500002b0000000040068e96c0000201c633640230390050000000040000000b50181000be970000616263";
+const IPV4_FRAGMENT_FIRST: &str =
+    "45000024002a200040116e68c0000201c63364029c40270f001800006162636465666768";
+const IPV4_FRAGMENT_LAST: &str = "4500001c002a000240118e6ec0000201c6336402696a6b6c6d6e6f70";
+const IPV4_FRAGMENT_INCOMPLETE: &str =
+    "45000024002b200040116e67c0000201c63364029c40270f001800006162636465666768";
 
 fn write_capture() -> tempfile::NamedTempFile {
     write_capture_frames(&[UDP_CLIENT, UDP_SERVER, TCP_CLIENT, TCP_SERVER, TCP_DATA])
 }
 
 fn write_capture_frames(frames: &[&str]) -> tempfile::NamedTempFile {
+    let frames = frames.iter().copied().map(decode_hex).collect::<Vec<_>>();
+    write_capture_byte_frames(&frames)
+}
+
+fn write_capture_byte_frames(frames: &[Vec<u8>]) -> tempfile::NamedTempFile {
     let mut file = tempfile::NamedTempFile::new().expect("temporary capture must open");
     file.write_all(&[
         0xd4, 0xc3, 0xb2, 0xa1, // little-endian microsecond PCAP
@@ -43,7 +59,7 @@ fn write_capture_frames(frames: &[&str]) -> tempfile::NamedTempFile {
     ])
     .expect("global header must write");
 
-    for (index, bytes) in frames.iter().copied().map(decode_hex).enumerate() {
+    for (index, bytes) in frames.iter().enumerate() {
         let seconds = u32::try_from(index + 1).expect("fixture index fits u32");
         let length = u32::try_from(bytes.len()).expect("fixture frame fits u32");
         file.write_all(&seconds.to_le_bytes())
@@ -54,7 +70,7 @@ fn write_capture_frames(frames: &[&str]) -> tempfile::NamedTempFile {
             .expect("captured length must write");
         file.write_all(&length.to_le_bytes())
             .expect("original length must write");
-        file.write_all(&bytes).expect("frame bytes must write");
+        file.write_all(bytes).expect("frame bytes must write");
     }
     file.flush().expect("capture must flush");
     file
@@ -92,6 +108,36 @@ fn write_capture_with_later_missing_timestamp() -> tempfile::NamedTempFile {
     file
 }
 
+fn ipv6_fragment_hex() -> String {
+    let registry = std::sync::Arc::new(
+        packetcraftr::core::protocol::builtin::registry().expect("built-in registry builds"),
+    );
+    let mut packet = Packet::new();
+    packet.push(Ipv6 {
+        source: "2001:db8::1".parse().expect("documentation source"),
+        destination: "2001:db8::2".parse().expect("documentation destination"),
+        ..Ipv6::default()
+    });
+    packet.push(Ipv6Fragment {
+        next_header: WireValue::Exact(17),
+        fragment_offset: 0,
+        more_fragments: true,
+        identification: 42,
+    });
+    packet.push(Raw::new(b"abcdefgh".to_vec()));
+    packetcraftr::core::build::Builder::new(registry)
+        .build(
+            packet,
+            packetcraftr::core::build::Context::default(),
+            packetcraftr::core::build::Options::default(),
+        )
+        .expect("IPv6 fragment builds")
+        .bytes
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
 fn write_truncated_capture() -> tempfile::NamedTempFile {
     let mut file = write_capture();
     append_truncated_record(&mut file);
@@ -117,10 +163,153 @@ fn stats_exercises_every_table_and_filtering_mode() {
     assert_eq!(value["result"]["frames_read"], 5);
     assert_eq!(value["result"]["frames_matched"], 1);
 
-    for table in ["conversations", "endpoints", "protocols", "ports", "io"] {
+    for table in [
+        "conversations",
+        "endpoints",
+        "protocols",
+        "ports",
+        "io",
+        "fragments",
+    ] {
         let output = run_success(&["stats", path, "--table", table, "--interval-ms", "500"]);
         assert!(String::from_utf8_lossy(&output.stdout).contains("matched 5 of 5"));
     }
+}
+
+#[test]
+fn single_frame_fragment_dissection_and_capture_rewrite_remain_physical() {
+    for (link_type, hex, expected) in [
+        ("228", IPV4_FRAGMENT_FIRST.to_owned(), vec!["ipv4", "raw"]),
+        (
+            "229",
+            ipv6_fragment_hex(),
+            vec!["ipv6", "ipv6_fragment", "raw"],
+        ),
+    ] {
+        let output = run_success(&[
+            "--output",
+            "json",
+            "dissect",
+            "--link-type",
+            link_type,
+            "--hex",
+            &hex,
+        ]);
+        let value = parse_json(&output);
+        let protocols = value["result"]["dissection"]["packet"]["layers"]
+            .as_array()
+            .expect("dissection layers are present")
+            .iter()
+            .map(|layer| layer["protocol"].as_str().expect("protocol is text"))
+            .collect::<Vec<_>>();
+        assert_eq!(protocols, expected);
+        assert!(!protocols.contains(&"udp"));
+        assert!(!protocols.contains(&"tcp"));
+    }
+
+    let capture = write_capture_frames(&[IPV4_FRAGMENT_FIRST, IPV4_FRAGMENT_LAST]);
+    let rewritten = run_success(&["--output", "pcap", "read", path_text(capture.path())]);
+    assert_eq!(
+        rewritten.stdout,
+        std::fs::read(capture.path()).expect("fragment capture reads")
+    );
+}
+
+#[test]
+fn stats_fragments_separates_physical_totals_from_bounded_derived_outcomes() {
+    let capture = write_capture_frames(&[
+        IPV4_FRAGMENT_FIRST,
+        IPV4_FRAGMENT_LAST,
+        IPV4_FRAGMENT_INCOMPLETE,
+    ]);
+    let path = path_text(capture.path());
+
+    let text = run_success(&["stats", path, "--table", "fragments"]);
+    let rendered = String::from_utf8_lossy(&text.stdout);
+    assert!(
+        rendered.contains("matched 3 of 3 frame(s), 100 byte(s)"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("ipv4: physical fragments 3"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("fragment accounting is capture-global"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("derived datagram bytes 44, derived payload bytes 24"),
+        "{rendered}"
+    );
+    assert!(rendered.contains("complete, fragments 2"), "{rendered}");
+    assert!(
+        rendered.contains("incomplete (end-of-capture), fragments 1"),
+        "{rendered}"
+    );
+
+    let json = run_success(&["--output", "json", "stats", path, "--table", "fragments"]);
+    let value = parse_json(&json);
+    assert_eq!(value["result"]["table"], "fragments");
+    assert_eq!(value["result"]["frames_read"], 3);
+    assert_eq!(value["result"]["frames_matched"], 3);
+    assert_eq!(value["result"]["bytes_matched"], 100);
+    let fragments = &value["result"]["fragments"];
+    assert_eq!(fragments["families"][0]["family"], "ipv4");
+    assert_eq!(fragments["families"][0]["physical_fragments"], 3);
+    assert_eq!(fragments["families"][0]["completed_datagrams"], 1);
+    assert_eq!(fragments["families"][0]["incomplete_datagrams"], 1);
+    assert_eq!(fragments["families"][0]["derived_datagram_bytes"], 44);
+    assert_eq!(fragments["families"][0]["derived_payload_bytes"], 24);
+    assert_eq!(fragments["families"][1]["family"], "ipv6");
+    assert_eq!(fragments["families"][1]["physical_fragments"], 0);
+    assert_eq!(fragments["outcomes"].as_array().map(Vec::len), Some(2));
+    assert_eq!(fragments["outcomes"][0]["status"], "completed");
+    assert_eq!(fragments["outcomes"][1]["status"], "incomplete");
+    assert_eq!(fragments["outcomes_omitted"], 0);
+    for other in ["conversations", "endpoints", "protocols", "ports", "io"] {
+        assert!(value["result"].get(other).is_none(), "unexpected {other}");
+    }
+
+    let filtered = run_success(&[
+        "--output",
+        "json",
+        "stats",
+        path,
+        "--table",
+        "fragments",
+        "--filter",
+        "udp",
+    ]);
+    let filtered = parse_json(&filtered);
+    assert_eq!(filtered["result"]["frames_read"], 3);
+    assert_eq!(filtered["result"]["frames_matched"], 1);
+    assert_eq!(filtered["result"]["bytes_matched"], 28);
+    assert_eq!(
+        filtered["result"]["fragments"]["families"][0]["physical_fragments"], 3,
+        "capture-global reassembly still sees filtered physical fragments"
+    );
+    assert_eq!(
+        filtered["result"]["fragments"]["outcomes"]
+            .as_array()
+            .map(Vec::len),
+        Some(2)
+    );
+
+    let bounded = run_success(&[
+        "--output",
+        "json",
+        "stats",
+        path,
+        "--table",
+        "fragments",
+        "--max-ip-outcomes",
+        "1",
+    ]);
+    let bounded = parse_json(&bounded);
+    let fragments = &bounded["result"]["fragments"];
+    assert_eq!(fragments["outcomes"].as_array().map(Vec::len), Some(1));
+    assert_eq!(fragments["outcomes_omitted"], 1);
 }
 
 #[test]
@@ -182,6 +371,121 @@ fn follow_handles_udp_directions_and_all_output_encodings() {
         let rejected = run(&["follow", path, "--stream", stream]);
         assert_eq!(rejected.status.code(), Some(2));
     }
+}
+
+#[test]
+fn follow_and_expert_stream_ip_lifecycle_before_data_and_single_terminal() {
+    let capture = write_capture_frames(&[
+        IPV4_FRAGMENT_FIRST,
+        IPV4_FRAGMENT_LAST,
+        IPV4_FRAGMENT_INCOMPLETE,
+    ]);
+    let path = path_text(capture.path());
+
+    let follow = run_success(&["--output", "ndjson", "follow", path, "--stream", "udp:0"]);
+    let records = parse_ndjson(&follow);
+    assert_contiguous(&records);
+    assert_eq!(records.len(), 4);
+    assert_eq!(records[0]["result"]["event"], "ip_datagram_completed");
+    assert_eq!(records[0]["result"]["frame"], 2);
+    assert_eq!(records[1]["result"]["frame"], 2);
+    assert_eq!(
+        records[1]["result"]["bytes_hex"],
+        "6162636465666768696a6b6c6d6e6f70"
+    );
+    assert_eq!(records[2]["result"]["event"], "ip_datagram_incomplete");
+    assert_eq!(records[2]["result"]["frame"], 3);
+    assert_eq!(records[3]["result"]["frames"], 1);
+    assert_eq!(
+        records[3]["result"]["ip_reassembly"]["families"][0]["completed_datagrams"],
+        1
+    );
+    assert_eq!(
+        records[3]["result"]["ip_reassembly"]["families"][0]["incomplete_datagrams"],
+        1
+    );
+    assert_eq!(
+        records
+            .iter()
+            .filter(|record| record["sequence"] == 3)
+            .count(),
+        1,
+        "follow has exactly one terminal record"
+    );
+
+    let expert = run_success(&["--output", "ndjson", "expert", path]);
+    let records = parse_ndjson(&expert);
+    assert_contiguous(&records);
+    assert_eq!(records.len(), 3);
+    assert_eq!(records[0]["result"]["event"], "ip_datagram_completed");
+    assert_eq!(records[1]["result"]["event"], "ip_datagram_incomplete");
+    assert_eq!(records[2]["result"]["frames_read"], 3);
+    assert_eq!(
+        records[2]["result"]["ip_reassembly"]["families"][0]["completed_datagrams"],
+        1
+    );
+    assert_eq!(
+        records
+            .iter()
+            .filter(|record| record["sequence"] == 2)
+            .count(),
+        1,
+        "expert has exactly one terminal record"
+    );
+
+    let tls = run_success(&["--output", "ndjson", "tls", path]);
+    let records = parse_ndjson(&tls);
+    assert_contiguous(&records);
+    assert_eq!(records.len(), 3);
+    assert_eq!(records[0]["result"]["event"], "ip_datagram_completed");
+    assert_eq!(records[1]["result"]["event"], "ip_datagram_incomplete");
+    assert_eq!(records[2]["result"]["event"], "complete");
+    assert_eq!(records[2]["result"]["sessions"], 0);
+    assert_eq!(
+        records[2]["result"]["ip_reassembly"]["families"][0]["incomplete_datagrams"],
+        1
+    );
+    assert_eq!(
+        records
+            .iter()
+            .filter(|record| record["result"]["event"] == "complete")
+            .count(),
+        1,
+        "TLS has exactly one terminal record"
+    );
+}
+
+#[test]
+fn follow_stream_reports_overlap_resolution_before_completion_and_payload() {
+    let first = decode_hex(IPV4_FRAGMENT_FIRST);
+    let mut conflict = first.clone();
+    conflict[28] = b'X';
+    let last = decode_hex(IPV4_FRAGMENT_LAST);
+    let capture = write_capture_byte_frames(&[first, conflict, last]);
+    let path = path_text(capture.path());
+    let output = run_success(&[
+        "--output",
+        "ndjson",
+        "follow",
+        path,
+        "--stream",
+        "udp:0",
+        "--ip-overlap",
+        "first",
+    ]);
+    let records = parse_ndjson(&output);
+    assert_contiguous(&records);
+    assert_eq!(records.len(), 4);
+    assert_eq!(records[0]["result"]["event"], "ip_overlap_resolved");
+    assert_eq!(records[0]["result"]["frame"], 2);
+    assert_eq!(records[0]["result"]["affected_bytes"], 1);
+    assert_eq!(records[1]["result"]["event"], "ip_datagram_completed");
+    assert_eq!(records[1]["result"]["frame"], 3);
+    assert_eq!(records[2]["result"]["frame"], 3);
+    assert_eq!(
+        records[3]["result"]["ip_reassembly"]["families"][0]["overlap_bytes"],
+        1
+    );
 }
 
 #[test]
@@ -553,9 +857,55 @@ fn packet_documents_stdin_and_file_inputs_cover_offline_input_paths() {
 #[test]
 fn format_and_limit_failures_are_reported_before_offline_work() {
     let missing = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("does-not-exist.pcap");
-    let unsupported = run(&["--output", "raw", "stats", path_text(&missing)]);
+    let missing = path_text(&missing);
+    let unsupported = run(&["--output", "raw", "stats", missing]);
     assert_eq!(unsupported.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&unsupported.stderr).contains("does not support raw"));
+
+    for arguments in [
+        vec!["stats", missing, "--max-ip-datagrams", "0"],
+        vec!["expert", missing, "--max-ip-fragments-per-datagram", "0"],
+        vec![
+            "follow",
+            missing,
+            "--stream",
+            "tcp:0",
+            "--max-ip-bytes-per-datagram",
+            "0",
+        ],
+        vec!["tls", missing, "--max-ip-reassembly-bytes", "0"],
+        vec!["stats", missing, "--max-ip-outcomes", "0"],
+        vec!["expert", missing, "--ip-idle-expiry-ms", "0"],
+        vec!["stats", missing, "--ip-overlap", "invalid"],
+    ] {
+        let output = run(&arguments);
+        assert_eq!(output.status.code(), Some(2), "{arguments:?}");
+        assert!(
+            !String::from_utf8_lossy(&output.stderr).contains("open "),
+            "{arguments:?} must fail before opening the capture"
+        );
+    }
+    if Instant::now()
+        .checked_add(Duration::from_millis(u64::MAX))
+        .is_none()
+    {
+        let output = run(&[
+            "stats",
+            missing,
+            "--ip-idle-expiry-ms",
+            "18446744073709551615",
+        ]);
+        assert_eq!(output.status.code(), Some(2));
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("open "));
+    }
+    for policy in ["reject", "first", "last"] {
+        let output = run(&["stats", missing, "--ip-overlap", policy]);
+        assert_eq!(output.status.code(), Some(5), "{policy}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("open "),
+            "valid overlap policy {policy} must reach capture opening"
+        );
+    }
 
     let capture = write_capture();
     let path = path_text(capture.path());

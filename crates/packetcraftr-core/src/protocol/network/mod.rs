@@ -9,7 +9,9 @@ mod ipv4;
 mod ipv6;
 mod raw_ip;
 
-pub(crate) use envelope::resolve_envelope;
+pub(crate) use envelope::{
+    ipv6_extension_header_length, is_walkable_ipv6_extension, resolve_envelope,
+};
 pub use igmp::Igmp;
 pub(crate) use igmp::IgmpCodec;
 pub use ipv4::Ipv4;

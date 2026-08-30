@@ -253,6 +253,7 @@ fn convert_frame(
         if !filter
             .matches(&core::filter::Context {
                 decoded: &decoded,
+                derived: &[],
                 number: source_frame,
                 tcp_stream: None,
                 udp_stream: None,

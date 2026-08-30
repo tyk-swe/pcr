@@ -190,7 +190,8 @@ impl Collector {
         };
         self.note_stream(stream);
         let key = CanonicalFlow::from_flow(flow);
-        let transport = transports(&record.decoded.packet).tcp;
+        let decoded = record.tcp_decoded;
+        let transport = transports(&decoded.packet).tcp;
         if let Some(transport) = &transport
             && transport.layer.flags & Tcp::SYN != 0
         {
@@ -212,7 +213,7 @@ impl Collector {
             None => self.track(&key, stream, flow.clone(), &mut events),
         }
         if let Some(live) = self.live_mut(&key) {
-            live.note_frame(record.decoded.frame.timestamp);
+            live.note_frame(decoded.frame.timestamp);
             if let Some(transport) = &transport {
                 let first = live.first_flow().clone();
                 live.dedup().observe_syn(flow, &first, transport.layer);

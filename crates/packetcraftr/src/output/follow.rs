@@ -64,14 +64,17 @@ pub struct Result {
     /// TCP bytes captured but stranded behind missing segments.
     pub undelivered_bytes: u64,
     pub chunks: Vec<Chunk>,
+    pub ip_reassembly: super::reassembly::Report,
 }
 
 impl Result {
+    #[must_use]
     pub fn from_summary(
         transport: StreamTransport,
         stream: u64,
         summary: packetcraftr_core::analysis::follow::Summary,
         chunks: Vec<Chunk>,
+        ip_reassembly: &packetcraftr_core::analysis::IpReassemblyReport,
     ) -> Self {
         let endpoint = |address: IpAddr, port: u16| Endpoint { address, port };
         let (client, server) = match &summary.client_flow {
@@ -91,6 +94,7 @@ impl Result {
             server_bytes: summary.server_bytes,
             undelivered_bytes: summary.undelivered_bytes,
             chunks,
+            ip_reassembly: super::reassembly::Report::from_analysis(ip_reassembly),
         }
     }
 }

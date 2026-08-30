@@ -153,6 +153,7 @@ fn matches(decoded: &decode::DecodedPacket, source: &str) -> bool {
     .unwrap_or_else(|error| panic!("{source} must compile: {error}"))
     .matches(&FilterContext {
         decoded,
+        derived: &[],
         number: 1,
         tcp_stream: Some(0),
         udp_stream: None,

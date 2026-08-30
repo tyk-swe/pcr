@@ -113,5 +113,6 @@ fn result(
         } else {
             Vec::new()
         },
+        ip_reassembly: output::reassembly::Report::from_analysis(&summary.ip_reassembly),
     }
 }

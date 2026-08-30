@@ -48,7 +48,45 @@
         "stream": 0,
         "message": "connection reset by 10.0.0.2:443"
       }
-    ]
+    ],
+    "ip_reassembly": {
+      "families": [
+        {
+          "family": "ipv4",
+          "physical_fragments": 0,
+          "atomic_fragments": 0,
+          "admitted_fragments": 0,
+          "duplicate_fragments": 0,
+          "overlap_resolved_fragments": 0,
+          "completing_fragments": 0,
+          "completed_datagrams": 0,
+          "incomplete_datagrams": 0,
+          "idle_expired_datagrams": 0,
+          "end_of_capture_datagrams": 0,
+          "overlap_bytes": 0,
+          "derived_datagram_bytes": 0,
+          "derived_payload_bytes": 0
+        },
+        {
+          "family": "ipv6",
+          "physical_fragments": 0,
+          "atomic_fragments": 0,
+          "admitted_fragments": 0,
+          "duplicate_fragments": 0,
+          "overlap_resolved_fragments": 0,
+          "completing_fragments": 0,
+          "completed_datagrams": 0,
+          "incomplete_datagrams": 0,
+          "idle_expired_datagrams": 0,
+          "end_of_capture_datagrams": 0,
+          "overlap_bytes": 0,
+          "derived_datagram_bytes": 0,
+          "derived_payload_bytes": 0
+        }
+      ],
+      "outcomes": [],
+      "outcomes_omitted": 0
+    }
   },
   "diagnostics": []
 }

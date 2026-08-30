@@ -139,7 +139,8 @@ impl Collector {
         if record.tcp_stream != Some(self.selector.index) {
             return Vec::new();
         }
-        let Some(transport) = transports(&record.decoded.packet).tcp else {
+        let decoded = record.tcp_decoded;
+        let Some(transport) = transports(&decoded.packet).tcp else {
             return Vec::new();
         };
         let Some(flow) = record.tcp_flow else {
@@ -192,7 +193,8 @@ impl Collector {
         if record.udp_stream != Some(self.selector.index) {
             return Vec::new();
         }
-        let Some(transport) = transports(&record.decoded.packet).udp else {
+        let decoded = record.udp_decoded;
+        let Some(transport) = transports(&decoded.packet).udp else {
             return Vec::new();
         };
         let Some(flow) = record.udp_flow else {
@@ -214,7 +216,7 @@ impl Collector {
         };
         // Every datagram is one chunk, an empty one included: the frame and
         // direction are part of the conversation's shape.
-        let bytes = transport_payload(record.decoded, transport.index);
+        let bytes = transport_payload(decoded, transport.index);
         self.tally(direction, bytes.len());
         vec![Chunk {
             direction,

@@ -20,7 +20,9 @@ use packetcraftr_core::analysis::follow::{Direction as FollowDirection, Selector
 use packetcraftr_core::analysis::pcap::{Reader, Writer};
 use packetcraftr_core::analysis::reassembly::tcp;
 use packetcraftr_core::analysis::stats::TransportKind;
-use packetcraftr_core::analysis::{Error, Limits, Options, run};
+use packetcraftr_core::analysis::{
+    Error, IpFamilyCounters, IpReassemblyReport, Limits, Options, run,
+};
 use packetcraftr_core::build::Builder;
 use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::filter::Filter;
@@ -199,6 +201,17 @@ fn limits_validate_each_finite_budget_before_input_is_read() {
         .validate(),
         Err(Error::InvalidLimit {
             field: "max_duration",
+            ..
+        })
+    ));
+    assert!(matches!(
+        Limits {
+            ip_idle_expiry: Duration::MAX,
+            ..Limits::default()
+        }
+        .validate(),
+        Err(Error::InvalidLimit {
+            field: "ip_idle_expiry",
             ..
         })
     ));
@@ -520,7 +533,7 @@ fn stats_collect_all_tables_with_directional_and_time_accounting() {
         },
     )
     .expect("statistics pass succeeds");
-    let report = collector.finish();
+    let report = collector.finish(IpReassemblyReport::default());
     assert_eq!(summary.frames_read, 3);
     assert_eq!(report.frames, 3);
     assert_eq!(report.bytes, total_bytes);
@@ -590,13 +603,35 @@ fn stats_reject_zero_interval_and_empty_report_is_well_formed() {
     ));
     let report = packetcraftr_core::analysis::stats::Collector::new(Duration::from_millis(250))
         .expect("valid interval")
-        .finish();
+        .finish(IpReassemblyReport::default());
     assert_eq!(report.frames, 0);
     assert_eq!(report.bytes, 0);
     assert!(report.first_timestamp.is_none());
     assert!(report.protocols.is_empty());
     assert!(report.conversations.is_empty());
     assert!(report.io.is_empty());
+    assert_eq!(report.ip_reassembly, IpReassemblyReport::default());
+
+    let ip_reassembly = IpReassemblyReport {
+        counters: packetcraftr_core::analysis::IpCounters {
+            ipv4: IpFamilyCounters {
+                physical_fragments: 2,
+                completed_datagrams: 1,
+                derived_datagram_bytes: 44,
+                derived_payload_bytes: 24,
+                ..IpFamilyCounters::default()
+            },
+            ..packetcraftr_core::analysis::IpCounters::default()
+        },
+        outcomes_omitted: 3,
+        ..IpReassemblyReport::default()
+    };
+    let report = packetcraftr_core::analysis::stats::Collector::new(Duration::from_millis(250))
+        .expect("valid interval")
+        .finish(ip_reassembly.clone());
+    assert_eq!(report.ip_reassembly, ip_reassembly);
+    assert_eq!(report.frames, 0);
+    assert_eq!(report.bytes, 0);
 }
 
 #[test]

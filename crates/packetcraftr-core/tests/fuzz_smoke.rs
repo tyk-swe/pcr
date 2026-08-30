@@ -23,6 +23,9 @@ use packetcraftr_core::protocol::application::tls::{
 };
 use packetcraftr_core::protocol::builtin;
 
+#[path = "../../../fuzz/fuzz_targets/ip_reassembly_support.rs"]
+mod ip_reassembly_support;
+
 /// The checked-in seed corpus for one fuzz target; a missing corpus is a
 /// harness defect, not an empty smoke test.
 fn corpus(target: &str) -> std::path::PathBuf {
@@ -176,6 +179,7 @@ fn smoke_test_filter_parse() {
                         if let Ok(decoded) = dissector.decode(frame, DecodeOptions::default()) {
                             let context = FilterContext {
                                 decoded: &decoded,
+                                derived: &[],
                                 number: 1,
                                 tcp_stream: None,
                                 udp_stream: None,
@@ -221,6 +225,30 @@ fn smoke_test_tcp_reassembly() {
         payload: Bytes::from_static(b"hello"),
     };
     let _ = reassembler.push(seg, now);
+}
+
+#[test]
+fn smoke_test_ip_reassembly_seeds_reach_completion_and_overlap() {
+    let corpus_dir = corpus("ip_reassembly");
+    let mut coverage = ip_reassembly_support::Coverage::default();
+    let mut checked = 0_usize;
+    for entry in fs::read_dir(corpus_dir)
+        .expect("IP reassembly corpus directory")
+        .flatten()
+    {
+        let path = entry.path();
+        if path.is_file() {
+            checked = checked.saturating_add(1);
+            let seed_coverage =
+                ip_reassembly_support::run(&fs::read(&path).expect("read IP reassembly seed"));
+            coverage.completed |= seed_coverage.completed;
+            coverage.overlap |= seed_coverage.overlap;
+        }
+    }
+
+    assert!(checked > 0, "IP reassembly corpus must contain seeds");
+    assert!(coverage.completed, "seed corpus must reach completion");
+    assert!(coverage.overlap, "seed corpus must reach overlap handling");
 }
 
 #[test]

@@ -75,19 +75,45 @@ impl ScopeId {
 pub enum Error {
     #[error("capture scope table exhausted its 32-bit identity space")]
     Capacity,
+    #[error("capture scope {scope} was not issued by this interner")]
+    Unknown { scope: u32 },
+    #[error("capture scope {scope} does not end with the expected replayed encapsulation")]
+    ReplayMismatch { scope: u32 },
+    #[error("capture scope table reached configured limit {limit}")]
+    Limit { limit: usize },
 }
 
 /// Exact interner for semantic encapsulation paths and capture scopes.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Interner {
     scopes: HashMap<(Option<GlobalInterfaceId>, Vec<EncapsulationIdentifier>), ScopeId>,
+    definitions: Vec<(Option<GlobalInterfaceId>, Vec<EncapsulationIdentifier>)>,
     next: u32,
+    limit: usize,
+}
+
+impl Default for Interner {
+    fn default() -> Self {
+        Self {
+            scopes: HashMap::new(),
+            definitions: Vec::new(),
+            next: 0,
+            limit: usize::MAX,
+        }
+    }
 }
 
 impl Interner {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub(crate) fn with_limit(limit: usize) -> Self {
+        Self {
+            limit,
+            ..Self::default()
+        }
     }
 
     /// Returns the compact ID for an exact interface and encapsulation path.
@@ -100,11 +126,39 @@ impl Interner {
         if let Some(id) = self.scopes.get(&scope) {
             return Ok(*id);
         }
+        if self.scopes.len() >= self.limit {
+            return Err(Error::Limit { limit: self.limit });
+        }
         let next = self.next.checked_add(1).ok_or(Error::Capacity)?;
         let id = ScopeId(self.next);
         self.next = next;
-        self.scopes.insert(scope, id);
+        self.scopes.insert(scope.clone(), id);
+        self.definitions.push(scope);
         Ok(id)
+    }
+
+    /// Replaces identifiers replayed while decoding a reconstructed datagram
+    /// before appending the complete derived encapsulation path.
+    pub(crate) fn replace_suffix(
+        &mut self,
+        base: ScopeId,
+        replayed: &[EncapsulationIdentifier],
+        replacement: &[EncapsulationIdentifier],
+    ) -> Result<ScopeId, Error> {
+        let index = usize::try_from(base.0).map_err(|_| Error::Unknown { scope: base.0 })?;
+        let (interface, mut path) = self
+            .definitions
+            .get(index)
+            .cloned()
+            .ok_or(Error::Unknown { scope: base.0 })?;
+        if !path.ends_with(replayed) {
+            return Err(Error::ReplayMismatch { scope: base.0 });
+        }
+        path.truncate(path.len().saturating_sub(replayed.len()));
+        path.try_reserve(replacement.len())
+            .map_err(|_| Error::Capacity)?;
+        path.extend_from_slice(replacement);
+        self.intern(interface, path)
     }
 }
 
@@ -161,6 +215,70 @@ mod tests {
                 .intern(Some(1), tunnel_path(10))
                 .expect("base scope is still interned"),
             base
+        );
+    }
+
+    #[test]
+    fn derived_encapsulation_extends_the_exact_physical_scope() {
+        let mut interner = Interner::new();
+        let base_path = tunnel_path(10);
+        let base = interner
+            .intern(Some(7), base_path.clone())
+            .expect("base scope fits");
+        let suffix = [EncapsulationIdentifier::Gre { key: Some(42) }];
+        let extended = interner
+            .replace_suffix(base, &[], &suffix)
+            .expect("derived scope extension fits");
+        let mut expected_path = base_path;
+        expected_path.extend_from_slice(&suffix);
+        let expected = interner
+            .intern(Some(7), expected_path)
+            .expect("composed scope is interned");
+
+        assert_eq!(extended, expected);
+        assert_ne!(extended, base);
+        assert_eq!(
+            interner
+                .replace_suffix(base, &[], &[])
+                .expect("empty suffix reuses base"),
+            base
+        );
+    }
+
+    #[test]
+    fn derived_encapsulation_replaces_replayed_scope_suffix_in_order() {
+        let mut interner = Interner::new();
+        let ah = EncapsulationIdentifier::Ah { spi: 42 };
+        let base = interner
+            .intern(Some(7), vec![ah.clone()])
+            .expect("fragment scope fits");
+        let mut replacement = tunnel_path(10);
+        replacement.insert(1, ah.clone());
+        let composed = interner
+            .replace_suffix(base, std::slice::from_ref(&ah), &replacement)
+            .expect("replayed suffix composes");
+        let expected = interner
+            .intern(Some(7), replacement)
+            .expect("unfragmented scope is interned");
+
+        assert_eq!(composed, expected);
+    }
+
+    #[test]
+    fn configured_scope_limit_bounds_persistent_path_metadata() {
+        let mut interner = Interner::with_limit(1);
+        let first = interner
+            .intern(Some(1), tunnel_path(10))
+            .expect("first scope fits");
+        assert_eq!(
+            interner
+                .intern(Some(1), tunnel_path(10))
+                .expect("existing scope remains reusable"),
+            first
+        );
+        assert_eq!(
+            interner.intern(Some(1), tunnel_path(11)),
+            Err(Error::Limit { limit: 1 })
         );
     }
 }

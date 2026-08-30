@@ -16,9 +16,7 @@ use self::arguments::Args;
 use super::super::errors::CliError;
 use super::super::input::open_capture;
 use super::format::ToolFormat;
-use super::offline_analysis::{
-    Prepared, StreamSelector, parse_stream_selector, prepare_with_tls_ports,
-};
+use super::offline_analysis::{StreamSelector, parse_stream_selector, prepare_with_tls_ports};
 use crate::rendering::StreamEncoder;
 
 use analysis::expert::StreamTransport;
@@ -147,34 +145,32 @@ pub(super) fn run(
     // The stream filter narrows reassembly to one conversation while indices
     // stay capture-global, so the index reported is the one asked for.
     let source = selected_stream.map(|index| format!("tcp.stream == {index}"));
-    let Prepared {
-        registry,
-        filter,
-        limits,
-    } = prepare_with_tls_ports(
+    let prepared = prepare_with_tls_ports(
         arguments.limits,
         source.as_deref(),
         &arguments.tls_ports.ports,
     )?;
     let mut reader = open_capture(&arguments.path, arguments.limits.capture)?;
 
-    let options = analysis::Options {
-        filter: filter.as_ref(),
-        // Assembly consumes the reassembler's in-order deliveries.
-        tcp_events: true,
-        limits,
-    };
+    // Assembly consumes the reassembler's in-order deliveries.
+    let options = prepared.options(true);
     let mut collector = Collector::new(tls_limits);
     let mut state = State::new(arguments.max_tls_sessions);
-    let run_summary = analysis::run(&mut reader, registry, &options, |record| {
-        for event in collector.observe(&record) {
-            if selector.matches(&event.session) {
-                rendering::render_session(format, event.session, &mut state, stream)
-                    .map_err(CliError::into_boundary_error)?;
+    let run_summary = analysis::run_with_ip_events(
+        &mut reader,
+        prepared.registry.clone(),
+        &options,
+        super::offline_analysis::ip_event_sink(format == ToolFormat::Ndjson, stream.clone()),
+        |record| {
+            for event in collector.observe(&record) {
+                if selector.matches(&event.session) {
+                    rendering::render_session(format, event.session, &mut state, stream)
+                        .map_err(CliError::into_boundary_error)?;
+                }
             }
-        }
-        Ok(())
-    })
+            Ok(())
+        },
+    )
     .map_err(CliError::classified)?;
     let (trailing, summary) = collector.finish(&run_summary.trailing_tcp_events);
     for event in trailing {
@@ -196,6 +192,7 @@ pub(super) fn run(
         run_summary.frames_read,
         run_summary.frames_matched,
         state.counts(),
+        &run_summary.ip_reassembly,
     );
     match format {
         ToolFormat::Text => rendering::render_text(&state, &summary, &arguments.tls_ports.ports),
@@ -255,17 +252,11 @@ fn missing_stream_error(index: u64, arguments: &Args) -> Result<CliError, CliErr
 
 /// Counts the capture's TCP conversations, which are indexed before filtering.
 fn count_tcp_streams(arguments: &Args) -> Result<u64, CliError> {
-    let Prepared {
-        registry, limits, ..
-    } = prepare_with_tls_ports(arguments.limits, None, &arguments.tls_ports.ports)?;
+    let prepared = prepare_with_tls_ports(arguments.limits, None, &arguments.tls_ports.ports)?;
     let mut reader = open_capture(&arguments.path, arguments.limits.capture)?;
-    let options = analysis::Options {
-        filter: None,
-        tcp_events: false,
-        limits,
-    };
+    let options = prepared.options(false);
     let mut highest = None;
-    analysis::run(&mut reader, registry, &options, |record| {
+    analysis::run(&mut reader, prepared.registry.clone(), &options, |record| {
         if let Some(stream) = record.tcp_stream {
             highest = Some(highest.map_or(stream, |seen: u64| seen.max(stream)));
         }

@@ -20,7 +20,7 @@ const KINDS: [&str; 4] = ["success", "event", "complete", "error"];
 
 /// Documents published beyond the canonical kinds, each showing one branch a
 /// command's output can take.
-const SUB_KIND_EXAMPLES: [&str; 11] = [
+const SUB_KIND_EXAMPLES: [&str; 15] = [
     "output-dissect-filter-no-match.json",
     "output-dns-attempt-response-event.json",
     "output-dns-record-event.json",
@@ -31,7 +31,11 @@ const SUB_KIND_EXAMPLES: [&str; 11] = [
     "output-exchange-unanswered-event.json",
     "output-exchange-undecoded-event.json",
     "output-exchange-unsolicited-event.json",
+    "output-expert-ip-incomplete-event.json",
+    "output-follow-ip-completed-event.json",
     "output-protocols-detail-success.json",
+    "output-stats-fragments-success.json",
+    "output-tls-ip-overlap-event.json",
 ];
 
 /// Packet documents, which are command input rather than command output.

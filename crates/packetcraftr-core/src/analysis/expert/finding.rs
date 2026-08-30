@@ -3,7 +3,7 @@
 
 use crate::diagnostic::Severity;
 
-use crate::analysis::adapter::Transports;
+use crate::analysis::adapter::{Transports, transports};
 use crate::analysis::pipeline::FrameRecord;
 
 use super::{Finding, StreamRef, tcp_stream_ref, udp_stream_ref};
@@ -21,13 +21,67 @@ struct DiagnosticStreams {
     outermost: Option<usize>,
 }
 
-pub(super) fn from_diagnostics(
+pub(super) fn from_diagnostics(record: &FrameRecord<'_>) -> Vec<Finding> {
+    let finding = |diagnostic: &crate::diagnostic::Diagnostic, streams: DiagnosticStreams| {
+        new(
+            diagnostic.severity,
+            diagnostic.code.clone(),
+            record.number,
+            diagnostic_stream(diagnostic.layer, streams),
+            diagnostic.message.clone(),
+        )
+    };
+    // The transport walk only pays off when a view actually carries
+    // diagnostics, which most frames do not.
+    let mut findings = Vec::new();
+    if !record.decoded.diagnostics.is_empty() {
+        let physical_streams =
+            diagnostic_streams(record, record.decoded, &transports(&record.decoded.packet));
+        findings.extend(
+            record
+                .decoded
+                .diagnostics
+                .iter()
+                .map(|diagnostic| finding(diagnostic, physical_streams)),
+        );
+    }
+    for derived in record.derived_datagrams() {
+        if derived.decoded.diagnostics.is_empty() {
+            continue;
+        }
+        let streams = diagnostic_streams(
+            record,
+            &derived.decoded,
+            &transports(&derived.decoded.packet),
+        );
+        findings.extend(
+            derived
+                .decoded
+                .diagnostics
+                .iter()
+                // Prefix headers were decoded on the fragment source; only
+                // diagnostics from children exposed by this completion are
+                // new findings on the completing frame.
+                .filter(|diagnostic| {
+                    diagnostic
+                        .layer
+                        .is_none_or(|layer| layer >= derived.replayed_prefix_layers())
+                })
+                .map(|diagnostic| finding(diagnostic, streams)),
+        );
+    }
+    findings
+}
+
+fn diagnostic_streams(
     record: &FrameRecord<'_>,
+    decoded: &crate::decode::DecodedPacket,
     transports: &Transports<'_>,
-) -> Vec<Finding> {
-    let streams = DiagnosticStreams {
+) -> DiagnosticStreams {
+    DiagnosticStreams {
         tcp: record
             .tcp_stream
+            .filter(|_| std::ptr::eq(record.tcp_decoded, decoded))
             .zip(transports.tcp.as_ref())
             .map(|(stream, transport)| IndexedTransport {
                 layer: transport.index,
@@ -35,28 +89,14 @@ pub(super) fn from_diagnostics(
             }),
         udp: record
             .udp_stream
+            .filter(|_| std::ptr::eq(record.udp_decoded, decoded))
             .zip(transports.udp.as_ref())
             .map(|(stream, transport)| IndexedTransport {
                 layer: transport.index,
                 stream: udp_stream_ref(stream),
             }),
         outermost: transports.outermost,
-    };
-
-    record
-        .decoded
-        .diagnostics
-        .iter()
-        .map(|diagnostic| {
-            new(
-                diagnostic.severity,
-                diagnostic.code.clone(),
-                record.number,
-                diagnostic_stream(diagnostic.layer, streams),
-                diagnostic.message.clone(),
-            )
-        })
-        .collect()
+    }
 }
 
 fn diagnostic_stream(layer: Option<usize>, streams: DiagnosticStreams) -> Option<StreamRef> {

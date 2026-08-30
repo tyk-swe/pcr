@@ -74,6 +74,7 @@ pub struct Result {
     pub notes: u64,
     pub codes: Vec<CodeCount>,
     pub findings: Vec<Finding>,
+    pub ip_reassembly: super::reassembly::Report,
 }
 
 impl Result {
@@ -82,6 +83,7 @@ impl Result {
         frames_read: u64,
         frames_matched: u64,
         findings: Vec<Finding>,
+        ip_reassembly: &packetcraftr_core::analysis::IpReassemblyReport,
     ) -> Self {
         Self {
             frames_read,
@@ -95,6 +97,7 @@ impl Result {
                 .map(|(code, findings)| CodeCount { code, findings })
                 .collect(),
             findings,
+            ip_reassembly: super::reassembly::Report::from_analysis(ip_reassembly),
         }
     }
 }

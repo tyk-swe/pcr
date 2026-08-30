@@ -9,7 +9,7 @@ use crate::command_options::OfflineLimitsArgs;
 
 pub(crate) const AFTER_LONG_HELP: &str = r#"Following is computed offline over dissected frames; no live capture or transmission is involved.
 
-The conversation index comes from the same first-seen numbering stats reports and stream filters match, so 'follow --stream tcp:7' extracts the conversation 'tcp.stream == 7' selects. The client is the endpoint that sent the conversation's first captured frame. TCP payload is reassembled in stream order per direction; UDP emits one chunk per datagram. IP-fragmented datagrams carry no conversation index and are not followed. Raw output needs a single direction, since interleaved raw bytes would be indistinguishable.
+The conversation index comes from the same first-seen numbering stats reports and stream filters match, so 'follow --stream tcp:7' extracts the conversation 'tcp.stream == 7' selects. The client is the endpoint that sent the conversation's first captured frame. TCP payload is reassembled in stream order per direction; UDP emits one chunk per datagram. Completed IP-fragmented datagrams join their transport conversation on the fragment that completes them. Raw output needs a single direction, since interleaved raw bytes would be indistinguishable.
 
 Examples:
   packetcraftr follow capture.pcapng --stream tcp:0

@@ -24,6 +24,7 @@ pub mod network;
 pub mod plan;
 pub mod protocols;
 pub mod read;
+pub mod reassembly;
 pub mod replay;
 pub mod routes;
 pub mod scan;

@@ -32,6 +32,7 @@ jobs:
           - pcapng_parse
           - packet_decode
           - tcp_reassembly
+          - ip_reassembly
           - tls_assembly
           - filter_parse
     steps:

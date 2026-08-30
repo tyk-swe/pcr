@@ -52,6 +52,12 @@ test = false
 doc = false
 
 [[bin]]
+name = "ip_reassembly"
+path = "fuzz_targets/ip_reassembly.rs"
+test = false
+doc = false
+
+[[bin]]
 name = "tls_assembly"
 path = "fuzz_targets/tls_assembly.rs"
 test = false

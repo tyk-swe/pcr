@@ -76,6 +76,7 @@ pub(super) fn render_aggregate(
     selector: Selector,
     summary: Summary,
     state: State,
+    ip_reassembly: &analysis::IpReassemblyReport,
 ) -> Result<(), CliError> {
     emit_aggregate(
         output::contract::Command::Follow,
@@ -84,6 +85,7 @@ pub(super) fn render_aggregate(
             selector.index,
             summary,
             state.retained,
+            ip_reassembly,
         ),
         Vec::new(),
     )
@@ -92,6 +94,7 @@ pub(super) fn render_aggregate(
 pub(super) fn render_stream(
     selector: Selector,
     summary: Summary,
+    ip_reassembly: &analysis::IpReassemblyReport,
     stream: &mut StreamEncoder,
 ) -> Result<(), CliError> {
     Ok(stream.complete(
@@ -100,6 +103,7 @@ pub(super) fn render_stream(
             selector.index,
             summary,
             Vec::new(),
+            ip_reassembly,
         ),
         Vec::new(),
     )?)

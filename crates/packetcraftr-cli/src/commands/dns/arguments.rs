@@ -9,7 +9,10 @@ use crate::command_options::{
 
 pub(crate) const AFTER_LONG_HELP: &str = r#"Examples:
   packetcraftr dns 192.0.2.53 example.test --type a
-  packetcraftr --output json dns 192.0.2.53 _service._tcp.example.test --type srv"#;
+  packetcraftr --output json dns 192.0.2.53 _service._tcp.example.test --type srv
+  packetcraftr dns 192.0.2.53 example.test --udp-only --help"#;
+
+pub(crate) const LONG_ABOUT: &str = "Run bounded, policy-gated DNS queries. Each attempt starts over UDP. By default, one validated matching response with the truncation flag triggers at most one DNS-over-TCP continuation to the same reauthorized numeric server. UDP and TCP share the same --timeout-ms attempt window. --udp-only disables fallback for compatibility, transport diagnostics, or packet-oriented route overrides that kernel TCP cannot preserve. Text, JSON, and NDJSON identify each attempted phase and the accepted response transport.";
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
 pub(crate) enum QueryType {
@@ -57,25 +60,28 @@ pub(crate) struct Args {
     /// Select the first authorized server address or one IP family.
     #[arg(long, value_enum, default_value_t = AddressFamily::Any)]
     pub(crate) family: AddressFamily,
-    /// DNS server UDP port.
+    /// DNS server port for UDP and any TCP fallback.
     #[arg(long, default_value_t = packetcraftr::dns::DEFAULT_DNS_SERVER_PORT)]
     pub(crate) port: u16,
     /// Explicit 16-bit transaction ID; a process-local value is generated when omitted.
     #[arg(long)]
     pub(crate) transaction_id: Option<u16>,
-    /// First UDP source port; an ephemeral-range value is generated when omitted.
+    /// First UDP source port; TCP fallback uses an OS-selected local port.
     #[arg(long)]
     pub(crate) source_port: Option<u16>,
     /// Disable the recursion-desired query flag.
     #[arg(long)]
     pub(crate) no_recursion: bool,
+    /// Keep DNS attempts UDP-only and report validated truncation as terminal.
+    #[arg(long)]
+    pub(crate) udp_only: bool,
     /// Number of independently re-resolved and re-authorized attempts.
     #[arg(long, default_value_t = packetcraftr::dns::DEFAULT_DNS_ATTEMPTS)]
     pub(crate) attempts: u32,
-    /// Response window for each capture-ready query.
+    /// Shared UDP and TCP response window for each attempt.
     #[arg(long, default_value_t = 1_000)]
     pub(crate) timeout_ms: u64,
-    /// Optional average query-rate ceiling.
+    /// Optional UDP attempt-rate ceiling; TCP continuation is immediate.
     #[arg(long)]
     pub(crate) rate: Option<u32>,
     /// Maximum worst-case timeout plus intentional retry delay in milliseconds.
@@ -108,4 +114,29 @@ pub(crate) struct Args {
     pub(crate) limits: CaptureLimitsArgs,
     #[command(flatten)]
     pub(crate) policy: HostnamePolicyArgs,
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser as _;
+
+    use super::*;
+    use crate::cli::Cli;
+    use crate::commands::Command;
+
+    fn dns_args(extra: &[&str]) -> Args {
+        let mut command = vec!["packetcraftr", "dns", "192.0.2.53", "example.test"];
+        command.extend_from_slice(extra);
+        let parsed = Cli::try_parse_from(command).expect("DNS arguments parse");
+        let Command::Dns(arguments) = parsed.command else {
+            panic!("fixture must select DNS")
+        };
+        arguments
+    }
+
+    #[test]
+    fn tcp_fallback_is_default_and_udp_only_is_explicit() {
+        assert!(!dns_args(&[]).udp_only);
+        assert!(dns_args(&["--udp-only"]).udp_only);
+    }
 }

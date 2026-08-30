@@ -39,6 +39,7 @@ impl<C: Session> Transaction<C> {
             .captured
             .response_counts
             .iter()
+            .take(self.sent.len())
             .enumerate()
             .filter_map(|(index, count)| (*count == 0).then_some(index))
             .collect::<Vec<_>>();
@@ -50,13 +51,19 @@ impl<C: Session> Transaction<C> {
                 source: Box::new(source),
             })?;
         }
+        let stopped_before_all_sends = self.sent.len() < self.prepared.len();
+        let (packets_attempted, bytes) = if stopped_before_all_sends {
+            (self.completed_sends, sent_bytes(&self.sent))
+        } else {
+            (self.packet_count, self.total_bytes)
+        };
         Ok(super::Summary {
             unanswered,
             diagnostics: Vec::new(),
             stats: Stats {
-                packets_attempted: self.packet_count,
+                packets_attempted,
                 packets_completed: self.completed_sends,
-                bytes: self.total_bytes,
+                bytes,
                 elapsed: self.started.elapsed(),
                 capture: capture_statistics,
             },
@@ -89,4 +96,12 @@ impl<C: Session> Transaction<C> {
         );
         Ok(())
     }
+}
+
+fn sent_bytes(sent: &[std::sync::Arc<crate::SentPacket>]) -> u64 {
+    sent.iter()
+        .try_fold(0_u64, |total, sent| {
+            total.checked_add(u64::try_from(sent.bytes_sent()).unwrap_or(u64::MAX))
+        })
+        .expect("sent bytes are a subset of the validated aggregate exchange byte total")
 }

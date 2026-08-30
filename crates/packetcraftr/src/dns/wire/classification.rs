@@ -53,6 +53,7 @@ pub enum ResponseClassification {
 impl ResponseClassification {
     pub(crate) fn rank(&self) -> u8 {
         match self {
+            Self::Response(response) if !response.metadata.truncated => 5,
             Self::Response(_) => 4,
             Self::NetworkFailure { .. } => 3,
             Self::DecodeFailure { .. } => 2,

@@ -4,14 +4,15 @@
 //! The single authorization seam every live workflow passes through.
 //!
 //! Scan, DNS, traceroute, fuzz, and replay all ask the same question before
-//! they can produce traffic: may this operation run, with these packets, this
-//! destination, and this many wire bytes? [`Authorizer`] is that question,
+//! they can produce traffic: may this operation run, with these packets or
+//! bounded socket actions, this destination, and these bytes? [`Authorizer`] is that question,
 //! [`Operation`] is the complete, shape-specific statement a workflow makes
 //! about its operation, and [`PolicyAuthorizer`] is the answer a
 //! [`crate::policy::Policy`] gives.
 
 use std::net::IpAddr;
 use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 
 use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::frame::{Frame, LinkType};
@@ -36,7 +37,10 @@ pub struct WireBudget {
 
 impl WireBudget {
     /// Prospective packets that reach the wire and the conservative total of
-    /// their wire bytes.
+    /// their wire bytes. [`DnsOperation::budget`] uses the same policy fields
+    /// for a documented aggregate of raw UDP packets plus bounded TCP socket
+    /// connections/messages and application bytes; it does not claim that
+    /// kernel-managed TCP has an exact packet count.
     #[must_use]
     pub const fn new(packets: u64, wire_bytes: u64) -> Self {
         Self {
@@ -55,6 +59,99 @@ impl WireBudget {
     #[must_use]
     pub const fn wire_bytes(&self) -> u64 {
         self.wire_bytes
+    }
+}
+
+/// Finite application-level authorization for kernel-managed socket traffic.
+///
+/// Operating systems control TCP handshake, acknowledgement, teardown, and
+/// retransmission packets, so those cannot honestly be represented as an
+/// exact [`WireBudget`]. This shape instead makes the enforceable quantities
+/// explicit before a socket is opened: connections, framed messages,
+/// application bytes, and total wall-clock duration.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SocketBudget {
+    connections: u64,
+    messages: u64,
+    application_bytes: u64,
+    max_duration: Duration,
+}
+
+impl SocketBudget {
+    #[must_use]
+    pub const fn new(
+        connections: u64,
+        messages: u64,
+        application_bytes: u64,
+        max_duration: Duration,
+    ) -> Self {
+        Self {
+            connections,
+            messages,
+            application_bytes,
+            max_duration,
+        }
+    }
+
+    #[must_use]
+    pub const fn connections(&self) -> u64 {
+        self.connections
+    }
+
+    #[must_use]
+    pub const fn messages(&self) -> u64 {
+        self.messages
+    }
+
+    #[must_use]
+    pub const fn application_bytes(&self) -> u64 {
+        self.application_bytes
+    }
+
+    #[must_use]
+    pub const fn max_duration(&self) -> Duration {
+        self.max_duration
+    }
+
+    const fn traffic_units(&self) -> u64 {
+        self.connections.saturating_add(self.messages)
+    }
+}
+
+/// Complete authorization shape for DNS that may use raw UDP and kernel TCP.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DnsOperation {
+    udp: WireBudget,
+    tcp: SocketBudget,
+}
+
+impl DnsOperation {
+    #[must_use]
+    pub const fn new(udp: WireBudget, tcp: SocketBudget) -> Self {
+        Self { udp, tcp }
+    }
+
+    #[must_use]
+    pub const fn udp(&self) -> WireBudget {
+        self.udp
+    }
+
+    #[must_use]
+    pub const fn tcp(&self) -> SocketBudget {
+        self.tcp
+    }
+
+    /// Aggregate policy charge. The packet field counts UDP packets plus TCP
+    /// connection/message traffic units; the byte field counts UDP wire bytes
+    /// plus framed TCP application bytes.
+    #[must_use]
+    pub const fn budget(&self) -> WireBudget {
+        WireBudget::new(
+            self.udp.packets.saturating_add(self.tcp.traffic_units()),
+            self.udp
+                .wire_bytes
+                .saturating_add(self.tcp.application_bytes),
+        )
     }
 }
 
@@ -196,10 +293,13 @@ impl<'a> ReplayFrame<'a> {
 /// authorizer until each says what it does with it.
 #[derive(Clone, Copy, Debug)]
 pub enum Operation<'a> {
-    /// A target workflow (scan, DNS, traceroute) whose destinations were
+    /// A packet-oriented target workflow (scan, traceroute, or UDP-only DNS) whose destinations were
     /// already authorized through [`Authorizer::resolve_and_authorize`]; only
     /// the budget remains to be approved.
     Budgeted(WireBudget),
+    /// DNS with exact raw-UDP bounds and a separate finite socket budget for
+    /// a possible TCP continuation.
+    Dns(DnsOperation),
     /// A workflow that declares the exact packets it may transmit.
     Declared(DeclaredPackets<'a>),
     /// A replay of one exact captured frame.
@@ -212,6 +312,7 @@ impl Operation<'_> {
     pub const fn budget(&self) -> WireBudget {
         match self {
             Self::Budgeted(budget) => *budget,
+            Self::Dns(dns) => dns.budget(),
             Self::Declared(declared) => declared.budget,
             Self::Replay(replay) => replay.budget,
         }
@@ -222,6 +323,7 @@ impl Operation<'_> {
     pub const fn shape(&self) -> &'static str {
         match self {
             Self::Budgeted(_) => "budgeted",
+            Self::Dns(_) => "dns",
             Self::Declared(_) => "declared-packet",
             Self::Replay(_) => "replay",
         }
@@ -341,11 +443,17 @@ impl<R: Resolver> Authorizer for PolicyAuthorizer<'_, R> {
     fn authorize_operation(&mut self, request: Operation<'_>) -> Result<(), BoundaryError> {
         self.policy.validate().map_err(BoundaryError::from_error)?;
         let budget = request.budget();
-        self.policy
-            .authorize_operation(budget.packets(), budget.wire_bytes())
-            .map_err(BoundaryError::from_error)?;
+        if matches!(request, Operation::Dns(_)) {
+            self.policy
+                .authorize_dns_operation(budget.packets(), budget.wire_bytes())
+                .map_err(BoundaryError::from_error)?;
+        } else {
+            self.policy
+                .authorize_operation(budget.packets(), budget.wire_bytes())
+                .map_err(BoundaryError::from_error)?;
+        }
         match request {
-            Operation::Budgeted(_) => Ok(()),
+            Operation::Budgeted(_) | Operation::Dns(_) => Ok(()),
             Operation::Declared(declared) => {
                 if let PermissiveLive::Required { allowed } = declared.permissive_live() {
                     authorize_permissive_live(self.policy, allowed)
@@ -592,6 +700,30 @@ mod tests {
         };
         assert_eq!(replay.mode(), LinkMode::Layer3);
         assert_eq!(replay.frame().bytes().len(), 20);
+
+        let socket = SocketBudget::new(1, 1, 22, Duration::from_secs(1));
+        let dns = DnsOperation::new(WireBudget::new(1, 40), socket);
+        let dns_shape = Operation::Dns(dns);
+        assert_eq!(dns_shape.shape(), "dns");
+        assert_eq!(dns_shape.budget(), WireBudget::new(3, 62));
+        assert_eq!(dns.udp(), WireBudget::new(1, 40));
+        assert_eq!(dns.tcp(), socket);
+    }
+
+    #[test]
+    fn policy_authorizer_applies_the_aggregate_dns_socket_budget() {
+        let policy = crate::policy::Policy {
+            max_packets_per_operation: 2,
+            ..crate::policy::Policy::default()
+        };
+        let dns = Operation::Dns(DnsOperation::new(
+            WireBudget::new(1, 40),
+            SocketBudget::new(1, 1, 22, Duration::from_secs(1)),
+        ));
+        let error = PolicyAuthorizer::for_packets(&policy)
+            .authorize_operation(dns)
+            .expect_err("UDP plus TCP connection/message units exceed the policy");
+        assert_eq!(error.classification().code, "policy.traffic_unit_limit");
     }
 
     #[test]

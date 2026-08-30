@@ -3,6 +3,14 @@
 
 //! Bounded DNS query construction, response validation, relevance filtering,
 //! and retry execution over the shared target-policy and exchange seams.
+//!
+//! Each attempt begins over UDP. When [`Request::tcp_fallback`] is true, one
+//! matching validated response with the truncation flag may continue over
+//! DNS-over-TCP to the same reauthorized numeric endpoint. Both phases share
+//! the attempt timeout. TCP framing and allocation are bounded, accepted
+//! responses receive the same transaction/question validation as UDP, and TCP
+//! socket bytes are never represented as captured [`Frame`](packetcraftr_core::frame::Frame)
+//! evidence.
 
 use std::time::Duration;
 
@@ -12,6 +20,8 @@ pub const DNS_HEADER_BYTES: usize = 12;
 pub const DEFAULT_DNS_SERVER_PORT: u16 = 53;
 pub const DNS_EPHEMERAL_SOURCE_PORT_BASE: u16 = crate::EPHEMERAL_SOURCE_PORT_BASE;
 pub const DEFAULT_DNS_ATTEMPTS: u32 = 1;
+/// DNS queries retry one validated truncated UDP response over TCP by default.
+pub const DEFAULT_DNS_TCP_FALLBACK: bool = true;
 pub const DEFAULT_MAX_DNS_RECORDS: usize = 512;
 pub const DEFAULT_MAX_DNS_NAME_POINTERS: usize = 32;
 pub const DEFAULT_MAX_DNS_TXT_STRINGS: usize = 256;
@@ -58,7 +68,8 @@ pub use error::{Error, WireError};
 pub use model::{
     AttemptEvidence, Edns, EdnsOption, Event, EventContext, Exchange, Execution, Executor, Limits,
     Name, Outcome, Probe, QueryType, Record, RecordValue, RejectedRecord, Request,
-    ResponseMetadata, Result, Section, Summary, UndecodedEvidence, ValidatedResponse,
+    ResponseMetadata, Result, Section, Summary, TcpExchange, TcpExecution, Transport,
+    UndecodedEvidence, ValidatedResponse,
 };
 pub use wire::{
     ResponseClassification, canonical_query_name, classify_response, decode_response,

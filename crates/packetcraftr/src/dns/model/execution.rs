@@ -1,6 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -73,8 +73,41 @@ impl Probe {
 pub struct Exchange {
     pub probe: Probe,
     pub timeout: Duration,
+    pub limits: super::request::Limits,
     pub max_responses: usize,
     pub(crate) permit: crate::evidence::ExecutionPermit,
+}
+
+/// One DNS-over-TCP continuation after a validated truncated UDP response.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TcpExchange {
+    /// Logical retry attempt shared with the triggering UDP phase.
+    pub attempt: u32,
+    /// Already-reauthorized numeric server and DNS port.
+    pub endpoint: SocketAddr,
+    /// Exact DNS query message without the TCP length prefix.
+    pub query: Bytes,
+    /// Time remaining in the shared UDP/TCP attempt window.
+    pub timeout: Duration,
+    /// Maximum response message bytes allowed before allocation.
+    pub max_message_bytes: usize,
+    pub(crate) permit: crate::evidence::ExecutionPermit,
+}
+
+/// Opaque receipt for one permit-bound DNS-over-TCP execution.
+#[derive(Clone, Debug)]
+pub struct TcpExecution {
+    pub(crate) permit: crate::evidence::ExecutionPermit,
+    pub(crate) response: packetcraftr_netio::dns_tcp::Response,
+}
+
+impl TcpExecution {
+    pub(crate) const fn new(
+        permit: crate::evidence::ExecutionPermit,
+        response: packetcraftr_netio::dns_tcp::Response,
+    ) -> Self {
+        Self { permit, response }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -93,4 +126,16 @@ pub trait Executor {
         &mut self,
         exchange: &Exchange,
     ) -> std::result::Result<Execution, crate::BoundaryError>;
+
+    /// Executes one bounded DNS-over-TCP continuation. Expected socket and
+    /// framing failures are returned as typed data so the workflow can apply
+    /// its normal retry precedence.
+    fn execute_tcp(
+        &mut self,
+        _exchange: &TcpExchange,
+    ) -> std::result::Result<TcpExecution, packetcraftr_netio::dns_tcp::Error> {
+        Err(packetcraftr_netio::dns_tcp::Error::Unsupported {
+            message: "DNS executor does not provide TCP fallback".to_owned(),
+        })
+    }
 }

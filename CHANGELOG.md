@@ -8,6 +8,11 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Added
 
+- Bounded DNS UDP-to-TCP fallback: one validated truncated UDP response may
+  continue over length-prefixed TCP to the same reauthorized numeric server
+  within the original attempt deadline. `packetcraftr dns --udp-only` retains
+  the prior UDP-only diagnostic behavior and is required for scoped IPv6
+  link-local servers.
 - Eight implementation fuzz targets, property coverage for document, capture,
   filter, layout, reassembly, and TLS behavior, plus non-gating Criterion and
   peak-RSS measurement harnesses.
@@ -18,6 +23,13 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- **Breaking (library/output):** `dns::Request` now declares `tcp_fallback`;
+  DNS attempt events identify their transport and optional source port, while
+  aggregate/completion output reports `fallback_attempted` and the optional
+  `accepted_transport` instead of a hard-coded UDP transport.
+- **Breaking (library):** authorization gained `DnsOperation` and
+  `SocketBudget`, separating exact raw-UDP wire bounds from finite TCP
+  connection, framed-message, application-byte, and duration bounds.
 - Updated all Rust dependencies and lockfiles, including Criterion 0.8,
   Noyalib 0.0.28, jsonschema 0.52, RustCrypto hashes 0.11, libloading 0.9, and
   pcap 2.5.
@@ -44,6 +56,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- DNS-over-TCP uses one bounded two-byte frame, deadline-aware partial I/O,
+  pre-allocation message limits, exact response identity/question validation,
+  deterministic retry precedence, and no synthetic captured-frame evidence.
 - Replay applies final-wire source ownership policy after passive route and
   interface selection, requiring `--allow-source-spoofing` for captured IP or
   Ethernet sources the selected route does not own.

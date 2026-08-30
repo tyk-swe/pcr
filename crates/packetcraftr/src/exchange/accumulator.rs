@@ -28,6 +28,7 @@ pub(super) struct UnsolicitedEvidence {
 
 pub(crate) type WorkflowResponseMatcher<'a> =
     dyn FnMut(usize, &Packet, &DecodedPacket) -> bool + 'a;
+pub(crate) type WorkflowStopPredicate<'a> = dyn FnMut(usize, &Packet, &DecodedPacket) -> bool + 'a;
 
 pub(crate) struct Accumulator {
     pub(super) unsolicited: Vec<UnsolicitedEvidence>,
@@ -64,6 +65,7 @@ pub(crate) enum ProcessOutcome {
     Continue,
     CorrelationDeadlineExpired,
     DuplicateRecordIdentity,
+    StopCapture,
 }
 
 impl Accumulator {

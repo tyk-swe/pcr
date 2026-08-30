@@ -297,6 +297,30 @@ pub enum Outcome {
     NetworkFailure,
 }
 
+/// Transport used by one DNS attempt phase or accepted response.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Transport {
+    Udp,
+    Tcp,
+}
+
+impl Transport {
+    /// The stable text and structured-output name.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Udp => "udp",
+            Self::Tcp => "tcp",
+        }
+    }
+}
+
+impl fmt::Display for Transport {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
 impl Outcome {
     /// The name the CLI prints, identical to the serialized one.
     pub const fn as_str(self) -> &'static str {
@@ -314,10 +338,11 @@ impl Outcome {
 #[derive(Clone, Debug)]
 pub struct AttemptEvidence {
     pub attempt: u32,
+    pub transport: Transport,
     pub server_address: IpAddr,
-    pub source_port: u16,
+    pub source_port: Option<u16>,
     pub status: Outcome,
-    pub sent_at: SystemTime,
+    pub sent_at: Option<SystemTime>,
     pub received_at: Option<SystemTime>,
     pub latency: Option<Duration>,
     pub response: Option<Frame>,
@@ -328,6 +353,7 @@ pub struct AttemptEvidence {
 #[derive(Clone, Debug)]
 pub struct UndecodedEvidence {
     pub attempt: u32,
+    pub transport: Transport,
     pub frame: Frame,
 }
 
@@ -340,6 +366,8 @@ pub struct Result {
     pub query_type: QueryType,
     pub transaction_id: u16,
     pub outcome: Outcome,
+    pub fallback_attempted: bool,
+    pub accepted_transport: Option<Transport>,
     pub response: Option<ValidatedResponse>,
     pub attempts: Vec<AttemptEvidence>,
     pub undecoded: Vec<UndecodedEvidence>,
@@ -363,12 +391,14 @@ pub enum Event {
     },
     Record {
         attempt: u32,
+        transport: Transport,
         context: Arc<EventContext>,
         section: Section,
         record: Record,
     },
     Rejected {
         attempt: u32,
+        transport: Transport,
         context: Arc<EventContext>,
         record: RejectedRecord,
     },
@@ -385,6 +415,8 @@ pub struct Summary {
     pub query_type: QueryType,
     pub transaction_id: u16,
     pub outcome: Outcome,
+    pub fallback_attempted: bool,
+    pub accepted_transport: Option<Transport>,
     pub response: Option<ResponseMetadata>,
     pub diagnostics: Vec<Diagnostic>,
     pub stats: Stats,
@@ -408,6 +440,11 @@ mod tests {
         ] {
             let serialized = serde_json::to_value(outcome).expect("outcome is a name");
             assert_eq!(serialized.as_str(), Some(outcome.as_str()));
+        }
+
+        for transport in [Transport::Udp, Transport::Tcp] {
+            let serialized = serde_json::to_value(transport).expect("transport is a name");
+            assert_eq!(serialized.as_str(), Some(transport.as_str()));
         }
     }
 }

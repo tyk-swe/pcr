@@ -146,11 +146,14 @@ impl TargetWorkflow for Traceroute {
 
     fn convert_complete(
         summary: Self::Summary,
-    ) -> (
-        Self::Record,
-        Vec<core::diagnostic::Diagnostic>,
-        output::envelope::Stats,
-    ) {
-        output::traceroute::Event::complete_from_traceroute(summary)
+    ) -> Result<
+        (
+            Self::Record,
+            Vec<core::diagnostic::Diagnostic>,
+            output::envelope::Stats,
+        ),
+        CliError,
+    > {
+        Ok(output::traceroute::Event::complete_from_traceroute(summary))
     }
 }

@@ -2614,8 +2614,8 @@
         "query_name",
         "query_type",
         "transaction_id",
-        "transport",
         "outcome",
+        "fallback_attempted",
         "answers",
         "authorities",
         "additionals",
@@ -2651,11 +2651,14 @@
           "minimum": 0,
           "maximum": 65535
         },
-        "transport": {
-          "const": "udp"
-        },
         "outcome": {
           "$ref": "#/$defs/dnsOutcome"
+        },
+        "fallback_attempted": {
+          "type": "boolean"
+        },
+        "accepted_transport": {
+          "$ref": "#/$defs/dnsTransport"
         },
         "response_code": {
           "type": "integer",
@@ -2718,6 +2721,97 @@
           }
         }
       },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "enum": [
+                  "response",
+                  "truncated"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "accepted_transport"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "accepted_transport"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "accepted_transport"
+            ],
+            "properties": {
+              "accepted_transport": {
+                "const": "tcp"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "fallback_attempted": {
+                "const": true
+              },
+              "outcome": {
+                "const": "response"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "fallback_attempted": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "attempts": {
+                "contains": {
+                  "required": [
+                    "transport"
+                  ],
+                  "properties": {
+                    "transport": {
+                      "const": "tcp"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "attempts": {
+                "not": {
+                  "contains": {
+                    "required": [
+                      "transport"
+                    ],
+                    "properties": {
+                      "transport": {
+                        "const": "tcp"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
       "additionalProperties": false
     },
     "fuzzResult": {
@@ -3154,6 +3248,7 @@
           "required": [
             "event",
             "attempt",
+            "transport",
             "server",
             "server_port",
             "query_name",
@@ -3167,6 +3262,9 @@
             },
             "attempt": {
               "$ref": "#/$defs/dnsAttemptNumber"
+            },
+            "transport": {
+              "$ref": "#/$defs/dnsTransport"
             },
             "server": {
               "type": "string"
@@ -3196,6 +3294,7 @@
           "required": [
             "event",
             "attempt",
+            "transport",
             "server",
             "server_port",
             "query_name",
@@ -3208,6 +3307,9 @@
             },
             "attempt": {
               "$ref": "#/$defs/dnsAttemptNumber"
+            },
+            "transport": {
+              "$ref": "#/$defs/dnsTransport"
             },
             "server": {
               "type": "string"
@@ -3258,8 +3360,8 @@
             "query_name",
             "query_type",
             "transaction_id",
-            "transport",
             "outcome",
+            "fallback_attempted",
             "rejected_record_count"
           ],
           "properties": {
@@ -3292,11 +3394,14 @@
               "minimum": 0,
               "maximum": 65535
             },
-            "transport": {
-              "const": "udp"
-            },
             "outcome": {
               "$ref": "#/$defs/dnsOutcome"
+            },
+            "fallback_attempted": {
+              "type": "boolean"
+            },
+            "accepted_transport": {
+              "$ref": "#/$defs/dnsTransport"
             },
             "response_code": {
               "type": "integer",
@@ -3331,6 +3436,54 @@
               "$ref": "#/$defs/uint64"
             }
           },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "outcome": {
+                    "enum": [
+                      "response",
+                      "truncated"
+                    ]
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "accepted_transport"
+                ]
+              },
+              "else": {
+                "not": {
+                  "required": [
+                    "accepted_transport"
+                  ]
+                }
+              }
+            },
+            {
+              "if": {
+                "required": [
+                  "accepted_transport"
+                ],
+                "properties": {
+                  "accepted_transport": {
+                    "const": "tcp"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "fallback_attempted": {
+                    "const": true
+                  },
+                  "outcome": {
+                    "const": "response"
+                  }
+                }
+              }
+            }
+          ],
           "additionalProperties": false
         }
       ]
@@ -4301,6 +4454,13 @@
         "any"
       ]
     },
+    "dnsTransport": {
+      "type": "string",
+      "enum": [
+        "udp",
+        "tcp"
+      ]
+    },
     "dnsSection": {
       "type": "string",
       "enum": [
@@ -4340,15 +4500,17 @@
       "type": "object",
       "required": [
         "attempt",
+        "transport",
         "server_address",
-        "source_port",
         "status",
-        "sent_at",
         "reason"
       ],
       "properties": {
         "attempt": {
           "$ref": "#/$defs/dnsAttemptNumber"
+        },
+        "transport": {
+          "$ref": "#/$defs/dnsTransport"
         },
         "server_address": {
           "$ref": "#/$defs/ipAddress"
@@ -4383,6 +4545,39 @@
           "minLength": 1
         }
       },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "transport": {
+                "const": "tcp"
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": [
+                "frame"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "transport": {
+                "const": "udp"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "source_port",
+              "sent_at"
+            ]
+          }
+        }
+      ],
       "additionalProperties": false
     },
     "dnsRejectedRecord": {
@@ -4478,11 +4673,15 @@
       "type": "object",
       "required": [
         "attempt",
+        "transport",
         "frame"
       ],
       "properties": {
         "attempt": {
           "$ref": "#/$defs/dnsAttemptNumber"
+        },
+        "transport": {
+          "const": "udp"
         },
         "frame": {
           "$ref": "#/$defs/frame"

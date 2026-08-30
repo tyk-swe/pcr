@@ -61,6 +61,10 @@ pub enum Error {
     PacketLimit { actual: u64, limit: u64 },
     #[error("operation byte count {actual} exceeds policy limit {limit}")]
     ByteLimit { actual: u64, limit: u64 },
+    #[error("operation packet/socket traffic-unit count {actual} exceeds policy limit {limit}")]
+    TrafficUnitLimit { actual: u64, limit: u64 },
+    #[error("operation wire/application byte count {actual} exceeds policy limit {limit}")]
+    TrafficByteLimit { actual: u64, limit: u64 },
 }
 
 impl Classified for Error {
@@ -93,6 +97,14 @@ impl Classified for Error {
             Self::ByteLimit { .. } => (
                 "policy.byte_limit",
                 "reduce the operation byte count or deliberately raise the configured traffic budget",
+            ),
+            Self::TrafficUnitLimit { .. } => (
+                "policy.traffic_unit_limit",
+                "reduce DNS attempts or deliberately raise the packet/socket traffic-unit budget",
+            ),
+            Self::TrafficByteLimit { .. } => (
+                "policy.traffic_byte_limit",
+                "reduce DNS attempts or query bytes, or deliberately raise the wire/application byte budget",
             ),
         };
         Classification::new(code, Kind::Policy, Some(remediation))

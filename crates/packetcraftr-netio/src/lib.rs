@@ -8,6 +8,7 @@
 //! `packetcraftr`.
 
 pub mod capture;
+pub mod dns_tcp;
 mod error;
 mod exchange;
 pub mod interface;

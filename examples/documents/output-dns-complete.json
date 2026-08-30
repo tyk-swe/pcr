@@ -15,8 +15,9 @@
     "query_name": "www.example.test.",
     "query_type": "a",
     "transaction_id": 20547,
-    "transport": "udp",
     "outcome": "response",
+    "fallback_attempted": true,
+    "accepted_transport": "tcp",
     "response_code": 0,
     "response_code_name": "no_error",
     "authoritative": false,
@@ -29,12 +30,12 @@
   },
   "diagnostics": [],
   "stats": {
-    "packets_attempted": 2,
-    "packets_completed": 2,
+    "packets_attempted": 1,
+    "packets_completed": 1,
     "bytes": 116,
     "elapsed": {
-      "secs": 1,
-      "nanos": 5000000
+      "secs": 0,
+      "nanos": 10000000
     },
     "capture": {
       "received_frames": 1,

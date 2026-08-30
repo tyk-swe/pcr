@@ -115,6 +115,29 @@ of copying flags between workflows.
 For `capture`, `--capture-filter` is resolver-free native BPF applied before
 PacketcraftR queues and budgets; `--filter` runs after capture.
 
+`dns` starts each attempt over UDP. By default, a matching validated response
+with the DNS truncation flag triggers one length-prefixed TCP continuation to
+the same independently reauthorized numeric server. UDP and TCP share the
+single `--timeout-ms` attempt window; TCP failures follow the normal retry
+count. Output identifies both attempted phases and the transport of the
+accepted response, without presenting socket bytes as captured frames. Use
+`--udp-only` when transport diagnostics or compatibility require the previous
+terminal-truncation behavior, or when packet-oriented `--interface`, `--source`,
+or `--link-mode` overrides must be preserved. IPv6 link-local DNS servers also
+require `--udp-only` because the target syntax does not carry a TCP scope ID.
+
+Kernel TCP control and retransmission packets are OS-managed, so DNS
+authorization does not mislabel them as an exact raw-packet count. It instead
+charges bounded connection and framed-message traffic units, application
+bytes, and duration alongside the exact UDP wire budget.
+
+This documentation-address example only prints help and performs no network
+operation:
+
+```console
+packetcraftr dns 192.0.2.53 example.test --udp-only --help
+```
+
 ## Contributing, Security, and License
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidance. Report

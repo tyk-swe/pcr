@@ -35,6 +35,15 @@ pub fn decode_tcp_frame(
         minimum: 2,
     })?;
     let declared = usize::from(u16::from_be_bytes(*prefix));
+    if declared == 0 {
+        return Err(WireError::TcpFrameZeroLength);
+    }
+    if declared > limits.max_message_bytes {
+        return Err(WireError::MessageTooLarge {
+            actual: declared,
+            maximum: limits.max_message_bytes,
+        });
+    }
     let payload = frame.get(2..).ok_or(WireError::MessageTooShort {
         actual: frame.len(),
         minimum: 2,
@@ -45,7 +54,11 @@ pub fn decode_tcp_frame(
             actual: payload.len(),
         });
     }
-    decode_response(payload, query_name, query_type, transaction_id, limits)
+    let response = decode_response(payload, query_name, query_type, transaction_id, limits)?;
+    if response.metadata.truncated {
+        return Err(WireError::TcpResponseTruncated);
+    }
+    Ok(response)
 }
 
 /// Decodes a DNS response, accepting relevant records and retaining a bounded

@@ -100,6 +100,37 @@ fn help_and_version_are_available_without_network_access() {
 }
 
 #[test]
+fn dns_help_documents_bounded_tcp_fallback_without_network_access() {
+    let help = run_success(&["dns", "--help"]);
+    let help = String::from_utf8_lossy(&help.stdout);
+    for expected in [
+        "DNS-over-TCP continuation",
+        "--udp-only",
+        "share the same --timeout-ms attempt window",
+        "DNS server port for UDP and any TCP fallback",
+    ] {
+        assert!(help.contains(expected), "missing {expected:?} in:\n{help}");
+    }
+}
+
+#[test]
+fn dns_fallback_rejects_raw_route_overrides_before_network_access() {
+    let output = run(&[
+        "--output",
+        "json",
+        "dns",
+        "192.0.2.53",
+        "example.test",
+        "--interface",
+        "fixture0",
+    ]);
+    assert_eq!(output.status.code(), Some(2));
+    let error = parse_json(&output)["error"].clone();
+    assert_eq!(error["kind"], "cli");
+    assert!(error["message"].as_str().unwrap().contains("--udp-only"));
+}
+
+#[test]
 fn offline_build_supports_json_hex_and_raw_without_terminal_style() {
     let json_output = run_success(&[
         "--output",

@@ -131,11 +131,14 @@ impl TargetWorkflow for Scan {
 
     fn convert_complete(
         summary: Self::Summary,
-    ) -> (
-        Self::Record,
-        Vec<core::diagnostic::Diagnostic>,
-        output::envelope::Stats,
-    ) {
-        output::scan::Event::complete_from_scan(summary)
+    ) -> Result<
+        (
+            Self::Record,
+            Vec<core::diagnostic::Diagnostic>,
+            output::envelope::Stats,
+        ),
+        CliError,
+    > {
+        Ok(output::scan::Event::complete_from_scan(summary))
     }
 }

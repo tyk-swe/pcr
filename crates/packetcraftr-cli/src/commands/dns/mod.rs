@@ -29,6 +29,12 @@ pub(super) fn run(
     stream: &mut StreamEncoder,
 ) -> Result<(), CliError> {
     let format = ToolFormat::narrow(output::contract::Command::Dns, format)?;
+    if !arguments.udp_only && !arguments.route.supports_kernel_tcp() {
+        return Err(CliError::new(
+            core::error::Kind::Cli,
+            "DNS TCP fallback cannot preserve --interface, --source, or --link-mode; remove the route override or pass --udp-only",
+        ));
+    }
     let queue_limits = arguments.limits.clone().into_limits();
     let request = prepare_request(&arguments, queue_limits)?;
     let mut probe = target_workflow::prepare(
@@ -58,6 +64,7 @@ fn prepare_request(
             .transaction_id
             .unwrap_or_else(conversion::transaction_id),
         recursion_desired: !arguments.no_recursion,
+        tcp_fallback: packetcraftr::dns::DEFAULT_DNS_TCP_FALLBACK && !arguments.udp_only,
         attempts: arguments.attempts,
         timeout: Duration::from_millis(arguments.timeout_ms),
         queries_per_second: arguments.rate,
@@ -138,11 +145,14 @@ impl TargetWorkflow for Dns {
 
     fn convert_complete(
         summary: Self::Summary,
-    ) -> (
-        Self::Record,
-        Vec<core::diagnostic::Diagnostic>,
-        output::envelope::Stats,
-    ) {
-        output::dns::Event::complete_from_dns(summary)
+    ) -> Result<
+        (
+            Self::Record,
+            Vec<core::diagnostic::Diagnostic>,
+            output::envelope::Stats,
+        ),
+        CliError,
+    > {
+        output::dns::Event::complete_from_dns(summary).map_err(CliError::classified)
     }
 }

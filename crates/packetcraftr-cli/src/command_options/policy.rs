@@ -81,8 +81,10 @@ impl Budget for Transmitted {
         default_limit_bytes()
     }
 
-    const PACKETS_HELP: &'static str = "Maximum packets authorized for one operation";
-    const BYTES_HELP: &'static str = "Maximum packet bytes authorized for one operation";
+    const PACKETS_HELP: &'static str =
+        "Maximum transmitted packets or bounded socket traffic units authorized";
+    const BYTES_HELP: &'static str =
+        "Maximum wire or socket application bytes authorized for one operation";
 }
 
 /// Frames read from a capture file and replayed onto the wire, which run to

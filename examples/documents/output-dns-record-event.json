@@ -6,7 +6,8 @@
   "status": "success",
   "result": {
     "event": "record",
-    "attempt": 2,
+    "attempt": 1,
+    "transport": "tcp",
     "server": "resolver.lab",
     "server_port": 53,
     "query_name": "www.example.test.",

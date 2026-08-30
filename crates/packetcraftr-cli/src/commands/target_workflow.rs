@@ -66,11 +66,14 @@ pub(super) trait TargetWorkflow {
 
     fn convert_complete(
         summary: Self::Summary,
-    ) -> (
-        Self::Record,
-        Vec<core::diagnostic::Diagnostic>,
-        output::envelope::Stats,
-    );
+    ) -> Result<
+        (
+            Self::Record,
+            Vec<core::diagnostic::Diagnostic>,
+            output::envelope::Stats,
+        ),
+        CliError,
+    >;
 
     /// Writes one event as an NDJSON record.
     fn emit_event(event: Self::Event, stream: &StreamEncoder) -> Result<(), CliError> {
@@ -80,7 +83,7 @@ pub(super) trait TargetWorkflow {
 
     /// Writes the terminal completion record.
     fn emit_complete(summary: Self::Summary, stream: &StreamEncoder) -> Result<(), CliError> {
-        let (record, diagnostics, stats) = Self::convert_complete(summary);
+        let (record, diagnostics, stats) = Self::convert_complete(summary)?;
         Ok(stream.complete_with_stats(record, diagnostics, stats)?)
     }
 }

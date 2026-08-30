@@ -6,9 +6,11 @@ use crate::ExchangeExecutor;
 use crate::probe::client_executor::ExecutorFault;
 use crate::probe::{self, Transport as ProbeTransport};
 
+use packetcraftr_netio::dns_tcp::Provider as TcpProvider;
 use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Sender as PacketIo};
 
-use super::model::{Exchange, Execution, Executor};
+use super::model::{Exchange, Execution, Executor, TcpExchange, TcpExecution};
+use super::wire::{ResponseClassification, classify_response};
 
 const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
     "cli.dns_executor",
@@ -45,7 +47,10 @@ where
                 .min(exchange.max_responses),
             ..self.options.clone()
         };
-        let result = ExchangeExecutor::new(self.client, options).exchange_for_workflow(
+        let registry = std::sync::Arc::clone(self.client.registry());
+        let stop_probe = exchange.probe.clone();
+        let stop_limits = exchange.limits;
+        let result = ExchangeExecutor::new(self.client, options).exchange_for_workflow_until(
             &packetcraftr_core::template::Template::new(exchange.probe.packet()),
             exchange.timeout,
             1,
@@ -53,6 +58,12 @@ where
             |_request_index, sent, response| {
                 probe::observe(self.client.registry(), ProbeTransport::Udp, sent, response)
                     .is_some()
+            },
+            move |_request_index, sent, response| {
+                matches!(
+                    classify_response(&registry, &stop_probe, sent, response, stop_limits),
+                    Some(ResponseClassification::Response(_))
+                )
             },
         )?;
         let crate::exchange::Result {
@@ -82,5 +93,69 @@ where
             diagnostics,
             stats,
         })
+    }
+
+    fn execute_tcp(
+        &mut self,
+        exchange: &TcpExchange,
+    ) -> Result<TcpExecution, packetcraftr_netio::dns_tcp::Error> {
+        validate_tcp_route_options(&self.options.send.plan)?;
+        let response = packetcraftr_netio::dns_tcp::SystemProvider.exchange(
+            packetcraftr_netio::dns_tcp::Request {
+                endpoint: exchange.endpoint,
+                query: &exchange.query,
+                timeout: exchange.timeout,
+                max_message_bytes: exchange.max_message_bytes,
+            },
+        )?;
+        Ok(TcpExecution::new(exchange.permit, response))
+    }
+}
+
+fn validate_tcp_route_options(
+    plan: &packetcraftr_netio::route::Options,
+) -> Result<(), packetcraftr_netio::dns_tcp::Error> {
+    if plan.interface.is_some()
+        || plan.preferred_source.is_some()
+        || !matches!(plan.link_mode, packetcraftr_netio::link::Mode::Auto)
+    {
+        return Err(packetcraftr_netio::dns_tcp::Error::Unsupported {
+            message: "kernel TCP cannot preserve packet-oriented interface, source, or link-mode overrides; use UDP-only DNS"
+                .to_owned(),
+        });
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::{IpAddr, Ipv4Addr};
+
+    use super::validate_tcp_route_options;
+
+    #[test]
+    fn tcp_route_validation_rejects_every_packet_oriented_override() {
+        let defaults = packetcraftr_netio::route::Options::default();
+        assert!(validate_tcp_route_options(&defaults).is_ok());
+
+        let mut source = defaults.clone();
+        source.preferred_source = Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)));
+        assert!(validate_tcp_route_options(&source).is_err());
+
+        let mut interface = defaults.clone();
+        interface.interface = Some(packetcraftr_netio::interface::Id {
+            name: "fixture0".to_owned(),
+            index: 1,
+        });
+        assert!(validate_tcp_route_options(&interface).is_err());
+
+        for link_mode in [
+            packetcraftr_netio::link::Mode::Layer2,
+            packetcraftr_netio::link::Mode::Layer3,
+        ] {
+            let mut plan = defaults.clone();
+            plan.link_mode = link_mode;
+            assert!(validate_tcp_route_options(&plan).is_err());
+        }
     }
 }

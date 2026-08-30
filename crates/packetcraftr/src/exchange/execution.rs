@@ -15,7 +15,9 @@ use packetcraftr_netio::{
 use crate::Client;
 use crate::Error;
 
-use crate::exchange::{Collector, Prepared, Transaction, WorkflowResponseMatcher};
+use crate::exchange::{
+    Collector, Prepared, Transaction, WorkflowResponseMatcher, WorkflowStopPredicate,
+};
 use crate::planning::ensure_preparation_deadline;
 
 impl<R, N, I> Client<R, N, I>
@@ -29,7 +31,7 @@ where
         template: &packetcraftr_core::template::Template,
         options: crate::exchange::Options,
     ) -> Result<crate::exchange::Result, Error> {
-        self.exchange_collected(template, options, None)
+        self.exchange_collected(template, options, None, None)
     }
 
     /// Runs one capture-ready exchange and publishes each event when final.
@@ -55,7 +57,7 @@ where
                 source: Box::new(source),
             }
         })?;
-        self.exchange_internal_with_events(template, options, None, &mut |event| {
+        self.exchange_internal_with_events(template, options, None, None, &mut |event| {
             sink.emit(event, &deadline).map_err(exchange_sink_error)
         })
     }
@@ -66,7 +68,17 @@ where
         options: crate::exchange::Options,
         workflow_matcher: Option<&mut WorkflowResponseMatcher<'_>>,
     ) -> Result<crate::exchange::Result, Error> {
-        self.exchange_collected(template, options, workflow_matcher)
+        self.exchange_collected(template, options, workflow_matcher, None)
+    }
+
+    pub(crate) fn exchange_internal_until(
+        &self,
+        template: &packetcraftr_core::template::Template,
+        options: crate::exchange::Options,
+        workflow_matcher: Option<&mut WorkflowResponseMatcher<'_>>,
+        stop_predicate: &mut WorkflowStopPredicate<'_>,
+    ) -> Result<crate::exchange::Result, Error> {
+        self.exchange_collected(template, options, workflow_matcher, Some(stop_predicate))
     }
 
     fn exchange_collected(
@@ -74,12 +86,14 @@ where
         template: &packetcraftr_core::template::Template,
         options: crate::exchange::Options,
         workflow_matcher: Option<&mut WorkflowResponseMatcher<'_>>,
+        stop_predicate: Option<&mut WorkflowStopPredicate<'_>>,
     ) -> Result<crate::exchange::Result, Error> {
         let mut collector = Collector::default();
         let summary = self.exchange_internal_with_events(
             template,
             options,
             workflow_matcher,
+            stop_predicate,
             &mut |event| {
                 collector.observe(event);
                 Ok(())
@@ -93,6 +107,7 @@ where
         template: &packetcraftr_core::template::Template,
         options: crate::exchange::Options,
         workflow_matcher: Option<&mut WorkflowResponseMatcher<'_>>,
+        stop_predicate: Option<&mut WorkflowStopPredicate<'_>>,
         emit: &mut F,
     ) -> Result<crate::exchange::Summary, Error>
     where
@@ -100,7 +115,7 @@ where
     {
         let prepared = self.prepare_exchange(template, options)?;
         let transaction = self.arm_capture(prepared)?;
-        transaction.execute(&self.io, workflow_matcher, emit)
+        transaction.execute(&self.io, workflow_matcher, stop_predicate, emit)
     }
 
     fn arm_capture(

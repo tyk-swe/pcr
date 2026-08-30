@@ -886,26 +886,160 @@ fn txt_limits_and_name_compression_safety_are_enforced() {
     }
 }
 
-#[test]
-fn dns_over_tcp_length_prefix_is_exact() {
-    let message = response("example.test.", QueryType::A, RESPONSE, &[], &[], &[]);
+fn tcp_frame(message: &[u8]) -> Vec<u8> {
     let mut frame = u16::try_from(message.len())
         .expect("fixture DNS response fits TCP prefix")
         .to_be_bytes()
         .to_vec();
-    frame.extend_from_slice(&message);
-    assert!(
-        dns::decode_tcp_frame(&frame, "example.test", QueryType::A, ID, Limits::default()).is_ok()
-    );
+    frame.extend_from_slice(message);
+    frame
+}
+
+#[test]
+fn dns_over_tcp_accepts_one_exact_complete_response() {
+    let message = response("example.test.", QueryType::A, RESPONSE, &[], &[], &[]);
+    let decoded = dns::decode_tcp_frame(
+        &tcp_frame(&message),
+        "example.test",
+        QueryType::A,
+        ID,
+        Limits::default(),
+    )
+    .expect("exact DNS-over-TCP response");
+    assert!(!decoded.metadata.truncated);
+}
+
+#[test]
+fn dns_over_tcp_rejects_short_prefix_and_zero_length_message() {
     assert!(matches!(
         dns::decode_tcp_frame(&[0], "example.test", QueryType::A, ID, Limits::default()),
         Err(WireError::MessageTooShort { minimum: 2, .. })
     ));
-    frame[1] = frame[1].wrapping_add(1);
+    assert_eq!(
+        dns::decode_tcp_frame(&[0, 0], "example.test", QueryType::A, ID, Limits::default()),
+        Err(WireError::TcpFrameZeroLength)
+    );
+}
+
+#[test]
+fn dns_over_tcp_rejects_oversized_declaration_before_incomplete_frame() {
+    let limits = Limits {
+        max_message_bytes: 12,
+        ..Limits::default()
+    };
+    assert_eq!(
+        dns::decode_tcp_frame(&[0, 13], "example.test", QueryType::A, ID, limits),
+        Err(WireError::MessageTooLarge {
+            actual: 13,
+            maximum: 12,
+        })
+    );
+}
+
+#[test]
+fn dns_over_tcp_rejects_incomplete_and_trailing_frame_bytes() {
+    let message = response("example.test.", QueryType::A, RESPONSE, &[], &[], &[]);
+    let mut incomplete = tcp_frame(&message);
+    let declared = message.len() + 1;
+    incomplete[..2].copy_from_slice(
+        &u16::try_from(declared)
+            .expect("fixture DNS response fits TCP prefix")
+            .to_be_bytes(),
+    );
+    assert_eq!(
+        dns::decode_tcp_frame(
+            &incomplete,
+            "example.test",
+            QueryType::A,
+            ID,
+            Limits::default()
+        ),
+        Err(WireError::TcpFrameLength {
+            declared,
+            actual: message.len(),
+        })
+    );
+
+    let mut trailing = tcp_frame(&message);
+    trailing.push(0xff);
+    assert_eq!(
+        dns::decode_tcp_frame(
+            &trailing,
+            "example.test",
+            QueryType::A,
+            ID,
+            Limits::default()
+        ),
+        Err(WireError::TcpFrameLength {
+            declared: message.len(),
+            actual: message.len() + 1,
+        })
+    );
+}
+
+#[test]
+fn dns_over_tcp_preserves_dns_malformed_trailing_and_identity_validation() {
+    let malformed = tcp_frame(&[0; 11]);
     assert!(matches!(
-        dns::decode_tcp_frame(&frame, "example.test", QueryType::A, ID, Limits::default()),
-        Err(WireError::TcpFrameLength { .. })
+        dns::decode_tcp_frame(
+            &malformed,
+            "example.test",
+            QueryType::A,
+            ID,
+            Limits::default()
+        ),
+        Err(WireError::MessageTooShort {
+            actual: 11,
+            minimum: 12,
+        })
     ));
+
+    let mut dns_trailing = response("example.test.", QueryType::A, RESPONSE, &[], &[], &[]);
+    dns_trailing.push(0xff);
+    assert_eq!(
+        dns::decode_tcp_frame(
+            &tcp_frame(&dns_trailing),
+            "example.test",
+            QueryType::A,
+            ID,
+            Limits::default()
+        ),
+        Err(WireError::TrailingBytes { remaining: 1 })
+    );
+
+    let message = response("example.test.", QueryType::A, RESPONSE, &[], &[], &[]);
+    assert!(matches!(
+        dns::decode_tcp_frame(
+            &tcp_frame(&message),
+            "example.test",
+            QueryType::A,
+            ID + 1,
+            Limits::default()
+        ),
+        Err(WireError::TransactionIdMismatch { .. })
+    ));
+}
+
+#[test]
+fn dns_over_tcp_rejects_a_response_that_is_still_truncated() {
+    let message = response(
+        "example.test.",
+        QueryType::A,
+        RESPONSE | TRUNCATED,
+        &[],
+        &[],
+        &[],
+    );
+    assert_eq!(
+        dns::decode_tcp_frame(
+            &tcp_frame(&message),
+            "example.test",
+            QueryType::A,
+            ID,
+            Limits::default()
+        ),
+        Err(WireError::TcpResponseTruncated)
+    );
 }
 
 #[test]

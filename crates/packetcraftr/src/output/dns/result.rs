@@ -14,7 +14,7 @@ use super::super::envelope::Stats;
 use super::super::frame::{Captured, Timestamp};
 use super::record::{Edns, Record, RejectedRecord, Section};
 
-pub use crate::dns::Outcome;
+pub use crate::dns::{Outcome, Transport};
 
 /// Aggregate result of `dns`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -25,8 +25,10 @@ pub struct Result {
     pub query_name: String,
     pub query_type: String,
     pub transaction_id: u16,
-    pub transport: String,
     pub outcome: Outcome,
+    pub fallback_attempted: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub accepted_transport: Option<Transport>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_code: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -133,12 +135,24 @@ impl Result {
             query_type,
             transaction_id,
             outcome,
+            fallback_attempted,
+            accepted_transport,
             response,
             attempts,
             undecoded,
             diagnostics,
             stats,
         } = result;
+        let has_tcp_attempt = attempts
+            .iter()
+            .any(|attempt| attempt.transport == Transport::Tcp);
+        validate_transport_outcome(outcome, fallback_attempted, accepted_transport)?;
+        if fallback_attempted != has_tcp_attempt {
+            return Err(Error::IncoherentDnsEvidence {
+                message: "fallback_attempted did not match the retained TCP attempt evidence"
+                    .to_owned(),
+            });
+        }
         let response_fields = ResponseFields::from_response(response);
         let attempt_outputs = attempts
             .into_iter()
@@ -156,8 +170,9 @@ impl Result {
                 query_name,
                 query_type: query_type.to_string(),
                 transaction_id,
-                transport: "udp".to_owned(),
                 outcome,
+                fallback_attempted,
+                accepted_transport,
                 response_code: response_fields.response_code,
                 response_code_name: response_fields.response_code_name,
                 edns: response_fields.edns,
@@ -182,12 +197,28 @@ impl Result {
 }
 
 fn try_from_attempt(evidence: crate::dns::AttemptEvidence) -> std::result::Result<Attempt, Error> {
+    if evidence.transport == Transport::Udp && evidence.source_port.is_none() {
+        return Err(Error::IncoherentDnsEvidence {
+            message: "UDP attempt evidence omitted its selected source port".to_owned(),
+        });
+    }
+    if evidence.transport == Transport::Udp && evidence.sent_at.is_none() {
+        return Err(Error::IncoherentDnsEvidence {
+            message: "UDP attempt evidence omitted its query transmission time".to_owned(),
+        });
+    }
+    if evidence.transport == Transport::Tcp && evidence.response.is_some() {
+        return Err(Error::IncoherentDnsEvidence {
+            message: "TCP socket bytes cannot be represented as a captured frame".to_owned(),
+        });
+    }
     Ok(Attempt {
         attempt: evidence.attempt,
+        transport: evidence.transport,
         server_address: evidence.server_address,
         source_port: evidence.source_port,
         status: evidence.status,
-        sent_at: evidence.sent_at.try_into()?,
+        sent_at: evidence.sent_at.map(Timestamp::try_from).transpose()?,
         received_at: evidence.received_at.map(Timestamp::try_from).transpose()?,
         latency: evidence.latency,
         frame: evidence
@@ -202,8 +233,15 @@ fn try_from_attempt(evidence: crate::dns::AttemptEvidence) -> std::result::Resul
 fn try_from_undecoded(
     evidence: crate::dns::UndecodedEvidence,
 ) -> std::result::Result<Undecoded, Error> {
+    if evidence.transport != Transport::Udp {
+        return Err(Error::IncoherentDnsEvidence {
+            message: "TCP socket bytes cannot be represented as undecoded captured evidence"
+                .to_owned(),
+        });
+    }
     Ok(Undecoded {
         attempt: evidence.attempt,
+        transport: evidence.transport,
         frame: Captured::try_from_frame(evidence.frame)?,
     })
 }
@@ -211,10 +249,13 @@ fn try_from_undecoded(
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Attempt {
     pub attempt: u32,
+    pub transport: Transport,
     pub server_address: IpAddr,
-    pub source_port: u16,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_port: Option<u16>,
     pub status: Outcome,
-    pub sent_at: Timestamp,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sent_at: Option<Timestamp>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub received_at: Option<Timestamp>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -229,6 +270,7 @@ pub struct Attempt {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Undecoded {
     pub attempt: u32,
+    pub transport: Transport,
     pub frame: Captured,
 }
 
@@ -244,6 +286,7 @@ pub enum Event {
     },
     Record {
         attempt: u32,
+        transport: Transport,
         server: String,
         server_port: u16,
         query_name: String,
@@ -253,6 +296,7 @@ pub enum Event {
     },
     Rejected {
         attempt: u32,
+        transport: Transport,
         server: String,
         server_port: u16,
         query_name: String,
@@ -270,8 +314,10 @@ pub enum Event {
         query_name: String,
         query_type: String,
         transaction_id: u16,
-        transport: String,
         outcome: Outcome,
+        fallback_attempted: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        accepted_transport: Option<Transport>,
         #[serde(skip_serializing_if = "Option::is_none")]
         response_code: Option<u16>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -311,12 +357,14 @@ impl Event {
             ),
             crate::dns::Event::Record {
                 attempt,
+                transport,
                 context,
                 section,
                 record,
             } => (
                 Self::Record {
                     attempt,
+                    transport,
                     server: context.server.to_string(),
                     server_port: context.server_port,
                     query_name: context.query_name.to_string(),
@@ -328,11 +376,13 @@ impl Event {
             ),
             crate::dns::Event::Rejected {
                 attempt,
+                transport,
                 context,
                 record,
             } => (
                 Self::Rejected {
                     attempt,
+                    transport,
                     server: context.server.to_string(),
                     server_port: context.server_port,
                     query_name: context.query_name.to_string(),
@@ -358,9 +408,16 @@ impl Event {
         Ok((event, diagnostics))
     }
 
-    pub fn complete_from_dns(summary: crate::dns::Summary) -> (Self, Vec<Diagnostic>, Stats) {
+    pub fn complete_from_dns(
+        summary: crate::dns::Summary,
+    ) -> std::result::Result<(Self, Vec<Diagnostic>, Stats), Error> {
+        validate_transport_outcome(
+            summary.outcome,
+            summary.fallback_attempted,
+            summary.accepted_transport,
+        )?;
         let response = ResponseFields::from_metadata(summary.response);
-        (
+        Ok((
             Self::Complete {
                 server: summary.server,
                 server_port: summary.server_port,
@@ -368,8 +425,9 @@ impl Event {
                 query_name: summary.query_name,
                 query_type: summary.query_type.to_string(),
                 transaction_id: summary.transaction_id,
-                transport: "udp".to_owned(),
                 outcome: summary.outcome,
+                fallback_attempted: summary.fallback_attempted,
+                accepted_transport: summary.accepted_transport,
                 response_code: response.response_code,
                 response_code_name: response.response_code_name,
                 edns: response.edns,
@@ -383,6 +441,30 @@ impl Event {
             },
             summary.diagnostics,
             summary.stats.into(),
-        )
+        ))
     }
+}
+
+fn validate_transport_outcome(
+    outcome: Outcome,
+    fallback_attempted: bool,
+    accepted_transport: Option<Transport>,
+) -> std::result::Result<(), Error> {
+    let accepted_response = matches!(outcome, Outcome::Response | Outcome::Truncated);
+    if accepted_response != accepted_transport.is_some() {
+        return Err(Error::IncoherentDnsEvidence {
+            message:
+                "accepted_transport must be present exactly when the outcome accepts a response"
+                    .to_owned(),
+        });
+    }
+    if accepted_transport == Some(Transport::Tcp)
+        && (!fallback_attempted || outcome != Outcome::Response)
+    {
+        return Err(Error::IncoherentDnsEvidence {
+            message: "accepted TCP transport requires an attempted fallback and a response outcome"
+                .to_owned(),
+        });
+    }
+    Ok(())
 }

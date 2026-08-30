@@ -40,6 +40,14 @@ impl packetcraftr::dns::Executor for Executor {
             .map_err(CliError::into_boundary_error)?
             .execute(exchange)
     }
+
+    fn execute_tcp(
+        &mut self,
+        exchange: &packetcraftr::dns::TcpExchange,
+    ) -> Result<packetcraftr::dns::TcpExecution, packetcraftr::netio::dns_tcp::Error> {
+        let mut executor = packetcraftr::ExchangeExecutor::new(&self.client, self.exchange.clone());
+        packetcraftr::dns::Executor::execute_tcp(&mut executor, exchange)
+    }
 }
 
 impl packetcraftr::scan::Executor for Executor {

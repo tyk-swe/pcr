@@ -53,6 +53,29 @@ impl Policy {
         Ok(())
     }
 
+    /// Applies the shared policy ceilings to DNS's explicit aggregate of raw
+    /// packets and bounded socket connection/message traffic units.
+    #[doc(hidden)]
+    pub fn authorize_dns_operation(
+        &self,
+        traffic_units: u64,
+        wire_and_application_bytes: u64,
+    ) -> Result<(), Error> {
+        if traffic_units > self.max_packets_per_operation {
+            return Err(Error::TrafficUnitLimit {
+                actual: traffic_units,
+                limit: self.max_packets_per_operation,
+            });
+        }
+        if wire_and_application_bytes > self.max_bytes_per_operation {
+            return Err(Error::TrafficByteLimit {
+                actual: wire_and_application_bytes,
+                limit: self.max_bytes_per_operation,
+            });
+        }
+        Ok(())
+    }
+
     fn authorize_hostname(&self, hostname: &Hostname) -> Result<(), Error> {
         if !self.allow_hostname_resolution {
             return Err(Error::HostnameResolution {

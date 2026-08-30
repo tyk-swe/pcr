@@ -6,4 +6,4 @@
 mod record;
 mod result;
 pub use record::{Edns, EdnsOption, Record, RecordData, RejectedRecord, Section};
-pub use result::{Attempt, Event, Outcome, Result, Undecoded};
+pub use result::{Attempt, Event, Outcome, Result, Transport, Undecoded};

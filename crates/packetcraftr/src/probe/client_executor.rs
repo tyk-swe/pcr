@@ -66,4 +66,35 @@ where
             .exchange_internal(template, options, Some(&mut matches_request))
             .map_err(crate::BoundaryError::from_error)
     }
+
+    pub(crate) fn exchange_for_workflow_until(
+        &self,
+        template: &packetcraftr_core::template::Template,
+        timeout: std::time::Duration,
+        max_template_packets: usize,
+        destination: std::net::IpAddr,
+        mut matches_request: impl FnMut(
+            usize,
+            &Packet,
+            &packetcraftr_core::decode::DecodedPacket,
+        ) -> bool,
+        mut stop_after_response: impl FnMut(
+            usize,
+            &Packet,
+            &packetcraftr_core::decode::DecodedPacket,
+        ) -> bool,
+    ) -> Result<crate::exchange::Result, crate::BoundaryError> {
+        let mut options = self.options.clone();
+        options.timeout = timeout;
+        options.max_template_packets = max_template_packets;
+        options.send.destination = Some(destination);
+        self.client
+            .exchange_internal_until(
+                template,
+                options,
+                Some(&mut matches_request),
+                &mut stop_after_response,
+            )
+            .map_err(crate::BoundaryError::from_error)
+    }
 }

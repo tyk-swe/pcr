@@ -14,7 +14,9 @@ use packetcraftr_netio::{
 };
 
 use super::CaptureGuard;
-use super::{Accumulator, PreparedPacket, WorkflowResponseMatcher};
+use super::{
+    Accumulator, PreparedPacket, ProcessOutcome, WorkflowResponseMatcher, WorkflowStopPredicate,
+};
 
 use crate::Error;
 
@@ -89,13 +91,14 @@ impl<C: Session> Transaction<C> {
         mut self,
         io: &I,
         mut workflow_matcher: Option<&mut WorkflowResponseMatcher<'_>>,
+        mut stop_predicate: Option<&mut WorkflowStopPredicate<'_>>,
         emit: &mut F,
     ) -> Result<super::Summary, Error>
     where
         I: PacketIo,
         F: FnMut(super::Event) -> Result<(), crate::BoundaryError>,
     {
-        let operation = self.run(io, &mut workflow_matcher, emit);
+        let operation = self.run(io, &mut workflow_matcher, &mut stop_predicate, emit);
         if let Err(operation) = operation {
             return Err(self.fail_after_shutdown(operation));
         }
@@ -108,6 +111,7 @@ impl<C: Session> Transaction<C> {
         &mut self,
         io: &I,
         workflow_matcher: &mut Option<&mut WorkflowResponseMatcher<'_>>,
+        stop_predicate: &mut Option<&mut WorkflowStopPredicate<'_>>,
         emit: &mut F,
     ) -> Result<(), OperationError>
     where
@@ -115,8 +119,12 @@ impl<C: Session> Transaction<C> {
         F: FnMut(super::Event) -> Result<(), crate::BoundaryError>,
     {
         self.await_capture_readiness()?;
-        self.send_requests(io, workflow_matcher, emit)?;
-        self.collect_remaining(workflow_matcher, emit)
+        if self.send_requests(io, workflow_matcher, stop_predicate, emit)?
+            == ProcessOutcome::StopCapture
+        {
+            return Ok(());
+        }
+        self.collect_remaining(workflow_matcher, stop_predicate, emit)
     }
 
     fn await_capture_readiness(&mut self) -> Result<(), LiveIoError> {

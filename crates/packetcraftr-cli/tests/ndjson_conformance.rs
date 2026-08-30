@@ -207,10 +207,11 @@ fn dns_context() -> Arc<packetcraftr::dns::EventContext> {
 fn dns_attempt() -> packetcraftr::dns::AttemptEvidence {
     packetcraftr::dns::AttemptEvidence {
         attempt: 1,
+        transport: packetcraftr::dns::Transport::Udp,
         server_address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53)),
-        source_port: 49_152,
+        source_port: Some(49_152),
         status: packetcraftr::dns::Outcome::Timeout,
-        sent_at: UNIX_EPOCH,
+        sent_at: Some(UNIX_EPOCH),
         received_at: None,
         latency: None,
         response: None,
@@ -419,14 +420,29 @@ fn validate_dns_event_variants() {
             context: Arc::clone(&context),
             evidence: dns_attempt(),
         },
+        packetcraftr::dns::Event::Attempt {
+            context: Arc::clone(&context),
+            evidence: packetcraftr::dns::AttemptEvidence {
+                transport: packetcraftr::dns::Transport::Tcp,
+                source_port: None,
+                status: packetcraftr::dns::Outcome::Response,
+                received_at: Some(UNIX_EPOCH + Duration::from_millis(1)),
+                latency: Some(Duration::from_millis(1)),
+                response_code: Some(0),
+                reason: "validated DNS-over-TCP response".to_owned(),
+                ..dns_attempt()
+            },
+        },
         packetcraftr::dns::Event::Record {
             attempt: 1,
+            transport: packetcraftr::dns::Transport::Tcp,
             context: Arc::clone(&context),
             section: packetcraftr::dns::Section::Answer,
             record,
         },
         packetcraftr::dns::Event::Rejected {
             attempt: 1,
+            transport: packetcraftr::dns::Transport::Tcp,
             context,
             record: packetcraftr::dns::RejectedRecord {
                 section: packetcraftr::dns::Section::Answer,
@@ -438,6 +454,7 @@ fn validate_dns_event_variants() {
         },
         packetcraftr::dns::Event::Undecoded(packetcraftr::dns::UndecodedEvidence {
             attempt: 1,
+            transport: packetcraftr::dns::Transport::Udp,
             frame: frame(&[4]),
         }),
         packetcraftr::dns::Event::Diagnostic(core::diagnostic::Diagnostic::warning(
@@ -448,6 +465,75 @@ fn validate_dns_event_variants() {
     for event in events {
         let (event, diagnostics) = output::dns::Event::try_from_dns(event).unwrap();
         validate_typed_event(output::contract::Command::Dns, event, diagnostics);
+    }
+}
+
+#[test]
+fn dns_schema_forbids_capture_frames_on_tcp_attempts() {
+    let mut evidence = dns_attempt();
+    evidence.response = Some(frame(&[4]));
+    let (event, diagnostics) =
+        output::dns::Event::try_from_dns(packetcraftr::dns::Event::Attempt {
+            context: dns_context(),
+            evidence,
+        })
+        .unwrap();
+    let (sink, bytes) = stream(output::contract::Command::Dns);
+    sink.emit_data(event, diagnostics).unwrap();
+    let mut record = bytes.records().remove(0);
+    schema_validator()
+        .validate(&record)
+        .expect("UDP captured evidence is valid");
+    record["result"]["evidence"]["transport"] = json!("tcp");
+    assert!(schema_validator().validate(&record).is_err());
+}
+
+#[test]
+fn dns_schema_enforces_fallback_transport_consistency() {
+    let document: Value = serde_json::from_str(include_str!(
+        "../../../examples/documents/output-dns-success.json"
+    ))
+    .unwrap();
+    schema_validator()
+        .validate(&document)
+        .expect("published fallback aggregate is valid");
+
+    let mut no_fallback = document.clone();
+    no_fallback["result"]["fallback_attempted"] = json!(false);
+    no_fallback["result"]["accepted_transport"] = json!("udp");
+    assert!(schema_validator().validate(&no_fallback).is_err());
+
+    let mut no_tcp_attempt = document.clone();
+    no_tcp_attempt["result"]["attempts"]
+        .as_array_mut()
+        .unwrap()
+        .pop();
+    assert!(schema_validator().validate(&no_tcp_attempt).is_err());
+
+    let mut no_transport = document.clone();
+    no_transport["result"]
+        .as_object_mut()
+        .unwrap()
+        .remove("accepted_transport");
+    assert!(schema_validator().validate(&no_transport).is_err());
+
+    let mut no_udp_source = document;
+    no_udp_source["result"]["attempts"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("source_port");
+    assert!(schema_validator().validate(&no_udp_source).is_err());
+}
+
+#[test]
+fn dns_schema_rejects_truncated_tcp_results() {
+    for document in [
+        include_str!("../../../examples/documents/output-dns-success.json"),
+        include_str!("../../../examples/documents/output-dns-complete.json"),
+    ] {
+        let mut document: Value = serde_json::from_str(document).unwrap();
+        document["result"]["outcome"] = json!("truncated");
+        assert!(schema_validator().validate(&document).is_err());
     }
 }
 

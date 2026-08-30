@@ -17,24 +17,26 @@ pub(super) fn render_text(
     stats: output::envelope::Stats,
 ) -> Result<(), CliError> {
     write_stdout_line(format_args!(
-        "server={}:{} resolved={} query={} type={} id={} transport={} outcome={}",
+        "server={}:{} resolved={} query={} type={} id={} fallback_attempted={} accepted_transport={} outcome={}",
         result.server,
         result.server_port,
         comma_separated(&result.resolved_addresses),
         result.query_name,
         result.query_type,
         result.transaction_id,
-        result.transport,
+        result.fallback_attempted,
+        optional_display(result.accepted_transport),
         result.outcome.as_str(),
     ))?;
     for attempt in &result.attempts {
         write_stdout_line(format_args!(
-            "attempt={} server={} source_port={} status={} sent={} received={} latency={} rcode={} reason={}",
+            "attempt={} transport={} server={} source_port={} status={} sent={} received={} latency={} rcode={} reason={}",
             attempt.attempt,
+            attempt.transport,
             attempt.server_address,
-            attempt.source_port,
+            optional_display(attempt.source_port),
             attempt.status.as_str(),
-            output_timestamp_text(attempt.sent_at),
+            render_optional(attempt.sent_at, output_timestamp_text),
             render_optional(attempt.received_at, output_timestamp_text),
             render_optional(attempt.latency, |value| format!("{value:?}")),
             optional_display(attempt.response_code),
@@ -79,7 +81,7 @@ pub(super) fn render_text(
                 .saturating_add(result.authorities.len())
                 .saturating_add(result.additionals.len()),
             rejected: result.rejected_record_count,
-            queries: stats.packets_completed,
+            udp_packets_completed: stats.packets_completed,
             bytes: stats.bytes,
         })
     ))?;
@@ -113,7 +115,7 @@ struct ResponseLine<'a> {
     truncated: String,
     accepted: usize,
     rejected: usize,
-    queries: u64,
+    udp_packets_completed: u64,
     bytes: u64,
 }
 
@@ -125,11 +127,11 @@ fn response_summary(summary: ResponseLine<'_>) -> String {
         truncated,
         accepted,
         rejected,
-        queries,
+        udp_packets_completed,
         bytes,
     } = summary;
     format!(
-        "dns response_code={response_code} response_code_name={response_code_name} authoritative={authoritative} truncated={truncated} accepted={accepted} rejected={rejected} queries={queries} bytes={bytes}"
+        "dns response_code={response_code} response_code_name={response_code_name} authoritative={authoritative} truncated={truncated} accepted={accepted} rejected={rejected} udp_packets_completed={udp_packets_completed} bytes={bytes}"
     )
 }
 
@@ -160,10 +162,11 @@ mod tests {
             }),
             evidence: dns::AttemptEvidence {
                 attempt,
+                transport: dns::Transport::Udp,
                 server_address: address,
-                source_port: packetcraftr::EPHEMERAL_SOURCE_PORT_BASE,
+                source_port: Some(packetcraftr::EPHEMERAL_SOURCE_PORT_BASE),
                 status: dns::Outcome::Timeout,
-                sent_at: UNIX_EPOCH,
+                sent_at: Some(UNIX_EPOCH),
                 received_at: None,
                 latency: None,
                 response: None,
@@ -182,6 +185,8 @@ mod tests {
             query_type: dns::QueryType::A,
             transaction_id: u16::MAX,
             outcome: dns::Outcome::Timeout,
+            fallback_attempted: false,
+            accepted_transport: None,
             response: None,
             diagnostics: Vec::new(),
             stats: packetcraftr::Stats::default(),
@@ -197,11 +202,13 @@ mod tests {
             truncated: "false".to_owned(),
             accepted: 1,
             rejected: 0,
-            queries: 1,
+            udp_packets_completed: 1,
             bytes: 64,
         });
 
         assert!(summary.contains("response_code_name=NOERROR"));
+        assert!(summary.contains("udp_packets_completed=1"));
+        assert!(!summary.contains("transmissions="));
         assert!(!summary.contains(" response_name="));
     }
 

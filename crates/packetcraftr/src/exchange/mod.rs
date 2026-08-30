@@ -19,6 +19,7 @@ mod transaction;
 
 pub(crate) use accumulator::{
     Accumulator, ProcessContext, ProcessOutcome, WorkflowPromotionContext, WorkflowResponseMatcher,
+    WorkflowStopPredicate,
 };
 pub(crate) use contract::into_sent_packet;
 pub use contract::{

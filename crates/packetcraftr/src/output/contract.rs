@@ -197,6 +197,7 @@ pub enum Error {
     TimestampOutOfRange,
     InvalidSourceFrame,
     IncoherentFuzzEvents { message: String },
+    IncoherentDnsEvidence { message: String },
 }
 
 impl fmt::Display for Error {
@@ -223,6 +224,9 @@ impl fmt::Display for Error {
             }
             Self::IncoherentFuzzEvents { message } => {
                 write!(formatter, "fuzz events are incoherent: {message}")
+            }
+            Self::IncoherentDnsEvidence { message } => {
+                write!(formatter, "DNS evidence is incoherent: {message}")
             }
         }
     }
@@ -252,6 +256,11 @@ impl Classified for Error {
                 "internal.fuzz_event_coherence",
                 Kind::Internal,
                 Some("collect cases from exactly one complete campaign in publication order"),
+            ),
+            Self::IncoherentDnsEvidence { .. } => Classification::new(
+                "internal.dns_event_coherence",
+                Kind::Internal,
+                Some("publish TCP socket metadata without synthesizing a captured frame"),
             ),
         }
     }

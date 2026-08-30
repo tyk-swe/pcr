@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::net::Ipv6Addr;
 use std::time::Duration;
 
 use thiserror::Error;
@@ -72,8 +73,12 @@ pub enum WireError {
     TxtByteLimit { limit: usize },
     #[error("DNS message has {remaining} trailing byte(s) after declared sections")]
     TrailingBytes { remaining: usize },
+    #[error("DNS-over-TCP frame declares a zero-length DNS message")]
+    TcpFrameZeroLength,
     #[error("DNS-over-TCP frame length {declared} does not match {actual} payload byte(s)")]
     TcpFrameLength { declared: usize, actual: usize },
+    #[error("DNS-over-TCP response is still truncated")]
+    TcpResponseTruncated,
 }
 
 impl WireError {
@@ -111,6 +116,8 @@ pub enum Error {
     Authorization(#[from] BoundaryError),
     #[error("resolved DNS server has no {family} address selected")]
     Family { family: &'static str },
+    #[error("DNS-over-TCP fallback cannot address scoped IPv6 link-local server {address}")]
+    TcpLinkLocal { address: Ipv6Addr },
     #[error("DNS worst-case duration {actual:?} exceeds the configured limit of {limit:?}")]
     DurationLimit { actual: Duration, limit: Duration },
     #[error("DNS execution failed on attempt {attempt}: {source}")]
@@ -118,6 +125,12 @@ pub enum Error {
         attempt: u32,
         #[source]
         source: BoundaryError,
+    },
+    #[error("DNS-over-TCP execution is unavailable on attempt {attempt}: {source}")]
+    TcpExecution {
+        attempt: u32,
+        #[source]
+        source: packetcraftr_netio::dns_tcp::Error,
     },
     #[error("DNS retry clock failed before attempt {attempt}: {message}")]
     Clock { attempt: u32, message: String },
@@ -166,6 +179,11 @@ impl Classified for Error {
                 Kind::Packet,
                 Some("select a DNS server address family returned by the authorized resolution"),
             ),
+            Self::TcpLinkLocal { .. } => Classification::new(
+                "capability.dns_tcp_scope",
+                Kind::Capability,
+                Some("use --udp-only for a scoped IPv6 link-local DNS server"),
+            ),
             Self::DurationLimit { .. } => Classification::new(
                 "policy.dns_duration_limit",
                 Kind::Policy,
@@ -174,6 +192,7 @@ impl Classified for Error {
                 ),
             ),
             Self::Execution { source, .. } => source.classification(),
+            Self::TcpExecution { source, .. } => source.classification(),
             Self::Clock { .. } => Classification::new(
                 "io.dns_clock",
                 Kind::Io,
@@ -194,6 +213,7 @@ impl Classified for Error {
         match self {
             Self::Authorization(error) | Self::Output { source: error } => error.context(),
             Self::Execution { attempt, .. }
+            | Self::TcpExecution { attempt, .. }
             | Self::Clock { attempt, .. }
             | Self::InvalidEvidence { attempt, .. }
             | Self::StatisticsOverflow { attempt } => Context::attempt(*attempt),
@@ -205,6 +225,7 @@ impl Classified for Error {
         match self {
             Self::Authorization(error) => error.causes(),
             Self::Execution { source, .. } | Self::Output { source } => source.causes(),
+            Self::TcpExecution { .. } => Vec::new(),
             _ => Vec::new(),
         }
     }

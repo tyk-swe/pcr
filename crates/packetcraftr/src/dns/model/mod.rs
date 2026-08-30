@@ -5,10 +5,10 @@ mod execution;
 mod request;
 mod result;
 
-pub use execution::{Exchange, Execution, Executor, Probe};
+pub use execution::{Exchange, Execution, Executor, Probe, TcpExchange, TcpExecution};
 pub use request::{Limits, QueryType, Request};
 pub use result::{
     AttemptEvidence, Edns, EdnsOption, Event, EventContext, Name, Outcome, Record, RecordValue,
-    RejectedRecord, ResponseMetadata, Result, Section, Summary, UndecodedEvidence,
+    RejectedRecord, ResponseMetadata, Result, Section, Summary, Transport, UndecodedEvidence,
     ValidatedResponse,
 };

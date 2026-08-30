@@ -12,14 +12,24 @@
     "query_type": "a",
     "evidence": {
       "attempt": 1,
+      "transport": "udp",
       "server_address": "192.168.56.53",
       "source_port": 50000,
-      "status": "timeout",
+      "status": "truncated",
       "sent_at": {
         "unix_seconds": 1770000000,
         "nanoseconds": 0
       },
-      "reason": "no checksum-valid, tuple-correlated DNS response before the deadline"
+      "received_at": {
+        "unix_seconds": 1770000000,
+        "nanoseconds": 5000000
+      },
+      "latency": {
+        "secs": 0,
+        "nanos": 5000000
+      },
+      "response_code": 0,
+      "reason": "validated DNS response set the truncation flag; partial records were not accepted"
     }
   },
   "diagnostics": []

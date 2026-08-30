@@ -12,8 +12,9 @@
     "query_name": "txt.example.test.",
     "query_type": "txt",
     "transaction_id": 20547,
-    "transport": "udp",
     "outcome": "response",
+    "fallback_attempted": true,
+    "accepted_transport": "tcp",
     "response_code": 0,
     "response_code_name": "no_error",
     "authoritative": false,
@@ -51,9 +52,10 @@
     "attempts": [
       {
         "attempt": 1,
+        "transport": "udp",
         "server_address": "192.168.56.53",
         "source_port": 50000,
-        "status": "response",
+        "status": "truncated",
         "sent_at": {
           "unix_seconds": 1770000000,
           "nanoseconds": 0
@@ -67,7 +69,28 @@
           "nanos": 5000000
         },
         "response_code": 0,
-        "reason": "validated DNS response with code no_error"
+        "reason": "validated DNS response set the truncation flag; partial records were not accepted"
+      },
+      {
+        "attempt": 1,
+        "transport": "tcp",
+        "server_address": "192.168.56.53",
+        "source_port": 50001,
+        "status": "response",
+        "sent_at": {
+          "unix_seconds": 1770000000,
+          "nanoseconds": 5000000
+        },
+        "received_at": {
+          "unix_seconds": 1770000000,
+          "nanoseconds": 10000000
+        },
+        "latency": {
+          "secs": 0,
+          "nanos": 5000000
+        },
+        "response_code": 0,
+        "reason": "validated DNS-over-TCP response with code no_error"
       }
     ],
     "undecoded": []
@@ -76,10 +99,10 @@
   "stats": {
     "packets_attempted": 1,
     "packets_completed": 1,
-    "bytes": 58,
+    "bytes": 116,
     "elapsed": {
       "secs": 0,
-      "nanos": 5000000
+      "nanos": 10000000
     },
     "capture": {
       "received_frames": 1,

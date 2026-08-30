@@ -173,6 +173,11 @@ pub struct Request {
     pub query_type: QueryType,
     pub transaction_id: u16,
     pub recursion_desired: bool,
+    /// Whether a validated truncated UDP response may trigger one TCP
+    /// continuation within the same attempt deadline. Scoped IPv6 link-local
+    /// servers require UDP-only mode because [`Target`] does not carry a TCP
+    /// scope identifier.
+    pub tcp_fallback: bool,
     pub attempts: u32,
     pub timeout: Duration,
     pub queries_per_second: Option<u32>,

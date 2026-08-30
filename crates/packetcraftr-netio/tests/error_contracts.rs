@@ -11,11 +11,132 @@ use packetcraftr_core::{
     layer::Id as LayerId,
 };
 use packetcraftr_netio::{
-    Error, capture,
+    Error, capture, dns_tcp,
     link::Mode,
     neighbor::Error as NeighborError,
     route::{Error as RouteError, SystemError},
 };
+
+#[test]
+fn dns_tcp_errors_keep_stable_classes_for_every_public_failure_variant() {
+    let endpoint = "127.0.0.1:53".parse().expect("fixture endpoint");
+    let cases = [
+        (
+            dns_tcp::Error::Unsupported {
+                message: "fixture".to_owned(),
+            },
+            "capability.dns_tcp",
+            Kind::Capability,
+        ),
+        (
+            dns_tcp::Error::InvalidTimeout {
+                value: Duration::ZERO,
+            },
+            "internal.dns_tcp_request",
+            Kind::Internal,
+        ),
+        (
+            dns_tcp::Error::QueryTooLarge {
+                actual: 65_536,
+                maximum: 65_535,
+            },
+            "internal.dns_tcp_request",
+            Kind::Internal,
+        ),
+        (
+            dns_tcp::Error::EmptyQuery,
+            "internal.dns_tcp_request",
+            Kind::Internal,
+        ),
+        (
+            dns_tcp::Error::InvalidMessageLimit {
+                value: 0,
+                maximum: 65_535,
+            },
+            "internal.dns_tcp_request",
+            Kind::Internal,
+        ),
+        (
+            dns_tcp::Error::DeadlineOverflow {
+                value: Duration::MAX,
+            },
+            "internal.dns_tcp_request",
+            Kind::Internal,
+        ),
+        (
+            dns_tcp::Error::Timeout {
+                phase: dns_tcp::Phase::Connect,
+                transferred: 0,
+            },
+            "io.dns_tcp_timeout",
+            Kind::Io,
+        ),
+        (
+            dns_tcp::Error::Connect {
+                endpoint,
+                message: "fixture".to_owned(),
+            },
+            "io.dns_tcp",
+            Kind::Io,
+        ),
+        (
+            dns_tcp::Error::ConfigureTimeout {
+                phase: dns_tcp::Phase::Write,
+                transferred: 1,
+                message: "fixture".to_owned(),
+            },
+            "io.dns_tcp",
+            Kind::Io,
+        ),
+        (
+            dns_tcp::Error::Write {
+                written: 1,
+                expected: 2,
+                message: "fixture".to_owned(),
+            },
+            "io.dns_tcp",
+            Kind::Io,
+        ),
+        (
+            dns_tcp::Error::Read {
+                phase: dns_tcp::Phase::ReadPrefix,
+                message: "fixture".to_owned(),
+            },
+            "io.dns_tcp",
+            Kind::Io,
+        ),
+        (
+            dns_tcp::Error::IncompletePrefix { actual: 1 },
+            "packet.dns_tcp_frame",
+            Kind::Packet,
+        ),
+        (
+            dns_tcp::Error::ZeroLength,
+            "packet.dns_tcp_frame",
+            Kind::Packet,
+        ),
+        (
+            dns_tcp::Error::MessageTooLarge {
+                declared: 512,
+                maximum: 511,
+            },
+            "packet.dns_tcp_frame",
+            Kind::Packet,
+        ),
+        (
+            dns_tcp::Error::IncompleteMessage {
+                declared: 4,
+                actual: 2,
+            },
+            "packet.dns_tcp_frame",
+            Kind::Packet,
+        ),
+    ];
+
+    for (error, code, kind) in cases {
+        assert_contract(&error, code, kind);
+    }
+}
 
 fn ipv4(value: &str) -> IpAddr {
     value.parse().expect("fixture IPv4 address")

@@ -179,10 +179,11 @@ fn evidence_frame() -> Frame {
 fn attempt_evidence() -> dns::AttemptEvidence {
     dns::AttemptEvidence {
         attempt: 1,
+        transport: dns::Transport::Udp,
         server_address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53)),
-        source_port: 49_152,
+        source_port: Some(49_152),
         status: dns::Outcome::Response,
-        sent_at: UNIX_EPOCH + Duration::from_secs(1),
+        sent_at: Some(UNIX_EPOCH + Duration::from_secs(1)),
         received_at: Some(UNIX_EPOCH + Duration::from_secs(2)),
         latency: Some(Duration::from_secs(1)),
         response: Some(evidence_frame()),
@@ -225,10 +226,13 @@ fn dns_aggregate_output_preserves_all_record_shapes_metadata_and_evidence() {
         query_type: dns::QueryType::Any,
         transaction_id: TRANSACTION_ID,
         outcome: dns::Outcome::Response,
+        fallback_attempted: false,
+        accepted_transport: Some(dns::Transport::Udp),
         response: Some(representative_response()),
         attempts: vec![attempt_evidence()],
         undecoded: vec![dns::UndecodedEvidence {
             attempt: 2,
+            transport: dns::Transport::Udp,
             frame: evidence_frame(),
         }],
         diagnostics: vec![diagnostic.clone()],
@@ -248,6 +252,8 @@ fn dns_aggregate_output_preserves_all_record_shapes_metadata_and_evidence() {
     assert_eq!(output.authenticated_data, Some(true));
     assert_eq!(output.checking_disabled, Some(true));
     assert_eq!(output.rejected_record_count, 1);
+    assert!(!output.fallback_attempted);
+    assert_eq!(output.accepted_transport, Some(dns::Transport::Udp));
     assert_eq!(output.rejected_records.len(), 1);
     assert_eq!(output.attempts[0].attempt, 1);
     assert_eq!(
@@ -300,6 +306,160 @@ fn dns_aggregate_output_preserves_all_record_shapes_metadata_and_evidence() {
 }
 
 #[test]
+fn dns_tcp_attempt_output_uses_metadata_without_synthetic_capture_bytes() {
+    let mut tcp = attempt_evidence();
+    tcp.transport = dns::Transport::Tcp;
+    tcp.source_port = Some(50_000);
+    tcp.response = None;
+    let (event, diagnostics) = dns_output::Event::try_from_dns(dns::Event::Attempt {
+        context: event_context(),
+        evidence: tcp.clone(),
+    })
+    .expect("TCP attempt metadata converts");
+    assert!(diagnostics.is_empty());
+    let json = serde_json::to_value(event).expect("TCP attempt serializes");
+    assert_eq!(json["evidence"]["transport"], "tcp");
+    assert_eq!(json["evidence"]["source_port"], 50_000);
+    assert!(json["evidence"].get("frame").is_none());
+
+    let mut failed_tcp = tcp.clone();
+    failed_tcp.sent_at = None;
+    failed_tcp.received_at = None;
+    failed_tcp.latency = None;
+    failed_tcp.status = dns::Outcome::NetworkFailure;
+    let (event, _) = dns_output::Event::try_from_dns(dns::Event::Attempt {
+        context: event_context(),
+        evidence: failed_tcp,
+    })
+    .expect("an unsent TCP attempt converts without a synthetic timestamp");
+    let json = serde_json::to_value(event).expect("failed TCP attempt serializes");
+    assert!(json["evidence"].get("sent_at").is_none());
+
+    tcp.response = Some(evidence_frame());
+    let error = dns_output::Event::try_from_dns(dns::Event::Attempt {
+        context: event_context(),
+        evidence: tcp,
+    })
+    .expect_err("TCP socket bytes cannot become captured-frame evidence");
+    assert!(matches!(
+        error,
+        packetcraftr::output::contract::Error::IncoherentDnsEvidence { .. }
+    ));
+
+    let error = dns_output::Event::try_from_dns(dns::Event::Undecoded(dns::UndecodedEvidence {
+        attempt: 1,
+        transport: dns::Transport::Tcp,
+        frame: evidence_frame(),
+    }))
+    .expect_err("TCP socket bytes cannot become undecoded capture evidence");
+    assert!(matches!(
+        error,
+        packetcraftr::output::contract::Error::IncoherentDnsEvidence { .. }
+    ));
+}
+
+#[test]
+fn dns_aggregate_output_requires_fallback_flag_and_tcp_attempts_to_match() {
+    let result = |fallback_attempted, attempts| dns::Result {
+        server: "resolver.example.test".to_owned(),
+        server_port: 53,
+        resolved_addresses: vec![IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53))],
+        query_name: "example.test".to_owned(),
+        query_type: dns::QueryType::A,
+        transaction_id: TRANSACTION_ID,
+        outcome: dns::Outcome::Timeout,
+        fallback_attempted,
+        accepted_transport: None,
+        response: None,
+        attempts,
+        undecoded: Vec::new(),
+        diagnostics: Vec::new(),
+        stats: Stats::default(),
+    };
+    let mut tcp = attempt_evidence();
+    tcp.transport = dns::Transport::Tcp;
+    tcp.response = None;
+
+    for inconsistent in [
+        result(false, vec![tcp]),
+        result(true, vec![attempt_evidence()]),
+    ] {
+        let error = dns_output::Result::try_from_dns(inconsistent)
+            .expect_err("fallback metadata must match retained TCP attempt evidence");
+        assert!(matches!(
+            error,
+            packetcraftr::output::contract::Error::IncoherentDnsEvidence { .. }
+        ));
+    }
+}
+
+#[test]
+fn dns_aggregate_output_rejects_incoherent_outcome_transport_metadata() {
+    let result = |outcome, fallback_attempted, accepted_transport| dns::Result {
+        server: "resolver.example.test".to_owned(),
+        server_port: 53,
+        resolved_addresses: vec![IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53))],
+        query_name: "example.test".to_owned(),
+        query_type: dns::QueryType::A,
+        transaction_id: TRANSACTION_ID,
+        outcome,
+        fallback_attempted,
+        accepted_transport,
+        response: None,
+        attempts: Vec::new(),
+        undecoded: Vec::new(),
+        diagnostics: Vec::new(),
+        stats: Stats::default(),
+    };
+
+    for incoherent in [
+        result(dns::Outcome::Response, false, None),
+        result(dns::Outcome::Timeout, false, Some(dns::Transport::Udp)),
+        result(dns::Outcome::Truncated, true, Some(dns::Transport::Tcp)),
+        result(dns::Outcome::Response, false, Some(dns::Transport::Tcp)),
+    ] {
+        let error = dns_output::Result::try_from_dns(incoherent)
+            .expect_err("schema-incoherent transport metadata must be rejected");
+        assert!(matches!(
+            error,
+            packetcraftr::output::contract::Error::IncoherentDnsEvidence { .. }
+        ));
+    }
+}
+
+#[test]
+fn dns_complete_output_rejects_incoherent_outcome_transport_metadata() {
+    let summary = |outcome, fallback_attempted, accepted_transport| dns::Summary {
+        server: "resolver.example.test".to_owned(),
+        server_port: 53,
+        resolved_addresses: vec![IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53))],
+        query_name: "example.test".to_owned(),
+        query_type: dns::QueryType::A,
+        transaction_id: TRANSACTION_ID,
+        outcome,
+        fallback_attempted,
+        accepted_transport,
+        response: None,
+        diagnostics: Vec::new(),
+        stats: Stats::default(),
+    };
+
+    for incoherent in [
+        summary(dns::Outcome::Response, false, None),
+        summary(dns::Outcome::Timeout, false, Some(dns::Transport::Udp)),
+        summary(dns::Outcome::Truncated, true, Some(dns::Transport::Tcp)),
+        summary(dns::Outcome::Response, false, Some(dns::Transport::Tcp)),
+    ] {
+        let error = dns_output::Event::complete_from_dns(incoherent)
+            .expect_err("schema-incoherent completion metadata must be rejected");
+        assert!(matches!(
+            error,
+            packetcraftr::output::contract::Error::IncoherentDnsEvidence { .. }
+        ));
+    }
+}
+
+#[test]
 fn dns_progressive_outputs_cover_every_event_and_complete_metadata_shape() {
     let context = event_context();
     let response = representative_response();
@@ -313,17 +473,20 @@ fn dns_progressive_outputs_cover_every_event_and_complete_metadata_shape() {
         },
         dns::Event::Record {
             attempt: 1,
+            transport: dns::Transport::Udp,
             context: Arc::clone(&context),
             section: dns::Section::Answer,
             record,
         },
         dns::Event::Rejected {
             attempt: 1,
+            transport: dns::Transport::Udp,
             context,
             record: rejected,
         },
         dns::Event::Undecoded(dns::UndecodedEvidence {
             attempt: 2,
+            transport: dns::Transport::Udp,
             frame: evidence_frame(),
         }),
     ];
@@ -354,10 +517,13 @@ fn dns_progressive_outputs_cover_every_event_and_complete_metadata_shape() {
             query_type: dns::QueryType::Any,
             transaction_id: TRANSACTION_ID,
             outcome: dns::Outcome::Response,
+            fallback_attempted: false,
+            accepted_transport: Some(dns::Transport::Udp),
             response: Some(response.metadata),
             diagnostics: Vec::new(),
             stats: stats(),
-        });
+        })
+        .expect("coherent completion metadata converts");
     assert!(diagnostics.is_empty());
     assert_eq!(converted_stats.bytes, 128);
     let complete = serde_json::to_value(complete).expect("complete event serializes");
@@ -377,6 +543,8 @@ fn dns_timeout_output_omits_response_only_fields() {
         query_type: dns::QueryType::A,
         transaction_id: TRANSACTION_ID,
         outcome: dns::Outcome::Timeout,
+        fallback_attempted: false,
+        accepted_transport: None,
         response: None,
         attempts: Vec::new(),
         undecoded: Vec::new(),
@@ -413,10 +581,13 @@ fn dns_timeout_output_omits_response_only_fields() {
         query_type: dns::QueryType::A,
         transaction_id: TRANSACTION_ID,
         outcome: dns::Outcome::Timeout,
+        fallback_attempted: false,
+        accepted_transport: None,
         response: None,
         diagnostics: Vec::new(),
         stats: Stats::default(),
-    });
+    })
+    .expect("coherent timeout metadata converts");
     assert!(diagnostics.is_empty());
     let complete = serde_json::to_value(complete).expect("complete timeout serializes");
     assert!(complete.get("response_code").is_none());

@@ -97,8 +97,11 @@ pub(crate) enum Command {
         after_long_help = traceroute::arguments::AFTER_LONG_HELP
     )]
     Traceroute(traceroute::arguments::Args),
-    /// Run a structured DNS operation.
-    #[command(after_long_help = dns::arguments::AFTER_LONG_HELP)]
+    /// Run DNS with bounded UDP-to-TCP fallback.
+    #[command(
+        long_about = dns::arguments::LONG_ABOUT,
+        after_long_help = dns::arguments::AFTER_LONG_HELP
+    )]
     Dns(dns::arguments::Args),
     /// Run bounded field-aware packet fuzzing.
     #[command(after_long_help = fuzz::arguments::AFTER_LONG_HELP)]

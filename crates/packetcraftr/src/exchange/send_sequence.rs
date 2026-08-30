@@ -14,21 +14,26 @@ use packetcraftr_netio::{
 
 use super::transaction::OperationError;
 use super::transaction::Transaction;
-use super::{Event, ProcessOutcome, WorkflowResponseMatcher};
+use super::{Event, ProcessOutcome, WorkflowResponseMatcher, WorkflowStopPredicate};
 
 impl<C: Session> Transaction<C> {
     pub(super) fn send_requests<I, F>(
         &mut self,
         io: &I,
         workflow_matcher: &mut Option<&mut WorkflowResponseMatcher<'_>>,
+        stop_predicate: &mut Option<&mut WorkflowStopPredicate<'_>>,
         emit: &mut F,
-    ) -> Result<(), OperationError>
+    ) -> Result<ProcessOutcome, OperationError>
     where
         I: PacketIo,
         F: FnMut(Event) -> Result<(), crate::BoundaryError>,
     {
         for send_index in 0..self.prepared.len() {
-            let _ = self.drain(Some(self.deadline), workflow_matcher, emit)?;
+            if self.drain(Some(self.deadline), workflow_matcher, stop_predicate, emit)?
+                == ProcessOutcome::StopCapture
+            {
+                return Ok(ProcessOutcome::StopCapture);
+            }
             self.ensure_send_deadline()?;
             self.send_one(io, send_index, emit)?;
             self.ensure_send_deadline()?;
@@ -37,13 +42,17 @@ impl<C: Session> Transaction<C> {
             let outcome = self.drain(
                 more_requests.then_some(self.deadline),
                 workflow_matcher,
+                stop_predicate,
                 emit,
             )?;
+            if outcome == ProcessOutcome::StopCapture {
+                return Ok(outcome);
+            }
             if outcome == ProcessOutcome::CorrelationDeadlineExpired {
                 self.correlation_stopped = true;
             }
         }
-        Ok(())
+        Ok(ProcessOutcome::Continue)
     }
 
     fn send_one<I, F>(

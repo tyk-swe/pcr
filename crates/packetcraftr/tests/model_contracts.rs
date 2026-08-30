@@ -231,6 +231,20 @@ fn policy_validates_address_and_operation_bounds() {
         defaults.authorize_operation(0, defaults.max_bytes_per_operation + 1),
         Err(policy::Error::ByteLimit { .. })
     ));
+    defaults
+        .authorize_dns_operation(
+            defaults.max_packets_per_operation,
+            defaults.max_bytes_per_operation,
+        )
+        .expect("DNS traffic-unit limits are inclusive");
+    assert!(matches!(
+        defaults.authorize_dns_operation(defaults.max_packets_per_operation + 1, 0),
+        Err(policy::Error::TrafficUnitLimit { .. })
+    ));
+    assert!(matches!(
+        defaults.authorize_dns_operation(0, defaults.max_bytes_per_operation + 1),
+        Err(policy::Error::TrafficByteLimit { .. })
+    ));
 }
 
 #[test]

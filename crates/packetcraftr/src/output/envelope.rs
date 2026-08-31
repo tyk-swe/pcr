@@ -5,14 +5,13 @@
 
 use std::fmt;
 use std::io::{self, Write};
-use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde::Serialize;
 
 use packetcraftr_core::diagnostic::Diagnostic as PacketDiagnostic;
-use packetcraftr_core::error::{Classification, Classified, Context, Kind};
+use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 
 use super::contract::{Command, Mode, SCHEMA_V1};
 
@@ -22,8 +21,8 @@ pub struct Error {
     pub kind: Kind,
     pub message: String,
     pub causes: Vec<String>,
-    #[serde(skip_serializing_if = "Context::is_empty")]
-    pub context: Context,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context: Option<Coordinate>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remediation: Option<String>,
 }
@@ -39,7 +38,7 @@ impl Error {
             kind: classification.kind,
             message: message.into(),
             causes,
-            context: Context::default(),
+            context: None,
             remediation: classification.remediation.map(str::to_owned),
         }
     }
@@ -50,7 +49,7 @@ impl Error {
     }
 
     #[must_use]
-    pub const fn with_context(mut self, context: Context) -> Self {
+    pub const fn with_context(mut self, context: Option<Coordinate>) -> Self {
         self.context = context;
         self
     }
@@ -68,7 +67,9 @@ pub struct CaptureStats {
     pub receiver_dropped_frames: u64,
 }
 
-const fn is_zero(value: &u64) -> bool {
+/// The one `skip_serializing_if` predicate for counters the contract omits
+/// when they are zero.
+pub(super) const fn is_zero(value: &u64) -> bool {
     *value == 0
 }
 
@@ -120,10 +121,12 @@ impl From<&crate::fuzz::Stats> for Stats {
 }
 
 impl From<&packetcraftr_core::fuzz::Stats> for Stats {
+    /// An offline campaign transmits nothing, so each generated case is the
+    /// packet operation it attempted and each built case the one it completed.
     fn from(value: &packetcraftr_core::fuzz::Stats) -> Self {
         Self {
-            packets_attempted: value.packets_attempted,
-            packets_completed: value.packets_completed,
+            packets_attempted: value.cases_generated,
+            packets_completed: value.cases_built,
             bytes: value.bytes,
             elapsed: value.elapsed,
             capture: CaptureStats::default(),
@@ -132,22 +135,6 @@ impl From<&packetcraftr_core::fuzz::Stats> for Stats {
 }
 
 pub use packetcraftr_core::diagnostic::Severity as DiagnosticSeverity;
-
-/// Output-v1 byte range used by diagnostics.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-pub struct DiagnosticRange {
-    pub start: usize,
-    pub end: usize,
-}
-
-impl From<packetcraftr_core::layout::ByteRange> for DiagnosticRange {
-    fn from(value: packetcraftr_core::layout::ByteRange) -> Self {
-        Self {
-            start: value.start,
-            end: value.end,
-        }
-    }
-}
 
 /// Output-v1 diagnostic record.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -159,8 +146,6 @@ pub struct Diagnostic {
     pub layer: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub field: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub range: Option<DiagnosticRange>,
 }
 
 impl From<PacketDiagnostic> for Diagnostic {
@@ -171,7 +156,6 @@ impl From<PacketDiagnostic> for Diagnostic {
             message: value.message,
             layer: value.layer,
             field: value.field,
-            range: value.range.map(Into::into),
         }
     }
 }
@@ -183,12 +167,15 @@ enum OutputPayload<T> {
     Error { error: Error },
 }
 
-/// One aggregate JSON success or error. Its type cannot carry a stream sequence.
+/// One structured record: an aggregate JSON result, or the same shape plus the
+/// `sequence` that makes it one NDJSON stream record.
 #[derive(Clone, Debug, Serialize)]
-pub struct Aggregate<T> {
+pub struct Envelope<T> {
     schema: &'static str,
     command: Option<Command>,
     mode: Mode,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sequence: Option<u64>,
     #[serde(flatten)]
     payload: OutputPayload<T>,
     diagnostics: Vec<Diagnostic>,
@@ -196,12 +183,32 @@ pub struct Aggregate<T> {
     stats: Option<Stats>,
 }
 
-impl<T> Aggregate<T> {
+impl<T> Envelope<T> {
+    /// One aggregate JSON success.
     pub fn success(command: Command, result: T, diagnostics: Vec<PacketDiagnostic>) -> Self {
         Self {
             schema: SCHEMA_V1,
             command: Some(command),
             mode: Mode::Aggregate,
+            sequence: None,
+            payload: OutputPayload::Success { result },
+            diagnostics: diagnostics.into_iter().map(Into::into).collect(),
+            stats: None,
+        }
+    }
+
+    /// One NDJSON success record at `sequence`.
+    fn record(
+        command: Command,
+        sequence: u64,
+        result: T,
+        diagnostics: Vec<PacketDiagnostic>,
+    ) -> Self {
+        Self {
+            schema: SCHEMA_V1,
+            command: Some(command),
+            mode: Mode::Stream,
+            sequence: Some(sequence),
             payload: OutputPayload::Success { result },
             diagnostics: diagnostics.into_iter().map(Into::into).collect(),
             stats: None,
@@ -215,121 +222,101 @@ impl<T> Aggregate<T> {
     }
 }
 
-impl Aggregate<()> {
+impl Envelope<()> {
+    /// One aggregate JSON error. `command` is absent when the failure happened
+    /// before command selection.
     pub fn error(command: Option<Command>, error: Error) -> Self {
         Self {
             schema: SCHEMA_V1,
             command,
             mode: Mode::Aggregate,
+            sequence: None,
             payload: OutputPayload::Error { error },
             diagnostics: Vec::new(),
             stats: None,
         }
     }
-}
 
-/// Aggregate error envelope with no unused success-result type parameter.
-pub type AggregateError = Aggregate<()>;
-
-/// One independently valid NDJSON success or terminal-error record.
-#[derive(Clone, Debug, Serialize)]
-struct Stream<T> {
-    schema: &'static str,
-    command: Option<Command>,
-    mode: Mode,
-    sequence: u64,
-    #[serde(flatten)]
-    payload: OutputPayload<T>,
-    diagnostics: Vec<Diagnostic>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    stats: Option<Stats>,
-}
-
-impl<T> Stream<T> {
-    fn success(
-        command: Command,
-        sequence: u64,
-        result: T,
-        diagnostics: Vec<PacketDiagnostic>,
-    ) -> Self {
-        Self {
-            schema: SCHEMA_V1,
-            command: Some(command),
-            mode: Mode::Stream,
-            sequence,
-            payload: OutputPayload::Success { result },
-            diagnostics: diagnostics.into_iter().map(Into::into).collect(),
-            stats: None,
-        }
-    }
-
-    fn error(command: Option<Command>, sequence: u64, error: Error) -> Self {
+    /// One terminal NDJSON error record at `sequence`.
+    fn error_record(command: Option<Command>, sequence: u64, error: Error) -> Self {
         Self {
             schema: SCHEMA_V1,
             command,
             mode: Mode::Stream,
-            sequence,
+            sequence: Some(sequence),
             payload: OutputPayload::Error { error },
             diagnostics: Vec::new(),
             stats: None,
         }
     }
-
-    #[must_use]
-    fn with_stats(mut self, stats: Stats) -> Self {
-        self.stats = Some(stats);
-        self
-    }
 }
 
+/// The aggregate JSON envelope, named for the mode its constructors produce.
+pub type Aggregate<T> = Envelope<T>;
+
+/// Aggregate error envelope with no unused success-result type parameter.
+pub type AggregateError = Envelope<()>;
+
+/// Writes the single NDJSON error record a failure before command selection can
+/// publish. Such a failure has no stream to join, so this record is the whole
+/// document — which is why it, alone, may carry a null `command`.
+pub fn write_unattributed_error(
+    mut writer: impl Write,
+    command: Option<Command>,
+    error: Error,
+) -> Result<(), EncodeError> {
+    let line = serialize_line(&Envelope::error_record(command, 0, error), 0)?;
+    writer
+        .write_all(&line)
+        .and_then(|()| writer.flush())
+        .map_err(|source| EncodeError::Write {
+            sequence: 0,
+            source,
+        })
+}
+
+/// Whether the stream may still be written to, and why not when it may not.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u8)]
 enum EncoderState {
     Open,
-    Writing,
     Terminal,
     Failed,
 }
 
-impl EncoderState {
-    fn from_u8(value: u8) -> Self {
-        match value {
-            0 => Self::Open,
-            1 => Self::Writing,
-            2 => Self::Terminal,
-            _ => Self::Failed,
-        }
-    }
-}
-
+/// The whole encoder state, held under one mutex so a record is written, the
+/// sequence advanced, and the state settled as one indivisible step.
 struct EncoderOutput {
+    state: EncoderState,
     sequence: u64,
     writer: Box<dyn Write + Send>,
 }
 
-struct EncoderShared {
-    command: Option<Command>,
-    state: AtomicU8,
-    output: Mutex<EncoderOutput>,
+impl EncoderOutput {
+    const fn require_open(&self) -> Result<(), EncodeError> {
+        match self.state {
+            EncoderState::Open => Ok(()),
+            EncoderState::Terminal => Err(EncodeError::Terminal),
+            EncoderState::Failed => Err(EncodeError::Failed),
+        }
+    }
 }
 
 /// The single owning encoder for one contiguous NDJSON invocation.
 #[derive(Clone)]
 pub struct StreamEncoder {
-    shared: Arc<EncoderShared>,
+    command: Command,
+    output: Arc<Mutex<EncoderOutput>>,
 }
 
 impl StreamEncoder {
-    pub fn new(command: Option<Command>, writer: impl Write + Send + 'static) -> Self {
+    pub fn new(command: Command, writer: impl Write + Send + 'static) -> Self {
         Self {
-            shared: Arc::new(EncoderShared {
-                command,
-                state: AtomicU8::new(EncoderState::Open as u8),
-                output: Mutex::new(EncoderOutput {
-                    sequence: 0,
-                    writer: Box::new(writer),
-                }),
-            }),
+            command,
+            output: Arc::new(Mutex::new(EncoderOutput {
+                state: EncoderState::Open,
+                sequence: 0,
+                writer: Box::new(writer),
+            })),
         }
     }
 
@@ -338,8 +325,7 @@ impl StreamEncoder {
         result: T,
         diagnostics: Vec<PacketDiagnostic>,
     ) -> Result<(), EncodeError> {
-        let command = self.shared.command.ok_or(EncodeError::MissingCommand)?;
-        self.write_success(command, result, diagnostics, None, false)
+        self.write_success(result, diagnostics, None, false)
     }
 
     pub fn complete<T: Serialize>(
@@ -347,8 +333,7 @@ impl StreamEncoder {
         result: T,
         diagnostics: Vec<PacketDiagnostic>,
     ) -> Result<(), EncodeError> {
-        let command = self.shared.command.ok_or(EncodeError::MissingCommand)?;
-        self.write_success(command, result, diagnostics, None, true)
+        self.write_success(result, diagnostics, None, true)
     }
 
     pub fn complete_with_stats<T: Serialize>(
@@ -357,39 +342,37 @@ impl StreamEncoder {
         diagnostics: Vec<PacketDiagnostic>,
         stats: Stats,
     ) -> Result<(), EncodeError> {
-        let command = self.shared.command.ok_or(EncodeError::MissingCommand)?;
-        self.write_success(command, result, diagnostics, Some(stats), true)
+        self.write_success(result, diagnostics, Some(stats), true)
     }
 
     pub fn emit_error(&self, error: Error) -> Result<(), EncodeError> {
         let mut output = self.lock_output()?;
-        self.require_open()?;
+        output.require_open()?;
         let sequence = output.sequence;
-        let record: Stream<()> = Stream::error(self.shared.command, sequence, error);
+        let record = Envelope::error_record(Some(self.command), sequence, error);
         let line = serialize_line(&record, sequence)?;
-        self.write_line(&mut output, &line, sequence, true)
+        write_line(&mut output, &line, sequence, true)
     }
 
     #[must_use]
     pub fn is_open(&self) -> bool {
-        self.state() == EncoderState::Open
+        self.state() == Some(EncoderState::Open)
     }
 
     #[must_use]
     pub fn is_terminal(&self) -> bool {
-        self.state() == EncoderState::Terminal
+        self.state() == Some(EncoderState::Terminal)
     }
 
     fn write_success<T: Serialize>(
         &self,
-        command: Command,
         result: T,
         diagnostics: Vec<PacketDiagnostic>,
         stats: Option<Stats>,
         terminal: bool,
     ) -> Result<(), EncodeError> {
         let mut output = self.lock_output()?;
-        self.require_open()?;
+        output.require_open()?;
         let sequence = output.sequence;
         let next = if terminal {
             None
@@ -400,62 +383,49 @@ impl StreamEncoder {
                     .ok_or(EncodeError::SequenceOverflow)?,
             )
         };
-        let mut record = Stream::success(command, sequence, result, diagnostics);
+        let mut record = Envelope::record(self.command, sequence, result, diagnostics);
         if let Some(stats) = stats {
             record = record.with_stats(stats);
         }
         let line = serialize_line(&record, sequence)?;
-        self.write_line(&mut output, &line, sequence, terminal)?;
+        write_line(&mut output, &line, sequence, terminal)?;
         if let Some(next) = next {
             output.sequence = next;
         }
         Ok(())
     }
 
-    fn write_line(
-        &self,
-        output: &mut EncoderOutput,
-        line: &[u8],
-        sequence: u64,
-        terminal: bool,
-    ) -> Result<(), EncodeError> {
-        self.set_state(EncoderState::Writing);
-        if let Err(source) = output
-            .writer
-            .write_all(line)
-            .and_then(|()| output.writer.flush())
-        {
-            self.set_state(EncoderState::Failed);
-            return Err(EncodeError::Write { sequence, source });
-        }
-        self.set_state(if terminal {
-            EncoderState::Terminal
-        } else {
-            EncoderState::Open
-        });
-        Ok(())
-    }
-
     fn lock_output(&self) -> Result<std::sync::MutexGuard<'_, EncoderOutput>, EncodeError> {
-        self.shared.output.lock().map_err(|_| EncodeError::Poisoned)
+        self.output.lock().map_err(|_| EncodeError::Poisoned)
     }
 
-    fn require_open(&self) -> Result<(), EncodeError> {
-        match self.state() {
-            EncoderState::Open => Ok(()),
-            EncoderState::Writing => Err(EncodeError::Writing),
-            EncoderState::Terminal => Err(EncodeError::Terminal),
-            EncoderState::Failed => Err(EncodeError::Failed),
-        }
+    /// `None` once the lock is poisoned: a stream whose state cannot be read is
+    /// neither open nor cleanly terminated.
+    fn state(&self) -> Option<EncoderState> {
+        self.output.lock().ok().map(|output| output.state)
     }
+}
 
-    fn state(&self) -> EncoderState {
-        EncoderState::from_u8(self.shared.state.load(Ordering::Acquire))
+fn write_line(
+    output: &mut EncoderOutput,
+    line: &[u8],
+    sequence: u64,
+    terminal: bool,
+) -> Result<(), EncodeError> {
+    if let Err(source) = output
+        .writer
+        .write_all(line)
+        .and_then(|()| output.writer.flush())
+    {
+        output.state = EncoderState::Failed;
+        return Err(EncodeError::Write { sequence, source });
     }
-
-    fn set_state(&self, state: EncoderState) {
-        self.shared.state.store(state as u8, Ordering::Release);
-    }
+    output.state = if terminal {
+        EncoderState::Terminal
+    } else {
+        EncoderState::Open
+    };
+    Ok(())
 }
 
 fn serialize_line(record: &impl Serialize, sequence: u64) -> Result<Vec<u8>, EncodeError> {
@@ -466,11 +436,8 @@ fn serialize_line(record: &impl Serialize, sequence: u64) -> Result<Vec<u8>, Enc
 }
 
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum EncodeError {
-    #[error("NDJSON success record has no command")]
-    MissingCommand,
-    #[error("NDJSON stream is writing a record")]
-    Writing,
     #[error("NDJSON stream is already terminated")]
     Terminal,
     #[error("NDJSON stream output has already failed")]
@@ -509,12 +476,9 @@ impl Classified for EncodeError {
         }
     }
 
+    /// Walked from the retained `#[source]` chain rather than hand-written.
     fn causes(&self) -> Vec<String> {
-        match self {
-            Self::Serialize { source, .. } => vec![source.to_string()],
-            Self::Write { source, .. } => vec![source.to_string()],
-            _ => Vec::new(),
-        }
+        packetcraftr_core::error::source_chain(self)
     }
 }
 
@@ -529,7 +493,15 @@ mod tests {
             Classification::new("fixture", Kind::Packet, None),
             Vec::new(),
         )
-        .with_context(Context::attempt(7));
-        assert_eq!(Error::classified(&source).context.attempt, Some(7));
+        .with_context(Some(Coordinate::Attempt(7)));
+        let error = Error::classified(&source);
+        assert_eq!(error.context, Some(Coordinate::Attempt(7)));
+        // The externally tagged coordinate publishes exactly the one key the
+        // output contract declares.
+        let value = serde_json::to_value(&error).expect("error serializes");
+        assert_eq!(
+            value.get("context"),
+            Some(&serde_json::json!({"attempt": 7}))
+        );
     }
 }

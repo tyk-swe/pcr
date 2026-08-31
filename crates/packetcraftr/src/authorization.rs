@@ -1,25 +1,36 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The single authorization seam every live workflow passes through.
+//! The workflow authorization seam, and the wire primitives both seams share.
 //!
-//! Scan, DNS, traceroute, fuzz, and replay all ask the same question before
-//! they can produce traffic: may this operation run, with these packets or
-//! bounded socket actions, this destination, and these bytes? [`Authorizer`] is that question,
-//! [`Operation`] is the complete, shape-specific statement a workflow makes
-//! about its operation, and [`PolicyAuthorizer`] is the answer a
-//! [`crate::policy::Policy`] gives.
+//! There are two live-traffic front doors, and they are not the same seam:
+//!
+//! * [`Authorizer`] is the seam a workflow engine holds. Scan, DNS,
+//!   traceroute, fuzz, and replay all take an injected authorizer and ask it
+//!   the same question before they can produce traffic: may this operation
+//!   run, with these packets or bounded socket actions, this destination, and
+//!   these bytes? [`Operation`] is the complete, shape-specific statement a
+//!   workflow makes, and [`PolicyAuthorizer`] is the answer a
+//!   [`crate::policy::Policy`] gives.
+//! * [`crate::Client`]'s own inherent methods `authorize_built_packet` and
+//!   `authorize_built_wire`, in `client.rs`, are the seam `send`, `exchange`,
+//!   and `plan` pass through. They apply the
+//!   [`Policy`](crate::policy::Policy) the client owns, and no `Authorizer` is
+//!   involved.
+//!
+//! `decode_wire` and `authorize_wire`, below, are the shared primitives
+//! underneath both: the exact bytes that will reach the wire are decoded with
+//! the trusted built-in registry, never a caller registry, before policy sees
+//! them.
 
 use std::net::IpAddr;
-use std::sync::{Arc, OnceLock};
-use std::time::Duration;
 
+use bytes::Bytes;
 use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::frame::{Frame, LinkType};
-use packetcraftr_core::{Packet, build::BuiltPacket, decode::Dissector, registry::Registry};
-use packetcraftr_netio::{Error as LiveIoError, link::Mode as LinkMode};
+use packetcraftr_core::{Packet, decode::Dissector};
+use packetcraftr_netio::link::Mode as LinkMode;
 
-use crate::Client;
 use crate::Error;
 use crate::target::{Authorized, Resolver, Target};
 
@@ -66,31 +77,36 @@ impl WireBudget {
 ///
 /// Operating systems control TCP handshake, acknowledgement, teardown, and
 /// retransmission packets, so those cannot honestly be represented as an
-/// exact [`WireBudget`]. This shape instead makes the enforceable quantities
-/// explicit before a socket is opened: connections, framed messages,
-/// application bytes, and total wall-clock duration.
+/// exact [`WireBudget`]. This shape instead states the three quantities an
+/// authorizer can actually charge against a traffic policy before a socket is
+/// opened: connections, framed messages, and application bytes. Wall-clock
+/// duration is not one of them — the workflow that opens the socket owns its
+/// own deadline and enforces it there.
+///
+/// [`SocketBudget::none`] is the honest statement that an operation opens no
+/// socket at all; it is not a default, and a workflow that may open one must
+/// still state all three counts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SocketBudget {
     connections: u64,
     messages: u64,
     application_bytes: u64,
-    max_duration: Duration,
 }
 
 impl SocketBudget {
     #[must_use]
-    pub const fn new(
-        connections: u64,
-        messages: u64,
-        application_bytes: u64,
-        max_duration: Duration,
-    ) -> Self {
+    pub const fn new(connections: u64, messages: u64, application_bytes: u64) -> Self {
         Self {
             connections,
             messages,
             application_bytes,
-            max_duration,
         }
+    }
+
+    /// The budget of an operation that will not open a socket.
+    #[must_use]
+    pub const fn none() -> Self {
+        Self::new(0, 0, 0)
     }
 
     #[must_use]
@@ -106,11 +122,6 @@ impl SocketBudget {
     #[must_use]
     pub const fn application_bytes(&self) -> u64 {
         self.application_bytes
-    }
-
-    #[must_use]
-    pub const fn max_duration(&self) -> Duration {
-        self.max_duration
     }
 
     const fn traffic_units(&self) -> u64 {
@@ -178,7 +189,7 @@ pub enum PermissiveLive {
 #[derive(Clone, Copy, Debug)]
 pub struct DeclaredPackets<'a> {
     budget: WireBudget,
-    packets: &'a [Packet],
+    packets: &'a [&'a Packet],
     destination: Option<IpAddr>,
     permissive_live: PermissiveLive,
 }
@@ -190,7 +201,7 @@ impl<'a> DeclaredPackets<'a> {
     #[must_use]
     pub const fn new(
         budget: WireBudget,
-        packets: &'a [Packet],
+        packets: &'a [&'a Packet],
         destination: Option<IpAddr>,
         permissive_live: PermissiveLive,
     ) -> Self {
@@ -209,8 +220,11 @@ impl<'a> DeclaredPackets<'a> {
 
     /// Packets whose declared destinations must be authorized before a route,
     /// capture, neighbor, or transmission provider can observe them.
+    ///
+    /// Borrowed, never owned: a campaign states ten thousand built packets
+    /// here, and the authorizer only reads their declared destinations.
     #[must_use]
-    pub const fn packets(&self) -> &'a [Packet] {
+    pub const fn packets(&self) -> &'a [&'a Packet] {
         self.packets
     }
 
@@ -293,12 +307,17 @@ impl<'a> ReplayFrame<'a> {
 /// authorizer until each says what it does with it.
 #[derive(Clone, Copy, Debug)]
 pub enum Operation<'a> {
-    /// A packet-oriented target workflow (scan, traceroute, or UDP-only DNS) whose destinations were
-    /// already authorized through [`Authorizer::resolve_and_authorize`]; only
-    /// the budget remains to be approved.
+    /// A packet-oriented target workflow — scan or traceroute — whose
+    /// destinations were already authorized through
+    /// [`Authorizer::resolve_and_authorize`]; only the budget remains to be
+    /// approved.
     Budgeted(WireBudget),
-    /// DNS with exact raw-UDP bounds and a separate finite socket budget for
-    /// a possible TCP continuation.
+    /// DNS, with exact raw-UDP bounds and a separate finite socket budget for
+    /// a possible TCP continuation. DNS states this shape for every query,
+    /// with a [`SocketBudget::none`] when no continuation is configured, so
+    /// the same overrun is always charged and reported the same way. Unlike
+    /// [`Operation::Budgeted`], the destination is *not* authorized yet: DNS
+    /// deliberately buys its budget before it resolves a server.
     Dns(DnsOperation),
     /// A workflow that declares the exact packets it may transmit.
     Declared(DeclaredPackets<'a>),
@@ -388,58 +407,61 @@ pub trait Authorizer {
     /// packets and captures) leave this at the fail-closed default.
     fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> {
         let _ = target;
-        Err(BoundaryError::new(
-            "this authorizer does not resolve declared targets",
-            packetcraftr_core::error::Classification::new(
-                "internal.target_resolution",
-                packetcraftr_core::error::Kind::Internal,
-                Some("resolve targets through an authorizer built with a resolver"),
-            ),
-            Vec::new(),
-        ))
+        Err(no_resolver())
     }
+}
+
+/// The refusal an authorizer without a resolver reports.
+///
+/// It is deliberately neither a policy denial nor an I/O failure: the policy is
+/// not the reason and there is no resolver configuration to inspect. Something
+/// asked a packet-oriented authorizer to resolve a name, which is a wiring
+/// fault in the caller.
+fn no_resolver() -> BoundaryError {
+    BoundaryError::new(
+        "this authorizer does not resolve declared targets",
+        packetcraftr_core::error::Classification::new(
+            "internal.target_resolution",
+            packetcraftr_core::error::Kind::Internal,
+            Some("resolve targets through an authorizer built with a resolver"),
+        ),
+        Vec::new(),
+    )
 }
 
 /// Applies a client traffic policy, and an optional hostname resolver, to an
 /// operation without exposing either concern to workflow engines.
-pub struct PolicyAuthorizer<'a, R> {
+///
+/// The resolver is `Option` rather than a stand-in that always fails: a
+/// workflow that authorizes packets rather than names has no resolver, and
+/// saying so is what lets [`Authorizer::resolve_and_authorize`] report that
+/// wiring fault instead of a policy denial for a policy that was never asked.
+pub struct PolicyAuthorizer<'a> {
     policy: &'a crate::policy::Policy,
-    resolver: &'a R,
+    resolver: Option<&'a dyn Resolver>,
 }
 
-impl<'a, R> PolicyAuthorizer<'a, R> {
-    pub fn new(policy: &'a crate::policy::Policy, resolver: &'a R) -> Self {
-        Self { policy, resolver }
-    }
-}
-
-/// Stand-in resolver for workflows that authorize packets rather than names.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct NoResolver;
-
-impl Resolver for NoResolver {
-    fn resolve(
-        &self,
-        hostname: &crate::target::Hostname,
-        _limit: usize,
-    ) -> Result<Vec<IpAddr>, crate::target::Error> {
-        Err(crate::target::Error::NoAddresses {
-            hostname: hostname.to_string(),
-        })
-    }
-}
-
-impl<'a> PolicyAuthorizer<'a, NoResolver> {
-    /// Authorizer for a workflow that never resolves a declared target.
-    pub fn for_packets(policy: &'a crate::policy::Policy) -> Self {
+impl<'a> PolicyAuthorizer<'a> {
+    /// Authorizer for a workflow that resolves declared targets.
+    pub fn new(policy: &'a crate::policy::Policy, resolver: &'a dyn Resolver) -> Self {
         Self {
             policy,
-            resolver: &NoResolver,
+            resolver: Some(resolver),
+        }
+    }
+
+    /// Authorizer for a workflow that authorizes packets rather than names, so
+    /// resolution fails closed.
+    #[must_use]
+    pub const fn for_packets(policy: &'a crate::policy::Policy) -> Self {
+        Self {
+            policy,
+            resolver: None,
         }
     }
 }
 
-impl<R: Resolver> Authorizer for PolicyAuthorizer<'_, R> {
+impl Authorizer for PolicyAuthorizer<'_> {
     fn authorize_operation(&mut self, request: Operation<'_>) -> Result<(), BoundaryError> {
         self.policy.validate().map_err(BoundaryError::from_error)?;
         let budget = request.budget();
@@ -479,9 +501,20 @@ impl<R: Resolver> Authorizer for PolicyAuthorizer<'_, R> {
     }
 
     fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> {
-        self.policy
-            .resolve_target(target, self.resolver)
-            .map_err(BoundaryError::from_error)
+        match (self.resolver, target) {
+            (Some(resolver), _) => self
+                .policy
+                .resolve_target(target, resolver)
+                .map_err(BoundaryError::from_error),
+            // A numeric target names its own address; the policy still gates
+            // that destination. A declared hostname without a resolver is a
+            // wiring fault in the caller, not a policy denial.
+            (None, Target::Address(address)) => self
+                .policy
+                .authorize_numeric_target(target, *address)
+                .map_err(BoundaryError::from_error),
+            (None, Target::Hostname(_)) => Err(no_resolver()),
+        }
     }
 }
 
@@ -525,52 +558,6 @@ pub(crate) fn authorize_permissive_live(
     })
 }
 
-impl<R, N, I> Client<R, N, I> {
-    pub(crate) fn authorize_built(
-        &self,
-        built: &BuiltPacket,
-        allow_permissive_live: bool,
-    ) -> Result<(), Error> {
-        self.policy.authorize_packet_destinations(&built.packet)?;
-        if built.requires_live_opt_in {
-            authorize_permissive_live(&self.policy, allow_permissive_live)?;
-        }
-        Ok(())
-    }
-
-    pub(crate) fn authorize_final_wire(
-        &self,
-        built: &BuiltPacket,
-        route: &packetcraftr_netio::route::Plan,
-    ) -> Result<(), Error> {
-        let link_type = match route.mode {
-            LinkMode::Layer2 => route.decision.link_type,
-            LinkMode::Layer3 => LinkType::RAW,
-            LinkMode::Auto => return Err(LiveIoError::UnresolvedLinkMode.into()),
-        };
-        let frame = Frame::new(
-            std::time::SystemTime::UNIX_EPOCH,
-            link_type,
-            built.bytes.clone(),
-        )
-        .map_err(|error| crate::policy::Error::InvalidPacketSemantics {
-            reason: error.to_string(),
-        })?;
-        authorize_wire(&self.policy, frame, Some(route)).map_err(|error| -> Error {
-            match error {
-                WireAuthorizationError::Decode(error) => {
-                    crate::policy::Error::InvalidPacketSemantics {
-                        reason: error.to_string(),
-                    }
-                }
-                WireAuthorizationError::Policy(error) => error,
-            }
-            .into()
-        })?;
-        Ok(())
-    }
-}
-
 /// Why the final wire bytes were refused: they did not decode, or they
 /// decoded to packets the policy does not permit.
 #[derive(Debug)]
@@ -579,47 +566,44 @@ pub(crate) enum WireAuthorizationError {
     Policy(crate::policy::Error),
 }
 
+/// Decodes exact wire bytes with the trusted built-in registry.
+///
+/// The caller passes the link type and the bytes rather than a capture record:
+/// bytes about to be transmitted have no capture time, no interface, and no
+/// original length to invent, and the one place they must be expressed as a
+/// record is here.
 pub(crate) fn decode_wire(
-    frame: Frame,
+    link_type: LinkType,
+    bytes: &Bytes,
 ) -> Result<packetcraftr_core::decode::DecodedPacket, WireAuthorizationError> {
-    static REGISTRY: OnceLock<Result<Arc<Registry>, String>> = OnceLock::new();
-    let registry = REGISTRY
-        .get_or_init(|| {
-            packetcraftr_core::protocol::builtin::registry()
-                .map(Arc::new)
-                .map_err(|error| error.to_string())
-        })
-        .as_ref()
-        .map_err(|reason| {
-            WireAuthorizationError::Policy(crate::policy::Error::InvalidPacketSemantics {
-                reason: reason.clone(),
-            })
-        })?;
-    if registry.root_for_link_type(frame.link_type.0).is_none() {
-        return Err(WireAuthorizationError::Policy(
-            crate::policy::Error::InvalidPacketSemantics {
-                reason: format!(
-                    "trusted wire authorization does not support link type {}",
-                    frame.link_type.0
-                ),
-            },
-        ));
+    let unsupported = |reason| {
+        WireAuthorizationError::Policy(crate::policy::Error::InvalidPacketSemantics { reason })
+    };
+    let registry = packetcraftr_core::protocol::builtin::registry();
+    if registry.root_for_link_type(link_type.0).is_none() {
+        return Err(unsupported(format!(
+            "trusted wire authorization does not support link type {}",
+            link_type.0
+        )));
     }
-    Dissector::new(Arc::clone(registry))
+    let frame = Frame::without_timestamp(link_type, bytes.clone())
+        .map_err(|source| unsupported(source.to_string()))?;
+    Dissector::new(registry)
         .decode(frame, packetcraftr_core::decode::Options::default())
         .map_err(WireAuthorizationError::Decode)
 }
 
-/// Decodes the bytes that will actually reach the wire with a trusted built-in
-/// registry and applies destination (and, given a route, source) policy to the
-/// decoded packet. Caller registries remain outside this policy trust boundary.
-/// Callers classify decode failures in their own vocabulary.
+/// Applies destination (and, given a route, source) policy to the packet the
+/// trusted registry decodes from the bytes that will actually reach the wire.
+/// Caller registries remain outside this policy trust boundary. Callers
+/// classify decode failures in their own vocabulary.
 pub(crate) fn authorize_wire(
     policy: &crate::policy::Policy,
-    frame: Frame,
+    link_type: LinkType,
+    bytes: &Bytes,
     route: Option<&packetcraftr_netio::route::Plan>,
 ) -> Result<(), WireAuthorizationError> {
-    let decoded = decode_wire(frame)?;
+    let decoded = decode_wire(link_type, bytes)?;
     policy
         .authorize_packet_destinations(&decoded.packet)
         .map_err(WireAuthorizationError::Policy)?;
@@ -676,7 +660,8 @@ mod tests {
 
     #[test]
     fn every_shape_carries_its_budget() {
-        let packets = vec![documentation_packet()];
+        let packet = documentation_packet();
+        let packets = [&packet];
         let frame = Frame::new(std::time::UNIX_EPOCH, LinkType::RAW, vec![0x45_u8; 20])
             .expect("fixture frame");
         let budget = WireBudget::new(3, 40);
@@ -701,7 +686,7 @@ mod tests {
         assert_eq!(replay.mode(), LinkMode::Layer3);
         assert_eq!(replay.frame().bytes().len(), 20);
 
-        let socket = SocketBudget::new(1, 1, 22, Duration::from_secs(1));
+        let socket = SocketBudget::new(1, 1, 22);
         let dns = DnsOperation::new(WireBudget::new(1, 40), socket);
         let dns_shape = Operation::Dns(dns);
         assert_eq!(dns_shape.shape(), "dns");
@@ -718,7 +703,7 @@ mod tests {
         };
         let dns = Operation::Dns(DnsOperation::new(
             WireBudget::new(1, 40),
-            SocketBudget::new(1, 1, 22, Duration::from_secs(1)),
+            SocketBudget::new(1, 1, 22),
         ));
         let error = PolicyAuthorizer::for_packets(&policy)
             .authorize_operation(dns)
@@ -754,7 +739,8 @@ mod tests {
             max_bytes_per_operation: 10,
             ..crate::policy::Policy::default()
         };
-        let packets = vec![documentation_packet()];
+        let packet = documentation_packet();
+        let packets = [&packet];
         let public = std::net::IpAddr::V4(std::net::Ipv4Addr::new(224, 0, 0, 251));
         let mut authorizer = PolicyAuthorizer::for_packets(&policy);
 
@@ -787,7 +773,8 @@ mod tests {
     #[test]
     fn declared_requests_state_destination_and_permissive_live_explicitly() {
         let policy = crate::policy::Policy::default();
-        let packets = vec![documentation_packet()];
+        let packet = documentation_packet();
+        let packets = [&packet];
         // Multicast counts as public under the policy and never names a host.
         let public = std::net::IpAddr::V4(std::net::Ipv4Addr::new(224, 0, 0, 251));
         let mut authorizer = PolicyAuthorizer::for_packets(&policy);
@@ -841,15 +828,20 @@ mod tests {
         );
     }
 
+    /// A packet-oriented authorizer reports the wiring fault, not a policy
+    /// denial: the policy was never consulted and there is no resolver to
+    /// configure.
     #[test]
-    fn the_packet_authorizer_resolves_no_hostname() {
-        let policy = crate::policy::Policy::default();
+    fn the_packet_authorizer_reports_that_it_has_no_resolver() {
+        let policy = crate::policy::Policy {
+            allow_hostname_resolution: true,
+            ..crate::policy::Policy::default()
+        };
 
         let error = PolicyAuthorizer::for_packets(&policy)
             .resolve_and_authorize(&hostname_target())
             .expect_err("a packet authorizer has no resolver to answer with");
 
-        assert_eq!(error.classification().code, "policy.hostname_resolution");
-        assert!(error.to_string().contains("documentation.invalid"));
+        assert_eq!(error.classification().code, "internal.target_resolution");
     }
 }

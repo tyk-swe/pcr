@@ -17,7 +17,26 @@ pub(crate) fn binding_protocol(layer: &dyn Layer) -> &crate::layer::Id {
         .unwrap_or_else(|| layer.protocol_id())
 }
 
-pub(crate) fn wrong_layer(expected: &str, actual: &dyn Layer) -> crate::codec::Error {
+/// Whether a child layer only preserves opaque bytes, so a parent that would
+/// otherwise reject a typed payload accepts it.
+pub(crate) fn child_is_opaque(child: &dyn Layer) -> bool {
+    crate::protocol::BuiltinProtocol::of(child)
+        .is_some_and(crate::protocol::BuiltinProtocol::preserves_opaque_bytes)
+}
+
+/// Borrows the concrete layer a codec encodes, or reports the mismatch as
+/// [`crate::codec::Error::WrongLayer`].
+pub(crate) fn typed_layer<'a, L: Layer + 'static>(
+    name: &str,
+    layer: &'a dyn Layer,
+) -> Result<&'a L, crate::codec::Error> {
+    layer
+        .as_any()
+        .downcast_ref::<L>()
+        .ok_or_else(|| wrong_layer(name, layer))
+}
+
+fn wrong_layer(expected: &str, actual: &dyn Layer) -> crate::codec::Error {
     crate::codec::Error::WrongLayer {
         expected: protocol(expected),
         actual: actual.protocol_id().clone(),

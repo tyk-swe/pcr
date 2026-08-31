@@ -84,7 +84,7 @@ fn every_published_json_packet_example_validates_against_the_schema() {
 
 #[test]
 fn every_published_packet_example_loads_and_builds() {
-    let registry = packetcraftr::core::protocol::builtin::registry().expect("built-in registry");
+    let registry = packetcraftr::core::protocol::builtin::registry();
     for path in packet_examples() {
         let input = fs::read_to_string(&path).expect("published example must be readable");
         let document = Packet::parse(&input, format_for(&path), DEFAULT_MAX_DOCUMENT_BYTES)

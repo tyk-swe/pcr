@@ -1,187 +1,35 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! The live fuzz executor boundary: one permit-bound case in, one bounded
+//! evidence receipt out.
+
 use std::time::Duration;
 
-use packetcraftr_core::budget::Deadline;
-use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::frame::Frame;
+use packetcraftr_core::{Packet, diagnostic::Diagnostic};
 
-use crate::evidence::Budget;
-
-use super::MAX_DURATION;
-use super::boundary::Execution;
-use super::error::{Error, duration_limit};
-use super::request::{LiveLimits, LiveOptions};
-use super::result::{Case, Stats};
-
-pub(super) fn worst_case_duration(live: LiveOptions, cases: usize) -> Result<Duration, Error> {
-    let exchange = live
-        .timeout
-        .checked_mul(u32::try_from(cases).unwrap_or(u32::MAX))
-        .ok_or(Error::DurationLimit {
-            actual: Duration::MAX,
-            limit: MAX_DURATION,
-        })?;
-    let delay = rate_delay(live.cases_per_second)?
-        .checked_mul(u32::try_from(cases.saturating_sub(1)).unwrap_or(u32::MAX))
-        .ok_or(Error::DurationLimit {
-            actual: Duration::MAX,
-            limit: MAX_DURATION,
-        })?;
-    exchange.checked_add(delay).ok_or(Error::DurationLimit {
-        actual: Duration::MAX,
-        limit: MAX_DURATION,
-    })
+#[derive(Clone, Debug)]
+pub struct ExecutionCase {
+    pub(crate) permit: crate::evidence::ExecutionPermit,
+    pub(crate) packet: Packet,
 }
 
-pub(super) fn rate_delay(rate: Option<u32>) -> Result<Duration, Error> {
-    crate::clock::rate_delay(1, rate).ok_or(Error::InvalidLimit {
-        field: "cases_per_second",
-        value: u64::from(rate.unwrap_or_default()),
-        reason: "rate-delay arithmetic overflowed".to_owned(),
-    })
+#[derive(Clone, Debug)]
+pub struct Execution {
+    pub(crate) permit: crate::evidence::ExecutionPermit,
+    pub(crate) sent: crate::SentPacket,
+    pub(crate) responses: Vec<Frame>,
+    pub(crate) unmatched: Vec<Frame>,
+    pub(crate) undecoded: Vec<Frame>,
+    pub(crate) diagnostics: Vec<Diagnostic>,
+    pub(crate) stats: crate::Stats,
 }
 
-pub(super) fn validate_execution(
-    case: &Case,
-    execution: &Execution,
-    max_packet_bytes: usize,
-    deadline: &Deadline,
-) -> Result<(), Error> {
-    if execution.stats.packets_attempted != 1 || execution.stats.packets_completed != 1 {
-        return Err(Error::InvalidEvidence {
-            case_index: case.prepared.index,
-            message: "successful live execution must account for exactly one attempted and completed packet".to_owned(),
-        });
-    }
-    if execution.stats.bytes != u64::try_from(execution.sent.bytes_sent()).unwrap_or(u64::MAX) {
-        return Err(Error::InvalidEvidence {
-            case_index: case.prepared.index,
-            message: "sent receipt and byte statistics disagree".to_owned(),
-        });
-    }
-    if execution.sent.built().bytes.len() > max_packet_bytes {
-        return Err(Error::InvalidEvidence {
-            case_index: case.prepared.index,
-            message: format!(
-                "executor built {} bytes, exceeding max_packet_bytes={}",
-                execution.sent.built().bytes.len(),
-                max_packet_bytes
-            ),
-        });
-    }
-    execution
-        .stats
-        .capture
-        .validate()
-        .map_err(|source| Error::InvalidEvidence {
-            case_index: case.prepared.index,
-            message: format!("invalid capture statistics: {source}"),
-        })?;
-    for response in &execution.responses {
-        deadline.check().map_err(duration_limit)?;
-        let Some(_received_at) = response.timestamp else {
-            return Err(Error::InvalidEvidence {
-                case_index: case.prepared.index,
-                message: "executor returned response frame without a timestamp".to_owned(),
-            });
-        };
-    }
-    deadline.check().map_err(duration_limit)?;
-    Ok(())
-}
-
-pub(super) fn add_execution_stats(
-    total: &mut Stats,
-    value: &crate::Stats,
-    case_index: u64,
-) -> Result<(), Error> {
-    let mut sum = total.clone();
-    macro_rules! add {
-        ($field:ident) => {
-            sum.$field = sum
-                .$field
-                .checked_add(value.$field)
-                .ok_or(Error::StatisticsOverflow { case_index })?;
-        };
-    }
-    add!(packets_attempted);
-    add!(packets_completed);
-    add!(bytes);
-    sum.elapsed = sum
-        .elapsed
-        .checked_add(value.elapsed)
-        .ok_or(Error::StatisticsOverflow { case_index })?;
-    sum.capture = sum
-        .capture
-        .checked_add(value.capture)
-        .ok_or(Error::StatisticsOverflow { case_index })?;
-    *total = sum;
-    Ok(())
-}
-
-fn retain_fuzz_evidence(budget: &mut Budget, frame: &Frame, limits: LiveLimits) -> bool {
-    budget
-        .reserve(
-            frame.bytes().len(),
-            limits.max_evidence_frames,
-            limits.max_evidence_bytes,
-        )
-        .is_ok()
-}
-
-pub(super) struct ExecutionEvidence {
-    pub(super) responses: Vec<Frame>,
-    pub(super) unmatched: Vec<Frame>,
-    pub(super) undecoded: Vec<Frame>,
-}
-
-pub(super) fn retain_evidence(
-    case: &mut Case,
-    evidence: ExecutionEvidence,
-    limits: LiveLimits,
-    budget: &mut Budget,
-    diagnostics: &mut Vec<Diagnostic>,
-    deadline: &Deadline,
-) -> Result<(), Error> {
-    let mut omitted = false;
-    for frame in evidence.responses {
-        deadline.check().map_err(duration_limit)?;
-        if retain_fuzz_evidence(budget, &frame, limits) {
-            case.responses.push(frame);
-        } else {
-            omitted = true;
-        }
-    }
-    for frame in evidence.unmatched {
-        deadline.check().map_err(duration_limit)?;
-        if retain_fuzz_evidence(budget, &frame, limits) {
-            case.unmatched.push(frame);
-        } else {
-            omitted = true;
-        }
-    }
-    for frame in evidence.undecoded {
-        deadline.check().map_err(duration_limit)?;
-        if retain_fuzz_evidence(budget, &frame, limits) {
-            case.undecoded.push(frame);
-        } else {
-            omitted = true;
-        }
-    }
-    if omitted {
-        packetcraftr_core::diagnostic::push_once(
-            diagnostics,
-            Diagnostic::warning(
-                "fuzz.evidence_limit",
-                format!(
-                    "fuzz response evidence exceeded {} frame(s) or {} byte(s); later exact frames were omitted",
-                    limits.max_evidence_frames, limits.max_evidence_bytes
-                ),
-            ),
-        );
-    }
-    deadline.check().map_err(duration_limit)?;
-    Ok(())
+pub trait Executor {
+    fn execute(
+        &mut self,
+        case: &ExecutionCase,
+        timeout: Duration,
+    ) -> Result<Execution, crate::BoundaryError>;
 }

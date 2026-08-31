@@ -5,11 +5,13 @@
   "sequence": 0,
   "status": "error",
   "error": {
-    "code": "policy.public_destination",
-    "kind": "policy",
-    "message": "traffic policy denies public destination 8.8.8.8",
-    "causes": [],
-    "remediation": "explicitly authorize public destinations only for networks you are permitted to test"
+    "code": "io.capture",
+    "kind": "io",
+    "message": "capture failed: could not open lo through libpcap",
+    "causes": [
+      "libpcap error: Attempt to create packet socket failed - CAP_NET_RAW may be required"
+    ],
+    "remediation": "inspect the capture device state and native backend diagnostic before retrying"
   },
   "diagnostics": []
 }

@@ -3,8 +3,6 @@
 
 //! Operating-system native interface snapshot validation.
 
-#![forbid(unsafe_code)]
-
 use crate::interface;
 
 pub(crate) fn validate_native_interface(interface: &interface::Info) -> Result<(), String> {

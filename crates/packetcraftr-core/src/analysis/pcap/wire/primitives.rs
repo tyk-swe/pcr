@@ -5,8 +5,8 @@ use std::io::{self, Read, Write};
 
 use crate::frame::Frame;
 
-use super::super::error::Error;
-use super::super::model::{Endianness, Format, TimestampResolution};
+use crate::analysis::pcap::error::Error;
+use crate::analysis::pcap::model::{Endianness, Format, TimestampResolution};
 
 pub(in crate::analysis::pcap) const PCAP_GLOBAL_HEADER_LEN: usize = 24;
 pub(in crate::analysis::pcap) const PCAP_RECORD_HEADER_LEN: usize = 16;

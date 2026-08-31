@@ -11,7 +11,10 @@ use std::fs::File;
 use std::sync::Arc;
 use std::time::Duration;
 
-use packetcraftr::{analysis::pcap::Reader, netio as net, output};
+use packetcraftr::{
+    analysis::pcap::{self as capture, Reader},
+    netio as net, output,
+};
 
 use self::arguments::Args;
 use super::format::ExchangeFormat;
@@ -24,7 +27,9 @@ use crate::rendering::StreamEncoder;
 
 use conversion::{interface, timing};
 
-struct Prepared {
+/// One validated replay: the source reader, the transmit providers, and the
+/// bounds the run is held to.
+struct ReplayRun {
     reader: Reader<File>,
     options: packetcraftr::replay::Options,
     authorizer: packetcraftr::replay::SystemAuthorizer,
@@ -38,66 +43,57 @@ struct Prepared {
 pub(super) fn run(
     arguments: Args,
     format: output::contract::Format,
-    stream: &mut StreamEncoder,
+    stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     let format = ExchangeFormat::narrow(output::contract::Command::Replay, format)?;
     let mut prepared = prepare(&arguments)?;
     let filtered = prepared.filter.is_some();
-    let selector = prepared
-        .filter
-        .as_mut()
-        .map(|selector| selector as &mut dyn packetcraftr::replay::Selector);
+    let requested_interface = prepared.requested_interface.clone();
+    let max_interfaces = prepared.max_interfaces;
+    let run = rendering::Run {
+        reader: &mut prepared.reader,
+        options: &prepared.options,
+        selector: prepared
+            .filter
+            .as_mut()
+            .map(|selector| selector as &mut dyn packetcraftr::replay::Selector),
+        authorizer: &mut prepared.authorizer,
+        transmitter: &mut prepared.transmitter,
+        clock: &mut prepared.clock,
+    };
     match format {
-        ExchangeFormat::Text => rendering::render_text(
-            &mut prepared.reader,
-            &prepared.options,
-            selector,
-            &mut prepared.authorizer,
-            &mut prepared.transmitter,
-            &mut prepared.clock,
-            filtered,
-        ),
-        ExchangeFormat::Json => rendering::render_aggregate(
-            &mut prepared.reader,
-            &prepared.options,
-            selector,
-            &mut prepared.authorizer,
-            &mut prepared.transmitter,
-            &mut prepared.clock,
-            prepared.requested_interface,
-        ),
-        ExchangeFormat::Ndjson => rendering::render_stream(
-            &mut prepared.reader,
-            &prepared.options,
-            selector,
-            &mut prepared.authorizer,
-            &mut prepared.transmitter,
-            &mut prepared.clock,
-            stream,
-        ),
-        ExchangeFormat::Pcap | ExchangeFormat::PcapNg => rendering::render_capture(
-            &mut prepared.reader,
-            &prepared.options,
-            selector,
-            &mut prepared.authorizer,
-            &mut prepared.transmitter,
-            &mut prepared.clock,
+        ExchangeFormat::Text => rendering::render_text(run, filtered),
+        ExchangeFormat::Json => rendering::render_aggregate(run, requested_interface),
+        ExchangeFormat::Ndjson => rendering::render_stream(run, stream),
+        ExchangeFormat::Pcap => rendering::render_capture(
+            run,
             rendering::CaptureSettings {
-                format: format.format(),
-                max_interfaces: prepared.max_interfaces,
+                format: capture::Format::Pcap,
+                max_interfaces,
+            },
+        ),
+        ExchangeFormat::PcapNg => rendering::render_capture(
+            run,
+            rendering::CaptureSettings {
+                format: capture::Format::PcapNg,
+                max_interfaces,
             },
         ),
     }
 }
 
-fn prepare(arguments: &Args) -> Result<Prepared, CliError> {
+fn prepare(arguments: &Args) -> Result<ReplayRun, CliError> {
     let policy = arguments.policy.clone().into_policy();
-    validate_capture_stream_limits(
-        policy.max_packets_per_operation,
-        policy.max_bytes_per_operation,
-        arguments.max_frame_bytes,
-        arguments.max_interfaces,
-    )?;
+    // Replay's aggregate ceilings come from the traffic policy rather than
+    // from `--max-frames`/`--max-bytes`, but they bound the same capture
+    // stream and are validated against the same cross-field rule.
+    let capture_limits = OfflineCaptureLimitsArgs {
+        max_frames: policy.max_packets_per_operation,
+        max_bytes: policy.max_bytes_per_operation,
+        max_frame_bytes: arguments.max_frame_bytes,
+        max_interfaces: arguments.max_interfaces,
+    };
+    validate_capture_stream_limits(capture_limits)?;
     let timing = timing(arguments)?;
     let registry = registry()?;
     let filter = FrameSelector::compile_optional(
@@ -107,24 +103,14 @@ fn prepare(arguments: &Args) -> Result<Prepared, CliError> {
     )?;
     let requested_interface = interface(&arguments.interface)?;
     policy.validate().map_err(CliError::classified)?;
-    let limits = packetcraftr::replay::Limits {
-        max_frames: policy.max_packets_per_operation,
-        max_bytes: policy.max_bytes_per_operation,
-        max_frame_bytes: arguments.max_frame_bytes,
-        max_duration: Duration::from_millis(arguments.max_duration_ms),
-    }
-    .validate()
-    .map_err(CliError::classified)?;
-    let reader = open_capture(
-        &arguments.path,
-        OfflineCaptureLimitsArgs {
-            max_frames: policy.max_packets_per_operation,
-            max_bytes: policy.max_bytes_per_operation,
-            max_frame_bytes: arguments.max_frame_bytes,
-            max_interfaces: arguments.max_interfaces,
-        },
-    )?;
-    Ok(Prepared {
+    let limits = packetcraftr::replay::Limits::from_policy(
+        &policy,
+        arguments.max_frame_bytes,
+        Duration::from_millis(arguments.max_duration_ms),
+    );
+    limits.validate().map_err(CliError::classified)?;
+    let reader = open_capture(&arguments.path, capture_limits.reader_bounds())?;
+    Ok(ReplayRun {
         reader,
         options: packetcraftr::replay::Options {
             interface: requested_interface.clone(),

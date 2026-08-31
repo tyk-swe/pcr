@@ -66,6 +66,7 @@ pub(in crate::platform::npcap) fn open_capture(
                 interface.name,
                 handle.error_message()
             ),
+            source: None,
         })?;
     // SAFETY: handle is activated and live; pcap_snapshot only reads its
     // effective snapshot length.
@@ -163,6 +164,7 @@ impl NativeCaptureSource for NpcapCaptureSource {
             1 => {
                 let header = NonNull::new(header).ok_or_else(|| Error::Capture {
                     message: "Npcap returned a packet without a header".to_owned(),
+                    source: None,
                 })?;
                 // SAFETY: a successful pcap_next_ex result guarantees the
                 // header remains valid until the next handle operation; we copy
@@ -180,6 +182,7 @@ impl NativeCaptureSource for NpcapCaptureSource {
                             "Npcap returned {captured_length} bytes beyond configured snap length {}",
                             self.snap_length
                         ),
+                        source: None,
                     });
                 }
                 if header.original_length < header.captured_length {
@@ -188,6 +191,7 @@ impl NativeCaptureSource for NpcapCaptureSource {
                             "Npcap returned captured length {} above original length {}",
                             header.captured_length, header.original_length
                         ),
+                        source: None,
                     });
                 }
                 let bytes = if captured_length == 0 {
@@ -197,6 +201,7 @@ impl NativeCaptureSource for NpcapCaptureSource {
                         return Err(Error::Capture {
                             message: "Npcap returned packet bytes through a null pointer"
                                 .to_owned(),
+                            source: None,
                         });
                     }
                     // SAFETY: pcap_next_ex guarantees caplen readable bytes
@@ -217,12 +222,14 @@ impl NativeCaptureSource for NpcapCaptureSource {
             PCAP_ERROR_BREAK => Ok(NativeCaptureEvent::Closed),
             PCAP_ERROR => Err(Error::Capture {
                 message: format!("Npcap receive failed: {}", self.handle.error_message()),
+                source: None,
             }),
             status => Err(Error::Capture {
                 message: format!(
                     "Npcap receive returned unexpected status {status}: {}",
                     self.handle.error_message()
                 ),
+                source: None,
             }),
         }
     }
@@ -239,6 +246,7 @@ impl NativeCaptureSource for NpcapCaptureSource {
                     "Npcap statistics failed with status {result}: {}",
                     self.handle.error_message()
                 ),
+                source: None,
             });
         }
         Ok(NativeCaptureStatistics {

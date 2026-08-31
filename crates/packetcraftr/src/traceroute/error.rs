@@ -6,7 +6,7 @@ use std::time::Duration;
 use thiserror::Error;
 
 use crate::BoundaryError;
-use packetcraftr_core::error::{Classification, Classified, Context, Kind};
+use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -35,8 +35,12 @@ pub enum Error {
         #[source]
         source: BoundaryError,
     },
-    #[error("traceroute rate clock failed before probe {sequence}: {message}")]
-    Clock { sequence: u64, message: String },
+    #[error("traceroute rate clock failed before probe {sequence}")]
+    Clock {
+        sequence: u64,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
     #[error("traceroute executor returned invalid evidence at probe {sequence}: {message}")]
     InvalidEvidence { sequence: u64, message: String },
     #[error("traceroute statistic accounting overflowed at probe {sequence}")]
@@ -91,22 +95,45 @@ impl Classified for Error {
         }
     }
 
-    fn context(&self) -> Context {
+    fn context(&self) -> Option<Coordinate> {
         match self {
             Self::Authorization(error) | Self::Output { source: error } => error.context(),
             Self::Execution { sequence, .. }
             | Self::Clock { sequence, .. }
             | Self::InvalidEvidence { sequence, .. }
-            | Self::StatisticsOverflow { sequence } => Context::probe_sequence(*sequence),
-            _ => Context::default(),
+            | Self::StatisticsOverflow { sequence } => Some(Coordinate::ProbeSequence(*sequence)),
+            _ => None,
         }
     }
 
+    /// Walked from the retained `#[source]` chain rather than hand-written.
+    /// The boundary-sourced variants delegate instead: a [`BoundaryError`]
+    /// carries a captured `causes` snapshot its own source chain no longer
+    /// holds.
+    ///
+    /// [`BoundaryError`]: crate::BoundaryError
     fn causes(&self) -> Vec<String> {
         match self {
             Self::Authorization(error) => error.causes(),
             Self::Execution { source, .. } | Self::Output { source } => source.causes(),
-            _ => Vec::new(),
+            error => packetcraftr_core::error::source_chain(error),
+        }
+    }
+}
+
+impl From<crate::probe::runner::ProbeRunError> for Error {
+    fn from(error: crate::probe::runner::ProbeRunError) -> Self {
+        use crate::probe::runner::ProbeRunError;
+        match error {
+            ProbeRunError::Duration { actual, limit } => Self::DurationLimit { actual, limit },
+            ProbeRunError::Rate { rate } => Self::InvalidLimit {
+                field: "probes_per_second",
+                value: u64::from(rate.unwrap_or_default()),
+                reason: "rate-delay arithmetic overflowed".to_owned(),
+            },
+            ProbeRunError::Clock { sequence, source } => Self::Clock { sequence, source },
+            ProbeRunError::Execution { sequence, source } => Self::Execution { sequence, source },
+            ProbeRunError::Statistics { sequence } => Self::StatisticsOverflow { sequence },
         }
     }
 }

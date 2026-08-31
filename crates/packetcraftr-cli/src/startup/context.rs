@@ -116,13 +116,12 @@ fn parse_machine_format(value: &str) -> Option<Option<MachineFormat>> {
     })
 }
 
+/// `None` for a value clap would reject, so the earlier choice stands.
+///
+/// Delegating to `ValueEnum` keeps this pre-clap scan on exactly the spellings
+/// clap itself accepts, as [`parse_machine_format`] does.
 fn parse_color_choice(value: &str) -> Option<ColorChoice> {
-    match value {
-        "always" => Some(ColorChoice::Always),
-        "never" => Some(ColorChoice::Never),
-        "auto" => Some(ColorChoice::Auto),
-        _ => None,
-    }
+    <ColorChoice as clap::ValueEnum>::from_str(value, false).ok()
 }
 
 fn parse_command(value: &str) -> Option<output::contract::Command> {

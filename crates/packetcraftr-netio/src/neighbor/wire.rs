@@ -36,10 +36,7 @@ use self::{
     },
 };
 #[cfg(test)]
-use super::{
-    MAX_VLAN_TAGS as MAX_NEIGHBOR_VLAN_TAGS, VlanKind as NeighborVlanKind,
-    VlanTag as NeighborVlanTag,
-};
+use crate::link::{MAX_VLAN_TAGS, VlanKind, VlanTag};
 pub(super) fn build_request_frame(
     request: &NeighborRequest,
 ) -> Result<(Bytes, MacAddress), crate::neighbor::Error> {
@@ -248,14 +245,14 @@ mod tests {
     #[test]
     fn ethernet_prefix_encodes_stacked_vlan_metadata_in_order() {
         let tags = [
-            NeighborVlanTag {
-                kind: NeighborVlanKind::Ieee8021Ad,
+            VlanTag {
+                kind: VlanKind::Ieee8021Ad,
                 priority: 5,
                 drop_eligible: true,
                 vlan_id: 100,
             },
-            NeighborVlanTag {
-                kind: NeighborVlanKind::Ieee8021Q,
+            VlanTag {
+                kind: VlanKind::Ieee8021Q,
                 priority: 1,
                 drop_eligible: false,
                 vlan_id: 200,
@@ -362,8 +359,8 @@ mod tests {
         assert_eq!(match_neighbor_response(&request, &wrong_link), None);
 
         let mut tagged = request.clone();
-        tagged.vlan_tags.push(NeighborVlanTag {
-            kind: NeighborVlanKind::Ieee8021Q,
+        tagged.vlan_tags.push(VlanTag {
+            kind: VlanKind::Ieee8021Q,
             priority: 3,
             drop_eligible: true,
             vlan_id: 409,
@@ -544,7 +541,7 @@ mod tests {
 
         let mut too_many_tags = vec![0_u8; ETHERNET_HEADER_LENGTH];
         too_many_tags[12..14].copy_from_slice(&ETHERTYPE_VLAN.to_be_bytes());
-        for _ in 0..=MAX_NEIGHBOR_VLAN_TAGS {
+        for _ in 0..=MAX_VLAN_TAGS {
             too_many_tags.extend_from_slice(&[0, 1, 0x81, 0]);
         }
         assert!(parse_ethernet(&too_many_tags).is_none());

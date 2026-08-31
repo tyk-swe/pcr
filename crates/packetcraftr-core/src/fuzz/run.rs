@@ -5,11 +5,13 @@ use std::sync::Arc;
 
 use crate::budget::Deadline;
 use crate::error::BoundaryError;
-use crate::{Packet, field::FieldKind, registry::Registry};
+use crate::progress::{EmitError, Runtime, Sink};
+use crate::{Packet, registry::Registry};
 
 use super::error::{Error, duration_limit};
-use super::mutation::prepare_with_events;
-use super::result::{Case, Stats, Summary};
+use super::prepare::prepare_with_events;
+use super::report::{Case, Report, Stats, Summary};
+use super::request::Request;
 
 /// A completely prepared and bounded deterministic mutation campaign.
 ///
@@ -17,12 +19,12 @@ use super::result::{Case, Stats, Summary};
 /// these exact cases; preparation never performs networking or capture I/O.
 #[derive(Clone, Debug)]
 pub struct Campaign {
-    pub(super) cases: Vec<super::result::Case>,
+    pub(super) cases: Vec<Case>,
 }
 
 impl Campaign {
     pub fn prepare(
-        request: &super::request::Request,
+        request: &Request,
         packet: Packet,
         registry: Arc<Registry>,
         deadline: &mut Deadline,
@@ -36,22 +38,18 @@ impl Campaign {
         Ok(Self { cases })
     }
 
-    pub fn into_cases(self) -> Vec<super::result::Case> {
+    pub fn into_cases(self) -> Vec<Case> {
         self.cases
     }
 }
 
-pub fn run(
-    request: &super::request::Request,
-    packet: Packet,
-    registry: Arc<Registry>,
-) -> Result<super::result::Result, Error> {
+pub fn run(request: &Request, packet: Packet, registry: Arc<Registry>) -> Result<Report, Error> {
     let mut cases = Vec::new();
     let summary = run_observed(request, packet, registry, |case, _| {
         cases.push(case);
         Ok(())
     })?;
-    Ok(super::result::Result {
+    Ok(Report {
         seed: summary.seed,
         first_case: summary.first_case,
         cases,
@@ -63,35 +61,36 @@ pub fn run(
 /// Generates each deterministic case once and publishes it as soon as its
 /// offline outcome is final.
 ///
-/// The callback runs on a process-budgeted worker. Each result is acknowledged
-/// before generation continues, callback failure aborts later cases, and the
-/// deadline bounds publisher waiting for callback backpressure. It does not
-/// terminate callback code: a callback may finish after this function returns
-/// and holds one process-wide worker permit until then.
+/// The callback runs on a worker admitted by `runtime`. Each result is
+/// acknowledged before generation continues, callback failure aborts later
+/// cases, and the deadline bounds publisher waiting for callback backpressure.
+/// It does not terminate callback code: a callback may finish after this
+/// function returns and holds one of the runtime's worker permits until then.
 pub fn run_with_events<F>(
-    request: &super::request::Request,
+    request: &Request,
     packet: Packet,
     registry: Arc<Registry>,
+    runtime: &Runtime,
     emit: F,
 ) -> Result<Summary, Error>
 where
     F: FnMut(Case) -> Result<(), BoundaryError> + Send + 'static,
 {
-    let sink = crate::progress::Sink::new(emit).map_err(|source| Error::Output { source })?;
+    let sink = Sink::new_in(runtime, emit).map_err(|source| Error::Output { source })?;
     run_observed(
         request,
         packet,
         registry,
         move |case, deadline| match sink.emit(case, deadline) {
             Ok(()) => Ok(()),
-            Err(crate::progress::EmitError::Deadline(error)) => Err(duration_limit(error)),
-            Err(crate::progress::EmitError::Output(source)) => Err(Error::Output { source }),
+            Err(EmitError::Deadline(error)) => Err(duration_limit(error)),
+            Err(EmitError::Output(source)) => Err(Error::Output { source }),
         },
     )
 }
 
 fn run_observed<F>(
-    request: &super::request::Request,
+    request: &Request,
     packet: Packet,
     registry: Arc<Registry>,
     mut emit: F,
@@ -107,20 +106,10 @@ where
         first_case: request.first_case,
         diagnostics: Vec::new(),
         stats: Stats {
-            cases_generated: request.cases as u64,
+            cases_generated: u64::try_from(request.cases).unwrap_or(u64::MAX),
             cases_built: prepared.built_case_count,
-            packets_attempted: request.cases as u64,
-            packets_completed: prepared.built_case_count,
             bytes: prepared.built_byte_count,
-            ..Stats::default()
+            elapsed: prepared.elapsed,
         },
     })
-}
-
-#[derive(Clone)]
-pub(super) struct ResolvedField {
-    pub(super) target: super::request::Target,
-    pub(super) protocol: String,
-    pub(super) kind: FieldKind,
-    pub(super) is_derived: bool,
 }

@@ -3,12 +3,12 @@
 
 use crate::BoundaryError;
 use crate::ExchangeExecutor;
-use crate::probe::client_executor::ExecutorFault;
+use crate::probe::client_executor::{ExecutorFault, WorkflowOverrides};
 
 use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Sender as PacketIo};
 
 use super::classification::classify_response;
-use super::model::{Batch, Execution, Executor, Strategy};
+use super::model::{Batch, Execution, Executor, Probe, Strategy};
 
 const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
     "cli.traceroute_executor",
@@ -17,7 +17,7 @@ const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
 
 /// Executes homogeneous traceroute hop batches through the client's
 /// capture-ready exchange lifecycle.
-impl<R, N, I> Executor for ExchangeExecutor<'_, R, N, I>
+impl<R, N, I> Executor<Probe> for ExchangeExecutor<'_, R, N, I>
 where
     R: packetcraftr_netio::route::Provider,
     N: packetcraftr_netio::neighbor::Resolver,
@@ -30,21 +30,17 @@ where
         if batch
             .probes
             .iter()
-            .any(|probe| !match (probe.strategy, probe.destination_port) {
-                (Strategy::Udp | Strategy::Tcp, Some(port)) => port != 0,
-                (Strategy::Icmp, None) => true,
-                _ => false,
-            })
+            .any(|probe| probe.target.port() == Some(0))
         {
-            return Err(EXECUTOR_FAULT
-                .invalid("traceroute probe strategy and destination port are inconsistent"));
+            return Err(
+                EXECUTOR_FAULT.invalid("traceroute probes require a non-zero destination port")
+            );
         }
         if batch.probes.iter().any(|probe| {
             probe.address != first.address
-                || probe.strategy != first.strategy
+                || probe.target.strategy() != first.target.strategy()
                 || probe.hop_limit != first.hop_limit
-                || (probe.strategy == Strategy::Tcp
-                    && probe.destination_port != first.destination_port)
+                || (probe.target.strategy() == Strategy::Tcp && probe.target != first.target)
         }) {
             return Err(EXECUTOR_FAULT.invalid(
                 "traceroute batches must share address, strategy, hop limit, and TCP destination port",
@@ -58,7 +54,7 @@ where
             )));
         }
 
-        let varying_field = match first.strategy {
+        let varying_field = match first.target.strategy() {
             Strategy::Udp => "destination_port",
             Strategy::Tcp => "sequence",
             Strategy::Icmp => "body",
@@ -77,7 +73,7 @@ where
                         .ok_or_else(|| {
                             EXECUTOR_FAULT.invalid(format!(
                                 "{} probe has no {varying_field} correlation field",
-                                probe.strategy
+                                probe.target.strategy()
                             ))
                         })
                 })
@@ -85,17 +81,30 @@ where
             template = template.axis(1, varying_field, values);
         }
 
+        let mut matches_request =
+            |request_index: usize,
+             sent: &packetcraftr_core::Packet,
+             response: &packetcraftr_core::decode::DecodedPacket| {
+                batch.probes.get(request_index).is_some_and(|probe| {
+                    classify_response(
+                        self.client.registry(),
+                        probe.target.strategy(),
+                        sent,
+                        response,
+                    )
+                    .is_some()
+                })
+            };
         let exchange = self.exchange_for_workflow(
             &template,
-            batch.timeout,
-            batch.probes.len(),
-            first.address,
-            |request_index, sent, response| {
-                batch.probes.get(request_index).is_some_and(|probe| {
-                    classify_response(self.client.registry(), probe.strategy, sent, response)
-                        .is_some()
-                })
+            WorkflowOverrides {
+                timeout: batch.timeout,
+                max_template_packets: batch.probes.len(),
+                destination: first.address,
+                max_responses: None,
             },
+            &mut matches_request,
+            None,
         )?;
         let execution = Execution::from_exchange(batch.permit, exchange);
         Ok(execution)

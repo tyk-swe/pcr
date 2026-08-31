@@ -25,7 +25,7 @@ const REAPER_POLL_INTERVAL: Duration = Duration::from_millis(10);
 pub(super) fn transfer_capture_worker(
     worker: JoinHandle<()>,
     stop: Arc<AtomicBool>,
-    interrupt: Option<Arc<dyn super::CaptureInterrupt>>,
+    interrupt: Arc<dyn super::CaptureInterrupt>,
     permit: ReaperPermit,
     reaper: &ReaperClient,
 ) -> TransferOutcome {
@@ -35,12 +35,10 @@ pub(super) fn transfer_capture_worker(
         let _permit = permit;
         stop.store(true, Ordering::Release);
         while !worker.is_finished() {
-            if let Some(interrupt) = &interrupt {
-                // CaptureInterrupt is an internal native boundary, but keeping
-                // its panic contained prevents a defective implementation from
-                // abandoning the complete ownership bundle.
-                let _ = catch_unwind(AssertUnwindSafe(|| interrupt.interrupt()));
-            }
+            // CaptureInterrupt is an internal native boundary, but keeping its
+            // panic contained prevents a defective implementation from
+            // abandoning the complete ownership bundle.
+            let _ = catch_unwind(AssertUnwindSafe(|| interrupt.interrupt()));
             thread::park_timeout(REAPER_POLL_INTERVAL);
         }
         let _ = worker.join();
@@ -78,7 +76,8 @@ pub(super) fn capture_worker(
                     Ok(frame) => frame,
                     Err(error) => {
                         shared.set_error(Error::Capture {
-                            message: format!("native capture returned an invalid frame: {error}"),
+                            message: "native capture returned an invalid frame".to_owned(),
+                            source: Some(Arc::new(error)),
                         });
                         return;
                     }
@@ -96,6 +95,7 @@ pub(super) fn capture_worker(
             Ok(NativeCaptureEvent::Closed) => {
                 shared.set_error(Error::Capture {
                     message: "native capture source closed unexpectedly".to_owned(),
+                    source: None,
                 });
                 return;
             }

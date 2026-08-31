@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 mod execution;
+mod report;
 mod request;
-mod result;
 
 pub use execution::{Exchange, Execution, Executor, Probe, TcpExchange, TcpExecution};
-pub use request::{Limits, QueryType, Request};
-pub use result::{
+pub use report::{
     AttemptEvidence, Edns, EdnsOption, Event, EventContext, Name, Outcome, Record, RecordValue,
-    RejectedRecord, ResponseMetadata, Result, Section, Summary, Transport, UndecodedEvidence,
+    RejectedRecord, Report, ResponseMetadata, Section, Summary, Transport, UndecodedEvidence,
     ValidatedResponse,
 };
+pub use request::{Limits, MessageLimits, QueryType, Request};

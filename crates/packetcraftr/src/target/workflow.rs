@@ -50,12 +50,15 @@ where
     })
 }
 
-/// Obtains complete packet and byte approval before batch construction or
-/// execution can produce live side effects.
+/// Obtains complete operation approval before batch construction or execution
+/// can produce live side effects, checking the same absolute deadline on both
+/// sides of the authorization boundary.
+///
+/// Every packet-oriented workflow states its own shape here; the bracket is
+/// shared so no caller has to open-code it.
 pub(crate) fn approve_operation<A, E>(
     authorizer: &mut A,
-    packets: u64,
-    maximum_wire_bytes: u64,
+    operation: Operation<'_>,
     deadline: &Deadline,
     mut duration_error: impl FnMut(Duration, Duration) -> E,
 ) -> Result<(), E>
@@ -64,10 +67,12 @@ where
     E: From<BoundaryError>,
 {
     check_deadline(deadline, &mut duration_error)?;
-    let approval = authorizer.authorize_operation(Operation::Budgeted(WireBudget::new(
-        packets,
-        maximum_wire_bytes,
-    )));
+    let approval = authorizer.authorize_operation(operation);
     check_deadline(deadline, &mut duration_error)?;
     approval.map_err(E::from)
+}
+
+/// The packet-and-byte budget shape scan and traceroute state.
+pub(crate) const fn budgeted(packets: u64, maximum_wire_bytes: u64) -> Operation<'static> {
+    Operation::Budgeted(WireBudget::new(packets, maximum_wire_bytes))
 }

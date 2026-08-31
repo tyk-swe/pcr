@@ -6,7 +6,9 @@ use std::time::Instant;
 
 use super::pending::{commit::commit_push, plan_push};
 use super::state::{TcpFlowState, flow_memory_charge, retained_bytes};
-use super::{Error, Event, Limits, Reassembler, ScopedFlowKey, Segment, TCP_SERIAL_HALF_SPACE};
+use super::{
+    Error, Event, Limits, MAX_BYTES_PER_FLOW, Reassembler, ResourceError, ScopedFlowKey, Segment,
+};
 
 impl Reassembler {
     pub fn new(limits: Limits) -> Self {
@@ -47,9 +49,10 @@ impl Reassembler {
                     .saturating_sub(usize::from(existing.is_some()))
                     >= self.limits.max_flows
             {
-                return Err(Error::FlowLimit {
+                return Err(ResourceError::FlowLimit {
                     limit: self.limits.max_flows,
-                });
+                }
+                .into());
             }
 
             let (aggregate_bytes, aggregate_memory_charge) = if changes_generation {
@@ -65,7 +68,7 @@ impl Reassembler {
             let empty = TcpFlowState::new(
                 first_payload_sequence,
                 now,
-                now.checked_add(self.limits.tcp_idle_expiry),
+                now.checked_add(self.limits.idle_expiry),
             );
             let state = if changes_generation {
                 &empty
@@ -124,7 +127,7 @@ impl Reassembler {
     /// Open SYN's payload moves it past the base.
     #[expect(
         clippy::cast_possible_truncation,
-        reason = "validate_limits rejects max_bytes_per_flow >= TCP_SERIAL_HALF_SPACE (2^31), \
+        reason = "validate_limits rejects max_bytes_per_flow above MAX_BYTES_PER_FLOW (2^31 - 1), \
                   so next_offset never reaches 2^32 and the narrowing is lossless"
     )]
     pub fn flow_next_sequence(&self, flow: &ScopedFlowKey) -> Option<u32> {
@@ -153,10 +156,11 @@ impl Reassembler {
     }
 
     fn validate_limits(&self) -> Result<(), Error> {
-        if self.limits.max_bytes_per_flow >= TCP_SERIAL_HALF_SPACE {
-            return Err(Error::InvalidWindowLimit {
+        if self.limits.max_bytes_per_flow > MAX_BYTES_PER_FLOW {
+            return Err(ResourceError::InvalidWindowLimit {
                 limit: self.limits.max_bytes_per_flow,
-            });
+            }
+            .into());
         }
         Ok(())
     }
@@ -165,7 +169,7 @@ impl Reassembler {
         &self,
         existing: Option<&TcpFlowState>,
     ) -> Result<(usize, usize), Error> {
-        let accounting_error = || Error::AggregateByteLimit {
+        let accounting_error = || ResourceError::AggregateByteLimit {
             limit: self.limits.max_aggregate_bytes,
         };
         let old_retained_bytes = existing
@@ -185,14 +189,14 @@ impl Reassembler {
         if aggregate_bytes > self.limits.max_aggregate_bytes
             || aggregate_memory_charge > self.limits.max_aggregate_bytes
         {
-            return Err(accounting_error());
+            return Err(accounting_error().into());
         }
         Ok((aggregate_bytes, aggregate_memory_charge))
     }
 
     #[expect(
         clippy::cast_possible_truncation,
-        reason = "validate_limits rejects max_bytes_per_flow >= TCP_SERIAL_HALF_SPACE (2^31), so \
+        reason = "validate_limits rejects max_bytes_per_flow above MAX_BYTES_PER_FLOW (2^31 - 1), so \
                   neither next_offset nor a pending offset reaches 2^32"
     )]
     fn remove_flows(&mut self, mut keys: Vec<ScopedFlowKey>) -> Vec<Event> {
@@ -282,7 +286,7 @@ mod tests {
         let idle_expiry = Duration::from_secs(120);
         let mut reassembler = Reassembler::new(Limits {
             max_flows: IDLE_FLOW_COUNT + 1,
-            tcp_idle_expiry: idle_expiry,
+            idle_expiry,
             ..Limits::default()
         });
 

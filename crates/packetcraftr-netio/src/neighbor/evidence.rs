@@ -3,16 +3,15 @@
 
 //! Captured-evidence validation and retention bounds for active neighbor resolution.
 
-#![forbid(unsafe_code)]
-
 use std::collections::VecDeque;
 
 use bytes::Bytes;
 
+use super::Request as NeighborRequest;
 use super::error::{map_io_error, resolution_error};
 use super::options::Options;
 use super::wire::is_unicast_mac;
-use super::{MAX_VLAN_TAGS as MAX_NEIGHBOR_VLAN_TAGS, Request as NeighborRequest};
+use crate::link::MAX_VLAN_TAGS;
 use crate::transmit;
 use packetcraftr_core::frame::{Frame, LinkType};
 
@@ -62,9 +61,9 @@ pub(super) fn validate_request(request: &NeighborRequest) -> Result<(), crate::n
             message: "interface MTU is zero".to_owned(),
         });
     }
-    if request.vlan_tags.len() > MAX_NEIGHBOR_VLAN_TAGS {
+    if request.vlan_tags.len() > MAX_VLAN_TAGS {
         return Err(crate::neighbor::Error::InvalidRequest {
-            message: format!("VLAN stack exceeds {MAX_NEIGHBOR_VLAN_TAGS} discovery tags"),
+            message: format!("VLAN stack exceeds {MAX_VLAN_TAGS} discovery tags"),
         });
     }
     for tag in &request.vlan_tags {
@@ -164,8 +163,7 @@ mod tests {
     use super::*;
     use crate::{
         interface::Id as InterfaceId,
-        link::MacAddress,
-        neighbor::{VlanKind as NeighborVlanKind, VlanTag as NeighborVlanTag},
+        link::{MacAddress, VlanKind, VlanTag},
     };
 
     fn request() -> NeighborRequest {
@@ -230,19 +228,19 @@ mod tests {
             },
             NeighborRequest {
                 vlan_tags: vec![
-                    NeighborVlanTag {
-                        kind: NeighborVlanKind::Ieee8021Q,
+                    VlanTag {
+                        kind: VlanKind::Ieee8021Q,
                         priority: 0,
                         drop_eligible: false,
                         vlan_id: 1,
                     };
-                    MAX_NEIGHBOR_VLAN_TAGS + 1
+                    MAX_VLAN_TAGS + 1
                 ],
                 ..request()
             },
             NeighborRequest {
-                vlan_tags: vec![NeighborVlanTag {
-                    kind: NeighborVlanKind::Ieee8021Q,
+                vlan_tags: vec![VlanTag {
+                    kind: VlanKind::Ieee8021Q,
                     priority: 8,
                     drop_eligible: false,
                     vlan_id: 1,
@@ -250,8 +248,8 @@ mod tests {
                 ..request()
             },
             NeighborRequest {
-                vlan_tags: vec![NeighborVlanTag {
-                    kind: NeighborVlanKind::Ieee8021Q,
+                vlan_tags: vec![VlanTag {
+                    kind: VlanKind::Ieee8021Q,
                     priority: 0,
                     drop_eligible: false,
                     vlan_id: 4_096,

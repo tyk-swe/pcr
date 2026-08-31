@@ -4,21 +4,20 @@
 // for library paths.
 #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
+use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::time::{Duration, UNIX_EPOCH};
 
-use packetcraftr::core::error::{Classified, Kind};
+use packetcraftr::core::error::{Classified, Coordinate, Kind};
 use packetcraftr::core::frame::{Direction as CaptureDirection, Frame, LinkType};
 use packetcraftr::core::protocol::support::BUILTIN_PROTOCOLS;
 use packetcraftr::core::{
     diagnostic::Diagnostic, field::FieldKind as PacketFieldKind, layer::FieldSchema,
-    layout::ByteRange,
 };
 use packetcraftr::netio::{
     interface::Id as InterfaceId,
     interface::{Address, Flags, Info},
-    link::{Capability, MacAddress, Mode as LinkMode},
-    neighbor::{VlanKind, VlanTag},
+    link::{Capability, MacAddress, Mode as LinkMode, VlanKind, VlanTag},
     route::{Decision, Plan, Scope, SelectionReason},
 };
 use packetcraftr::output::{
@@ -127,10 +126,9 @@ fn command_format_matrix_display_and_errors_cover_the_full_vocabulary() {
 
 #[test]
 fn envelopes_convert_diagnostics_errors_and_statistics() {
-    let mut diagnostic = Diagnostic::error("packet.bad", "bad packet")
+    let diagnostic = Diagnostic::error("packet.bad", "bad packet")
         .at_layer(2)
         .at_field("checksum");
-    diagnostic.range = Some(ByteRange { start: 4, end: 6 });
     let client_stats = packetcraftr::Stats {
         packets_attempted: 3,
         packets_completed: 2,
@@ -153,10 +151,8 @@ fn envelopes_convert_diagnostics_errors_and_statistics() {
     .expect("aggregate serializes");
     assert_eq!(value["status"], "success");
     assert_eq!(value["diagnostics"][0]["severity"], "error");
-    assert_eq!(
-        value["diagnostics"][0]["range"],
-        json!({"start": 4, "end": 6})
-    );
+    assert_eq!(value["diagnostics"][0]["layer"], 2);
+    assert_eq!(value["diagnostics"][0]["field"], "checksum");
     assert_eq!(value["stats"]["capture"]["receiver_dropped_frames"], 1);
 
     for diagnostic in [
@@ -164,7 +160,7 @@ fn envelopes_convert_diagnostics_errors_and_statistics() {
         Diagnostic::warning("packet.warn", "warning"),
     ] {
         let output = SharedWriter::default();
-        let encoder = StreamEncoder::new(Some(Command::Read), output.clone());
+        let encoder = StreamEncoder::new(Command::Read, output.clone());
         encoder
             .complete(json!({}), vec![diagnostic])
             .expect("stream serializes");
@@ -185,13 +181,17 @@ fn envelopes_convert_diagnostics_errors_and_statistics() {
     assert_eq!(value["status"], "error");
     assert_eq!(value["error"]["code"], "packet.timestamp_range");
 
-    let output = SharedWriter::default();
-    StreamEncoder::new(None, output.clone())
-        .emit_error(classified)
+    // A failure before command selection publishes one command-less NDJSON
+    // error record, which is the whole document.
+    let mut output = Vec::new();
+    packetcraftr::output::envelope::write_unattributed_error(&mut output, None, classified)
         .expect("error stream serializes");
-    let value = output.records().remove(0);
+    let value: serde_json::Value =
+        serde_json::from_slice(&output).expect("the record must be JSON");
     assert_eq!(value["sequence"], 0);
     assert_eq!(value["status"], "error");
+    assert_eq!(value["command"], serde_json::Value::Null);
+    assert_eq!(value["mode"], "stream");
 
     let empty_stats = Stats::default();
     let value = serde_json::to_value(empty_stats).expect("empty stats serialize");
@@ -203,25 +203,43 @@ fn domain_failures_preserve_typed_error_context() {
     let replay = OutputError::classified(&packetcraftr::replay::Error::output_at_source_index(
         7, "failed",
     ));
-    assert_eq!(replay.context.source_frame, Some(8));
+    assert_eq!(replay.context, Some(Coordinate::SourceFrame(8)));
 
     let scan = OutputError::classified(&packetcraftr::scan::Error::Clock {
         sequence: 8,
-        message: "failed".to_owned(),
+        source: Box::new(io::Error::other("failed")),
     });
-    assert_eq!(scan.context.probe_sequence, Some(8));
+    assert_eq!(scan.context, Some(Coordinate::ProbeSequence(8)));
 
     let dns = OutputError::classified(&packetcraftr::dns::Error::Clock {
         attempt: 3,
-        message: "failed".to_owned(),
+        source: Box::new(io::Error::other("failed")),
     });
-    assert_eq!(dns.context.attempt, Some(3));
+    assert_eq!(dns.context, Some(Coordinate::Attempt(3)));
 
     let fuzz = OutputError::classified(&packetcraftr::fuzz::Error::Clock {
         case_index: 11,
-        message: "failed".to_owned(),
+        source: Box::new(io::Error::other("failed")),
     });
-    assert_eq!(fuzz.context.case_index, Some(11));
+    assert_eq!(fuzz.context, Some(Coordinate::CaseIndex(11)));
+
+    // Each coordinate publishes exactly the one-key object the output
+    // contract's `errorContext` declares, and a coordinate-free failure
+    // publishes no `context` key at all.
+    for (error, expected) in [
+        (replay, json!({"source_frame": 8})),
+        (scan, json!({"probe_sequence": 8})),
+        (dns, json!({"attempt": 3})),
+        (fuzz, json!({"case_index": 11})),
+    ] {
+        let value = serde_json::to_value(&error).expect("error serializes");
+        assert_eq!(value["context"], expected, "{}", error.code);
+    }
+
+    let uncoordinated = OutputError::classified(&packetcraftr::Error::HeterogeneousExchangeRoute);
+    assert_eq!(uncoordinated.context, None);
+    let value = serde_json::to_value(&uncoordinated).expect("error serializes");
+    assert!(value.get("context").is_none());
 }
 
 #[test]
@@ -299,7 +317,7 @@ fn protocol_output_converts_every_field_kind_and_manifest_capability() {
         "bool", "unsigned", "signed", "text", "bytes", "ipv4", "ipv6", "mac", "list",
     ];
     for (kind, expected) in packet_kinds.into_iter().zip(expected) {
-        let output = FieldKind::from(kind);
+        let output = FieldKind::from_core(kind).expect("v1 names every current field kind");
         assert_eq!(output.as_str(), expected);
         assert_eq!(
             serde_json::to_value(output).expect("kind serializes"),
@@ -309,12 +327,13 @@ fn protocol_output_converts_every_field_kind_and_manifest_capability() {
 
     let schema = FieldSchema {
         name: "field_name",
+        aliases: &["fixture_alias"],
         kind: PacketFieldKind::Unsigned,
         derived: true,
         required: false,
         description: "fixture field",
     };
-    let field = Field::from(&schema);
+    let field = Field::try_from(&schema).expect("a known field kind converts");
     assert_eq!(field.name, "field_name");
     assert!(field.derived);
     assert!(!field.required);
@@ -398,7 +417,7 @@ fn interface_fixture() -> Vec<Info> {
 
 #[test]
 fn interface_outputs_are_stable_and_sorted() {
-    let output = interfaces::Result::new(interface_fixture());
+    let output = interfaces::Report::new(interface_fixture());
     assert_eq!(output.interfaces[0].name, "lo");
     assert_eq!(
         output.interfaces[1].addresses,
@@ -436,17 +455,23 @@ fn interface_capability_outputs_are_stable() {
 #[test]
 fn route_enum_outputs_are_stable() {
     for (mode, expected) in [
-        (LinkMode::Auto, packetcraftr::output::network::Mode::Auto),
+        (
+            LinkMode::Auto,
+            packetcraftr::output::network::LinkMode::Auto,
+        ),
         (
             LinkMode::Layer2,
-            packetcraftr::output::network::Mode::Layer2,
+            packetcraftr::output::network::LinkMode::Layer2,
         ),
         (
             LinkMode::Layer3,
-            packetcraftr::output::network::Mode::Layer3,
+            packetcraftr::output::network::LinkMode::Layer3,
         ),
     ] {
-        assert_eq!(packetcraftr::output::network::Mode::from(mode), expected);
+        assert_eq!(
+            packetcraftr::output::network::LinkMode::from(mode),
+            expected
+        );
     }
     for (scope, expected) in [
         (Scope::Host, packetcraftr::output::network::Scope::Host),

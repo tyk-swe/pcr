@@ -7,11 +7,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use packetcraftr_core::{decode::Dissector, registry::Registry};
-use packetcraftr_netio::{
-    Error as LiveIoError,
-    capture::{Limits as CaptureQueueLimits, Session},
-    transmit::Sender as PacketIo,
-};
+use packetcraftr_netio::{Error as LiveIoError, capture::Session, transmit::Sender as PacketIo};
 
 use super::CaptureGuard;
 use super::{
@@ -52,7 +48,6 @@ pub(crate) struct Transaction<C: Session> {
     pub(super) capture: CaptureGuard<C>,
     pub(super) started: Instant,
     pub(super) deadline: Instant,
-    pub(super) capture_limits: CaptureQueueLimits,
     pub(super) options: super::Options,
     pub(super) prepared: Vec<PreparedPacket>,
     pub(super) packet_count: u64,
@@ -62,7 +57,6 @@ pub(crate) struct Transaction<C: Session> {
     pub(super) dissector: Dissector,
     pub(super) captured: Accumulator,
     pub(super) correlation_stopped: bool,
-    pub(super) published_diagnostics: usize,
 }
 
 impl<C: Session> Transaction<C> {
@@ -74,7 +68,6 @@ impl<C: Session> Transaction<C> {
             capture: CaptureGuard::new(capture),
             started: prepared.started,
             deadline: prepared.deadline,
-            capture_limits: prepared.capture_limits,
             options: prepared.options,
             prepared: prepared.packets,
             packet_count: prepared.packet_count,
@@ -83,7 +76,6 @@ impl<C: Session> Transaction<C> {
             completed_sends: 0,
             captured: Accumulator::new(request_count),
             correlation_stopped: false,
-            published_diagnostics: 0,
         }
     }
 

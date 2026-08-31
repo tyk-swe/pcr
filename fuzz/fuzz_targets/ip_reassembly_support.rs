@@ -2,10 +2,10 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
-use packetcraftr_core::analysis::reassembly::Limits as ReassemblyLimits;
 use packetcraftr_core::analysis::reassembly::ip::{
     Error, Fragment, FragmentDisposition, Ipv4DatagramKey, Ipv4Fragment, Ipv6DatagramKey,
-    Ipv6Fragment, MalformedError, OverlapPolicy, PushOutcome, Reassembler,
+    Ipv6Fragment, Limits as ReassemblyLimits, MalformedError, OverlapPolicy, PushOutcome,
+    Reassembler,
 };
 use packetcraftr_core::analysis::scope::Interner;
 
@@ -22,25 +22,24 @@ pub(crate) struct Coverage {
 
 pub(crate) fn run(data: &[u8]) -> Coverage {
     let config = |index: usize, fallback: u8| data.get(index).copied().unwrap_or(fallback);
-    let ip_idle_expiry = if config(4, 4) == u8::MAX {
+    let idle_expiry = if config(4, 4) == u8::MAX {
         Duration::MAX
     } else {
         Duration::from_millis(u64::from(config(4, 4) % 16).saturating_add(1))
     };
     let limits = ReassemblyLimits {
-        max_ip_datagrams: usize::from(config(0, 3) % 4).saturating_add(1),
-        max_ip_fragments_per_datagram: usize::from(config(1, 7) % 12).saturating_add(1),
-        max_ip_bytes_per_datagram: usize::from(config(2, 15) % 32)
+        max_datagrams: usize::from(config(0, 3) % 4).saturating_add(1),
+        max_fragments_per_datagram: usize::from(config(1, 7) % 12).saturating_add(1),
+        max_bytes_per_datagram: usize::from(config(2, 15) % 32)
             .saturating_add(1)
             .saturating_mul(8),
         // Four conservatively charged datagram slots fit even at the floor;
         // the configurable span still explores aggregate-pressure failures.
-        max_ip_aggregate_bytes: usize::from(config(3, 128))
+        max_aggregate_bytes: usize::from(config(3, 128))
             .saturating_mul(512)
             .saturating_add(24_576),
-        max_ip_retained_outcomes: 8,
-        ip_idle_expiry,
-        ..ReassemblyLimits::default()
+        max_retained_outcomes: 8,
+        idle_expiry,
     };
 
     let mut intern = Interner::new();

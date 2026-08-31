@@ -30,18 +30,19 @@ where
         &self,
         template: &packetcraftr_core::template::Template,
         options: crate::exchange::Options,
-    ) -> Result<crate::exchange::Result, Error> {
-        self.exchange_collected(template, options, None, None)
+    ) -> Result<crate::exchange::Report, Error> {
+        self.exchange_hooked(template, options, None, None)
     }
 
     /// Runs one capture-ready exchange and publishes each event when final.
     ///
     /// Confirmed sends are published before later requests, capture evidence
     /// when its classification is final, and unanswered requests after capture
-    /// shutdown. The callback runs on a process-budgeted one-event worker;
-    /// failure aborts later work, and the timeout bounds publisher waiting, not
+    /// shutdown. The callback runs on a one-event worker admitted by this
+    /// client's [`Runtime`](packetcraftr_core::progress::Runtime); failure
+    /// aborts later work, and the timeout bounds publisher waiting, not
     /// arbitrary callback execution. A callback may finish after this method
-    /// returns and holds one process-wide worker permit until then.
+    /// returns and holds one of that runtime's worker permits until then.
     pub fn exchange_with_events<F>(
         &self,
         template: &packetcraftr_core::template::Template,
@@ -52,44 +53,32 @@ where
         F: FnMut(crate::exchange::Event) -> Result<(), crate::BoundaryError> + Send + 'static,
     {
         let deadline = Deadline::new(options.timeout);
-        let sink = packetcraftr_core::progress::Sink::new(emit).map_err(|source| {
-            Error::ExchangeOutput {
-                source: Box::new(source),
-            }
-        })?;
-        self.exchange_internal_with_events(template, options, None, None, &mut |event| {
+        let sink =
+            packetcraftr_core::progress::Sink::new_in(&self.runtime, emit).map_err(|source| {
+                Error::ExchangeOutput {
+                    source: Box::new(source),
+                }
+            })?;
+        self.exchange_streamed(template, options, None, None, &mut |event| {
             sink.emit(event, &deadline).map_err(exchange_sink_error)
         })
     }
 
-    pub(crate) fn exchange_internal(
-        &self,
-        template: &packetcraftr_core::template::Template,
-        options: crate::exchange::Options,
-        workflow_matcher: Option<&mut WorkflowResponseMatcher<'_>>,
-    ) -> Result<crate::exchange::Result, Error> {
-        self.exchange_collected(template, options, workflow_matcher, None)
-    }
-
-    pub(crate) fn exchange_internal_until(
-        &self,
-        template: &packetcraftr_core::template::Template,
-        options: crate::exchange::Options,
-        workflow_matcher: Option<&mut WorkflowResponseMatcher<'_>>,
-        stop_predicate: &mut WorkflowStopPredicate<'_>,
-    ) -> Result<crate::exchange::Result, Error> {
-        self.exchange_collected(template, options, workflow_matcher, Some(stop_predicate))
-    }
-
-    fn exchange_collected(
+    /// One collected exchange with the two optional workflow hooks: the
+    /// matcher that gets a second chance at frames the registry matchers could
+    /// not uniquely attribute, and the predicate that stops capture early.
+    ///
+    /// This is the only entry point workflow executors use; `exchange` is the
+    /// same call with both hooks absent.
+    pub(crate) fn exchange_hooked(
         &self,
         template: &packetcraftr_core::template::Template,
         options: crate::exchange::Options,
         workflow_matcher: Option<&mut WorkflowResponseMatcher<'_>>,
         stop_predicate: Option<&mut WorkflowStopPredicate<'_>>,
-    ) -> Result<crate::exchange::Result, Error> {
+    ) -> Result<crate::exchange::Report, Error> {
         let mut collector = Collector::default();
-        let summary = self.exchange_internal_with_events(
+        let summary = self.exchange_streamed(
             template,
             options,
             workflow_matcher,
@@ -102,7 +91,7 @@ where
         collector.finish(summary)
     }
 
-    fn exchange_internal_with_events<F>(
+    fn exchange_streamed<F>(
         &self,
         template: &packetcraftr_core::template::Template,
         options: crate::exchange::Options,
@@ -131,7 +120,7 @@ where
         ensure_preparation_deadline(prepared.deadline)?;
         let capture = self.io.arm_capture(&CaptureRequest {
             interface: first_route.decision.interface.clone(),
-            limits: prepared.capture_limits,
+            limits: prepared.options.capture,
             filter: None,
             promiscuous: false,
         })?;

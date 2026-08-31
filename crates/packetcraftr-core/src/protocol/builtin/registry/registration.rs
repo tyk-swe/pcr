@@ -4,6 +4,7 @@
 //! Ordered built-in binding registration.
 
 use crate::{
+    protocol::BuiltinProtocol,
     protocol::{
         link::LLC_FRAME_DISCRIMINATOR,
         support::BUILTIN_CAPTURE_ROOTS,
@@ -12,7 +13,6 @@ use crate::{
             PPPOE_SESSION,
         },
     },
-    semantics::BuiltinProtocol,
 };
 
 type Child = (u64, BuiltinProtocol, i32);

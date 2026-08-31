@@ -13,8 +13,10 @@
 /// `#[serde(rename_all = ...)]`, and per-variant attributes pass through as
 /// written.
 ///
-/// A `#[non_exhaustive]` source needs a trailing `unmatched <binding> => <expr>`
-/// clause, which becomes the catch-all match arm.
+/// Every source this macro mirrors is exhaustive, so the generated `match` is
+/// too and a new source variant is a compile error here. A `#[non_exhaustive]`
+/// source needs a fallible conversion written by hand instead; see
+/// [`super::protocols::FieldKind`].
 ///
 /// ```ignore
 /// mirror_enum! {
@@ -35,7 +37,6 @@ macro_rules! mirror_enum {
                 $variant:ident = $source_variant:ident,
             )*
         }
-        $( unmatched $binding:ident => $fallback:expr $(,)? )?
     ) => {
         #[derive(Clone, Copy, Debug, PartialEq, Eq, ::serde::Serialize)]
         $(#[$enum_attribute])*
@@ -50,7 +51,6 @@ macro_rules! mirror_enum {
             fn from(value: $source) -> Self {
                 match value {
                     $( <$source>::$source_variant => Self::$variant, )*
-                    $( $binding => $fallback, )?
                 }
             }
         }

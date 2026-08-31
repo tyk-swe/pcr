@@ -7,16 +7,16 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use packetcraftr_core::template::DEFAULT_MAX_TEMPLATE_PACKETS;
-use packetcraftr_netio::capture::{DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES};
+use packetcraftr_netio::capture::{MAX_CAPTURE_QUEUE_BYTES, MAX_CAPTURE_QUEUE_FRAMES};
 
 use crate::probe::evidence::{check_limits, duration_violation};
 use crate::target::Family;
 use crate::target::Target;
 
-use super::super::error::Error;
-use super::super::{
-    DEFAULT_MAX_SCAN_PORTS, DEFAULT_MAX_UNDECODED_SCAN_FRAMES, DEFAULT_SCAN_BATCH_SIZE,
-    MAX_SCAN_ATTEMPTS, MAX_SCAN_DURATION, MAX_SCAN_PROBES, MAX_SCAN_RATE,
+use crate::scan::error::Error;
+use crate::scan::{
+    DEFAULT_BATCH_SIZE, DEFAULT_MAX_PORTS, DEFAULT_MAX_UNDECODED_FRAMES, MAX_ATTEMPTS,
+    MAX_DURATION, MAX_PROBES, MAX_RATE,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -65,33 +65,35 @@ pub struct Limits {
 impl Default for Limits {
     fn default() -> Self {
         Self {
-            max_ports: DEFAULT_MAX_SCAN_PORTS,
+            max_ports: DEFAULT_MAX_PORTS,
             max_probes: DEFAULT_MAX_TEMPLATE_PACKETS,
-            batch_size: DEFAULT_SCAN_BATCH_SIZE,
-            max_duration: MAX_SCAN_DURATION,
-            max_evidence_frames: DEFAULT_CAPTURE_QUEUE_FRAMES,
-            max_evidence_bytes: DEFAULT_CAPTURE_QUEUE_BYTES,
-            max_undecoded: DEFAULT_MAX_UNDECODED_SCAN_FRAMES,
+            batch_size: DEFAULT_BATCH_SIZE,
+            max_duration: MAX_DURATION,
+            max_evidence_frames: MAX_CAPTURE_QUEUE_FRAMES,
+            max_evidence_bytes: MAX_CAPTURE_QUEUE_BYTES,
+            max_undecoded: DEFAULT_MAX_UNDECODED_FRAMES,
         }
     }
 }
 
 impl Limits {
-    pub fn validate(self) -> std::result::Result<Self, Error> {
+    /// Rejects any bound above the ceiling this crate enforces, and any pair
+    /// of bounds that cannot both hold.
+    pub fn validate(&self) -> Result<(), Error> {
         check_limits(
             &[
                 ("max_ports", self.max_ports, usize::from(u16::MAX) + 1),
-                ("max_probes", self.max_probes, MAX_SCAN_PROBES),
-                ("batch_size", self.batch_size, MAX_SCAN_PROBES),
+                ("max_probes", self.max_probes, MAX_PROBES),
+                ("batch_size", self.batch_size, MAX_PROBES),
                 (
                     "max_evidence_frames",
                     self.max_evidence_frames,
-                    DEFAULT_CAPTURE_QUEUE_FRAMES,
+                    MAX_CAPTURE_QUEUE_FRAMES,
                 ),
                 (
                     "max_evidence_bytes",
                     self.max_evidence_bytes,
-                    DEFAULT_CAPTURE_QUEUE_BYTES,
+                    MAX_CAPTURE_QUEUE_BYTES,
                 ),
             ],
             &[
@@ -120,14 +122,59 @@ impl Limits {
                 reason,
             },
         )?;
-        if duration_violation(self.max_duration, MAX_SCAN_DURATION) {
+        if duration_violation(self.max_duration, MAX_DURATION) {
             return Err(Error::InvalidDuration {
                 value: self.max_duration,
-                maximum: MAX_SCAN_DURATION,
+                maximum: MAX_DURATION,
             });
         }
-        Ok(self)
+        Ok(())
     }
+}
+
+/// One requested destination-port selection: a single port, or an inclusive
+/// range. A range whose `end` precedes its `start` selects nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PortSpec {
+    Single(u16),
+    RangeInclusive { start: u16, end: u16 },
+}
+
+/// Expands port selections into the stable, de-duplicated destination-port
+/// list a [`Request`] carries, enforcing `max_ports` as it goes.
+///
+/// Ports keep their first-seen order; a repeated port or an overlapping range
+/// collapses and does not consume the budget. Expansion stops at the first
+/// distinct port that would exceed `max_ports`, so an oversized range is never
+/// materialized.
+pub fn select_ports(
+    specs: impl IntoIterator<Item = PortSpec>,
+    max_ports: usize,
+) -> Result<Vec<u16>, Error> {
+    let mut ports: Vec<u16> = Vec::new();
+    let mut seen: HashSet<u16> = HashSet::new();
+    for spec in specs {
+        let (start, end) = match spec {
+            PortSpec::Single(port) => (port, port),
+            PortSpec::RangeInclusive { start, end } => (start, end),
+        };
+        for port in start..=end {
+            if !seen.insert(port) {
+                continue;
+            }
+            if ports.len() >= max_ports {
+                return Err(Error::InvalidLimit {
+                    field: "ports",
+                    value: u64::try_from(ports.len())
+                        .unwrap_or(u64::MAX)
+                        .saturating_add(1),
+                    reason: format!("exceeds max_ports={max_ports}"),
+                });
+            }
+            ports.push(port);
+        }
+    }
+    Ok(ports)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -147,13 +194,16 @@ pub struct Request {
 }
 
 impl Request {
-    pub(in crate::scan) fn validate(&self) -> std::result::Result<Vec<u16>, Error> {
+    /// Rejects every request this workflow cannot execute: an out-of-range
+    /// limit, attempt count, timeout, or rate, and a transport that disagrees
+    /// with the declared ports.
+    pub fn validate(&self) -> Result<(), Error> {
         self.limits.validate()?;
-        if !(1..=MAX_SCAN_ATTEMPTS).contains(&self.attempts) {
+        if !(1..=MAX_ATTEMPTS).contains(&self.attempts) {
             return Err(Error::InvalidLimit {
                 field: "attempts",
                 value: u64::from(self.attempts),
-                reason: format!("must be within 1..={MAX_SCAN_ATTEMPTS}"),
+                reason: format!("must be within 1..={MAX_ATTEMPTS}"),
             });
         }
         if self.timeout.is_zero() || self.timeout > packetcraftr_netio::capture::MAX_TIMEOUT {
@@ -163,12 +213,12 @@ impl Request {
             });
         }
         if let Some(rate) = self.probes_per_second
-            && (rate == 0 || rate > MAX_SCAN_RATE)
+            && (rate == 0 || rate > MAX_RATE)
         {
             return Err(Error::InvalidLimit {
                 field: "probes_per_second",
                 value: u64::from(rate),
-                reason: format!("must be within 1..={MAX_SCAN_RATE}"),
+                reason: format!("must be within 1..={MAX_RATE}"),
             });
         }
         match self.transport {
@@ -185,20 +235,16 @@ impl Request {
             }
             _ => {}
         }
-        let mut ports = Vec::with_capacity(self.ports.len());
-        let mut seen_ports = HashSet::with_capacity(self.ports.len());
-        for port in &self.ports {
-            if seen_ports.insert(*port) {
-                ports.push(*port);
-            }
-        }
-        if ports.len() > self.limits.max_ports {
-            return Err(Error::InvalidLimit {
-                field: "ports",
-                value: u64::try_from(ports.len()).unwrap_or(u64::MAX),
-                reason: format!("exceeds max_ports={}", self.limits.max_ports),
-            });
-        }
-        Ok(ports)
+        Ok(())
+    }
+
+    /// The de-duplicated destination ports this request scans, in first-seen
+    /// order, after [`Request::validate`] accepts it. Empty for ICMP.
+    pub fn selected_ports(&self) -> Result<Vec<u16>, Error> {
+        self.validate()?;
+        select_ports(
+            self.ports.iter().copied().map(PortSpec::Single),
+            self.limits.max_ports,
+        )
     }
 }

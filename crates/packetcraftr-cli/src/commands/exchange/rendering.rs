@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr::output;
+use packetcraftr::{analysis::pcap::Format, output};
 
 use crate::errors::CliError;
 use crate::rendering::{
@@ -9,7 +9,7 @@ use crate::rendering::{
     write_stdout_line,
 };
 
-pub(super) fn render_text(result: &packetcraftr::exchange::Result) -> Result<(), CliError> {
+pub(super) fn render_text(result: &packetcraftr::exchange::Report) -> Result<(), CliError> {
     let mut diagnostics = result.diagnostics.clone();
     for sent in &result.sent {
         diagnostics.extend(sent.built().diagnostics.iter().cloned());
@@ -27,8 +27,8 @@ pub(super) fn render_text(result: &packetcraftr::exchange::Result) -> Result<(),
 }
 
 pub(super) fn render_capture(
-    result: &packetcraftr::exchange::Result,
-    format: output::contract::Format,
+    result: &packetcraftr::exchange::Report,
+    format: Format,
 ) -> Result<(), CliError> {
     let frames = stable_timestamp_order(
         result
@@ -55,9 +55,9 @@ fn stable_timestamp_order<'a>(
     frames
 }
 
-pub(super) fn render_aggregate(result: packetcraftr::exchange::Result) -> Result<(), CliError> {
+pub(super) fn render_aggregate(result: packetcraftr::exchange::Report) -> Result<(), CliError> {
     let (result, diagnostics, stats) =
-        output::exchange::Result::try_from_exchange(result).map_err(CliError::classified)?;
+        output::exchange::Report::try_from_exchange(result).map_err(CliError::classified)?;
     emit_aggregate_with_stats(
         output::contract::Command::Exchange,
         result,

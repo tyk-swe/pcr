@@ -63,7 +63,7 @@
     "packets_attempted": 1,
     "packets_completed": 1,
     "bytes": 1,
-    "elapsed": { "secs": 0, "nanos": 0 },
+    "elapsed": { "secs": 0, "nanos": 500000 },
     "capture": {
       "received_frames": 0,
       "received_bytes": 0,

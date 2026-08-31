@@ -3,10 +3,10 @@
 
 use std::net::{IpAddr, Ipv6Addr};
 
-use super::super::{BuiltinProtocol, FieldValue, Layer, Packet};
 use super::error::Error;
 use super::ipv4_option::{ParsedIpv4SourceRoutes, parse_ipv4_source_routes};
 use super::segment_routing::{SegmentRoute, validate_segment_route};
+use crate::semantics::{BuiltinProtocol, FieldValue, Layer, Packet};
 
 pub const SOURCE: &str = "source";
 pub const DESTINATION: &str = "destination";
@@ -93,7 +93,7 @@ pub(super) fn ip_path_at(
 ) -> Result<IpPath, Error> {
     let layer = packet
         .layer(network_index)
-        .ok_or_else(|| Error::new("IP layer index is outside the packet"))?;
+        .ok_or(Error::LayerIndexOutOfRange)?;
     let source = ip_field(layer, SOURCE, protocol)?;
     let header_destination = ip_field(layer, DESTINATION, protocol)?;
 
@@ -150,9 +150,7 @@ pub(super) fn ip_path_at(
         }
         if candidate_protocol == BuiltinProtocol::Ipv6Srh {
             if segment_route.is_some() {
-                return Err(Error::new(
-                    "an IPv6 extension chain contains more than one SRH",
-                ));
+                return Err(Error::DuplicateSegmentRoutingHeader);
             }
             segment_route = Some(typed_segment_route(candidate, header_destination_v6)?);
         }
@@ -218,10 +216,9 @@ pub(super) fn reject_non_atomic_fragment(layer: &dyn Layer) -> Result<(), Error>
         }
     };
     if offset != 0 || more {
-        return Err(Error::new(format!(
-            "non-atomic {} fragment may hide a live destination",
-            layer.protocol_id()
-        )));
+        return Err(Error::NonAtomicFragment {
+            protocol: layer.protocol_id().clone(),
+        });
     }
     Ok(())
 }
@@ -266,7 +263,7 @@ fn typed_segment_route(
     )
 }
 
-fn wire_u8_field(layer: &dyn Layer, field: &str, automatic: u8) -> Result<u8, Error> {
+fn wire_u8_field(layer: &dyn Layer, field: &'static str, automatic: u8) -> Result<u8, Error> {
     match layer.field(field) {
         Some(FieldValue::Unsigned(value)) => u8::try_from(value)
             .map_err(|_| Error::field(layer.protocol_id(), field, "is outside the u8 range")),
@@ -285,7 +282,7 @@ fn wire_u8_field(layer: &dyn Layer, field: &str, automatic: u8) -> Result<u8, Er
     }
 }
 
-pub(super) fn required_u8_field(layer: &dyn Layer, field: &str) -> Result<u8, Error> {
+pub(super) fn required_u8_field(layer: &dyn Layer, field: &'static str) -> Result<u8, Error> {
     match layer.field(field) {
         Some(FieldValue::Unsigned(value)) => u8::try_from(value)
             .map_err(|_| Error::field(layer.protocol_id(), field, "is outside the u8 range")),
@@ -294,7 +291,11 @@ pub(super) fn required_u8_field(layer: &dyn Layer, field: &str) -> Result<u8, Er
     }
 }
 
-fn ip_field(layer: &dyn Layer, field: &str, protocol: BuiltinProtocol) -> Result<IpAddr, Error> {
+fn ip_field(
+    layer: &dyn Layer,
+    field: &'static str,
+    protocol: BuiltinProtocol,
+) -> Result<IpAddr, Error> {
     match (protocol, layer.field(field)) {
         (BuiltinProtocol::Ipv4, Some(FieldValue::Ipv4(value))) => Ok(IpAddr::V4(value)),
         (BuiltinProtocol::Ipv6, Some(FieldValue::Ipv6(value))) => Ok(IpAddr::V6(value)),

@@ -249,12 +249,9 @@ fn pcap_writer_options_and_metadata_rejections_are_atomic() {
             ..
         })
     ));
-    writer
-        .set_stream_limits(Limits {
-            max_frames: 0,
-            max_bytes: 0,
-        })
-        .expect("no rejected frame reached the output");
+    // Every rejection above was atomic: none of them reached the output.
+    assert_eq!(writer.frames_written(), 0);
+    assert_eq!(writer.captured_bytes_written(), 0);
 }
 
 fn assert_invalid_pcap_writer_options() {
@@ -304,21 +301,30 @@ fn assert_invalid_pcap_writer_options() {
 }
 
 #[test]
-fn writer_stream_limits_account_only_committed_output() {
+fn writer_stream_limits_are_fixed_at_construction_and_account_committed_output() {
     let first = frame_at(SystemTime::UNIX_EPOCH, LinkType::ETHERNET, b"abc");
     let second = frame_at(
         SystemTime::UNIX_EPOCH + Duration::from_secs(1),
         LinkType::ETHERNET,
         b"de",
     );
-    let mut writer = Writer::pcap(Vec::new(), LinkType::ETHERNET).expect("valid writer");
     let limits = Limits {
         max_frames: 2,
         max_bytes: 4,
     };
-    writer.set_stream_limits(limits).expect("fresh limits fit");
+    let mut writer = Writer::pcap_with_options(
+        Vec::new(),
+        LinkType::ETHERNET,
+        PcapOptions {
+            stream_limits: limits,
+            ..PcapOptions::default()
+        },
+    )
+    .expect("valid writer");
     assert_eq!(writer.stream_limits(), limits);
     writer.write_frame(&first).expect("first frame fits");
+    // A refused frame commits nothing, so the byte total still reflects only
+    // what was written.
     assert!(matches!(
         writer.write_frame(&second),
         Err(Error::StreamByteLimitExceeded {
@@ -326,36 +332,25 @@ fn writer_stream_limits_account_only_committed_output() {
             limit: 4
         })
     ));
-    assert!(matches!(
-        writer.set_stream_limits(Limits {
-            max_frames: 0,
-            max_bytes: 10,
-        }),
-        Err(Error::FrameLimitExceeded {
-            actual: 1,
-            limit: 0
-        })
-    ));
-    assert!(matches!(
-        writer.set_stream_limits(Limits {
-            max_frames: 1,
-            max_bytes: 2,
-        }),
-        Err(Error::StreamByteLimitExceeded {
-            actual: 3,
-            limit: 2
-        })
-    ));
     assert_eq!(writer.stream_limits(), limits);
+    assert_eq!(writer.frames_written(), 1);
+    assert_eq!(writer.captured_bytes_written(), 3);
 
-    writer
-        .set_stream_limits(Limits {
-            max_frames: 1,
-            max_bytes: 3,
-        })
-        .expect("equal committed totals fit");
+    let mut bounded = Writer::pcap_with_options(
+        Vec::new(),
+        LinkType::ETHERNET,
+        PcapOptions {
+            stream_limits: Limits {
+                max_frames: 1,
+                max_bytes: 16,
+            },
+            ..PcapOptions::default()
+        },
+    )
+    .expect("valid writer");
+    bounded.write_frame(&first).expect("first frame fits");
     assert!(matches!(
-        writer.write_frame(&frame_at(SystemTime::UNIX_EPOCH, LinkType::ETHERNET, b"")),
+        bounded.write_frame(&frame_at(SystemTime::UNIX_EPOCH, LinkType::ETHERNET, b"")),
         Err(Error::FrameLimitExceeded {
             actual: 2,
             limit: 1
@@ -372,6 +367,7 @@ fn pcapng_round_trip_preserves_interfaces_directions_and_signed_time() {
                 endianness,
                 max_size: 256,
                 max_interfaces: 3,
+                ..PcapNgOptions::default()
             },
         )
         .expect("valid pcapng writer");
@@ -408,22 +404,8 @@ fn pcapng_round_trip_preserves_interfaces_directions_and_signed_time() {
         writer
             .write_frame(&outbound)
             .expect("missing link type gets an automatic interface");
-        assert!(matches!(
-            writer.set_stream_limits(Limits {
-                max_frames: 2,
-                max_bytes: 6,
-            }),
-            Err(Error::StreamByteLimitExceeded {
-                actual: 7,
-                limit: 6
-            })
-        ));
-        writer
-            .set_stream_limits(Limits {
-                max_frames: 2,
-                max_bytes: 7,
-            })
-            .expect("both frames and all seven captured bytes are committed");
+        assert_eq!(writer.frames_written(), 2);
+        assert_eq!(writer.captured_bytes_written(), 7);
         writer.flush().expect("memory flush succeeds");
 
         let bytes = writer.into_inner();

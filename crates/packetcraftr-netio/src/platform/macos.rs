@@ -4,8 +4,6 @@
 //! Passive macOS route/interface adapter backed by `getifaddrs(3)` and routing sockets.
 //! It performs no neighbor discovery, capture, or transmission.
 
-#![allow(unsafe_code)]
-
 mod enumeration;
 mod parser;
 mod query;

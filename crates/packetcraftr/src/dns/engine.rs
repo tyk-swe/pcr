@@ -5,36 +5,40 @@
 
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::frame::Frame;
+use packetcraftr_core::progress::Runtime;
 use packetcraftr_core::registry::Registry;
+use packetcraftr_netio::dns_tcp::Category as TcpCategory;
 
 use crate::BoundaryError;
 use crate::Stats;
-use crate::authorization::{
-    DnsOperation, Operation as AuthorizedOperation, SocketBudget, WireBudget,
-};
+use crate::authorization::{DnsOperation, Operation as AuthorizedOperation, WireBudget};
 use crate::clock::Clock;
-use crate::evidence::Budget;
+use crate::evidence::{Budget, DiagnosticLog};
 use crate::probe::evidence::{
-    ResponseCandidate, UndecodedRetention, response_within_deadline, retain_evidence,
-    update_best_candidate,
+    ResponseCandidate, UndecodedRetention, response_within_deadline, update_best_candidate,
 };
 use crate::probe::runner::sink_observer;
 use crate::target::{Authorizer, Family, Target, approve_operation, resolve_selected};
 
+use super::EVIDENCE_DIAGNOSTICS;
+use super::classification::{
+    ClassifiedAttempt, ResponseClassification, candidate_evidence, classify_response,
+    classify_tcp_response, tcp_failure_evidence, tcp_timeout_evidence, timeout_evidence,
+};
 use super::error::Error;
 use super::evidence::validate_dns_execution;
 use super::model::{
     AttemptEvidence, Event, EventContext, Exchange, Execution, Executor, Limits, Outcome, Probe,
-    Record, Request, Result, Section, Summary, TcpExchange, Transport, UndecodedEvidence,
+    Record, Report, Request, Section, Summary, TcpExchange, Transport, UndecodedEvidence,
     ValidatedResponse,
 };
-use super::wire::{ResponseClassification, classify_response, decode_tcp_frame, encode_query};
-use super::{DNS_EVIDENCE_DIAGNOSTICS, MAX_DNS_PROBE_OVERHEAD};
+use super::plan::{OperationBudget, operation_budget};
+use super::probe::rotated_source_port;
 
 /// Executes bounded DNS retries, repeating declared-name authorization,
 /// resolution, and resolved-answer authorization before each UDP probe. A
@@ -46,7 +50,7 @@ pub fn run<A, E, C>(
     registry: &Registry,
     executor: &mut E,
     clock: &mut C,
-) -> std::result::Result<Result, Error>
+) -> Result<Report, Error>
 where
     A: Authorizer,
     E: Executor,
@@ -79,15 +83,17 @@ pub fn run_with_events<A, E, C, F>(
     registry: &Registry,
     executor: &mut E,
     clock: &mut C,
+    runtime: &Runtime,
     emit: F,
-) -> std::result::Result<Summary, Error>
+) -> Result<Summary, Error>
 where
     A: Authorizer,
     E: Executor,
     C: Clock,
-    F: FnMut(Event) -> std::result::Result<(), BoundaryError> + Send + 'static,
+    F: FnMut(Event) -> Result<(), BoundaryError> + Send + 'static,
 {
     let observe = sink_observer(
+        runtime,
         emit,
         |error| duration_error(error.actual, error.limit),
         |source| Error::Output { source },
@@ -102,12 +108,12 @@ fn run_observed<A, E, C, F>(
     executor: &mut E,
     clock: &mut C,
     emit: F,
-) -> std::result::Result<Summary, Error>
+) -> Result<Summary, Error>
 where
     A: Authorizer,
     E: Executor,
     C: Clock,
-    F: FnMut(Event, &Deadline) -> std::result::Result<(), Error>,
+    F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
     run_observed_with_deadline(
         request,
@@ -128,12 +134,12 @@ pub(super) fn run_observed_with_deadline<A, E, C, F>(
     clock: &mut C,
     deadline: Deadline,
     mut emit: F,
-) -> std::result::Result<Summary, Error>
+) -> Result<Summary, Error>
 where
     A: Authorizer,
     E: Executor,
     C: Clock,
-    F: FnMut(Event, &Deadline) -> std::result::Result<(), Error>,
+    F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
     let PreparedOperation {
         deadline,
@@ -158,11 +164,7 @@ where
         delay,
         context,
         summary,
-        evidence_budget: Budget::default(),
-        fallback_rank: 0,
-        scheduled_delay: Duration::ZERO,
-        attempts_completed: 0,
-        retained_undecoded: 0,
+        state: DnsState::default(),
         emit: &mut emit,
     }
     .execute()
@@ -196,7 +198,7 @@ impl Collector {
         }
     }
 
-    pub(super) fn finish(mut self, summary: Summary) -> Result {
+    pub(super) fn finish(self, summary: Summary) -> Report {
         let response = summary.response.map(|response| ValidatedResponse {
             metadata: response,
             answers: self.answers,
@@ -204,8 +206,7 @@ impl Collector {
             additionals: self.additionals,
             rejected_records: self.rejected,
         });
-        self.diagnostics.extend(summary.diagnostics);
-        Result {
+        Report {
             server: summary.server,
             server_port: summary.server_port,
             resolved_addresses: summary.resolved_addresses,
@@ -224,13 +225,6 @@ impl Collector {
     }
 }
 
-struct OperationBudget {
-    packet_count: u64,
-    maximum_wire_bytes: u64,
-    tcp: Option<SocketBudget>,
-    delay: Duration,
-}
-
 struct PreparedOperation {
     deadline: Deadline,
     query: Bytes,
@@ -242,9 +236,9 @@ fn prepare_operation<A: Authorizer>(
     request: &Request,
     authorizer: &mut A,
     deadline: Deadline,
-) -> std::result::Result<PreparedOperation, Error> {
-    let query_name = request.validate()?;
-    let query = encode_query(
+) -> Result<PreparedOperation, Error> {
+    let query_name = request.canonical_name()?;
+    let query = super::wire::encode_query(
         &query_name,
         request.query_type,
         request.transaction_id,
@@ -255,28 +249,26 @@ fn prepare_operation<A: Authorizer>(
     // This complete-operation gate deliberately precedes resolution and probe
     // construction. The authorizer's resolver path independently enforces the
     // declared hostname before every resolver side effect.
-    if let Some(tcp) = budget.tcp {
-        deadline.check()?;
-        let approval = authorizer.authorize_operation(AuthorizedOperation::Dns(DnsOperation::new(
-            WireBudget::new(budget.packet_count, budget.maximum_wire_bytes),
+    let OperationBudget {
+        packet_count,
+        maximum_wire_bytes,
+        tcp,
+        delay,
+    } = budget;
+    approve_operation(
+        authorizer,
+        AuthorizedOperation::Dns(DnsOperation::new(
+            WireBudget::new(packet_count, maximum_wire_bytes),
             tcp,
-        )));
-        deadline.check()?;
-        approval?;
-    } else {
-        approve_operation(
-            authorizer,
-            budget.packet_count,
-            budget.maximum_wire_bytes,
-            &deadline,
-            duration_error,
-        )?;
-    }
+        )),
+        &deadline,
+        duration_error,
+    )?;
 
     Ok(PreparedOperation {
         deadline,
         query,
-        delay: budget.delay,
+        delay,
         summary: Summary {
             server: request.server.to_string(),
             server_port: request.server_port,
@@ -288,83 +280,20 @@ fn prepare_operation<A: Authorizer>(
             fallback_attempted: false,
             accepted_transport: None,
             response: None,
-            diagnostics: Vec::new(),
             stats: Stats::default(),
         },
     })
 }
 
-fn operation_budget(
-    request: &Request,
-    query_bytes: usize,
-) -> std::result::Result<OperationBudget, Error> {
-    let packet_count = u64::from(request.attempts);
-    let query_bytes = u64::try_from(query_bytes).unwrap_or(u64::MAX);
-    let udp_probe_bytes = query_bytes.saturating_add(MAX_DNS_PROBE_OVERHEAD);
-    let maximum_wire_bytes =
-        packet_count
-            .checked_mul(udp_probe_bytes)
-            .ok_or(Error::InvalidLimit {
-                field: "wire_bytes",
-                value: u64::MAX,
-                reason: "wire-byte accounting overflowed".to_owned(),
-            })?;
-    let tcp = if request.tcp_fallback {
-        let framed_query_bytes = query_bytes.checked_add(2).ok_or(Error::InvalidLimit {
-            field: "socket_bytes",
-            value: u64::MAX,
-            reason: "DNS-over-TCP framing accounting overflowed".to_owned(),
-        })?;
-        let application_bytes =
-            packet_count
-                .checked_mul(framed_query_bytes)
-                .ok_or(Error::InvalidLimit {
-                    field: "socket_bytes",
-                    value: u64::MAX,
-                    reason: "DNS-over-TCP byte accounting overflowed".to_owned(),
-                })?;
-        let max_duration =
-            request
-                .timeout
-                .checked_mul(request.attempts)
-                .ok_or(Error::DurationLimit {
-                    actual: Duration::MAX,
-                    limit: request.limits.max_duration,
-                })?;
-        Some(SocketBudget::new(
-            packet_count,
-            packet_count,
-            application_bytes,
-            max_duration,
-        ))
-    } else {
-        None
-    };
-    let delay = dns_rate_delay(request.queries_per_second)?;
-    let worst_case = request
-        .timeout
-        .checked_mul(request.attempts)
-        .and_then(|duration| {
-            delay
-                .checked_mul(request.attempts.saturating_sub(1))
-                .and_then(|delays| duration.checked_add(delays))
-        })
-        .ok_or(Error::DurationLimit {
-            actual: Duration::MAX,
-            limit: request.limits.max_duration,
-        })?;
-    if worst_case > request.limits.max_duration {
-        return Err(Error::DurationLimit {
-            actual: worst_case,
-            limit: request.limits.max_duration,
-        });
-    }
-    Ok(OperationBudget {
-        packet_count,
-        maximum_wire_bytes,
-        tcp,
-        delay,
-    })
+/// Everything one running DNS operation accumulates, kept apart from the
+/// [`Summary`] it publishes.
+#[derive(Default)]
+struct DnsState {
+    evidence_budget: Budget,
+    diagnostics: DiagnosticLog,
+    scheduled_delay: Duration,
+    attempts_completed: u32,
+    retained_undecoded: usize,
 }
 
 struct Operation<'a, A, E, C, F> {
@@ -378,17 +307,8 @@ struct Operation<'a, A, E, C, F> {
     delay: Duration,
     context: Arc<EventContext>,
     summary: Summary,
-    evidence_budget: Budget,
-    fallback_rank: u8,
-    scheduled_delay: Duration,
-    attempts_completed: u32,
-    retained_undecoded: usize,
+    state: DnsState,
     emit: &'a mut F,
-}
-
-struct ClassifiedAttempt {
-    evidence: AttemptEvidence,
-    response: Option<ValidatedResponse>,
 }
 
 struct ProbeExecution {
@@ -402,9 +322,9 @@ where
     A: Authorizer,
     E: Executor,
     C: Clock,
-    F: FnMut(Event, &Deadline) -> std::result::Result<(), Error>,
+    F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
-    fn execute(mut self) -> std::result::Result<Summary, Error> {
+    fn execute(mut self) -> Result<Summary, Error> {
         for attempt in 1..=self.request.attempts {
             if self.execute_attempt(attempt)? {
                 break;
@@ -415,24 +335,22 @@ where
             .summary
             .stats
             .elapsed
-            .checked_add(self.scheduled_delay)
+            .checked_add(self.state.scheduled_delay)
             .ok_or(Error::StatisticsOverflow {
-                attempt: self.attempts_completed,
+                attempt: self.state.attempts_completed,
             })?;
-        self.summary.diagnostics.clear();
         Ok(self.summary)
     }
 
-    fn execute_attempt(&mut self, attempt: u32) -> std::result::Result<bool, Error> {
+    fn execute_attempt(&mut self, attempt: u32) -> Result<bool, Error> {
         self.wait_before_attempt(attempt)?;
         let probe = self.prepare_probe(attempt)?;
-        let diagnostic_start = self.summary.diagnostics.len();
         let ProbeExecution {
             execution,
             timeout,
             mut attempt_deadline,
         } = self.execute_probe(&probe)?;
-        self.publish_diagnostics_since(diagnostic_start)?;
+        self.publish_new_diagnostics()?;
         let sent_at = execution.sent.timing().freshness_marker().wall_clock();
         let best = select_response(
             &self.deadline,
@@ -442,64 +360,75 @@ where
             self.request.limits,
             timeout,
         )?;
-        let retention_diagnostic_start = self.summary.diagnostics.len();
         let udp = match best {
-            Some(candidate) => self.candidate_evidence(&probe, sent_at, candidate),
-            None => ClassifiedAttempt {
-                evidence: timeout_evidence(&probe, sent_at),
-                response: None,
-            },
+            Some(candidate) => candidate_evidence(
+                &probe,
+                sent_at,
+                candidate,
+                self.request.limits,
+                &mut self.state.evidence_budget,
+                &mut self.state.diagnostics,
+            ),
+            None => timeout_evidence(&probe, sent_at),
         };
-        self.publish_diagnostics_since(retention_diagnostic_start)?;
-        self.attempts_completed = attempt;
+        self.publish_new_diagnostics()?;
+        self.state.attempts_completed = attempt;
         let udp_status = udp.evidence.status;
         self.emit_attempt(udp.evidence)?;
         self.retain_undecoded(attempt, execution.undecoded)?;
-        let terminal = match (udp_status, udp.response) {
-            (Outcome::Response, Some(response)) => {
-                self.accept_response(attempt, Transport::Udp, response)?;
-                true
-            }
-            (Outcome::Truncated, Some(response)) if !self.request.tcp_fallback => {
-                self.accept_response(attempt, Transport::Udp, response)?;
-                true
-            }
-            (Outcome::Truncated, Some(_)) => {
-                let tcp = self.execute_tcp_fallback(&probe, &mut attempt_deadline)?;
-                let tcp_status = tcp.evidence.status;
-                self.emit_attempt(tcp.evidence)?;
-                if tcp_status == Outcome::Response {
-                    let response = tcp.response.ok_or(Error::InvalidEvidence {
-                        attempt,
-                        message: "successful TCP fallback omitted its validated response"
-                            .to_owned(),
-                    })?;
-                    self.accept_response(attempt, Transport::Tcp, response)?;
-                    true
-                } else {
-                    update_dns_fallback(
-                        &mut self.summary.outcome,
-                        &mut self.fallback_rank,
-                        tcp_status,
-                    );
-                    false
-                }
-            }
-            (status, None) => {
-                update_dns_fallback(&mut self.summary.outcome, &mut self.fallback_rank, status);
+        // A validated response is present exactly when the attempt was
+        // accepted, so this match is total: there is no shape for "timed out
+        // and yet produced a response".
+        let terminal = match udp.response {
+            None => {
+                self.record_failure_outcome(udp_status);
                 false
             }
-            _ => {
-                return Err(Error::InvalidEvidence {
-                    attempt,
-                    message: "DNS classification returned an incoherent response phase".to_owned(),
-                });
+            // A truncated response continues over TCP when — and only when —
+            // a continuation was configured.
+            Some(_) if udp_status == Outcome::Truncated && self.request.tcp_fallback => {
+                self.continue_over_tcp(&probe, &mut attempt_deadline)?
+            }
+            Some(response) => {
+                self.accept_response(attempt, Transport::Udp, response)?;
+                true
             }
         };
         Ok(terminal)
     }
 
-    fn wait_before_attempt(&mut self, attempt: u32) -> std::result::Result<(), Error> {
+    /// Runs the one DNS-over-TCP continuation a validated truncated response
+    /// permits, and reports whether it ended the operation.
+    fn continue_over_tcp(
+        &mut self,
+        probe: &Probe,
+        attempt_deadline: &mut Deadline,
+    ) -> Result<bool, Error> {
+        let tcp = self.execute_tcp_fallback(probe, attempt_deadline)?;
+        let tcp_status = tcp.evidence.status;
+        self.emit_attempt(tcp.evidence)?;
+        if tcp_status != Outcome::Response {
+            self.record_failure_outcome(tcp_status);
+            return Ok(false);
+        }
+        let response = tcp.response.ok_or(Error::InvalidEvidence {
+            attempt: probe.attempt,
+            message: "successful TCP fallback omitted its validated response".to_owned(),
+        })?;
+        self.accept_response(probe.attempt, Transport::Tcp, response)?;
+        Ok(true)
+    }
+
+    /// Keeps the most informative failure seen so far as the operation
+    /// outcome. An accepted response is recorded by [`Self::accept_response`]
+    /// and ends the operation, so it never competes here.
+    fn record_failure_outcome(&mut self, candidate: Outcome) {
+        if candidate.retry_rank() > self.summary.outcome.retry_rank() {
+            self.summary.outcome = candidate;
+        }
+    }
+
+    fn wait_before_attempt(&mut self, attempt: u32) -> Result<(), Error> {
         if attempt != 1 {
             self.deadline.check()?;
             self.deadline.start_accounting(self.delay)?;
@@ -507,11 +436,12 @@ where
                 .sleep(self.delay)
                 .map_err(|source| Error::Clock {
                     attempt,
-                    message: source.to_string(),
+                    source: Box::new(source),
                 })?;
             self.deadline.account(self.delay)?;
-            self.scheduled_delay =
-                self.scheduled_delay
+            self.state.scheduled_delay =
+                self.state
+                    .scheduled_delay
                     .checked_add(self.delay)
                     .ok_or(Error::DurationLimit {
                         actual: Duration::MAX,
@@ -521,7 +451,7 @@ where
         Ok(())
     }
 
-    fn prepare_probe(&mut self, attempt: u32) -> std::result::Result<Probe, Error> {
+    fn prepare_probe(&mut self, attempt: u32) -> Result<Probe, Error> {
         let resolved = resolve_selected(
             self.authorizer,
             &self.request.server,
@@ -557,12 +487,11 @@ where
         {
             return Err(Error::TcpLinkLocal { address });
         }
-        let source_port = dns_source_port(self.request.source_port, attempt);
         Ok(Probe {
             attempt,
             server_address,
             server_port: self.request.server_port,
-            source_port,
+            source_port: rotated_source_port(self.request.source_port, attempt),
             transaction_id: self.request.transaction_id,
             query_name: self.summary.query_name.clone(),
             query_type: self.request.query_type,
@@ -570,7 +499,7 @@ where
         })
     }
 
-    fn execute_probe(&mut self, probe: &Probe) -> std::result::Result<ProbeExecution, Error> {
+    fn execute_probe(&mut self, probe: &Probe) -> Result<ProbeExecution, Error> {
         let timeout = self.request.timeout.min(self.deadline.remaining()?);
         if timeout.is_zero() {
             return Err(Error::DurationLimit {
@@ -584,7 +513,6 @@ where
             probe: probe.clone(),
             timeout,
             limits: self.request.limits,
-            max_responses: self.request.limits.max_evidence_frames,
             permit: crate::evidence::ExecutionPermit::new(),
         };
         let execution = self.executor.execute(&execution_request);
@@ -610,7 +538,7 @@ where
                 attempt: probe.attempt,
             })?;
         for diagnostic in execution.diagnostics.drain(..) {
-            packetcraftr_core::diagnostic::push_once(&mut self.summary.diagnostics, diagnostic);
+            self.state.diagnostics.push_once(diagnostic);
         }
         Ok(ProbeExecution {
             execution,
@@ -619,87 +547,11 @@ where
         })
     }
 
-    fn candidate_evidence(
-        &mut self,
-        probe: &Probe,
-        sent_at: SystemTime,
-        candidate: ResponseCandidate<'_, ResponseClassification>,
-    ) -> ClassifiedAttempt {
-        let received_at = crate::live_timestamp(&candidate.decoded.frame);
-        let latency = Some(candidate.latency);
-        let response_frame = retain_evidence(
-            &mut self.evidence_budget,
-            &candidate.decoded.frame,
-            DNS_EVIDENCE_DIAGNOSTICS,
-            self.request.limits.max_evidence_frames,
-            self.request.limits.max_evidence_bytes,
-            &mut self.summary.diagnostics,
-        )
-        .then(|| candidate.decoded.frame.clone());
-        let (status, response_code, reason, response) =
-            self.accept_classification(candidate.observation);
-        ClassifiedAttempt {
-            evidence: AttemptEvidence {
-                attempt: probe.attempt,
-                transport: Transport::Udp,
-                server_address: probe.server_address,
-                source_port: Some(probe.source_port),
-                status,
-                sent_at: Some(sent_at),
-                received_at: Some(received_at),
-                latency,
-                response: response_frame,
-                response_code,
-                reason,
-            },
-            response,
-        }
-    }
-
-    fn accept_classification(
-        &mut self,
-        classification: ResponseClassification,
-    ) -> (Outcome, Option<u16>, String, Option<ValidatedResponse>) {
-        match classification {
-            ResponseClassification::Response(response) => {
-                let truncated = response.metadata.truncated;
-                let response_code = Some(response.metadata.response_code);
-                let reason = if truncated {
-                    "validated DNS response set the truncation flag; partial records were not accepted"
-                        .to_owned()
-                } else {
-                    format!(
-                        "validated DNS response with code {}",
-                        response.response_code_name()
-                    )
-                };
-                let status = if truncated {
-                    Outcome::Truncated
-                } else {
-                    Outcome::Response
-                };
-                (status, response_code, reason, Some(response))
-            }
-            ResponseClassification::NetworkFailure { reason } => {
-                let status = Outcome::NetworkFailure;
-                (status, None, reason, None)
-            }
-            ResponseClassification::DecodeFailure { reason } => {
-                let status = Outcome::DecodeFailure;
-                (status, None, reason, None)
-            }
-            ResponseClassification::Unrelated { reason } => {
-                let status = Outcome::Unrelated;
-                (status, None, reason, None)
-            }
-        }
-    }
-
     fn execute_tcp_fallback(
         &mut self,
         probe: &Probe,
         attempt_deadline: &mut Deadline,
-    ) -> std::result::Result<ClassifiedAttempt, Error> {
+    ) -> Result<ClassifiedAttempt, Error> {
         self.summary.fallback_attempted = true;
         if !self.authorize_tcp_destination(probe, attempt_deadline)? {
             return Ok(tcp_timeout_evidence(
@@ -712,7 +564,7 @@ where
             endpoint: SocketAddr::new(probe.server_address, probe.server_port),
             query: probe.query.clone(),
             timeout: Duration::ZERO,
-            max_message_bytes: self.request.limits.max_message_bytes,
+            max_message_bytes: self.request.limits.message.max_message_bytes,
             permit: crate::evidence::ExecutionPermit::new(),
         };
         self.deadline.start_accounting(Duration::ZERO)?;
@@ -791,28 +643,41 @@ where
                 "DNS-over-TCP did not complete within the shared attempt deadline",
             ));
         }
-        match result {
-            Ok(execution) => self.classify_tcp_response(probe, timeout, execution.response),
-            Err(error) if error.is_timeout() => Ok(tcp_failure_evidence(
+        let error = match result {
+            Ok(execution) => {
+                return classify_tcp_response(
+                    probe,
+                    timeout,
+                    execution.response,
+                    self.request.limits.message,
+                );
+            }
+            Err(error) => error,
+        };
+        match error.category() {
+            TcpCategory::Timeout => Ok(tcp_failure_evidence(
                 probe,
                 Outcome::Timeout,
                 error.to_string(),
             )),
-            Err(error) if error.is_network() => Ok(tcp_failure_evidence(
+            TcpCategory::Network => Ok(tcp_failure_evidence(
                 probe,
                 Outcome::NetworkFailure,
                 error.to_string(),
             )),
-            Err(error) if error.is_framing() => Ok(tcp_failure_evidence(
+            TcpCategory::Framing => Ok(tcp_failure_evidence(
                 probe,
                 Outcome::DecodeFailure,
                 error.to_string(),
             )),
-            Err(source) if source.is_unsupported() => Err(Error::TcpExecution {
+            TcpCategory::Unsupported => Err(Error::TcpExecution {
                 attempt: probe.attempt,
-                source,
+                source: error,
             }),
-            Err(error) => Err(Error::InvalidEvidence {
+            // `Request` — and any class added later — fails closed here: a
+            // request this workflow built itself cannot be rejected by the
+            // executor, so it is never a retryable per-attempt outcome.
+            _ => Err(Error::InvalidEvidence {
                 attempt: probe.attempt,
                 message: format!("TCP executor rejected the validated local request: {error}"),
             }),
@@ -823,7 +688,7 @@ where
         &mut self,
         probe: &Probe,
         attempt_deadline: &Deadline,
-    ) -> std::result::Result<bool, Error> {
+    ) -> Result<bool, Error> {
         if attempt_deadline.check().is_err() {
             return Ok(false);
         }
@@ -852,73 +717,7 @@ where
         Ok(true)
     }
 
-    fn classify_tcp_response(
-        &self,
-        probe: &Probe,
-        timeout: Duration,
-        response: packetcraftr_netio::dns_tcp::Response,
-    ) -> std::result::Result<ClassifiedAttempt, Error> {
-        let expected_written = probe
-            .query
-            .len()
-            .checked_add(2)
-            .ok_or(Error::InvalidEvidence {
-                attempt: probe.attempt,
-                message: "TCP query length accounting overflowed".to_owned(),
-            })?;
-        if response.local_address.port() == 0
-            || response.peer_address != SocketAddr::new(probe.server_address, probe.server_port)
-            || response.bytes_written != expected_written
-            || response.bytes_read != response.frame.len()
-            || response.elapsed > timeout
-            || response.latency > response.elapsed
-        {
-            return Err(Error::InvalidEvidence {
-                attempt: probe.attempt,
-                message: "TCP executor returned inconsistent endpoint, byte, or deadline evidence"
-                    .to_owned(),
-            });
-        }
-        let (status, response_code, reason, validated) = match decode_tcp_frame(
-            &response.frame,
-            &probe.query_name,
-            probe.query_type,
-            probe.transaction_id,
-            self.request.limits,
-        ) {
-            Ok(validated) => (
-                Outcome::Response,
-                Some(validated.metadata.response_code),
-                format!(
-                    "validated DNS-over-TCP response with code {}",
-                    validated.response_code_name()
-                ),
-                Some(validated),
-            ),
-            Err(error) if error.is_unrelated() => {
-                (Outcome::Unrelated, None, error.to_string(), None)
-            }
-            Err(error) => (Outcome::DecodeFailure, None, error.to_string(), None),
-        };
-        Ok(ClassifiedAttempt {
-            evidence: AttemptEvidence {
-                attempt: probe.attempt,
-                transport: Transport::Tcp,
-                server_address: probe.server_address,
-                source_port: Some(response.local_address.port()),
-                status,
-                sent_at: Some(response.sent_at),
-                received_at: Some(response.received_at),
-                latency: Some(response.latency),
-                response: None,
-                response_code,
-                reason,
-            },
-            response: validated,
-        })
-    }
-
-    fn emit_attempt(&mut self, evidence: AttemptEvidence) -> std::result::Result<(), Error> {
+    fn emit_attempt(&mut self, evidence: AttemptEvidence) -> Result<(), Error> {
         self.publish(Event::Attempt {
             context: Arc::clone(&self.context),
             evidence,
@@ -930,7 +729,7 @@ where
         attempt: u32,
         transport: Transport,
         response: ValidatedResponse,
-    ) -> std::result::Result<(), Error> {
+    ) -> Result<(), Error> {
         let ValidatedResponse {
             metadata,
             answers,
@@ -971,7 +770,7 @@ where
         transport: Transport,
         section: Section,
         record: Record,
-    ) -> std::result::Result<(), Error> {
+    ) -> Result<(), Error> {
         self.publish(Event::Record {
             attempt,
             transport,
@@ -981,51 +780,42 @@ where
         })
     }
 
-    fn publish(&mut self, event: Event) -> std::result::Result<(), Error> {
+    fn publish(&mut self, event: Event) -> Result<(), Error> {
         (self.emit)(event, &self.deadline)?;
         self.deadline.check()?;
         Ok(())
     }
 
-    fn retain_undecoded(
-        &mut self,
-        attempt: u32,
-        frames: Vec<Frame>,
-    ) -> std::result::Result<(), Error> {
+    fn retain_undecoded(&mut self, attempt: u32, frames: Vec<Frame>) -> Result<(), Error> {
         let mut retention = UndecodedRetention::new(
-            &mut self.retained_undecoded,
+            &mut self.state.retained_undecoded,
             self.request.limits.max_undecoded,
-            &mut self.evidence_budget,
-            DNS_EVIDENCE_DIAGNOSTICS,
+            &mut self.state.evidence_budget,
+            EVIDENCE_DIAGNOSTICS,
             self.request.limits.max_evidence_frames,
             self.request.limits.max_evidence_bytes,
-            &mut self.summary.diagnostics,
+            &mut self.state.diagnostics,
         );
         retention.retain(
             frames,
-            |frame| {
-                Event::Undecoded(UndecodedEvidence {
-                    attempt,
-                    transport: Transport::Udp,
-                    frame,
-                })
-            },
+            |frame| Event::Undecoded(UndecodedEvidence { attempt, frame }),
             Event::Diagnostic,
             |event| (self.emit)(event, &self.deadline),
             || self.deadline.check().map_err(Into::into),
         )
     }
 
-    fn publish_diagnostics_since(&mut self, start: usize) -> std::result::Result<(), Error> {
-        let diagnostics = self
-            .summary
+    fn publish_new_diagnostics(&mut self) -> Result<(), Error> {
+        let Self {
+            state,
+            emit,
+            deadline,
+            ..
+        } = self;
+        state
             .diagnostics
-            .get(start..)
-            .unwrap_or_default()
-            .to_vec();
-        for diagnostic in diagnostics {
-            self.publish(Event::Diagnostic(diagnostic))?;
-        }
+            .publish_new(|diagnostic| emit(Event::Diagnostic(diagnostic), deadline))?;
+        self.deadline.check()?;
         Ok(())
     }
 }
@@ -1037,14 +827,19 @@ fn select_response<'a>(
     execution: &'a Execution,
     limits: Limits,
     timeout: Duration,
-) -> std::result::Result<Option<ResponseCandidate<'a, ResponseClassification>>, Error> {
+) -> Result<Option<ResponseCandidate<'a, ResponseClassification>>, Error> {
     let sent_packet = &execution.sent.built().packet;
     let mut best = None;
     for matched in &execution.responses {
         deadline.check()?;
         if response_within_deadline(matched.latency, timeout)
-            && let Some(classification) =
-                classify_response(registry, probe, sent_packet, &matched.response, limits)
+            && let Some(classification) = classify_response(
+                registry,
+                probe,
+                sent_packet,
+                &matched.response,
+                limits.message,
+            )
         {
             update_best_candidate(
                 &mut best,
@@ -1061,70 +856,6 @@ fn select_response<'a>(
         deadline.check()?;
     }
     Ok(best)
-}
-
-fn timeout_evidence(probe: &Probe, sent_at: SystemTime) -> AttemptEvidence {
-    AttemptEvidence {
-        attempt: probe.attempt,
-        transport: Transport::Udp,
-        server_address: probe.server_address,
-        source_port: Some(probe.source_port),
-        status: Outcome::Timeout,
-        sent_at: Some(sent_at),
-        received_at: None,
-        latency: None,
-        response: None,
-        response_code: None,
-        reason: "no checksum-valid, tuple-correlated DNS response before the deadline".to_owned(),
-    }
-}
-
-fn tcp_timeout_evidence(probe: &Probe, reason: &'static str) -> ClassifiedAttempt {
-    tcp_failure_evidence(probe, Outcome::Timeout, reason.to_owned())
-}
-
-fn tcp_failure_evidence(probe: &Probe, status: Outcome, reason: String) -> ClassifiedAttempt {
-    ClassifiedAttempt {
-        evidence: AttemptEvidence {
-            attempt: probe.attempt,
-            transport: Transport::Tcp,
-            server_address: probe.server_address,
-            source_port: None,
-            status,
-            sent_at: None,
-            received_at: None,
-            latency: None,
-            response: None,
-            response_code: None,
-            reason,
-        },
-        response: None,
-    }
-}
-
-pub(super) fn dns_source_port(base: u16, attempt: u32) -> u16 {
-    crate::probe::ephemeral_source_port(base, u64::from(attempt.saturating_sub(1)))
-}
-
-fn dns_rate_delay(rate: Option<u32>) -> std::result::Result<Duration, Error> {
-    crate::clock::rate_delay(1, rate).ok_or(Error::InvalidLimit {
-        field: "queries_per_second",
-        value: u64::from(rate.unwrap_or_default()),
-        reason: "rate-delay arithmetic overflowed".to_owned(),
-    })
-}
-
-fn update_dns_fallback(outcome: &mut Outcome, rank: &mut u8, candidate: Outcome) {
-    let candidate_rank = match candidate {
-        Outcome::NetworkFailure => 3,
-        Outcome::DecodeFailure => 2,
-        Outcome::Unrelated => 1,
-        Outcome::Timeout | Outcome::Response | Outcome::Truncated => 0,
-    };
-    if candidate_rank > *rank {
-        *outcome = candidate;
-        *rank = candidate_rank;
-    }
 }
 
 fn duration_error(actual: Duration, limit: Duration) -> Error {

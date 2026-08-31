@@ -20,7 +20,7 @@ pub struct Response {
 
 /// Aggregate result of `exchange`; diagnostics and statistics live in the envelope.
 #[derive(Clone, Debug, Serialize)]
-pub struct Result {
+pub struct Report {
     pub sent: Vec<Wire>,
     pub responses: Vec<Response>,
     pub unanswered: Vec<u64>,
@@ -28,11 +28,11 @@ pub struct Result {
     pub undecoded: Vec<Captured>,
 }
 
-impl Result {
+impl Report {
     pub fn try_from_exchange(
-        result: crate::exchange::Result,
-    ) -> std::result::Result<(Self, Vec<Diagnostic>, Stats), Error> {
-        let crate::exchange::Result {
+        result: crate::exchange::Report,
+    ) -> Result<(Self, Vec<Diagnostic>, Stats), Error> {
+        let crate::exchange::Report {
             sent,
             responses,
             unanswered,
@@ -52,11 +52,11 @@ impl Result {
         let response_outputs = responses
             .into_iter()
             .map(response_output)
-            .collect::<std::result::Result<Vec<_>, Error>>()?;
+            .collect::<Result<Vec<_>, Error>>()?;
         let unsolicited_outputs = unsolicited
             .into_iter()
             .map(Decoded::try_from_decoded)
-            .collect::<std::result::Result<Vec<_>, _>>()?;
+            .collect::<Result<Vec<_>, _>>()?;
         Ok((
             Self {
                 sent: sent_frames,
@@ -66,7 +66,7 @@ impl Result {
                 undecoded: undecoded
                     .into_iter()
                     .map(Captured::try_from_frame)
-                    .collect::<std::result::Result<Vec<_>, _>>()?,
+                    .collect::<Result<Vec<_>, _>>()?,
             },
             diagnostics,
             stats.into(),
@@ -105,7 +105,7 @@ pub enum Event {
 impl Event {
     pub fn try_from_exchange(
         event: crate::exchange::Event,
-    ) -> std::result::Result<(Self, Vec<Diagnostic>), Error> {
+    ) -> Result<(Self, Vec<Diagnostic>), Error> {
         let (event, diagnostics) = match event {
             crate::exchange::Event::Sent {
                 request_index: index,
@@ -181,7 +181,7 @@ fn sent_output(sent: std::sync::Arc<crate::SentPacket>) -> (Wire, Vec<Diagnostic
     )
 }
 
-fn response_output(response: crate::exchange::Response) -> std::result::Result<Response, Error> {
+fn response_output(response: crate::exchange::Response) -> Result<Response, Error> {
     Ok(Response {
         request_index: request_index(response.request_index),
         response: Decoded::try_from_decoded(response.response)?,

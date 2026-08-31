@@ -8,33 +8,27 @@ use std::net::IpAddr;
 
 use crate::Packet;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct MatchResult {
-    pub matched: bool,
+/// One matcher's positive attribution of a response to a request.
+///
+/// A match exists or it does not, so the absence of one is `None` rather than
+/// a value that carries a confidence. Where several matchers attribute the
+/// same response, the highest `confidence` wins.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Match {
     pub confidence: u8,
-    pub reason: Option<String>,
 }
 
-impl MatchResult {
-    pub fn no_match() -> Self {
-        Self {
-            matched: false,
-            confidence: 0,
-            reason: None,
-        }
-    }
-
-    pub fn matched(confidence: u8, reason: impl Into<String>) -> Self {
-        Self {
-            matched: true,
-            confidence,
-            reason: Some(reason.into()),
-        }
+impl Match {
+    #[must_use]
+    pub const fn new(confidence: u8) -> Self {
+        Self { confidence }
     }
 }
 
 pub trait ResponseMatcher: Send + Sync + fmt::Debug {
-    fn matches(&self, request: &Packet, response: &Packet) -> MatchResult;
+    /// Attributes `response` to `request`, or `None` when it does not belong
+    /// to it.
+    fn matches(&self, request: &Packet, response: &Packet) -> Option<Match>;
 
     /// Returns the network-layer source selected for a matched response when
     /// the matcher can identify one. The default preserves compatibility for

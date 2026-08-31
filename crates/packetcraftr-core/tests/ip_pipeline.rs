@@ -9,15 +9,15 @@ use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
 use packetcraftr_core::Packet;
-use packetcraftr_core::analysis::expert::{StreamRef, StreamTransport};
-use packetcraftr_core::analysis::follow::{Collector as FollowCollector, Selector};
+use packetcraftr_core::analysis::follow::Collector as FollowCollector;
 use packetcraftr_core::analysis::pcap::{Reader, Writer};
 use packetcraftr_core::analysis::reassembly::ip::{
-    Family, IncompleteReason, OverlapPolicy, ResourceError,
+    Family, IncompleteDatagram, IncompleteReason, OverlapPolicy, ResourceError,
 };
 use packetcraftr_core::analysis::{
     IpDatagramOutcome, IpEvent, IpEventRecord, Limits, Options, run_with_ip_events,
 };
+use packetcraftr_core::analysis::{StreamRef, StreamTransport};
 use packetcraftr_core::build::{Builder, Context as BuildContext, Options as BuildOptions};
 use packetcraftr_core::error::Classified;
 use packetcraftr_core::field::WireValue;
@@ -40,9 +40,7 @@ const CLIENT: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 1);
 const SERVER: Ipv4Addr = Ipv4Addr::new(198, 51, 100, 2);
 
 fn registry() -> Arc<packetcraftr_core::registry::Registry> {
-    Arc::new(
-        packetcraftr_core::protocol::builtin::registry().expect("built-in protocols must register"),
-    )
+    packetcraftr_core::protocol::builtin::registry()
 }
 
 fn build(registry: &Arc<packetcraftr_core::registry::Registry>, packet: Packet) -> Bytes {
@@ -1149,7 +1147,7 @@ fn assert_derived_udp(link_type: LinkType, family: Family, frames: &[Frame]) {
     let mut capture = reader(link_type, frames);
     let mut events = Vec::new();
     let mut observed = Vec::new();
-    let mut follow = FollowCollector::new(Selector {
+    let mut follow = FollowCollector::new(StreamRef {
         transport: StreamTransport::Udp,
         index: 0,
     });
@@ -1295,8 +1293,7 @@ fn expert_reports_replayed_ah_diagnostic_once_on_completing_fragment() {
             Ok(())
         })
         .expect("AH diagnostics analyze");
-    let (trailing, expert_summary) =
-        expert.finish(&summary.trailing_tcp_events, summary.frames_read);
+    let (trailing, expert_summary) = expert.finish(&summary);
     findings.extend(trailing);
     let ah_findings = findings
         .iter()
@@ -1392,13 +1389,13 @@ fn eof_incomplete_event_is_capture_global_even_when_filter_matches_no_frame() {
         events.as_slice(),
         [IpEventRecord {
             number: 1,
-            event: IpEvent::Outcome(IpDatagramOutcome::Incomplete {
+            event: IpEvent::Outcome(IpDatagramOutcome::Incomplete(IncompleteDatagram {
                 reason: IncompleteReason::EndOfCapture,
                 fragment_count: 1,
                 unique_bytes: 16,
                 known_final_length: None,
                 ..
-            })
+            }))
         }]
     ));
 }
@@ -1526,10 +1523,10 @@ fn eof_events_and_outcomes_share_the_configured_retention_cap() {
     assert_eq!(events.len(), 1);
     assert!(matches!(
         &events[0].event,
-        IpEvent::Outcome(IpDatagramOutcome::Incomplete {
+        IpEvent::Outcome(IpDatagramOutcome::Incomplete(IncompleteDatagram {
             reason: IncompleteReason::EndOfCapture,
             ..
-        })
+        }))
     ));
 }
 
@@ -1580,7 +1577,7 @@ fn derived_inner_fragments_reenter_reassembly_and_dispatch_udp() {
     let mut capture = reader(LinkType::IPV4, &frames);
     let mut events = Vec::new();
     let mut observed = Vec::new();
-    let mut follow = FollowCollector::new(Selector {
+    let mut follow = FollowCollector::new(StreamRef {
         transport: StreamTransport::Udp,
         index: 0,
     });
@@ -1707,7 +1704,7 @@ fn fragmented_udp_inside_udp_defers_the_same_kind_carrier_stream() {
     let registry = registry();
     let frames = vxlan_inner_udp_fragment_frames(&registry);
     let mut capture = reader(LinkType::IPV4, &frames);
-    let mut follow = FollowCollector::new(Selector {
+    let mut follow = FollowCollector::new(StreamRef {
         transport: StreamTransport::Udp,
         index: 0,
     });
@@ -1742,7 +1739,7 @@ fn fragmented_ipv6_extension_udp_defers_the_same_kind_carrier_stream() {
     let registry = registry();
     let frames = vxlan_inner_ipv6_extension_udp_fragment_frames(&registry);
     let mut capture = reader(LinkType::IPV4, &frames);
-    let mut follow = FollowCollector::new(Selector {
+    let mut follow = FollowCollector::new(StreamRef {
         transport: StreamTransport::Udp,
         index: 0,
     });
@@ -1919,10 +1916,10 @@ fn idle_expiry_is_delivered_before_a_failing_fragment_push() {
         events.as_slice(),
         [IpEventRecord {
             number: 2,
-            event: IpEvent::Outcome(IpDatagramOutcome::Incomplete {
+            event: IpEvent::Outcome(IpDatagramOutcome::Incomplete(IncompleteDatagram {
                 reason: IncompleteReason::IdleExpired,
                 ..
-            })
+            }))
         }]
     ));
 }
@@ -2065,7 +2062,7 @@ fn fragmented_tcp_completion_feeds_tcp_follow_and_expert() {
     )
     .expect("combined physical and derived TCP filter compiles");
     let mut capture = reader(LinkType::IPV4, &frames);
-    let mut follow = FollowCollector::new(Selector {
+    let mut follow = FollowCollector::new(StreamRef {
         transport: StreamTransport::Tcp,
         index: 0,
     });
@@ -2087,8 +2084,8 @@ fn fragmented_tcp_completion_feeds_tcp_follow_and_expert() {
         },
     )
     .expect("fragmented TCP analysis succeeds");
-    let follow_summary = follow.finish(&summary.trailing_tcp_events);
-    let (trailing_findings, _) = expert.finish(&summary.trailing_tcp_events, summary.frames_read);
+    let follow_summary = follow.finish(&summary);
+    let (trailing_findings, _) = expert.finish(&summary);
     findings.extend(trailing_findings);
 
     assert_eq!(summary.frames_read, 2);
@@ -2160,7 +2157,7 @@ fn fragmented_tcp_segments_assemble_a_tls_session() {
         },
     )
     .expect("fragmented TLS capture analyzes");
-    let (trailing, _) = collector.finish(&summary.trailing_tcp_events);
+    let (trailing, _) = collector.finish(&summary);
     sessions.extend(trailing);
 
     assert_eq!(summary.ip_reassembly.counters.ipv4.completed_datagrams, 2);

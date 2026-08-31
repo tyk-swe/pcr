@@ -3,17 +3,24 @@
 
 //! Owned live-capture sessions and bounded queue configuration.
 
+use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use super::Error;
 use super::interface::Id as InterfaceId;
-use packetcraftr_core::frame::{DEFAULT_SIZE_LIMIT, Frame as CaptureFrame, LinkType};
+use packetcraftr_core::frame::{Frame as CaptureFrame, LinkType};
 
-/// Aggregate backend capture-queue capacity used by default.
-pub const DEFAULT_CAPTURE_QUEUE_FRAMES: usize = 4_096;
-/// Aggregate backend capture-queue byte capacity used by default.
-pub const DEFAULT_CAPTURE_QUEUE_BYTES: usize = 256 * 1024 * 1024;
+/// Aggregate backend capture-queue frame ceiling; also the value
+/// [`Limits::default`] uses.
+pub const MAX_CAPTURE_QUEUE_FRAMES: usize = 4_096;
+/// Aggregate backend capture-queue byte ceiling; also the value
+/// [`Limits::default`] uses.
+pub const MAX_CAPTURE_QUEUE_BYTES: usize = 256 * 1024 * 1024;
+/// Largest per-frame snapshot a capture session will retain (16 MiB), matching
+/// the default captured-frame size limit in `packetcraftr-core`; also the value
+/// [`Limits::default`] uses.
+pub const MAX_SNAP_LENGTH: usize = 16 * 1024 * 1024;
 
 /// Maximum blocking wait accepted by an owned capture session.
 pub const MAX_TIMEOUT: Duration = Duration::from_secs(60 * 60);
@@ -46,7 +53,7 @@ impl Statistics {
     }
 
     /// Validates required frame/byte counter relationships.
-    pub fn validate(self) -> Result<Self, Error> {
+    pub fn validate(&self) -> Result<(), Error> {
         if self.dropped_frames == 0 && self.dropped_bytes != 0 {
             return Err(Error::InvalidCaptureStatistics {
                 message: "dropped bytes were reported without a dropped frame".to_owned(),
@@ -57,42 +64,53 @@ impl Statistics {
                 message: "receiver-dropped frames exceed total dropped frames".to_owned(),
             });
         }
-        Ok(self)
+        Ok(())
     }
 
-    /// Returns whether the backend reported any drop or queue overflow.
-    pub fn has_loss(self) -> bool {
-        self.dropped_frames != 0
-            || self.dropped_bytes != 0
-            || self.overflow_events != 0
-            || self.receiver_dropped_frames != 0
-    }
-
-    /// Returns a typed loss error, or `None` for complete evidence.
+    /// Returns the typed loss error these counters describe, or `None` when the
+    /// backend reported no drop and no queue overflow. This is the single
+    /// answer to "is the evidence complete"; there is no separate predicate.
     pub fn evidence_loss_error(self) -> Option<Error> {
-        if !self.has_loss() {
-            None
-        } else if self.overflow_events != 0 {
+        if self.overflow_events != 0 {
             Some(Error::CaptureQueueOverflow {
                 dropped_frames: self.dropped_frames,
                 dropped_bytes: self.dropped_bytes,
                 overflow_events: self.overflow_events,
             })
-        } else {
+        } else if self.dropped_frames != 0
+            || self.dropped_bytes != 0
+            || self.receiver_dropped_frames != 0
+        {
             Some(Error::CaptureEvidenceLoss {
                 dropped_frames: self.dropped_frames,
                 dropped_bytes: self.dropped_bytes,
                 receiver_dropped_frames: self.receiver_dropped_frames,
             })
+        } else {
+            None
         }
     }
 }
 
+/// One owned live-capture session.
+///
+/// The lifecycle is fixed: a [`Provider`] returns an armed session,
+/// [`Session::wait_ready`] is the barrier that must pass before any exchange
+/// frame is transmitted, [`Session::next_captured_frame`] then delivers records
+/// until the caller stops, and [`Session::shutdown`] joins the backend exactly
+/// once. [`Session::statistics`] is only final after a successful shutdown.
 pub trait Session: Send {
     /// Returns the backend-confirmed properties fixed when the session was activated.
     fn metadata(&self) -> &Metadata;
     /// Readiness is an explicit barrier. No exchange frame may be sent first.
     fn wait_ready(&mut self, timeout: Duration) -> Result<(), Error>;
+    /// Waits up to `timeout` for the next record.
+    ///
+    /// `Ok(None)` means only "no record within this wait": the queue was empty,
+    /// the timeout expired, or the backend stopped delivering. It is never
+    /// evidence that nothing was captured, and it never ends the session — only
+    /// [`Session::shutdown`] does. Loss is reported through
+    /// [`Session::statistics`], not here.
     fn next_captured_frame(&mut self, timeout: Duration) -> Result<Option<Captured>, Error>;
     /// Stops and joins capture; errors leave cleanup unconfirmed.
     fn shutdown(&mut self) -> Result<(), Error>;
@@ -198,6 +216,26 @@ pub enum OverflowPolicy {
     DropOldest,
 }
 
+impl OverflowPolicy {
+    /// The one spelling this policy is named by, in help text, in the
+    /// `--overflow-policy` values a caller passes, and in the diagnostics that
+    /// report which policy was in force.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Fail => "fail",
+            Self::DropNewest => "drop-newest",
+            Self::DropOldest => "drop-oldest",
+        }
+    }
+}
+
+impl fmt::Display for OverflowPolicy {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
     pub max_frames: usize,
@@ -209,9 +247,9 @@ pub struct Limits {
 impl Default for Limits {
     fn default() -> Self {
         Self {
-            max_frames: DEFAULT_CAPTURE_QUEUE_FRAMES,
-            max_bytes: DEFAULT_CAPTURE_QUEUE_BYTES,
-            snap_length: DEFAULT_SIZE_LIMIT,
+            max_frames: MAX_CAPTURE_QUEUE_FRAMES,
+            max_bytes: MAX_CAPTURE_QUEUE_BYTES,
+            snap_length: MAX_SNAP_LENGTH,
             overflow_policy: OverflowPolicy::Fail,
         }
     }
@@ -219,7 +257,7 @@ impl Default for Limits {
 
 impl Limits {
     /// Validates bounded nonzero limits and byte/snap consistency before capture.
-    pub fn validate(self) -> Result<Self, Error> {
+    pub fn validate(&self) -> Result<(), Error> {
         for (field, value) in [
             ("max_frames", self.max_frames),
             ("max_bytes", self.max_bytes),
@@ -234,9 +272,9 @@ impl Limits {
             }
         }
         for (field, value, maximum) in [
-            ("max_frames", self.max_frames, DEFAULT_CAPTURE_QUEUE_FRAMES),
-            ("max_bytes", self.max_bytes, DEFAULT_CAPTURE_QUEUE_BYTES),
-            ("snap_length", self.snap_length, DEFAULT_SIZE_LIMIT),
+            ("max_frames", self.max_frames, MAX_CAPTURE_QUEUE_FRAMES),
+            ("max_bytes", self.max_bytes, MAX_CAPTURE_QUEUE_BYTES),
+            ("snap_length", self.snap_length, MAX_SNAP_LENGTH),
         ] {
             if value > maximum {
                 return Err(Error::InvalidCaptureQueueLimit {
@@ -253,7 +291,7 @@ impl Limits {
                 reason: "cannot exceed max_bytes",
             });
         }
-        Ok(self)
+        Ok(())
     }
 }
 
@@ -276,5 +314,22 @@ impl Provider for SystemProvider {
 
     fn arm_capture(&self, request: &Request) -> Result<Self::Capture, Error> {
         super::platform::system_capture(request)
+    }
+}
+
+/// Composes an independently owned sender and capture provider for a
+/// capture-before-send exchange. The convention is sender first, capture
+/// second: `(sender, capture)` also implements [`transmit::Sender`].
+///
+/// [`transmit::Sender`]: crate::transmit::Sender
+impl<S, C> Provider for (S, C)
+where
+    S: Send + Sync,
+    C: Provider,
+{
+    type Capture = C::Capture;
+
+    fn arm_capture(&self, request: &Request) -> Result<Self::Capture, Error> {
+        self.1.arm_capture(request)
     }
 }

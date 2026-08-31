@@ -5,6 +5,7 @@
 #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 use std::convert::Infallible;
+use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
 use std::sync::Arc;
@@ -15,6 +16,7 @@ use packetcraftr::{
     target::{Error as TargetError, Family, Hostname, Resolver, Target},
 };
 use packetcraftr_core::error::{Classified, Kind};
+use packetcraftr_netio as net;
 use packetcraftr_netio::{
     Error as LiveIoError,
     capture::Statistics,
@@ -206,16 +208,29 @@ fn policy_validates_address_and_operation_bounds() {
             ..defaults.clone()
         }
         .validate(),
-        Err(TargetError::InvalidAddressLimit { value: 0, .. })
+        Err(policy::Error::InvalidAddressLimit { value: 0, .. })
     ));
+    let over_limit = policy::Policy {
+        max_resolved_addresses: policy::MAX_RESOLVED_ADDRESSES + 1,
+        ..defaults.clone()
+    }
+    .validate()
+    .expect_err("an out-of-range resolved-address bound is rejected");
     assert!(matches!(
-        policy::Policy {
-            max_resolved_addresses: policy::MAX_RESOLVED_ADDRESSES + 1,
-            ..defaults.clone()
-        }
-        .validate(),
-        Err(TargetError::InvalidAddressLimit { .. })
+        over_limit,
+        policy::Error::InvalidAddressLimit { .. }
     ));
+    // The published CLI contract for this refusal does not move with its home.
+    assert_eq!(over_limit.classification().code, "cli.live_target");
+    assert_eq!(over_limit.classification().kind, Kind::Cli);
+    assert_eq!(
+        over_limit.to_string(),
+        format!(
+            "resolved-address limit {} is invalid; expected 1..={}",
+            policy::MAX_RESOLVED_ADDRESSES + 1,
+            policy::MAX_RESOLVED_ADDRESSES
+        )
+    );
 
     defaults
         .authorize_operation(
@@ -275,10 +290,14 @@ fn resolution_rejects_empty_and_over_limit_results() {
 #[test]
 fn exchange_options_validate_all_aggregate_bounds() {
     let defaults = exchange::Options::default();
-    let limits = defaults.validate().expect("default exchange options");
-    assert_eq!(limits.max_frames, defaults.max_capture_queue_frames);
-    assert_eq!(limits.max_bytes, defaults.max_captured_bytes);
-    assert_eq!(limits.snap_length, defaults.decode.max_packet_size);
+    defaults.validate().expect("default exchange options");
+    // The single capture field is exactly what arms the provider, so the
+    // aggregate ceilings and the snapshot length cannot drift from each other.
+    assert_eq!(defaults.capture, net::capture::Limits::default());
+    defaults
+        .capture
+        .validate()
+        .expect("default exchange options imply valid capture limits");
 
     let invalid = [
         exchange::Options {
@@ -290,21 +309,27 @@ fn exchange_options_validate_all_aggregate_bounds() {
             ..defaults.clone()
         },
         exchange::Options {
-            max_responses: defaults.max_capture_queue_frames + 1,
+            max_responses: defaults.capture.max_frames + 1,
             ..defaults.clone()
         },
         exchange::Options {
-            max_unmatched_frames: defaults.max_capture_queue_frames + 1,
+            max_unmatched_frames: defaults.capture.max_frames + 1,
             ..defaults.clone()
         },
         exchange::Options {
-            max_capture_queue_frames: 0,
+            capture: net::capture::Limits {
+                max_frames: 0,
+                ..defaults.capture
+            },
             max_responses: 0,
             max_unmatched_frames: 0,
             ..defaults.clone()
         },
         exchange::Options {
-            max_captured_bytes: 1,
+            capture: net::capture::Limits {
+                max_bytes: 1,
+                ..defaults.capture
+            },
             ..defaults
         },
     ];
@@ -402,7 +427,7 @@ fn public_errors_retain_stable_policy_and_target_classification() {
         (
             Box::new(TargetError::Resolver {
                 hostname: "example.test".to_owned(),
-                message: "fixture".to_owned(),
+                source: Box::new(io::Error::other("fixture")),
             }),
             "io.hostname_resolution",
             Kind::Io,
@@ -416,10 +441,47 @@ fn public_errors_retain_stable_policy_and_target_classification() {
     }
 }
 
+/// A workflow failure publishes the causes of whatever it wraps, so a chain
+/// that starts in another crate still reaches the render boundary intact: a
+/// transparent variant delegates to the error it restates, and a variant with
+/// a retained source walks it.
+#[test]
+fn workflow_failures_publish_the_causes_of_the_error_they_carry() {
+    let udp = packetcraftr::core::layer::Id::from("udp");
+    let codec = packetcraftr::core::build::Error::Codec {
+        index: 1,
+        protocol: udp.clone(),
+        source: packetcraftr::core::codec::Error::Invalid {
+            protocol: udp,
+            message: "port 53 is reserved".to_owned(),
+        },
+    };
+    let build_causes = codec.causes();
+    assert_eq!(build_causes, ["invalid udp layer: port 53 is reserved"]);
+
+    let workflow = packetcraftr::Error::Build(codec);
+    assert_eq!(workflow.causes(), build_causes);
+
+    // A hostname lookup keeps the system refusal instead of pasting it into
+    // the message, so the message and the cause each say it once.
+    let resolver = TargetError::Resolver {
+        hostname: "example.test".to_owned(),
+        source: Box::new(io::Error::other("name or service not known")),
+    };
+    assert_eq!(
+        resolver.to_string(),
+        "hostname resolution for example.test failed"
+    );
+    assert_eq!(resolver.causes(), ["name or service not known"]);
+    assert_eq!(
+        packetcraftr::Error::Target(resolver).causes(),
+        ["name or service not known"]
+    );
+}
+
 #[test]
 fn client_exposes_the_exact_registry_arc() {
-    let registry =
-        Arc::new(packetcraftr_core::protocol::builtin::registry().expect("built-in registry"));
+    let registry = packetcraftr_core::protocol::builtin::registry();
     let client = Client::new(
         Arc::clone(&registry),
         NoRoutes,

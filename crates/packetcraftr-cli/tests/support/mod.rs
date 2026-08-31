@@ -73,7 +73,7 @@ pub(crate) fn stream(
 ) -> (output::envelope::StreamEncoder, SharedBuffer) {
     let buffer = SharedBuffer::default();
     (
-        output::envelope::StreamEncoder::new(Some(command), buffer.clone()),
+        output::envelope::StreamEncoder::new(command, buffer.clone()),
         buffer,
     )
 }

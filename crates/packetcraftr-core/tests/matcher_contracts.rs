@@ -64,7 +64,7 @@ impl ProbeTransport {
 }
 
 fn registry() -> Arc<packetcraftr_core::registry::Registry> {
-    Arc::new(builtin::registry().expect("built-in protocols must register"))
+    builtin::registry()
 }
 
 fn ipv4_envelope(source: Ipv4Addr, destination: Ipv4Addr) -> Packet {
@@ -197,15 +197,16 @@ fn reverse_udp_and_echo_matchers_require_reversed_identity() {
     });
     response.push(Raw::new(vec![2]));
 
-    let matched = udp_matcher.matches(&request, &response);
-    assert!(matched.matched);
+    let matched = udp_matcher
+        .matches(&request, &response)
+        .expect("reverse UDP tuples attribute the response");
     assert_eq!(matched.confidence, 100);
     assert_eq!(
         udp_matcher.responder(&request, &response),
         Some(IpAddr::V4(IPV4_SERVER))
     );
     response.get_mut::<Udp>().expect("UDP").destination_port += 1;
-    assert!(!udp_matcher.matches(&request, &response).matched);
+    assert!(udp_matcher.matches(&request, &response).is_none());
 
     let echo_matcher = registry.matcher("icmpv4").expect("ICMPv4 matcher");
     let echo_body = Bytes::from_static(&[0x12, 0x34, 0, 1, 9]);
@@ -220,9 +221,17 @@ fn reverse_udp_and_echo_matchers_require_reversed_identity() {
         body: Bytes::from_static(&[0x12, 0x34, 0, 1, 7]),
         ..Icmpv4::default()
     });
-    assert!(echo_matcher.matches(&echo_request, &echo_response).matched);
+    assert!(
+        echo_matcher
+            .matches(&echo_request, &echo_response)
+            .is_some()
+    );
     echo_response.get_mut::<Icmpv4>().expect("ICMP").code = 1;
-    assert!(!echo_matcher.matches(&echo_request, &echo_response).matched);
+    assert!(
+        echo_matcher
+            .matches(&echo_request, &echo_response)
+            .is_none()
+    );
 }
 
 #[test]
@@ -258,8 +267,8 @@ fn quoted_icmp_errors_classify_every_transport_in_both_address_families() {
             let matched = registry
                 .matcher(protocol)
                 .expect("transport matcher")
-                .matches(&request.packet, &response);
-            assert!(matched.matched, "{network:?} {transport:?}");
+                .matches(&request.packet, &response)
+                .unwrap_or_else(|| panic!("{network:?} {transport:?} must correlate"));
             assert_eq!(matched.confidence, 150, "{network:?} {transport:?}");
         }
     }
@@ -394,8 +403,9 @@ fn sctp_init_ack_requires_reversed_ports_and_the_initiate_tag() {
 
     let registry = registry();
     let matcher = registry.matcher("sctp").expect("SCTP matcher");
-    let matched = matcher.matches(&request, &response);
-    assert!(matched.matched);
+    let matched = matcher
+        .matches(&request, &response)
+        .expect("reverse SCTP tuples attribute the response");
     assert_eq!(matched.confidence, 200);
     assert_eq!(
         matcher.responder(&request, &response),
@@ -403,8 +413,8 @@ fn sctp_init_ack_requires_reversed_ports_and_the_initiate_tag() {
     );
 
     response.get_mut::<Sctp>().expect("SCTP").verification_tag += 1;
-    assert!(!matcher.matches(&request, &response).matched);
+    assert!(matcher.matches(&request, &response).is_none());
     response.get_mut::<Sctp>().expect("SCTP").verification_tag = INITIATE_TAG;
     response.get_mut::<Raw>().expect("INIT ACK").bytes = init_chunk(1, 0xa0b0_c0d0);
-    assert!(!matcher.matches(&request, &response).matched);
+    assert!(matcher.matches(&request, &response).is_none());
 }

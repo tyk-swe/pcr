@@ -22,22 +22,24 @@ pub fn validate_segment_route(
     flags: u8,
 ) -> Result<SegmentRoute, Error> {
     if segments.is_empty() || segments.len() > 127 {
-        return Err(Error::new("SRH requires 1..=127 IPv6 segments"));
+        return Err(Error::SegmentCount);
     }
     let expected_last = u8::try_from(segments.len().saturating_sub(1))
-        .map_err(|_| Error::new("SRH segment count cannot be represented"))?;
+        .map_err(|_| Error::SegmentCountUnrepresentable)?;
     if last_entry != expected_last {
-        return Err(Error::new(format!(
-            "SRH last_entry {last_entry} does not match segment-list index {expected_last}"
-        )));
+        return Err(Error::SegmentLastEntry {
+            last_entry,
+            expected: expected_last,
+        });
     }
     if segments_left > last_entry {
-        return Err(Error::new(format!(
-            "SRH segments_left {segments_left} exceeds last_entry {last_entry}"
-        )));
+        return Err(Error::SegmentsLeft {
+            segments_left,
+            last_entry,
+        });
     }
     if flags != 0 {
-        return Err(Error::new("unsupported SRH flags are non-zero"));
+        return Err(Error::SegmentFlags);
     }
     let active_index = usize::from(last_entry.saturating_sub(segments_left));
     #[expect(
@@ -46,9 +48,10 @@ pub fn validate_segment_route(
     )]
     let active_destination = segments[active_index];
     if !header_destination.is_unspecified() && header_destination != active_destination {
-        return Err(Error::new(format!(
-            "IPv6 header destination {header_destination} does not match active SRH segment {active_destination}"
-        )));
+        return Err(Error::SegmentDestinationMismatch {
+            header: header_destination,
+            active: active_destination,
+        });
     }
     let final_destination = *segments
         .last()

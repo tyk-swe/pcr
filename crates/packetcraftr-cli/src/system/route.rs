@@ -5,12 +5,14 @@ use std::net::IpAddr;
 
 use packetcraftr::{core, core::Packet, netio as net};
 
-use super::super::command_options::RouteArgs;
-use super::super::errors::CliError;
-use super::super::input::read_recipe;
 use super::interface;
+use crate::command_options::RouteArgs;
+use crate::errors::CliError;
+use crate::input::read_recipe;
 
-pub(crate) struct Prepared {
+/// One packet with the destination, route options, and policy the CLI
+/// resolved for it, ready for a live send, exchange, or plan.
+pub(crate) struct RoutedPacket {
     pub(crate) packet: Packet,
     pub(crate) destination: Option<IpAddr>,
     pub(crate) options: net::route::Options,
@@ -21,7 +23,7 @@ pub(crate) fn prepare_route(
     arguments: RouteArgs,
     policy: packetcraftr::policy::Policy,
     registry: &core::registry::Registry,
-) -> Result<Prepared, CliError> {
+) -> Result<RoutedPacket, CliError> {
     let RouteArgs {
         recipe,
         destination,
@@ -37,7 +39,7 @@ pub(crate) fn prepare_route(
     let interface = interface::InterfaceSelector::parse_optional(route.interface.as_deref())?
         .map(|selector| interface::resolve(selector, &net::interface::SystemProvider))
         .transpose()?;
-    Ok(Prepared {
+    Ok(RoutedPacket {
         packet,
         destination,
         options: net::route::Options {

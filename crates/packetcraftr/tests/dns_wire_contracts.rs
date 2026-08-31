@@ -7,7 +7,9 @@
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 use bytes::Bytes;
-use packetcraftr::dns::{self, Limits, Name, QueryType, Record, RecordValue, Section, WireError};
+use packetcraftr::dns::{
+    self, MessageLimits as Limits, Name, QueryType, Record, RecordValue, Section, WireError,
+};
 
 const ID: u16 = 0x4a5b;
 const RESPONSE: u16 = 0x8000;

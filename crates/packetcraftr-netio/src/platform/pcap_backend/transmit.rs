@@ -3,7 +3,7 @@
 
 //! libpcap Layer 2 frame transmission.
 
-#![allow(unsafe_code)]
+use std::sync::Arc;
 
 use pcap::{Capture, Error as PcapError};
 
@@ -11,12 +11,13 @@ use super::capture::map_open_error;
 use crate::{
     Error,
     interface::Id as InterfaceId,
+    platform::live_capture::is_permission_denied,
     transmit::{self, Layer2Frame, Submission},
 };
 
 const READ_TIMEOUT_MILLIS: i32 = 50;
 
-pub(crate) fn send_layer2(frame: Layer2Frame<'_>) -> Result<transmit::Report, Error> {
+pub(in crate::platform) fn send_layer2(frame: Layer2Frame<'_>) -> Result<transmit::Report, Error> {
     let interface = &frame.route().plan.decision.interface;
     i32::try_from(frame.bytes().len()).map_err(|_| Error::InvalidTransmissionFrame {
         message: format!(
@@ -38,21 +39,20 @@ pub(crate) fn send_layer2(frame: Layer2Frame<'_>) -> Result<transmit::Report, Er
     Ok(submission.complete(frame.bytes().len(), frame.bytes().clone()))
 }
 
-pub(super) fn map_send_error(interface: &InterfaceId, error: PcapError) -> Error {
+fn map_send_error(interface: &InterfaceId, error: PcapError) -> Error {
     let message = error.to_string();
-    let lower = message.to_ascii_lowercase();
-    if lower.contains("permission denied")
-        || lower.contains("operation not permitted")
-        || lower.contains("access is denied")
-    {
+    let source: Option<crate::SystemFault> = Some(Arc::new(error));
+    if is_permission_denied(&message) {
         return Error::Privilege {
             message: format!(
-                "cannot inject on {} through libpcap: {message}; grant link-layer injection privileges",
+                "cannot inject on {} through libpcap; grant link-layer injection privileges",
                 interface.name
             ),
+            source,
         };
     }
     Error::Send {
-        message: format!("libpcap injection on {} failed: {message}", interface.name),
+        message: format!("libpcap injection on {} failed", interface.name),
+        source,
     }
 }

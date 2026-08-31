@@ -3,17 +3,14 @@
 
 use thiserror::Error;
 
-use super::super::layer::FieldError;
-
+/// Why a structural [`crate::Packet`] operation was refused.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum Error {
+pub enum PacketError {
     #[error("layer index {index} is outside packet length {len}")]
     IndexOutOfBounds { index: usize, len: usize },
     #[error(
         "cannot remove layer {index}: padding coverage ends at that layer and no successor can preserve the boundary"
     )]
     PaddingBoundaryRemoval { index: usize },
-    #[error(transparent)]
-    Field(#[from] FieldError),
 }

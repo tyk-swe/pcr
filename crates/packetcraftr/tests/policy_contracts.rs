@@ -12,7 +12,10 @@ use std::sync::{
 };
 
 use packetcraftr::{
-    Client, policy,
+    Client,
+    authorization::Authorizer,
+    core::error::Classified,
+    policy,
     target::{Hostname, Resolver, Target},
 };
 use packetcraftr_core::{
@@ -134,9 +137,7 @@ fn denied_resolved_address_never_reaches_route_neighbor_or_transmit_providers() 
         ..policy::Policy::default()
     };
     let client = Client::new(
-        Arc::new(
-            packetcraftr_core::protocol::builtin::registry().expect("built-ins must register"),
-        ),
+        packetcraftr_core::protocol::builtin::registry(),
         CountingRoutes {
             calls: Arc::clone(&route_calls),
         },
@@ -205,9 +206,7 @@ fn source_client(
     allow_source_spoofing: bool,
 ) -> Client<FixedRoutes, NeverNeighbors, NeverTransmit> {
     Client::new(
-        Arc::new(
-            packetcraftr_core::protocol::builtin::registry().expect("built-ins must register"),
-        ),
+        packetcraftr_core::protocol::builtin::registry(),
         FixedRoutes,
         NeverNeighbors,
         NeverTransmit,
@@ -311,5 +310,49 @@ fn raw_layer3_wire_source_requires_the_spoofing_opt_in() {
     assert_eq!(
         packetcraftr_core::error::Classified::classification(&error).code,
         "policy.source_ownership"
+    );
+}
+
+/// The workflow seam validated the policy before every operation; the client's
+/// own seam did not, so an unusable resolved-address bound was accepted by
+/// `send` and `exchange` and refused by scan, DNS, traceroute, and fuzz. Both
+/// front doors now refuse it with the same classification.
+#[test]
+fn both_authorization_seams_refuse_a_malformed_policy_identically() {
+    let malformed = policy::Policy {
+        max_resolved_addresses: 0,
+        ..policy::Policy::default()
+    };
+    let workflow_denial = packetcraftr::authorization::PolicyAuthorizer::for_packets(&malformed)
+        .authorize_operation(packetcraftr::authorization::Operation::Budgeted(
+            packetcraftr::authorization::WireBudget::new(1, 1),
+        ))
+        .expect_err("the workflow seam rejects a malformed policy");
+
+    let client = Client::new(
+        packetcraftr_core::protocol::builtin::registry(),
+        FixedRoutes,
+        NeverNeighbors,
+        NeverTransmit,
+        malformed,
+    );
+    let client_denial = client
+        .send(
+            sourced_packet(None, SELECTED_SOURCE),
+            packetcraftr::send::Options {
+                destination: Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))),
+                ..packetcraftr::send::Options::default()
+            },
+        )
+        .expect_err("the client seam rejects the same malformed policy");
+
+    assert_eq!(
+        packetcraftr_core::error::Classified::classification(&client_denial).code,
+        workflow_denial.classification().code
+    );
+    assert_eq!(client_denial.to_string(), workflow_denial.to_string());
+    assert_eq!(
+        packetcraftr_core::error::Classified::classification(&client_denial).code,
+        "cli.live_target"
     );
 }

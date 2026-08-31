@@ -5,7 +5,6 @@
 #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 use std::io::Cursor;
-use std::sync::Arc;
 use std::time::SystemTime;
 
 use packetcraftr_core::analysis::pcap::{
@@ -416,21 +415,27 @@ fn statistics_reject_simple_packet_time_absence_explicitly() {
     input.extend_from_slice(&idb(Endianness::Little));
     input.extend_from_slice(&simple_packet(Endianness::Little));
     let mut reader = Reader::new(Cursor::new(input)).expect("pcapng opens");
-    let registry = Arc::new(builtin::registry().expect("built-in registry initializes"));
+    let registry = builtin::registry();
     let mut collector =
         Collector::new(std::time::Duration::from_secs(1)).expect("statistics interval is valid");
+    let mut observed = 0_u32;
     let error = run(
         &mut reader,
         registry,
         &packetcraftr_core::analysis::Options::default(),
         |record| {
-            collector
-                .observe(&record)
-                .expect("pipeline rejects missing time before the statistics sink");
+            observed += 1;
+            collector.observe(&record);
             Ok(())
         },
     )
     .expect_err("statistics require capture time");
+    // The collector reads `record.timestamp` and cannot fail; this is the
+    // guarantee that makes that sound.
+    assert_eq!(
+        observed, 0,
+        "an untimestamped frame is refused before any sink observes it"
+    );
     assert!(matches!(
         error,
         packetcraftr_core::analysis::Error::TimestampUnavailable { number: 1 }

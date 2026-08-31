@@ -8,12 +8,9 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
-use packetcraftr_core::analysis::reassembly::{
-    Limits,
-    tcp::{
-        Error as TcpError, Event as TcpEvent, FlowKey, Reassembler as TcpReassembler,
-        ScopedFlowKey, Segment,
-    },
+use packetcraftr_core::analysis::reassembly::tcp::{
+    Error as TcpError, Event as TcpEvent, FlowKey, Limits, MalformedError as TcpMalformedError,
+    Reassembler as TcpReassembler, ResourceError as TcpResourceError, ScopedFlowKey, Segment,
 };
 use packetcraftr_core::analysis::scope::ScopeId;
 
@@ -84,7 +81,7 @@ fn equal_deadline_expiry_events_use_stable_keys() {
     let mut tcp = TcpReassembler::new(Limits::default());
     open(&mut tcp, higher.clone(), 0, now).expect("higher flow opens");
     open(&mut tcp, lower.clone(), 0, now).expect("lower flow opens");
-    let events = tcp.expire(now + Limits::default().tcp_idle_expiry);
+    let events = tcp.expire(now + Limits::default().idle_expiry);
     assert!(matches!(
         events.as_slice(),
         [
@@ -113,15 +110,17 @@ fn tcp_empty_ack_is_ignored_and_invalid_window_is_rejected() {
     });
     assert_eq!(
         open(&mut invalid, key.clone(), 1, now),
-        Err(TcpError::InvalidWindowLimit {
+        Err(TcpResourceError::InvalidWindowLimit {
             limit: 1usize << 31
-        })
+        }
+        .into())
     );
     assert_eq!(
         invalid.push(segment(key, 1, b"x", false, false, false), now),
-        Err(TcpError::InvalidWindowLimit {
+        Err(TcpResourceError::InvalidWindowLimit {
             limit: 1usize << 31
-        })
+        }
+        .into())
     );
 }
 
@@ -149,7 +148,7 @@ fn tcp_flow_opening_replacement_and_limits_have_stable_queries() {
     assert_eq!(reassembler.flow_base_sequence(&first), Some(200));
     assert_eq!(
         open(&mut reassembler, second, 1, now),
-        Err(TcpError::FlowLimit { limit: 1 })
+        Err(TcpResourceError::FlowLimit { limit: 1 }.into())
     );
     assert!(reassembler.evict_flow(&flow(65_000)).is_empty());
     let evicted = reassembler.evict_flow(&first);
@@ -182,7 +181,7 @@ fn tcp_flow_state_metadata_is_bounded_and_only_charged_while_retained() {
         .expect("replacement reuses the existing flow's metadata budget");
     assert_eq!(
         open(&mut reassembler, second.clone(), 200, now),
-        Err(TcpError::AggregateByteLimit { limit: 256 })
+        Err(TcpResourceError::AggregateByteLimit { limit: 256 }.into())
     );
     assert_eq!(reassembler.flow_count(), 1);
     assert_eq!(reassembler.flow_base_sequence(&first), Some(101));
@@ -345,7 +344,7 @@ fn tcp_segment_window_and_aggregate_limits_fail_without_mutating_delivery() {
     let now = Instant::now();
     let key = flow(10_005);
     let mut segment_limit = TcpReassembler::new(Limits {
-        max_tcp_segments_per_flow: 1,
+        max_segments_per_flow: 1,
         ..Limits::default()
     });
     open(&mut segment_limit, key.clone(), 100, now).expect("flow opens");
@@ -354,7 +353,7 @@ fn tcp_segment_window_and_aggregate_limits_fail_without_mutating_delivery() {
         .expect("first pending segment fits");
     assert_eq!(
         segment_limit.push(segment(key.clone(), 106, b"b", false, false, false), now),
-        Err(TcpError::SegmentLimit { limit: 1 })
+        Err(TcpResourceError::SegmentLimit { limit: 1 }.into())
     );
     assert_eq!(segment_limit.flow_next_sequence(&key), Some(100));
 
@@ -365,14 +364,14 @@ fn tcp_segment_window_and_aggregate_limits_fail_without_mutating_delivery() {
     open(&mut window, key.clone(), 100, now).expect("flow opens");
     assert_eq!(
         window.push(segment(key.clone(), 105, b"x", false, false, false), now),
-        Err(TcpError::FlowByteLimit { limit: 4 })
+        Err(TcpResourceError::FlowByteLimit { limit: 4 }.into())
     );
     assert_eq!(
         window.push(
             segment(key.clone(), 100, b"abcde", false, false, false),
             now
         ),
-        Err(TcpError::FlowByteLimit { limit: 4 })
+        Err(TcpResourceError::FlowByteLimit { limit: 4 }.into())
     );
     assert_eq!(window.flow_next_sequence(&key), Some(100));
 
@@ -382,7 +381,7 @@ fn tcp_segment_window_and_aggregate_limits_fail_without_mutating_delivery() {
     });
     assert_eq!(
         aggregate.push(segment(key, 100, b"x", false, false, false), now),
-        Err(TcpError::AggregateByteLimit { limit: 0 })
+        Err(TcpResourceError::AggregateByteLimit { limit: 0 }.into())
     );
     assert_eq!(aggregate.flow_count(), 0);
     assert_eq!(aggregate.aggregate_bytes(), 0);
@@ -426,14 +425,15 @@ fn tcp_fin_and_reset_close_generations_and_final_sequence_is_immutable() {
         .expect("out-of-order FIN pins final offset");
     assert_eq!(
         bounded.push(segment(key.clone(), 106, b"", false, true, false), now),
-        Err(TcpError::ConflictingFinalSequence {
+        Err(TcpMalformedError::ConflictingFinalSequence {
             existing_offset: 5,
             new_offset: 6
-        })
+        }
+        .into())
     );
     assert_eq!(
         bounded.push(segment(key, 104, b"zz", false, false, false), now),
-        Err(TcpError::BeyondFinalSequence { final_offset: 5 })
+        Err(TcpMalformedError::BeyondFinalSequence { final_offset: 5 }.into())
     );
 }
 
@@ -442,7 +442,7 @@ fn tcp_syn_payload_wraps_sequence_and_expiry_emits_gap_then_eviction() {
     let now = Instant::now();
     let wrapped = flow(10_007);
     let mut reassembler = TcpReassembler::new(Limits {
-        tcp_idle_expiry: Duration::from_secs(2),
+        idle_expiry: Duration::from_secs(2),
         ..Limits::default()
     });
     let events = reassembler

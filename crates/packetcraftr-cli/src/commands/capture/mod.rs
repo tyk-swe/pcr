@@ -9,7 +9,7 @@ mod rendering;
 
 use std::time::{Duration, Instant};
 
-use packetcraftr::{netio as net, netio::capture::Provider as _, output};
+use packetcraftr::{analysis::pcap, netio as net, netio::capture::Provider as _, output};
 
 use self::arguments::Args;
 use super::registry;
@@ -25,7 +25,7 @@ use super::format::CaptureFormat;
 pub(super) fn run(
     arguments: Args,
     format: output::contract::Format,
-    stream: &mut StreamEncoder,
+    stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     let format = CaptureFormat::narrow(output::contract::Command::Capture, format)?;
     let Args {
@@ -44,10 +44,8 @@ pub(super) fn run(
             maximum: net::capture::MAX_TIMEOUT,
         }));
     }
-    let limits = limits
-        .into_limits()
-        .validate()
-        .map_err(CliError::classified)?;
+    let limits = limits.into_limits();
+    limits.validate().map_err(CliError::classified)?;
     let registry = registry()?;
     let selector =
         FrameSelector::compile_optional(filter.as_deref(), &registry, limits.snap_length)?;
@@ -67,23 +65,18 @@ pub(super) fn run(
         .arm_capture(&request)
         .map_err(CliError::classified)?;
 
+    let session = || execution::Session {
+        capture,
+        timeout,
+        limits,
+        budget,
+        selector: selector.as_ref(),
+    };
     match format {
-        CaptureFormat::Text => {
-            rendering::render_text(capture, timeout, limits, budget, selector.as_ref())
-        }
-        CaptureFormat::Hex => {
-            rendering::render_hex(capture, timeout, limits, budget, selector.as_ref())
-        }
-        CaptureFormat::Ndjson => {
-            rendering::render_stream(capture, timeout, limits, budget, selector.as_ref(), stream)
-        }
-        CaptureFormat::Pcap | CaptureFormat::PcapNg => rendering::render_capture(
-            capture,
-            format.format(),
-            timeout,
-            limits,
-            budget,
-            selector.as_ref(),
-        ),
+        CaptureFormat::Text => rendering::render_text(session()),
+        CaptureFormat::Hex => rendering::render_hex(session()),
+        CaptureFormat::Ndjson => rendering::render_stream(session(), stream),
+        CaptureFormat::Pcap => rendering::render_capture(session(), pcap::Format::Pcap),
+        CaptureFormat::PcapNg => rendering::render_capture(session(), pcap::Format::PcapNg),
     }
 }

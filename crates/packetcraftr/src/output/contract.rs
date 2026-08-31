@@ -106,11 +106,11 @@ impl fmt::Display for Command {
     }
 }
 
-/// User-selectable output formats across supported commands.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// User-selectable output formats across supported commands. Never a document
+/// field: a format is chosen on the command line, so it has no default here.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Format {
-    #[default]
     Text,
     Json,
     Ndjson,
@@ -198,6 +198,7 @@ pub enum Error {
     InvalidSourceFrame,
     IncoherentFuzzEvents { message: String },
     IncoherentDnsEvidence { message: String },
+    UnsupportedFieldKind { field: String },
 }
 
 impl fmt::Display for Error {
@@ -227,6 +228,12 @@ impl fmt::Display for Error {
             }
             Self::IncoherentDnsEvidence { message } => {
                 write!(formatter, "DNS evidence is incoherent: {message}")
+            }
+            Self::UnsupportedFieldKind { field } => {
+                write!(
+                    formatter,
+                    "field {field} has a reflective kind the v1 output contract cannot name"
+                )
             }
         }
     }
@@ -261,6 +268,11 @@ impl Classified for Error {
                 "internal.dns_event_coherence",
                 Kind::Internal,
                 Some("publish TCP socket metadata without synthesizing a captured frame"),
+            ),
+            Self::UnsupportedFieldKind { .. } => Classification::new(
+                "internal.field_kind",
+                Kind::Internal,
+                Some("use a build whose output schema covers this reflective field kind"),
             ),
         }
     }

@@ -7,7 +7,6 @@ mod convert;
 mod error;
 mod parse;
 mod types;
-mod visitor;
 
 pub use error::Error;
 pub use types::{

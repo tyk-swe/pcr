@@ -50,6 +50,6 @@ pub enum Error {
     #[error("protocol {protocol} has no reflective schema, so {path} cannot be resolved")]
     UnresolvableProtocol {
         path: String,
-        protocol: super::super::layer::Id,
+        protocol: crate::layer::Id,
     },
 }

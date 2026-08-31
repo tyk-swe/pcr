@@ -5,13 +5,14 @@ use std::time::UNIX_EPOCH;
 
 use bytes::Bytes;
 
-use super::super::decode::DecodedPacket;
-use super::super::field::{FieldKind, FieldValue};
-use super::super::layer::Layer;
 use super::ast::{Op, Predicate};
 use super::comparison;
 use super::lexer::CompareOperator;
-use super::path::{ByteSlice, FieldAccess, FieldRef, FieldSource, FrameField, StreamTransport};
+use super::path::{ByteSlice, FieldRef, FieldSource, FrameField, StreamTransport};
+use crate::decode::DecodedPacket;
+use crate::field::{FieldKind, FieldValue};
+use crate::layer::Layer;
+use crate::registry::FilterFieldBinding;
 
 /// Everything a compiled filter may read about one packet.
 ///
@@ -161,16 +162,15 @@ where
             }
         }
         FieldSource::Layer {
-            protocol,
+            binding,
             occurrence,
-            access,
         } => {
-            for layer in layers(context, protocol.as_str(), *occurrence) {
-                for name in access_fields(access) {
+            for layer in layers(context, binding.protocol().as_str(), *occurrence) {
+                for name in binding.fields() {
                     let Some(value) = layer.field(name) else {
                         continue;
                     };
-                    let Some(value) = project(value, access, field.slice) else {
+                    let Some(value) = project(value, binding, field.slice) else {
                         continue;
                     };
                     if predicate(&value) {
@@ -180,14 +180,6 @@ where
             }
             false
         }
-    }
-}
-
-fn access_fields(access: &FieldAccess) -> &[&'static str] {
-    match access {
-        FieldAccess::Direct(field) => std::slice::from_ref(field),
-        FieldAccess::Bits { field, .. } => std::slice::from_ref(field),
-        FieldAccess::Either(fields) => fields,
     }
 }
 
@@ -221,14 +213,14 @@ pub(super) fn byte_addressable(kind: FieldKind) -> bool {
 /// rather than matching something unintended.
 fn project(
     value: FieldValue,
-    access: &FieldAccess,
+    binding: &FilterFieldBinding,
     slice: Option<ByteSlice>,
 ) -> Option<FieldValue> {
-    let value = match access {
-        FieldAccess::Bits { mask, shift, .. } => {
+    let value = match binding {
+        FilterFieldBinding::Bits { mask, shift, .. } => {
             FieldValue::Unsigned((value.as_u64()? & mask) >> shift)
         }
-        FieldAccess::Direct(_) | FieldAccess::Either(_) => value,
+        FilterFieldBinding::Direct { .. } | FilterFieldBinding::Either { .. } => value,
     };
     let Some(slice) = slice else {
         return Some(value);
@@ -257,11 +249,7 @@ fn frame_value(context: &Context<'_>, which: FrameField) -> Option<FieldValue> {
     Some(match which {
         FrameField::Number => FieldValue::Unsigned(context.number),
         // Floor to whole Unix seconds, matching the capture and output layers.
-        FrameField::TimeEpoch => match frame
-            .timestamp
-            .expect("Filter::matches rejects unavailable required timestamps")
-            .duration_since(UNIX_EPOCH)
-        {
+        FrameField::TimeEpoch => match frame.timestamp?.duration_since(UNIX_EPOCH) {
             Ok(elapsed) => FieldValue::Unsigned(elapsed.as_secs()),
             Err(error) => {
                 let elapsed = error.duration();

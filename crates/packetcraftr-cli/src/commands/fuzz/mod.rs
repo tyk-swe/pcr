@@ -33,7 +33,7 @@ struct PreparedLive {
 pub(super) fn run(
     arguments: Args,
     format: output::contract::Format,
-    stream: &mut StreamEncoder,
+    stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     let format = ToolFormat::narrow(output::contract::Command::Fuzz, format)?;
     let request = prepare_request(&arguments)?;
@@ -100,9 +100,8 @@ fn prepare_live(
             max_evidence_frames: queue_limits.max_frames,
             max_evidence_bytes: queue_limits.max_bytes,
         },
-    }
-    .validate()
-    .map_err(CliError::classified)?;
+    };
+    options.validate().map_err(CliError::classified)?;
     let policy = arguments.policy.clone().into_policy();
     policy.validate().map_err(CliError::classified)?;
     let interface = InterfaceSelector::parse_optional(arguments.route.interface.as_deref())?;
@@ -135,7 +134,7 @@ fn execute_and_render(
     registry: Arc<core::registry::Registry>,
     live: Option<PreparedLive>,
     format: ToolFormat,
-    stream: &mut StreamEncoder,
+    stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     if let Some(live) = live {
         execute_live(request, packet, registry, live, format, stream)
@@ -153,19 +152,21 @@ fn execute_offline(
 ) -> Result<(), CliError> {
     if format == ToolFormat::Ndjson {
         let event_stream = stream.clone();
-        let summary = core::fuzz::run_with_events(&request, packet, registry, move |case| {
-            output::fuzz::Event::try_from_offline(case)
-                .map_err(CliError::classified)
-                .and_then(|event| Ok(event_stream.emit_data(event, Vec::new())?))
-                .map_err(CliError::into_boundary_error)
-        })
-        .map_err(CliError::classified)?;
+        let runtime = core::progress::Runtime::default();
+        let summary =
+            core::fuzz::run_with_events(&request, packet, registry, &runtime, move |case| {
+                output::fuzz::Event::try_from_offline(case)
+                    .map_err(CliError::classified)
+                    .and_then(|event| Ok(event_stream.emit_data(event, Vec::new())?))
+                    .map_err(CliError::into_boundary_error)
+            })
+            .map_err(CliError::classified)?;
         return rendering::render_offline_complete(summary, stream);
     }
     let format = AggregateFormat::narrow_from(output::contract::Command::Fuzz, format)?;
     let result = core::fuzz::run(&request, packet, registry).map_err(CliError::classified)?;
     let (result, diagnostics, stats) =
-        output::fuzz::Result::try_from_offline(result).map_err(CliError::classified)?;
+        output::fuzz::Report::try_from_offline(result).map_err(CliError::classified)?;
     render_collected(result, diagnostics, stats, format)
 }
 
@@ -186,6 +187,7 @@ fn execute_live(
     let mut clock = packetcraftr::clock::SystemClock;
     if format == ToolFormat::Ndjson {
         let event_stream = stream.clone();
+        let runtime = core::progress::Runtime::default();
         let summary = packetcraftr::fuzz::run_with_events(
             packetcraftr::fuzz::RunInput {
                 request: &request,
@@ -196,6 +198,7 @@ fn execute_live(
             &mut authorizer,
             &mut executor,
             &mut clock,
+            &runtime,
             move |case| {
                 output::fuzz::Event::try_from_live(case)
                     .map_err(CliError::classified)
@@ -220,12 +223,12 @@ fn execute_live(
     )
     .map_err(CliError::classified)?;
     let (result, diagnostics, stats) =
-        output::fuzz::Result::try_from_live(result).map_err(CliError::classified)?;
+        output::fuzz::Report::try_from_live(result).map_err(CliError::classified)?;
     render_collected(result, diagnostics, stats, format)
 }
 
 fn render_collected(
-    result: output::fuzz::Result,
+    result: output::fuzz::Report,
     diagnostics: Vec<core::diagnostic::Diagnostic>,
     stats: output::envelope::Stats,
     format: AggregateFormat,

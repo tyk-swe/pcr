@@ -146,7 +146,7 @@ fn representative_response() -> dns::ValidatedResponse {
         "example.test",
         dns::QueryType::Any,
         TRANSACTION_ID,
-        dns::Limits::default(),
+        dns::MessageLimits::default(),
     )
     .expect("representative DNS response decodes");
     let edns = response.metadata.edns.clone().expect("EDNS metadata");
@@ -218,7 +218,7 @@ fn event_context() -> Arc<dns::EventContext> {
 #[test]
 fn dns_aggregate_output_preserves_all_record_shapes_metadata_and_evidence() {
     let diagnostic = Diagnostic::warning("dns.fixture", "fixture warning");
-    let (output, diagnostics, converted_stats) = dns_output::Result::try_from_dns(dns::Result {
+    let (output, diagnostics, converted_stats) = dns_output::Report::try_from_dns(dns::Report {
         server: "resolver.example.test".to_owned(),
         server_port: 53,
         resolved_addresses: vec![IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53))],
@@ -232,7 +232,6 @@ fn dns_aggregate_output_preserves_all_record_shapes_metadata_and_evidence() {
         attempts: vec![attempt_evidence()],
         undecoded: vec![dns::UndecodedEvidence {
             attempt: 2,
-            transport: dns::Transport::Udp,
             frame: evidence_frame(),
         }],
         diagnostics: vec![diagnostic.clone()],
@@ -243,14 +242,15 @@ fn dns_aggregate_output_preserves_all_record_shapes_metadata_and_evidence() {
     assert_eq!(diagnostics, [diagnostic]);
     assert_eq!(converted_stats.packets_attempted, 2);
     assert_eq!(converted_stats.capture.received_frames, 2);
-    assert_eq!(output.response_code, Some(18));
-    assert_eq!(output.response_code_name.as_deref(), Some("bad_time"));
-    assert_eq!(output.authoritative, Some(true));
-    assert_eq!(output.truncated, Some(false));
-    assert_eq!(output.recursion_desired, Some(true));
-    assert_eq!(output.recursion_available, Some(true));
-    assert_eq!(output.authenticated_data, Some(true));
-    assert_eq!(output.checking_disabled, Some(true));
+    let response = output.response.as_ref().expect("accepted response header");
+    assert_eq!(response.response_code, 18);
+    assert_eq!(response.response_code_name, "bad_time");
+    assert!(response.authoritative);
+    assert!(!response.truncated);
+    assert!(response.recursion_desired);
+    assert!(response.recursion_available);
+    assert!(response.authenticated_data);
+    assert!(response.checking_disabled);
     assert_eq!(output.rejected_record_count, 1);
     assert!(!output.fallback_attempted);
     assert_eq!(output.accepted_transport, Some(dns::Transport::Udp));
@@ -345,22 +345,11 @@ fn dns_tcp_attempt_output_uses_metadata_without_synthetic_capture_bytes() {
         error,
         packetcraftr::output::contract::Error::IncoherentDnsEvidence { .. }
     ));
-
-    let error = dns_output::Event::try_from_dns(dns::Event::Undecoded(dns::UndecodedEvidence {
-        attempt: 1,
-        transport: dns::Transport::Tcp,
-        frame: evidence_frame(),
-    }))
-    .expect_err("TCP socket bytes cannot become undecoded capture evidence");
-    assert!(matches!(
-        error,
-        packetcraftr::output::contract::Error::IncoherentDnsEvidence { .. }
-    ));
 }
 
 #[test]
 fn dns_aggregate_output_requires_fallback_flag_and_tcp_attempts_to_match() {
-    let result = |fallback_attempted, attempts| dns::Result {
+    let result = |fallback_attempted, attempts| dns::Report {
         server: "resolver.example.test".to_owned(),
         server_port: 53,
         resolved_addresses: vec![IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53))],
@@ -384,7 +373,7 @@ fn dns_aggregate_output_requires_fallback_flag_and_tcp_attempts_to_match() {
         result(false, vec![tcp]),
         result(true, vec![attempt_evidence()]),
     ] {
-        let error = dns_output::Result::try_from_dns(inconsistent)
+        let error = dns_output::Report::try_from_dns(inconsistent)
             .expect_err("fallback metadata must match retained TCP attempt evidence");
         assert!(matches!(
             error,
@@ -395,7 +384,7 @@ fn dns_aggregate_output_requires_fallback_flag_and_tcp_attempts_to_match() {
 
 #[test]
 fn dns_aggregate_output_rejects_incoherent_outcome_transport_metadata() {
-    let result = |outcome, fallback_attempted, accepted_transport| dns::Result {
+    let result = |outcome, fallback_attempted, accepted_transport| dns::Report {
         server: "resolver.example.test".to_owned(),
         server_port: 53,
         resolved_addresses: vec![IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53))],
@@ -418,7 +407,7 @@ fn dns_aggregate_output_rejects_incoherent_outcome_transport_metadata() {
         result(dns::Outcome::Truncated, true, Some(dns::Transport::Tcp)),
         result(dns::Outcome::Response, false, Some(dns::Transport::Tcp)),
     ] {
-        let error = dns_output::Result::try_from_dns(incoherent)
+        let error = dns_output::Report::try_from_dns(incoherent)
             .expect_err("schema-incoherent transport metadata must be rejected");
         assert!(matches!(
             error,
@@ -440,7 +429,6 @@ fn dns_complete_output_rejects_incoherent_outcome_transport_metadata() {
         fallback_attempted,
         accepted_transport,
         response: None,
-        diagnostics: Vec::new(),
         stats: Stats::default(),
     };
 
@@ -486,7 +474,6 @@ fn dns_progressive_outputs_cover_every_event_and_complete_metadata_shape() {
         },
         dns::Event::Undecoded(dns::UndecodedEvidence {
             attempt: 2,
-            transport: dns::Transport::Udp,
             frame: evidence_frame(),
         }),
     ];
@@ -520,7 +507,6 @@ fn dns_progressive_outputs_cover_every_event_and_complete_metadata_shape() {
             fallback_attempted: false,
             accepted_transport: Some(dns::Transport::Udp),
             response: Some(response.metadata),
-            diagnostics: Vec::new(),
             stats: stats(),
         })
         .expect("coherent completion metadata converts");
@@ -535,7 +521,7 @@ fn dns_progressive_outputs_cover_every_event_and_complete_metadata_shape() {
 
 #[test]
 fn dns_timeout_output_omits_response_only_fields() {
-    let (output, diagnostics, _) = dns_output::Result::try_from_dns(dns::Result {
+    let (output, diagnostics, _) = dns_output::Report::try_from_dns(dns::Report {
         server: "resolver.example.test".to_owned(),
         server_port: 53,
         resolved_addresses: vec![IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53))],
@@ -584,7 +570,6 @@ fn dns_timeout_output_omits_response_only_fields() {
         fallback_attempted: false,
         accepted_transport: None,
         response: None,
-        diagnostics: Vec::new(),
         stats: Stats::default(),
     })
     .expect("coherent timeout metadata converts");

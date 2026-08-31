@@ -2,25 +2,23 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use packetcraftr::{
-    core::error::{Classification, Classified, Context, Kind},
+    core::error::{Classification, Classified, Coordinate, Kind},
     netio as net, output,
 };
 
 #[derive(Debug)]
-pub(super) struct CliError {
-    pub(super) exit_code: u8,
-    pub(super) message: String,
-    pub(super) classification: Classification,
-    context: Option<Box<Context>>,
-    pub(super) causes: Vec<String>,
+pub(crate) struct CliError {
+    pub(crate) message: String,
+    pub(crate) classification: Classification,
+    context: Option<Coordinate>,
+    pub(crate) causes: Vec<String>,
 }
 
 impl CliError {
     /// A CLI-originated failure with the fallback classification for `kind`;
     /// the exit code follows from the kind.
-    pub(super) fn new(kind: Kind, message: impl Into<String>) -> Self {
+    pub(crate) fn new(kind: Kind, message: impl Into<String>) -> Self {
         Self {
-            exit_code: exit_code_for_kind(kind),
             message: message.into(),
             classification: Classification::new(fallback_code(kind), kind, None),
             context: None,
@@ -28,20 +26,19 @@ impl CliError {
         }
     }
 
-    pub(super) fn classified(error: impl Classified + std::fmt::Display) -> Self {
+    pub(crate) fn classified(error: impl Classified + std::fmt::Display) -> Self {
         let classification = error.classification();
         let context = error.context();
         let causes = error.causes();
         Self::from_classification(classification, error.to_string(), causes).with_context(context)
     }
 
-    pub(super) fn from_classification(
+    pub(crate) fn from_classification(
         classification: Classification,
         message: impl Into<String>,
         causes: Vec<String>,
     ) -> Self {
         Self {
-            exit_code: exit_code_for_kind(classification.kind),
             message: message.into(),
             classification,
             context: None,
@@ -49,18 +46,30 @@ impl CliError {
         }
     }
 
-    pub(super) fn with_context(mut self, context: Context) -> Self {
-        self.context = (!context.is_empty()).then(|| Box::new(context));
+    /// The process exit code this failure ends in, which is a function of its
+    /// classification kind and nothing else.
+    pub(crate) const fn exit_code(&self) -> u8 {
+        match self.classification.kind {
+            Kind::Cli => 2,
+            Kind::Packet => 3,
+            Kind::Capability => 4,
+            Kind::Io => 5,
+            Kind::Policy => 6,
+            Kind::Internal => 70,
+        }
+    }
+
+    pub(crate) fn with_context(mut self, context: Option<Coordinate>) -> Self {
+        self.context = context;
         self
     }
 
-    pub(super) fn into_boundary_error(self) -> packetcraftr::BoundaryError {
-        let context = self.context.as_deref().copied().unwrap_or_default();
+    pub(crate) fn into_boundary_error(self) -> packetcraftr::BoundaryError {
         packetcraftr::BoundaryError::new(self.message, self.classification, self.causes)
-            .with_context(context)
+            .with_context(self.context)
     }
 
-    pub(super) fn with_cleanup(mut self, cleanup: net::Error) -> Self {
+    pub(crate) fn with_cleanup(mut self, cleanup: net::Error) -> Self {
         let operation = self.message.clone();
         self.message = format!("{operation}; capture shutdown also failed: {cleanup}");
         if self.causes.is_empty() {
@@ -70,14 +79,13 @@ impl CliError {
         self
     }
 
-    pub(super) fn output_error(&self) -> output::envelope::Error {
-        let context = self.context.as_deref().copied().unwrap_or_default();
+    pub(crate) fn output_error(&self) -> output::envelope::Error {
         output::envelope::Error::new(
             self.classification,
             self.message.clone(),
             self.causes.clone(),
         )
-        .with_context(context)
+        .with_context(self.context)
     }
 }
 
@@ -100,17 +108,6 @@ const fn fallback_code(kind: Kind) -> &'static str {
     }
 }
 
-const fn exit_code_for_kind(kind: Kind) -> u8 {
-    match kind {
-        Kind::Cli => 2,
-        Kind::Packet => 3,
-        Kind::Capability => 4,
-        Kind::Io => 5,
-        Kind::Policy => 6,
-        Kind::Internal => 70,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -128,7 +125,7 @@ mod tests {
 
         for (kind, exit_code, code) in cases {
             let error = CliError::new(kind, "failure");
-            assert_eq!(error.exit_code, exit_code, "kind {kind:?}");
+            assert_eq!(error.exit_code(), exit_code, "kind {kind:?}");
             assert_eq!(error.classification.kind, kind, "kind {kind:?}");
             assert_eq!(error.classification.code, code, "kind {kind:?}");
         }
@@ -145,20 +142,20 @@ mod tests {
             ),
             vec!["first cause".to_owned(), "second cause".to_owned()],
         )
-        .with_context(Context::probe_sequence(42));
+        .with_context(Some(Coordinate::ProbeSequence(42)));
         let error = CliError::classified(classified);
-        assert_eq!(error.exit_code, 6);
+        assert_eq!(error.exit_code(), 6);
 
         let output = error.output_error();
         assert_eq!(output.code, "fixture.denied");
         assert_eq!(output.causes, ["first cause", "second cause"]);
         assert_eq!(output.remediation.as_deref(), Some("authorize the fixture"));
-        assert_eq!(output.context.probe_sequence, Some(42));
+        assert_eq!(output.context, Some(Coordinate::ProbeSequence(42)));
 
         let boundary = error.into_boundary_error();
         assert_eq!(boundary.classification().code, "fixture.denied");
         assert_eq!(boundary.causes(), ["first cause", "second cause"]);
-        assert_eq!(boundary.context().probe_sequence, Some(42));
+        assert_eq!(boundary.context(), Some(Coordinate::ProbeSequence(42)));
     }
 
     #[test]
@@ -168,12 +165,12 @@ mod tests {
             source: std::io::Error::other("sink closed"),
         };
         let error = CliError::from(write);
-        assert_eq!(error.exit_code, 5);
+        assert_eq!(error.exit_code(), 5);
         assert_eq!(error.classification.code, "io.stdout");
         assert!(error.message.contains("sequence 3"));
 
         let terminated = CliError::from(output::envelope::EncodeError::Terminal);
-        assert_eq!(terminated.exit_code, 70);
+        assert_eq!(terminated.exit_code(), 70);
         assert_eq!(terminated.classification.code, "internal.ndjson_stream");
     }
 
@@ -181,6 +178,7 @@ mod tests {
     fn cleanup_failure_keeps_the_primary_error() {
         let cleanup = net::Error::Capture {
             message: "receiver stopped".to_owned(),
+            source: None,
         };
         let error = CliError::new(Kind::Io, "capture failed").with_cleanup(cleanup.clone());
         assert_eq!(

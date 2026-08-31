@@ -6,7 +6,7 @@ use std::net::Ipv4Addr;
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
-use packetcraftr_core::analysis::reassembly::Limits;
+use packetcraftr_core::analysis::reassembly::ip::Limits;
 use packetcraftr_core::analysis::reassembly::ip::{
     DatagramKey, Error, Family, Fragment, FragmentDisposition, IncompleteReason, Ipv4DatagramKey,
     Ipv4Fragment, Ipv6DatagramKey, Ipv6Fragment, MalformedError, OverlapPolicy, PushOutcome,
@@ -482,7 +482,7 @@ fn idle_and_eof_retirement_report_bounded_gap_evidence() {
     let key = ipv4_key();
     let now = Instant::now();
     let limits = Limits {
-        ip_idle_expiry: Duration::from_secs(2),
+        idle_expiry: Duration::from_secs(2),
         ..Limits::default()
     };
     let mut reassembler = Reassembler::new(limits, OverlapPolicy::Reject);
@@ -518,7 +518,7 @@ fn resource_limits_reject_before_retaining_new_payload() {
     let now = Instant::now();
     let mut datagrams = Reassembler::new(
         Limits {
-            max_ip_datagrams: 0,
+            max_datagrams: 0,
             ..Limits::default()
         },
         OverlapPolicy::Reject,
@@ -531,7 +531,7 @@ fn resource_limits_reject_before_retaining_new_payload() {
 
     let mut bytes = Reassembler::new(
         Limits {
-            max_ip_bytes_per_datagram: 7,
+            max_bytes_per_datagram: 7,
             ..Limits::default()
         },
         OverlapPolicy::Reject,
@@ -547,7 +547,7 @@ fn resource_limits_reject_before_retaining_new_payload() {
     let mut aggregate = Reassembler::new(
         Limits {
             // 4,096 collection metadata + 64 range + 20 header + 8 payload.
-            max_ip_aggregate_bytes: 4_187,
+            max_aggregate_bytes: 4_187,
             ..Limits::default()
         },
         OverlapPolicy::Reject,
@@ -562,7 +562,7 @@ fn resource_limits_reject_before_retaining_new_payload() {
 
     let mut fragments = Reassembler::new(
         Limits {
-            max_ip_fragments_per_datagram: 1,
+            max_fragments_per_datagram: 1,
             ..Limits::default()
         },
         OverlapPolicy::Reject,
@@ -586,7 +586,7 @@ fn aggregate_limit_covers_replacement_and_completion_peak_allocations() {
     let limit = 4_295;
     let mut reassembler = Reassembler::new(
         Limits {
-            max_ip_aggregate_bytes: limit,
+            max_aggregate_bytes: limit,
             ..Limits::default()
         },
         OverlapPolicy::Reject,
@@ -616,8 +616,8 @@ fn removed_datagrams_keep_hash_table_high_water_memory_charged() {
     let now = Instant::now();
     let mut reassembler = Reassembler::new(
         Limits {
-            max_ip_datagrams: 2,
-            max_ip_aggregate_bytes: 8_400,
+            max_datagrams: 2,
+            max_aggregate_bytes: 8_400,
             ..Limits::default()
         },
         OverlapPolicy::Reject,
@@ -896,7 +896,7 @@ fn ipv6_predecessor_rejects_an_undersized_authentication_header() {
 fn unrepresentable_idle_expiry_fails_before_state_mutation() {
     let key = ipv4_key();
     let limits = Limits {
-        ip_idle_expiry: Duration::MAX,
+        idle_expiry: Duration::MAX,
         ..Limits::default()
     };
     let mut reassembler = Reassembler::new(limits, OverlapPolicy::Reject);

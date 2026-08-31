@@ -4,8 +4,8 @@
 use crate::{
     Packet,
     field::FieldValue,
-    matcher::{MatchResult, ResponseMatcher},
-    semantics::BuiltinProtocol,
+    matcher::{Match, ResponseMatcher},
+    protocol::BuiltinProtocol,
 };
 
 use super::{
@@ -38,13 +38,11 @@ impl EchoMatcher {
 }
 
 impl ResponseMatcher for EchoMatcher {
-    fn matches(&self, request: &Packet, response: &Packet) -> MatchResult {
+    fn matches(&self, request: &Packet, response: &Packet) -> Option<Match> {
         if quoted_icmp_error_kind(request, response, QuotedProbeTransport::Icmp).is_some() {
-            return MatchResult::matched(150, "matching quoted ICMP error response");
+            return Some(Match::new(150));
         }
-        let Some(layers) = reversed_protocol_layers(self.protocol, request, response) else {
-            return MatchResult::no_match();
-        };
+        let layers = reversed_protocol_layers(self.protocol, request, response)?;
         for layers in &layers {
             let request_layer = layers.request;
             let response_layer = layers.response;
@@ -55,7 +53,7 @@ impl ResponseMatcher for EchoMatcher {
                     .and_then(|value| value.as_u64())
                     != Some(self.reply_type)
             {
-                return MatchResult::no_match();
+                return None;
             }
             if request_layer.field("code").and_then(|value| value.as_u64()) != Some(0)
                 || response_layer
@@ -63,22 +61,20 @@ impl ResponseMatcher for EchoMatcher {
                     .and_then(|value| value.as_u64())
                     != Some(0)
             {
-                return MatchResult::no_match();
+                return None;
             }
             let Some(FieldValue::Bytes(request_body)) = request_layer.field("body") else {
-                return MatchResult::no_match();
+                return None;
             };
             let Some(FieldValue::Bytes(response_body)) = response_layer.field("body") else {
-                return MatchResult::no_match();
+                return None;
             };
-            let Some(request_identity) = request_body.first_chunk::<4>() else {
-                return MatchResult::no_match();
-            };
+            let request_identity = request_body.first_chunk::<4>()?;
             if Some(request_identity) != response_body.first_chunk::<4>() {
-                return MatchResult::no_match();
+                return None;
             }
         }
-        MatchResult::matched(100, "matching ICMP echo identifiers and sequences")
+        Some(Match::new(100))
     }
 
     fn responder(&self, _request: &Packet, response: &Packet) -> Option<std::net::IpAddr> {

@@ -97,16 +97,16 @@ pub(super) fn adapter_snapshots() -> Result<Vec<WindowsAdapter>, SystemError> {
     Err(SystemError::OperatingSystem {
         operation: "GetAdaptersAddresses",
         message: "adapter list changed during four consecutive reads".to_owned(),
+        source: None,
     })
 }
 
 pub(super) fn win32_error(operation: &'static str, error: WIN32_ERROR) -> SystemError {
     SystemError::OperatingSystem {
         operation,
-        message: format!(
-            "{} (Win32 error {})",
-            std::io::Error::from_raw_os_error(error.0.cast_signed()),
-            error.0
-        ),
+        message: format!("Win32 error {}", error.0),
+        source: Some(std::sync::Arc::new(std::io::Error::from_raw_os_error(
+            error.0.cast_signed(),
+        ))),
     }
 }

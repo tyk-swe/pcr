@@ -12,10 +12,14 @@ use crate::{
     layer::{Layer, reflective_layer},
 };
 
-use super::super::common::{
+use crate::protocol::common::{
     ValueExpectation, checksum, checksum_parts, ensure_encode_budget, invalid, make_layer,
-    payload_without_padding, protocol, resolve_u16, truncated, wrong_layer,
+    payload_without_padding, protocol, resolve_u16, truncated, typed_layer,
 };
+
+use crate::protocol::BuiltinProtocol;
+
+const NAME: &str = BuiltinProtocol::Igmp.as_str();
 
 const IGMP_HEADER_LEN: usize = 4;
 const IGMP_MIN_LEN: usize = 8;
@@ -40,7 +44,7 @@ impl Default for Igmp {
 }
 
 reflective_layer! {
-    fn igmp_schema() => { protocol: protocol("igmp"), name: "IGMP" }
+    fn igmp_schema() => { protocol: protocol(NAME), name: "IGMP" }
     impl Igmp {
         "type" => {
             kind: Unsigned, derived: false, required: true,
@@ -74,8 +78,8 @@ reflective_layer! {
 pub(crate) struct IgmpCodec;
 
 impl LayerCodec for IgmpCodec {
-    fn protocol_id(&self) -> crate::layer::Id {
-        protocol("igmp")
+    fn protocol_id(&self) -> &'static crate::layer::Id {
+        &igmp_schema().protocol
     }
 
     fn encode(
@@ -84,29 +88,26 @@ impl LayerCodec for IgmpCodec {
         payload: &[u8],
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
-        let layer = layer
-            .as_any()
-            .downcast_ref::<Igmp>()
-            .ok_or_else(|| wrong_layer("igmp", layer))?;
+        let layer = typed_layer::<Igmp>(NAME, layer)?;
         let contribution = IGMP_HEADER_LEN
             .checked_add(layer.body.len())
-            .ok_or_else(|| invalid("igmp", "message length overflow"))?;
+            .ok_or_else(|| invalid(NAME, "message length overflow"))?;
         if contribution < IGMP_MIN_LEN {
             return Err(invalid(
-                "igmp",
+                NAME,
                 format!("message length {contribution} is below the 8-byte minimum"),
             ));
         }
-        ensure_encode_budget("igmp", contribution, context)?;
+        ensure_encode_budget(NAME, contribution, context)?;
 
         let mut prefix = Vec::with_capacity(contribution);
         prefix.extend_from_slice(&[layer.igmp_type, layer.code, 0, 0]);
         prefix.extend_from_slice(&layer.body);
-        let covered_payload = payload_without_padding("igmp", payload, context)?;
+        let covered_payload = payload_without_padding(NAME, payload, context)?;
         let expected = checksum_parts(&[&prefix, covered_payload]);
         let mut diagnostics = Vec::new();
         let (checksum, materialized_checksum) = resolve_u16(
-            "igmp",
+            NAME,
             "checksum",
             &layer.checksum,
             ValueExpectation::Required(expected),
@@ -123,13 +124,9 @@ impl LayerCodec for IgmpCodec {
 
         let mut materialized = layer.clone();
         materialized.checksum = materialized_checksum;
-        Ok(EncodedLayer {
-            prefix,
-            suffix: Vec::new(),
-            materialized: Box::new(materialized),
-            fields: igmp_layout(layer.body.len()),
-            diagnostics,
-        })
+        Ok(EncodedLayer::header(prefix, Box::new(materialized))
+            .with_fields(igmp_layout(layer.body.len()))
+            .with_diagnostics(diagnostics))
     }
 
     fn decode(
@@ -138,7 +135,7 @@ impl LayerCodec for IgmpCodec {
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
         let Some(header) = input.first_chunk::<IGMP_MIN_LEN>() else {
-            return Err(truncated("igmp", IGMP_MIN_LEN, input.len()));
+            return Err(truncated(NAME, IGMP_MIN_LEN, input.len()));
         };
         let mut diagnostics = Vec::new();
         if checksum(input) != 0 {
@@ -148,7 +145,7 @@ impl LayerCodec for IgmpCodec {
         }
         let body = input
             .get(IGMP_HEADER_LEN..)
-            .ok_or_else(|| truncated("igmp", IGMP_MIN_LEN, input.len()))?;
+            .ok_or_else(|| truncated(NAME, IGMP_MIN_LEN, input.len()))?;
         Ok(DecodedLayerValue {
             layer: Box::new(Igmp {
                 igmp_type: header[0],

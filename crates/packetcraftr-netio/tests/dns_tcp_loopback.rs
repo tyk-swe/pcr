@@ -9,9 +9,18 @@ use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream};
 use std::thread;
 use std::time::Duration;
 
-use packetcraftr_netio::dns_tcp::{self, Provider as _};
+use packetcraftr_netio::dns_tcp;
 
 const QUERY: &[u8] = b"bounded query";
+
+/// Field-by-field equality for an error that retains a system source and so
+/// cannot derive `PartialEq`. `Debug` renders every field, the source
+/// included, so this compares strictly more than a derived `==` did.
+#[track_caller]
+fn assert_same_error(actual: &dns_tcp::Error, expected: &dns_tcp::Error) {
+    assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
+}
+
 const RESPONSE: &[u8] = &[0x12, 0x34, 0x80, 0, 0, 1, 0, 0, 0, 0, 0, 0];
 
 fn read_query(stream: &mut TcpStream) {
@@ -34,19 +43,18 @@ fn run_fragmented_success(listener: TcpListener) -> SocketAddr {
         }
     });
 
-    let response = dns_tcp::SystemProvider
-        .exchange(dns_tcp::Request {
-            endpoint,
-            query: QUERY,
-            timeout: Duration::from_secs(1),
-            max_message_bytes: 512,
-        })
-        .expect("bounded loopback exchange");
+    let response = dns_tcp::exchange(dns_tcp::Request {
+        endpoint,
+        query: QUERY,
+        timeout: Duration::from_secs(1),
+        max_message_bytes: 512,
+    })
+    .expect("bounded loopback exchange");
     server.join().expect("loopback server");
     assert_eq!(response.peer_address, endpoint);
     assert_eq!(response.local_address.ip(), endpoint.ip());
     assert_eq!(response.bytes_written, QUERY.len() + 2);
-    assert_eq!(response.bytes_read, RESPONSE.len() + 2);
+    assert_eq!(response.frame.len(), RESPONSE.len() + 2);
     assert_eq!(
         &response.frame[..2],
         &u16::try_from(RESPONSE.len()).unwrap().to_be_bytes()
@@ -81,21 +89,20 @@ fn loopback_read_timeout_uses_the_exchange_deadline() {
         thread::sleep(Duration::from_millis(80));
     });
 
-    let error = dns_tcp::SystemProvider
-        .exchange(dns_tcp::Request {
-            endpoint,
-            query: QUERY,
-            timeout: Duration::from_millis(20),
-            max_message_bytes: 512,
-        })
-        .expect_err("silent peer must time out");
+    let error = dns_tcp::exchange(dns_tcp::Request {
+        endpoint,
+        query: QUERY,
+        timeout: Duration::from_millis(20),
+        max_message_bytes: 512,
+    })
+    .expect_err("silent peer must time out");
     server.join().expect("loopback server");
-    assert_eq!(
-        error,
-        dns_tcp::Error::Timeout {
+    assert_same_error(
+        &error,
+        &dns_tcp::Error::Timeout {
             phase: dns_tcp::Phase::ReadPrefix,
             transferred: 0,
-        }
+        },
     );
 }
 
@@ -118,15 +125,14 @@ fn loopback_early_close_reports_prefix_and_body_progress() {
             read_query(&mut stream);
             stream.write_all(&response).expect("partial response");
         });
-        let error = dns_tcp::SystemProvider
-            .exchange(dns_tcp::Request {
-                endpoint,
-                query: QUERY,
-                timeout: Duration::from_secs(1),
-                max_message_bytes: 512,
-            })
-            .expect_err("early close must fail");
+        let error = dns_tcp::exchange(dns_tcp::Request {
+            endpoint,
+            query: QUERY,
+            timeout: Duration::from_secs(1),
+            max_message_bytes: 512,
+        })
+        .expect_err("early close must fail");
         server.join().expect("loopback server");
-        assert_eq!(error, expected);
+        assert_same_error(&error, &expected);
     }
 }

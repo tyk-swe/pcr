@@ -21,19 +21,19 @@ use crate::{
     interface::Id as InterfaceId,
     platform::live_capture::{
         CaptureInterrupt, NativeCaptureEvent, NativeCaptureParts, NativeCaptureSource,
-        NativeCaptureStatistics, NativeCapturedPacket, canonical_link_type, monotonic_packet_time,
-        system_time, validate_effective_snapshot_length,
+        NativeCaptureStatistics, NativeCapturedPacket, canonical_link_type, is_permission_denied,
+        monotonic_packet_time, system_time, validate_effective_snapshot_length,
     },
 };
 const READ_TIMEOUT_MILLIS: i32 = 50;
-pub(super) const PCAP_NETMASK_UNKNOWN: u32 = u32::MAX;
+const PCAP_NETMASK_UNKNOWN: u32 = u32::MAX;
 
 #[link(name = "pcap")]
 unsafe extern "C" {
     fn pcap_snapshot(handle: *mut c_void) -> c_int;
 }
 
-pub(crate) fn open_capture(
+pub(in crate::platform) fn open_capture(
     interface: &InterfaceId,
     limits: Limits,
     capture_filter: Option<&str>,
@@ -70,6 +70,7 @@ pub(crate) fn open_capture(
                 "libpcap returned negative data-link type {datalink} for {}",
                 interface.name
             ),
+            source: None,
         })?;
     // SAFETY: capture is activated and remains live and immutably borrowed for
     // this query; pcap_snapshot only reads its configured snapshot length.
@@ -120,6 +121,7 @@ impl NativeCaptureSource for PcapCaptureSource {
                             packet.data.len(),
                             self.snap_length
                         ),
+                        source: None,
                     });
                 }
                 if packet.data.len() != packet.header.caplen as usize {
@@ -129,6 +131,7 @@ impl NativeCaptureSource for PcapCaptureSource {
                             packet.data.len(),
                             packet.header.caplen
                         ),
+                        source: None,
                     });
                 }
                 Ok(NativeCaptureEvent::Packet(NativeCapturedPacket {
@@ -142,7 +145,8 @@ impl NativeCaptureSource for PcapCaptureSource {
             Err(PcapError::TimeoutExpired) => Ok(NativeCaptureEvent::Timeout),
             Err(PcapError::NoMorePackets) => Ok(NativeCaptureEvent::Closed),
             Err(error) => Err(Error::Capture {
-                message: format!("libpcap receive failed: {error}"),
+                message: "libpcap receive failed".to_owned(),
+                source: Some(Arc::new(error)),
             }),
         }
     }
@@ -156,7 +160,8 @@ impl NativeCaptureSource for PcapCaptureSource {
                 interface_dropped_frames: statistics.if_dropped,
             })
             .map_err(|error| Error::Capture {
-                message: format!("libpcap statistics failed: {error}"),
+                message: "libpcap statistics failed".to_owned(),
+                source: Some(Arc::new(error)),
             })
     }
 }
@@ -171,31 +176,29 @@ impl CaptureInterrupt for PcapInterrupt {
 
 pub(super) fn map_open_error(interface: &InterfaceId, error: PcapError) -> Error {
     let message = error.to_string();
-    let lower = message.to_ascii_lowercase();
-    if lower.contains("permission denied")
-        || lower.contains("operation not permitted")
-        || lower.contains("access is denied")
-    {
+    let source: Option<crate::SystemFault> = Some(Arc::new(error));
+    if is_permission_denied(&message) {
         return Error::Privilege {
             message: format!(
-                "cannot open {} through libpcap: {message}; grant capture privileges (for example CAP_NET_RAW on Linux or BPF access on macOS)",
+                "cannot open {} through libpcap; grant capture privileges (for example CAP_NET_RAW on Linux or BPF access on macOS)",
                 interface.name
             ),
+            source,
         };
     }
+    let lower = message.to_ascii_lowercase();
     if lower.contains("no such device")
         || lower.contains("not found")
         || lower.contains("does not exist")
     {
         return Error::Device {
             interface: interface.name.clone(),
-            message: format!("libpcap could not open this interface: {message}"),
+            message: "libpcap could not open this interface".to_owned(),
+            source,
         };
     }
     Error::Capture {
-        message: format!(
-            "could not open {} through libpcap: {message}",
-            interface.name
-        ),
+        message: format!("could not open {} through libpcap", interface.name),
+        source,
     }
 }

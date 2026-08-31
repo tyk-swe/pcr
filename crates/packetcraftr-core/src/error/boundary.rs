@@ -4,14 +4,14 @@
 use std::error::Error;
 use std::fmt;
 
-use super::{Classification, Classified, Context, Kind};
+use super::{Classification, Classified, Coordinate, Kind};
 
 /// Classified failure propagated across a workflow authorization or execution seam.
 #[derive(Debug)]
 pub struct BoundaryError {
     message: String,
     classification: Box<Classification>,
-    context: Option<Box<Context>>,
+    context: Option<Coordinate>,
     causes: Vec<String>,
     source: Option<Box<dyn Error + Send + Sync>>,
 }
@@ -45,7 +45,7 @@ impl BoundaryError {
         Self {
             message,
             classification: Box::new(classification),
-            context: (!context.is_empty()).then(|| Box::new(context)),
+            context,
             causes,
             source: Some(Box::new(error)),
         }
@@ -71,10 +71,10 @@ impl BoundaryError {
         }
     }
 
-    /// Attaches stable domain coordinates to a boundary failure.
+    /// Attaches the stable domain coordinate of a boundary failure.
     #[must_use]
-    pub fn with_context(mut self, context: Context) -> Self {
-        self.context = (!context.is_empty()).then(|| Box::new(context));
+    pub fn with_context(mut self, context: Option<Coordinate>) -> Self {
+        self.context = context;
         self
     }
 
@@ -131,8 +131,8 @@ impl Classified for BoundaryError {
         *self.classification
     }
 
-    fn context(&self) -> Context {
-        self.context.as_deref().copied().unwrap_or_default()
+    fn context(&self) -> Option<Coordinate> {
+        self.context
     }
 
     fn causes(&self) -> Vec<String> {

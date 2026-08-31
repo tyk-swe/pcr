@@ -10,20 +10,19 @@ mod machine;
 mod ndjson;
 mod style;
 
-pub(crate) use capture_file::{capture_file_format, write_capture_file, write_raw};
+pub(crate) use capture_file::{stdout_error, stream_capture_error, write_capture_file, write_raw};
 pub(crate) use capture_writer::{LinkCaptureWriter, SourceCaptureWriter};
 
 pub(crate) use human::{
-    emit_stderr_document, emit_stderr_error, emit_stderr_message, emit_stdout_document,
-    render_diagnostics_text, write_plain_line, write_stdout_line,
+    captured_frame_text, comma_separated, emit_stderr_document, emit_stderr_error,
+    emit_stderr_message, emit_stdout_document, optional_display, render_diagnostics_stderr,
+    render_diagnostics_text, render_optional, spaced_hex, write_plain_line, write_stdout_line,
+    write_summary_line,
 };
 
-pub(crate) use machine::{
-    captured_frame_text, comma_separated, emit_aggregate, emit_aggregate_with_stats, emit_json,
-    optional_display, output_timestamp_text, render_optional, spaced_hex,
-};
+pub(crate) use machine::{emit_aggregate, emit_aggregate_with_stats, emit_json};
 
-pub(crate) use ndjson::{StreamEncoder, stdout_stream};
+pub(crate) use ndjson::{StreamEncoder, stdout_stream, write_unattributed_error};
 
 #[cfg(test)]
 pub(crate) use ndjson::test_support as ndjson_test_support;

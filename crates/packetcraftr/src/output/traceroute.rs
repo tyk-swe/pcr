@@ -14,14 +14,14 @@ use super::contract::Error;
 use super::envelope::Stats;
 use super::frame::{Captured, Timestamp};
 
-pub use crate::traceroute::{Completion, ProbeStatus, ResponseKind};
+pub use crate::traceroute::{Completion, ProbeStatus, ResponseKind, Strategy};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Probe {
     pub sequence: u64,
     pub hop_limit: u8,
     pub attempt: u32,
-    pub strategy: String,
+    pub strategy: Strategy,
     pub destination: IpAddr,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub destination_port: Option<u16>,
@@ -54,11 +54,11 @@ pub struct Undecoded {
 
 /// Aggregate result of `traceroute`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Result {
+pub struct Report {
     pub target: String,
     pub resolved_addresses: Vec<IpAddr>,
     pub destination: IpAddr,
-    pub strategy: String,
+    pub strategy: Strategy,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub destination_port: Option<u16>,
     pub hops: Vec<Hop>,
@@ -66,11 +66,11 @@ pub struct Result {
     pub completion: Completion,
 }
 
-impl Result {
+impl Report {
     pub fn try_from_traceroute(
-        result: crate::traceroute::Result,
-    ) -> std::result::Result<(Self, Vec<PacketDiagnostic>, Stats), Error> {
-        let crate::traceroute::Result {
+        result: crate::traceroute::Report,
+    ) -> Result<(Self, Vec<PacketDiagnostic>, Stats), Error> {
+        let crate::traceroute::Report {
             target,
             resolved_addresses,
             destination,
@@ -89,13 +89,13 @@ impl Result {
                     .probes
                     .into_iter()
                     .map(try_from_probe)
-                    .collect::<std::result::Result<Vec<_>, Error>>()?;
+                    .collect::<Result<Vec<_>, Error>>()?;
                 Ok(Hop {
                     hop_limit: hop.hop_limit,
                     probes: probe_outputs,
                 })
             })
-            .collect::<std::result::Result<Vec<_>, Error>>()?;
+            .collect::<Result<Vec<_>, Error>>()?;
         let undecoded_outputs = undecoded
             .into_iter()
             .map(|evidence| {
@@ -104,13 +104,13 @@ impl Result {
                     frame: Captured::try_from_frame(evidence.frame)?,
                 })
             })
-            .collect::<std::result::Result<Vec<_>, Error>>()?;
+            .collect::<Result<Vec<_>, Error>>()?;
         Ok((
             Self {
                 target,
                 resolved_addresses,
                 destination,
-                strategy: strategy.to_string(),
+                strategy,
                 destination_port,
                 hops: hop_outputs,
                 undecoded: undecoded_outputs,
@@ -138,7 +138,7 @@ pub enum Event {
         target: String,
         resolved_addresses: Vec<IpAddr>,
         destination: IpAddr,
-        strategy: String,
+        strategy: Strategy,
         #[serde(skip_serializing_if = "Option::is_none")]
         destination_port: Option<u16>,
         completion: Completion,
@@ -148,7 +148,7 @@ pub enum Event {
 impl Event {
     pub fn try_from_traceroute(
         event: crate::traceroute::Event,
-    ) -> std::result::Result<(Self, Vec<PacketDiagnostic>), Error> {
+    ) -> Result<(Self, Vec<PacketDiagnostic>), Error> {
         let (event, diagnostics) = match event {
             crate::traceroute::Event::Probe { target, probe } => (
                 Self::Probe {
@@ -179,22 +179,22 @@ impl Event {
                 target: summary.target,
                 resolved_addresses: summary.resolved_addresses,
                 destination: summary.destination,
-                strategy: summary.strategy.to_string(),
+                strategy: summary.strategy,
                 destination_port: summary.destination_port,
                 completion: summary.completion,
             },
-            summary.diagnostics,
+            Vec::new(),
             summary.stats.into(),
         )
     }
 }
 
-fn try_from_probe(probe: crate::traceroute::ProbeEvidence) -> std::result::Result<Probe, Error> {
+fn try_from_probe(probe: crate::traceroute::ProbeEvidence) -> Result<Probe, Error> {
     Ok(Probe {
         sequence: probe.sequence,
         hop_limit: probe.hop_limit,
         attempt: probe.attempt,
-        strategy: probe.strategy.to_string(),
+        strategy: probe.strategy,
         destination: probe.destination,
         destination_port: probe.destination_port,
         status: probe.status,

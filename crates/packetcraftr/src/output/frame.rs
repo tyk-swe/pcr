@@ -17,6 +17,7 @@ use super::envelope::Diagnostic;
 use super::hex::CompactHex;
 
 const MAX_SIGNED_SECONDS: u64 = i64::MAX as u64;
+const NANOS_PER_SECOND: u32 = 1_000_000_000;
 
 /// Validated one-based position in an input capture stream.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -69,7 +70,7 @@ impl TryFrom<SystemTime> for Timestamp {
 }
 
 impl Timestamp {
-    pub(crate) fn from_pre_epoch_duration(duration: Duration) -> Result<Self, Error> {
+    fn from_pre_epoch_duration(duration: Duration) -> Result<Self, Error> {
         if duration.subsec_nanos() == 0 {
             let unix_seconds = if duration.as_secs() == MAX_SIGNED_SECONDS + 1 {
                 i64::MIN
@@ -114,12 +115,27 @@ impl Timestamp {
                 reason = "`subsec_nanos` is always below 1_000_000_000, so the subtraction cannot \
                           underflow"
             )]
-            let nanoseconds = 1_000_000_000 - duration.subsec_nanos();
+            let nanoseconds = NANOS_PER_SECOND - duration.subsec_nanos();
             Ok(Self {
                 unix_seconds,
                 nanoseconds,
             })
         }
+    }
+}
+
+/// The inverse of the pre-epoch floor-seconds encoding above: `(-3,
+/// 750_000_000)` is 0.75 s after -3 s, which is -2.25 s in conventional signed
+/// decimal notation. Every renderer prints a timestamp through this, so the two
+/// halves of the rule cannot drift apart.
+impl std::fmt::Display for Timestamp {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.unix_seconds >= 0 || self.nanoseconds == 0 {
+            return write!(formatter, "{}.{:09}", self.unix_seconds, self.nanoseconds);
+        }
+        let whole_seconds = self.unix_seconds.saturating_add(1).saturating_neg();
+        let fractional = NANOS_PER_SECOND.saturating_sub(self.nanoseconds);
+        write!(formatter, "-{whole_seconds}.{fractional:09}")
     }
 }
 
@@ -291,5 +307,53 @@ impl Decoded {
             layout,
             diagnostics: diagnostics.into_iter().map(Into::into).collect(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+
+    use super::*;
+
+    /// The floor-seconds pair and its rendering are inverses: `(-3,
+    /// 750_000_000)` is 0.75 s after -3 s, so it reads as -2.25 s.
+    #[test]
+    fn timestamp_display_uses_conventional_signed_decimal_notation() {
+        for ((unix_seconds, nanoseconds), expected) in [
+            ((3, 250_000_000), "3.250000000"),
+            ((0, 0), "0.000000000"),
+            ((-3, 750_000_000), "-2.250000000"),
+            ((-1, 999_999_999), "-0.000000001"),
+            ((-3, 0), "-3.000000000"),
+        ] {
+            let timestamp = Timestamp {
+                unix_seconds,
+                nanoseconds,
+            };
+            assert_eq!(timestamp.to_string(), expected);
+        }
+    }
+
+    /// Encoding an instant and rendering it recovers the offset it was built
+    /// from, on both sides of the epoch.
+    #[test]
+    fn every_encoded_instant_renders_its_own_offset_from_the_epoch() {
+        for (offset, before_epoch, expected) in [
+            (Duration::ZERO, false, "0.000000000"),
+            (Duration::from_nanos(1), false, "0.000000001"),
+            (Duration::new(3, 250_000_000), false, "3.250000000"),
+            (Duration::from_nanos(1), true, "-0.000000001"),
+            (Duration::new(2, 250_000_000), true, "-2.250000000"),
+            (Duration::new(3, 0), true, "-3.000000000"),
+        ] {
+            let instant = if before_epoch {
+                UNIX_EPOCH - offset
+            } else {
+                UNIX_EPOCH + offset
+            };
+            let timestamp = Timestamp::try_from(instant).expect("in-range instant encodes");
+            assert_eq!(timestamp.to_string(), expected);
+        }
     }
 }

@@ -44,6 +44,8 @@ impl Default for Policy {
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Error {
+    #[error("resolved-address limit {value} is invalid; expected 1..={maximum}")]
+    InvalidAddressLimit { value: usize, maximum: usize },
     #[error("traffic policy denies public destination {destination}")]
     PublicDestination { destination: IpAddr },
     #[error("traffic policy cannot authorize packet routing semantics: {reason}")]
@@ -70,6 +72,13 @@ pub enum Error {
 impl Classified for Error {
     fn classification(&self) -> Classification {
         let (code, remediation) = match self {
+            // A malformed resolved-address bound is a caller request error,
+            // and keeps the published `cli.live_target` code and remediation
+            // it reported while it lived on the target-resolution error.
+            Self::InvalidAddressLimit { .. } => (
+                "cli.live_target",
+                "use a valid IP address or bounded ASCII DNS hostname",
+            ),
             Self::PublicDestination { .. } => (
                 "policy.public_destination",
                 "explicitly authorize public destinations only for networks you are permitted to test",
@@ -107,6 +116,10 @@ impl Classified for Error {
                 "reduce DNS attempts or query bytes, or deliberately raise the wire/application byte budget",
             ),
         };
-        Classification::new(code, Kind::Policy, Some(remediation))
+        let kind = match self {
+            Self::InvalidAddressLimit { .. } => Kind::Cli,
+            _ => Kind::Policy,
+        };
+        Classification::new(code, kind, Some(remediation))
     }
 }

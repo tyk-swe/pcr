@@ -155,22 +155,14 @@ impl From<&AnalysisOutcome> for DatagramOutcome {
                 duplicate_fragments: *duplicate_fragments,
                 overlap_bytes: *overlap_bytes,
             },
-            AnalysisOutcome::Incomplete {
-                key,
-                reason,
-                fragment_count,
-                unique_bytes,
-                known_final_length,
-                duplicate_fragments,
-                overlap_bytes,
-            } => Self::Incomplete {
-                key: key.into(),
-                reason: (*reason).into(),
-                fragment_count: *fragment_count,
-                unique_bytes: *unique_bytes,
-                known_final_length: *known_final_length,
-                duplicate_fragments: *duplicate_fragments,
-                overlap_bytes: *overlap_bytes,
+            AnalysisOutcome::Incomplete(datagram) => Self::Incomplete {
+                key: (&datagram.key).into(),
+                reason: datagram.reason.into(),
+                fragment_count: datagram.fragment_count,
+                unique_bytes: datagram.unique_bytes,
+                known_final_length: datagram.known_final_length,
+                duplicate_fragments: datagram.duplicate_fragments,
+                overlap_bytes: datagram.overlap_bytes,
             },
         }
     }
@@ -289,7 +281,7 @@ impl From<AnalysisEventRecord> for Event {
                     frame: value.number,
                     outcome: (&outcome).into(),
                 },
-                AnalysisOutcome::Incomplete { .. } => Self::IpDatagramIncomplete {
+                AnalysisOutcome::Incomplete(_) => Self::IpDatagramIncomplete {
                     frame: value.number,
                     outcome: (&outcome).into(),
                 },

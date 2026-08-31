@@ -11,11 +11,16 @@ use crate::{
     layer::{Layer, reflective_layer},
 };
 
-use super::super::common::{
-    aliased_fields, invalid, make_layer, payload_without_padding, protocol, resolve_u16, truncated,
-    validate_auto_raw_discriminator, validate_raw_child_discriminator, wrong_layer,
-};
 use super::ethernet::{link_payload_selection, link_type_expectation, validate_link_length_form};
+use crate::protocol::common::{
+    invalid, make_layer, payload_without_padding, protocol, resolve_u16, truncated, typed_layer,
+    validate_auto_raw_discriminator, validate_raw_child_discriminator,
+};
+
+use crate::protocol::BuiltinProtocol;
+
+const VLAN_NAME: &str = BuiltinProtocol::Vlan.as_str();
+const SERVICE_NAME: &str = BuiltinProtocol::Vlan8021ad.as_str();
 
 const VLAN_LEN: usize = 4;
 
@@ -58,13 +63,13 @@ impl Default for Vlan8021ad {
 }
 
 macro_rules! declare_vlan_layer {
-    ($ty:ty, $schema:ident, $protocol:literal, $name:literal, $layout:ident) => {
+    ($ty:ty, $schema:ident, $protocol:expr, $name:literal, $layout:ident) => {
         reflective_layer! {
             fn $schema() => { protocol: protocol($protocol), name: $name }
             impl $ty {
-                "priority" => { kind: Unsigned, derived: false, required: false, description: "IEEE 802.1 priority code point", reflect_bounded: priority, 7_u64, layout: (0, 2) },
-                "drop_eligible" => { kind: Bool, derived: false, required: false, description: "Drop eligible indicator", reflect: drop_eligible, layout: (0, 2) },
-                "vlan_id" => { kind: Unsigned, derived: false, required: true, description: "VLAN identifier", reflect_bounded: vlan_id, 4095_u64, layout: (0, 2) },
+                "priority" | "pcp" => { kind: Unsigned, derived: false, required: false, description: "IEEE 802.1 priority code point", reflect_bounded: priority, 7_u64, layout: (0, 2) },
+                "drop_eligible" | "dei" => { kind: Bool, derived: false, required: false, description: "Drop eligible indicator", reflect: drop_eligible, layout: (0, 2) },
+                "vlan_id" | "vid" => { kind: Unsigned, derived: false, required: true, description: "VLAN identifier", reflect_bounded: vlan_id, 4095_u64, layout: (0, 2) },
                 "ether_type" => { kind: Unsigned, derived: true, required: false, description: "Encapsulated EtherType", reflect: ether_type, layout: (2, 4) },
             }
             layout pub(crate) fn $layout();
@@ -72,11 +77,17 @@ macro_rules! declare_vlan_layer {
     };
 }
 
-declare_vlan_layer!(Vlan, vlan_schema, "vlan", "IEEE 802.1Q VLAN", vlan_layout);
+declare_vlan_layer!(
+    Vlan,
+    vlan_schema,
+    VLAN_NAME,
+    "IEEE 802.1Q VLAN",
+    vlan_layout
+);
 declare_vlan_layer!(
     Vlan8021ad,
     vlan_ad_schema,
-    "vlan8021ad",
+    SERVICE_NAME,
     "IEEE 802.1ad Service VLAN",
     vlan_ad_layout
 );
@@ -144,13 +155,11 @@ where
     let mut prefix = Vec::with_capacity(VLAN_LEN);
     prefix.extend_from_slice(&tci.to_be_bytes());
     prefix.extend_from_slice(&ether_type.to_be_bytes());
-    Ok(EncodedLayer {
-        prefix,
-        suffix: Vec::new(),
-        materialized: Box::new(materialize(materialized_type)),
-        fields: layout(),
-        diagnostics,
-    })
+    Ok(
+        EncodedLayer::header(prefix, Box::new(materialize(materialized_type)))
+            .with_fields(layout())
+            .with_diagnostics(diagnostics),
+    )
 }
 
 fn decode_vlan(
@@ -188,8 +197,8 @@ fn decode_vlan(
 }
 
 impl LayerCodec for VlanCodec {
-    fn protocol_id(&self) -> crate::layer::Id {
-        protocol("vlan")
+    fn protocol_id(&self) -> &'static crate::layer::Id {
+        &vlan_schema().protocol
     }
 
     fn encode(
@@ -198,12 +207,9 @@ impl LayerCodec for VlanCodec {
         payload: &[u8],
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
-        let layer = layer
-            .as_any()
-            .downcast_ref::<Vlan>()
-            .ok_or_else(|| wrong_layer("vlan", layer))?;
+        let layer = typed_layer::<Vlan>(VLAN_NAME, layer)?;
         encode_vlan(
-            "vlan",
+            VLAN_NAME,
             VlanEncodeFields {
                 priority: layer.priority,
                 drop_eligible: layer.drop_eligible,
@@ -226,7 +232,7 @@ impl LayerCodec for VlanCodec {
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
         decode_vlan(
-            "vlan",
+            VLAN_NAME,
             input,
             vlan_layout,
             |priority, drop_eligible, vlan_id, ether_type| {
@@ -244,24 +250,13 @@ impl LayerCodec for VlanCodec {
         &self,
         fields: &BTreeMap<String, FieldValue>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(
-            Vlan::default(),
-            &aliased_fields(
-                "vlan",
-                fields,
-                &[
-                    ("vid", "vlan_id"),
-                    ("pcp", "priority"),
-                    ("dei", "drop_eligible"),
-                ],
-            )?,
-        )
+        make_layer(Vlan::default(), fields)
     }
 }
 
 impl LayerCodec for Vlan8021adCodec {
-    fn protocol_id(&self) -> crate::layer::Id {
-        protocol("vlan8021ad")
+    fn protocol_id(&self) -> &'static crate::layer::Id {
+        &vlan_ad_schema().protocol
     }
 
     fn encode(
@@ -270,12 +265,9 @@ impl LayerCodec for Vlan8021adCodec {
         payload: &[u8],
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
-        let layer = layer
-            .as_any()
-            .downcast_ref::<Vlan8021ad>()
-            .ok_or_else(|| wrong_layer("vlan8021ad", layer))?;
+        let layer = typed_layer::<Vlan8021ad>(SERVICE_NAME, layer)?;
         encode_vlan(
-            "vlan8021ad",
+            SERVICE_NAME,
             VlanEncodeFields {
                 priority: layer.priority,
                 drop_eligible: layer.drop_eligible,
@@ -298,7 +290,7 @@ impl LayerCodec for Vlan8021adCodec {
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
         decode_vlan(
-            "vlan8021ad",
+            SERVICE_NAME,
             input,
             vlan_ad_layout,
             |priority, drop_eligible, vlan_id, ether_type| {
@@ -316,17 +308,6 @@ impl LayerCodec for Vlan8021adCodec {
         &self,
         fields: &BTreeMap<String, FieldValue>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(
-            Vlan8021ad::default(),
-            &aliased_fields(
-                "vlan8021ad",
-                fields,
-                &[
-                    ("vid", "vlan_id"),
-                    ("pcp", "priority"),
-                    ("dei", "drop_eligible"),
-                ],
-            )?,
-        )
+        make_layer(Vlan8021ad::default(), fields)
     }
 }

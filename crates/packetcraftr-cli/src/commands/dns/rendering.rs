@@ -7,12 +7,12 @@ use packetcraftr::{core, output};
 
 use crate::errors::CliError;
 use crate::rendering::{
-    captured_frame_text, comma_separated, optional_display, output_timestamp_text,
-    render_diagnostics_text, render_optional, write_stdout_line,
+    captured_frame_text, comma_separated, optional_display, render_diagnostics_text,
+    render_optional, write_stdout_line,
 };
 
 pub(super) fn render_text(
-    result: output::dns::Result,
+    result: output::dns::Report,
     diagnostics: Vec<core::diagnostic::Diagnostic>,
     stats: output::envelope::Stats,
 ) -> Result<(), CliError> {
@@ -36,8 +36,8 @@ pub(super) fn render_text(
             attempt.server_address,
             optional_display(attempt.source_port),
             attempt.status.as_str(),
-            render_optional(attempt.sent_at, output_timestamp_text),
-            render_optional(attempt.received_at, output_timestamp_text),
+            optional_display(attempt.sent_at),
+            optional_display(attempt.received_at),
             render_optional(attempt.latency, |value| format!("{value:?}")),
             optional_display(attempt.response_code),
             attempt.reason,
@@ -71,10 +71,25 @@ pub(super) fn render_text(
     write_stdout_line(format_args!(
         "{}",
         response_summary(ResponseLine {
-            response_code: optional_display(result.response_code),
-            response_code_name: result.response_code_name.as_deref().unwrap_or("none"),
-            authoritative: optional_display(result.authoritative),
-            truncated: optional_display(result.truncated),
+            response_code: optional_display(
+                result
+                    .response
+                    .as_ref()
+                    .map(|response| response.response_code)
+            ),
+            response_code_name: result
+                .response
+                .as_ref()
+                .map_or("none", |response| response.response_code_name.as_str()),
+            authoritative: optional_display(
+                result
+                    .response
+                    .as_ref()
+                    .map(|response| response.authoritative)
+            ),
+            truncated: optional_display(
+                result.response.as_ref().map(|response| response.truncated)
+            ),
             accepted: result
                 .answers
                 .len()
@@ -145,8 +160,8 @@ mod tests {
 
     use packetcraftr::dns;
 
-    use super::super::Dns;
     use super::{ResponseLine, response_summary, serialization_failure};
+    use crate::commands::dns::Dns;
     use crate::commands::target_workflow::TargetWorkflow as _;
     use crate::rendering::ndjson_test_support::{assert_contiguous, stream};
     use packetcraftr::output;
@@ -188,7 +203,6 @@ mod tests {
             fallback_attempted: false,
             accepted_transport: None,
             response: None,
-            diagnostics: Vec::new(),
             stats: packetcraftr::Stats::default(),
         }
     }
@@ -219,7 +233,7 @@ mod tests {
 
         let failure = serialization_failure(error);
 
-        assert_eq!(failure.exit_code, 70);
+        assert_eq!(failure.exit_code(), 70);
         assert_eq!(
             failure.message,
             format!("DNS output serialization failed: {rendered}")

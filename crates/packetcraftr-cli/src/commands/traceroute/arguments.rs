@@ -47,13 +47,13 @@ pub(crate) struct Args {
     #[arg(long)]
     pub(crate) port: Option<u16>,
     /// First non-zero IPv4 TTL or IPv6 hop limit.
-    #[arg(long, default_value_t = packetcraftr::traceroute::DEFAULT_TRACEROUTE_FIRST_HOP)]
+    #[arg(long, default_value_t = packetcraftr::traceroute::DEFAULT_FIRST_HOP)]
     pub(crate) first_hop: u8,
     /// Last IPv4 TTL or IPv6 hop limit attempted.
-    #[arg(long, default_value_t = packetcraftr::traceroute::DEFAULT_TRACEROUTE_MAX_HOPS)]
+    #[arg(long, default_value_t = packetcraftr::traceroute::DEFAULT_MAX_HOPS)]
     pub(crate) max_hops: u8,
     /// Number of attempts retained for every hop.
-    #[arg(long, default_value_t = packetcraftr::traceroute::DEFAULT_TRACEROUTE_PROBES_PER_HOP)]
+    #[arg(long, default_value_t = packetcraftr::traceroute::DEFAULT_PROBES_PER_HOP)]
     pub(crate) attempts: u32,
     /// Shared response window for every capture-ready hop batch.
     #[arg(long, default_value_t = 1_000)]
@@ -68,7 +68,7 @@ pub(crate) struct Args {
     #[arg(long, default_value_t = 3_600_000)]
     pub(crate) max_duration_ms: u64,
     /// Maximum hop-scoped undecodable exact frames retained.
-    #[arg(long, default_value_t = packetcraftr::traceroute::DEFAULT_MAX_UNDECODED_TRACEROUTE_FRAMES)]
+    #[arg(long, default_value_t = packetcraftr::traceroute::DEFAULT_MAX_UNDECODED_FRAMES)]
     pub(crate) max_undecoded: usize,
     #[command(flatten)]
     pub(crate) route: RouteSelectionArgs,

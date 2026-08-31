@@ -34,7 +34,7 @@ fn representative_packet() -> Packet {
 
 #[test]
 fn ipv4_udp_build_dissect_rebuild_is_exact() {
-    let registry = Arc::new(builtin::registry().expect("built-ins must register"));
+    let registry = builtin::registry();
     let builder = build::Builder::new(Arc::clone(&registry));
     let built = builder
         .build(
@@ -73,10 +73,16 @@ fn ipv4_udp_build_dissect_rebuild_is_exact() {
 
 #[test]
 fn advertised_protocols_and_capture_roots_are_registered() {
-    let registry = builtin::registry().expect("built-ins must register");
+    let registry = builtin::registry();
 
     for support in BUILTIN_PROTOCOLS {
         assert_eq!(registry.codec(support.protocol).is_some(), support.dissect);
+        assert_eq!(
+            registry.matcher(support.protocol).is_some(),
+            support.matcher,
+            "{}",
+            support.protocol
+        );
         for alias in support.aliases {
             assert_eq!(
                 registry.protocol_named(alias).map(|value| value.as_str()),
@@ -84,6 +90,36 @@ fn advertised_protocols_and_capture_roots_are_registered() {
             );
         }
     }
+    // The one advertised non-round-tripping codec is the one that cannot
+    // encode at all, and it says so instead of failing silently.
+    let not_round_tripping: Vec<&str> = BUILTIN_PROTOCOLS
+        .iter()
+        .filter(|support| !support.exact_round_trip)
+        .map(|support| support.protocol)
+        .collect();
+    assert_eq!(not_round_tripping, ["raw_ip"]);
+    let error = registry
+        .codec("raw_ip")
+        .expect("raw_ip codec")
+        .encode(
+            &Raw::new(vec![0x45]),
+            &[],
+            &packetcraftr_core::codec::LayerEncodeContext {
+                packet: &Packet::new(),
+                index: 0,
+                build_context: &build::Context::default(),
+                mode: build::Mode::Strict,
+                registry: &registry,
+                child: None,
+                remaining_packet_bytes: usize::MAX,
+            },
+        )
+        .err()
+        .expect("raw_ip cannot encode");
+    assert!(
+        matches!(error, packetcraftr_core::codec::Error::Unsupported { .. }),
+        "{error}"
+    );
     for root in BUILTIN_CAPTURE_ROOTS {
         assert_eq!(
             registry
@@ -96,7 +132,7 @@ fn advertised_protocols_and_capture_roots_are_registered() {
 
 #[test]
 fn dissection_limits_reject_before_parsing() {
-    let registry = Arc::new(builtin::registry().expect("built-ins must register"));
+    let registry = builtin::registry();
     let frame = Frame::new(
         std::time::SystemTime::UNIX_EPOCH,
         LinkType::IPV4,

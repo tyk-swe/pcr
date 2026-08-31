@@ -12,8 +12,8 @@ use packetcraftr_core::{
 };
 use packetcraftr_netio::capture::RecordIdentity;
 
-use super::preparation::PreparedPacket;
-use crate::evidence::Budget;
+use crate::evidence::{Budget, DiagnosticLog};
+use crate::materialize::PreparedPacket;
 
 #[derive(Clone, Copy)]
 pub(super) struct UnsolicitedFreshness {
@@ -33,7 +33,7 @@ pub(crate) type WorkflowStopPredicate<'a> = dyn FnMut(usize, &Packet, &DecodedPa
 pub(crate) struct Accumulator {
     pub(super) unsolicited: Vec<UnsolicitedEvidence>,
     pub(super) pending_events: Vec<super::contract::Event>,
-    pub(crate) diagnostics: Vec<packetcraftr_core::diagnostic::Diagnostic>,
+    pub(crate) diagnostics: DiagnosticLog,
     pub(super) evidence_budget: Budget,
     pub(crate) response_counts: Vec<usize>,
     pub(super) response_count: usize,
@@ -52,19 +52,27 @@ pub(crate) struct ProcessContext<'a> {
     pub(crate) options: &'a super::contract::Options,
 }
 
-#[derive(Clone, Copy)]
-pub(crate) struct WorkflowPromotionContext<'a> {
-    pub(crate) prepared: &'a [PreparedPacket],
-    pub(crate) sent: &'a [Arc<crate::SentPacket>],
-    pub(crate) deadline: Instant,
-    pub(crate) max_responses: usize,
+/// The capture provider handed back an ingress record it had already
+/// delivered. Nothing about the operation can be trusted after that, so it is
+/// a failure rather than one more outcome to keep processing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct DuplicateRecord;
+
+impl DuplicateRecord {
+    /// The single wording both the blocking collection loop and the zero-time
+    /// drain report for this failure.
+    pub(crate) fn into_error(self) -> packetcraftr_netio::Error {
+        packetcraftr_netio::Error::Capture {
+            message: "capture provider returned the same ingress record more than once".to_owned(),
+            source: None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ProcessOutcome {
     Continue,
     CorrelationDeadlineExpired,
-    DuplicateRecordIdentity,
     StopCapture,
 }
 
@@ -73,7 +81,7 @@ impl Accumulator {
         Self {
             unsolicited: Vec::new(),
             pending_events: Vec::new(),
-            diagnostics: Vec::new(),
+            diagnostics: DiagnosticLog::default(),
             evidence_budget: Budget::default(),
             response_counts: vec![0; requests],
             response_count: 0,

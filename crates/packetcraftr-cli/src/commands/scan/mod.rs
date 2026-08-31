@@ -4,7 +4,6 @@
 //! Scan CLI command logic.
 
 pub(super) mod arguments;
-mod conversion;
 mod rendering;
 
 use std::time::Duration;
@@ -22,7 +21,7 @@ use crate::rendering::StreamEncoder;
 pub(super) fn run(
     arguments: Args,
     format: output::contract::Format,
-    stream: &mut StreamEncoder,
+    stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     let format = ToolFormat::narrow(output::contract::Command::Scan, format)?;
     let Args {
@@ -54,7 +53,8 @@ pub(super) fn run(
         max_undecoded,
     };
     scan_limits.validate().map_err(CliError::classified)?;
-    let ports = conversion::expand_port_specs(&ports, max_ports).map_err(CliError::classified)?;
+    let ports = packetcraftr::scan::select_ports(ports.into_iter().map(|spec| spec.0), max_ports)
+        .map_err(CliError::classified)?;
     let request = packetcraftr::scan::Request {
         target,
         transport: transport.into(),
@@ -65,9 +65,9 @@ pub(super) fn run(
         probes_per_second: rate,
         limits: scan_limits,
     };
-    let mut probe =
+    let mut providers =
         target_workflow::prepare(route, policy, request.timeout, batch_size, queue_limits)?;
-    target_workflow::run::<Scan>(&request, &mut probe, format, stream)
+    target_workflow::run::<Scan>(&request, &mut providers, format, stream)
 }
 
 /// The `scan` workflow.
@@ -79,7 +79,7 @@ impl TargetWorkflow for Scan {
     type Request = packetcraftr::scan::Request;
     type Event = packetcraftr::scan::Event;
     type Summary = packetcraftr::scan::Summary;
-    type Document = output::scan::Result;
+    type Document = output::scan::Report;
     type Record = output::scan::Event;
 
     fn execute(
@@ -92,7 +92,7 @@ impl TargetWorkflow for Scan {
         let result = packetcraftr::scan::run(request, authorizer, registry, executor, clock)
             .map_err(CliError::classified)?;
         let (result, diagnostics, stats) =
-            output::scan::Result::try_from_scan(result).map_err(CliError::classified)?;
+            output::scan::Report::try_from_scan(result).map_err(CliError::classified)?;
         Ok(Document::new(result, diagnostics, stats))
     }
 
@@ -102,6 +102,7 @@ impl TargetWorkflow for Scan {
         registry: &core::registry::Registry,
         executor: &mut Executor,
         clock: &mut impl packetcraftr::clock::Clock,
+        runtime: &core::progress::Runtime,
         stream: &StreamEncoder,
     ) -> Result<(), CliError> {
         let event_stream = stream.clone();
@@ -111,6 +112,7 @@ impl TargetWorkflow for Scan {
             registry,
             executor,
             clock,
+            runtime,
             move |event| {
                 Self::emit_event(event, &event_stream).map_err(CliError::into_boundary_error)
             },

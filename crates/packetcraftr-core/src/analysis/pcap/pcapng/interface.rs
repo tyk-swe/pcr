@@ -5,7 +5,8 @@
 
 use crate::frame::LinkType;
 
-use super::super::{
+use super::options::visit_options;
+use crate::analysis::pcap::{
     error::Error,
     model::{Endianness, Format, Interface, TimestampResolution},
     wire::{
@@ -13,7 +14,6 @@ use super::super::{
         decode_i64, decode_u16, decode_u32,
     },
 };
-use super::options::visit_options;
 
 pub(in crate::analysis::pcap) fn parse_interface_description(
     body: &[u8],

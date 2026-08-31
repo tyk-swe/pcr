@@ -10,9 +10,14 @@ use crate::{
     registry::Discriminator,
 };
 
-use super::super::common::{
-    ensure_encode_budget, make_layer, protocol, strict_or_diagnostic, truncated, wrong_layer,
+use crate::protocol::common::{
+    child_is_opaque, ensure_encode_budget, make_layer, protocol, strict_or_diagnostic, truncated,
+    typed_layer,
 };
+
+use crate::protocol::BuiltinProtocol;
+
+const NAME: &str = BuiltinProtocol::L2tpv3.as_str();
 
 const L2TPV3_LEN: usize = 4;
 
@@ -35,7 +40,7 @@ impl Default for L2tpv3 {
 }
 
 reflective_layer! {
-    fn l2tpv3_schema() => { protocol: protocol("l2tpv3"), name: "L2TPv3" }
+    fn l2tpv3_schema() => { protocol: protocol(NAME), name: "L2TPv3" }
     impl L2tpv3 {
         "session_id" => { kind: Unsigned, derived: false, required: true, description: "32-bit session identifier; zero is the control connection", reflect: session_id, layout: (0, 4) }
     }
@@ -46,8 +51,8 @@ reflective_layer! {
 pub(crate) struct L2tpv3Codec;
 
 impl LayerCodec for L2tpv3Codec {
-    fn protocol_id(&self) -> crate::layer::Id {
-        protocol("l2tpv3")
+    fn protocol_id(&self) -> &'static crate::layer::Id {
+        &l2tpv3_schema().protocol
     }
 
     fn encode(
@@ -56,23 +61,17 @@ impl LayerCodec for L2tpv3Codec {
         _payload: &[u8],
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
-        let layer = layer
-            .as_any()
-            .downcast_ref::<L2tpv3>()
-            .ok_or_else(|| wrong_layer("l2tpv3", layer))?;
-        ensure_encode_budget("l2tpv3", L2TPV3_LEN, context)?;
+        let layer = typed_layer::<L2tpv3>(NAME, layer)?;
+        ensure_encode_budget(NAME, L2TPV3_LEN, context)?;
         let mut diagnostics = Vec::new();
         // The negotiated cookie sits between this header and the tunneled
         // frame with no on-wire length, so a typed child would serialize
         // structure that dissection deliberately never recovers.
         if let Some(child) = context.child
-            && !matches!(
-                child.protocol_id().as_str(),
-                "raw" | "padding" | "malformed"
-            )
+            && !child_is_opaque(child)
         {
             strict_or_diagnostic(
-                "l2tpv3",
+                NAME,
                 "build.l2tpv3_cookie",
                 "session_id",
                 format!(
@@ -83,13 +82,12 @@ impl LayerCodec for L2tpv3Codec {
                 &mut diagnostics,
             )?;
         }
-        Ok(EncodedLayer {
-            prefix: layer.session_id.to_be_bytes().to_vec(),
-            suffix: Vec::new(),
-            materialized: Box::new(layer.clone()),
-            fields: l2tpv3_layout(),
-            diagnostics,
-        })
+        Ok(EncodedLayer::header(
+            layer.session_id.to_be_bytes().to_vec(),
+            Box::new(layer.clone()),
+        )
+        .with_fields(l2tpv3_layout())
+        .with_diagnostics(diagnostics))
     }
 
     fn decode(
@@ -98,7 +96,7 @@ impl LayerCodec for L2tpv3Codec {
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
         let Some(header) = input.first_chunk::<L2TPV3_LEN>() else {
-            return Err(truncated("l2tpv3", L2TPV3_LEN, input.len()));
+            return Err(truncated(NAME, L2TPV3_LEN, input.len()));
         };
         let payload_len = input.len().saturating_sub(L2TPV3_LEN);
         Ok(DecodedLayerValue {

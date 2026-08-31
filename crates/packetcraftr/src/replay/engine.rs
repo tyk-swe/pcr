@@ -9,7 +9,7 @@ use packetcraftr_core::analysis::pcap::{Format, Interface, Reader};
 use packetcraftr_core::budget::{Deadline, DeadlineExceeded};
 use packetcraftr_core::frame::Frame;
 use packetcraftr_netio::{
-    interface::Id as InterfaceId, link::Mode as LinkMode, route::Plan as RoutePlan,
+    link::Mode as LinkMode, route::Materialized as MaterializedRoute, route::Plan as RoutePlan,
 };
 
 use crate::clock::Clock;
@@ -77,8 +77,10 @@ where
     F: FnMut(FrameEvidence) -> Result<(), Error>,
 {
     let mut deadline = Deadline::new(options.limits.max_duration);
-    let limits = options.limits.validate()?;
-    let timing = options.timing.validate()?;
+    options.limits.validate()?;
+    options.timing.validate()?;
+    let limits = options.limits;
+    let timing = options.timing;
     enforce_deadline(&deadline, 0)?;
     let source_format = reader.format();
     let mut progress = Progress::default();
@@ -117,7 +119,7 @@ where
             &read.frame,
             plan.mode,
         )?;
-        let route = validate_interface(
+        let route = plan_frame_route(
             transmitter,
             options,
             &deadline,
@@ -125,16 +127,16 @@ where
             plan.mode,
             &read.frame,
         )?;
-        authorize_final_wire(authorizer, &deadline, source_index, &read.frame, &route)?;
-        pace(clock, &mut deadline, source_index, plan.delay)?;
-        let transmission = transmit_frame(
-            transmitter,
+        authorize_final_wire(
+            authorizer,
             &deadline,
             source_index,
-            &route.decision.interface,
-            plan.mode,
             &read.frame,
+            &route.plan,
         )?;
+        pace(clock, &mut deadline, source_index, plan.delay)?;
+        let transmission =
+            transmit_frame(transmitter, &deadline, source_index, &route, &read.frame)?;
 
         progress.complete(&plan, read.frame.timestamp);
         emit(FrameEvidence {
@@ -169,16 +171,16 @@ fn read_frame<R: Read>(
         return Ok(None);
     };
     let capture_interface = capture_interface(reader, &frame, source_index)?;
-    let number = source_index.checked_add(1).ok_or(Error::FrameLimit {
+    let number = source_index.checked_add(1).ok_or(Error::SourceFrameLimit {
         source_index,
         actual: u64::MAX,
-        limit: limits.max_frames,
+        limit: limits.max_source_frames,
     })?;
-    if number > limits.max_frames {
-        return Err(Error::FrameLimit {
+    if number > limits.max_source_frames {
+        return Err(Error::SourceFrameLimit {
             source_index,
             actual: number,
-            limit: limits.max_frames,
+            limit: limits.max_source_frames,
         });
     }
     if frame.bytes().len() > limits.max_frame_bytes {
@@ -252,16 +254,16 @@ fn plan_frame(
     let next_bytes = progress
         .bytes_transmitted
         .checked_add(u64::from(frame.captured_length()))
-        .ok_or(Error::ByteLimit {
+        .ok_or(Error::TransmittedByteLimit {
             source_index,
             actual: u64::MAX,
-            limit: limits.max_bytes,
+            limit: limits.max_transmitted_bytes,
         })?;
-    if next_bytes > limits.max_bytes {
-        return Err(Error::ByteLimit {
+    if next_bytes > limits.max_transmitted_bytes {
+        return Err(Error::TransmittedByteLimit {
             source_index,
             actual: next_bytes,
-            limit: limits.max_bytes,
+            limit: limits.max_transmitted_bytes,
         });
     }
     let mode = replay_link_mode(source_index, frame.link_type, options.link_mode)?;
@@ -340,18 +342,18 @@ fn authorize_frame<A: Authorizer>(
     })
 }
 
-fn validate_interface<T: Transmitter>(
+fn plan_frame_route<T: Transmitter>(
     transmitter: &mut T,
     options: &Options,
     deadline: &Deadline,
     source_index: u64,
     mode: LinkMode,
     frame: &Frame,
-) -> Result<RoutePlan, Error> {
+) -> Result<MaterializedRoute, Error> {
     enforce_deadline(deadline, source_index)?;
-    let interface = transmitter.validate_interface(&options.interface, mode, frame);
+    let route = transmitter.plan_frame(&options.interface, mode, frame);
     enforce_deadline(deadline, source_index)?;
-    interface.map_err(|source| Error::Transmission {
+    route.map_err(|source| Error::Transmission {
         source_index,
         source,
     })
@@ -384,7 +386,7 @@ fn pace<C: Clock>(
         .map_err(|error| duration_limit(source_index, error))?;
     clock.sleep(delay).map_err(|source| Error::Clock {
         source_index,
-        message: source.to_string(),
+        source: Box::new(source),
     })?;
     deadline
         .account(delay)
@@ -395,17 +397,18 @@ fn transmit_frame<T: Transmitter>(
     transmitter: &mut T,
     deadline: &Deadline,
     source_index: u64,
-    interface: &InterfaceId,
-    mode: LinkMode,
+    route: &MaterializedRoute,
     frame: &Frame,
 ) -> Result<Transmission, Error> {
     enforce_deadline(deadline, source_index)?;
-    let transmission = transmitter
-        .transmit(interface, mode, frame)
-        .map_err(|source| Error::Transmission {
-            source_index,
-            source,
-        })?;
+    let interface = &route.plan.decision.interface;
+    let transmission =
+        transmitter
+            .transmit(route, frame)
+            .map_err(|source| Error::Transmission {
+                source_index,
+                source,
+            })?;
     if &transmission.interface != interface {
         return Err(Error::InvalidEvidence {
             source_index,

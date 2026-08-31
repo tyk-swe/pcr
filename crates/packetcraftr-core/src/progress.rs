@@ -4,6 +4,7 @@
 //! Deadline-aware publication for progressive operation events.
 
 use std::{
+    fmt,
     sync::{
         Arc, Mutex, OnceLock,
         atomic::{AtomicBool, Ordering},
@@ -16,12 +17,72 @@ use std::{
 use crate::budget::{Deadline, DeadlineExceeded};
 use crate::error::{BoundaryError, Classification, Kind};
 
-/// Process-wide upper bound on callbacks that can own an OS worker, including
-/// callbacks still running after their publisher stopped waiting.
-const PROGRESS_WORKER_LIMIT: usize = 8;
+/// Upper bound on callbacks one [`Runtime`] can own an OS worker for,
+/// including callbacks still running after their publisher stopped waiting.
+pub const MAX_WORKER_CAPACITY: usize = 8;
 const REAPER_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
-static PROGRESS_RUNTIME: OnceLock<Result<ProgressRuntime, Arc<str>>> = OnceLock::new();
+/// The worker budget and handle cleanup that one set of [`Sink`]s shares.
+///
+/// A runtime owns its budget instead of borrowing a process-wide one, so a
+/// caller that composes a fresh runtime always starts from a full budget and
+/// working cleanup. That matters because cleanup failure disables admission:
+/// scoping it here keeps the failure to the operations that share this
+/// runtime rather than to every later operation in the process.
+///
+/// The cleanup worker starts with the first admitted sink, so composing a
+/// runtime that never publishes costs no thread.
+pub struct Runtime {
+    capacity: usize,
+    workers: OnceLock<Result<Workers, Arc<str>>>,
+}
+
+impl Runtime {
+    /// Bounds this runtime at `capacity` concurrent callback workers.
+    ///
+    /// The capacity is clamped to [`MAX_WORKER_CAPACITY`] so the worker
+    /// ceiling stays finite no matter what a caller asks for. A zero capacity
+    /// admits no callback worker at all, which fails progressive publication
+    /// closed.
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            capacity: capacity.min(MAX_WORKER_CAPACITY),
+            workers: OnceLock::new(),
+        }
+    }
+
+    /// Concurrent callback workers this runtime admits.
+    pub const fn capacity(&self) -> usize {
+        self.capacity
+    }
+
+    fn workers(&self) -> Result<&Workers, BoundaryError> {
+        self.workers
+            .get_or_init(|| start_workers(self.capacity))
+            .as_ref()
+            .map_err(|message| {
+                unavailable(format!(
+                    "progressive output cleanup initialization failed: {message}"
+                ))
+            })
+    }
+}
+
+impl Default for Runtime {
+    fn default() -> Self {
+        Self::new(MAX_WORKER_CAPACITY)
+    }
+}
+
+impl fmt::Debug for Runtime {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Runtime")
+            .field("capacity", &self.capacity)
+            .field("started", &self.workers.get().is_some())
+            .finish()
+    }
+}
 
 /// Failure returned by an interruptible progressive sink.
 #[derive(Debug)]
@@ -30,14 +91,15 @@ pub enum EmitError {
     Output(BoundaryError),
 }
 
-/// Runs a user callback on an isolated, process-budgeted worker.
+/// Runs a user callback on an isolated, runtime-budgeted worker.
 ///
 /// Publication deadlines bound how long Sink::emit waits for a callback; they
 /// do not terminate arbitrary callback code. A callback may therefore outlive
-/// the deadline and its Sink, but it continues to occupy one of the process-wide
-/// worker permits until it returns. Once all permits are occupied, Sink::new
-/// fails with the classified internal.progressive_output_worker_exhausted error
-/// instead of starting another OS thread.
+/// the deadline and its Sink, but it continues to occupy one of its runtime's
+/// worker permits until it returns. Once all permits are occupied,
+/// [`Sink::new_in`] fails with the classified
+/// internal.progressive_output_worker_exhausted error instead of starting
+/// another OS thread.
 pub struct Sink<T> {
     events: Option<SyncSender<T>>,
     outcomes: mpsc::Receiver<Result<(), BoundaryError>>,
@@ -47,19 +109,19 @@ pub struct Sink<T> {
 }
 
 impl<T: Send + 'static> Sink<T> {
-    /// Starts a bounded one-event worker for emit.
+    /// Starts a bounded one-event worker for emit on `runtime`.
     ///
-    /// The worker is admitted against a process-wide limit before its thread is
-    /// created. Exhaustion is observable as a classified BoundaryError.
-    pub fn new<F>(emit: F) -> Result<Self, BoundaryError>
+    /// The worker is admitted against the runtime's budget before its thread
+    /// is created. Exhaustion is observable as a classified BoundaryError.
+    pub fn new_in<F>(runtime: &Runtime, emit: F) -> Result<Self, BoundaryError>
     where
         F: FnMut(T) -> Result<(), BoundaryError> + Send + 'static,
     {
-        let runtime = shared_runtime()?;
-        Self::new_with_runtime(emit, runtime.budget.clone(), runtime.reaper.clone())
+        let workers = runtime.workers()?;
+        Self::start(emit, workers.budget.clone(), workers.reaper.clone())
     }
 
-    fn new_with_runtime<F>(
+    fn start<F>(
         mut emit: F,
         budget: WorkerBudget,
         reaper: HandleReaper,
@@ -72,7 +134,10 @@ impl<T: Send + 'static> Sink<T> {
                 "progressive output worker cleanup is unavailable",
             ));
         }
-        let permit = budget.acquire().ok_or_else(worker_budget_exhausted)?;
+        let capacity = budget.capacity();
+        let permit = budget
+            .acquire()
+            .ok_or_else(|| worker_budget_exhausted(capacity))?;
         let (events, event_receiver) = mpsc::sync_channel(1);
         let (outcomes, outcome_receiver) = mpsc::sync_channel(1);
         let worker = thread::Builder::new()
@@ -195,6 +260,10 @@ impl WorkerBudget {
         }
     }
 
+    fn capacity(&self) -> usize {
+        self.state.capacity
+    }
+
     fn acquire(&self) -> Option<WorkerPermit> {
         let mut available = self
             .state
@@ -230,10 +299,13 @@ struct HandleReaper {
     available: Arc<AtomicBool>,
 }
 
-struct ProgressRuntime {
+/// The started half of a [`Runtime`].
+struct Workers {
     budget: WorkerBudget,
     reaper: HandleReaper,
-    // The process-long reaper handle remains owned instead of detached.
+    // A sink may outlive the runtime that admitted it, so this handle is not
+    // joined when the runtime drops. Owning it keeps the reaper's lifetime
+    // explicit instead of detaching the thread at startup.
     _reaper_worker: JoinHandle<()>,
 }
 
@@ -267,33 +339,26 @@ impl HandleReaper {
     }
 }
 
-fn shared_runtime() -> Result<&'static ProgressRuntime, BoundaryError> {
-    PROGRESS_RUNTIME
-        .get_or_init(|| start_runtime(PROGRESS_WORKER_LIMIT))
-        .as_ref()
-        .map_err(|message| {
-            unavailable_owned(format!(
-                "progressive output cleanup initialization failed: {message}"
-            ))
-        })
-}
-
-fn start_runtime(capacity: usize) -> Result<ProgressRuntime, Arc<str>> {
+fn start_workers(capacity: usize) -> Result<Workers, Arc<str>> {
     let (workers, receiver) = mpsc::channel();
     let available = Arc::new(AtomicBool::new(true));
     let reaper_available = Arc::clone(&available);
     let reaper_worker = thread::Builder::new()
         .name("packetcraftr-progress-reaper".to_owned())
-        .spawn(move || run_handle_reaper(receiver, reaper_available))
+        .spawn(move || run_handle_reaper(receiver, reaper_available, capacity))
         .map_err(|error| Arc::from(error.to_string()))?;
-    Ok(ProgressRuntime {
+    Ok(Workers {
         budget: WorkerBudget::new(capacity),
         reaper: HandleReaper { workers, available },
         _reaper_worker: reaper_worker,
     })
 }
 
-fn run_handle_reaper(receiver: mpsc::Receiver<JoinHandle<()>>, available: Arc<AtomicBool>) {
+fn run_handle_reaper(
+    receiver: mpsc::Receiver<JoinHandle<()>>,
+    available: Arc<AtomicBool>,
+    capacity: usize,
+) {
     struct AvailabilityGuard(Arc<AtomicBool>);
 
     impl Drop for AvailabilityGuard {
@@ -303,7 +368,7 @@ fn run_handle_reaper(receiver: mpsc::Receiver<JoinHandle<()>>, available: Arc<At
     }
 
     let _guard = AvailabilityGuard(available);
-    let mut active = Vec::with_capacity(PROGRESS_WORKER_LIMIT);
+    let mut active = Vec::with_capacity(capacity);
     loop {
         match receiver.recv_timeout(REAPER_POLL_INTERVAL) {
             Ok(worker) => active.push(worker),
@@ -329,18 +394,14 @@ fn run_handle_reaper(receiver: mpsc::Receiver<JoinHandle<()>>, available: Arc<At
     }
 }
 
-fn unavailable(message: &'static str) -> BoundaryError {
+fn unavailable(message: impl Into<String>) -> BoundaryError {
     BoundaryError::new(message, output_classification(), Vec::new())
 }
 
-fn unavailable_owned(message: String) -> BoundaryError {
-    BoundaryError::new(message, output_classification(), Vec::new())
-}
-
-fn worker_budget_exhausted() -> BoundaryError {
+fn worker_budget_exhausted(capacity: usize) -> BoundaryError {
     BoundaryError::new(
         format!(
-            "progressive output worker capacity {PROGRESS_WORKER_LIMIT} is exhausted by callbacks that have not returned"
+            "progressive output worker capacity {capacity} is exhausted by callbacks that have not returned"
         ),
         Classification::new(
             "internal.progressive_output_worker_exhausted",
@@ -376,7 +437,9 @@ mod tests {
 
     use super::*;
 
-    fn test_runtime(
+    /// A runtime's started half with the reaper replaced by a plain receiver,
+    /// so a test can observe every transferred handle directly.
+    fn test_workers(
         capacity: usize,
     ) -> (WorkerBudget, HandleReaper, mpsc::Receiver<JoinHandle<()>>) {
         let (workers, receiver) = mpsc::channel();
@@ -405,10 +468,10 @@ mod tests {
 
     #[test]
     fn blocked_callback_does_not_block_publisher_beyond_waiting_deadline() {
-        let (budget, reaper, handles) = test_runtime(1);
+        let (budget, reaper, handles) = test_workers(1);
         let (release, wait) = mpsc::channel();
         let (started, callback_started) = mpsc::channel();
-        let sink = Sink::new_with_runtime(
+        let sink = Sink::start(
             move |(): ()| {
                 started.send(()).expect("report callback start");
                 wait.recv().expect("test releases callback");
@@ -436,10 +499,10 @@ mod tests {
 
     #[test]
     fn callback_may_outlive_publisher_deadline_and_sink_lifetime() {
-        let (budget, reaper, handles) = test_runtime(1);
+        let (budget, reaper, handles) = test_workers(1);
         let (release, wait) = mpsc::channel();
         let (finished, callback_finished) = mpsc::channel();
-        let sink = Sink::new_with_runtime(
+        let sink = Sink::start(
             move |(): ()| {
                 wait.recv().expect("test releases callback");
                 finished.send(()).expect("report callback finish");
@@ -471,13 +534,13 @@ mod tests {
 
     #[test]
     fn repeatedly_blocked_callbacks_cannot_exceed_worker_budget() {
-        let (budget, reaper, handles) = test_runtime(2);
+        let (budget, reaper, handles) = test_workers(2);
         let mut releases = Vec::new();
         let mut sinks = Vec::new();
         for _ in 0..2 {
             let (release, wait) = mpsc::channel();
             let (started, callback_started) = mpsc::channel();
-            let sink = Sink::new_with_runtime(
+            let sink = Sink::start(
                 move |(): ()| {
                     started.send(()).expect("report callback start");
                     wait.recv().expect("release blocked callback");
@@ -497,7 +560,7 @@ mod tests {
             releases.push(release);
             sinks.push(sink);
         }
-        let third = Sink::<()>::new_with_runtime(|_| Ok(()), budget.clone(), reaper.clone());
+        let third = Sink::<()>::start(|_| Ok(()), budget.clone(), reaper.clone());
         let error = match third {
             Ok(_) => panic!("budget must reject another callback worker"),
             Err(error) => error,
@@ -522,8 +585,8 @@ mod tests {
 
     #[test]
     fn callback_classification_is_returned_unchanged() {
-        let (budget, reaper, handles) = test_runtime(1);
-        let sink = Sink::new_with_runtime(
+        let (budget, reaper, handles) = test_workers(1);
+        let sink = Sink::start(
             |(): ()| {
                 Err(BoundaryError::new(
                     "denied",
@@ -552,9 +615,8 @@ mod tests {
 
     #[test]
     fn normal_sink_shutdown_reclaims_worker_and_permit() {
-        let (budget, reaper, handles) = test_runtime(1);
-        let sink = Sink::new_with_runtime(|(): ()| Ok(()), budget.clone(), reaper)
-            .expect("worker admitted");
+        let (budget, reaper, handles) = test_workers(1);
+        let sink = Sink::start(|(): ()| Ok(()), budget.clone(), reaper).expect("worker admitted");
         sink.emit((), &Deadline::new(Duration::from_secs(1)))
             .expect("callback succeeds");
         assert!(budget.acquire().is_none());
@@ -569,7 +631,7 @@ mod tests {
 
     #[test]
     fn completed_handles_can_outnumber_worker_budget_without_disabling_cleanup() {
-        let (budget, reaper, handles) = test_runtime(1);
+        let (budget, reaper, handles) = test_workers(1);
         for _ in 0..3 {
             let worker = thread::spawn(|| {});
             while !worker.is_finished() {
@@ -578,7 +640,7 @@ mod tests {
             assert_eq!(reaper.transfer(worker), TransferOutcome::Queued);
         }
         assert!(reaper.is_available());
-        let sink = Sink::<()>::new_with_runtime(|_| Ok(()), budget, reaper)
+        let sink = Sink::<()>::start(|_| Ok(()), budget, reaper)
             .expect("cleanup remains available after the handle burst");
         drop(sink);
         for _ in 0..4 {
@@ -588,5 +650,58 @@ mod tests {
                 .join()
                 .expect("worker joins");
         }
+    }
+
+    #[test]
+    fn a_runtime_admits_sinks_against_its_own_finite_capacity() {
+        assert_eq!(Runtime::new(usize::MAX).capacity(), MAX_WORKER_CAPACITY);
+        assert_eq!(Runtime::default().capacity(), MAX_WORKER_CAPACITY);
+
+        let runtime = Runtime::new(1);
+        let (finished, callback_finished) = mpsc::channel();
+        let sink = Sink::new_in(&runtime, move |(): ()| {
+            finished.send(()).expect("report callback finish");
+            Ok(())
+        })
+        .expect("the first sink is admitted");
+        sink.emit((), &Deadline::new(Duration::from_secs(1)))
+            .expect("callback succeeds");
+        callback_finished
+            .recv_timeout(Duration::from_secs(1))
+            .expect("callback ran on the runtime's worker");
+
+        let error = match Sink::<()>::new_in(&runtime, |_| Ok(())) {
+            Ok(_) => panic!("a one-worker runtime must reject a second live sink"),
+            Err(error) => error,
+        };
+        assert_eq!(
+            error.classification().code,
+            "internal.progressive_output_worker_exhausted"
+        );
+        assert!(error.to_string().contains("capacity 1"));
+        drop(sink);
+    }
+
+    #[test]
+    fn stopped_cleanup_disables_only_the_runtime_that_owns_it() {
+        let (budget, reaper, handles) = test_workers(1);
+        drop(handles);
+        let sink = Sink::start(|(): ()| Ok(()), budget.clone(), reaper.clone())
+            .expect("worker admitted while cleanup is available");
+        drop(sink);
+        assert!(!reaper.is_available());
+        let error = match Sink::<()>::start(|_| Ok(()), budget, reaper) {
+            Ok(_) => panic!("a stopped reaper must refuse later admission"),
+            Err(error) => error,
+        };
+        assert_eq!(error.classification().code, "internal.progressive_output");
+
+        // The latch is per-runtime: a separately composed runtime still runs
+        // progressive operations, which a process-wide static could not.
+        let runtime = Runtime::new(1);
+        let sink = Sink::new_in(&runtime, |(): ()| Ok(()))
+            .expect("an independent runtime is unaffected by another's cleanup failure");
+        sink.emit((), &Deadline::new(Duration::from_secs(1)))
+            .expect("callback succeeds");
     }
 }

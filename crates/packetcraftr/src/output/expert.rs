@@ -5,9 +5,8 @@
 
 use serde::Serialize;
 
-use packetcraftr_core::analysis::expert::{
-    Finding as AnalysisFinding, StreamTransport as AnalysisStreamTransport,
-};
+use packetcraftr_core::analysis::StreamTransport as AnalysisStreamTransport;
+use packetcraftr_core::analysis::expert::Finding as AnalysisFinding;
 
 pub use packetcraftr_core::diagnostic::Severity;
 
@@ -66,7 +65,7 @@ pub struct CodeCount {
 /// Aggregate result or terminal NDJSON record; the latter omits already-streamed
 /// findings.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Result {
+pub struct Report {
     pub frames_read: u64,
     pub frames_matched: u64,
     pub errors: u64,
@@ -77,7 +76,7 @@ pub struct Result {
     pub ip_reassembly: super::reassembly::Report,
 }
 
-impl Result {
+impl Report {
     pub fn from_summary(
         summary: packetcraftr_core::analysis::expert::Summary,
         frames_read: u64,

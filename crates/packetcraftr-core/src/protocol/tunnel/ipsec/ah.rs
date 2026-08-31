@@ -10,15 +10,17 @@ use crate::{
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
     layer::{Layer, reflective_layer},
+    protocol::BuiltinProtocol,
     registry::Discriminator,
-    semantics::BuiltinProtocol,
 };
 
 use crate::protocol::common::{
-    ValueExpectation, ensure_encode_budget, expected_discriminator_for_value, invalid, make_layer,
-    protocol, resolve_u8, strict_or_diagnostic, truncated, validate_auto_raw_discriminator,
-    validate_raw_child_discriminator, wrong_layer,
+    ValueExpectation, ensure_encode_budget, expected_discriminator, invalid, make_layer, protocol,
+    resolve_u8, strict_or_diagnostic, truncated, typed_layer, validate_auto_raw_discriminator,
+    validate_raw_child_discriminator,
 };
+
+const NAME: &str = BuiltinProtocol::Ah.as_str();
 
 const AH_FIXED_LEN: usize = 12;
 
@@ -26,17 +28,18 @@ const AH_FIXED_LEN: usize = 12;
 /// shared `ah` registry entry binds children of both families, so the codec
 /// itself keeps ICMPv4 out of IPv6 chains and the IPv6 repertoire out of
 /// IPv4 ones.
-fn ah_family_mismatch(under_ipv6: Option<bool>, child: &str) -> bool {
+fn ah_family_mismatch(under_ipv6: Option<bool>, child: Option<BuiltinProtocol>) -> bool {
+    let Some(child) = child else {
+        return false;
+    };
     match under_ipv6 {
-        Some(true) => matches!(child, "icmpv4" | "igmp"),
-        Some(false) => matches!(
-            child,
-            "icmpv6"
-                | "ipv6_hop_by_hop"
-                | "ipv6_destination_options"
-                | "ipv6_fragment"
-                | "ipv6_srh"
-        ),
+        // AH is itself an IPv6 extension header but belongs to both families,
+        // so the IPv6-only repertoire is every other extension plus ICMPv6.
+        Some(false) => {
+            child == BuiltinProtocol::Icmpv6
+                || (child.is_ipv6_extension() && child != BuiltinProtocol::Ah)
+        }
+        Some(true) => matches!(child, BuiltinProtocol::Icmpv4 | BuiltinProtocol::Igmp),
         None => false,
     }
 }
@@ -77,7 +80,7 @@ impl Default for Ah {
 }
 
 reflective_layer! {
-    fn ah_schema() => { protocol: protocol("ah"), name: "AH" }
+    fn ah_schema() => { protocol: protocol(NAME), name: "AH" }
     impl Ah {
         "next_header" => { kind: Unsigned, derived: true, required: false, description: "Protocol number of the authenticated payload", reflect: next_header, layout: (0, 1) },
         "payload_length" => { kind: Unsigned, derived: true, required: false, description: "Header length in 4-byte units minus two", reflect: payload_length, layout: (1, 2) },
@@ -93,8 +96,8 @@ reflective_layer! {
 pub(crate) struct AhCodec;
 
 impl LayerCodec for AhCodec {
-    fn protocol_id(&self) -> crate::layer::Id {
-        protocol("ah")
+    fn protocol_id(&self) -> &'static crate::layer::Id {
+        &ah_schema().protocol
     }
 
     fn encode(
@@ -103,17 +106,14 @@ impl LayerCodec for AhCodec {
         _payload: &[u8],
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
-        let layer = layer
-            .as_any()
-            .downcast_ref::<Ah>()
-            .ok_or_else(|| wrong_layer("ah", layer))?;
+        let layer = typed_layer::<Ah>(NAME, layer)?;
         let header_len = AH_FIXED_LEN
             .checked_add(layer.icv.len())
-            .ok_or_else(|| invalid("ah", "ICV length overflow"))?;
-        ensure_encode_budget("ah", header_len, context)?;
+            .ok_or_else(|| invalid(NAME, "ICV length overflow"))?;
+        ensure_encode_budget(NAME, header_len, context)?;
         if !layer.icv.len().is_multiple_of(4) || header_len > (0xff + 2) * 4 {
             return Err(invalid(
-                "ah",
+                NAME,
                 "the ICV must be a multiple of 4 bytes within the length field's range",
             ));
         }
@@ -126,17 +126,17 @@ impl LayerCodec for AhCodec {
 
         let (under_ipv6, mut diagnostics) = validate_context(layer, header_len, context)?;
         validate_auto_raw_discriminator(
-            "ah",
+            NAME,
             "next_header",
             &layer.next_header,
             context,
             &mut diagnostics,
         )?;
         let (next_header, materialized_next_header) = resolve_u8(
-            "ah",
+            NAME,
             "next_header",
             &layer.next_header,
-            expected_discriminator_for_value("ah", context, 59_u8, &layer.next_header),
+            expected_discriminator(NAME, context, 59_u8, &layer.next_header),
             context.mode,
             &mut diagnostics,
         )?;
@@ -145,18 +145,20 @@ impl LayerCodec for AhCodec {
         // payloads opaque — so a raw child is the faithful rebuild there.
         let selects_cross_family = context
             .registry
-            .child_for("ah", Discriminator(u64::from(next_header)))
-            .is_some_and(|selected| ah_family_mismatch(under_ipv6, selected.as_str()));
+            .child_for(NAME, Discriminator(u64::from(next_header)))
+            .is_some_and(|selected| {
+                ah_family_mismatch(under_ipv6, BuiltinProtocol::from_id(selected))
+            });
         if !selects_cross_family {
             validate_raw_child_discriminator(
-                "ah",
+                NAME,
                 u64::from(next_header),
                 context,
                 &mut diagnostics,
             )?;
         }
         let (payload_length, materialized_payload_length) = resolve_u8(
-            "ah",
+            NAME,
             "payload_length",
             &layer.payload_length,
             ValueExpectation::Required(expected_payload_length),
@@ -174,13 +176,9 @@ impl LayerCodec for AhCodec {
         let mut materialized = layer.clone();
         materialized.next_header = materialized_next_header;
         materialized.payload_length = materialized_payload_length;
-        Ok(EncodedLayer {
-            prefix,
-            suffix: Vec::new(),
-            materialized: Box::new(materialized),
-            fields: ah_layout(header_len),
-            diagnostics,
-        })
+        Ok(EncodedLayer::header(prefix, Box::new(materialized))
+            .with_fields(ah_layout(header_len))
+            .with_diagnostics(diagnostics))
     }
 
     fn decode(
@@ -189,7 +187,7 @@ impl LayerCodec for AhCodec {
         context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
         let Some(fixed) = input.first_chunk::<AH_FIXED_LEN>() else {
-            return Err(truncated("ah", AH_FIXED_LEN, input.len()));
+            return Err(truncated(NAME, AH_FIXED_LEN, input.len()));
         };
         let payload_length = fixed[1];
         let header_len = usize::from(payload_length)
@@ -197,12 +195,12 @@ impl LayerCodec for AhCodec {
             .saturating_mul(4);
         if header_len < AH_FIXED_LEN {
             return Err(invalid(
-                "ah",
+                NAME,
                 format!("payload length {payload_length} is below the fixed header"),
             ));
         }
         let Some(icv) = input.get(AH_FIXED_LEN..header_len) else {
-            return Err(truncated("ah", header_len, input.len()));
+            return Err(truncated(NAME, header_len, input.len()));
         };
         let next_header = fixed[0];
         let reserved = u16::from_be_bytes([fixed[2], fixed[3]]);
@@ -227,8 +225,10 @@ impl LayerCodec for AhCodec {
         // that child; the payload stays opaque instead.
         let cross_family = context
             .registry
-            .child_for("ah", Discriminator(u64::from(next_header)))
-            .is_some_and(|selected| ah_family_mismatch(under_ipv6, selected.as_str()));
+            .child_for(NAME, Discriminator(u64::from(next_header)))
+            .is_some_and(|selected| {
+                ah_family_mismatch(under_ipv6, BuiltinProtocol::from_id(selected))
+            });
         if cross_family {
             diagnostics.push(
                 Diagnostic::warning(
@@ -278,7 +278,7 @@ fn validate_context(
     let mut diagnostics = Vec::new();
     if layer.spi == 0 {
         strict_or_diagnostic(
-            "ah",
+            NAME,
             "build.ah_spi",
             "spi",
             "SPI zero is reserved and must not appear on the wire",
@@ -288,7 +288,7 @@ fn validate_context(
     }
     if layer.reserved != 0 {
         strict_or_diagnostic(
-            "ah",
+            NAME,
             "build.ah_reserved",
             "reserved",
             "the AH reserved field must be zero on transmission",
@@ -309,7 +309,7 @@ fn validate_context(
         );
     if under_ipv6 == Some(true) && !header_len.is_multiple_of(8) {
         strict_or_diagnostic(
-            "ah",
+            NAME,
             "build.ah_alignment",
             "icv",
             "an IPv6 AH header must be a multiple of 8 octets",
@@ -318,10 +318,10 @@ fn validate_context(
         )?;
     }
     if let Some(child) = context.child
-        && ah_family_mismatch(under_ipv6, child.protocol_id().as_str())
+        && ah_family_mismatch(under_ipv6, BuiltinProtocol::of(child))
     {
         strict_or_diagnostic(
-            "ah",
+            NAME,
             "build.ah_family",
             "next_header",
             format!(

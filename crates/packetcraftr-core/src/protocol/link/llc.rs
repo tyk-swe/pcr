@@ -12,11 +12,16 @@ use crate::{
     registry::Discriminator,
 };
 
-use super::super::common::{
-    ValueExpectation, ensure_encode_budget, invalid, make_layer, protocol, resolve_u16,
-    strict_or_diagnostic, truncated, validate_auto_raw_discriminator,
-    validate_raw_child_discriminator, validate_typed_child_discriminator, wrong_layer,
+use crate::protocol::common::{
+    ValueExpectation, child_is_opaque, ensure_encode_budget, invalid, make_layer, protocol,
+    resolve_u16, strict_or_diagnostic, truncated, typed_layer, validate_auto_raw_discriminator,
+    validate_raw_child_discriminator, validate_typed_child_discriminator,
 };
+
+use crate::protocol::BuiltinProtocol;
+
+const LLC_NAME: &str = BuiltinProtocol::Llc.as_str();
+const SNAP_NAME: &str = BuiltinProtocol::Snap.as_str();
 
 /// Synthetic discriminator selecting IEEE 802.2 LLC framing. An EtherType at
 /// or below 1500 is an 802.3 payload length, and `Discriminator` is wide
@@ -69,7 +74,7 @@ impl Default for Llc {
 }
 
 reflective_layer! {
-    fn llc_schema() => { protocol: protocol("llc"), name: "LLC" }
+    fn llc_schema() => { protocol: protocol(LLC_NAME), name: "LLC" }
     impl Llc {
         "dsap" => { kind: Unsigned, derived: false, required: true, description: "Destination service access point", reflect: dsap, layout: (0, 1) },
         "ssap" => { kind: Unsigned, derived: false, required: true, description: "Source service access point", reflect: ssap, layout: (1, 2) },
@@ -82,8 +87,8 @@ reflective_layer! {
 pub(crate) struct LlcCodec;
 
 impl LayerCodec for LlcCodec {
-    fn protocol_id(&self) -> crate::layer::Id {
-        protocol("llc")
+    fn protocol_id(&self) -> &'static crate::layer::Id {
+        &llc_schema().protocol
     }
 
     fn encode(
@@ -92,20 +97,17 @@ impl LayerCodec for LlcCodec {
         _payload: &[u8],
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
-        let layer = layer
-            .as_any()
-            .downcast_ref::<Llc>()
-            .ok_or_else(|| wrong_layer("llc", layer))?;
+        let layer = typed_layer::<Llc>(LLC_NAME, layer)?;
         let expected_control_len = match layer.control.first() {
             Some(first) if first & U_FORMAT_MASK == U_FORMAT_MASK => 1,
             Some(_) => 2,
             None => {
-                return Err(invalid("llc", "the control field is empty"));
+                return Err(invalid(LLC_NAME, "the control field is empty"));
             }
         };
         if layer.control.len() != expected_control_len {
             return Err(invalid(
-                "llc",
+                LLC_NAME,
                 format!(
                     "this control format is exactly {expected_control_len} byte(s), got {}",
                     layer.control.len()
@@ -113,25 +115,22 @@ impl LayerCodec for LlcCodec {
             ));
         }
         let header_len = layer.control.len().saturating_add(2);
-        ensure_encode_budget("llc", header_len, context)?;
+        ensure_encode_budget(LLC_NAME, header_len, context)?;
 
         let mut diagnostics = Vec::new();
         let sap_pair = (u64::from(layer.dsap) << 8) | u64::from(layer.ssap);
         if is_ui_control(layer.control.as_ref()) {
-            validate_raw_child_discriminator("llc", sap_pair, context, &mut diagnostics)?;
+            validate_raw_child_discriminator(LLC_NAME, sap_pair, context, &mut diagnostics)?;
             // An unregistered SAP pair dissects through the typed-raw
             // fallback, so a typed child needs the pair that announces it.
-            validate_typed_child_discriminator("llc", sap_pair, context, &mut diagnostics)?;
+            validate_typed_child_discriminator(LLC_NAME, sap_pair, context, &mut diagnostics)?;
         } else if let Some(child) = context.child
-            && !matches!(
-                child.protocol_id().as_str(),
-                "raw" | "padding" | "malformed"
-            )
+            && !child_is_opaque(child)
         {
             // Only unnumbered-information frames carry an upper protocol's
             // payload, so dissection never selects a typed child here.
             strict_or_diagnostic(
-                "llc",
+                LLC_NAME,
                 "build.llc_control",
                 "control",
                 format!(
@@ -147,13 +146,9 @@ impl LayerCodec for LlcCodec {
         prefix.push(layer.dsap);
         prefix.push(layer.ssap);
         prefix.extend_from_slice(&layer.control);
-        Ok(EncodedLayer {
-            prefix,
-            suffix: Vec::new(),
-            materialized: Box::new(layer.clone()),
-            fields: llc_layout(header_len),
-            diagnostics,
-        })
+        Ok(EncodedLayer::header(prefix, Box::new(layer.clone()))
+            .with_fields(llc_layout(header_len))
+            .with_diagnostics(diagnostics))
     }
 
     fn decode(
@@ -162,7 +157,7 @@ impl LayerCodec for LlcCodec {
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
         let Some(head) = input.first_chunk::<LLC_MIN_LEN>() else {
-            return Err(truncated("llc", LLC_MIN_LEN, input.len()));
+            return Err(truncated(LLC_NAME, LLC_MIN_LEN, input.len()));
         };
         let control_len: usize = if head[2] & U_FORMAT_MASK == U_FORMAT_MASK {
             1
@@ -171,7 +166,7 @@ impl LayerCodec for LlcCodec {
         };
         let header_len = control_len.saturating_add(2);
         let Some(control) = input.get(2..header_len) else {
-            return Err(truncated("llc", header_len, input.len()));
+            return Err(truncated(LLC_NAME, header_len, input.len()));
         };
         let dsap = head[0];
         let ssap = head[1];
@@ -235,7 +230,7 @@ impl Default for Snap {
 }
 
 reflective_layer! {
-    fn snap_schema() => { protocol: protocol("snap"), name: "SNAP" }
+    fn snap_schema() => { protocol: protocol(SNAP_NAME), name: "SNAP" }
     impl Snap {
         "oui" => { kind: Unsigned, derived: false, required: true, description: "Organizationally unique identifier; zero selects the EtherType space", reflect_bounded: oui, OUI_MAX, layout: (0, 3) },
         "protocol_id" => { kind: Unsigned, derived: true, required: false, description: "Protocol identifier within the OUI's numbering", reflect: protocol_id, layout: (3, 5) },
@@ -258,8 +253,8 @@ pub(crate) fn snap_discriminator(oui: u32, protocol_id: u16) -> u64 {
 pub(crate) struct SnapCodec;
 
 impl LayerCodec for SnapCodec {
-    fn protocol_id(&self) -> crate::layer::Id {
-        protocol("snap")
+    fn protocol_id(&self) -> &'static crate::layer::Id {
+        &snap_schema().protocol
     }
 
     fn encode(
@@ -268,18 +263,15 @@ impl LayerCodec for SnapCodec {
         _payload: &[u8],
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
-        let layer = layer
-            .as_any()
-            .downcast_ref::<Snap>()
-            .ok_or_else(|| wrong_layer("snap", layer))?;
-        ensure_encode_budget("snap", SNAP_LEN, context)?;
+        let layer = typed_layer::<Snap>(SNAP_NAME, layer)?;
+        ensure_encode_budget(SNAP_NAME, SNAP_LEN, context)?;
         if layer.oui > OUI_MAX {
-            return Err(invalid("snap", "the OUI exceeds its 24-bit wire range"));
+            return Err(invalid(SNAP_NAME, "the OUI exceeds its 24-bit wire range"));
         }
 
         let mut diagnostics = Vec::new();
         validate_auto_raw_discriminator(
-            "snap",
+            SNAP_NAME,
             "protocol_id",
             &layer.protocol_id,
             context,
@@ -288,22 +280,22 @@ impl LayerCodec for SnapCodec {
         let expectation = if layer.oui == 0 {
             // The zero OUI is the EtherType space, so the child derives the
             // identifier exactly as it would under Ethernet II.
-            super::super::common::expected_discriminator_for_value(
-                "snap",
+            crate::protocol::common::expected_discriminator(
+                SNAP_NAME,
                 context,
                 0_u16,
                 &layer.protocol_id,
             )
         } else if matches!(layer.protocol_id, WireValue::Auto) {
             return Err(invalid(
-                "snap",
+                SNAP_NAME,
                 "an Auto protocol_id resolves only under the zero OUI; vendor numberings need an explicit value",
             ));
         } else {
             ValueExpectation::Suggested(0)
         };
         let (protocol_id, materialized_protocol_id) = resolve_u16(
-            "snap",
+            SNAP_NAME,
             "protocol_id",
             &layer.protocol_id,
             expectation,
@@ -311,7 +303,7 @@ impl LayerCodec for SnapCodec {
             &mut diagnostics,
         )?;
         validate_raw_child_discriminator(
-            "snap",
+            SNAP_NAME,
             snap_discriminator(layer.oui, protocol_id),
             context,
             &mut diagnostics,
@@ -320,7 +312,7 @@ impl LayerCodec for SnapCodec {
         // registered vendor binding under a nonzero OUI, a bound EtherType
         // under the zero OUI — or dissection would fall back to raw bytes.
         validate_typed_child_discriminator(
-            "snap",
+            SNAP_NAME,
             snap_discriminator(layer.oui, protocol_id),
             context,
             &mut diagnostics,
@@ -332,16 +324,15 @@ impl LayerCodec for SnapCodec {
         let [_, oui_high, oui_mid, oui_low] = layer.oui.to_be_bytes();
         prefix.extend_from_slice(&[oui_high, oui_mid, oui_low]);
         prefix.extend_from_slice(&protocol_id.to_be_bytes());
-        Ok(EncodedLayer {
+        Ok(EncodedLayer::header(
             prefix,
-            suffix: Vec::new(),
-            materialized: Box::new(Snap {
+            Box::new(Snap {
                 oui: layer.oui,
                 protocol_id: materialized_protocol_id,
             }),
-            fields: snap_layout(),
-            diagnostics,
-        })
+        )
+        .with_fields(snap_layout())
+        .with_diagnostics(diagnostics))
     }
 
     fn decode(
@@ -350,7 +341,7 @@ impl LayerCodec for SnapCodec {
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
         let Some(header) = input.first_chunk::<SNAP_LEN>() else {
-            return Err(truncated("snap", SNAP_LEN, input.len()));
+            return Err(truncated(SNAP_NAME, SNAP_LEN, input.len()));
         };
         let oui = u32::from_be_bytes([0, header[0], header[1], header[2]]);
         let protocol_id = u16::from_be_bytes([header[3], header[4]]);

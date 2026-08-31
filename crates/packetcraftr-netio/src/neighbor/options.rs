@@ -39,7 +39,9 @@ impl Default for Options {
 }
 
 impl Options {
-    pub fn validate(self) -> Result<Self, crate::neighbor::Error> {
+    /// Validates every finite bound; returns nothing, so a caller keeps the
+    /// options it already owns.
+    pub fn validate(&self) -> Result<(), crate::neighbor::Error> {
         if !(1..=MAX_CONFIGURED_ATTEMPTS).contains(&self.max_attempts) {
             return Err(invalid_options(format!(
                 "max_attempts must be within 1..={MAX_CONFIGURED_ATTEMPTS}"
@@ -73,6 +75,6 @@ impl Options {
         }
         .validate()
         .map_err(|error| invalid_options(error.to_string()))?;
-        Ok(self)
+        Ok(())
     }
 }

@@ -74,9 +74,10 @@ impl NpcapApi {
         .map_err(|error| Error::MissingDependency {
             dependency: NPCAP_DEPENDENCY,
             message: format!(
-                "could not load {}: {error}; install Npcap 1.88 for all users and restart PacketcraftR",
+                "could not load {}; install Npcap 1.88 for all users and restart PacketcraftR",
                 path.display()
             ),
+            source: Some(Arc::new(error)),
         })?;
 
         // SAFETY: every requested symbol and function signature is copied
@@ -135,6 +136,7 @@ impl NpcapApi {
                     "pcap_init rejected UTF-8 mode: {}",
                     error_buffer_message(&error_buffer)
                 ),
+                source: None,
             });
         }
 
@@ -190,8 +192,27 @@ pub(super) fn npcap_device_name(interface: &InterfaceId) -> Result<String, Error
     Ok(format_npcap_device(guid))
 }
 
+/// Renders the adapter GUID in the registry form Npcap's device namespace
+/// uses, from the GUID's own fields.
+///
+/// The previous spelling went through `windows-rs`'s `Debug` implementation,
+/// making every Windows capture and Layer 2 send depend on a formatting choice
+/// that carries no stability guarantee.
 fn format_npcap_device(guid: GUID) -> String {
-    format!(r"\Device\NPF_{{{guid:?}}}")
+    format!(
+        r"\Device\NPF_{{{:08X}-{:04X}-{:04X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}}}",
+        guid.data1,
+        guid.data2,
+        guid.data3,
+        guid.data4[0],
+        guid.data4[1],
+        guid.data4[2],
+        guid.data4[3],
+        guid.data4[4],
+        guid.data4[5],
+        guid.data4[6],
+        guid.data4[7],
+    )
 }
 
 fn npcap_library_path() -> Result<PathBuf, Error> {
@@ -205,6 +226,7 @@ fn npcap_library_path() -> Result<PathBuf, Error> {
             dependency: NPCAP_DEPENDENCY,
             message: "Windows did not return a valid system directory for secure DLL lookup"
                 .to_owned(),
+            source: None,
         });
     }
     windows_directory.truncate(length);
@@ -223,8 +245,33 @@ unsafe fn load_symbol<T: Copy>(library: &Library, name: &'static [u8]) -> Result
         .map_err(|error| Error::MissingDependency {
             dependency: NPCAP_DEPENDENCY,
             message: format!(
-                "required SDK 1.16 symbol {} is unavailable: {error}",
+                "required SDK 1.16 symbol {} is unavailable",
                 String::from_utf8_lossy(name.split_last().map_or(name, |(_, head)| head))
             ),
+            source: Some(Arc::new(error)),
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn npcap_device_names_use_the_registry_guid_spelling() {
+        let guid = GUID::from_values(
+            0x0123_4567,
+            0x89ab,
+            0xcdef,
+            [0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef],
+        );
+
+        assert_eq!(
+            format_npcap_device(guid),
+            r"\Device\NPF_{01234567-89AB-CDEF-0123-456789ABCDEF}"
+        );
+        assert_eq!(
+            format_npcap_device(GUID::zeroed()),
+            r"\Device\NPF_{00000000-0000-0000-0000-000000000000}"
+        );
+    }
 }

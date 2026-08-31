@@ -10,18 +10,15 @@ use crate::rendering::{
 };
 
 pub(super) fn render_record(
-    event: &output::read::Event,
+    record: output::read::Frame,
     format: FrameFormat,
-    stream: &mut StreamEncoder,
+    stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    let output::read::Event::Frame {
+    let output::read::Frame {
         source_frame,
         frame,
         decoded,
-    } = event
-    else {
-        unreachable!("read completion is rendered by the stream owner")
-    };
+    } = &record;
     match format {
         FrameFormat::Text => match decoded {
             None => write_stdout_line(format_args!(
@@ -44,6 +41,8 @@ pub(super) fn render_record(
             )),
         },
         FrameFormat::Hex => write_plain_line(format_args!("{}", frame.bytes_hex())),
-        FrameFormat::Ndjson => Ok(stream.emit_data(event, Vec::new())?),
+        FrameFormat::Ndjson => {
+            Ok(stream.emit_data(output::read::Event::Frame(record), Vec::new())?)
+        }
     }
 }

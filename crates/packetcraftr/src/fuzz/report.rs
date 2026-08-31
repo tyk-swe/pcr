@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use packetcraftr_core::{diagnostic::Diagnostic, frame::Frame, fuzz as packet_fuzz};
+use packetcraftr_core::{frame::Frame, fuzz as packet_fuzz};
 use packetcraftr_netio::capture::Statistics as CaptureStatistics;
 use serde::Serialize;
 
@@ -39,12 +39,20 @@ pub struct Case {
     pub undecoded: Vec<Frame>,
 }
 
+impl From<packet_fuzz::CaseOutcome> for CaseOutcome {
+    /// An offline case has been generated and either built or rejected; the
+    /// live outcomes are reached only after transmission.
+    fn from(value: packet_fuzz::CaseOutcome) -> Self {
+        match value {
+            packet_fuzz::CaseOutcome::Built => Self::Built,
+            packet_fuzz::CaseOutcome::Rejected => Self::Rejected,
+        }
+    }
+}
+
 impl From<packet_fuzz::Case> for Case {
     fn from(prepared: packet_fuzz::Case) -> Self {
-        let outcome = match prepared.outcome {
-            packet_fuzz::CaseOutcome::Built => CaseOutcome::Built,
-            packet_fuzz::CaseOutcome::Rejected => CaseOutcome::Rejected,
-        };
+        let outcome = prepared.outcome.into();
         Self {
             prepared,
             outcome,
@@ -67,12 +75,14 @@ pub struct Stats {
     pub capture: CaptureStatistics,
 }
 
+/// One completed live campaign. Diagnostics are carried by the case they were
+/// raised during, in [`Case::prepared`]'s `diagnostics`, so the campaign does
+/// not repeat them.
 #[derive(Clone, Debug)]
-pub struct Result {
+pub struct Report {
     pub seed: u64,
     pub first_case: u64,
     pub cases: Vec<Case>,
-    pub diagnostics: Vec<Diagnostic>,
     pub stats: Stats,
 }
 
@@ -81,7 +91,6 @@ pub struct Result {
 pub struct Summary {
     pub seed: u64,
     pub first_case: u64,
-    pub diagnostics: Vec<Diagnostic>,
     pub stats: Stats,
 }
 

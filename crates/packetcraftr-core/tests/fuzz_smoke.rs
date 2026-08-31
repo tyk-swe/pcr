@@ -11,7 +11,7 @@ use std::time::{Instant, SystemTime};
 
 use bytes::Bytes;
 use packetcraftr_core::analysis::pcap::{Reader, ReaderOptions};
-use packetcraftr_core::analysis::reassembly::Limits as ReassemblyLimits;
+use packetcraftr_core::analysis::reassembly::tcp::Limits as ReassemblyLimits;
 use packetcraftr_core::analysis::reassembly::tcp::{FlowKey, Reassembler, ScopedFlowKey, Segment};
 use packetcraftr_core::analysis::scope::Interner;
 use packetcraftr_core::decode::{Dissector, Options as DecodeOptions};
@@ -155,7 +155,7 @@ fn smoke_test_pcapng_captures() {
 fn smoke_test_filter_parse() {
     let corpus_dir = corpus("filter_parse");
     let mut checked = 0_usize;
-    let registry = Arc::new(builtin::registry().expect("built-in registry"));
+    let registry = builtin::registry();
     {
         for entry in fs::read_dir(corpus_dir)
             .expect("corpus directory")
@@ -274,7 +274,7 @@ fn smoke_test_tls_assembly() {
 
 #[test]
 fn smoke_test_packet_decode() {
-    let registry = Arc::new(builtin::registry().expect("built-in registry"));
+    let registry = builtin::registry();
     let dissector = Dissector::new(Arc::clone(&registry));
     let frame = Frame::new(
         SystemTime::now(),

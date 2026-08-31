@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::error::Error as StdError;
+use std::sync::Arc;
 use std::time::Duration;
 
 use thiserror::Error as ThisError;
@@ -8,25 +10,77 @@ use thiserror::Error as ThisError;
 use super::link::Mode;
 use packetcraftr_core::error::{Classification, Classified, Kind};
 
-/// Errors shared by live interface, transmission, and capture providers.
+/// The system or backend failure a live-I/O error retains.
+///
+/// Shared rather than boxed so [`Error`] stays `Clone` — a capture session
+/// stores its terminal failure and hands it to every later caller — while
+/// still retaining `io::Error`, `pcap::Error`, and the platform loader
+/// failures, none of which are `Clone`. `None` means the refusal is
+/// PacketcraftR's own invariant rather than something the platform reported.
+pub type SystemFault = Arc<dyn StdError + Send + Sync>;
+
+/// Which exact-transmission invariant a provider's wire evidence violated.
+///
+/// Each variant is one unrelated failure: they are never interchangeable and
+/// never distinguished by inspecting a message.
 #[derive(Debug, ThisError, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SendEvidenceFault {
+    #[error("provider-accepted bytes differ from the exact submitted frame")]
+    AcceptedBytesDiffer,
+    #[error("provider timing has inconsistent monotonic endpoints")]
+    InconsistentTiming,
+    #[error("provider-accepted bytes cannot form a capture record: {0}")]
+    UnrepresentableFrame(#[from] packetcraftr_core::frame::Error),
+}
+
+/// Errors shared by live interface, transmission, and capture providers.
+///
+/// The variants a native adapter raises retain the platform failure they were
+/// given as a [`SystemFault`] rather than formatting it into `message`, so the
+/// typed refusal survives to the render boundary. That source is not
+/// comparable, so these failures are matched on rather than equated.
+#[derive(Debug, ThisError, Clone)]
 #[non_exhaustive]
 pub enum Error {
     #[error("live packet I/O is unavailable: {message}")]
-    Unsupported { message: String },
+    Unsupported {
+        message: String,
+        #[source]
+        source: Option<SystemFault>,
+    },
     #[error("interface discovery failed: {message}")]
-    InterfaceDiscovery { message: String },
+    InterfaceDiscovery {
+        message: String,
+        #[source]
+        source: Option<SystemFault>,
+    },
     #[error("native dependency {dependency} is unavailable: {message}")]
     MissingDependency {
         dependency: &'static str,
         message: String,
+        #[source]
+        source: Option<SystemFault>,
     },
     #[error("network device {interface} is unavailable: {message}")]
-    Device { interface: String, message: String },
+    Device {
+        interface: String,
+        message: String,
+        #[source]
+        source: Option<SystemFault>,
+    },
     #[error("live packet I/O requires additional privileges: {message}")]
-    Privilege { message: String },
+    Privilege {
+        message: String,
+        #[source]
+        source: Option<SystemFault>,
+    },
     #[error("packet transmission failed: {message}")]
-    Send { message: String },
+    Send {
+        message: String,
+        #[source]
+        source: Option<SystemFault>,
+    },
     #[error(
         "packet transmission mode mismatch: expected {expected:?}, materialized route uses {actual:?}"
     )]
@@ -44,14 +98,21 @@ pub enum Error {
         bytes_sent: usize,
         wire_bytes: usize,
     },
-    #[error("packet transmission wire evidence is inconsistent: {message}")]
-    InvalidSendEvidence { message: String },
+    #[error("packet transmission wire evidence is inconsistent: {fault}")]
+    InvalidSendEvidence {
+        #[source]
+        fault: SendEvidenceFault,
+    },
     #[error("Layer 2 envelope synthesis failed: {message}")]
     Encapsulation { message: String },
     #[error("raw Layer 3 frame is invalid for native transmission: {message}")]
     InvalidTransmissionFrame { message: String },
     #[error("capture failed: {message}")]
-    Capture { message: String },
+    Capture {
+        message: String,
+        #[source]
+        source: Option<SystemFault>,
+    },
     #[error("native capture filter was rejected for {interface}: {message}")]
     InvalidCaptureFilter { interface: String, message: String },
     #[error("native capture filter installation failed for {interface}: {message}")]
@@ -192,6 +253,11 @@ impl Classified for Error {
             ),
         }
     }
+
+    /// Walked from the retained `#[source]` chain rather than hand-written.
+    fn causes(&self) -> Vec<String> {
+        packetcraftr_core::error::source_chain(self)
+    }
 }
 
 fn classified(code: &'static str, kind: Kind, remediation: &'static str) -> Classification {
@@ -200,4 +266,25 @@ fn classified(code: &'static str, kind: Kind, remediation: &'static str) -> Clas
 
 fn classified_cli(code: &'static str, remediation: &'static str) -> Classification {
     classified(code, Kind::Cli, remediation)
+}
+
+#[cfg(test)]
+pub(crate) mod testing {
+    use super::Error;
+
+    /// Whether two failures are the same failure, field by field.
+    ///
+    /// A retained [`SystemFault`](super::SystemFault) is not comparable, so
+    /// `Error` derives no `PartialEq`. `Debug` renders every field, the source
+    /// included, which compares strictly more than a derived `==` did.
+    #[must_use]
+    pub(crate) fn same_failure(left: &Error, right: &Error) -> bool {
+        format!("{left:?}") == format!("{right:?}")
+    }
+
+    /// [`same_failure`] as an assertion, reporting both renderings on failure.
+    #[track_caller]
+    pub(crate) fn assert_same_failure(actual: &Error, expected: &Error) {
+        assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
+    }
 }

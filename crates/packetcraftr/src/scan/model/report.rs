@@ -93,7 +93,7 @@ pub struct Endpoint {
 }
 
 #[derive(Clone, Debug)]
-pub struct Result {
+pub struct Report {
     pub target: String,
     pub resolved_addresses: Vec<IpAddr>,
     pub endpoints: Vec<Endpoint>,
@@ -114,11 +114,13 @@ pub enum Event {
     Diagnostic(Diagnostic),
 }
 
+/// Final scan metadata after every probe event was published. Diagnostics are
+/// not repeated here: each one already reached the caller as
+/// [`Event::Diagnostic`] when it was raised.
 #[derive(Clone, Debug)]
 pub struct Summary {
     pub target: String,
     pub resolved_addresses: Vec<IpAddr>,
-    pub diagnostics: Vec<Diagnostic>,
     pub stats: Stats,
 }
 

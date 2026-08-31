@@ -23,7 +23,7 @@ use crate::rendering::StreamEncoder;
 pub(super) fn run(
     arguments: Args,
     format: output::contract::Format,
-    stream: &mut StreamEncoder,
+    stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     let format = ToolFormat::narrow(output::contract::Command::Traceroute, format)?;
     let queue_limits = arguments.limits.clone().into_limits();
@@ -34,14 +34,14 @@ pub(super) fn run(
             "traceroute attempt count exceeds the platform size limit",
         )
     })?;
-    let mut probe = target_workflow::prepare(
+    let mut providers = target_workflow::prepare(
         arguments.route,
         arguments.policy,
         request.timeout,
         max_template_packets,
         queue_limits,
     )?;
-    target_workflow::run::<Traceroute>(&request, &mut probe, format, stream)
+    target_workflow::run::<Traceroute>(&request, &mut providers, format, stream)
 }
 
 fn prepare_request(
@@ -53,12 +53,12 @@ fn prepare_request(
         packetcraftr::traceroute::Strategy::Udp => Some(
             arguments
                 .port
-                .unwrap_or(packetcraftr::traceroute::DEFAULT_TRACEROUTE_UDP_PORT),
+                .unwrap_or(packetcraftr::traceroute::DEFAULT_UDP_PORT),
         ),
         packetcraftr::traceroute::Strategy::Tcp => Some(
             arguments
                 .port
-                .unwrap_or(packetcraftr::traceroute::DEFAULT_TRACEROUTE_TCP_PORT),
+                .unwrap_or(packetcraftr::traceroute::DEFAULT_TCP_PORT),
         ),
         packetcraftr::traceroute::Strategy::Icmp => arguments.port,
     };
@@ -94,7 +94,7 @@ impl TargetWorkflow for Traceroute {
     type Request = packetcraftr::traceroute::Request;
     type Event = packetcraftr::traceroute::Event;
     type Summary = packetcraftr::traceroute::Summary;
-    type Document = output::traceroute::Result;
+    type Document = output::traceroute::Report;
     type Record = output::traceroute::Event;
 
     fn execute(
@@ -106,7 +106,7 @@ impl TargetWorkflow for Traceroute {
     ) -> Result<Document<Self::Document>, CliError> {
         let result = packetcraftr::traceroute::run(request, authorizer, registry, executor, clock)
             .map_err(CliError::classified)?;
-        let (result, diagnostics, stats) = output::traceroute::Result::try_from_traceroute(result)
+        let (result, diagnostics, stats) = output::traceroute::Report::try_from_traceroute(result)
             .map_err(CliError::classified)?;
         Ok(Document::new(result, diagnostics, stats))
     }
@@ -117,6 +117,7 @@ impl TargetWorkflow for Traceroute {
         registry: &core::registry::Registry,
         executor: &mut Executor,
         clock: &mut impl packetcraftr::clock::Clock,
+        runtime: &core::progress::Runtime,
         stream: &StreamEncoder,
     ) -> Result<(), CliError> {
         let event_stream = stream.clone();
@@ -126,6 +127,7 @@ impl TargetWorkflow for Traceroute {
             registry,
             executor,
             clock,
+            runtime,
             move |event| {
                 Self::emit_event(event, &event_stream).map_err(CliError::into_boundary_error)
             },

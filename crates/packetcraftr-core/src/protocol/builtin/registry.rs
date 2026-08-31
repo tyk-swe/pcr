@@ -1,11 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#![forbid(unsafe_code)]
-
 //! Portable built-in Internet protocol layers and their deterministic registry module.
 
-use super::super::{
+use std::sync::{Arc, OnceLock};
+
+use crate::protocol::{
     application, capture as capture_link, gre, icmp, ipv6 as ipv6_ext, link, matcher,
     network as ip, raw, transport, tunnel,
 };
@@ -23,7 +23,8 @@ use tunnel::{
     VxlanCodec,
 };
 
-use crate::semantics::{BuiltinProtocol, builtin_protocol_catalog};
+use crate::protocol::BuiltinProtocol;
+use crate::protocol_catalog::builtin_protocol_catalog;
 
 use application::{DnsCodec, TlsCodec};
 
@@ -58,12 +59,13 @@ fn register_catalog(builder: &mut crate::registry::Builder) -> Result<(), crate:
                 canonical: $canonical:literal,
                 aliases: [$($alias:literal),* $(,)?],
                 constructible: $constructible:literal,
+                exact_round_trip: $exact_round_trip:literal,
                 matcher: $matcher:ident,
                 codec: $codec:ident
             }
         )*) => {{
             $(
-                builder.register_builtin_codec($codec, BuiltinProtocol::$variant.aliases())?;
+                builder.register_codec($codec, BuiltinProtocol::$variant.aliases())?;
                 register_matcher!($variant, $matcher);
             )*
             Ok(())
@@ -73,9 +75,22 @@ fn register_catalog(builder: &mut crate::registry::Builder) -> Result<(), crate:
     builtin_protocol_catalog!(register_protocols)
 }
 
-/// Build the default immutable registry without global mutable registration.
-pub fn registry() -> Result<crate::registry::Registry, crate::registry::Error> {
-    registry_with(|_builder| Ok(()))
+/// The default immutable registry, built once and shared by every caller.
+///
+/// The built-in catalog is a static property of compiled-in code, so this
+/// cannot fail at runtime; use [`registry_with`] when a caller-supplied
+/// closure may conflict with the defaults.
+///
+/// # Panics
+///
+/// Panics if the built-in catalog registers a duplicate protocol, alias, link
+/// type, matcher, or filter path — a defect in this crate, not in caller
+/// input. `builtin_registry_initializes_and_is_shared` pins that it does not.
+pub fn registry() -> Arc<crate::registry::Registry> {
+    static REGISTRY: OnceLock<Arc<crate::registry::Registry>> = OnceLock::new();
+    Arc::clone(REGISTRY.get_or_init(|| {
+        Arc::new(registry_with(|_builder| Ok(())).expect("built-in catalog must register"))
+    }))
 }
 
 /// Build the default registry, then let the caller add bindings before it is
@@ -134,4 +149,21 @@ pub fn registry_with_tls_ports(
     ports: &[u16],
 ) -> Result<crate::registry::Registry, crate::registry::Error> {
     registry_with(|builder| registration::bind_tls_ports(builder, ports))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn builtin_registry_initializes_and_is_shared() {
+        let first = super::registry();
+        let second = super::registry();
+        assert!(
+            std::sync::Arc::ptr_eq(&first, &second),
+            "the built-in registry must be built once and shared"
+        );
+        assert!(
+            first.codec_named("ethernet").is_some(),
+            "the shared registry must carry the built-in catalog"
+        );
+    }
 }

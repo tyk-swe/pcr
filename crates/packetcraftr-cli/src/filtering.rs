@@ -112,7 +112,7 @@ impl FrameSelector {
                     ..core::decode::Options::default()
                 },
             )
-            .map_err(|source| CliError::new(Kind::Packet, source.to_string()))?;
+            .map_err(CliError::classified)?;
         self.filter
             .matches(&Context {
                 decoded: &decoded,
@@ -177,7 +177,7 @@ mod tests {
     use super::*;
 
     fn registry() -> Arc<Registry> {
-        Arc::new(builtin::registry().expect("built-in registry"))
+        builtin::registry()
     }
 
     #[test]
@@ -218,7 +218,8 @@ mod tests {
         let error = too_small
             .keep(2, &frame)
             .expect_err("decode errors cannot become silent mismatches");
-        assert_eq!(error.classification.code, "packet.error");
+        assert_eq!(error.classification.code, "policy.decode_resource_limit");
+        assert_eq!(error.exit_code(), 6);
     }
 
     #[test]

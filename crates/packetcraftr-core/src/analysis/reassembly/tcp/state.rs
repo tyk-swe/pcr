@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use bytes::Bytes;
 
-use super::Error;
+use super::{Error, ResourceError};
 use super::{PENDING_SEGMENT_METADATA_CHARGE, TCP_FLOW_STATE_METADATA_CHARGE};
 
 #[derive(Debug)]
@@ -138,13 +138,14 @@ pub(super) fn prepare_emitted_history(
     let mut resized = VecDeque::new();
     resized
         .try_reserve_exact(capacity)
-        .map_err(|_| Error::AllocationFailed {
+        .map_err(|_| ResourceError::AllocationFailed {
             requested: capacity,
         })?;
     if resized.capacity() != capacity {
-        return Err(Error::AllocationFailed {
+        return Err(ResourceError::AllocationFailed {
             requested: capacity,
-        });
+        }
+        .into());
     }
     let skip = state
         .emitted_history

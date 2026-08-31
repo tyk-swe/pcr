@@ -3,8 +3,6 @@
 
 //! Neighbor resolution failures and internal error construction.
 
-#![forbid(unsafe_code)]
-
 use std::net::IpAddr;
 
 use packetcraftr_core::{
@@ -15,7 +13,9 @@ use packetcraftr_core::{
 use super::Request;
 use crate::{capture::Statistics, interface::Id as InterfaceId};
 
-#[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
+/// The provider failures this wraps retain their own platform source, which
+/// is not comparable, so these failures are matched on rather than equated.
+#[derive(Debug, thiserror::Error, Clone)]
 #[non_exhaustive]
 pub enum Error {
     #[error("neighbor resolution for {target} on {interface} failed: {message}")]
@@ -35,12 +35,6 @@ pub enum Error {
         evidence_truncated: bool,
         capture_statistics: Statistics,
     },
-    #[error("interface {interface} has no source MAC for Layer 2 transmission")]
-    MissingSourceMac { interface: String },
-    #[error("Layer 2 plan on {interface} has no neighbor target")]
-    MissingNeighborTarget { interface: String },
-    #[error("Layer 2 plan on {interface} has no interface-owned neighbor source address")]
-    MissingNeighborSource { interface: String },
     #[error("neighbor request is invalid: {message}")]
     InvalidRequest { message: String },
     #[error("neighbor resolver options are invalid: {message}")]
@@ -100,11 +94,7 @@ impl Classified for Error {
                     "use finite non-zero neighbor attempts, timeouts, cache limits, and capture bounds",
                 ),
             ),
-            Self::MissingSourceMac { .. }
-            | Self::MissingNeighborTarget { .. }
-            | Self::MissingNeighborSource { .. }
-            | Self::InvalidRequest { .. }
-            | Self::State { .. } => Classification::new(
+            Self::InvalidRequest { .. } | Self::State { .. } => Classification::new(
                 "internal.neighbor_invariant",
                 Kind::Internal,
                 Some(
@@ -114,15 +104,15 @@ impl Classified for Error {
         }
     }
 
+    /// Walked from the retained `#[source]` chain rather than hand-written,
+    /// except for the dual failure, which carries two unrelated errors at once
+    /// and so has no single chain to walk.
     fn causes(&self) -> Vec<String> {
         match self {
-            Self::Io { source, .. } | Self::Cleanup { source, .. } => {
-                vec![source.to_string()]
-            }
             Self::OperationAndCleanup {
                 operation, cleanup, ..
             } => vec![operation.to_string(), cleanup.to_string()],
-            _ => Vec::new(),
+            error => packetcraftr_core::error::source_chain(error),
         }
     }
 }

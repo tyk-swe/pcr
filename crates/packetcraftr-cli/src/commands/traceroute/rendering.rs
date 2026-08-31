@@ -5,12 +5,12 @@ use packetcraftr::{core, output};
 
 use crate::errors::CliError;
 use crate::rendering::{
-    captured_frame_text, comma_separated, optional_display, output_timestamp_text,
-    render_diagnostics_text, render_optional, write_stdout_line,
+    captured_frame_text, comma_separated, optional_display, render_diagnostics_text,
+    render_optional, write_stdout_line,
 };
 
 pub(super) fn render_text(
-    result: output::traceroute::Result,
+    result: output::traceroute::Report,
     diagnostics: Vec<core::diagnostic::Diagnostic>,
     stats: output::envelope::Stats,
 ) -> Result<(), CliError> {
@@ -33,8 +33,8 @@ pub(super) fn render_text(
                 probe
                     .response_kind
                     .map_or("none", output::traceroute::ResponseKind::as_str),
-                output_timestamp_text(probe.sent_at),
-                render_optional(probe.received_at, output_timestamp_text),
+                probe.sent_at,
+                optional_display(probe.received_at),
                 optional_display(probe.responder),
                 render_optional(probe.latency, |value| format!("{value:?}")),
                 optional_display(probe.destination_port),
@@ -71,9 +71,9 @@ mod tests {
 
     use packetcraftr::traceroute;
 
-    use super::super::Traceroute;
     use super::*;
     use crate::commands::target_workflow::TargetWorkflow as _;
+    use crate::commands::traceroute::Traceroute;
     use crate::rendering::ndjson_test_support::{assert_contiguous, stream};
 
     fn probe_event(sequence: u64, hop_limit: u8) -> traceroute::Event {
@@ -108,7 +108,6 @@ mod tests {
             strategy: traceroute::Strategy::Udp,
             destination_port: Some(33_434),
             completion: traceroute::Completion::Timeout,
-            diagnostics: Vec::new(),
             stats: packetcraftr::Stats::default(),
         }
     }

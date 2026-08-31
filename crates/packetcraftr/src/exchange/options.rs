@@ -5,14 +5,16 @@
 
 use std::time::Instant;
 
-use packetcraftr_netio::capture::Limits as CaptureQueueLimits;
-
 use super::MAX_EXCHANGE_TIMEOUT;
 use crate::Error;
 
 impl super::Options {
     /// Validates finite options and retention bounds before live providers run.
-    pub fn validate(&self) -> Result<CaptureQueueLimits, Error> {
+    ///
+    /// Once this returns, [`Options::capture`](super::Options::capture) is
+    /// exactly the bounded queue configuration a capture provider may be armed
+    /// with, and every retention ceiling fits inside it.
+    pub fn validate(&self) -> Result<(), Error> {
         if self.timeout > MAX_EXCHANGE_TIMEOUT {
             return Err(Error::InvalidExchangeOption {
                 field: "timeout",
@@ -29,12 +31,12 @@ impl super::Options {
             ("max_responses", self.max_responses),
             ("max_unmatched_frames", self.max_unmatched_frames),
         ] {
-            if value > self.max_capture_queue_frames {
+            if value > self.capture.max_frames {
                 return Err(Error::InvalidExchangeOption {
                     field,
                     message: format!(
                         "{value} exceeds aggregate capture frame ceiling {}",
-                        self.max_capture_queue_frames
+                        self.capture.max_frames
                     ),
                 });
             }
@@ -45,13 +47,6 @@ impl super::Options {
                 field: "timeout",
                 message: "cannot be represented by the platform monotonic clock".to_owned(),
             })?;
-        CaptureQueueLimits {
-            max_frames: self.max_capture_queue_frames,
-            max_bytes: self.max_captured_bytes,
-            snap_length: self.decode.max_packet_size,
-            overflow_policy: self.capture_overflow_policy,
-        }
-        .validate()
-        .map_err(Error::from)
+        self.capture.validate().map_err(Error::from)
     }
 }

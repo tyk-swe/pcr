@@ -6,7 +6,7 @@ use std::num::NonZeroU32;
 
 use packetcraftr::{core::error::Kind, netio as net};
 
-use super::super::errors::CliError;
+use crate::errors::CliError;
 
 /// A validated `--interface` value. Decimal selectors are always indexes:
 /// zero and values outside the public `u32` index domain never fall back to
@@ -85,6 +85,7 @@ pub(crate) fn resolve<I: net::interface::Provider>(
             CliError::classified(net::Error::Device {
                 interface: selector.to_string(),
                 message: "no interface matches the requested name or index".to_owned(),
+                source: None,
             })
         })
 }
@@ -119,7 +120,7 @@ mod tests {
         ] {
             let error = InterfaceSelector::parse(selector)
                 .expect_err("invalid selectors must fail before provider access");
-            assert_eq!(error.exit_code, 2, "selector={selector:?}");
+            assert_eq!(error.exit_code(), 2, "selector={selector:?}");
             assert_eq!(error.message, expected, "selector={selector:?}");
         }
     }

@@ -4,8 +4,7 @@
 use std::net::{IpAddr, Ipv4Addr};
 
 use crate::interface::Id as InterfaceId;
-use crate::link::{Capability, MacAddress, Mode};
-use crate::neighbor::VlanTag as NeighborVlanTag;
+use crate::link::{Capability, MacAddress, Mode, VlanTag};
 use packetcraftr_core::error::{Classification, Kind};
 use packetcraftr_core::frame::LinkType;
 
@@ -113,7 +112,7 @@ pub struct Plan {
     pub destination_mac: Option<MacAddress>,
     pub source_mac: Option<MacAddress>,
     /// Planned VLAN stack reused for ARP/NDP to stay on the same logical link.
-    pub neighbor_vlan_tags: Vec<NeighborVlanTag>,
+    pub neighbor_vlan_tags: Vec<VlanTag>,
     pub synthesized_ethernet: bool,
 }
 

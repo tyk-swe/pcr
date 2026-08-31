@@ -15,11 +15,15 @@ use crate::{
 
 use super::vxlan::VNI_MAX;
 
-use super::super::common::{
+use crate::protocol::common::{
     ensure_encode_budget, expected_discriminator, invalid, make_layer, protocol, resolve_u16,
-    strict_or_diagnostic, truncated, validate_auto_raw_discriminator,
-    validate_raw_child_discriminator, wrong_layer,
+    strict_or_diagnostic, truncated, typed_layer, validate_auto_raw_discriminator,
+    validate_raw_child_discriminator,
 };
+
+use crate::protocol::BuiltinProtocol;
+
+const NAME: &str = BuiltinProtocol::Geneve.as_str();
 
 const GENEVE_BASE_LEN: usize = 8;
 /// Options length is a 6-bit count of 4-byte multiples.
@@ -68,7 +72,7 @@ impl Default for Geneve {
 }
 
 reflective_layer! {
-    fn geneve_schema() => { protocol: protocol("geneve"), name: "GENEVE" }
+    fn geneve_schema() => { protocol: protocol(NAME), name: "GENEVE" }
     impl Geneve {
         "version" => { kind: Unsigned, derived: false, required: false, description: "2-bit GENEVE version; only version 0 is defined", reflect_bounded: version, 3_u64, layout: (0, 1) },
         "control" => { kind: Bool, derived: false, required: false, description: "Control-packet O bit", reflect: control, layout: (1, 2) },
@@ -118,8 +122,8 @@ fn parse_option_chain(options: &[u8]) -> Option<OptionChain> {
 pub(crate) struct GeneveCodec;
 
 impl LayerCodec for GeneveCodec {
-    fn protocol_id(&self) -> crate::layer::Id {
-        protocol("geneve")
+    fn protocol_id(&self) -> &'static crate::layer::Id {
+        &geneve_schema().protocol
     }
 
     fn encode(
@@ -128,28 +132,25 @@ impl LayerCodec for GeneveCodec {
         _payload: &[u8],
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
-        let layer = layer
-            .as_any()
-            .downcast_ref::<Geneve>()
-            .ok_or_else(|| wrong_layer("geneve", layer))?;
+        let layer = typed_layer::<Geneve>(NAME, layer)?;
         let (header_len, mut diagnostics) = validate_geneve(layer, context)?;
         validate_auto_raw_discriminator(
-            "geneve",
+            NAME,
             "protocol_type",
             &layer.protocol_type,
             context,
             &mut diagnostics,
         )?;
         let (protocol_type, materialized_protocol_type) = resolve_u16(
-            "geneve",
+            NAME,
             "protocol_type",
             &layer.protocol_type,
-            expected_discriminator("geneve", context, 0_u16),
+            expected_discriminator(NAME, context, 0_u16, &layer.protocol_type),
             context.mode,
             &mut diagnostics,
         )?;
         validate_raw_child_discriminator(
-            "geneve",
+            NAME,
             u64::from(protocol_type),
             context,
             &mut diagnostics,
@@ -174,13 +175,9 @@ impl LayerCodec for GeneveCodec {
 
         let mut materialized = layer.clone();
         materialized.protocol_type = materialized_protocol_type;
-        Ok(EncodedLayer {
-            prefix,
-            suffix: Vec::new(),
-            materialized: Box::new(materialized),
-            fields: geneve_layout(header_len),
-            diagnostics,
-        })
+        Ok(EncodedLayer::header(prefix, Box::new(materialized))
+            .with_fields(geneve_layout(header_len))
+            .with_diagnostics(diagnostics))
     }
 
     fn decode(
@@ -189,19 +186,19 @@ impl LayerCodec for GeneveCodec {
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
         let Some(header) = input.first_chunk::<GENEVE_BASE_LEN>() else {
-            return Err(truncated("geneve", GENEVE_BASE_LEN, input.len()));
+            return Err(truncated(NAME, GENEVE_BASE_LEN, input.len()));
         };
         let version = header[0] >> 6;
         if version != 0 {
             return Err(crate::codec::Error::Unsupported {
-                protocol: protocol("geneve"),
+                protocol: protocol(NAME),
                 message: format!("GENEVE version {version} is not supported"),
             });
         }
         let options_len = usize::from(header[0] & 0x3f).saturating_mul(4);
         let header_len = GENEVE_BASE_LEN.saturating_add(options_len);
         let Some(option_bytes) = input.get(GENEVE_BASE_LEN..header_len) else {
-            return Err(truncated("geneve", header_len, input.len()));
+            return Err(truncated(NAME, header_len, input.len()));
         };
         let control = header[1] & 0x80 != 0;
         let critical = header[1] & 0x40 != 0;
@@ -288,14 +285,14 @@ fn validate_geneve(
 ) -> Result<(usize, Vec<Diagnostic>), crate::codec::Error> {
     let header_len = GENEVE_BASE_LEN
         .checked_add(layer.options.len())
-        .ok_or_else(|| invalid("geneve", "option length overflow"))?;
-    ensure_encode_budget("geneve", header_len, context)?;
+        .ok_or_else(|| invalid(NAME, "option length overflow"))?;
+    ensure_encode_budget(NAME, header_len, context)?;
     if layer.version > 3 || layer.reserved1 > 0x3f || layer.vni > VNI_MAX {
-        return Err(invalid("geneve", "field exceeds its wire range"));
+        return Err(invalid(NAME, "field exceeds its wire range"));
     }
     if !layer.options.len().is_multiple_of(4) || layer.options.len() > GENEVE_MAX_OPTIONS_LEN {
         return Err(invalid(
-            "geneve",
+            NAME,
             format!(
                 "options must be a multiple of 4 bytes up to {GENEVE_MAX_OPTIONS_LEN}, got {}",
                 layer.options.len()
@@ -305,7 +302,7 @@ fn validate_geneve(
     let mut diagnostics = Vec::new();
     if layer.version != 0 {
         strict_or_diagnostic(
-            "geneve",
+            NAME,
             "build.geneve_version",
             "version",
             "RFC 8926 defines only GENEVE version 0",
@@ -315,7 +312,7 @@ fn validate_geneve(
     }
     if layer.reserved1 != 0 || layer.reserved2 != 0 {
         strict_or_diagnostic(
-            "geneve",
+            NAME,
             "build.geneve_reserved",
             "reserved1",
             "GENEVE reserved fields must be zero on transmission",
@@ -325,7 +322,7 @@ fn validate_geneve(
     }
     match parse_option_chain(&layer.options) {
         None => strict_or_diagnostic(
-            "geneve",
+            NAME,
             "build.geneve_options",
             "options",
             "GENEVE option bytes do not parse as an exact TLV chain",
@@ -345,7 +342,7 @@ fn validate_option_chain(
 ) -> Result<(), crate::codec::Error> {
     if chain.critical != layer.critical {
         strict_or_diagnostic(
-            "geneve",
+            NAME,
             "build.geneve_critical",
             "critical",
             "the C bit must be set exactly when a critical option is present",
@@ -355,7 +352,7 @@ fn validate_option_chain(
     }
     if chain.reserved_bits {
         strict_or_diagnostic(
-            "geneve",
+            NAME,
             "build.geneve_reserved",
             "options",
             "GENEVE option-header reserved bits must be zero on transmission",
@@ -375,12 +372,12 @@ mod tests {
 
     fn encode(
         layer: &Geneve,
-        mode: crate::build::Mode,
+        mode: crate::codec::Mode,
         remaining_packet_bytes: usize,
     ) -> Result<EncodedLayer, crate::codec::Error> {
-        let registry = crate::protocol::builtin::registry().expect("built-in registry");
+        let registry = crate::protocol::builtin::registry();
         let packet = Packet::new();
-        let build_context = crate::build::Context::default();
+        let build_context = crate::codec::Context::default();
         let context = LayerEncodeContext {
             packet: &packet,
             index: 0,
@@ -394,7 +391,7 @@ mod tests {
     }
 
     fn decode(input: &[u8]) -> Result<DecodedLayerValue, crate::codec::Error> {
-        let registry = crate::protocol::builtin::registry().expect("built-in registry");
+        let registry = crate::protocol::builtin::registry();
         let context = LayerDecodeContext {
             registry: &registry,
             allow_trailing_padding: false,
@@ -412,7 +409,7 @@ mod tests {
     }
 
     fn encode_error(layer: &Geneve) -> crate::codec::Error {
-        match encode(layer, crate::build::Mode::Strict, usize::MAX) {
+        match encode(layer, crate::codec::Mode::Strict, usize::MAX) {
             Ok(_) => panic!("invalid GENEVE layer unexpectedly encoded: {layer:?}"),
             Err(error) => error,
         }
@@ -430,7 +427,7 @@ mod tests {
             ..Geneve::default()
         };
 
-        let encoded = encode(&layer, crate::build::Mode::Strict, 16).unwrap();
+        let encoded = encode(&layer, crate::codec::Mode::Strict, 16).unwrap();
         assert_eq!(
             encoded.prefix,
             [
@@ -583,7 +580,7 @@ mod tests {
             assert!(error.to_string().contains(expected), "{layer:?}: {error}");
         }
 
-        let error = match encode(&Geneve::default(), crate::build::Mode::Strict, 7) {
+        let error = match encode(&Geneve::default(), crate::codec::Mode::Strict, 7) {
             Ok(_) => panic!("undersized packet budget unexpectedly encoded"),
             Err(error) => error,
         };
@@ -599,7 +596,7 @@ mod tests {
             options: Bytes::from_static(&[0, 0, 0, 1]),
             ..Geneve::default()
         };
-        let encoded = encode(&layer, crate::build::Mode::Permissive, 12).unwrap();
+        let encoded = encode(&layer, crate::codec::Mode::Permissive, 12).unwrap();
 
         assert_eq!(encoded.prefix.len(), 12);
         assert_eq!(

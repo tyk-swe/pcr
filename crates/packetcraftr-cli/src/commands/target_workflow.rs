@@ -54,6 +54,7 @@ pub(super) trait TargetWorkflow {
         registry: &core::registry::Registry,
         executor: &mut Executor,
         clock: &mut impl packetcraftr::clock::Clock,
+        runtime: &core::progress::Runtime,
         stream: &StreamEncoder,
     ) -> Result<(), CliError>;
 
@@ -113,20 +114,20 @@ impl<T> Document<T> {
 /// Runs one prepared workflow and renders it in the requested format.
 pub(super) fn run<W: TargetWorkflow>(
     request: &W::Request,
-    probe: &mut Probe,
+    providers: &mut TargetProviders,
     format: ToolFormat,
-    stream: &mut StreamEncoder,
+    stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     let resolver = packetcraftr::target::SystemResolver;
-    let mut authorizer = packetcraftr::target::PolicyAuthorizer::new(&probe.policy, &resolver);
+    let mut authorizer = packetcraftr::target::PolicyAuthorizer::new(&providers.policy, &resolver);
     let mut clock = packetcraftr::clock::SystemClock;
     match format {
         ToolFormat::Text | ToolFormat::Json => {
             let document = W::execute(
                 request,
                 &mut authorizer,
-                &probe.registry,
-                &mut probe.executor,
+                &providers.registry,
+                &mut providers.executor,
                 &mut clock,
             )?;
             if format == ToolFormat::Text {
@@ -143,9 +144,10 @@ pub(super) fn run<W: TargetWorkflow>(
         ToolFormat::Ndjson => W::stream(
             request,
             &mut authorizer,
-            &probe.registry,
-            &mut probe.executor,
+            &providers.registry,
+            &mut providers.executor,
             &mut clock,
+            &providers.runtime,
             stream,
         ),
     }
@@ -153,10 +155,15 @@ pub(super) fn run<W: TargetWorkflow>(
 
 /// The providers the three commands compose identically once their request is
 /// built.
-pub(super) struct Probe {
+///
+/// Named for what it holds, not for what it runs: in this codebase a *probe*
+/// is one transmitted attempt (`scan::Probe`, `ProbeEvidence`, `--max-probes`).
+pub(super) struct TargetProviders {
     policy: packetcraftr::policy::Policy,
     pub(super) registry: Arc<core::registry::Registry>,
     executor: Executor,
+    /// Admits the one callback worker NDJSON streaming publishes through.
+    runtime: core::progress::Runtime,
 }
 
 /// Validates the policy and interface selector, then binds an executor to the
@@ -170,7 +177,7 @@ pub(super) fn prepare(
     timeout: Duration,
     max_template_packets: usize,
     queue_limits: net::capture::Limits,
-) -> Result<Probe, CliError> {
+) -> Result<TargetProviders, CliError> {
     let policy = policy.into_policy();
     policy.validate().map_err(CliError::classified)?;
     let interface = InterfaceSelector::parse_optional(route.interface.as_deref())?;
@@ -195,9 +202,10 @@ pub(super) fn prepare(
         exchange,
         interface,
     };
-    Ok(Probe {
+    Ok(TargetProviders {
         policy,
         registry,
         executor,
+        runtime: core::progress::Runtime::default(),
     })
 }

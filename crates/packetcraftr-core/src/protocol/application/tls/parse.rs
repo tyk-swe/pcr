@@ -15,7 +15,6 @@ use std::net::IpAddr;
 
 use bytes::Bytes;
 
-use super::super::super::common::invalid;
 use super::model::{
     CONTENT_TYPE_APPLICATION_DATA, CONTENT_TYPE_CHANGE_CIPHER_SPEC, ClientHello, Extension,
     HANDSHAKE_CLIENT_HELLO, HANDSHAKE_HEADER_LEN, HANDSHAKE_SERVER_HELLO,
@@ -23,6 +22,11 @@ use super::model::{
     MAX_EXTENSIONS, MAX_HANDSHAKE_BODY, MAX_LEGACY_VERSION, MAX_RECORD_BODY, MAX_SESSION_ID_LEN,
     MAX_SNI_LEN, MIN_LEGACY_VERSION, RECORD_HEADER_LEN, Record, ServerHello, extension,
 };
+use crate::protocol::common::invalid;
+
+use crate::protocol::BuiltinProtocol;
+
+const NAME: &str = BuiltinProtocol::Tls.as_str();
 
 type Error = crate::codec::Error;
 
@@ -110,13 +114,13 @@ pub fn parse_handshake(input: &[u8]) -> Outcome<Handshake> {
     let declared = u32::from_be_bytes([0, header[1], header[2], header[3]]);
     let Ok(length) = usize::try_from(declared) else {
         return Outcome::Malformed(invalid(
-            "tls",
+            NAME,
             format!("handshake body of {declared} bytes exceeds the address space"),
         ));
     };
     if length > MAX_HANDSHAKE_BODY {
         return Outcome::Malformed(invalid(
-            "tls",
+            NAME,
             format!("handshake body of {length} bytes exceeds the limit of {MAX_HANDSHAKE_BODY}"),
         ));
     }
@@ -194,7 +198,7 @@ fn trailing_bytes(reader: &Reader<'_>, what: &str) -> Result<(), Error> {
         return Ok(());
     }
     Err(invalid(
-        "tls",
+        NAME,
         format!("{what} has {remaining} trailing bytes after its extension block"),
     ))
 }
@@ -209,7 +213,7 @@ fn record_header(header: &[u8; RECORD_HEADER_LEN]) -> Result<RecordHeader, Error
     let content_type = header[0];
     if !(CONTENT_TYPE_CHANGE_CIPHER_SPEC..=CONTENT_TYPE_APPLICATION_DATA).contains(&content_type) {
         return Err(invalid(
-            "tls",
+            NAME,
             format!(
                 "record content type {content_type} is outside \
                  {CONTENT_TYPE_CHANGE_CIPHER_SPEC}..={CONTENT_TYPE_APPLICATION_DATA}"
@@ -219,7 +223,7 @@ fn record_header(header: &[u8; RECORD_HEADER_LEN]) -> Result<RecordHeader, Error
     let legacy_version = u16::from_be_bytes([header[1], header[2]]);
     if !(MIN_LEGACY_VERSION..=MAX_LEGACY_VERSION).contains(&legacy_version) {
         return Err(invalid(
-            "tls",
+            NAME,
             format!(
                 "record version {legacy_version:#06x} is outside \
                  {MIN_LEGACY_VERSION:#06x}..={MAX_LEGACY_VERSION:#06x}"
@@ -228,11 +232,11 @@ fn record_header(header: &[u8; RECORD_HEADER_LEN]) -> Result<RecordHeader, Error
     }
     let length = usize::from(u16::from_be_bytes([header[3], header[4]]));
     if length == 0 {
-        return Err(invalid("tls", "record body length is zero"));
+        return Err(invalid(NAME, "record body length is zero"));
     }
     if length > MAX_RECORD_BODY {
         return Err(invalid(
-            "tls",
+            NAME,
             format!("record body of {length} bytes exceeds the limit of {MAX_RECORD_BODY}"),
         ));
     }
@@ -247,7 +251,7 @@ fn session_id<'a>(reader: &mut Reader<'a>) -> Result<&'a [u8], Error> {
     let session_id = reader.vector8()?;
     if session_id.len() > MAX_SESSION_ID_LEN {
         return Err(invalid(
-            "tls",
+            NAME,
             format!(
                 "session identifier of {} bytes exceeds the limit of {MAX_SESSION_ID_LEN}",
                 session_id.len()
@@ -283,7 +287,7 @@ fn next_extension<'a>(
 ) -> Result<(Extension, &'a [u8]), Error> {
     if seen >= MAX_EXTENSIONS {
         return Err(invalid(
-            "tls",
+            NAME,
             format!("extension count exceeds the limit of {MAX_EXTENSIONS}"),
         ));
     }
@@ -291,7 +295,7 @@ fn next_extension<'a>(
     let len = usize::from(reader.u16()?);
     if len > MAX_EXTENSION_LEN {
         return Err(invalid(
-            "tls",
+            NAME,
             format!(
                 "extension {kind:#06x} of {len} bytes exceeds the limit of {MAX_EXTENSION_LEN}"
             ),
@@ -380,7 +384,7 @@ fn parse_server_name(body: &[u8], hello: &mut ClientHello) -> Result<(), Error> 
         }
         if name.len() > MAX_SNI_LEN {
             return Err(invalid(
-                "tls",
+                NAME,
                 format!(
                     "server name of {} bytes exceeds the limit of {MAX_SNI_LEN}",
                     name.len()
@@ -416,13 +420,13 @@ fn parse_alpn(body: &[u8]) -> Result<Vec<Bytes>, Error> {
     while !list.is_empty() {
         if protocols.len() >= MAX_ALPN {
             return Err(invalid(
-                "tls",
+                NAME,
                 format!("ALPN list exceeds the limit of {MAX_ALPN} protocols"),
             ));
         }
         let protocol = list.vector8()?;
         if protocol.is_empty() {
-            return Err(invalid("tls", "ALPN protocol name is empty"));
+            return Err(invalid(NAME, "ALPN protocol name is empty"));
         }
         protocols.push(Bytes::copy_from_slice(protocol));
     }
@@ -448,7 +452,7 @@ fn parse_client_key_share(body: &[u8]) -> Result<Vec<u16>, Error> {
     while !list.is_empty() {
         if groups.len() >= MAX_EXTENSIONS {
             return Err(invalid(
-                "tls",
+                NAME,
                 format!("key_share list exceeds the limit of {MAX_EXTENSIONS} entries"),
             ));
         }
@@ -466,7 +470,7 @@ fn parse_ec_point_formats(body: &[u8]) -> Result<Vec<u8>, Error> {
 fn u16_list(input: &[u8], limit: usize, what: &str) -> Result<Vec<u16>, Error> {
     if !input.len().is_multiple_of(2) {
         return Err(invalid(
-            "tls",
+            NAME,
             format!(
                 "{what} list of {} bytes is not a whole number of entries",
                 input.len()
@@ -476,7 +480,7 @@ fn u16_list(input: &[u8], limit: usize, what: &str) -> Result<Vec<u16>, Error> {
     let count = input.len() / 2;
     if count > limit {
         return Err(invalid(
-            "tls",
+            NAME,
             format!("{what} list of {count} entries exceeds the limit of {limit}"),
         ));
     }
@@ -513,10 +517,10 @@ impl<'a> Reader<'a> {
         let end = self
             .cursor
             .checked_add(len)
-            .ok_or_else(|| invalid("tls", "handshake offset arithmetic overflowed"))?;
+            .ok_or_else(|| invalid(NAME, "handshake offset arithmetic overflowed"))?;
         let slice = self.input.get(self.cursor..end).ok_or_else(|| {
             invalid(
-                "tls",
+                NAME,
                 format!(
                     "handshake field needs {len} bytes but only {} remain",
                     self.input.len().saturating_sub(self.cursor)
@@ -531,7 +535,7 @@ impl<'a> Reader<'a> {
     fn array<const N: usize>(&mut self) -> Result<&'a [u8; N], Error> {
         let bytes = self.take(N)?;
         <&[u8; N]>::try_from(bytes)
-            .map_err(|_| invalid("tls", format!("handshake field is not {N} bytes")))
+            .map_err(|_| invalid(NAME, format!("handshake field is not {N} bytes")))
     }
 
     fn u8(&mut self) -> Result<u8, Error> {
@@ -544,7 +548,7 @@ impl<'a> Reader<'a> {
 
     fn random(&mut self) -> Result<[u8; 32], Error> {
         let bytes = self.take(32)?;
-        <[u8; 32]>::try_from(bytes).map_err(|_| invalid("tls", "hello random is not 32 bytes"))
+        <[u8; 32]>::try_from(bytes).map_err(|_| invalid(NAME, "hello random is not 32 bytes"))
     }
 
     fn vector8(&mut self) -> Result<&'a [u8], Error> {
@@ -562,17 +566,17 @@ impl<'a> Reader<'a> {
 mod tests {
     #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
-    use super::super::model::{
+    use crate::fuzz::rng::SplitMix64;
+    use crate::protocol::application::tls::model::{
         CONTENT_TYPE_APPLICATION_DATA, CONTENT_TYPE_HANDSHAKE, HANDSHAKE_CLIENT_HELLO,
         HANDSHAKE_SERVER_HELLO, HELLO_RETRY_REQUEST_RANDOM, Handshake, MAX_ALPN, MAX_CIPHER_SUITES,
         MAX_EXTENSION_LEN, MAX_EXTENSIONS, MAX_HANDSHAKE_BODY, MAX_RECORD_BODY, RECORD_HEADER_LEN,
     };
-    use crate::fuzz::execution::SplitMix64;
 
-    use super::super::test_wire::{
+    use super::{Outcome, looks_like_record_start, parse_handshake, parse_record, u16_list};
+    use crate::protocol::application::tls::test_wire::{
         extension, handshake_message, record, u16_bytes, vector8, vector16,
     };
-    use super::{Outcome, looks_like_record_start, parse_handshake, parse_record, u16_list};
 
     fn client_hello_body(
         legacy_version: u16,

@@ -14,6 +14,8 @@ use crate::{
     registry::Discriminator,
 };
 
+use crate::protocol::BuiltinProtocol;
+
 use super::errors::{binding_protocol, invalid};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -35,7 +37,7 @@ pub(crate) fn resolve_u8(
     field: &str,
     value: &WireValue<u8>,
     expectation: ValueExpectation<u8>,
-    mode: crate::build::Mode,
+    mode: crate::codec::Mode,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(u8, WireValue<u8>), crate::codec::Error> {
     resolve_fixed(
@@ -54,7 +56,7 @@ pub(crate) fn resolve_u16(
     field: &str,
     value: &WireValue<u16>,
     expectation: ValueExpectation<u16>,
-    mode: crate::build::Mode,
+    mode: crate::codec::Mode,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(u16, WireValue<u16>), crate::codec::Error> {
     resolve_fixed(
@@ -73,7 +75,7 @@ pub(crate) fn resolve_fixed<T, const N: usize>(
     field: &str,
     value: &WireValue<T>,
     expectation: ValueExpectation<T>,
-    mode: crate::build::Mode,
+    mode: crate::codec::Mode,
     diagnostics: &mut Vec<Diagnostic>,
     decode_raw: impl FnOnce([u8; N]) -> T,
 ) -> Result<(T, WireValue<T>), crate::codec::Error>
@@ -88,7 +90,7 @@ where
             Ok((*actual, value.clone()))
         }
         WireValue::Raw(bytes) => {
-            if mode == crate::build::Mode::Strict {
+            if mode == crate::codec::Mode::Strict {
                 return Err(invalid(
                     name,
                     format!("raw {field} requires permissive build mode"),
@@ -120,7 +122,7 @@ fn validate_dependent<T>(
     field: &str,
     actual: T,
     expectation: ValueExpectation<T>,
-    mode: crate::build::Mode,
+    mode: crate::codec::Mode,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), crate::codec::Error>
 where
@@ -133,7 +135,7 @@ where
         return Ok(());
     }
     let message = format!("{field} is {actual}, expected {expected}");
-    if mode == crate::build::Mode::Strict {
+    if mode == crate::codec::Mode::Strict {
         return Err(invalid(name, message));
     }
     diagnostics
@@ -141,12 +143,14 @@ where
     Ok(())
 }
 
-/// Like [`expected_discriminator`], but honours an exact value that already
-/// selects the child on dissection. Some children are registered under more
-/// than one discriminator — MPLS under both its unicast and multicast
-/// EtherTypes — and any alias that forward-resolves to the same child is
-/// consistent, not a mismatch with the reverse lookup's preferred one.
-pub(crate) fn expected_discriminator_for_value<T>(
+/// The discriminator this parent must (or should) carry for the child it
+/// actually holds.
+///
+/// An explicit `value` that already selects this child is honoured as-is:
+/// several protocols are registered under more than one discriminator —
+/// MPLS's two EtherTypes, PPPoE's two stages, ERSPAN's two GRE protocol
+/// types — and only one of them is the reverse binding's winner.
+pub(crate) fn expected_discriminator<T>(
     parent: &str,
     context: &LayerEncodeContext<'_>,
     fallback: T,
@@ -155,9 +159,12 @@ pub(crate) fn expected_discriminator_for_value<T>(
 where
     T: Copy + TryFrom<u64> + Into<u64>,
 {
+    let Some(child) = context.child else {
+        return ValueExpectation::Suggested(fallback);
+    };
+    let child_is_raw = BuiltinProtocol::of(child) == Some(BuiltinProtocol::Raw);
     if let WireValue::Exact(exact) = value
-        && let Some(child) = context.child
-        && child.protocol_id().as_str() != "raw"
+        && !child_is_raw
         && context
             .registry
             .child_for(parent, Discriminator((*exact).into()))
@@ -165,21 +172,7 @@ where
     {
         return ValueExpectation::Required(*exact);
     }
-    expected_discriminator(parent, context, fallback)
-}
-
-pub(crate) fn expected_discriminator<T>(
-    parent: &str,
-    context: &LayerEncodeContext<'_>,
-    fallback: T,
-) -> ValueExpectation<T>
-where
-    T: Copy + TryFrom<u64>,
-{
-    let Some(child) = context.child else {
-        return ValueExpectation::Suggested(fallback);
-    };
-    if child.protocol_id().as_str() == "raw" {
+    if child_is_raw {
         let expected = context
             .registry
             .discriminator_for(parent, child.protocol_id().as_str())
@@ -215,28 +208,33 @@ pub(crate) fn make_layer<L>(
 where
     L: Layer + 'static,
 {
+    reject_aliased_duplicates(layer.schema(), fields)?;
     for (name, value) in fields {
         layer.set_field(name, value.clone())?;
     }
     Ok(Box::new(layer))
 }
 
-pub(crate) fn aliased_fields(
-    name: &str,
+/// Rejects a field supplied under two spellings at once.
+///
+/// Both spellings write the same member, so accepting them would silently
+/// drop one of the caller's values. The alias table comes from the schema, so
+/// every layer is covered without a per-codec list.
+fn reject_aliased_duplicates(
+    schema: &'static crate::layer::Schema,
     fields: &BTreeMap<String, FieldValue>,
-    aliases: &[(&str, &str)],
-) -> Result<BTreeMap<String, FieldValue>, crate::codec::Error> {
-    let mut normalized = fields.clone();
-    for (alias, canonical) in aliases {
-        let Some(value) = normalized.remove(*alias) else {
+) -> Result<(), crate::codec::Error> {
+    for declared in schema.fields {
+        let mut supplied = std::iter::once(declared.name)
+            .chain(declared.aliases.iter().copied())
+            .filter(|spelling| fields.contains_key(*spelling));
+        let (Some(first), Some(second)) = (supplied.next(), supplied.next()) else {
             continue;
         };
-        if normalized.insert((*canonical).to_string(), value).is_some() {
-            return Err(invalid(
-                name,
-                format!("both {alias} and {canonical} were supplied"),
-            ));
-        }
+        return Err(invalid(
+            schema.protocol.as_str(),
+            format!("both {second} and {first} were supplied"),
+        ));
     }
-    Ok(normalized)
+    Ok(())
 }

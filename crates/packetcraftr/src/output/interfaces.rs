@@ -11,11 +11,11 @@ use crate::output::network::Interface;
 
 /// Aggregate result of `interfaces`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Result {
+pub struct Report {
     pub interfaces: Vec<Interface>,
 }
 
-impl Result {
+impl Report {
     pub fn new(interfaces: Vec<Info>) -> Self {
         let mut interfaces = interfaces
             .into_iter()

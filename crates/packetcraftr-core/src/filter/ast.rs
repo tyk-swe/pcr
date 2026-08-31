@@ -10,7 +10,7 @@ use super::path::FieldRef;
 pub(super) enum Predicate {
     /// A bare protocol name: does the packet carry such a layer at all?
     LayerPresent {
-        protocol: super::super::layer::Id,
+        protocol: crate::layer::Id,
         occurrence: Option<usize>,
     },
     /// A bare field path. For a flag this reads the flag's value; for every

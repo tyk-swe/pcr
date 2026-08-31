@@ -11,17 +11,17 @@ use packetcraftr_core::protocol::{
     network::{Ipv4, Ipv6},
     transport::{Tcp, Udp},
 };
-use packetcraftr_core::{Packet, semantics::BuiltinProtocol};
+use packetcraftr_core::{Packet, protocol::BuiltinProtocol};
 
 use crate::probe::{nonzero_ipv4_identification, packet_shape_matches};
 
-use super::TRACEROUTE_SOURCE_PORT;
-use super::model::{Probe, Strategy};
+use super::SOURCE_PORT;
+use super::model::{Probe, ProbeTarget};
 
 #[expect(
     clippy::cast_possible_truncation,
     reason = "the operation-local sequence is reduced to the 32-bit wire field the probe carries; \
-              sent_traceroute_probe_matches applies the same reduction when comparing, so even a \
+              sent_probe_matches applies the same reduction when comparing, so even a \
               wrapped counter still matches"
 )]
 pub(super) fn probe_packet(probe: &Probe) -> Packet {
@@ -46,26 +46,26 @@ pub(super) fn probe_packet(probe: &Probe) -> Packet {
             });
         }
     }
-    match probe.strategy {
-        Strategy::Udp => packet.push(Udp {
-            source_port: TRACEROUTE_SOURCE_PORT,
-            destination_port: probe.destination_port.expect("validated UDP port"),
+    match probe.target {
+        ProbeTarget::Udp { port } => packet.push(Udp {
+            source_port: SOURCE_PORT,
+            destination_port: port,
             ..Udp::default()
         }),
-        Strategy::Tcp => packet.push(Tcp {
-            source_port: TRACEROUTE_SOURCE_PORT,
-            destination_port: probe.destination_port.expect("validated TCP port"),
+        ProbeTarget::Tcp { port } => packet.push(Tcp {
+            source_port: SOURCE_PORT,
+            destination_port: port,
             sequence: probe.sequence as u32,
             flags: Tcp::SYN,
             ..Tcp::default()
         }),
-        Strategy::Icmp => match probe.address {
+        ProbeTarget::Icmp => match probe.address {
             IpAddr::V4(_) => packet.push(Icmpv4 {
-                body: traceroute_identity(probe.sequence),
+                body: icmp_identity(probe.sequence),
                 ..Icmpv4::default()
             }),
             IpAddr::V6(_) => packet.push(Icmpv6 {
-                body: traceroute_identity(probe.sequence),
+                body: icmp_identity(probe.sequence),
                 ..Icmpv6::default()
             }),
         },
@@ -78,7 +78,7 @@ pub(super) fn probe_packet(probe: &Probe) -> Packet {
     reason = "the identity tag is a deliberate 16-bit reduction of the sequence, split across \
               the two payload bytes below"
 )]
-pub(super) fn traceroute_identity(sequence: u64) -> Bytes {
+pub(super) fn icmp_identity(sequence: u64) -> Bytes {
     let sequence = sequence as u16;
     Bytes::copy_from_slice(&[0x50, 0x54, (sequence >> 8) as u8, sequence as u8])
 }
@@ -88,17 +88,17 @@ pub(super) fn traceroute_identity(sequence: u64) -> Bytes {
     reason = "the observed packet is compared against the same reduction probe_packet applied, \
               so the narrowing is symmetric on both sides of the comparison"
 )]
-pub(super) fn sent_traceroute_probe_matches(probe: &Probe, sent: &Packet) -> bool {
+pub(super) fn sent_probe_matches(probe: &Probe, sent: &Packet) -> bool {
     let network_protocol = if probe.address.is_ipv4() {
         BuiltinProtocol::Ipv4
     } else {
         BuiltinProtocol::Ipv6
     };
-    let transport_protocol = match probe.strategy {
-        Strategy::Tcp => BuiltinProtocol::Tcp,
-        Strategy::Udp => BuiltinProtocol::Udp,
-        Strategy::Icmp if probe.address.is_ipv4() => BuiltinProtocol::Icmpv4,
-        Strategy::Icmp => BuiltinProtocol::Icmpv6,
+    let transport_protocol = match probe.target {
+        ProbeTarget::Tcp { .. } => BuiltinProtocol::Tcp,
+        ProbeTarget::Udp { .. } => BuiltinProtocol::Udp,
+        ProbeTarget::Icmp if probe.address.is_ipv4() => BuiltinProtocol::Icmpv4,
+        ProbeTarget::Icmp => BuiltinProtocol::Icmpv6,
     };
     if !packet_shape_matches(sent, &[network_protocol, transport_protocol]) {
         return false;
@@ -133,27 +133,24 @@ pub(super) fn sent_traceroute_probe_matches(probe: &Probe, sent: &Packet) -> boo
     if !network_matches {
         return false;
     }
-    match probe.strategy {
-        Strategy::Udp => sent.get::<Udp>().is_some_and(|udp| {
-            udp.source_port == TRACEROUTE_SOURCE_PORT
-                && udp.destination_port == probe.destination_port.expect("validated UDP port")
-        }),
-        Strategy::Tcp => sent.get::<Tcp>().is_some_and(|tcp| {
-            tcp.source_port == TRACEROUTE_SOURCE_PORT
-                && tcp.destination_port == probe.destination_port.expect("validated TCP port")
+    match probe.target {
+        ProbeTarget::Udp { port } => sent
+            .get::<Udp>()
+            .is_some_and(|udp| udp.source_port == SOURCE_PORT && udp.destination_port == port),
+        ProbeTarget::Tcp { port } => sent.get::<Tcp>().is_some_and(|tcp| {
+            tcp.source_port == SOURCE_PORT
+                && tcp.destination_port == port
                 && tcp.sequence == probe.sequence as u32
                 && tcp.flags == Tcp::SYN
         }),
-        Strategy::Icmp => match probe.address {
+        ProbeTarget::Icmp => match probe.address {
             IpAddr::V4(_) => sent.get::<Icmpv4>().is_some_and(|icmp| {
-                icmp.icmp_type == 8
-                    && icmp.code == 0
-                    && icmp.body == traceroute_identity(probe.sequence)
+                icmp.icmp_type == 8 && icmp.code == 0 && icmp.body == icmp_identity(probe.sequence)
             }),
             IpAddr::V6(_) => sent.get::<Icmpv6>().is_some_and(|icmp| {
                 icmp.icmp_type == 128
                     && icmp.code == 0
-                    && icmp.body == traceroute_identity(probe.sequence)
+                    && icmp.body == icmp_identity(probe.sequence)
             }),
         },
     }

@@ -5,17 +5,16 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use packetcraftr_netio::capture::{DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES};
+use packetcraftr_netio::capture::{MAX_CAPTURE_QUEUE_BYTES, MAX_CAPTURE_QUEUE_FRAMES};
 
 use crate::probe::Transport as ProbeTransport;
 use crate::probe::evidence::{check_limits, duration_violation};
 use crate::target::Family;
 use crate::target::Target;
 
-use super::super::error::Error;
-use super::super::{
-    DEFAULT_MAX_UNDECODED_TRACEROUTE_FRAMES, MAX_TRACEROUTE_DURATION, MAX_TRACEROUTE_PROBES,
-    MAX_TRACEROUTE_PROBES_PER_HOP, MAX_TRACEROUTE_RATE,
+use crate::traceroute::error::Error;
+use crate::traceroute::{
+    DEFAULT_MAX_UNDECODED_FRAMES, MAX_DURATION, MAX_PROBES, MAX_PROBES_PER_HOP, MAX_RATE,
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -64,28 +63,30 @@ impl Default for Limits {
     fn default() -> Self {
         Self {
             max_probes: packetcraftr_core::template::DEFAULT_MAX_TEMPLATE_PACKETS,
-            max_duration: MAX_TRACEROUTE_DURATION,
-            max_evidence_frames: DEFAULT_CAPTURE_QUEUE_FRAMES,
-            max_evidence_bytes: DEFAULT_CAPTURE_QUEUE_BYTES,
-            max_undecoded: DEFAULT_MAX_UNDECODED_TRACEROUTE_FRAMES,
+            max_duration: MAX_DURATION,
+            max_evidence_frames: MAX_CAPTURE_QUEUE_FRAMES,
+            max_evidence_bytes: MAX_CAPTURE_QUEUE_BYTES,
+            max_undecoded: DEFAULT_MAX_UNDECODED_FRAMES,
         }
     }
 }
 
 impl Limits {
-    pub fn validate(self) -> std::result::Result<Self, Error> {
+    /// Rejects any bound above the ceiling this crate enforces, and any pair
+    /// of bounds that cannot both hold.
+    pub fn validate(&self) -> Result<(), Error> {
         check_limits(
             &[
-                ("max_probes", self.max_probes, MAX_TRACEROUTE_PROBES),
+                ("max_probes", self.max_probes, MAX_PROBES),
                 (
                     "max_evidence_frames",
                     self.max_evidence_frames,
-                    DEFAULT_CAPTURE_QUEUE_FRAMES,
+                    MAX_CAPTURE_QUEUE_FRAMES,
                 ),
                 (
                     "max_evidence_bytes",
                     self.max_evidence_bytes,
-                    DEFAULT_CAPTURE_QUEUE_BYTES,
+                    MAX_CAPTURE_QUEUE_BYTES,
                 ),
             ],
             &[(
@@ -100,13 +101,13 @@ impl Limits {
                 reason,
             },
         )?;
-        if duration_violation(self.max_duration, MAX_TRACEROUTE_DURATION) {
+        if duration_violation(self.max_duration, MAX_DURATION) {
             return Err(Error::InvalidDuration {
                 value: self.max_duration,
-                maximum: MAX_TRACEROUTE_DURATION,
+                maximum: MAX_DURATION,
             });
         }
-        Ok(self)
+        Ok(())
     }
 }
 
@@ -127,7 +128,7 @@ pub struct Request {
 }
 
 impl Request {
-    pub fn validate(&self) -> std::result::Result<(), Error> {
+    pub fn validate(&self) -> Result<(), Error> {
         self.limits.validate()?;
         if self.first_hop == 0 {
             return Err(Error::InvalidLimit {
@@ -143,11 +144,11 @@ impl Request {
                 reason: format!("must be at least first_hop={}", self.first_hop),
             });
         }
-        if !(1..=MAX_TRACEROUTE_PROBES_PER_HOP).contains(&self.probes_per_hop) {
+        if !(1..=MAX_PROBES_PER_HOP).contains(&self.probes_per_hop) {
             return Err(Error::InvalidLimit {
                 field: "probes_per_hop",
                 value: u64::from(self.probes_per_hop),
-                reason: format!("must be within 1..={MAX_TRACEROUTE_PROBES_PER_HOP}"),
+                reason: format!("must be within 1..={MAX_PROBES_PER_HOP}"),
             });
         }
         if usize::try_from(self.probes_per_hop).unwrap_or(usize::MAX)
@@ -169,12 +170,12 @@ impl Request {
             });
         }
         if let Some(rate) = self.probes_per_second
-            && (rate == 0 || rate > MAX_TRACEROUTE_RATE)
+            && (rate == 0 || rate > MAX_RATE)
         {
             return Err(Error::InvalidLimit {
                 field: "probes_per_second",
                 value: u64::from(rate),
-                reason: format!("must be within 1..={MAX_TRACEROUTE_RATE}"),
+                reason: format!("must be within 1..={MAX_RATE}"),
             });
         }
         match (self.strategy, self.destination_port) {
@@ -208,7 +209,7 @@ impl Request {
         usize::from(self.max_hops - self.first_hop) + 1
     }
 
-    pub(in crate::traceroute) fn total_probe_count(&self) -> std::result::Result<usize, Error> {
+    pub(in crate::traceroute) fn total_probe_count(&self) -> Result<usize, Error> {
         self.hop_count()
             .checked_mul(usize::try_from(self.probes_per_hop).unwrap_or(usize::MAX))
             .ok_or(Error::InvalidLimit {

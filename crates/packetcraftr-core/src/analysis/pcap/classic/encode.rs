@@ -6,9 +6,9 @@ use std::time::UNIX_EPOCH;
 
 use crate::frame::{Frame, LinkType};
 
-use super::super::error::Error;
-use super::super::model::{Endianness, Format, TimestampPrecision};
-use super::super::wire::{write_u16, write_u32};
+use crate::analysis::pcap::error::Error;
+use crate::analysis::pcap::model::{Endianness, Format, TimestampPrecision};
+use crate::analysis::pcap::wire::{write_u16, write_u32};
 
 pub(in crate::analysis::pcap) fn write_pcap_header<W: Write>(
     writer: &mut W,

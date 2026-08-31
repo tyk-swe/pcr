@@ -6,41 +6,20 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use packetcraftr_core::{
-    Packet,
-    build::{self, Builder, BuiltPacket},
-    template,
-};
-use packetcraftr_netio::{capture, neighbor, route, transmit};
+use packetcraftr_core::{Packet, build::Builder, template};
+use packetcraftr_netio::{neighbor, route, transmit};
 
 use crate::Client;
 use crate::Error;
-use crate::materialize::{
-    build_context, materialize_link_fields, materialize_link_structure, materialize_network_fields,
-    require_fixed_width_link_materialization,
-};
-use crate::mtu::validate_mtu;
+use crate::materialize::{PlannedPacket, PreparedPacket};
 use crate::planning::ensure_preparation_deadline;
 
 use super::contract::Options;
 use super::route_cache::CachedProvider;
 
-pub(crate) struct PlannedPacket {
-    pub(crate) packet: Packet,
-    pub(crate) plan: route::Plan,
-    pub(crate) build_context: build::Context,
-    pub(crate) preliminary_build: BuiltPacket,
-}
-
-pub(crate) struct PreparedPacket {
-    pub(crate) built: BuiltPacket,
-    pub(crate) route: route::Materialized,
-}
-
 pub(crate) struct Prepared {
     pub(crate) started: Instant,
     pub(crate) deadline: Instant,
-    pub(crate) capture_limits: capture::Limits,
     pub(crate) options: Options,
     pub(crate) packets: Vec<PreparedPacket>,
     pub(crate) packet_count: u64,
@@ -59,13 +38,14 @@ where
         options: Options,
     ) -> Result<Prepared, Error> {
         let started = Instant::now();
-        let capture_limits = options.validate()?;
+        // Both front doors reject a malformed policy identically: the
+        // workflow seam does it in `PolicyAuthorizer::authorize_operation`.
+        self.policy.validate()?;
+        options.validate()?;
         let deadline = started
             .checked_add(options.timeout)
             .expect("validated bounded exchange timeout must fit Instant");
-        let expansion_len = template.expansion_len().map_err(|source| Error::Template {
-            message: source.to_string(),
-        })?;
+        let expansion_len = template.expansion_len();
         self.policy
             .authorize_operation(u64::try_from(expansion_len).unwrap_or(u64::MAX), 0)?;
         if expansion_len == 0 {
@@ -94,7 +74,6 @@ where
         Ok(Prepared {
             started,
             deadline,
-            capture_limits,
             options,
             packets,
             packet_count,
@@ -119,7 +98,7 @@ where
                 break;
             };
             ensure_preparation_deadline(deadline)?;
-            let mut packet_to_send = expanded_packet.map_err(|source| Error::Template {
+            let packet_to_send = expanded_packet.map_err(|source| Error::Template {
                 message: source.to_string(),
             })?;
             ensure_preparation_deadline(deadline)?;
@@ -131,39 +110,29 @@ where
                 Some(deadline),
             )?;
             ensure_preparation_deadline(deadline)?;
-            // Route selection precedes all route-dependent materialization.
-            materialize_network_fields(&mut packet_to_send, &plan)?;
-            materialize_link_structure(&mut packet_to_send, &plan)?;
-            ensure_preparation_deadline(deadline)?;
-            let context = build_context(&plan);
-            let preliminary = builder.build(
-                packet_to_send.clone(),
-                context.clone(),
-                options.send.build.clone(),
+            let planned = self.plan_and_authorize(
+                packet_to_send,
+                plan,
+                builder,
+                &options.send,
+                Some(deadline),
             )?;
-            ensure_preparation_deadline(deadline)?;
-            validate_mtu(&preliminary, plan.decision.mtu)?;
-            self.authorize_built(&preliminary, options.send.allow_permissive_live)?;
-            self.authorize_final_wire(&preliminary, &plan)?;
             total_bytes = total_bytes
-                .checked_add(u64::try_from(preliminary.bytes.len()).unwrap_or(u64::MAX))
+                .checked_add(
+                    u64::try_from(planned.preliminary_build.bytes.len()).unwrap_or(u64::MAX),
+                )
                 .ok_or(crate::policy::Error::ByteLimit {
                     actual: u64::MAX,
                     limit: self.policy.max_bytes_per_operation,
                 })?;
             self.policy.authorize_operation(packet_count, total_bytes)?;
             if let Some(first_packet) = planned_packets.first()
-                && (first_packet.plan.decision.interface != plan.decision.interface
-                    || first_packet.plan.mode != plan.mode)
+                && (first_packet.plan.decision.interface != planned.plan.decision.interface
+                    || first_packet.plan.mode != planned.plan.mode)
             {
                 return Err(Error::HeterogeneousExchangeRoute);
             }
-            planned_packets.push(PlannedPacket {
-                packet: packet_to_send,
-                plan,
-                build_context: context,
-                preliminary_build: preliminary,
-            });
+            planned_packets.push(planned);
         }
         Ok((planned_packets, total_bytes))
     }
@@ -180,30 +149,12 @@ where
         let mut prepared_packets = Vec::with_capacity(planned_packets.len());
         for planned_packet in planned_packets {
             ensure_preparation_deadline(deadline)?;
-            let PlannedPacket {
-                mut packet,
-                plan,
-                build_context,
-                preliminary_build,
-            } = planned_packet;
-            let preliminary_len = preliminary_build.bytes.len();
-            let route = route::materialize(plan, &self.neighbors)?;
-            ensure_preparation_deadline(deadline)?;
-            // Neighbor materialization is the only step that resolves link fields.
-            let link_changed = materialize_link_fields(&mut packet, &route)?;
-            let built = if link_changed {
-                ensure_preparation_deadline(deadline)?;
-                builder.build(packet, build_context, options.send.build.clone())?
-            } else {
-                preliminary_build
-            };
-            ensure_preparation_deadline(deadline)?;
-            self.authorize_built(&built, options.send.allow_permissive_live)?;
-            // Every final materialized destination is authorized immediately
-            // before capture arming and transmission can observe it.
-            self.authorize_final_wire(&built, &route.plan)?;
-            require_fixed_width_link_materialization(preliminary_len, built.bytes.len())?;
-            prepared_packets.push(PreparedPacket { built, route });
+            prepared_packets.push(self.materialize_and_authorize(
+                planned_packet,
+                builder,
+                &options.send,
+                Some(deadline),
+            )?);
         }
         Ok(prepared_packets)
     }

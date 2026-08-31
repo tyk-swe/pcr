@@ -35,10 +35,10 @@ pub mod progress;
 pub mod protocol;
 mod protocol_catalog;
 pub mod registry;
-/// Cross-crate seam for the `packetcraftr` workflow crate. Hidden from the
-/// docs and outside the semver contract.
+/// Cross-crate seam for the `packetcraftr` and `packetcraftr-netio` crates.
+/// Hidden from the docs and outside the semver contract.
 #[doc(hidden)]
 pub mod semantics;
 pub mod template;
 
-pub use model::{Error, Packet};
+pub use model::{Packet, PacketError};

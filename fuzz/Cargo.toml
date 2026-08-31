@@ -68,3 +68,9 @@ name = "filter_parse"
 path = "fuzz_targets/filter_parse.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "dns_name"
+path = "fuzz_targets/dns_name.rs"
+test = false
+doc = false

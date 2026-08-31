@@ -10,7 +10,7 @@ use std::{
     mem::MaybeUninit,
 };
 
-use pcap::{Activated, Capture};
+use pcap::{Active, Capture};
 
 use crate::{Error, interface::Id as InterfaceId};
 
@@ -28,14 +28,28 @@ unsafe extern "C" {
     fn pcap_geterr(handle: *mut c_void) -> *mut c_char;
 }
 
+/// Owns the kernel-format program `pcap_compile` allocates.
+///
+/// A value of this type only ever exists after a successful `pcap_compile`,
+/// and `Drop` is its single release, so no exit path can leak the allocation.
 #[repr(C)]
-pub(crate) struct PcapBpfProgram {
-    pub(super) instruction_count: c_uint,
-    pub(super) instructions: *mut c_void,
+struct PcapBpfProgram {
+    instruction_count: c_uint,
+    instructions: *mut c_void,
 }
 
-pub(super) fn install_capture_filter<T: Activated>(
-    capture: &mut Capture<T>,
+impl Drop for PcapBpfProgram {
+    fn drop(&mut self) {
+        // SAFETY: this value is only ever produced by a successful
+        // `pcap_compile`, whose allocation this owns; `Drop` runs once, and
+        // `pcap_setfilter` has finished with the program by then because it
+        // borrows the value for strictly less than this scope.
+        unsafe { pcap_freecode((&raw mut *self).cast()) };
+    }
+}
+
+pub(super) fn install_capture_filter(
+    capture: &mut Capture<Active>,
     interface: &InterfaceId,
     filter: &str,
     netmask: u32,
@@ -44,21 +58,15 @@ pub(super) fn install_capture_filter<T: Activated>(
     let handle = capture.as_ptr().cast::<c_void>();
     // SAFETY: program was initialized by pcap_compile for this live handle,
     // which remains exclusively borrowed until installation returns.
-    let install_status =
-        unsafe { pcap_setfilter(handle, (&mut program as *mut PcapBpfProgram).cast()) };
-    let diagnostic = (install_status != 0).then(|| read_pcap_error(handle));
-    // SAFETY: pcap_compile initialized this ABI-compatible local structure,
-    // pcap_setfilter has finished using it, and this is its single cleanup.
-    unsafe { pcap_freecode((&mut program as *mut PcapBpfProgram).cast()) };
-
-    if let Some(diagnostic) = diagnostic {
-        return Err(map_filter_install_error(interface, diagnostic));
+    let install_status = unsafe { pcap_setfilter(handle, (&raw mut program).cast::<c_void>()) };
+    if install_status != 0 {
+        return Err(map_filter_install_error(interface, read_pcap_error(handle)));
     }
     Ok(())
 }
 
-pub(crate) fn compile_capture_filter<T: Activated>(
-    capture: &Capture<T>,
+fn compile_capture_filter(
+    capture: &Capture<Active>,
     interface: &InterfaceId,
     filter: &str,
     netmask: u32,
@@ -105,20 +113,14 @@ fn read_pcap_error(handle: *mut c_void) -> String {
         .into_owned()
 }
 
-pub(crate) fn map_filter_compile_error(
-    interface: &InterfaceId,
-    error: impl std::fmt::Display,
-) -> Error {
+fn map_filter_compile_error(interface: &InterfaceId, error: impl std::fmt::Display) -> Error {
     Error::InvalidCaptureFilter {
         interface: interface.name.clone(),
         message: format!("libpcap compilation failed: {error}"),
     }
 }
 
-pub(crate) fn map_filter_install_error(
-    interface: &InterfaceId,
-    error: impl std::fmt::Display,
-) -> Error {
+fn map_filter_install_error(interface: &InterfaceId, error: impl std::fmt::Display) -> Error {
     Error::CaptureFilterInstallation {
         interface: interface.name.clone(),
         message: format!("libpcap installation failed: {error}"),

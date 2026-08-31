@@ -5,7 +5,7 @@
 
 use bytes::Bytes;
 
-use super::super::{
+use crate::analysis::pcap::{
     error::Error,
     model::{Endianness, Format, PcapNgOption},
     wire::{PCAPNG_OPTION_END, align_to_usize, decode_u16},

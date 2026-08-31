@@ -3,7 +3,7 @@
 
 use thiserror::Error as ThisError;
 
-use packetcraftr_core::error::{Classification, Classified, Context, Kind};
+use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 use packetcraftr_netio::Error as LiveIoError;
 
 use crate::{policy, target};
@@ -13,10 +13,10 @@ use crate::{policy, target};
 pub enum Error {
     #[error(transparent)]
     Target(#[from] target::Error),
+    /// Route planning or materialization failed, including active neighbor
+    /// resolution performed while materializing the route.
     #[error(transparent)]
     Plan(#[from] packetcraftr_netio::route::Error),
-    #[error(transparent)]
-    Neighbor(#[from] packetcraftr_netio::neighbor::Error),
     #[error(transparent)]
     Build(#[from] packetcraftr_core::build::Error),
     #[error(transparent)]
@@ -25,10 +25,13 @@ pub enum Error {
     PermissiveLiveOptInRequired,
     #[error(transparent)]
     Io(#[from] LiveIoError),
+    /// Boxed because this variant is the only one that carries two complete
+    /// live-I/O failures, and no other workflow failure should make room for
+    /// them.
     #[error("{operation}; capture shutdown also failed: {shutdown}")]
     OperationAndCaptureShutdown {
-        operation: LiveIoError,
-        shutdown: LiveIoError,
+        operation: Box<LiveIoError>,
+        shutdown: Box<LiveIoError>,
     },
     #[error("exchange progressive output failed: {source}")]
     ExchangeOutput {
@@ -72,7 +75,6 @@ impl Classified for Error {
         match self {
             Self::Target(error) => error.classification(),
             Self::Plan(error) => error.classification(),
-            Self::Neighbor(error) => error.classification(),
             Self::Build(_) => Classification::new(
                 "packet.build",
                 Kind::Packet,
@@ -129,11 +131,10 @@ impl Classified for Error {
         }
     }
 
-    fn context(&self) -> Context {
+    fn context(&self) -> Option<Coordinate> {
         match self {
             Self::Target(error) => error.context(),
             Self::Plan(error) => error.context(),
-            Self::Neighbor(error) => error.context(),
             Self::Policy(error) => error.context(),
             Self::Io(error) => error.context(),
             Self::OperationAndCaptureShutdown { operation, .. } => operation.context(),
@@ -146,22 +147,30 @@ impl Classified for Error {
             | Self::Template { .. }
             | Self::PacketMaterialization { .. }
             | Self::PacketExceedsMtu { .. }
-            | Self::InvalidExchangeOption { .. } => Context::default(),
+            | Self::InvalidExchangeOption { .. } => None,
         }
     }
 
+    /// Walked from the retained `#[source]` chain rather than hand-written.
+    /// A transparent variant delegates, because its own `Display` is already
+    /// the inner error's message; so does the boundary-sourced variant, whose
+    /// [`BoundaryError`] carries a captured `causes` snapshot its own source
+    /// chain no longer holds. The two paired failures carry an operation and
+    /// an unrelated cleanup at once, so neither has a single chain to walk.
+    ///
+    /// [`BoundaryError`]: packetcraftr_core::error::BoundaryError
     fn causes(&self) -> Vec<String> {
         match self {
             Self::Target(error) => error.causes(),
             Self::Plan(error) => error.causes(),
-            Self::Neighbor(error) => error.causes(),
+            Self::Build(error) => error.causes(),
             Self::Policy(error) => error.causes(),
             Self::Io(error) => error.causes(),
+            Self::ExchangeOutput { source } => source.causes(),
             Self::OperationAndCaptureShutdown {
                 operation,
                 shutdown,
             } => vec![operation.to_string(), shutdown.to_string()],
-            Self::ExchangeOutput { source } => source.causes(),
             Self::ExchangeOutputAndCaptureShutdown { output, shutdown } => {
                 let mut causes = output.causes();
                 if causes.is_empty() {
@@ -170,14 +179,7 @@ impl Classified for Error {
                 causes.push(shutdown.to_string());
                 causes
             }
-            Self::Build(_)
-            | Self::PermissiveLiveOptInRequired
-            | Self::InvalidExchangeEvents { .. }
-            | Self::HeterogeneousExchangeRoute
-            | Self::Template { .. }
-            | Self::PacketMaterialization { .. }
-            | Self::PacketExceedsMtu { .. }
-            | Self::InvalidExchangeOption { .. } => Vec::new(),
+            error => packetcraftr_core::error::source_chain(error),
         }
     }
 }

@@ -6,18 +6,18 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::progress::Runtime;
 use packetcraftr_core::{
     Packet,
     build::{Builder, BuiltPacket},
     decode::Dissector,
-    diagnostic::Diagnostic,
     frame::LinkType,
     fuzz as packet_fuzz,
     registry::Registry,
 };
 
 use crate::clock::Clock;
-use crate::evidence::Budget;
+use crate::evidence::{Budget, DiagnosticLog};
 use crate::materialize::{
     build_context, materialize_link_fields, materialize_link_structure, materialize_network_fields,
     require_fixed_width_link_materialization,
@@ -25,14 +25,14 @@ use crate::materialize::{
 use crate::probe::runner::sink_observer;
 
 use super::SYNTHESIZED_ETHERNET_BYTES;
-use super::boundary::{Execution, ExecutionCase, Executor};
 use super::error::{Error, duration_limit};
-use super::execution::{
-    ExecutionEvidence, add_execution_stats, rate_delay, retain_evidence, validate_execution,
-    worst_case_duration,
+use super::evidence::{
+    ExecutionEvidence, add_execution_stats, retain_evidence, validate_execution,
 };
+use super::execution::{Execution, ExecutionCase, Executor};
+use super::plan::{rate_delay, worst_case_duration};
+use super::report::{Case, CaseOutcome, Report, Stats, Summary};
 use super::request::LiveOptions;
-use super::result::{Case, CaseOutcome, Result, Stats, Summary};
 use crate::authorization::{Authorizer, DeclaredPackets, Operation, PermissiveLive, WireBudget};
 
 /// Builds and validates all cases offline, then authorizes and executes the campaign.
@@ -41,7 +41,7 @@ pub fn run<A, E, C>(
     authorizer: &mut A,
     executor: &mut E,
     clock: &mut C,
-) -> std::result::Result<Result, Error>
+) -> Result<Report, Error>
 where
     A: Authorizer,
     E: Executor,
@@ -52,11 +52,10 @@ where
         cases.push(case);
         Ok(())
     })?;
-    Ok(Result {
+    Ok(Report {
         seed: summary.seed,
         first_case: summary.first_case,
         cases,
-        diagnostics: summary.diagnostics,
         stats: summary.stats,
     })
 }
@@ -72,15 +71,18 @@ pub fn run_with_events<A, E, C, F>(
     authorizer: &mut A,
     executor: &mut E,
     clock: &mut C,
+    runtime: &Runtime,
     emit: F,
-) -> std::result::Result<Summary, Error>
+) -> Result<Summary, Error>
 where
     A: Authorizer,
     E: Executor,
     C: Clock,
-    F: FnMut(Case) -> std::result::Result<(), crate::BoundaryError> + Send + 'static,
+    F: FnMut(Case) -> Result<(), crate::BoundaryError> + Send + 'static,
 {
-    let observe = sink_observer(emit, duration_limit, |source| Error::Output { source })?;
+    let observe = sink_observer(runtime, emit, duration_limit, |source| Error::Output {
+        source,
+    })?;
     run_observed(input, authorizer, executor, clock, observe)
 }
 
@@ -103,12 +105,12 @@ fn run_observed<A, E, C, F>(
     executor: &mut E,
     clock: &mut C,
     mut emit: F,
-) -> std::result::Result<Summary, Error>
+) -> Result<Summary, Error>
 where
     A: Authorizer,
     E: Executor,
     C: Clock,
-    F: FnMut(Case, &Deadline) -> std::result::Result<(), Error>,
+    F: FnMut(Case, &Deadline) -> Result<(), Error>,
 {
     let RunInput {
         request,
@@ -116,7 +118,7 @@ where
         packet,
         registry,
     } = input;
-    let live = live.validate()?;
+    live.validate()?;
     let mut deadline = Deadline::new(request.limits.max_duration);
     let live_dissector = Dissector::new(Arc::clone(&registry));
     let prepared = prepare_campaign(request, live, packet, &registry, &mut deadline)?;
@@ -141,7 +143,7 @@ where
             ..Stats::default()
         },
         evidence: Budget::default(),
-        diagnostics: Vec::new(),
+        diagnostics: DiagnosticLog::default(),
         scheduled_delay: Duration::ZERO,
     }
     .execute(executor, clock, &mut emit)
@@ -160,7 +162,7 @@ fn prepare_campaign(
     packet: Packet,
     registry: &Arc<Registry>,
     deadline: &mut Deadline,
-) -> std::result::Result<PreparedCampaign, Error> {
+) -> Result<PreparedCampaign, Error> {
     let campaign = packet_fuzz::Campaign::prepare(request, packet, Arc::clone(registry), deadline)?;
     let cases = campaign
         .into_cases()
@@ -178,15 +180,15 @@ fn prepare_campaign(
         .check_additional(worst_case)
         .map_err(duration_limit)?;
     let maximum_wire_bytes = maximum_wire_bytes(request, &cases)?;
+    // Whether the opt-in is *needed* is decided here; whether it was *given*
+    // is decided by `authorize_campaign` on the next line, so the destination
+    // gate runs first and `policy.allow_permissive_packets` also applies.
     let requires_malformed_live = cases.iter().any(|case| {
         case.prepared
             .built
             .as_ref()
             .is_some_and(|built| built.requires_live_opt_in)
     });
-    if requires_malformed_live && !live.allow_malformed_live {
-        return Err(Error::MalformedLiveOptInRequired);
-    }
 
     Ok(PreparedCampaign {
         cases,
@@ -196,10 +198,7 @@ fn prepare_campaign(
     })
 }
 
-fn maximum_wire_bytes(
-    request: &packet_fuzz::Request,
-    cases: &[Case],
-) -> std::result::Result<u64, Error> {
+fn maximum_wire_bytes(request: &packet_fuzz::Request, cases: &[Case]) -> Result<u64, Error> {
     cases.iter().try_fold(0_u64, |total, case| {
         let Some(built) = &case.prepared.built else {
             return Ok(total);
@@ -227,19 +226,14 @@ fn authorize_campaign<A>(
     prepared: &PreparedCampaign,
     live: LiveOptions,
     authorizer: &mut A,
-) -> std::result::Result<(), Error>
+) -> Result<(), Error>
 where
     A: Authorizer,
 {
     let packets = prepared
         .cases
         .iter()
-        .filter_map(|case| {
-            case.prepared
-                .built
-                .as_ref()
-                .map(|built| built.packet.clone())
-        })
+        .filter_map(|case| case.prepared.built.as_ref().map(|built| &built.packet))
         .collect::<Vec<_>>();
     // Unconditional: a campaign with no buildable case still has to clear
     // policy validation and the destination gate before anything else runs.
@@ -268,7 +262,7 @@ struct ExecutionPhase<'a> {
     cases: Vec<Case>,
     stats: Stats,
     evidence: Budget,
-    diagnostics: Vec<Diagnostic>,
+    diagnostics: DiagnosticLog,
     scheduled_delay: Duration,
 }
 
@@ -278,16 +272,15 @@ impl ExecutionPhase<'_> {
         executor: &mut E,
         clock: &mut C,
         emit: &mut F,
-    ) -> std::result::Result<Summary, Error>
+    ) -> Result<Summary, Error>
     where
         E: Executor,
         C: Clock,
-        F: FnMut(Case, &Deadline) -> std::result::Result<(), Error>,
+        F: FnMut(Case, &Deadline) -> Result<(), Error>,
     {
         let cases = std::mem::take(&mut self.cases);
         let mut built_ordinal = 0;
         for mut case in cases {
-            let diagnostic_start = self.diagnostics.len();
             if case.prepared.built.is_some() {
                 self.pace(built_ordinal, case.prepared.index, clock)?;
                 self.deadline.check().map_err(duration_limit)?;
@@ -301,26 +294,18 @@ impl ExecutionPhase<'_> {
                     built_ordinal += 1;
                 }
             }
-            #[expect(
-                clippy::indexing_slicing,
-                reason = "`diagnostic_start` is `self.diagnostics.len()` read at the top of this \
-                          iteration and the vector is only appended to, so the range is in bounds"
-            )]
-            let new_diagnostics = &self.diagnostics[diagnostic_start..];
-            case.prepared
-                .diagnostics
-                .extend(new_diagnostics.iter().cloned());
+            // Campaign-level diagnostics reach the caller on the case they
+            // were raised during; the campaign never republishes them.
+            self.diagnostics.publish_new::<Error>(|diagnostic| {
+                case.prepared.diagnostics.push(diagnostic);
+                Ok(())
+            })?;
             emit(case, &self.deadline)?;
         }
         self.finish()
     }
 
-    fn pace<C>(
-        &mut self,
-        ordinal: usize,
-        case_index: u64,
-        clock: &mut C,
-    ) -> std::result::Result<(), Error>
+    fn pace<C>(&mut self, ordinal: usize, case_index: u64, clock: &mut C) -> Result<(), Error>
     where
         C: Clock,
     {
@@ -340,18 +325,14 @@ impl ExecutionPhase<'_> {
             .map_err(duration_limit)?;
         clock.sleep(delay).map_err(|source| Error::Clock {
             case_index,
-            message: source.to_string(),
+            source: Box::new(source),
         })?;
         self.deadline.account(delay).map_err(duration_limit)?;
         self.scheduled_delay = prospective_scheduled_delay;
         Ok(())
     }
 
-    fn execute_case<E>(
-        &mut self,
-        case: &mut Case,
-        executor: &mut E,
-    ) -> std::result::Result<(), Error>
+    fn execute_case<E>(&mut self, case: &mut Case, executor: &mut E) -> Result<(), Error>
     where
         E: Executor,
     {
@@ -434,7 +415,7 @@ impl ExecutionPhase<'_> {
         Ok(())
     }
 
-    fn finish(mut self) -> std::result::Result<Summary, Error> {
+    fn finish(mut self) -> Result<Summary, Error> {
         self.stats.elapsed = self.stats.elapsed.checked_add(self.scheduled_delay).ok_or(
             Error::StatisticsOverflow {
                 case_index: last_case_index(self.request),
@@ -445,7 +426,6 @@ impl ExecutionPhase<'_> {
         Ok(Summary {
             seed: self.request.seed,
             first_case: self.request.first_case,
-            diagnostics: Vec::new(),
             stats: self.stats,
         })
     }
@@ -456,7 +436,7 @@ fn expected_live_build(
     mut packet: Packet,
     registry: &Arc<Registry>,
     execution: &Execution,
-) -> std::result::Result<BuiltPacket, String> {
+) -> Result<BuiltPacket, String> {
     let route = execution.sent.route();
     stringify(materialize_network_fields(&mut packet, &route.plan))?;
     stringify(materialize_link_structure(&mut packet, &route.plan))?;
@@ -483,7 +463,7 @@ fn build_packet(
     packet: Packet,
     context: packetcraftr_core::build::Context,
     request: &packet_fuzz::Request,
-) -> std::result::Result<BuiltPacket, String> {
+) -> Result<BuiltPacket, String> {
     stringify(builder.build(packet, context, request.build.clone()))
 }
 
@@ -493,6 +473,6 @@ fn last_case_index(request: &packet_fuzz::Request) -> u64 {
         .saturating_add(u64::try_from(request.cases.saturating_sub(1)).unwrap_or(u64::MAX))
 }
 
-fn stringify<T, E: Display>(result: std::result::Result<T, E>) -> std::result::Result<T, String> {
+fn stringify<T, E: Display>(result: Result<T, E>) -> Result<T, String> {
     result.map_err(|source| source.to_string())
 }

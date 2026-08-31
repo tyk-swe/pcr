@@ -48,26 +48,18 @@ fn terminal_safe_with_layout(value: &str, preserve_newlines: bool) -> String {
     safe
 }
 
+/// Colours a diagnostic line by the severity it opens with.
+///
+/// The tokens are [`Severity::as_str`][severity] spellings, the same three the
+/// JSON documents carry, so text and machine output name a severity one way.
+///
+/// [severity]: packetcraftr::core::diagnostic::Severity::as_str
 pub(crate) fn style_human_line(value: &str) -> String {
-    const SUCCESSES: &[&str] = &[
-        "built",
-        "captured",
-        "completed",
-        "decoded",
-        "generated",
-        "planned",
-        "read",
-        "replayed",
-        "scanned",
-        "sent",
-    ];
-
     if let Some((prefix, rest)) = split_leading_token(value) {
         let style = match prefix {
-            "Error" | "ERROR" => Some(error_style()),
-            "Warning" | "WARNING" => Some(warning_style()),
-            "Info" | "INFO" | "Note" | "NOTE" => Some(info_style()),
-            _ if SUCCESSES.contains(&prefix) => Some(success_style()),
+            "error" => Some(error_style()),
+            "warning" => Some(warning_style()),
+            "info" => Some(info_style()),
             _ => None,
         };
         if let Some(style) = style {
@@ -84,6 +76,20 @@ pub(crate) fn style_human_line(value: &str) -> String {
         return format!("{style}warning:{style:#}{rest}");
     }
     value.to_owned()
+}
+
+/// Colours the leading word of a command's terminal summary line.
+///
+/// Only [`write_summary_line`][summary] reaches this, so a rendered value that
+/// happens to start with a summary verb is never mistaken for one.
+///
+/// [summary]: super::human::write_summary_line
+pub(crate) fn style_summary_line(value: &str) -> String {
+    let style = success_style();
+    match split_leading_token(value) {
+        Some((prefix, rest)) => format!("{style}{prefix}{style:#}{rest}"),
+        None => format!("{style}{value}{style:#}"),
+    }
 }
 
 fn split_leading_token(value: &str) -> Option<(&str, &str)> {
@@ -172,6 +178,33 @@ mod tests {
                 "input={input:?}, preserve_newlines={preserve_newlines}",
             );
         }
+    }
+
+    /// Severity colour keys off the three serde spellings and nothing else, so
+    /// a rendered value that happens to open with a summary verb — a `stats`
+    /// row, a `follow` payload line — is never coloured by accident.
+    #[test]
+    fn severity_colour_follows_the_serialized_spellings_alone() {
+        for severity in [
+            packetcraftr::core::diagnostic::Severity::Info,
+            packetcraftr::core::diagnostic::Severity::Warning,
+            packetcraftr::core::diagnostic::Severity::Error,
+        ] {
+            let line = format!("{} some.code: message", severity.as_str());
+            assert_ne!(style_human_line(&line), line, "{severity} must be styled");
+        }
+
+        for plain in [
+            "Warning some.code: message",
+            "read 3 frame(s)",
+            "sent 12 bytes",
+            "captured 4 frame(s)",
+            "tcp stream 0: a <-> b",
+        ] {
+            assert_eq!(style_human_line(plain), plain, "{plain}");
+        }
+
+        assert_ne!(style_summary_line("read 3 frame(s)"), "read 3 frame(s)");
     }
 
     #[test]

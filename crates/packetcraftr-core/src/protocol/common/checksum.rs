@@ -111,16 +111,20 @@ fn fold_checksum(mut sum: u128) -> u16 {
     !(sum as u16)
 }
 
+/// `name` is the calling codec's protocol, so a pseudo-header failure is
+/// reported against a protocol that is actually in the catalog.
 pub(crate) fn transport_checksum(
+    name: &str,
     network: NetworkEnvelope,
     protocol_number: u8,
     segment: &[u8],
 ) -> Result<u16, crate::codec::Error> {
-    transport_checksum_parts(network, protocol_number, &[segment])
+    transport_checksum_parts(name, network, protocol_number, &[segment])
 }
 
 /// Treats `parts` as one contiguous byte stream, including across odd boundaries.
 pub(crate) fn transport_checksum_parts(
+    name: &str,
     network: NetworkEnvelope,
     protocol_number: u8,
     parts: &[&[u8]],
@@ -128,12 +132,12 @@ pub(crate) fn transport_checksum_parts(
     let transport_length = parts
         .iter()
         .try_fold(0_usize, |total, part| total.checked_add(part.len()))
-        .ok_or_else(|| invalid("transport", "transport segment length overflow"))?;
+        .ok_or_else(|| invalid(name, "segment length overflow"))?;
     let mut accumulator = ChecksumAccumulator::default();
     match (network.source, network.destination) {
         (IpAddr::V4(source), IpAddr::V4(destination)) => {
             let length = u16::try_from(transport_length)
-                .map_err(|_| invalid("transport", "IPv4 transport segment exceeds 65535 bytes"))?;
+                .map_err(|_| invalid(name, "IPv4 segment exceeds 65535 bytes"))?;
             accumulator.add(&source.octets());
             accumulator.add(&destination.octets());
             accumulator.add(&[0, protocol_number]);
@@ -141,13 +145,13 @@ pub(crate) fn transport_checksum_parts(
         }
         (IpAddr::V6(source), IpAddr::V6(destination)) => {
             let length = u32::try_from(transport_length)
-                .map_err(|_| invalid("transport", "IPv6 transport segment exceeds u32 length"))?;
+                .map_err(|_| invalid(name, "IPv6 segment exceeds u32 length"))?;
             accumulator.add(&source.octets());
             accumulator.add(&destination.octets());
             accumulator.add(&length.to_be_bytes());
             accumulator.add(&[0, 0, 0, protocol_number]);
         }
-        _ => return Err(invalid("transport", "mixed IP versions in pseudo-header")),
+        _ => return Err(invalid(name, "mixed IP versions in pseudo-header")),
     }
     for part in parts {
         accumulator.add(part);

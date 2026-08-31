@@ -42,15 +42,16 @@ impl Template {
 
     /// Number of packets this template expands to: one per axis value, or one
     /// packet when no axis is set.
-    pub fn expansion_len(&self) -> Result<usize, Error> {
-        Ok(self.axis.as_ref().map_or(1, |axis| axis.values.len()))
+    #[must_use]
+    pub fn expansion_len(&self) -> usize {
+        self.axis.as_ref().map_or(1, |axis| axis.values.len())
     }
 
     pub fn expand(
         &self,
         maximum: usize,
     ) -> Result<impl ExactSizeIterator<Item = Result<Packet, Error>> + '_, Error> {
-        let total = self.expansion_len()?;
+        let total = self.expansion_len();
         if total > maximum {
             return Err(Error::ExpansionLimit {
                 requested: total,

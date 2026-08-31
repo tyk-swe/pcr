@@ -3,8 +3,6 @@
 
 //! Resolver-free native capture-filter validation.
 
-#![forbid(unsafe_code)]
-
 use crate::{Error, interface::Id as InterfaceId};
 
 pub(super) fn validate(interface: &InterfaceId, source: &str) -> Result<(), Error> {

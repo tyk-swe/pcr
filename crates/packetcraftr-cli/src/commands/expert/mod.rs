@@ -7,10 +7,10 @@ mod rendering;
 use packetcraftr::{analysis, output};
 
 use self::arguments::{Args, Severity};
-use super::super::errors::CliError;
-use super::super::input::open_capture;
 use super::format::ToolFormat;
 use super::offline_analysis::prepare;
+use crate::errors::CliError;
+use crate::input::open_capture;
 use crate::rendering::StreamEncoder;
 
 fn matches_selector(
@@ -18,7 +18,7 @@ fn matches_selector(
     min_severity: Severity,
     codes: &[String],
 ) -> bool {
-    if Severity::from(finding.severity) < min_severity {
+    if finding.severity < min_severity.into() {
         return false;
     }
     if !codes.is_empty() && !codes.iter().any(|c| c == &finding.code) {
@@ -30,21 +30,23 @@ fn matches_selector(
 pub(super) fn run(
     arguments: Args,
     format: output::contract::Format,
-    stream: &mut StreamEncoder,
+    stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     let format = ToolFormat::narrow(output::contract::Command::Expert, format)?;
     let prepared = prepare(arguments.limits, arguments.filter.as_deref())?;
-    let mut reader = open_capture(&arguments.path, arguments.limits.capture)?;
+    let mut reader = open_capture(&arguments.path, arguments.limits.capture.reader_bounds())?;
 
     // Expert needs the reassembler's byte-exact retransmission evidence.
     let options = prepared.options(true);
     let mut collector = analysis::expert::Collector::new();
-    let mut state = rendering::State::default();
+    let mut state = rendering::State::new(arguments.limits.capture.retention_ceiling());
     let outcome = analysis::run_with_ip_events(
         &mut reader,
         prepared.registry.clone(),
         &options,
-        super::offline_analysis::ip_event_sink(format == ToolFormat::Ndjson, stream.clone()),
+        super::offline_analysis::ip_event_sink(
+            (format == ToolFormat::Ndjson).then(|| stream.clone()),
+        ),
         |record| {
             for finding in collector.observe(&record) {
                 if matches_selector(&finding, arguments.min_severity, &arguments.codes) {
@@ -57,8 +59,7 @@ pub(super) fn run(
         },
     );
     let summary = outcome.map_err(CliError::classified)?;
-    let (trailing, _expert_summary) =
-        collector.finish(&summary.trailing_tcp_events, summary.frames_read);
+    let (trailing, _expert_summary) = collector.finish(&summary);
     for finding in trailing {
         if matches_selector(&finding, arguments.min_severity, &arguments.codes) {
             state.count(&finding);

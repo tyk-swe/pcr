@@ -9,16 +9,52 @@ use std::time::Duration;
 use packetcraftr_core::diagnostic::Diagnostic;
 use serde::Serialize;
 
-use super::super::contract::Error;
-use super::super::envelope::Stats;
-use super::super::frame::{Captured, Timestamp};
 use super::record::{Edns, Record, RejectedRecord, Section};
+use crate::output::contract::Error;
+use crate::output::envelope::Stats;
+use crate::output::frame::{Captured, Timestamp};
 
 pub use crate::dns::{Outcome, Transport};
 
+/// The response-header block the aggregate result and the terminal record both
+/// publish, present exactly when a response was accepted.
+///
+/// Flattened at both use sites, so the emitted keys sit beside their siblings
+/// as they always have and a new header flag is declared once.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ResponseSummary {
+    pub response_code: u16,
+    pub response_code_name: String,
+    /// Absent when the response carried no OPT record.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub edns: Option<Edns>,
+    pub authoritative: bool,
+    pub truncated: bool,
+    pub recursion_desired: bool,
+    pub recursion_available: bool,
+    pub authenticated_data: bool,
+    pub checking_disabled: bool,
+}
+
+impl From<crate::dns::ResponseMetadata> for ResponseSummary {
+    fn from(metadata: crate::dns::ResponseMetadata) -> Self {
+        Self {
+            response_code: metadata.response_code,
+            response_code_name: metadata.response_code_name().to_owned(),
+            edns: metadata.edns.map(Into::into),
+            authoritative: metadata.authoritative,
+            truncated: metadata.truncated,
+            recursion_desired: metadata.recursion_desired,
+            recursion_available: metadata.recursion_available,
+            authenticated_data: metadata.authenticated_data,
+            checking_disabled: metadata.checking_disabled,
+        }
+    }
+}
+
 /// Aggregate result of `dns`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Result {
+pub struct Report {
     pub server: String,
     pub server_port: u16,
     pub resolved_addresses: Vec<IpAddr>,
@@ -29,24 +65,8 @@ pub struct Result {
     pub fallback_attempted: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub accepted_transport: Option<Transport>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub response_code: Option<u16>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub response_code_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub edns: Option<Edns>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub authoritative: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub truncated: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub recursion_desired: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub recursion_available: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub authenticated_data: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub checking_disabled: Option<bool>,
+    #[serde(flatten)]
+    pub response: Option<ResponseSummary>,
     pub answers: Vec<Record>,
     pub authorities: Vec<Record>,
     pub additionals: Vec<Record>,
@@ -56,78 +76,38 @@ pub struct Result {
     pub undecoded: Vec<Undecoded>,
 }
 
+/// The response halves that only the aggregate result publishes.
 #[derive(Default)]
-struct ResponseFields {
-    response_code: Option<u16>,
-    response_code_name: Option<String>,
-    edns: Option<Edns>,
-    authoritative: Option<bool>,
-    truncated: Option<bool>,
-    recursion_desired: Option<bool>,
-    recursion_available: Option<bool>,
-    authenticated_data: Option<bool>,
-    checking_disabled: Option<bool>,
+struct ResponseRecords {
     answers: Vec<Record>,
     authorities: Vec<Record>,
     additionals: Vec<Record>,
     rejected_records: Vec<RejectedRecord>,
-    rejected_record_count: usize,
 }
 
-impl ResponseFields {
-    fn from_response(response: Option<crate::dns::ValidatedResponse>) -> Self {
-        let Some(response) = response else {
-            return Self::default();
-        };
-        let crate::dns::ValidatedResponse {
-            metadata,
-            answers,
-            authorities,
-            additionals,
-            rejected_records,
-        } = response;
-        let mut fields = Self::from_metadata(Some(metadata));
-        fields.answers = answers.into_iter().map(Record::from_record).collect();
-        fields.authorities = authorities.into_iter().map(Record::from_record).collect();
-        fields.additionals = additionals.into_iter().map(Record::from_record).collect();
-        fields.rejected_records = rejected_records
-            .into_iter()
-            .map(|record| RejectedRecord {
-                section: record.section,
-                index: record.index,
-                owner: record.owner,
-                type_code: record.type_code,
-                reason: record.reason,
-            })
-            .collect();
-        fields
-    }
-
-    fn from_metadata(metadata: Option<crate::dns::ResponseMetadata>) -> Self {
-        let Some(metadata) = metadata else {
-            return Self::default();
-        };
+impl From<Vec<crate::dns::RejectedRecord>> for ResponseRecords {
+    fn from(rejected_records: Vec<crate::dns::RejectedRecord>) -> Self {
         Self {
-            response_code: Some(metadata.response_code),
-            response_code_name: Some(metadata.response_code_name().to_owned()),
-            edns: metadata.edns.map(Into::into),
-            authoritative: Some(metadata.authoritative),
-            truncated: Some(metadata.truncated),
-            recursion_desired: Some(metadata.recursion_desired),
-            recursion_available: Some(metadata.recursion_available),
-            authenticated_data: Some(metadata.authenticated_data),
-            checking_disabled: Some(metadata.checking_disabled),
-            rejected_record_count: metadata.rejected_record_count,
+            rejected_records: rejected_records
+                .into_iter()
+                .map(|record| RejectedRecord {
+                    section: record.section,
+                    index: record.index,
+                    owner: record.owner,
+                    type_code: record.type_code,
+                    reason: record.reason,
+                })
+                .collect(),
             ..Self::default()
         }
     }
 }
 
-impl Result {
+impl Report {
     pub fn try_from_dns(
-        result: crate::dns::Result,
-    ) -> std::result::Result<(Self, Vec<Diagnostic>, Stats), Error> {
-        let crate::dns::Result {
+        result: crate::dns::Report,
+    ) -> Result<(Self, Vec<Diagnostic>, Stats), Error> {
+        let crate::dns::Report {
             server,
             server_port,
             resolved_addresses,
@@ -153,15 +133,15 @@ impl Result {
                     .to_owned(),
             });
         }
-        let response_fields = ResponseFields::from_response(response);
+        let (summary, records, rejected_record_count) = split_response(response);
         let attempt_outputs = attempts
             .into_iter()
             .map(try_from_attempt)
-            .collect::<std::result::Result<Vec<_>, Error>>()?;
+            .collect::<Result<Vec<_>, Error>>()?;
         let undecoded_outputs = undecoded
             .into_iter()
             .map(try_from_undecoded)
-            .collect::<std::result::Result<Vec<_>, Error>>()?;
+            .collect::<Result<Vec<_>, Error>>()?;
         Ok((
             Self {
                 server,
@@ -173,20 +153,12 @@ impl Result {
                 outcome,
                 fallback_attempted,
                 accepted_transport,
-                response_code: response_fields.response_code,
-                response_code_name: response_fields.response_code_name,
-                edns: response_fields.edns,
-                authoritative: response_fields.authoritative,
-                truncated: response_fields.truncated,
-                recursion_desired: response_fields.recursion_desired,
-                recursion_available: response_fields.recursion_available,
-                authenticated_data: response_fields.authenticated_data,
-                checking_disabled: response_fields.checking_disabled,
-                answers: response_fields.answers,
-                authorities: response_fields.authorities,
-                additionals: response_fields.additionals,
-                rejected_records: response_fields.rejected_records,
-                rejected_record_count: response_fields.rejected_record_count,
+                response: summary,
+                answers: records.answers,
+                authorities: records.authorities,
+                additionals: records.additionals,
+                rejected_records: records.rejected_records,
+                rejected_record_count,
                 attempts: attempt_outputs,
                 undecoded: undecoded_outputs,
             },
@@ -196,7 +168,32 @@ impl Result {
     }
 }
 
-fn try_from_attempt(evidence: crate::dns::AttemptEvidence) -> std::result::Result<Attempt, Error> {
+/// Splits a validated response into the flattened header summary, the record
+/// sections only the aggregate publishes, and the rejection tally both do.
+fn split_response(
+    response: Option<crate::dns::ValidatedResponse>,
+) -> (Option<ResponseSummary>, ResponseRecords, usize) {
+    let Some(response) = response else {
+        return (None, ResponseRecords::default(), 0);
+    };
+    let crate::dns::ValidatedResponse {
+        metadata,
+        answers,
+        authorities,
+        additionals,
+        rejected_records,
+    } = response;
+    let rejected_record_count = metadata.rejected_record_count;
+    let records = ResponseRecords {
+        answers: answers.into_iter().map(Record::from_record).collect(),
+        authorities: authorities.into_iter().map(Record::from_record).collect(),
+        additionals: additionals.into_iter().map(Record::from_record).collect(),
+        ..ResponseRecords::from(rejected_records)
+    };
+    (Some(metadata.into()), records, rejected_record_count)
+}
+
+fn try_from_attempt(evidence: crate::dns::AttemptEvidence) -> Result<Attempt, Error> {
     if evidence.transport == Transport::Udp && evidence.source_port.is_none() {
         return Err(Error::IncoherentDnsEvidence {
             message: "UDP attempt evidence omitted its selected source port".to_owned(),
@@ -230,18 +227,13 @@ fn try_from_attempt(evidence: crate::dns::AttemptEvidence) -> std::result::Resul
     })
 }
 
-fn try_from_undecoded(
-    evidence: crate::dns::UndecodedEvidence,
-) -> std::result::Result<Undecoded, Error> {
-    if evidence.transport != Transport::Udp {
-        return Err(Error::IncoherentDnsEvidence {
-            message: "TCP socket bytes cannot be represented as undecoded captured evidence"
-                .to_owned(),
-        });
-    }
+fn try_from_undecoded(evidence: crate::dns::UndecodedEvidence) -> Result<Undecoded, Error> {
     Ok(Undecoded {
         attempt: evidence.attempt,
-        transport: evidence.transport,
+        // DNS-over-TCP runs on a kernel socket and never yields captured
+        // frames, so undecoded evidence is UDP by construction. The schema
+        // pins this to the constant "udp".
+        transport: Transport::Udp,
         frame: Captured::try_from_frame(evidence.frame)?,
     })
 }
@@ -318,32 +310,14 @@ pub enum Event {
         fallback_attempted: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
         accepted_transport: Option<Transport>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        response_code: Option<u16>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        response_code_name: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        edns: Option<Edns>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        authoritative: Option<bool>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        truncated: Option<bool>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        recursion_desired: Option<bool>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        recursion_available: Option<bool>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        authenticated_data: Option<bool>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        checking_disabled: Option<bool>,
+        #[serde(flatten)]
+        response: Option<ResponseSummary>,
         rejected_record_count: usize,
     },
 }
 
 impl Event {
-    pub fn try_from_dns(
-        event: crate::dns::Event,
-    ) -> std::result::Result<(Self, Vec<Diagnostic>), Error> {
+    pub fn try_from_dns(event: crate::dns::Event) -> Result<(Self, Vec<Diagnostic>), Error> {
         let (event, diagnostics) = match event {
             crate::dns::Event::Attempt { context, evidence } => (
                 Self::Attempt {
@@ -410,13 +384,17 @@ impl Event {
 
     pub fn complete_from_dns(
         summary: crate::dns::Summary,
-    ) -> std::result::Result<(Self, Vec<Diagnostic>, Stats), Error> {
+    ) -> Result<(Self, Vec<Diagnostic>, Stats), Error> {
         validate_transport_outcome(
             summary.outcome,
             summary.fallback_attempted,
             summary.accepted_transport,
         )?;
-        let response = ResponseFields::from_metadata(summary.response);
+        let rejected_record_count = summary
+            .response
+            .as_ref()
+            .map_or(0, |metadata| metadata.rejected_record_count);
+        let response = summary.response.map(ResponseSummary::from);
         Ok((
             Self::Complete {
                 server: summary.server,
@@ -428,18 +406,10 @@ impl Event {
                 outcome: summary.outcome,
                 fallback_attempted: summary.fallback_attempted,
                 accepted_transport: summary.accepted_transport,
-                response_code: response.response_code,
-                response_code_name: response.response_code_name,
-                edns: response.edns,
-                authoritative: response.authoritative,
-                truncated: response.truncated,
-                recursion_desired: response.recursion_desired,
-                recursion_available: response.recursion_available,
-                authenticated_data: response.authenticated_data,
-                checking_disabled: response.checking_disabled,
-                rejected_record_count: response.rejected_record_count,
+                response,
+                rejected_record_count,
             },
-            summary.diagnostics,
+            Vec::new(),
             summary.stats.into(),
         ))
     }
@@ -449,7 +419,7 @@ fn validate_transport_outcome(
     outcome: Outcome,
     fallback_attempted: bool,
     accepted_transport: Option<Transport>,
-) -> std::result::Result<(), Error> {
+) -> Result<(), Error> {
     let accepted_response = matches!(outcome, Outcome::Response | Outcome::Truncated);
     if accepted_response != accepted_transport.is_some() {
         return Err(Error::IncoherentDnsEvidence {

@@ -9,6 +9,8 @@ use packetcraftr_core::field::FieldKind as CoreFieldKind;
 use packetcraftr_core::layer::FieldSchema;
 use packetcraftr_core::protocol::support;
 
+use super::contract::Error as ContractError;
+
 /// Capability summary for one built-in protocol.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Summary {
@@ -39,25 +41,45 @@ impl From<&support::Protocol> for Summary {
     }
 }
 
-mirror_enum! {
-    /// Stable reflective field type owned by the output-v1 contract.
-    #[serde(rename_all = "snake_case")]
-    pub enum FieldKind from CoreFieldKind {
-        Bool = Bool,
-        Unsigned = Unsigned,
-        Signed = Signed,
-        Text = Text,
-        Bytes = Bytes,
-        Ipv4 = Ipv4,
-        Ipv6 = Ipv6,
-        Mac = Mac,
-        List = List,
-    }
-    // v1 pins this value set; new kinds require a schema revision and explicit arm.
-    unmatched value => unreachable!("field kind {value:?} has no v1 output representation"),
+/// Stable reflective field type owned by the output-v1 contract.
+///
+/// v1 pins this value set. [`CoreFieldKind`] is `#[non_exhaustive]`, so a kind
+/// added there before the schema is revised has no representation here and is
+/// reported rather than guessed at — `protocols --detail` is a descriptive
+/// path and must not abort on one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FieldKind {
+    Bool,
+    Unsigned,
+    Signed,
+    Text,
+    Bytes,
+    Ipv4,
+    Ipv6,
+    Mac,
+    List,
 }
 
 impl FieldKind {
+    /// The v1 representation of one core field kind, or `None` when this
+    /// contract has no name for it.
+    #[must_use]
+    pub const fn from_core(kind: CoreFieldKind) -> Option<Self> {
+        match kind {
+            CoreFieldKind::Bool => Some(Self::Bool),
+            CoreFieldKind::Unsigned => Some(Self::Unsigned),
+            CoreFieldKind::Signed => Some(Self::Signed),
+            CoreFieldKind::Text => Some(Self::Text),
+            CoreFieldKind::Bytes => Some(Self::Bytes),
+            CoreFieldKind::Ipv4 => Some(Self::Ipv4),
+            CoreFieldKind::Ipv6 => Some(Self::Ipv6),
+            CoreFieldKind::Mac => Some(Self::Mac),
+            CoreFieldKind::List => Some(Self::List),
+            _ => None,
+        }
+    }
+
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Bool => "bool",
@@ -83,15 +105,21 @@ pub struct Field {
     pub description: String,
 }
 
-impl From<&FieldSchema> for Field {
-    fn from(value: &FieldSchema) -> Self {
-        Self {
+impl TryFrom<&FieldSchema> for Field {
+    type Error = ContractError;
+
+    fn try_from(value: &FieldSchema) -> Result<Self, Self::Error> {
+        Ok(Self {
             name: value.name.to_owned(),
-            kind: value.kind.into(),
+            kind: FieldKind::from_core(value.kind).ok_or_else(|| {
+                ContractError::UnsupportedFieldKind {
+                    field: value.name.to_owned(),
+                }
+            })?,
             required: value.required,
             derived: value.derived,
             description: value.description.to_owned(),
-        }
+        })
     }
 }
 

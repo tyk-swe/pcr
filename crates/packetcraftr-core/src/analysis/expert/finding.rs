@@ -152,7 +152,7 @@ pub(super) fn new(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::expert::StreamTransport;
+    use crate::analysis::StreamTransport;
 
     const TCP: StreamRef = StreamRef {
         transport: StreamTransport::Tcp,

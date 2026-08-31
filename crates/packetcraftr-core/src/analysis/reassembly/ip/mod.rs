@@ -13,7 +13,6 @@ use std::time::Instant;
 
 use bytes::Bytes;
 
-use super::Limits;
 use super::expiry::ExpiryIndex;
 
 mod contract;
@@ -24,6 +23,8 @@ pub use contract::{
 };
 
 mod engine;
+mod limits;
+pub use limits::Limits;
 
 // This deliberately coarse reservation covers the hash-table key/state and
 // load-factor slack, transient old+new tables during geometric growth, the

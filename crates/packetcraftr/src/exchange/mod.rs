@@ -17,15 +17,15 @@ mod send_sequence;
 mod shutdown;
 mod transaction;
 
+pub(crate) use crate::materialize::PreparedPacket;
 pub(crate) use accumulator::{
-    Accumulator, ProcessContext, ProcessOutcome, WorkflowPromotionContext, WorkflowResponseMatcher,
-    WorkflowStopPredicate,
+    Accumulator, ProcessContext, ProcessOutcome, WorkflowResponseMatcher, WorkflowStopPredicate,
 };
 pub(crate) use contract::into_sent_packet;
 pub use contract::{
     Collector, DEFAULT_MAX_RESPONSES, DEFAULT_MAX_UNMATCHED_FRAMES, Event, MAX_EXCHANGE_TIMEOUT,
-    Options, Response, Result, Summary,
+    Options, Report, Response, Summary,
 };
-pub(crate) use preparation::{Prepared, PreparedPacket};
+pub(crate) use preparation::Prepared;
 pub(crate) use shutdown::CaptureGuard;
 pub(crate) use transaction::Transaction;

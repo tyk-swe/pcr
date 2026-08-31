@@ -17,7 +17,7 @@ use crate::field::{FieldValue, WireValue, parse_mac};
 #[doc(hidden)]
 macro_rules! reflective_layer {
     (
-        fn $schema:ident() => {
+        $schema_vis:vis fn $schema:ident() => {
             protocol: $protocol:expr_2021,
             name: $layer_name:literal
         }
@@ -40,13 +40,14 @@ macro_rules! reflective_layer {
         }
         layout $vis:vis fn $layout:ident($($layout_arg:ident: $layout_ty:ty),* $(,)?) ;
     ) => {
-        fn $schema() -> &'static $crate::layer::Schema {
+        $schema_vis fn $schema() -> &'static $crate::layer::Schema {
             static SCHEMA: std::sync::OnceLock<$crate::layer::Schema> =
                 std::sync::OnceLock::new();
             static FIELDS: &[$crate::layer::FieldSchema] = &[
                 $(
                     $crate::layer::FieldSchema {
                         name: $field,
+                        aliases: &[$($alias),*],
                         kind: $crate::field::FieldKind::$kind,
                         derived: $derived,
                         required: $required,
@@ -135,7 +136,7 @@ macro_rules! reflective_layer {
     };
     (@layout $field:literal, $start:expr, $end:expr) => {
         Some($crate::layout::FieldLayout {
-            name: $field.to_owned(),
+            name: $field,
             range: $crate::layout::ByteRange::new($start, $end),
         })
     };
@@ -176,8 +177,13 @@ macro_rules! reflective_layer {
 #[doc(hidden)]
 pub(crate) use reflective_layer;
 
+/// Why a reflective setter refused a value, before the field name and
+/// protocol that [`reflect_set`] attaches are known.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum ReflectiveFieldError {
+    #[error("value is not {0}")]
     WrongType(&'static str),
+    #[error("value is outside the field's range")]
     OutOfRange,
 }
 

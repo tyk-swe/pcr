@@ -11,7 +11,7 @@ use crate::{
     diagnostic::Diagnostic,
     layer::{Malformed, Padding, Raw},
     layout::{ByteRange, FieldLayout, LayerLayout, PacketLayout},
-    semantics::BuiltinProtocol,
+    protocol::BuiltinProtocol,
 };
 
 use super::DecodedPacket;
@@ -77,7 +77,7 @@ fn bytes_layer_layout(
         protocol: crate::layer::Id::new(protocol.as_str()),
         range: ByteRange::new(absolute_offset, end),
         fields: vec![FieldLayout {
-            name: "bytes".to_owned(),
+            name: "bytes",
             range: ByteRange::new(absolute_offset, end),
         }],
     }
@@ -116,7 +116,7 @@ pub(super) fn raw_decoded_frame(frame: Frame, diagnostic: Diagnostic) -> Decoded
         packet,
         original,
         frame,
-        layout: PacketLayout { layers: layouts },
+        layout: PacketLayout::new(layouts),
         diagnostics: vec![diagnostic],
     }
 }

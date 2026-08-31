@@ -16,14 +16,15 @@ use packetcraftr::{
 };
 
 use self::arguments::Args;
-use super::super::errors::CliError;
-use super::super::filtering::{self, Capabilities};
-use super::super::input::{InputKind, read_bounded_file, read_stdin_bounded};
-use super::super::rendering::{
-    emit_aggregate, render_diagnostics_text, write_plain_line, write_raw, write_stdout_line,
-};
 use super::format::BuildFormat;
 use super::registry_with_tls_ports;
+use crate::errors::CliError;
+use crate::filtering::{self, Capabilities};
+use crate::input::{InputKind, read_bounded_file, read_stdin_bounded};
+use crate::rendering::{
+    emit_aggregate, render_diagnostics_text, write_plain_line, write_raw, write_stdout_line,
+    write_summary_line,
+};
 
 pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
     let format = BuildFormat::narrow(output::contract::Command::Dissect, format)?;
@@ -52,10 +53,10 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
     let decoded = core::decode::Dissector::new(registry)
         .decode(
             Frame::new(SystemTime::now(), LinkType(arguments.link_type), bytes)
-                .map_err(|source| CliError::new(Kind::Packet, source.to_string()))?,
+                .map_err(CliError::classified)?,
             core::decode::Options::default(),
         )
-        .map_err(|source| CliError::new(Kind::Packet, source.to_string()))?;
+        .map_err(CliError::classified)?;
     // The filter selects emission, not validity: a frame it rejects is still
     // decoded successfully, while an unsupported output format is refused
     // whether or not the frame matched.
@@ -71,15 +72,15 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
             .map_err(|source| CliError::new(Kind::Packet, source.to_string()))?,
         None => true,
     };
-    let (result, diagnostics) = output::dissect::Result::from_decoded(decoded);
+    let (result, diagnostics) = output::dissect::Report::from_decoded(decoded);
     match format {
         BuildFormat::Text => {
             if !kept {
                 return Ok(());
             }
-            write_stdout_line(format_args!(
+            write_summary_line(format_args!(
                 "decoded {} bytes into {} layer(s)",
-                result.length,
+                result.frame.length,
                 result.packet.layers.len()
             ))?;
             for (index, layer) in result.packet.layers.iter().enumerate() {
@@ -91,17 +92,17 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
             if !kept {
                 return Ok(());
             }
-            write_plain_line(format_args!("{}", result.bytes_hex))
+            write_plain_line(format_args!("{}", result.frame.bytes_hex()))
         }
         BuildFormat::Raw => {
             if !kept {
                 return Ok(());
             }
-            write_raw(result.bytes())
+            write_raw(result.frame.bytes())
         }
         BuildFormat::Json => emit_aggregate(
             output::contract::Command::Dissect,
-            output::dissect::AggregateResult::from_filter(kept, result),
+            output::dissect::AggregateResult::new(kept.then_some(result)),
             diagnostics,
         ),
     }

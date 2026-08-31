@@ -2,8 +2,9 @@
 
 use bytes::Bytes;
 use libfuzzer_sys::fuzz_target;
-use packetcraftr_core::analysis::reassembly::Limits as ReassemblyLimits;
-use packetcraftr_core::analysis::reassembly::tcp::{FlowKey, Reassembler, ScopedFlowKey, Segment};
+use packetcraftr_core::analysis::reassembly::tcp::{
+    FlowKey, Limits as ReassemblyLimits, Reassembler, ScopedFlowKey, Segment,
+};
 use packetcraftr_core::analysis::scope::Interner;
 use std::net::{IpAddr, Ipv4Addr};
 use std::time::Instant;

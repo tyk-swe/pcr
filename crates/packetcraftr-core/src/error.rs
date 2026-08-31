@@ -3,75 +3,28 @@
 
 //! Stable failure taxonomy shared by the Rust API and command-line renderer.
 
-#![forbid(unsafe_code)]
-
 use serde::Serialize;
 
 mod boundary;
 
 pub use boundary::BoundaryError;
 
-/// Stable domain coordinates associated with a classified failure.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
-pub struct Context {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source_frame: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub probe_sequence: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub attempt: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub case_index: Option<u64>,
-}
-
-impl Context {
-    #[must_use]
-    pub const fn source_frame(source_frame: u64) -> Self {
-        Self {
-            source_frame: Some(source_frame),
-            probe_sequence: None,
-            attempt: None,
-            case_index: None,
-        }
-    }
-
-    #[must_use]
-    pub const fn probe_sequence(probe_sequence: u64) -> Self {
-        Self {
-            source_frame: None,
-            probe_sequence: Some(probe_sequence),
-            attempt: None,
-            case_index: None,
-        }
-    }
-
-    #[must_use]
-    pub const fn attempt(attempt: u32) -> Self {
-        Self {
-            source_frame: None,
-            probe_sequence: None,
-            attempt: Some(attempt),
-            case_index: None,
-        }
-    }
-
-    #[must_use]
-    pub const fn case_index(case_index: u64) -> Self {
-        Self {
-            source_frame: None,
-            probe_sequence: None,
-            attempt: None,
-            case_index: Some(case_index),
-        }
-    }
-
-    #[must_use]
-    pub const fn is_empty(&self) -> bool {
-        self.source_frame.is_none()
-            && self.probe_sequence.is_none()
-            && self.attempt.is_none()
-            && self.case_index.is_none()
-    }
+/// The single stable domain coordinate a classified failure carries.
+///
+/// Externally tagged, so each variant serializes as the one-key object the
+/// output contract publishes: `{"source_frame": 7}`, `{"attempt": 3}`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum Coordinate {
+    /// One-based position of the source frame in its capture.
+    SourceFrame(u64),
+    /// Probe sequence number within a scan or traceroute run.
+    ProbeSequence(u64),
+    /// One-based attempt number within one request.
+    Attempt(u32),
+    /// Zero-based fuzz case index within a campaign.
+    CaseIndex(u64),
 }
 
 /// Top-level failure classes shared by API boundaries.
@@ -121,18 +74,62 @@ impl Classification {
     }
 }
 
+/// Every distinct `#[source]` in an error's chain, outermost first.
+///
+/// The one derivation of [`Classified::causes`] for an error that retains its
+/// sources, so no implementor hand-writes the walk. A link whose `Display` is
+/// identical to the link above it — what `#[error(transparent)]` and
+/// [`BoundaryError::from_error`] both produce — restates the message it wraps
+/// and is skipped, so a wrapper never publishes the same sentence twice.
+///
+/// An error that carries two unrelated failures at once (an operation and the
+/// cleanup that also failed) has no single chain and still builds its own
+/// list; so does a value type that carries a captured `causes` snapshot rather
+/// than live sources.
+///
+/// ```
+/// use packetcraftr_core::error::source_chain;
+///
+/// #[derive(Debug, thiserror::Error)]
+/// #[error("outer")]
+/// struct Outer(#[source] Inner);
+///
+/// #[derive(Debug, thiserror::Error)]
+/// #[error("inner")]
+/// struct Inner(#[source] std::io::Error);
+///
+/// let error = Outer(Inner(std::io::Error::other("root")));
+/// assert_eq!(source_chain(&error), ["inner", "root"]);
+/// ```
+#[must_use]
+pub fn source_chain(error: &(impl std::error::Error + ?Sized)) -> Vec<String> {
+    let mut above = error.to_string();
+    let mut causes = Vec::new();
+    for source in std::iter::successors(error.source(), |error| (*error).source()) {
+        let rendered = source.to_string();
+        if rendered != above {
+            causes.push(rendered.clone());
+        }
+        above = rendered;
+    }
+    causes
+}
+
 /// Implemented by public errors that cross a live-workflow or CLI boundary.
 pub trait Classified {
     fn classification(&self) -> Classification;
 
-    /// Stable domain coordinates for automation and partial-stream recovery.
-    fn context(&self) -> Context {
-        Context::default()
+    /// The stable domain coordinate for automation and partial-stream
+    /// recovery, when the failure has one.
+    fn context(&self) -> Option<Coordinate> {
+        None
     }
 
     /// Ordered source diagnostics retained for structured renderers. The main
-    /// error remains authoritative; implementations use this for dual
-    /// operation/cleanup failures and typed adapter causes.
+    /// error remains authoritative. An error that retains its sources derives
+    /// this with [`source_chain`] rather than hand-walking the chain; the
+    /// exceptions are dual operation/cleanup failures and value types that
+    /// carry a captured snapshot.
     fn causes(&self) -> Vec<String> {
         Vec::new()
     }

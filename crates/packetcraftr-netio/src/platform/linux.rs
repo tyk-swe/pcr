@@ -3,8 +3,6 @@
 
 //! Linux route and interface adapter backed by route netlink.
 
-#![forbid(unsafe_code)]
-
 use std::net::IpAddr;
 
 use self::{
@@ -37,11 +35,4 @@ pub(super) fn route(
 
 pub(super) fn interface_route(requested: &InterfaceId) -> Result<Decision, SystemError> {
     interface_decision(find_interface(&interfaces()?, requested)?)
-}
-
-pub(super) fn os_error(operation: &'static str, error: impl std::fmt::Display) -> SystemError {
-    SystemError::OperatingSystem {
-        operation,
-        message: error.to_string(),
-    }
 }

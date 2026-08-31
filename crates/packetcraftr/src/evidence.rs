@@ -5,10 +5,11 @@
 
 use packetcraftr_core::{
     build::BuiltPacket,
+    diagnostic::Diagnostic,
     frame::{Frame, LinkType},
 };
 use packetcraftr_netio::{
-    Error as LiveIoError,
+    Error as LiveIoError, SendEvidenceFault,
     link::Mode as LinkMode,
     transmit::{Report as TransmissionReport, Timing as TransmissionTiming},
 };
@@ -28,6 +29,60 @@ impl ExecutionPermit {
             .expect("live execution permit space exhausted"),
         )
     }
+}
+
+/// One operation's append-only diagnostic log, together with the cursor that
+/// says how much of it the caller has already published.
+///
+/// Every long-running workflow raises diagnostics from several places and then
+/// has to hand out exactly the ones raised since it last looked. Owning the
+/// cursor here is what keeps callers from snapshotting `len()` and slicing
+/// with it afterwards.
+#[derive(Debug, Default)]
+pub(crate) struct DiagnosticLog {
+    entries: Vec<Diagnostic>,
+    published: usize,
+}
+
+impl DiagnosticLog {
+    /// Records `diagnostic` unless an identical one is already logged.
+    pub(crate) fn push_once(&mut self, diagnostic: Diagnostic) {
+        packetcraftr_core::diagnostic::push_once(&mut self.entries, diagnostic);
+    }
+
+    /// Every diagnostic recorded so far, published or not.
+    #[cfg(test)]
+    pub(crate) fn as_slice(&self) -> &[Diagnostic] {
+        &self.entries
+    }
+
+    /// Hands `publish` each diagnostic recorded since the previous call and
+    /// advances the cursor past it.
+    ///
+    /// The cursor advances one entry at a time, so a failing `publish` leaves
+    /// the entry it failed on unpublished rather than skipping the remainder.
+    pub(crate) fn publish_new<E>(
+        &mut self,
+        mut publish: impl FnMut(Diagnostic) -> Result<(), E>,
+    ) -> Result<(), E> {
+        while let Some(diagnostic) = self.entries.get(self.published).cloned() {
+            publish(diagnostic)?;
+            self.published = self.published.saturating_add(1);
+        }
+        Ok(())
+    }
+}
+
+/// Total wire bytes across trusted send receipts, or [`None`] when the sum
+/// overflows.
+///
+/// The single fold behind both the statistics an exchange publishes and the
+/// evidence validator that re-checks them, so the two can never disagree about
+/// how the total is computed.
+pub(crate) fn total_bytes_sent<'a>(sent: impl IntoIterator<Item = &'a SentPacket>) -> Option<u64> {
+    sent.into_iter().try_fold(0_u64, |total, sent| {
+        total.checked_add(u64::try_from(sent.bytes_sent()).unwrap_or(u64::MAX))
+    })
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -106,7 +161,7 @@ impl SentPacket {
             report.wire_bytes().clone(),
         )
         .map_err(|source| LiveIoError::InvalidSendEvidence {
-            message: source.to_string(),
+            fault: SendEvidenceFault::from(source),
         })?;
         Ok(Self {
             built,
@@ -162,15 +217,11 @@ pub(crate) fn test_sent_packet_with_report(
 
 #[cfg(test)]
 fn test_built_packet(packet: packetcraftr_core::Packet) -> BuiltPacket {
-    use std::sync::Arc;
-
     use packetcraftr_core::build::{Builder, Context, Options};
 
-    Builder::new(Arc::new(
-        packetcraftr_core::protocol::builtin::registry().expect("built-in registry"),
-    ))
-    .build(packet, Context::default(), Options::default())
-    .expect("sent-packet fixture must build")
+    Builder::new(packetcraftr_core::protocol::builtin::registry())
+        .build(packet, Context::default(), Options::default())
+        .expect("sent-packet fixture must build")
 }
 
 #[cfg(test)]
@@ -222,6 +273,63 @@ mod tests {
     use packetcraftr_netio::transmit::Submission;
 
     use super::*;
+
+    #[test]
+    fn a_diagnostic_log_publishes_each_entry_once_and_deduplicates_repeats() {
+        let mut log = DiagnosticLog::default();
+        let mut published: Vec<String> = Vec::new();
+
+        log.push_once(Diagnostic::warning("test.one", "first"));
+        log.push_once(Diagnostic::warning("test.one", "first"));
+        log.publish_new::<()>(|diagnostic| {
+            published.push(diagnostic.code.to_string());
+            Ok(())
+        })
+        .expect("publishing cannot fail");
+        assert_eq!(published, vec!["test.one".to_owned()]);
+
+        log.publish_new::<()>(|_| panic!("already-published entries are never republished"))
+            .expect("publishing cannot fail");
+
+        log.push_once(Diagnostic::warning("test.two", "second"));
+        log.publish_new::<()>(|diagnostic| {
+            published.push(diagnostic.code.to_string());
+            Ok(())
+        })
+        .expect("publishing cannot fail");
+        assert_eq!(
+            published,
+            vec!["test.one".to_owned(), "test.two".to_owned()]
+        );
+        assert_eq!(log.as_slice().len(), 2);
+    }
+
+    /// A publication failure must not consume the entry it failed on, so a
+    /// later retry still reports it.
+    #[test]
+    fn a_failed_publication_leaves_its_entry_unpublished() {
+        let mut log = DiagnosticLog::default();
+        log.push_once(Diagnostic::warning("test.one", "first"));
+        log.push_once(Diagnostic::warning("test.two", "second"));
+
+        let mut seen = 0_usize;
+        assert_eq!(
+            log.publish_new(|_| {
+                seen += 1;
+                Err::<(), _>("sink closed")
+            }),
+            Err("sink closed")
+        );
+        assert_eq!(seen, 1);
+
+        let mut retried: Vec<String> = Vec::new();
+        log.publish_new::<()>(|diagnostic| {
+            retried.push(diagnostic.code.to_string());
+            Ok(())
+        })
+        .expect("publishing cannot fail");
+        assert_eq!(retried, vec!["test.one".to_owned(), "test.two".to_owned()]);
+    }
 
     #[test]
     fn sent_receipt_rejects_semantic_build_with_different_accepted_bytes() {

@@ -3,6 +3,8 @@
 
 use thiserror::Error;
 
+use crate::error::{Classification, Classified, Kind};
+
 use super::types::{DocumentLimits, Limit};
 
 #[derive(Debug, Error)]
@@ -41,11 +43,6 @@ pub enum Error {
         #[source]
         source: crate::codec::Error,
     },
-    #[error("could not serialize {format} packet document: {message}")]
-    Serialize {
-        format: &'static str,
-        message: String,
-    },
 }
 
 impl Error {
@@ -77,5 +74,48 @@ impl Error {
             | Limit::ByteValueBytes
             | Limit::TotalPayloadBytes => Self::ResourceLimit { limit, maximum },
         }
+    }
+}
+
+impl Classified for Error {
+    fn classification(&self) -> Classification {
+        match self {
+            Self::SizeLimit { .. }
+            | Self::LayerLimit { .. }
+            | Self::NestingLimit { .. }
+            | Self::ResourceLimit { .. }
+            | Self::InvalidLimit { .. } => Classification::new(
+                "cli.document_limit",
+                Kind::Cli,
+                Some(
+                    "shrink the packet document to stay inside its finite byte, node, and nesting bounds",
+                ),
+            ),
+            Self::Parse { .. } => Classification::new(
+                "cli.document_syntax",
+                Kind::Cli,
+                Some("repair the packet document so it parses as well-formed JSON or YAML"),
+            ),
+            Self::Schema { .. } => Classification::new(
+                "cli.document_schema",
+                Kind::Cli,
+                Some("declare the packet document schema this build supports"),
+            ),
+            Self::UnknownProtocol { .. } => Classification::new(
+                "cli.document_protocol",
+                Kind::Cli,
+                Some("run `packetcraftr protocols` to list the protocol names the registry binds"),
+            ),
+            Self::Layer { .. } => Classification::new(
+                "cli.document_field",
+                Kind::Cli,
+                Some("correct the layer's field names and values against its reflective schema"),
+            ),
+        }
+    }
+
+    /// Walked from the retained `#[source]` chain rather than hand-written.
+    fn causes(&self) -> Vec<String> {
+        crate::error::source_chain(self)
     }
 }

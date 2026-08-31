@@ -7,21 +7,34 @@ use bytes::Bytes;
 
 use crate::frame::{Direction, Frame};
 
-use super::super::error::Error;
-use super::super::model::{Endianness, Format, Interface};
-use super::super::wire::{
+use super::options::visit_options;
+use crate::analysis::pcap::error::Error;
+use crate::analysis::pcap::model::{Endianness, Format, Interface};
+use crate::analysis::pcap::wire::{
     PCAPNG_OPTION_EPB_FLAGS, align_to_usize, copy_bytes_fallibly, decode_u16, decode_u32,
     timestamp_from_ticks, validate_declared_lengths,
 };
-use super::options::visit_options;
 
-pub(in crate::analysis::pcap) fn parse_enhanced_packet(
-    body: &[u8],
+/// One parsed packet block.
+///
+/// The single pass over the block header already reads the interface ID and
+/// locates the trailing options, so both travel out with the frame instead
+/// of being decoded a second time from the raw block type.
+pub(in crate::analysis::pcap) struct ParsedPacket<'a> {
+    pub(in crate::analysis::pcap) frame: Frame,
+    pub(in crate::analysis::pcap) interface_id: u32,
+    /// Option bytes following the packet data. A simple packet block has no
+    /// options at all, so this is empty for one.
+    pub(in crate::analysis::pcap) options: &'a [u8],
+}
+
+pub(in crate::analysis::pcap) fn parse_enhanced_packet<'a>(
+    body: &'a [u8],
     endianness: Endianness,
     interfaces: &[Interface],
     interface_base: u32,
     max_size: usize,
-) -> Result<Frame, Error> {
+) -> Result<ParsedPacket<'a>, Error> {
     parse(
         body,
         endianness,
@@ -32,24 +45,24 @@ pub(in crate::analysis::pcap) fn parse_enhanced_packet(
     )
 }
 
-pub(in crate::analysis::pcap) fn parse_obsolete_packet(
-    body: &[u8],
+pub(in crate::analysis::pcap) fn parse_obsolete_packet<'a>(
+    body: &'a [u8],
     endianness: Endianness,
     interfaces: &[Interface],
     interface_base: u32,
     max_size: usize,
-) -> Result<Frame, Error> {
+) -> Result<ParsedPacket<'a>, Error> {
     parse(body, endianness, interfaces, interface_base, max_size, true)
 }
 
-fn parse(
-    body: &[u8],
+fn parse<'a>(
+    body: &'a [u8],
     endianness: Endianness,
     interfaces: &[Interface],
     interface_base: u32,
     max_size: usize,
     obsolete_layout: bool,
-) -> Result<Frame, Error> {
+) -> Result<ParsedPacket<'a>, Error> {
     const HEADER_LENGTH: usize = 20;
 
     let Some(header) = body
@@ -138,16 +151,20 @@ fn parse(
     )?;
     frame.interface = Some(global_interface);
     frame.direction = direction;
-    Ok(frame)
+    Ok(ParsedPacket {
+        frame,
+        interface_id,
+        options: trailing_options,
+    })
 }
 
-pub(in crate::analysis::pcap) fn parse_simple_packet(
-    body: &[u8],
+pub(in crate::analysis::pcap) fn parse_simple_packet<'a>(
+    body: &'a [u8],
     endianness: Endianness,
     interfaces: &[Interface],
     interface_base: u32,
     max_size: usize,
-) -> Result<Frame, Error> {
+) -> Result<ParsedPacket<'a>, Error> {
     if body.len() < 4 {
         return Err(Error::InvalidData {
             format: Format::PcapNg,
@@ -202,7 +219,11 @@ pub(in crate::analysis::pcap) fn parse_simple_packet(
         Bytes::from(copy_bytes_fallibly(data)?),
     )?;
     frame.interface = Some(interface_base);
-    Ok(frame)
+    Ok(ParsedPacket {
+        frame,
+        interface_id: 0,
+        options: &[],
+    })
 }
 
 pub(in crate::analysis::pcap) fn parse_packet_direction(

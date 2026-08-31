@@ -19,6 +19,20 @@ const IPV6_FRAGMENT_HEADER_LENGTH: usize = 8;
 const MAX_WIRE_LENGTH: usize = 65_535;
 const IPV6_FRAGMENT_DISCRIMINATOR: u8 = 44;
 
+/// Retained state whose family disagrees with the key it was found under.
+const FAMILY_MISMATCH: Error = Error::Inconsistent {
+    reason: "retained datagram family disagrees with its key",
+};
+/// A complete IPv4 datagram covers offset zero, so the fragment that filled
+/// it recorded the header every reconstruction needs.
+const MISSING_OFFSET_ZERO_HEADER: Error = Error::Inconsistent {
+    reason: "complete IPv4 payload has no offset-zero header",
+};
+/// Reconstruction is only ever asked for after completion is established.
+const INCOMPLETE_RECONSTRUCTION: Error = Error::Inconsistent {
+    reason: "reconstruction requested before the datagram completed",
+};
+
 struct Incoming {
     key: DatagramKey,
     offset: usize,
@@ -81,9 +95,9 @@ impl Reassembler {
         let incoming = validate_fragment(fragment, &self.limits)?;
         let key = incoming.key.clone();
         let existing = self.datagrams.get(&key);
-        if existing.is_none() && self.datagrams.len() >= self.limits.max_ip_datagrams {
+        if existing.is_none() && self.datagrams.len() >= self.limits.max_datagrams {
             return Err(ResourceError::DatagramLimit {
-                limit: self.limits.max_ip_datagrams,
+                limit: self.limits.max_datagrams,
             }
             .into());
         }
@@ -91,9 +105,9 @@ impl Reassembler {
         let old_fragment_count = existing.map_or(0, |state| state.fragment_count);
         let fragment_count = old_fragment_count
             .checked_add(1)
-            .filter(|count| *count <= self.limits.max_ip_fragments_per_datagram)
+            .filter(|count| *count <= self.limits.max_fragments_per_datagram)
             .ok_or(ResourceError::FragmentLimit {
-                limit: self.limits.max_ip_fragments_per_datagram,
+                limit: self.limits.max_fragments_per_datagram,
             })?;
 
         validate_reconstruction_consistency(existing, &incoming)?;
@@ -118,9 +132,9 @@ impl Reassembler {
             };
         let unique_bytes = old_unique_bytes
             .checked_add(merge.added_bytes)
-            .filter(|bytes| *bytes <= self.limits.max_ip_bytes_per_datagram)
+            .filter(|bytes| *bytes <= self.limits.max_bytes_per_datagram)
             .ok_or(ResourceError::DatagramByteLimit {
-                limit: self.limits.max_ip_bytes_per_datagram,
+                limit: self.limits.max_bytes_per_datagram,
             })?;
         let reconstruction_bytes = reconstruction_retained_bytes(existing, &incoming)?;
         // Only the bytes this fragment newly retains are charged as an
@@ -128,22 +142,22 @@ impl Reassembler {
         let reconstruction_allocation = reconstruction_bytes
             .saturating_sub(existing.map_or(0, |state| state.reconstruction.retained_bytes()));
         let last_update = existing.map_or(now, |state| state.last_update.max(now));
-        let deadline = Some(last_update.checked_add(self.limits.ip_idle_expiry).ok_or(
+        let deadline = Some(last_update.checked_add(self.limits.idle_expiry).ok_or(
             ResourceError::IdleExpiryRange {
-                expiry: self.limits.ip_idle_expiry,
+                expiry: self.limits.idle_expiry,
             },
         )?);
         let duplicate_fragments = existing
             .map_or(0, |state| state.duplicate_fragments)
             .checked_add(usize::from(merge.duplicate))
             .ok_or(ResourceError::AggregateMemoryLimit {
-                limit: self.limits.max_ip_aggregate_bytes,
+                limit: self.limits.max_aggregate_bytes,
             })?;
         let overlap_bytes = existing
             .map_or(0, |state| state.overlap_bytes)
             .checked_add(merge.conflicting_bytes)
             .ok_or(ResourceError::AggregateMemoryLimit {
-                limit: self.limits.max_ip_aggregate_bytes,
+                limit: self.limits.max_aggregate_bytes,
             })?;
 
         let prospective_charge = merge
@@ -152,7 +166,7 @@ impl Reassembler {
             .and_then(|charge| charge.checked_add(unique_bytes))
             .and_then(|charge| charge.checked_add(reconstruction_bytes))
             .ok_or(ResourceError::AggregateMemoryLimit {
-                limit: self.limits.max_ip_aggregate_bytes,
+                limit: self.limits.max_aggregate_bytes,
             })?;
         let old_charge = existing.and_then(DatagramState::memory_charge).unwrap_or(0);
         let aggregate_memory_charge = self
@@ -163,10 +177,10 @@ impl Reassembler {
             .filter(|charge| {
                 charge
                     .checked_add(external_charge)
-                    .is_some_and(|total| total <= self.limits.max_ip_aggregate_bytes)
+                    .is_some_and(|total| total <= self.limits.max_aggregate_bytes)
             })
             .ok_or(ResourceError::AggregateMemoryLimit {
-                limit: self.limits.max_ip_aggregate_bytes,
+                limit: self.limits.max_aggregate_bytes,
             })?;
         // The retained state is not removed until every fallible replacement
         // allocation succeeds, so admission must cover old and new storage at
@@ -175,23 +189,23 @@ impl Reassembler {
             &merge,
             reconstruction_allocation,
             new_slot_charge,
-            self.limits.max_ip_aggregate_bytes,
+            self.limits.max_aggregate_bytes,
         )?;
         let replacement_peak_charge = self
             .aggregate_memory_charge
             .checked_add(replacement_allocation)
             .and_then(|charge| charge.checked_add(external_charge))
-            .filter(|charge| *charge <= self.limits.max_ip_aggregate_bytes)
+            .filter(|charge| *charge <= self.limits.max_aggregate_bytes)
             .ok_or(ResourceError::AggregateMemoryLimit {
-                limit: self.limits.max_ip_aggregate_bytes,
+                limit: self.limits.max_aggregate_bytes,
             })?;
         let aggregate_payload_bytes = self
             .aggregate_payload_bytes
             .checked_sub(old_unique_bytes)
             .and_then(|bytes| bytes.checked_add(unique_bytes))
-            .filter(|bytes| *bytes <= self.limits.max_ip_aggregate_bytes)
+            .filter(|bytes| *bytes <= self.limits.max_aggregate_bytes)
             .ok_or(ResourceError::AggregateMemoryLimit {
-                limit: self.limits.max_ip_aggregate_bytes,
+                limit: self.limits.max_aggregate_bytes,
             })?;
 
         let reconstruction = materialize_reconstruction(existing, &incoming)?;
@@ -240,14 +254,13 @@ impl Reassembler {
             known_final_length: final_length,
         };
         let previous_deadline = existing.and_then(|state| state.deadline);
-        let completed = is_complete(&new_state);
-        let completed_datagram = if completed {
+        let completed_datagram = if completed_payload(&new_state).is_some() {
             let datagram_charge = reconstructed_datagram_length(&new_state)?;
             replacement_peak_charge
                 .checked_add(datagram_charge)
-                .filter(|charge| *charge <= self.limits.max_ip_aggregate_bytes)
+                .filter(|charge| *charge <= self.limits.max_aggregate_bytes)
                 .ok_or(ResourceError::AggregateMemoryLimit {
-                    limit: self.limits.max_ip_aggregate_bytes,
+                    limit: self.limits.max_aggregate_bytes,
                 })?;
             Some(reconstruct(&key, &new_state)?)
         } else {
@@ -288,7 +301,7 @@ impl Reassembler {
     /// at most the configured number of per-datagram outcomes.
     pub fn expire(&mut self, now: Instant) -> RetiredDatagrams {
         let mut retired = RetiredDatagrams::default();
-        let retain_limit = self.limits.max_ip_retained_outcomes;
+        let retain_limit = self.limits.max_retained_outcomes;
         let datagrams = &mut self.datagrams;
         let aggregate_payload_bytes = &mut self.aggregate_payload_bytes;
         let aggregate_memory_charge = &mut self.aggregate_memory_charge;
@@ -310,10 +323,7 @@ impl Reassembler {
     /// Retires every remaining datagram at end of capture, retaining a bounded
     /// stable-key prefix of per-datagram outcomes.
     pub fn flush(&mut self) -> RetiredDatagrams {
-        let retain_limit = self
-            .limits
-            .max_ip_retained_outcomes
-            .min(self.datagrams.len());
+        let retain_limit = self.limits.max_retained_outcomes.min(self.datagrams.len());
         let mut smallest = BinaryHeap::with_capacity(retain_limit);
         for key in self.datagrams.keys() {
             if smallest.len() < retain_limit {
@@ -476,9 +486,9 @@ fn validate_fragment(fragment: Fragment, limits: &Limits) -> Result<Incoming, Er
         &incoming,
         (!incoming.more_fragments).then_some(incoming.end),
     )?;
-    if incoming.end > limits.max_ip_bytes_per_datagram {
+    if incoming.end > limits.max_bytes_per_datagram {
         return Err(ResourceError::DatagramByteLimit {
-            limit: limits.max_ip_bytes_per_datagram,
+            limit: limits.max_bytes_per_datagram,
         }
         .into());
     }
@@ -659,12 +669,9 @@ fn validate_reconstruction_consistency(
                 return Err(MalformedError::InconsistentIpv6Prefix.into());
             }
         }
-        _ => {
-            return Err(MalformedError::InvalidIpv4Header {
-                reason: "fragment family changed for an established key",
-            }
-            .into());
-        }
+        // The datagram key carries the family, so a lookup can never return
+        // state of the other one.
+        _ => return Err(FAMILY_MISMATCH),
     }
     Ok(())
 }
@@ -766,7 +773,7 @@ fn validate_family_wire_extent(
             .len()
             .checked_sub(IPV6_HEADER_LENGTH)
             .ok_or(MalformedError::OffsetOverflow)?,
-        _ => return Err(MalformedError::OffsetOverflow.into()),
+        _ => return Err(FAMILY_MISMATCH),
     };
     if reconstructed_prefix_length
         .checked_add(extent)
@@ -797,7 +804,7 @@ fn reconstruction_retained_bytes(
                     0
                 })
             }
-            Some(Reconstruction::Ipv6 { .. }) => Err(MalformedError::OffsetOverflow.into()),
+            Some(Reconstruction::Ipv6 { .. }) => Err(FAMILY_MISMATCH),
         },
         IncomingReconstruction::Ipv6 { prefix, .. } => match established {
             Some(Reconstruction::Ipv6 {
@@ -805,7 +812,7 @@ fn reconstruction_retained_bytes(
                 ..
             }) => Ok(established_prefix.len()),
             None => Ok(prefix.len()),
-            Some(Reconstruction::Ipv4 { .. }) => Err(MalformedError::OffsetOverflow.into()),
+            Some(Reconstruction::Ipv4 { .. }) => Err(FAMILY_MISMATCH),
         },
     }
 }
@@ -845,9 +852,7 @@ fn materialize_reconstruction(
             let established_first = match established {
                 Some(Reconstruction::Ipv4 { first_header }) => first_header.clone(),
                 None => None,
-                Some(Reconstruction::Ipv6 { .. }) => {
-                    return Err(MalformedError::OffsetOverflow.into());
-                }
+                Some(Reconstruction::Ipv6 { .. }) => return Err(FAMILY_MISMATCH),
             };
             Ok(Reconstruction::Ipv4 {
                 first_header: match established_first {
@@ -868,7 +873,7 @@ fn materialize_reconstruction(
                 predecessor_next_header_offset: *predecessor_next_header_offset,
                 next_header: *next_header,
             }),
-            Some(Reconstruction::Ipv4 { .. }) => Err(MalformedError::OffsetOverflow.into()),
+            Some(Reconstruction::Ipv4 { .. }) => Err(FAMILY_MISMATCH),
         },
     }
 }
@@ -1061,27 +1066,29 @@ fn copy_into(target: &mut [u8], start: usize, bytes: &[u8]) -> Result<(), Error>
     Ok(())
 }
 
-fn is_complete(state: &DatagramState) -> bool {
-    let Some(final_length) = state.final_length else {
-        return false;
-    };
-    matches!(
-        state.ranges.as_slice(),
-        [range] if range.start == 0 && range.end() == Some(final_length)
-    )
+/// The single contiguous payload of a complete datagram, with its known
+/// final length, or [`None`] while any gap remains.
+///
+/// Completion is one fact, so it is decided once here instead of being
+/// re-derived — with its own failure case — by every consumer of a datagram
+/// already known to be complete.
+fn completed_payload(state: &DatagramState) -> Option<(&Bytes, usize)> {
+    let final_length = state.final_length?;
+    match state.ranges.as_slice() {
+        [range] if range.start == 0 && range.end() == Some(final_length) => {
+            Some((&range.bytes, final_length))
+        }
+        _ => None,
+    }
 }
 
 fn reconstructed_datagram_length(state: &DatagramState) -> Result<usize, Error> {
-    let payload = state.final_length.ok_or(MalformedError::OffsetOverflow)?;
+    let (_, payload) = completed_payload(state).ok_or(INCOMPLETE_RECONSTRUCTION)?;
     let prefix = match &state.reconstruction {
-        Reconstruction::Ipv4 { first_header } => {
-            first_header
-                .as_ref()
-                .map(Bytes::len)
-                .ok_or(MalformedError::InvalidIpv4Header {
-                    reason: "complete payload has no offset-zero header",
-                })?
-        }
+        Reconstruction::Ipv4 { first_header } => first_header
+            .as_ref()
+            .map(Bytes::len)
+            .ok_or(MISSING_OFFSET_ZERO_HEADER)?,
         Reconstruction::Ipv6 { prefix, .. } => prefix.len(),
     };
     prefix
@@ -1090,13 +1097,8 @@ fn reconstructed_datagram_length(state: &DatagramState) -> Result<usize, Error> 
 }
 
 fn reconstruct(key: &DatagramKey, state: &DatagramState) -> Result<CompletedDatagram, Error> {
-    let final_length = state.final_length.ok_or(MalformedError::OffsetOverflow)?;
-    let payload = state
-        .ranges
-        .first()
-        .filter(|range| range.start == 0 && range.end() == Some(final_length))
-        .map(|range| range.bytes.as_ref())
-        .ok_or(MalformedError::OffsetOverflow)?;
+    let (payload, final_length) = completed_payload(state).ok_or(INCOMPLETE_RECONSTRUCTION)?;
+    let payload = payload.as_ref();
     let bytes = match &state.reconstruction {
         Reconstruction::Ipv4 { first_header } => reconstruct_ipv4(first_header.as_ref(), payload)?,
         Reconstruction::Ipv6 {
@@ -1122,9 +1124,7 @@ fn reconstruct(key: &DatagramKey, state: &DatagramState) -> Result<CompletedData
 }
 
 fn reconstruct_ipv4(first_header: Option<&Bytes>, payload: &[u8]) -> Result<Bytes, Error> {
-    let header = first_header.ok_or(MalformedError::InvalidIpv4Header {
-        reason: "complete payload has no offset-zero header",
-    })?;
+    let header = first_header.ok_or(MISSING_OFFSET_ZERO_HEADER)?;
     let total_length = header
         .len()
         .checked_add(payload.len())

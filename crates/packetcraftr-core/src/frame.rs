@@ -9,6 +9,8 @@ use bytes::Bytes;
 use serde::{Deserialize, Deserializer, Serialize};
 use thiserror::Error;
 
+use crate::error::{Classification, Classified, Kind};
+
 /// Default maximum size of a captured frame (16 MiB).
 pub const DEFAULT_SIZE_LIMIT: usize = 16 * 1024 * 1024;
 
@@ -51,6 +53,20 @@ pub enum Error {
     CapturedLengthMismatch { declared: u32, actual: usize },
     #[error("frame original length {original} is smaller than captured length {captured}")]
     OriginalLengthTooSmall { captured: u32, original: u32 },
+}
+
+impl Classified for Error {
+    fn classification(&self) -> Classification {
+        match self {
+            Self::CapturedLengthTooLarge { .. }
+            | Self::CapturedLengthMismatch { .. }
+            | Self::OriginalLengthTooSmall { .. } => Classification::new(
+                "packet.frame_metadata",
+                Kind::Packet,
+                Some("repair the capture record whose declared and actual frame lengths disagree"),
+            ),
+        }
+    }
 }
 
 /// Complete bytes and capture metadata, independent of successful dissection.

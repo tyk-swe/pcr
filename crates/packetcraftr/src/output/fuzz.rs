@@ -33,16 +33,6 @@ impl Mode {
 }
 
 pub use crate::fuzz::CaseOutcome as Outcome;
-
-impl From<packet_fuzz::CaseOutcome> for Outcome {
-    fn from(value: packet_fuzz::CaseOutcome) -> Self {
-        match value {
-            packet_fuzz::CaseOutcome::Built => Self::Built,
-            packet_fuzz::CaseOutcome::Rejected => Self::Rejected,
-        }
-    }
-}
-
 pub use packet_fuzz::Strategy;
 
 /// Output-v1 description of one deterministic field mutation.
@@ -104,7 +94,7 @@ pub struct Case {
 
 /// Aggregate or streamed result of `fuzz`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Result {
+pub struct Report {
     pub seed: u64,
     pub first_case: u64,
     pub mode: Mode,
@@ -114,11 +104,11 @@ pub struct Result {
     pub cases: Vec<Case>,
 }
 
-impl Result {
+impl Report {
     pub fn try_from_offline(
-        result: packet_fuzz::Result,
-    ) -> std::result::Result<(Self, Vec<PacketDiagnostic>, Stats), ContractError> {
-        let packet_fuzz::Result {
+        result: packet_fuzz::Report,
+    ) -> Result<(Self, Vec<PacketDiagnostic>, Stats), ContractError> {
+        let packet_fuzz::Report {
             seed,
             first_case,
             cases,
@@ -135,18 +125,17 @@ impl Result {
         let cases = cases
             .into_iter()
             .map(Case::try_from_offline)
-            .collect::<std::result::Result<Vec<_>, _>>()?;
+            .collect::<Result<Vec<_>, _>>()?;
         Ok((from_events(metadata, cases)?, diagnostics, (&stats).into()))
     }
 
     pub fn try_from_live(
-        result: live_fuzz::Result,
-    ) -> std::result::Result<(Self, Vec<PacketDiagnostic>, Stats), ContractError> {
-        let live_fuzz::Result {
+        result: live_fuzz::Report,
+    ) -> Result<(Self, Vec<PacketDiagnostic>, Stats), ContractError> {
+        let live_fuzz::Report {
             seed,
             first_case,
             cases,
-            diagnostics,
             stats,
         } = result;
         let metadata = campaign(
@@ -159,8 +148,8 @@ impl Result {
         let cases = cases
             .into_iter()
             .map(Case::try_from_live)
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-        Ok((from_events(metadata, cases)?, diagnostics, (&stats).into()))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok((from_events(metadata, cases)?, Vec::new(), (&stats).into()))
     }
 }
 
@@ -191,9 +180,9 @@ const fn campaign(
     }
 }
 
-fn from_events(metadata: Campaign, cases: Vec<Case>) -> std::result::Result<Result, ContractError> {
+fn from_events(metadata: Campaign, cases: Vec<Case>) -> Result<Report, ContractError> {
     validate_events(metadata, &cases)?;
-    Ok(Result {
+    Ok(Report {
         seed: metadata.seed,
         first_case: metadata.first_case,
         mode: metadata.mode,
@@ -204,7 +193,7 @@ fn from_events(metadata: Campaign, cases: Vec<Case>) -> std::result::Result<Resu
     })
 }
 
-fn validate_events(metadata: Campaign, cases: &[Case]) -> std::result::Result<(), ContractError> {
+fn validate_events(metadata: Campaign, cases: &[Case]) -> Result<(), ContractError> {
     if u64::try_from(cases.len()).unwrap_or(u64::MAX) != metadata.cases_generated {
         return Err(incoherent(
             "case cardinality does not match the campaign summary",
@@ -244,7 +233,7 @@ fn incoherent(message: &str) -> ContractError {
 }
 
 impl Case {
-    fn try_from_offline(case: packet_fuzz::Case) -> std::result::Result<Self, ContractError> {
+    fn try_from_offline(case: packet_fuzz::Case) -> Result<Self, ContractError> {
         let operation_seed = case.operation_seed;
         let outcome = case.outcome.into();
         convert_case(
@@ -258,7 +247,7 @@ impl Case {
         )
     }
 
-    fn try_from_live(case: live_fuzz::Case) -> std::result::Result<Self, ContractError> {
+    fn try_from_live(case: live_fuzz::Case) -> Result<Self, ContractError> {
         let operation_seed = case.prepared.operation_seed;
         let live_fuzz::Case {
             prepared,
@@ -288,7 +277,7 @@ fn convert_case(
     responses: Vec<packetcraftr_core::frame::Frame>,
     unmatched: Vec<packetcraftr_core::frame::Frame>,
     undecoded: Vec<packetcraftr_core::frame::Frame>,
-) -> std::result::Result<Case, ContractError> {
+) -> Result<Case, ContractError> {
     let packet_fuzz::Case {
         index,
         seed,
@@ -349,7 +338,7 @@ pub enum Event {
 }
 
 impl Event {
-    pub fn try_from_offline(case: packet_fuzz::Case) -> std::result::Result<Self, ContractError> {
+    pub fn try_from_offline(case: packet_fuzz::Case) -> Result<Self, ContractError> {
         let operation_seed = case.operation_seed;
         Ok(Self::Case {
             operation_seed,
@@ -357,7 +346,7 @@ impl Event {
         })
     }
 
-    pub fn try_from_live(case: live_fuzz::Case) -> std::result::Result<Self, ContractError> {
+    pub fn try_from_live(case: live_fuzz::Case) -> Result<Self, ContractError> {
         let operation_seed = case.prepared.operation_seed;
         Ok(Self::Case {
             operation_seed,
@@ -386,7 +375,7 @@ impl Event {
             summary.stats.cases_generated,
             summary.stats.cases_built,
         );
-        complete(metadata, summary.diagnostics, (&summary.stats).into())
+        complete(metadata, Vec::new(), (&summary.stats).into())
     }
 }
 

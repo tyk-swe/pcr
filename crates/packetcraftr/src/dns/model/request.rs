@@ -5,19 +5,18 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use packetcraftr_netio::capture::{DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES};
+use packetcraftr_netio::capture::{MAX_CAPTURE_QUEUE_BYTES, MAX_CAPTURE_QUEUE_FRAMES};
 
 use crate::probe::evidence::{check_limits, duration_violation};
 use crate::target::Family;
 use crate::target::Target;
 
-use super::super::error::Error;
-use super::super::wire::canonical_query_name;
-use super::super::{
-    DEFAULT_MAX_DNS_NAME_POINTERS, DEFAULT_MAX_DNS_RECORDS, DEFAULT_MAX_DNS_TXT_BYTES,
-    DEFAULT_MAX_DNS_TXT_STRINGS, DEFAULT_MAX_REJECTED_DNS_RECORDS,
-    DEFAULT_MAX_UNDECODED_DNS_FRAMES, MAX_DNS_ATTEMPTS, MAX_DNS_DURATION, MAX_DNS_MESSAGE_BYTES,
-    MAX_DNS_NAME_POINTERS, MAX_DNS_RATE, MAX_DNS_RECORDS,
+use crate::dns::error::Error;
+use crate::dns::wire::canonical_query_name;
+use crate::dns::{
+    DEFAULT_MAX_NAME_POINTERS, DEFAULT_MAX_RECORDS, DEFAULT_MAX_REJECTED_RECORDS,
+    DEFAULT_MAX_TXT_BYTES, DEFAULT_MAX_TXT_STRINGS, DEFAULT_MAX_UNDECODED_FRAMES, MAX_ATTEMPTS,
+    MAX_DURATION, MAX_MESSAGE_BYTES, MAX_NAME_POINTERS, MAX_RATE, MAX_RECORDS,
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -74,14 +73,76 @@ impl fmt::Display for QueryType {
     }
 }
 
+/// Bounds every decision the DNS message codec makes about hostile input.
+///
+/// These are separate from the workflow's [`Limits`] on purpose: decoding one
+/// message has nothing to say about capture-queue frames or an operation
+/// deadline, so a caller of [`decode_response`](crate::dns::decode_response)
+/// is not asked for them, and the codec's own defaults never reach for a
+/// capture constant.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Limits {
+pub struct MessageLimits {
     pub max_message_bytes: usize,
     pub max_records: usize,
     pub max_name_pointers: usize,
     pub max_txt_strings: usize,
     pub max_txt_bytes: usize,
     pub max_rejected_records: usize,
+}
+
+impl Default for MessageLimits {
+    fn default() -> Self {
+        Self {
+            max_message_bytes: MAX_MESSAGE_BYTES,
+            max_records: DEFAULT_MAX_RECORDS,
+            max_name_pointers: DEFAULT_MAX_NAME_POINTERS,
+            max_txt_strings: DEFAULT_MAX_TXT_STRINGS,
+            max_txt_bytes: DEFAULT_MAX_TXT_BYTES,
+            max_rejected_records: DEFAULT_MAX_REJECTED_RECORDS,
+        }
+    }
+}
+
+impl MessageLimits {
+    /// Rejects any bound above the ceiling this crate enforces, and any pair
+    /// of bounds that cannot both hold.
+    pub fn validate(&self) -> Result<(), Error> {
+        check_limits(
+            &[
+                (
+                    "max_message_bytes",
+                    self.max_message_bytes,
+                    MAX_MESSAGE_BYTES,
+                ),
+                ("max_records", self.max_records, MAX_RECORDS),
+                (
+                    "max_name_pointers",
+                    self.max_name_pointers,
+                    MAX_NAME_POINTERS,
+                ),
+                ("max_txt_strings", self.max_txt_strings, MAX_RECORDS),
+                ("max_txt_bytes", self.max_txt_bytes, MAX_MESSAGE_BYTES),
+            ],
+            &[(
+                "max_rejected_records",
+                self.max_rejected_records,
+                self.max_records,
+                "cannot exceed max_records",
+            )],
+            |field, value, reason| Error::InvalidLimit {
+                field,
+                value,
+                reason,
+            },
+        )
+    }
+}
+
+/// Bounds one DNS workflow operation: the message codec, the exact evidence it
+/// retains, and its duration.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Limits {
+    pub message: MessageLimits,
     pub max_evidence_frames: usize,
     pub max_evidence_bytes: usize,
     pub max_undecoded: usize,
@@ -91,75 +152,52 @@ pub struct Limits {
 impl Default for Limits {
     fn default() -> Self {
         Self {
-            max_message_bytes: MAX_DNS_MESSAGE_BYTES,
-            max_records: DEFAULT_MAX_DNS_RECORDS,
-            max_name_pointers: DEFAULT_MAX_DNS_NAME_POINTERS,
-            max_txt_strings: DEFAULT_MAX_DNS_TXT_STRINGS,
-            max_txt_bytes: DEFAULT_MAX_DNS_TXT_BYTES,
-            max_rejected_records: DEFAULT_MAX_REJECTED_DNS_RECORDS,
-            max_evidence_frames: DEFAULT_CAPTURE_QUEUE_FRAMES,
-            max_evidence_bytes: DEFAULT_CAPTURE_QUEUE_BYTES,
-            max_undecoded: DEFAULT_MAX_UNDECODED_DNS_FRAMES,
-            max_duration: MAX_DNS_DURATION,
+            message: MessageLimits::default(),
+            max_evidence_frames: MAX_CAPTURE_QUEUE_FRAMES,
+            max_evidence_bytes: MAX_CAPTURE_QUEUE_BYTES,
+            max_undecoded: DEFAULT_MAX_UNDECODED_FRAMES,
+            max_duration: MAX_DURATION,
         }
     }
 }
 
 impl Limits {
-    pub fn validate(self) -> std::result::Result<Self, Error> {
+    /// Rejects any bound above the ceiling this crate enforces, and any pair
+    /// of bounds that cannot both hold.
+    pub fn validate(&self) -> Result<(), Error> {
+        self.message.validate()?;
         check_limits(
             &[
                 (
-                    "max_message_bytes",
-                    self.max_message_bytes,
-                    MAX_DNS_MESSAGE_BYTES,
-                ),
-                ("max_records", self.max_records, MAX_DNS_RECORDS),
-                (
-                    "max_name_pointers",
-                    self.max_name_pointers,
-                    MAX_DNS_NAME_POINTERS,
-                ),
-                ("max_txt_strings", self.max_txt_strings, MAX_DNS_RECORDS),
-                ("max_txt_bytes", self.max_txt_bytes, MAX_DNS_MESSAGE_BYTES),
-                (
                     "max_evidence_frames",
                     self.max_evidence_frames,
-                    DEFAULT_CAPTURE_QUEUE_FRAMES,
+                    MAX_CAPTURE_QUEUE_FRAMES,
                 ),
                 (
                     "max_evidence_bytes",
                     self.max_evidence_bytes,
-                    DEFAULT_CAPTURE_QUEUE_BYTES,
+                    MAX_CAPTURE_QUEUE_BYTES,
                 ),
             ],
-            &[
-                (
-                    "max_rejected_records",
-                    self.max_rejected_records,
-                    self.max_records,
-                    "cannot exceed max_records",
-                ),
-                (
-                    "max_undecoded",
-                    self.max_undecoded,
-                    self.max_evidence_frames,
-                    "cannot exceed max_evidence_frames",
-                ),
-            ],
+            &[(
+                "max_undecoded",
+                self.max_undecoded,
+                self.max_evidence_frames,
+                "cannot exceed max_evidence_frames",
+            )],
             |field, value, reason| Error::InvalidLimit {
                 field,
                 value,
                 reason,
             },
         )?;
-        if duration_violation(self.max_duration, MAX_DNS_DURATION) {
+        if duration_violation(self.max_duration, MAX_DURATION) {
             return Err(Error::InvalidDuration {
                 value: self.max_duration,
-                maximum: MAX_DNS_DURATION,
+                maximum: MAX_DURATION,
             });
         }
-        Ok(self)
+        Ok(())
     }
 }
 
@@ -185,7 +223,10 @@ pub struct Request {
 }
 
 impl Request {
-    pub fn validate(&self) -> std::result::Result<String, Error> {
+    /// Rejects every request this workflow cannot execute: an out-of-range
+    /// limit, port, attempt count, timeout, or rate, and a query name that is
+    /// not a valid DNS name.
+    pub fn validate(&self) -> Result<(), Error> {
         self.limits.validate()?;
         if self.server_port == 0 {
             return Err(Error::InvalidPort);
@@ -193,11 +234,11 @@ impl Request {
         if self.source_port == 0 {
             return Err(Error::InvalidSourcePort);
         }
-        if !(1..=MAX_DNS_ATTEMPTS).contains(&self.attempts) {
+        if !(1..=MAX_ATTEMPTS).contains(&self.attempts) {
             return Err(Error::InvalidLimit {
                 field: "attempts",
                 value: u64::from(self.attempts),
-                reason: format!("must be within 1..={MAX_DNS_ATTEMPTS}"),
+                reason: format!("must be within 1..={MAX_ATTEMPTS}"),
             });
         }
         if self.timeout.is_zero() || self.timeout > packetcraftr_netio::capture::MAX_TIMEOUT {
@@ -207,14 +248,22 @@ impl Request {
             });
         }
         if let Some(rate) = self.queries_per_second
-            && (rate == 0 || rate > MAX_DNS_RATE)
+            && (rate == 0 || rate > MAX_RATE)
         {
             return Err(Error::InvalidLimit {
                 field: "queries_per_second",
                 value: u64::from(rate),
-                reason: format!("must be within 1..={MAX_DNS_RATE}"),
+                reason: format!("must be within 1..={MAX_RATE}"),
             });
         }
+        canonical_query_name(&self.query_name).map_err(Error::Query)?;
+        Ok(())
+    }
+
+    /// The canonical wire form of the declared query name, after
+    /// [`Request::validate`] accepts the request.
+    pub fn canonical_name(&self) -> Result<String, Error> {
+        self.validate()?;
         canonical_query_name(&self.query_name).map_err(Error::Query)
     }
 }

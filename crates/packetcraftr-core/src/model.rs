@@ -8,7 +8,7 @@ use super::layer::Layer;
 mod boundary;
 mod error;
 
-pub use error::Error;
+pub use error::PacketError;
 
 /// Exactly one ordered, arbitrary wire stack.
 ///
@@ -59,10 +59,7 @@ impl Packet {
         self.layers.is_empty()
     }
 
-    pub fn push<L>(&mut self, layer: L) -> &mut Self
-    where
-        L: Layer + 'static,
-    {
+    pub fn push<L: Layer>(&mut self, layer: L) -> &mut Self {
         self.push_boxed(Box::new(layer))
     }
 
@@ -72,12 +69,9 @@ impl Packet {
         self
     }
 
-    pub fn insert<L>(&mut self, index: usize, layer: L) -> Result<&mut Self, Error>
-    where
-        L: Layer + 'static,
-    {
+    pub fn insert<L: Layer>(&mut self, index: usize, layer: L) -> Result<&mut Self, PacketError> {
         if index > self.layers.len() {
-            return Err(Error::IndexOutOfBounds {
+            return Err(PacketError::IndexOutOfBounds {
                 index,
                 len: self.layers.len(),
             });
@@ -88,15 +82,15 @@ impl Packet {
         Ok(self)
     }
 
-    pub fn remove(&mut self, index: usize) -> Result<Box<dyn Layer>, Error> {
+    pub fn remove(&mut self, index: usize) -> Result<Box<dyn Layer>, PacketError> {
         if index >= self.layers.len() {
-            return Err(Error::IndexOutOfBounds {
+            return Err(PacketError::IndexOutOfBounds {
                 index,
                 len: self.layers.len(),
             });
         }
-        if boundary::check_padding_boundary_removal(&self.layers, index) {
-            return Err(Error::PaddingBoundaryRemoval { index });
+        if boundary::removal_would_orphan_padding(&self.layers, index) {
+            return Err(PacketError::PaddingBoundaryRemoval { index });
         }
         let removed = self.layers.remove(index);
         boundary::shift_padding_for_remove(&mut self.layers, index);
@@ -104,22 +98,23 @@ impl Packet {
         Ok(removed)
     }
 
-    pub fn replace<L>(&mut self, index: usize, layer: L) -> Result<Box<dyn Layer>, Error>
-    where
-        L: Layer + 'static,
-    {
+    pub fn replace<L: Layer>(
+        &mut self,
+        index: usize,
+        layer: L,
+    ) -> Result<Box<dyn Layer>, PacketError> {
         let mut layer: Box<dyn Layer> = Box::new(layer);
         let len = self.layers.len();
         let slot = self
             .layers
             .get_mut(index)
-            .ok_or(Error::IndexOutOfBounds { index, len })?;
+            .ok_or(PacketError::IndexOutOfBounds { index, len })?;
         std::mem::swap(slot, &mut layer);
         self.invalidate_encoded_payload_lengths();
         Ok(layer)
     }
 
-    pub fn get<T: Layer + 'static>(&self) -> Option<&T> {
+    pub fn get<T: Layer>(&self) -> Option<&T> {
         self.layers
             .iter()
             .find_map(|layer| layer.as_any().downcast_ref::<T>())
@@ -130,7 +125,7 @@ impl Packet {
     /// Obtaining mutable layer access invalidates cached encoded payload
     /// lengths before the reference is returned. A failed type lookup does
     /// not change the packet.
-    pub fn get_mut<T: Layer + 'static>(&mut self) -> Option<&mut T> {
+    pub fn get_mut<T: Layer>(&mut self) -> Option<&mut T> {
         let index = self
             .layers
             .iter()
@@ -184,10 +179,7 @@ impl fmt::Debug for Packet {
     }
 }
 
-impl<L> FromIterator<L> for Packet
-where
-    L: Layer + 'static,
-{
+impl<L: Layer> FromIterator<L> for Packet {
     fn from_iter<T: IntoIterator<Item = L>>(iter: T) -> Self {
         let layers = iter
             .into_iter()

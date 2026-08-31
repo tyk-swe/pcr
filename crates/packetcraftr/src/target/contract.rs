@@ -155,7 +155,9 @@ impl Authorized {
     }
 }
 
-#[derive(Debug, Error, Clone, PartialEq, Eq)]
+/// A resolver refusal retains the system failure it was given, which is not
+/// comparable, so these failures are matched on rather than equated.
+#[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum Error {
     #[error("invalid hostname {hostname:?}: {reason}")]
@@ -163,10 +165,12 @@ pub enum Error {
         hostname: String,
         reason: &'static str,
     },
-    #[error("resolved-address limit {value} is invalid; expected 1..={maximum}")]
-    InvalidAddressLimit { value: usize, maximum: usize },
-    #[error("hostname resolution for {hostname} failed: {message}")]
-    Resolver { hostname: String, message: String },
+    #[error("hostname resolution for {hostname} failed")]
+    Resolver {
+        hostname: String,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
     #[error("hostname {hostname} did not resolve to any addresses")]
     NoAddresses { hostname: String },
     #[error("hostname {hostname} resolved beyond the configured {limit}-address limit")]
@@ -174,13 +178,13 @@ pub enum Error {
     #[error("resolved target has no {family} address compatible with the packet")]
     AddressFamilyUnavailable { family: &'static str },
     #[error(transparent)]
-    Policy(#[from] super::super::policy::Error),
+    Policy(#[from] crate::policy::Error),
 }
 
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
-            Self::InvalidHostname { .. } | Self::InvalidAddressLimit { .. } => Classification::new(
+            Self::InvalidHostname { .. } => Classification::new(
                 "cli.live_target",
                 Kind::Cli,
                 Some("use a valid IP address or bounded ASCII DNS hostname"),
@@ -208,10 +212,13 @@ impl Classified for Error {
         }
     }
 
+    /// Walked from the retained `#[source]` chain rather than hand-written,
+    /// except for the transparent policy variant, whose own `Display` is
+    /// already this error's message and which therefore delegates.
     fn causes(&self) -> Vec<String> {
         match self {
             Self::Policy(error) => error.causes(),
-            _ => Vec::new(),
+            error => packetcraftr_core::error::source_chain(error),
         }
     }
 }
@@ -232,7 +239,7 @@ impl Resolver for SystemResolver {
                 .to_socket_addrs()
                 .map_err(|source| Error::Resolver {
                     hostname: hostname.to_string(),
-                    message: source.to_string(),
+                    source: Box::new(source),
                 })?;
         let mut addresses = Vec::new();
         for address in resolved.map(|address| address.ip()) {

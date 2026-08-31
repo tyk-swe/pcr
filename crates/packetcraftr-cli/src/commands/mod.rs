@@ -136,14 +136,17 @@ impl Command {
         }
     }
 
-    pub(super) fn run(
+    /// Dispatches to the selected command.
+    ///
+    /// The format gate lives in each command's own `narrow` call, which is the
+    /// first thing every `run` does and produces the same
+    /// `contract::Error::UnsupportedFormat`; `format::formats_match_the_published_contract`
+    /// keeps those subsets equal to what the contract publishes.
+    pub(crate) fn run(
         self,
         format: output::contract::Format,
-        stream: &mut StreamEncoder,
+        stream: &StreamEncoder,
     ) -> Result<(), CliError> {
-        self.kind()
-            .require_format(format)
-            .map_err(CliError::classified)?;
         match self {
             Self::Build(arguments) => build::run(arguments, format),
             Self::Dissect(arguments) => dissect::run(arguments, format),

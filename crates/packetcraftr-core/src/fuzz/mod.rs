@@ -24,21 +24,36 @@ pub const MAX_DURATION: Duration = Duration::from_secs(3_600);
 pub const MAX_STRATEGIES: usize = 4;
 pub const MAX_TARGET_FIELDS: usize = 4_096;
 
-pub const DEFAULT_MAX_TOTAL_BYTES: usize = 256 * 1024 * 1024;
+/// Largest retained and wire byte total one campaign may charge (256 MiB).
+pub const MAX_TOTAL_BYTES: usize = 256 * 1024 * 1024;
+pub const DEFAULT_MAX_TOTAL_BYTES: usize = MAX_TOTAL_BYTES;
+/// Largest packet one case may build or dissect (16 MiB).
+///
+/// A case is one packet, so this is the same ceiling the packet layout uses;
+/// a campaign starts at that size and may only lower it.
+pub const MAX_PACKET_BYTES: usize = 16 * 1024 * 1024;
+/// Deepest list nesting a reflected fuzz value may carry.
+///
+/// This must not exceed
+/// [`MAX_DOCUMENT_NESTING`](crate::document::MAX_DOCUMENT_NESTING): a value a
+/// packet document can carry has to stay measurable here.
+pub const MAX_VALUE_NESTING: usize = 64;
 const SPLITMIX_INCREMENT: u64 = 0x9e37_79b9_7f4a_7c15;
 const CASE_DOMAIN: u64 = 0xd1b5_4a32_d192_ed03;
 
+mod decode;
 mod error;
-pub(crate) mod execution;
 mod mutation;
+mod prepare;
+mod report;
 mod request;
-mod result;
+pub(crate) mod rng;
 mod run;
 #[cfg(test)]
 mod tests;
 
+pub use decode::{dissect_built, packet_link_type};
 pub use error::Error;
-pub use mutation::{dissect_built, packet_link_type};
+pub use report::{Case, CaseFailure, CaseOutcome, Mutation, Report, Stats, Summary};
 pub use request::{Limits, Request, Strategy, Target, TargetParseError};
-pub use result::{Case, CaseFailure, CaseOutcome, Mutation, Result, Stats, Summary};
 pub use run::{Campaign, run, run_with_events};

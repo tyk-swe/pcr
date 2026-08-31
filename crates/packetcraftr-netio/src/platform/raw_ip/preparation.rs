@@ -3,14 +3,12 @@
 
 //! Pure raw-IP validation and target-specific byte preparation.
 
-#![forbid(unsafe_code)]
-
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use bytes::Bytes;
 
-use super::super::super::{Error, transmit::Layer3Frame};
 use crate::interface::Id as InterfaceId;
+use crate::{Error, transmit::Layer3Frame};
 use packetcraftr_core::protocol::checksum;
 
 const IPV4_MINIMUM_HEADER: usize = 20;
@@ -173,7 +171,7 @@ fn ipv4_submission(bytes: &Bytes) -> Result<Bytes, Error> {
 /// minimum header is rejected instead of being sent with big-endian fields the
 /// kernel would misread.
 #[cfg(target_os = "macos")]
-pub(super) fn macos_ipv4_submission(bytes: &Bytes) -> Result<Bytes, Error> {
+fn macos_ipv4_submission(bytes: &Bytes) -> Result<Bytes, Error> {
     let mut submission = bytes.to_vec();
     let Some(header) = submission.first_chunk_mut::<IPV4_MINIMUM_HEADER>() else {
         return Err(invalid_frame("truncated IPv4 header".to_owned()));
@@ -196,7 +194,7 @@ fn validate_windows_restrictions(
         return Err(Error::Unsupported {
             message: "Windows client editions drop raw UDP with a source not assigned to a local interface"
                 .to_owned(),
-        });
+         source: None });
     }
     Ok(())
 }
@@ -208,7 +206,7 @@ fn extension_header(bytes: &[u8], offset: usize) -> Option<[u8; 2]> {
 }
 
 #[cfg(windows)]
-pub(super) fn upper_protocol(bytes: &[u8]) -> Result<u8, Error> {
+fn upper_protocol(bytes: &[u8]) -> Result<u8, Error> {
     let version = bytes
         .first()
         .ok_or_else(|| invalid_frame("packet is empty".to_owned()))?;

@@ -37,8 +37,8 @@ use crate::{
     registry::Discriminator,
 };
 
-use super::super::super::common::{
-    ensure_encode_budget, invalid, protocol, read_only, text_list, unsigned_list, wrong_layer,
+use crate::protocol::common::{
+    ensure_encode_budget, invalid, protocol, read_only, text_list, typed_layer, unsigned_list,
 };
 
 use super::fingerprint::{Transport, ja3, ja4};
@@ -48,6 +48,10 @@ use super::model::{
     Record, ServerHello,
 };
 use super::parse::{Outcome, looks_like_record_start, parse_handshake, parse_record};
+
+use crate::protocol::BuiltinProtocol;
+
+const NAME: &str = BuiltinProtocol::Tls.as_str();
 
 /// Records dissected from one segment before the remainder becomes a raw tail.
 ///
@@ -285,7 +289,7 @@ impl Tls {
             Ok(())
         } else {
             Err(invalid(
-                "tls",
+                NAME,
                 "TLS fields were changed after dissection and no longer match the retained wire payload",
             ))
         }
@@ -318,7 +322,7 @@ fn optional_codes(values: &[u16]) -> Option<FieldValue> {
 }
 
 reflective_layer! {
-    fn tls_schema() => { protocol: protocol("tls"), name: "TLS" }
+    fn tls_schema() => { protocol: protocol(NAME), name: "TLS" }
     impl Tls {
         "content_type" => { kind: Unsigned, derived: false, required: false, description: "Record content type of the first record", get |layer| Some(FieldValue::from(layer.content_type)), set |_layer, _value, name| read_only(tls_schema(), name), layout: (0, 1) },
         "version" => { kind: Unsigned, derived: false, required: false, description: "Legacy record version of the first record", get |layer| Some(FieldValue::from(layer.version)), set |_layer, _value, name| read_only(tls_schema(), name), layout: (1, 3) },
@@ -346,14 +350,14 @@ reflective_layer! {
 pub(crate) struct TlsCodec;
 
 impl LayerCodec for TlsCodec {
-    fn protocol_id(&self) -> crate::layer::Id {
-        protocol("tls")
+    fn protocol_id(&self) -> &'static crate::layer::Id {
+        &tls_schema().protocol
     }
 
     /// A segment on a TLS port that is not TLS decodes as `raw`, so this codec
     /// legitimately produces either protocol.
     fn accepts_decoded_protocol(&self, protocol: &crate::layer::Id) -> bool {
-        matches!(protocol.as_str(), "tls" | "raw")
+        matches!(protocol.as_str(), NAME | "raw")
     }
 
     fn published_schema(&self) -> Option<&'static crate::layer::Schema> {
@@ -366,19 +370,13 @@ impl LayerCodec for TlsCodec {
         _payload: &[u8],
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
-        let layer = layer
-            .as_any()
-            .downcast_ref::<Tls>()
-            .ok_or_else(|| wrong_layer("tls", layer))?;
+        let layer = typed_layer::<Tls>(NAME, layer)?;
         layer.validate_wire_consistency()?;
-        ensure_encode_budget("tls", layer.wire.len(), context)?;
-        Ok(EncodedLayer {
-            prefix: layer.wire.to_vec(),
-            suffix: Vec::new(),
-            materialized: Box::new(layer.clone()),
-            fields: tls_layout(),
-            diagnostics: Vec::new(),
-        })
+        ensure_encode_budget(NAME, layer.wire.len(), context)?;
+        Ok(
+            EncodedLayer::header(layer.wire.to_vec(), Box::new(layer.clone()))
+                .with_fields(tls_layout()),
+        )
     }
 
     fn decode(
@@ -418,7 +416,7 @@ impl LayerCodec for TlsCodec {
         _fields: &BTreeMap<String, FieldValue>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         Err(crate::codec::Error::Unsupported {
-            protocol: protocol("tls"),
+            protocol: protocol(NAME),
             message: "TLS is dissection-only; build the segment payload as raw bytes".to_owned(),
         })
     }
@@ -440,8 +438,8 @@ fn raw_segment(input: &[u8]) -> Result<DecodedLayerValue, crate::codec::Error> {
 mod tests {
     #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
-    use super::super::test_wire::{TLS_1_2, record};
     use super::*;
+    use crate::protocol::application::tls::test_wire::{TLS_1_2, record};
 
     #[test]
     fn a_segment_without_a_record_header_has_no_dissection() {
@@ -523,14 +521,14 @@ mod tests {
     /// Encodes `layer` the way the builder does, with an empty packet around
     /// it: the codec writes back only the bytes the layer retained.
     fn encode(layer: &Tls) -> Result<EncodedLayer, crate::codec::Error> {
-        let registry = crate::protocol::builtin::registry().expect("built-in registry");
+        let registry = crate::protocol::builtin::registry();
         let packet = crate::Packet::new();
-        let build_context = crate::build::Context::default();
+        let build_context = crate::codec::Context::default();
         let context = LayerEncodeContext {
             packet: &packet,
             index: 0,
             build_context: &build_context,
-            mode: crate::build::Mode::Strict,
+            mode: crate::codec::Mode::Strict,
             registry: &registry,
             child: None,
             remaining_packet_bytes: 4096,

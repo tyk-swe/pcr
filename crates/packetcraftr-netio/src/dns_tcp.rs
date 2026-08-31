@@ -3,18 +3,20 @@
 
 //! Bounded DNS-over-TCP framing over portable system sockets.
 //!
-//! This module deliberately exposes a DNS-specific provider rather than a
+//! This module deliberately exposes a DNS-specific exchange rather than a
 //! general stream-socket abstraction. Higher-level workflows remain
 //! responsible for destination authorization and DNS response validation.
 //! One exchange consumes the first declared response frame and then drops the
 //! connection; later messages on the stream are outside that frame.
 
+use std::error::Error as StdError;
 use std::fmt;
 #[cfg(any(feature = "native-route", test))]
 use std::io::{self, Read, Write};
 use std::net::SocketAddr;
 #[cfg(feature = "native-route")]
 use std::net::TcpStream;
+use std::sync::Arc;
 #[cfg(any(feature = "native-route", test))]
 use std::time::Instant;
 use std::time::{Duration, SystemTime};
@@ -64,8 +66,33 @@ impl fmt::Display for Phase {
     }
 }
 
+/// The retry-relevant class of a DNS-over-TCP failure.
+///
+/// Every [`Error`] variant belongs to exactly one category, and the category
+/// decides both the stable classification and how a workflow may react.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Category {
+    /// The caller submitted a request that is not a runnable bounded exchange.
+    Request,
+    /// This build or route cannot execute DNS over TCP at all.
+    Unsupported,
+    /// The bounded attempt deadline expired during a socket phase.
+    Timeout,
+    /// A socket operation failed before an orderly response.
+    Network,
+    /// The peer's DNS-over-TCP framing was incomplete or oversized.
+    Framing,
+}
+
+/// The system failure a socket phase carries.
+///
+/// Shared rather than boxed so [`Error`] stays `Clone` while retaining
+/// `io::Error`, which is not.
+pub type SocketFault = Arc<dyn StdError + Send + Sync>;
+
 /// Typed failures from one DNS-over-TCP exchange.
-#[derive(Clone, Debug, PartialEq, Eq, ThisError)]
+#[derive(Clone, Debug, ThisError)]
 #[non_exhaustive]
 pub enum Error {
     /// Native DNS-over-TCP execution is unavailable in this feature profile.
@@ -90,30 +117,50 @@ pub enum Error {
     #[error("DNS-over-TCP deadline expired during {phase} after {transferred} phase byte(s)")]
     Timeout { phase: Phase, transferred: usize },
     /// The TCP connection could not be established.
+    ///
+    /// `message` names the socket step; the system failure that step reported,
+    /// when there was one, stays in `source` instead of being formatted into
+    /// the message.
     #[error("DNS-over-TCP connection to {endpoint} failed: {message}")]
     Connect {
         endpoint: SocketAddr,
         message: String,
+        #[source]
+        source: Option<SocketFault>,
     },
     /// A per-call socket timeout could not be installed.
     #[error(
-        "DNS-over-TCP could not configure the {phase} timeout after {transferred} phase byte(s): {message}"
+        "DNS-over-TCP could not configure the {phase} timeout after {transferred} phase byte(s)"
     )]
     ConfigureTimeout {
         phase: Phase,
         transferred: usize,
-        message: String,
+        #[source]
+        source: SocketFault,
     },
     /// The prefixed query could not be written completely.
+    ///
+    /// A socket refusal keeps its system failure in `source`; the module's own
+    /// accounting invariants have no source and say so in `message` alone.
     #[error("DNS-over-TCP query write stopped after {written} of {expected} bytes: {message}")]
     Write {
         written: usize,
         expected: usize,
         message: String,
+        #[source]
+        source: Option<SocketFault>,
     },
     /// A response read failed before an orderly end of stream.
+    ///
+    /// A socket refusal keeps its system failure in `source`; the module's own
+    /// accounting invariants have no source and say so in `message` alone.
     #[error("DNS-over-TCP {phase} failed: {message}")]
-    Read { phase: Phase, message: String },
+    Read {
+        phase: Phase,
+        message: String,
+        #[source]
+        source: Option<SocketFault>,
+    },
     /// The peer closed before the complete two-byte prefix arrived.
     #[error("DNS-over-TCP response prefix ended after {actual} of 2 bytes")]
     IncompletePrefix { actual: usize },
@@ -129,40 +176,30 @@ pub enum Error {
 }
 
 impl Error {
-    /// Whether this build deliberately omits native DNS-over-TCP execution.
+    /// The retry-relevant class of this failure.
+    ///
+    /// This is the single classifier: an exhaustive match, so a new variant is
+    /// a compile error here instead of being silently reported as a caller
+    /// request fault.
     #[must_use]
-    pub const fn is_unsupported(&self) -> bool {
-        matches!(self, Self::Unsupported { .. })
-    }
-
-    /// Whether retry processing should treat this as a timeout.
-    #[must_use]
-    pub const fn is_timeout(&self) -> bool {
-        matches!(self, Self::Timeout { .. })
-    }
-
-    /// Whether retry processing should treat this as a network failure.
-    #[must_use]
-    pub const fn is_network(&self) -> bool {
-        matches!(
-            self,
+    pub const fn category(&self) -> Category {
+        match self {
+            Self::Unsupported { .. } => Category::Unsupported,
+            Self::InvalidTimeout { .. }
+            | Self::EmptyQuery
+            | Self::QueryTooLarge { .. }
+            | Self::InvalidMessageLimit { .. }
+            | Self::DeadlineOverflow { .. } => Category::Request,
+            Self::Timeout { .. } => Category::Timeout,
             Self::Connect { .. }
-                | Self::ConfigureTimeout { .. }
-                | Self::Write { .. }
-                | Self::Read { .. }
-        )
-    }
-
-    /// Whether retry processing should treat this as malformed framing.
-    #[must_use]
-    pub const fn is_framing(&self) -> bool {
-        matches!(
-            self,
+            | Self::ConfigureTimeout { .. }
+            | Self::Write { .. }
+            | Self::Read { .. } => Category::Network,
             Self::IncompletePrefix { .. }
-                | Self::ZeroLength
-                | Self::MessageTooLarge { .. }
-                | Self::IncompleteMessage { .. }
-        )
+            | Self::ZeroLength
+            | Self::MessageTooLarge { .. }
+            | Self::IncompleteMessage { .. } => Category::Framing,
+        }
     }
 
     /// Exact framed-query bytes written before this failure.
@@ -213,41 +250,40 @@ impl Error {
 
 impl Classified for Error {
     fn classification(&self) -> Classification {
-        if self.is_timeout() {
-            return Classification::new(
-                "io.dns_tcp_timeout",
-                Kind::Io,
-                Some("retry within the finite DNS attempt budget or increase its timeout"),
-            );
-        }
-        if self.is_network() {
-            return Classification::new(
-                "io.dns_tcp",
-                Kind::Io,
-                Some("inspect the authorized DNS server TCP endpoint and retry"),
-            );
-        }
-        if self.is_framing() {
-            return Classification::new(
-                "packet.dns_tcp_frame",
-                Kind::Packet,
-                Some("treat the incomplete or oversized DNS-over-TCP response as invalid"),
-            );
-        }
-        if self.is_unsupported() {
-            return Classification::new(
+        match self.category() {
+            Category::Request => Classification::new(
+                "internal.dns_tcp_request",
+                Kind::Internal,
+                Some("submit a non-empty bounded DNS query with a finite remaining timeout"),
+            ),
+            Category::Unsupported => Classification::new(
                 "capability.dns_tcp",
                 Kind::Capability,
                 Some(
                     "enable native DNS-over-TCP or provide a TCP-capable executor, and remove incompatible packet-route overrides",
                 ),
-            );
+            ),
+            Category::Timeout => Classification::new(
+                "io.dns_tcp_timeout",
+                Kind::Io,
+                Some("retry within the finite DNS attempt budget or increase its timeout"),
+            ),
+            Category::Network => Classification::new(
+                "io.dns_tcp",
+                Kind::Io,
+                Some("inspect the authorized DNS server TCP endpoint and retry"),
+            ),
+            Category::Framing => Classification::new(
+                "packet.dns_tcp_frame",
+                Kind::Packet,
+                Some("treat the incomplete or oversized DNS-over-TCP response as invalid"),
+            ),
         }
-        Classification::new(
-            "internal.dns_tcp_request",
-            Kind::Internal,
-            Some("submit a non-empty bounded DNS query with a finite remaining timeout"),
-        )
+    }
+
+    /// Walked from the retained `#[source]` chain rather than hand-written.
+    fn causes(&self) -> Vec<String> {
+        packetcraftr_core::error::source_chain(self)
     }
 }
 
@@ -258,8 +294,6 @@ pub struct Response {
     pub peer_address: SocketAddr,
     /// Local socket selected by the operating system.
     pub local_address: SocketAddr,
-    /// Wall-clock marker recorded before connection.
-    pub started_at: SystemTime,
     /// Wall-clock marker recorded after the complete query was written.
     pub sent_at: SystemTime,
     /// Wall-clock marker recorded after the declared body arrived.
@@ -270,38 +304,28 @@ pub struct Response {
     pub latency: Duration,
     /// Exact number of prefix and query bytes written.
     pub bytes_written: usize,
-    /// Exact number of prefix and response bytes read.
-    pub bytes_read: usize,
-    /// One exact DNS-over-TCP frame, including its two-byte prefix.
+    /// One exact DNS-over-TCP frame, including its two-byte prefix. Its length
+    /// is the exact number of prefix and response bytes read.
     pub frame: Bytes,
 }
 
-/// Provider boundary for one bounded DNS-over-TCP request.
-pub trait Provider {
-    /// Connects, writes one framed query, and reads the first framed response.
-    /// A subsequent message on the same stream is not part of that response.
-    fn exchange(&self, request: Request<'_>) -> Result<Response, Error>;
-}
-
-/// Portable provider backed by `std::net::TcpStream` when `native-route` is
-/// enabled. Offline-only builds return [`Error::Unsupported`] before opening a
-/// socket.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct SystemProvider;
-
-impl Provider for SystemProvider {
-    fn exchange(&self, request: Request<'_>) -> Result<Response, Error> {
-        #[cfg(feature = "native-route")]
-        {
-            exchange_with_connector(request, &SystemConnector)
-        }
-        #[cfg(not(feature = "native-route"))]
-        {
-            let _ = request;
-            Err(Error::Unsupported {
-                message: "packetcraftr-netio was built without native-route support".to_owned(),
-            })
-        }
+/// Runs one bounded DNS-over-TCP exchange over a portable system socket.
+///
+/// Connects, writes one framed query, and reads the first framed response; a
+/// subsequent message on the same stream is not part of that response. Backed
+/// by `std::net::TcpStream` when `native-route` is enabled; an offline-only
+/// build returns [`Error::Unsupported`] before opening a socket.
+pub fn exchange(request: Request<'_>) -> Result<Response, Error> {
+    #[cfg(feature = "native-route")]
+    {
+        exchange_with_connector(request, &SystemConnector)
+    }
+    #[cfg(not(feature = "native-route"))]
+    {
+        let _ = request;
+        Err(Error::Unsupported {
+            message: "packetcraftr-netio was built without native-route support".to_owned(),
+        })
     }
 }
 
@@ -377,7 +401,6 @@ fn exchange_with_connector<C: Connector>(
     }
 
     let started = Instant::now();
-    let started_at = SystemTime::now();
     let deadline = started
         .checked_add(request.timeout)
         .ok_or(Error::DeadlineOverflow {
@@ -389,17 +412,20 @@ fn exchange_with_connector<C: Connector>(
         .map_err(|source| map_connect_error(request.endpoint, source))?;
     let peer_address = stream.peer_addr().map_err(|source| Error::Connect {
         endpoint: request.endpoint,
-        message: format!("peer socket inspection failed: {source}"),
+        message: "peer socket inspection failed".to_owned(),
+        source: Some(Arc::new(source)),
     })?;
     if peer_address != request.endpoint {
         return Err(Error::Connect {
             endpoint: request.endpoint,
             message: format!("connected peer changed to {peer_address}"),
+            source: None,
         });
     }
     let local_address = stream.local_addr().map_err(|source| Error::Connect {
         endpoint: request.endpoint,
-        message: format!("local socket inspection failed: {source}"),
+        message: "local socket inspection failed".to_owned(),
+        source: Some(Arc::new(source)),
     })?;
 
     let expected_write =
@@ -474,13 +500,11 @@ fn exchange_with_connector<C: Connector>(
     Ok(Response {
         peer_address,
         local_address,
-        started_at,
         sent_at,
         received_at,
         elapsed: completed.duration_since(started),
         latency: completed.duration_since(sent),
         bytes_written,
-        bytes_read: capacity,
         frame: Bytes::from(frame),
     })
 }
@@ -503,7 +527,8 @@ fn map_connect_error(endpoint: SocketAddr, source: io::Error) -> Error {
     } else {
         Error::Connect {
             endpoint,
-            message: source.to_string(),
+            message: "the socket could not be opened".to_owned(),
+            source: Some(Arc::new(source)),
         }
     }
 }
@@ -523,7 +548,7 @@ fn write_exact<S: Stream>(
             .map_err(|source| Error::ConfigureTimeout {
                 phase: Phase::Write,
                 transferred: *written,
-                message: source.to_string(),
+                source: Arc::new(source),
             })?;
         match stream.write(bytes) {
             Ok(0) => {
@@ -531,6 +556,7 @@ fn write_exact<S: Stream>(
                     written: *written,
                     expected,
                     message: "peer accepted zero bytes".to_owned(),
+                    source: None,
                 });
             }
             Ok(count) => {
@@ -538,11 +564,13 @@ fn write_exact<S: Stream>(
                     written: *written,
                     expected,
                     message: "byte accounting overflowed".to_owned(),
+                    source: None,
                 })?;
                 bytes = bytes.get(count..).ok_or(Error::Write {
                     written: *written,
                     expected,
                     message: "socket reported more bytes than were submitted".to_owned(),
+                    source: None,
                 })?;
             }
             Err(source) if source.kind() == io::ErrorKind::Interrupted => {}
@@ -556,7 +584,8 @@ fn write_exact<S: Stream>(
                 return Err(Error::Write {
                     written: *written,
                     expected,
-                    message: source.to_string(),
+                    message: "the socket write failed".to_owned(),
+                    source: Some(Arc::new(source)),
                 });
             }
         }
@@ -579,11 +608,12 @@ fn read_exact<S: Stream>(
             .map_err(|source| Error::ConfigureTimeout {
                 phase,
                 transferred: read,
-                message: source.to_string(),
+                source: Arc::new(source),
             })?;
         let tail = bytes.get_mut(read..).ok_or(Error::Read {
             phase,
             message: "read accounting exceeded the destination buffer".to_owned(),
+            source: None,
         })?;
         match stream.read(tail) {
             Ok(0) => break,
@@ -591,6 +621,7 @@ fn read_exact<S: Stream>(
                 read = read.checked_add(count).ok_or(Error::Read {
                     phase,
                     message: "byte accounting overflowed".to_owned(),
+                    source: None,
                 })?;
             }
             Err(source) if source.kind() == io::ErrorKind::Interrupted => {}
@@ -603,7 +634,8 @@ fn read_exact<S: Stream>(
             Err(source) => {
                 return Err(Error::Read {
                     phase,
-                    message: source.to_string(),
+                    message: "the socket read failed".to_owned(),
+                    source: Some(Arc::new(source)),
                 });
             }
         }
@@ -627,9 +659,17 @@ mod tests {
     use std::collections::VecDeque;
     use std::io::Cursor;
     use std::net::{IpAddr, Ipv4Addr};
-    use std::sync::{Arc, Mutex};
+    use std::sync::Mutex;
 
     use super::*;
+
+    /// Field-by-field equality for an error that retains a system source and
+    /// so cannot derive `PartialEq`. `Debug` renders every field, the source
+    /// included, so this compares strictly more than a derived `==` did.
+    #[track_caller]
+    fn assert_same_error(actual: &Error, expected: &Error) {
+        assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
+    }
 
     const ENDPOINT: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 53);
     const LOCAL: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 49_152);
@@ -660,7 +700,7 @@ mod tests {
         input: Cursor<Vec<u8>>,
         output: Vec<u8>,
         read_chunks: VecDeque<usize>,
-        read_delays: VecDeque<Duration>,
+        read_pacing: VecDeque<Pacing>,
         write_chunks: VecDeque<usize>,
         write_delays: VecDeque<Duration>,
         read_interrupts: usize,
@@ -677,7 +717,7 @@ mod tests {
                     input: Cursor::new(input),
                     output: Vec::new(),
                     read_chunks: VecDeque::new(),
-                    read_delays: VecDeque::new(),
+                    read_pacing: VecDeque::new(),
                     write_chunks: VecDeque::new(),
                     write_delays: VecDeque::new(),
                     read_interrupts: 0,
@@ -690,18 +730,45 @@ mod tests {
         }
     }
 
+    /// How much of the caller's deadline a scripted read spends before it
+    /// delivers bytes.
+    #[derive(Clone, Copy, Debug)]
+    enum Pacing {
+        /// Deliver immediately.
+        Prompt,
+        /// Sleep past the whole budget the caller just set for this read, so
+        /// the read always completes after the deadline no matter how long the
+        /// preceding phases took. Reading the budget back off the stream is
+        /// what makes the outcome independent of the wall clock: a fixed delay
+        /// only outlasts a fixed timeout when the machine is not loaded.
+        PastDeadline,
+    }
+
+    /// How far past the caller's budget a [`Pacing::PastDeadline`] read sleeps.
+    const OVERRUN_MARGIN: Duration = Duration::from_millis(1);
+
     impl Read for ScriptedStream {
         fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
-            let delay = {
+            let overrun = {
                 let mut state = self.state.lock().unwrap();
                 if state.read_interrupts != 0 {
                     state.read_interrupts -= 1;
                     return Err(io::Error::from(io::ErrorKind::Interrupted));
                 }
-                state.read_delays.pop_front()
+                match state.read_pacing.pop_front() {
+                    Some(Pacing::PastDeadline) => Some(
+                        state
+                            .read_timeouts
+                            .last()
+                            .copied()
+                            .expect("a bounded read sets its timeout first")
+                            + OVERRUN_MARGIN,
+                    ),
+                    Some(Pacing::Prompt) | None => None,
+                }
             };
-            if let Some(delay) = delay {
-                std::thread::sleep(delay);
+            if let Some(overrun) = overrun {
+                std::thread::sleep(overrun);
             }
             let mut state = self.state.lock().unwrap();
             let limit = state.read_chunks.pop_front().unwrap_or(bytes.len());
@@ -769,6 +836,12 @@ mod tests {
         }
     }
 
+    /// The budget a deadline-crossing test hands the exchange. Every phase
+    /// before the scripted overrun is in-memory work, so this only has to
+    /// outlast scheduler noise; the overrun itself sleeps the whole remaining
+    /// budget, so it also bounds how long such a test takes.
+    const SCRIPTED_TIMEOUT: Duration = Duration::from_millis(50);
+
     fn request(query: &[u8]) -> Request<'_> {
         Request {
             endpoint: ENDPOINT,
@@ -792,6 +865,7 @@ mod tests {
             state.write_chunks.extend([1, 1, 2, 1, 64]);
             state.write_delays.push_back(Duration::from_millis(10));
             state.read_chunks.extend([1, 1, 2, 3, 64]);
+            state.read_pacing.extend([Pacing::Prompt; 5]);
             state.write_interrupts = 1;
             state.read_interrupts = 1;
         }
@@ -801,8 +875,7 @@ mod tests {
         assert_eq!(response.local_address, LOCAL);
         assert_eq!(response.frame.as_ref(), input);
         assert_eq!(response.bytes_written, 7);
-        assert_eq!(response.bytes_read, input.len());
-        assert!(response.sent_at >= response.started_at);
+        assert_eq!(response.frame.len(), input.len());
         assert!(response.received_at >= response.sent_at);
         assert!(response.elapsed > response.latency);
         let state = connector.stream.state.lock().unwrap();
@@ -851,8 +924,8 @@ mod tests {
                 &connector,
             )
             .unwrap_err();
-            assert_eq!(error, expected);
-            assert!(error.is_framing());
+            assert_same_error(&error, &expected);
+            assert_eq!(error.category(), Category::Framing);
         }
     }
 
@@ -862,7 +935,6 @@ mod tests {
             .expect("the first complete response frame is sufficient");
 
         assert_eq!(response.frame.as_ref(), [0, 1, 1]);
-        assert_eq!(response.bytes_read, 3);
     }
 
     #[test]
@@ -873,39 +945,39 @@ mod tests {
             .state
             .lock()
             .unwrap()
-            .read_delays
-            .extend([Duration::ZERO, Duration::from_millis(10)]);
+            .read_pacing
+            .extend([Pacing::Prompt, Pacing::PastDeadline]);
 
         let error = exchange_with_connector(
             Request {
-                timeout: Duration::from_millis(1),
+                timeout: SCRIPTED_TIMEOUT,
                 ..request(b"q")
             },
             &connector,
         )
         .expect_err("a late final read must not produce a successful receipt");
 
-        assert_eq!(
-            error,
-            Error::Timeout {
+        assert_same_error(
+            &error,
+            &Error::Timeout {
                 phase: Phase::ReadMessage,
                 transferred: 1,
-            }
+            },
         );
     }
 
     #[test]
     fn late_end_of_stream_is_a_timeout_not_a_framing_failure() {
-        for (input, delays, phase, transferred) in [
+        for (input, pacing, phase, transferred) in [
             (
                 vec![0],
-                vec![Duration::ZERO, Duration::from_millis(10)],
+                vec![Pacing::Prompt, Pacing::PastDeadline],
                 Phase::ReadPrefix,
                 1,
             ),
             (
                 vec![0, 4, 1, 2],
-                vec![Duration::ZERO, Duration::ZERO, Duration::from_millis(10)],
+                vec![Pacing::Prompt, Pacing::Prompt, Pacing::PastDeadline],
                 Phase::ReadMessage,
                 2,
             ),
@@ -916,19 +988,19 @@ mod tests {
                 .state
                 .lock()
                 .unwrap()
-                .read_delays
-                .extend(delays);
+                .read_pacing
+                .extend(pacing);
 
             let error = exchange_with_connector(
                 Request {
-                    timeout: Duration::from_millis(1),
+                    timeout: SCRIPTED_TIMEOUT,
                     ..request(b"q")
                 },
                 &connector,
             )
             .expect_err("a late end of stream must report the expired deadline");
 
-            assert_eq!(error, Error::Timeout { phase, transferred });
+            assert_same_error(&error, &Error::Timeout { phase, transferred });
         }
     }
 
@@ -944,15 +1016,16 @@ mod tests {
             ),
             Err(Error::InvalidTimeout { .. })
         ));
-        assert_eq!(
-            exchange_with_connector(
+        assert_same_error(
+            &exchange_with_connector(
                 request(b""),
                 &ScriptedConnector {
                     stream: ScriptedStream::new(Vec::new()),
                     connect_error: Some(io::ErrorKind::TimedOut),
-                }
-            ),
-            Err(Error::EmptyQuery)
+                },
+            )
+            .expect_err("an empty query is refused before the socket opens"),
+            &Error::EmptyQuery,
         );
         assert!(matches!(
             exchange_with_connector(
@@ -973,7 +1046,7 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(error, Error::Connect { .. }));
-        assert!(error.is_network());
+        assert_eq!(error.category(), Category::Network);
     }
 
     #[test]
@@ -997,14 +1070,14 @@ mod tests {
             },
         )
         .unwrap_err();
-        assert_eq!(
-            error,
-            Error::Timeout {
+        assert_same_error(
+            &error,
+            &Error::Timeout {
                 phase: Phase::Connect,
                 transferred: 0,
-            }
+            },
         );
-        assert!(error.is_timeout());
+        assert_eq!(error.category(), Category::Timeout);
     }
 
     #[test]
@@ -1026,6 +1099,7 @@ mod tests {
             Error::Connect {
                 endpoint: ENDPOINT,
                 message: "fixture".to_owned(),
+                source: None,
             }
             .query_bytes_written(framed),
             0
@@ -1034,9 +1108,9 @@ mod tests {
 
     #[cfg(not(feature = "native-route"))]
     #[test]
-    fn system_provider_fails_closed_without_native_route_support() {
-        let error = SystemProvider.exchange(request(b"query")).unwrap_err();
+    fn exchange_fails_closed_without_native_route_support() {
+        let error = exchange(request(b"query")).unwrap_err();
         assert!(matches!(error, Error::Unsupported { .. }));
-        assert!(error.is_unsupported());
+        assert_eq!(error.category(), Category::Unsupported);
     }
 }

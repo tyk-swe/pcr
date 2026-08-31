@@ -10,6 +10,7 @@ pub use model::{FieldError, FieldSchema};
 pub use model::{Id, Layer, Malformed, Padding, Raw, Schema};
 #[doc(hidden)]
 pub use model::{malformed_layout, padding_layout, raw_layout};
+pub(crate) use model::{malformed_schema, padding_schema, raw_schema};
 pub(crate) use reflection::reflective_layer;
 #[doc(hidden)]
 pub use reflection::{

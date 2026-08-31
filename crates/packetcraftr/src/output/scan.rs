@@ -14,13 +14,25 @@ use super::contract::Error;
 use super::envelope::Stats;
 use super::frame::{Captured, Timestamp};
 
-pub use crate::scan::{Classification, ProbeStatus};
+pub use crate::scan::{Classification, ProbeStatus, Transport};
+
+/// The wire protocol one probe was sent over. `scan::Transport::Icmp` splits by
+/// address family here because the v1 contract names the two ICMP protocols
+/// separately; this enum is the only declaration of that vocabulary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Protocol {
+    Tcp,
+    Udp,
+    Icmpv4,
+    Icmpv6,
+}
 
 /// One canonical scan probe record used by aggregate and stream output.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Probe {
     pub sequence: u64,
-    pub protocol: String,
+    pub protocol: Protocol,
     pub destination: IpAddr,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub destination_port: Option<u16>,
@@ -42,7 +54,7 @@ pub struct Probe {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Endpoint {
     pub address: IpAddr,
-    pub transport: String,
+    pub transport: Transport,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub port: Option<u16>,
     pub classification: Classification,
@@ -51,18 +63,18 @@ pub struct Endpoint {
 
 /// Aggregate result of `scan`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Result {
+pub struct Report {
     pub target: String,
     pub resolved_addresses: Vec<IpAddr>,
     pub endpoints: Vec<Endpoint>,
     pub undecoded: Vec<Captured>,
 }
 
-impl Result {
+impl Report {
     pub fn try_from_scan(
-        result: crate::scan::Result,
-    ) -> std::result::Result<(Self, Vec<PacketDiagnostic>, Stats), Error> {
-        let crate::scan::Result {
+        result: crate::scan::Report,
+    ) -> Result<(Self, Vec<PacketDiagnostic>, Stats), Error> {
+        let crate::scan::Report {
             target,
             resolved_addresses,
             endpoints,
@@ -77,16 +89,16 @@ impl Result {
                     .probes
                     .into_iter()
                     .map(try_from_probe)
-                    .collect::<std::result::Result<Vec<_>, Error>>()?;
+                    .collect::<Result<Vec<_>, Error>>()?;
                 Ok(Endpoint {
                     address: endpoint.address,
-                    transport: endpoint.transport.to_string(),
+                    transport: endpoint.transport,
                     port: endpoint.port,
                     classification: endpoint.classification,
                     probes: probe_outputs,
                 })
             })
-            .collect::<std::result::Result<Vec<_>, Error>>()?;
+            .collect::<Result<Vec<_>, Error>>()?;
         Ok((
             Self {
                 target,
@@ -121,7 +133,7 @@ pub enum Event {
 impl Event {
     pub fn try_from_scan(
         event: crate::scan::Event,
-    ) -> std::result::Result<(Self, Vec<PacketDiagnostic>), Error> {
+    ) -> Result<(Self, Vec<PacketDiagnostic>), Error> {
         let (event, diagnostics) = match event {
             crate::scan::Event::Probe { target, probe } => (
                 Self::Probe {
@@ -149,21 +161,22 @@ impl Event {
                 target: summary.target,
                 resolved_addresses: summary.resolved_addresses,
             },
-            summary.diagnostics,
+            Vec::new(),
             summary.stats.into(),
         )
     }
 }
 
-fn try_from_probe(evidence: crate::scan::ProbeEvidence) -> std::result::Result<Probe, Error> {
+fn try_from_probe(evidence: crate::scan::ProbeEvidence) -> Result<Probe, Error> {
     let protocol = match (evidence.transport, evidence.address) {
-        (crate::scan::Transport::Icmp, IpAddr::V4(_)) => "icmpv4",
-        (crate::scan::Transport::Icmp, IpAddr::V6(_)) => "icmpv6",
-        _ => evidence.transport.as_str(),
+        (Transport::Icmp, IpAddr::V4(_)) => Protocol::Icmpv4,
+        (Transport::Icmp, IpAddr::V6(_)) => Protocol::Icmpv6,
+        (Transport::Tcp, _) => Protocol::Tcp,
+        (Transport::Udp, _) => Protocol::Udp,
     };
     Ok(Probe {
         sequence: evidence.sequence,
-        protocol: protocol.to_owned(),
+        protocol,
         destination: evidence.address,
         destination_port: evidence.port,
         attempt: evidence.attempt,

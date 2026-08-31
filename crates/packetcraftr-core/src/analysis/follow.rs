@@ -5,23 +5,15 @@
 
 use bytes::Bytes;
 
-use crate::analysis::adapter::{transport_payload, transports};
+use crate::analysis::adapter::transport_payload;
 use crate::analysis::dedup::Deduplicator;
-use crate::analysis::expert::StreamTransport;
-use crate::analysis::pipeline::FrameRecord;
+use crate::analysis::pipeline::{FrameRecord, Summary as RunSummary};
 use crate::analysis::reassembly::tcp::{Event as TcpEvent, FlowKey, ScopedFlowKey};
+use crate::analysis::{StreamRef, StreamTransport};
 
 /// Direction lives with the deduplicator every TCP conversation collector
 /// shares; this is its public path.
 pub use crate::analysis::dedup::Direction;
-
-/// Which conversation to follow, in the same vocabulary the `tcp.stream`
-/// and `udp.stream` display filters use.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Selector {
-    pub transport: StreamTransport,
-    pub index: u64,
-}
 
 /// One run of conversation payload, in delivery order.
 ///
@@ -61,14 +53,16 @@ pub struct Summary {
 /// correct and merely does more work.
 #[derive(Debug)]
 pub struct Collector {
-    selector: Selector,
+    selector: StreamRef,
     summary: Summary,
     client_flow: Option<ScopedFlowKey>,
     dedup: Deduplicator,
 }
 
 impl Collector {
-    pub fn new(selector: Selector) -> Self {
+    /// Creates a collector following one conversation, named in the same
+    /// vocabulary the `tcp.stream` and `udp.stream` display filters use.
+    pub fn new(selector: StreamRef) -> Self {
         Self {
             selector,
             summary: Summary::default(),
@@ -85,12 +79,12 @@ impl Collector {
         }
     }
 
-    /// Finishes the pass, folding in the trailing flush: whatever the
+    /// Finishes the pass, folding in the run's trailing flush: whatever the
     /// followed conversation still buffered behind missing segments was
     /// captured but never deliverable.
-    pub fn finish(mut self, trailing: &[TcpEvent]) -> Summary {
+    pub fn finish(mut self, summary: &RunSummary) -> Summary {
         if let Some(client) = self.client_flow.clone() {
-            for event in trailing {
+            for event in &summary.trailing_tcp_events {
                 if let TcpEvent::Evicted {
                     flow,
                     pending_bytes,
@@ -139,8 +133,7 @@ impl Collector {
         if record.tcp_stream != Some(self.selector.index) {
             return Vec::new();
         }
-        let decoded = record.tcp_decoded;
-        let Some(transport) = transports(&decoded.packet).tcp else {
+        let Some(tcp) = record.tcp_header else {
             return Vec::new();
         };
         let Some(flow) = record.tcp_flow else {
@@ -155,7 +148,7 @@ impl Collector {
             .clone()
             .expect("client flow was established");
 
-        self.dedup.observe_syn(flow, &client, transport.layer);
+        self.dedup.observe_syn(flow, &client, tcp);
         self.summary.frames = self.summary.frames.saturating_add(1);
         let mut chunks = Vec::new();
         for event in record.tcp_events {
@@ -193,8 +186,7 @@ impl Collector {
         if record.udp_stream != Some(self.selector.index) {
             return Vec::new();
         }
-        let decoded = record.udp_decoded;
-        let Some(transport) = transports(&decoded.packet).udp else {
+        let Some(udp_layer) = record.udp_layer else {
             return Vec::new();
         };
         let Some(flow) = record.udp_flow else {
@@ -216,7 +208,7 @@ impl Collector {
         };
         // Every datagram is one chunk, an empty one included: the frame and
         // direction are part of the conversation's shape.
-        let bytes = transport_payload(decoded, transport.index);
+        let bytes = transport_payload(record.udp_decoded, udp_layer);
         self.tally(direction, bytes.len());
         vec![Chunk {
             direction,

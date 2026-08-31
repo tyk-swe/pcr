@@ -7,18 +7,18 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 
 use bytes::Bytes;
 
-use super::super::super::DNS_TYPE_OPT;
-use super::super::super::error::WireError;
-use super::super::super::model::{Edns, EdnsOption, Limits, Name, Record, RecordValue};
-use super::super::name::decode_name;
 use super::advance;
 use super::primitives::{read_u16, read_u32};
+use crate::dns::TYPE_OPT;
+use crate::dns::error::WireError;
+use crate::dns::model::{Edns, EdnsOption, MessageLimits, Name, Record, RecordValue};
+use crate::dns::wire::name::decode_name;
 
 pub(super) fn decode_records(
     message: &[u8],
     mut offset: usize,
     count: usize,
-    limits: Limits,
+    limits: MessageLimits,
 ) -> Result<(Vec<Record>, usize), WireError> {
     let mut records = Vec::with_capacity(count);
     for _ in 0..count {
@@ -66,7 +66,7 @@ struct Rdata<'a> {
     type_code: u16,
     offset: usize,
     end: usize,
-    limits: Limits,
+    limits: MessageLimits,
 }
 
 impl Rdata<'_> {
@@ -203,7 +203,7 @@ fn decode_rdata(
     ttl: u32,
     offset: usize,
     end: usize,
-    limits: Limits,
+    limits: MessageLimits,
 ) -> Result<RecordValue, WireError> {
     let bytes = message.get(offset..end).ok_or(WireError::TruncatedField {
         field: "RDATA",
@@ -237,7 +237,7 @@ fn decode_rdata(
             Ok(RecordValue::Aaaa(Ipv6Addr::from(bytes)))
         }
         33 => rdata.decode_srv(),
-        DNS_TYPE_OPT => decode_edns(class, ttl, bytes).map(RecordValue::Opt),
+        TYPE_OPT => decode_edns(class, ttl, bytes).map(RecordValue::Opt),
         _ => Ok(RecordValue::Unknown {
             type_code,
             rdata: Bytes::copy_from_slice(bytes),

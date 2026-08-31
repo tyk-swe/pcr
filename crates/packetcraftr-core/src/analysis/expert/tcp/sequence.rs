@@ -6,10 +6,10 @@ use std::collections::HashMap;
 use crate::diagnostic::Severity;
 use crate::protocol::transport::Tcp;
 
-use super::super::finding::new as new_finding;
-use super::super::observation::TcpObservation;
-use super::super::{Finding, FlowKey, TcpEvent, tcp_stream_ref};
 use super::DirectionState;
+use crate::analysis::expert::finding::new as new_finding;
+use crate::analysis::expert::observation::TcpObservation;
+use crate::analysis::expert::{Finding, FlowKey, TcpEvent, tcp_stream_ref};
 
 pub(super) fn reconcile_events(
     flows: &mut HashMap<FlowKey, DirectionState>,

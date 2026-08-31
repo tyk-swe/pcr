@@ -10,7 +10,7 @@ use std::fs::File;
 use std::io;
 
 use packetcraftr::{
-    analysis::pcap::{Limits, Reader, rewrite},
+    analysis::pcap::{self as capture, Limits, Reader, rewrite},
     core::{
         self,
         error::{Classification, Kind},
@@ -25,14 +25,21 @@ use crate::command_options::OfflineCaptureLimitsArgs;
 use crate::errors::CliError;
 use crate::filtering::{self, Capabilities};
 use crate::input::{open_capture, validate_capture_stream_limits};
-use crate::rendering::{StreamEncoder, capture_file_format};
+use crate::rendering::StreamEncoder;
 
 use super::increment_counter;
 use rendering::render_record;
 
+/// The decoding one `read` invocation needs, built only when `--filter` or
+/// `--dissect` asks for it.
+///
+/// `publish_layers` lives here rather than beside it so "dissect with nothing
+/// to dissect with" is not a state a caller can hold.
 struct Decoding {
     decoder: core::decode::Dissector,
     filter: Option<core::filter::Filter>,
+    /// Whether the decoded stack is published, not merely used to filter.
+    publish_layers: bool,
 }
 
 #[derive(Default)]
@@ -45,7 +52,7 @@ struct StreamState {
 pub(super) fn run(
     arguments: Args,
     format: output::contract::Format,
-    stream: &mut StreamEncoder,
+    stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     let Args {
         path,
@@ -55,41 +62,30 @@ pub(super) fn run(
         tls_ports,
     } = arguments;
     let format = CaptureFormat::narrow(output::contract::Command::Read, format)?;
-    validate_limits(limits)?;
+    validate_capture_stream_limits(limits)?;
+    // Both rejections precede filter compilation, so a request that rewrites
+    // a capture is answered with the incompatibility rather than with a
+    // syntax error from a filter it would have refused anyway.
     validate_dissect_format(dissect, format)?;
-    let decoding = prepare_decoding(filter.as_deref(), dissect, &tls_ports.ports)?;
-    let mut reader = open_capture(&path, limits)?;
-    let stream_limits = Limits {
-        max_frames: limits.max_frames,
-        max_bytes: limits.max_bytes,
+    let rewrite_format = match format {
+        CaptureFormat::Pcap => Some(capture::Format::Pcap),
+        CaptureFormat::PcapNg => Some(capture::Format::PcapNg),
+        CaptureFormat::Text | CaptureFormat::Ndjson | CaptureFormat::Hex => None,
     };
-
-    if matches!(format, CaptureFormat::Pcap | CaptureFormat::PcapNg) {
-        return rewrite_capture(
-            &mut reader,
-            format.format(),
-            stream_limits,
-            filter.is_some(),
-        );
+    if rewrite_format.is_some() && filter.is_some() {
+        return Err(capture_rewrite_filter_error());
+    }
+    let decoding = prepare_decoding(filter.as_deref(), dissect, &tls_ports.ports)?;
+    let mut reader = open_capture(&path, limits.reader_bounds())?;
+    if let Some(rewrite_format) = rewrite_format {
+        let stream_limits = Limits {
+            max_frames: limits.max_frames,
+            max_bytes: limits.max_bytes,
+        };
+        return rewrite_capture(&mut reader, rewrite_format, stream_limits);
     }
     let format = FrameFormat::narrow_from(output::contract::Command::Read, format)?;
-    read_records(
-        &mut reader,
-        limits,
-        decoding.as_ref(),
-        dissect,
-        format,
-        stream,
-    )
-}
-
-fn validate_limits(limits: OfflineCaptureLimitsArgs) -> Result<(), CliError> {
-    validate_capture_stream_limits(
-        limits.max_frames,
-        limits.max_bytes,
-        limits.max_frame_bytes,
-        limits.max_interfaces,
-    )
+    read_records(&mut reader, limits, decoding.as_ref(), format, stream)
 }
 
 fn validate_dissect_format(dissect: bool, format: CaptureFormat) -> Result<(), CliError> {
@@ -100,11 +96,23 @@ fn validate_dissect_format(dissect: bool, format: CaptureFormat) -> Result<(), C
                 Kind::Cli,
                 Some("use --output text or --output ndjson to show the layer stack"),
             ),
-            format!("--dissect has no effect on {} output", format.format()),
+            format!("--dissect has no effect on {format} output"),
             Vec::new(),
         ));
     }
     Ok(())
+}
+
+fn capture_rewrite_filter_error() -> CliError {
+    CliError::from_classification(
+        Classification::new(
+            "cli.capture_rewrite_filter",
+            Kind::Cli,
+            Some("use text, hex, or ndjson output to filter frames"),
+        ),
+        "capture rewriting cannot filter records without discarding source structure",
+        Vec::new(),
+    )
 }
 
 fn prepare_decoding(
@@ -122,27 +130,15 @@ fn prepare_decoding(
     Ok(Some(Decoding {
         decoder: core::decode::Dissector::new(registry),
         filter,
+        publish_layers: dissect,
     }))
 }
 
 fn rewrite_capture(
     reader: &mut Reader<File>,
-    format: output::contract::Format,
+    format: capture::Format,
     limits: Limits,
-    filtered: bool,
 ) -> Result<(), CliError> {
-    if filtered {
-        return Err(CliError::from_classification(
-            Classification::new(
-                "cli.capture_rewrite_filter",
-                Kind::Cli,
-                Some("use text, hex, or ndjson output to filter frames"),
-            ),
-            "capture rewriting cannot filter records without discarding source structure",
-            Vec::new(),
-        ));
-    }
-    let format = capture_file_format(format)?;
     if format != reader.format() {
         return Err(CliError::from_classification(
             Classification::new(
@@ -151,7 +147,7 @@ fn rewrite_capture(
                 Some("select the capture output format matching the input capture"),
             ),
             format!(
-                "capture rewriting cannot convert {:?} input to {format:?} without normalization",
+                "capture rewriting cannot convert {} input to {format} without normalization",
                 reader.format()
             ),
             Vec::new(),
@@ -167,17 +163,16 @@ fn read_records(
     reader: &mut Reader<File>,
     limits: OfflineCaptureLimitsArgs,
     decoding: Option<&Decoding>,
-    dissect: bool,
     format: FrameFormat,
-    stream: &mut StreamEncoder,
+    stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     let mut state = StreamState::default();
     while let Some(frame) = reader.next_frame().map_err(CliError::classified)? {
         let source_frame = account_frame(&mut state, &frame, limits)?;
-        let Some(event) = convert_frame(frame, source_frame, decoding, dissect, limits)? else {
+        let Some(record) = convert_frame(frame, source_frame, decoding, limits)? else {
             continue;
         };
-        render_record(&event, format, stream)?;
+        render_record(record, format, stream)?;
         state.frames_matched = increment_counter(state.frames_matched, "read matched-frame count")?;
     }
     if format == FrameFormat::Ndjson {
@@ -193,48 +188,37 @@ fn read_records(
     Ok(())
 }
 
+/// Charges one frame against the same two aggregate ceilings the rewrite copy
+/// and the analysis loop charge against, and answers with its source number.
 fn account_frame(
     state: &mut StreamState,
     frame: &core::frame::Frame,
     limits: OfflineCaptureLimitsArgs,
 ) -> Result<u64, CliError> {
-    state.frames_read = increment_counter(state.frames_read, "read frame count")?;
-    if state.frames_read > limits.max_frames {
-        return Err(CliError::classified(
-            packetcraftr::analysis::pcap::Error::FrameLimitExceeded {
-                actual: state.frames_read,
-                limit: limits.max_frames,
-            },
-        ));
-    }
-    state.captured_bytes_read = state
-        .captured_bytes_read
-        .checked_add(u64::from(frame.captured_length()))
-        .ok_or_else(|| stream_byte_error(u64::MAX, limits.max_bytes))?;
-    if state.captured_bytes_read > limits.max_bytes {
-        return Err(stream_byte_error(
+    let stream_limits = Limits {
+        max_frames: limits.max_frames,
+        max_bytes: limits.max_bytes,
+    };
+    let (frames_read, captured_bytes_read) = stream_limits
+        .advance(
+            state.frames_read,
             state.captured_bytes_read,
-            limits.max_bytes,
-        ));
-    }
+            frame.captured_length(),
+        )
+        .map_err(CliError::classified)?;
+    state.frames_read = frames_read;
+    state.captured_bytes_read = captured_bytes_read;
     Ok(state.frames_read)
-}
-
-fn stream_byte_error(actual: u64, limit: u64) -> CliError {
-    CliError::classified(
-        packetcraftr::analysis::pcap::Error::StreamByteLimitExceeded { actual, limit },
-    )
 }
 
 fn convert_frame(
     frame: core::frame::Frame,
     source_frame: u64,
     decoding: Option<&Decoding>,
-    dissect: bool,
     limits: OfflineCaptureLimitsArgs,
-) -> Result<Option<output::read::Event>, CliError> {
+) -> Result<Option<output::read::Frame>, CliError> {
     let Some(decoding) = decoding else {
-        return output::read::Event::try_from_frame(source_frame, frame)
+        return output::read::Frame::try_from_frame(source_frame, frame)
             .map(Some)
             .map_err(CliError::classified);
     };
@@ -247,7 +231,7 @@ fn convert_frame(
                 ..core::decode::Options::default()
             },
         )
-        .map_err(|source| CliError::new(Kind::Packet, source.to_string()))?;
+        .map_err(CliError::classified)?;
     if let Some(filter) = &decoding.filter {
         validate_filter_timestamp(filter, &frame, source_frame)?;
         if !filter
@@ -263,10 +247,10 @@ fn convert_frame(
             return Ok(None);
         }
     }
-    if dissect {
-        output::read::Event::try_from_decoded(source_frame, frame, &decoded)
+    if decoding.publish_layers {
+        output::read::Frame::try_from_decoded(source_frame, frame, &decoded)
     } else {
-        output::read::Event::try_from_frame(source_frame, frame)
+        output::read::Frame::try_from_frame(source_frame, frame)
     }
     .map(Some)
     .map_err(CliError::classified)

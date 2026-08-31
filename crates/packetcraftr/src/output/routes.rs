@@ -9,6 +9,6 @@ use crate::output::network::Decision;
 
 /// Aggregate result of `routes`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Result {
+pub struct Report {
     pub routes: Vec<Decision>,
 }

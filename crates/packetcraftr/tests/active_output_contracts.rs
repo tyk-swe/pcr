@@ -63,7 +63,7 @@ fn scan_output_preserves_endpoint_identity_and_port_absence() {
         port: Some(0),
         ..evidence_free.clone()
     };
-    let (output, _, _) = scan_output::Result::try_from_scan(scan::Result {
+    let (output, _, _) = scan_output::Report::try_from_scan(scan::Report {
         target: "router.example".to_owned(),
         resolved_addresses: vec![ipv4, ipv6],
         endpoints: vec![
@@ -80,10 +80,16 @@ fn scan_output_preserves_endpoint_identity_and_port_absence() {
 
     assert_eq!(output.endpoints[0].address, ipv4);
     assert_eq!(output.endpoints[0].port, None);
-    assert_eq!(output.endpoints[0].probes[0].protocol, "icmpv4");
+    assert_eq!(
+        output.endpoints[0].probes[0].protocol,
+        scan_output::Protocol::Icmpv4
+    );
     assert_eq!(output.endpoints[1].address, ipv6);
     assert_eq!(output.endpoints[1].port, None);
-    assert_eq!(output.endpoints[1].probes[0].protocol, "icmpv6");
+    assert_eq!(
+        output.endpoints[1].probes[0].protocol,
+        scan_output::Protocol::Icmpv6
+    );
     assert_eq!(
         output.endpoints[0].classification,
         scan_output::Classification::Open

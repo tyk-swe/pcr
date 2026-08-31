@@ -9,8 +9,8 @@ use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use super::super::field::{FieldKind, FieldValue};
 use super::reflection::reflective_layer;
+use crate::field::{FieldKind, FieldValue};
 
 /// An open, stable identifier for a protocol layer or codec.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -62,6 +62,11 @@ pub struct FieldSchema {
     /// Stable reflective field name used by documents, expressions, and
     /// [`Layer::field`].
     pub name: &'static str,
+    /// Additional spellings [`Layer::field`] and [`Layer::set_field`] accept
+    /// for this field. Aliases are conveniences, never a second name in the
+    /// published contract: only [`Self::name`] is listed by `pcr protocols`
+    /// and resolvable as a canonical filter path.
+    pub aliases: &'static [&'static str],
     /// Nominal typed value accepted by the field. Derived wire values may also
     /// expose `"auto"` or raw bytes through [`FieldValue`].
     pub kind: FieldKind,
@@ -156,7 +161,7 @@ impl Raw {
 }
 
 reflective_layer! {
-    fn raw_schema() => { protocol: Id::new("raw"), name: "Raw" }
+    pub(crate) fn raw_schema() => { protocol: Id::new("raw"), name: "Raw" }
     impl Raw {
         "bytes" => {
             kind: Bytes, derived: false, required: false,
@@ -193,7 +198,7 @@ impl Padding {
 }
 
 reflective_layer! {
-    fn padding_schema() => { protocol: Id::new("padding"), name: "Padding" }
+    pub(crate) fn padding_schema() => { protocol: Id::new("padding"), name: "Padding" }
     impl Padding {
         "bytes" => {
             kind: Bytes, derived: false, required: false,
@@ -243,7 +248,7 @@ impl Malformed {
 }
 
 reflective_layer! {
-    fn malformed_schema() => { protocol: Id::new("malformed"), name: "Malformed" }
+    pub(crate) fn malformed_schema() => { protocol: Id::new("malformed"), name: "Malformed" }
     impl Malformed {
         "protocol" => {
             kind: Text, derived: false, required: false,

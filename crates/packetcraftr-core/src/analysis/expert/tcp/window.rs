@@ -5,10 +5,10 @@ use std::collections::HashMap;
 
 use crate::diagnostic::Severity;
 
-use super::super::finding::new as new_finding;
-use super::super::observation::TcpObservation;
-use super::super::{Finding, FlowKey};
 use super::DirectionState;
+use crate::analysis::expert::finding::new as new_finding;
+use crate::analysis::expert::observation::TcpObservation;
+use crate::analysis::expert::{Finding, FlowKey};
 
 pub(super) fn report_zero(observation: &TcpObservation<'_>, findings: &mut Vec<Finding>) {
     if observation.tcp.window == 0 && !observation.rst {

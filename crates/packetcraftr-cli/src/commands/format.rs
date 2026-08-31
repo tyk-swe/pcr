@@ -10,15 +10,17 @@
 //! command never sees. `formats_match_the_published_contract` keeps every
 //! subset here equal to the one `output::contract::Command::formats` publishes.
 
+use std::fmt;
+
 use packetcraftr::output;
 
 use crate::errors::CliError;
 
 /// Declares one format subset.
 ///
-/// Two optional markers come first: `narrow` for a subset a command narrows
-/// the global `--output` choice into, and `wide` for one whose command hands
-/// the format on to a writer shared with other commands.
+/// Two optional markers come first, in this order: `narrow` for a subset a
+/// command narrows the global `--output` choice into, and `wide` for one that
+/// also has to name the requested `--output` choice back to the user.
 macro_rules! narrowed_format {
     (@enum $(#[$meta:meta])* $name:ident { $($variant:ident),+ }) => {
         $(#[$meta])*
@@ -53,7 +55,9 @@ macro_rules! narrowed_format {
     };
     (@wide $name:ident { $($variant:ident),+ }) => {
         impl $name {
-            /// The wide format, for a writer shared with other commands.
+            /// The wide format, for naming the requested `--output` choice in
+            /// a message. A renderer that writes capture bytes takes
+            /// `analysis::pcap::Format` from its own match arm instead.
             pub(crate) const fn format(self) -> output::contract::Format {
                 match self {
                     $(Self::$variant => output::contract::Format::$variant),+
@@ -69,10 +73,6 @@ macro_rules! narrowed_format {
     (narrow $(#[$meta:meta])* $name:ident { $($variant:ident),+ $(,)? }) => {
         narrowed_format! { @enum $(#[$meta])* $name { $($variant),+ } }
         narrowed_format! { @narrow $name { $($variant),+ } }
-    };
-    (wide $(#[$meta:meta])* $name:ident { $($variant:ident),+ $(,)? }) => {
-        narrowed_format! { @enum $(#[$meta])* $name { $($variant),+ } }
-        narrowed_format! { @wide $name { $($variant),+ } }
     };
     ($(#[$meta:meta])* $name:ident { $($variant:ident),+ $(,)? }) => {
         narrowed_format! { @enum $(#[$meta])* $name { $($variant),+ } }
@@ -127,13 +127,13 @@ narrowed_format! {
 }
 
 narrowed_format! {
-    narrow wide
+    narrow
     /// One transmitted packet, renderable as bytes or as a capture file.
     SendFormat { Text, Json, Hex, Raw, Pcap, PcapNg }
 }
 
 narrowed_format! {
-    narrow wide
+    narrow
     /// A live exchange whose frames can be streamed or written to a capture
     /// file: `exchange` and `replay`.
     ExchangeFormat { Text, Json, Ndjson, Pcap, PcapNg }
@@ -145,8 +145,15 @@ narrowed_format! {
     CaptureFormat { Text, Ndjson, Hex, Pcap, PcapNg }
 }
 
+/// `read` names the requested format in the message that rejects `--dissect`,
+/// and names it exactly as `--output` spells it.
+impl fmt::Display for CaptureFormat {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.format().as_str())
+    }
+}
+
 narrowed_format! {
-    wide
     /// One finished exchange, once streaming is ruled out: a report, a
     /// document, or a capture file. `exchange`.
     CollectedFormat { Text, Json, Pcap, PcapNg }
@@ -258,7 +265,7 @@ mod tests {
             output::contract::Format::Pcap,
         )
         .expect_err("scan does not publish pcap");
-        assert_eq!(error.exit_code, 2);
+        assert_eq!(error.exit_code(), 2);
 
         assert_eq!(
             ToolFormat::narrow(
@@ -315,7 +322,7 @@ mod tests {
             ExchangeFormat::Ndjson,
         )
         .expect_err("ndjson is streamed, not collected");
-        assert_eq!(error.exit_code, 2);
+        assert_eq!(error.exit_code(), 2);
         assert_eq!(error.classification.code, "cli.output_format");
         assert!(error.message.contains("ndjson"));
     }

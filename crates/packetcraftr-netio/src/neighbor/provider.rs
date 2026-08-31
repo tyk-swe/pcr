@@ -10,8 +10,7 @@ use packetcraftr_core::frame::Frame;
 
 use crate::{
     capture::{self, Session},
-    link::{Capability, MacAddress, Mode},
-    route::{Decision, Materialized, Plan, Scope, SelectionReason},
+    route::Materialized,
     transmit::{self, Layer2Frame},
 };
 
@@ -40,10 +39,11 @@ pub struct ActiveResolver<L, C> {
 
 impl<L, C> ActiveResolver<L, C> {
     pub fn try_new(layer2: L, capture: C, options: Options) -> Result<Self, Error> {
+        options.validate()?;
         Ok(Self {
             layer2,
             capture,
-            options: options.validate()?,
+            options,
             cache: Arc::new(NeighborCache::default()),
         })
     }
@@ -82,11 +82,15 @@ where
         }
 
         let (request_bytes, destination_mac) = build_request_frame(request)?;
-        let planned_route = discovery_route(request, destination_mac);
-        let materialized_route = Materialized {
-            plan: planned_route.clone(),
-            neighbor_resolution: None,
-        };
+        // The discovery frame is already complete, so this route only names the
+        // interface the prepared Layer 2 bytes must leave on.
+        let materialized_route = Materialized::for_prepared_layer2_frame(
+            request.interface.clone(),
+            request.interface_mac,
+            destination_mac,
+            request.mtu,
+            request.link_type,
+        );
         let limits = capture::Limits {
             max_frames: self.options.max_capture_queue_frames,
             max_bytes: self.options.max_captured_bytes,
@@ -126,10 +130,10 @@ where
                 });
             }
         };
-        let validated_statistics = statistics
+        statistics
             .validate()
             .map_err(|error| map_io_error(request, "validating capture statistics", error))?;
-        if let Some(error) = validated_statistics.evidence_loss_error() {
+        if let Some(error) = statistics.evidence_loss_error() {
             return Err(map_io_error(
                 request,
                 "checking capture completeness",
@@ -144,7 +148,7 @@ where
                 attempts: outcome.attempts,
                 captured: outcome.captured,
                 evidence_truncated: outcome.evidence_truncated,
-                capture_statistics: validated_statistics,
+                capture_statistics: statistics,
             });
         };
         self.cache.insert(mac_address, cache_key, &self.options)?;
@@ -154,7 +158,7 @@ where
             cache_hit: false,
             captured: outcome.captured,
             evidence_truncated: outcome.evidence_truncated,
-            capture_statistics: validated_statistics,
+            capture_statistics: statistics,
         })
     }
 }
@@ -283,34 +287,6 @@ where
     }
 }
 
-fn discovery_route(request: &Request, destination_mac: MacAddress) -> Plan {
-    Plan {
-        decision: Decision {
-            interface: request.interface.clone(),
-            source_mac: Some(request.interface_mac),
-            selected_source: Some(request.interface_source),
-            preferred_source: None,
-            next_hop: None,
-            selection_reason: SelectionReason::OnLink,
-            destination_scope: Scope::Link,
-            mtu: request.mtu,
-            capability: Capability::Layer2,
-            link_type: request.link_type,
-        },
-        mode: Mode::Layer2,
-        lookup_destination: Some(request.target),
-        final_destination: Some(request.target),
-        visited_destinations: vec![request.target],
-        packet_source: Some(request.interface_source),
-        neighbor_source: Some(request.interface_source),
-        neighbor_target: Some(request.target),
-        destination_mac: Some(destination_mac),
-        source_mac: Some(request.interface_mac),
-        neighbor_vlan_tags: request.vlan_tags.clone(),
-        synthesized_ethernet: false,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
@@ -323,9 +299,12 @@ mod tests {
     use std::time::{Duration, SystemTime};
 
     use crate::interface::Id as InterfaceId;
+    use crate::link::{MacAddress, Mode};
+    use crate::route::Plan;
     use packetcraftr_core::frame::LinkType;
 
     use super::*;
+    use crate::error::testing::same_failure;
 
     #[derive(Clone)]
     struct SlowLayer2 {
@@ -685,9 +664,14 @@ mod tests {
         assert_eq!(sent.len(), 1);
         assert_eq!(sent[0].1.mode, Mode::Layer2);
         assert_eq!(sent[0].1.decision.interface, request.interface);
-        assert_eq!(sent[0].1.packet_source, Some(request.interface_source));
-        assert_eq!(sent[0].1.neighbor_target, Some(request.target));
+        assert_eq!(sent[0].1.source_mac, Some(request.interface_mac));
         assert_eq!(sent[0].1.destination_mac, Some(MacAddress([0xff; 6])));
+        // The discovery frame is already complete, so the route invents no
+        // lookup destination, packet source, or neighbor target.
+        assert_eq!(sent[0].1.lookup_destination, None);
+        assert_eq!(sent[0].1.packet_source, None);
+        assert_eq!(sent[0].1.neighbor_target, None);
+        assert!(sent[0].1.visited_destinations.is_empty());
 
         let capture_requests = captures
             .state
@@ -830,6 +814,7 @@ mod tests {
         let request = request();
         let arm_failure = crate::Error::Capture {
             message: "arm failed".to_owned(),
+            source: None,
         };
         let resolver = ActiveResolver::try_new(
             FixtureLayer2::successful(),
@@ -843,11 +828,12 @@ mod tests {
                 operation: "arming capture",
                 source,
                 ..
-            }) if source == arm_failure
+            }) if same_failure(&source, &arm_failure)
         ));
 
         let cleanup_failure = crate::Error::Capture {
             message: "cleanup failed".to_owned(),
+            source: None,
         };
         let mut capture = FixtureCapture::empty();
         capture.cleanup = Err(cleanup_failure.clone());
@@ -859,7 +845,7 @@ mod tests {
         .expect("resolver options");
         assert!(matches!(
             resolver.resolve(&request),
-            Err(Error::Cleanup { source, .. }) if source == cleanup_failure
+            Err(Error::Cleanup { source, .. }) if same_failure(&source, &cleanup_failure)
         ));
 
         let readiness_failure = crate::Error::CaptureReadiness {
@@ -889,8 +875,8 @@ mod tests {
                     operation: "waiting for capture readiness",
                     source,
                     ..
-                } if source == &readiness_failure
-            ) && cleanup == cleanup_failure
+                } if same_failure(source, &readiness_failure)
+            ) && same_failure(&cleanup, &cleanup_failure)
         ));
     }
 
@@ -901,6 +887,7 @@ mod tests {
             (
                 VecDeque::from([CaptureStep::Error(crate::Error::Capture {
                     message: "drain failed".to_owned(),
+                    source: None,
                 })]),
                 VecDeque::new(),
                 "draining pre-request capture",
@@ -909,6 +896,7 @@ mod tests {
                 VecDeque::new(),
                 VecDeque::from([CaptureStep::Error(crate::Error::Capture {
                     message: "receive failed".to_owned(),
+                    source: None,
                 })]),
                 "receiving discovery response",
             ),
@@ -934,6 +922,7 @@ mod tests {
 
         let send_failure = crate::Error::Send {
             message: "send failed".to_owned(),
+            source: None,
         };
         let layer2 = FixtureLayer2::successful();
         *layer2.state.failure.lock().expect("fixture send failure") = Some(send_failure.clone());
@@ -949,7 +938,7 @@ mod tests {
                 operation: "sending discovery request",
                 source,
                 ..
-            }) if source == send_failure
+            }) if same_failure(&source, &send_failure)
         ));
     }
 
@@ -977,10 +966,13 @@ mod tests {
         let request = request();
         let (request_bytes, destination_mac) =
             build_request_frame(&request).expect("discovery frame");
-        let route = Materialized {
-            plan: discovery_route(&request, destination_mac),
-            neighbor_resolution: None,
-        };
+        let route = Materialized::for_prepared_layer2_frame(
+            request.interface.clone(),
+            request.interface_mac,
+            destination_mac,
+            request.mtu,
+            request.link_type,
+        );
         let mut capture = ObservedCapture {
             metadata: capture::Metadata {
                 interface: request.interface.clone(),

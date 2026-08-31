@@ -7,27 +7,27 @@ use std::net::IpAddr;
 use std::time::Duration;
 
 use super::error::Error;
-use super::model::{Batch, Probe, Request};
+use super::model::{Batch, Probe, ProbeEndpoint, Request};
 
 pub(super) fn build_batches(
     request: &Request,
     addresses: &[IpAddr],
-    endpoint_ports: &[Option<u16>],
+    endpoints: &[ProbeEndpoint],
 ) -> Result<Vec<Batch>, Error> {
     let batch_size = checked_batch_size(request)?;
     let mut batches = Vec::new();
     let mut sequence = 0_u64;
     for address in addresses {
         for attempt in 1..=request.attempts {
-            for chunk in endpoint_ports.chunks(batch_size) {
+            for chunk in endpoints.chunks(batch_size) {
+                let batch_sequence = sequence;
                 let probes = chunk
                     .iter()
-                    .map(|port| {
+                    .map(|endpoint| {
                         let probe = Probe {
                             sequence,
                             address: *address,
-                            transport: request.transport,
-                            port: *port,
+                            endpoint: *endpoint,
                             attempt,
                         };
                         sequence = sequence.checked_add(1).ok_or(Error::InvalidLimit {
@@ -42,6 +42,7 @@ pub(super) fn build_batches(
                     probes,
                     timeout: request.timeout,
                     permit: crate::evidence::ExecutionPermit::new(),
+                    sequence: batch_sequence,
                 });
             }
         }
@@ -145,19 +146,19 @@ mod tests {
         let address = "192.0.2.1".parse().expect("documentation address");
         let request = Request {
             target: Target::Address(address),
-            transport: super::super::model::Transport::Tcp,
+            transport: crate::scan::model::Transport::Tcp,
             address_family: Family::Any,
             ports: vec![80],
             attempts: 1,
             timeout: Duration::from_millis(1),
             probes_per_second: None,
-            limits: super::super::model::Limits {
+            limits: crate::scan::model::Limits {
                 batch_size: 0,
-                ..super::super::model::Limits::default()
+                ..crate::scan::model::Limits::default()
             },
         };
         assert!(matches!(
-            build_batches(&request, &[address], &[Some(80)]),
+            build_batches(&request, &[address], &[ProbeEndpoint::Tcp { port: 80 }]),
             Err(Error::InvalidLimit {
                 field: "batch_size",
                 value: 0,

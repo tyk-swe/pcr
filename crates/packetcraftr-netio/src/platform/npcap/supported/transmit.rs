@@ -7,11 +7,11 @@
 
 use super::{
     abi::SEND_SNAPSHOT_LENGTH,
-    error::is_permission_message,
     handles::{PromiscuousMode, open_handle},
 };
 use crate::{
     Error,
+    platform::live_capture::is_permission_denied,
     transmit::{self, Layer2Frame, Submission},
 };
 
@@ -24,6 +24,7 @@ pub(in crate::platform::npcap) fn send_layer2(
             "Layer 2 frame for {} exceeds Npcap's signed 32-bit send length",
             interface.name
         ),
+        source: None,
     })?;
     let handle = open_handle(interface, SEND_SNAPSHOT_LENGTH, PromiscuousMode::Disabled)?;
     let submission = Submission::start();
@@ -34,13 +35,13 @@ pub(in crate::platform::npcap) fn send_layer2(
     };
     if result != 0 {
         let message = handle.error_message();
-        let lower = message.to_ascii_lowercase();
-        if is_permission_message(&lower) {
+        if is_permission_denied(&message) {
             return Err(Error::Privilege {
                 message: format!(
                     "cannot inject on {} through Npcap: {message}; run with packet capture privileges",
                     interface.name
                 ),
+                source: None,
             });
         }
         return Err(Error::Send {
@@ -48,6 +49,7 @@ pub(in crate::platform::npcap) fn send_layer2(
                 "Npcap injection on {} failed with status {result}: {message}",
                 interface.name
             ),
+            source: None,
         });
     }
     Ok(submission.complete(frame.bytes().len(), frame.bytes().clone()))

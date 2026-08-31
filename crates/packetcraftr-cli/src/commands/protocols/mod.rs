@@ -10,10 +10,10 @@ use packetcraftr::{
 };
 
 use self::arguments::Args;
-use super::super::errors::CliError;
-use super::super::rendering::{emit_aggregate, write_stdout_line};
 use super::format::AggregateFormat;
 use super::registry;
+use crate::errors::CliError;
+use crate::rendering::{emit_aggregate, write_stdout_line};
 
 pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
     let format = AggregateFormat::narrow(output::contract::Command::Protocols, format)?;
@@ -70,9 +70,11 @@ fn describe_protocol(name: &str, format: AggregateFormat) -> Result<(), CliError
             schema
                 .fields
                 .iter()
-                .map(output::protocols::Field::from)
-                .collect()
+                .map(output::protocols::Field::try_from)
+                .collect::<Result<Vec<_>, _>>()
         })
+        .transpose()
+        .map_err(CliError::classified)?
         .unwrap_or_default();
     let bindings = registry
         .parent_bindings(support.protocol)

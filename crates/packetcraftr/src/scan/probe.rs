@@ -11,14 +11,14 @@ use packetcraftr_core::protocol::{
     network::{Ipv4, Ipv6},
     transport::{Tcp, Udp},
 };
-use packetcraftr_core::{Packet, semantics::BuiltinProtocol};
+use packetcraftr_core::{Packet, protocol::BuiltinProtocol};
 
 use crate::probe::{
     EPHEMERAL_SOURCE_PORT_BASE, ephemeral_source_port, nonzero_ipv4_identification,
     packet_shape_matches,
 };
 
-use super::model::{Probe, Transport};
+use super::model::{Probe, ProbeEndpoint};
 
 fn scan_udp_source_port(attempt: u32) -> u16 {
     ephemeral_source_port(
@@ -30,7 +30,7 @@ fn scan_udp_source_port(attempt: u32) -> u16 {
 #[expect(
     clippy::cast_possible_truncation,
     reason = "the operation-local sequence is reduced to the 32-bit and 20-bit wire fields the \
-              probe carries; sent_scan_probe_matches applies the same reduction when comparing, \
+              probe carries; sent_probe_matches applies the same reduction when comparing, \
               so even a wrapped counter still matches"
 )]
 pub(super) fn probe_packet(probe: &Probe) -> Packet {
@@ -51,18 +51,18 @@ pub(super) fn probe_packet(probe: &Probe) -> Packet {
             });
         }
     }
-    match probe.transport {
-        Transport::Tcp => packet.push(Tcp {
-            destination_port: probe.port.expect("validated TCP scan port"),
+    match probe.endpoint {
+        ProbeEndpoint::Tcp { port } => packet.push(Tcp {
+            destination_port: port,
             sequence: probe.sequence as u32,
             ..Tcp::default()
         }),
-        Transport::Udp => packet.push(Udp {
+        ProbeEndpoint::Udp { port } => packet.push(Udp {
             source_port: scan_udp_source_port(probe.attempt),
-            destination_port: probe.port.expect("validated UDP scan port"),
+            destination_port: port,
             ..Udp::default()
         }),
-        Transport::Icmp => match probe.address {
+        ProbeEndpoint::Icmp => match probe.address {
             IpAddr::V4(_) => packet.push(Icmpv4 {
                 body: icmp_identity(probe.sequence),
                 ..Icmpv4::default()
@@ -91,17 +91,17 @@ fn icmp_identity(sequence: u64) -> Bytes {
     reason = "the observed packet is compared against the same reduction probe_packet applied, \
               so the narrowing is symmetric on both sides of the comparison"
 )]
-pub(super) fn sent_scan_probe_matches(probe: &Probe, sent: &Packet) -> bool {
+pub(super) fn sent_probe_matches(probe: &Probe, sent: &Packet) -> bool {
     let network_protocol = if probe.address.is_ipv4() {
         BuiltinProtocol::Ipv4
     } else {
         BuiltinProtocol::Ipv6
     };
-    let transport_protocol = match probe.transport {
-        Transport::Tcp => BuiltinProtocol::Tcp,
-        Transport::Udp => BuiltinProtocol::Udp,
-        Transport::Icmp if probe.address.is_ipv4() => BuiltinProtocol::Icmpv4,
-        Transport::Icmp => BuiltinProtocol::Icmpv6,
+    let transport_protocol = match probe.endpoint {
+        ProbeEndpoint::Tcp { .. } => BuiltinProtocol::Tcp,
+        ProbeEndpoint::Udp { .. } => BuiltinProtocol::Udp,
+        ProbeEndpoint::Icmp if probe.address.is_ipv4() => BuiltinProtocol::Icmpv4,
+        ProbeEndpoint::Icmp => BuiltinProtocol::Icmpv6,
     };
     if !packet_shape_matches(sent, &[network_protocol, transport_protocol]) {
         return false;
@@ -131,17 +131,16 @@ pub(super) fn sent_scan_probe_matches(probe: &Probe, sent: &Packet) -> bool {
     if !network_matches {
         return false;
     }
-    match probe.transport {
-        Transport::Tcp => sent.get::<Tcp>().is_some_and(|tcp| {
-            tcp.destination_port == probe.port.expect("validated TCP scan port")
+    match probe.endpoint {
+        ProbeEndpoint::Tcp { port } => sent.get::<Tcp>().is_some_and(|tcp| {
+            tcp.destination_port == port
                 && tcp.sequence == probe.sequence as u32
                 && tcp.flags == Tcp::SYN
         }),
-        Transport::Udp => sent.get::<Udp>().is_some_and(|udp| {
-            udp.source_port == scan_udp_source_port(probe.attempt)
-                && udp.destination_port == probe.port.expect("validated UDP scan port")
+        ProbeEndpoint::Udp { port } => sent.get::<Udp>().is_some_and(|udp| {
+            udp.source_port == scan_udp_source_port(probe.attempt) && udp.destination_port == port
         }),
-        Transport::Icmp => match probe.address {
+        ProbeEndpoint::Icmp => match probe.address {
             IpAddr::V4(_) => sent.get::<Icmpv4>().is_some_and(|icmp| {
                 icmp.icmp_type == 8 && icmp.code == 0 && icmp.body == icmp_identity(probe.sequence)
             }),

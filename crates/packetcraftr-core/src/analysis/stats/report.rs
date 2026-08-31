@@ -6,23 +6,7 @@
 use std::net::IpAddr;
 use std::time::{Duration, SystemTime};
 
-use crate::analysis::IpReassemblyReport;
-
-/// Which transport a conversation or port tally belongs to.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum TransportKind {
-    Tcp,
-    Udp,
-}
-
-impl TransportKind {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Tcp => "tcp",
-            Self::Udp => "udp",
-        }
-    }
-}
+use crate::analysis::{IpReassemblyReport, StreamTransport};
 
 /// One protocol's presence across the matched frames.
 ///
@@ -43,7 +27,7 @@ pub struct ProtocolStat {
 /// the index the analysis pipeline assigned, shared with display filters.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ConversationStat {
-    pub transport: TransportKind,
+    pub transport: StreamTransport,
     pub stream: u64,
     pub address_a: IpAddr,
     pub port_a: u16,
@@ -78,7 +62,7 @@ pub struct EndpointStat {
 /// One transport port's tallies, counting source and destination roles.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PortStat {
-    pub transport: TransportKind,
+    pub transport: StreamTransport,
     pub port: u16,
     pub frames: u64,
     pub bytes: u64,

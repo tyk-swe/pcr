@@ -11,10 +11,14 @@ use crate::{
 };
 
 use crate::protocol::common::{
-    expected_discriminator, invalid, make_layer, payload_without_padding, protocol, resolve_u8,
-    strict_or_diagnostic, truncated, validate_auto_raw_discriminator, validate_ipv6_routing_child,
-    validate_raw_child_discriminator, wrong_layer,
+    child_is_opaque, expected_discriminator, invalid, make_layer, payload_without_padding,
+    protocol, resolve_u8, strict_or_diagnostic, truncated, typed_layer,
+    validate_auto_raw_discriminator, validate_ipv6_routing_child, validate_raw_child_discriminator,
 };
+
+use crate::protocol::BuiltinProtocol;
+
+const NAME: &str = BuiltinProtocol::Ipv6Fragment.as_str();
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Fragment {
@@ -37,7 +41,7 @@ impl Default for Fragment {
 }
 
 reflective_layer! {
-    fn fragment_schema() => { protocol: protocol("ipv6_fragment"), name: "IPv6 Fragment" }
+    fn fragment_schema() => { protocol: protocol(NAME), name: "IPv6 Fragment" }
     impl Fragment {
         "next_header" => { kind: Unsigned, derived: true, required: false, description: "IPv6 next-header discriminator", reflect: next_header, layout: (0, 1) },
         "fragment_offset" => { kind: Unsigned, derived: false, required: true, description: "Fragment offset in eight-byte units", reflect_bounded: fragment_offset, 0x1fff_u64, layout: (2, 4) },
@@ -51,8 +55,8 @@ reflective_layer! {
 pub(crate) struct FragmentCodec;
 
 impl LayerCodec for FragmentCodec {
-    fn protocol_id(&self) -> crate::layer::Id {
-        protocol("ipv6_fragment")
+    fn protocol_id(&self) -> &'static crate::layer::Id {
+        &fragment_schema().protocol
     }
 
     fn encode(
@@ -61,26 +65,23 @@ impl LayerCodec for FragmentCodec {
         payload: &[u8],
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
-        let layer = layer
-            .as_any()
-            .downcast_ref::<Fragment>()
-            .ok_or_else(|| wrong_layer("ipv6_fragment", layer))?;
+        let layer = typed_layer::<Fragment>(NAME, layer)?;
         if layer.fragment_offset > 0x1fff {
-            return Err(invalid("ipv6_fragment", "fragment offset exceeds 13 bits"));
+            return Err(invalid(NAME, "fragment offset exceeds 13 bits"));
         }
-        let expectation = expected_discriminator("ipv6_fragment", context, 59_u8);
+        let expectation = expected_discriminator(NAME, context, 59_u8, &layer.next_header);
         let mut diagnostics = Vec::new();
         validate_auto_raw_discriminator(
-            "ipv6_fragment",
+            NAME,
             "next_header",
             &layer.next_header,
             context,
             &mut diagnostics,
         )?;
-        let covered_payload = payload_without_padding("ipv6_fragment", payload, context)?;
+        let covered_payload = payload_without_padding(NAME, payload, context)?;
         if layer.more_fragments && covered_payload.len() % 8 != 0 {
             strict_or_diagnostic(
-                "ipv6_fragment",
+                NAME,
                 "build.ipv6_fragment_alignment",
                 "more_fragments",
                 format!(
@@ -92,15 +93,10 @@ impl LayerCodec for FragmentCodec {
             )?;
         }
         if (layer.fragment_offset != 0 || layer.more_fragments)
-            && context.child.is_some_and(|child| {
-                !matches!(
-                    child.protocol_id().as_str(),
-                    "raw" | "padding" | "malformed"
-                )
-            })
+            && context.child.is_some_and(|child| !child_is_opaque(child))
         {
             strict_or_diagnostic(
-                "ipv6_fragment",
+                NAME,
                 "build.typed_fragment_payload",
                 "fragment_offset",
                 "fragment payload must be Raw; convert typed fragment payloads to Raw explicitly",
@@ -109,7 +105,7 @@ impl LayerCodec for FragmentCodec {
             )?;
         }
         let (next, materialized_next) = resolve_u8(
-            "ipv6_fragment",
+            NAME,
             "next_header",
             &layer.next_header,
             expectation,
@@ -117,14 +113,9 @@ impl LayerCodec for FragmentCodec {
             &mut diagnostics,
         )?;
         if layer.fragment_offset == 0 && !layer.more_fragments {
-            validate_raw_child_discriminator(
-                "ipv6_fragment",
-                u64::from(next),
-                context,
-                &mut diagnostics,
-            )?;
+            validate_raw_child_discriminator(NAME, u64::from(next), context, &mut diagnostics)?;
         }
-        validate_ipv6_routing_child("ipv6_fragment", next, context, &mut diagnostics)?;
+        validate_ipv6_routing_child(NAME, next, context, &mut diagnostics)?;
         let offset_flags = (layer.fragment_offset << 3) | u16::from(layer.more_fragments);
         let mut prefix = Vec::with_capacity(8);
         prefix.extend_from_slice(&[next, 0]);
@@ -132,13 +123,9 @@ impl LayerCodec for FragmentCodec {
         prefix.extend_from_slice(&layer.identification.to_be_bytes());
         let mut materialized = layer.clone();
         materialized.next_header = materialized_next;
-        Ok(EncodedLayer {
-            prefix,
-            suffix: Vec::new(),
-            materialized: Box::new(materialized),
-            fields: fragment_layout(),
-            diagnostics,
-        })
+        Ok(EncodedLayer::header(prefix, Box::new(materialized))
+            .with_fields(fragment_layout())
+            .with_diagnostics(diagnostics))
     }
 
     fn decode(
@@ -147,11 +134,11 @@ impl LayerCodec for FragmentCodec {
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
         let Some(header) = input.first_chunk::<8>() else {
-            return Err(truncated("ipv6_fragment", 8, input.len()));
+            return Err(truncated(NAME, 8, input.len()));
         };
         let offset_flags = u16::from_be_bytes([header[2], header[3]]);
         if header[1] != 0 || offset_flags & 0x0006 != 0 {
-            return Err(invalid("ipv6_fragment", "reserved bits are non-zero"));
+            return Err(invalid(NAME, "reserved bits are non-zero"));
         }
         let fragment_offset = offset_flags >> 3;
         Ok(DecodedLayerValue {

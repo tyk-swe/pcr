@@ -4,10 +4,11 @@
   "mode": "aggregate",
   "status": "error",
   "error": {
-    "code": "packet.error",
+    "code": "packet.unbound_layers",
     "kind": "packet",
     "message": "layer ethernet cannot contain adjacent layer udp",
-    "causes": []
+    "causes": [],
+    "remediation": "order the layers so each parent can carry the next, or build permissively"
   },
   "diagnostics": []
 }

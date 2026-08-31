@@ -3,12 +3,13 @@
 
 //! Shared bounded lifecycle for homogeneous probe workflows.
 
+use std::ops::ControlFlow;
 use std::time::Duration;
 
 use packetcraftr_core::budget::{Deadline, DeadlineExceeded};
 use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::frame::Frame;
-use packetcraftr_core::progress::{EmitError, Sink};
+use packetcraftr_core::progress::{EmitError, Runtime, Sink};
 use packetcraftr_core::{decode::DecodedPacket, diagnostic::Diagnostic};
 
 use crate::clock::{Clock, check_deadline, rate_delay};
@@ -20,6 +21,18 @@ pub struct Batch<P> {
     pub probes: Vec<P>,
     pub timeout: Duration,
     pub(crate) permit: crate::evidence::ExecutionPermit,
+    /// The first probe's operation-local sequence, recorded by the planner
+    /// that built the batch. It names the batch in every error the runner
+    /// reports, so the identity is fixed where the probes are numbered rather
+    /// than re-derived by indexing a vector the runner has to assume is
+    /// non-empty.
+    pub(crate) sequence: u64,
+}
+
+impl<P> Batch<P> {
+    pub(crate) fn probe_count(&self) -> usize {
+        self.probes.len()
+    }
 }
 
 /// Common executor evidence returned by homogeneous probe batches.
@@ -37,9 +50,9 @@ pub struct Execution {
 impl Execution {
     pub(crate) fn from_exchange(
         permit: crate::evidence::ExecutionPermit,
-        result: crate::exchange::Result,
+        result: crate::exchange::Report,
     ) -> Self {
-        let crate::exchange::Result {
+        let crate::exchange::Report {
             sent,
             responses,
             unanswered: _,
@@ -64,10 +77,19 @@ impl Execution {
     }
 }
 
+/// The executor boundary every homogeneous probe workflow shares: it takes one
+/// approved batch of probes and returns the evidence that batch produced.
+/// `P` is the workflow's probe type, so a scan executor and a traceroute
+/// executor stay distinct implementations.
+pub trait Executor<P> {
+    fn execute(&mut self, batch: &Batch<P>) -> Result<Execution, BoundaryError>;
+}
+
 /// Wraps a caller's progressive callback in a bounded [`Sink`] and adapts both
 /// of its failures into the workflow's own error type, so every `run_with_events`
 /// entry point differs only in those two constructors.
 pub(crate) fn sink_observer<T, E>(
+    runtime: &Runtime,
     emit: impl FnMut(T) -> Result<(), BoundaryError> + Send + 'static,
     on_deadline: impl Fn(DeadlineExceeded) -> E,
     on_output: impl Fn(BoundaryError) -> E,
@@ -75,7 +97,7 @@ pub(crate) fn sink_observer<T, E>(
 where
     T: Send + 'static,
 {
-    let sink = match Sink::new(emit) {
+    let sink = match Sink::new_in(runtime, emit) {
         Ok(sink) => sink,
         Err(source) => return Err(on_output(source)),
     };
@@ -88,107 +110,131 @@ where
     )
 }
 
-pub(crate) trait ProbeBatch {
-    fn sequence(&self) -> u64;
-    fn probe_count(&self) -> usize;
+/// Every way the shared runner itself can fail, before any workflow-specific
+/// policy applies.
+///
+/// The runner never constructs a workflow error: each workflow converts these
+/// with one `From` impl, so a new runner failure is a compile error in every
+/// workflow rather than a silently reclassified one.
+#[derive(Debug)]
+pub(crate) enum ProbeRunError {
+    /// The operation's duration budget was spent.
+    Duration { actual: Duration, limit: Duration },
+    /// The configured probe rate produced unrepresentable pacing arithmetic.
+    Rate { rate: Option<u32> },
+    /// The clock refused to pace the batch starting at `sequence`.
+    Clock {
+        sequence: u64,
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+    /// The executor boundary failed for the batch starting at `sequence`.
+    Execution {
+        sequence: u64,
+        source: BoundaryError,
+    },
+    /// Accumulating the batch starting at `sequence` overflowed a counter.
+    Statistics { sequence: u64 },
 }
 
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct ProbeRunConfig {
-    pub(crate) probes_per_second: Option<u32>,
-    pub(crate) duration_limit: Duration,
-    pub(crate) final_statistics_sequence: u64,
+impl ProbeRunError {
+    fn duration(actual: Duration, limit: Duration) -> Self {
+        Self::Duration { actual, limit }
+    }
+
+    fn exceeded(error: DeadlineExceeded) -> Self {
+        Self::Duration {
+            actual: error.actual,
+            limit: error.limit,
+        }
+    }
 }
 
-/// Workflow-owned operations and error taxonomy for the shared probe runner.
-pub(crate) trait ProbeLifecycle<B> {
-    type Error;
+/// Workflow-owned operations for the shared probe runner.
+pub(crate) trait ProbeLifecycle<P> {
+    type Error: From<ProbeRunError>;
 
-    fn execute(&mut self, batch: &B) -> Result<Execution, BoundaryError>;
-    fn validate(&mut self, batch: &B, execution: &Execution) -> Result<(), Self::Error>;
+    fn execute(&mut self, batch: &Batch<P>) -> Result<Execution, BoundaryError>;
+    fn validate(&mut self, batch: &Batch<P>, execution: &Execution) -> Result<(), Self::Error>;
+    /// Consumes one batch's evidence. [`ControlFlow::Break`] ends the
+    /// operation without running the remaining batches.
     fn process(
         &mut self,
-        batch: &B,
+        batch: &Batch<P>,
         execution: Execution,
         deadline: &Deadline,
-    ) -> Result<bool, Self::Error>;
-    fn duration_error(actual: Duration, limit: Duration) -> Self::Error;
-    fn rate_error(rate: Option<u32>) -> Self::Error;
-    fn clock_error(sequence: u64, message: String) -> Self::Error;
-    fn execution_error(sequence: u64, source: BoundaryError) -> Self::Error;
-    fn statistics_error(sequence: u64) -> Self::Error;
+    ) -> Result<ControlFlow<()>, Self::Error>;
 }
 
 /// Runs already-approved homogeneous batches with shared deadline, pacing,
 /// executor-boundary, evidence-validation, and checked-statistics policy.
-pub(crate) fn run_batches<B, L, C>(
-    batches: &[B],
-    config: ProbeRunConfig,
+pub(crate) fn run_batches<P, L, C>(
+    batches: &[Batch<P>],
+    probes_per_second: Option<u32>,
     deadline: &mut Deadline,
     clock: &mut C,
     lifecycle: &mut L,
 ) -> Result<Stats, L::Error>
 where
-    B: ProbeBatch,
-    L: ProbeLifecycle<B>,
+    L: ProbeLifecycle<P>,
     C: Clock,
 {
     let mut stats = Stats::default();
     let mut scheduled_delay = Duration::ZERO;
+    let mut previous: Option<&Batch<P>> = None;
 
-    for (batch_index, batch) in batches.iter().enumerate() {
-        check_deadline(deadline, L::duration_error)?;
-        let sequence = batch.sequence();
-        if batch_index != 0 {
-            #[expect(
-                clippy::indexing_slicing,
-                clippy::arithmetic_side_effects,
-                reason = "`batch_index` is non-zero here and comes from an enumerate over \
-                          `batches`, so `batch_index - 1` is a valid index"
-            )]
-            let previous_probe_count = batches[batch_index - 1].probe_count();
-            let delay = rate_delay(previous_probe_count, config.probes_per_second)
-                .ok_or_else(|| L::rate_error(config.probes_per_second))?;
-            check_deadline(deadline, L::duration_error)?;
+    for batch in batches {
+        check_deadline(deadline, ProbeRunError::duration)?;
+        let sequence = batch.sequence;
+        if let Some(previous) = previous {
+            let delay = rate_delay(previous.probe_count(), probes_per_second).ok_or(
+                ProbeRunError::Rate {
+                    rate: probes_per_second,
+                },
+            )?;
+            check_deadline(deadline, ProbeRunError::duration)?;
             deadline
                 .start_accounting(delay)
-                .map_err(|error| L::duration_error(error.actual, error.limit))?;
-            clock
-                .sleep(delay)
-                .map_err(|source| L::clock_error(sequence, source.to_string()))?;
-            deadline
-                .account(delay)
-                .map_err(|error| L::duration_error(error.actual, error.limit))?;
+                .map_err(ProbeRunError::exceeded)?;
+            clock.sleep(delay).map_err(|source| ProbeRunError::Clock {
+                sequence,
+                source: Box::new(source),
+            })?;
+            deadline.account(delay).map_err(ProbeRunError::exceeded)?;
             scheduled_delay = scheduled_delay
                 .checked_add(delay)
-                .ok_or_else(|| L::duration_error(Duration::MAX, config.duration_limit))?;
+                .ok_or(ProbeRunError::Statistics { sequence })?;
         }
+        previous = Some(batch);
 
-        check_deadline(deadline, L::duration_error)?;
+        check_deadline(deadline, ProbeRunError::duration)?;
         deadline
             .start_accounting(Duration::ZERO)
-            .map_err(|error| L::duration_error(error.actual, error.limit))?;
+            .map_err(ProbeRunError::exceeded)?;
         let execution = lifecycle
             .execute(batch)
-            .map_err(|source| L::execution_error(sequence, source))?;
-        check_deadline(deadline, L::duration_error)?;
+            .map_err(|source| ProbeRunError::Execution { sequence, source })?;
+        check_deadline(deadline, ProbeRunError::duration)?;
         deadline
             .account(execution.stats.elapsed)
-            .map_err(|error| L::duration_error(error.actual, error.limit))?;
+            .map_err(ProbeRunError::exceeded)?;
         lifecycle.validate(batch, &execution)?;
-        check_deadline(deadline, L::duration_error)?;
+        check_deadline(deadline, ProbeRunError::duration)?;
         stats
             .checked_add_assign(&execution.stats)
-            .ok_or_else(|| L::statistics_error(sequence))?;
-        if lifecycle.process(batch, execution, deadline)? {
+            .ok_or(ProbeRunError::Statistics { sequence })?;
+        if lifecycle.process(batch, execution, deadline)?.is_break() {
             break;
         }
     }
 
-    check_deadline(deadline, L::duration_error)?;
-    stats.elapsed = stats
-        .elapsed
-        .checked_add(scheduled_delay)
-        .ok_or_else(|| L::statistics_error(config.final_statistics_sequence))?;
+    check_deadline(deadline, ProbeRunError::duration)?;
+    let final_sequence = previous.map_or(0, |batch| batch.sequence);
+    stats.elapsed =
+        stats
+            .elapsed
+            .checked_add(scheduled_delay)
+            .ok_or(ProbeRunError::Statistics {
+                sequence: final_sequence,
+            })?;
     Ok(stats)
 }

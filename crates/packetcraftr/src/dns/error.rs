@@ -8,7 +8,8 @@ use thiserror::Error;
 
 use crate::BoundaryError;
 use packetcraftr_core::budget::DeadlineExceeded;
-use packetcraftr_core::error::{Classification, Classified, Context, Kind};
+use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
+use packetcraftr_core::protocol::application::dns::name;
 
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 #[non_exhaustive]
@@ -51,7 +52,10 @@ pub enum WireError {
     PointerLimit { limit: usize },
     #[error("DNS label at byte {offset} uses a reserved length encoding")]
     ReservedLabelLength { offset: usize },
-    #[error("DNS label at byte {offset} is {actual} bytes; maximum is 63")]
+    #[error(
+        "DNS label at byte {offset} is {actual} bytes; maximum is {}",
+        name::MAX_LABEL_LEN
+    )]
     LabelTooLong { offset: usize, actual: usize },
     #[error("DNS response contains more than one EDNS OPT pseudo-record")]
     DuplicateEdns,
@@ -59,7 +63,7 @@ pub enum WireError {
     UnsupportedEdnsVersion { version: u8 },
     #[error("DNS EDNS metadata is invalid: {message}")]
     InvalidEdns { message: String },
-    #[error("DNS name exceeds the 255-byte wire limit")]
+    #[error("DNS name exceeds the {}-byte wire limit", name::MAX_NAME_LEN)]
     NameTooLong,
     #[error("DNS {record_type} RDATA at byte {offset} is invalid: {message}")]
     InvalidRdata {
@@ -79,6 +83,38 @@ pub enum WireError {
     TcpFrameLength { declared: usize, actual: usize },
     #[error("DNS-over-TCP response is still truncated")]
     TcpResponseTruncated,
+}
+
+impl From<name::Error> for WireError {
+    /// Restates a shared decompression failure in this crate's own published
+    /// vocabulary. The `match` is exhaustive on purpose: a new decompression
+    /// failure has to be given a name here rather than falling into a
+    /// catch-all.
+    fn from(error: name::Error) -> Self {
+        match error {
+            name::Error::TruncatedLabelLength { offset } => Self::TruncatedField {
+                field: "name label length",
+                offset,
+            },
+            name::Error::TruncatedPointer { offset } => Self::TruncatedPointer { offset },
+            name::Error::TruncatedLabel { offset, .. } => Self::TruncatedField {
+                field: "name label",
+                offset,
+            },
+            name::Error::PointerOutOfBounds { pointer, length } => {
+                Self::PointerOutOfBounds { pointer, length }
+            }
+            name::Error::SelfPointer { offset } => Self::PointerLoop { offset },
+            name::Error::ForwardPointer { offset, pointer } => {
+                Self::ForwardPointer { offset, pointer }
+            }
+            name::Error::PointerLoop { offset } => Self::PointerLoop { offset },
+            name::Error::PointerLimit { limit } => Self::PointerLimit { limit },
+            name::Error::ReservedLabelLength { offset } => Self::ReservedLabelLength { offset },
+            name::Error::LabelTooLong { offset, actual } => Self::LabelTooLong { offset, actual },
+            name::Error::NameTooLong => Self::NameTooLong,
+        }
+    }
 }
 
 impl WireError {
@@ -132,8 +168,12 @@ pub enum Error {
         #[source]
         source: packetcraftr_netio::dns_tcp::Error,
     },
-    #[error("DNS retry clock failed before attempt {attempt}: {message}")]
-    Clock { attempt: u32, message: String },
+    #[error("DNS retry clock failed before attempt {attempt}")]
+    Clock {
+        attempt: u32,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
     #[error("DNS executor returned invalid evidence on attempt {attempt}: {message}")]
     InvalidEvidence { attempt: u32, message: String },
     #[error("DNS statistic accounting overflowed on attempt {attempt}")]
@@ -209,24 +249,29 @@ impl Classified for Error {
         }
     }
 
-    fn context(&self) -> Context {
+    fn context(&self) -> Option<Coordinate> {
         match self {
             Self::Authorization(error) | Self::Output { source: error } => error.context(),
             Self::Execution { attempt, .. }
             | Self::TcpExecution { attempt, .. }
             | Self::Clock { attempt, .. }
             | Self::InvalidEvidence { attempt, .. }
-            | Self::StatisticsOverflow { attempt } => Context::attempt(*attempt),
-            _ => Context::default(),
+            | Self::StatisticsOverflow { attempt } => Some(Coordinate::Attempt(*attempt)),
+            _ => None,
         }
     }
 
+    /// Walked from the retained `#[source]` chain rather than hand-written.
+    /// The boundary-sourced variants delegate instead: a [`BoundaryError`]
+    /// carries a captured `causes` snapshot its own source chain no longer
+    /// holds.
+    ///
+    /// [`BoundaryError`]: crate::BoundaryError
     fn causes(&self) -> Vec<String> {
         match self {
             Self::Authorization(error) => error.causes(),
             Self::Execution { source, .. } | Self::Output { source } => source.causes(),
-            Self::TcpExecution { .. } => Vec::new(),
-            _ => Vec::new(),
+            error => packetcraftr_core::error::source_chain(error),
         }
     }
 }

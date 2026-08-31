@@ -4,10 +4,12 @@
 //! Unsolicited and undecodable frame retention under aggregate bounds.
 
 use packetcraftr_core::decode::DecodedPacket;
+use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_netio::capture::RecordIdentity;
 
 use super::accumulator::{Accumulator, UnsolicitedEvidence};
+use super::contract::Options;
 
 use crate::evidence::BudgetError;
 
@@ -15,12 +17,12 @@ impl Accumulator {
     pub(super) fn reserve_decoded_evidence(
         &mut self,
         additional: usize,
-        options: &super::contract::Options,
+        options: &Options,
     ) -> bool {
         let error = match self.evidence_budget.reserve(
             additional,
-            options.max_capture_queue_frames,
-            options.max_captured_bytes,
+            options.capture.max_frames,
+            options.capture.max_bytes,
         ) {
             Ok(()) => return true,
             Err(error) => error,
@@ -34,7 +36,7 @@ impl Accumulator {
                 "exchange.capture_frame_limit",
                 format!(
                     "aggregate retained capture frame limit {} reached; later frames were not retained",
-                    options.max_capture_queue_frames
+                    options.capture.max_frames
                 ),
             ),
             BudgetError::ByteCountOverflow => (
@@ -45,47 +47,62 @@ impl Accumulator {
                 "exchange.capture_byte_limit",
                 format!(
                     "retained capture byte limit {} reached; later frames were not retained",
-                    options.max_captured_bytes
+                    options.capture.max_bytes
                 ),
             ),
         };
-        packetcraftr_core::diagnostic::push_once(
-            &mut self.diagnostics,
-            packetcraftr_core::diagnostic::Diagnostic::warning(code, message),
-        );
+        self.diagnostics
+            .push_once(Diagnostic::warning(code, message));
         false
+    }
+
+    /// The one retention gate every unattributed capture record passes: the
+    /// unsolicited/undecoded frame ceiling, then the aggregate evidence budget.
+    ///
+    /// Both retention paths reach the ceiling under the same condition, so both
+    /// report it with the same words. They previously published the same
+    /// `exchange.unsolicited_limit` code with two different messages, and
+    /// `push_once` deduplicates by code, so whichever path hit the limit first
+    /// decided what the operator saw.
+    fn reserve_unattributed(
+        &mut self,
+        identity: RecordIdentity,
+        frame_bytes: usize,
+        options: &Options,
+    ) -> bool {
+        if self.retained_unmatched >= options.max_unmatched_frames {
+            self.diagnostics.push_once(Diagnostic::warning(
+                "exchange.unsolicited_limit",
+                format!(
+                    "unsolicited/undecoded frame limit {} reached; later frames were not retained",
+                    options.max_unmatched_frames
+                ),
+            ));
+            return false;
+        }
+        if !self.reserve_decoded_evidence(frame_bytes, options) {
+            return false;
+        }
+        self.mark_record_retained(identity);
+        #[expect(
+            clippy::arithmetic_side_effects,
+            reason = "the early return above keeps `retained_unmatched` below \
+                      `max_unmatched_frames`, so the increment cannot overflow"
+        )]
+        {
+            self.retained_unmatched += 1;
+        }
+        true
     }
 
     pub(super) fn retain_unsolicited(
         &mut self,
         identity: RecordIdentity,
         decoded: DecodedPacket,
-        options: &super::contract::Options,
+        options: &Options,
         freshness: Option<super::accumulator::UnsolicitedFreshness>,
     ) {
-        if self.retained_unmatched >= options.max_unmatched_frames {
-            packetcraftr_core::diagnostic::push_once(
-                &mut self.diagnostics,
-                packetcraftr_core::diagnostic::Diagnostic::warning(
-                    "exchange.unsolicited_limit",
-                    format!(
-                        "unsolicited frame limit {} reached; later frames were not retained",
-                        options.max_unmatched_frames
-                    ),
-                ),
-            );
-            return;
-        }
-        if self.reserve_decoded_evidence(decoded.original.len(), options) {
-            self.mark_record_retained(identity);
-            #[expect(
-                clippy::arithmetic_side_effects,
-                reason = "the early return above keeps `retained_unmatched` below \
-                          `max_unmatched_frames`, so the increment cannot overflow"
-            )]
-            {
-                self.retained_unmatched += 1;
-            }
+        if self.reserve_unattributed(identity, decoded.original.len(), options) {
             self.unsolicited
                 .push(UnsolicitedEvidence { decoded, freshness });
         }
@@ -95,31 +112,9 @@ impl Accumulator {
         &mut self,
         identity: RecordIdentity,
         frame: Frame,
-        options: &super::contract::Options,
+        options: &Options,
     ) {
-        if self.retained_unmatched >= options.max_unmatched_frames {
-            packetcraftr_core::diagnostic::push_once(
-                &mut self.diagnostics,
-                packetcraftr_core::diagnostic::Diagnostic::warning(
-                    "exchange.unsolicited_limit",
-                    format!(
-                        "unsolicited/undecoded frame limit {} reached; later frames were not retained",
-                        options.max_unmatched_frames
-                    ),
-                ),
-            );
-            return;
-        }
-        if self.reserve_decoded_evidence(frame.bytes().len(), options) {
-            self.mark_record_retained(identity);
-            #[expect(
-                clippy::arithmetic_side_effects,
-                reason = "the early return above keeps `retained_unmatched` below \
-                          `max_unmatched_frames`, so the increment cannot overflow"
-            )]
-            {
-                self.retained_unmatched += 1;
-            }
+        if self.reserve_unattributed(identity, frame.bytes().len(), options) {
             self.pending_events
                 .push(super::contract::Event::Undecoded { frame });
         }

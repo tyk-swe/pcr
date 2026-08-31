@@ -1,7 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Pure policy for validating and normalizing native route snapshots.
+//! Portable route policy: validates and normalizes an operating-system route
+//! snapshot into a [`Decision`]. No native code lives here.
 
 use std::net::{IpAddr, Ipv4Addr};
 

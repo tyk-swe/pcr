@@ -81,18 +81,21 @@ pub struct Case {
     pub diagnostics: Vec<Diagnostic>,
 }
 
+/// What one offline campaign generated, built, retained, and took.
+///
+/// The module has no transmission seam, so a case is the only unit counted
+/// here; the output boundary is what maps these onto the published
+/// packet-operation columns.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Stats {
     pub cases_generated: u64,
     pub cases_built: u64,
-    pub packets_attempted: u64,
-    pub packets_completed: u64,
     pub bytes: u64,
     pub elapsed: Duration,
 }
 
 #[derive(Clone, Debug)]
-pub struct Result {
+pub struct Report {
     pub seed: u64,
     pub first_case: u64,
     pub cases: Vec<Case>,

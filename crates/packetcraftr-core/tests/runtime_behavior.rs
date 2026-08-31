@@ -154,12 +154,8 @@ reflective_layer! {
 struct ProbeCodec;
 
 impl LayerCodec for ProbeCodec {
-    fn protocol_id(&self) -> packetcraftr_core::layer::Id {
-        "probe".into()
-    }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        &["p"]
+    fn protocol_id(&self) -> &'static packetcraftr_core::layer::Id {
+        &probe_schema().protocol
     }
 
     fn encode(
@@ -229,8 +225,8 @@ impl LayerCodec for ProbeCodec {
 struct ChildCodec;
 
 impl LayerCodec for ChildCodec {
-    fn protocol_id(&self) -> packetcraftr_core::layer::Id {
-        "child".into()
+    fn protocol_id(&self) -> &'static packetcraftr_core::layer::Id {
+        &child_schema().protocol
     }
 
     fn encode(
@@ -284,10 +280,10 @@ impl LayerCodec for ChildCodec {
 fn registry() -> packetcraftr_core::registry::Registry {
     let mut builder = packetcraftr_core::registry::Builder::new();
     builder
-        .register_builtin_codec(ProbeCodec, ProbeCodec.aliases())
+        .register_codec(ProbeCodec, &["p"])
         .expect("register probe");
     builder
-        .register_builtin_codec(ChildCodec, ChildCodec.aliases())
+        .register_codec(ChildCodec, &[])
         .expect("register child");
     builder.bind_link_type(777, "probe").expect("bind root");
     builder.bind("probe", 7, "child", 10).expect("bind child");
@@ -324,7 +320,7 @@ fn assert_failed_packet_mutations(packet: &mut Packet) {
     assert!(packet.get_mut::<Raw>().is_none());
     assert!(matches!(
         packet.replace(99, Child::default()),
-        Err(packetcraftr_core::Error::IndexOutOfBounds { index: 99, len: 4 })
+        Err(packetcraftr_core::PacketError::IndexOutOfBounds { index: 99, len: 4 })
     ));
     assert_eq!(structure(packet), structure(&before_failed_mutations));
     assert_eq!(packet.get::<Child>().map(|child| child.value), Some(10));
@@ -373,7 +369,7 @@ fn packet_mutation_reflection_and_boundaries_are_consistent() {
     );
     assert!(matches!(
         packet.insert(9, Raw::default()),
-        Err(packetcraftr_core::Error::IndexOutOfBounds { index: 9, len: 4 })
+        Err(packetcraftr_core::PacketError::IndexOutOfBounds { index: 9, len: 4 })
     ));
 
     let removed = packet
@@ -389,13 +385,13 @@ fn packet_mutation_reflection_and_boundaries_are_consistent() {
 
     assert!(matches!(
         packet.remove(2),
-        Err(packetcraftr_core::Error::PaddingBoundaryRemoval { index: 2 })
+        Err(packetcraftr_core::PacketError::PaddingBoundaryRemoval { index: 2 })
     ));
     packet.remove(3).expect("padding itself can be removed");
     assert_eq!(packet.len(), 3);
     assert!(matches!(
         packet.remove(8),
-        Err(packetcraftr_core::Error::IndexOutOfBounds { index: 8, len: 3 })
+        Err(packetcraftr_core::PacketError::IndexOutOfBounds { index: 8, len: 3 })
     ));
 
     packet
@@ -526,7 +522,7 @@ fn reflected_fields_cover_supported_types_and_fail_closed() {
     assert_eq!(
         probe_layout(),
         vec![FieldLayout {
-            name: "value".to_owned(),
+            name: "value",
             range: ByteRange::new(0, 1)
         }]
     );
@@ -638,7 +634,7 @@ fn templates_expand_one_axis_and_report_limits_and_edit_errors() {
         .axis(0, "label", vec![FieldValue::Text("replaced".to_owned())])
         .axis(0, "value", vec![10_u8.into(), 11_u8.into(), 12_u8.into()]);
     assert_eq!(
-        template.expansion_len().expect("bounded axis"),
+        template.expansion_len(),
         3,
         "a second axis replaces the first rather than multiplying with it"
     );
@@ -668,11 +664,11 @@ fn templates_expand_one_axis_and_report_limits_and_edit_errors() {
     );
 
     let axisless = template::Template::new(Packet::new());
-    assert_eq!(axisless.expansion_len().expect("one packet"), 1);
+    assert_eq!(axisless.expansion_len(), 1);
     assert_eq!(axisless.expand(1).expect("one ordinal").len(), 1);
 
     let empty = template::Template::new(Packet::new()).axis(0, "value", Vec::new());
-    assert_eq!(empty.expansion_len().expect("empty range"), 0);
+    assert_eq!(empty.expansion_len(), 0);
     assert_eq!(empty.expand(0).expect("empty expansion").len(), 0);
 
     let bad_index = template::Template::new(Packet::new()).axis(1, "value", vec![1_u8.into()]);
@@ -904,15 +900,15 @@ fn assert_failed_packet_lookups(decoded: decode::DecodedPacket) {
     assert!(failed_lookups.layer_mut(99).is_none());
     assert!(matches!(
         failed_lookups.insert(99, Probe::default()),
-        Err(packetcraftr_core::Error::IndexOutOfBounds { index: 99, len: 2 })
+        Err(packetcraftr_core::PacketError::IndexOutOfBounds { index: 99, len: 2 })
     ));
     assert!(matches!(
         failed_lookups.replace(99, Probe::default()),
-        Err(packetcraftr_core::Error::IndexOutOfBounds { index: 99, len: 2 })
+        Err(packetcraftr_core::PacketError::IndexOutOfBounds { index: 99, len: 2 })
     ));
     assert!(matches!(
         failed_lookups.remove(99),
-        Err(packetcraftr_core::Error::IndexOutOfBounds { index: 99, len: 2 })
+        Err(packetcraftr_core::PacketError::IndexOutOfBounds { index: 99, len: 2 })
     ));
     assert_eq!(
         structure(&failed_lookups),
@@ -1039,10 +1035,10 @@ fn registry_build_decode_and_error_paths_are_bounded() {
 fn assert_registry_binding_conflicts() {
     let mut duplicate = packetcraftr_core::registry::Builder::new();
     duplicate
-        .register_builtin_codec(ProbeCodec, ProbeCodec.aliases())
+        .register_codec(ProbeCodec, &["p"])
         .expect("first codec");
     assert!(matches!(
-        duplicate.register_builtin_codec(ProbeCodec, ProbeCodec.aliases()),
+        duplicate.register_codec(ProbeCodec, &["p"]),
         Err(packetcraftr_core::registry::Error::DuplicateProtocol { .. })
     ));
 
@@ -1058,12 +1054,8 @@ fn assert_registry_binding_conflicts() {
     ));
 
     let mut bindings = packetcraftr_core::registry::Builder::new();
-    bindings
-        .register_builtin_codec(ProbeCodec, ProbeCodec.aliases())
-        .expect("probe");
-    bindings
-        .register_builtin_codec(ChildCodec, ChildCodec.aliases())
-        .expect("child");
+    bindings.register_codec(ProbeCodec, &["p"]).expect("probe");
+    bindings.register_codec(ChildCodec, &[]).expect("child");
     bindings.bind("probe", 7, "child", 1).expect("binding");
     assert!(matches!(
         bindings.bind("probe", 7, "probe", 1),
@@ -1117,9 +1109,7 @@ fn assert_filter_field_binding_conflicts() {
     ));
 
     let mut canonical = packetcraftr_core::registry::Builder::new();
-    canonical
-        .register_builtin_codec(ProbeCodec, ProbeCodec.aliases())
-        .expect("probe");
+    canonical.register_codec(ProbeCodec, &["p"]).expect("probe");
     canonical
         .bind_filter_field(
             "probe.value",
@@ -1135,9 +1125,7 @@ fn assert_filter_field_binding_conflicts() {
     ));
 
     let mut unknown = packetcraftr_core::registry::Builder::new();
-    unknown
-        .register_builtin_codec(ProbeCodec, ProbeCodec.aliases())
-        .expect("probe");
+    unknown.register_codec(ProbeCodec, &["p"]).expect("probe");
     unknown
         .bind_filter_field(
             "probe.nope",
@@ -1154,7 +1142,7 @@ fn assert_filter_field_binding_conflicts() {
 
     let mut wrong_kind = packetcraftr_core::registry::Builder::new();
     wrong_kind
-        .register_builtin_codec(ProbeCodec, ProbeCodec.aliases())
+        .register_codec(ProbeCodec, &["p"])
         .expect("probe");
     wrong_kind
         .bind_filter_field(

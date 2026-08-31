@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 mod execution;
+mod report;
 mod request;
-mod result;
 
-pub use execution::{Batch, Execution, Executor, Probe};
-pub use request::{Limits, Request, Transport};
-pub use result::{Classification, Endpoint, Event, ProbeEvidence, ProbeStatus, Result, Summary};
+pub use execution::{Batch, Execution, Executor, Probe, ProbeEndpoint};
+pub use report::{Classification, Endpoint, Event, ProbeEvidence, ProbeStatus, Report, Summary};
+pub use request::{Limits, PortSpec, Request, Transport, select_ports};

@@ -3,10 +3,10 @@
 
 use std::net::IpAddr;
 
-use super::super::{BuiltinProtocol, FieldValue, Packet};
 use super::error::Error;
 use super::path::{DESTINATION, SEGMENTS, TARGET_PROTOCOL, ip_path_at};
 use crate::layer::Malformed;
+use crate::semantics::{BuiltinProtocol, FieldValue, Packet};
 
 pub(super) const ROUTE_FIELDS: [&str; 3] = [DESTINATION, SEGMENTS, TARGET_PROTOCOL];
 
@@ -20,10 +20,10 @@ pub fn live_destinations(packet: &Packet) -> Result<Vec<IpAddr>, Error> {
             && BuiltinProtocol::from_name_or_alias(intended.as_str())
                 .is_some_and(malformed_protocol_may_hide_destination)
         {
-            return Err(Error::new(format!(
-                "malformed {} layer may hide a live destination: {}",
-                intended, malformed.reason
-            )));
+            return Err(Error::MalformedMayHideDestination {
+                protocol: intended.clone(),
+                reason: malformed.reason.clone(),
+            });
         }
         match BuiltinProtocol::of(layer) {
             Some(BuiltinProtocol::Ipv4 | BuiltinProtocol::Ipv6) => {
@@ -66,10 +66,10 @@ pub fn live_destinations(packet: &Packet) -> Result<Vec<IpAddr>, Error> {
                         .any(|schema| schema.name == **field)
                         || layer.field(field).is_some()
                 }) {
-                    return Err(Error::new(format!(
-                        "unknown protocol {} exposes route-bearing field {field}",
-                        layer.protocol_id()
-                    )));
+                    return Err(Error::UnknownProtocolRouteField {
+                        protocol: layer.protocol_id().clone(),
+                        field,
+                    });
                 }
             }
         }
@@ -138,9 +138,7 @@ fn validate_attached_srh(packet: &Packet, srh_index: usize) -> Result<(), Error>
             _ => break,
         }
     }
-    Err(Error::new(
-        "IPv6 SRH is not in a contiguous typed extension chain",
-    ))
+    Err(Error::DetachedSegmentRoutingHeader)
 }
 
 fn push_if_specified(destinations: &mut Vec<IpAddr>, destination: IpAddr) {

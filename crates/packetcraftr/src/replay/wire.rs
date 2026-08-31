@@ -13,16 +13,29 @@ use packetcraftr_netio::{
 
 use super::error::Error;
 
+/// Republishes a route adapter refusal as the live-I/O failure replay
+/// transmission reports.
+///
+/// Both arms retain the adapter's own refusal as the `#[source]` rather than
+/// formatting it into `message`, so the route diagnostic — which destination
+/// had no route, which interface was missing, what the operating system
+/// reported — survives to the render boundary in `causes()` instead of being
+/// lost with the consumed [`SystemError`].
+///
+/// [`SystemError`]: packetcraftr_netio::route::SystemError
 pub(super) fn map_replay_route_error(
     source: packetcraftr_netio::route::SystemError,
 ) -> LiveIoError {
     let classification = packetcraftr_netio::route::SystemProvider.classify_error(&source);
+    let source: packetcraftr_netio::SystemFault = std::sync::Arc::new(source);
     match classification.kind {
         Kind::Capability => LiveIoError::Unsupported {
-            message: source.to_string(),
+            message: "the native route adapter cannot select a replay route".to_owned(),
+            source: Some(source),
         },
         _ => LiveIoError::Send {
-            message: format!("replay route selection failed: {source}"),
+            message: "replay route selection failed".to_owned(),
+            source: Some(source),
         },
     }
 }

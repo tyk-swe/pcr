@@ -11,23 +11,22 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use bytes::Bytes;
 use packetcraftr::core::Packet;
-use packetcraftr::core::analysis::expert::{
-    Finding as AnalysisFinding, StreamRef, StreamTransport as AnalysisStreamTransport,
-};
+use packetcraftr::core::analysis::expert::Finding as AnalysisFinding;
 use packetcraftr::core::analysis::follow::{
     Chunk as AnalysisChunk, Direction as AnalysisDirection,
 };
 use packetcraftr::core::analysis::reassembly::ip::{
-    DatagramKey as AnalysisDatagramKey, IncompleteReason,
+    DatagramKey as AnalysisDatagramKey, IncompleteDatagram, IncompleteReason,
     Ipv4DatagramKey as AnalysisIpv4DatagramKey, Ipv6DatagramKey as AnalysisIpv6DatagramKey,
 };
 use packetcraftr::core::analysis::reassembly::tcp::FlowKey;
 use packetcraftr::core::analysis::scope::Interner;
 use packetcraftr::core::analysis::stats::{
-    ConversationStat, EndpointStat, IoBucketStat, PortStat, ProtocolStat, TransportKind,
+    ConversationStat, EndpointStat, IoBucketStat, PortStat, ProtocolStat,
 };
 use packetcraftr::core::analysis::{
-    IpCounters, IpDatagramOutcome, IpFamilyCounters, IpReassemblyReport,
+    IpCounters, IpDatagramOutcome, IpFamilyCounters, IpReassemblyReport, StreamRef,
+    StreamTransport as AnalysisStreamTransport,
 };
 use packetcraftr::core::diagnostic::Diagnostic;
 use packetcraftr::core::frame::{Direction as CaptureDirection, Frame, LinkType};
@@ -42,7 +41,7 @@ fn built_udp_packet() -> (
     Arc<packetcraftr::core::registry::Registry>,
     build::BuiltPacket,
 ) {
-    let registry = Arc::new(builtin::registry().expect("built-ins must register"));
+    let registry = builtin::registry();
     let mut packet = Packet::new();
     packet.push(Ipv4 {
         source: Ipv4Addr::new(192, 0, 2, 1),
@@ -68,12 +67,15 @@ fn packet_output_adapters_preserve_wire_data_and_separate_diagnostics() {
         .diagnostics
         .push(Diagnostic::warning("build.fixture", "fixture warning"));
     let wire = built.bytes.clone();
-    let (built_output, build_diagnostics) = build_output::Result::from_built(built);
+    let (built_output, build_diagnostics) = build_output::Report::from_built(built);
 
-    assert_eq!(built_output.bytes(), wire.as_ref());
-    assert_eq!(built_output.bytes_hex.len(), wire.len() * 2);
+    assert_eq!(built_output.frame.bytes(), wire.as_ref());
     assert_eq!(
-        built_output.length,
+        built_output.frame.bytes_hex().to_string().len(),
+        wire.len() * 2
+    );
+    assert_eq!(
+        built_output.frame.length,
         u64::try_from(wire.len()).expect("fixture length fits u64")
     );
     assert!(
@@ -101,17 +103,18 @@ fn packet_output_adapters_preserve_wire_data_and_separate_diagnostics() {
         .push(Diagnostic::info("decode.fixture", "fixture note"));
 
     assert!(matches!(
-        read::Event::try_from_frame(0, frame.clone()),
+        read::Frame::try_from_frame(0, frame.clone()),
         Err(contract::Error::InvalidSourceFrame)
     ));
     assert!(matches!(
         capture::Event::try_from_frame(0, frame.clone()),
         Err(contract::Error::InvalidSourceFrame)
     ));
-    let raw_record = read::Event::try_from_frame(7, frame.clone()).expect("raw frame converts");
+    let raw_record = read::Frame::try_from_frame(7, frame.clone()).expect("raw frame converts");
     let dissected_record =
-        read::Event::try_from_decoded(7, frame, &decoded).expect("dissected frame converts");
-    let raw_value = serde_json::to_value(&raw_record).expect("raw read event serializes");
+        read::Frame::try_from_decoded(7, frame, &decoded).expect("dissected frame converts");
+    let raw_value = serde_json::to_value(read::Event::Frame(raw_record.clone()))
+        .expect("raw read event serializes");
     assert_eq!(raw_value["event"], "frame");
     assert_eq!(raw_value["source_frame"], 7);
     assert!(raw_value.get("decoded").is_none());
@@ -123,22 +126,16 @@ fn packet_output_adapters_preserve_wire_data_and_separate_diagnostics() {
     .expect("read completion serializes");
     assert_eq!(complete["event"], "complete");
     assert_eq!(complete["captured_bytes_read"], 512);
-    let read::Event::Frame {
+    let read::Frame {
         source_frame,
         frame: raw_frame,
         decoded: raw_decoded,
-    } = raw_record
-    else {
-        panic!("raw conversion must produce a frame event")
-    };
-    let read::Event::Frame {
+    } = raw_record;
+    let read::Frame {
         source_frame: dissected_source_frame,
         frame: dissected_frame,
         decoded: decoded_stack,
-    } = dissected_record
-    else {
-        panic!("dissected conversion must produce a frame event")
-    };
+    } = dissected_record;
     assert_eq!(source_frame.get(), 7);
     assert_eq!(dissected_source_frame.get(), 7);
     assert!(raw_decoded.is_none());
@@ -154,10 +151,10 @@ fn packet_output_adapters_preserve_wire_data_and_separate_diagnostics() {
 
     let original = decoded.original.clone();
     let link_type = decoded.frame.link_type.0;
-    let (dissected_output, decode_diagnostics) = dissect_output::Result::from_decoded(decoded);
-    assert_eq!(dissected_output.bytes(), original.as_ref());
+    let (dissected_output, decode_diagnostics) = dissect_output::Report::from_decoded(decoded);
+    assert_eq!(dissected_output.frame.bytes(), original.as_ref());
     assert_eq!(
-        dissected_output.length,
+        dissected_output.frame.length,
         u64::try_from(original.len()).expect("fixture length fits u64")
     );
     assert_eq!(dissected_output.link_type, link_type);
@@ -187,7 +184,7 @@ fn representative_stats_report() -> packetcraftr::core::analysis::stats::Report 
             bytes: 321,
         }],
         conversations: vec![ConversationStat {
-            transport: TransportKind::Tcp,
+            transport: AnalysisStreamTransport::Tcp,
             stream: 4,
             address_a: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
             port_a: 40_000,
@@ -208,7 +205,7 @@ fn representative_stats_report() -> packetcraftr::core::analysis::stats::Report 
             rx_bytes: 201,
         }],
         ports: vec![PortStat {
-            transport: TransportKind::Udp,
+            transport: AnalysisStreamTransport::Udp,
             port: 53,
             frames: 2,
             bytes: 80,
@@ -254,7 +251,7 @@ fn representative_stats_report() -> packetcraftr::core::analysis::stats::Report 
                     duplicate_fragments: 1,
                     overlap_bytes: 2,
                 },
-                IpDatagramOutcome::Incomplete {
+                IpDatagramOutcome::Incomplete(IncompleteDatagram {
                     key: AnalysisDatagramKey::Ipv6(AnalysisIpv6DatagramKey {
                         scope,
                         source: Ipv6Addr::LOCALHOST,
@@ -267,7 +264,7 @@ fn representative_stats_report() -> packetcraftr::core::analysis::stats::Report 
                     known_final_length: None,
                     duplicate_fragments: 0,
                     overlap_bytes: 0,
-                },
+                }),
             ],
             outcomes_omitted: 2,
         },
@@ -287,7 +284,7 @@ fn stats_output_selects_exactly_one_requested_table() {
     ];
 
     for (table, expected_key) in cases {
-        let result = stats::Result::try_from_report(table, &report, 9)
+        let result = stats::Report::try_from_report(table, &report, 9)
             .expect("in-range report must convert");
         let value = serde_json::to_value(&result).expect("statistics output serializes");
 
@@ -321,7 +318,7 @@ fn stats_output_selects_exactly_one_requested_table() {
 #[test]
 fn stats_fragment_output_preserves_family_counters_outcomes_and_omissions() {
     let report = representative_stats_report();
-    let fragments = stats::Result::try_from_report(stats::Table::Fragments, &report, 9)
+    let fragments = stats::Report::try_from_report(stats::Table::Fragments, &report, 9)
         .expect("fragment report converts")
         .fragments
         .expect("fragment table is present");
@@ -352,7 +349,7 @@ fn stats_fragment_output_preserves_family_counters_outcomes_and_omissions() {
 #[test]
 fn stats_conversation_output_preserves_source_fields() {
     let report = representative_stats_report();
-    let conversations = stats::Result::try_from_report(stats::Table::Conversations, &report, 9)
+    let conversations = stats::Report::try_from_report(stats::Table::Conversations, &report, 9)
         .expect("conversation report converts")
         .conversations
         .expect("conversation table is present");
@@ -383,7 +380,7 @@ fn stats_conversation_output_preserves_source_fields() {
 #[test]
 fn stats_endpoint_output_preserves_source_fields() {
     let report = representative_stats_report();
-    let endpoints = stats::Result::try_from_report(stats::Table::Endpoints, &report, 9)
+    let endpoints = stats::Report::try_from_report(stats::Table::Endpoints, &report, 9)
         .expect("endpoint report converts")
         .endpoints
         .expect("endpoint table is present");
@@ -402,7 +399,7 @@ fn stats_endpoint_output_preserves_source_fields() {
 #[test]
 fn stats_protocol_output_preserves_source_fields() {
     let report = representative_stats_report();
-    let protocols = stats::Result::try_from_report(stats::Table::Protocols, &report, 9)
+    let protocols = stats::Report::try_from_report(stats::Table::Protocols, &report, 9)
         .expect("protocol report converts")
         .protocols
         .expect("protocol table is present");
@@ -419,7 +416,7 @@ fn stats_protocol_output_preserves_source_fields() {
 #[test]
 fn stats_port_output_preserves_source_fields() {
     let report = representative_stats_report();
-    let ports = stats::Result::try_from_report(stats::Table::Ports, &report, 9)
+    let ports = stats::Report::try_from_report(stats::Table::Ports, &report, 9)
         .expect("port report converts")
         .ports
         .expect("port table is present");
@@ -437,7 +434,7 @@ fn stats_port_output_preserves_source_fields() {
 #[test]
 fn stats_io_output_preserves_interval_and_buckets() {
     let report = representative_stats_report();
-    let io = stats::Result::try_from_report(stats::Table::Io, &report, 9)
+    let io = stats::Report::try_from_report(stats::Table::Io, &report, 9)
         .expect("I/O report converts")
         .io
         .expect("I/O table is present");
@@ -486,7 +483,7 @@ fn expert_output_preserves_finding_severity_streams_and_code_order() {
     .into_iter()
     .map(Into::into)
     .collect();
-    let expert_result = expert::Result::from_summary(
+    let expert_result = expert::Report::from_summary(
         packetcraftr::core::analysis::expert::Summary {
             findings: 3,
             errors: 1,
@@ -535,7 +532,7 @@ fn follow_output_preserves_flow_directions_bytes_and_missing_endpoints() {
     .into_iter()
     .map(Into::into)
     .collect();
-    let followed = follow::Result::from_summary(
+    let followed = follow::Report::from_summary(
         expert::StreamTransport::Tcp,
         2,
         packetcraftr::core::analysis::follow::Summary {
@@ -556,7 +553,7 @@ fn follow_output_preserves_flow_directions_bytes_and_missing_endpoints() {
     assert_eq!(followed.chunks[1].direction, follow::Direction::Server);
     assert_eq!(followed.undelivered_bytes, 4);
 
-    let empty = follow::Result::from_summary(
+    let empty = follow::Report::from_summary(
         expert::StreamTransport::Udp,
         99,
         packetcraftr::core::analysis::follow::Summary::default(),

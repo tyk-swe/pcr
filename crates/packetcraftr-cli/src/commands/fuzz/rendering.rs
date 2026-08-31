@@ -11,7 +11,7 @@ use crate::rendering::{
 };
 
 pub(super) fn render_text(
-    result: output::fuzz::Result,
+    result: output::fuzz::Report,
     diagnostics: Vec<core::diagnostic::Diagnostic>,
     stats: output::envelope::Stats,
 ) -> Result<(), CliError> {

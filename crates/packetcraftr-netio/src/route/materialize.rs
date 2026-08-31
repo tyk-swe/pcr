@@ -3,36 +3,38 @@
 
 //! Neighbor resolution materialization for planned routes.
 
-#![forbid(unsafe_code)]
+use packetcraftr_core::frame::LinkType;
 
-use crate::link::Mode;
+use crate::interface::Id as InterfaceId;
+use crate::link::{Capability, MacAddress, Mode};
 use crate::neighbor::{Request as NeighborRequest, Resolution as NeighborResolution};
 
-use super::models::Plan;
+use super::error::Error;
+use super::models::{Decision, Plan, Scope, SelectionReason};
 
 /// Materialize a planned route, invoking neighbor resolution when required.
 pub fn materialize<N: crate::neighbor::Resolver>(
     mut plan: Plan,
     resolver: &N,
-) -> Result<Materialized, crate::neighbor::Error> {
+) -> Result<Materialized, Error> {
     let mut neighbor_resolution = None;
     if plan.needs_neighbor_resolution() {
-        let target =
-            plan.neighbor_target
-                .ok_or_else(|| crate::neighbor::Error::MissingNeighborTarget {
-                    interface: plan.decision.interface.name.clone(),
-                })?;
-        let source =
-            plan.neighbor_source
-                .ok_or_else(|| crate::neighbor::Error::MissingNeighborSource {
-                    interface: plan.decision.interface.name.clone(),
-                })?;
-        let interface_mac =
-            plan.decision
-                .source_mac
-                .ok_or_else(|| crate::neighbor::Error::MissingSourceMac {
-                    interface: plan.decision.interface.name.clone(),
-                })?;
+        let target = plan
+            .neighbor_target
+            .ok_or_else(|| Error::MissingNeighborTarget {
+                interface: plan.decision.interface.name.clone(),
+            })?;
+        let source = plan
+            .neighbor_source
+            .ok_or_else(|| Error::MissingNeighborSource {
+                interface: plan.decision.interface.name.clone(),
+            })?;
+        let interface_mac = plan
+            .decision
+            .source_mac
+            .ok_or_else(|| Error::MissingSourceMac {
+                interface: plan.decision.interface.name.clone(),
+            })?;
         let resolution = resolver.resolve(&NeighborRequest {
             interface: plan.decision.interface.clone(),
             interface_source: source,
@@ -46,7 +48,7 @@ pub fn materialize<N: crate::neighbor::Resolver>(
         neighbor_resolution = Some(resolution);
     }
     if plan.mode == Mode::Layer2 && plan.source_mac.is_none() {
-        return Err(crate::neighbor::Error::MissingSourceMac {
+        return Err(Error::MissingSourceMac {
             interface: plan.decision.interface.name.clone(),
         });
     }
@@ -62,6 +64,52 @@ pub struct Materialized {
     pub neighbor_resolution: Option<NeighborResolution>,
 }
 
+impl Materialized {
+    /// Route for a complete Layer 2 frame whose interface and link-layer
+    /// envelope the caller already fixed, so no lookup or neighbor resolution
+    /// can change them.
+    ///
+    /// Only the interface identity and the Layer 2 mode reach the transmission
+    /// boundary; every field a route lookup would have decided stays empty
+    /// rather than being invented.
+    pub fn for_prepared_layer2_frame(
+        interface: InterfaceId,
+        source_mac: MacAddress,
+        destination_mac: MacAddress,
+        mtu: u32,
+        link_type: LinkType,
+    ) -> Self {
+        Self {
+            plan: Plan {
+                decision: Decision {
+                    interface,
+                    source_mac: Some(source_mac),
+                    selected_source: None,
+                    preferred_source: None,
+                    next_hop: None,
+                    selection_reason: SelectionReason::InterfaceOnly,
+                    destination_scope: Scope::Unspecified,
+                    mtu,
+                    capability: Capability::Layer2,
+                    link_type,
+                },
+                mode: Mode::Layer2,
+                lookup_destination: None,
+                final_destination: None,
+                visited_destinations: Vec::new(),
+                packet_source: None,
+                neighbor_source: None,
+                neighbor_target: None,
+                destination_mac: Some(destination_mac),
+                source_mac: Some(source_mac),
+                neighbor_vlan_tags: Vec::new(),
+                synthesized_ethernet: false,
+            },
+            neighbor_resolution: None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -71,13 +119,12 @@ mod tests {
 
     use packetcraftr_core::frame::LinkType;
 
+    use packetcraftr_core::error::Classified;
+
     use super::*;
     use crate::{
         capture::Statistics,
-        interface::Id as InterfaceId,
-        link::{Capability, MacAddress},
-        neighbor::{VlanKind, VlanTag},
-        route::{Decision, Scope, SelectionReason},
+        link::{VlanKind, VlanTag},
     };
 
     const INTERFACE_MAC: MacAddress = MacAddress([0x02, 0, 0, 0, 0, 1]);
@@ -223,35 +270,27 @@ mod tests {
     }
 
     #[test]
-    fn materialize_rejects_each_missing_layer2_input_before_resolution() {
-        type InvalidCase = (fn(&mut Plan), crate::neighbor::Error);
+    fn materialize_reports_each_missing_layer2_input_as_a_route_defect() {
+        type InvalidCase = (fn(&mut Plan), fn(&Error) -> bool);
         let cases: [InvalidCase; 4] = [
             (
                 |plan| plan.neighbor_target = None,
-                crate::neighbor::Error::MissingNeighborTarget {
-                    interface: "fixture0".to_owned(),
-                },
+                |error| matches!(error, Error::MissingNeighborTarget { .. }),
             ),
             (
                 |plan| plan.neighbor_source = None,
-                crate::neighbor::Error::MissingNeighborSource {
-                    interface: "fixture0".to_owned(),
-                },
+                |error| matches!(error, Error::MissingNeighborSource { .. }),
             ),
             (
                 |plan| plan.decision.source_mac = None,
-                crate::neighbor::Error::MissingSourceMac {
-                    interface: "fixture0".to_owned(),
-                },
+                |error| matches!(error, Error::MissingSourceMac { .. }),
             ),
             (
                 |plan| {
                     plan.destination_mac = Some(RESOLVED_MAC);
                     plan.source_mac = None;
                 },
-                crate::neighbor::Error::MissingSourceMac {
-                    interface: "fixture0".to_owned(),
-                },
+                |error| matches!(error, Error::MissingSourceMac { .. }),
             ),
         ];
 
@@ -260,7 +299,13 @@ mod tests {
             remove_input(&mut plan);
             let resolver = RecordingResolver::default();
 
-            assert_eq!(materialize(plan, &resolver), Err(expected));
+            let error = materialize(plan, &resolver).expect_err("incomplete Layer 2 plan");
+            assert!(expected(&error), "{error}");
+            assert_eq!(
+                error.classification().code,
+                "internal.route_contract",
+                "{error}"
+            );
             assert!(
                 resolver
                     .requests
@@ -269,5 +314,34 @@ mod tests {
                     .is_empty()
             );
         }
+    }
+
+    #[test]
+    fn a_prepared_layer2_route_invents_no_route_lookup_field() {
+        let route = Materialized::for_prepared_layer2_frame(
+            InterfaceId {
+                name: "fixture0".to_owned(),
+                index: 7,
+            },
+            INTERFACE_MAC,
+            RESOLVED_MAC,
+            1_400,
+            LinkType::ETHERNET,
+        );
+
+        assert_eq!(route.plan.mode, Mode::Layer2);
+        assert_eq!(route.plan.decision.interface.name, "fixture0");
+        assert_eq!(route.plan.source_mac, Some(INTERFACE_MAC));
+        assert_eq!(route.plan.destination_mac, Some(RESOLVED_MAC));
+        assert_eq!(route.plan.decision.selected_source, None);
+        assert_eq!(route.plan.lookup_destination, None);
+        assert_eq!(route.plan.final_destination, None);
+        assert_eq!(route.plan.packet_source, None);
+        assert_eq!(route.plan.neighbor_source, None);
+        assert_eq!(route.plan.neighbor_target, None);
+        assert!(route.plan.visited_destinations.is_empty());
+        assert!(route.plan.neighbor_vlan_tags.is_empty());
+        assert_eq!(route.neighbor_resolution, None);
+        assert!(!route.plan.needs_neighbor_resolution());
     }
 }

@@ -1,9 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::super::layer::{Layer, Padding};
+use crate::layer::{Layer, Padding};
 
-pub(super) fn check_padding_boundary_removal(layers: &[Box<dyn Layer>], index: usize) -> bool {
+/// Whether removing the layer at `index` would leave a padding layer whose
+/// declared boundary no longer has a layer to sit outside of.
+pub(super) fn removal_would_orphan_padding(layers: &[Box<dyn Layer>], index: usize) -> bool {
     layers.iter().enumerate().any(|(padding_index, layer)| {
         layer
             .as_any()

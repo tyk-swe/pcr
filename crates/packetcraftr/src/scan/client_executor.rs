@@ -3,12 +3,12 @@
 
 use crate::BoundaryError;
 use crate::ExchangeExecutor;
-use crate::probe::client_executor::ExecutorFault;
+use crate::probe::client_executor::{ExecutorFault, WorkflowOverrides};
 use packetcraftr_core::field::FieldValue;
 use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Sender as PacketIo};
 
 use super::classification::classify_response;
-use super::model::{Batch, Execution, Executor, Transport};
+use super::model::{Batch, Execution, Executor, Probe, Transport};
 
 const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
     "cli.scan_executor",
@@ -17,7 +17,7 @@ const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
 
 /// Executes homogeneous scan batches through the client's capture-ready
 /// exchange lifecycle.
-impl<R, N, I> Executor for ExchangeExecutor<'_, R, N, I>
+impl<R, N, I> Executor<Probe> for ExchangeExecutor<'_, R, N, I>
 where
     R: packetcraftr_netio::route::Provider,
     N: packetcraftr_netio::neighbor::Resolver,
@@ -30,13 +30,13 @@ where
             .ok_or_else(|| EXECUTOR_FAULT.invalid("scan executor received an empty batch"))?;
         if batch.probes.iter().any(|probe| {
             probe.address != first.address
-                || probe.transport != first.transport
+                || probe.endpoint.transport() != first.endpoint.transport()
                 || probe.attempt != first.attempt
         }) {
             return Err(EXECUTOR_FAULT
                 .invalid("scan executor batches must share address, transport, and attempt"));
         }
-        if first.transport == Transport::Icmp && batch.probes.len() != 1 {
+        if first.endpoint.transport() == Transport::Icmp && batch.probes.len() != 1 {
             return Err(EXECUTOR_FAULT
                 .invalid("ICMP batches must contain exactly one uniquely identified echo probe"));
         }
@@ -55,7 +55,8 @@ where
                 .iter()
                 .map(|probe| {
                     probe
-                        .port
+                        .endpoint
+                        .port()
                         .map(|port| FieldValue::Unsigned(u64::from(port)))
                         .ok_or_else(|| {
                             EXECUTOR_FAULT
@@ -65,17 +66,30 @@ where
                 .collect::<Result<Vec<_>, _>>()?;
             template = template.axis(1, "destination_port", ports);
         }
+        let mut matches_request =
+            |request_index: usize,
+             sent: &packetcraftr_core::Packet,
+             response: &packetcraftr_core::decode::DecodedPacket| {
+                batch.probes.get(request_index).is_some_and(|probe| {
+                    classify_response(
+                        self.client.registry(),
+                        probe.endpoint.transport(),
+                        sent,
+                        response,
+                    )
+                    .is_some()
+                })
+            };
         let exchange = self.exchange_for_workflow(
             &template,
-            batch.timeout,
-            batch.probes.len(),
-            first.address,
-            |request_index, sent, response| {
-                batch.probes.get(request_index).is_some_and(|probe| {
-                    classify_response(self.client.registry(), probe.transport, sent, response)
-                        .is_some()
-                })
+            WorkflowOverrides {
+                timeout: batch.timeout,
+                max_template_packets: batch.probes.len(),
+                destination: first.address,
+                max_responses: None,
             },
+            &mut matches_request,
+            None,
         )?;
         Ok(Execution::from_exchange(batch.permit, exchange))
     }

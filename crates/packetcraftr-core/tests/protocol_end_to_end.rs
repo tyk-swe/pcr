@@ -35,7 +35,7 @@ use packetcraftr_core::registry::Registry;
 use packetcraftr_core::{Packet, build, decode};
 
 fn registry() -> Arc<Registry> {
-    Arc::new(builtin::registry().expect("built-in registry"))
+    builtin::registry()
 }
 
 /// A spare link type these tests bind to an explicit root protocol so a
@@ -1053,4 +1053,90 @@ fn corrupted_builtin_checksums_report_integrity_failures() {
             .copied()
             .collect::<BTreeSet<_>>()
     );
+}
+
+#[test]
+fn field_aliases_resolve_through_reflection_construction_and_filters_alike() {
+    use std::collections::BTreeMap;
+
+    use packetcraftr_core::field::FieldValue;
+
+    let registry = registry();
+
+    // Reflection accepts an alias wherever it accepts the canonical name, so a
+    // template axis or fuzz target may name `dst`.
+    let mut ipv4 = Ipv4 {
+        source: Ipv4Addr::new(192, 0, 2, 1),
+        destination: Ipv4Addr::new(198, 51, 100, 2),
+        ..Ipv4::default()
+    };
+    assert_eq!(ipv4.field("dst"), ipv4.field("destination"));
+    ipv4.set_field("dst", FieldValue::Ipv4(Ipv4Addr::new(203, 0, 113, 9)))
+        .expect("an alias is settable");
+    assert_eq!(ipv4.destination, Ipv4Addr::new(203, 0, 113, 9));
+
+    // Construction accepts the alias too, and refuses both spellings at once
+    // rather than silently dropping one value.
+    let codec = registry.codec_named("ipv4").expect("IPv4 codec");
+    let mut fields = BTreeMap::new();
+    fields.insert(
+        "dst".to_owned(),
+        FieldValue::Ipv4(Ipv4Addr::new(198, 51, 100, 7)),
+    );
+    let built = codec.make_layer(&fields).expect("alias-only construction");
+    assert_eq!(
+        built.field("destination"),
+        Some(FieldValue::Ipv4(Ipv4Addr::new(198, 51, 100, 7)))
+    );
+    fields.insert(
+        "destination".to_owned(),
+        FieldValue::Ipv4(Ipv4Addr::new(198, 51, 100, 8)),
+    );
+    let conflict = codec
+        .make_layer(&fields)
+        .expect_err("both spellings of one field are refused");
+    assert!(
+        conflict.to_string().contains("both dst and destination"),
+        "{conflict}"
+    );
+
+    // Aliases stay out of the published field list and the canonical filter
+    // namespace: `ip.src` keeps resolving through its registered binding.
+    let schema = registry.schema("ipv4").expect("IPv4 schema");
+    assert!(
+        schema.fields.iter().all(|field| field.name != "dst"),
+        "aliases must not appear as published fields"
+    );
+    for path in ["ip.src", "ipv4.source"] {
+        Filter::compile(
+            &format!("{path} == 192.0.2.1"),
+            &registry,
+            packetcraftr_core::filter::Options::default(),
+        )
+        .unwrap_or_else(|error| panic!("{path}: {error}"));
+    }
+}
+
+#[test]
+fn pseudo_header_failures_name_the_calling_protocol() {
+    let registry = registry();
+    let builder = build::Builder::new(Arc::clone(&registry));
+    for (protocol, layer) in [
+        ("tcp", Box::new(Tcp::default()) as Box<dyn Layer>),
+        ("udp", Box::new(Udp::default())),
+        ("icmpv6", Box::new(Icmpv6::default())),
+    ] {
+        let mut packet = Packet::new();
+        packet.push_boxed(layer);
+        let error = builder
+            .clone()
+            .build(packet, build::Context::default(), build::Options::default())
+            .err()
+            .unwrap_or_else(|| panic!("{protocol} without an IP envelope must not build"));
+        let message = error.to_string();
+        assert!(
+            message.contains(&format!("invalid {protocol} layer")),
+            "{protocol}: {message}"
+        );
+    }
 }

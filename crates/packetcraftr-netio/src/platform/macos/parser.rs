@@ -3,8 +3,6 @@
 
 //! Pure bounded parsers for Darwin socket-address records.
 
-#![forbid(unsafe_code)]
-
 use std::{
     mem::{offset_of, size_of},
     net::{IpAddr, Ipv4Addr, Ipv6Addr},

@@ -17,7 +17,7 @@ use crate::{
 use super::NativeCaptureStatistics;
 
 pub(super) struct SharedCapture {
-    pub(super) state: Mutex<CaptureState>,
+    state: Mutex<CaptureState>,
     changed: Condvar,
     limits: Limits,
 }
@@ -31,40 +31,45 @@ impl SharedCapture {
         }
     }
 
-    pub(super) fn lock(&self) -> Result<MutexGuard<'_, CaptureState>, Error> {
-        self.state.lock().map_err(|_| Error::Capture {
-            message: "native capture queue mutex was poisoned".to_owned(),
-        })
+    /// Poisoning is always recovered from rather than reported.
+    ///
+    /// `CaptureState` is plain data with no cross-field invariant to break
+    /// halfway: every mutation below computes into locals and commits each
+    /// counter, the queue, and the terminal error in one step, so a panic
+    /// while the lock is held cannot leave a partially applied update. A
+    /// worker that panics has already recorded its terminal error through
+    /// `set_error`, and refusing the lock afterwards would hide that evidence
+    /// from the reader instead of surfacing it.
+    pub(super) fn lock(&self) -> MutexGuard<'_, CaptureState> {
+        self.state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
+    /// Waits for a state change, returning the guard and whether it timed out.
+    ///
+    /// Poisoning is recovered from for the reason given on [`Self::lock`].
     pub(super) fn wait_timeout<'a>(
         &self,
         state: MutexGuard<'a, CaptureState>,
         timeout: Duration,
-    ) -> Result<(MutexGuard<'a, CaptureState>, bool), Error> {
-        self.changed
+    ) -> (MutexGuard<'a, CaptureState>, bool) {
+        let (state, result) = self
+            .changed
             .wait_timeout(state, timeout)
-            .map(|(state, result)| (state, result.timed_out()))
-            .map_err(|_| Error::Capture {
-                message: "native capture queue mutex was poisoned".to_owned(),
-            })
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        (state, result.timed_out())
     }
 
     pub(super) fn set_ready(&self) {
-        let mut state = self
-            .state
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut state = self.lock();
         state.ready = true;
         drop(state);
         self.changed.notify_all();
     }
 
     pub(super) fn set_error(&self, error: Error) {
-        let mut state = self
-            .state
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut state = self.lock();
         if state.error.is_none() {
             state.error = Some(error);
         }
@@ -74,17 +79,14 @@ impl SharedCapture {
     }
 
     pub(super) fn close(&self) {
-        let mut state = self
-            .state
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut state = self.lock();
         state.closed = true;
         drop(state);
         self.changed.notify_all();
     }
 
     pub(super) fn enqueue(&self, captured: Captured) -> Result<(), Error> {
-        let mut state = self.lock()?;
+        let mut state = self.lock();
         let frame_bytes = captured.frame.bytes().len();
         let mut queued_bytes = state.queued_bytes;
         let mut statistics = state.statistics;
@@ -192,7 +194,7 @@ impl SharedCapture {
         if total_drop_delta == 0 {
             return Ok(());
         }
-        let mut state = self.lock()?;
+        let mut state = self.lock();
         let mut statistics = state.statistics;
         increment(
             &mut statistics.dropped_frames,
@@ -294,7 +296,7 @@ mod tests {
             let result = queue.enqueue(captured(&[3, 3, 3]));
             assert_eq!(result.is_err(), policy == OverflowPolicy::Fail);
 
-            let state = queue.lock().expect("queue state");
+            let state = queue.lock();
             let retained = state
                 .queue
                 .iter()
@@ -328,7 +330,7 @@ mod tests {
             .enqueue(captured(&[3, 3, 3, 3, 3]))
             .expect("an individually oversized frame is dropped by policy");
 
-        let state = queue.lock().expect("queue state");
+        let state = queue.lock();
         assert_eq!(state.queue.len(), 2);
         assert_eq!(state.queued_bytes, 4);
         assert_eq!(state.statistics.received_frames, 2);
@@ -341,10 +343,8 @@ mod tests {
     #[test]
     fn queue_state_transitions_are_monotonic_and_preserve_the_first_error() {
         let queue = queue(OverflowPolicy::Fail, 1, 1);
-        let state = queue.lock().expect("queue state");
-        let (state, _) = queue
-            .wait_timeout(state, Duration::ZERO)
-            .expect("unpoisoned condition variable");
+        let state = queue.lock();
+        let (state, _) = queue.wait_timeout(state, Duration::ZERO);
         assert!(!state.ready);
         assert!(!state.closed);
         assert!(state.error.is_none());
@@ -354,35 +354,33 @@ mod tests {
         queue.set_ready();
         queue.set_error(Error::Capture {
             message: "first failure".to_owned(),
+            source: None,
         });
         queue.set_error(Error::Capture {
             message: "later failure".to_owned(),
+            source: None,
         });
         queue.close();
 
-        let state = queue.lock().expect("queue state");
+        let state = queue.lock();
         assert!(state.ready);
         assert!(state.closed);
         assert!(matches!(
             state.error.as_ref(),
-            Some(Error::Capture { message }) if message == "first failure"
+            Some(Error::Capture { message, .. }) if message == "first failure"
         ));
     }
 
     #[test]
     fn queue_counter_overflow_does_not_partially_commit_a_frame_or_loss_event() {
         let received = queue(OverflowPolicy::Fail, 1, 1);
-        received
-            .lock()
-            .expect("queue state")
-            .statistics
-            .received_frames = u64::MAX;
+        received.lock().statistics.received_frames = u64::MAX;
         assert!(matches!(
             received.enqueue(captured(&[1])),
             Err(Error::InvalidCaptureStatistics { .. })
         ));
         {
-            let state = received.lock().expect("queue state");
+            let state = received.lock();
             assert!(state.queue.is_empty());
             assert_eq!(state.queued_bytes, 0);
             assert_eq!(state.statistics.received_frames, u64::MAX);
@@ -391,16 +389,12 @@ mod tests {
 
         let overflow = queue(OverflowPolicy::Fail, 1, 1);
         overflow.enqueue(captured(&[1])).expect("first frame");
-        overflow
-            .lock()
-            .expect("queue state")
-            .statistics
-            .overflow_events = u64::MAX;
+        overflow.lock().statistics.overflow_events = u64::MAX;
         assert!(matches!(
             overflow.enqueue(captured(&[2])),
             Err(Error::InvalidCaptureStatistics { .. })
         ));
-        let state = overflow.lock().expect("queue state");
+        let state = overflow.lock();
         assert_eq!(state.queue.len(), 1);
         assert_eq!(state.statistics.overflow_events, u64::MAX);
         assert_eq!(state.statistics.dropped_frames, 0);
@@ -421,12 +415,12 @@ mod tests {
             )
             .expect("each wrapped counter advanced once");
         {
-            let state = queue.lock().expect("queue state");
+            let state = queue.lock();
             assert_eq!(state.statistics.dropped_frames, 3);
             assert_eq!(state.statistics.receiver_dropped_frames, 3);
         }
 
-        queue.lock().expect("queue state").statistics.dropped_frames = u64::MAX;
+        queue.lock().statistics.dropped_frames = u64::MAX;
         let error = queue
             .add_native_drop_deltas(
                 NativeCaptureStatistics::default(),
@@ -437,12 +431,12 @@ mod tests {
             )
             .expect_err("overflow must fail closed");
         assert!(matches!(error, Error::InvalidCaptureStatistics { .. }));
-        let state = queue.lock().expect("queue state");
+        let state = queue.lock();
         assert_eq!(state.statistics.dropped_frames, u64::MAX);
         assert_eq!(state.statistics.receiver_dropped_frames, 3);
 
         drop(state);
-        queue.lock().expect("queue state").statistics = Statistics {
+        queue.lock().statistics = Statistics {
             receiver_dropped_frames: u64::MAX,
             ..Statistics::default()
         };
@@ -456,7 +450,7 @@ mod tests {
             )
             .expect_err("the second counter overflow must not commit the first");
         assert!(matches!(error, Error::InvalidCaptureStatistics { .. }));
-        let state = queue.lock().expect("queue state");
+        let state = queue.lock();
         assert_eq!(state.statistics.dropped_frames, 0);
         assert_eq!(state.statistics.receiver_dropped_frames, u64::MAX);
     }

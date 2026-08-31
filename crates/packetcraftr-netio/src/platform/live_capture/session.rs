@@ -46,13 +46,30 @@ pub(in crate::platform) struct NativeCaptureSession {
     metadata: Metadata,
     shared: Arc<SharedCapture>,
     stop: Arc<AtomicBool>,
-    interrupt: Option<Arc<dyn CaptureInterrupt>>,
-    worker: Option<JoinHandle<()>>,
+    /// Present exactly while a native worker is still owned by this session.
+    ///
+    /// The three parts are acquired together and released together: the
+    /// cleanup permit is reserved before the worker exists, and the interrupt
+    /// stays alive until the worker has stopped. Keeping them in one value is
+    /// what makes "worker without a permit" unrepresentable.
+    running: Option<RunningCapture>,
     reaper: ReaperClient,
-    reaper_permit: Option<ReaperPermit>,
     shutdown_timeout: Duration,
-    shutdown_attempted: bool,
-    shutdown_result: Option<Result<(), Error>>,
+    shutdown: Shutdown,
+}
+
+struct RunningCapture {
+    worker: JoinHandle<()>,
+    interrupt: Arc<dyn CaptureInterrupt>,
+    permit: ReaperPermit,
+}
+
+enum Shutdown {
+    NotAttempted,
+    /// Shutdown ran but its finite deadline expired, so the worker is still
+    /// owned and an explicit retry is still allowed.
+    Incomplete,
+    Finished(Result<(), Error>),
 }
 
 impl NativeCaptureSession {
@@ -80,13 +97,15 @@ impl NativeCaptureSession {
         // Both fallible cleanup-service steps happen before the source worker
         // is created, so failure cannot leave an unmanaged native worker.
         let reaper = reaper.map_err(|error| Error::Capture {
-            message: format!("native capture cleanup is unavailable: {error}"),
+            message: "native capture cleanup is unavailable".to_owned(),
+            source: Some(Arc::new(error)),
         })?;
         let reaper_permit = reaper.reserve().map_err(|error| Error::Capture {
             message: format!(
                 "native capture cleanup capacity {} is exhausted",
                 error.capacity
             ),
+            source: None,
         })?;
         let NativeCaptureParts {
             source,
@@ -118,23 +137,26 @@ impl NativeCaptureSession {
                 {
                     panic_shared.set_error(Error::Capture {
                         message: "native capture worker panicked".to_owned(),
+                        source: None,
                     });
                 }
             })
             .map_err(|error| Error::Capture {
-                message: format!("could not start the owned capture worker: {error}"),
+                message: "could not start the owned capture worker".to_owned(),
+                source: Some(Arc::new(error)),
             })?;
         Ok(Self {
             metadata,
             shared,
             stop,
-            interrupt: Some(interrupt),
-            worker: Some(worker),
+            running: Some(RunningCapture {
+                worker,
+                interrupt,
+                permit: reaper_permit,
+            }),
             reaper,
-            reaper_permit: Some(reaper_permit),
             shutdown_timeout,
-            shutdown_attempted: false,
-            shutdown_result: None,
+            shutdown: Shutdown::NotAttempted,
         })
     }
 }
@@ -146,14 +168,14 @@ impl Session for NativeCaptureSession {
 
     fn wait_ready(&mut self, timeout: Duration) -> Result<(), Error> {
         let deadline = capture_deadline(timeout)?;
-        let mut state = self.shared.lock()?;
+        let mut state = self.shared.lock();
         while !state.ready && !state.closed && state.error.is_none() {
             let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
                 return Err(Error::CaptureReadiness {
                     message: "capture readiness deadline expired".to_owned(),
                 });
             };
-            let (next, timed_out) = self.shared.wait_timeout(state, remaining)?;
+            let (next, timed_out) = self.shared.wait_timeout(state, remaining);
             state = next;
             if timed_out && !state.ready && !state.closed && state.error.is_none() {
                 return Err(Error::CaptureReadiness {
@@ -179,7 +201,7 @@ impl Session for NativeCaptureSession {
 
     fn next_captured_frame(&mut self, timeout: Duration) -> Result<Option<Captured>, Error> {
         let deadline = capture_deadline(timeout)?;
-        let mut state = self.shared.lock()?;
+        let mut state = self.shared.lock();
         loop {
             if let Some(captured) = state.queue.front() {
                 let queued_bytes = state
@@ -201,7 +223,7 @@ impl Session for NativeCaptureSession {
             let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
                 return Ok(None);
             };
-            let (next_state, timed_out) = self.shared.wait_timeout(state, remaining)?;
+            let (next_state, timed_out) = self.shared.wait_timeout(state, remaining);
             state = next_state;
             if timed_out {
                 continue;
@@ -214,38 +236,54 @@ impl Session for NativeCaptureSession {
     }
 
     fn statistics(&self) -> Statistics {
-        self.shared
-            .state
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .statistics
+        self.shared.lock().statistics
     }
 }
 
 impl NativeCaptureSession {
     fn shutdown_with_timeout(&mut self, timeout: Duration) -> Result<(), Error> {
-        if let Some(result) = &self.shutdown_result {
+        if let Shutdown::Finished(result) = &self.shutdown {
             return result.clone();
         }
-        self.shutdown_attempted = true;
+        self.shutdown = Shutdown::Incomplete;
         self.stop.store(true, Ordering::Release);
-        let interrupt_result = self.interrupt.as_ref().map_or(Ok(()), |interrupt| {
-            catch_unwind(AssertUnwindSafe(|| interrupt.interrupt())).map_err(|_| Error::Capture {
-                message: "native capture interrupt panicked during shutdown".to_owned(),
-            })
-        });
 
-        let join_result = match join_worker(&mut self.worker, timeout) {
-            JoinAttempt::TimedOut(error) => return Err(error),
-            JoinAttempt::Finished(result) => result,
+        let stopped = match self.running.take() {
+            None => Ok(()),
+            Some(RunningCapture {
+                worker,
+                interrupt,
+                permit,
+            }) => {
+                let interrupt_result = catch_unwind(AssertUnwindSafe(|| interrupt.interrupt()))
+                    .map_err(|_| Error::Capture {
+                        message: "native capture interrupt panicked during shutdown".to_owned(),
+                        source: None,
+                    });
+                match join_worker(worker, timeout) {
+                    JoinAttempt::TimedOut(worker) => {
+                        // The deadline expired with the worker still running,
+                        // so this session keeps the complete bundle and an
+                        // explicit retry stays possible.
+                        self.running = Some(RunningCapture {
+                            worker,
+                            interrupt,
+                            permit,
+                        });
+                        return Err(Error::DeadlineExceeded {
+                            operation: "shutting down native capture",
+                        });
+                    }
+                    // The worker is now known to be finished, so the native
+                    // interrupt and the cleanup permit are released here and
+                    // only here: after that ownership boundary has completed.
+                    JoinAttempt::Finished(join_result) => join_result.and(interrupt_result),
+                }
+            }
         };
-        // The worker is now known to be finished. It is safe to release the
-        // native interrupt only after this ownership boundary has completed.
-        self.interrupt.take();
-        self.reaper_permit.take();
 
-        let result = join_result.and(interrupt_result).and_then(|()| {
-            let mut state = self.shared.lock()?;
+        let result = stopped.and_then(|()| {
+            let mut state = self.shared.lock();
             state.closed = true;
             if state.error_observed {
                 Ok(())
@@ -256,70 +294,59 @@ impl NativeCaptureSession {
                 Ok(())
             }
         });
-        self.shutdown_result = Some(result.clone());
+        self.shutdown = Shutdown::Finished(result.clone());
         result
     }
 }
 
 enum JoinAttempt {
     Finished(Result<(), Error>),
-    TimedOut(Error),
+    /// The deadline expired first, so the still-running worker is handed back
+    /// to its owner rather than detached.
+    TimedOut(JoinHandle<()>),
 }
 
-fn join_worker(worker: &mut Option<JoinHandle<()>>, timeout: Duration) -> JoinAttempt {
+fn join_worker(worker: JoinHandle<()>, timeout: Duration) -> JoinAttempt {
     let Some(deadline) = Instant::now().checked_add(timeout) else {
-        return JoinAttempt::TimedOut(Error::DeadlineExceeded {
-            operation: "shutting down native capture",
-        });
+        return JoinAttempt::TimedOut(worker);
     };
-    loop {
-        let Some(handle) = worker.as_ref() else {
-            return JoinAttempt::Finished(Ok(()));
-        };
-        if handle.is_finished() {
-            break;
-        }
+    while !worker.is_finished() {
         let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
-            return JoinAttempt::TimedOut(Error::DeadlineExceeded {
-                operation: "shutting down native capture",
-            });
+            return JoinAttempt::TimedOut(worker);
         };
         thread::park_timeout(remaining.min(Duration::from_millis(10)));
     }
 
-    // `is_finished` is monotonic: once true, taking the handle cannot turn a
-    // still-running worker into an unowned detached thread.
-    let Some(handle) = worker.take() else {
-        return JoinAttempt::Finished(Ok(()));
-    };
-    JoinAttempt::Finished(handle.join().map_err(|_| Error::Capture {
+    // `is_finished` is monotonic: once true, joining cannot block on a worker
+    // that is still running.
+    JoinAttempt::Finished(worker.join().map_err(|_| Error::Capture {
         message: "native capture worker panicked during shutdown".to_owned(),
+        source: None,
     }))
 }
 
 impl Drop for NativeCaptureSession {
     fn drop(&mut self) {
-        if !self.shutdown_attempted {
+        if matches!(self.shutdown, Shutdown::NotAttempted) {
             let _ = catch_unwind(AssertUnwindSafe(|| self.shutdown()));
         }
-        if let Some(worker) = self.worker.take() {
+        if let Some(RunningCapture {
+            worker,
+            interrupt,
+            permit,
+        }) = self.running.take()
+        {
             // Explicit shutdown has already used its finite deadline. A
-            // running worker is transferred, together with its interrupt, to
-            // an owner that can wait without blocking this Drop path.
-            if let Some(permit) = self.reaper_permit.take() {
-                let _ = transfer_capture_worker(
-                    worker,
-                    Arc::clone(&self.stop),
-                    self.interrupt.take(),
-                    permit,
-                    &self.reaper,
-                );
-            } else {
-                // This state is unreachable through the constructors, but a
-                // cleanup path must still fail safely if its invariant is ever
-                // broken: retain the complete remaining lifetime bundle.
-                std::mem::forget((worker, Arc::clone(&self.stop), self.interrupt.take()));
-            }
+            // running worker is transferred, together with its interrupt and
+            // its cleanup permit, to an owner that can wait without blocking
+            // this Drop path.
+            let _ = transfer_capture_worker(
+                worker,
+                Arc::clone(&self.stop),
+                interrupt,
+                permit,
+                &self.reaper,
+            );
         }
     }
 }
@@ -337,10 +364,11 @@ mod tests {
     use bytes::Bytes;
     use packetcraftr_core::frame::LinkType;
 
-    use super::super::{
+    use super::*;
+    use crate::error::testing::assert_same_failure;
+    use crate::platform::live_capture::{
         NativeCaptureEvent, NativeCaptureSource, NativeCaptureStatistics, NativeCapturedPacket,
     };
-    use super::*;
     use crate::{
         capture::{Limits, Metadata},
         interface::Id as InterfaceId,
@@ -422,6 +450,7 @@ mod tests {
             }
             self.release.recv().map_err(|_| Error::Capture {
                 message: "fake capture release channel closed".to_owned(),
+                source: None,
             })?;
             if let Some(finished) = self.finished.take() {
                 let _ = finished.send(());
@@ -461,6 +490,7 @@ mod tests {
             self.events.pop_front().unwrap_or_else(|| {
                 Err(Error::Capture {
                     message: "scripted source exhausted".to_owned(),
+                    source: None,
                 })
             })
         }
@@ -507,7 +537,7 @@ mod tests {
         finished
             .recv_timeout(Duration::from_secs(1))
             .expect("scripted capture worker should reach its terminal state");
-        let state = session.shared.lock().expect("scripted capture state");
+        let state = session.shared.lock();
         assert!(state.error.is_some());
         assert_eq!(state.queue.len(), queued_frames);
     }
@@ -564,17 +594,17 @@ mod tests {
                 operation: "shutting down native capture"
             })
         ));
-        assert!(session.worker.is_some());
-        assert!(session.interrupt.is_some());
+        assert!(session.running.is_some());
         assert_eq!(interrupt.calls.load(Ordering::SeqCst), 1);
 
         release_sender
             .send(())
             .expect("release fake capture worker");
-        assert_eq!(session.shutdown(), Ok(()));
-        assert!(session.worker.is_none());
-        assert!(session.interrupt.is_none());
-        assert_eq!(session.shutdown(), Ok(()));
+        session.shutdown().expect("released worker shuts down");
+        assert!(session.running.is_none());
+        session
+            .shutdown()
+            .expect("shutdown after the worker is gone is idempotent");
         assert_eq!(interrupt.calls.load(Ordering::SeqCst), 2);
     }
 
@@ -605,14 +635,13 @@ mod tests {
         let second = session
             .shutdown()
             .expect_err("cached worker panic must remain terminal");
-        assert_eq!(first, second);
+        assert_same_failure(&first, &second);
         assert!(matches!(
             first,
-            Error::Capture { ref message }
+            Error::Capture { ref message, .. }
                 if message == "native capture worker panicked"
         ));
-        assert!(session.worker.is_none());
-        assert!(session.interrupt.is_none());
+        assert!(session.running.is_none());
         assert_eq!(interrupt.calls.load(Ordering::SeqCst), 1);
     }
 
@@ -621,6 +650,7 @@ mod tests {
         let ingress = Instant::now();
         let terminal = Error::Capture {
             message: "source failed after one frame".to_owned(),
+            source: None,
         };
         let interrupt = Arc::new(FakeInterrupt::default());
         let (mut session, finished) = scripted_session(
@@ -650,11 +680,11 @@ mod tests {
         assert_eq!(captured.frame.original_length(), 5);
         assert_eq!(captured.frame.interface, Some(9));
         assert_eq!(captured.received_at, Some(ingress));
-        assert_eq!(
-            session
+        assert_same_failure(
+            &session
                 .next_captured_frame(Duration::ZERO)
                 .expect_err("terminal error follows queued evidence"),
-            terminal
+            &terminal,
         );
         assert_eq!(
             session.statistics(),
@@ -690,7 +720,7 @@ mod tests {
             .expect_err("invalid frame must fail closed");
         assert!(matches!(
             error,
-            Error::Capture { ref message }
+            Error::Capture { ref message, .. }
                 if message.contains("native capture returned an invalid frame")
         ));
         assert!(matches!(

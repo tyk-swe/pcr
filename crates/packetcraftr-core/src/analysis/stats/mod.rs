@@ -10,15 +10,13 @@ use std::time::{Duration, SystemTime};
 use crate::protocol::network::{Ipv4, Ipv6};
 
 use crate::analysis::Error;
-use crate::analysis::IpReassemblyReport;
+use crate::analysis::StreamTransport;
 use crate::analysis::conversation_index::CanonicalFlow;
-use crate::analysis::pipeline::FrameRecord;
+use crate::analysis::pipeline::{FrameRecord, Summary as RunSummary};
 use crate::analysis::reassembly::tcp::ScopedFlowKey;
 
 mod report;
-pub use report::{
-    ConversationStat, EndpointStat, IoBucketStat, PortStat, ProtocolStat, Report, TransportKind,
-};
+pub use report::{ConversationStat, EndpointStat, IoBucketStat, PortStat, ProtocolStat, Report};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct Tally {
@@ -69,9 +67,9 @@ pub struct Collector {
     last_timestamp: Option<SystemTime>,
     io_origin: Option<SystemTime>,
     protocols: BTreeMap<String, Tally>,
-    conversations: BTreeMap<(TransportKind, u64), ConversationState>,
+    conversations: BTreeMap<(StreamTransport, u64), ConversationState>,
     endpoints: BTreeMap<IpAddr, EndpointTally>,
-    ports: BTreeMap<(TransportKind, u16), Tally>,
+    ports: BTreeMap<(StreamTransport, u16), Tally>,
     io: BTreeMap<u64, Tally>,
 }
 
@@ -101,15 +99,9 @@ impl Collector {
     }
 
     /// Folds one matched frame into every table.
-    pub fn observe(&mut self, record: &FrameRecord<'_>) -> Result<(), Error> {
+    pub fn observe(&mut self, record: &FrameRecord<'_>) {
         let bytes = u64::from(record.decoded.frame.captured_length());
-        let timestamp = record
-            .decoded
-            .frame
-            .timestamp
-            .ok_or(Error::TimestampUnavailable {
-                number: record.number,
-            })?;
+        let timestamp = record.timestamp;
         self.frames = self.frames.saturating_add(1);
         self.bytes = self.bytes.saturating_add(bytes);
         self.observe_time(timestamp, bytes);
@@ -137,12 +129,11 @@ impl Collector {
 
         // Use pipeline-assigned stream IDs for stable conversation and port stats.
         if let (Some(stream), Some(flow)) = (record.tcp_stream, record.tcp_flow) {
-            self.record_conversation(TransportKind::Tcp, stream, flow, bytes, timestamp);
+            self.record_conversation(StreamTransport::Tcp, stream, flow, bytes, timestamp);
         }
         if let (Some(stream), Some(flow)) = (record.udp_stream, record.udp_flow) {
-            self.record_conversation(TransportKind::Udp, stream, flow, bytes, timestamp);
+            self.record_conversation(StreamTransport::Udp, stream, flow, bytes, timestamp);
         }
-        Ok(())
     }
 
     fn observe_time(&mut self, timestamp: SystemTime, bytes: u64) {
@@ -171,7 +162,7 @@ impl Collector {
 
     fn record_conversation(
         &mut self,
-        transport: TransportKind,
+        transport: StreamTransport,
         stream: u64,
         flow: &ScopedFlowKey,
         bytes: u64,
@@ -208,11 +199,13 @@ impl Collector {
         }
     }
 
-    /// Finishes the pass and attaches capture-global IP fragment accounting.
+    /// Finishes the pass and attaches the run's capture-global IP fragment
+    /// accounting.
     ///
     /// Physical frame and byte totals remain those observed by this collector;
     /// derived datagram and payload bytes live only in `ip_reassembly`.
-    pub fn finish(self, ip_reassembly: IpReassemblyReport) -> Report {
+    pub fn finish(self, summary: &RunSummary) -> Report {
+        let ip_reassembly = summary.ip_reassembly.clone();
         let mut protocols = self
             .protocols
             .into_iter()

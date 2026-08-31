@@ -34,7 +34,7 @@ const REQUIRES_PACKET_CONTEXT_OR_CHILD: &[&str] = &[
 
 #[test]
 fn constructible_defaults_either_build_standalone_or_require_declared_context() {
-    let registry = Arc::new(builtin::registry().expect("built-in registry should be valid"));
+    let registry = builtin::registry();
     let builder = build::Builder::new(Arc::clone(&registry));
     let mut rejected = Vec::new();
     let mut built_count = 0_usize;
@@ -73,14 +73,26 @@ fn constructible_defaults_either_build_standalone_or_require_declared_context() 
 
 #[test]
 fn exact_round_trip_builtins_decode_their_own_default_wire_image() {
-    let registry = Arc::new(builtin::registry().expect("built-in registry should be valid"));
+    let registry = builtin::registry();
     let builder = build::Builder::new(Arc::clone(&registry));
     let mut rejected = Vec::new();
     let mut round_trip_count = 0_usize;
 
+    // `dissect` is true for every built-in row, so it selects nothing here.
+    // `exact_round_trip` is false only for a codec that cannot encode at all,
+    // which today is never a constructible one; this guard makes adding such a
+    // protocol a test failure rather than a silently skipped row.
+    assert!(
+        BUILTIN_PROTOCOLS
+            .iter()
+            .filter(|support| support.build)
+            .all(|support| support.exact_round_trip),
+        "a constructible codec that cannot round-trip needs its own coverage"
+    );
+
     for support in BUILTIN_PROTOCOLS
         .iter()
-        .filter(|support| support.build && support.dissect && support.exact_round_trip)
+        .filter(|support| support.build && support.exact_round_trip)
     {
         let codec = registry
             .codec(support.protocol)

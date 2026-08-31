@@ -10,8 +10,17 @@ use packetcraftr::output;
 pub(crate) use packetcraftr::output::envelope::StreamEncoder;
 
 /// Opens the process-wide NDJSON stream on stdout.
-pub(crate) fn stdout_stream(command: Option<output::contract::Command>) -> StreamEncoder {
+pub(crate) fn stdout_stream(command: output::contract::Command) -> StreamEncoder {
     StreamEncoder::new(command, io::stdout())
+}
+
+/// Writes the one NDJSON error record a failure before command selection can
+/// publish, which has no stream to join.
+pub(crate) fn write_unattributed_error(
+    command: Option<output::contract::Command>,
+    error: output::envelope::Error,
+) -> Result<(), output::envelope::EncodeError> {
+    output::envelope::write_unattributed_error(io::stdout(), command, error)
 }
 
 #[cfg(test)]
@@ -22,7 +31,7 @@ pub(crate) mod test_support {
 
     pub(crate) fn stream(command: output::contract::Command) -> (StreamEncoder, SharedBuffer) {
         let output = SharedBuffer::default();
-        (StreamEncoder::new(Some(command), output.clone()), output)
+        (StreamEncoder::new(command, output.clone()), output)
     }
 }
 
@@ -198,7 +207,7 @@ mod tests {
             output: buffer.clone(),
             flushes: 0,
         };
-        let stream = StreamEncoder::new(Some(output::contract::Command::Capture), writer);
+        let stream = StreamEncoder::new(output::contract::Command::Capture, writer);
         stream.emit_data(json!({"value": 0}), Vec::new()).unwrap();
         let error = stream
             .emit_data(json!({"value": 1}), Vec::new())

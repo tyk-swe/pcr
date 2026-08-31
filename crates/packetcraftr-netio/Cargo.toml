@@ -28,8 +28,10 @@ native-route = [
     "dep:tokio",
     "dep:windows",
 ]
-native-layer2 = ["native-interfaces", "dep:libloading", "dep:pcap"]
-native-layer3 = ["native-interfaces", "dep:socket2"]
+# `dep:libc` covers the `if_nametoindex`/`if_indextoname` identity check that
+# every Layer 2 and Layer 3 injection performs on Linux and macOS.
+native-layer2 = ["native-interfaces", "dep:libc", "dep:libloading", "dep:pcap"]
+native-layer3 = ["native-interfaces", "dep:libc", "dep:socket2"]
 
 [dependencies]
 bytes.workspace = true
@@ -38,6 +40,7 @@ thiserror.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 futures-util = { workspace = true, optional = true }
+libc = { workspace = true, optional = true }
 pcap = { workspace = true, optional = true }
 rtnetlink = { workspace = true, optional = true }
 socket2 = { workspace = true, optional = true }

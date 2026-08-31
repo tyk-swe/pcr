@@ -3,6 +3,7 @@
 
 //! Route-planning failures and their stable classifications.
 
+use std::error::Error as StdError;
 use std::net::IpAddr;
 
 use thiserror::Error;
@@ -12,10 +13,11 @@ use packetcraftr_core::error::{Classification, Classified, Kind};
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum Error {
-    #[error("route lookup for {destination} failed: {message}")]
+    #[error("route lookup for {destination} failed: {source}")]
     RouteLookup {
         destination: IpAddr,
-        message: String,
+        #[source]
+        source: Box<dyn StdError + Send + Sync>,
         failure: Classification,
     },
     #[error("packet has no IP destination and none was supplied")]
@@ -24,10 +26,11 @@ pub enum Error {
     MissingLayer2Interface,
     #[error("route provider cannot select interface {interface} without an IP destination")]
     InterfaceLookupUnsupported { interface: String },
-    #[error("interface lookup for {interface} failed: {message}")]
+    #[error("interface lookup for {interface} failed: {source}")]
     InterfaceLookup {
         interface: String,
-        message: String,
+        #[source]
+        source: Box<dyn StdError + Send + Sync>,
         failure: Classification,
     },
     #[error(
@@ -51,8 +54,18 @@ pub enum Error {
     Layer2Unsupported,
     #[error("selected interface does not support Layer 3 transmission")]
     Layer3Unsupported,
-    #[error("Layer 2 planning requires an interface-owned source address for neighbor resolution")]
-    MissingNeighborSource,
+    #[error("Layer 2 plan on {interface} has no interface-owned neighbor source address")]
+    MissingNeighborSource { interface: String },
+    #[error("Layer 2 plan on {interface} has no neighbor target")]
+    MissingNeighborTarget { interface: String },
+    #[error("interface {interface} has no source MAC for Layer 2 transmission")]
+    MissingSourceMac { interface: String },
+    /// Active neighbor resolution failed while materializing this route.
+    ///
+    /// Boxed because a neighbor failure carries the captured discovery
+    /// evidence, which no other route failure should have to make room for.
+    #[error(transparent)]
+    Neighbor(Box<crate::neighbor::Error>),
     #[error("route source address family does not match destination {destination}")]
     SourceFamilyMismatch { destination: IpAddr },
     #[error(
@@ -74,7 +87,17 @@ pub enum Error {
     #[error("invalid IPv4 source-route state: {message}")]
     InvalidSourceRouting { message: String },
     #[error("packet carries an invalid neighbor-discovery VLAN stack: {message}")]
-    InvalidNeighborVlan { message: String },
+    InvalidNeighborVlan {
+        message: String,
+        #[source]
+        source: Option<Box<dyn StdError + Send + Sync>>,
+    },
+}
+
+impl From<crate::neighbor::Error> for Error {
+    fn from(error: crate::neighbor::Error) -> Self {
+        Self::Neighbor(Box::new(error))
+    }
 }
 
 impl Classified for Error {
@@ -114,8 +137,11 @@ impl Classified for Error {
                     "correct the packet destination, address family, or link-layer intent before planning again",
                 ),
             ),
+            Self::Neighbor(error) => error.classification(),
             Self::InterfaceMismatch { .. }
-            | Self::MissingNeighborSource
+            | Self::MissingNeighborSource { .. }
+            | Self::MissingNeighborTarget { .. }
+            | Self::MissingSourceMac { .. }
             | Self::PreferredSourceNotSelected { .. }
             | Self::MissingPacketSource => Classification::new(
                 "internal.route_contract",
@@ -124,6 +150,16 @@ impl Classified for Error {
                     "do not transmit with the inconsistent route result; inspect or replace the route provider",
                 ),
             ),
+        }
+    }
+
+    /// Walked from the retained `#[source]` chain rather than hand-written,
+    /// except for the transparent neighbor variant, whose own `Display` is
+    /// already this error's message and which therefore delegates.
+    fn causes(&self) -> Vec<String> {
+        match self {
+            Self::Neighbor(error) => error.causes(),
+            error => packetcraftr_core::error::source_chain(error),
         }
     }
 }

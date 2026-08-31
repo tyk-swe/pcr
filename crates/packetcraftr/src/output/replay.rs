@@ -7,43 +7,23 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use packetcraftr_netio::{interface::Id as InterfaceId, link::Mode as NetworkLinkMode};
+use packetcraftr_netio::{interface::Id as NetworkInterfaceId, link::Mode as NetworkLinkMode};
 
 use super::contract::Error;
 use super::frame::Captured;
 
 pub use crate::replay::Timing;
 pub use packetcraftr_core::analysis::pcap::Format as SourceFormat;
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Interface {
-    pub name: String,
-    pub index: u32,
-}
-
-impl From<InterfaceId> for Interface {
-    fn from(value: InterfaceId) -> Self {
-        Self {
-            name: value.name,
-            index: value.index,
-        }
-    }
-}
-
-mirror_enum! {
-    #[serde(rename_all = "snake_case")]
-    pub enum LinkMode from NetworkLinkMode {
-        Auto = Auto,
-        Layer2 = Layer2,
-        Layer3 = Layer3,
-    }
-}
+// The schema resolves both replay interface fields to `$defs.interfaceId` and
+// both link-mode fields to `$defs.linkMode`, so replay names the shared
+// network types rather than declaring twins of them.
+pub use super::network::{InterfaceId, LinkMode};
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct Result {
+pub struct Report {
     pub source_format: SourceFormat,
     pub timing: Timing,
-    pub requested_interface: Interface,
+    pub requested_interface: InterfaceId,
     pub requested_link_mode: LinkMode,
     #[serde(rename = "frames_attempted")]
     pub frames_read: u64,
@@ -55,10 +35,10 @@ pub struct Result {
     pub frames: Vec<Frame>,
 }
 
-impl Result {
+impl Report {
     pub fn from_summary(
         summary: crate::replay::Summary,
-        requested_interface: InterfaceId,
+        requested_interface: NetworkInterfaceId,
         requested_link_mode: NetworkLinkMode,
         frames: Vec<Frame>,
     ) -> Self {
@@ -81,18 +61,21 @@ impl Result {
 pub struct Frame {
     #[serde(rename = "source_sequence")]
     pub source_index: u64,
-    pub interface: Interface,
+    pub interface: InterfaceId,
     pub link_mode: LinkMode,
     pub scheduled_delay: Duration,
     pub bytes_sent: u64,
     pub frame: Captured,
+    /// Always `true`: `replay` only publishes a frame record after the frame
+    /// has been transmitted, and a frame the selector skipped produces no
+    /// record at all. The field is `required` in the frozen v1 schema, so it
+    /// stays until a contract revision either removes it or gives it a second
+    /// producer.
     pub transmitted: bool,
 }
 
 impl Frame {
-    pub fn try_from_evidence(
-        evidence: crate::replay::FrameEvidence,
-    ) -> std::result::Result<Self, Error> {
+    pub fn try_from_evidence(evidence: crate::replay::FrameEvidence) -> Result<Self, Error> {
         Ok(Self {
             source_index: evidence.source_index,
             interface: evidence.transmission().interface.clone().into(),

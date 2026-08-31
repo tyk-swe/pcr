@@ -12,29 +12,21 @@ use super::frame::{Captured, SourceFrame};
 
 use super::frame::Stack;
 
-/// One NDJSON event produced by `read`.
+/// One frame `read` publishes, optionally with its dissected layer stack.
+///
+/// Named apart from the completion record so a per-frame renderer takes the
+/// record it can actually receive rather than the whole event.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-#[serde(tag = "event", rename_all = "snake_case")]
-pub enum Event {
-    Frame {
-        source_frame: SourceFrame,
-        frame: Captured,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        decoded: Option<Stack>,
-    },
-    Complete {
-        frames_read: u64,
-        frames_matched: u64,
-        captured_bytes_read: u64,
-    },
+pub struct Frame {
+    pub source_frame: SourceFrame,
+    pub frame: Captured,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decoded: Option<Stack>,
 }
 
-impl Event {
-    pub fn try_from_frame(
-        source_frame: u64,
-        frame: CaptureFrame,
-    ) -> std::result::Result<Self, Error> {
-        Ok(Self::Frame {
+impl Frame {
+    pub fn try_from_frame(source_frame: u64, frame: CaptureFrame) -> Result<Self, Error> {
+        Ok(Self {
             source_frame: source_frame.try_into()?,
             frame: Captured::try_from_frame(frame)?,
             decoded: None,
@@ -46,11 +38,23 @@ impl Event {
         source_frame: u64,
         frame: CaptureFrame,
         decoded: &DecodedPacket,
-    ) -> std::result::Result<Self, Error> {
-        Ok(Self::Frame {
+    ) -> Result<Self, Error> {
+        Ok(Self {
             source_frame: source_frame.try_into()?,
             frame: Captured::try_from_frame(frame)?,
             decoded: Some(Stack::from_decoded(decoded)),
         })
     }
+}
+
+/// One NDJSON event produced by `read`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "event", rename_all = "snake_case")]
+pub enum Event {
+    Frame(Frame),
+    Complete {
+        frames_read: u64,
+        frames_matched: u64,
+        captured_bytes_read: u64,
+    },
 }

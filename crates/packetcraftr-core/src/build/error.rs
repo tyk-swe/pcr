@@ -3,6 +3,7 @@
 
 use thiserror::Error;
 
+use crate::error::{Classification, Classified, Kind};
 use crate::layer::FieldError;
 
 #[derive(Debug, Error)]
@@ -53,4 +54,73 @@ pub enum Error {
     InvalidPaddingBoundary { index: usize, outside_layer: usize },
     #[error("padding layer at index {index} has no enclosing link-layer frame")]
     PaddingWithoutLinkLayer { index: usize },
+}
+
+impl Classified for Error {
+    fn classification(&self) -> Classification {
+        match self {
+            Self::EmptyPacket => Classification::new(
+                "packet.empty",
+                Kind::Packet,
+                Some("supply at least one layer before building"),
+            ),
+            Self::LayerLimit { .. }
+            | Self::PacketSizeLimit { .. }
+            | Self::AllocationFailure { .. } => Classification::new(
+                "policy.build_resource_limit",
+                Kind::Policy,
+                Some(
+                    "shrink the packet or deliberately raise the finite build layer and byte budget",
+                ),
+            ),
+            Self::MissingCodec { .. } => Classification::new(
+                "packet.missing_codec",
+                Kind::Packet,
+                Some("name a protocol the registry binds, or register a codec for it"),
+            ),
+            Self::InvalidLayer { .. } => Classification::new(
+                "packet.invalid_layer",
+                Kind::Packet,
+                Some("supply every field the layer's reflective schema declares required"),
+            ),
+            Self::UnboundLayers { .. } => Classification::new(
+                "packet.unbound_layers",
+                Kind::Packet,
+                Some("order the layers so each parent can carry the next, or build permissively"),
+            ),
+            Self::Codec { .. } => Classification::new(
+                "packet.codec",
+                Kind::Packet,
+                Some("correct the layer field values the codec refused to encode"),
+            ),
+            Self::LengthOverflow => Classification::new(
+                "packet.length_overflow",
+                Kind::Packet,
+                Some("shrink the packet so its byte offsets stay representable"),
+            ),
+            Self::MaterializedProtocolMismatch { .. } | Self::InvalidCodecLayout { .. } => {
+                Classification::new(
+                    "internal.codec_contract",
+                    Kind::Internal,
+                    Some(
+                        "report the codec that returned a protocol or byte layout its own contract forbids",
+                    ),
+                )
+            }
+            Self::InvalidPaddingBoundary { .. } | Self::PaddingWithoutLinkLayer { .. } => {
+                Classification::new(
+                    "packet.padding_boundary",
+                    Kind::Packet,
+                    Some(
+                        "attach padding to an enclosing link-layer frame with a valid outside-layer index",
+                    ),
+                )
+            }
+        }
+    }
+
+    /// Walked from the retained `#[source]` chain rather than hand-written.
+    fn causes(&self) -> Vec<String> {
+        crate::error::source_chain(self)
+    }
 }

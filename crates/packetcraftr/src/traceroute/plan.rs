@@ -7,17 +7,13 @@ use std::net::IpAddr;
 use std::time::Duration;
 
 use super::error::Error;
-use super::model::{Batch, Probe, Request, Strategy};
+use super::model::{Batch, Probe, ProbeTarget, Request, Strategy};
 
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "the sequence is reduced to a 16-bit port offset; the checked_add below rejects any \
-              value that would leave the validated UDP probe port range"
-)]
 pub(super) fn build_batches(request: &Request, destination: IpAddr) -> Result<Vec<Batch>, Error> {
     let mut batches = Vec::with_capacity(request.hop_count());
     let mut sequence = 0_u64;
     for hop_limit in request.first_hop..=request.max_hops {
+        let batch_sequence = sequence;
         let probe_capacity =
             usize::try_from(request.probes_per_hop).map_err(|_| Error::InvalidLimit {
                 field: "probes_per_hop",
@@ -26,22 +22,11 @@ pub(super) fn build_batches(request: &Request, destination: IpAddr) -> Result<Ve
             })?;
         let mut probes = Vec::with_capacity(probe_capacity);
         for attempt in 1..=request.probes_per_hop {
-            let destination_port = match request.strategy {
-                Strategy::Udp => Some(
-                    request
-                        .destination_port
-                        .expect("validated UDP port")
-                        .checked_add(sequence as u16)
-                        .expect("validated UDP probe port range"),
-                ),
-                Strategy::Tcp => request.destination_port,
-                Strategy::Icmp => None,
-            };
+            let target = probe_target(request, sequence)?;
             probes.push(Probe {
                 sequence,
                 address: destination,
-                strategy: request.strategy,
-                destination_port,
+                target,
                 hop_limit,
                 attempt,
             });
@@ -55,9 +40,44 @@ pub(super) fn build_batches(request: &Request, destination: IpAddr) -> Result<Ve
             probes,
             timeout: request.timeout,
             permit: crate::evidence::ExecutionPermit::new(),
+            sequence: batch_sequence,
         });
     }
     Ok(batches)
+}
+
+/// Resolves the request's strategy and declared port into the target the probe
+/// at `sequence` addresses. UDP walks one unique destination port per probe,
+/// so the guard that keeps that walk inside `u16` lives here beside the
+/// arithmetic it protects.
+fn probe_target(request: &Request, sequence: u64) -> Result<ProbeTarget, Error> {
+    let declared_port = || {
+        request.destination_port.ok_or_else(|| Error::InvalidPort {
+            message: format!(
+                "{} traceroute requires a destination port",
+                request.strategy
+            ),
+        })
+    };
+    match request.strategy {
+        Strategy::Udp => {
+            let base = declared_port()?;
+            let port = u16::try_from(sequence)
+                .ok()
+                .and_then(|offset| base.checked_add(offset))
+                .ok_or_else(|| Error::InvalidPort {
+                    message: format!(
+                        "base UDP port {base} plus probe {sequence} exceeds {}",
+                        u16::MAX
+                    ),
+                })?;
+            Ok(ProbeTarget::Udp { port })
+        }
+        Strategy::Tcp => Ok(ProbeTarget::Tcp {
+            port: declared_port()?,
+        }),
+        Strategy::Icmp => Ok(ProbeTarget::Icmp),
+    }
 }
 
 pub(super) fn worst_case_duration(request: &Request) -> Result<Duration, Error> {

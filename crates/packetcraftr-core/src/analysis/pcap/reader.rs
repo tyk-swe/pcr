@@ -160,11 +160,6 @@ impl<R: Read> Reader<R> {
         }
     }
 
-    /// Returns the configured packet/block limit.
-    pub fn size_limit(&self) -> usize {
-        self.options.max_size
-    }
-
     /// Interface metadata parsed so far.
     ///
     /// Classic PCAP exposes its single global interface immediately. PCAPNG

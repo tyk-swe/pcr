@@ -5,25 +5,32 @@
 #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 use std::io::Cursor;
-use std::net::{IpAddr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 
 use bytes::Bytes;
 use packetcraftr_core::analysis::pcap::{Reader, Writer};
-use packetcraftr_core::error::{Classification, Kind};
+use packetcraftr_core::error::{Classification, Classified, Kind};
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_netio::{
     Error as LiveIoError,
     interface::Id as InterfaceId,
     link::{Capability as LinkCapability, MacAddress, Mode as LinkMode},
-    route::{Decision, Plan as RoutePlan, Scope, SelectionReason},
+    route::{
+        Decision, Materialized as MaterializedRoute, Plan as RoutePlan, Scope, SelectionReason,
+        SystemError as RouteSystemError,
+    },
     transmit::Submission,
 };
 
 use super::engine::run_with_selector;
 use super::error::Error;
 use super::model::{Limits, Options, Selector, Timing, Transmission, Transmitter};
-use super::wire::{replay_link_mode, replay_network_envelope, validate_transmission_evidence};
+use super::wire::{
+    map_replay_route_error, replay_link_mode, replay_network_envelope,
+    validate_transmission_evidence,
+};
 use crate::BoundaryError;
 use crate::authorization::{Authorizer, Operation};
 use crate::test_fixtures::RecordingClock;
@@ -84,23 +91,26 @@ struct RecordingTransmitter {
 }
 
 impl Transmitter for RecordingTransmitter {
-    fn validate_interface(
+    fn plan_frame(
         &mut self,
         interface: &InterfaceId,
         mode: LinkMode,
         frame: &Frame,
-    ) -> Result<RoutePlan, LiveIoError> {
+    ) -> Result<MaterializedRoute, LiveIoError> {
         self.validation_calls += 1;
-        Ok(test_route(interface, mode, frame.link_type))
+        Ok(MaterializedRoute {
+            plan: test_route(interface, mode, frame.link_type),
+            neighbor_resolution: None,
+        })
     }
 
     fn transmit(
         &mut self,
-        interface: &InterfaceId,
-        _mode: LinkMode,
+        route: &MaterializedRoute,
         frame: &Frame,
     ) -> Result<Transmission, LiveIoError> {
         self.transmission_calls += 1;
+        let interface = &route.plan.decision.interface;
         let reported_interface = if self.different_interface {
             InterfaceId {
                 name: "other0".to_owned(),
@@ -473,7 +483,7 @@ fn replay_selector_skipped_frames_still_consume_the_frame_budget() {
         keep: false,
     };
     let mut options = replay_options(Timing::Immediate);
-    options.limits.max_frames = 2;
+    options.limits.max_source_frames = 2;
     let mut authorizer = RecordingAuthorizer::default();
     let mut transmitter = RecordingTransmitter::default();
     let error = run_with_selector(
@@ -489,7 +499,7 @@ fn replay_selector_skipped_frames_still_consume_the_frame_budget() {
 
     assert!(matches!(
         error,
-        Error::FrameLimit {
+        Error::SourceFrameLimit {
             source_index: 2,
             actual: 3,
             limit: 2,
@@ -498,4 +508,63 @@ fn replay_selector_skipped_frames_still_consume_the_frame_budget() {
     assert_eq!(selector.numbers, [1, 2]);
     assert_eq!(authorizer.calls, 0);
     assert_eq!(transmitter.transmission_calls, 0);
+}
+
+/// Both arms of the replay route-selection mapping retain the route adapter's
+/// own refusal as a source, so the platform diagnostic reaches `causes()`
+/// instead of being dropped when it stops being restated in `message`.
+#[test]
+fn replay_route_selection_failures_retain_the_route_adapter_refusal() {
+    let destination = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 9));
+    let unreachable = map_replay_route_error(RouteSystemError::RouteNotFound { destination });
+
+    assert_eq!(
+        unreachable.to_string(),
+        "packet transmission failed: replay route selection failed"
+    );
+    assert_eq!(unreachable.classification().code, "io.send");
+    assert_eq!(unreachable.causes(), ["no route to 203.0.113.9 was found"]);
+
+    // The refusal keeps reaching a consumer through the replay wrapper the
+    // engine publishes it in.
+    let published = Error::Transmission {
+        source_index: 0,
+        source: unreachable,
+    };
+    assert_eq!(
+        published.causes(),
+        [
+            "packet transmission failed: replay route selection failed",
+            "no route to 203.0.113.9 was found",
+        ]
+    );
+
+    // An operating-system refusal keeps its own nested diagnostic too.
+    let refused = map_replay_route_error(RouteSystemError::OperatingSystem {
+        operation: "RTM_GETROUTE",
+        message: "the operating system refused the request".to_owned(),
+        source: Some(Arc::new(std::io::Error::other("operation not permitted"))),
+    });
+    assert_eq!(
+        refused.causes(),
+        [
+            "native operation RTM_GETROUTE failed: the operating system refused the request",
+            "operation not permitted",
+        ]
+    );
+
+    // The capability arm keeps naming the replay boundary and publishes the
+    // adapter's text once, in `causes`.
+    let unsupported = map_replay_route_error(RouteSystemError::Unsupported {
+        message: "native route selection is off".to_owned(),
+    });
+    assert_eq!(
+        unsupported.to_string(),
+        "live packet I/O is unavailable: the native route adapter cannot select a replay route"
+    );
+    assert_eq!(unsupported.classification().kind, Kind::Capability);
+    assert_eq!(
+        unsupported.causes(),
+        ["native route selection is unavailable: native route selection is off"]
+    );
 }

@@ -11,9 +11,14 @@ use crate::{
 };
 
 use crate::protocol::common::{
-    expected_discriminator_for_value, invalid, make_layer, protocol, resolve_u16, truncated,
-    validate_auto_raw_discriminator, validate_raw_child_discriminator, wrong_layer,
+    expected_discriminator, invalid, make_layer, protocol, resolve_u16, truncated, typed_layer,
+    validate_auto_raw_discriminator, validate_raw_child_discriminator,
 };
+
+use crate::protocol::BuiltinProtocol;
+
+const SLL_NAME: &str = BuiltinProtocol::LinuxSll.as_str();
+const SLL2_NAME: &str = BuiltinProtocol::LinuxSll2.as_str();
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LinuxSll {
@@ -60,7 +65,7 @@ impl Default for LinuxSll2 {
 }
 
 reflective_layer! {
-    fn linux_sll_schema() => { protocol: protocol("linux_sll"), name: "Linux cooked capture v1" }
+    fn linux_sll_schema() => { protocol: protocol(SLL_NAME), name: "Linux cooked capture v1" }
     impl LinuxSll {
         "protocol" => { kind: Unsigned, derived: true, required: false, description: "Protocol discriminator", reflect: protocol, layout: (14, 16) },
         "packet_type" => { kind: Unsigned, derived: false, required: true, description: "Packet direction/type", reflect: packet_type, layout: (0, 2) },
@@ -72,7 +77,7 @@ reflective_layer! {
 }
 
 reflective_layer! {
-    fn linux_sll2_schema() => { protocol: protocol("linux_sll2"), name: "Linux cooked capture v2" }
+    fn linux_sll2_schema() => { protocol: protocol(SLL2_NAME), name: "Linux cooked capture v2" }
     impl LinuxSll2 {
         "protocol" => { kind: Unsigned, derived: true, required: false, description: "Protocol discriminator", reflect: protocol, layout: (0, 2) },
         "packet_type" => { kind: Unsigned, derived: false, required: true, description: "Packet direction/type", reflect: packet_type, layout: (10, 11) },
@@ -91,8 +96,8 @@ pub(crate) struct LinuxSllCodec;
 pub(crate) struct LinuxSll2Codec;
 
 impl LayerCodec for LinuxSllCodec {
-    fn protocol_id(&self) -> crate::layer::Id {
-        protocol("linux_sll")
+    fn protocol_id(&self) -> &'static crate::layer::Id {
+        &linux_sll_schema().protocol
     }
 
     fn encode(
@@ -101,25 +106,21 @@ impl LayerCodec for LinuxSllCodec {
         _payload: &[u8],
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
-        let layer = layer
-            .as_any()
-            .downcast_ref::<LinuxSll>()
-            .ok_or_else(|| wrong_layer("linux_sll", layer))?;
+        let layer = typed_layer::<LinuxSll>(SLL_NAME, layer)?;
         if layer.address_length > 8 {
-            return Err(invalid("linux_sll", "address length exceeds slot"));
+            return Err(invalid(SLL_NAME, "address length exceeds slot"));
         }
         let mut diagnostics = Vec::new();
-        let expectation =
-            expected_discriminator_for_value("linux_sll", context, 0_u16, &layer.protocol);
+        let expectation = expected_discriminator(SLL_NAME, context, 0_u16, &layer.protocol);
         validate_auto_raw_discriminator(
-            "linux_sll",
+            SLL_NAME,
             "protocol",
             &layer.protocol,
             context,
             &mut diagnostics,
         )?;
         let (protocol_value, materialized_protocol) = resolve_u16(
-            "linux_sll",
+            SLL_NAME,
             "protocol",
             &layer.protocol,
             expectation,
@@ -127,7 +128,7 @@ impl LayerCodec for LinuxSllCodec {
             &mut diagnostics,
         )?;
         validate_raw_child_discriminator(
-            "linux_sll",
+            SLL_NAME,
             u64::from(protocol_value),
             context,
             &mut diagnostics,
@@ -140,13 +141,9 @@ impl LayerCodec for LinuxSllCodec {
         prefix.extend_from_slice(&protocol_value.to_be_bytes());
         let mut materialized = layer.clone();
         materialized.protocol = materialized_protocol;
-        Ok(EncodedLayer {
-            prefix,
-            suffix: Vec::new(),
-            materialized: Box::new(materialized),
-            fields: linux_sll_layout(),
-            diagnostics,
-        })
+        Ok(EncodedLayer::header(prefix, Box::new(materialized))
+            .with_fields(linux_sll_layout())
+            .with_diagnostics(diagnostics))
     }
 
     fn decode(
@@ -155,11 +152,11 @@ impl LayerCodec for LinuxSllCodec {
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
         let Some(header) = input.first_chunk::<16>() else {
-            return Err(truncated("linux_sll", 16, input.len()));
+            return Err(truncated(SLL_NAME, 16, input.len()));
         };
         let address_length = u16::from_be_bytes([header[4], header[5]]);
         if address_length > 8 {
-            return Err(invalid("linux_sll", "address length exceeds slot"));
+            return Err(invalid(SLL_NAME, "address length exceeds slot"));
         }
         let mut address = [0; 8];
         address.copy_from_slice(&header[6..14]);
@@ -191,8 +188,8 @@ impl LayerCodec for LinuxSllCodec {
 }
 
 impl LayerCodec for LinuxSll2Codec {
-    fn protocol_id(&self) -> crate::layer::Id {
-        protocol("linux_sll2")
+    fn protocol_id(&self) -> &'static crate::layer::Id {
+        &linux_sll2_schema().protocol
     }
 
     fn encode(
@@ -201,25 +198,21 @@ impl LayerCodec for LinuxSll2Codec {
         _payload: &[u8],
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
-        let layer = layer
-            .as_any()
-            .downcast_ref::<LinuxSll2>()
-            .ok_or_else(|| wrong_layer("linux_sll2", layer))?;
+        let layer = typed_layer::<LinuxSll2>(SLL2_NAME, layer)?;
         if layer.address_length > 8 {
-            return Err(invalid("linux_sll2", "address length exceeds slot"));
+            return Err(invalid(SLL2_NAME, "address length exceeds slot"));
         }
         let mut diagnostics = Vec::new();
-        let expectation =
-            expected_discriminator_for_value("linux_sll2", context, 0_u16, &layer.protocol);
+        let expectation = expected_discriminator(SLL2_NAME, context, 0_u16, &layer.protocol);
         validate_auto_raw_discriminator(
-            "linux_sll2",
+            SLL2_NAME,
             "protocol",
             &layer.protocol,
             context,
             &mut diagnostics,
         )?;
         let (protocol_value, materialized_protocol) = resolve_u16(
-            "linux_sll2",
+            SLL2_NAME,
             "protocol",
             &layer.protocol,
             expectation,
@@ -227,7 +220,7 @@ impl LayerCodec for LinuxSll2Codec {
             &mut diagnostics,
         )?;
         validate_raw_child_discriminator(
-            "linux_sll2",
+            SLL2_NAME,
             u64::from(protocol_value),
             context,
             &mut diagnostics,
@@ -242,13 +235,9 @@ impl LayerCodec for LinuxSll2Codec {
         prefix.extend_from_slice(&layer.address);
         let mut materialized = layer.clone();
         materialized.protocol = materialized_protocol;
-        Ok(EncodedLayer {
-            prefix,
-            suffix: Vec::new(),
-            materialized: Box::new(materialized),
-            fields: linux_sll2_layout(),
-            diagnostics,
-        })
+        Ok(EncodedLayer::header(prefix, Box::new(materialized))
+            .with_fields(linux_sll2_layout())
+            .with_diagnostics(diagnostics))
     }
 
     fn decode(
@@ -257,13 +246,13 @@ impl LayerCodec for LinuxSll2Codec {
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
         let Some(header) = input.first_chunk::<20>() else {
-            return Err(truncated("linux_sll2", 20, input.len()));
+            return Err(truncated(SLL2_NAME, 20, input.len()));
         };
         if header[2] != 0 || header[3] != 0 {
-            return Err(invalid("linux_sll2", "reserved field is non-zero"));
+            return Err(invalid(SLL2_NAME, "reserved field is non-zero"));
         }
         if header[11] > 8 {
-            return Err(invalid("linux_sll2", "address length exceeds slot"));
+            return Err(invalid(SLL2_NAME, "address length exceeds slot"));
         }
         let protocol_value = u16::from_be_bytes([header[0], header[1]]);
         let mut address = [0; 8];

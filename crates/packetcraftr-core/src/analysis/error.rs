@@ -145,36 +145,35 @@ impl Classified for Error {
             ),
             // Reassembly fails for two distinct reasons: a finite budget was
             // exhausted, or the capture itself carries conflicting data. Only
-            // the former is answered by raising budgets.
+            // the former is answered by raising budgets, and both engines
+            // make the caller choose a side rather than leaving a catch-all
+            // here to misfile a future variant.
             Self::Reassembly { source, .. } => match source {
-                TcpError::FlowLimit { .. }
-                | TcpError::SegmentLimit { .. }
-                | TcpError::FlowByteLimit { .. }
-                | TcpError::AggregateByteLimit { .. }
-                | TcpError::AllocationFailed { .. }
-                | TcpError::InvalidWindowLimit { .. } => resource_limit(),
-                _ => malformed_reassembly(),
+                TcpError::Resource(_) => tcp_resource_limit(),
+                TcpError::Malformed(_) => malformed_reassembly(),
             },
             Self::IpReassembly { source, .. } => match source {
                 IpError::Resource(_) => ip_resource_limit(),
                 IpError::Malformed(_) => malformed_reassembly(),
+                IpError::Inconsistent { .. } => Classification::new(
+                    "internal.ip_reassembly",
+                    Kind::Internal,
+                    Some("report the capture and command as an internal IP reassembly failure"),
+                ),
             },
             Self::Sink { source, .. } => source.classification(),
         }
     }
 
+    /// Walked from the retained `#[source]` chain rather than hand-written.
+    /// The consumer variant delegates instead: a [`BoundaryError`] carries a
+    /// captured `causes` snapshot that its own source chain no longer holds.
+    ///
+    /// [`BoundaryError`]: crate::error::BoundaryError
     fn causes(&self) -> Vec<String> {
         match self {
-            Self::Capture { source, .. } => vec![source.to_string()],
-            Self::Decode { source, .. } => vec![source.to_string()],
-            Self::DerivedFrame { source, .. } => vec![source.to_string()],
-            Self::DerivedDecode { source, .. } => vec![source.to_string()],
-            Self::Filter { source, .. } => vec![source.to_string()],
-            Self::Scope { source, .. } => vec![source.to_string()],
-            Self::Reassembly { source, .. } => vec![source.to_string()],
-            Self::IpReassembly { source, .. } => vec![source.to_string()],
             Self::Sink { source, .. } => source.causes(),
-            _ => Vec::new(),
+            error => crate::error::source_chain(error),
         }
     }
 }
@@ -194,6 +193,17 @@ fn ip_resource_limit() -> Classification {
         Some(
             "trim or pre-filter the capture, or deliberately raise the relevant finite \
              --max-ip-* analysis budget",
+        ),
+    )
+}
+
+fn tcp_resource_limit() -> Classification {
+    Classification::new(
+        "policy.analysis_resource_limit",
+        Kind::Policy,
+        Some(
+            "trim or pre-filter the capture, or deliberately raise the relevant finite \
+             --max-tcp-* analysis budget",
         ),
     )
 }

@@ -13,8 +13,6 @@
 //! is chosen by the peer, so a match is a hint about software identity, never
 //! authentication.
 
-use std::net::IpAddr;
-
 use serde::Serialize;
 
 use packetcraftr_core::analysis::tls::{
@@ -23,23 +21,18 @@ use packetcraftr_core::analysis::tls::{
 };
 use packetcraftr_core::protocol::application::tls::names;
 
+use super::envelope::is_zero;
 use super::hex::compact_hex;
 
 pub use packetcraftr_core::analysis::tls::Status;
 
-/// One side of a session.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Endpoint {
-    pub address: IpAddr,
-    pub port: u16,
-}
+/// One side of a session; the same endpoint shape `follow` publishes.
+pub use super::network::Endpoint;
 
-impl From<AnalysisEndpoint> for Endpoint {
-    fn from(value: AnalysisEndpoint) -> Self {
-        Self {
-            address: value.address,
-            port: value.port,
-        }
+fn endpoint(value: AnalysisEndpoint) -> Endpoint {
+    Endpoint {
+        address: value.address,
+        port: value.port,
     }
 }
 
@@ -202,8 +195,8 @@ impl From<AnalysisSession> for Session {
         Self {
             session: value.session,
             tcp_stream: value.tcp_stream,
-            client_endpoint: value.client_endpoint.into(),
-            server_endpoint: value.server_endpoint.into(),
+            client_endpoint: endpoint(value.client_endpoint),
+            server_endpoint: endpoint(value.server_endpoint),
             first_frame: value.first_frame,
             last_frame: value.last_frame,
             handshake_rtt_ms: value.handshake_rtt_ms,
@@ -216,14 +209,6 @@ impl From<AnalysisSession> for Session {
             reason: value.reason,
         }
     }
-}
-
-#[expect(
-    clippy::trivially_copy_pass_by_ref,
-    reason = "serde requires this signature"
-)]
-fn is_zero(value: &u64) -> bool {
-    *value == 0
 }
 
 /// Sessions per terminal status. Every status is reported, so a zero is a
@@ -322,7 +307,7 @@ pub struct SelectionCounts {
 
 /// Aggregate result of `tls`.
 #[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct Result {
+pub struct Report {
     pub sessions: Vec<Session>,
     pub summary: Summary,
 }

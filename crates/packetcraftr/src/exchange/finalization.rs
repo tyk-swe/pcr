@@ -16,8 +16,8 @@ impl<C: Session> Transaction<C> {
             Ok(()) => operation.into_error(),
             Err(shutdown) => match operation {
                 OperationError::Io(operation) => Error::OperationAndCaptureShutdown {
-                    operation,
-                    shutdown,
+                    operation: Box::new(operation),
+                    shutdown: Box::new(shutdown),
                 },
                 OperationError::Output(output) => Error::ExchangeOutputAndCaptureShutdown {
                     output: Box::new(output),
@@ -31,7 +31,8 @@ impl<C: Session> Transaction<C> {
     where
         F: FnMut(super::Event) -> Result<(), crate::BoundaryError>,
     {
-        let capture_statistics = self.capture.inner.statistics().validate()?;
+        let capture_statistics = self.capture.inner.statistics();
+        capture_statistics.validate()?;
         self.apply_capture_loss_policy(capture_statistics)?;
         self.publish_diagnostics(emit)
             .map_err(OperationError::into_error)?;
@@ -71,26 +72,22 @@ impl<C: Session> Transaction<C> {
     }
 
     fn apply_capture_loss_policy(&mut self, statistics: Statistics) -> Result<(), Error> {
-        if !statistics.has_loss() {
+        let Some(loss) = statistics.evidence_loss_error() else {
             return Ok(());
+        };
+        if self.options.capture.overflow_policy == OverflowPolicy::Fail {
+            return Err(loss.into());
         }
-        if self.capture_limits.overflow_policy == OverflowPolicy::Fail {
-            return Err(statistics
-                .evidence_loss_error()
-                .expect("lossy capture statistics must produce a typed error")
-                .into());
-        }
-        packetcraftr_core::diagnostic::push_once(
-            &mut self.captured.diagnostics,
+        self.captured.diagnostics.push_once(
             packetcraftr_core::diagnostic::Diagnostic::warning(
                 "capture.evidence_incomplete",
                 format!(
-                    "capture backend reported {} overflow event(s), {} receiver drop(s), {} total dropped frame(s), and {} dropped byte(s) under {:?}",
+                    "capture backend reported {} overflow event(s), {} receiver drop(s), {} total dropped frame(s), and {} dropped byte(s) under {}",
                     statistics.overflow_events,
                     statistics.receiver_dropped_frames,
                     statistics.dropped_frames,
                     statistics.dropped_bytes,
-                    self.capture_limits.overflow_policy,
+                    self.options.capture.overflow_policy,
                 ),
             ),
         );
@@ -98,10 +95,9 @@ impl<C: Session> Transaction<C> {
     }
 }
 
+/// A live operation never aborts while accounting for traffic it has already
+/// emitted: an overflowing total is reported saturated, and the evidence
+/// validator that recomputes the same fold rejects it as an overflow there.
 fn sent_bytes(sent: &[std::sync::Arc<crate::SentPacket>]) -> u64 {
-    sent.iter()
-        .try_fold(0_u64, |total, sent| {
-            total.checked_add(u64::try_from(sent.bytes_sent()).unwrap_or(u64::MAX))
-        })
-        .expect("sent bytes are a subset of the validated aggregate exchange byte total")
+    crate::evidence::total_bytes_sent(sent.iter().map(std::sync::Arc::as_ref)).unwrap_or(u64::MAX)
 }

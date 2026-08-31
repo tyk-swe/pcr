@@ -5,7 +5,7 @@
 
 use std::io::Write;
 
-use packetcraftr::analysis::pcap::{Error, Format, Interface, Limits, Writer};
+use packetcraftr::analysis::pcap::{Error, Format, Interface, Writer};
 use packetcraftr::core::frame::{Frame, LinkType};
 
 /// A streaming writer plus the interface mapping its callers register.
@@ -29,10 +29,6 @@ impl<W: Write, K: Copy + PartialEq> CaptureWriter<W, K> {
             writer,
             interface_map: Vec::new(),
         }
-    }
-
-    pub(crate) fn set_stream_limits(&mut self, limits: Limits) -> Result<(), Error> {
-        self.writer.set_stream_limits(limits)
     }
 
     /// Resolves the output interface ID for `key`, registering it once.
@@ -108,7 +104,7 @@ mod tests {
     use std::io::Cursor;
     use std::time::UNIX_EPOCH;
 
-    use packetcraftr::analysis::pcap::{Reader, TimestampResolution};
+    use packetcraftr::analysis::pcap::{Limits, PcapOptions, Reader, TimestampResolution};
 
     use super::*;
 
@@ -203,15 +199,19 @@ mod tests {
 
     #[test]
     fn classic_pcap_has_no_interface_ids_and_enforces_stream_limits() {
-        let writer =
-            Writer::new(Vec::new(), Format::Pcap, LinkType::ETHERNET).expect("classic PCAP writer");
+        let writer = Writer::pcap_with_options(
+            Vec::new(),
+            LinkType::ETHERNET,
+            PcapOptions {
+                stream_limits: Limits {
+                    max_frames: 1,
+                    max_bytes: 1,
+                },
+                ..PcapOptions::default()
+            },
+        )
+        .expect("classic PCAP writer");
         let mut output = LinkCaptureWriter::new(writer);
-        output
-            .set_stream_limits(Limits {
-                max_frames: 1,
-                max_bytes: 1,
-            })
-            .expect("uncommitted limits");
 
         assert_eq!(output.add_link_type(LinkType::ETHERNET).unwrap(), None);
         output

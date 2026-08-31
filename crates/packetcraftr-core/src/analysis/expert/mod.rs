@@ -8,9 +8,9 @@ use std::collections::{BTreeMap, HashMap};
 use crate::diagnostic::Severity;
 use crate::protocol::transport::Tcp;
 
-use crate::analysis::adapter::{transport_payload, transports};
-use crate::analysis::pipeline::FrameRecord;
+use crate::analysis::pipeline::{FrameRecord, Summary as RunSummary};
 use crate::analysis::reassembly::tcp::{Event as TcpEvent, ScopedFlowKey as FlowKey};
+use crate::analysis::{StreamRef, StreamTransport};
 
 use tcp::DirectionState;
 
@@ -18,24 +18,6 @@ mod finding;
 mod generation;
 mod observation;
 mod tcp;
-
-/// The transport namespace a conversation index belongs to.
-///
-/// TCP and UDP indices are allocated independently, so a bare number cannot
-/// name a conversation in a capture that holds both.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum StreamTransport {
-    Tcp,
-    Udp,
-}
-
-/// One conversation: its transport namespace plus per-transport index,
-/// matching the `tcp.stream` and `udp.stream` filter vocabularies.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct StreamRef {
-    pub transport: StreamTransport,
-    pub index: u64,
-}
 
 const fn tcp_stream_ref(index: u64) -> StreamRef {
     StreamRef {
@@ -117,13 +99,10 @@ impl Collector {
 
     /// Folds one matched frame, returning the findings it revealed.
     pub fn observe(&mut self, record: &FrameRecord<'_>) -> Vec<Finding> {
-        let decoded = record.tcp_decoded;
-        let frame_transports = transports(&decoded.packet);
         let mut findings = finding::from_diagnostics(record);
         self.reconcile_tcp_evictions(record.tcp_events);
-        if let (Some(transport), Some(flow)) = (frame_transports.tcp, record.tcp_flow) {
-            let payload_len = transport_payload(decoded, transport.index).len();
-            self.observe_tcp(record, flow, transport.layer, payload_len, &mut findings);
+        if let (Some(tcp), Some(flow)) = (record.tcp_header, record.tcp_flow) {
+            self.observe_tcp(record, flow, tcp, record.tcp_payload_len, &mut findings);
         }
 
         for finding in &findings {
@@ -132,12 +111,16 @@ impl Collector {
         findings
     }
 
-    /// Finishes the pass, folding in the pipeline's trailing reassembly
-    /// events: a flow flushed with bytes still buffered never healed its
-    /// holes, which is evidence the per-frame view cannot carry. Returned
-    /// findings are attributed to `end_number`, the last frame read.
-    pub fn finish(mut self, trailing: &[TcpEvent], end_number: u64) -> (Vec<Finding>, Summary) {
-        let findings = tcp::finish(&self.streams, trailing, end_number);
+    /// Finishes the pass, folding in the run's trailing reassembly events: a
+    /// flow flushed with bytes still buffered never healed its holes, which
+    /// is evidence the per-frame view cannot carry. Returned findings are
+    /// attributed to the run's last frame read.
+    pub fn finish(mut self, summary: &RunSummary) -> (Vec<Finding>, Summary) {
+        let findings = tcp::finish(
+            &self.streams,
+            &summary.trailing_tcp_events,
+            summary.frames_read,
+        );
         for finding in &findings {
             self.summary.count(finding);
         }

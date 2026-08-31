@@ -15,8 +15,9 @@ use common::{
     CLIENT, SERVER, TcpSpec, client_tcp as client, reader, registry, server_tcp as server,
     tcp_frame as frame, udp_frame,
 };
-use packetcraftr_core::analysis::expert::{Finding, StreamRef, StreamTransport};
+use packetcraftr_core::analysis::expert::Finding;
 use packetcraftr_core::analysis::{Options, run};
+use packetcraftr_core::analysis::{StreamRef, StreamTransport};
 
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::protocol::transport::Tcp;
@@ -47,8 +48,7 @@ fn analyze_frames(
         },
     )
     .expect("expert pass succeeds");
-    let (trailing, summary) =
-        collector.finish(&run_summary.trailing_tcp_events, run_summary.frames_read);
+    let (trailing, summary) = collector.finish(&run_summary);
     findings.extend(trailing);
     (findings, summary)
 }

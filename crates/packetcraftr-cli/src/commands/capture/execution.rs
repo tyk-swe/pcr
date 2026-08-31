@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use packetcraftr::policy::CaptureBudget;
 use packetcraftr::{core, core::frame::Frame, netio as net, output};
 
-use super::super::increment_counter;
+use crate::commands::increment_counter;
 use crate::errors::CliError;
 use crate::filtering::FrameSelector;
 
@@ -40,18 +40,31 @@ impl Progress {
     }
 }
 
-pub(super) fn run<C, F>(
-    mut capture: C,
-    timeout: Duration,
-    limits: net::capture::Limits,
-    budget: CaptureBudget,
-    selector: Option<&FrameSelector>,
-    mut emit: F,
-) -> Result<Outcome, CliError>
+/// One armed capture and the bounds it runs under.
+///
+/// The four renderers differ only in what they do with each frame, so they
+/// take this rather than the same five positional arguments and hand it
+/// straight to [`run`].
+pub(super) struct Session<'a, C> {
+    pub(super) capture: C,
+    pub(super) timeout: Duration,
+    pub(super) limits: net::capture::Limits,
+    pub(super) budget: CaptureBudget,
+    pub(super) selector: Option<&'a FrameSelector>,
+}
+
+pub(super) fn run<C, F>(session: Session<'_, C>, mut emit: F) -> Result<Outcome, CliError>
 where
     C: net::capture::Session,
     F: FnMut(Frame, u64) -> Result<(), CliError>,
 {
+    let Session {
+        mut capture,
+        timeout,
+        limits,
+        budget,
+        selector,
+    } = session;
     let mut progress = Progress::new(timeout, budget);
     if let Err(error) = wait_ready(&mut capture, timeout, progress.deadline) {
         return Err(shutdown_after_error(&mut capture, error));
@@ -135,10 +148,8 @@ fn finish<C: net::capture::Session>(
     limits: net::capture::Limits,
 ) -> Result<Outcome, CliError> {
     capture.shutdown().map_err(CliError::classified)?;
-    let statistics = capture
-        .statistics()
-        .validate()
-        .map_err(CliError::classified)?;
+    let statistics = capture.statistics();
+    statistics.validate().map_err(CliError::classified)?;
     let diagnostics = loss_diagnostics(&statistics, limits)?;
     Ok(Outcome {
         diagnostics,
@@ -156,20 +167,16 @@ fn loss_diagnostics(
     statistics: &net::capture::Statistics,
     limits: net::capture::Limits,
 ) -> Result<Vec<core::diagnostic::Diagnostic>, CliError> {
-    if !statistics.has_loss() {
+    let Some(loss) = statistics.evidence_loss_error() else {
         return Ok(Vec::new());
-    }
+    };
     if limits.overflow_policy == net::capture::OverflowPolicy::Fail {
-        return Err(CliError::classified(
-            statistics
-                .evidence_loss_error()
-                .expect("lossy capture statistics must produce a typed error"),
-        ));
+        return Err(CliError::classified(loss));
     }
     Ok(vec![core::diagnostic::Diagnostic::warning(
         "capture.evidence_incomplete",
         format!(
-            "capture backend reported {} overflow event(s), {} receiver drop(s), {} total dropped frame(s), and {} dropped byte(s) under {:?}",
+            "capture backend reported {} overflow event(s), {} receiver drop(s), {} total dropped frame(s), and {} dropped byte(s) under {}",
             statistics.overflow_events,
             statistics.receiver_dropped_frames,
             statistics.dropped_frames,

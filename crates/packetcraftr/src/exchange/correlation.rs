@@ -6,8 +6,7 @@
 use std::time::Instant;
 
 use packetcraftr_core::{
-    decode::DecodedPacket, diagnostic::Diagnostic, frame::Frame, matcher::MatchResult,
-    registry::Registry,
+    decode::DecodedPacket, diagnostic::Diagnostic, frame::Frame, matcher::Match, registry::Registry,
 };
 use packetcraftr_netio::{
     capture::{Captured, RecordIdentity},
@@ -15,11 +14,12 @@ use packetcraftr_netio::{
 };
 
 use super::accumulator::{
-    Accumulator, ProcessContext, ProcessOutcome, UnsolicitedEvidence, UnsolicitedFreshness,
-    WorkflowPromotionContext, WorkflowResponseMatcher,
+    Accumulator, DuplicateRecord, ProcessContext, ProcessOutcome, UnsolicitedEvidence,
+    UnsolicitedFreshness, WorkflowResponseMatcher,
 };
 use super::contract::{Options, Response};
-use super::preparation::PreparedPacket;
+use crate::materialize::PreparedPacket;
+use crate::planning::expired;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Attribution {
@@ -43,7 +43,7 @@ fn capture_follows_send(received_at: Instant, timing: Timing) -> bool {
 }
 
 fn ensure_correlation_active(deadline: Instant) -> Result<(), CorrelationDeadlineExpired> {
-    if Instant::now() >= deadline {
+    if expired(deadline) {
         return Err(CorrelationDeadlineExpired);
     }
     Ok(())
@@ -57,7 +57,7 @@ fn select_attribution(
     decoded: &DecodedPacket,
     deadline: Instant,
 ) -> Result<Attribution, CorrelationDeadlineExpired> {
-    let mut best_match: Option<MatchResult> = None;
+    let mut best_match: Option<Match> = None;
     let mut equally_best = Vec::new();
     for (request_index, prepared_request) in prepared.iter().take(sent.len()).enumerate() {
         ensure_correlation_active(deadline)?;
@@ -74,7 +74,7 @@ fn select_attribution(
             continue;
         }
 
-        let mut request_match = None;
+        let mut request_match: Option<Match> = None;
         for layer in prepared_request.built.packet.iter() {
             ensure_correlation_active(deadline)?;
             let Some(matcher) = registry.matcher(layer.protocol_id().as_str()) else {
@@ -82,10 +82,8 @@ fn select_attribution(
             };
             let candidate = matcher.matches(&prepared_request.built.packet, &decoded.packet);
             ensure_correlation_active(deadline)?;
-            if candidate.matched
-                && request_match
-                    .as_ref()
-                    .is_none_or(|best: &MatchResult| candidate.confidence > best.confidence)
+            if let Some(candidate) = candidate
+                && request_match.is_none_or(|best| candidate.confidence > best.confidence)
             {
                 request_match = Some(candidate);
             }
@@ -95,17 +93,12 @@ fn select_attribution(
             continue;
         };
 
-        let replace = best_match
-            .as_ref()
-            .is_none_or(|best| request_match.confidence > best.confidence);
+        let replace = best_match.is_none_or(|best| request_match.confidence > best.confidence);
         if replace {
             equally_best.clear();
             equally_best.push(request_index);
             best_match = Some(request_match);
-        } else if best_match
-            .as_ref()
-            .is_some_and(|best| request_match.confidence == best.confidence)
-        {
+        } else if best_match.is_some_and(|best| request_match.confidence == best.confidence) {
             equally_best.push(request_index);
         }
     }
@@ -118,23 +111,23 @@ impl Accumulator {
         &mut self,
         captured: Captured,
         context: ProcessContext<'_>,
-    ) -> ProcessOutcome {
+    ) -> Result<ProcessOutcome, DuplicateRecord> {
         let identity = captured.identity();
         if !self.can_retain_record(identity) {
-            return ProcessOutcome::DuplicateRecordIdentity;
+            return Err(DuplicateRecord);
         }
         let Captured {
             frame, received_at, ..
         } = captured;
-        if self.correlation_deadline_expired || Instant::now() >= context.deadline {
-            return self.retain_capture_after_deadline(identity, frame, context);
+        if self.correlation_deadline_expired || expired(context.deadline) {
+            return Ok(self.retain_capture_after_deadline(identity, frame, context));
         }
 
         let decoded = match self.decode_capture(identity, frame, context) {
             Ok(decoded) => decoded,
-            Err(outcome) => return outcome,
+            Err(outcome) => return Ok(outcome),
         };
-        self.correlate_decoded_capture(identity, received_at, decoded, context)
+        Ok(self.correlate_decoded_capture(identity, received_at, decoded, context))
     }
 
     fn retain_capture_after_deadline(
@@ -167,24 +160,21 @@ impl Accumulator {
             .decode(frame, context.options.decode.clone())
         {
             Ok(decoded) => {
-                if Instant::now() >= context.deadline {
+                if expired(context.deadline) {
                     return Err(self.expire_decoded(identity, decoded, context.options));
                 }
                 Ok(decoded)
             }
             Err(error) => {
-                if Instant::now() >= context.deadline {
+                if expired(context.deadline) {
                     self.mark_correlation_deadline_expired();
                     self.retain_undecoded(identity, raw_frame, context.options);
                     return Err(ProcessOutcome::CorrelationDeadlineExpired);
                 }
-                packetcraftr_core::diagnostic::push_once(
-                    &mut self.diagnostics,
-                    Diagnostic::warning(
-                        "exchange.decode_error",
-                        format!("captured frame could not be decoded: {error}"),
-                    ),
-                );
+                self.diagnostics.push_once(Diagnostic::warning(
+                    "exchange.decode_error",
+                    format!("captured frame could not be decoded: {error}"),
+                ));
                 self.retain_undecoded(identity, raw_frame, context.options);
                 Err(ProcessOutcome::Continue)
             }
@@ -202,17 +192,14 @@ impl Accumulator {
             .diagnostics
             .iter()
             .any(Diagnostic::is_checksum_failure);
-        if Instant::now() >= context.deadline {
+        if expired(context.deadline) {
             return self.expire_decoded(identity, decoded, context.options);
         }
         if integrity_failure {
-            packetcraftr_core::diagnostic::push_once(
-                &mut self.diagnostics,
-                Diagnostic::warning(
-                    "exchange.integrity_rejected",
-                    "a response whose checksum did not verify was not correlated",
-                ),
-            );
+            self.diagnostics.push_once(Diagnostic::warning(
+                "exchange.integrity_rejected",
+                "a response whose checksum did not verify was not correlated",
+            ));
             self.retain_unsolicited(
                 identity,
                 decoded,
@@ -223,8 +210,7 @@ impl Accumulator {
         }
 
         if received_at.is_none() {
-            packetcraftr_core::diagnostic::push_once(
-                &mut self.diagnostics,
+            self.diagnostics.push_once(
                 Diagnostic::warning(
                     "capture.ingress_time_unavailable",
                     "a capture provider returned a frame without an ingress marker; the frame was retained but not correlated",
@@ -258,8 +244,7 @@ impl Accumulator {
     ) -> ProcessOutcome {
         match attribution {
             Attribution::Ambiguous => {
-                packetcraftr_core::diagnostic::push_once(
-                    &mut self.diagnostics,
+                self.diagnostics.push_once(
                     Diagnostic::warning(
                         "exchange.ambiguous_attribution",
                         "a captured response matched several requests equally and was retained as unsolicited",
@@ -274,23 +259,20 @@ impl Accumulator {
             }
             Attribution::Unique(request_index) => {
                 let received_at = received_at.expect("only timestamped capture frames can match");
-                if Instant::now() >= context.deadline {
+                if expired(context.deadline) {
                     return self.expire_decoded(identity, decoded, context.options);
                 }
                 if self.response_count >= context.options.max_responses {
-                    packetcraftr_core::diagnostic::push_once(
-                        &mut self.diagnostics,
-                        Diagnostic::warning(
-                            "exchange.response_limit",
-                            format!(
-                                "matched response limit {} reached; later responses were not retained",
-                                context.options.max_responses
-                            ),
+                    self.diagnostics.push_once(Diagnostic::warning(
+                        "exchange.response_limit",
+                        format!(
+                            "matched response limit {} reached; later responses were not retained",
+                            context.options.max_responses
                         ),
-                    );
+                    ));
                     return ProcessOutcome::Continue;
                 }
-                if Instant::now() >= context.deadline {
+                if expired(context.deadline) {
                     return self.expire_decoded(identity, decoded, context.options);
                 }
                 if self.reserve_decoded_evidence(decoded.original.len(), context.options) {
@@ -327,8 +309,7 @@ impl Accumulator {
             }
             Attribution::None => {
                 if context.sent.len() < context.prepared.len() {
-                    packetcraftr_core::diagnostic::push_once(
-                        &mut self.diagnostics,
+                    self.diagnostics.push_once(
                         Diagnostic::info(
                             "exchange.pre_send_frame",
                             "a captured frame arrived before one or more requests were sent and was not correlated to those requests",
@@ -348,25 +329,27 @@ impl Accumulator {
 
     pub(crate) fn promote_workflow_unsolicited(
         &mut self,
-        context: WorkflowPromotionContext<'_>,
+        context: ProcessContext<'_>,
         matches_request: &mut WorkflowResponseMatcher<'_>,
     ) -> ProcessOutcome {
-        let WorkflowPromotionContext {
+        let ProcessContext {
             prepared,
             sent,
             deadline,
-            max_responses,
+            options,
+            ..
         } = context;
+        let max_responses = options.max_responses;
         if self.unsolicited.is_empty() {
             return ProcessOutcome::Continue;
         }
         let mut candidates = std::mem::take(&mut self.unsolicited).into_iter();
-        if Instant::now() >= deadline {
+        if expired(deadline) {
             return self.expire_workflow_candidates(candidates);
         }
 
         while let Some(candidate) = candidates.next() {
-            if Instant::now() >= deadline {
+            if expired(deadline) {
                 return self
                     .expire_workflow_candidates(std::iter::once(candidate).chain(candidates));
             }
@@ -389,7 +372,7 @@ impl Accumulator {
                     &prepared_request.built.packet,
                     &candidate.decoded,
                 );
-                if Instant::now() >= deadline {
+                if expired(deadline) {
                     return self
                         .expire_workflow_candidates(std::iter::once(candidate).chain(candidates));
                 }
@@ -401,8 +384,7 @@ impl Accumulator {
                 Attribution::Unique(request_index) => request_index,
                 attribution => {
                     if attribution == Attribution::Ambiguous {
-                        packetcraftr_core::diagnostic::push_once(
-                            &mut self.diagnostics,
+                        self.diagnostics.push_once(
                             Diagnostic::warning(
                                 "exchange.ambiguous_attribution",
                                 "a workflow response matched several requests and was retained as unsolicited",
@@ -467,15 +449,12 @@ impl Accumulator {
         if self.response_count < max_responses {
             return false;
         }
-        packetcraftr_core::diagnostic::push_once(
-            &mut self.diagnostics,
-            Diagnostic::warning(
-                "exchange.response_limit",
-                format!(
-                    "matched response limit {max_responses} reached; later responses were not retained"
-                ),
+        self.diagnostics.push_once(Diagnostic::warning(
+            "exchange.response_limit",
+            format!(
+                "matched response limit {max_responses} reached; later responses were not retained"
             ),
-        );
+        ));
         true
     }
 
@@ -488,13 +467,10 @@ impl Accumulator {
 
     fn mark_correlation_deadline_expired(&mut self) {
         self.correlation_deadline_expired = true;
-        packetcraftr_core::diagnostic::push_once(
-            &mut self.diagnostics,
-            Diagnostic::warning(
-                "exchange.correlation_deadline",
-                "response correlation stopped at the bounded exchange deadline",
-            ),
-        );
+        self.diagnostics.push_once(Diagnostic::warning(
+            "exchange.correlation_deadline",
+            "response correlation stopped at the bounded exchange deadline",
+        ));
     }
 
     fn expire_decoded(

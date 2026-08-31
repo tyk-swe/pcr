@@ -11,17 +11,18 @@ use crate::{
     diagnostic::{Diagnostic, UDP_CHECKSUM},
     field::{FieldValue, WireValue},
     layer::{Layer, reflective_layer},
-    semantics::BuiltinProtocol,
+    protocol::BuiltinProtocol,
 };
 
-use super::super::application::DNS_HEADER_LEN;
-use super::super::common::{
-    ValueExpectation, aliased_fields, invalid, make_layer, payload_without_padding, protocol,
-    resolve_u16, strict_or_diagnostic, transport_checksum, transport_checksum_parts, truncated,
-    wrong_layer,
-};
-use super::super::network::resolve_envelope;
 use super::ports::child_discriminators;
+use crate::protocol::application::dns;
+use crate::protocol::common::{
+    ValueExpectation, invalid, make_layer, payload_without_padding, protocol, resolve_u16,
+    strict_or_diagnostic, transport_checksum, transport_checksum_parts, truncated, typed_layer,
+};
+use crate::protocol::network::resolve_envelope;
+
+const NAME: &str = BuiltinProtocol::Udp.as_str();
 
 const UDP_LEN: usize = 8;
 const DNS_PORT: u16 = 53;
@@ -41,7 +42,7 @@ fn preferred_ports(source_port: u16, destination_port: u16, payload: &[u8]) -> [
 }
 
 fn dns_response_prefers_source_port(source_port: u16, payload: &[u8]) -> bool {
-    if source_port != DNS_PORT || payload.len() < DNS_HEADER_LEN {
+    if source_port != DNS_PORT || payload.len() < dns::HEADER_LEN {
         return false;
     }
     let Some(flags) = payload
@@ -74,15 +75,15 @@ impl Default for Udp {
 }
 
 reflective_layer! {
-    fn udp_schema() => { protocol: protocol("udp"), name: "UDP" }
+    fn udp_schema() => { protocol: protocol(NAME), name: "UDP" }
     impl Udp {
-        "source_port" => {
+        "source_port" | "sport" => {
             kind: Unsigned, derived: false, required: true,
             description: "UDP source port",
             reflect: source_port,
             layout: (0, 2)
         },
-        "destination_port" => {
+        "destination_port" | "dport" => {
             kind: Unsigned, derived: false, required: true,
             description: "UDP destination port",
             reflect: destination_port,
@@ -108,8 +109,8 @@ reflective_layer! {
 pub(crate) struct UdpCodec;
 
 impl LayerCodec for UdpCodec {
-    fn protocol_id(&self) -> crate::layer::Id {
-        protocol("udp")
+    fn protocol_id(&self) -> &'static crate::layer::Id {
+        &udp_schema().protocol
     }
 
     fn encode(
@@ -118,38 +119,35 @@ impl LayerCodec for UdpCodec {
         payload: &[u8],
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
-        let layer = layer
-            .as_any()
-            .downcast_ref::<Udp>()
-            .ok_or_else(|| wrong_layer("udp", layer))?;
-        let covered_payload = payload_without_padding("udp", payload, context)?;
+        let layer = typed_layer::<Udp>(NAME, layer)?;
+        let covered_payload = payload_without_padding(NAME, payload, context)?;
         let expected_length = UDP_LEN
             .checked_add(covered_payload.len())
             .and_then(|value| u16::try_from(value).ok())
-            .ok_or_else(|| invalid("udp", "datagram exceeds UDP length range"))?;
+            .ok_or_else(|| invalid(NAME, "datagram exceeds UDP length range"))?;
         let mut diagnostics = validate_child_selection(layer, covered_payload, context)?;
         let (length, materialized_length) = resolve_u16(
-            "udp",
+            NAME,
             "length",
             &layer.length,
             ValueExpectation::Required(expected_length),
             context.mode,
             &mut diagnostics,
         )?;
-        let network = resolve_envelope(context)?;
+        let network = resolve_envelope(NAME, context)?;
         let mut header = [0_u8; UDP_LEN];
         header[0..2].copy_from_slice(&layer.source_port.to_be_bytes());
         header[2..4].copy_from_slice(&layer.destination_port.to_be_bytes());
         header[4..6].copy_from_slice(&length.to_be_bytes());
         let mut checksum_expected =
-            transport_checksum_parts(network, 17, &[&header, covered_payload])?;
+            transport_checksum_parts(NAME, network, 17, &[&header, covered_payload])?;
         if checksum_expected == 0 {
             checksum_expected = 0xffff;
         }
         let ipv4_omitted = matches!(network.source, IpAddr::V4(_))
             && matches!(layer.checksum, WireValue::Exact(0));
         let (checksum, materialized_checksum) = resolve_u16(
-            "udp",
+            NAME,
             "checksum",
             &layer.checksum,
             if ipv4_omitted {
@@ -164,13 +162,11 @@ impl LayerCodec for UdpCodec {
         let mut materialized = layer.clone();
         materialized.length = materialized_length;
         materialized.checksum = materialized_checksum;
-        Ok(EncodedLayer {
-            prefix: header.to_vec(),
-            suffix: Vec::new(),
-            materialized: Box::new(materialized),
-            fields: udp_layout(),
-            diagnostics,
-        })
+        Ok(
+            EncodedLayer::header(header.to_vec(), Box::new(materialized))
+                .with_fields(udp_layout())
+                .with_diagnostics(diagnostics),
+        )
     }
 
     fn decode(
@@ -179,18 +175,15 @@ impl LayerCodec for UdpCodec {
         context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
         let Some(header) = input.first_chunk::<UDP_LEN>() else {
-            return Err(truncated("udp", UDP_LEN, input.len()));
+            return Err(truncated(NAME, UDP_LEN, input.len()));
         };
         let length_field = u16::from_be_bytes([header[4], header[5]]);
         let length = usize::from(length_field);
         if length < UDP_LEN {
-            return Err(invalid(
-                "udp",
-                format!("length {length} is below {UDP_LEN}"),
-            ));
+            return Err(invalid(NAME, format!("length {length} is below {UDP_LEN}")));
         }
         let Some(datagram) = input.get(..length) else {
-            return Err(truncated("udp", length, input.len()));
+            return Err(truncated(NAME, length, input.len()));
         };
         let checksum_value = u16::from_be_bytes([header[6], header[7]]);
         let mut diagnostics = Vec::new();
@@ -202,7 +195,7 @@ impl LayerCodec for UdpCodec {
                             .at_field("checksum"),
                     );
                 }
-            } else if transport_checksum(network, 17, datagram)? != 0 {
+            } else if transport_checksum(NAME, network, 17, datagram)? != 0 {
                 diagnostics.push(
                     Diagnostic::warning(UDP_CHECKSUM, "UDP checksum mismatch").at_field("checksum"),
                 );
@@ -243,14 +236,7 @@ impl LayerCodec for UdpCodec {
         &self,
         fields: &BTreeMap<String, FieldValue>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(
-            Udp::default(),
-            &aliased_fields(
-                "udp",
-                fields,
-                &[("sport", "source_port"), ("dport", "destination_port")],
-            )?,
-        )
+        make_layer(Udp::default(), fields)
     }
 }
 
@@ -275,7 +261,7 @@ fn validate_child_selection(
         payload,
     ))
     .into_iter()
-    .find_map(|discriminator| context.registry.child_for("udp", discriminator)) else {
+    .find_map(|discriminator| context.registry.child_for(NAME, discriminator)) else {
         return Ok(diagnostics);
     };
     if *selected == *child.protocol_id() {
@@ -283,7 +269,7 @@ fn validate_child_selection(
     }
     let message = match context
         .registry
-        .discriminator_for("udp", child.protocol_id().as_str())
+        .discriminator_for(NAME, child.protocol_id().as_str())
         .filter(|discriminator| discriminator.0 != 0)
     {
         Some(registered) => format!(
@@ -297,7 +283,7 @@ fn validate_child_selection(
         ),
     };
     strict_or_diagnostic(
-        "udp",
+        NAME,
         "build.udp_encapsulation_port",
         "destination_port",
         message,

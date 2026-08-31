@@ -4,10 +4,11 @@
 //! Child-discriminator, strictness, and encode-budget validation.
 
 use crate::{
-    codec::LayerEncodeContext, diagnostic::Diagnostic, field::WireValue, registry::Discriminator,
+    codec::LayerEncodeContext, diagnostic::Diagnostic, field::WireValue, protocol::BuiltinProtocol,
+    registry::Discriminator,
 };
 
-use super::errors::{binding_protocol, invalid, protocol};
+use super::errors::{binding_protocol, child_is_opaque, invalid, protocol};
 
 pub(crate) fn validate_ipv6_routing_child(
     name: &str,
@@ -23,7 +24,7 @@ pub(crate) fn validate_ipv6_routing_child(
         return Ok(());
     }
     let message = "IPv6 routing headers must use the typed SRH layer; routing type 0 and unsupported generic routing headers are prohibited";
-    if context.mode == crate::build::Mode::Strict {
+    if context.mode == crate::codec::Mode::Strict {
         return Err(crate::codec::Error::Unsupported {
             protocol: protocol(name),
             message: message.to_owned(),
@@ -55,8 +56,11 @@ pub(crate) fn validate_raw_child_discriminator(
     }
 
     let actual = context.child.and_then(|child| {
-        (!matches!(child.protocol_id().as_str(), "padding" | "raw"))
-            .then(|| binding_protocol(child))
+        (!matches!(
+            BuiltinProtocol::of(child),
+            Some(BuiltinProtocol::Padding | BuiltinProtocol::Raw)
+        ))
+        .then(|| binding_protocol(child))
     });
     if actual == Some(bound) {
         return Ok(());
@@ -79,7 +83,7 @@ pub(crate) fn validate_raw_child_discriminator(
             "discriminator {discriminator} selects registered layer {bound}, but that layer is absent"
         ),
     };
-    if context.mode == crate::build::Mode::Strict {
+    if context.mode == crate::codec::Mode::Strict {
         return Err(invalid(parent, message));
     }
     let code = if context
@@ -109,10 +113,7 @@ pub(crate) fn validate_typed_child_discriminator(
     let Some(child) = context.child else {
         return Ok(());
     };
-    if matches!(
-        child.protocol_id().as_str(),
-        "raw" | "padding" | "malformed"
-    ) {
+    if child_is_opaque(child) {
         return Ok(());
     }
     if context
@@ -152,7 +153,7 @@ pub(crate) fn validate_auto_raw_discriminator<T>(
     let message = format!(
         "Auto {field} cannot infer wire intent from Raw; supply an explicit unknown discriminator"
     );
-    if context.mode == crate::build::Mode::Strict {
+    if context.mode == crate::codec::Mode::Strict {
         return Err(invalid(name, message));
     }
     diagnostics.push(Diagnostic::warning("build.auto_raw_discriminator", message).at_field(field));
@@ -168,7 +169,7 @@ pub(crate) fn strict_or_diagnostic(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), crate::codec::Error> {
     let message = message.into();
-    if context.mode == crate::build::Mode::Strict {
+    if context.mode == crate::codec::Mode::Strict {
         return Err(invalid(name, message));
     }
     diagnostics.push(Diagnostic::warning(code, message).at_field(field));

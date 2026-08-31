@@ -4,14 +4,17 @@
 // for library paths.
 #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
-use std::{fmt, net::IpAddr, time::Duration};
+use std::{
+    error::Error as StdError, fmt, io, net::IpAddr, net::SocketAddr, sync::Arc, time::Duration,
+};
 
 use packetcraftr_core::{
     error::{Classification, Classified, Kind},
     layer::Id as LayerId,
 };
 use packetcraftr_netio::{
-    Error, capture, dns_tcp,
+    Error, SendEvidenceFault, capture,
+    dns_tcp::{self, Category},
     link::Mode,
     neighbor::Error as NeighborError,
     route::{Error as RouteError, SystemError},
@@ -25,6 +28,7 @@ fn dns_tcp_errors_keep_stable_classes_for_every_public_failure_variant() {
             dns_tcp::Error::Unsupported {
                 message: "fixture".to_owned(),
             },
+            Category::Unsupported,
             "capability.dns_tcp",
             Kind::Capability,
         ),
@@ -32,6 +36,7 @@ fn dns_tcp_errors_keep_stable_classes_for_every_public_failure_variant() {
             dns_tcp::Error::InvalidTimeout {
                 value: Duration::ZERO,
             },
+            Category::Request,
             "internal.dns_tcp_request",
             Kind::Internal,
         ),
@@ -40,11 +45,13 @@ fn dns_tcp_errors_keep_stable_classes_for_every_public_failure_variant() {
                 actual: 65_536,
                 maximum: 65_535,
             },
+            Category::Request,
             "internal.dns_tcp_request",
             Kind::Internal,
         ),
         (
             dns_tcp::Error::EmptyQuery,
+            Category::Request,
             "internal.dns_tcp_request",
             Kind::Internal,
         ),
@@ -53,6 +60,7 @@ fn dns_tcp_errors_keep_stable_classes_for_every_public_failure_variant() {
                 value: 0,
                 maximum: 65_535,
             },
+            Category::Request,
             "internal.dns_tcp_request",
             Kind::Internal,
         ),
@@ -60,6 +68,7 @@ fn dns_tcp_errors_keep_stable_classes_for_every_public_failure_variant() {
             dns_tcp::Error::DeadlineOverflow {
                 value: Duration::MAX,
             },
+            Category::Request,
             "internal.dns_tcp_request",
             Kind::Internal,
         ),
@@ -68,6 +77,7 @@ fn dns_tcp_errors_keep_stable_classes_for_every_public_failure_variant() {
                 phase: dns_tcp::Phase::Connect,
                 transferred: 0,
             },
+            Category::Timeout,
             "io.dns_tcp_timeout",
             Kind::Io,
         ),
@@ -75,7 +85,9 @@ fn dns_tcp_errors_keep_stable_classes_for_every_public_failure_variant() {
             dns_tcp::Error::Connect {
                 endpoint,
                 message: "fixture".to_owned(),
+                source: Some(Arc::new(io::Error::other("provider refused"))),
             },
+            Category::Network,
             "io.dns_tcp",
             Kind::Io,
         ),
@@ -83,8 +95,9 @@ fn dns_tcp_errors_keep_stable_classes_for_every_public_failure_variant() {
             dns_tcp::Error::ConfigureTimeout {
                 phase: dns_tcp::Phase::Write,
                 transferred: 1,
-                message: "fixture".to_owned(),
+                source: Arc::new(io::Error::other("timeout not installable")),
             },
+            Category::Network,
             "io.dns_tcp",
             Kind::Io,
         ),
@@ -93,7 +106,9 @@ fn dns_tcp_errors_keep_stable_classes_for_every_public_failure_variant() {
                 written: 1,
                 expected: 2,
                 message: "fixture".to_owned(),
+                source: None,
             },
+            Category::Network,
             "io.dns_tcp",
             Kind::Io,
         ),
@@ -101,17 +116,21 @@ fn dns_tcp_errors_keep_stable_classes_for_every_public_failure_variant() {
             dns_tcp::Error::Read {
                 phase: dns_tcp::Phase::ReadPrefix,
                 message: "fixture".to_owned(),
+                source: None,
             },
+            Category::Network,
             "io.dns_tcp",
             Kind::Io,
         ),
         (
             dns_tcp::Error::IncompletePrefix { actual: 1 },
+            Category::Framing,
             "packet.dns_tcp_frame",
             Kind::Packet,
         ),
         (
             dns_tcp::Error::ZeroLength,
+            Category::Framing,
             "packet.dns_tcp_frame",
             Kind::Packet,
         ),
@@ -120,6 +139,7 @@ fn dns_tcp_errors_keep_stable_classes_for_every_public_failure_variant() {
                 declared: 512,
                 maximum: 511,
             },
+            Category::Framing,
             "packet.dns_tcp_frame",
             Kind::Packet,
         ),
@@ -128,13 +148,124 @@ fn dns_tcp_errors_keep_stable_classes_for_every_public_failure_variant() {
                 declared: 4,
                 actual: 2,
             },
+            Category::Framing,
             "packet.dns_tcp_frame",
             Kind::Packet,
         ),
     ];
 
-    for (error, code, kind) in cases {
+    let mut seen: Vec<Category> = Vec::new();
+    for (error, category, code, kind) in cases {
+        assert_eq!(error.category(), category, "{error}");
+        // The classification is a function of the category alone, so every
+        // variant sharing a category must share its code and kind.
+        assert_eq!(dns_tcp_classification(category), (code, kind), "{error}");
         assert_contract(&error, code, kind);
+        if !seen.contains(&category) {
+            seen.push(category);
+        }
+    }
+    assert_eq!(
+        seen.len(),
+        5,
+        "every DNS-over-TCP category needs a covered variant"
+    );
+}
+
+/// A socket refusal reaches the render boundary as a typed source rather than
+/// as text pasted into the message, so the operator-facing message states the
+/// step and the published cause states what the system said, once each.
+#[test]
+fn dns_tcp_socket_failures_retain_the_system_error_without_restating_it() {
+    let endpoint: SocketAddr = "127.0.0.1:53".parse().expect("fixture endpoint");
+    let refused = io::Error::new(io::ErrorKind::ConnectionRefused, "connection refused");
+
+    let error = dns_tcp::Error::Connect {
+        endpoint,
+        message: "the socket could not be opened".to_owned(),
+        source: Some(Arc::new(refused)),
+    };
+    assert_eq!(
+        error.to_string(),
+        "DNS-over-TCP connection to 127.0.0.1:53 failed: the socket could not be opened"
+    );
+    assert_eq!(error.causes(), ["connection refused"]);
+    assert!(StdError::source(&error).is_some());
+
+    // Configuring a per-call timeout can only fail because the socket refused,
+    // so that variant has no message of its own to keep.
+    let configure = dns_tcp::Error::ConfigureTimeout {
+        phase: dns_tcp::Phase::Write,
+        transferred: 2,
+        source: Arc::new(io::Error::other("timeout not installable")),
+    };
+    assert_eq!(
+        configure.to_string(),
+        "DNS-over-TCP could not configure the write timeout after 2 phase byte(s)"
+    );
+    assert_eq!(configure.causes(), ["timeout not installable"]);
+
+    // This module's own accounting invariants have no system source and
+    // publish no cause.
+    let accounting = dns_tcp::Error::Write {
+        written: 1,
+        expected: 2,
+        message: "peer accepted zero bytes".to_owned(),
+        source: None,
+    };
+    assert!(accounting.causes().is_empty());
+    assert!(StdError::source(&accounting).is_none());
+}
+
+/// The live-I/O failures a native adapter raises keep the platform refusal as
+/// a source, and the retained failure is published exactly once.
+#[test]
+fn live_io_failures_retain_the_platform_refusal_as_a_source() {
+    let error = Error::Capture {
+        message: "libpcap receive failed".to_owned(),
+        source: Some(Arc::new(io::Error::other("device is not up"))),
+    };
+    assert_eq!(error.to_string(), "capture failed: libpcap receive failed");
+    assert_eq!(error.causes(), ["device is not up"]);
+    assert_eq!(error.classification().code, "io.capture");
+
+    // A provider-invariant failure names its own fault and nothing else.
+    let invariant = Error::InvalidSendEvidence {
+        fault: SendEvidenceFault::AcceptedBytesDiffer,
+    };
+    assert_eq!(
+        invariant.causes(),
+        ["provider-accepted bytes differ from the exact submitted frame"]
+    );
+
+    // A route adapter refusal survives the interface-discovery boundary.
+    let discovery = Error::InterfaceDiscovery {
+        message: "the native route adapter refused the interface query".to_owned(),
+        source: Some(Arc::new(SystemError::OperatingSystem {
+            operation: "RTM_GETLINK",
+            message: "the operating system refused the request".to_owned(),
+            source: Some(Arc::new(io::Error::other("operation not permitted"))),
+        })),
+    };
+    assert_eq!(
+        discovery.causes(),
+        [
+            "native operation RTM_GETLINK failed: the operating system refused the request",
+            "operation not permitted",
+        ]
+    );
+}
+
+/// The one stable mapping from category to classification. A category with no
+/// row here fails the test instead of silently reaching a catch-all.
+fn dns_tcp_classification(category: Category) -> (&'static str, Kind) {
+    match category {
+        Category::Request => ("internal.dns_tcp_request", Kind::Internal),
+        Category::Unsupported => ("capability.dns_tcp", Kind::Capability),
+        Category::Timeout => ("io.dns_tcp_timeout", Kind::Io),
+        Category::Network => ("io.dns_tcp", Kind::Io),
+        Category::Framing => ("packet.dns_tcp_frame", Kind::Packet),
+        other => panic!("DNS-over-TCP category {other:?} has no declared classification"),
     }
 }
 
@@ -169,7 +300,7 @@ fn route_errors_keep_stable_classes_for_every_public_failure_variant() {
         (
             RouteError::RouteLookup {
                 destination: ipv4("192.0.2.9"),
-                message: "fixture".to_owned(),
+                source: Box::new(std::io::Error::other("fixture")),
                 failure: provider_failure,
             },
             "fixture.route_provider",
@@ -191,7 +322,7 @@ fn route_errors_keep_stable_classes_for_every_public_failure_variant() {
         (
             RouteError::InterfaceLookup {
                 interface: "fixture0".to_owned(),
-                message: "fixture".to_owned(),
+                source: Box::new(std::io::Error::other("fixture")),
                 failure: provider_failure,
             },
             "fixture.route_provider",
@@ -231,9 +362,34 @@ fn route_errors_keep_stable_classes_for_every_public_failure_variant() {
             Kind::Capability,
         ),
         (
-            RouteError::MissingNeighborSource,
+            RouteError::MissingNeighborSource {
+                interface: "fixture0".to_owned(),
+            },
             "internal.route_contract",
             Kind::Internal,
+        ),
+        (
+            RouteError::MissingNeighborTarget {
+                interface: "fixture0".to_owned(),
+            },
+            "internal.route_contract",
+            Kind::Internal,
+        ),
+        (
+            RouteError::MissingSourceMac {
+                interface: "fixture0".to_owned(),
+            },
+            "internal.route_contract",
+            Kind::Internal,
+        ),
+        (
+            RouteError::Neighbor(Box::new(NeighborError::Resolution {
+                interface: "fixture0".to_owned(),
+                target: ipv4("192.0.2.9"),
+                message: "fixture".to_owned(),
+            })),
+            "io.neighbor",
+            Kind::Io,
         ),
         (
             RouteError::SourceFamilyMismatch {
@@ -280,6 +436,7 @@ fn route_errors_keep_stable_classes_for_every_public_failure_variant() {
         (
             RouteError::InvalidNeighborVlan {
                 message: "fixture".to_owned(),
+                source: None,
             },
             "packet.plan",
             Kind::Packet,
@@ -289,6 +446,32 @@ fn route_errors_keep_stable_classes_for_every_public_failure_variant() {
     for (error, code, kind) in cases {
         assert_contract(&error, code, kind);
     }
+}
+
+/// The two lookup variants retain the provider failure they wrap instead of
+/// flattening it into a string, so the chain survives to the render boundary
+/// while the published message stays exactly what it was.
+#[test]
+fn route_lookup_failures_retain_the_provider_error_as_a_source() {
+    let error = RouteError::RouteLookup {
+        destination: ipv4("192.0.2.9"),
+        source: Box::new(std::io::Error::other("provider refused")),
+        failure: Classification::new("fixture.route_provider", Kind::Policy, Some("replace it")),
+    };
+
+    assert_eq!(
+        error.to_string(),
+        "route lookup for 192.0.2.9 failed: provider refused"
+    );
+    assert_eq!(error.causes(), ["provider refused"]);
+    assert!(std::error::Error::source(&error).is_some());
+
+    // A transparent variant delegates rather than repeating its own message.
+    let neighbor = RouteError::Neighbor(Box::new(NeighborError::InvalidRequest {
+        message: "fixture".to_owned(),
+    }));
+    assert!(neighbor.causes().is_empty());
+    assert_eq!(neighbor.to_string(), "neighbor request is invalid: fixture");
 }
 
 #[test]
@@ -353,6 +536,7 @@ fn system_route_errors_keep_stable_provider_classes() {
             SystemError::OperatingSystem {
                 operation: "fixture operation",
                 message: "fixture".to_owned(),
+                source: Some(Arc::new(io::Error::other("kernel refused the request"))),
             },
             "io.route",
             Kind::Io,
@@ -397,30 +581,6 @@ fn neighbor_errors_keep_stable_classes_and_ordered_provider_causes() {
         ),
         (not_found(), "io.neighbor_timeout", Kind::Io, NO_CAUSES),
         (
-            NeighborError::MissingSourceMac {
-                interface: "fixture0".to_owned(),
-            },
-            "internal.neighbor_invariant",
-            Kind::Internal,
-            NO_CAUSES,
-        ),
-        (
-            NeighborError::MissingNeighborTarget {
-                interface: "fixture0".to_owned(),
-            },
-            "internal.neighbor_invariant",
-            Kind::Internal,
-            NO_CAUSES,
-        ),
-        (
-            NeighborError::MissingNeighborSource {
-                interface: "fixture0".to_owned(),
-            },
-            "internal.neighbor_invariant",
-            Kind::Internal,
-            NO_CAUSES,
-        ),
-        (
             NeighborError::InvalidRequest {
                 message: "fixture".to_owned(),
             },
@@ -451,6 +611,7 @@ fn neighbor_errors_keep_stable_classes_and_ordered_provider_causes() {
                 operation: "sending request",
                 source: Error::Send {
                     message: "send failed".to_owned(),
+                    source: None,
                 },
             },
             "io.send",
@@ -463,6 +624,7 @@ fn neighbor_errors_keep_stable_classes_and_ordered_provider_causes() {
                 target: ipv4("192.0.2.9"),
                 source: Error::Capture {
                     message: "cleanup failed".to_owned(),
+                    source: None,
                 },
             },
             "io.capture",
@@ -476,6 +638,7 @@ fn neighbor_errors_keep_stable_classes_and_ordered_provider_causes() {
                 operation: Box::new(not_found()),
                 cleanup: Error::Capture {
                     message: "cleanup failed".to_owned(),
+                    source: None,
                 },
             },
             "io.neighbor_timeout",
@@ -498,6 +661,7 @@ fn live_io_errors_keep_stable_classes_for_every_public_failure_variant() {
         (
             Error::Unsupported {
                 message: "fixture".to_owned(),
+                source: None,
             },
             "capability.unsupported",
             Kind::Capability,
@@ -505,6 +669,7 @@ fn live_io_errors_keep_stable_classes_for_every_public_failure_variant() {
         (
             Error::InterfaceDiscovery {
                 message: "fixture".to_owned(),
+                source: None,
             },
             "io.interface_discovery",
             Kind::Io,
@@ -513,6 +678,7 @@ fn live_io_errors_keep_stable_classes_for_every_public_failure_variant() {
             Error::MissingDependency {
                 dependency: "fixture",
                 message: "fixture".to_owned(),
+                source: None,
             },
             "capability.missing_dependency",
             Kind::Capability,
@@ -521,6 +687,7 @@ fn live_io_errors_keep_stable_classes_for_every_public_failure_variant() {
             Error::Device {
                 interface: "fixture0".to_owned(),
                 message: "fixture".to_owned(),
+                source: None,
             },
             "io.device",
             Kind::Io,
@@ -528,6 +695,7 @@ fn live_io_errors_keep_stable_classes_for_every_public_failure_variant() {
         (
             Error::Privilege {
                 message: "fixture".to_owned(),
+                source: None,
             },
             "capability.privilege",
             Kind::Capability,
@@ -535,6 +703,7 @@ fn live_io_errors_keep_stable_classes_for_every_public_failure_variant() {
         (
             Error::Send {
                 message: "fixture".to_owned(),
+                source: None,
             },
             "io.send",
             Kind::Io,
@@ -565,7 +734,7 @@ fn live_io_errors_keep_stable_classes_for_every_public_failure_variant() {
         ),
         (
             Error::InvalidSendEvidence {
-                message: "fixture".to_owned(),
+                fault: SendEvidenceFault::AcceptedBytesDiffer,
             },
             "internal.live_io_invariant",
             Kind::Internal,
@@ -595,6 +764,7 @@ fn live_io_errors_keep_stable_classes_for_every_public_failure_variant() {
         (
             Error::Capture {
                 message: "fixture".to_owned(),
+                source: None,
             },
             "io.capture",
             Kind::Io,

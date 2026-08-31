@@ -14,7 +14,7 @@ use proptest::prelude::*;
 
 use packetcraftr_core::Packet;
 use packetcraftr_core::analysis::pcap::{Reader, Writer};
-use packetcraftr_core::analysis::reassembly::Limits as ReassemblyLimits;
+use packetcraftr_core::analysis::reassembly::tcp::Limits as ReassemblyLimits;
 use packetcraftr_core::analysis::reassembly::tcp::{
     Event as TcpEvent, FlowKey, Reassembler, ScopedFlowKey, Segment,
 };
@@ -34,7 +34,7 @@ use packetcraftr_core::protocol::transport::Tcp;
 use packetcraftr_core::registry::Registry;
 
 fn test_registry() -> Arc<Registry> {
-    Arc::new(builtin::registry().expect("built-in protocols must register"))
+    builtin::registry()
 }
 
 // Strategy for FieldValue

@@ -14,16 +14,21 @@ use crate::{
     layer::{Layer, reflective_layer},
 };
 
-use super::super::common::{
-    ensure_encode_budget, invalid, protocol, read_only, text_list, truncated, unsigned_list,
-    wrong_layer,
+use crate::protocol::common::{
+    ensure_encode_budget, invalid, protocol, read_only, text_list, truncated, typed_layer,
+    unsigned_list,
 };
 
-pub(crate) const DNS_HEADER_LEN: usize = 12;
+use crate::protocol::BuiltinProtocol;
+
+pub mod name;
+
+const NAME: &str = BuiltinProtocol::Dns.as_str();
+
+/// Octets in the fixed DNS message header, before the first question.
+pub(crate) const HEADER_LEN: usize = 12;
 const MAX_QUESTIONS: usize = 64;
 const MAX_NAME_POINTERS: usize = 32;
-const MAX_EXPANDED_NAME_LEN: usize = 255;
-const MAX_LABEL_LEN: usize = 63;
 
 /// The bounded, exact DNS-over-UDP layer.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -53,8 +58,8 @@ impl Dns {
     pub fn from_wire(wire: impl Into<Bytes>) -> Result<Self, crate::codec::Error> {
         let wire = wire.into();
         let input = wire.as_ref();
-        let Some(header) = input.first_chunk::<DNS_HEADER_LEN>() else {
-            return Err(truncated("dns", DNS_HEADER_LEN, input.len()));
+        let Some(header) = input.first_chunk::<HEADER_LEN>() else {
+            return Err(truncated(NAME, HEADER_LEN, input.len()));
         };
         let flags = u16::from_be_bytes([header[2], header[3]]);
         let question_count = u16::from_be_bytes([header[4], header[5]]);
@@ -64,7 +69,7 @@ impl Dns {
         let count = usize::from(question_count);
         if count > MAX_QUESTIONS {
             return Err(invalid(
-                "dns",
+                NAME,
                 format!("question count {count} exceeds the limit of {MAX_QUESTIONS}"),
             ));
         }
@@ -78,7 +83,7 @@ impl Dns {
             id: u16::from_be_bytes([header[0], header[1]]),
             response: flags & 0x8000 != 0,
             opcode: u8::try_from((flags >> 11) & 0x0f)
-                .map_err(|_| invalid("dns", "opcode exceeds four bits"))?,
+                .map_err(|_| invalid(NAME, "opcode exceeds four bits"))?,
             authoritative_answer: flags & 0x0400 != 0,
             truncated: flags & 0x0200 != 0,
             recursion_desired: flags & 0x0100 != 0,
@@ -86,7 +91,7 @@ impl Dns {
             authenticated_data: flags & 0x0020 != 0,
             checking_disabled: flags & 0x0010 != 0,
             rcode: u8::try_from(flags & 0x000f)
-                .map_err(|_| invalid("dns", "rcode exceeds four bits"))?,
+                .map_err(|_| invalid(NAME, "rcode exceeds four bits"))?,
             question_count,
             answer_count,
             authority_count,
@@ -109,7 +114,7 @@ impl Dns {
             Ok(())
         } else {
             Err(invalid(
-                "dns",
+                NAME,
                 "DNS fields were changed after dissection and no longer match the retained wire payload",
             ))
         }
@@ -121,7 +126,7 @@ fn read_u16(input: &[u8], cursor: &mut usize) -> Result<u16, crate::codec::Error
     let bytes = input
         .get(*cursor..end)
         .and_then(<[u8]>::first_chunk::<2>)
-        .ok_or_else(|| truncated("dns", end, input.len()))?;
+        .ok_or_else(|| truncated(NAME, end, input.len()))?;
     *cursor = end;
     Ok(u16::from_be_bytes([bytes[0], bytes[1]]))
 }
@@ -133,7 +138,7 @@ struct ParsedQuestions {
 }
 
 fn parse_questions(input: &[u8], count: usize) -> Result<ParsedQuestions, crate::codec::Error> {
-    let mut cursor = DNS_HEADER_LEN;
+    let mut cursor = HEADER_LEN;
     let mut qnames = Vec::with_capacity(count);
     let mut qtypes = Vec::with_capacity(count);
     let mut qclasses = Vec::with_capacity(count);
@@ -155,101 +160,58 @@ fn checked_end(offset: usize, length: usize) -> Result<usize, crate::codec::Erro
     offset
         .checked_add(length)
         .ok_or(crate::codec::Error::LengthOverflow {
-            protocol: protocol("dns"),
+            protocol: protocol(NAME),
         })
 }
 
-fn take(input: &[u8], offset: usize, length: usize) -> Result<&[u8], crate::codec::Error> {
-    let end = checked_end(offset, length)?;
-    input
-        .get(offset..end)
-        .ok_or_else(|| truncated("dns", end, input.len()))
+fn parse_name(input: &[u8], start: usize) -> Result<(usize, String), crate::codec::Error> {
+    let expanded = name::decompress(input, start, MAX_NAME_POINTERS)
+        .map_err(|error| name_error(input, error))?;
+    Ok((expanded.resume, format_name(&expanded.labels)))
 }
 
-fn parse_name(input: &[u8], start: usize) -> Result<(usize, String), crate::codec::Error> {
-    let mut cursor = start;
-    let mut resume = None;
-    let mut labels = Vec::new();
-    let mut visited = Vec::new();
-    let mut expanded_len = 1usize;
-
-    loop {
-        let length_end = checked_end(cursor, 1)?;
-        let length = *input
-            .get(cursor)
-            .ok_or_else(|| truncated("dns", length_end, input.len()))?;
-        match length & 0xc0 {
-            0xc0 => {
-                let pointer_end = checked_end(cursor, 2)?;
-                let second_offset = checked_end(cursor, 1)?;
-                let second = *input
-                    .get(second_offset)
-                    .ok_or_else(|| truncated("dns", pointer_end, input.len()))?;
-                let pointer = (usize::from(length & 0x3f) << 8) | usize::from(second);
-                if pointer >= input.len() {
-                    return Err(invalid(
-                        "dns",
-                        format!("compression pointer {pointer} is outside the message"),
-                    ));
-                }
-                if pointer >= cursor {
-                    return Err(invalid(
-                        "dns",
-                        format!("compression pointer {pointer} is not backward from {cursor}"),
-                    ));
-                }
-                if visited.len() >= MAX_NAME_POINTERS {
-                    return Err(invalid(
-                        "dns",
-                        format!("compression pointer limit of {MAX_NAME_POINTERS} exceeded"),
-                    ));
-                }
-                if visited.contains(&pointer) {
-                    return Err(invalid(
-                        "dns",
-                        format!("compression pointer loop at {pointer}"),
-                    ));
-                }
-                visited.push(pointer);
-                resume.get_or_insert(pointer_end);
-                cursor = pointer;
-            }
-            0 => {
-                cursor = length_end;
-                if length == 0 {
-                    let next = resume.unwrap_or(cursor);
-                    return Ok((next, format_name(&labels)));
-                }
-                let label_len = usize::from(length);
-                if label_len > MAX_LABEL_LEN {
-                    return Err(invalid(
-                        "dns",
-                        format!("label length {label_len} exceeds {MAX_LABEL_LEN}"),
-                    ));
-                }
-                let label = take(input, cursor, label_len)?;
-                expanded_len = expanded_len
-                    .checked_add(label_len.saturating_add(1))
-                    .ok_or(crate::codec::Error::LengthOverflow {
-                        protocol: protocol("dns"),
-                    })?;
-                if expanded_len > MAX_EXPANDED_NAME_LEN {
-                    return Err(invalid(
-                        "dns",
-                        format!("expanded name exceeds {MAX_EXPANDED_NAME_LEN} wire bytes"),
-                    ));
-                }
-                labels.push(label.to_vec());
-                cursor = checked_end(cursor, label_len)?;
-            }
-            _ => {
-                return Err(invalid("dns", "reserved label length tag"));
-            }
+/// Restates a decompression failure in this codec's own vocabulary.
+fn name_error(input: &[u8], error: name::Error) -> crate::codec::Error {
+    match error {
+        name::Error::TruncatedLabelLength { offset } => {
+            truncated(NAME, offset.saturating_add(1), input.len())
         }
+        name::Error::TruncatedPointer { offset } => {
+            truncated(NAME, offset.saturating_add(2), input.len())
+        }
+        name::Error::TruncatedLabel { end, .. } => truncated(NAME, end, input.len()),
+        name::Error::PointerOutOfBounds { pointer, .. } => invalid(
+            NAME,
+            format!("compression pointer {pointer} is outside the message"),
+        ),
+        name::Error::SelfPointer { offset } => invalid(
+            NAME,
+            format!("compression pointer {offset} is not backward from {offset}"),
+        ),
+        name::Error::ForwardPointer { offset, pointer } => invalid(
+            NAME,
+            format!("compression pointer {pointer} is not backward from {offset}"),
+        ),
+        name::Error::PointerLoop { offset } => {
+            invalid(NAME, format!("compression pointer loop at {offset}"))
+        }
+        name::Error::PointerLimit { limit } => invalid(
+            NAME,
+            format!("compression pointer limit of {limit} exceeded"),
+        ),
+        name::Error::ReservedLabelLength { .. } => invalid(NAME, "reserved label length tag"),
+        name::Error::LabelTooLong { actual, .. } => invalid(
+            NAME,
+            format!("label length {actual} exceeds {}", name::MAX_LABEL_LEN),
+        ),
+        name::Error::NameTooLong => invalid(
+            NAME,
+            format!("expanded name exceeds {} wire bytes", name::MAX_NAME_LEN),
+        ),
     }
 }
 
-fn format_name(labels: &[Vec<u8>]) -> String {
+fn format_name(labels: &[Bytes]) -> String {
     if labels.is_empty() {
         return ".".to_owned();
     }
@@ -271,7 +233,7 @@ fn format_name(labels: &[Vec<u8>]) -> String {
 }
 
 reflective_layer! {
-    fn dns_schema() => { protocol: protocol("dns"), name: "DNS" }
+    fn dns_schema() => { protocol: protocol(NAME), name: "DNS" }
     impl Dns {
         "id" => { kind: Unsigned, derived: false, required: false, description: "Transaction identifier", get |layer| Some(FieldValue::from(layer.id)), set |_layer, _value, name| read_only(dns_schema(), name), layout: (0, 2) },
         "response" => { kind: Bool, derived: false, required: false, description: "Query/response flag", get |layer| Some(FieldValue::from(layer.response)), set |_layer, _value, name| read_only(dns_schema(), name), layout: (2, 4) },
@@ -298,8 +260,8 @@ reflective_layer! {
 pub(crate) struct DnsCodec;
 
 impl LayerCodec for DnsCodec {
-    fn protocol_id(&self) -> crate::layer::Id {
-        protocol("dns")
+    fn protocol_id(&self) -> &'static crate::layer::Id {
+        &dns_schema().protocol
     }
 
     fn published_schema(&self) -> Option<&'static crate::layer::Schema> {
@@ -312,22 +274,16 @@ impl LayerCodec for DnsCodec {
         payload: &[u8],
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
-        let layer = layer
-            .as_any()
-            .downcast_ref::<Dns>()
-            .ok_or_else(|| wrong_layer("dns", layer))?;
+        let layer = typed_layer::<Dns>(NAME, layer)?;
         if context.child.is_some() || !payload.is_empty() {
-            return Err(invalid("dns", "DNS is a terminal UDP payload layer"));
+            return Err(invalid(NAME, "DNS is a terminal UDP payload layer"));
         }
         layer.validate_wire_consistency()?;
-        ensure_encode_budget("dns", layer.wire.len(), context)?;
-        Ok(EncodedLayer {
-            prefix: layer.wire.to_vec(),
-            suffix: Vec::new(),
-            materialized: Box::new(layer.clone()),
-            fields: dns_layout(),
-            diagnostics: Vec::new(),
-        })
+        ensure_encode_budget(NAME, layer.wire.len(), context)?;
+        Ok(
+            EncodedLayer::header(layer.wire.to_vec(), Box::new(layer.clone()))
+                .with_fields(dns_layout()),
+        )
     }
 
     fn decode(
@@ -353,7 +309,7 @@ impl LayerCodec for DnsCodec {
         _fields: &BTreeMap<String, FieldValue>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         Err(crate::codec::Error::Unsupported {
-            protocol: protocol("dns"),
+            protocol: protocol(NAME),
             message: "DNS is dissection-only; construct a query in the DNS workflow".to_owned(),
         })
     }

@@ -7,7 +7,7 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 
 use serde::Serialize;
 
-use super::super::hex::compact_hex;
+use crate::output::hex::compact_hex;
 
 pub use crate::dns::Section;
 

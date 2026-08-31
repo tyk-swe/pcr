@@ -82,3 +82,57 @@ fn fuzz_failures_retain_stable_boundary_classifications() {
         assert!(!error.to_string().is_empty());
     }
 }
+
+#[test]
+fn a_campaign_publishes_the_duration_it_charged_against_its_own_deadline() {
+    let request = fuzz::Request {
+        seed: 5,
+        cases: 8,
+        strategies: vec![fuzz::Strategy::BitFlip],
+        ..fuzz::Request::default()
+    };
+    let mut packet = packetcraftr_core::Packet::new();
+    packet.push(packetcraftr_core::layer::Raw::new(b"elapsed".to_vec()));
+
+    let report = fuzz::run(
+        &request,
+        packet,
+        packetcraftr_core::protocol::builtin::registry(),
+    )
+    .expect("bounded offline campaign");
+
+    assert_eq!(report.stats.cases_generated, 8);
+    assert!(
+        report.stats.elapsed > Duration::ZERO,
+        "a generated campaign reports the time it took, not zero: {:?}",
+        report.stats.elapsed
+    );
+    assert!(
+        report.stats.elapsed < request.limits.max_duration,
+        "{:?}",
+        report.stats.elapsed
+    );
+}
+
+#[test]
+fn campaign_limits_reject_values_above_the_ceilings_they_enforce() {
+    for limits in [
+        fuzz::Limits {
+            max_total_bytes: fuzz::MAX_TOTAL_BYTES + 1,
+            ..fuzz::Limits::default()
+        },
+        fuzz::Limits {
+            max_packet_bytes: fuzz::MAX_PACKET_BYTES + 1,
+            ..fuzz::Limits::default()
+        },
+    ] {
+        assert!(matches!(
+            limits.validate(),
+            Err(fuzz::Error::InvalidLimit { .. })
+        ));
+    }
+    assert!(fuzz::Limits::default().validate().is_ok());
+    const {
+        assert!(fuzz::MAX_VALUE_NESTING <= packetcraftr_core::document::MAX_DOCUMENT_NESTING);
+    }
+}

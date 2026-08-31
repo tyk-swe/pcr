@@ -13,10 +13,14 @@ use crate::{
     registry::Discriminator,
 };
 
-use super::super::common::{
+use crate::protocol::common::{
     ensure_encode_budget, invalid, make_layer, out_of_range, protocol, strict_or_diagnostic,
-    truncated, validate_raw_child_discriminator, wrong_layer, wrong_type,
+    truncated, typed_layer, validate_raw_child_discriminator, wrong_type,
 };
+
+use crate::protocol::BuiltinProtocol;
+
+const NAME: &str = BuiltinProtocol::Erspan.as_str();
 
 const ERSPAN_II_LEN: usize = 8;
 const ERSPAN_III_LEN: usize = 12;
@@ -84,7 +88,7 @@ impl Default for Erspan {
 }
 
 reflective_layer! {
-    fn erspan_schema() => { protocol: protocol("erspan"), name: "ERSPAN" }
+    fn erspan_schema() => { protocol: protocol(NAME), name: "ERSPAN" }
     impl Erspan {
         "version" => { kind: Unsigned, derived: false, required: true, description: "Header version: 1 is Type II, 2 is Type III", get |layer| Some(reflect_get(&layer.version)), set |layer, value, name| { reflect_set_bounded(&mut layer.version, erspan_schema(), name, value, 0xf_u64)?; if layer.version == 2 && layer.type3.is_none() { layer.type3 = Some(ErspanType3::default()); } Ok(()) }, layout: (0, 2) },
         "vlan" => { kind: Unsigned, derived: false, required: false, description: "VLAN of the mirrored frame", reflect_bounded: vlan, 0xfff_u64, layout: (0, 2) },
@@ -105,8 +109,8 @@ reflective_layer! {
 pub(crate) struct ErspanCodec;
 
 impl LayerCodec for ErspanCodec {
-    fn protocol_id(&self) -> crate::layer::Id {
-        protocol("erspan")
+    fn protocol_id(&self) -> &'static crate::layer::Id {
+        &erspan_schema().protocol
     }
 
     fn encode(
@@ -115,10 +119,7 @@ impl LayerCodec for ErspanCodec {
         _payload: &[u8],
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
-        let layer = layer
-            .as_any()
-            .downcast_ref::<Erspan>()
-            .ok_or_else(|| wrong_layer("erspan", layer))?;
+        let layer = typed_layer::<Erspan>(NAME, layer)?;
         let header_len = validate_shape(layer, context)?;
         let diagnostics = validate_parent(layer, context)?;
 
@@ -140,13 +141,9 @@ impl LayerCodec for ErspanCodec {
         } else {
             prefix.extend_from_slice(&layer.index_word.to_be_bytes());
         }
-        Ok(EncodedLayer {
-            prefix,
-            suffix: Vec::new(),
-            materialized: Box::new(layer.clone()),
-            fields: erspan_layout(layer),
-            diagnostics,
-        })
+        Ok(EncodedLayer::header(prefix, Box::new(layer.clone()))
+            .with_fields(erspan_layout(layer))
+            .with_diagnostics(diagnostics))
     }
 
     fn decode(
@@ -155,7 +152,7 @@ impl LayerCodec for ErspanCodec {
         context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
         let Some(base) = input.first_chunk::<ERSPAN_II_LEN>() else {
-            return Err(truncated("erspan", ERSPAN_II_LEN, input.len()));
+            return Err(truncated(NAME, ERSPAN_II_LEN, input.len()));
         };
         let first = u16::from_be_bytes([base[0], base[1]]);
         let version = (first >> 12) as u8;
@@ -164,7 +161,7 @@ impl LayerCodec for ErspanCodec {
             1 => ERSPAN_II_LEN,
             2 => {
                 let Some(header) = input.first_chunk::<ERSPAN_III_LEN>() else {
-                    return Err(truncated("erspan", ERSPAN_III_LEN, input.len()));
+                    return Err(truncated(NAME, ERSPAN_III_LEN, input.len()));
                 };
                 type3_header = Some(header);
                 // The flag word's O bit places an 8-byte subheader before
@@ -177,13 +174,13 @@ impl LayerCodec for ErspanCodec {
             }
             other => {
                 return Err(crate::codec::Error::Unsupported {
-                    protocol: protocol("erspan"),
+                    protocol: protocol(NAME),
                     message: format!("ERSPAN version {other} is not supported"),
                 });
             }
         };
         if input.len() < header_len {
-            return Err(truncated("erspan", header_len, input.len()));
+            return Err(truncated(NAME, header_len, input.len()));
         }
         let second = u16::from_be_bytes([base[2], base[3]]);
 
@@ -275,18 +272,18 @@ fn validate_shape(
         }
         other => {
             return Err(invalid(
-                "erspan",
+                NAME,
                 format!("version {other} is not a known ERSPAN header type"),
             ));
         }
     };
-    ensure_encode_budget("erspan", header_len, context)?;
+    ensure_encode_budget(NAME, header_len, context)?;
     if layer.vlan > 0xfff || layer.cos > 7 || layer.encapsulation > 3 || layer.session_id > 0x3ff {
-        return Err(invalid("erspan", "field exceeds its wire range"));
+        return Err(invalid(NAME, "field exceeds its wire range"));
     }
     if (layer.version == 2) != layer.type3.is_some() {
         return Err(invalid(
-            "erspan",
+            NAME,
             "Type III fields are present exactly when the version is 2",
         ));
     }
@@ -294,19 +291,16 @@ fn validate_shape(
         match (&type3.subheader, type3.flags & SUBHEADER_FLAG != 0) {
             (Some(subheader), true) if subheader.len() != SUBHEADER_LEN => {
                 return Err(invalid(
-                    "erspan",
+                    NAME,
                     format!("the optional subheader is exactly {SUBHEADER_LEN} bytes"),
                 ));
             }
             (Some(_), false) => {
-                return Err(invalid(
-                    "erspan",
-                    "a subheader requires the flag word's O bit",
-                ));
+                return Err(invalid(NAME, "a subheader requires the flag word's O bit"));
             }
             (None, true) => {
                 return Err(invalid(
-                    "erspan",
+                    NAME,
                     "the flag word's O bit requires the 8-byte subheader",
                 ));
             }
@@ -323,7 +317,7 @@ fn validate_parent(
     let mut diagnostics = Vec::new();
     if layer.version == 2 && layer.index_word != 0 {
         strict_or_diagnostic(
-            "erspan",
+            NAME,
             "build.erspan_index",
             "index_word",
             "the index word belongs to Type II headers only",
@@ -349,7 +343,7 @@ fn validate_parent(
     };
     if protocol_type_disagrees {
         strict_or_diagnostic(
-            "erspan",
+            NAME,
             "build.erspan_type",
             "version",
             format!(
@@ -366,7 +360,7 @@ fn validate_parent(
         })
     {
         strict_or_diagnostic(
-            "erspan",
+            NAME,
             "build.erspan_sequence",
             "version",
             "Type II encapsulation requires the GRE sequence field",
@@ -374,7 +368,7 @@ fn validate_parent(
             &mut diagnostics,
         )?;
     }
-    validate_raw_child_discriminator("erspan", 0, context, &mut diagnostics)?;
+    validate_raw_child_discriminator(NAME, 0, context, &mut diagnostics)?;
     Ok(diagnostics)
 }
 
@@ -386,13 +380,13 @@ fn erspan_layout(layer: &Erspan) -> Vec<crate::layout::FieldLayout> {
         fields.retain(|field| field.name != "index_word");
         for (name, start, end) in [("timestamp", 4, 8), ("sgt", 8, 10), ("flags", 10, 12)] {
             fields.push(crate::layout::FieldLayout {
-                name: name.to_owned(),
+                name,
                 range: crate::layout::ByteRange::new(start, end),
             });
         }
         if type3.subheader.is_some() {
             fields.push(crate::layout::FieldLayout {
-                name: "subheader".to_owned(),
+                name: "subheader",
                 range: crate::layout::ByteRange::new(
                     ERSPAN_III_LEN,
                     ERSPAN_III_LEN.saturating_add(SUBHEADER_LEN),
@@ -413,12 +407,12 @@ mod tests {
 
     fn encode(
         layer: &Erspan,
-        mode: crate::build::Mode,
+        mode: crate::codec::Mode,
         remaining_packet_bytes: usize,
     ) -> Result<EncodedLayer, crate::codec::Error> {
-        let registry = crate::protocol::builtin::registry().expect("built-in registry");
+        let registry = crate::protocol::builtin::registry();
         let packet = Packet::new();
-        let build_context = crate::build::Context::default();
+        let build_context = crate::codec::Context::default();
         let child = Ethernet::default();
         let context = LayerEncodeContext {
             packet: &packet,
@@ -436,7 +430,7 @@ mod tests {
         input: &[u8],
         discriminator: Option<u64>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
-        let registry = crate::protocol::builtin::registry().expect("built-in registry");
+        let registry = crate::protocol::builtin::registry();
         let context = LayerDecodeContext {
             registry: &registry,
             allow_trailing_padding: false,
@@ -454,7 +448,7 @@ mod tests {
     }
 
     fn encode_error(layer: &Erspan) -> crate::codec::Error {
-        match encode(layer, crate::build::Mode::Strict, usize::MAX) {
+        match encode(layer, crate::codec::Mode::Strict, usize::MAX) {
             Ok(_) => panic!("invalid ERSPAN layer unexpectedly encoded: {layer:?}"),
             Err(error) => error,
         }
@@ -473,7 +467,7 @@ mod tests {
             type3: None,
         };
 
-        let encoded = encode(&layer, crate::build::Mode::Strict, ERSPAN_II_LEN).unwrap();
+        let encoded = encode(&layer, crate::codec::Mode::Strict, ERSPAN_II_LEN).unwrap();
         assert_eq!(
             encoded.prefix,
             [0x1a, 0xbc, 0xb5, 0x55, 0x12, 0x34, 0x56, 0x78]
@@ -511,7 +505,7 @@ mod tests {
             }),
         };
 
-        let encoded = encode(&layer, crate::build::Mode::Strict, 20).unwrap();
+        let encoded = encode(&layer, crate::codec::Mode::Strict, 20).unwrap();
         assert_eq!(
             encoded.prefix,
             [
@@ -666,7 +660,7 @@ mod tests {
             assert!(error.to_string().contains(expected), "{layer:?}: {error}");
         }
 
-        let error = match encode(&Erspan::default(), crate::build::Mode::Strict, 7) {
+        let error = match encode(&Erspan::default(), crate::codec::Mode::Strict, 7) {
             Ok(_) => panic!("undersized packet budget unexpectedly encoded"),
             Err(error) => error,
         };
@@ -687,7 +681,7 @@ mod tests {
                 .contains("Type II headers only")
         );
 
-        let encoded = encode(&layer, crate::build::Mode::Permissive, 12).unwrap();
+        let encoded = encode(&layer, crate::codec::Mode::Permissive, 12).unwrap();
         assert_eq!(encoded.prefix.len(), 12);
         assert_eq!(encoded.diagnostics.len(), 1);
         assert_eq!(encoded.diagnostics[0].code, "build.erspan_index");

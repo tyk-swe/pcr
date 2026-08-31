@@ -4,7 +4,6 @@
 //! DNS CLI command logic.
 
 pub(super) mod arguments;
-mod conversion;
 mod rendering;
 
 use std::time::Duration;
@@ -26,7 +25,7 @@ const MAX_TEMPLATE_PACKETS: usize = 1;
 pub(super) fn run(
     arguments: Args,
     format: output::contract::Format,
-    stream: &mut StreamEncoder,
+    stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     let format = ToolFormat::narrow(output::contract::Command::Dns, format)?;
     if !arguments.udp_only && !arguments.route.supports_kernel_tcp() {
@@ -37,14 +36,14 @@ pub(super) fn run(
     }
     let queue_limits = arguments.limits.clone().into_limits();
     let request = prepare_request(&arguments, queue_limits)?;
-    let mut probe = target_workflow::prepare(
+    let mut providers = target_workflow::prepare(
         arguments.route,
         arguments.policy,
         request.timeout,
         MAX_TEMPLATE_PACKETS,
         queue_limits,
     )?;
-    target_workflow::run::<Dns>(&request, &mut probe, format, stream)
+    target_workflow::run::<Dns>(&request, &mut providers, format, stream)
 }
 
 fn prepare_request(
@@ -57,24 +56,26 @@ fn prepare_request(
         server_port: arguments.port,
         source_port: arguments
             .source_port
-            .unwrap_or_else(conversion::source_port),
+            .unwrap_or_else(packetcraftr::dns::unpredictable_source_port),
         query_name: arguments.name.clone(),
         query_type: arguments.query_type.into(),
         transaction_id: arguments
             .transaction_id
-            .unwrap_or_else(conversion::transaction_id),
+            .unwrap_or_else(packetcraftr::dns::unpredictable_transaction_id),
         recursion_desired: !arguments.no_recursion,
-        tcp_fallback: packetcraftr::dns::DEFAULT_DNS_TCP_FALLBACK && !arguments.udp_only,
+        tcp_fallback: packetcraftr::dns::DEFAULT_TCP_FALLBACK && !arguments.udp_only,
         attempts: arguments.attempts,
         timeout: Duration::from_millis(arguments.timeout_ms),
         queries_per_second: arguments.rate,
         limits: packetcraftr::dns::Limits {
-            max_message_bytes: arguments.max_message_bytes,
-            max_records: arguments.max_records,
-            max_name_pointers: arguments.max_name_pointers,
-            max_txt_strings: arguments.max_txt_strings,
-            max_txt_bytes: arguments.max_txt_bytes,
-            max_rejected_records: arguments.max_rejected_records,
+            message: packetcraftr::dns::MessageLimits {
+                max_message_bytes: arguments.max_message_bytes,
+                max_records: arguments.max_records,
+                max_name_pointers: arguments.max_name_pointers,
+                max_txt_strings: arguments.max_txt_strings,
+                max_txt_bytes: arguments.max_txt_bytes,
+                max_rejected_records: arguments.max_rejected_records,
+            },
             max_evidence_frames: queue_limits.max_frames,
             max_evidence_bytes: queue_limits.max_bytes,
             max_undecoded: arguments.max_undecoded,
@@ -93,7 +94,7 @@ impl TargetWorkflow for Dns {
     type Request = packetcraftr::dns::Request;
     type Event = packetcraftr::dns::Event;
     type Summary = packetcraftr::dns::Summary;
-    type Document = output::dns::Result;
+    type Document = output::dns::Report;
     type Record = output::dns::Event;
 
     fn execute(
@@ -106,7 +107,7 @@ impl TargetWorkflow for Dns {
         let result = packetcraftr::dns::run(request, authorizer, registry, executor, clock)
             .map_err(CliError::classified)?;
         let (result, diagnostics, stats) =
-            output::dns::Result::try_from_dns(result).map_err(CliError::classified)?;
+            output::dns::Report::try_from_dns(result).map_err(CliError::classified)?;
         Ok(Document::new(result, diagnostics, stats))
     }
 
@@ -116,6 +117,7 @@ impl TargetWorkflow for Dns {
         registry: &core::registry::Registry,
         executor: &mut Executor,
         clock: &mut impl packetcraftr::clock::Clock,
+        runtime: &core::progress::Runtime,
         stream: &StreamEncoder,
     ) -> Result<(), CliError> {
         let event_stream = stream.clone();
@@ -125,6 +127,7 @@ impl TargetWorkflow for Dns {
             registry,
             executor,
             clock,
+            runtime,
             move |event| {
                 Self::emit_event(event, &event_stream).map_err(CliError::into_boundary_error)
             },

@@ -23,7 +23,7 @@ use packetcraftr_netio::interface::Id as InterfaceId;
 use packetcraftr_netio::{
     Error,
     capture::{self, Provider as _, Session as _},
-    link::{Capability, MacAddress, Mode},
+    link::{Capability, MacAddress, Mode, VlanKind},
     neighbor,
     route::{
         Decision, Materialized, Options, Plan, Provider, Scope, SelectionReason, plan as plan_route,
@@ -162,21 +162,21 @@ fn capture_limits_validate_each_bound_and_cross_field_constraint() {
         (
             "max_frames",
             capture::Limits {
-                max_frames: capture::DEFAULT_CAPTURE_QUEUE_FRAMES + 1,
+                max_frames: capture::MAX_CAPTURE_QUEUE_FRAMES + 1,
                 ..defaults
             },
         ),
         (
             "max_bytes",
             capture::Limits {
-                max_bytes: capture::DEFAULT_CAPTURE_QUEUE_BYTES + 1,
+                max_bytes: capture::MAX_CAPTURE_QUEUE_BYTES + 1,
                 ..defaults
             },
         ),
         (
             "snap_length",
             capture::Limits {
-                snap_length: packetcraftr_core::frame::DEFAULT_SIZE_LIMIT + 1,
+                snap_length: capture::MAX_SNAP_LENGTH + 1,
                 ..defaults
             },
         ),
@@ -209,9 +209,8 @@ fn capture_statistics_distinguish_complete_receiver_loss_and_queue_overflow() {
         received_bytes: 20,
         ..capture::Statistics::default()
     };
-    assert!(!complete.has_loss());
-    assert_eq!(complete.evidence_loss_error(), None);
-    assert_eq!(complete.validate().expect("complete statistics"), complete);
+    assert!(complete.evidence_loss_error().is_none());
+    complete.validate().expect("complete statistics");
 
     let receiver_loss = capture::Statistics {
         dropped_frames: 3,
@@ -219,7 +218,6 @@ fn capture_statistics_distinguish_complete_receiver_loss_and_queue_overflow() {
         receiver_dropped_frames: 2,
         ..capture::Statistics::default()
     };
-    assert!(receiver_loss.has_loss());
     assert!(matches!(
         receiver_loss.evidence_loss_error(),
         Some(Error::CaptureEvidenceLoss {
@@ -569,8 +567,8 @@ fn route_model_helpers_cover_neighbor_and_vlan_contracts() {
         MacAddress([0, 1, 2, 0xab, 0xcd, 0xef]).to_string(),
         "00:01:02:ab:cd:ef"
     );
-    assert_eq!(neighbor::VlanKind::Ieee8021Q.ether_type(), 0x8100);
-    assert_eq!(neighbor::VlanKind::Ieee8021Ad.ether_type(), 0x88a8);
+    assert_eq!(VlanKind::Ieee8021Q.ether_type(), 0x8100);
+    assert_eq!(VlanKind::Ieee8021Ad.ether_type(), 0x88a8);
 
     let mut plan = planned(Mode::Layer2);
     plan.destination_mac = None;
@@ -619,7 +617,7 @@ fn planner_preserves_explicit_ethernet_destination_for_broadcast() {
 #[test]
 fn neighbor_options_reject_every_unbounded_value() {
     let defaults = neighbor::Options::default();
-    assert_eq!(defaults.clone().validate().expect("defaults"), defaults);
+    defaults.validate().expect("defaults are valid");
 
     let invalid = [
         neighbor::Options {

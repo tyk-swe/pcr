@@ -8,11 +8,11 @@ use std::sync::Arc;
 use packetcraftr::output;
 
 use self::arguments::Args;
-use super::super::errors::CliError;
-use super::super::rendering::{emit_aggregate, optional_display, write_stdout_line};
-use super::super::system::{client, prepare_route};
 use super::format::AggregateFormat;
 use super::registry;
+use crate::errors::CliError;
+use crate::rendering::{emit_aggregate, optional_display, write_stdout_line};
+use crate::system::{client, prepare_route};
 
 pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
     let format = AggregateFormat::narrow(output::contract::Command::Plan, format)?;
@@ -23,7 +23,7 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
     let route = client
         .plan(&request.packet, request.destination, &request.options)
         .map_err(CliError::classified)?;
-    let result = output::plan::Result { plan: route.into() };
+    let result = output::plan::Report { plan: route.into() };
     match format {
         AggregateFormat::Text => render_text(&result.plan),
         AggregateFormat::Json => {
@@ -34,7 +34,7 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
 
 fn render_text(route: &output::network::Plan) -> Result<(), CliError> {
     write_stdout_line(format_args!(
-        "interface={} index={} mode={:?} mtu={} link_type={}",
+        "interface={} index={} mode={} mtu={} link_type={}",
         route.decision.interface.name,
         route.decision.interface.index,
         route.mode,

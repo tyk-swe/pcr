@@ -5,7 +5,7 @@
 
 use std::time::Duration;
 
-use packetcraftr_core::{Packet, codec::NetworkEnvelope, semantics::BuiltinProtocol};
+use packetcraftr_core::{Packet, codec::NetworkEnvelope, protocol::BuiltinProtocol};
 
 use crate::probe::evidence::{
     ExchangeEvidenceError, format_exchange_evidence_error, validate_aggregate_evidence_limits,
@@ -13,9 +13,9 @@ use crate::probe::evidence::{
     validate_sent_byte_accounting,
 };
 
+use super::classification::dns_payload;
 use super::error::Error;
 use super::model::{Execution, Limits, Probe};
-use super::wire::dns_payload;
 
 pub(super) fn validate_dns_execution(
     probe: &Probe,
@@ -112,16 +112,10 @@ pub(super) fn validate_dns_execution(
 }
 
 fn map_dns_evidence_error(attempt: u32, error: ExchangeEvidenceError) -> Error {
-    let message = match error {
-        ExchangeEvidenceError::SentCardinality { .. }
-        | ExchangeEvidenceError::ResponseOutsideBatch
-        | ExchangeEvidenceError::SentPacketMismatch { .. }
-        | ExchangeEvidenceError::IncompleteStatistics => {
-            unreachable!("DNS validation does not produce batch-only evidence errors")
-        }
-        error => format_exchange_evidence_error(error, "DNS exchange", "DNS"),
-    };
-    Error::InvalidEvidence { attempt, message }
+    Error::InvalidEvidence {
+        attempt,
+        message: format_exchange_evidence_error(error, "DNS exchange", "DNS"),
+    }
 }
 
 fn dns_network_envelope(packet: &Packet) -> Option<NetworkEnvelope> {

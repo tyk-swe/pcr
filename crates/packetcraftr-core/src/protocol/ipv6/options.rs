@@ -13,10 +13,14 @@ use crate::{
 };
 
 use crate::protocol::common::{
-    expected_discriminator, invalid, make_layer, protocol, resolve_u8, truncated,
+    expected_discriminator, invalid, make_layer, protocol, resolve_u8, truncated, typed_layer,
     validate_auto_raw_discriminator, validate_ipv6_routing_child, validate_raw_child_discriminator,
-    wrong_layer,
 };
+
+use crate::protocol::BuiltinProtocol;
+
+const HOP_NAME: &str = BuiltinProtocol::Ipv6HopByHop.as_str();
+const DESTINATION_NAME: &str = BuiltinProtocol::Ipv6DestinationOptions.as_str();
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HopByHop {
@@ -49,7 +53,7 @@ impl Default for DestinationOptions {
 }
 
 macro_rules! declare_options_layer {
-    ($ty:ty, $schema:ident, $protocol:literal, $name:literal, $layout:ident) => {
+    ($ty:ty, $schema:ident, $protocol:expr, $name:literal, $layout:ident) => {
         reflective_layer! {
             fn $schema() => { protocol: protocol($protocol), name: $name }
             impl $ty {
@@ -64,14 +68,14 @@ macro_rules! declare_options_layer {
 declare_options_layer!(
     HopByHop,
     hop_schema,
-    "ipv6_hop_by_hop",
+    HOP_NAME,
     "IPv6 Hop-by-Hop Options",
     hop_layout
 );
 declare_options_layer!(
     DestinationOptions,
     destination_schema,
-    "ipv6_destination_options",
+    DESTINATION_NAME,
     "IPv6 Destination Options",
     destination_layout
 );
@@ -93,7 +97,7 @@ fn encode_options<L>(
 where
     L: Layer + Clone + 'static,
 {
-    let expectation = expected_discriminator(name, context, 59_u8);
+    let expectation = expected_discriminator(name, context, 59_u8, next_header);
     let mut diagnostics = Vec::new();
     validate_auto_raw_discriminator(name, "next_header", next_header, context, &mut diagnostics)?;
     let (next, _) = resolve_u8(
@@ -135,13 +139,9 @@ where
     )]
     let padded_options = Bytes::copy_from_slice(&prefix[2..header_len]);
     materialized.set_field("options", FieldValue::Bytes(padded_options))?;
-    Ok(EncodedLayer {
-        prefix,
-        suffix: Vec::new(),
-        materialized,
-        fields: layout(header_len),
-        diagnostics,
-    })
+    Ok(EncodedLayer::header(prefix, materialized)
+        .with_fields(layout(header_len))
+        .with_diagnostics(diagnostics))
 }
 
 fn decode_options<L>(
@@ -179,8 +179,8 @@ where
 }
 
 impl LayerCodec for HopByHopCodec {
-    fn protocol_id(&self) -> crate::layer::Id {
-        protocol("ipv6_hop_by_hop")
+    fn protocol_id(&self) -> &'static crate::layer::Id {
+        &hop_schema().protocol
     }
 
     fn encode(
@@ -189,12 +189,9 @@ impl LayerCodec for HopByHopCodec {
         _payload: &[u8],
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
-        let layer = layer
-            .as_any()
-            .downcast_ref::<HopByHop>()
-            .ok_or_else(|| wrong_layer("ipv6_hop_by_hop", layer))?;
+        let layer = typed_layer::<HopByHop>(HOP_NAME, layer)?;
         encode_options(
-            "ipv6_hop_by_hop",
+            HOP_NAME,
             layer,
             &layer.next_header,
             &layer.options,
@@ -209,7 +206,7 @@ impl LayerCodec for HopByHopCodec {
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
         decode_options(
-            "ipv6_hop_by_hop",
+            HOP_NAME,
             input,
             |next, options| HopByHop {
                 next_header: WireValue::Exact(next),
@@ -228,8 +225,8 @@ impl LayerCodec for HopByHopCodec {
 }
 
 impl LayerCodec for DestinationOptionsCodec {
-    fn protocol_id(&self) -> crate::layer::Id {
-        protocol("ipv6_destination_options")
+    fn protocol_id(&self) -> &'static crate::layer::Id {
+        &destination_schema().protocol
     }
 
     fn encode(
@@ -238,12 +235,9 @@ impl LayerCodec for DestinationOptionsCodec {
         _payload: &[u8],
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
-        let layer = layer
-            .as_any()
-            .downcast_ref::<DestinationOptions>()
-            .ok_or_else(|| wrong_layer("ipv6_destination_options", layer))?;
+        let layer = typed_layer::<DestinationOptions>(DESTINATION_NAME, layer)?;
         encode_options(
-            "ipv6_destination_options",
+            DESTINATION_NAME,
             layer,
             &layer.next_header,
             &layer.options,
@@ -258,7 +252,7 @@ impl LayerCodec for DestinationOptionsCodec {
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
         decode_options(
-            "ipv6_destination_options",
+            DESTINATION_NAME,
             input,
             |next, options| DestinationOptions {
                 next_header: WireValue::Exact(next),

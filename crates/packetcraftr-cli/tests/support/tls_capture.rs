@@ -196,9 +196,7 @@ pub(crate) fn client_hello_frame_hex(server_port: u16, sni: &str) -> String {
 }
 
 fn registry() -> Arc<Registry> {
-    Arc::new(
-        packetcraftr::core::protocol::builtin::registry().expect("built-in registry must build"),
-    )
+    packetcraftr::core::protocol::builtin::registry()
 }
 
 /// A datagram on UDP port 443, which the collector counts but never assembles.

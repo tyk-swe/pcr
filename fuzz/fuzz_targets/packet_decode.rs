@@ -5,15 +5,7 @@ use libfuzzer_sys::fuzz_target;
 use packetcraftr_core::decode::{Dissector, Options as DecodeOptions};
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::protocol::builtin;
-use packetcraftr_core::registry::Registry;
-use std::sync::{Arc, OnceLock};
 use std::time::SystemTime;
-
-static REGISTRY: OnceLock<Arc<Registry>> = OnceLock::new();
-
-fn get_registry() -> &'static Arc<Registry> {
-    REGISTRY.get_or_init(|| Arc::new(builtin::registry().expect("built-in registry")))
-}
 
 fuzz_target!(|data: &[u8]| {
     if data.is_empty() {
@@ -30,8 +22,8 @@ fuzz_target!(|data: &[u8]| {
         LinkType(link_type_val),
     ];
 
-    let registry = get_registry();
-    let dissector = Dissector::new(Arc::clone(registry));
+    let registry = builtin::registry();
+    let dissector = Dissector::new(registry.clone());
 
     for link_type in link_types {
         if let Ok(frame) = Frame::new(

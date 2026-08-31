@@ -3,11 +3,11 @@
 
 //! Field-path models, registry resolution, and byte-slice validation.
 
-use super::super::field::FieldKind;
+use crate::field::FieldKind;
 
-use super::super::registry::{FilterFieldBinding, Registry};
 use super::error::Error;
 use super::eval;
+use crate::registry::{FilterFieldBinding, Registry};
 
 /// Per-frame values that no protocol layer carries.
 ///
@@ -23,18 +23,6 @@ pub(super) enum FrameField {
     LinkType,
 }
 
-/// How one resolved path reads values out of a matching layer.
-#[derive(Clone, Debug)]
-pub(super) enum FieldAccess {
-    Direct(&'static str),
-    Bits {
-        field: &'static str,
-        mask: u64,
-        shift: u32,
-    },
-    Either(&'static [&'static str]),
-}
-
 /// Which transport's conversation index a stream path reads.
 ///
 /// The slots are separate so `udp.stream` can never observe a TCP index: in
@@ -48,10 +36,12 @@ pub(super) enum StreamTransport {
 
 #[derive(Clone, Debug)]
 pub(super) enum FieldSource {
+    /// Reflective fields of one protocol's layers, addressed exactly as the
+    /// registry binds them. Canonical `<protocol>.<field>` paths resolve to a
+    /// `Direct` binding, so every layer path reads through one description.
     Layer {
-        protocol: super::super::layer::Id,
+        binding: FilterFieldBinding,
         occurrence: Option<usize>,
-        access: FieldAccess,
     },
     Frame(FrameField),
     /// The conversation index assigned by a session-aware caller.
@@ -106,7 +96,7 @@ impl FieldRef {
     /// whether the packet carries options at all.
     pub(super) fn is_flag(&self) -> bool {
         if let FieldSource::Layer {
-            access: FieldAccess::Bits { .. },
+            binding: FilterFieldBinding::Bits { .. },
             ..
         } = &self.source
         {
@@ -121,7 +111,7 @@ impl FieldRef {
 pub(super) enum Resolved {
     /// A protocol name with no field, testing whether such a layer is present.
     Layer {
-        protocol: super::super::layer::Id,
+        protocol: crate::layer::Id,
         occurrence: Option<usize>,
     },
     Field(FieldRef),
@@ -178,23 +168,9 @@ fn frame_field(name: &str) -> Option<FrameField> {
     })
 }
 
-fn access_from_binding(binding: &FilterFieldBinding) -> FieldAccess {
-    match binding {
-        FilterFieldBinding::Direct { field, .. } => FieldAccess::Direct(field),
-        FilterFieldBinding::Bits {
-            field, mask, shift, ..
-        } => FieldAccess::Bits {
-            field,
-            mask: *mask,
-            shift: *shift,
-        },
-        FilterFieldBinding::Either { fields, .. } => FieldAccess::Either(fields),
-    }
-}
-
 fn specs_for(
     registry: &Registry,
-    protocol: &super::super::layer::Id,
+    protocol: &crate::layer::Id,
     fields: &[&'static str],
     path: &str,
 ) -> Result<Vec<FieldSpec>, Error> {
@@ -236,13 +212,11 @@ pub(super) fn resolve(path: &str, registry: &Registry, offset: usize) -> Result<
     }
 
     if let Some(binding) = registry.filter_field(&stripped) {
-        let protocol = binding.protocol().clone();
-        let specs = specs_for(registry, &protocol, binding.fields(), path)?;
+        let specs = specs_for(registry, binding.protocol(), binding.fields(), path)?;
         return Ok(Resolved::Field(FieldRef {
             source: FieldSource::Layer {
-                protocol,
+                binding: binding.clone(),
                 occurrence,
-                access: access_from_binding(binding),
             },
             slice: None,
             specs,
@@ -265,9 +239,11 @@ pub(super) fn resolve(path: &str, registry: &Registry, offset: usize) -> Result<
             .ok_or_else(unknown)?;
         return Ok(Resolved::Field(FieldRef {
             source: FieldSource::Layer {
-                protocol,
+                binding: FilterFieldBinding::Direct {
+                    protocol,
+                    field: declared.name,
+                },
                 occurrence,
-                access: FieldAccess::Direct(declared.name),
             },
             slice: None,
             specs: vec![FieldSpec {

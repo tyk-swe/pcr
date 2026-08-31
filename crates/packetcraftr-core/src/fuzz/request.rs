@@ -7,13 +7,13 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::build::DEFAULT_MAX_PACKET_SIZE;
+use crate::layout::DEFAULT_MAX_PACKET_SIZE;
 
 use super::error::Error;
 use super::{
     DEFAULT_CASES, DEFAULT_MAX_CASES, DEFAULT_MAX_FIELD_BYTES, DEFAULT_MAX_LIST_ITEMS,
     DEFAULT_MAX_SHRINK_STEPS, DEFAULT_MAX_TOTAL_BYTES, MAX_CASES, MAX_DURATION, MAX_FIELD_BYTES,
-    MAX_LIST_ITEMS, MAX_SHRINK_STEPS, MAX_STRATEGIES,
+    MAX_LIST_ITEMS, MAX_PACKET_BYTES, MAX_SHRINK_STEPS, MAX_STRATEGIES, MAX_TOTAL_BYTES,
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -58,7 +58,7 @@ impl fmt::Display for Target {
 impl FromStr for Target {
     type Err = TargetParseError;
 
-    fn from_str(value: &str) -> std::result::Result<Self, Self::Err> {
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
         let (layer, field) = value
             .split_once('.')
             .ok_or_else(|| TargetParseError(value.to_owned()))?;
@@ -109,19 +109,11 @@ impl Default for Limits {
 }
 
 impl Limits {
-    pub fn validate(self) -> std::result::Result<Self, Error> {
+    pub fn validate(&self) -> Result<(), Error> {
         for (field, value, maximum) in [
             ("max_cases", self.max_cases, MAX_CASES),
-            (
-                "max_packet_bytes",
-                self.max_packet_bytes,
-                DEFAULT_MAX_PACKET_SIZE,
-            ),
-            (
-                "max_total_bytes",
-                self.max_total_bytes,
-                DEFAULT_MAX_TOTAL_BYTES,
-            ),
+            ("max_packet_bytes", self.max_packet_bytes, MAX_PACKET_BYTES),
+            ("max_total_bytes", self.max_total_bytes, MAX_TOTAL_BYTES),
             ("max_field_bytes", self.max_field_bytes, MAX_FIELD_BYTES),
             ("max_list_items", self.max_list_items, MAX_LIST_ITEMS),
             ("max_shrink_steps", self.max_shrink_steps, MAX_SHRINK_STEPS),
@@ -129,7 +121,7 @@ impl Limits {
             if value == 0 || value > maximum {
                 return Err(Error::InvalidLimit {
                     field,
-                    value: value as u64,
+                    value: u64::try_from(value).unwrap_or(u64::MAX),
                     reason: format!("must be within 1..={maximum}"),
                 });
             }
@@ -137,7 +129,7 @@ impl Limits {
         if self.max_packet_bytes > self.max_total_bytes {
             return Err(Error::InvalidLimit {
                 field: "max_packet_bytes",
-                value: self.max_packet_bytes as u64,
+                value: u64::try_from(self.max_packet_bytes).unwrap_or(u64::MAX),
                 reason: "cannot exceed max_total_bytes".to_owned(),
             });
         }
@@ -147,7 +139,7 @@ impl Limits {
                 maximum: MAX_DURATION,
             });
         }
-        Ok(self)
+        Ok(())
     }
 }
 
@@ -183,7 +175,7 @@ impl Default for Request {
 }
 
 impl Request {
-    pub fn validate(&self) -> std::result::Result<(), Error> {
+    pub fn validate(&self) -> Result<(), Error> {
         self.limits.validate()?;
         if self.cases == 0 || self.cases > self.limits.max_cases {
             return Err(Error::InvalidLimit {

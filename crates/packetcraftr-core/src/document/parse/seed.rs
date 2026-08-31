@@ -1,134 +1,25 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Budgeted deserialization of packet documents.
-//!
-//! Every seed shares one [`Budget`]. Counts and byte widths are charged
-//! against it before the bounded item is allocated, pushed, or inserted, and
-//! the first breach records which [`Limit`] tripped so the parser can report
-//! it as a classified error instead of a format message.
+//! The seeds that read a packet document, each charging [`Budget`] before it
+//! allocates.
 
-use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 use bytes::Bytes;
 use serde::Deserialize;
-use serde::de::{self, DeserializeSeed, IgnoredAny, MapAccess, SeqAccess, Unexpected, Visitor};
+use serde::de::{self, DeserializeSeed, IgnoredAny, MapAccess, SeqAccess, Visitor};
 
-use super::types::{DocumentLimits, Layer, Limit, Packet};
+use crate::document::types::{Layer, Limit, Packet};
 use crate::field::FieldValue;
 
-/// Retained width charged for fixed-size scalars, in payload bytes.
-const BOOL_PAYLOAD_BYTES: usize = 1;
-const INTEGER_PAYLOAD_BYTES: usize = 8;
-const IPV4_PAYLOAD_BYTES: usize = 4;
-const IPV6_PAYLOAD_BYTES: usize = 16;
-const MAC_PAYLOAD_BYTES: usize = 6;
-
-/// Shared parse budget. Cheap interior mutability is enough: serde drives
-/// one document on one thread.
-pub(super) struct Budget<'l> {
-    limits: &'l DocumentLimits,
-    nodes: Cell<usize>,
-    list_items: Cell<usize>,
-    payload_bytes: Cell<usize>,
-    breach: Cell<Option<Limit>>,
-}
-
-impl<'l> Budget<'l> {
-    pub(super) fn new(limits: &'l DocumentLimits) -> Self {
-        Self {
-            limits,
-            nodes: Cell::new(0),
-            list_items: Cell::new(0),
-            payload_bytes: Cell::new(0),
-            breach: Cell::new(None),
-        }
-    }
-
-    /// The first limit this budget rejected, if any.
-    pub(super) fn breach(&self) -> Option<Limit> {
-        self.breach.get()
-    }
-
-    fn exceeded<E: de::Error>(&self, limit: Limit) -> E {
-        if self.breach.get().is_none() {
-            self.breach.set(Some(limit));
-        }
-        E::custom(format_args!(
-            "packet document exceeds configured limit {limit}={}",
-            self.limits.maximum(limit)
-        ))
-    }
-
-    fn charge<E: de::Error>(
-        &self,
-        counter: &Cell<usize>,
-        amount: usize,
-        limit: Limit,
-    ) -> Result<(), E> {
-        let next = counter
-            .get()
-            .checked_add(amount)
-            .filter(|next| *next <= self.limits.maximum(limit))
-            .ok_or_else(|| self.exceeded(limit))?;
-        counter.set(next);
-        Ok(())
-    }
-
-    fn charge_node<E: de::Error>(&self) -> Result<(), E> {
-        self.charge(&self.nodes, 1, Limit::TotalNodes)
-    }
-
-    /// Which list budget is already full before another item is read, so the
-    /// caller can probe for the item without allocating it.
-    fn list_budget_full(&self, in_list: usize) -> Option<Limit> {
-        if in_list >= self.limits.max_list_items {
-            Some(Limit::ListItems)
-        } else if self.list_items.get() >= self.limits.max_total_list_items {
-            Some(Limit::TotalListItems)
-        } else {
-            None
-        }
-    }
-
-    /// Charges one aggregate list item ahead of reading it; a read that finds
-    /// the end of the list hands the charge back.
-    fn charge_list_item<E: de::Error>(&self) -> Result<(), E> {
-        self.charge(&self.list_items, 1, Limit::TotalListItems)
-    }
-
-    fn refund_list_item(&self) {
-        self.list_items.set(self.list_items.get().saturating_sub(1));
-    }
-
-    fn charge_payload<E: de::Error>(&self, bytes: usize) -> Result<(), E> {
-        self.charge(&self.payload_bytes, bytes, Limit::TotalPayloadBytes)
-    }
-
-    fn check_width<E: de::Error>(&self, actual: usize, limit: Limit) -> Result<(), E> {
-        if actual > self.limits.maximum(limit) {
-            return Err(self.exceeded(limit));
-        }
-        Ok(())
-    }
-
-    /// Entering a list at `depth` enclosing lists.
-    fn enter_list<E: de::Error>(&self, depth: usize) -> Result<(), E> {
-        if depth >= self.limits.max_nesting {
-            return Err(self.exceeded(Limit::Nesting));
-        }
-        Ok(())
-    }
-
-    /// Reserves capacity for a sequence without trusting its size hint beyond
-    /// the remaining budget.
-    fn bounded_capacity(&self, hint: Option<usize>, limit: Limit) -> usize {
-        hint.unwrap_or(0).min(self.limits.maximum(limit))
-    }
-}
+use super::budget::{
+    BOOL_PAYLOAD_BYTES, Budget, INTEGER_PAYLOAD_BYTES, IPV4_PAYLOAD_BYTES, IPV6_PAYLOAD_BYTES,
+    MAC_PAYLOAD_BYTES,
+};
+use super::buffered::{Buffered, BufferedSeed};
 
 #[derive(Deserialize)]
 #[serde(field_identifier, rename_all = "snake_case")]
@@ -153,7 +44,7 @@ enum ValueField {
 
 #[derive(Clone, Copy, Deserialize)]
 #[serde(rename_all = "snake_case")]
-enum Tag {
+pub(super) enum Tag {
     Bool,
     Unsigned,
     Signed,
@@ -163,6 +54,22 @@ enum Tag {
     Ipv6,
     Mac,
     List,
+}
+
+impl Tag {
+    pub(super) const fn expected(self) -> &'static str {
+        match self {
+            Self::Bool => "a boolean",
+            Self::Unsigned => "an unsigned integer",
+            Self::Signed => "a signed integer",
+            Self::Text => "a string",
+            Self::Bytes => "an array of bytes",
+            Self::Ipv4 => "an IPv4 address string",
+            Self::Ipv6 => "an IPv6 address string",
+            Self::Mac => "an array of 6 bytes",
+            Self::List => "a list of tagged field values",
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -429,9 +336,9 @@ impl Visitor<'_> for SchemaString<'_, '_> {
 /// A string whose byte length is checked before it is copied out of the
 /// deserializer.
 #[derive(Clone, Copy)]
-struct BoundedString<'b, 'l> {
-    budget: &'b Budget<'l>,
-    limit: Limit,
+pub(super) struct BoundedString<'b, 'l> {
+    pub(super) budget: &'b Budget<'l>,
+    pub(super) limit: Limit,
 }
 
 impl<'de> DeserializeSeed<'de> for BoundedString<'_, '_> {
@@ -476,9 +383,9 @@ impl<'de> Visitor<'de> for BoundedString<'_, '_> {
 /// One tagged `{"type": ..., "value": ...}` field value at `depth` enclosing
 /// lists. Charges one node before anything else.
 #[derive(Clone, Copy)]
-struct FieldValueSeed<'b, 'l> {
-    budget: &'b Budget<'l>,
-    depth: usize,
+pub(super) struct FieldValueSeed<'b, 'l> {
+    pub(super) budget: &'b Budget<'l>,
+    pub(super) depth: usize,
 }
 
 impl<'de> DeserializeSeed<'de> for FieldValueSeed<'_, '_> {
@@ -736,267 +643,5 @@ impl<'de> Visitor<'de> for ListSeed<'_, '_> {
             };
             values.push(value);
         }
-    }
-}
-
-/// A `value` that arrived before its `type`.
-///
-/// The value is retained under the most expensive interpretation it could
-/// still have: strings are text, and sequence elements are charged as list
-/// items, nodes, and payload bytes at once. A document that puts `value`
-/// first therefore fits a slightly narrower envelope than the same document
-/// with `type` first, but never a wider one.
-enum Buffered {
-    Bool(bool),
-    Unsigned(u64),
-    Signed(i64),
-    Text(String),
-    Seq(Vec<BufferedItem>),
-}
-
-enum BufferedItem {
-    Unsigned(u64),
-    Signed(i64),
-    Value(FieldValue),
-}
-
-impl Buffered {
-    fn into_value<E: de::Error>(self, tag: Tag, budget: &Budget<'_>) -> Result<FieldValue, E> {
-        match (tag, self) {
-            (Tag::Bool, Self::Bool(value)) => Ok(FieldValue::Bool(value)),
-            (Tag::Unsigned, Self::Unsigned(value)) => Ok(FieldValue::Unsigned(value)),
-            (Tag::Signed, Self::Signed(value)) => Ok(FieldValue::Signed(value)),
-            (Tag::Signed, Self::Unsigned(value)) => i64::try_from(value)
-                .map(FieldValue::Signed)
-                .map_err(|_| E::invalid_value(Unexpected::Unsigned(value), &"a signed integer")),
-            (Tag::Text, Self::Text(value)) => Ok(FieldValue::Text(value)),
-            (Tag::Ipv4, Self::Text(value)) => value
-                .parse()
-                .map(FieldValue::Ipv4)
-                .map_err(|_| E::invalid_value(Unexpected::Str(&value), &"an IPv4 address")),
-            (Tag::Ipv6, Self::Text(value)) => {
-                // The buffered string has already been charged by its text
-                // length. A compressed address can be shorter than the
-                // retained 16-byte value, so reserve the difference now.
-                budget.charge_payload(IPV6_PAYLOAD_BYTES.saturating_sub(value.len()))?;
-                value
-                    .parse()
-                    .map(FieldValue::Ipv6)
-                    .map_err(|_| E::invalid_value(Unexpected::Str(&value), &"an IPv6 address"))
-            }
-            (Tag::Bytes, Self::Seq(items)) => {
-                budget.check_width(items.len(), Limit::ByteValueBytes)?;
-                items
-                    .into_iter()
-                    .map(BufferedItem::into_byte)
-                    .collect::<Result<Vec<u8>, E>>()
-                    .map(|bytes| FieldValue::Bytes(Bytes::from(bytes)))
-            }
-            (Tag::Mac, Self::Seq(items)) => {
-                let bytes = items
-                    .into_iter()
-                    .map(BufferedItem::into_byte)
-                    .collect::<Result<Vec<u8>, E>>()?;
-                <[u8; 6]>::try_from(bytes)
-                    .map(FieldValue::Mac)
-                    .map_err(|bytes| E::invalid_length(bytes.len(), &"6 MAC address bytes"))
-            }
-            (Tag::List, Self::Seq(items)) => items
-                .into_iter()
-                .map(|item| match item {
-                    BufferedItem::Value(value) => Ok(value),
-                    BufferedItem::Unsigned(value) => Err(E::invalid_type(
-                        Unexpected::Unsigned(value),
-                        &"a tagged field value object",
-                    )),
-                    BufferedItem::Signed(value) => Err(E::invalid_type(
-                        Unexpected::Signed(value),
-                        &"a tagged field value object",
-                    )),
-                })
-                .collect::<Result<Vec<_>, E>>()
-                .map(FieldValue::List),
-            (tag, other) => Err(E::invalid_type(other.unexpected(), &tag.expected())),
-        }
-    }
-
-    fn unexpected(&self) -> Unexpected<'_> {
-        match self {
-            Self::Bool(value) => Unexpected::Bool(*value),
-            Self::Unsigned(value) => Unexpected::Unsigned(*value),
-            Self::Signed(value) => Unexpected::Signed(*value),
-            Self::Text(value) => Unexpected::Str(value),
-            Self::Seq(_) => Unexpected::Seq,
-        }
-    }
-}
-
-impl BufferedItem {
-    fn into_byte<E: de::Error>(self) -> Result<u8, E> {
-        match self {
-            Self::Unsigned(value) => u8::try_from(value)
-                .map_err(|_| E::invalid_value(Unexpected::Unsigned(value), &"a byte")),
-            Self::Signed(value) => Err(E::invalid_value(Unexpected::Signed(value), &"a byte")),
-            Self::Value(_) => Err(E::invalid_type(Unexpected::Map, &"a byte")),
-        }
-    }
-}
-
-impl Tag {
-    const fn expected(self) -> &'static str {
-        match self {
-            Self::Bool => "a boolean",
-            Self::Unsigned => "an unsigned integer",
-            Self::Signed => "a signed integer",
-            Self::Text => "a string",
-            Self::Bytes => "an array of bytes",
-            Self::Ipv4 => "an IPv4 address string",
-            Self::Ipv6 => "an IPv6 address string",
-            Self::Mac => "an array of 6 bytes",
-            Self::List => "a list of tagged field values",
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-struct BufferedSeed<'b, 'l> {
-    budget: &'b Budget<'l>,
-    depth: usize,
-}
-
-impl<'de> DeserializeSeed<'de> for BufferedSeed<'_, '_> {
-    type Value = Buffered;
-
-    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        deserializer.deserialize_any(self)
-    }
-}
-
-impl<'de> Visitor<'de> for BufferedSeed<'_, '_> {
-    type Value = Buffered;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("a boolean, integer, string, or array field value")
-    }
-
-    fn visit_bool<E: de::Error>(self, value: bool) -> Result<Self::Value, E> {
-        self.budget.charge_payload(BOOL_PAYLOAD_BYTES)?;
-        Ok(Buffered::Bool(value))
-    }
-
-    fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E> {
-        self.budget.charge_payload(INTEGER_PAYLOAD_BYTES)?;
-        Ok(Buffered::Unsigned(value))
-    }
-
-    fn visit_i64<E: de::Error>(self, value: i64) -> Result<Self::Value, E> {
-        self.budget.charge_payload(INTEGER_PAYLOAD_BYTES)?;
-        u64::try_from(value).map_or(Ok(Buffered::Signed(value)), |value| {
-            Ok(Buffered::Unsigned(value))
-        })
-    }
-
-    fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
-        BoundedString {
-            budget: self.budget,
-            limit: Limit::TextBytes,
-        }
-        .visit_str(value)
-        .map(Buffered::Text)
-    }
-
-    fn visit_string<E: de::Error>(self, value: String) -> Result<Self::Value, E> {
-        BoundedString {
-            budget: self.budget,
-            limit: Limit::TextBytes,
-        }
-        .visit_string(value)
-        .map(Buffered::Text)
-    }
-
-    fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
-    where
-        A: SeqAccess<'de>,
-    {
-        self.budget.enter_list(self.depth)?;
-        if let Some(hint) = sequence.size_hint() {
-            self.budget.check_width(hint, Limit::ListItems)?;
-        }
-        let mut items = Vec::with_capacity(
-            self.budget
-                .bounded_capacity(sequence.size_hint(), Limit::ListItems),
-        );
-        loop {
-            if let Some(limit) = self.budget.list_budget_full(items.len()) {
-                if sequence.next_element::<IgnoredAny>()?.is_some() {
-                    return Err(self.budget.exceeded(limit));
-                }
-                return Ok(Buffered::Seq(items));
-            }
-            self.budget.charge_list_item()?;
-            let Some(item) = sequence.next_element_seed(BufferedItemSeed {
-                budget: self.budget,
-                depth: self.depth.saturating_add(1),
-            })?
-            else {
-                self.budget.refund_list_item();
-                return Ok(Buffered::Seq(items));
-            };
-            items.push(item);
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-struct BufferedItemSeed<'b, 'l> {
-    budget: &'b Budget<'l>,
-    depth: usize,
-}
-
-impl<'de> DeserializeSeed<'de> for BufferedItemSeed<'_, '_> {
-    type Value = BufferedItem;
-
-    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        deserializer.deserialize_any(self)
-    }
-}
-
-impl<'de> Visitor<'de> for BufferedItemSeed<'_, '_> {
-    type Value = BufferedItem;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("a byte or a tagged field value object")
-    }
-
-    fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E> {
-        self.budget.charge_node()?;
-        self.budget.charge_payload(1)?;
-        Ok(BufferedItem::Unsigned(value))
-    }
-
-    fn visit_i64<E: de::Error>(self, value: i64) -> Result<Self::Value, E> {
-        self.budget.charge_node()?;
-        self.budget.charge_payload(1)?;
-        u64::try_from(value).map_or(Ok(BufferedItem::Signed(value)), |value| {
-            Ok(BufferedItem::Unsigned(value))
-        })
-    }
-
-    fn visit_map<A>(self, map: A) -> Result<Self::Value, A::Error>
-    where
-        A: MapAccess<'de>,
-    {
-        let seed = FieldValueSeed {
-            budget: self.budget,
-            depth: self.depth,
-        };
-        seed.budget.charge_node()?;
-        seed.visit_map(map).map(BufferedItem::Value)
     }
 }

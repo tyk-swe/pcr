@@ -83,6 +83,7 @@ pub(super) fn open_handle(
     let device_name = CString::new(device_name).map_err(|_| Error::Device {
         interface: interface.name.clone(),
         message: "Npcap device name contains an embedded NUL byte".to_owned(),
+        source: None,
     })?;
     let mut error_buffer = [0 as c_char; PCAP_ERROR_BUFFER_SIZE];
     // SAFETY: both C strings are valid for this synchronous call and the
@@ -158,6 +159,7 @@ fn set_integer_option(
                 interface.name,
                 handle.error_message()
             ),
+            source: None,
         })
     }
 }

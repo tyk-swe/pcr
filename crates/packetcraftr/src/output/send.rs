@@ -32,9 +32,7 @@ pub struct NeighborEvidence {
 }
 
 impl MaterializedRoute {
-    pub fn try_from_route(
-        route: packetcraftr_netio::route::Materialized,
-    ) -> std::result::Result<Self, Error> {
+    pub fn try_from_route(route: packetcraftr_netio::route::Materialized) -> Result<Self, Error> {
         let neighbor = route
             .neighbor_resolution
             .map(|resolution| {
@@ -57,15 +55,15 @@ impl MaterializedRoute {
 
 /// Aggregate result of `send`; operation statistics live in the envelope.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Result {
+pub struct Report {
     pub frame: Wire,
     pub route: MaterializedRoute,
 }
 
-impl Result {
+impl Report {
     pub fn try_from_report(
         report: crate::send::Report,
-    ) -> std::result::Result<(Self, Vec<Diagnostic>, Stats), Error> {
+    ) -> Result<(Self, Vec<Diagnostic>, Stats), Error> {
         let crate::send::Report { sent, stats } = report;
         Ok((
             Self {

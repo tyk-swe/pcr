@@ -3,9 +3,9 @@
 
 use packetcraftr::{netio as net, output};
 
-use super::super::errors::CliError;
-use super::super::rendering::{emit_aggregate, write_stdout_line};
 use super::format::AggregateFormat;
+use crate::errors::CliError;
+use crate::rendering::{emit_aggregate, write_stdout_line};
 
 pub(super) const AFTER_LONG_HELP: &str = r#"Examples:
   packetcraftr interfaces
@@ -15,7 +15,7 @@ pub(super) fn run(format: output::contract::Format) -> Result<(), CliError> {
     let format = AggregateFormat::narrow(output::contract::Command::Interfaces, format)?;
     let interfaces = net::interface::Provider::interfaces(&net::interface::SystemProvider)
         .map_err(CliError::classified)?;
-    let result = output::interfaces::Result::new(interfaces);
+    let result = output::interfaces::Report::new(interfaces);
     match format {
         AggregateFormat::Text => {
             for interface in result.interfaces {

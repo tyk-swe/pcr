@@ -8,8 +8,9 @@ use std::time::Duration;
 
 use serde::Serialize;
 
+use packetcraftr_core::analysis::StreamTransport;
 use packetcraftr_core::analysis::stats::{
-    ConversationStat, EndpointStat, IoBucketStat, PortStat, ProtocolStat, TransportKind,
+    ConversationStat, EndpointStat, IoBucketStat, PortStat, ProtocolStat,
 };
 
 use super::contract::Error;
@@ -29,7 +30,7 @@ pub enum Table {
 
 mirror_enum! {
     #[serde(rename_all = "snake_case")]
-    pub enum Transport from TransportKind {
+    pub enum Transport from StreamTransport {
         Tcp = Tcp,
         Udp = Udp,
     }
@@ -92,7 +93,7 @@ pub struct Io {
 
 /// Aggregate result of `stats`, carrying exactly the requested table.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Result {
+pub struct Report {
     pub table: Table,
     /// Frames the capture yielded, matched or not, and the frames the
     /// filter kept. Physical tables describe matched frames; fragment
@@ -118,13 +119,13 @@ pub struct Result {
     pub fragments: Option<super::reassembly::Report>,
 }
 
-impl Result {
+impl Report {
     /// Builds the result for one requested table from a finished report.
     pub fn try_from_report(
         table: Table,
         report: &packetcraftr_core::analysis::stats::Report,
         frames_read: u64,
-    ) -> std::result::Result<Self, Error> {
+    ) -> Result<Self, Error> {
         let mut result = Self {
             table,
             frames_read,
@@ -146,7 +147,7 @@ impl Result {
                         .conversations
                         .iter()
                         .map(convert_conversation)
-                        .collect::<std::result::Result<_, _>>()?,
+                        .collect::<Result<_, _>>()?,
                 );
             }
             Table::Endpoints => {
@@ -174,13 +175,11 @@ impl Result {
     }
 }
 
-fn convert_timestamp(
-    value: Option<std::time::SystemTime>,
-) -> std::result::Result<Option<Timestamp>, Error> {
+fn convert_timestamp(value: Option<std::time::SystemTime>) -> Result<Option<Timestamp>, Error> {
     value.map(Timestamp::try_from).transpose()
 }
 
-fn convert_conversation(row: &ConversationStat) -> std::result::Result<Conversation, Error> {
+fn convert_conversation(row: &ConversationStat) -> Result<Conversation, Error> {
     Ok(Conversation {
         transport: row.transport.into(),
         stream: row.stream,

@@ -12,7 +12,12 @@ use crate::interface::Id as InterfaceId;
 use super::models::{Decision, Provider};
 
 /// Errors emitted by the current target's passive route/interface adapter.
-#[derive(Debug, Error, Clone, PartialEq, Eq)]
+///
+/// A native refusal is retained as a [`SystemFault`](crate::SystemFault)
+/// rather than formatted into `message`, so the operating-system diagnostic
+/// survives to the render boundary. That source is not comparable, so these
+/// failures are matched on rather than equated.
+#[derive(Debug, Error, Clone)]
 #[non_exhaustive]
 pub enum SystemError {
     #[error("native route selection is unavailable: {message}")]
@@ -48,6 +53,8 @@ pub enum SystemError {
     OperatingSystem {
         operation: &'static str,
         message: String,
+        #[source]
+        source: Option<crate::SystemFault>,
     },
 }
 
@@ -65,11 +72,11 @@ impl Provider for SystemProvider {
         interface_hint: Option<&InterfaceId>,
         preferred_source: Option<IpAddr>,
     ) -> Result<Decision, Self::Error> {
-        super::super::platform::system_route(destination, interface_hint, preferred_source)
+        crate::platform::system_route(destination, interface_hint, preferred_source)
     }
 
     fn lookup_interface(&self, interface: &InterfaceId) -> Result<Option<Decision>, Self::Error> {
-        super::super::platform::system_interface_route(interface).map(Some)
+        crate::platform::system_interface_route(interface).map(Some)
     }
 
     fn classify_error(&self, error: &Self::Error) -> Classification {

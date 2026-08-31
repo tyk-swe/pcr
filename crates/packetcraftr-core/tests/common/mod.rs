@@ -37,7 +37,7 @@ pub(crate) struct TcpSpec {
 }
 
 pub(crate) fn registry() -> Arc<Registry> {
-    Arc::new(builtin::registry().expect("built-in protocols must register"))
+    builtin::registry()
 }
 
 pub(crate) fn client_tcp(sequence: u32, acknowledgment: u32, flags: u16, window: u16) -> TcpSpec {

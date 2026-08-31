@@ -3,8 +3,6 @@
 
 //! Shared bounded ownership service for native workers that miss shutdown.
 
-#![forbid(unsafe_code)]
-
 use std::{
     fmt,
     panic::{AssertUnwindSafe, catch_unwind},
@@ -50,6 +48,10 @@ impl fmt::Display for ReaperStartError {
     }
 }
 
+/// So a live-I/O failure can retain this as its typed source instead of
+/// formatting it into a message.
+impl std::error::Error for ReaperStartError {}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct ReaperExhausted {
     pub capacity: usize,
@@ -65,7 +67,7 @@ struct PermitPool {
 }
 
 pub(super) struct ReapTask {
-    reap: Option<Box<dyn FnOnce() + Send + 'static>>,
+    reap: Box<dyn FnOnce() + Send + 'static>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -140,14 +142,12 @@ impl Drop for ReaperPermit {
 impl ReapTask {
     pub(super) fn new(reap: impl FnOnce() + Send + 'static) -> Self {
         Self {
-            reap: Some(Box::new(reap)),
+            reap: Box::new(reap),
         }
     }
 
-    pub(super) fn run(mut self) {
-        if let Some(reap) = self.reap.take() {
-            reap();
-        }
+    pub(super) fn run(self) {
+        (self.reap)();
     }
 }
 

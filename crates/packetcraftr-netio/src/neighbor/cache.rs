@@ -3,17 +3,18 @@
 
 //! Neighbor resolution cache key, entry, and state management.
 
-#![forbid(unsafe_code)]
-
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::Mutex;
 use std::time::Instant;
 
+use super::Request as NeighborRequest;
 use super::error::invalid_options;
 use super::options::Options;
-use super::{Request as NeighborRequest, VlanTag as NeighborVlanTag};
-use crate::{interface::Id as InterfaceId, link::MacAddress};
+use crate::{
+    interface::Id as InterfaceId,
+    link::{MacAddress, VlanTag},
+};
 use packetcraftr_core::frame::{Frame, LinkType};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -22,7 +23,7 @@ pub(super) struct NeighborCacheKey {
     interface_source: IpAddr,
     interface_mac: MacAddress,
     target: IpAddr,
-    vlan_tags: Vec<NeighborVlanTag>,
+    vlan_tags: Vec<VlanTag>,
     link_type: LinkType,
 }
 
@@ -120,7 +121,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::{interface::Id as InterfaceId, neighbor::VlanKind as NeighborVlanKind};
+    use crate::{interface::Id as InterfaceId, link::VlanKind};
 
     fn request(target: IpAddr) -> NeighborRequest {
         NeighborRequest {
@@ -134,8 +135,8 @@ mod tests {
             },
             interface_mac: MacAddress([0x02, 0, 0, 0, 0, 1]),
             target,
-            vlan_tags: vec![NeighborVlanTag {
-                kind: NeighborVlanKind::Ieee8021Q,
+            vlan_tags: vec![VlanTag {
+                kind: VlanKind::Ieee8021Q,
                 priority: 1,
                 drop_eligible: false,
                 vlan_id: 7,

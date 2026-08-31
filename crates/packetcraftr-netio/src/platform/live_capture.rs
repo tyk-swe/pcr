@@ -3,8 +3,6 @@
 
 //! Owned native capture worker and bounded queue shared by libpcap and Npcap.
 
-#![forbid(unsafe_code)]
-
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 
@@ -97,6 +95,7 @@ pub(super) fn validate_effective_snapshot_length(
             "{backend} returned invalid snapshot length {reported} for {}",
             interface.name
         ),
+        source: None,
     })?;
     if effective == 0 {
         return Err(Error::Capture {
@@ -104,6 +103,7 @@ pub(super) fn validate_effective_snapshot_length(
                 "{backend} returned zero snapshot length for {}",
                 interface.name
             ),
+            source: None,
         });
     }
     if effective > requested {
@@ -112,9 +112,28 @@ pub(super) fn validate_effective_snapshot_length(
                 "{backend} effective snapshot length {effective} exceeds configured maximum {requested} for {}",
                 interface.name
             ),
+            source: None,
         });
     }
     Ok(effective)
+}
+
+/// Recognizes the privilege refusals libpcap and Npcap phrase differently.
+///
+/// One list keeps the classification identical on every target. libpcap
+/// reports `Permission denied` or `Operation not permitted`; Npcap reports
+/// `Access is denied` or asks to be run as an administrator. Splitting the
+/// list per backend is what made `administrator` a privilege failure on
+/// Windows and a generic capture failure on Linux for the same refusal.
+pub(super) fn is_permission_denied(message: &str) -> bool {
+    const PHRASES: [&str; 4] = [
+        "permission denied",
+        "not permitted",
+        "access is denied",
+        "administrator",
+    ];
+    let message = message.to_ascii_lowercase();
+    PHRASES.iter().any(|phrase| message.contains(phrase))
 }
 
 pub(super) struct NativeCaptureParts {
@@ -158,10 +177,29 @@ mod tests {
     }
 
     #[test]
+    fn privilege_refusals_are_recognized_in_every_backend_phrasing() {
+        for message in [
+            "eth0: You don't have permission to capture on that device (socket: Operation not permitted)",
+            "en0: Permission denied",
+            r"\Device\NPF_{0}: Access is denied.",
+            "The requested operation requires elevation; run as Administrator",
+        ] {
+            assert!(is_permission_denied(message), "{message}");
+        }
+        for message in [
+            "eth0: No such device exists",
+            "libpcap statistics failed: not supported",
+        ] {
+            assert!(!is_permission_denied(message), "{message}");
+        }
+    }
+
+    #[test]
     fn effective_snapshot_length_is_positive_and_cannot_relax_the_requested_bound() {
         assert_eq!(
-            validate_effective_snapshot_length("fixture", &interface(), 64, 32),
-            Ok(32)
+            validate_effective_snapshot_length("fixture", &interface(), 64, 32)
+                .expect("a reported length inside the requested bound is accepted"),
+            32
         );
         for reported in [-1, 0, 65] {
             assert!(matches!(

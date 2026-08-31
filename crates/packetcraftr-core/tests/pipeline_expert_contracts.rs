@@ -126,8 +126,7 @@ fn expert_combines_header_reassembly_and_end_of_capture_findings() {
         },
     )
     .expect("expert pass succeeds");
-    let (trailing, summary) =
-        collector.finish(&run_summary.trailing_tcp_events, run_summary.frames_read);
+    let (trailing, summary) = collector.finish(&run_summary);
     findings.extend(trailing);
     let codes = findings
         .iter()
@@ -184,18 +183,27 @@ fn analysis_errors_keep_policy_packet_and_boundary_classifications_distinct() {
     assert_eq!(stream.classification().kind, Kind::Policy);
     let malformed = Error::Reassembly {
         number: 3,
-        source: tcp::Error::ConflictingFinalSequence {
+        source: tcp::MalformedError::ConflictingFinalSequence {
             existing_offset: 1,
             new_offset: 2,
-        },
+        }
+        .into(),
     };
     assert_eq!(malformed.classification().kind, Kind::Packet);
     assert_eq!(malformed.causes().len(), 1);
     let bounded = Error::Reassembly {
         number: 3,
-        source: tcp::Error::FlowByteLimit { limit: 8 },
+        source: tcp::ResourceError::FlowByteLimit { limit: 8 }.into(),
     };
     assert_eq!(bounded.classification().kind, Kind::Policy);
+    let tcp_remediation = bounded
+        .classification()
+        .remediation
+        .expect("TCP resource failures have remediation");
+    assert!(tcp_remediation.contains("trim or pre-filter the capture"));
+    // A TCP budget failure must point at the TCP budgets, not tell the
+    // operator to inspect the flow instead of raising them.
+    assert!(tcp_remediation.contains("--max-tcp-*"));
     let bounded_ip = Error::IpReassembly {
         number: 3,
         source: packetcraftr_core::analysis::reassembly::ip::ResourceError::AggregateMemoryLimit {
@@ -209,6 +217,16 @@ fn analysis_errors_keep_policy_packet_and_boundary_classifications_distinct() {
         .expect("IP resource failures have remediation");
     assert!(remediation.contains("trim or pre-filter the capture"));
     assert!(remediation.contains("--max-ip-*"));
+    // An engine invariant that broke is neither the operator's capture nor
+    // their budget, so it must not be reported as either.
+    let inconsistent = Error::IpReassembly {
+        number: 4,
+        source: packetcraftr_core::analysis::reassembly::ip::Error::Inconsistent {
+            reason: "retained datagram family disagrees with its key",
+        },
+    };
+    assert_eq!(inconsistent.classification().kind, Kind::Internal);
+    assert_eq!(inconsistent.classification().code, "internal.ip_reassembly");
     let bounded_scope = Error::Scope {
         number: 3,
         source: packetcraftr_core::analysis::scope::Error::Limit { limit: 8 },

@@ -267,4 +267,13 @@ pub enum Error {
     Resource(#[from] ResourceError),
     #[error(transparent)]
     Malformed(#[from] MalformedError),
+    /// The engine's own retained state contradicted itself — a family that
+    /// its key makes impossible, or completion evidence missing from a
+    /// datagram already found complete.
+    ///
+    /// This is a defect in reassembly, never a property of the capture, so
+    /// it reaches the operator as an internal failure rather than telling
+    /// them to repair their input or raise a budget.
+    #[error("IP reassembly state is inconsistent: {reason}")]
+    Inconsistent { reason: &'static str },
 }

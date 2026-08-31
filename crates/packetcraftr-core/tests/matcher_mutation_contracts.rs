@@ -17,7 +17,7 @@ use packetcraftr_core::protocol::transport::Tcp;
 use packetcraftr_core::{Packet, build, decode};
 
 fn registry() -> Arc<packetcraftr_core::registry::Registry> {
-    Arc::new(builtin::registry().expect("built-in registry should be valid"))
+    builtin::registry()
 }
 
 fn ipv4(source: [u8; 4], destination: [u8; 4]) -> Ipv4 {
@@ -96,7 +96,7 @@ fn tcp_response_correlation_uses_decoded_payload_after_every_mutation_api() {
             "{name} invalidates"
         );
         assert!(
-            tcp_matcher.matches(&request, &response).matched,
+            tcp_matcher.matches(&request, &response).is_some(),
             "{name} must use the new TCP payload length"
         );
     }
@@ -136,5 +136,5 @@ fn tcp_response_correlation_preserves_syn_fin_and_trailing_padding_rules() {
         flags: Tcp::ACK,
         ..Tcp::default()
     });
-    assert!(matcher.matches(&built.packet, &response).matched);
+    assert!(matcher.matches(&built.packet, &response).is_some());
 }

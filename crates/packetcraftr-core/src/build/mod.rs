@@ -9,8 +9,8 @@ use crate::Packet;
 use crate::codec::LayerEncodeContext;
 use crate::layer::{Id, Malformed, Padding};
 use crate::layout::{ByteRange, LayerLayout, PacketLayout};
+use crate::protocol::BuiltinProtocol;
 use crate::registry::Registry;
-use crate::semantics::BuiltinProtocol;
 
 use buffer::PacketBuffer;
 
@@ -19,10 +19,13 @@ mod error;
 mod options;
 mod validation;
 
+/// Re-exported so a builder caller names the encoding mode, the address
+/// context, and the default ceilings without importing the codec contract or
+/// the layout module. These are the same items, not copies.
+pub use crate::codec::{Context, Mode};
+pub use crate::layout::{DEFAULT_MAX_LAYERS, DEFAULT_MAX_PACKET_SIZE};
 pub use error::Error;
-pub use options::{
-    BuiltPacket, Context, DEFAULT_MAX_LAYERS, DEFAULT_MAX_PACKET_SIZE, Mode, Options,
-};
+pub use options::{BuiltPacket, Options};
 
 #[derive(Clone, Debug)]
 pub struct Builder {
@@ -53,7 +56,7 @@ impl Builder {
         packet: Packet,
         context: Context,
         options: Options,
-    ) -> std::result::Result<BuiltPacket, Error> {
+    ) -> Result<BuiltPacket, Error> {
         let mut diagnostics = Vec::new();
         let protocols = self.validate_packet(&packet, &options, &mut diagnostics)?;
         let encoding = self.encode_layers(&packet, protocols, &context, &options, diagnostics)?;
@@ -217,9 +220,7 @@ impl Builder {
                 .checked_add(layout.range.len())
                 .ok_or(Error::LengthOverflow)?;
         }
-        let layout = PacketLayout {
-            layers: encoding.layouts,
-        };
+        let layout = PacketLayout::new(encoding.layouts);
         encoding.layers.reverse();
         encoding.payload_lengths.reverse();
         let materialized = Packet::from_encoded_layers(encoding.layers, encoding.payload_lengths);

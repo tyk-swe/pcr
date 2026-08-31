@@ -3,14 +3,15 @@
 
 //! Canonical interpretation of packet fields used at live boundaries.
 //!
-//! This is a seam for `packetcraftr`, not part of the public surface: it is
-//! hidden from the docs and its items may change in any release.
+//! This is a seam for `packetcraftr` and `packetcraftr-netio`, not part of the
+//! public surface: it is hidden from the docs and its items may change in any
+//! release. The built-in protocol identity it interprets is public as
+//! [`crate::protocol::BuiltinProtocol`].
 
 use super::Packet;
 use super::field::FieldValue;
 use super::layer::Layer;
-pub use super::protocol_catalog::BuiltinProtocol;
-pub(crate) use super::protocol_catalog::builtin_protocol_catalog;
+use super::protocol::BuiltinProtocol;
 
 pub(crate) use ip::ipv4_source_route_destination;
 pub use ip::{

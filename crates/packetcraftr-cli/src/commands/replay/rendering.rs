@@ -3,7 +3,6 @@
 
 use packetcraftr::core::error::Kind;
 
-use std::fs::File;
 use std::io::{self, Read, Write};
 use std::time::{Duration, Instant};
 
@@ -14,38 +13,71 @@ use packetcraftr::{
 
 use crate::errors::CliError;
 use crate::rendering::{
-    SourceCaptureWriter, StreamEncoder, capture_file_format, emit_aggregate_with_stats, spaced_hex,
-    write_stdout_line,
+    SourceCaptureWriter, StreamEncoder, emit_aggregate_with_stats, spaced_hex,
+    stream_capture_error, write_stdout_line, write_summary_line,
 };
 
 type Selector<'a> = Option<&'a mut dyn packetcraftr::replay::Selector>;
 
 pub(super) struct CaptureSettings {
-    pub(super) format: output::contract::Format,
+    pub(super) format: Format,
     pub(super) max_interfaces: usize,
 }
 
-pub(super) fn render_text(
-    reader: &mut Reader<File>,
-    options: &packetcraftr::replay::Options,
-    selector: Selector<'_>,
-    authorizer: &mut packetcraftr::replay::SystemAuthorizer,
-    transmitter: &mut packetcraftr::replay::SystemTransmitter,
-    clock: &mut packetcraftr::clock::SystemClock,
+/// One replay, borrowed for the length of one render: the source, the frame
+/// selector, and the three providers a run drives.
+///
+/// The four renderers take this instead of the same six positional arguments,
+/// so every one of them is generic and every one can be driven by fakes.
+pub(super) struct Run<'a, R, A, T, C> {
+    pub(super) reader: &'a mut Reader<R>,
+    pub(super) options: &'a packetcraftr::replay::Options,
+    pub(super) selector: Selector<'a>,
+    pub(super) authorizer: &'a mut A,
+    pub(super) transmitter: &'a mut T,
+    pub(super) clock: &'a mut C,
+}
+
+impl<R, A, T, C> Run<'_, R, A, T, C>
+where
+    R: Read,
+    A: packetcraftr::replay::Authorizer,
+    T: packetcraftr::replay::Transmitter,
+    C: packetcraftr::clock::Clock,
+{
+    /// Drives the run, handing each transmitted frame to `record`.
+    fn drive(
+        self,
+        record: impl FnMut(
+            packetcraftr::replay::FrameEvidence,
+        ) -> Result<(), packetcraftr::replay::Error>,
+    ) -> Result<packetcraftr::replay::Summary, CliError> {
+        packetcraftr::replay::run_with_selector(
+            self.reader,
+            self.options,
+            self.selector,
+            self.authorizer,
+            self.transmitter,
+            self.clock,
+            record,
+        )
+        .map_err(CliError::classified)
+    }
+}
+
+pub(super) fn render_text<R, A, T, C>(
+    run: Run<'_, R, A, T, C>,
     filtered: bool,
-) -> Result<(), CliError> {
-    let summary = packetcraftr::replay::run_with_selector(
-        reader,
-        options,
-        selector,
-        authorizer,
-        transmitter,
-        clock,
-        render_record,
-    )
-    .map_err(CliError::classified)?;
+) -> Result<(), CliError>
+where
+    R: Read,
+    A: packetcraftr::replay::Authorizer,
+    T: packetcraftr::replay::Transmitter,
+    C: packetcraftr::clock::Clock,
+{
+    let summary = run.drive(render_record)?;
     if filtered {
-        write_stdout_line(format_args!(
+        write_summary_line(format_args!(
             "replayed {} of {} frame(s), {} byte(s), scheduled delay {:?}",
             summary.frames_transmitted,
             summary.frames_read,
@@ -53,55 +85,16 @@ pub(super) fn render_text(
             summary.scheduled_duration
         ))
     } else {
-        write_stdout_line(format_args!(
+        write_summary_line(format_args!(
             "replayed {} frame(s), {} byte(s), scheduled delay {:?}",
             summary.frames_transmitted, summary.bytes_transmitted, summary.scheduled_duration
         ))
     }
 }
 
-pub(super) fn render_aggregate(
-    reader: &mut Reader<File>,
-    options: &packetcraftr::replay::Options,
-    selector: Selector<'_>,
-    authorizer: &mut packetcraftr::replay::SystemAuthorizer,
-    transmitter: &mut packetcraftr::replay::SystemTransmitter,
-    clock: &mut packetcraftr::clock::SystemClock,
+pub(super) fn render_aggregate<R, A, T, C>(
+    run: Run<'_, R, A, T, C>,
     requested_interface: net::interface::Id,
-) -> Result<(), CliError> {
-    let started = Instant::now();
-    let mut frames = Vec::new();
-    let summary = packetcraftr::replay::run_with_selector(
-        reader,
-        options,
-        selector,
-        authorizer,
-        transmitter,
-        clock,
-        |evidence| {
-            frames.push(output_frame(evidence)?);
-            Ok(())
-        },
-    )
-    .map_err(CliError::classified)?;
-    let stats = stats(&summary, started.elapsed());
-    let result = output::replay::Result::from_summary(
-        summary,
-        requested_interface,
-        options.link_mode,
-        frames,
-    );
-    emit_aggregate_with_stats(output::contract::Command::Replay, result, Vec::new(), stats)
-}
-
-pub(super) fn render_stream<R, A, T, C>(
-    reader: &mut Reader<R>,
-    options: &packetcraftr::replay::Options,
-    selector: Selector<'_>,
-    authorizer: &mut A,
-    transmitter: &mut T,
-    clock: &mut C,
-    stream: &mut StreamEncoder,
 ) -> Result<(), CliError>
 where
     R: Read,
@@ -110,55 +103,59 @@ where
     C: packetcraftr::clock::Clock,
 {
     let started = Instant::now();
-    let summary = packetcraftr::replay::run_with_selector(
-        reader,
-        options,
-        selector,
-        authorizer,
-        transmitter,
-        clock,
-        |evidence| render_stream_record(stream, evidence),
-    )
-    .map_err(CliError::classified)?;
+    let link_mode = run.options.link_mode;
+    let mut frames = Vec::new();
+    let summary = run.drive(|evidence| {
+        frames.push(output_frame(evidence)?);
+        Ok(())
+    })?;
     let stats = stats(&summary, started.elapsed());
-    let result = output::replay::Result::from_summary(
-        summary,
-        options.interface.clone(),
-        options.link_mode,
-        Vec::new(),
-    );
+    let result =
+        output::replay::Report::from_summary(summary, requested_interface, link_mode, frames);
+    emit_aggregate_with_stats(output::contract::Command::Replay, result, Vec::new(), stats)
+}
+
+pub(super) fn render_stream<R, A, T, C>(
+    run: Run<'_, R, A, T, C>,
+    stream: &StreamEncoder,
+) -> Result<(), CliError>
+where
+    R: Read,
+    A: packetcraftr::replay::Authorizer,
+    T: packetcraftr::replay::Transmitter,
+    C: packetcraftr::clock::Clock,
+{
+    let started = Instant::now();
+    let interface = run.options.interface.clone();
+    let link_mode = run.options.link_mode;
+    let summary = run.drive(|evidence| render_stream_record(stream, evidence))?;
+    let stats = stats(&summary, started.elapsed());
+    let result = output::replay::Report::from_summary(summary, interface, link_mode, Vec::new());
     Ok(stream.complete_with_stats(result, Vec::new(), stats)?)
 }
 
-pub(super) fn render_capture(
-    reader: &mut Reader<File>,
-    options: &packetcraftr::replay::Options,
-    selector: Selector<'_>,
-    authorizer: &mut packetcraftr::replay::SystemAuthorizer,
-    transmitter: &mut packetcraftr::replay::SystemTransmitter,
-    clock: &mut packetcraftr::clock::SystemClock,
+pub(super) fn render_capture<R, A, T, C>(
+    run: Run<'_, R, A, T, C>,
     settings: CaptureSettings,
-) -> Result<(), CliError> {
-    let format = capture_file_format(settings.format)?;
+) -> Result<(), CliError>
+where
+    R: Read,
+    A: packetcraftr::replay::Authorizer,
+    T: packetcraftr::replay::Transmitter,
+    C: packetcraftr::clock::Clock,
+{
     let stdout = io::stdout();
     let mut writer = capture_writer(
-        reader,
+        run.reader,
         stdout.lock(),
-        format,
-        options.limits,
+        settings.format,
+        run.options.limits,
         settings.max_interfaces,
     )?;
-    packetcraftr::replay::run_with_selector(
-        reader,
-        options,
-        selector,
-        authorizer,
-        transmitter,
-        clock,
-        |evidence| render_capture_record(&mut writer, evidence),
-    )
-    .map_err(CliError::classified)?;
-    writer.flush().map_err(CliError::classified)
+    run.drive(|evidence| render_capture_record(&mut writer, evidence))?;
+    writer
+        .flush()
+        .map_err(|source| stream_capture_error("flush capture output failed", source))
 }
 
 fn output_frame(
@@ -175,7 +172,7 @@ fn render_record(
 ) -> Result<(), packetcraftr::replay::Error> {
     let result = output_frame(evidence)?;
     write_stdout_line(format_args!(
-        "{}: sent {} bytes via {} (index {}, {:?}) dlt={} {}",
+        "{}: sent {} bytes via {} (index {}, {}) dlt={} {}",
         result.source_index,
         result.bytes_sent,
         result.interface.name,
@@ -190,7 +187,7 @@ fn render_record(
 }
 
 fn render_stream_record(
-    stream: &mut StreamEncoder,
+    stream: &StreamEncoder,
     evidence: packetcraftr::replay::FrameEvidence,
 ) -> Result<(), packetcraftr::replay::Error> {
     let source_index = evidence.source_index;
@@ -200,8 +197,8 @@ fn render_stream_record(
     })
 }
 
-fn capture_writer<W: Write>(
-    reader: &Reader<File>,
+fn capture_writer<R: Read, W: Write>(
+    reader: &Reader<R>,
     destination: W,
     format: Format,
     limits: packetcraftr::replay::Limits,
@@ -215,22 +212,16 @@ fn capture_writer<W: Write>(
                 endianness: reader.endianness(),
                 max_size: limits.max_frame_bytes,
                 max_interfaces,
+                stream_limits: stream_limits(limits),
             },
         )
-        .map_err(CliError::classified)?,
+        .map_err(|source| stream_capture_error("initialize capture output failed", source))?,
     };
-    let mut writer = SourceCaptureWriter::new(writer);
-    writer
-        .set_stream_limits(Limits {
-            max_frames: limits.max_frames,
-            max_bytes: limits.max_bytes,
-        })
-        .map_err(CliError::classified)?;
-    Ok(writer)
+    Ok(SourceCaptureWriter::new(writer))
 }
 
-fn classic_writer<W: Write>(
-    reader: &Reader<File>,
+fn classic_writer<R: Read, W: Write>(
+    reader: &Reader<R>,
     destination: W,
     format: Format,
     limits: packetcraftr::replay::Limits,
@@ -262,9 +253,18 @@ fn classic_writer<W: Write>(
             timestamp_resolution: interface.timestamp_resolution,
             snap_len: snap_length,
             max_size: limits.max_frame_bytes,
+            stream_limits: stream_limits(limits),
         },
     )
-    .map_err(CliError::classified)
+    .map_err(|source| stream_capture_error("initialize capture output failed", source))
+}
+
+/// The replay budget's aggregate ceilings, in the capture writer's own terms.
+const fn stream_limits(limits: packetcraftr::replay::Limits) -> Limits {
+    Limits {
+        max_frames: limits.max_source_frames,
+        max_bytes: limits.max_transmitted_bytes,
+    }
 }
 
 fn render_capture_record<W: Write>(
@@ -346,15 +346,15 @@ mod tests {
     struct FakeTransmitter;
 
     impl packetcraftr::replay::Transmitter for FakeTransmitter {
-        fn validate_interface(
+        fn plan_frame(
             &mut self,
             interface: &net::interface::Id,
             mode: net::link::Mode,
             frame: &Frame,
-        ) -> Result<net::route::Plan, net::Error> {
+        ) -> Result<net::route::Materialized, net::Error> {
             let selected_source = "192.0.2.1".parse().expect("fixture source");
             let source_mac = net::link::MacAddress([0x02, 0, 0, 0, 0, 1]);
-            Ok(net::route::Plan {
+            let plan = net::route::Plan {
                 decision: net::route::Decision {
                     interface: interface.clone(),
                     source_mac: Some(source_mac),
@@ -378,17 +378,20 @@ mod tests {
                 source_mac: Some(source_mac),
                 neighbor_vlan_tags: Vec::new(),
                 synthesized_ethernet: false,
+            };
+            Ok(net::route::Materialized {
+                plan,
+                neighbor_resolution: None,
             })
         }
 
         fn transmit(
             &mut self,
-            interface: &net::interface::Id,
-            _mode: net::link::Mode,
+            route: &net::route::Materialized,
             frame: &Frame,
         ) -> Result<packetcraftr::replay::Transmission, net::Error> {
             Ok(packetcraftr::replay::Transmission {
-                interface: interface.clone(),
+                interface: route.plan.decision.interface.clone(),
                 report: net::transmit::Submission::start()
                     .complete(frame.bytes().len(), frame.bytes().clone()),
             })
@@ -458,29 +461,35 @@ mod tests {
 
     fn render_fixture(
         reader: &mut Reader<Cursor<Vec<u8>>>,
-        selector: Selector<'_>,
+        selector: Option<&mut OnlyFrame>,
         authorizer: &mut FakeAuthorizer,
-        stream: &mut StreamEncoder,
+        stream: &StreamEncoder,
     ) -> Result<(), CliError> {
+        let options = options();
+        let mut transmitter = FakeTransmitter;
+        let mut clock = FakeClock;
         render_stream(
-            reader,
-            &options(),
-            selector,
-            authorizer,
-            &mut FakeTransmitter,
-            &mut FakeClock,
+            Run {
+                reader,
+                options: &options,
+                selector: selector
+                    .map(|selector| selector as &mut dyn packetcraftr::replay::Selector),
+                authorizer,
+                transmitter: &mut transmitter,
+                clock: &mut clock,
+            },
             stream,
         )
     }
 
     #[test]
     fn replay_stream_success_is_contiguous_and_terminal() {
-        let (mut stream, output) = stream(output::contract::Command::Replay);
+        let (stream, output) = stream(output::contract::Command::Replay);
         render_fixture(
             &mut reader(2),
             None,
             &mut FakeAuthorizer::default(),
-            &mut stream,
+            &stream,
         )
         .expect("fake replay succeeds");
 
@@ -493,15 +502,15 @@ mod tests {
 
     #[test]
     fn replay_domain_failure_after_two_records_uses_position_two() {
-        let (mut stream, output) = stream(output::contract::Command::Replay);
+        let (stream, output) = stream(output::contract::Command::Replay);
         let mut authorizer = FakeAuthorizer {
             calls: 0,
             deny_on: Some(3),
         };
-        let error = render_fixture(&mut reader(3), None, &mut authorizer, &mut stream)
+        let error = render_fixture(&mut reader(3), None, &mut authorizer, &stream)
             .expect_err("third fake replay authorization is denied");
 
-        assert_eq!(error.exit_code, 6);
+        assert_eq!(error.exit_code(), 6);
         assert_eq!(error.classification.code, "policy.fixture_replay");
         assert_eq!(error.causes, ["fixture domain cause"]);
         stream.emit_error(error.output_error()).unwrap();
@@ -516,13 +525,13 @@ mod tests {
 
     #[test]
     fn replay_source_identifier_42_is_data_at_stream_position_zero() {
-        let (mut stream, output) = stream(output::contract::Command::Replay);
+        let (stream, output) = stream(output::contract::Command::Replay);
         let mut selector = OnlyFrame(43);
         render_fixture(
             &mut reader(43),
             Some(&mut selector),
             &mut FakeAuthorizer::default(),
-            &mut stream,
+            &stream,
         )
         .expect("selected fake replay succeeds");
 
@@ -536,17 +545,17 @@ mod tests {
 
     #[test]
     fn replay_output_failure_retains_source_frame_context_and_remediation() {
-        let mut stream = StreamEncoder::new(Some(output::contract::Command::Replay), FailingWriter);
+        let stream = StreamEncoder::new(output::contract::Command::Replay, FailingWriter);
         let mut selector = OnlyFrame(43);
         let error = render_fixture(
             &mut reader(43),
             Some(&mut selector),
             &mut FakeAuthorizer::default(),
-            &mut stream,
+            &stream,
         )
         .expect_err("selected replay output must fail");
 
-        assert_eq!(error.exit_code, 5);
+        assert_eq!(error.exit_code(), 5);
         assert_eq!(error.classification.code, "io.replay");
         assert!(error.message.contains("source index 42"));
         assert!(error.message.contains("sequence 0"));

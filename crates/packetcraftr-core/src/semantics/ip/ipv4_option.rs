@@ -26,9 +26,7 @@ pub(crate) fn ipv4_source_route_destination(
 
 pub(super) fn parse_ipv4_source_routes(options: &[u8]) -> Result<ParsedIpv4SourceRoutes, Error> {
     if options.len() > 40 {
-        return Err(Error::new(
-            "IPv4 option bytes exceed the 40-byte header limit",
-        ));
+        return Err(Error::Ipv4OptionsTooLong);
     }
     let mut routes = ParsedIpv4SourceRoutes::default();
     let mut cursor = 0usize;
@@ -44,21 +42,17 @@ pub(super) fn parse_ipv4_source_routes(options: &[u8]) -> Result<ParsedIpv4Sourc
                     .get(cursor.saturating_add(1))
                     .copied()
                     .map(usize::from)
-                    .ok_or_else(|| Error::new("IPv4 option is missing its length byte"))?;
+                    .ok_or(Error::Ipv4OptionMissingLength)?;
                 if length < 2 {
-                    return Err(Error::new(format!(
-                        "IPv4 option {option} has invalid length {length}"
-                    )));
+                    return Err(Error::Ipv4OptionLength { option, length });
                 }
                 let end = cursor
                     .checked_add(length)
                     .filter(|end| *end <= options.len())
-                    .ok_or_else(|| Error::new(format!("IPv4 option {option} is truncated")))?;
+                    .ok_or(Error::Ipv4OptionTruncated { option })?;
                 if matches!(option, 131 | 137) {
                     if length < 3 || !length.saturating_sub(3).is_multiple_of(4) {
-                        return Err(Error::new(format!(
-                            "IPv4 source-route option {option} has invalid length {length}"
-                        )));
+                        return Err(Error::Ipv4SourceRouteLength { option, length });
                     }
                     #[expect(
                         clippy::indexing_slicing,
@@ -70,9 +64,7 @@ pub(super) fn parse_ipv4_source_routes(options: &[u8]) -> Result<ParsedIpv4Sourc
                         || pointer > length.saturating_add(1)
                         || !pointer.saturating_sub(4).is_multiple_of(4)
                     {
-                        return Err(Error::new(format!(
-                            "IPv4 source-route option {option} has invalid pointer {pointer}"
-                        )));
+                        return Err(Error::Ipv4SourceRoutePointer { option, pointer });
                     }
                     #[expect(
                         clippy::indexing_slicing,

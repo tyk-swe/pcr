@@ -50,9 +50,8 @@ use std::collections::{BTreeMap, HashMap};
 
 use serde::Serialize;
 
-use crate::analysis::adapter::transports;
 use crate::analysis::conversation_index::CanonicalFlow;
-use crate::analysis::pipeline::FrameRecord;
+use crate::analysis::pipeline::{FrameRecord, Summary as RunSummary};
 use crate::analysis::reassembly::tcp::{Event as TcpEvent, ScopedFlowKey};
 use crate::protocol::transport::Tcp;
 
@@ -190,10 +189,9 @@ impl Collector {
         };
         self.note_stream(stream);
         let key = CanonicalFlow::from_flow(flow);
-        let decoded = record.tcp_decoded;
-        let transport = transports(&decoded.packet).tcp;
-        if let Some(transport) = &transport
-            && transport.layer.flags & Tcp::SYN != 0
+        let tcp = record.tcp_header;
+        if let Some(tcp) = tcp
+            && tcp.flags & Tcp::SYN != 0
         {
             // A connection opening on a retired four-tuple is a new session,
             // with its own index and its own delivery edges.
@@ -213,25 +211,26 @@ impl Collector {
             None => self.track(&key, stream, flow.clone(), &mut events),
         }
         if let Some(live) = self.live_mut(&key) {
-            live.note_frame(decoded.frame.timestamp);
-            if let Some(transport) = &transport {
+            live.note_frame(Some(record.timestamp));
+            if let Some(tcp) = tcp {
                 let first = live.first_flow().clone();
-                live.dedup().observe_syn(flow, &first, transport.layer);
+                live.dedup().observe_syn(flow, &first, tcp);
             }
         }
         self.fold_deliveries(record, &key, &mut events);
         events
     }
 
-    /// Finishes the pass, folding in the pipeline's trailing flush.
+    /// Finishes the pass, folding in the run's trailing flush.
     ///
     /// The flush evicts every flow the capture left open, so an eviction here
     /// is the capture ending rather than data loss: sessions still in flight
     /// are [`truncated`](Status::Truncated), and only a trailing gap — bytes
     /// that were captured but never deliverable — is a [`gap`](Status::Gap).
     #[must_use]
-    pub fn finish(mut self, trailing: &[TcpEvent]) -> (Vec<SessionEvent>, Summary) {
+    pub fn finish(mut self, summary: &RunSummary) -> (Vec<SessionEvent>, Summary) {
         let mut events = Vec::new();
+        let trailing = &summary.trailing_tcp_events;
         for event in trailing {
             if let TcpEvent::Gap { flow, .. } = event {
                 let key = CanonicalFlow::from_flow(flow);

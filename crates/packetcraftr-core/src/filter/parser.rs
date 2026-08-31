@@ -3,13 +3,13 @@
 
 //! Bounded parsing and postfix-program compilation for display filters.
 
-use super::super::field::FieldKind;
-use super::super::registry::Registry;
 use super::ast::{Op, Predicate};
 use super::error::Error;
 use super::lexer::{CompareOperator, Spanned, Token, tokenize};
 use super::literal::{self, Literal};
 use super::path::{self, FieldRef, FieldSource, FrameField, Resolved, StreamTransport};
+use crate::field::FieldKind;
+use crate::registry::Registry;
 
 pub const DEFAULT_MAX_FILTER_BYTES: usize = 64 * 1024;
 /// Absolute parenthesis nesting accepted by the display-filter parser.
@@ -69,20 +69,40 @@ impl Requirements {
     }
 }
 
-/// Binding power of the boolean operators. `not` binds tightest, then `and`,
-/// then `or`, matching the conventional reading of `a || b && c`.
-fn precedence(op: &Op) -> u8 {
-    match op {
-        Op::Not => 3,
-        Op::And => 2,
-        Op::Or => 1,
-        Op::Leaf(_) => 0,
+/// A boolean operator waiting for its operands.
+///
+/// Only these three can wait: a predicate is pushed straight onto the program,
+/// so the operator stack has no way to hold one.
+#[derive(Clone, Copy)]
+enum Operator {
+    Not,
+    And,
+    Or,
+}
+
+impl Operator {
+    /// Binding power. `not` binds tightest, then `and`, then `or`, matching
+    /// the conventional reading of `a || b && c`.
+    const fn precedence(self) -> u8 {
+        match self {
+            Self::Not => 3,
+            Self::And => 2,
+            Self::Or => 1,
+        }
+    }
+
+    const fn into_op(self) -> Op {
+        match self {
+            Self::Not => Op::Not,
+            Self::And => Op::And,
+            Self::Or => Op::Or,
+        }
     }
 }
 
 /// One entry on the operator stack.
 enum Pending {
-    Operator(Op),
+    Operator(Operator),
     LeftParen,
 }
 
@@ -195,7 +215,7 @@ impl<'a> Compiler<'a> {
                 self.index = self.index.saturating_add(1);
             }
             Token::Not => {
-                self.operators.push(Pending::Operator(Op::Not));
+                self.operators.push(Pending::Operator(Operator::Not));
                 self.index = self.index.saturating_add(1);
             }
             Token::Word(_) => {
@@ -235,18 +255,18 @@ impl<'a> Compiler<'a> {
         match token {
             Token::And | Token::Or => {
                 let incoming = if matches!(token, Token::And) {
-                    Op::And
+                    Operator::And
                 } else {
-                    Op::Or
+                    Operator::Or
                 };
                 while let Some(Pending::Operator(top)) = self.operators.last() {
-                    if precedence(top) < precedence(&incoming) {
+                    if top.precedence() < incoming.precedence() {
                         break;
                     }
-                    let Some(Pending::Operator(op)) = self.operators.pop() else {
+                    let Some(Pending::Operator(operator)) = self.operators.pop() else {
                         break;
                     };
-                    self.program.push(op);
+                    self.program.push(operator.into_op());
                 }
                 self.operators.push(Pending::Operator(incoming));
                 self.expect_operand = true;
@@ -261,7 +281,9 @@ impl<'a> Compiler<'a> {
                 }
                 loop {
                     match self.operators.pop() {
-                        Some(Pending::Operator(op)) => self.program.push(op),
+                        Some(Pending::Operator(operator)) => {
+                            self.program.push(operator.into_op());
+                        }
                         Some(Pending::LeftParen) => break,
                         None => {
                             return Err(Error::Syntax {
@@ -293,7 +315,7 @@ impl<'a> Compiler<'a> {
         }
         while let Some(pending) = self.operators.pop() {
             match pending {
-                Pending::Operator(op) => self.program.push(op),
+                Pending::Operator(operator) => self.program.push(operator.into_op()),
                 Pending::LeftParen => {
                     return Err(Error::Syntax {
                         offset: source_len,
@@ -631,8 +653,8 @@ mod tests {
 
     use super::*;
 
-    fn registry() -> Registry {
-        crate::protocol::builtin::registry().expect("built-in registry")
+    fn registry() -> std::sync::Arc<Registry> {
+        crate::protocol::builtin::registry()
     }
 
     #[test]

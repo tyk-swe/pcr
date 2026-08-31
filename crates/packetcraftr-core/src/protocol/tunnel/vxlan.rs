@@ -11,10 +11,14 @@ use crate::{
     registry::Discriminator,
 };
 
-use super::super::common::{
+use crate::protocol::common::{
     ensure_encode_budget, invalid, make_layer, protocol, strict_or_diagnostic, truncated,
-    validate_raw_child_discriminator, wrong_layer,
+    typed_layer, validate_raw_child_discriminator,
 };
+
+use crate::protocol::BuiltinProtocol;
+
+const NAME: &str = BuiltinProtocol::Vxlan.as_str();
 
 const VXLAN_LEN: usize = 8;
 /// The I flag: the VNI field is valid. RFC 7348 requires it set and every
@@ -51,7 +55,7 @@ impl Default for Vxlan {
 }
 
 reflective_layer! {
-    fn vxlan_schema() => { protocol: protocol("vxlan"), name: "VXLAN" }
+    fn vxlan_schema() => { protocol: protocol(NAME), name: "VXLAN" }
     impl Vxlan {
         "flags" => { kind: Unsigned, derived: false, required: true, description: "VXLAN flag byte; only the VNI-valid bit 0x08 is defined", reflect: flags, layout: (0, 1) },
         "reserved1" => { kind: Unsigned, derived: false, required: false, description: "Reserved 24 bits between the flags and the VNI", reflect_bounded: reserved1, VNI_MAX, layout: (1, 4) },
@@ -65,8 +69,8 @@ reflective_layer! {
 pub(crate) struct VxlanCodec;
 
 impl LayerCodec for VxlanCodec {
-    fn protocol_id(&self) -> crate::layer::Id {
-        protocol("vxlan")
+    fn protocol_id(&self) -> &'static crate::layer::Id {
+        &vxlan_schema().protocol
     }
 
     fn encode(
@@ -75,13 +79,10 @@ impl LayerCodec for VxlanCodec {
         _payload: &[u8],
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
-        let layer = layer
-            .as_any()
-            .downcast_ref::<Vxlan>()
-            .ok_or_else(|| wrong_layer("vxlan", layer))?;
-        ensure_encode_budget("vxlan", VXLAN_LEN, context)?;
+        let layer = typed_layer::<Vxlan>(NAME, layer)?;
+        ensure_encode_budget(NAME, VXLAN_LEN, context)?;
         if layer.vni > VNI_MAX || layer.reserved1 > VNI_MAX {
-            return Err(invalid("vxlan", "24-bit field exceeds its wire range"));
+            return Err(invalid(NAME, "24-bit field exceeds its wire range"));
         }
 
         let mut diagnostics = Vec::new();
@@ -89,10 +90,10 @@ impl LayerCodec for VxlanCodec {
         // one the bytes dissect into a missing-required-child error. The
         // shared discriminator validation accepts a malformed child, so
         // dissected captures of truncated inner frames always rebuild.
-        validate_raw_child_discriminator("vxlan", 0, context, &mut diagnostics)?;
+        validate_raw_child_discriminator(NAME, 0, context, &mut diagnostics)?;
         if layer.flags != VNI_VALID_FLAG {
             strict_or_diagnostic(
-                "vxlan",
+                NAME,
                 "build.vxlan_flags",
                 "flags",
                 "RFC 7348 requires the VNI-valid flag set and every other flag bit clear",
@@ -102,7 +103,7 @@ impl LayerCodec for VxlanCodec {
         }
         if layer.reserved1 != 0 || layer.reserved2 != 0 {
             strict_or_diagnostic(
-                "vxlan",
+                NAME,
                 "build.vxlan_reserved",
                 "reserved1",
                 "VXLAN reserved fields must be zero on transmission",
@@ -118,13 +119,9 @@ impl LayerCodec for VxlanCodec {
         prefix.extend_from_slice(&[reserved1_hi, reserved1_mid, reserved1_lo]);
         prefix.extend_from_slice(&[vni_hi, vni_mid, vni_lo]);
         prefix.push(layer.reserved2);
-        Ok(EncodedLayer {
-            prefix,
-            suffix: Vec::new(),
-            materialized: Box::new(layer.clone()),
-            fields: vxlan_layout(),
-            diagnostics,
-        })
+        Ok(EncodedLayer::header(prefix, Box::new(layer.clone()))
+            .with_fields(vxlan_layout())
+            .with_diagnostics(diagnostics))
     }
 
     fn decode(
@@ -133,7 +130,7 @@ impl LayerCodec for VxlanCodec {
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
         let Some(header) = input.first_chunk::<VXLAN_LEN>() else {
-            return Err(truncated("vxlan", VXLAN_LEN, input.len()));
+            return Err(truncated(NAME, VXLAN_LEN, input.len()));
         };
         let flags = header[0];
         let reserved1 = u32::from_be_bytes([0, header[1], header[2], header[3]]);

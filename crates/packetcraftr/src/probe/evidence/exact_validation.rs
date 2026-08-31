@@ -117,11 +117,7 @@ pub(crate) fn validate_sent_byte_accounting(
     sent: &[SentPacket],
     reported: u64,
 ) -> Result<(), ExchangeEvidenceError> {
-    let actual = sent
-        .iter()
-        .try_fold(0_u64, |total, sent| {
-            total.checked_add(u64::try_from(sent.bytes_sent()).unwrap_or(u64::MAX))
-        })
+    let actual = crate::evidence::total_bytes_sent(sent)
         .ok_or(ExchangeEvidenceError::SentByteCountOverflow)?;
     if reported != actual {
         return Err(ExchangeEvidenceError::SentByteCountMismatch { reported, actual });

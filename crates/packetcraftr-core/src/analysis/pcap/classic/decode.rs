@@ -8,13 +8,13 @@ use bytes::Bytes;
 
 use crate::frame::{Frame, LinkType};
 
-use super::super::error::Error;
-use super::super::model::{
+use crate::analysis::pcap::error::Error;
+use crate::analysis::pcap::model::{
     CaptureRecord, Endianness, Format, PacketBlockKind, PcapHeader, RecordKind, TimestampPrecision,
     TimestampResolution,
 };
-use super::super::reader::ReaderState;
-use super::super::wire::{
+use crate::analysis::pcap::reader::ReaderState;
+use crate::analysis::pcap::wire::{
     PCAP_GLOBAL_HEADER_LEN, PCAP_RECORD_HEADER_LEN, decode_u16, decode_u32, read_exact_counted,
     read_exact_or_eof, read_exact_vec, validate_declared_lengths,
 };

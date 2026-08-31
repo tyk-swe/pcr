@@ -146,10 +146,8 @@ impl Classified for Error {
         }
     }
 
+    /// Walked from the retained `#[source]` chain rather than hand-written.
     fn causes(&self) -> Vec<String> {
-        match self {
-            Self::Io(source) => vec![source.to_string()],
-            _ => Vec::new(),
-        }
+        crate::error::source_chain(self)
     }
 }

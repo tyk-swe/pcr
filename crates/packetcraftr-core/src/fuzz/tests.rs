@@ -17,14 +17,15 @@ use crate::{
 use bytes::Bytes;
 
 use super::error::Error;
+use super::report::CaseOutcome;
 use super::request::{Limits, Request, Strategy};
-use super::result::CaseOutcome;
 use super::run::run as fuzz;
 use super::run::run_with_events;
-use crate::error::{BoundaryError, Classification, Kind};
+use crate::error::{BoundaryError, Classification, Classified, Kind};
+use crate::progress::Runtime;
 
 fn fuzz_protocol_registry() -> Arc<Registry> {
-    Arc::new(crate::protocol::builtin::registry().expect("built-in protocol registry"))
+    crate::protocol::builtin::registry()
 }
 
 fn udp_fuzz_packet() -> Packet {
@@ -120,7 +121,18 @@ fn fuzz_bounded_resource_rejection_precedes_unbounded_case_growth() {
         fuzz_protocol_registry(),
     )
     .unwrap_err();
-    assert!(matches!(error, Error::ByteLimit { .. }));
+    // The base packet's own reflected values exhaust the 64-byte campaign
+    // budget, so the first value that no longer fits is refused by name
+    // instead of being reported as one byte over the limit.
+    assert!(
+        matches!(error, Error::ValueTooLarge { limit: 64 }),
+        "{error:?}"
+    );
+    assert_eq!(
+        error.classification().code,
+        "policy.fuzz_resource_limit",
+        "{error:?}"
+    );
 }
 
 #[test]
@@ -138,6 +150,7 @@ fn offline_fuzz_sink_failure_stops_generation_after_the_emitted_case() {
         &request,
         raw_fuzz_packet(),
         fuzz_protocol_registry(),
+        &Runtime::default(),
         move |case| {
             observed.lock().unwrap().push(case.index);
             Err(output_failure())
@@ -175,6 +188,7 @@ fn offline_fuzz_late_limit_failure_preserves_earlier_cases() {
         &request,
         raw_fuzz_packet(),
         fuzz_protocol_registry(),
+        &Runtime::default(),
         move |case| {
             observed.lock().unwrap().push(case.index);
             Ok(())

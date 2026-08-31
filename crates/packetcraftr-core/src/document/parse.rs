@@ -1,6 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+mod budget;
+mod buffered;
+mod seed;
+
 use std::fmt;
 
 use serde::Deserialize;
@@ -8,7 +12,8 @@ use serde::de::{self, DeserializeSeed};
 
 use super::error::Error;
 use super::types::{DOCUMENT_BASE_CONTAINER_DEPTH, DocumentLimits, Format, Limit, Packet};
-use super::visitor::{Budget, PacketSeed};
+use budget::Budget;
+use seed::PacketSeed;
 
 impl Packet {
     /// Parses one bounded JSON or YAML document with [`DocumentLimits::DEFAULT`]
@@ -58,23 +63,7 @@ impl Packet {
                 Ok(document)
             }
             Format::Yaml => {
-                // The YAML parser's own budgets are an outer envelope derived
-                // from the input ceiling; every semantic limit trips first, so
-                // the classified error is the same one JSON reports.
-                let envelope = limits.max_input_bytes.max(1);
-                let config = noyalib::ParserConfig::new()
-                    .max_depth(document_container_depth(limits.max_nesting))
-                    .max_document_length(limits.max_input_bytes)
-                    .max_alias_expansions(0)
-                    .max_mapping_keys(envelope)
-                    .max_sequence_length(envelope)
-                    .max_events(envelope.saturating_mul(2))
-                    .max_nodes(envelope)
-                    .max_total_scalar_bytes(limits.max_input_bytes)
-                    .max_documents(1)
-                    .max_merge_keys(0)
-                    .duplicate_key_policy(noyalib::DuplicateKeyPolicy::Error)
-                    .strict_booleans(true);
+                let config = yaml_config(limits);
                 let mut deserializer = noyalib::StreamingDeserializer::with_config(input, &config);
                 let document = seed
                     .deserialize(&mut deserializer)
@@ -84,15 +73,51 @@ impl Packet {
                         format: "YAML",
                         message: "multiple YAML documents are not supported".to_owned(),
                     }),
-                    Err(source) if source.to_string().contains("parser has already finished") => {
-                        Ok(document)
-                    }
+                    Err(source) if yaml_stream_ended(&source) => Ok(document),
                     Err(source) => Err(map_yaml_parse_error(source, &budget, limits)),
                 }
             }
         }
     }
 }
+
+/// The parser budgets one YAML document is read under.
+///
+/// They are an outer envelope derived from the input ceiling: every semantic
+/// limit trips first, so the classified error is the same one JSON reports.
+fn yaml_config(limits: &DocumentLimits) -> noyalib::ParserConfig {
+    let envelope = limits.max_input_bytes.max(1);
+    noyalib::ParserConfig::new()
+        .max_depth(document_container_depth(limits.max_nesting))
+        .max_document_length(limits.max_input_bytes)
+        .max_alias_expansions(0)
+        .max_mapping_keys(envelope)
+        .max_sequence_length(envelope)
+        .max_events(envelope.saturating_mul(2))
+        .max_nodes(envelope)
+        .max_total_scalar_bytes(limits.max_input_bytes)
+        .max_documents(1)
+        .max_merge_keys(0)
+        .duplicate_key_policy(noyalib::DuplicateKeyPolicy::Error)
+        .strict_booleans(true)
+}
+
+/// Whether reading past the end of a YAML stream failed because the stream
+/// ended rather than because the input is malformed.
+///
+/// noyalib has no typed end-of-stream signal: a read after the last document
+/// fails with a `ScanError` whose message is [`YAML_STREAM_ENDED`]. That makes
+/// an ordinary one-document parse depend on a dependency's internal wording,
+/// which is one reason `noyalib` is pinned exactly (`=0.0.28`). Every use of
+/// that spelling is here, and
+/// `the_yaml_end_of_stream_probe_still_matches_the_pinned_parser` fails if a
+/// bump changes it.
+fn yaml_stream_ended(error: &noyalib::Error) -> bool {
+    error.to_string().contains(YAML_STREAM_ENDED)
+}
+
+/// The message the pinned YAML parser reports once a stream is exhausted.
+const YAML_STREAM_ENDED: &str = "parser has already finished";
 
 fn document_container_depth(max_nesting: usize) -> usize {
     DOCUMENT_BASE_CONTAINER_DEPTH.saturating_add(max_nesting.saturating_mul(2))
@@ -157,4 +182,50 @@ fn map_yaml_parse_error(
         return Error::exceeded(Limit::Nesting, limits);
     }
     map_parse_error("YAML", source, budget, limits)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ONE_DOCUMENT: &str = concat!(
+        "schema: packetcraftr.packet/v1\n",
+        "layers:\n",
+        "  - protocol: raw\n",
+        "    fields:\n",
+        "      bytes:\n",
+        "        type: bytes\n",
+        "        value: [1, 2]\n",
+    );
+
+    #[test]
+    fn the_yaml_end_of_stream_probe_still_matches_the_pinned_parser() {
+        let limits = DocumentLimits::DEFAULT;
+        let config = yaml_config(&limits);
+        let mut deserializer = noyalib::StreamingDeserializer::with_config(ONE_DOCUMENT, &config);
+        de::IgnoredAny::deserialize(&mut deserializer).expect("the one document reads");
+
+        let error = de::IgnoredAny::deserialize(&mut deserializer)
+            .expect_err("reading past the last document fails instead of ending cleanly");
+        assert!(
+            yaml_stream_ended(&error),
+            "the pinned parser now reports end of stream as {error}, not {YAML_STREAM_ENDED:?}"
+        );
+    }
+
+    #[test]
+    fn the_end_of_stream_probe_separates_an_exhausted_stream_from_a_second_document() {
+        let single =
+            Packet::parse_with_limits(ONE_DOCUMENT, Format::Yaml, &DocumentLimits::DEFAULT)
+                .expect("a single document parses through the end-of-stream probe");
+        assert_eq!(single.layers.len(), 1);
+
+        let two = format!("{ONE_DOCUMENT}---\n{ONE_DOCUMENT}");
+        let error = Packet::parse_with_limits(&two, Format::Yaml, &DocumentLimits::DEFAULT)
+            .expect_err("a second document is refused");
+        assert!(
+            error.to_string().contains("multiple YAML documents"),
+            "{error}"
+        );
+    }
 }

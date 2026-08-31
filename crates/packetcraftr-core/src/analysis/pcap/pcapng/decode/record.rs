@@ -6,26 +6,24 @@
 use crate::frame::Frame;
 use bytes::Bytes;
 
-use super::super::super::{
-    error::Error,
-    model::{
-        CaptureRecord, Endianness, Format, Interface, MetadataBlockKind, PacketBlockKind,
-        ReaderOptions, RecordKind,
-    },
-    wire::{
-        PCAPNG_CUSTOM_BLOCK, PCAPNG_CUSTOM_BLOCK_NO_COPY, PCAPNG_ENHANCED_PACKET_BLOCK,
-        PCAPNG_INTERFACE_DESCRIPTION_BLOCK, PCAPNG_INTERFACE_STATISTICS_BLOCK,
-        PCAPNG_NAME_RESOLUTION_BLOCK, PCAPNG_PACKET_BLOCK, PCAPNG_SIMPLE_PACKET_BLOCK,
-        align_to_usize, decode_u16, decode_u32,
-    },
-};
-use super::super::{
+use super::PcapNgState;
+use super::framing::{FramedBlock, packet_block_kind};
+use crate::analysis::pcap::pcapng::{
     interface::parse_interface_description,
     options::parse_options,
     packet::{parse_enhanced_packet, parse_obsolete_packet, parse_simple_packet},
 };
-use super::PcapNgState;
-use super::framing::{FramedBlock, is_packet_block};
+use crate::analysis::pcap::{
+    error::Error,
+    model::{
+        CaptureRecord, Format, Interface, MetadataBlockKind, PacketBlockKind, ReaderOptions,
+        RecordKind,
+    },
+    wire::{
+        PCAPNG_CUSTOM_BLOCK, PCAPNG_CUSTOM_BLOCK_NO_COPY, PCAPNG_INTERFACE_DESCRIPTION_BLOCK,
+        PCAPNG_INTERFACE_STATISTICS_BLOCK, PCAPNG_NAME_RESOLUTION_BLOCK, decode_u32,
+    },
+};
 
 pub(super) fn decode(
     block: FramedBlock<'_>,
@@ -37,10 +35,10 @@ pub(super) fn decode(
         PCAPNG_INTERFACE_DESCRIPTION_BLOCK => {
             decode_interface(block.body, block.raw, state, all_interfaces, options)
         }
-        block_type if is_packet_block(block_type) => {
-            decode_packet(block_type, block.body, block.raw, state, options)
-        }
-        block_type => decode_metadata(block_type, block.body, block.raw, state),
+        block_type => match packet_block_kind(block_type) {
+            Some(kind) => decode_packet(kind, block.body, block.raw, state, options),
+            None => decode_metadata(block_type, block.body, block.raw, state),
+        },
     }
 }
 
@@ -75,58 +73,35 @@ fn decode_interface(
 }
 
 fn decode_packet(
-    block_type: u32,
+    kind: PacketBlockKind,
     body: &[u8],
     raw: Bytes,
     state: &mut PcapNgState,
     options: &ReaderOptions,
 ) -> Result<CaptureRecord, Error> {
-    let frame = match block_type {
-        PCAPNG_ENHANCED_PACKET_BLOCK => parse_enhanced_packet(
-            body,
-            state.endianness,
-            &state.interfaces,
-            state.interface_base,
-            options.max_size,
-        )?,
-        PCAPNG_PACKET_BLOCK => parse_obsolete_packet(
-            body,
-            state.endianness,
-            &state.interfaces,
-            state.interface_base,
-            options.max_size,
-        )?,
-        _ => parse_simple_packet(
-            body,
-            state.endianness,
-            &state.interfaces,
-            state.interface_base,
-            options.max_size,
-        )?,
+    let parse = match kind {
+        PacketBlockKind::Enhanced => parse_enhanced_packet,
+        PacketBlockKind::Obsolete => parse_obsolete_packet,
+        // A classic-PCAP record never reaches this decoder.
+        PacketBlockKind::Simple | PacketBlockKind::Classic => parse_simple_packet,
     };
-    let interface_id = match block_type {
-        PCAPNG_SIMPLE_PACKET_BLOCK => 0,
-        PCAPNG_PACKET_BLOCK => u32::from(decode_u16(state.endianness, body)?),
-        _ => decode_u32(state.endianness, body)?,
-    };
-    let parsed_options = parse_options(
-        packet_options(block_type, body, state.endianness)?,
+    let parsed = parse(
+        body,
         state.endianness,
-        "pcapng packet options",
+        &state.interfaces,
+        state.interface_base,
+        options.max_size,
     )?;
+    let parsed_options = parse_options(parsed.options, state.endianness, "pcapng packet options")?;
     state.reset_metadata();
     Ok(record(
         RecordKind::Packet {
-            block: match block_type {
-                PCAPNG_ENHANCED_PACKET_BLOCK => PacketBlockKind::Enhanced,
-                PCAPNG_PACKET_BLOCK => PacketBlockKind::Obsolete,
-                _ => PacketBlockKind::Simple,
-            },
+            block: kind,
             section: Some(state.section_index),
-            interface_id: Some(interface_id),
+            interface_id: Some(parsed.interface_id),
             options: parsed_options,
         },
-        Some(frame),
+        Some(parsed.frame),
         raw,
     ))
 }
@@ -169,27 +144,6 @@ fn decode_metadata(
         },
     };
     Ok(record(RecordKind::Metadata(kind), None, raw))
-}
-
-fn packet_options(block_type: u32, body: &[u8], endianness: Endianness) -> Result<&[u8], Error> {
-    if block_type == PCAPNG_SIMPLE_PACKET_BLOCK {
-        return Ok(&[]);
-    }
-    let length_bytes = body.get(12..).ok_or(Error::InvalidData {
-        format: Format::PcapNg,
-        reason: "packet block is shorter than 20 bytes",
-    })?;
-    let captured_length = decode_u32(endianness, length_bytes)?;
-    let offset = 20_usize
-        .checked_add(align_to_usize(captured_length as usize)?)
-        .ok_or(Error::InvalidData {
-            format: Format::PcapNg,
-            reason: "packet options offset overflow",
-        })?;
-    body.get(offset..).ok_or(Error::InvalidData {
-        format: Format::PcapNg,
-        reason: "packet options begin beyond the block body",
-    })
 }
 
 fn record(kind: RecordKind, frame: Option<Frame>, raw: Bytes) -> CaptureRecord {

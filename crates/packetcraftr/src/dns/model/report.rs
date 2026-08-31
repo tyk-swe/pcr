@@ -1,6 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-use std::fmt;
+use std::fmt::{self, Write as _};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -10,13 +10,14 @@ use serde::Serialize;
 
 use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::frame::Frame;
+use packetcraftr_core::protocol::application::dns::name::{MAX_LABEL_LEN, MAX_NAME_LEN};
 
 use crate::Stats;
 
-use super::super::DNS_TYPE_OPT;
-use super::super::error::WireError;
-use super::super::wire::response_code_name;
 use super::request::QueryType;
+use crate::dns::TYPE_OPT;
+use crate::dns::classification::response_code_name;
+use crate::dns::error::WireError;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -52,7 +53,7 @@ impl Name {
         }
     }
 
-    pub fn from_labels<I, B>(labels: I) -> std::result::Result<Self, WireError>
+    pub fn from_labels<I, B>(labels: I) -> Result<Self, WireError>
     where
         I: IntoIterator<Item = B>,
         B: Into<Bytes>,
@@ -60,9 +61,9 @@ impl Name {
         let labels = labels.into_iter().map(Into::into).collect::<Vec<_>>();
         let mut wire_length = 1usize;
         for label in &labels {
-            if label.is_empty() || label.len() > 63 {
+            if label.is_empty() || label.len() > MAX_LABEL_LEN {
                 return Err(WireError::InvalidName {
-                    message: "wire labels must contain 1..=63 octets".to_owned(),
+                    message: format!("wire labels must contain 1..={MAX_LABEL_LEN} octets"),
                 });
             }
             wire_length = wire_length
@@ -70,7 +71,7 @@ impl Name {
                 .and_then(|length| length.checked_add(1))
                 .ok_or(WireError::NameTooLong)?;
         }
-        if wire_length > 255 {
+        if wire_length > MAX_NAME_LEN {
             return Err(WireError::NameTooLong);
         }
         Ok(Self { labels })
@@ -107,7 +108,7 @@ impl fmt::Display for Name {
             }
             for byte in label {
                 if byte.is_ascii_graphic() && !matches!(*byte, b'.' | b'\\') {
-                    formatter.write_str(&char::from(*byte).to_string())?;
+                    formatter.write_char(char::from(*byte))?;
                 } else {
                     write!(formatter, "\\{byte:03}")?;
                 }
@@ -118,7 +119,7 @@ impl fmt::Display for Name {
 }
 
 impl Serialize for Name {
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
@@ -198,7 +199,7 @@ impl RecordValue {
             Self::Txt(_) => 16,
             Self::Aaaa(_) => 28,
             Self::Srv { .. } => 33,
-            Self::Opt(_) => DNS_TYPE_OPT,
+            Self::Opt(_) => TYPE_OPT,
             Self::Unknown { type_code, .. } => *type_code,
         }
     }
@@ -322,6 +323,22 @@ impl fmt::Display for Transport {
 }
 
 impl Outcome {
+    /// Precedence across retries and across several correlated frames in one
+    /// attempt: the most informative outcome seen is the one reported.
+    ///
+    /// A timeout ranks last precisely because it carries no evidence, so any
+    /// later attempt that learns something replaces it.
+    pub(in crate::dns) const fn retry_rank(self) -> u8 {
+        match self {
+            Self::Response => 5,
+            Self::Truncated => 4,
+            Self::NetworkFailure => 3,
+            Self::DecodeFailure => 2,
+            Self::Unrelated => 1,
+            Self::Timeout => 0,
+        }
+    }
+
     /// The name the CLI prints, identical to the serialized one.
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -350,15 +367,18 @@ pub struct AttemptEvidence {
     pub reason: String,
 }
 
+/// One captured frame this operation could not correlate to its query.
+///
+/// There is no transport field: DNS-over-TCP runs on a kernel socket and never
+/// yields captured frames, so undecoded evidence is always UDP.
 #[derive(Clone, Debug)]
 pub struct UndecodedEvidence {
     pub attempt: u32,
-    pub transport: Transport,
     pub frame: Frame,
 }
 
 #[derive(Clone, Debug)]
-pub struct Result {
+pub struct Report {
     pub server: String,
     pub server_port: u16,
     pub resolved_addresses: Vec<IpAddr>,
@@ -406,6 +426,9 @@ pub enum Event {
     Diagnostic(Diagnostic),
 }
 
+/// Final DNS metadata after every attempt and record event was published.
+/// Diagnostics are not repeated here: each one already reached the caller as
+/// [`Event::Diagnostic`] when it was raised.
 #[derive(Clone, Debug)]
 pub struct Summary {
     pub server: String,
@@ -418,7 +441,6 @@ pub struct Summary {
     pub fallback_attempted: bool,
     pub accepted_transport: Option<Transport>,
     pub response: Option<ResponseMetadata>,
-    pub diagnostics: Vec<Diagnostic>,
     pub stats: Stats,
 }
 

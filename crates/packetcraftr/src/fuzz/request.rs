@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use packetcraftr_netio::capture::{DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES};
+use packetcraftr_netio::capture::{MAX_CAPTURE_QUEUE_BYTES, MAX_CAPTURE_QUEUE_FRAMES};
 
 use crate::probe::evidence::check_limits;
 
@@ -22,25 +22,26 @@ pub struct LiveLimits {
 impl Default for LiveLimits {
     fn default() -> Self {
         Self {
-            max_evidence_frames: DEFAULT_CAPTURE_QUEUE_FRAMES,
-            max_evidence_bytes: DEFAULT_CAPTURE_QUEUE_BYTES,
+            max_evidence_frames: MAX_CAPTURE_QUEUE_FRAMES,
+            max_evidence_bytes: MAX_CAPTURE_QUEUE_BYTES,
         }
     }
 }
 
 impl LiveLimits {
-    pub fn validate(self) -> Result<Self, Error> {
+    /// Rejects any retention bound above the ceiling this crate enforces.
+    pub fn validate(&self) -> Result<(), Error> {
         check_limits(
             &[
                 (
                     "max_evidence_frames",
                     self.max_evidence_frames,
-                    DEFAULT_CAPTURE_QUEUE_FRAMES,
+                    MAX_CAPTURE_QUEUE_FRAMES,
                 ),
                 (
                     "max_evidence_bytes",
                     self.max_evidence_bytes,
-                    DEFAULT_CAPTURE_QUEUE_BYTES,
+                    MAX_CAPTURE_QUEUE_BYTES,
                 ),
             ],
             &[],
@@ -50,7 +51,7 @@ impl LiveLimits {
                 reason,
             },
         )?;
-        Ok(self)
+        Ok(())
     }
 }
 
@@ -77,7 +78,9 @@ impl Default for LiveOptions {
 }
 
 impl LiveOptions {
-    pub fn validate(self) -> Result<Self, Error> {
+    /// Rejects every live campaign option this workflow cannot execute: an
+    /// out-of-range retention bound, timeout, or rate.
+    pub fn validate(&self) -> Result<(), Error> {
         self.limits.validate()?;
         if self.timeout.is_zero() || self.timeout > packetcraftr_netio::capture::MAX_TIMEOUT {
             return Err(Error::InvalidTimeout {
@@ -94,6 +97,6 @@ impl LiveOptions {
                 reason: format!("must be within 1..={MAX_RATE}"),
             });
         }
-        Ok(self)
+        Ok(())
     }
 }

@@ -41,7 +41,14 @@ impl Default for Limits {
 }
 
 impl Limits {
-    pub(super) fn advance(
+    /// Admits one more frame, returning the new frame and captured-byte
+    /// totals, or the ceiling it would have crossed.
+    ///
+    /// Every path that streams frames under an aggregate budget — the rewrite
+    /// copy, the analysis loop, and the CLI's per-frame reader — charges
+    /// through here, so the two ceilings have one implementation and one pair
+    /// of errors.
+    pub fn advance(
         self,
         frames: u64,
         captured_bytes: u64,
@@ -145,6 +152,10 @@ pub struct PcapOptions {
     pub snap_len: usize,
     /// Maximum captured packet size accepted by the writer, in bytes.
     pub max_size: usize,
+    /// Aggregate frame and captured-payload ceilings for the whole stream.
+    /// Fixed at construction, so a writer's budget cannot be retuned once it
+    /// has begun producing output.
+    pub stream_limits: Limits,
 }
 
 impl Default for PcapOptions {
@@ -154,6 +165,7 @@ impl Default for PcapOptions {
             timestamp_resolution: TimestampResolution::Decimal(9),
             snap_len: DEFAULT_SIZE_LIMIT,
             max_size: DEFAULT_SIZE_LIMIT,
+            stream_limits: Limits::default(),
         }
     }
 }
@@ -180,6 +192,10 @@ pub struct PcapNgOptions {
     pub max_size: usize,
     /// Maximum number of interface descriptions in the section.
     pub max_interfaces: usize,
+    /// Aggregate frame and captured-payload ceilings for the whole stream.
+    /// Fixed at construction, so a writer's budget cannot be retuned once it
+    /// has begun producing output.
+    pub stream_limits: Limits,
 }
 
 impl Default for PcapNgOptions {
@@ -188,6 +204,7 @@ impl Default for PcapNgOptions {
             endianness: Endianness::Little,
             max_size: DEFAULT_SIZE_LIMIT,
             max_interfaces: DEFAULT_INTERFACE_LIMIT,
+            stream_limits: Limits::default(),
         }
     }
 }

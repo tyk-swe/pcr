@@ -7,14 +7,14 @@ use std::io::Read;
 
 use bytes::Bytes;
 
-use super::super::{
+use super::options::parse_options;
+use crate::analysis::pcap::{
     error::Error,
     model::{Endianness, Format, PcapNgOption},
     wire::{
         decode_i64, decode_u16, decode_u32, read_exact_counted, read_exact_or_eof, read_exact_vec,
     },
 };
-use super::options::parse_options;
 
 #[derive(Clone)]
 pub(in crate::analysis::pcap) struct SectionHeader {
@@ -145,7 +145,7 @@ pub(in crate::analysis::pcap) fn read_section_header_with_length<R: Read>(
             kind: "pcapng section header",
             requested: block_length_usize,
         })?;
-    raw.extend_from_slice(&super::super::wire::PCAPNG_SECTION_HEADER);
+    raw.extend_from_slice(&crate::analysis::pcap::wire::PCAPNG_SECTION_HEADER);
     raw.extend_from_slice(&raw_length);
     raw.extend_from_slice(&raw_bom);
     raw.extend_from_slice(scratch);

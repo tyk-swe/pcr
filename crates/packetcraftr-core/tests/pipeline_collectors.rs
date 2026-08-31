@@ -15,13 +15,13 @@ use common::{
     CLIENT, SERVER, TcpSpec, client_tcp, reader, registry, server_tcp, tcp_frame, udp_frame,
 };
 use packetcraftr_core::Packet;
-use packetcraftr_core::analysis::expert::{Finding, StreamRef, StreamTransport};
-use packetcraftr_core::analysis::follow::{Direction as FollowDirection, Selector};
+use packetcraftr_core::analysis::expert::Finding;
+use packetcraftr_core::analysis::follow::Direction as FollowDirection;
 use packetcraftr_core::analysis::pcap::{Reader, Writer};
 use packetcraftr_core::analysis::reassembly::tcp;
-use packetcraftr_core::analysis::stats::TransportKind;
 use packetcraftr_core::analysis::{
-    Error, IpFamilyCounters, IpReassemblyReport, Limits, Options, run,
+    Error, IpFamilyCounters, IpReassemblyReport, Limits, Options, StreamRef, StreamTransport,
+    Summary as RunSummary, run,
 };
 use packetcraftr_core::build::Builder;
 use packetcraftr_core::error::BoundaryError;
@@ -133,8 +133,7 @@ fn gre_tcp_frame(
 fn expert_public_models_and_collector_keep_their_contracts() {
     type Finish = fn(
         packetcraftr_core::analysis::expert::Collector,
-        &[tcp::Event],
-        u64,
+        &packetcraftr_core::analysis::Summary,
     ) -> (Vec<Finding>, packetcraftr_core::analysis::expert::Summary);
 
     fn assert_model<T: Clone + std::fmt::Debug + Eq>() {}
@@ -163,24 +162,97 @@ fn expert_public_models_and_collector_keep_their_contracts() {
 
 #[test]
 fn limits_validate_each_finite_budget_before_input_is_read() {
-    for field in ["max_frames", "max_bytes", "max_frame_bytes", "max_flows"] {
+    // Every ceiling the two reassembly engines enforce is reachable from
+    // this type, so every one of them is refused at zero before a single
+    // frame is read.
+    type ZeroOne = fn(&mut Limits);
+    let zeroed: [(&str, ZeroOne); 12] = [
+        ("max_frames", |limits| limits.max_frames = 0),
+        ("max_bytes", |limits| limits.max_bytes = 0),
+        ("max_frame_bytes", |limits| limits.max_frame_bytes = 0),
+        ("max_flows", |limits| limits.max_flows = 0),
+        ("max_tcp_bytes_per_flow", |limits| {
+            limits.max_tcp_bytes_per_flow = 0;
+        }),
+        ("max_tcp_reassembly_bytes", |limits| {
+            limits.max_tcp_reassembly_bytes = 0;
+        }),
+        ("max_tcp_segments_per_flow", |limits| {
+            limits.max_tcp_segments_per_flow = 0;
+        }),
+        ("max_ip_datagrams", |limits| limits.max_ip_datagrams = 0),
+        ("max_ip_fragments_per_datagram", |limits| {
+            limits.max_ip_fragments_per_datagram = 0;
+        }),
+        ("max_ip_bytes_per_datagram", |limits| {
+            limits.max_ip_bytes_per_datagram = 0;
+        }),
+        ("max_ip_reassembly_bytes", |limits| {
+            limits.max_ip_reassembly_bytes = 0;
+        }),
+        ("max_ip_outcomes", |limits| limits.max_ip_outcomes = 0),
+    ];
+    for (field, zero) in zeroed {
         let mut limits = Limits::default();
-        match field {
-            "max_frames" => limits.max_frames = 0,
-            "max_bytes" => limits.max_bytes = 0,
-            "max_frame_bytes" => limits.max_frame_bytes = 0,
-            "max_flows" => limits.max_flows = 0,
-            _ => unreachable!(),
-        }
-        assert!(matches!(
-            limits.validate(),
-            Err(Error::InvalidLimit {
-                field: actual,
-                value: 0,
-                ..
-            }) if actual == field
-        ));
+        zero(&mut limits);
+        assert!(
+            matches!(
+                limits.validate(),
+                Err(Error::InvalidLimit {
+                    field: actual,
+                    value: 0,
+                    ..
+                }) if actual == field
+            ),
+            "{field} must be refused at zero"
+        );
     }
+    for (field, zero) in [
+        (
+            "tcp_idle_expiry",
+            Limits {
+                tcp_idle_expiry: Duration::ZERO,
+                ..Limits::default()
+            },
+        ),
+        (
+            "ip_idle_expiry",
+            Limits {
+                ip_idle_expiry: Duration::ZERO,
+                ..Limits::default()
+            },
+        ),
+    ] {
+        assert!(
+            matches!(
+                zero.validate(),
+                Err(Error::InvalidLimit { field: actual, .. }) if actual == field
+            ),
+            "{field} must be refused at zero"
+        );
+    }
+    // The per-flow window doubles as the reordering window: at the serial
+    // half-space a retransmission and a wrapped future segment stop being
+    // distinguishable, and the engine refuses to run at all.
+    assert!(matches!(
+        Limits {
+            max_tcp_bytes_per_flow: tcp::MAX_BYTES_PER_FLOW + 1,
+            ..Limits::default()
+        }
+        .validate(),
+        Err(Error::InvalidLimit {
+            field: "max_tcp_bytes_per_flow",
+            ..
+        })
+    ));
+    assert!(
+        Limits {
+            max_tcp_bytes_per_flow: tcp::MAX_BYTES_PER_FLOW,
+            ..Limits::default()
+        }
+        .validate()
+        .is_ok()
+    );
     assert!(matches!(
         Limits {
             max_bytes: 8,
@@ -212,6 +284,17 @@ fn limits_validate_each_finite_budget_before_input_is_read() {
         .validate(),
         Err(Error::InvalidLimit {
             field: "ip_idle_expiry",
+            ..
+        })
+    ));
+    assert!(matches!(
+        Limits {
+            tcp_idle_expiry: Duration::MAX,
+            ..Limits::default()
+        }
+        .validate(),
+        Err(Error::InvalidLimit {
+            field: "tcp_idle_expiry",
             ..
         })
     ));
@@ -528,12 +611,12 @@ fn stats_collect_all_tables_with_directional_and_time_accounting() {
         Arc::clone(&registry),
         &Options::default(),
         |record| {
-            collector.observe(&record).expect("record has capture time");
+            collector.observe(&record);
             Ok(())
         },
     )
     .expect("statistics pass succeeds");
-    let report = collector.finish(IpReassemblyReport::default());
+    let report = collector.finish(&summary);
     assert_eq!(summary.frames_read, 3);
     assert_eq!(report.frames, 3);
     assert_eq!(report.bytes, total_bytes);
@@ -556,7 +639,7 @@ fn stats_collect_all_tables_with_directional_and_time_accounting() {
     let tcp = report
         .conversations
         .iter()
-        .find(|row| row.transport == TransportKind::Tcp)
+        .find(|row| row.transport == StreamTransport::Tcp)
         .expect("TCP conversation row");
     assert_eq!(tcp.stream, 0);
     assert_eq!(tcp.frames_a_to_b, 1);
@@ -566,11 +649,11 @@ fn stats_collect_all_tables_with_directional_and_time_accounting() {
     let udp = report
         .conversations
         .iter()
-        .find(|row| row.transport == TransportKind::Udp)
+        .find(|row| row.transport == StreamTransport::Udp)
         .expect("UDP conversation row");
     assert_eq!(udp.stream, 0);
     assert_eq!(udp.frames_a_to_b, 1);
-    assert_eq!(TransportKind::Udp.as_str(), "udp");
+    assert_eq!(StreamTransport::Udp.as_str(), "udp");
 
     assert_eq!(report.endpoints.len(), 2);
     let client = report
@@ -583,7 +666,7 @@ fn stats_collect_all_tables_with_directional_and_time_accounting() {
     let udp_port = report
         .ports
         .iter()
-        .find(|row| row.transport == TransportKind::Udp && row.port == 9_999)
+        .find(|row| row.transport == StreamTransport::Udp && row.port == 9_999)
         .expect("UDP port row");
     assert_eq!(
         udp_port.frames, 1,
@@ -603,7 +686,7 @@ fn stats_reject_zero_interval_and_empty_report_is_well_formed() {
     ));
     let report = packetcraftr_core::analysis::stats::Collector::new(Duration::from_millis(250))
         .expect("valid interval")
-        .finish(IpReassemblyReport::default());
+        .finish(&RunSummary::default());
     assert_eq!(report.frames, 0);
     assert_eq!(report.bytes, 0);
     assert!(report.first_timestamp.is_none());
@@ -628,7 +711,10 @@ fn stats_reject_zero_interval_and_empty_report_is_well_formed() {
     };
     let report = packetcraftr_core::analysis::stats::Collector::new(Duration::from_millis(250))
         .expect("valid interval")
-        .finish(ip_reassembly.clone());
+        .finish(&RunSummary {
+            ip_reassembly: ip_reassembly.clone(),
+            ..RunSummary::default()
+        });
     assert_eq!(report.ip_reassembly, ip_reassembly);
     assert_eq!(report.frames, 0);
     assert_eq!(report.bytes, 0);
@@ -660,7 +746,7 @@ fn tcp_follow_delivers_gap_fill_in_order_and_classifies_both_directions() {
         ),
     ];
     let mut capture = reader(&frames);
-    let mut collector = packetcraftr_core::analysis::follow::Collector::new(Selector {
+    let mut collector = packetcraftr_core::analysis::follow::Collector::new(StreamRef {
         transport: StreamTransport::Tcp,
         index: 0,
     });
@@ -678,7 +764,7 @@ fn tcp_follow_delivers_gap_fill_in_order_and_classifies_both_directions() {
         },
     )
     .expect("follow pass succeeds");
-    let summary = collector.finish(&run_summary.trailing_tcp_events);
+    let summary = collector.finish(&run_summary);
     assert_eq!(chunks.len(), 2);
     assert_eq!(chunks[0].number, 3);
     assert_eq!(chunks[0].direction, FollowDirection::ClientToServer);
@@ -731,7 +817,7 @@ fn tcp_follow_deduplicates_fast_open_data_across_directional_close() {
         ),
     ];
     let mut capture = reader(&frames);
-    let mut collector = packetcraftr_core::analysis::follow::Collector::new(Selector {
+    let mut collector = packetcraftr_core::analysis::follow::Collector::new(StreamRef {
         transport: StreamTransport::Tcp,
         index: 0,
     });
@@ -749,7 +835,7 @@ fn tcp_follow_deduplicates_fast_open_data_across_directional_close() {
         },
     )
     .expect("Fast Open follow pass succeeds");
-    let summary = collector.finish(&run_summary.trailing_tcp_events);
+    let summary = collector.finish(&run_summary);
 
     assert_eq!(chunks.len(), 1);
     assert_eq!(chunks[0].direction, FollowDirection::ClientToServer);
@@ -784,7 +870,7 @@ fn tcp_follow_starts_a_fresh_delivery_generation_for_four_tuple_reuse() {
         ),
     ];
     let mut capture = reader(&frames);
-    let mut collector = packetcraftr_core::analysis::follow::Collector::new(Selector {
+    let mut collector = packetcraftr_core::analysis::follow::Collector::new(StreamRef {
         transport: StreamTransport::Tcp,
         index: 0,
     });
@@ -802,7 +888,7 @@ fn tcp_follow_starts_a_fresh_delivery_generation_for_four_tuple_reuse() {
         },
     )
     .expect("reused four-tuple follow pass succeeds");
-    let summary = collector.finish(&run_summary.trailing_tcp_events);
+    let summary = collector.finish(&run_summary);
 
     assert_eq!(
         chunks
@@ -841,7 +927,7 @@ fn udp_follow_emits_empty_and_nonempty_datagrams_and_ignores_other_streams() {
         ),
     ];
     let mut capture = reader(&frames);
-    let mut collector = packetcraftr_core::analysis::follow::Collector::new(Selector {
+    let mut collector = packetcraftr_core::analysis::follow::Collector::new(StreamRef {
         transport: StreamTransport::Udp,
         index: 0,
     });
@@ -856,7 +942,7 @@ fn udp_follow_emits_empty_and_nonempty_datagrams_and_ignores_other_streams() {
         },
     )
     .expect("UDP follow succeeds");
-    let summary = collector.finish(&run_summary.trailing_tcp_events);
+    let summary = collector.finish(&run_summary);
     assert_eq!(chunks.len(), 2);
     assert_eq!(chunks[0].bytes.as_ref(), b"query");
     assert_eq!(chunks[0].direction, FollowDirection::ClientToServer);
@@ -866,11 +952,11 @@ fn udp_follow_emits_empty_and_nonempty_datagrams_and_ignores_other_streams() {
     assert_eq!(summary.client_bytes, 5);
     assert_eq!(summary.server_bytes, 6);
 
-    let empty = packetcraftr_core::analysis::follow::Collector::new(Selector {
+    let empty = packetcraftr_core::analysis::follow::Collector::new(StreamRef {
         transport: StreamTransport::Udp,
         index: 99,
     })
-    .finish(&[]);
+    .finish(&RunSummary::default());
     assert_eq!(empty.frames, 0);
     assert!(empty.client_flow.is_none());
 }
@@ -889,7 +975,7 @@ fn tcp_follow_reports_bytes_stranded_behind_a_gap_at_end() {
         ),
     ];
     let mut capture = reader(&frames);
-    let mut collector = packetcraftr_core::analysis::follow::Collector::new(Selector {
+    let mut collector = packetcraftr_core::analysis::follow::Collector::new(StreamRef {
         transport: StreamTransport::Tcp,
         index: 0,
     });
@@ -912,8 +998,157 @@ fn tcp_follow_reports_bytes_stranded_behind_a_gap_at_end() {
             .iter()
             .any(|event| matches!(event, tcp::Event::Gap { .. }))
     );
-    let summary = collector.finish(&run_summary.trailing_tcp_events);
+    let summary = collector.finish(&run_summary);
     assert_eq!(summary.frames, 2);
     assert_eq!(summary.client_bytes, 0);
     assert_eq!(summary.undelivered_bytes, 4);
+}
+
+/// A handshake plus two out-of-order payload segments, so the reassembler
+/// retains pending bytes rather than delivering them immediately.
+fn pending_reassembly_frames(registry: &Arc<packetcraftr_core::registry::Registry>) -> Vec<Frame> {
+    let epoch = SystemTime::UNIX_EPOCH;
+    vec![
+        tcp_frame(registry, epoch, client_tcp(100, 0, Tcp::SYN, 4_000), b""),
+        tcp_frame(
+            registry,
+            epoch + Duration::from_secs(1),
+            server_tcp(500, 101, Tcp::SYN | Tcp::ACK, 4_000),
+            b"",
+        ),
+        // Each sequence leaves a hole after the handshake, so both segments
+        // are retained instead of delivered.
+        tcp_frame(
+            registry,
+            epoch + Duration::from_secs(2),
+            client_tcp(121, 501, Tcp::ACK, 4_000),
+            b"first out-of-order",
+        ),
+        tcp_frame(
+            registry,
+            epoch + Duration::from_secs(3),
+            client_tcp(161, 501, Tcp::ACK, 4_000),
+            b"second out-of-order",
+        ),
+    ]
+}
+
+fn run_with_limits(
+    registry: &Arc<packetcraftr_core::registry::Registry>,
+    frames: &[Frame],
+    limits: Limits,
+) -> Result<Vec<tcp::Event>, Error> {
+    let mut capture = reader(frames);
+    let mut events = Vec::new();
+    run(
+        &mut capture,
+        Arc::clone(registry),
+        &Options {
+            tcp_events: true,
+            limits,
+            ..Options::default()
+        },
+        |record| {
+            events.extend(record.tcp_events.iter().cloned());
+            Ok(())
+        },
+    )?;
+    Ok(events)
+}
+
+#[test]
+fn analysis_limits_reach_every_tcp_reassembly_budget() {
+    let registry = registry();
+    let frames = pending_reassembly_frames(&registry);
+
+    // Each byte budget is refused by the engine naming the exact value the
+    // caller set, which is only possible if that value reached it.
+    let bounded: [(Limits, tcp::Error); 2] = [
+        (
+            Limits {
+                max_tcp_bytes_per_flow: 4,
+                ..Limits::default()
+            },
+            tcp::ResourceError::FlowByteLimit { limit: 4 }.into(),
+        ),
+        (
+            Limits {
+                max_tcp_reassembly_bytes: 8,
+                ..Limits::default()
+            },
+            tcp::ResourceError::AggregateByteLimit { limit: 8 }.into(),
+        ),
+    ];
+    for (limits, expected) in bounded {
+        let error = run_with_limits(&registry, &frames, limits)
+            .expect_err("the configured TCP budget bounds the run");
+        assert!(
+            matches!(&error, Error::Reassembly { source, .. } if *source == expected),
+            "expected {expected}, got {error}"
+        );
+    }
+
+    // The segment ceiling is recoverable rather than fatal: the flow is
+    // evicted and the segment retried, so reachability shows up as an
+    // eviction the default budget does not produce.
+    let evictions = |limits: Limits| {
+        run_with_limits(&registry, &frames, limits)
+            .expect("a recoverable segment ceiling does not fail the run")
+            .iter()
+            .filter(|event| matches!(event, tcp::Event::Evicted { .. }))
+            .count()
+    };
+    assert_eq!(evictions(Limits::default()), 0);
+    assert_eq!(
+        evictions(Limits {
+            max_tcp_segments_per_flow: 1,
+            ..Limits::default()
+        }),
+        1
+    );
+}
+
+#[test]
+fn tcp_idle_expiry_follows_the_configured_capture_time_interval() {
+    let registry = registry();
+    let epoch = SystemTime::UNIX_EPOCH;
+    let frames = [
+        tcp_frame(&registry, epoch, client_tcp(100, 0, Tcp::SYN, 4_000), b""),
+        tcp_frame(
+            &registry,
+            epoch + Duration::from_secs(30),
+            server_tcp(500, 101, Tcp::SYN | Tcp::ACK, 4_000),
+            b"",
+        ),
+    ];
+
+    let evictions = |tcp_idle_expiry: Duration| {
+        let mut capture = reader(&frames);
+        let mut evicted = 0_usize;
+        run(
+            &mut capture,
+            Arc::clone(&registry),
+            &Options {
+                tcp_events: true,
+                limits: Limits {
+                    tcp_idle_expiry,
+                    ..Limits::default()
+                },
+                ..Options::default()
+            },
+            |record| {
+                evicted += record
+                    .tcp_events
+                    .iter()
+                    .filter(|event| matches!(event, tcp::Event::Evicted { .. }))
+                    .count();
+                Ok(())
+            },
+        )
+        .expect("bounded run succeeds");
+        evicted
+    };
+
+    assert_eq!(evictions(Duration::from_secs(120)), 0);
+    assert_eq!(evictions(Duration::from_secs(5)), 1);
 }

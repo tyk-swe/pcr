@@ -3,20 +3,14 @@
 
 use std::net::IpAddr;
 
-use packetcraftr_core::{
-    Packet,
-    semantics::{self, BuiltinProtocol},
-};
+use packetcraftr_core::{Packet, protocol::BuiltinProtocol, semantics};
 
 use super::error::Error;
 use super::intent::{
     arp_link_macs, extract_neighbor_vlan_tags, multicast_mac, outer_ethernet_mac,
     packet_has_link_layer_intent,
 };
-use crate::{
-    link::{MacAddress, Mode},
-    neighbor::VlanTag as NeighborVlanTag,
-};
+use crate::link::{MacAddress, Mode, VlanTag};
 
 use super::models::{Decision, Options, Plan, Provider};
 
@@ -211,7 +205,7 @@ fn lookup_route<P: Provider>(
             .map_err(|source| Error::RouteLookup {
                 destination: lookup_destination,
                 failure: provider.classify_error(&source),
-                message: source.to_string(),
+                source: Box::new(source),
             })?,
         None => {
             let interface = options
@@ -223,7 +217,7 @@ fn lookup_route<P: Provider>(
                 .map_err(|source| Error::InterfaceLookup {
                     interface: interface.name.clone(),
                     failure: provider.classify_error(&source),
-                    message: source.to_string(),
+                    source: Box::new(source),
                 })?
                 .ok_or_else(|| Error::InterfaceLookupUnsupported {
                     interface: interface.name.clone(),
@@ -265,13 +259,13 @@ fn select_link_mode(
         Mode::Layer3 => Mode::Layer3,
         Mode::Layer2 => Mode::Layer2,
         Mode::Auto if intent.has_link_layer => Mode::Layer2,
-        Mode::Auto if intent.ip_root && route.capability.supports_layer3() => Mode::Layer3,
+        Mode::Auto if intent.ip_root && route.capability.supports(Mode::Layer3) => Mode::Layer3,
         Mode::Auto => Mode::Layer2,
     };
-    if mode == Mode::Layer2 && !route.capability.supports_layer2() {
+    if mode == Mode::Layer2 && !route.capability.supports(Mode::Layer2) {
         return Err(Error::Layer2Unsupported);
     }
-    if mode == Mode::Layer3 && !route.capability.supports_layer3() {
+    if mode == Mode::Layer3 && !route.capability.supports(Mode::Layer3) {
         return Err(Error::Layer3Unsupported);
     }
 
@@ -319,7 +313,7 @@ fn select_sources(intent: &PacketIntent, route: &Decision) -> Result<SelectedSou
 struct SelectedLink {
     destination_mac: Option<MacAddress>,
     source_mac: Option<MacAddress>,
-    neighbor_vlan_tags: Vec<NeighborVlanTag>,
+    neighbor_vlan_tags: Vec<VlanTag>,
     synthesized_ethernet: bool,
 }
 
@@ -343,7 +337,9 @@ fn select_link(
             return Err(Error::MissingLayer2DestinationMac);
         };
         if neighbor_source.is_none() && !lookup_destination.is_multicast() {
-            return Err(Error::MissingNeighborSource);
+            return Err(Error::MissingNeighborSource {
+                interface: route.interface.name.clone(),
+            });
         }
     }
     let source_mac = explicit_source_mac.or(arp_source_mac).or(route.source_mac);
@@ -882,7 +878,7 @@ mod tests {
 
         assert!(matches!(
             super::plan(&packet, None, &layer2(), &routes(Ok(no_source))),
-            Err(Error::MissingNeighborSource)
+            Err(Error::MissingNeighborSource { .. })
         ));
     }
 }

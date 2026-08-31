@@ -29,7 +29,8 @@ pub(super) fn timing(arguments: &Args) -> Result<packetcraftr::replay::Timing, C
     } else {
         arguments.timing.into()
     };
-    timing.validate().map_err(CliError::classified)
+    timing.validate().map_err(CliError::classified)?;
+    Ok(timing)
 }
 
 pub(super) fn interface(selector: &str) -> Result<net::interface::Id, CliError> {

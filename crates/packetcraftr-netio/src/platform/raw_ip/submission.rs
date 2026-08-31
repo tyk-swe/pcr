@@ -4,12 +4,12 @@
 //! Target socket ownership, interface binding, and native error mapping.
 
 #![cfg_attr(windows, allow(unsafe_code))]
-#![cfg_attr(not(windows), forbid(unsafe_code))]
 
 #[cfg(target_os = "macos")]
 use std::num::NonZeroU32;
 #[cfg(windows)]
 use std::os::windows::io::AsRawSocket;
+use std::sync::Arc;
 use std::{
     io,
     net::{IpAddr, SocketAddr, SocketAddrV6},
@@ -176,7 +176,7 @@ pub(super) fn validate_platform_support(packet: &PreparedRawIp) -> Result<(), Er
         return Err(Error::Unsupported {
             message: "Darwin raw IPv6 sockets synthesize the IPv6 header and do not support IPV6_HDRINCL; exact complete-header transmission requires an explicit Layer 2 path"
                 .to_owned(),
-        });
+         source: None });
     }
     Ok(())
 }
@@ -186,15 +186,18 @@ pub(super) fn raw_error(operation: &'static str, source: io::Error) -> RawSocket
 }
 
 pub(super) fn map_raw_error(interface: &InterfaceId, error: RawSocketError) -> Error {
-    let message = format!("{}: {}", error.operation, error.source);
-    match error.source.kind() {
-        io::ErrorKind::PermissionDenied => Error::Privilege { message },
-        io::ErrorKind::Unsupported => Error::Unsupported { message },
+    let message = error.operation.to_owned();
+    let kind = error.source.kind();
+    let source: Option<crate::SystemFault> = Some(Arc::new(error.source));
+    match kind {
+        io::ErrorKind::PermissionDenied => Error::Privilege { message, source },
+        io::ErrorKind::Unsupported => Error::Unsupported { message, source },
         io::ErrorKind::NotFound => Error::Device {
             interface: interface.name.clone(),
             message,
+            source,
         },
-        _ => Error::Send { message },
+        _ => Error::Send { message, source },
     }
 }
 

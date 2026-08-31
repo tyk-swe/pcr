@@ -58,6 +58,25 @@ mod windows;
 ))]
 mod worker_reaper;
 
+/// Wraps a native failure as the operating-system route diagnostic.
+///
+/// Linux and macOS phrased this identically in their own modules; Windows
+/// keeps its own because it also renders the Win32 status code.
+#[cfg(all(
+    feature = "native-route",
+    any(target_os = "linux", target_os = "macos")
+))]
+fn os_error(
+    operation: &'static str,
+    error: impl std::error::Error + Send + Sync + 'static,
+) -> crate::route::SystemError {
+    crate::route::SystemError::OperatingSystem {
+        operation,
+        message: "the operating system refused the request".to_owned(),
+        source: Some(std::sync::Arc::new(error)),
+    }
+}
+
 pub(crate) use capture_dispatch::system_capture;
 pub(crate) use interface_dispatch::system_interfaces;
 #[cfg(all(

@@ -16,9 +16,13 @@ use crate::{
     layer::{Layer, reflective_layer},
 };
 
-use super::super::common::{
-    ValueExpectation, aliased_fields, make_layer, protocol, resolve_u8, truncated, wrong_layer,
+use crate::protocol::common::{
+    ValueExpectation, make_layer, protocol, resolve_u8, truncated, typed_layer,
 };
+
+use crate::protocol::BuiltinProtocol;
+
+const NAME: &str = BuiltinProtocol::Arp.as_str();
 
 const ARP_ETHERNET_IPV4_LEN: usize = 28;
 /// The fixed head that names the address families and their lengths.
@@ -62,17 +66,17 @@ impl Default for Arp {
 }
 
 reflective_layer! {
-    fn arp_schema() => { protocol: protocol("arp"), name: "ARP" }
+    fn arp_schema() => { protocol: protocol(NAME), name: "ARP" }
     impl Arp {
         "hardware_type" => { kind: Unsigned, derived: false, required: true, description: "Hardware address family", reflect: hardware_type, layout: (0, 2) },
         "protocol_type" => { kind: Unsigned, derived: false, required: true, description: "Protocol address family", reflect: protocol_type, layout: (2, 4) },
         "hardware_len" => { kind: Unsigned, derived: true, required: false, description: "Hardware address length", reflect: hardware_len, layout: (4, 5) },
         "protocol_len" => { kind: Unsigned, derived: true, required: false, description: "Protocol address length", reflect: protocol_len, layout: (5, 6) },
-        "operation" => { kind: Unsigned, derived: false, required: true, description: "ARP operation", reflect: operation, layout: (6, 8) },
-        "sender_hardware" => { kind: Mac, derived: false, required: true, description: "Sender hardware address", reflect: sender_hardware, layout: (8, 14) },
-        "sender_protocol" => { kind: Ipv4, derived: false, required: true, description: "Sender IPv4 address", reflect: sender_protocol, layout: (14, 18) },
-        "target_hardware" => { kind: Mac, derived: false, required: true, description: "Target hardware address", reflect: target_hardware, layout: (18, 24) },
-        "target_protocol" => { kind: Ipv4, derived: false, required: true, description: "Target IPv4 address", reflect: target_protocol, layout: (24, 28) },
+        "operation" | "op" => { kind: Unsigned, derived: false, required: true, description: "ARP operation", reflect: operation, layout: (6, 8) },
+        "sender_hardware" | "sha" => { kind: Mac, derived: false, required: true, description: "Sender hardware address", reflect: sender_hardware, layout: (8, 14) },
+        "sender_protocol" | "spa" => { kind: Ipv4, derived: false, required: true, description: "Sender IPv4 address", reflect: sender_protocol, layout: (14, 18) },
+        "target_hardware" | "tha" => { kind: Mac, derived: false, required: true, description: "Target hardware address", reflect: target_hardware, layout: (18, 24) },
+        "target_protocol" | "tpa" => { kind: Ipv4, derived: false, required: true, description: "Target IPv4 address", reflect: target_protocol, layout: (24, 28) },
     }
     layout pub(crate) fn arp_layout();
 }
@@ -81,8 +85,8 @@ reflective_layer! {
 pub(crate) struct ArpCodec;
 
 impl LayerCodec for ArpCodec {
-    fn protocol_id(&self) -> crate::layer::Id {
-        protocol("arp")
+    fn protocol_id(&self) -> &'static crate::layer::Id {
+        &arp_schema().protocol
     }
 
     fn encode(
@@ -91,19 +95,16 @@ impl LayerCodec for ArpCodec {
         _payload: &[u8],
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
-        let layer = layer
-            .as_any()
-            .downcast_ref::<Arp>()
-            .ok_or_else(|| wrong_layer("arp", layer))?;
+        let layer = typed_layer::<Arp>(NAME, layer)?;
         let mut diagnostics = Vec::new();
         if layer.hardware_type != 1 || layer.protocol_type != 0x0800 {
             let message = format!(
                 "typed ARP requires Ethernet/IPv4 types (htype={}, ptype=0x{:04x})",
                 layer.hardware_type, layer.protocol_type
             );
-            if context.mode == crate::build::Mode::Strict {
+            if context.mode == crate::codec::Mode::Strict {
                 return Err(crate::codec::Error::Unsupported {
-                    protocol: protocol("arp"),
+                    protocol: protocol(NAME),
                     message,
                 });
             }
@@ -113,7 +114,7 @@ impl LayerCodec for ArpCodec {
             );
         }
         let (hardware_len, materialized_hardware_len) = resolve_u8(
-            "arp",
+            NAME,
             "hardware_len",
             &layer.hardware_len,
             ValueExpectation::Required(6),
@@ -121,7 +122,7 @@ impl LayerCodec for ArpCodec {
             &mut diagnostics,
         )?;
         let (protocol_len, materialized_protocol_len) = resolve_u8(
-            "arp",
+            NAME,
             "protocol_len",
             &layer.protocol_len,
             ValueExpectation::Required(4),
@@ -141,13 +142,9 @@ impl LayerCodec for ArpCodec {
         let mut materialized = layer.clone();
         materialized.hardware_len = materialized_hardware_len;
         materialized.protocol_len = materialized_protocol_len;
-        Ok(EncodedLayer {
-            prefix,
-            suffix: Vec::new(),
-            materialized: Box::new(materialized),
-            fields: arp_layout(),
-            diagnostics,
-        })
+        Ok(EncodedLayer::header(prefix, Box::new(materialized))
+            .with_fields(arp_layout())
+            .with_diagnostics(diagnostics))
     }
 
     fn decode(
@@ -156,7 +153,7 @@ impl LayerCodec for ArpCodec {
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
         let Some(head) = input.first_chunk::<ARP_HEAD_LEN>() else {
-            return Err(truncated("arp", ARP_HEAD_LEN, input.len()));
+            return Err(truncated(NAME, ARP_HEAD_LEN, input.len()));
         };
         let hardware_len = head[4];
         let protocol_len = head[5];
@@ -164,7 +161,7 @@ impl LayerCodec for ArpCodec {
         let protocol_type = u16::from_be_bytes([head[2], head[3]]);
         if hardware_type != 1 || protocol_type != 0x0800 || hardware_len != 6 || protocol_len != 4 {
             return Err(crate::codec::Error::Unsupported {
-                protocol: protocol("arp"),
+                protocol: protocol(NAME),
                 message: format!(
                     "only Ethernet/IPv4 ARP is typed (htype={hardware_type}, ptype=0x{protocol_type:04x}, hlen={hardware_len}, plen={protocol_len})"
                 ),
@@ -182,7 +179,7 @@ impl LayerCodec for ArpCodec {
             arp_chunk::<4>(input, 24),
         )
         else {
-            return Err(truncated("arp", ARP_ETHERNET_IPV4_LEN, input.len()));
+            return Err(truncated(NAME, ARP_ETHERNET_IPV4_LEN, input.len()));
         };
         let layer = Arp {
             hardware_type,
@@ -211,19 +208,6 @@ impl LayerCodec for ArpCodec {
         &self,
         fields: &BTreeMap<String, FieldValue>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(
-            Arp::default(),
-            &aliased_fields(
-                "arp",
-                fields,
-                &[
-                    ("sha", "sender_hardware"),
-                    ("spa", "sender_protocol"),
-                    ("tha", "target_hardware"),
-                    ("tpa", "target_protocol"),
-                    ("op", "operation"),
-                ],
-            )?,
-        )
+        make_layer(Arp::default(), fields)
     }
 }

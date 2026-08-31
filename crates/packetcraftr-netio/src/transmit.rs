@@ -7,6 +7,7 @@ use bytes::Bytes;
 use std::time::{Instant, SystemTime};
 
 use super::Error;
+use super::error::SendEvidenceFault;
 use super::link::Mode;
 use super::route::Materialized;
 
@@ -234,12 +235,12 @@ impl Report {
         }
         if self.wire_bytes.as_ref() != expected.as_ref() {
             return Err(super::Error::InvalidSendEvidence {
-                message: "provider-accepted bytes differ from the exact submitted frame".to_owned(),
+                fault: SendEvidenceFault::AcceptedBytesDiffer,
             });
         }
         if !self.timing.is_consistent() {
             return Err(super::Error::InvalidSendEvidence {
-                message: "provider timing has inconsistent monotonic endpoints".to_owned(),
+                fault: SendEvidenceFault::InconsistentTiming,
             });
         }
         Ok(())
@@ -307,11 +308,27 @@ where
     }
 }
 
+/// Composes an independently owned sender and capture provider for a
+/// capture-before-send exchange. The convention is sender first, capture
+/// second: `(sender, capture)` also implements [`capture::Provider`].
+///
+/// [`capture::Provider`]: crate::capture::Provider
+impl<S, C> Sender for (S, C)
+where
+    S: Sender,
+    C: Send + Sync,
+{
+    fn send(&self, frame: Frame<'_>) -> Result<Report, Error> {
+        self.0.send(frame)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
 
     use super::*;
+    use crate::error::testing::assert_same_failure;
 
     #[test]
     fn backward_wall_clock_step_does_not_invalidate_submission_timing() {
@@ -371,11 +388,14 @@ mod tests {
             };
 
             assert!(!report.timing().is_consistent());
-            assert!(matches!(
-                report.validate_exact(&expected),
-                Err(Error::InvalidSendEvidence { ref message })
-                    if message.contains("timing")
-            ));
+            assert_same_failure(
+                &report
+                    .validate_exact(&expected)
+                    .expect_err("inconsistent provider timing is refused"),
+                &Error::InvalidSendEvidence {
+                    fault: SendEvidenceFault::InconsistentTiming,
+                },
+            );
         }
     }
 }

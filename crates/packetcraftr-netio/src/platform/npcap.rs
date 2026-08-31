@@ -3,8 +3,6 @@
 
 //! Runtime-loaded Npcap adapter for Windows.
 
-#![allow(unsafe_code)]
-
 use super::live_capture::NativeCaptureParts;
 use crate::{
     Error,

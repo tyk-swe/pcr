@@ -6,7 +6,7 @@ use std::time::Duration;
 use thiserror::Error;
 
 use crate::budget::DeadlineExceeded;
-use crate::error::{BoundaryError, Classification, Classified, Context, Kind};
+use crate::error::{BoundaryError, Classification, Classified, Coordinate, Kind};
 
 use super::request::Target;
 
@@ -33,6 +33,10 @@ pub enum Error {
     NoCompatibleTargets,
     #[error("fuzz retained/wire bytes {actual} exceed the configured limit of {limit}")]
     ByteLimit { actual: u64, limit: u64 },
+    #[error(
+        "one fuzz value exceeds the retained/wire budget still unused under the configured limit of {limit} bytes"
+    )]
+    ValueTooLarge { limit: usize },
     #[error("fuzz worst-case duration {actual:?} exceeds the configured limit of {limit:?}")]
     DurationLimit { actual: Duration, limit: Duration },
     #[error("fuzz progressive output failed: {source}")]
@@ -68,28 +72,33 @@ impl Classified for Error {
                 Kind::Packet,
                 Some("select a strategy compatible with at least one reflective packet field"),
             ),
-            Self::ByteLimit { .. } | Self::DurationLimit { .. } => Classification::new(
-                "policy.fuzz_resource_limit",
-                Kind::Policy,
-                Some(
-                    "reduce cases, packet sizes, timeout, or rate delay, or deliberately raise the finite fuzz limit",
-                ),
-            ),
+            Self::ByteLimit { .. } | Self::ValueTooLarge { .. } | Self::DurationLimit { .. } => {
+                Classification::new(
+                    "policy.fuzz_resource_limit",
+                    Kind::Policy,
+                    Some(
+                        "reduce cases, packet sizes, timeout, or rate delay, or deliberately raise the finite fuzz limit",
+                    ),
+                )
+            }
             Self::Output { source } => source.classification(),
         }
     }
 
-    fn context(&self) -> Context {
+    fn context(&self) -> Option<Coordinate> {
         match self {
             Self::Output { source } => source.context(),
-            _ => Context::default(),
+            _ => None,
         }
     }
 
+    /// Walked from the retained `#[source]` chain rather than hand-written.
+    /// The output variant delegates instead: a [`BoundaryError`] carries a
+    /// captured `causes` snapshot its own source chain no longer holds.
     fn causes(&self) -> Vec<String> {
         match self {
             Self::Output { source } => source.causes(),
-            _ => Vec::new(),
+            error => crate::error::source_chain(error),
         }
     }
 }

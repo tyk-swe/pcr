@@ -19,7 +19,7 @@ Examples:
   packetcraftr --output ndjson expert capture.pcapng"#;
 
 /// Minimum finding severity selector for `expert`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 #[value(rename_all = "snake_case")]
 pub(crate) enum Severity {
     Info,
@@ -27,12 +27,12 @@ pub(crate) enum Severity {
     Error,
 }
 
-impl From<packetcraftr::core::diagnostic::Severity> for Severity {
-    fn from(value: packetcraftr::core::diagnostic::Severity) -> Self {
+impl From<Severity> for packetcraftr::core::diagnostic::Severity {
+    fn from(value: Severity) -> Self {
         match value {
-            packetcraftr::core::diagnostic::Severity::Info => Self::Info,
-            packetcraftr::core::diagnostic::Severity::Warning => Self::Warning,
-            packetcraftr::core::diagnostic::Severity::Error => Self::Error,
+            Severity::Info => Self::Info,
+            Severity::Warning => Self::Warning,
+            Severity::Error => Self::Error,
         }
     }
 }

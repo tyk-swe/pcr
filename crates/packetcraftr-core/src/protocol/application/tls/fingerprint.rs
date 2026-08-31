@@ -282,9 +282,9 @@ mod tests {
     use md5::Md5;
     use sha2::{Digest as _, Sha256};
 
-    use super::super::hex;
-    use super::super::model::{ClientHello, Extension, ServerHello};
     use super::{Transport, is_grease, ja3, ja3s, ja4};
+    use crate::protocol::application::tls::hex;
+    use crate::protocol::application::tls::model::{ClientHello, Extension, ServerHello};
 
     fn extensions(kinds: &[u16]) -> Vec<Extension> {
         kinds

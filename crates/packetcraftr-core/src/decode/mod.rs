@@ -32,11 +32,7 @@ impl Dissector {
         Self { registry }
     }
 
-    pub fn decode(
-        &self,
-        frame: Frame,
-        options: Options,
-    ) -> std::result::Result<DecodedPacket, Error> {
+    pub fn decode(&self, frame: Frame, options: Options) -> Result<DecodedPacket, Error> {
         if options.max_layers == 0 {
             return Err(Error::LayerLimit { limit: 0 });
         }

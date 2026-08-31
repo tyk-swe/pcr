@@ -4,9 +4,9 @@
 use packetcraftr::netio::{interface::Provider as _, route::Provider as _};
 use packetcraftr::{netio as net, output};
 
-use super::super::errors::CliError;
-use super::super::rendering::{emit_aggregate, optional_display, write_stdout_line};
 use super::format::AggregateFormat;
+use crate::errors::CliError;
+use crate::rendering::{emit_aggregate, optional_display, write_stdout_line};
 
 pub(super) const AFTER_LONG_HELP: &str = r#"Examples:
   packetcraftr routes
@@ -36,14 +36,14 @@ pub(super) fn run(format: output::contract::Format) -> Result<(), CliError> {
     }
     routes.sort_by_key(|route| (route.interface.index, route.interface.name.clone()));
     routes.dedup_by(|left, right| left.interface == right.interface);
-    let result = output::routes::Result {
+    let result = output::routes::Report {
         routes: routes.into_iter().map(Into::into).collect(),
     };
     match format {
         AggregateFormat::Text => {
             for route in result.routes {
                 write_stdout_line(format_args!(
-                    "{} (index {}): source={} mtu={} capability={:?} link_type={}",
+                    "{} (index {}): source={} mtu={} capability={} link_type={}",
                     route.interface.name,
                     route.interface.index,
                     optional_display(route.selected_source.or(route.preferred_source)),

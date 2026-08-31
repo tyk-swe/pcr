@@ -3,8 +3,6 @@
 
 //! Bounded, capture-before-send ARP and IPv6 Neighbor Discovery.
 
-#![forbid(unsafe_code)]
-
 mod cache;
 mod error;
 mod evidence;
@@ -14,8 +12,6 @@ mod provider;
 mod wire;
 
 pub use error::Error;
-pub use model::{Request, Resolution, VlanKind, VlanTag};
+pub use model::{Request, Resolution};
 pub use options::Options;
 pub use provider::{ActiveResolver, Resolver, SystemResolver};
-
-pub(crate) use model::MAX_VLAN_TAGS;

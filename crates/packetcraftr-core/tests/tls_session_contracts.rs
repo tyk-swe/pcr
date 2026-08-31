@@ -195,7 +195,7 @@ fn assemble(capture: &Capture, limits: TlsLimits) -> (Vec<Session>, TlsSummary) 
         },
     )
     .expect("TLS assembly pass succeeds");
-    let (trailing, summary) = collector.finish(&summary.trailing_tcp_events);
+    let (trailing, summary) = collector.finish(&summary);
     sessions.extend(trailing);
     for event in &sessions {
         assert!(
@@ -1040,10 +1040,8 @@ fn tls_limits_reject_zero_ceilings() {
 
 #[test]
 fn the_public_session_model_and_collector_keep_their_contracts() {
-    type Finish = fn(
-        Collector,
-        &[packetcraftr_core::analysis::reassembly::tcp::Event],
-    ) -> (Vec<SessionEvent>, TlsSummary);
+    type Finish =
+        fn(Collector, &packetcraftr_core::analysis::Summary) -> (Vec<SessionEvent>, TlsSummary);
     fn observe<'record>(
         collector: &mut Collector,
         record: &FrameRecord<'record>,

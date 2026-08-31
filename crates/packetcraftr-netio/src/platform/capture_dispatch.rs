@@ -3,8 +3,6 @@
 
 //! Native capture capability dispatch.
 
-#![forbid(unsafe_code)]
-
 #[cfg(all(
     feature = "native-layer2",
     any(target_os = "linux", target_os = "macos", windows)
@@ -13,53 +11,57 @@ use crate::interface;
 use crate::{Error, capture};
 
 #[cfg(all(feature = "native-layer2", windows))]
-use super::npcap as capture_backend;
+use super::npcap as backend;
 #[cfg(all(
     feature = "native-layer2",
     any(target_os = "linux", target_os = "macos")
 ))]
-use super::pcap_backend as capture_backend;
+use super::pcap_backend as backend;
 
-#[cfg(feature = "native-layer2")]
+#[cfg(all(
+    feature = "native-layer2",
+    any(target_os = "linux", target_os = "macos", windows)
+))]
 pub(crate) fn system_capture(
     request: &capture::Request,
 ) -> Result<Box<dyn capture::Session>, Error> {
-    let validated_limits = request.limits.validate()?;
-    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
-    {
-        if let Some(filter) = request.filter.as_deref() {
-            super::capture_filter::validate(&request.interface, filter)?;
-        }
-        let interface =
-            super::interface_identity::validate_current_interface_identity(&request.interface)?;
-        let netmask = capture_netmask(&interface);
-        let parts = capture_backend::open_capture(
-            &interface.id,
-            validated_limits,
-            request.filter.as_deref(),
-            netmask,
-            request.promiscuous,
-        )?;
-        Ok(Box::new(super::live_capture::NativeCaptureSession::spawn(
-            parts,
-            validated_limits,
-        )?))
+    request.limits.validate()?;
+    let validated_limits = request.limits;
+    if let Some(filter) = request.filter.as_deref() {
+        super::capture_filter::validate(&request.interface, filter)?;
     }
-    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
-    {
-        let _ = (request, validated_limits);
-        Err(Error::Unsupported {
-            message: "native Layer 2 capture is unsupported on this target".to_owned(),
-        })
-    }
+    let interface =
+        super::interface_identity::validate_current_interface_identity(&request.interface)?;
+    let netmask = capture_netmask(&interface);
+    let parts = backend::open_capture(
+        &interface.id,
+        validated_limits,
+        request.filter.as_deref(),
+        netmask,
+        request.promiscuous,
+    )?;
+    Ok(Box::new(super::live_capture::NativeCaptureSession::spawn(
+        parts,
+        validated_limits,
+    )?))
 }
 
-#[cfg(not(feature = "native-layer2"))]
+/// Distinguishes a target that has no native capture backend from a build that
+/// simply left the feature off, so the message names the actionable cause.
+#[cfg(not(all(
+    feature = "native-layer2",
+    any(target_os = "linux", target_os = "macos", windows)
+)))]
 pub(crate) fn system_capture(
     _request: &capture::Request,
 ) -> Result<Box<dyn capture::Session>, Error> {
     Err(Error::Unsupported {
-        message: "enable the native-layer2 feature for native packet capture".to_owned(),
+        message: if cfg!(feature = "native-layer2") {
+            "native Layer 2 capture is unsupported on this target".to_owned()
+        } else {
+            "enable the native-layer2 feature for native packet capture".to_owned()
+        },
+        source: None,
     })
 }
 

@@ -64,6 +64,29 @@ pub(crate) struct UdpTransport {
     pub(crate) encapsulation: Vec<EncapsulationIdentifier>,
 }
 
+/// The IPv4 header at this layer, when it is a fragment reassembly must see.
+///
+/// Offset zero with no More Fragments is an *atomic* fragment: a complete
+/// datagram that is not reassembly input and whose payload stays transparent
+/// to dissection. Every walk that looks for fragments needs both the
+/// downcast and that test, so they travel together here rather than being
+/// restated at each site.
+fn ipv4_fragment(layer: &dyn crate::layer::Layer) -> Option<&Ipv4> {
+    layer
+        .as_any()
+        .downcast_ref::<Ipv4>()
+        .filter(|ipv4| ipv4.fragment_offset != 0 || ipv4.more_fragments)
+}
+
+/// The IPv6 Fragment header at this layer, when it is non-atomic. The atomic
+/// rule is the same one [`ipv4_fragment`] documents.
+fn ipv6_fragment(layer: &dyn crate::layer::Layer) -> Option<&Ipv6FragmentHeader> {
+    layer
+        .as_any()
+        .downcast_ref::<Ipv6FragmentHeader>()
+        .filter(|fragment| fragment.fragment_offset != 0 || fragment.more_fragments)
+}
+
 /// Scope identity contributed by one tunnel or tag layer.
 ///
 /// The transport walk and the fragment walk must agree on the encapsulation
@@ -249,9 +272,9 @@ fn ip_fragments_with_scope(
             let path_index = path.len();
             path.push(EncapsulationIdentifier::Network { first, second });
             ipv6_network = None;
-            if ipv4.fragment_offset == 0 && !ipv4.more_fragments {
+            let Some(ipv4) = ipv4_fragment(layer) else {
                 continue;
-            }
+            };
             let scope = fragment_scope(
                 decoded,
                 base_scope,
@@ -313,11 +336,11 @@ fn ip_fragments_with_scope(
             continue;
         }
 
-        if let Some(fragment) = layer.as_any().downcast_ref::<Ipv6FragmentHeader>() {
-            if fragment.fragment_offset == 0 && !fragment.more_fragments {
+        if layer.as_any().is::<Ipv6FragmentHeader>() {
+            let Some(fragment) = ipv6_fragment(layer) else {
                 atomic.push(IpFamily::Ipv6);
                 continue;
-            }
+            };
             let Some(network) = &ipv6_network else {
                 continue;
             };
@@ -449,20 +472,20 @@ pub(crate) fn transport_payload(decoded: &DecodedPacket, transport_index: usize)
     }
 }
 
-/// Maps a decoded stack onto the innermost TCP segment, when there is one.
+/// Maps an already-located TCP transport onto a reassembly segment.
 ///
 /// A pure control segment has an empty payload rather than no segment,
-/// because an empty SYN, FIN, or RST still carries stream state. A derived
+/// because an empty SYN, FIN, or RST still carries stream state. [`None`]
+/// means the transport is the visible carrier of a fragmented same-transport
+/// child, which the eventual completion will index instead. A derived
 /// datagram view passes its fragment source and base scope in `base` to
 /// preserve the physical fragments' already-interned capture scope.
 pub(crate) fn tcp_segment(
     decoded: &DecodedPacket,
+    transport: TcpTransport<'_>,
     base: ScopeBase<'_>,
     scopes: &mut Interner,
 ) -> Result<Option<Segment>, crate::analysis::scope::Error> {
-    let Some(transport) = transports(&decoded.packet).tcp else {
-        return Ok(None);
-    };
     if transport_hidden_by_fragment(decoded, transport.index, 6) {
         return Ok(None);
     }
@@ -480,16 +503,14 @@ pub(crate) fn tcp_segment(
     }))
 }
 
-/// Maps a decoded stack onto the innermost UDP flow, when there is one.
-/// `base` follows the same convention as [`tcp_segment`].
+/// Maps an already-located UDP transport onto its scoped flow. `base` and
+/// the [`None`] outcome follow the same convention as [`tcp_segment`].
 pub(crate) fn udp_flow(
     decoded: &DecodedPacket,
+    transport: UdpTransport,
     base: ScopeBase<'_>,
     scopes: &mut Interner,
 ) -> Result<Option<ScopedFlowKey>, crate::analysis::scope::Error> {
-    let Some(transport) = transports(&decoded.packet).udp else {
-        return Ok(None);
-    };
     if transport_hidden_by_fragment(decoded, transport.index, 17) {
         return Ok(None);
     }
@@ -527,17 +548,13 @@ fn transport_hidden_by_fragment(
         if index <= transport_index {
             return false;
         }
-        if let Some(ipv4) = layer.as_any().downcast_ref::<Ipv4>() {
-            return (ipv4.fragment_offset != 0 || ipv4.more_fragments)
-                && ipv4.protocol.exact().copied() == Some(protocol);
+        if layer.as_any().is::<Ipv4>() {
+            return ipv4_fragment(layer)
+                .is_some_and(|ipv4| ipv4.protocol.exact().copied() == Some(protocol));
         }
-        layer
-            .as_any()
-            .downcast_ref::<Ipv6FragmentHeader>()
-            .is_some_and(|fragment| {
-                (fragment.fragment_offset != 0 || fragment.more_fragments)
-                    && ipv6_fragment_transport_protocol(decoded, index, fragment) == Some(protocol)
-            })
+        ipv6_fragment(layer).is_some_and(|fragment| {
+            ipv6_fragment_transport_protocol(decoded, index, fragment) == Some(protocol)
+        })
     })
 }
 
@@ -599,8 +616,8 @@ fn replayed_ipv6_encapsulation(decoded: &DecodedPacket) -> Vec<EncapsulationIden
         } else if layer.as_any().is::<Ipv6>() {
             in_ipv6 = true;
             replayed.clear();
-        } else if let Some(fragment) = layer.as_any().downcast_ref::<Ipv6FragmentHeader>() {
-            if in_ipv6 && (fragment.fragment_offset != 0 || fragment.more_fragments) {
+        } else if layer.as_any().is::<Ipv6FragmentHeader>() {
+            if in_ipv6 && ipv6_fragment(layer).is_some() {
                 return replayed;
             }
         } else if in_ipv6 && let Some(ah) = layer.as_any().downcast_ref::<Ah>() {
@@ -614,15 +631,14 @@ fn replayed_ipv6_encapsulation(decoded: &DecodedPacket) -> Vec<EncapsulationIden
 pub(crate) fn replayed_ip_prefix_layers(decoded: &DecodedPacket) -> usize {
     let mut ipv6_start = None;
     for (index, layer) in decoded.packet.iter().enumerate() {
-        if let Some(ipv4) = layer.as_any().downcast_ref::<Ipv4>() {
+        if layer.as_any().is::<Ipv4>() {
             ipv6_start = None;
-            if ipv4.fragment_offset != 0 || ipv4.more_fragments {
+            if ipv4_fragment(layer).is_some() {
                 return 1;
             }
         } else if layer.as_any().is::<Ipv6>() {
             ipv6_start = Some(index);
-        } else if let Some(fragment) = layer.as_any().downcast_ref::<Ipv6FragmentHeader>()
-            && (fragment.fragment_offset != 0 || fragment.more_fragments)
+        } else if ipv6_fragment(layer).is_some()
             && let Some(start) = ipv6_start
         {
             return index.saturating_sub(start);

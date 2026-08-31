@@ -5,7 +5,7 @@
 use std::time::Duration;
 
 use packetcraftr_core::analysis::pcap::Error as CaptureError;
-use packetcraftr_core::error::{Classification, Classified, Context, Kind};
+use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 use packetcraftr_netio::{Error as LiveIoError, link::Mode as LinkMode};
 use thiserror::Error;
 
@@ -46,7 +46,7 @@ pub enum Error {
     #[error(
         "replay frame count {actual} exceeds the configured limit of {limit} at source index {source_index}"
     )]
-    FrameLimit {
+    SourceFrameLimit {
         source_index: u64,
         actual: u64,
         limit: u64,
@@ -54,7 +54,7 @@ pub enum Error {
     #[error(
         "replay byte count {actual} exceeds the configured limit of {limit} at source index {source_index}"
     )]
-    ByteLimit {
+    TransmittedByteLimit {
         source_index: u64,
         actual: u64,
         limit: u64,
@@ -109,8 +109,12 @@ pub enum Error {
         "replay transmitter returned invalid evidence at source index {source_index}: {message}"
     )]
     InvalidEvidence { source_index: u64, message: String },
-    #[error("replay clock failed at source index {source_index}: {message}")]
-    Clock { source_index: u64, message: String },
+    #[error("replay clock failed at source index {source_index}")]
+    Clock {
+        source_index: u64,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
     #[error("replay output failed at source index {source_index}: {message}")]
     Output { source_index: u64, message: String },
 }
@@ -123,13 +127,13 @@ impl Error {
         }
     }
 
-    fn context(&self) -> Context {
+    fn context(&self) -> Option<Coordinate> {
         let source_index = match self {
             Self::Timing { source_index, .. }
             | Self::TimestampUnavailable { source_index, .. }
             | Self::Capture { source_index, .. }
-            | Self::FrameLimit { source_index, .. }
-            | Self::ByteLimit { source_index, .. }
+            | Self::SourceFrameLimit { source_index, .. }
+            | Self::TransmittedByteLimit { source_index, .. }
             | Self::FrameSizeLimit { source_index, .. }
             | Self::DurationLimit { source_index, .. }
             | Self::UnsupportedLinkType { source_index, .. }
@@ -143,10 +147,10 @@ impl Error {
             Self::InvalidLimit { .. }
             | Self::InvalidDuration { .. }
             | Self::InvalidTiming { .. } => {
-                return Context::default();
+                return None;
             }
         };
-        Context::source_frame(source_index.saturating_add(1))
+        Some(Coordinate::SourceFrame(source_index.saturating_add(1)))
     }
 }
 
@@ -161,15 +165,13 @@ impl Classified for Error {
                 Some("use finite non-zero replay limits and a valid positive timing value"),
             ),
             Self::Capture { source, .. } => source.classification(),
-            Self::FrameLimit { .. } | Self::ByteLimit { .. } | Self::DurationLimit { .. } => {
-                Classification::new(
-                    "policy.replay_limit",
-                    Kind::Policy,
-                    Some(
-                        "reduce the replay input or deliberately raise the finite operation budget",
-                    ),
-                )
-            }
+            Self::SourceFrameLimit { .. }
+            | Self::TransmittedByteLimit { .. }
+            | Self::DurationLimit { .. } => Classification::new(
+                "policy.replay_limit",
+                Kind::Policy,
+                Some("reduce the replay input or deliberately raise the finite operation budget"),
+            ),
             Self::FrameSizeLimit { .. } => Classification::new(
                 "packet.capture_size",
                 Kind::Packet,
@@ -217,19 +219,20 @@ impl Classified for Error {
         }
     }
 
-    fn context(&self) -> Context {
+    fn context(&self) -> Option<Coordinate> {
         Error::context(self)
     }
 
+    /// Walked from the retained `#[source]` chain rather than hand-written.
+    /// The two boundary-sourced variants delegate instead: a [`BoundaryError`]
+    /// carries a captured `causes` snapshot its own source chain no longer
+    /// holds.
+    ///
+    /// [`BoundaryError`]: crate::BoundaryError
     fn causes(&self) -> Vec<String> {
         match self {
             Self::Selection { source, .. } | Self::Authorization { source, .. } => source.causes(),
-            Self::Transmission { source, .. } => source.causes(),
-            Self::Capture { source, .. } => vec![source.to_string()],
-            Self::InvalidTiming { mode, value } | Self::Timing { mode, value, .. } => {
-                vec![format!("invalid replay {mode} value {value}")]
-            }
-            _ => Vec::new(),
+            error => packetcraftr_core::error::source_chain(error),
         }
     }
 }

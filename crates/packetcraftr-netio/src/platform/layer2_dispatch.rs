@@ -3,8 +3,6 @@
 
 //! Native Layer 2 transmission capability dispatch.
 
-#![forbid(unsafe_code)]
-
 use crate::{
     Error,
     transmit::{self, Layer2Frame},
@@ -14,32 +12,28 @@ use crate::{
     feature = "native-layer2",
     any(target_os = "linux", target_os = "macos")
 ))]
-use super::pcap_backend as layer2_backend;
+use super::pcap_backend as backend;
 
 #[cfg(all(feature = "native-layer2", windows))]
-use super::npcap as layer2_backend;
+use super::npcap as backend;
 
 #[cfg(all(
     feature = "native-layer2",
     any(target_os = "linux", target_os = "macos", windows)
 ))]
 pub(crate) fn system_send_layer2(frame: Layer2Frame<'_>) -> Result<transmit::Report, Error> {
-    super::interface_identity::validate_current_interface_identity(
-        &frame.route().plan.decision.interface,
-    )?;
-    layer2_backend::send_layer2(frame)
+    super::interface_identity::verify_interface_identity(&frame.route().plan.decision.interface)?;
+    backend::send_layer2(frame)
 }
 
-#[cfg(any(
-    not(feature = "native-layer2"),
-    all(
-        feature = "native-layer2",
-        not(any(target_os = "linux", target_os = "macos", windows))
-    )
-))]
+#[cfg(not(all(
+    feature = "native-layer2",
+    any(target_os = "linux", target_os = "macos", windows)
+)))]
 pub(crate) fn system_send_layer2(_frame: Layer2Frame<'_>) -> Result<transmit::Report, Error> {
     Err(Error::Unsupported {
         message: "enable the native-layer2 feature on a supported target for Layer 2 injection"
             .to_owned(),
+        source: None,
     })
 }

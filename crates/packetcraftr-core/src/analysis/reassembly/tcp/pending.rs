@@ -10,7 +10,7 @@ use super::state::{
     TcpFlowState, emitted_history_conflicts, flow_memory_charge, prepare_emitted_history,
     retained_bytes,
 };
-use super::{Error, Limits, Segment};
+use super::{Error, Limits, MalformedError, ResourceError, Segment};
 
 use accounting::{PushAccountingInput, plan_push_accounting};
 
@@ -41,7 +41,7 @@ pub(super) fn plan_push(
         incoming.payload,
         &mut planned.merge,
     )?
-    .ok_or(Error::FlowByteLimit {
+    .ok_or(ResourceError::FlowByteLimit {
         limit: limits.max_bytes_per_flow,
     })?;
     let history_replacement = prepare_emitted_history(
@@ -53,7 +53,7 @@ pub(super) fn plan_push(
         let end = incoming
             .payload_start
             .checked_add(incoming.payload.len())
-            .ok_or(Error::FlowByteLimit {
+            .ok_or(ResourceError::FlowByteLimit {
                 limit: limits.max_bytes_per_flow,
             })?;
         Some(incoming.payload_start..end)
@@ -89,7 +89,7 @@ struct IncomingPayload<'a> {
 
 #[expect(
     clippy::cast_possible_truncation,
-    reason = "validate_limits rejects max_bytes_per_flow >= TCP_SERIAL_HALF_SPACE (2^31), so \
+    reason = "validate_limits rejects max_bytes_per_flow above MAX_BYTES_PER_FLOW (2^31 - 1), so \
               next_offset never reaches 2^32"
 )]
 #[expect(
@@ -126,7 +126,7 @@ fn normalize_payload<'a>(
     let mut payload_start = before_base;
     let mut retransmitted = before_base;
     let mut conflicting = false;
-    let mut offset = u64::try_from(absolute.max(0)).map_err(|_| Error::FlowByteLimit {
+    let mut offset = u64::try_from(absolute.max(0)).map_err(|_| ResourceError::FlowByteLimit {
         limit: limits.max_bytes_per_flow,
     })?;
     if offset < state.next_offset {
@@ -140,11 +140,12 @@ fn normalize_payload<'a>(
         let (overlap, rest) = payload.split_at(consumed.min(payload.len()));
         conflicting = emitted_history_conflicts(state, offset, overlap);
         retransmitted = retransmitted.saturating_add(consumed);
-        payload_start = payload_start
-            .checked_add(consumed)
-            .ok_or(Error::FlowByteLimit {
-                limit: limits.max_bytes_per_flow,
-            })?;
+        payload_start =
+            payload_start
+                .checked_add(consumed)
+                .ok_or(ResourceError::FlowByteLimit {
+                    limit: limits.max_bytes_per_flow,
+                })?;
         payload = rest;
         offset = state.next_offset;
     }
@@ -171,34 +172,37 @@ fn validate_sequence_bounds(
     let window_end = state
         .next_offset
         .checked_add(limits.max_bytes_per_flow as u64)
-        .ok_or(Error::FlowByteLimit {
+        .ok_or(ResourceError::FlowByteLimit {
             limit: limits.max_bytes_per_flow,
         })?;
-    let remaining_end = offset
-        .checked_add(payload.len() as u64)
-        .ok_or(Error::FlowByteLimit {
-            limit: limits.max_bytes_per_flow,
-        })?;
+    let remaining_end =
+        offset
+            .checked_add(payload.len() as u64)
+            .ok_or(ResourceError::FlowByteLimit {
+                limit: limits.max_bytes_per_flow,
+            })?;
     if let Some(final_offset) = state.fin_offset {
         if fin_offset.is_some_and(|incoming| incoming != final_offset) {
-            return Err(Error::ConflictingFinalSequence {
+            return Err(MalformedError::ConflictingFinalSequence {
                 existing_offset: final_offset,
                 new_offset: fin_offset.expect("checked as present"),
-            });
+            }
+            .into());
         }
         if remaining_end > final_offset {
-            return Err(Error::BeyondFinalSequence { final_offset });
+            return Err(MalformedError::BeyondFinalSequence { final_offset }.into());
         }
     }
     if let Some(final_offset) = fin_offset
         && state.next_offset > final_offset
     {
-        return Err(Error::BeyondFinalSequence { final_offset });
+        return Err(MalformedError::BeyondFinalSequence { final_offset }.into());
     }
     if offset > window_end || remaining_end > window_end {
-        return Err(Error::FlowByteLimit {
+        return Err(ResourceError::FlowByteLimit {
             limit: limits.max_bytes_per_flow,
-        });
+        }
+        .into());
     }
     Ok(remaining_end)
 }
@@ -222,7 +226,7 @@ fn plan_merge_and_accounting(
     segment: &Segment,
     incoming: &IncomingPayload<'_>,
 ) -> Result<PlannedMerge, Error> {
-    let accounting_error = || Error::AggregateByteLimit {
+    let accounting_error = || ResourceError::AggregateByteLimit {
         limit: limits.max_aggregate_bytes,
     };
     let old_retained_bytes = if state_is_accounted {
@@ -241,21 +245,21 @@ fn plan_merge_and_accounting(
         incoming.payload,
         state.next_offset,
     )
-    .ok_or(Error::FlowByteLimit {
+    .ok_or(ResourceError::FlowByteLimit {
         limit: limits.max_bytes_per_flow,
     })?;
     let pending_bytes = state
         .pending_bytes
         .checked_add(merge.added_bytes)
         .filter(|bytes| *bytes <= limits.max_bytes_per_flow)
-        .ok_or(Error::FlowByteLimit {
+        .ok_or(ResourceError::FlowByteLimit {
             limit: limits.max_bytes_per_flow,
         })?;
     validate_pending_final_offset(state, incoming)?;
     let final_next_offset = state
         .next_offset
         .checked_add(merge.emitted_segment_bytes as u64)
-        .ok_or(Error::FlowByteLimit {
+        .ok_or(ResourceError::FlowByteLimit {
             limit: limits.max_bytes_per_flow,
         })?;
     let final_fin_offset = state.fin_offset.or(incoming.fin_offset);
@@ -300,7 +304,7 @@ fn validate_pending_final_offset(
             })
             || incoming.remaining_end > final_offset)
     {
-        return Err(Error::BeyondFinalSequence { final_offset });
+        return Err(MalformedError::BeyondFinalSequence { final_offset }.into());
     }
     Ok(())
 }
@@ -450,7 +454,7 @@ fn materialize_pending_merge(
     let mut bytes = Vec::new();
     bytes
         .try_reserve_exact(union_len)
-        .map_err(|_| Error::AllocationFailed {
+        .map_err(|_| ResourceError::AllocationFailed {
             requested: union_len,
         })?;
     bytes.resize(union_len, 0);

@@ -7,7 +7,7 @@ use std::io::Write;
 
 use crate::frame::{Direction, Frame, LinkType};
 
-use super::super::{
+use crate::analysis::pcap::{
     error::Error,
     model::{Endianness, Interface, TimestampResolution},
     wire::{

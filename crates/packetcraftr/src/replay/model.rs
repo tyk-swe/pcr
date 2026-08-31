@@ -10,7 +10,7 @@ use packetcraftr_core::analysis::pcap::{
 use packetcraftr_core::frame::Frame;
 use packetcraftr_netio::{
     Error as LiveIoError, interface::Id as InterfaceId, link::Mode as LinkMode,
-    route::Plan as RoutePlan, transmit::Report as IoSendReport,
+    route::Materialized as MaterializedRoute, transmit::Report as IoSendReport,
 };
 use serde::{Deserialize, Serialize};
 
@@ -31,8 +31,8 @@ pub enum Timing {
 
 impl Timing {
     /// Validates any numeric timing parameter before frames are read.
-    pub fn validate(self) -> Result<Self, Error> {
-        match self {
+    pub fn validate(&self) -> Result<(), Error> {
+        match *self {
             Self::Scaled(value) if !value.is_finite() || value <= 0.0 => {
                 Err(Error::InvalidTiming {
                     mode: "scaled",
@@ -45,7 +45,7 @@ impl Timing {
                     value,
                 })
             }
-            timing => Ok(timing),
+            _ => Ok(()),
         }
     }
 
@@ -113,10 +113,18 @@ fn required_times(
 }
 
 /// Finite resource ceilings applied before authorizing or transmitting a frame.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// The two aggregate ceilings bound different quantities, and the names say
+/// which: `max_source_frames` bounds frames *read* from the capture, including
+/// the ones a selector skips before they are ever authorized, while
+/// `max_transmitted_bytes` bounds only the bytes that actually reach the wire.
+/// This engine bound is independent of the authorizer's own budget on purpose:
+/// it is what still bounds the operation when an injected authorizer approves
+/// everything.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
-    pub max_frames: u64,
-    pub max_bytes: u64,
+    pub max_source_frames: u64,
+    pub max_transmitted_bytes: u64,
     pub max_frame_bytes: usize,
     pub max_duration: Duration,
 }
@@ -124,8 +132,8 @@ pub struct Limits {
 impl Default for Limits {
     fn default() -> Self {
         Self {
-            max_frames: DEFAULT_STREAM_FRAMES,
-            max_bytes: DEFAULT_STREAM_BYTES,
+            max_source_frames: DEFAULT_STREAM_FRAMES,
+            max_transmitted_bytes: DEFAULT_STREAM_BYTES,
             max_frame_bytes: DEFAULT_SIZE_LIMIT,
             max_duration: MAX_REPLAY_DURATION,
         }
@@ -133,10 +141,29 @@ impl Default for Limits {
 }
 
 impl Limits {
-    pub fn validate(self) -> Result<Self, Error> {
+    /// The engine ceilings a traffic policy's per-operation budget implies.
+    ///
+    /// The policy bounds what may be *transmitted*; this bound is applied to
+    /// what is *read*, which is at least as many frames, so the operation
+    /// cannot outlive the policy budget even when every frame is selected.
+    #[must_use]
+    pub fn from_policy(
+        policy: &crate::policy::Policy,
+        max_frame_bytes: usize,
+        max_duration: Duration,
+    ) -> Self {
+        Self {
+            max_source_frames: policy.max_packets_per_operation,
+            max_transmitted_bytes: policy.max_bytes_per_operation,
+            max_frame_bytes,
+            max_duration,
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), Error> {
         for (field, value) in [
-            ("max_frames", self.max_frames),
-            ("max_bytes", self.max_bytes),
+            ("max_source_frames", self.max_source_frames),
+            ("max_transmitted_bytes", self.max_transmitted_bytes),
             (
                 "max_frame_bytes",
                 u64::try_from(self.max_frame_bytes).unwrap_or(u64::MAX),
@@ -150,11 +177,11 @@ impl Limits {
                 });
             }
         }
-        if u64::try_from(self.max_frame_bytes).unwrap_or(u64::MAX) > self.max_bytes {
+        if u64::try_from(self.max_frame_bytes).unwrap_or(u64::MAX) > self.max_transmitted_bytes {
             return Err(Error::InvalidLimit {
                 field: "max_frame_bytes",
                 value: u64::try_from(self.max_frame_bytes).unwrap_or(u64::MAX),
-                reason: "cannot exceed max_bytes",
+                reason: "cannot exceed max_transmitted_bytes",
             });
         }
         if self.max_duration.is_zero() || self.max_duration > MAX_REPLAY_DURATION {
@@ -163,7 +190,7 @@ impl Limits {
                 maximum: MAX_REPLAY_DURATION,
             });
         }
-        Ok(self)
+        Ok(())
     }
 }
 
@@ -219,20 +246,26 @@ pub trait Selector {
 }
 
 /// Exact-frame transmitter seam used by native and injected adapters.
+///
+/// The two methods are one handoff: [`plan_frame`](Transmitter::plan_frame)
+/// produces the exact route the engine then has authorized, and that same
+/// route is handed back to [`transmit`](Transmitter::transmit). "The bytes on
+/// the wire are routed by the plan that was authorized" is therefore
+/// structural, not a runtime comparison of remembered frames.
 pub trait Transmitter {
-    /// Resolve and validate the concrete interface and passively select the
-    /// final route before any intentional delay.
-    fn validate_interface(
+    /// Resolve and validate the concrete interface, then passively select and
+    /// materialize the final route, before any intentional delay.
+    fn plan_frame(
         &mut self,
         interface: &InterfaceId,
         mode: LinkMode,
         frame: &Frame,
-    ) -> Result<RoutePlan, LiveIoError>;
+    ) -> Result<MaterializedRoute, LiveIoError>;
 
+    /// Transmit the exact frame through the route that was authorized.
     fn transmit(
         &mut self,
-        interface: &InterfaceId,
-        mode: LinkMode,
+        route: &MaterializedRoute,
         frame: &Frame,
     ) -> Result<Transmission, LiveIoError>;
 }

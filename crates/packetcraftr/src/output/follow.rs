@@ -22,12 +22,7 @@ mirror_enum! {
     }
 }
 
-/// One conversation endpoint.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Endpoint {
-    pub address: IpAddr,
-    pub port: u16,
-}
+pub use super::network::Endpoint;
 
 /// One run of conversation payload, in delivery order.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -50,7 +45,7 @@ impl From<AnalysisChunk> for Chunk {
 
 /// Aggregate result of `follow`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Result {
+pub struct Report {
     pub transport: StreamTransport,
     pub stream: u64,
     /// Absent when the capture holds no frame of the conversation.
@@ -67,7 +62,7 @@ pub struct Result {
     pub ip_reassembly: super::reassembly::Report,
 }
 
-impl Result {
+impl Report {
     #[must_use]
     pub fn from_summary(
         transport: StreamTransport,

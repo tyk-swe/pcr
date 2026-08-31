@@ -3,17 +3,17 @@
 
 //! Ordered DNS response validation and decoding orchestration.
 
-use super::super::error::WireError;
-use super::super::model::{
-    Edns, Limits, Name, QueryType, Record, RecordValue, ResponseMetadata, ValidatedResponse,
-};
-use super::super::{
-    DNS_CLASS_IN, DNS_FLAG_AUTHENTICATED_DATA, DNS_FLAG_AUTHORITATIVE, DNS_FLAG_CHECKING_DISABLED,
-    DNS_FLAG_RECURSION_AVAILABLE, DNS_FLAG_RECURSION_DESIRED, DNS_FLAG_RESPONSE,
-    DNS_FLAG_TRUNCATED, DNS_HEADER_BYTES, DNS_OPCODE_MASK, DNS_RCODE_MASK, DNS_RESERVED_MASK,
-};
 use super::name::{canonical_query_name, decode_name};
 use super::relevance::{RelevantRecords, filter_relevant_records};
+use crate::dns::error::WireError;
+use crate::dns::model::{
+    Edns, MessageLimits, Name, QueryType, Record, RecordValue, ResponseMetadata, ValidatedResponse,
+};
+use crate::dns::{
+    CLASS_IN, FLAG_AUTHENTICATED_DATA, FLAG_AUTHORITATIVE, FLAG_CHECKING_DISABLED,
+    FLAG_RECURSION_AVAILABLE, FLAG_RECURSION_DESIRED, FLAG_RESPONSE, FLAG_TRUNCATED, HEADER_BYTES,
+    OPCODE_MASK, RCODE_MASK, RESERVED_MASK,
+};
 
 use primitives::read_u16;
 use records::decode_records;
@@ -28,7 +28,7 @@ pub fn decode_tcp_frame(
     query_name: &str,
     query_type: QueryType,
     transaction_id: u16,
-    limits: Limits,
+    limits: MessageLimits,
 ) -> Result<ValidatedResponse, WireError> {
     let prefix = frame.first_chunk::<2>().ok_or(WireError::MessageTooShort {
         actual: frame.len(),
@@ -68,7 +68,7 @@ pub fn decode_response(
     query_name: &str,
     query_type: QueryType,
     transaction_id: u16,
-    limits: Limits,
+    limits: MessageLimits,
 ) -> Result<ValidatedResponse, WireError> {
     let query_name = canonical_query_name(query_name)?;
     let expected_name = Name::from_canonical_ascii(&query_name);
@@ -76,7 +76,7 @@ pub fn decode_response(
     let header = decode_header(message, transaction_id)?;
     let offset = decode_question(message, &query_name, &expected_name, query_type, limits)?;
 
-    if header.flags & DNS_FLAG_TRUNCATED != 0 {
+    if header.flags & FLAG_TRUNCATED != 0 {
         return Ok(truncated_response(header.flags));
     }
 
@@ -87,7 +87,7 @@ pub fn decode_response(
         .as_ref()
         .map_or(0, |edns| u16::from(edns.extended_response_code))
         << 4)
-        | (header.flags & DNS_RCODE_MASK);
+        | (header.flags & RCODE_MASK);
     let RelevantRecords {
         answers,
         authorities,
@@ -106,12 +106,12 @@ pub fn decode_response(
         metadata: ResponseMetadata {
             response_code,
             edns: sections.edns,
-            authoritative: header.flags & DNS_FLAG_AUTHORITATIVE != 0,
+            authoritative: header.flags & FLAG_AUTHORITATIVE != 0,
             truncated: false,
-            recursion_desired: header.flags & DNS_FLAG_RECURSION_DESIRED != 0,
-            recursion_available: header.flags & DNS_FLAG_RECURSION_AVAILABLE != 0,
-            authenticated_data: header.flags & DNS_FLAG_AUTHENTICATED_DATA != 0,
-            checking_disabled: header.flags & DNS_FLAG_CHECKING_DISABLED != 0,
+            recursion_desired: header.flags & FLAG_RECURSION_DESIRED != 0,
+            recursion_available: header.flags & FLAG_RECURSION_AVAILABLE != 0,
+            authenticated_data: header.flags & FLAG_AUTHENTICATED_DATA != 0,
+            checking_disabled: header.flags & FLAG_CHECKING_DISABLED != 0,
             rejected_record_count,
         },
         answers,
@@ -142,11 +142,11 @@ fn advance(offset: usize, delta: usize, field: &'static str) -> Result<usize, Wi
         .ok_or(WireError::TruncatedField { field, offset })
 }
 
-fn validate_message_bounds(message: &[u8], limits: Limits) -> Result<(), WireError> {
-    if message.len() < DNS_HEADER_BYTES {
+fn validate_message_bounds(message: &[u8], limits: MessageLimits) -> Result<(), WireError> {
+    if message.len() < HEADER_BYTES {
         return Err(WireError::MessageTooShort {
             actual: message.len(),
-            minimum: DNS_HEADER_BYTES,
+            minimum: HEADER_BYTES,
         });
     }
     if message.len() > limits.max_message_bytes {
@@ -161,14 +161,14 @@ fn validate_message_bounds(message: &[u8], limits: Limits) -> Result<(), WireErr
 fn decode_header(message: &[u8], transaction_id: u16) -> Result<ResponseHeader, WireError> {
     let actual_id = read_u16(message, 0, "transaction ID")?;
     let flags = read_u16(message, 2, "flags")?;
-    if flags & DNS_FLAG_RESPONSE == 0 {
+    if flags & FLAG_RESPONSE == 0 {
         return Err(WireError::NotResponse);
     }
-    let opcode = u8::try_from((flags & DNS_OPCODE_MASK) >> 11).unwrap_or_default();
+    let opcode = u8::try_from((flags & OPCODE_MASK) >> 11).unwrap_or_default();
     if opcode != 0 {
         return Err(WireError::UnsupportedOpcode { opcode });
     }
-    if flags & DNS_RESERVED_MASK != 0 {
+    if flags & RESERVED_MASK != 0 {
         return Err(WireError::ReservedHeaderBits);
     }
     if actual_id != transaction_id {
@@ -196,9 +196,9 @@ fn decode_question(
     query_name: &str,
     expected_name: &Name,
     query_type: QueryType,
-    limits: Limits,
+    limits: MessageLimits,
 ) -> Result<usize, WireError> {
-    let (actual_name, mut offset) = decode_name(message, DNS_HEADER_BYTES, limits)?;
+    let (actual_name, mut offset) = decode_name(message, HEADER_BYTES, limits)?;
     if actual_name != *expected_name {
         return Err(WireError::QuestionNameMismatch {
             expected: query_name.to_owned(),
@@ -215,7 +215,7 @@ fn decode_question(
     }
     let actual_class = read_u16(message, offset, "question class")?;
     offset = advance(offset, 2, "answer section")?;
-    if actual_class != DNS_CLASS_IN {
+    if actual_class != CLASS_IN {
         return Err(WireError::QuestionClassMismatch {
             actual: actual_class,
         });
@@ -228,14 +228,14 @@ fn truncated_response(flags: u16) -> ValidatedResponse {
     // Do not decode or present possibly partial records as accepted facts.
     ValidatedResponse {
         metadata: ResponseMetadata {
-            response_code: flags & DNS_RCODE_MASK,
+            response_code: flags & RCODE_MASK,
             edns: None,
-            authoritative: flags & DNS_FLAG_AUTHORITATIVE != 0,
+            authoritative: flags & FLAG_AUTHORITATIVE != 0,
             truncated: true,
-            recursion_desired: flags & DNS_FLAG_RECURSION_DESIRED != 0,
-            recursion_available: flags & DNS_FLAG_RECURSION_AVAILABLE != 0,
-            authenticated_data: flags & DNS_FLAG_AUTHENTICATED_DATA != 0,
-            checking_disabled: flags & DNS_FLAG_CHECKING_DISABLED != 0,
+            recursion_desired: flags & FLAG_RECURSION_DESIRED != 0,
+            recursion_available: flags & FLAG_RECURSION_AVAILABLE != 0,
+            authenticated_data: flags & FLAG_AUTHENTICATED_DATA != 0,
+            checking_disabled: flags & FLAG_CHECKING_DISABLED != 0,
             rejected_record_count: 0,
         },
         answers: Vec::new(),
@@ -245,7 +245,7 @@ fn truncated_response(flags: u16) -> ValidatedResponse {
     }
 }
 
-fn validate_record_count(header: &ResponseHeader, limits: Limits) -> Result<(), WireError> {
+fn validate_record_count(header: &ResponseHeader, limits: MessageLimits) -> Result<(), WireError> {
     let record_count = header
         .answer_count
         .checked_add(header.authority_count)
@@ -267,7 +267,7 @@ fn decode_sections(
     message: &[u8],
     offset: usize,
     header: &ResponseHeader,
-    limits: Limits,
+    limits: MessageLimits,
 ) -> Result<ResponseSections, WireError> {
     let (answers, next) = decode_records(message, offset, header.answer_count, limits)?;
     let (authorities, next) = decode_records(message, next, header.authority_count, limits)?;

@@ -1,14 +1,14 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Shared serialized interface and route representations.
+//! Shared serialized interface, endpoint, and route representations.
 
 use std::fmt;
 use std::net::IpAddr;
 
 use serde::Serialize;
 
-use packetcraftr_netio::link::{Capability as LinkCapability, Mode as LinkMode};
+use packetcraftr_netio::link::{Capability as LinkCapability, Mode as NetworkLinkMode};
 
 /// Stable interface shape used by both the text and JSON renderers.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
@@ -39,6 +39,25 @@ mirror_enum! {
         Layer3 = Layer3,
         #[serde(rename = "layer2_and3")]
         Layer2AndLayer3 = Layer2AndLayer3,
+    }
+}
+
+impl Capability {
+    /// The serialized spelling, so a text renderer and the JSON document never
+    /// name the same capability two ways.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Layer2 => "layer2",
+            Self::Layer3 => "layer3",
+            Self::Layer2AndLayer3 => "layer2_and3",
+        }
+    }
+}
+
+impl fmt::Display for Capability {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
     }
 }
 
@@ -78,7 +97,16 @@ impl From<packetcraftr_netio::interface::Info> for Interface {
     }
 }
 
-/// Aggregate result of `plan`.
+/// One address-and-port conversation endpoint. `$defs.followEndpoint` and
+/// `$defs.tlsEndpoint` are byte-identical declarations of this one shape, so
+/// both commands publish this type under their own module name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct Endpoint {
+    pub address: IpAddr,
+    pub port: u16,
+}
+
+/// The interface identity every route, plan, and replay record names.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct InterfaceId {
     pub name: String,
@@ -118,11 +146,31 @@ mirror_enum! {
 }
 
 mirror_enum! {
+    /// How a plan reaches the wire: the schema's `$defs.linkMode`.
     #[serde(rename_all = "snake_case")]
-    pub enum Mode from LinkMode {
+    pub enum LinkMode from NetworkLinkMode {
         Auto = Auto,
         Layer2 = Layer2,
         Layer3 = Layer3,
+    }
+}
+
+impl LinkMode {
+    /// The serialized spelling, so a text renderer and the JSON document never
+    /// name the same mode two ways.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Layer2 => "layer2",
+            Self::Layer3 => "layer3",
+        }
+    }
+}
+
+impl fmt::Display for LinkMode {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
     }
 }
 
@@ -151,7 +199,7 @@ impl fmt::Display for MacAddress {
 
 mirror_enum! {
     #[serde(rename_all = "snake_case")]
-    pub enum VlanKind from packetcraftr_netio::neighbor::VlanKind {
+    pub enum VlanKind from packetcraftr_netio::link::VlanKind {
         Ieee8021Q = Ieee8021Q,
         Ieee8021Ad = Ieee8021Ad,
     }
@@ -165,8 +213,8 @@ pub struct VlanTag {
     pub vlan_id: u16,
 }
 
-impl From<packetcraftr_netio::neighbor::VlanTag> for VlanTag {
-    fn from(value: packetcraftr_netio::neighbor::VlanTag) -> Self {
+impl From<packetcraftr_netio::link::VlanTag> for VlanTag {
+    fn from(value: packetcraftr_netio::link::VlanTag) -> Self {
         Self {
             kind: value.kind.into(),
             priority: value.priority,
@@ -179,7 +227,7 @@ impl From<packetcraftr_netio::neighbor::VlanTag> for VlanTag {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Decision {
     pub interface: InterfaceId,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub source_mac: Option<MacAddress>,
     #[serde(rename = "selected_address")]
     pub selected_source: Option<IpAddr>,
@@ -209,14 +257,18 @@ impl From<packetcraftr_netio::route::Decision> for Decision {
     }
 }
 
+/// A materialized send path: the route that was selected, plus everything the
+/// link layer needed on top of it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Plan {
+    /// Serialized as `route`, which is also what [`super::plan::Report`] calls
+    /// this whole plan one level up.
     #[serde(rename = "route")]
     pub decision: Decision,
-    pub mode: Mode,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: LinkMode,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub lookup_destination: Option<IpAddr>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub final_destination: Option<IpAddr>,
     pub visited_destinations: Vec<IpAddr>,
     pub packet_source: Option<IpAddr>,
@@ -224,7 +276,7 @@ pub struct Plan {
     pub neighbor_target: Option<IpAddr>,
     pub destination_mac: Option<MacAddress>,
     pub source_mac: Option<MacAddress>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub neighbor_vlan_tags: Vec<VlanTag>,
     pub synthesized_ethernet: bool,
 }
@@ -248,6 +300,30 @@ impl From<packetcraftr_netio::route::Plan> for Plan {
                 .map(Into::into)
                 .collect(),
             synthesized_ethernet: value.synthesized_ethernet,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The colour and wording of every text renderer follows `as_str`, so a
+    /// serde rename that outran it would silently split the two views apart.
+    #[test]
+    fn link_text_spellings_match_the_serialized_document() {
+        for mode in [LinkMode::Auto, LinkMode::Layer2, LinkMode::Layer3] {
+            let serialized = serde_json::to_string(&mode).expect("mirror enums serialize");
+            assert_eq!(serialized, format!("\"{}\"", mode.as_str()));
+        }
+
+        for capability in [
+            Capability::Layer2,
+            Capability::Layer3,
+            Capability::Layer2AndLayer3,
+        ] {
+            let serialized = serde_json::to_string(&capability).expect("mirror enums serialize");
+            assert_eq!(serialized, format!("\"{}\"", capability.as_str()));
         }
     }
 }

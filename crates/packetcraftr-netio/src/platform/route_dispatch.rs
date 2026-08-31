@@ -3,8 +3,6 @@
 
 //! Native route-selection capability dispatch.
 
-#![forbid(unsafe_code)]
-
 use std::net::IpAddr;
 
 use crate::{
@@ -13,13 +11,13 @@ use crate::{
 };
 
 #[cfg(all(feature = "native-route", target_os = "linux"))]
-use super::linux as native;
+use super::linux as backend;
 
 #[cfg(all(feature = "native-route", target_os = "macos"))]
-use super::macos as native;
+use super::macos as backend;
 
 #[cfg(all(feature = "native-route", windows))]
-use super::windows as native;
+use super::windows as backend;
 
 #[cfg(all(
     feature = "native-route",
@@ -30,7 +28,7 @@ pub(crate) fn system_route(
     interface_hint: Option<&InterfaceId>,
     preferred_source: Option<IpAddr>,
 ) -> Result<Decision, SystemError> {
-    native::route(destination, interface_hint, preferred_source)
+    backend::route(destination, interface_hint, preferred_source)
 }
 
 #[cfg(all(
@@ -38,7 +36,7 @@ pub(crate) fn system_route(
     any(target_os = "linux", target_os = "macos", windows)
 ))]
 pub(crate) fn system_interface_route(interface: &InterfaceId) -> Result<Decision, SystemError> {
-    native::interface_route(interface)
+    backend::interface_route(interface)
 }
 
 #[cfg(not(all(

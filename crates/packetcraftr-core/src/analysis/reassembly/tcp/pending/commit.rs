@@ -31,7 +31,7 @@ pub(in crate::analysis::reassembly::tcp) fn commit_push(
         .flows
         .get(&segment.flow)
         .map_or(now, |state| state.last_update.max(now));
-    let deadline = last_update.checked_add(reassembler.limits.tcp_idle_expiry);
+    let deadline = last_update.checked_add(reassembler.limits.idle_expiry);
     let Segment {
         flow, rst, payload, ..
     } = segment;
@@ -155,7 +155,7 @@ fn commit_flow_push(
 
 #[expect(
     clippy::cast_possible_truncation,
-    reason = "validate_limits rejects max_bytes_per_flow >= TCP_SERIAL_HALF_SPACE (2^31), so \
+    reason = "validate_limits rejects max_bytes_per_flow above MAX_BYTES_PER_FLOW (2^31 - 1), so \
               next_offset never reaches 2^32 and the narrowing to a wire sequence is lossless"
 )]
 fn emit_data(

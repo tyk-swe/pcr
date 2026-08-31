@@ -8,24 +8,25 @@ use std::io::{self, Write};
 
 use packetcraftr::{core, output};
 
-use super::super::errors::CliError;
 use super::style::{
-    error_style, style_document, style_human_line, terminal_document, terminal_safe,
+    error_style, style_document, style_human_line, style_summary_line, terminal_document,
+    terminal_safe,
 };
+use crate::errors::CliError;
 
 /// The diagnostic fields the human renderer prints.
 ///
 /// The core and envelope diagnostics carry the same three fields under
 /// different types, and both render identically.
 pub(crate) trait DiagnosticLine {
-    fn severity(&self) -> &dyn fmt::Debug;
+    fn severity(&self) -> core::diagnostic::Severity;
     fn code(&self) -> &str;
     fn message(&self) -> &str;
 }
 
 impl DiagnosticLine for core::diagnostic::Diagnostic {
-    fn severity(&self) -> &dyn fmt::Debug {
-        &self.severity
+    fn severity(&self) -> core::diagnostic::Severity {
+        self.severity
     }
 
     fn code(&self) -> &str {
@@ -38,8 +39,8 @@ impl DiagnosticLine for core::diagnostic::Diagnostic {
 }
 
 impl DiagnosticLine for output::envelope::Diagnostic {
-    fn severity(&self) -> &dyn fmt::Debug {
-        &self.severity
+    fn severity(&self) -> core::diagnostic::Severity {
+        self.severity
     }
 
     fn code(&self) -> &str {
@@ -51,24 +52,108 @@ impl DiagnosticLine for output::envelope::Diagnostic {
     }
 }
 
+/// One diagnostic line, severity spelled exactly as the JSON document spells
+/// it. Written once so the stdout and stderr renderers cannot drift apart.
+fn diagnostic_line(diagnostic: &impl DiagnosticLine) -> String {
+    format!(
+        "{} {}: {}",
+        diagnostic.severity().as_str(),
+        diagnostic.code(),
+        diagnostic.message()
+    )
+}
+
 pub(crate) fn render_diagnostics_text(diagnostics: &[impl DiagnosticLine]) -> Result<(), CliError> {
     for diagnostic in diagnostics {
-        write_stdout_line(format_args!(
-            "{:?} {}: {}",
-            diagnostic.severity(),
-            diagnostic.code(),
-            diagnostic.message()
-        ))?;
+        write_stdout_line(format_args!("{}", diagnostic_line(diagnostic)))?;
     }
     Ok(())
 }
 
-pub(crate) fn write_stdout_line(arguments: std::fmt::Arguments<'_>) -> Result<(), CliError> {
+/// The same lines on stderr, for a command whose stdout carries capture bytes
+/// or NDJSON records a diagnostic must not be interleaved with.
+pub(crate) fn render_diagnostics_stderr(
+    diagnostics: &[impl DiagnosticLine],
+) -> Result<(), CliError> {
+    for diagnostic in diagnostics {
+        emit_stderr_message(&diagnostic_line(diagnostic))?;
+    }
+    Ok(())
+}
+
+pub(crate) fn render_optional<T>(value: Option<T>, render: impl FnOnce(T) -> String) -> String {
+    value.map_or_else(|| "none".to_owned(), render)
+}
+
+pub(crate) fn optional_display<T: std::fmt::Display>(value: Option<T>) -> String {
+    render_optional(value, |value| value.to_string())
+}
+
+pub(crate) fn comma_separated<I, T>(values: I) -> String
+where
+    I: IntoIterator<Item = T>,
+    T: ToString,
+{
+    values
+        .into_iter()
+        .map(|value| value.to_string())
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+pub(crate) fn spaced_hex(bytes: &[u8]) -> impl fmt::Display + '_ {
+    SpacedHex(bytes)
+}
+
+struct SpacedHex<'a>(&'a [u8]);
+
+impl fmt::Display for SpacedHex<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (index, byte) in self.0.iter().enumerate() {
+            if index != 0 {
+                formatter.write_str(" ")?;
+            }
+            write!(formatter, "{byte:02x}")?;
+        }
+        Ok(())
+    }
+}
+
+pub(crate) fn captured_frame_text(frame: &output::frame::Captured) -> impl fmt::Display + '_ {
+    CapturedFrameText(frame)
+}
+
+struct CapturedFrameText<'a>(&'a output::frame::Captured);
+
+impl fmt::Display for CapturedFrameText<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let frame = self.0;
+        write!(
+            formatter,
+            "dlt={} caplen={} wirelen={} {}",
+            frame.link_type,
+            frame.captured_length,
+            frame.original_length,
+            spaced_hex(frame.bytes())
+        )
+    }
+}
+
+pub(crate) fn write_stdout_line(arguments: fmt::Arguments<'_>) -> Result<(), CliError> {
     let rendered = style_human_line(&terminal_safe(&arguments.to_string()));
     write_human_stdout(&rendered, true)
 }
 
-pub(crate) fn write_plain_line(arguments: std::fmt::Arguments<'_>) -> Result<(), CliError> {
+/// The one line a text renderer ends with, naming what the command completed.
+///
+/// Success colour is a property of this call, not of the words the line
+/// happens to start with.
+pub(crate) fn write_summary_line(arguments: fmt::Arguments<'_>) -> Result<(), CliError> {
+    let rendered = style_summary_line(&terminal_safe(&arguments.to_string()));
+    write_human_stdout(&rendered, true)
+}
+
+pub(crate) fn write_plain_line(arguments: fmt::Arguments<'_>) -> Result<(), CliError> {
     let mut stdout = io::stdout().lock();
     stdout
         .write_fmt(arguments)
@@ -157,6 +242,39 @@ mod tests {
 
     fn plain(error: &CliError) -> String {
         anstream::adapter::strip_str(&render_human_error(error)).to_string()
+    }
+
+    /// Text and JSON name a severity one way. The CLI prints `as_str`, the
+    /// document serializes the same enum, and this pins them to each other.
+    #[test]
+    fn diagnostic_lines_spell_severity_exactly_as_the_document_does() {
+        for diagnostic in [
+            core::diagnostic::Diagnostic::info("decode.note", "a note"),
+            core::diagnostic::Diagnostic::warning("tcp.retransmission", "duplicate segment"),
+            core::diagnostic::Diagnostic::error("ipv4.checksum", "bad checksum"),
+        ] {
+            let severity = diagnostic.severity.as_str();
+            assert_eq!(
+                diagnostic_line(&diagnostic),
+                format!("{severity} {}: {}", diagnostic.code, diagnostic.message),
+            );
+            let document = serde_json::to_value(&diagnostic).expect("diagnostics serialize");
+            assert_eq!(
+                document.get("severity"),
+                Some(&serde_json::Value::from(severity)),
+            );
+        }
+    }
+
+    #[test]
+    fn spaced_hex_is_lowercase_and_exact() {
+        for (bytes, expected) in [
+            (&[][..], ""),
+            (&[0][..], "00"),
+            (&[0, 10, 171, 255][..], "00 0a ab ff"),
+        ] {
+            assert_eq!(spaced_hex(bytes).to_string(), expected);
+        }
     }
 
     #[test]

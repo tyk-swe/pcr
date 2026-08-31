@@ -13,13 +13,13 @@ mod rendering;
 use packetcraftr::{analysis, output};
 
 use self::arguments::Args;
-use super::super::errors::CliError;
-use super::super::input::open_capture;
 use super::format::ToolFormat;
-use super::offline_analysis::{StreamSelector, parse_stream_selector, prepare_with_tls_ports};
+use super::offline_analysis::{parse_stream_selector, prepare_with_tls_ports};
+use crate::errors::CliError;
+use crate::input::open_capture;
 use crate::rendering::StreamEncoder;
 
-use analysis::expert::StreamTransport;
+use analysis::StreamTransport;
 use analysis::tls::{Collector, Limits as TlsLimits, Status};
 use rendering::State;
 
@@ -109,7 +109,7 @@ impl SniPattern {
 pub(super) fn run(
     arguments: Args,
     format: output::contract::Format,
-    stream: &mut StreamEncoder,
+    stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     let format = ToolFormat::narrow(output::contract::Command::Tls, format)?;
     let selected_stream = arguments
@@ -150,7 +150,7 @@ pub(super) fn run(
         source.as_deref(),
         &arguments.tls_ports.ports,
     )?;
-    let mut reader = open_capture(&arguments.path, arguments.limits.capture)?;
+    let mut reader = open_capture(&arguments.path, arguments.limits.capture.reader_bounds())?;
 
     // Assembly consumes the reassembler's in-order deliveries.
     let options = prepared.options(true);
@@ -160,7 +160,9 @@ pub(super) fn run(
         &mut reader,
         prepared.registry.clone(),
         &options,
-        super::offline_analysis::ip_event_sink(format == ToolFormat::Ndjson, stream.clone()),
+        super::offline_analysis::ip_event_sink(
+            (format == ToolFormat::Ndjson).then(|| stream.clone()),
+        ),
         |record| {
             for event in collector.observe(&record) {
                 if selector.matches(&event.session) {
@@ -172,7 +174,7 @@ pub(super) fn run(
         },
     )
     .map_err(CliError::classified)?;
-    let (trailing, summary) = collector.finish(&run_summary.trailing_tcp_events);
+    let (trailing, summary) = collector.finish(&run_summary);
     for event in trailing {
         if selector.matches(&event.session) {
             rendering::render_session(format, event.session, &mut state, stream)?;
@@ -184,7 +186,7 @@ pub(super) fn run(
     if let Some(index) = selected_stream
         && run_summary.frames_matched == 0
     {
-        return Err(missing_stream_error(index, &arguments)?);
+        return Err(missing_stream_error(index, &arguments));
     }
 
     let summary = output::tls::Summary::from_analysis(
@@ -222,9 +224,9 @@ fn buffer_floor_error(value: usize) -> CliError {
 
 /// Parses `--stream`, rejecting the transports this command cannot assemble.
 fn parse_tcp_stream_selector(spec: &str) -> Result<u64, CliError> {
-    let StreamSelector { transport, index } = parse_stream_selector(spec)?;
-    match transport {
-        StreamTransport::Tcp => Ok(index),
+    let selected = parse_stream_selector(spec)?;
+    match selected.transport {
+        StreamTransport::Tcp => Ok(selected.index),
         StreamTransport::Udp => Err(CliError::new(
             Kind::Cli,
             format!(
@@ -239,21 +241,26 @@ fn parse_tcp_stream_selector(spec: &str) -> Result<u64, CliError> {
 ///
 /// Only reached when the selector matched nothing, so the second read costs
 /// nothing on the path that works.
-fn missing_stream_error(index: u64, arguments: &Args) -> Result<CliError, CliError> {
-    let streams = count_tcp_streams(arguments)?;
-    Ok(CliError::new(
-        Kind::Cli,
-        match streams {
-            0 => format!("--stream tcp:{index} is not present (the capture has no TCP streams)"),
-            count => format!("--stream tcp:{index} is not present (0..{count})"),
-        },
-    ))
+fn missing_stream_error(index: u64, arguments: &Args) -> CliError {
+    match count_tcp_streams(arguments) {
+        Ok(0) => CliError::new(
+            Kind::Cli,
+            format!("--stream tcp:{index} is not present (the capture has no TCP streams)"),
+        ),
+        Ok(count) => CliError::new(
+            Kind::Cli,
+            format!("--stream tcp:{index} is not present (0..{count})"),
+        ),
+        // The second read failed where the first succeeded; report why rather
+        // than the selector, which is no longer the known cause.
+        Err(error) => error,
+    }
 }
 
 /// Counts the capture's TCP conversations, which are indexed before filtering.
 fn count_tcp_streams(arguments: &Args) -> Result<u64, CliError> {
     let prepared = prepare_with_tls_ports(arguments.limits, None, &arguments.tls_ports.ports)?;
-    let mut reader = open_capture(&arguments.path, arguments.limits.capture)?;
+    let mut reader = open_capture(&arguments.path, arguments.limits.capture.reader_bounds())?;
     let options = prepared.options(false);
     let mut highest = None;
     analysis::run(&mut reader, prepared.registry.clone(), &options, |record| {
@@ -273,7 +280,7 @@ mod tests {
     #[test]
     fn the_buffer_floor_error_quotes_the_per_direction_buffer() {
         let error = buffer_floor_error(1_024);
-        assert_eq!(error.exit_code, 2);
+        assert_eq!(error.exit_code(), 2);
         assert!(
             error.message.contains("--max-tls-buffer-bytes=1024"),
             "{}",

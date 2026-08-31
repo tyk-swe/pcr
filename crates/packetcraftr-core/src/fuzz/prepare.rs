@@ -16,23 +16,33 @@ use crate::{
     registry::Registry,
 };
 
-use super::super::MAX_TARGET_FIELDS;
-use super::super::error::{Error, duration_limit};
-use super::super::execution::case_seed;
-
-use super::super::run::ResolvedField;
+use super::MAX_TARGET_FIELDS;
 use super::decode::dissect_built;
-use super::value::{bounded_value_size, index_from, mutation_value, shrink_values};
+use super::error::{Error, duration_limit};
+use super::mutation::{bounded_value_size, index_from, mutation_value, shrink_values};
+use super::report::{Case, CaseFailure, CaseOutcome, Mutation};
+use super::request::{Limits, Request, Strategy, Target};
+use super::rng::case_seed;
 
-pub(in crate::fuzz) fn prepare_with_events<F>(
-    request: &super::super::request::Request,
+/// One reflectively readable field a campaign may mutate, resolved against the
+/// base packet once so every case reuses the same schema answers.
+#[derive(Clone)]
+pub(super) struct ResolvedField {
+    pub(super) target: Target,
+    pub(super) protocol: String,
+    pub(super) kind: FieldKind,
+    pub(super) is_derived: bool,
+}
+
+pub(super) fn prepare_with_events<F>(
+    request: &Request,
     packet: Packet,
     registry: Arc<Registry>,
     deadline: &mut Deadline,
     emit: &mut F,
 ) -> Result<PreparedCases, Error>
 where
-    F: FnMut(super::super::result::Case, &Deadline) -> Result<(), Error>,
+    F: FnMut(Case, &Deadline) -> Result<(), Error>,
 {
     deadline
         .start_accounting(Duration::ZERO)
@@ -67,10 +77,9 @@ where
         builder: &builder,
         dissector: &dissector,
     };
-    let campaign = prepare_cases(&inputs, deadline, emit)?;
-    deadline
-        .account(started.elapsed())
-        .map_err(duration_limit)?;
+    let mut campaign = prepare_cases(&inputs, deadline, emit)?;
+    campaign.elapsed = started.elapsed();
+    deadline.account(campaign.elapsed).map_err(duration_limit)?;
     Ok(campaign)
 }
 
@@ -81,16 +90,19 @@ struct Counters {
     retained_bytes: u64,
 }
 
-pub(in crate::fuzz) struct PreparedCases {
-    pub(in crate::fuzz) built_case_count: u64,
-    pub(in crate::fuzz) built_byte_count: u64,
+pub(super) struct PreparedCases {
+    pub(super) built_case_count: u64,
+    pub(super) built_byte_count: u64,
+    /// How long generation took. This is the duration charged against the
+    /// campaign deadline, and it is what the campaign publishes as elapsed.
+    pub(super) elapsed: Duration,
 }
 
 struct CaseInputs<'a> {
-    request: &'a super::super::request::Request,
+    request: &'a Request,
     packet: &'a Packet,
     fields: &'a [ResolvedField],
-    compatible_mutations: &'a [(super::super::request::Strategy, usize)],
+    compatible_mutations: &'a [(Strategy, usize)],
     builder: &'a Builder,
     dissector: &'a Dissector,
 }
@@ -101,7 +113,7 @@ fn prepare_cases<F>(
     emit: &mut F,
 ) -> Result<PreparedCases, Error>
 where
-    F: FnMut(super::super::result::Case, &Deadline) -> Result<(), Error>,
+    F: FnMut(Case, &Deadline) -> Result<(), Error>,
 {
     let mut counters = Counters::default();
     for offset in 0..inputs.request.cases {
@@ -112,6 +124,7 @@ where
     Ok(PreparedCases {
         built_case_count: counters.built_cases,
         built_byte_count: counters.built_bytes,
+        elapsed: Duration::ZERO,
     })
 }
 
@@ -119,10 +132,10 @@ fn prepare_case(
     inputs: &CaseInputs<'_>,
     offset: usize,
     counters: &mut Counters,
-) -> Result<super::super::result::Case, Error> {
+) -> Result<Case, Error> {
     let request = inputs.request;
     let compatible_mutations = inputs.compatible_mutations;
-    let total_byte_limit = request.limits.max_total_bytes as u64;
+    let total_byte_limit = total_byte_limit(request.limits);
     let index = request
         .first_case
         .checked_add(offset as u64)
@@ -158,7 +171,7 @@ fn prepare_case(
         strategy_round,
         request.limits,
     );
-    let mutation = super::super::result::Mutation {
+    let mutation = Mutation {
         layer: field.target.layer,
         protocol: field.protocol.clone(),
         field: field.target.field.clone(),
@@ -198,11 +211,11 @@ fn new_case(
     operation_seed: u64,
     index: u64,
     seed: u64,
-    mutation: super::super::result::Mutation,
+    mutation: Mutation,
     shrink_values: Vec<FieldValue>,
     recipe: Packet,
-) -> super::super::result::Case {
-    super::super::result::Case {
+) -> Case {
+    Case {
         operation_seed,
         index,
         seed,
@@ -211,14 +224,14 @@ fn new_case(
         recipe,
         built: None,
         decoded: None,
-        outcome: super::super::result::CaseOutcome::Rejected,
+        outcome: CaseOutcome::Rejected,
         error: None,
         diagnostics: Vec::new(),
     }
 }
 
-fn mutation_failure(source: impl std::fmt::Display) -> super::super::result::CaseFailure {
-    super::super::result::CaseFailure::new(
+fn mutation_failure(source: impl std::fmt::Display) -> CaseFailure {
+    CaseFailure::new(
         format!("mutation was rejected: {source}"),
         Classification::new(
             "packet.fuzz_mutation",
@@ -232,8 +245,8 @@ fn mutation_failure(source: impl std::fmt::Display) -> super::super::result::Cas
 }
 
 fn build_case(
-    case: &mut super::super::result::Case,
-    request: &super::super::request::Request,
+    case: &mut Case,
+    request: &Request,
     builder: &Builder,
     dissector: &Dissector,
     counters: &mut Counters,
@@ -241,7 +254,7 @@ fn build_case(
 ) -> Result<(), Error> {
     match builder.build(
         case.recipe.clone(),
-        crate::build::Context::default(),
+        crate::codec::Context::default(),
         request.build.clone(),
     ) {
         Ok(built) => {
@@ -268,7 +281,7 @@ fn build_case(
                 )?;
             }
             case.built = Some(built);
-            case.outcome = super::super::result::CaseOutcome::Built;
+            case.outcome = CaseOutcome::Built;
             #[expect(
                 clippy::arithmetic_side_effects,
                 reason = "a u64 case counter cannot reach u64::MAX from the validated case budget"
@@ -279,7 +292,7 @@ fn build_case(
             counters.built_bytes = next_built_bytes;
         }
         Err(source) => {
-            case.error = Some(super::super::result::CaseFailure::new(
+            case.error = Some(CaseFailure::new(
                 format!("mutated packet was rejected: {source}"),
                 Classification::new(
                     "packet.fuzz_build",
@@ -323,12 +336,12 @@ fn validate_base_shape(packet: &Packet, max_layers: usize) -> Result<(), Error> 
 }
 
 fn retained_case_value_bytes(
-    mutation: &super::super::result::Mutation,
+    mutation: &Mutation,
     shrink_values: &[FieldValue],
     recipe: &Packet,
-    limits: super::super::request::Limits,
+    limits: Limits,
 ) -> Result<u64, Error> {
-    let limit = limits.max_total_bytes as u64;
+    let limit = total_byte_limit(limits);
     let mut total = (mutation.protocol.len() as u64)
         .checked_add(mutation.field.len() as u64)
         .ok_or(byte_limit(u64::MAX, limit))?;
@@ -336,42 +349,48 @@ fn retained_case_value_bytes(
         .chain(std::iter::once(&mutation.value))
         .chain(shrink_values)
     {
-        let remaining = limits
-            .max_total_bytes
-            .saturating_sub(usize::try_from(total).unwrap_or(usize::MAX));
-        let size = bounded_value_size(value, remaining, limits.max_list_items, 0)
-            .ok_or(byte_limit(limit.saturating_add(1), limit))?;
-        total = total
-            .checked_add(size as u64)
-            .ok_or(byte_limit(u64::MAX, limit))?;
+        total = charge_value(total, value, limits)?;
     }
     total
         .checked_add(packet_reflected_value_bytes(recipe, limits)?)
         .ok_or(byte_limit(u64::MAX, limit))
 }
 
-fn packet_reflected_value_bytes(
-    packet: &Packet,
-    limits: super::super::request::Limits,
-) -> Result<u64, Error> {
+fn packet_reflected_value_bytes(packet: &Packet, limits: Limits) -> Result<u64, Error> {
     let mut total = 0_u64;
-    let limit = limits.max_total_bytes as u64;
     for layer in packet.iter() {
         for field in layer.schema().fields {
             let Some(value) = layer.field(field.name) else {
                 continue;
             };
-            let remaining = limits
-                .max_total_bytes
-                .saturating_sub(usize::try_from(total).unwrap_or(usize::MAX));
-            let size = bounded_value_size(&value, remaining, limits.max_list_items, 0)
-                .ok_or(byte_limit(limit.saturating_add(1), limit))?;
-            total = total
-                .checked_add(size as u64)
-                .ok_or(byte_limit(u64::MAX, limit))?;
+            total = charge_value(total, &value, limits)?;
         }
     }
     Ok(total)
+}
+
+/// Adds one reflected value's retained size to a running total.
+///
+/// The value is measured against what the total-byte budget still allows, so
+/// an oversized value is refused by its own limit rather than folded into a
+/// byte count nobody can act on.
+fn charge_value(total: u64, value: &FieldValue, limits: Limits) -> Result<u64, Error> {
+    let limit = total_byte_limit(limits);
+    let remaining = limits
+        .max_total_bytes
+        .saturating_sub(usize::try_from(total).unwrap_or(usize::MAX));
+    let size = bounded_value_size(value, remaining, limits.max_list_items).ok_or(
+        Error::ValueTooLarge {
+            limit: limits.max_total_bytes,
+        },
+    )?;
+    total
+        .checked_add(u64::try_from(size).unwrap_or(u64::MAX))
+        .ok_or(byte_limit(u64::MAX, limit))
+}
+
+fn total_byte_limit(limits: Limits) -> u64 {
+    u64::try_from(limits.max_total_bytes).unwrap_or(u64::MAX)
 }
 
 fn charge_retained_bytes(total: &mut u64, value: u64, limit: u64) -> Result<(), Error> {
@@ -389,10 +408,7 @@ fn byte_limit(actual: u64, limit: u64) -> Error {
     Error::ByteLimit { actual, limit }
 }
 
-fn resolve_fields(
-    packet: &Packet,
-    requested: &[super::super::request::Target],
-) -> Result<Vec<ResolvedField>, Error> {
+fn resolve_fields(packet: &Packet, requested: &[Target]) -> Result<Vec<ResolvedField>, Error> {
     if requested.is_empty() {
         let mut fields = Vec::new();
         for (layer_index, layer) in packet.iter().enumerate() {
@@ -408,7 +424,7 @@ fn resolve_fields(
                     });
                 }
                 fields.push(ResolvedField {
-                    target: super::super::request::Target {
+                    target: Target {
                         layer: layer_index,
                         field: field.name.to_owned(),
                     },
@@ -471,10 +487,10 @@ fn resolve_fields(
     Ok(fields)
 }
 
-fn strategy_compatible(strategy: super::super::request::Strategy, field: &ResolvedField) -> bool {
+fn strategy_compatible(strategy: Strategy, field: &ResolvedField) -> bool {
     match strategy {
-        super::super::request::Strategy::Boundary | super::super::request::Strategy::Random => true,
-        super::super::request::Strategy::BitFlip => field.kind == FieldKind::Bytes,
-        super::super::request::Strategy::Malformed => field.is_derived,
+        Strategy::Boundary | Strategy::Random => true,
+        Strategy::BitFlip => field.kind == FieldKind::Bytes,
+        Strategy::Malformed => field.is_derived,
     }
 }

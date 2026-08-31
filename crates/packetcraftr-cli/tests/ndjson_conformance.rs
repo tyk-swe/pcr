@@ -229,7 +229,7 @@ fn fuzz_cases() -> (core::fuzz::Case, packetcraftr::fuzz::Case) {
         targets: vec!["0.bytes".parse().expect("raw fuzz target")],
         ..core::fuzz::Request::default()
     };
-    let registry = Arc::new(core::protocol::builtin::registry().expect("built-in registry"));
+    let registry = core::protocol::builtin::registry();
     let case = core::fuzz::run(&request, packet, registry)
         .expect("offline fuzz fixture")
         .cases
@@ -245,7 +245,7 @@ fn sent_packet() -> packetcraftr::SentPacket {
 
     let mut packet = core::Packet::new();
     packet.push(core::layer::Raw::new(vec![0_u8]));
-    let registry = Arc::new(core::protocol::builtin::registry().expect("built-in registry"));
+    let registry = core::protocol::builtin::registry();
     let built = core::build::Builder::new(registry)
         .build(
             packet,
@@ -291,7 +291,8 @@ fn sent_packet() -> packetcraftr::SentPacket {
 
 #[test]
 fn production_typed_event_variants_are_schema_valid() {
-    let read = output::read::Event::try_from_frame(1, frame(&[1])).unwrap();
+    let read =
+        output::read::Event::Frame(output::read::Frame::try_from_frame(1, frame(&[1])).unwrap());
     validate_typed_event(output::contract::Command::Read, read, Vec::new());
     let capture = output::capture::Event::try_from_frame(1, frame(&[1])).unwrap();
     validate_typed_event(output::contract::Command::Capture, capture, Vec::new());
@@ -299,7 +300,7 @@ fn production_typed_event_variants_are_schema_valid() {
         output::contract::Command::Replay,
         output::replay::Frame {
             source_index: 1,
-            interface: output::replay::Interface {
+            interface: output::replay::InterfaceId {
                 name: "fixture0".to_owned(),
                 index: 1,
             },
@@ -432,7 +433,7 @@ fn validate_ip_event_stream<T: serde::Serialize>(command: output::contract::Comm
 fn ip_reassembly_events_and_terminal_reports_are_valid_for_every_offline_stream() {
     validate_ip_event_stream(
         output::contract::Command::Follow,
-        output::follow::Result {
+        output::follow::Report {
             transport: output::expert::StreamTransport::Udp,
             stream: 0,
             client: None,
@@ -447,7 +448,7 @@ fn ip_reassembly_events_and_terminal_reports_are_valid_for_every_offline_stream(
     );
     validate_ip_event_stream(
         output::contract::Command::Expert,
-        output::expert::Result {
+        output::expert::Report {
             frames_read: 0,
             frames_matched: 0,
             errors: 0,
@@ -576,7 +577,6 @@ fn validate_dns_event_variants() {
         },
         packetcraftr::dns::Event::Undecoded(packetcraftr::dns::UndecodedEvidence {
             attempt: 1,
-            transport: packetcraftr::dns::Transport::Udp,
             frame: frame(&[4]),
         }),
         packetcraftr::dns::Event::Diagnostic(core::diagnostic::Diagnostic::warning(
@@ -720,6 +720,7 @@ fn cleanup_failure_augments_the_primary_error_at_the_next_position() {
     .unwrap();
     let cleanup = packetcraftr::netio::Error::Capture {
         message: "cleanup failure".to_owned(),
+        source: None,
     };
     // Composed by the renderer under test rather than restated here, so the
     // record covers what `CliError::with_cleanup` actually produces.

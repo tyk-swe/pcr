@@ -11,10 +11,14 @@ use crate::{
     registry::Discriminator,
 };
 
-use super::super::common::{
-    ValueExpectation, aliased_fields, invalid, make_layer, payload_without_padding, protocol,
-    resolve_fixed, truncated, wrong_layer,
+use crate::protocol::common::{
+    ValueExpectation, invalid, make_layer, payload_without_padding, protocol, resolve_fixed,
+    truncated, typed_layer,
 };
+
+use crate::protocol::BuiltinProtocol;
+
+const NAME: &str = BuiltinProtocol::Sctp.as_str();
 
 const SCTP_HEADER_LEN: usize = 12;
 const CHUNK_HEADER_LEN: usize = 4;
@@ -41,19 +45,19 @@ impl Default for Sctp {
 }
 
 reflective_layer! {
-    fn sctp_schema() => { protocol: protocol("sctp"), name: "SCTP" }
+    fn sctp_schema() => { protocol: protocol(NAME), name: "SCTP" }
     impl Sctp {
-        "source_port" => {
+        "source_port" | "sport" => {
             kind: Unsigned, derived: false, required: true, description: "SCTP source port",
             reflect: source_port,
             layout: (0, 2)
         },
-        "destination_port" => {
+        "destination_port" | "dport" => {
             kind: Unsigned, derived: false, required: true, description: "SCTP destination port",
             reflect: destination_port,
             layout: (2, 4)
         },
-        "verification_tag" => {
+        "verification_tag" | "vtag" => {
             kind: Unsigned, derived: false, required: true, description: "SCTP verification tag",
             reflect: verification_tag,
             layout: (4, 8)
@@ -71,8 +75,8 @@ reflective_layer! {
 pub(crate) struct SctpCodec;
 
 impl LayerCodec for SctpCodec {
-    fn protocol_id(&self) -> crate::layer::Id {
-        protocol("sctp")
+    fn protocol_id(&self) -> &'static crate::layer::Id {
+        &sctp_schema().protocol
     }
 
     fn encode(
@@ -81,10 +85,7 @@ impl LayerCodec for SctpCodec {
         payload: &[u8],
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
-        let layer = layer
-            .as_any()
-            .downcast_ref::<Sctp>()
-            .ok_or_else(|| wrong_layer("sctp", layer))?;
+        let layer = typed_layer::<Sctp>(NAME, layer)?;
         let mut diagnostics = Vec::new();
         validate_port("source_port", layer.source_port, context, &mut diagnostics)?;
         validate_port(
@@ -94,10 +95,10 @@ impl LayerCodec for SctpCodec {
             &mut diagnostics,
         )?;
 
-        let covered_payload = payload_without_padding("sctp", payload, context)?;
+        let covered_payload = payload_without_padding(NAME, payload, context)?;
         if let Err(message) = validate_chunks(covered_payload, true) {
-            if context.mode == crate::build::Mode::Strict {
-                return Err(invalid("sctp", message));
+            if context.mode == crate::codec::Mode::Strict {
+                return Err(invalid(NAME, message));
             }
             diagnostics.push(Diagnostic::warning("build.sctp_chunks", message));
         }
@@ -108,7 +109,7 @@ impl LayerCodec for SctpCodec {
         header[4..8].copy_from_slice(&layer.verification_tag.to_be_bytes());
         let expected_checksum = crc32c_parts(&[&header, covered_payload]);
         let (checksum, materialized_checksum) = resolve_fixed(
-            "sctp",
+            NAME,
             "checksum",
             &layer.checksum,
             ValueExpectation::Required(expected_checksum),
@@ -120,13 +121,11 @@ impl LayerCodec for SctpCodec {
 
         let mut materialized = layer.clone();
         materialized.checksum = materialized_checksum;
-        Ok(EncodedLayer {
-            prefix: header.to_vec(),
-            suffix: Vec::new(),
-            materialized: Box::new(materialized),
-            fields: sctp_layout(),
-            diagnostics,
-        })
+        Ok(
+            EncodedLayer::header(header.to_vec(), Box::new(materialized))
+                .with_fields(sctp_layout())
+                .with_diagnostics(diagnostics),
+        )
     }
 
     fn decode(
@@ -135,10 +134,10 @@ impl LayerCodec for SctpCodec {
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
         let Some(header) = input.first_chunk::<SCTP_HEADER_LEN>() else {
-            return Err(truncated("sctp", SCTP_HEADER_LEN, input.len()));
+            return Err(truncated(NAME, SCTP_HEADER_LEN, input.len()));
         };
         let chunks = input.get(SCTP_HEADER_LEN..).unwrap_or_default();
-        validate_chunks(chunks, false).map_err(|message| invalid("sctp", message))?;
+        validate_chunks(chunks, false).map_err(|message| invalid(NAME, message))?;
 
         let source_port = u16::from_be_bytes([header[0], header[1]]);
         let destination_port = u16::from_be_bytes([header[2], header[3]]);
@@ -180,18 +179,7 @@ impl LayerCodec for SctpCodec {
         &self,
         fields: &BTreeMap<String, FieldValue>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(
-            Sctp::default(),
-            &aliased_fields(
-                "sctp",
-                fields,
-                &[
-                    ("sport", "source_port"),
-                    ("dport", "destination_port"),
-                    ("vtag", "verification_tag"),
-                ],
-            )?,
-        )
+        make_layer(Sctp::default(), fields)
     }
 }
 
@@ -205,8 +193,8 @@ fn validate_port(
         return Ok(());
     }
     let message = format!("{} must not be zero", field.replace('_', " "));
-    if context.mode == crate::build::Mode::Strict {
-        return Err(invalid("sctp", message));
+    if context.mode == crate::codec::Mode::Strict {
+        return Err(invalid(NAME, message));
     }
     diagnostics.push(Diagnostic::warning("build.sctp_zero_port", message).at_field(field));
     Ok(())

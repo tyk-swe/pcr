@@ -67,6 +67,7 @@ fn batch_execution(
             probes: vec![()],
             timeout: Duration::from_secs(1),
             permit,
+            sequence: 0,
         },
         crate::probe::runner::Execution {
             permit,
@@ -228,7 +229,7 @@ fn evidence_aggregate_validation_rejects_untimestamped_capture_evidence() {
 fn retained_undecoded_evidence_is_emitted_before_a_later_deadline_failure() {
     let mut retained_count = 0;
     let mut budget = crate::evidence::Budget::default();
-    let mut diagnostics = Vec::new();
+    let mut diagnostics = crate::evidence::DiagnosticLog::default();
     let mut emitted_diagnostic = Vec::new();
     let mut checks = 0;
 
@@ -258,7 +259,7 @@ fn retained_undecoded_evidence_is_emitted_before_a_later_deadline_failure() {
     assert_eq!(result, Err(()));
     assert_eq!(retained_count, 1);
     assert_eq!(emitted_diagnostic, [false, true]);
-    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics.as_slice().len(), 1);
 }
 
 fn raw_packet(bytes: &'static [u8]) -> Packet {

@@ -4,54 +4,42 @@
 use packetcraftr::core::error::Kind;
 
 use std::io::{self, Write};
-use std::time::Duration;
 
 use packetcraftr::{
     analysis::pcap::{
         self as capture, Interface, Limits, PcapNgOptions, PcapOptions, TimestampResolution, Writer,
     },
-    core, netio as net, output,
+    netio as net, output,
 };
 
 use packetcraftr::policy::CaptureBudget;
 
-use super::execution::{self, shutdown_after_error};
+use super::execution::{self, Session, shutdown_after_error};
 use crate::errors::CliError;
-use crate::filtering::FrameSelector;
 use crate::rendering::{
-    SourceCaptureWriter, StreamEncoder, capture_file_format, captured_frame_text,
-    emit_stderr_message, render_diagnostics_text, write_plain_line, write_stdout_line,
+    SourceCaptureWriter, StreamEncoder, captured_frame_text, render_diagnostics_stderr,
+    render_diagnostics_text, stdout_error, stream_capture_error, write_plain_line,
+    write_stdout_line, write_summary_line,
 };
 
 pub(super) fn render_text<C: net::capture::Session>(
-    capture: C,
-    timeout: Duration,
-    limits: net::capture::Limits,
-    budget: CaptureBudget,
-    selector: Option<&FrameSelector>,
+    session: Session<'_, C>,
 ) -> Result<(), CliError> {
-    let outcome = execution::run(
-        capture,
-        timeout,
-        limits,
-        budget,
-        selector,
-        |frame, source_frame| {
-            let frame =
-                output::frame::Captured::try_from_frame(frame).map_err(CliError::classified)?;
-            write_stdout_line(format_args!(
-                "{source_frame}: {}",
-                captured_frame_text(&frame)
-            ))
-        },
-    )?;
-    if selector.is_some() {
+    let filtered = session.selector.is_some();
+    let outcome = execution::run(session, |frame, source_frame| {
+        let frame = output::frame::Captured::try_from_frame(frame).map_err(CliError::classified)?;
         write_stdout_line(format_args!(
+            "{source_frame}: {}",
+            captured_frame_text(&frame)
+        ))
+    })?;
+    if filtered {
+        write_summary_line(format_args!(
             "matched {} of {} captured frame(s), {} byte(s)",
             outcome.stats.packets_completed, outcome.stats.packets_attempted, outcome.stats.bytes
         ))?;
     } else {
-        write_stdout_line(format_args!(
+        write_summary_line(format_args!(
             "captured {} frame(s), {} byte(s)",
             outcome.stats.packets_completed, outcome.stats.bytes
         ))?;
@@ -60,39 +48,24 @@ pub(super) fn render_text<C: net::capture::Session>(
 }
 
 pub(super) fn render_hex<C: net::capture::Session>(
-    capture: C,
-    timeout: Duration,
-    limits: net::capture::Limits,
-    budget: CaptureBudget,
-    selector: Option<&FrameSelector>,
+    session: Session<'_, C>,
 ) -> Result<(), CliError> {
-    let outcome = execution::run(capture, timeout, limits, budget, selector, |frame, _| {
+    let outcome = execution::run(session, |frame, _| {
         let frame = output::frame::Captured::try_from_frame(frame).map_err(CliError::classified)?;
         write_plain_line(format_args!("{}", frame.bytes_hex()))
     })?;
-    render_diagnostics(&outcome.diagnostics)
+    render_diagnostics_stderr(&outcome.diagnostics)
 }
 
 pub(super) fn render_stream<C: net::capture::Session>(
-    capture: C,
-    timeout: Duration,
-    limits: net::capture::Limits,
-    budget: CaptureBudget,
-    selector: Option<&FrameSelector>,
-    stream: &mut StreamEncoder,
+    session: Session<'_, C>,
+    stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    let outcome = execution::run(
-        capture,
-        timeout,
-        limits,
-        budget,
-        selector,
-        |frame, source_frame| {
-            let event = output::capture::Event::try_from_frame(source_frame, frame)
-                .map_err(CliError::classified)?;
-            Ok(stream.emit_data(event, Vec::new())?)
-        },
-    )?;
+    let outcome = execution::run(session, |frame, source_frame| {
+        let event = output::capture::Event::try_from_frame(source_frame, frame)
+            .map_err(CliError::classified)?;
+        Ok(stream.emit_data(event, Vec::new())?)
+    })?;
     Ok(stream.complete_with_stats(
         output::capture::Event::Complete,
         outcome.diagnostics,
@@ -101,36 +74,30 @@ pub(super) fn render_stream<C: net::capture::Session>(
 }
 
 pub(super) fn render_capture<C: net::capture::Session>(
-    mut capture: C,
-    format: output::contract::Format,
-    timeout: Duration,
-    limits: net::capture::Limits,
-    budget: CaptureBudget,
-    selector: Option<&FrameSelector>,
+    mut session: Session<'_, C>,
+    format: capture::Format,
 ) -> Result<(), CliError> {
-    let format = match capture_file_format(format) {
-        Ok(format) => format,
-        Err(error) => return Err(shutdown_after_error(&mut capture, error)),
-    };
-    let source_id = Some(capture.metadata().interface.index);
+    let source_id = Some(session.capture.metadata().interface.index);
     let stdout = io::stdout();
-    let (mut writer, description) =
-        match initialize_writer(stdout.lock(), format, capture.metadata(), budget) {
-            Ok(initialized) => initialized,
-            Err(error) => return Err(shutdown_after_error(&mut capture, error)),
-        };
-    let outcome = execution::run(capture, timeout, limits, budget, selector, |frame, _| {
+    let (mut writer, description) = match initialize_writer(
+        stdout.lock(),
+        format,
+        session.capture.metadata(),
+        session.budget,
+    ) {
+        Ok(initialized) => initialized,
+        Err(error) => return Err(shutdown_after_error(&mut session.capture, error)),
+    };
+    let outcome = execution::run(session, |frame, _| {
         writer
             .write_source_frame(source_id, description.clone(), frame)
-            .map_err(|source| {
-                CliError::new(Kind::Io, format!("write capture output failed: {source}"))
-            })
+            .map_err(|source| stream_capture_error("write capture output failed", source))
     })?;
     writer
         .into_inner()
         .flush()
-        .map_err(|source| CliError::new(Kind::Io, format!("write stdout failed: {source}")))?;
-    render_diagnostics(&outcome.diagnostics)
+        .map_err(|source| stdout_error("flush stdout failed", source))?;
+    render_diagnostics_stderr(&outcome.diagnostics)
 }
 
 fn initialize_writer<W: Write>(
@@ -144,11 +111,16 @@ fn initialize_writer<W: Write>(
             "initialize capture output failed: backend snapshot length exceeds the capture-file domain",
         )
     })?;
+
     let description = Interface {
         link_type: metadata.link_type,
         snap_len,
         timestamp_resolution: TimestampResolution::Decimal(9),
         timestamp_offset: 0,
+    };
+    let stream_limits = Limits {
+        max_frames: budget.max_frames(),
+        max_bytes: budget.max_bytes(),
     };
     let writer = match format {
         capture::Format::Pcap => Writer::pcap_with_options(
@@ -157,6 +129,7 @@ fn initialize_writer<W: Write>(
             PcapOptions {
                 snap_len: metadata.snap_length,
                 max_size: metadata.snap_length,
+                stream_limits,
                 ..PcapOptions::default()
             },
         ),
@@ -164,31 +137,16 @@ fn initialize_writer<W: Write>(
             destination,
             PcapNgOptions {
                 max_size: pcapng_max_size(metadata.snap_length)?,
+                stream_limits,
                 ..PcapNgOptions::default()
             },
         ),
     }
-    .map_err(|source| {
-        CliError::new(
-            Kind::Io,
-            format!("initialize capture output failed: {source}"),
-        )
-    })?;
+    .map_err(|source| stream_capture_error("initialize capture output failed", source))?;
     let mut writer = SourceCaptureWriter::new(writer);
     writer
         .add_source_interface(Some(metadata.interface.index), description.clone())
-        .map_err(|source| {
-            CliError::new(
-                Kind::Io,
-                format!("initialize capture output failed: {source}"),
-            )
-        })?;
-    writer
-        .set_stream_limits(Limits {
-            max_frames: budget.max_frames(),
-            max_bytes: budget.max_bytes(),
-        })
-        .map_err(CliError::classified)?;
+        .map_err(|source| stream_capture_error("initialize capture output failed", source))?;
     Ok((writer, description))
 }
 
@@ -200,16 +158,6 @@ fn pcapng_max_size(snap_length: usize) -> Result<usize, CliError> {
     })
 }
 
-fn render_diagnostics(diagnostics: &[core::diagnostic::Diagnostic]) -> Result<(), CliError> {
-    for diagnostic in diagnostics {
-        emit_stderr_message(&format!(
-            "{:?} {}: {}",
-            diagnostic.severity, diagnostic.code, diagnostic.message
-        ))?;
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
@@ -217,13 +165,14 @@ mod tests {
     use std::collections::VecDeque;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::time::UNIX_EPOCH;
+    use std::time::{Duration, UNIX_EPOCH};
 
+    use packetcraftr::core;
     use packetcraftr::core::frame::{Frame, LinkType};
     use serde_json::Value;
 
     use super::*;
-    use crate::filtering::{self, Capabilities};
+    use crate::filtering::{self, Capabilities, FrameSelector};
     use crate::rendering::ndjson_test_support::{assert_contiguous, stream};
 
     struct FakeSession {
@@ -348,14 +297,16 @@ mod tests {
     #[test]
     fn capture_stream_success_is_contiguous_and_terminal() {
         let (limits, budget) = settings();
-        let (mut stream, output) = stream(output::contract::Command::Capture);
+        let (stream, output) = stream(output::contract::Command::Capture);
         render_stream(
-            FakeSession::with_frames(2),
-            Duration::from_secs(1),
-            limits,
-            budget,
-            None,
-            &mut stream,
+            Session {
+                capture: FakeSession::with_frames(2),
+                timeout: Duration::from_secs(1),
+                limits,
+                budget,
+                selector: None,
+            },
+            &stream,
         )
         .expect("fake capture succeeds");
 
@@ -374,23 +325,23 @@ mod tests {
 
     #[test]
     fn capture_selector_preserves_the_retained_source_frame() {
-        let registry = Arc::new(
-            core::protocol::builtin::registry().expect("built-in registry must initialize"),
-        );
+        let registry = core::protocol::builtin::registry();
         let filter =
             filtering::compile("frame.number == 3", &registry, Capabilities::frames_only())
                 .expect("frame-number selector must compile");
         let selector = FrameSelector::new(registry, filter, 1);
         let (limits, budget) = settings();
-        let (mut stream, output) = stream(output::contract::Command::Capture);
+        let (stream, output) = stream(output::contract::Command::Capture);
 
         render_stream(
-            FakeSession::with_frames(3),
-            Duration::from_secs(1),
-            limits,
-            budget,
-            Some(&selector),
-            &mut stream,
+            Session {
+                capture: FakeSession::with_frames(3),
+                timeout: Duration::from_secs(1),
+                limits,
+                budget,
+                selector: Some(&selector),
+            },
+            &stream,
         )
         .expect("filtered fake capture succeeds");
 
@@ -414,15 +365,17 @@ mod tests {
         let limits = net::capture::Limits::default();
         let capture = FakeSession::with_frames(4);
         let shutdowns = Arc::clone(&capture.shutdowns);
-        let (mut stream, output) = stream(output::contract::Command::Capture);
+        let (stream, output) = stream(output::contract::Command::Capture);
 
         let error = render_stream(
-            capture,
-            Duration::from_secs(1),
-            limits,
-            budget(8, 2),
-            None,
-            &mut stream,
+            Session {
+                capture,
+                timeout: Duration::from_secs(1),
+                limits,
+                budget: budget(8, 2),
+                selector: None,
+            },
+            &stream,
         )
         .expect_err("the byte budget must stop the capture");
 
@@ -443,15 +396,17 @@ mod tests {
         let limits = net::capture::Limits::default();
         let capture = FakeSession::with_frames(4);
         let shutdowns = Arc::clone(&capture.shutdowns);
-        let (mut stream, output) = stream(output::contract::Command::Capture);
+        let (stream, output) = stream(output::contract::Command::Capture);
 
         render_stream(
-            capture,
-            Duration::from_secs(1),
-            limits,
-            budget(1, 64),
-            None,
-            &mut stream,
+            Session {
+                capture,
+                timeout: Duration::from_secs(1),
+                limits,
+                budget: budget(1, 64),
+                selector: None,
+            },
+            &stream,
         )
         .expect("a spent frame budget is a normal end");
 
@@ -479,20 +434,22 @@ mod tests {
 
         let capture = FakeSession::with_frames(1);
         let shutdowns = Arc::clone(&capture.shutdowns);
-        let (mut stream, output) = stream(output::contract::Command::Capture);
+        let (stream, output) = stream(output::contract::Command::Capture);
 
         let error = render_stream(
-            capture,
-            Duration::from_secs(1),
-            limits,
-            budget,
-            None,
-            &mut stream,
+            Session {
+                capture,
+                timeout: Duration::from_secs(1),
+                limits,
+                budget,
+                selector: None,
+            },
+            &stream,
         )
         .expect_err("the next byte cannot be charged");
 
         assert_eq!(error.classification.code, "policy.byte_limit");
-        assert_ne!(error.exit_code, 70);
+        assert_ne!(error.exit_code(), 70);
         assert_eq!(shutdowns.load(Ordering::Relaxed), 1);
         assert!(output.records().is_empty());
     }
@@ -503,19 +460,23 @@ mod tests {
         let mut capture = FakeSession::with_frames(2);
         capture.frames.push_back(Err(net::Error::Capture {
             message: "primary receive failure".to_owned(),
+            source: None,
         }));
         capture.shutdown_error = Some(net::Error::Capture {
             message: "cleanup failure".to_owned(),
+            source: None,
         });
-        let (mut stream, output) = stream(output::contract::Command::Capture);
+        let (stream, output) = stream(output::contract::Command::Capture);
 
         let error = render_stream(
-            capture,
-            Duration::from_secs(1),
-            limits,
-            budget,
-            None,
-            &mut stream,
+            Session {
+                capture,
+                timeout: Duration::from_secs(1),
+                limits,
+                budget,
+                selector: None,
+            },
+            &stream,
         )
         .expect_err("fake capture fails after two records");
         let primary_code = error.classification.code;

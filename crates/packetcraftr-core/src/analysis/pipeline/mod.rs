@@ -5,10 +5,10 @@
 //! loop shared by the offline analysis commands.
 
 use std::io::Read;
-use std::mem::size_of;
 use std::sync::Arc;
+use std::time::SystemTime;
 
-use crate::analysis::pcap::{Error as CaptureError, Reader};
+use crate::analysis::pcap::Reader;
 use crate::budget::Deadline;
 use crate::decode::{DecodedPacket, Dissector};
 use crate::filter::{Context as FilterContext, DerivedPacket as FilterDerivedPacket};
@@ -16,17 +16,17 @@ use crate::registry::Registry;
 
 use crate::analysis::Error;
 use crate::analysis::adapter::{
-    ip_fragments, ip_fragments_in_scope, replayed_ip_prefix_layers, tcp_segment, transports,
-    udp_flow,
+    TcpTransport, UdpTransport, ip_fragments, ip_fragments_in_scope, replayed_ip_prefix_layers,
+    tcp_segment, transports, udp_flow,
 };
 use crate::analysis::conversation_index::StreamIndex;
-use crate::analysis::reassembly::Limits as ReassemblyLimits;
 use crate::analysis::reassembly::ip::{
-    CompletedDatagram, DatagramKey, Error as IpReassemblyError, ResourceError as IpResourceError,
+    CompletedDatagram, DatagramKey, ResourceError as IpResourceError,
 };
 use crate::analysis::reassembly::tcp::{Event as TcpEvent, ScopedFlowKey};
 use crate::analysis::scope::{Interner, ScopeId};
 use crate::frame::{Frame, LinkType};
+use crate::protocol::transport::Tcp;
 
 mod clock;
 mod dispatch;
@@ -38,7 +38,6 @@ pub use ip::{
 };
 pub use limits::{Limits, Options};
 
-use clock::CaptureClock;
 use dispatch::ReassemblyDispatch;
 use ip::IpDispatch;
 
@@ -66,6 +65,10 @@ pub struct FrameRecord<'a> {
     /// 1-based position in the capture, counting unmatched frames too, so
     /// numbers agree with every other command reading the same file.
     pub number: u64,
+    /// The frame's capture timestamp, already validated as present by the
+    /// loop that read it. Every time-dependent consumer reads it from here
+    /// rather than re-deriving it and inventing its own failure case.
+    pub timestamp: SystemTime,
     pub decoded: &'a DecodedPacket,
     derived_datagrams: &'a [DerivedDatagram],
     /// Conversation index of the innermost TCP flow, when there is one.
@@ -83,6 +86,19 @@ pub struct FrameRecord<'a> {
     pub tcp_decoded: &'a DecodedPacket,
     /// Decoded view that supplied this record's innermost UDP transport.
     pub udp_decoded: &'a DecodedPacket,
+    /// Layer position of the innermost TCP header within `tcp_decoded`.
+    /// Present whenever the view carries TCP, even when the header is the
+    /// visible carrier of a fragmented child and so has no `tcp_flow`.
+    pub tcp_layer: Option<usize>,
+    /// The innermost TCP header within `tcp_decoded`, located once by the
+    /// pipeline. Present under the same condition as `tcp_layer`.
+    pub tcp_header: Option<&'a Tcp>,
+    /// Exact TCP stream bytes this frame carried, and 0 when it carried no
+    /// indexed TCP segment. Pure control segments legitimately carry none.
+    pub tcp_payload_len: usize,
+    /// Layer position of the innermost UDP header within `udp_decoded`,
+    /// under the same condition as `tcp_layer`.
+    pub udp_layer: Option<usize>,
 }
 
 impl FrameRecord<'_> {
@@ -103,7 +119,11 @@ impl FrameRecord<'_> {
 }
 
 /// Terminal counters and residue for a completed analysis run.
-#[derive(Clone, Debug)]
+///
+/// Every collector closes its pass with this one value, so the trailing
+/// events and the frame number a finding is attributed to cannot be supplied
+/// separately and cannot disagree.
+#[derive(Clone, Debug, Default)]
 pub struct Summary {
     pub frames_read: u64,
     pub frames_matched: u64,
@@ -175,28 +195,19 @@ where
         .unwrap_or(usize::MAX)
         .saturating_mul(3);
     let mut scopes = Interner::with_limit(scope_limit);
-    let mut reassembly_dispatch = ReassemblyDispatch::new(options.tcp_events, limits.max_flows);
-    let mut ip_dispatch = IpDispatch::new(
-        ReassemblyLimits {
-            max_ip_datagrams: limits.max_ip_datagrams,
-            max_ip_fragments_per_datagram: limits.max_ip_fragments_per_datagram,
-            max_ip_bytes_per_datagram: limits.max_ip_bytes_per_datagram,
-            max_ip_aggregate_bytes: limits.max_ip_reassembly_bytes,
-            max_ip_retained_outcomes: limits.max_ip_outcomes,
-            ip_idle_expiry: limits.ip_idle_expiry,
-            ..ReassemblyLimits::default()
-        },
-        options.ip_overlap,
-        limits.max_ip_outcomes,
-    );
-    let mut ip_clock = CaptureClock::new();
-    let mut tcp_clock = CaptureClock::new();
+    let mut reassembly_dispatch = ReassemblyDispatch::new(options.tcp_events, limits);
+    let mut ip_dispatch = IpDispatch::new(limits.ip_reassembly(), options.ip_overlap);
+    let stage = FrameStage {
+        decoder: &decoder,
+        deadline: &deadline,
+        max_ip_reassembly_bytes: limits.max_ip_reassembly_bytes,
+    };
 
     let mut frames_read = 0_u64;
     let mut frames_matched = 0_u64;
     let mut bytes_read = 0_u64;
     loop {
-        enforce_deadline(&deadline, limits)?;
+        enforce_deadline(&deadline)?;
         let Some((number, frame, timestamp)) =
             next_frame(reader, &mut frames_read, &mut bytes_read, limits)?
         else {
@@ -215,105 +226,59 @@ where
         // Every physical frame advances capture-global IP state before any
         // transport indexing or display filter. A completion is decoded as a
         // derived network-layer view attributed to this same physical frame.
-        let now = ip_clock.at(timestamp, number)?;
-        let expired = ip_dispatch.expire(now);
-        for event in expired {
-            enforce_deadline(&deadline, limits)?;
-            ip_sink(IpEventRecord { number, event })
-                .map_err(|source| Error::Sink { number, source })?;
-        }
-        let fragments = ip_fragments(&decoded, &mut scopes)
-            .map_err(|source| Error::Scope { number, source })?;
-        let (mut completed, next_events) = ip_dispatch
-            .dispatch(fragments, now, 0)
-            .map_err(|source| Error::IpReassembly { number, source })?;
-        for event in next_events {
-            enforce_deadline(&deadline, limits)?;
-            ip_sink(IpEventRecord { number, event })
-                .map_err(|source| Error::Sink { number, source })?;
-        }
-        let mut derived = Vec::new();
-        let mut derived_memory_charge = 0;
-        while let Some(datagram) = completed {
-            enforce_deadline(&deadline, limits)?;
-            let source = derived
-                .last()
-                .map_or(&decoded, |derived: &DerivedDatagram| &derived.decoded);
-            let decode_budget = plan_derived_decode(
-                derived_memory_charge,
-                datagram.bytes.len(),
-                ip_dispatch.retained_memory_charge(),
-                limits.max_ip_reassembly_bytes,
-            )
-            .map_err(|source| Error::IpReassembly { number, source })?;
-            let next_derived = decode_derived(
-                &decoder,
-                source,
-                datagram,
+        let derived = advance_ip_reassembly(
+            &mut ip_dispatch,
+            &stage,
+            &mut scopes,
+            PhysicalFrame {
+                decoded: &decoded,
                 number,
-                decode_budget.max_layers,
-                decode_budget.budget_reduced,
-                limits.max_ip_reassembly_bytes,
-            )?;
-            let next_derived_memory_charge = charge_derived_memory(
-                derived_memory_charge,
-                decode_budget.charge,
-                ip_dispatch.retained_memory_charge(),
-                limits.max_ip_reassembly_bytes,
-            )
-            .map_err(|source| Error::IpReassembly { number, source })?;
-            let fragments = ip_fragments_in_scope(
-                &next_derived.decoded,
-                source,
-                next_derived.scope,
-                &mut scopes,
-            )
-            .map_err(|source| Error::Scope { number, source })?;
-            let (next_completed, next_events) = ip_dispatch
-                .dispatch(fragments, now, next_derived_memory_charge)
-                .map_err(|source| Error::IpReassembly { number, source })?;
-            for event in next_events {
-                enforce_deadline(&deadline, limits)?;
-                ip_sink(IpEventRecord { number, event })
-                    .map_err(|source| Error::Sink { number, source })?;
-            }
-            derived.push(next_derived);
-            derived_memory_charge = next_derived_memory_charge;
-            completed = next_completed;
-        }
-        // One transport walk per derived view; the innermost occurrence of
-        // each transport kind wins, so later views overwrite earlier ones.
-        let mut derived_tcp = None;
-        let mut derived_udp = None;
-        for (index, derived_datagram) in derived.iter().enumerate() {
-            let found = transports(&derived_datagram.decoded.packet);
-            if found.tcp.is_some() {
-                derived_tcp = Some((index, derived_datagram));
-            }
-            if found.udp.is_some() {
-                derived_udp = Some((index, derived_datagram));
-            }
-        }
-        let tcp_decoded = derived_tcp.map_or(&decoded, |(_, derived)| &derived.decoded);
-        let udp_decoded = derived_udp.map_or(&decoded, |(_, derived)| &derived.decoded);
-        let scope_base = |entry: Option<(usize, &DerivedDatagram)>| {
-            entry.map(|(index, derived_datagram)| {
-                (
-                    derived_source(&decoded, &derived, index),
-                    derived_datagram.scope,
-                )
+                timestamp,
+            },
+            &mut ip_sink,
+        )?;
+        let TransportViews { tcp, udp } = elect_transport_views(&decoded, &derived);
+        let tcp_decoded = tcp.as_ref().map_or(&decoded, |elected| elected.decoded);
+        let udp_decoded = udp.as_ref().map_or(&decoded, |elected| elected.decoded);
+        let tcp_layer = tcp.as_ref().map(|elected| elected.transport.index);
+        let tcp_header = tcp.as_ref().map(|elected| elected.transport.layer);
+        let udp_layer = udp.as_ref().map(|elected| elected.transport.index);
+        let scope_base = |derived_index: Option<usize>| {
+            derived_index.and_then(|index| {
+                derived.get(index).map(|derived_datagram| {
+                    (
+                        derived_source(&decoded, &derived, index),
+                        derived_datagram.scope,
+                    )
+                })
             })
         };
 
         // Assign stream IDs before filtering to keep them stable across runs.
-        let segment = tcp_segment(tcp_decoded, scope_base(derived_tcp), &mut scopes)
-            .map_err(|source| Error::Scope { number, source })?;
+        let segment = match tcp {
+            Some(elected) => tcp_segment(
+                elected.decoded,
+                elected.transport,
+                scope_base(elected.derived_index),
+                &mut scopes,
+            )
+            .map_err(|source| Error::Scope { number, source })?,
+            None => None,
+        };
         let tcp_stream = match &segment {
             Some(segment) => Some(tcp_streams.assign(&segment.flow, number, limits.max_flows)?),
             None => None,
         };
-        let udp_flow = udp_flow(udp_decoded, scope_base(derived_udp), &mut scopes)
-            .map_err(|source| Error::Scope { number, source })?;
+        let udp_flow = match udp {
+            Some(elected) => udp_flow(
+                elected.decoded,
+                elected.transport,
+                scope_base(elected.derived_index),
+                &mut scopes,
+            )
+            .map_err(|source| Error::Scope { number, source })?,
+            None => None,
+        };
         let udp_stream = match &udp_flow {
             Some(flow) => Some(udp_streams.assign(flow, number, limits.max_flows)?),
             None => None,
@@ -341,18 +306,13 @@ where
         }
         frames_matched = frames_matched.saturating_add(1);
 
-        let tcp_events = reassembly_dispatch.dispatch(
-            tcp_decoded,
-            segment.as_ref(),
-            timestamp,
-            number,
-            &mut tcp_clock,
-            limits.max_flows,
-        )?;
+        let tcp_events =
+            reassembly_dispatch.dispatch(tcp_header, segment.as_ref(), timestamp, number)?;
 
-        enforce_deadline(&deadline, limits)?;
+        enforce_deadline(&deadline)?;
         sink(FrameRecord {
             number,
+            timestamp,
             decoded: &decoded,
             derived_datagrams: &derived,
             tcp_stream,
@@ -362,13 +322,17 @@ where
             tcp_events: &tcp_events,
             tcp_decoded,
             udp_decoded,
+            tcp_layer,
+            tcp_header,
+            tcp_payload_len: segment.as_ref().map_or(0, |segment| segment.payload.len()),
+            udp_layer,
         })
         .map_err(|source| Error::Sink { number, source })?;
     }
 
-    enforce_deadline(&deadline, limits)?;
+    enforce_deadline(&deadline)?;
     for event in ip_dispatch.flush() {
-        enforce_deadline(&deadline, limits)?;
+        enforce_deadline(&deadline)?;
         ip_sink(IpEventRecord {
             number: frames_read,
             event,
@@ -378,13 +342,155 @@ where
             source,
         })?;
     }
-    enforce_deadline(&deadline, limits)?;
+    enforce_deadline(&deadline)?;
     Ok(Summary {
         frames_read,
         frames_matched,
         trailing_tcp_events: reassembly_dispatch.flush(),
         ip_reassembly: ip_dispatch.report().clone(),
     })
+}
+
+/// Loop-invariant state the per-frame stages share.
+struct FrameStage<'a> {
+    decoder: &'a Dissector,
+    deadline: &'a Deadline,
+    max_ip_reassembly_bytes: usize,
+}
+
+/// One physical frame, as the stages downstream of the reader see it.
+struct PhysicalFrame<'a> {
+    decoded: &'a DecodedPacket,
+    number: u64,
+    timestamp: SystemTime,
+}
+
+/// Advances capture-global IP reassembly for one physical frame, returning
+/// the derived datagram views its arrival completed, outermost first.
+///
+/// Every lifecycle event this reveals reaches `ip_sink` before the frame's
+/// own record does, and the run deadline is checked before each one: a sink
+/// that blocks must not be able to overrun the budget by staying inside a
+/// single batch.
+fn advance_ip_reassembly<I>(
+    ip_dispatch: &mut IpDispatch,
+    stage: &FrameStage<'_>,
+    scopes: &mut Interner,
+    frame: PhysicalFrame<'_>,
+    ip_sink: &mut I,
+) -> Result<Vec<DerivedDatagram>, Error>
+where
+    I: FnMut(IpEventRecord) -> Result<(), crate::error::BoundaryError>,
+{
+    let PhysicalFrame {
+        decoded,
+        number,
+        timestamp,
+    } = frame;
+    let emit = |events: Vec<IpEvent>, sink: &mut I| -> Result<(), Error> {
+        for event in events {
+            enforce_deadline(stage.deadline)?;
+            sink(IpEventRecord { number, event })
+                .map_err(|source| Error::Sink { number, source })?;
+        }
+        Ok(())
+    };
+
+    let now = ip_dispatch.at(timestamp, number)?;
+    emit(ip_dispatch.expire(now), ip_sink)?;
+    let fragments =
+        ip_fragments(decoded, scopes).map_err(|source| Error::Scope { number, source })?;
+    let (mut completed, events) = ip_dispatch
+        .dispatch(fragments, now, 0)
+        .map_err(|source| Error::IpReassembly { number, source })?;
+    emit(events, ip_sink)?;
+
+    let mut derived: Vec<DerivedDatagram> = Vec::new();
+    let mut derived_memory_charge = 0;
+    while let Some(datagram) = completed {
+        enforce_deadline(stage.deadline)?;
+        let source = derived.last().map_or(decoded, |derived| &derived.decoded);
+        let budget = ip_dispatch
+            .plan_derived_decode(derived_memory_charge, datagram.bytes.len())
+            .map_err(|source| Error::IpReassembly { number, source })?;
+        let next_derived = decode_derived(
+            stage.decoder,
+            source,
+            datagram,
+            number,
+            budget.max_layers,
+            budget.budget_reduced,
+            stage.max_ip_reassembly_bytes,
+        )?;
+        let next_derived_memory_charge = ip_dispatch
+            .charge_derived_memory(derived_memory_charge, budget.charge)
+            .map_err(|source| Error::IpReassembly { number, source })?;
+        let fragments =
+            ip_fragments_in_scope(&next_derived.decoded, source, next_derived.scope, scopes)
+                .map_err(|source| Error::Scope { number, source })?;
+        let (next_completed, events) = ip_dispatch
+            .dispatch(fragments, now, next_derived_memory_charge)
+            .map_err(|source| Error::IpReassembly { number, source })?;
+        emit(events, ip_sink)?;
+        derived.push(next_derived);
+        derived_memory_charge = next_derived_memory_charge;
+        completed = next_completed;
+    }
+    Ok(derived)
+}
+
+/// The transport of one kind a frame's records are attributed to, together
+/// with the decoded view it was found in.
+struct ElectedTransport<'a, T> {
+    /// Position in the derived cascade, or [`None`] for the physical frame.
+    derived_index: Option<usize>,
+    decoded: &'a DecodedPacket,
+    transport: T,
+}
+
+struct TransportViews<'a> {
+    tcp: Option<ElectedTransport<'a, TcpTransport<'a>>>,
+    udp: Option<ElectedTransport<'a, UdpTransport>>,
+}
+
+/// Elects the innermost transport of each kind across the physical frame and
+/// its derived datagram views.
+///
+/// One walk per decoded view, and the located transports are carried forward
+/// rather than looked up again: a tunnelled frame legitimately belongs to
+/// both a UDP conversation and a TCP conversation, and the innermost
+/// occurrence of each kind is the one an operator means.
+fn elect_transport_views<'a>(
+    decoded: &'a DecodedPacket,
+    derived: &'a [DerivedDatagram],
+) -> TransportViews<'a> {
+    let mut views = TransportViews {
+        tcp: None,
+        udp: None,
+    };
+    let physical = std::iter::once((None, decoded));
+    let cascade = derived
+        .iter()
+        .enumerate()
+        .map(|(index, datagram)| (Some(index), &datagram.decoded));
+    for (derived_index, view) in physical.chain(cascade) {
+        let found = transports(&view.packet);
+        if let Some(transport) = found.tcp {
+            views.tcp = Some(ElectedTransport {
+                derived_index,
+                decoded: view,
+                transport,
+            });
+        }
+        if let Some(transport) = found.udp {
+            views.udp = Some(ElectedTransport {
+                derived_index,
+                decoded: view,
+                transport,
+            });
+        }
+    }
+    views
 }
 
 fn derived_source<'a>(
@@ -396,85 +502,6 @@ fn derived_source<'a>(
         .checked_sub(1)
         .and_then(|index| derived.get(index))
         .map_or(physical, |derived| &derived.decoded)
-}
-
-fn charge_derived_memory(
-    current: usize,
-    datagram_bytes: usize,
-    retained: usize,
-    limit: usize,
-) -> Result<usize, IpReassemblyError> {
-    let derived = current
-        .checked_add(datagram_bytes)
-        .ok_or(IpResourceError::AggregateMemoryLimit { limit })?;
-    retained
-        .checked_add(derived)
-        .filter(|total| *total <= limit)
-        .ok_or(IpResourceError::AggregateMemoryLimit { limit })?;
-    Ok(derived)
-}
-
-struct DerivedDecodeBudget {
-    charge: usize,
-    max_layers: usize,
-    budget_reduced: bool,
-}
-
-fn plan_derived_decode(
-    current: usize,
-    datagram_bytes: usize,
-    retained: usize,
-    limit: usize,
-) -> Result<DerivedDecodeBudget, IpReassemblyError> {
-    // Each committed layer consumes at least one input byte; only the final
-    // stop layer may consume zero. Capping the decoder to the number of layers
-    // reserved here makes the pre-allocation charge enforceable.
-    const LAYER_METADATA_RESERVATION: usize = 4_096;
-
-    let occupied = current
-        .checked_add(retained)
-        .ok_or_else(|| aggregate_memory_error(limit))?;
-    let available = limit
-        .checked_sub(occupied)
-        .ok_or_else(|| aggregate_memory_error(limit))?;
-    let base_charge = datagram_bytes
-        .checked_add(size_of::<DecodedPacket>())
-        .and_then(|charge| {
-            size_of::<DerivedDatagram>()
-                .checked_mul(2)
-                .and_then(|metadata| charge.checked_add(metadata))
-        })
-        .ok_or_else(|| aggregate_memory_error(limit))?;
-    let per_layer_charge = datagram_bytes
-        .checked_mul(2)
-        .and_then(|charge| charge.checked_add(size_of::<Box<dyn crate::layer::Layer>>()))
-        .and_then(|charge| charge.checked_add(size_of::<Option<usize>>()))
-        .and_then(|charge| charge.checked_add(LAYER_METADATA_RESERVATION))
-        .ok_or_else(|| aggregate_memory_error(limit))?;
-    let structural_layers = crate::decode::Options::default()
-        .max_layers
-        .min(datagram_bytes.saturating_add(1));
-    let affordable_layers = available
-        .checked_sub(base_charge)
-        .and_then(|remaining| remaining.checked_div(per_layer_charge))
-        .unwrap_or(0);
-    let max_layers = structural_layers.min(affordable_layers);
-    if max_layers == 0 {
-        return Err(aggregate_memory_error(limit));
-    }
-    let charge = per_layer_charge
-        .checked_mul(max_layers)
-        .and_then(|metadata| base_charge.checked_add(metadata))
-        .ok_or_else(|| aggregate_memory_error(limit))?;
-    Ok(DerivedDecodeBudget {
-        charge,
-        max_layers,
-        budget_reduced: max_layers < structural_layers,
-    })
-}
-
-fn aggregate_memory_error(limit: usize) -> IpReassemblyError {
-    IpResourceError::AggregateMemoryLimit { limit }.into()
 }
 
 fn decode_derived(
@@ -531,55 +558,42 @@ fn decode_derived(
     })
 }
 
+/// Reads one physical frame and charges it against the aggregate frame and
+/// captured-byte ceilings, which the capture reader's own [`pcap::Limits`]
+/// enforces so this loop does not re-implement them.
 fn next_frame<R: Read>(
     reader: &mut Reader<R>,
     frames_read: &mut u64,
     bytes_read: &mut u64,
     limits: &Limits,
-) -> Result<Option<(u64, crate::frame::Frame, std::time::SystemTime)>, Error> {
-    let number = frames_read.checked_add(1).ok_or(Error::Capture {
-        number: *frames_read,
-        source: CaptureError::FrameLimitExceeded {
-            actual: u64::MAX,
-            limit: limits.max_frames,
-        },
-    })?;
+) -> Result<Option<(u64, crate::frame::Frame, SystemTime)>, Error> {
+    let number = frames_read.saturating_add(1);
     let Some(frame) = reader
         .next_frame()
         .map_err(|source| Error::Capture { number, source })?
     else {
         return Ok(None);
     };
+    let (number, bytes) = limits
+        .capture()
+        .advance(*frames_read, *bytes_read, frame.captured_length())
+        .map_err(|source| Error::Capture { number, source })?;
     *frames_read = number;
-    if number > limits.max_frames {
-        return Err(Error::Capture {
-            number,
-            source: CaptureError::FrameLimitExceeded {
-                actual: number,
-                limit: limits.max_frames,
-            },
-        });
-    }
-    let captured = u64::from(frame.captured_length());
-    *bytes_read = bytes_read
-        .checked_add(captured)
-        .filter(|bytes| *bytes <= limits.max_bytes)
-        .ok_or(Error::Capture {
-            number,
-            source: CaptureError::StreamByteLimitExceeded {
-                actual: bytes_read.saturating_add(captured),
-                limit: limits.max_bytes,
-            },
-        })?;
+    *bytes_read = bytes;
     let timestamp = frame
         .timestamp
         .ok_or(Error::TimestampUnavailable { number })?;
     Ok(Some((number, frame, timestamp)))
 }
 
-fn enforce_deadline(deadline: &Deadline, limits: &Limits) -> Result<(), Error> {
+/// Refuses to continue once the run's own processing budget is spent.
+///
+/// The deadline already carries the limit it was built from, so the duration
+/// budget has one owner and callers cannot pass a limit that disagrees with
+/// the clock enforcing it.
+fn enforce_deadline(deadline: &Deadline) -> Result<(), Error> {
     deadline.check().map_err(|error| Error::DurationLimit {
         actual: error.actual,
-        limit: limits.max_duration,
+        limit: error.limit,
     })
 }

@@ -5,24 +5,35 @@ pub(super) use crate::command_options::SendArgs;
 
 use std::sync::Arc;
 
-use packetcraftr::{core, output};
+use packetcraftr::{analysis::pcap as capture, core, output};
 
-use super::super::errors::CliError;
-use super::super::rendering::{
-    emit_aggregate_with_stats, render_diagnostics_text, write_capture_file, write_plain_line,
-    write_raw, write_stdout_line,
-};
-use super::super::system::{client, prepare_route};
 use super::format::SendFormat;
 use super::registry;
+use crate::errors::CliError;
+use crate::rendering::{
+    emit_aggregate_with_stats, render_diagnostics_text, write_capture_file, write_plain_line,
+    write_raw, write_summary_line,
+};
+use crate::system::{Client, client, prepare_route};
 
 pub(super) const AFTER_LONG_HELP: &str = r#"Live transmission is policy-gated and may require native features, dependencies, and privileges.
 
 Example:
   packetcraftr send --packet 'ipv4(dst=192.0.2.1)/icmpv4(type=8,code=0)'"#;
 
-pub(super) fn run(arguments: SendArgs, format: output::contract::Format) -> Result<(), CliError> {
-    let format = SendFormat::narrow(output::contract::Command::Send, format)?;
+/// One `SendArgs` resolved into everything a transmitting command needs: the
+/// registry it dissects with, the packet, the send options, and a client bound
+/// to the same policy.
+///
+/// `send` transmits it directly; `exchange` transmits the same packet and then
+/// captures against it, so both resolve the route the same way.
+pub(super) struct PreparedSend {
+    pub(super) packet: core::Packet,
+    pub(super) options: packetcraftr::send::Options,
+    pub(super) client: Client,
+}
+
+pub(super) fn prepare(arguments: SendArgs) -> Result<PreparedSend, CliError> {
     let SendArgs {
         route,
         mode,
@@ -32,27 +43,35 @@ pub(super) fn run(arguments: SendArgs, format: output::contract::Format) -> Resu
     let registry = registry()?;
     let request = prepare_route(route, policy.into_policy(), &registry)?;
     let client = client(Arc::clone(&registry), request.policy);
-    let report = client
-        .send(
-            request.packet,
-            packetcraftr::send::Options {
-                destination: request.destination,
-                plan: request.options,
-                build: core::build::Options {
-                    mode: mode.into(),
-                    ..core::build::Options::default()
-                },
-                allow_permissive_live,
+    Ok(PreparedSend {
+        packet: request.packet,
+        options: packetcraftr::send::Options {
+            destination: request.destination,
+            plan: request.options,
+            build: core::build::Options {
+                mode: mode.into(),
+                ..core::build::Options::default()
             },
-        )
+            allow_permissive_live,
+        },
+        client,
+    })
+}
+
+pub(super) fn run(arguments: SendArgs, format: output::contract::Format) -> Result<(), CliError> {
+    let format = SendFormat::narrow(output::contract::Command::Send, format)?;
+    let prepared = prepare(arguments)?;
+    let report = prepared
+        .client
+        .send(prepared.packet, prepared.options)
         .map_err(CliError::classified)?;
     let capture_frame = report.sent.frame().clone();
     let (result, diagnostics, stats) =
-        output::send::Result::try_from_report(report).map_err(CliError::classified)?;
+        output::send::Report::try_from_report(report).map_err(CliError::classified)?;
     match format {
         SendFormat::Text => {
-            write_stdout_line(format_args!(
-                "sent {} bytes via {} (index {}, {:?})",
+            write_summary_line(format_args!(
+                "sent {} bytes via {} (index {}, {})",
                 result.frame.length,
                 result.route.plan.decision.interface.name,
                 result.route.plan.decision.interface.index,
@@ -65,8 +84,7 @@ pub(super) fn run(arguments: SendArgs, format: output::contract::Format) -> Resu
         }
         SendFormat::Hex => write_plain_line(format_args!("{}", result.frame.bytes_hex())),
         SendFormat::Raw => write_raw(result.frame.bytes()),
-        SendFormat::Pcap | SendFormat::PcapNg => {
-            write_capture_file(format.format(), [capture_frame])
-        }
+        SendFormat::Pcap => write_capture_file(capture::Format::Pcap, [capture_frame]),
+        SendFormat::PcapNg => write_capture_file(capture::Format::PcapNg, [capture_frame]),
     }
 }

@@ -5,7 +5,8 @@
 
 use std::io::Read;
 
-use super::super::{
+use super::section::{SectionHeader, read_pcapng_block_header, read_section_header_with_length};
+use crate::analysis::pcap::{
     error::Error,
     model::{
         CaptureRecord, Endianness, Format, Interface, MetadataBlockKind, ReaderOptions, RecordKind,
@@ -13,7 +14,6 @@ use super::super::{
     },
     wire::PCAPNG_SECTION_HEADER,
 };
-use super::section::{SectionHeader, read_pcapng_block_header, read_section_header_with_length};
 
 mod framing;
 mod record;

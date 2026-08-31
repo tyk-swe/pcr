@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#![forbid(unsafe_code)]
-
 //! Built-in protocol models, deterministic registration, and capability data.
 //!
 //! The default registry covers capture roots for BSD NULL/LOOP, Linux cooked
@@ -38,6 +36,7 @@ pub mod support;
 pub mod transport;
 pub mod tunnel;
 
+pub use crate::protocol_catalog::BuiltinProtocol;
 pub use common::{ChecksumAccumulator, checksum, checksum_parts};
 
 #[doc(hidden)]

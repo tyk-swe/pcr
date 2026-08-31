@@ -9,24 +9,23 @@ mod rendering;
 use packetcraftr::{analysis, output};
 
 use self::arguments::{Args, Direction};
-use super::super::errors::CliError;
-use super::super::input::open_capture;
 use super::format::FollowFormat;
-use super::offline_analysis::{StreamSelector, parse_stream_selector, prepare};
+use super::offline_analysis::{parse_stream_selector, prepare};
+use crate::errors::CliError;
+use crate::input::open_capture;
 use crate::rendering::StreamEncoder;
 
-use analysis::expert::StreamTransport;
-use analysis::follow::{Chunk, Collector, Selector};
+use analysis::StreamTransport;
+use analysis::follow::{Chunk, Collector};
 use rendering::State;
 
 pub(super) fn run(
     arguments: Args,
     format: output::contract::Format,
-    stream: &mut StreamEncoder,
+    stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     let format = FollowFormat::narrow(output::contract::Command::Follow, format)?;
-    let StreamSelector { transport, index } = parse_stream_selector(&arguments.stream)?;
-    let selector = Selector { transport, index };
+    let selector = parse_stream_selector(&arguments.stream)?;
     if format == FollowFormat::Raw && arguments.direction == Direction::Both {
         return Err(CliError::new(
             Kind::Cli,
@@ -39,25 +38,24 @@ pub(super) fn run(
     // index extracted here.
     let source = format!(
         "{}.stream == {}",
-        match selector.transport {
-            StreamTransport::Tcp => "tcp",
-            StreamTransport::Udp => "udp",
-        },
+        selector.transport.as_str(),
         selector.index
     );
     let prepared = prepare(arguments.limits, Some(&source))?;
-    let mut reader = open_capture(&arguments.path, arguments.limits.capture)?;
+    let mut reader = open_capture(&arguments.path, arguments.limits.capture.reader_bounds())?;
 
     // Only TCP needs reassembly; UDP chunks come straight from frames.
     let options = prepared.options(selector.transport == StreamTransport::Tcp);
     let mut collector = Collector::new(selector);
     let direction = arguments.direction;
-    let mut state = State::default();
+    let mut state = State::new(arguments.limits.capture.retention_ceiling());
     let run_summary = analysis::run_with_ip_events(
         &mut reader,
         prepared.registry.clone(),
         &options,
-        super::offline_analysis::ip_event_sink(format == FollowFormat::Ndjson, stream.clone()),
+        super::offline_analysis::ip_event_sink(
+            (format == FollowFormat::Ndjson).then(|| stream.clone()),
+        ),
         |record| {
             for chunk in collector.observe(&record) {
                 if !direction_matches(direction, &chunk) {
@@ -70,7 +68,7 @@ pub(super) fn run(
         },
     )
     .map_err(CliError::classified)?;
-    let summary = collector.finish(&run_summary.trailing_tcp_events);
+    let summary = collector.finish(&run_summary);
 
     match format {
         FollowFormat::Text => rendering::render_text(selector, &summary),

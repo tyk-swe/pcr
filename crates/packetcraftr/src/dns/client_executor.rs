@@ -3,14 +3,13 @@
 
 use crate::BoundaryError;
 use crate::ExchangeExecutor;
-use crate::probe::client_executor::ExecutorFault;
+use crate::probe::client_executor::{ExecutorFault, WorkflowOverrides};
 use crate::probe::{self, Transport as ProbeTransport};
 
-use packetcraftr_netio::dns_tcp::Provider as TcpProvider;
 use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Sender as PacketIo};
 
+use super::classification::{ResponseClassification, classify_response};
 use super::model::{Exchange, Execution, Executor, TcpExchange, TcpExecution};
-use super::wire::{ResponseClassification, classify_response};
 
 const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
     "cli.dns_executor",
@@ -30,43 +29,47 @@ where
     I: PacketIo + CaptureProvider,
 {
     fn execute(&mut self, exchange: &Exchange) -> Result<Execution, BoundaryError> {
-        if exchange.max_responses == 0 {
+        let max_responses = exchange.limits.max_evidence_frames;
+        if max_responses == 0 {
             return Err(EXECUTOR_FAULT.invalid("DNS exchange must retain at least one response"));
         }
-        if exchange.max_responses > self.options.max_responses {
+        if max_responses > self.options.max_responses {
             return Err(EXECUTOR_FAULT.invalid(format!(
                 "DNS exchange requests {} responses but the client is bounded to {}",
-                exchange.max_responses, self.options.max_responses
+                max_responses, self.options.max_responses
             )));
         }
-        let options = crate::exchange::Options {
-            max_responses: exchange.max_responses,
-            max_unmatched_frames: self
-                .options
-                .max_unmatched_frames
-                .min(exchange.max_responses),
-            ..self.options.clone()
-        };
         let registry = std::sync::Arc::clone(self.client.registry());
         let stop_probe = exchange.probe.clone();
-        let stop_limits = exchange.limits;
-        let result = ExchangeExecutor::new(self.client, options).exchange_for_workflow_until(
-            &packetcraftr_core::template::Template::new(exchange.probe.packet()),
-            exchange.timeout,
-            1,
-            exchange.probe.server_address,
-            |_request_index, sent, response| {
+        let stop_limits = exchange.limits.message;
+        let mut matches_request =
+            |_request_index: usize,
+             sent: &packetcraftr_core::Packet,
+             response: &packetcraftr_core::decode::DecodedPacket| {
                 probe::observe(self.client.registry(), ProbeTransport::Udp, sent, response)
                     .is_some()
-            },
-            move |_request_index, sent, response| {
+            };
+        let mut stop_after_response =
+            |_request_index: usize,
+             sent: &packetcraftr_core::Packet,
+             response: &packetcraftr_core::decode::DecodedPacket| {
                 matches!(
                     classify_response(&registry, &stop_probe, sent, response, stop_limits),
                     Some(ResponseClassification::Response(_))
                 )
+            };
+        let result = self.exchange_for_workflow(
+            &packetcraftr_core::template::Template::new(exchange.probe.packet()),
+            WorkflowOverrides {
+                timeout: exchange.timeout,
+                max_template_packets: 1,
+                destination: exchange.probe.server_address,
+                max_responses: Some(max_responses),
             },
+            &mut matches_request,
+            Some(&mut stop_after_response),
         )?;
-        let crate::exchange::Result {
+        let crate::exchange::Report {
             mut sent,
             responses,
             unanswered: _,
@@ -100,14 +103,13 @@ where
         exchange: &TcpExchange,
     ) -> Result<TcpExecution, packetcraftr_netio::dns_tcp::Error> {
         validate_tcp_route_options(&self.options.send.plan)?;
-        let response = packetcraftr_netio::dns_tcp::SystemProvider.exchange(
-            packetcraftr_netio::dns_tcp::Request {
+        let response =
+            packetcraftr_netio::dns_tcp::exchange(packetcraftr_netio::dns_tcp::Request {
                 endpoint: exchange.endpoint,
                 query: &exchange.query,
                 timeout: exchange.timeout,
                 max_message_bytes: exchange.max_message_bytes,
-            },
-        )?;
+            })?;
         Ok(TcpExecution::new(exchange.permit, response))
     }
 }

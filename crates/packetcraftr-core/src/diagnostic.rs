@@ -3,9 +3,9 @@
 
 //! Structured diagnostics produced by build and decode operations.
 
-use serde::{Deserialize, Serialize};
+use std::fmt;
 
-use crate::layout::ByteRange;
+use serde::{Deserialize, Serialize};
 
 pub const IPV4_CHECKSUM: &str = "decode.ipv4_checksum";
 pub const TCP_CHECKSUM: &str = "decode.tcp_checksum";
@@ -29,7 +29,8 @@ pub const CHECKSUM_FAILURE_CODES: &[&str] = &[
     GRE_CHECKSUM,
 ];
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// Diagnostic weight, ordered from least to most severe.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Severity {
     Info,
@@ -37,8 +38,26 @@ pub enum Severity {
     Error,
 }
 
+impl Severity {
+    /// The serialized spelling, so text and machine output never disagree.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Info => "info",
+            Self::Warning => "warning",
+            Self::Error => "error",
+        }
+    }
+}
+
+impl fmt::Display for Severity {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
 /// A machine-readable build, decode, session, or policy finding.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Diagnostic {
     pub code: String,
     pub severity: Severity,
@@ -47,8 +66,6 @@ pub struct Diagnostic {
     pub layer: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub field: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub range: Option<ByteRange>,
 }
 
 impl Diagnostic {
@@ -71,7 +88,6 @@ impl Diagnostic {
             message: message.into(),
             layer: None,
             field: None,
-            range: None,
         }
     }
 
@@ -107,6 +123,18 @@ pub fn push_once(diagnostics: &mut Vec<Diagnostic>, diagnostic: Diagnostic) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn severity_text_matches_its_serde_spelling_and_orders_by_weight() {
+        for severity in [Severity::Info, Severity::Warning, Severity::Error] {
+            let serialized =
+                serde_json::to_string(&severity).expect("severity serializes as a string");
+            assert_eq!(serialized, format!("\"{}\"", severity.as_str()));
+            assert_eq!(severity.to_string(), severity.as_str());
+        }
+        assert!(Severity::Info < Severity::Warning);
+        assert!(Severity::Warning < Severity::Error);
+    }
 
     #[test]
     fn unrelated_diagnostic_codes_never_classify_as_integrity_failures() {

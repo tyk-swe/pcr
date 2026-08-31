@@ -4,11 +4,8 @@
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use crate::{
-    Packet,
-    codec::NetworkEnvelope,
-    field::FieldValue,
-    layer::Layer,
-    semantics::{self, BuiltinProtocol},
+    Packet, codec::NetworkEnvelope, field::FieldValue, layer::Layer, protocol::BuiltinProtocol,
+    semantics,
 };
 
 use super::{sctp::sctp_initiate_tag, unsigned_field};

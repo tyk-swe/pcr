@@ -7,8 +7,6 @@
 //! analysis pipeline and the live probing workflows can bound themselves
 //! without either one having to depend on the other.
 
-#![forbid(unsafe_code)]
-
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 

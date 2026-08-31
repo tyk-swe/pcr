@@ -12,10 +12,9 @@
 //! [`policy::Policy`] and finite resource budgets.
 //!
 //! ```rust
-//! use std::sync::Arc;
 //! use packetcraftr::core::{build, layer::Raw, protocol, Packet};
 //!
-//! let registry = Arc::new(protocol::builtin::registry()?);
+//! let registry = protocol::builtin::registry();
 //! let mut packet = Packet::new();
 //! packet.push(Raw::new(vec![0xde, 0xad, 0xbe, 0xef]));
 //! let built = build::Builder::new(registry).build(

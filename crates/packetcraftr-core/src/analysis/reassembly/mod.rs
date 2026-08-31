@@ -13,12 +13,11 @@
 //! bounded completion; TCP segments carry sequence state, exact payload bytes,
 //! and control flags.
 //!
-//! [`Limits`] keeps IP and TCP payload, metadata, concurrency, and idle-expiry
-//! accounting separate.
+//! Each engine owns its own [`ip::Limits`] and [`tcp::Limits`], so a caller
+//! that fills one has named every payload, metadata, concurrency, and
+//! idle-expiry bound that engine enforces.
 
 pub mod ip;
 pub mod tcp;
 
 mod expiry;
-mod limits;
-pub use limits::Limits;

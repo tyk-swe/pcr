@@ -8,8 +8,8 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 
 use bytes::Bytes;
 
-use super::super::field::FieldKind;
 use super::path::FieldSpec;
+use crate::field::FieldKind;
 
 /// How an unbuilt derived wire value reflects through [`crate::field::FieldValue`].
 const AUTO_WIRE_VALUE: &str = "auto";

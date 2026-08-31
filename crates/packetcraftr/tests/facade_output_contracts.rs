@@ -21,7 +21,7 @@ use support::{SharedWriter, output_schema, output_schema_validator};
 
 #[test]
 fn facade_reexports_domains_and_command_formats_are_complete() {
-    let registry = protocol::builtin::registry().expect("facade protocol re-export must work");
+    let registry = protocol::builtin::registry();
     assert!(registry.codec("ipv4").is_some());
     for command in Command::ALL {
         assert!(!command.formats().is_empty());
@@ -45,7 +45,7 @@ fn aggregate_and_stream_envelopes_keep_version_and_discriminators() {
     assert!(aggregate.get("sequence").is_none());
 
     let output = SharedWriter::default();
-    let encoder = StreamEncoder::new(Some(Command::Read), output.clone());
+    let encoder = StreamEncoder::new(Command::Read, output.clone());
     for frame in 0..8 {
         encoder
             .emit_data(json!({"frame": frame}), Vec::new())

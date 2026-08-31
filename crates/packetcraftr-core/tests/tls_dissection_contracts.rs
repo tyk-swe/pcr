@@ -48,7 +48,7 @@ const TLS_PORTS: &[u16] = &[443, 465, 636, 853, 993, 995, 8443];
 const CLIENT_PORT: u16 = 40_000;
 
 fn registry() -> Arc<Registry> {
-    Arc::new(builtin::registry().expect("built-in registry"))
+    builtin::registry()
 }
 
 /// A whole ClientHello record, from the published-JA4 vector.

@@ -1,17 +1,15 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#![forbid(unsafe_code)]
-
-mod error;
-mod intent;
-mod materialize;
-mod models;
 #[cfg(all(
     feature = "native-route",
     any(target_os = "linux", target_os = "macos", windows)
 ))]
-mod native_policy;
+mod decision;
+mod error;
+mod intent;
+mod materialize;
+mod models;
 mod planner;
 mod provider;
 
@@ -25,11 +23,11 @@ pub use provider::{SystemError, SystemProvider};
     feature = "native-route",
     any(target_os = "linux", target_os = "macos")
 ))]
-pub(crate) use native_policy::find_interface;
+pub(crate) use decision::find_interface;
 #[cfg(all(
     feature = "native-route",
     any(target_os = "linux", target_os = "macos", windows)
 ))]
-pub(crate) use native_policy::{
+pub(crate) use decision::{
     NativeRouteSnapshot, finish_route, interface_decision, validate_preferred_source_family,
 };

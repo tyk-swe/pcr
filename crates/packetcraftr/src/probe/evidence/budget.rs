@@ -6,7 +6,7 @@
 use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::frame::Frame;
 
-use crate::evidence::{Budget, BudgetError};
+use crate::evidence::{Budget, BudgetError, DiagnosticLog};
 
 #[derive(Clone, Copy)]
 pub(crate) struct EvidenceDiagnosticDescriptor {
@@ -29,7 +29,7 @@ pub(crate) fn retain_evidence(
     descriptor: EvidenceDiagnosticDescriptor,
     max_frames: usize,
     max_bytes: usize,
-    diagnostics: &mut Vec<Diagnostic>,
+    diagnostics: &mut DiagnosticLog,
 ) -> bool {
     let error = match budget.reserve(frame.bytes().len(), max_frames, max_bytes) {
         Ok(()) => return true,
@@ -49,31 +49,25 @@ pub(crate) fn retain_evidence(
             descriptor.display_name
         ),
     };
-    packetcraftr_core::diagnostic::push_once(
-        diagnostics,
-        Diagnostic::warning(
-            format!("{}.evidence_limit", descriptor.code_namespace),
-            message,
-        ),
-    );
+    diagnostics.push_once(Diagnostic::warning(
+        format!("{}.evidence_limit", descriptor.code_namespace),
+        message,
+    ));
     false
 }
 
 pub(crate) fn push_undecoded_limit_diagnostic(
-    diagnostics: &mut Vec<Diagnostic>,
+    diagnostics: &mut DiagnosticLog,
     descriptor: EvidenceDiagnosticDescriptor,
     limit: usize,
 ) {
-    packetcraftr_core::diagnostic::push_once(
-        diagnostics,
-        Diagnostic::warning(
-            format!("{}.undecoded_limit", descriptor.code_namespace),
-            format!(
-                "undecodable {} evidence limit {limit} reached; later frames were omitted",
-                descriptor.display_name
-            ),
+    diagnostics.push_once(Diagnostic::warning(
+        format!("{}.undecoded_limit", descriptor.code_namespace),
+        format!(
+            "undecodable {} evidence limit {limit} reached; later frames were omitted",
+            descriptor.display_name
         ),
-    );
+    ));
 }
 
 /// Operation-wide evidence state for retaining undecodable frames.
@@ -84,7 +78,7 @@ pub(crate) struct UndecodedRetention<'a> {
     descriptor: EvidenceDiagnosticDescriptor,
     max_evidence_frames: usize,
     max_evidence_bytes: usize,
-    diagnostics: &'a mut Vec<Diagnostic>,
+    diagnostics: &'a mut DiagnosticLog,
 }
 
 impl<'a> UndecodedRetention<'a> {
@@ -95,7 +89,7 @@ impl<'a> UndecodedRetention<'a> {
         descriptor: EvidenceDiagnosticDescriptor,
         max_evidence_frames: usize,
         max_evidence_bytes: usize,
-        diagnostics: &'a mut Vec<Diagnostic>,
+        diagnostics: &'a mut DiagnosticLog,
     ) -> Self {
         Self {
             retained_count,
@@ -118,19 +112,14 @@ impl<'a> UndecodedRetention<'a> {
     ) -> Result<(), E> {
         for frame in frames {
             check_deadline()?;
-            let diagnostic_start = self.diagnostics.len();
             if *self.retained_count >= self.max_undecoded {
                 push_undecoded_limit_diagnostic(
                     self.diagnostics,
                     self.descriptor,
                     self.max_undecoded,
                 );
-                emit_diagnostics_since(
-                    self.diagnostics,
-                    diagnostic_start,
-                    &mut map_diagnostic,
-                    &mut emit,
-                )?;
+                self.diagnostics
+                    .publish_new(|diagnostic| emit(map_diagnostic(diagnostic)))?;
                 break;
             }
             if retain_evidence(
@@ -151,34 +140,12 @@ impl<'a> UndecodedRetention<'a> {
                 }
                 emit(map(frame))?;
             }
-            emit_diagnostics_since(
-                self.diagnostics,
-                diagnostic_start,
-                &mut map_diagnostic,
-                &mut emit,
-            )?;
+            self.diagnostics
+                .publish_new(|diagnostic| emit(map_diagnostic(diagnostic)))?;
             check_deadline()?;
         }
         Ok(())
     }
-}
-
-fn emit_diagnostics_since<T, E>(
-    diagnostics: &[Diagnostic],
-    start: usize,
-    map: &mut impl FnMut(Diagnostic) -> T,
-    emit: &mut impl FnMut(T) -> Result<(), E>,
-) -> Result<(), E> {
-    #[expect(
-        clippy::indexing_slicing,
-        reason = "`start` is a `diagnostics.len()` snapshot taken by the caller before appending \
-                  to the same append-only slice, so the range is in bounds"
-    )]
-    let since = &diagnostics[start..];
-    for diagnostic in since.iter().cloned() {
-        emit(map(diagnostic))?;
-    }
-    Ok(())
 }
 
 pub(crate) fn checked_frame_count(counts: &[usize]) -> Option<usize> {

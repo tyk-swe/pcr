@@ -11,11 +11,16 @@ use crate::{
     registry::Discriminator,
 };
 
-use super::super::common::{
-    ValueExpectation, ensure_encode_budget, expected_discriminator_for_value, invalid, make_layer,
-    payload_without_padding, protocol, resolve_u16, strict_or_diagnostic, truncated,
-    validate_auto_raw_discriminator, validate_raw_child_discriminator, wrong_layer,
+use crate::protocol::common::{
+    ValueExpectation, ensure_encode_budget, expected_discriminator, invalid, make_layer,
+    payload_without_padding, protocol, resolve_u16, strict_or_diagnostic, truncated, typed_layer,
+    validate_auto_raw_discriminator, validate_raw_child_discriminator,
 };
+
+use crate::protocol::BuiltinProtocol;
+
+const PPPOE_NAME: &str = BuiltinProtocol::Pppoe.as_str();
+const PPP_NAME: &str = BuiltinProtocol::Ppp.as_str();
 
 const PPPOE_LEN: usize = 6;
 const PPP_LEN: usize = 2;
@@ -57,7 +62,7 @@ impl Default for Pppoe {
 }
 
 reflective_layer! {
-    fn pppoe_schema() => { protocol: protocol("pppoe"), name: "PPPoE" }
+    fn pppoe_schema() => { protocol: protocol(PPPOE_NAME), name: "PPPoE" }
     impl Pppoe {
         "version" => { kind: Unsigned, derived: false, required: false, description: "4-bit PPPoE version; only version 1 is defined", reflect_bounded: version, 0xf_u64, layout: (0, 1) },
         "type" => { kind: Unsigned, derived: false, required: false, description: "4-bit PPPoE type; only type 1 is defined", reflect_bounded: type_code, 0xf_u64, layout: (0, 1) },
@@ -72,8 +77,8 @@ reflective_layer! {
 pub(crate) struct PppoeCodec;
 
 impl LayerCodec for PppoeCodec {
-    fn protocol_id(&self) -> crate::layer::Id {
-        protocol("pppoe")
+    fn protocol_id(&self) -> &'static crate::layer::Id {
+        &pppoe_schema().protocol
     }
 
     fn encode(
@@ -82,21 +87,18 @@ impl LayerCodec for PppoeCodec {
         payload: &[u8],
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
-        let layer = layer
-            .as_any()
-            .downcast_ref::<Pppoe>()
-            .ok_or_else(|| wrong_layer("pppoe", layer))?;
-        ensure_encode_budget("pppoe", PPPOE_LEN, context)?;
+        let layer = typed_layer::<Pppoe>(PPPOE_NAME, layer)?;
+        ensure_encode_budget(PPPOE_NAME, PPPOE_LEN, context)?;
         if layer.version > 0xf || layer.type_code > 0xf {
-            return Err(invalid("pppoe", "field exceeds its wire range"));
+            return Err(invalid(PPPOE_NAME, "field exceeds its wire range"));
         }
-        let covered_payload = payload_without_padding("pppoe", payload, context)?;
+        let covered_payload = payload_without_padding(PPPOE_NAME, payload, context)?;
         let expected_length = u16::try_from(covered_payload.len())
-            .map_err(|_| invalid("pppoe", "payload exceeds the PPPoE length range"))?;
+            .map_err(|_| invalid(PPPOE_NAME, "payload exceeds the PPPoE length range"))?;
 
         let mut diagnostics = validate_stage(layer, context)?;
         let (length, materialized_length) = resolve_u16(
-            "pppoe",
+            PPPOE_NAME,
             "length",
             &layer.length,
             ValueExpectation::Required(expected_length),
@@ -111,13 +113,9 @@ impl LayerCodec for PppoeCodec {
         prefix.extend_from_slice(&length.to_be_bytes());
         let mut materialized = layer.clone();
         materialized.length = materialized_length;
-        Ok(EncodedLayer {
-            prefix,
-            suffix: Vec::new(),
-            materialized: Box::new(materialized),
-            fields: pppoe_layout(),
-            diagnostics,
-        })
+        Ok(EncodedLayer::header(prefix, Box::new(materialized))
+            .with_fields(pppoe_layout())
+            .with_diagnostics(diagnostics))
     }
 
     fn decode(
@@ -126,7 +124,7 @@ impl LayerCodec for PppoeCodec {
         context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
         let Some(header) = input.first_chunk::<PPPOE_LEN>() else {
-            return Err(truncated("pppoe", PPPOE_LEN, input.len()));
+            return Err(truncated(PPPOE_NAME, PPPOE_LEN, input.len()));
         };
         let version = header[0] >> 4;
         let type_code = header[0] & 0x0f;
@@ -136,7 +134,7 @@ impl LayerCodec for PppoeCodec {
         let length = usize::from(length_field);
         if input.len().saturating_sub(PPPOE_LEN) < length {
             return Err(truncated(
-                "pppoe",
+                PPPOE_NAME,
                 PPPOE_LEN.saturating_add(length),
                 input.len(),
             ));
@@ -214,7 +212,7 @@ fn validate_stage(
     let mut diagnostics = Vec::new();
     if layer.version != 1 || layer.type_code != 1 {
         strict_or_diagnostic(
-            "pppoe",
+            PPPOE_NAME,
             "build.pppoe_version",
             "version",
             "RFC 2516 defines only PPPoE version 1, type 1",
@@ -223,7 +221,7 @@ fn validate_stage(
         )?;
     }
     let expected_stage = match context.child.map(|child| child.protocol_id().as_str()) {
-        Some("ppp") => Some(0_u8),
+        Some(PPP_NAME) => Some(0_u8),
         Some("malformed") => None,
         _ => Some(1),
     };
@@ -238,7 +236,7 @@ fn validate_stage(
             }
         };
         strict_or_diagnostic(
-            "pppoe",
+            PPPOE_NAME,
             "build.pppoe_stage",
             "code",
             message,
@@ -272,7 +270,7 @@ fn validate_parent_stage(
     };
     if disagrees {
         strict_or_diagnostic(
-            "pppoe",
+            PPPOE_NAME,
             "build.pppoe_stage",
             "code",
             format!(
@@ -303,7 +301,7 @@ impl Default for Ppp {
 }
 
 reflective_layer! {
-    fn ppp_schema() => { protocol: protocol("ppp"), name: "PPP" }
+    fn ppp_schema() => { protocol: protocol(PPP_NAME), name: "PPP" }
     impl Ppp {
         "protocol" => { kind: Unsigned, derived: true, required: false, description: "PPP protocol number selecting the payload", reflect: protocol, layout: (0, 2) },
     }
@@ -314,8 +312,8 @@ reflective_layer! {
 pub(crate) struct PppCodec;
 
 impl LayerCodec for PppCodec {
-    fn protocol_id(&self) -> crate::layer::Id {
-        protocol("ppp")
+    fn protocol_id(&self) -> &'static crate::layer::Id {
+        &ppp_schema().protocol
     }
 
     fn encode(
@@ -324,44 +322,40 @@ impl LayerCodec for PppCodec {
         _payload: &[u8],
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
-        let layer = layer
-            .as_any()
-            .downcast_ref::<Ppp>()
-            .ok_or_else(|| wrong_layer("ppp", layer))?;
-        ensure_encode_budget("ppp", PPP_LEN, context)?;
+        let layer = typed_layer::<Ppp>(PPP_NAME, layer)?;
+        ensure_encode_budget(PPP_NAME, PPP_LEN, context)?;
 
         let mut diagnostics = Vec::new();
         validate_auto_raw_discriminator(
-            "ppp",
+            PPP_NAME,
             "protocol",
             &layer.protocol,
             context,
             &mut diagnostics,
         )?;
         let (protocol_number, materialized_protocol) = resolve_u16(
-            "ppp",
+            PPP_NAME,
             "protocol",
             &layer.protocol,
-            expected_discriminator_for_value("ppp", context, 0_u16, &layer.protocol),
+            expected_discriminator(PPP_NAME, context, 0_u16, &layer.protocol),
             context.mode,
             &mut diagnostics,
         )?;
         validate_raw_child_discriminator(
-            "ppp",
+            PPP_NAME,
             u64::from(protocol_number),
             context,
             &mut diagnostics,
         )?;
 
-        Ok(EncodedLayer {
-            prefix: protocol_number.to_be_bytes().to_vec(),
-            suffix: Vec::new(),
-            materialized: Box::new(Ppp {
+        Ok(EncodedLayer::header(
+            protocol_number.to_be_bytes().to_vec(),
+            Box::new(Ppp {
                 protocol: materialized_protocol,
             }),
-            fields: ppp_layout(),
-            diagnostics,
-        })
+        )
+        .with_fields(ppp_layout())
+        .with_diagnostics(diagnostics))
     }
 
     fn decode(
@@ -370,7 +364,7 @@ impl LayerCodec for PppCodec {
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
         let Some(header) = input.first_chunk::<PPP_LEN>() else {
-            return Err(truncated("ppp", PPP_LEN, input.len()));
+            return Err(truncated(PPP_NAME, PPP_LEN, input.len()));
         };
         let protocol_number = u16::from_be_bytes([header[0], header[1]]);
         let payload_len = input.len().saturating_sub(PPP_LEN);

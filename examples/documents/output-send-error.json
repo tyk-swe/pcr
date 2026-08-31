@@ -4,11 +4,13 @@
   "mode": "aggregate",
   "status": "error",
   "error": {
-    "code": "policy.public_destination",
-    "kind": "policy",
-    "message": "traffic policy denies public destination 8.8.8.8",
-    "causes": [],
-    "remediation": "explicitly authorize public destinations only for networks you are permitted to test"
+    "code": "capability.privilege",
+    "kind": "capability",
+    "message": "live packet I/O requires additional privileges: opening a raw IP socket",
+    "causes": [
+      "Operation not permitted (os error 1)"
+    ],
+    "remediation": "grant the minimum raw-socket or capture permission required by the selected platform adapter"
   },
   "diagnostics": []
 }

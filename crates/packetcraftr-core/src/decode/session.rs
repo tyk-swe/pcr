@@ -353,14 +353,8 @@ impl<'registry> DecodeSession<'registry> {
         offset: usize,
     ) -> Result<(), Error> {
         let Some(required) = child.filter(|protocol| {
-            !matches!(
-                crate::semantics::BuiltinProtocol::from_id(protocol),
-                Some(
-                    crate::semantics::BuiltinProtocol::Raw
-                        | crate::semantics::BuiltinProtocol::Malformed
-                        | crate::semantics::BuiltinProtocol::Padding
-                )
-            )
+            !crate::protocol::BuiltinProtocol::from_id(protocol)
+                .is_some_and(crate::protocol::BuiltinProtocol::preserves_opaque_bytes)
         }) else {
             return Ok(());
         };
@@ -447,9 +441,7 @@ impl<'registry> DecodeSession<'registry> {
             packet: self.packet,
             original: self.original,
             frame: self.frame,
-            layout: PacketLayout {
-                layers: self.layouts,
-            },
+            layout: PacketLayout::new(self.layouts),
             diagnostics: self.diagnostics,
         })
     }

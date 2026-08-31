@@ -10,10 +10,14 @@ use crate::{
     registry::Discriminator,
 };
 
-use super::super::common::{
+use crate::protocol::common::{
     ensure_encode_budget, invalid, make_layer, protocol, strict_or_diagnostic, truncated,
-    wrong_layer,
+    typed_layer,
 };
+
+use crate::protocol::BuiltinProtocol;
+
+const NAME: &str = BuiltinProtocol::Mpls.as_str();
 
 const MPLS_LEN: usize = 4;
 const LABEL_MAX: u32 = 0x000f_ffff;
@@ -57,7 +61,7 @@ impl Default for Mpls {
 }
 
 reflective_layer! {
-    fn mpls_schema() => { protocol: protocol("mpls"), name: "MPLS" }
+    fn mpls_schema() => { protocol: protocol(NAME), name: "MPLS" }
     impl Mpls {
         "label" => { kind: Unsigned, derived: false, required: true, description: "20-bit MPLS label", reflect_bounded: label, LABEL_MAX, layout: (0, 3) },
         "traffic_class" => { kind: Unsigned, derived: false, required: false, description: "3-bit traffic class, historically the EXP bits", reflect_bounded: traffic_class, 7_u64, layout: (2, 3) },
@@ -71,8 +75,8 @@ reflective_layer! {
 pub(crate) struct MplsCodec;
 
 impl LayerCodec for MplsCodec {
-    fn protocol_id(&self) -> crate::layer::Id {
-        protocol("mpls")
+    fn protocol_id(&self) -> &'static crate::layer::Id {
+        &mpls_schema().protocol
     }
 
     fn encode(
@@ -81,13 +85,10 @@ impl LayerCodec for MplsCodec {
         _payload: &[u8],
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
-        let layer = layer
-            .as_any()
-            .downcast_ref::<Mpls>()
-            .ok_or_else(|| wrong_layer("mpls", layer))?;
-        ensure_encode_budget("mpls", MPLS_LEN, context)?;
+        let layer = typed_layer::<Mpls>(NAME, layer)?;
+        ensure_encode_budget(NAME, MPLS_LEN, context)?;
         if layer.label > LABEL_MAX || layer.traffic_class > 7 {
-            return Err(invalid("mpls", "field exceeds its wire range"));
+            return Err(invalid(NAME, "field exceeds its wire range"));
         }
 
         let mut diagnostics = Vec::new();
@@ -97,7 +98,7 @@ impl LayerCodec for MplsCodec {
         // including nothing at all — ends the stack. A malformed child is a
         // dissected truncated stack, which must always rebuild.
         let expected_bottom = match context.child.map(|child| child.protocol_id().as_str()) {
-            Some("mpls") => Some(false),
+            Some(NAME) => Some(false),
             Some("malformed") => None,
             _ => Some(true),
         };
@@ -105,7 +106,7 @@ impl LayerCodec for MplsCodec {
             && layer.bottom_of_stack != expected_bottom
         {
             strict_or_diagnostic(
-                "mpls",
+                NAME,
                 "build.mpls_bottom",
                 "bottom_of_stack",
                 if expected_bottom {
@@ -122,13 +123,11 @@ impl LayerCodec for MplsCodec {
             | (u32::from(layer.traffic_class) << 9)
             | (u32::from(layer.bottom_of_stack) << 8)
             | u32::from(layer.ttl);
-        Ok(EncodedLayer {
-            prefix: word.to_be_bytes().to_vec(),
-            suffix: Vec::new(),
-            materialized: Box::new(layer.clone()),
-            fields: mpls_layout(),
-            diagnostics,
-        })
+        Ok(
+            EncodedLayer::header(word.to_be_bytes().to_vec(), Box::new(layer.clone()))
+                .with_fields(mpls_layout())
+                .with_diagnostics(diagnostics),
+        )
     }
 
     fn decode(
@@ -137,7 +136,7 @@ impl LayerCodec for MplsCodec {
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
         let Some(header) = input.first_chunk::<MPLS_LEN>() else {
-            return Err(truncated("mpls", MPLS_LEN, input.len()));
+            return Err(truncated(NAME, MPLS_LEN, input.len()));
         };
         let word = u32::from_be_bytes(*header);
         let layer = Mpls {

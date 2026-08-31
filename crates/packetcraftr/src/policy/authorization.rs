@@ -6,16 +6,19 @@ use std::net::IpAddr;
 use packetcraftr_core::{Packet, protocol::link::Ethernet, semantics};
 use packetcraftr_netio::{link::MacAddress, route::Plan};
 
-use super::super::address::is_public;
-use super::super::target::{Authorized, Error as TargetError, Hostname, Resolver, Target};
 use super::contract::{Error, MAX_RESOLVED_ADDRESSES, Policy};
+use crate::address::is_public;
+use crate::target::{Authorized, Error as TargetError, Hostname, Resolver, Target};
 
 impl Policy {
     /// Validates policy configuration before resolver, route, capture, or
     /// transmission providers are invoked.
-    pub fn validate(&self) -> Result<(), TargetError> {
+    ///
+    /// This is a pure policy check, so it is reachable from callers that never
+    /// resolve a target at all — replay is one.
+    pub fn validate(&self) -> Result<(), Error> {
         if !(1..=MAX_RESOLVED_ADDRESSES).contains(&self.max_resolved_addresses) {
-            return Err(TargetError::InvalidAddressLimit {
+            return Err(Error::InvalidAddressLimit {
                 value: self.max_resolved_addresses,
                 maximum: MAX_RESOLVED_ADDRESSES,
             });
@@ -148,7 +151,7 @@ impl Policy {
     /// most once, then authorizes every selected address before returning any
     /// address to route planning. Calling this method again for re-resolution
     /// repeats both policy stages against the current policy.
-    pub fn resolve_target<R: Resolver>(
+    pub fn resolve_target<R: Resolver + ?Sized>(
         &self,
         target: &Target,
         resolver: &R,
@@ -183,6 +186,26 @@ impl Policy {
                 addresses
             }
         };
+        self.authorize_selected(target, addresses)
+    }
+
+    /// Authorizes a target that names its address outright, without a
+    /// resolver. The destination stage is exactly the one
+    /// [`Policy::resolve_target`] applies to a resolved answer.
+    pub(crate) fn authorize_numeric_target(
+        &self,
+        target: &Target,
+        address: IpAddr,
+    ) -> Result<Authorized, TargetError> {
+        self.validate()?;
+        self.authorize_selected(target, vec![address])
+    }
+
+    fn authorize_selected(
+        &self,
+        target: &Target,
+        addresses: Vec<IpAddr>,
+    ) -> Result<Authorized, TargetError> {
         for address in &addresses {
             self.authorize_destination(*address)?;
         }

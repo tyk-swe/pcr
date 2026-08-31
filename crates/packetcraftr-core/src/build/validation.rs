@@ -8,8 +8,8 @@ use crate::{
     diagnostic::Diagnostic,
     field::FieldValue,
     layer::{Malformed, Padding, Raw},
+    protocol::BuiltinProtocol,
     registry::Registry,
-    semantics::BuiltinProtocol,
 };
 
 use super::Error;

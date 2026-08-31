@@ -8,7 +8,7 @@ use crate::ExchangeExecutor;
 use crate::probe::client_executor::ExecutorFault;
 use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Sender as PacketIo};
 
-use super::boundary::{Execution, ExecutionCase, Executor};
+use super::execution::{Execution, ExecutionCase, Executor};
 
 const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
     "internal.fuzz_executor",
@@ -38,7 +38,7 @@ where
                 options,
             )
             .map_err(BoundaryError::from_error)?;
-        let crate::exchange::Result {
+        let crate::exchange::Report {
             mut sent,
             responses,
             unanswered: _,

@@ -7,7 +7,7 @@ use crate::probe::evidence::{format_exchange_evidence_error, validate_batch_exch
 
 use super::error::Error;
 use super::model::{Batch, Execution, Limits};
-use super::probe::sent_traceroute_probe_matches;
+use super::probe::sent_probe_matches;
 
 pub(super) fn validate_execution(
     batch: &Batch,
@@ -19,7 +19,7 @@ pub(super) fn validate_execution(
         execution,
         limits.max_evidence_frames,
         limits.max_evidence_bytes,
-        sent_traceroute_probe_matches,
+        sent_probe_matches,
     )
     .map_err(|error| Error::InvalidEvidence {
         sequence: error

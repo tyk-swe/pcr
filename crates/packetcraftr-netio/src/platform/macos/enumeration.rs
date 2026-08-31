@@ -15,6 +15,7 @@ use super::parser::sockaddr_ip;
 use crate::{
     interface::{self, Id as InterfaceId},
     link::{Capability, MacAddress},
+    platform::os_error,
     route::SystemError,
 };
 use packetcraftr_core::frame::LinkType;
@@ -125,7 +126,7 @@ fn interface_flags(flags: libc::c_uint) -> interface::Flags {
     }
 }
 
-pub(super) fn link_mtu(family: libc::sa_family_t, data: *const libc::c_void) -> Option<u32> {
+fn link_mtu(family: libc::sa_family_t, data: *const libc::c_void) -> Option<u32> {
     if i32::from(family) != libc::AF_LINK || data.is_null() {
         return None;
     }
@@ -135,10 +136,7 @@ pub(super) fn link_mtu(family: libc::sa_family_t, data: *const libc::c_void) -> 
     (data.ifi_mtu != 0).then_some(data.ifi_mtu)
 }
 
-pub(super) fn sockaddr_prefix(
-    address: *const libc::sockaddr,
-    interface_address: IpAddr,
-) -> Option<u8> {
+fn sockaddr_prefix(address: *const libc::sockaddr, interface_address: IpAddr) -> Option<u8> {
     if address.is_null() {
         return None;
     }
@@ -202,11 +200,4 @@ fn link_address(address: *const libc::sockaddr, length: usize) -> Option<MacAddr
 
 fn last_os_error(operation: &'static str) -> SystemError {
     os_error(operation, std::io::Error::last_os_error())
-}
-
-pub(super) fn os_error(operation: &'static str, error: impl std::fmt::Display) -> SystemError {
-    SystemError::OperatingSystem {
-        operation,
-        message: error.to_string(),
-    }
 }

@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use packetcraftr_core::budget::DeadlineExceeded;
-use packetcraftr_core::error::{Classification, Classified, Context, Kind};
+use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -20,8 +20,6 @@ pub enum Error {
     },
     #[error("fuzz live timeout {value:?} is invalid; maximum is {maximum:?}")]
     InvalidTimeout { value: Duration, maximum: Duration },
-    #[error("permissive or malformed fuzz cases require an explicit live opt-in")]
-    MalformedLiveOptInRequired,
     #[error("fuzz worst-case duration {actual:?} exceeds the configured limit of {limit:?}")]
     DurationLimit { actual: Duration, limit: Duration },
     #[error("fuzz authorization failed: {0}")]
@@ -32,8 +30,12 @@ pub enum Error {
         #[source]
         source: crate::BoundaryError,
     },
-    #[error("fuzz rate clock failed before case {case_index}: {message}")]
-    Clock { case_index: u64, message: String },
+    #[error("fuzz rate clock failed before case {case_index}")]
+    Clock {
+        case_index: u64,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
     #[error("fuzz executor returned invalid evidence at case {case_index}: {message}")]
     InvalidEvidence { case_index: u64, message: String },
     #[error("fuzz statistic accounting overflowed at case {case_index}")]
@@ -59,11 +61,6 @@ impl Classified for Error {
                 Kind::Policy,
                 Some("reduce cases, packet sizes, timeout, or rate delay"),
             ),
-            Self::MalformedLiveOptInRequired => Classification::new(
-                "policy.fuzz_malformed_opt_in",
-                Kind::Policy,
-                Some("pass the explicit malformed-live opt-in and authorize permissive packets"),
-            ),
             Self::Authorization(error) => error.classification(),
             Self::Execution { source, .. } => source.classification(),
             Self::Clock { .. } => Classification::new(
@@ -80,24 +77,30 @@ impl Classified for Error {
         }
     }
 
-    fn context(&self) -> Context {
+    fn context(&self) -> Option<Coordinate> {
         match self {
             Self::Campaign(error) => error.context(),
             Self::Authorization(error) | Self::Output { source: error } => error.context(),
             Self::Execution { case_index, .. }
             | Self::Clock { case_index, .. }
             | Self::InvalidEvidence { case_index, .. }
-            | Self::StatisticsOverflow { case_index } => Context::case_index(*case_index),
-            _ => Context::default(),
+            | Self::StatisticsOverflow { case_index } => Some(Coordinate::CaseIndex(*case_index)),
+            _ => None,
         }
     }
 
+    /// Walked from the retained `#[source]` chain rather than hand-written.
+    /// The boundary-sourced variants delegate instead: a [`BoundaryError`]
+    /// carries a captured `causes` snapshot its own source chain no longer
+    /// holds.
+    ///
+    /// [`BoundaryError`]: crate::BoundaryError
     fn causes(&self) -> Vec<String> {
         match self {
             Self::Campaign(error) => error.causes(),
             Self::Authorization(error) => error.causes(),
             Self::Execution { source, .. } | Self::Output { source } => source.causes(),
-            _ => Vec::new(),
+            error => packetcraftr_core::error::source_chain(error),
         }
     }
 }

@@ -123,3 +123,17 @@ impl ColorChoice {
         choice.write_global();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The whole command tree is rebuilt on every invocation, and several
+    /// subcommands adjust arguments defined in other modules by id, so a
+    /// renamed field turns *every* invocation into a clap panic. This asserts
+    /// those ids, plus `requires`/`conflicts_with` targets, at unit-test speed.
+    #[test]
+    fn the_command_tree_is_valid() {
+        <Cli as clap::CommandFactory>::command().debug_assert();
+    }
+}

@@ -3,8 +3,8 @@
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use super::super::error::Error;
-use super::super::model::{Format, TimestampResolution};
+use crate::analysis::pcap::error::Error;
+use crate::analysis::pcap::model::{Format, TimestampResolution};
 
 pub(in crate::analysis::pcap) fn validate_timestamp_resolution(
     resolution: TimestampResolution,

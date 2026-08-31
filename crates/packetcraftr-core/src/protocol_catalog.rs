@@ -10,49 +10,54 @@ use super::layer::Layer;
 /// Implementation hooks are neutral tokens: this packet-domain module never
 /// depends on codec or matcher implementations. Protocol consumers interpret
 /// the `codec` and `matcher` tokens locally.
+///
+/// `exact_round_trip` states whether encoding a decoded layer reproduces the
+/// bytes it was decoded from. It is false only for a codec that cannot encode
+/// at all — `raw_ip` is a decode-only version dispatcher whose `encode`
+/// always fails, so build IPv4 or IPv6 directly instead.
 #[macro_export]
 #[doc(hidden)]
 macro_rules! builtin_protocol_catalog {
     ($consumer:ident) => {
         $consumer! {
-            Ah { canonical: "ah", aliases: [], constructible: true, matcher: none, codec: AhCodec }
-            Arp { canonical: "arp", aliases: [], constructible: true, matcher: none, codec: ArpCodec }
-            BsdLoop { canonical: "bsd_loop", aliases: ["loop"], constructible: true, matcher: none, codec: BsdLoopCodec }
-            BsdNull { canonical: "bsd_null", aliases: ["null"], constructible: true, matcher: none, codec: BsdNullCodec }
-            Dns { canonical: "dns", aliases: [], constructible: false, matcher: none, codec: DnsCodec }
-            Erspan { canonical: "erspan", aliases: [], constructible: true, matcher: none, codec: ErspanCodec }
-            Esp { canonical: "esp", aliases: [], constructible: true, matcher: none, codec: EspCodec }
-            Ethernet { canonical: "ethernet", aliases: ["eth", "ether", "ethernet2"], constructible: true, matcher: none, codec: EthernetCodec }
-            Geneve { canonical: "geneve", aliases: [], constructible: true, matcher: none, codec: GeneveCodec }
-            Gre { canonical: "gre", aliases: [], constructible: true, matcher: none, codec: GreCodec }
-            Icmpv4 { canonical: "icmpv4", aliases: ["icmp", "icmp4"], constructible: true, matcher: echo_v4, codec: Icmpv4Codec }
-            Icmpv6 { canonical: "icmpv6", aliases: ["icmp6"], constructible: true, matcher: echo_v6, codec: Icmpv6Codec }
-            Igmp { canonical: "igmp", aliases: [], constructible: true, matcher: none, codec: IgmpCodec }
-            Ipv4 { canonical: "ipv4", aliases: ["ip", "ip4"], constructible: true, matcher: none, codec: Ipv4Codec }
-            Ipv6 { canonical: "ipv6", aliases: ["ip6"], constructible: true, matcher: none, codec: Ipv6Codec }
-            Ipv6DestinationOptions { canonical: "ipv6_destination_options", aliases: ["destopts", "destination_options"], constructible: true, matcher: none, codec: DestinationOptionsCodec }
-            Ipv6Fragment { canonical: "ipv6_fragment", aliases: ["fragment6", "frag6"], constructible: true, matcher: none, codec: FragmentCodec }
-            Ipv6HopByHop { canonical: "ipv6_hop_by_hop", aliases: ["hop", "hopopts", "hbh"], constructible: true, matcher: none, codec: HopByHopCodec }
-            Ipv6Srh { canonical: "ipv6_srh", aliases: ["srh", "segment_routing"], constructible: true, matcher: none, codec: SegmentRoutingHeaderCodec }
-            L2tpv3 { canonical: "l2tpv3", aliases: [], constructible: true, matcher: none, codec: L2tpv3Codec }
-            LinuxSll { canonical: "linux_sll", aliases: ["sll"], constructible: true, matcher: none, codec: LinuxSllCodec }
-            LinuxSll2 { canonical: "linux_sll2", aliases: ["sll2"], constructible: true, matcher: none, codec: LinuxSll2Codec }
-            Llc { canonical: "llc", aliases: [], constructible: true, matcher: none, codec: LlcCodec }
-            Malformed { canonical: "malformed", aliases: [], constructible: true, matcher: none, codec: MalformedCodec }
-            Mpls { canonical: "mpls", aliases: [], constructible: true, matcher: none, codec: MplsCodec }
-            Padding { canonical: "padding", aliases: ["pad"], constructible: true, matcher: none, codec: PaddingCodec }
-            Ppp { canonical: "ppp", aliases: [], constructible: true, matcher: none, codec: PppCodec }
-            Pppoe { canonical: "pppoe", aliases: [], constructible: true, matcher: none, codec: PppoeCodec }
-            Raw { canonical: "raw", aliases: ["payload", "bytes"], constructible: true, matcher: none, codec: RawCodec }
-            RawIp { canonical: "raw_ip", aliases: ["rawip"], constructible: false, matcher: none, codec: RawIpCodec }
-            Sctp { canonical: "sctp", aliases: [], constructible: true, matcher: reverse_flow, codec: SctpCodec }
-            Snap { canonical: "snap", aliases: [], constructible: true, matcher: none, codec: SnapCodec }
-            Tcp { canonical: "tcp", aliases: [], constructible: true, matcher: reverse_flow, codec: TcpCodec }
-            Tls { canonical: "tls", aliases: ["ssl"], constructible: false, matcher: none, codec: TlsCodec }
-            Udp { canonical: "udp", aliases: [], constructible: true, matcher: reverse_flow, codec: UdpCodec }
-            Vlan { canonical: "vlan", aliases: ["dot1q", "8021q"], constructible: true, matcher: none, codec: VlanCodec }
-            Vlan8021ad { canonical: "vlan8021ad", aliases: ["dot1ad", "8021ad", "qinq"], constructible: true, matcher: none, codec: Vlan8021adCodec }
-            Vxlan { canonical: "vxlan", aliases: [], constructible: true, matcher: none, codec: VxlanCodec }
+            Ah { canonical: "ah", aliases: [], constructible: true, exact_round_trip: true, matcher: none, codec: AhCodec }
+            Arp { canonical: "arp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, codec: ArpCodec }
+            BsdLoop { canonical: "bsd_loop", aliases: ["loop"], constructible: true, exact_round_trip: true, matcher: none, codec: BsdLoopCodec }
+            BsdNull { canonical: "bsd_null", aliases: ["null"], constructible: true, exact_round_trip: true, matcher: none, codec: BsdNullCodec }
+            Dns { canonical: "dns", aliases: [], constructible: false, exact_round_trip: true, matcher: none, codec: DnsCodec }
+            Erspan { canonical: "erspan", aliases: [], constructible: true, exact_round_trip: true, matcher: none, codec: ErspanCodec }
+            Esp { canonical: "esp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, codec: EspCodec }
+            Ethernet { canonical: "ethernet", aliases: ["eth", "ether", "ethernet2"], constructible: true, exact_round_trip: true, matcher: none, codec: EthernetCodec }
+            Geneve { canonical: "geneve", aliases: [], constructible: true, exact_round_trip: true, matcher: none, codec: GeneveCodec }
+            Gre { canonical: "gre", aliases: [], constructible: true, exact_round_trip: true, matcher: none, codec: GreCodec }
+            Icmpv4 { canonical: "icmpv4", aliases: ["icmp", "icmp4"], constructible: true, exact_round_trip: true, matcher: echo_v4, codec: Icmpv4Codec }
+            Icmpv6 { canonical: "icmpv6", aliases: ["icmp6"], constructible: true, exact_round_trip: true, matcher: echo_v6, codec: Icmpv6Codec }
+            Igmp { canonical: "igmp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, codec: IgmpCodec }
+            Ipv4 { canonical: "ipv4", aliases: ["ip", "ip4"], constructible: true, exact_round_trip: true, matcher: none, codec: Ipv4Codec }
+            Ipv6 { canonical: "ipv6", aliases: ["ip6"], constructible: true, exact_round_trip: true, matcher: none, codec: Ipv6Codec }
+            Ipv6DestinationOptions { canonical: "ipv6_destination_options", aliases: ["destopts", "destination_options"], constructible: true, exact_round_trip: true, matcher: none, codec: DestinationOptionsCodec }
+            Ipv6Fragment { canonical: "ipv6_fragment", aliases: ["fragment6", "frag6"], constructible: true, exact_round_trip: true, matcher: none, codec: FragmentCodec }
+            Ipv6HopByHop { canonical: "ipv6_hop_by_hop", aliases: ["hop", "hopopts", "hbh"], constructible: true, exact_round_trip: true, matcher: none, codec: HopByHopCodec }
+            Ipv6Srh { canonical: "ipv6_srh", aliases: ["srh", "segment_routing"], constructible: true, exact_round_trip: true, matcher: none, codec: SegmentRoutingHeaderCodec }
+            L2tpv3 { canonical: "l2tpv3", aliases: [], constructible: true, exact_round_trip: true, matcher: none, codec: L2tpv3Codec }
+            LinuxSll { canonical: "linux_sll", aliases: ["sll"], constructible: true, exact_round_trip: true, matcher: none, codec: LinuxSllCodec }
+            LinuxSll2 { canonical: "linux_sll2", aliases: ["sll2"], constructible: true, exact_round_trip: true, matcher: none, codec: LinuxSll2Codec }
+            Llc { canonical: "llc", aliases: [], constructible: true, exact_round_trip: true, matcher: none, codec: LlcCodec }
+            Malformed { canonical: "malformed", aliases: [], constructible: true, exact_round_trip: true, matcher: none, codec: MalformedCodec }
+            Mpls { canonical: "mpls", aliases: [], constructible: true, exact_round_trip: true, matcher: none, codec: MplsCodec }
+            Padding { canonical: "padding", aliases: ["pad"], constructible: true, exact_round_trip: true, matcher: none, codec: PaddingCodec }
+            Ppp { canonical: "ppp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, codec: PppCodec }
+            Pppoe { canonical: "pppoe", aliases: [], constructible: true, exact_round_trip: true, matcher: none, codec: PppoeCodec }
+            Raw { canonical: "raw", aliases: ["payload", "bytes"], constructible: true, exact_round_trip: true, matcher: none, codec: RawCodec }
+            RawIp { canonical: "raw_ip", aliases: ["rawip"], constructible: false, exact_round_trip: false, matcher: none, codec: RawIpCodec }
+            Sctp { canonical: "sctp", aliases: [], constructible: true, exact_round_trip: true, matcher: reverse_flow, codec: SctpCodec }
+            Snap { canonical: "snap", aliases: [], constructible: true, exact_round_trip: true, matcher: none, codec: SnapCodec }
+            Tcp { canonical: "tcp", aliases: [], constructible: true, exact_round_trip: true, matcher: reverse_flow, codec: TcpCodec }
+            Tls { canonical: "tls", aliases: ["ssl"], constructible: false, exact_round_trip: true, matcher: none, codec: TlsCodec }
+            Udp { canonical: "udp", aliases: [], constructible: true, exact_round_trip: true, matcher: reverse_flow, codec: UdpCodec }
+            Vlan { canonical: "vlan", aliases: ["dot1q", "8021q"], constructible: true, exact_round_trip: true, matcher: none, codec: VlanCodec }
+            Vlan8021ad { canonical: "vlan8021ad", aliases: ["dot1ad", "8021ad", "qinq"], constructible: true, exact_round_trip: true, matcher: none, codec: Vlan8021adCodec }
+            Vxlan { canonical: "vxlan", aliases: [], constructible: true, exact_round_trip: true, matcher: none, codec: VxlanCodec }
         }
     };
 }
@@ -66,10 +71,17 @@ macro_rules! define_builtin_protocol {
             canonical: $canonical:literal,
             aliases: [$($alias:literal),* $(,)?],
             constructible: $constructible:literal,
+            exact_round_trip: $exact_round_trip:literal,
             matcher: $matcher:ident,
             codec: $codec:ident
         }
     )*) => {
+        /// A protocol the default registry binds, and the per-protocol
+        /// facts every consumer reads instead of matching on name strings.
+        ///
+        /// [`Self::from_name`] accepts only canonical names;
+        /// [`Self::from_name_or_alias`] also accepts the alias spellings
+        /// [`Self::aliases`] lists.
         #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
         pub enum BuiltinProtocol {
             $($variant),*
@@ -136,6 +148,15 @@ macro_rules! define_builtin_protocol {
             /// routing intent for the packet that is transmitted directly.
             pub const fn is_encapsulation_boundary(self) -> bool {
                 matches!(self, Self::Erspan | Self::Geneve | Self::Gre | Self::Vxlan)
+            }
+
+            /// Whether this protocol carries bytes verbatim rather than a
+            /// structure a codec would round-trip. These three are the only
+            /// layers a parent may hold without announcing the child's
+            /// protocol on the wire, so a binding, discriminator, or payload
+            /// check that would reject a typed child accepts them.
+            pub const fn preserves_opaque_bytes(self) -> bool {
+                matches!(self, Self::Raw | Self::Padding | Self::Malformed)
             }
         }
     };

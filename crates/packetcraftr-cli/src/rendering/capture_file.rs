@@ -9,11 +9,10 @@ use packetcraftr::{
         error::{Classification, Kind},
         frame::Frame,
     },
-    output,
 };
 
-use super::super::errors::CliError;
 use super::LinkCaptureWriter;
+use crate::errors::CliError;
 
 const COPY_BUFFER_BYTES: usize = 64 * 1024;
 
@@ -21,19 +20,8 @@ trait Spool: Read + Write + Seek {}
 
 impl<T: Read + Write + Seek> Spool for T {}
 
-pub(crate) fn capture_file_format(format: output::contract::Format) -> Result<Format, CliError> {
-    match format {
-        output::contract::Format::Pcap => Ok(Format::Pcap),
-        output::contract::Format::PcapNg => Ok(Format::PcapNg),
-        _ => Err(CliError::new(
-            Kind::Internal,
-            "capture-file renderer received a non-capture format",
-        )),
-    }
-}
-
 pub(crate) fn write_capture_file(
-    format: output::contract::Format,
+    format: Format,
     frames: impl IntoIterator<Item = Frame>,
 ) -> Result<(), CliError> {
     let mut stdout = io::stdout().lock();
@@ -46,12 +34,11 @@ pub(crate) fn write_capture_file(
 }
 
 fn write_capture_file_with(
-    format: output::contract::Format,
+    format: Format,
     frames: impl IntoIterator<Item = Frame>,
     create_spool: impl FnOnce() -> io::Result<Box<dyn Spool>>,
     destination: &mut dyn Write,
 ) -> Result<(), CliError> {
-    let format = capture_file_format(format)?;
     let mut frames = frames.into_iter();
     let first = frames.next().ok_or_else(|| {
         CliError::new(
@@ -136,7 +123,21 @@ fn capture_io_error(operation: &str, source: io::Error) -> CliError {
     )
 }
 
-fn stdout_error(operation: &str, source: io::Error) -> CliError {
+/// The one mapping for a capture-file writer that writes straight to stdout,
+/// as `capture` and `replay` do.
+///
+/// An I/O failure there is a stdout failure and is classified as one, exactly
+/// as the spooled `send`/`exchange` path classifies its final copy; anything
+/// else keeps the capture error's own classification, so the same stream-limit
+/// or metadata failure is reported the same way whichever command hit it.
+pub(crate) fn stream_capture_error(operation: &str, source: CaptureError) -> CliError {
+    match source {
+        CaptureError::Io(source) => stdout_error(operation, source),
+        source => CliError::classified(source),
+    }
+}
+
+pub(crate) fn stdout_error(operation: &str, source: io::Error) -> CliError {
     CliError::from_classification(
         Classification::new(
             "io.stdout",

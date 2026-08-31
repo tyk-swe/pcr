@@ -22,19 +22,22 @@ Port syntax:
   Expansion is bounded by --max-ports and stops as soon as another distinct
   port would exceed that limit."#;
 
-/// One CLI `--ports` token: a u16 port or inclusive `START-END` range.
+/// One CLI `--ports` token, parsed into the library's own port selection.
+///
+/// Only the token syntax and its clap-facing messages live here; expansion,
+/// de-duplication, and the `max_ports` ceiling belong to
+/// [`packetcraftr::scan::select_ports`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum PortSpec {
-    Single(u16),
-    RangeInclusive { start: u16, end: u16 },
-}
+pub(crate) struct PortSpec(pub(crate) packetcraftr::scan::PortSpec);
 
 impl FromStr for PortSpec {
     type Err = String;
 
     fn from_str(token: &str) -> Result<Self, Self::Err> {
         let Some((start_part, end_part)) = token.split_once('-') else {
-            return Ok(Self::Single(parse_port(token)?));
+            return Ok(Self(packetcraftr::scan::PortSpec::Single(parse_port(
+                token,
+            )?)));
         };
         if start_part.is_empty() || end_part.is_empty() {
             return Err(format!(
@@ -49,7 +52,10 @@ impl FromStr for PortSpec {
                 "invalid port spec `{token}`: range end {end} precedes start {start}"
             ));
         }
-        Ok(Self::RangeInclusive { start, end })
+        Ok(Self(packetcraftr::scan::PortSpec::RangeInclusive {
+            start,
+            end,
+        }))
     }
 }
 
@@ -102,10 +108,10 @@ pub(crate) struct Args {
     #[arg(long)]
     pub(crate) rate: Option<u32>,
     /// Maximum probes sent by one shared-capture exchange batch.
-    #[arg(long, default_value_t = packetcraftr::scan::DEFAULT_SCAN_BATCH_SIZE)]
+    #[arg(long, default_value_t = packetcraftr::scan::DEFAULT_BATCH_SIZE)]
     pub(crate) batch_size: usize,
     /// Maximum distinct destination ports accepted by the request.
-    #[arg(long, default_value_t = packetcraftr::scan::DEFAULT_MAX_SCAN_PORTS)]
+    #[arg(long, default_value_t = packetcraftr::scan::DEFAULT_MAX_PORTS)]
     pub(crate) max_ports: usize,
     /// Maximum generated probes after target resolution and attempts.
     #[arg(long, default_value_t = core::template::DEFAULT_MAX_TEMPLATE_PACKETS)]
@@ -114,7 +120,7 @@ pub(crate) struct Args {
     #[arg(long, default_value_t = 3_600_000)]
     pub(crate) max_duration_ms: u64,
     /// Maximum undecodable exact frames retained across the scan.
-    #[arg(long, default_value_t = packetcraftr::scan::DEFAULT_MAX_UNDECODED_SCAN_FRAMES)]
+    #[arg(long, default_value_t = packetcraftr::scan::DEFAULT_MAX_UNDECODED_FRAMES)]
     pub(crate) max_undecoded: usize,
     #[command(flatten)]
     pub(crate) route: RouteSelectionArgs,
@@ -130,16 +136,21 @@ mod tests {
 
     #[test]
     fn port_specs_parse_single_ports_and_inclusive_ranges() {
+        use packetcraftr::scan::PortSpec as Spec;
+
         let cases = [
-            ("0", PortSpec::Single(0)),
-            ("65535", PortSpec::Single(u16::MAX)),
-            ("80-82", PortSpec::RangeInclusive { start: 80, end: 82 }),
+            ("0", PortSpec(Spec::Single(0))),
+            ("65535", PortSpec(Spec::Single(u16::MAX))),
+            (
+                "80-82",
+                PortSpec(Spec::RangeInclusive { start: 80, end: 82 }),
+            ),
             (
                 "443-443",
-                PortSpec::RangeInclusive {
+                PortSpec(Spec::RangeInclusive {
                     start: 443,
                     end: 443,
-                },
+                }),
             ),
         ];
 

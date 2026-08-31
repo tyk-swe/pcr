@@ -17,7 +17,7 @@ use crate::authorization::{
     check_permissive_live, unsupported_operation,
 };
 
-use super::super::wire::replay_network_envelope;
+use crate::replay::wire::replay_network_envelope;
 
 /// Validates complete capture evidence, applies policy to raw routing destinations
 /// before I/O, and requires an exact decode/build round trip.
@@ -50,9 +50,11 @@ impl SystemAuthorizer {
         validate_complete_frame(frame)?;
         self.validate_link_type(frame)?;
         validate_network_frame(frame, mode)?;
-        authorize_wire(&self.policy, frame.clone(), None).map_err(|error| match error {
-            WireAuthorizationError::Decode(source) => decode_error(source),
-            WireAuthorizationError::Policy(error) => BoundaryError::from_error(error),
+        authorize_wire(&self.policy, frame.link_type, frame.bytes(), None).map_err(|error| {
+            match error {
+                WireAuthorizationError::Decode(source) => decode_error(source),
+                WireAuthorizationError::Policy(error) => BoundaryError::from_error(error),
+            }
         })?;
         let decoded = self.decode_frame(frame)?;
         let rebuilt = self.rebuild_frame(&decoded)?;
@@ -231,9 +233,11 @@ impl Authorizer for SystemAuthorizer {
         frame: &Frame,
         route: &packetcraftr_netio::route::Plan,
     ) -> Result<(), BoundaryError> {
-        authorize_wire(&self.policy, frame.clone(), Some(route)).map_err(|error| match error {
-            WireAuthorizationError::Decode(source) => decode_error(source),
-            WireAuthorizationError::Policy(error) => BoundaryError::from_error(error),
+        authorize_wire(&self.policy, frame.link_type, frame.bytes(), Some(route)).map_err(|error| {
+            match error {
+                WireAuthorizationError::Decode(source) => decode_error(source),
+                WireAuthorizationError::Policy(error) => BoundaryError::from_error(error),
+            }
         })
     }
 }
@@ -263,7 +267,7 @@ mod tests {
     use crate::authorization::{DeclaredPackets, PermissiveLive, ReplayFrame, WireBudget};
 
     fn registry() -> Arc<Registry> {
-        Arc::new(packetcraftr_core::protocol::builtin::registry().expect("built-in registry"))
+        packetcraftr_core::protocol::builtin::registry()
     }
 
     /// A caller codec that preserves every root byte while exposing no IP
@@ -272,8 +276,10 @@ mod tests {
     struct OpaqueRawCodec;
 
     impl LayerCodec for OpaqueRawCodec {
-        fn protocol_id(&self) -> packetcraftr_core::layer::Id {
-            "raw".into()
+        fn protocol_id(&self) -> &'static packetcraftr_core::layer::Id {
+            static PROTOCOL: std::sync::OnceLock<packetcraftr_core::layer::Id> =
+                std::sync::OnceLock::new();
+            PROTOCOL.get_or_init(|| "raw".into())
         }
 
         fn encode(
@@ -315,7 +321,7 @@ mod tests {
     fn opaque_raw_registry() -> Arc<Registry> {
         let mut builder = Registry::builder();
         builder
-            .register_builtin_codec(OpaqueRawCodec, &[])
+            .register_codec(OpaqueRawCodec, &[])
             .expect("opaque codec registration");
         builder
             .bind_link_type(LinkType::RAW.0, "raw")

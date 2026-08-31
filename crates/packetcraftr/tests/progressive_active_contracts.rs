@@ -12,9 +12,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use bytes::Bytes;
-use packetcraftr::authorization::NoResolver;
 use packetcraftr::core::error::{Classification, Classified, Kind};
 use packetcraftr::core::frame::LinkType;
+use packetcraftr::core::progress::Runtime;
 use packetcraftr::core::protocol::{network::Ipv4, transport::Udp};
 use packetcraftr::core::{Packet, field::FieldValue, layer::Raw};
 use packetcraftr::netio::capture;
@@ -103,6 +103,7 @@ impl capture::Session for FakeCapture {
         if self.0.fail_shutdown_at == call {
             return Err(packetcraftr::netio::Error::Capture {
                 message: "induced capture shutdown failure".to_owned(),
+                source: None,
             });
         }
         Ok(())
@@ -163,7 +164,7 @@ fn traffic_policy() -> policy::Policy {
 
 fn client(state: Arc<IoState>) -> Client<FakeRoutes, NoNeighbors, FakeIo> {
     Client::new(
-        Arc::new(packetcraftr::core::protocol::builtin::registry().unwrap()),
+        packetcraftr::core::protocol::builtin::registry(),
         FakeRoutes,
         NoNeighbors,
         FakeIo(state),
@@ -251,12 +252,12 @@ impl Harness {
     ) -> (
         Arc<packetcraftr::core::registry::Registry>,
         ExchangeExecutor<'_, FakeRoutes, NoNeighbors, FakeIo>,
-        packetcraftr::target::PolicyAuthorizer<'_, NoResolver>,
+        packetcraftr::target::PolicyAuthorizer<'_>,
     ) {
         (
             Arc::clone(self.client.registry()),
             ExchangeExecutor::new(&self.client, exchange_options()),
-            packetcraftr::target::PolicyAuthorizer::new(&self.policy, &NoResolver),
+            packetcraftr::target::PolicyAuthorizer::for_packets(&self.policy),
         )
     }
 }
@@ -283,9 +284,9 @@ fn exchange_events_follow_provider_confirmation_and_completion() {
     let callback_collector = Arc::clone(&collector);
     let callback_state = Arc::clone(&state);
 
-    let expected_capture_limits = two_packet_exchange_options()
-        .validate()
-        .expect("valid exchange options");
+    let options = two_packet_exchange_options();
+    options.validate().expect("valid exchange options");
+    let expected_capture_limits = options.capture;
     let summary = client
         .exchange_with_events(
             &exchange_template(),
@@ -544,6 +545,7 @@ fn scan_sink_failure_stops_after_capture_shutdown() {
         &registry,
         &mut executor,
         &mut clock::SystemClock,
+        &Runtime::default(),
         |_| Err(output_failure()),
     )
     .expect_err("sink failure must abort the second scan batch");
@@ -580,6 +582,7 @@ fn later_capture_shutdown_failure_preserves_the_earlier_scan_event() {
         &registry,
         &mut executor,
         &mut clock::SystemClock,
+        &Runtime::default(),
         move |event| {
             callback_events.lock().unwrap().push(event);
             Ok(())
@@ -606,7 +609,7 @@ fn traceroute_sink_failure_stops_after_capture_shutdown() {
         target: Target::Address(destination),
         strategy: traceroute::Strategy::Udp,
         address_family: packetcraftr::target::Family::Any,
-        destination_port: Some(traceroute::DEFAULT_TRACEROUTE_UDP_PORT),
+        destination_port: Some(traceroute::DEFAULT_UDP_PORT),
         first_hop: 1,
         max_hops: 2,
         probes_per_hop: 1,
@@ -621,6 +624,7 @@ fn traceroute_sink_failure_stops_after_capture_shutdown() {
         &registry,
         &mut executor,
         &mut clock::SystemClock,
+        &Runtime::default(),
         |_| Err(output_failure()),
     )
     .expect_err("sink failure must abort the second hop");
@@ -640,8 +644,8 @@ fn dns_sink_failure_stops_after_capture_shutdown() {
     let request = dns::Request {
         server: Target::Address(destination),
         address_family: packetcraftr::target::Family::Any,
-        server_port: dns::DEFAULT_DNS_SERVER_PORT,
-        source_port: dns::DNS_EPHEMERAL_SOURCE_PORT_BASE,
+        server_port: dns::DEFAULT_SERVER_PORT,
+        source_port: packetcraftr::EPHEMERAL_SOURCE_PORT_BASE,
         query_name: "example.test".to_owned(),
         query_type: dns::QueryType::A,
         transaction_id: 7,
@@ -659,6 +663,7 @@ fn dns_sink_failure_stops_after_capture_shutdown() {
         &registry,
         &mut executor,
         &mut clock::SystemClock,
+        &Runtime::default(),
         |_| Err(output_failure()),
     )
     .expect_err("sink failure must abort the second DNS attempt");

@@ -4,6 +4,6 @@
 //! Structured DNS output.
 
 mod record;
-mod result;
+mod report;
 pub use record::{Edns, EdnsOption, Record, RecordData, RejectedRecord, Section};
-pub use result::{Attempt, Event, Outcome, Result, Transport, Undecoded};
+pub use report::{Attempt, Event, Outcome, Report, Transport, Undecoded};

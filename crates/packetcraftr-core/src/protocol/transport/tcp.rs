@@ -14,12 +14,16 @@ use crate::{
     layer::{Layer, reflective_layer},
 };
 
-use super::super::common::{
-    ValueExpectation, aliased_fields, invalid, make_layer, payload_without_padding, protocol,
-    resolve_u16, transport_checksum, transport_checksum_parts, truncated, wrong_layer,
-};
-use super::super::network::resolve_envelope;
 use super::ports::child_discriminators;
+use crate::protocol::common::{
+    ValueExpectation, invalid, make_layer, payload_without_padding, protocol, resolve_u16,
+    transport_checksum, transport_checksum_parts, truncated, typed_layer,
+};
+use crate::protocol::network::resolve_envelope;
+
+use crate::protocol::BuiltinProtocol;
+
+const NAME: &str = BuiltinProtocol::Tcp.as_str();
 
 const TCP_MIN_LEN: usize = 20;
 
@@ -62,11 +66,11 @@ impl Default for Tcp {
 }
 
 reflective_layer! {
-    fn tcp_schema() => { protocol: protocol("tcp"), name: "TCP" }
+    fn tcp_schema() => { protocol: protocol(NAME), name: "TCP" }
     impl Tcp {
-        "source_port" => { kind: Unsigned, derived: false, required: true, description: "TCP source port",
+        "source_port" | "sport" => { kind: Unsigned, derived: false, required: true, description: "TCP source port",
             reflect: source_port, layout: (0, 2) },
-        "destination_port" => { kind: Unsigned, derived: false, required: true, description: "TCP destination port",
+        "destination_port" | "dport" => { kind: Unsigned, derived: false, required: true, description: "TCP destination port",
             reflect: destination_port, layout: (2, 4) },
         "sequence" => { kind: Unsigned, derived: false, required: true, description: "Sequence number",
             reflect: sequence, layout: (4, 8) },
@@ -92,8 +96,8 @@ reflective_layer! {
 pub(crate) struct TcpCodec;
 
 impl LayerCodec for TcpCodec {
-    fn protocol_id(&self) -> crate::layer::Id {
-        protocol("tcp")
+    fn protocol_id(&self) -> &'static crate::layer::Id {
+        &tcp_schema().protocol
     }
 
     fn encode(
@@ -102,24 +106,21 @@ impl LayerCodec for TcpCodec {
         payload: &[u8],
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
-        let layer = layer
-            .as_any()
-            .downcast_ref::<Tcp>()
-            .ok_or_else(|| wrong_layer("tcp", layer))?;
+        let layer = typed_layer::<Tcp>(NAME, layer)?;
         if layer.flags > 0x01ff {
-            return Err(invalid("tcp", "flags exceed nine bits"));
+            return Err(invalid(NAME, "flags exceed nine bits"));
         }
         if layer.reserved_bits > 7 {
-            return Err(invalid("tcp", "reserved bits exceed three bits"));
+            return Err(invalid(NAME, "reserved bits exceed three bits"));
         }
         if layer.options.len() > 40 {
-            return Err(invalid("tcp", "options exceed the 40-byte TCP limit"));
+            return Err(invalid(NAME, "options exceed the 40-byte TCP limit"));
         }
         let mut diagnostics = Vec::new();
         if layer.reserved_bits != 0 {
             let message = "reserved TCP header bits are non-zero";
-            if context.mode == crate::build::Mode::Strict {
-                return Err(invalid("tcp", message));
+            if context.mode == crate::codec::Mode::Strict {
+                return Err(invalid(NAME, message));
             }
             diagnostics.push(
                 Diagnostic::warning("build.tcp_reserved_bits", message).at_field("reserved_bits"),
@@ -139,7 +140,7 @@ impl LayerCodec for TcpCodec {
         }
         let header_len = TCP_MIN_LEN.saturating_add(options.len());
         let data_offset =
-            u8::try_from(header_len / 4).map_err(|_| invalid("tcp", "header length overflow"))?;
+            u8::try_from(header_len / 4).map_err(|_| invalid(NAME, "header length overflow"))?;
         #[expect(
             clippy::cast_possible_truncation,
             reason = "the 9-bit flags field is split deliberately: bit 8 goes into the byte at \
@@ -160,11 +161,12 @@ impl LayerCodec for TcpCodec {
         prefix.extend_from_slice(&[0, 0]);
         prefix.extend_from_slice(&layer.urgent_pointer.to_be_bytes());
         prefix.extend_from_slice(&options);
-        let covered_payload = payload_without_padding("tcp", payload, context)?;
-        let network = resolve_envelope(context)?;
-        let checksum_expected = transport_checksum_parts(network, 6, &[&prefix, covered_payload])?;
+        let covered_payload = payload_without_padding(NAME, payload, context)?;
+        let network = resolve_envelope(NAME, context)?;
+        let checksum_expected =
+            transport_checksum_parts(NAME, network, 6, &[&prefix, covered_payload])?;
         let (checksum, materialized_checksum) = resolve_u16(
-            "tcp",
+            NAME,
             "checksum",
             &layer.checksum,
             ValueExpectation::Required(checksum_expected),
@@ -181,13 +183,9 @@ impl LayerCodec for TcpCodec {
         let mut materialized = layer.clone();
         materialized.checksum = materialized_checksum;
         materialized.options = Bytes::from(options);
-        Ok(EncodedLayer {
-            prefix,
-            suffix: Vec::new(),
-            materialized: Box::new(materialized),
-            fields: tcp_layout(header_len),
-            diagnostics,
-        })
+        Ok(EncodedLayer::header(prefix, Box::new(materialized))
+            .with_fields(tcp_layout(header_len))
+            .with_diagnostics(diagnostics))
     }
 
     fn decode(
@@ -196,20 +194,20 @@ impl LayerCodec for TcpCodec {
         context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
         let Some(header) = input.first_chunk::<TCP_MIN_LEN>() else {
-            return Err(truncated("tcp", TCP_MIN_LEN, input.len()));
+            return Err(truncated(NAME, TCP_MIN_LEN, input.len()));
         };
         let data_offset = usize::from(header[12] >> 4);
         if data_offset < 5 {
             return Err(invalid(
-                "tcp",
+                NAME,
                 format!("data offset {data_offset} is below 5"),
             ));
         }
         let header_len = data_offset
             .checked_mul(4)
-            .ok_or_else(|| invalid("tcp", "data offset overflow"))?;
+            .ok_or_else(|| invalid(NAME, "data offset overflow"))?;
         let Some(options) = input.get(TCP_MIN_LEN..header_len) else {
-            return Err(truncated("tcp", header_len, input.len()));
+            return Err(truncated(NAME, header_len, input.len()));
         };
         let checksum_value = u16::from_be_bytes([header[16], header[17]]);
         let mut diagnostics = Vec::new();
@@ -224,7 +222,7 @@ impl LayerCodec for TcpCodec {
             );
         }
         if let Some(network) = context.network
-            && transport_checksum(network, 6, input)? != 0
+            && transport_checksum(NAME, network, 6, input)? != 0
         {
             diagnostics.push(
                 Diagnostic::warning(TCP_CHECKSUM, "TCP checksum mismatch").at_field("checksum"),
@@ -269,14 +267,7 @@ impl LayerCodec for TcpCodec {
         &self,
         fields: &BTreeMap<String, FieldValue>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(
-            Tcp::default(),
-            &aliased_fields(
-                "tcp",
-                fields,
-                &[("sport", "source_port"), ("dport", "destination_port")],
-            )?,
-        )
+        make_layer(Tcp::default(), fields)
     }
 }
 

@@ -14,11 +14,14 @@ use crate::{
 };
 
 use super::common::{
-    ValueExpectation, checksum, checksum_parts, ensure_encode_budget,
-    expected_discriminator_for_value, invalid, make_layer, payload_without_padding, protocol,
-    resolve_u16, strict_or_diagnostic, truncated, validate_auto_raw_discriminator,
-    validate_raw_child_discriminator, wrong_layer,
+    ValueExpectation, checksum, checksum_parts, ensure_encode_budget, expected_discriminator,
+    invalid, make_layer, payload_without_padding, protocol, resolve_u16, strict_or_diagnostic,
+    truncated, typed_layer, validate_auto_raw_discriminator, validate_raw_child_discriminator,
 };
+
+use crate::protocol::BuiltinProtocol;
+
+const NAME: &str = BuiltinProtocol::Gre.as_str();
 
 pub(crate) const GRE_BASE_LEN: usize = 4;
 const GRE_OPTION_LEN: usize = 4;
@@ -63,7 +66,7 @@ impl Default for Gre {
 }
 
 reflective_layer! {
-    fn gre_schema() => { protocol: protocol("gre"), name: "GRE" }
+    fn gre_schema() => { protocol: protocol(NAME), name: "GRE" }
     impl Gre {
         "protocol_type" => { kind: Unsigned, derived: true, required: false, description: "Encapsulated EtherType discriminator", reflect: protocol_type, layout: (2, 4) },
         "checksum" => { kind: Unsigned, derived: true, required: false, description: "Optional checksum over the GRE header and payload", get |layer| layer.checksum.as_ref().map(reflect_get), set |layer, value, name| { let mut checksum = layer.checksum.clone().unwrap_or_default(); reflect_set(&mut checksum, gre_schema(), name, value)?; layer.checksum = Some(checksum); Ok(()) } },
@@ -78,8 +81,8 @@ reflective_layer! {
 pub(crate) struct GreCodec;
 
 impl LayerCodec for GreCodec {
-    fn protocol_id(&self) -> crate::layer::Id {
-        protocol("gre")
+    fn protocol_id(&self) -> &'static crate::layer::Id {
+        &gre_schema().protocol
     }
 
     fn encode(
@@ -88,25 +91,22 @@ impl LayerCodec for GreCodec {
         payload: &[u8],
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
-        let layer = layer
-            .as_any()
-            .downcast_ref::<Gre>()
-            .ok_or_else(|| wrong_layer("gre", layer))?;
+        let layer = typed_layer::<Gre>(NAME, layer)?;
         let header_len = gre_header_len(
             layer.checksum.is_some(),
             layer.key.is_some(),
             layer.sequence.is_some(),
         );
-        ensure_encode_budget("gre", header_len, context)?;
-        let covered_payload = payload_without_padding("gre", payload, context)?;
+        ensure_encode_budget(NAME, header_len, context)?;
+        let covered_payload = payload_without_padding(NAME, payload, context)?;
 
         let mut diagnostics = Vec::new();
         if layer.reserved_bits > 0x7f {
-            return Err(invalid("gre", "reserved bits exceed the 7-bit wire field"));
+            return Err(invalid(NAME, "reserved bits exceed the 7-bit wire field"));
         }
         if layer.reserved_bits != 0 {
             strict_or_diagnostic(
-                "gre",
+                NAME,
                 "build.gre_reserved_bits",
                 "reserved_bits",
                 "GRE bits 6 through 12 must be zero on transmission",
@@ -115,22 +115,22 @@ impl LayerCodec for GreCodec {
             )?;
         }
         validate_auto_raw_discriminator(
-            "gre",
+            NAME,
             "protocol_type",
             &layer.protocol_type,
             context,
             &mut diagnostics,
         )?;
         let (protocol_type, materialized_protocol_type) = resolve_u16(
-            "gre",
+            NAME,
             "protocol_type",
             &layer.protocol_type,
-            expected_discriminator_for_value("gre", context, 0_u16, &layer.protocol_type),
+            expected_discriminator(NAME, context, 0_u16, &layer.protocol_type),
             context.mode,
             &mut diagnostics,
         )?;
         validate_raw_child_discriminator(
-            "gre",
+            NAME,
             u64::from(protocol_type),
             context,
             &mut diagnostics,
@@ -141,7 +141,7 @@ impl LayerCodec for GreCodec {
         let materialized_checksum = if let Some(checksum_value) = &layer.checksum {
             let expected = checksum_parts(&[&prefix, covered_payload]);
             let (checksum, materialized) = resolve_u16(
-                "gre",
+                NAME,
                 "checksum",
                 checksum_value,
                 ValueExpectation::Required(expected),
@@ -163,13 +163,9 @@ impl LayerCodec for GreCodec {
         let mut materialized = layer.clone();
         materialized.protocol_type = materialized_protocol_type;
         materialized.checksum = materialized_checksum;
-        Ok(EncodedLayer {
-            prefix,
-            suffix: Vec::new(),
-            materialized: Box::new(materialized),
-            fields: gre_layout(layer),
-            diagnostics,
-        })
+        Ok(EncodedLayer::header(prefix, Box::new(materialized))
+            .with_fields(gre_layout(layer))
+            .with_diagnostics(diagnostics))
     }
 
     fn decode(
@@ -178,25 +174,25 @@ impl LayerCodec for GreCodec {
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
         let Some(header) = input.first_chunk::<GRE_BASE_LEN>() else {
-            return Err(truncated("gre", GRE_BASE_LEN, input.len()));
+            return Err(truncated(NAME, GRE_BASE_LEN, input.len()));
         };
         let flags = u16::from_be_bytes([header[0], header[1]]);
         let version = flags & VERSION_MASK;
         if version != 0 {
             return Err(crate::codec::Error::Unsupported {
-                protocol: protocol("gre"),
+                protocol: protocol(NAME),
                 message: format!("GRE version {version} is not supported"),
             });
         }
         if flags & ROUTING_PRESENT != 0 {
             return Err(crate::codec::Error::Unsupported {
-                protocol: protocol("gre"),
+                protocol: protocol(NAME),
                 message: "GRE routing fields are not supported".to_owned(),
             });
         }
         if flags & MUST_DISCARD_FLAGS != 0 {
             return Err(crate::codec::Error::Unsupported {
-                protocol: protocol("gre"),
+                protocol: protocol(NAME),
                 message: format!(
                     "must-discard GRE flags are non-zero (0x{:04x})",
                     flags & MUST_DISCARD_FLAGS
@@ -286,14 +282,14 @@ fn decode_options(input: &[u8], flags: u16) -> Result<DecodedOptions, crate::cod
     let sequence_present = flags & SEQUENCE_PRESENT != 0;
     let header_len = gre_header_len(checksum_present, key_present, sequence_present);
     if input.len() < header_len {
-        return Err(truncated("gre", header_len, input.len()));
+        return Err(truncated(NAME, header_len, input.len()));
     }
     let mut cursor = GRE_BASE_LEN;
     let checksum_value = if checksum_present {
         let option = gre_option(input, cursor)?;
         let value = u16::from_be_bytes([option[0], option[1]]);
         if option[2] != 0 || option[3] != 0 {
-            return Err(invalid("gre", "reserved1 field is non-zero"));
+            return Err(invalid(NAME, "reserved1 field is non-zero"));
         }
         cursor = cursor.saturating_add(GRE_OPTION_LEN);
         Some(WireValue::Exact(value))
@@ -321,7 +317,7 @@ fn gre_option(input: &[u8], cursor: usize) -> Result<[u8; GRE_OPTION_LEN], crate
         .get(cursor..)
         .and_then(<[u8]>::first_chunk::<GRE_OPTION_LEN>)
         .copied()
-        .ok_or_else(|| truncated("gre", cursor.saturating_add(GRE_OPTION_LEN), input.len()))
+        .ok_or_else(|| truncated(NAME, cursor.saturating_add(GRE_OPTION_LEN), input.len()))
 }
 
 fn gre_layout(layer: &Gre) -> Vec<crate::layout::FieldLayout> {
@@ -354,9 +350,9 @@ fn gre_layout(layer: &Gre) -> Vec<crate::layout::FieldLayout> {
     fields
 }
 
-fn gre_dynamic_field(name: &str, start: usize, end: usize) -> crate::layout::FieldLayout {
+fn gre_dynamic_field(name: &'static str, start: usize, end: usize) -> crate::layout::FieldLayout {
     crate::layout::FieldLayout {
-        name: name.to_owned(),
+        name,
         range: crate::layout::ByteRange::new(start, end),
     }
 }

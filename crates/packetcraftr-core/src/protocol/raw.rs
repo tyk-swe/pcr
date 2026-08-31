@@ -12,11 +12,17 @@ use crate::{
     layer::{Layer, Malformed, Padding, Raw},
 };
 
-use super::common::{ensure_encode_budget, invalid, make_layer, protocol, wrong_layer};
+use super::common::{ensure_encode_budget, invalid, make_layer, typed_layer};
+
+use crate::protocol::BuiltinProtocol;
+
+const RAW_NAME: &str = BuiltinProtocol::Raw.as_str();
+const MALFORMED_NAME: &str = BuiltinProtocol::Malformed.as_str();
+const PADDING_NAME: &str = BuiltinProtocol::Padding.as_str();
 
 /// Parses hexadecimal raw bytes with optional `0x`, whitespace, colon, or dash separators.
 pub fn parse_hex(input: &str) -> Result<Bytes, crate::codec::Error> {
-    let protocol = crate::layer::Id::new("raw");
+    let protocol = crate::layer::Id::new(RAW_NAME);
     let compact = input
         .strip_prefix("0x")
         .or_else(|| input.strip_prefix("0X"))
@@ -67,8 +73,8 @@ fn hex_nibble(value: u8) -> Option<u8> {
 pub(super) struct RawCodec;
 
 impl LayerCodec for RawCodec {
-    fn protocol_id(&self) -> crate::layer::Id {
-        protocol("raw")
+    fn protocol_id(&self) -> &'static crate::layer::Id {
+        &crate::layer::raw_schema().protocol
     }
 
     fn encode(
@@ -77,14 +83,12 @@ impl LayerCodec for RawCodec {
         _payload: &[u8],
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
-        let layer = layer
-            .as_any()
-            .downcast_ref::<Raw>()
-            .ok_or_else(|| wrong_layer("raw", layer))?;
-        ensure_encode_budget("raw", layer.bytes.len(), context)?;
-        let mut encoded = EncodedLayer::header(layer.bytes.to_vec(), Box::new(layer.clone()));
-        encoded.fields = crate::layer::raw_layout(layer.bytes.len());
-        Ok(encoded)
+        let layer = typed_layer::<Raw>(RAW_NAME, layer)?;
+        ensure_encode_budget(RAW_NAME, layer.bytes.len(), context)?;
+        Ok(
+            EncodedLayer::header(layer.bytes.to_vec(), Box::new(layer.clone()))
+                .with_fields(crate::layer::raw_layout(layer.bytes.len())),
+        )
     }
 
     fn decode(
@@ -104,7 +108,7 @@ impl LayerCodec for RawCodec {
         &self,
         fields: &BTreeMap<String, FieldValue>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(Raw::default(), &raw_fields(fields, "raw")?)
+        make_layer(Raw::default(), &raw_fields(fields, RAW_NAME)?)
     }
 }
 
@@ -115,8 +119,8 @@ pub(super) struct PaddingCodec;
 pub(super) struct MalformedCodec;
 
 impl LayerCodec for MalformedCodec {
-    fn protocol_id(&self) -> crate::layer::Id {
-        protocol("malformed")
+    fn protocol_id(&self) -> &'static crate::layer::Id {
+        &crate::layer::malformed_schema().protocol
     }
 
     fn encode(
@@ -125,18 +129,16 @@ impl LayerCodec for MalformedCodec {
         _payload: &[u8],
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
-        let layer = layer
-            .as_any()
-            .downcast_ref::<Malformed>()
-            .ok_or_else(|| wrong_layer("malformed", layer))?;
-        ensure_encode_budget("malformed", layer.bytes.len(), context)?;
-        let mut encoded = EncodedLayer::header(layer.bytes.to_vec(), Box::new(layer.clone()));
-        encoded.fields = crate::layer::malformed_layout(layer.bytes.len());
-        encoded.diagnostics.push(Diagnostic::warning(
-            "build.malformed_layer",
-            format!("preserving explicitly malformed bytes: {}", layer.reason),
-        ));
-        Ok(encoded)
+        let layer = typed_layer::<Malformed>(MALFORMED_NAME, layer)?;
+        ensure_encode_budget(MALFORMED_NAME, layer.bytes.len(), context)?;
+        Ok(
+            EncodedLayer::header(layer.bytes.to_vec(), Box::new(layer.clone()))
+                .with_fields(crate::layer::malformed_layout(layer.bytes.len()))
+                .with_diagnostics(vec![Diagnostic::warning(
+                    "build.malformed_layer",
+                    format!("preserving explicitly malformed bytes: {}", layer.reason),
+                )]),
+        )
     }
 
     fn decode(
@@ -169,8 +171,8 @@ impl LayerCodec for MalformedCodec {
 }
 
 impl LayerCodec for PaddingCodec {
-    fn protocol_id(&self) -> crate::layer::Id {
-        protocol("padding")
+    fn protocol_id(&self) -> &'static crate::layer::Id {
+        &crate::layer::padding_schema().protocol
     }
 
     fn encode(
@@ -179,14 +181,12 @@ impl LayerCodec for PaddingCodec {
         _payload: &[u8],
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
-        let layer = layer
-            .as_any()
-            .downcast_ref::<Padding>()
-            .ok_or_else(|| wrong_layer("padding", layer))?;
-        ensure_encode_budget("padding", layer.bytes.len(), context)?;
-        let mut encoded = EncodedLayer::header(layer.bytes.to_vec(), Box::new(layer.clone()));
-        encoded.fields = crate::layer::padding_layout(layer.bytes.len());
-        Ok(encoded)
+        let layer = typed_layer::<Padding>(PADDING_NAME, layer)?;
+        ensure_encode_budget(PADDING_NAME, layer.bytes.len(), context)?;
+        Ok(
+            EncodedLayer::header(layer.bytes.to_vec(), Box::new(layer.clone()))
+                .with_fields(crate::layer::padding_layout(layer.bytes.len())),
+        )
     }
 
     fn decode(
@@ -206,7 +206,7 @@ impl LayerCodec for PaddingCodec {
         &self,
         fields: &BTreeMap<String, FieldValue>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(Padding::default(), &raw_fields(fields, "padding")?)
+        make_layer(Padding::default(), &raw_fields(fields, PADDING_NAME)?)
     }
 }
 

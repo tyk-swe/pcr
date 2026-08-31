@@ -3,14 +3,18 @@
 
 //! Capture-pipeline accounting around the standalone IP reassembler.
 
-use std::time::Instant;
+use std::mem::size_of;
+use std::time::{Instant, SystemTime};
 
+use crate::analysis::Error;
 use crate::analysis::adapter::IpFragments;
-use crate::analysis::reassembly::Limits as ReassemblyLimits;
+use crate::analysis::pipeline::DerivedDatagram;
+use crate::analysis::pipeline::clock::CaptureClock;
 use crate::analysis::reassembly::ip::{
     self, CompletedDatagram, DatagramKey, Family, FragmentDisposition, IncompleteReason,
-    OverlapPolicy, PushOutcome,
+    Limits as IpReassemblyLimits, OverlapPolicy, PushOutcome,
 };
+use crate::decode::DecodedPacket;
 
 /// Counters for one IP family. Sub-counters describe admitted fragments and
 /// are intentionally independent: a completing fragment may also resolve an
@@ -60,15 +64,9 @@ pub enum IpDatagramOutcome {
         duplicate_fragments: usize,
         overlap_bytes: usize,
     },
-    Incomplete {
-        key: DatagramKey,
-        reason: IncompleteReason,
-        fragment_count: usize,
-        unique_bytes: usize,
-        known_final_length: Option<usize>,
-        duplicate_fragments: usize,
-        overlap_bytes: usize,
-    },
+    /// The engine's own retirement evidence, carried through unchanged
+    /// rather than restated field by field.
+    Incomplete(ip::IncompleteDatagram),
 }
 
 /// Progressive IP lifecycle evidence. The pipeline attributes each value to
@@ -102,23 +100,123 @@ pub struct IpReassemblyReport {
     pub outcomes_omitted: u64,
 }
 
+/// How much of the aggregate IP memory budget one derived decode may spend,
+/// and how many layers that buys.
+pub(super) struct DerivedDecodeBudget {
+    pub(super) charge: usize,
+    pub(super) max_layers: usize,
+    /// Whether the layer cap came from the budget rather than from the
+    /// datagram's own structure, so a layer-limit refusal can be reported as
+    /// the resource failure it is.
+    pub(super) budget_reduced: bool,
+}
+
+/// Owns the whole aggregate IP memory ledger: the reassembler's retained
+/// state and the derived-decode charges the pipeline holds while it feeds a
+/// completion cascade back in.
 pub(super) struct IpDispatch {
     reassembler: ip::Reassembler,
+    clock: CaptureClock,
+    max_aggregate_bytes: usize,
     max_outcomes: usize,
     report: IpReassemblyReport,
 }
 
 impl IpDispatch {
-    pub(super) fn new(
-        limits: ReassemblyLimits,
-        overlap_policy: OverlapPolicy,
-        max_outcomes: usize,
-    ) -> Self {
+    pub(super) fn new(limits: IpReassemblyLimits, overlap_policy: OverlapPolicy) -> Self {
         Self {
+            max_aggregate_bytes: limits.max_aggregate_bytes,
+            max_outcomes: limits.max_retained_outcomes,
             reassembler: ip::Reassembler::new(limits, overlap_policy),
-            max_outcomes,
+            clock: CaptureClock::new(),
             report: IpReassemblyReport::default(),
         }
+    }
+
+    /// The monotonic instant this frame's capture timestamp maps to. Every
+    /// physical frame advances IP expiry, matched or not, so the clock lives
+    /// with the state it ages rather than beside the loop.
+    pub(super) fn at(&mut self, timestamp: SystemTime, number: u64) -> Result<Instant, Error> {
+        self.clock.at(timestamp, number)
+    }
+
+    /// Plans one derived decode against whatever the ledger already holds.
+    ///
+    /// Each committed layer consumes at least one input byte; only the final
+    /// stop layer may consume zero. Capping the decoder to the number of
+    /// layers reserved here makes the pre-allocation charge enforceable.
+    pub(super) fn plan_derived_decode(
+        &self,
+        current: usize,
+        datagram_bytes: usize,
+    ) -> Result<DerivedDecodeBudget, ip::Error> {
+        const LAYER_METADATA_RESERVATION: usize = 4_096;
+
+        let limit = self.max_aggregate_bytes;
+        let occupied = current
+            .checked_add(self.retained_memory_charge())
+            .ok_or_else(|| self.aggregate_memory_error())?;
+        let available = limit
+            .checked_sub(occupied)
+            .ok_or_else(|| self.aggregate_memory_error())?;
+        let base_charge = datagram_bytes
+            .checked_add(size_of::<DecodedPacket>())
+            .and_then(|charge| {
+                size_of::<DerivedDatagram>()
+                    .checked_mul(2)
+                    .and_then(|metadata| charge.checked_add(metadata))
+            })
+            .ok_or_else(|| self.aggregate_memory_error())?;
+        let per_layer_charge = datagram_bytes
+            .checked_mul(2)
+            .and_then(|charge| charge.checked_add(size_of::<Box<dyn crate::layer::Layer>>()))
+            .and_then(|charge| charge.checked_add(size_of::<Option<usize>>()))
+            .and_then(|charge| charge.checked_add(LAYER_METADATA_RESERVATION))
+            .ok_or_else(|| self.aggregate_memory_error())?;
+        let structural_layers = crate::decode::Options::default()
+            .max_layers
+            .min(datagram_bytes.saturating_add(1));
+        let affordable_layers = available
+            .checked_sub(base_charge)
+            .and_then(|remaining| remaining.checked_div(per_layer_charge))
+            .unwrap_or(0);
+        let max_layers = structural_layers.min(affordable_layers);
+        if max_layers == 0 {
+            return Err(self.aggregate_memory_error());
+        }
+        let charge = per_layer_charge
+            .checked_mul(max_layers)
+            .and_then(|metadata| base_charge.checked_add(metadata))
+            .ok_or_else(|| self.aggregate_memory_error())?;
+        Ok(DerivedDecodeBudget {
+            charge,
+            max_layers,
+            budget_reduced: max_layers < structural_layers,
+        })
+    }
+
+    /// Adds one planned derived decode to the caller-held charge, refusing
+    /// the total the reassembler's retained state could not also afford.
+    pub(super) fn charge_derived_memory(
+        &self,
+        current: usize,
+        datagram_bytes: usize,
+    ) -> Result<usize, ip::Error> {
+        let derived = current
+            .checked_add(datagram_bytes)
+            .ok_or_else(|| self.aggregate_memory_error())?;
+        self.retained_memory_charge()
+            .checked_add(derived)
+            .filter(|total| *total <= self.max_aggregate_bytes)
+            .ok_or_else(|| self.aggregate_memory_error())?;
+        Ok(derived)
+    }
+
+    fn aggregate_memory_error(&self) -> ip::Error {
+        ip::ResourceError::AggregateMemoryLimit {
+            limit: self.max_aggregate_bytes,
+        }
+        .into()
     }
 
     pub(super) fn dispatch(
@@ -231,21 +329,13 @@ impl IpDispatch {
         &self.report
     }
 
-    pub(super) fn retained_memory_charge(&self) -> usize {
+    fn retained_memory_charge(&self) -> usize {
         self.reassembler.aggregate_memory_charge()
     }
 
     fn record_incomplete(&mut self, outcome: ip::IncompleteDatagram) -> IpEvent {
         self.count_incomplete(outcome.family(), outcome.reason, 1);
-        let terminal = IpDatagramOutcome::Incomplete {
-            key: outcome.key,
-            reason: outcome.reason,
-            fragment_count: outcome.fragment_count,
-            unique_bytes: outcome.unique_bytes,
-            known_final_length: outcome.known_final_length,
-            duplicate_fragments: outcome.duplicate_fragments,
-            overlap_bytes: outcome.overlap_bytes,
-        };
+        let terminal = IpDatagramOutcome::Incomplete(outcome);
         self.retain(terminal.clone());
         IpEvent::Outcome(terminal)
     }

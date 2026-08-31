@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use packetcraftr::{core, netio as net};
 
-use super::super::errors::CliError;
+use crate::errors::CliError;
 
 pub(crate) fn options(
     send: packetcraftr::send::Options,
@@ -19,9 +19,7 @@ pub(crate) fn options(
         max_template_packets,
         max_unmatched_frames: limits.max_frames,
         max_responses: limits.max_frames,
-        max_capture_queue_frames: limits.max_frames,
-        max_captured_bytes: limits.max_bytes,
-        capture_overflow_policy: limits.overflow_policy,
+        capture: limits,
         decode: core::decode::Options::default(),
     };
     options.decode.max_packet_size = limits.snap_length;

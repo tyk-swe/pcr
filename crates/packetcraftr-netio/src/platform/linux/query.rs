@@ -3,8 +3,6 @@
 
 //! Linux route-netlink query construction and reply translation.
 
-#![forbid(unsafe_code)]
-
 use std::{
     collections::BTreeMap,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
@@ -20,7 +18,7 @@ use rtnetlink::{
     },
 };
 
-use super::os_error;
+use crate::platform::os_error;
 use crate::{
     interface::{self, Id as InterfaceId},
     link::{Capability, MacAddress},
@@ -39,7 +37,7 @@ pub(super) async fn query_route(
     let reply = replies
         .try_next()
         .await
-        .map_err(|error| os_error("RTM_GETROUTE", error))?
+        .map_err(|error| route_lookup_error(destination, error))?
         .ok_or(SystemError::RouteNotFound { destination })?;
 
     let mut output_index = None;
@@ -109,6 +107,28 @@ pub(super) async fn query_route(
             selection_reason,
         },
     )
+}
+
+/// Reports the kernel's own "no route" errnos as a missing route rather than
+/// as a generic operating-system failure, so the same unreachable destination
+/// classifies as `io.route_not_found` on Linux exactly as it already does on
+/// macOS and Windows.
+fn route_lookup_error(destination: IpAddr, error: rtnetlink::Error) -> SystemError {
+    const NO_ROUTE: [i32; 4] = [
+        libc::ENETUNREACH,
+        libc::EHOSTUNREACH,
+        libc::ENOENT,
+        libc::ESRCH,
+    ];
+    if let rtnetlink::Error::NetlinkError(reply) = &error
+        && reply
+            .raw_code()
+            .checked_abs()
+            .is_some_and(|errno| NO_ROUTE.contains(&errno))
+    {
+        return SystemError::RouteNotFound { destination };
+    }
+    os_error("RTM_GETROUTE", error)
 }
 
 fn route_selection_reason(kind: &RouteType, has_next_hop: bool) -> Option<SelectionReason> {
@@ -285,7 +305,48 @@ fn route_address(address: &RouteAddress) -> Option<IpAddr> {
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZeroI32;
+
+    use rtnetlink::packet_core::ErrorMessage;
+
     use super::*;
+
+    fn netlink_error(code: i32) -> rtnetlink::Error {
+        let mut reply = ErrorMessage::default();
+        reply.code = NonZeroI32::new(code);
+        rtnetlink::Error::NetlinkError(reply)
+    }
+
+    #[test]
+    fn kernel_no_route_errnos_classify_as_a_missing_route() {
+        let destination = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1));
+        for errno in [
+            libc::ENETUNREACH,
+            libc::EHOSTUNREACH,
+            libc::ENOENT,
+            libc::ESRCH,
+        ] {
+            assert!(matches!(
+                route_lookup_error(destination, netlink_error(-errno)),
+                SystemError::RouteNotFound { destination: actual } if actual == destination
+            ));
+        }
+
+        assert!(matches!(
+            route_lookup_error(destination, netlink_error(-libc::EPERM)),
+            SystemError::OperatingSystem {
+                operation: "RTM_GETROUTE",
+                ..
+            }
+        ));
+        assert!(matches!(
+            route_lookup_error(destination, rtnetlink::Error::RequestFailed),
+            SystemError::OperatingSystem {
+                operation: "RTM_GETROUTE",
+                ..
+            }
+        ));
+    }
 
     #[test]
     fn linux_route_type_preserves_broadcast_before_native_normalization() {

@@ -3,8 +3,6 @@
 
 //! Npcap implementation for the pinned x86_64 MSVC target.
 
-#![allow(unsafe_code)]
-
 mod abi;
 mod capture;
 mod error;

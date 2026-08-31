@@ -25,36 +25,29 @@ impl Builder {
         Self::default()
     }
 
-    /// Registers a codec under an explicit alias list instead of the one the
-    /// codec advertises.
-    pub fn register_builtin_codec<C>(
-        &mut self,
-        codec: C,
-        aliases: &'static [&'static str],
-    ) -> Result<&mut Self, Error>
+    /// Registers a codec under its canonical protocol identifier plus the
+    /// alias spellings the caller supplies.
+    ///
+    /// The caller owns the alias list: a codec advertises no aliases of its
+    /// own, so the built-in path passes [`crate::protocol::BuiltinProtocol::aliases`]
+    /// and an external registration passes whatever it wants resolvable.
+    pub fn register_codec<C>(&mut self, codec: C, aliases: &[&str]) -> Result<&mut Self, Error>
     where
         C: LayerCodec + 'static,
     {
-        self.register_codec_with_aliases(Arc::new(codec), aliases)
-    }
-
-    pub(super) fn register_codec_with_aliases(
-        &mut self,
-        codec: Arc<dyn LayerCodec>,
-        advertised_aliases: &[&str],
-    ) -> Result<&mut Self, Error> {
-        let protocol = codec.protocol_id();
+        let codec: Arc<dyn LayerCodec> = Arc::new(codec);
+        let protocol = codec.protocol_id().clone();
         if self.codecs.contains_key(&protocol) {
             return Err(Error::DuplicateProtocol { protocol });
         }
-        let mut aliases = Vec::new();
-        for alias in std::iter::once(protocol.as_str()).chain(advertised_aliases.iter().copied()) {
+        let mut resolvable: Vec<String> = Vec::new();
+        for alias in std::iter::once(protocol.as_str()).chain(aliases.iter().copied()) {
             let alias = alias.trim().to_ascii_lowercase();
-            if !aliases.contains(&alias) {
-                aliases.push(alias);
+            if !resolvable.contains(&alias) {
+                resolvable.push(alias);
             }
         }
-        for alias in &aliases {
+        for alias in &resolvable {
             if let Some(existing) = self.aliases.get(alias) {
                 return Err(Error::DuplicateAlias {
                     alias: alias.clone(),
@@ -62,7 +55,7 @@ impl Builder {
                 });
             }
         }
-        for alias in aliases {
+        for alias in resolvable {
             self.aliases.insert(alias, protocol.clone());
         }
         self.codecs.insert(protocol, codec);

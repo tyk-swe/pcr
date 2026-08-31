@@ -7,7 +7,8 @@
 //! trips, response matching, and decode-only support. [`BUILTIN_CAPTURE_ROOTS`]
 //! lists the default registry's numeric capture bindings.
 
-use crate::semantics::{BuiltinProtocol, builtin_protocol_catalog};
+use crate::protocol::BuiltinProtocol;
+use crate::protocol_catalog::builtin_protocol_catalog;
 
 /// One built-in codec row in the stable protocol contract.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -16,6 +17,8 @@ pub struct Protocol {
     pub aliases: &'static [&'static str],
     pub build: bool,
     pub dissect: bool,
+    /// Whether encoding a decoded layer reproduces its wire bytes exactly.
+    /// False for a codec that cannot encode at all.
     pub exact_round_trip: bool,
     pub matcher: bool,
     pub decode_only: bool,
@@ -34,6 +37,7 @@ macro_rules! define_protocol_support {
             canonical: $canonical:literal,
             aliases: [$($alias:literal),* $(,)?],
             constructible: $constructible:literal,
+            exact_round_trip: $exact_round_trip:literal,
             matcher: $matcher:ident,
             codec: $codec:ident
         }
@@ -46,16 +50,12 @@ macro_rules! define_protocol_support {
                 aliases: &[$($alias),*],
                 build: $constructible,
                 dissect: true,
-                exact_round_trip: true,
-                matcher: define_protocol_support!(@matcher $matcher),
+                exact_round_trip: $exact_round_trip,
+                matcher: BuiltinProtocol::$variant.has_matcher(),
                 decode_only: !$constructible,
             }
         ),*];
     };
-    (@matcher none) => { false };
-    (@matcher reverse_flow) => { true };
-    (@matcher echo_v4) => { true };
-    (@matcher echo_v6) => { true };
 }
 
 builtin_protocol_catalog!(define_protocol_support);

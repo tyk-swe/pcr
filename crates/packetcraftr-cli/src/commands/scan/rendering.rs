@@ -5,12 +5,12 @@ use packetcraftr::{core, output};
 
 use crate::errors::CliError;
 use crate::rendering::{
-    captured_frame_text, comma_separated, optional_display, output_timestamp_text,
-    render_diagnostics_text, render_optional, write_stdout_line,
+    captured_frame_text, comma_separated, optional_display, render_diagnostics_text,
+    render_optional, write_stdout_line, write_summary_line,
 };
 
 pub(super) fn render_text(
-    result: output::scan::Result,
+    result: output::scan::Report,
     diagnostics: Vec<core::diagnostic::Diagnostic>,
     stats: output::envelope::Stats,
 ) -> Result<(), CliError> {
@@ -20,10 +20,13 @@ pub(super) fn render_text(
         comma_separated(&result.resolved_addresses)
     ))?;
     for endpoint in &result.endpoints {
-        let endpoint_name = if endpoint.transport == "icmp" {
-            "icmp".to_owned()
-        } else {
-            format!("{}/{}", endpoint.transport, optional_display(endpoint.port))
+        // ICMP has no port, so it names itself; the port-bearing transports
+        // name the endpoint they probed.
+        let endpoint_name = match endpoint.transport {
+            packetcraftr::scan::Transport::Icmp => endpoint.transport.to_string(),
+            packetcraftr::scan::Transport::Tcp | packetcraftr::scan::Transport::Udp => {
+                format!("{}/{}", endpoint.transport, optional_display(endpoint.port))
+            }
         };
         write_stdout_line(format_args!(
             "{} {} classification={}",
@@ -38,8 +41,8 @@ pub(super) fn render_text(
                 evidence.attempt,
                 evidence.status.as_str(),
                 evidence.classification.as_str(),
-                output_timestamp_text(evidence.sent_at),
-                render_optional(evidence.received_at, output_timestamp_text),
+                evidence.sent_at,
+                optional_display(evidence.received_at),
                 optional_display(evidence.responder),
                 render_optional(evidence.latency, |value| format!("{value:?}")),
                 evidence.reason,
@@ -52,7 +55,7 @@ pub(super) fn render_text(
     for frame in &result.undecoded {
         write_stdout_line(format_args!("undecoded {}", captured_frame_text(frame)))?;
     }
-    write_stdout_line(format_args!(
+    write_summary_line(format_args!(
         "scanned {} endpoint(s) with {} completed probe(s), {} byte(s)",
         result.endpoints.len(),
         stats.packets_completed,
@@ -70,8 +73,8 @@ mod tests {
 
     use packetcraftr::scan;
 
-    use super::super::Scan;
     use super::*;
+    use crate::commands::scan::Scan;
     use crate::commands::target_workflow::TargetWorkflow as _;
     use crate::rendering::ndjson_test_support::{assert_contiguous, stream};
 
@@ -101,7 +104,6 @@ mod tests {
         scan::Summary {
             target: "192.0.2.10".to_owned(),
             resolved_addresses: vec![IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10))],
-            diagnostics: Vec::new(),
             stats: packetcraftr::Stats::default(),
         }
     }

@@ -17,14 +17,18 @@ use crate::{
     semantics::ipv4_source_route_destination,
 };
 
-use super::super::common::{
-    ValueExpectation, aliased_fields, checksum, expected_discriminator, invalid, make_layer,
+use crate::protocol::common::{
+    ValueExpectation, checksum, child_is_opaque, expected_discriminator, invalid, make_layer,
     network_from_addresses, payload_without_padding, protocol, resolve_u8, resolve_u16,
-    strict_or_diagnostic, truncated, validate_auto_raw_discriminator,
-    validate_raw_child_discriminator, wrong_layer,
+    strict_or_diagnostic, truncated, typed_layer, validate_auto_raw_discriminator,
+    validate_raw_child_discriminator,
 };
 
 use super::envelope::is_outer_network_layer;
+
+use crate::protocol::BuiltinProtocol;
+
+const NAME: &str = BuiltinProtocol::Ipv4.as_str();
 
 const IPV4_MIN_LEN: usize = 20;
 
@@ -66,7 +70,7 @@ impl Default for Ipv4 {
 }
 
 reflective_layer! {
-    fn ipv4_schema() => { protocol: protocol("ipv4"), name: "IPv4" }
+    fn ipv4_schema() => { protocol: protocol(NAME), name: "IPv4" }
     impl Ipv4 {
         "dscp_ecn" => { kind: Unsigned, derived: false, required: false, description: "DSCP and ECN octet", reflect: dscp_ecn, layout: (1, 2) },
         "total_length" => { kind: Unsigned, derived: true, required: false, description: "IPv4 total length", reflect: total_length, layout: (2, 4) },
@@ -78,8 +82,8 @@ reflective_layer! {
         "ttl" => { kind: Unsigned, derived: false, required: true, description: "Time to live", reflect: ttl, layout: (8, 9) },
         "protocol" => { kind: Unsigned, derived: true, required: false, description: "Next protocol discriminator", reflect: protocol, layout: (9, 10) },
         "checksum" => { kind: Unsigned, derived: true, required: false, description: "IPv4 header checksum", reflect: checksum, layout: (10, 12) },
-        "source" => { kind: Ipv4, derived: false, required: true, description: "Source IPv4 address", reflect: source, layout: (12, 16) },
-        "destination" => { kind: Ipv4, derived: false, required: true, description: "Destination IPv4 address", reflect: destination, layout: (16, 20) },
+        "source" | "src" => { kind: Ipv4, derived: false, required: true, description: "Source IPv4 address", reflect: source, layout: (12, 16) },
+        "destination" | "dst" => { kind: Ipv4, derived: false, required: true, description: "Destination IPv4 address", reflect: destination, layout: (16, 20) },
         "options" => { kind: Bytes, derived: false, required: false, description: "Verbatim IPv4 option bytes", reflect: options, layout: (20, header_len) },
     }
     layout pub(crate) fn ipv4_layout(header_len: usize);
@@ -89,8 +93,8 @@ reflective_layer! {
 pub(crate) struct Ipv4Codec;
 
 impl LayerCodec for Ipv4Codec {
-    fn protocol_id(&self) -> crate::layer::Id {
-        protocol("ipv4")
+    fn protocol_id(&self) -> &'static crate::layer::Id {
+        &ipv4_schema().protocol
     }
 
     fn encode(
@@ -99,10 +103,7 @@ impl LayerCodec for Ipv4Codec {
         payload: &[u8],
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
-        let layer = layer
-            .as_any()
-            .downcast_ref::<Ipv4>()
-            .ok_or_else(|| wrong_layer("ipv4", layer))?;
+        let layer = typed_layer::<Ipv4>(NAME, layer)?;
         let (source, destination) = resolve_addresses(layer, context);
         let (options, covered_payload_len, mut diagnostics) =
             prepare_payload(layer, payload, context)?;
@@ -110,25 +111,25 @@ impl LayerCodec for Ipv4Codec {
         let total_expected = header_len
             .checked_add(covered_payload_len)
             .and_then(|value| u16::try_from(value).ok())
-            .ok_or_else(|| invalid("ipv4", "packet exceeds IPv4 total-length range"))?;
+            .ok_or_else(|| invalid(NAME, "packet exceeds IPv4 total-length range"))?;
         let (total_length, materialized_total) = resolve_u16(
-            "ipv4",
+            NAME,
             "total_length",
             &layer.total_length,
             ValueExpectation::Required(total_expected),
             context.mode,
             &mut diagnostics,
         )?;
-        let expected_protocol = expected_discriminator("ipv4", context, 255_u8);
+        let expected_protocol = expected_discriminator(NAME, context, 255_u8, &layer.protocol);
         validate_auto_raw_discriminator(
-            "ipv4",
+            NAME,
             "protocol",
             &layer.protocol,
             context,
             &mut diagnostics,
         )?;
         let (next_protocol, materialized_protocol) = resolve_u8(
-            "ipv4",
+            NAME,
             "protocol",
             &layer.protocol,
             expected_protocol,
@@ -137,7 +138,7 @@ impl LayerCodec for Ipv4Codec {
         )?;
         if layer.fragment_offset == 0 && !layer.more_fragments {
             validate_raw_child_discriminator(
-                "ipv4",
+                NAME,
                 u64::from(next_protocol),
                 context,
                 &mut diagnostics,
@@ -145,7 +146,7 @@ impl LayerCodec for Ipv4Codec {
         }
 
         let ihl =
-            u8::try_from(header_len / 4).map_err(|_| invalid("ipv4", "header length overflow"))?;
+            u8::try_from(header_len / 4).map_err(|_| invalid(NAME, "header length overflow"))?;
         let flags_offset = (if layer.reserved_flag { 1 << 15 } else { 0 })
             | (if layer.dont_fragment { 1 << 14 } else { 0 })
             | (if layer.more_fragments { 1 << 13 } else { 0 })
@@ -165,7 +166,7 @@ impl LayerCodec for Ipv4Codec {
         prefix.extend_from_slice(&options);
         let checksum_expected = checksum(&prefix);
         let (header_checksum, materialized_checksum) = resolve_u16(
-            "ipv4",
+            NAME,
             "checksum",
             &layer.checksum,
             ValueExpectation::Required(checksum_expected),
@@ -187,13 +188,9 @@ impl LayerCodec for Ipv4Codec {
         materialized.source = source;
         materialized.destination = destination;
         materialized.options = Bytes::from(options);
-        Ok(EncodedLayer {
-            prefix,
-            suffix: Vec::new(),
-            materialized: Box::new(materialized),
-            fields: ipv4_layout(header_len),
-            diagnostics,
-        })
+        Ok(EncodedLayer::header(prefix, Box::new(materialized))
+            .with_fields(ipv4_layout(header_len))
+            .with_diagnostics(diagnostics))
     }
 
     fn decode(
@@ -202,43 +199,43 @@ impl LayerCodec for Ipv4Codec {
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
         let Some(header) = input.first_chunk::<IPV4_MIN_LEN>() else {
-            return Err(truncated("ipv4", IPV4_MIN_LEN, input.len()));
+            return Err(truncated(NAME, IPV4_MIN_LEN, input.len()));
         };
         if header[0] >> 4 != 4 {
             return Err(invalid(
-                "ipv4",
+                NAME,
                 format!("version is {}, not 4", header[0] >> 4),
             ));
         }
         let ihl = usize::from(header[0] & 0x0f);
         if ihl < 5 {
-            return Err(invalid("ipv4", format!("IHL {ihl} is below 5")));
+            return Err(invalid(NAME, format!("IHL {ihl} is below 5")));
         }
         let header_len = ihl
             .checked_mul(4)
-            .ok_or_else(|| invalid("ipv4", "IHL overflow"))?;
+            .ok_or_else(|| invalid(NAME, "IHL overflow"))?;
         let (Some(full_header), Some(options)) =
             (input.get(..header_len), input.get(IPV4_MIN_LEN..header_len))
         else {
-            return Err(truncated("ipv4", header_len, input.len()));
+            return Err(truncated(NAME, header_len, input.len()));
         };
         let total_length_field = u16::from_be_bytes([header[2], header[3]]);
         let total_length = usize::from(total_length_field);
         if total_length < header_len {
             return Err(invalid(
-                "ipv4",
+                NAME,
                 format!("total length {total_length} is smaller than header {header_len}"),
             ));
         }
         if input.len() < total_length {
-            return Err(truncated("ipv4", total_length, input.len()));
+            return Err(truncated(NAME, total_length, input.len()));
         }
         let flags_offset = u16::from_be_bytes([header[6], header[7]]);
         let next = header[9];
         let source = Ipv4Addr::new(header[12], header[13], header[14], header[15]);
         let destination = Ipv4Addr::new(header[16], header[17], header[18], header[19]);
         let pseudo_header_destination = ipv4_source_route_destination(destination, options)
-            .map_err(|error| invalid("ipv4", error.to_string()))?;
+            .map_err(|error| invalid(NAME, error.to_string()))?;
         let mut diagnostics = Vec::new();
         if checksum(full_header) != 0 {
             diagnostics.push(
@@ -294,10 +291,7 @@ impl LayerCodec for Ipv4Codec {
         &self,
         fields: &BTreeMap<String, FieldValue>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(
-            Ipv4::default(),
-            &aliased_fields("ipv4", fields, &[("src", "source"), ("dst", "destination")])?,
-        )
+        make_layer(Ipv4::default(), fields)
     }
 }
 
@@ -322,16 +316,16 @@ fn prepare_payload(
     context: &LayerEncodeContext<'_>,
 ) -> Result<(Vec<u8>, usize, Vec<Diagnostic>), crate::codec::Error> {
     if layer.fragment_offset > 0x1fff {
-        return Err(invalid("ipv4", "fragment offset exceeds 13 bits"));
+        return Err(invalid(NAME, "fragment offset exceeds 13 bits"));
     }
     if layer.options.len() > 40 {
-        return Err(invalid("ipv4", "options exceed the 40-byte IPv4 limit"));
+        return Err(invalid(NAME, "options exceed the 40-byte IPv4 limit"));
     }
     let mut diagnostics = Vec::new();
     if layer.reserved_flag {
         let message = "reserved IPv4 flag bit is set";
-        if context.mode == crate::build::Mode::Strict {
-            return Err(invalid("ipv4", message));
+        if context.mode == crate::codec::Mode::Strict {
+            return Err(invalid(NAME, message));
         }
         diagnostics.push(
             Diagnostic::warning("build.ipv4_reserved_flag", message).at_field("reserved_flag"),
@@ -349,10 +343,10 @@ fn prepare_payload(
             .at_field("options"),
         );
     }
-    let covered_payload_len = payload_without_padding("ipv4", payload, context)?.len();
+    let covered_payload_len = payload_without_padding(NAME, payload, context)?.len();
     if layer.dont_fragment && (layer.more_fragments || layer.fragment_offset != 0) {
         strict_or_diagnostic(
-            "ipv4",
+            NAME,
             "build.ipv4_conflicting_fragment_flags",
             "dont_fragment",
             "don't-fragment cannot be combined with MF or a non-zero fragment offset",
@@ -362,7 +356,7 @@ fn prepare_payload(
     }
     if layer.more_fragments && covered_payload_len % 8 != 0 {
         strict_or_diagnostic(
-            "ipv4",
+            NAME,
             "build.ipv4_fragment_alignment",
             "more_fragments",
             format!(
@@ -373,15 +367,10 @@ fn prepare_payload(
         )?;
     }
     let typed_fragment = (layer.fragment_offset != 0 || layer.more_fragments)
-        && context.child.is_some_and(|child| {
-            !matches!(
-                child.protocol_id().as_str(),
-                "raw" | "padding" | "malformed"
-            )
-        });
+        && context.child.is_some_and(|child| !child_is_opaque(child));
     if typed_fragment {
         strict_or_diagnostic(
-            "ipv4",
+            NAME,
             "build.typed_fragment_payload",
             "fragment_offset",
             "fragment payload must be Raw; convert typed fragment payloads to Raw explicitly",

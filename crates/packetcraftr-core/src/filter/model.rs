@@ -1,11 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::super::registry::Registry;
 use super::ast::Op;
 use super::error::Error;
 use super::eval::{self, Context};
 use super::parser::{self, Options, Requirements};
+use crate::registry::Registry;
 
 /// A compiled display filter.
 ///

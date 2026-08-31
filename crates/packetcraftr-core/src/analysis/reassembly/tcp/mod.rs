@@ -5,14 +5,15 @@
 
 use std::collections::HashMap;
 
-use super::Limits;
 use super::expiry::ExpiryIndex;
 
 use state::TcpFlowState;
 
 mod contract;
-pub use contract::{Error, Event, FlowKey, ScopedFlowKey, Segment};
+pub use contract::{Error, Event, FlowKey, MalformedError, ResourceError, ScopedFlowKey, Segment};
 mod engine;
+mod limits;
+pub use limits::{Limits, MAX_BYTES_PER_FLOW};
 mod pending;
 mod state;
 
@@ -24,7 +25,6 @@ const PENDING_SEGMENT_METADATA_CHARGE: usize = 64;
 // and otherwise-empty TCP state. Without a fixed charge, opening payload-free
 // flows bypasses the aggregate resource ceiling entirely.
 const TCP_FLOW_STATE_METADATA_CHARGE: usize = 256;
-const TCP_SERIAL_HALF_SPACE: usize = 1usize << 31;
 
 #[derive(Debug)]
 pub struct Reassembler {

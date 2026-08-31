@@ -3,22 +3,12 @@
 
 //! Packet and link-layer intent extraction helpers for route planning.
 
-#![forbid(unsafe_code)]
-
 use std::net::IpAddr;
 
-use packetcraftr_core::{
-    Packet,
-    field::FieldValue,
-    semantics::{self, BuiltinProtocol},
-};
+use packetcraftr_core::{Packet, field::FieldValue, protocol::BuiltinProtocol, semantics};
 
 use super::error::Error;
-use crate::link::MacAddress;
-use crate::neighbor::{
-    MAX_VLAN_TAGS as MAX_NEIGHBOR_VLAN_TAGS, VlanKind as NeighborVlanKind,
-    VlanTag as NeighborVlanTag,
-};
+use crate::link::{MAX_VLAN_TAGS, MacAddress, VlanTag};
 
 pub(super) fn packet_has_link_layer_intent(packet: &Packet) -> bool {
     semantics::outer_layers(packet).any(|layer| {
@@ -39,28 +29,19 @@ pub(super) fn outer_ethernet_mac(packet: &Packet, field: &str) -> Option<MacAddr
         })
 }
 
-pub(super) fn extract_neighbor_vlan_tags(packet: &Packet) -> Result<Vec<NeighborVlanTag>, Error> {
+pub(super) fn extract_neighbor_vlan_tags(packet: &Packet) -> Result<Vec<VlanTag>, Error> {
     let metadata =
         semantics::vlan_metadata(packet).map_err(|source| Error::InvalidNeighborVlan {
-            message: source.to_string(),
+            message: "the VLAN stack could not be read".to_owned(),
+            source: Some(Box::new(source)),
         })?;
-    if metadata.len() > MAX_NEIGHBOR_VLAN_TAGS {
+    if metadata.len() > MAX_VLAN_TAGS {
         return Err(Error::InvalidNeighborVlan {
-            message: format!("more than {MAX_NEIGHBOR_VLAN_TAGS} VLAN headers are not supported"),
+            message: format!("more than {MAX_VLAN_TAGS} VLAN headers are not supported"),
+            source: None,
         });
     }
-    Ok(metadata
-        .into_iter()
-        .map(|tag| NeighborVlanTag {
-            kind: match tag.kind {
-                semantics::VlanKind::Ieee8021Q => NeighborVlanKind::Ieee8021Q,
-                semantics::VlanKind::Ieee8021Ad => NeighborVlanKind::Ieee8021Ad,
-            },
-            priority: tag.priority,
-            drop_eligible: tag.drop_eligible,
-            vlan_id: tag.vlan_id,
-        })
-        .collect())
+    Ok(metadata.into_iter().map(Into::into).collect())
 }
 
 pub(super) fn arp_link_macs(packet: &Packet) -> (Option<MacAddress>, Option<MacAddress>) {

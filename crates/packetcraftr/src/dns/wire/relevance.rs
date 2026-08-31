@@ -3,8 +3,8 @@
 
 //! Question-relevance filtering and bounded rejected-record auditing.
 
-use super::super::model::{Name, QueryType, Record, RecordValue, RejectedRecord, Section};
-use super::super::{DNS_CLASS_IN, DNS_TYPE_OPT};
+use crate::dns::model::{Name, QueryType, Record, RecordValue, RejectedRecord, Section};
+use crate::dns::{CLASS_IN, TYPE_OPT};
 
 pub(super) struct RelevantRecords {
     pub(super) answers: Vec<Record>,
@@ -61,7 +61,7 @@ fn accepted_answers(
     while changed {
         changed = false;
         for (record, accepted) in answers.iter().zip(accepted_answers.iter_mut()) {
-            if record.class != DNS_CLASS_IN || !relevant_names.contains(&record.owner) {
+            if record.class != CLASS_IN || !relevant_names.contains(&record.owner) {
                 continue;
             }
             let type_code = record.value.type_code();
@@ -87,7 +87,7 @@ fn accepted_authorities(relevant_names: &[Name], authorities: &[Record]) -> Vec<
         let relevant_owner = relevant_names
             .iter()
             .any(|name| is_same_or_ancestor(&record.owner, name));
-        if record.class == DNS_CLASS_IN
+        if record.class == CLASS_IN
             && relevant_owner
             && matches!(record.value, RecordValue::Ns(_) | RecordValue::Soa { .. })
         {
@@ -121,7 +121,7 @@ fn accepted_additionals(references: &[Name], additionals: &[Record]) -> Vec<bool
     additionals
         .iter()
         .map(|record| {
-            record.class == DNS_CLASS_IN
+            record.class == CLASS_IN
                 && references.contains(&record.owner)
                 && matches!(record.value, RecordValue::A(_) | RecordValue::Aaaa(_))
         })
@@ -226,9 +226,9 @@ fn retain_accepted(records: Vec<Record>, accepted: &[bool]) -> Vec<Record> {
 }
 
 fn rejection_reason<'a>(record: &Record, default: &'a str) -> &'a str {
-    if record.class != DNS_CLASS_IN {
+    if record.class != CLASS_IN {
         "record class is not IN"
-    } else if record.value.type_code() == DNS_TYPE_OPT {
+    } else if record.value.type_code() == TYPE_OPT {
         "EDNS OPT metadata is not accepted as question data"
     } else {
         default

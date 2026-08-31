@@ -7,55 +7,57 @@ use std::sync::Mutex;
 
 use packetcraftr_netio::interface::Id as InterfaceId;
 
+type Decision = packetcraftr_netio::route::Decision;
+
+/// The arguments that identify one preference-driven route lookup.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-enum LookupKey {
-    LookupWithPreferences {
-        destination: IpAddr,
-        interface_hint: Option<InterfaceId>,
-        preferred_source: Option<IpAddr>,
-    },
-    Interface {
-        interface: InterfaceId,
-    },
+struct PreferenceKey {
+    destination: IpAddr,
+    interface_hint: Option<InterfaceId>,
+    preferred_source: Option<IpAddr>,
 }
 
 /// Memoizes passive route decisions for one exchange without retaining an
 /// operating-system route snapshot beyond that operation.
+///
+/// The two lookups have different answers — one always yields a decision, the
+/// other may legitimately find none — so they get one map each rather than a
+/// shared `Option`-valued map that would force the infallible lookup to unwrap.
 pub(super) struct CachedProvider<'a, R> {
     inner: &'a R,
-    decisions: Mutex<HashMap<LookupKey, Option<packetcraftr_netio::route::Decision>>>,
+    by_preference: Mutex<HashMap<PreferenceKey, Decision>>,
+    by_interface: Mutex<HashMap<InterfaceId, Option<Decision>>>,
 }
 
 impl<'a, R: packetcraftr_netio::route::Provider> CachedProvider<'a, R> {
     pub(super) fn new(inner: &'a R) -> Self {
         Self {
             inner,
-            decisions: Mutex::new(HashMap::new()),
+            by_preference: Mutex::new(HashMap::new()),
+            by_interface: Mutex::new(HashMap::new()),
         }
     }
+}
 
-    fn get_or_lookup(
-        &self,
-        key: LookupKey,
-        lookup: impl FnOnce() -> Result<Option<packetcraftr_netio::route::Decision>, R::Error>,
-    ) -> Result<Option<packetcraftr_netio::route::Decision>, R::Error> {
-        let cached = self
-            .decisions
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .get(&key)
-            .cloned();
-        if let Some(decision) = cached {
-            return Ok(decision);
-        }
-
-        let decision = lookup()?;
-        self.decisions
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .insert(key, decision.clone());
-        Ok(decision)
+fn cached<K: Clone + Eq + std::hash::Hash, V: Clone, E>(
+    cache: &Mutex<HashMap<K, V>>,
+    key: K,
+    lookup: impl FnOnce() -> Result<V, E>,
+) -> Result<V, E> {
+    let hit = cache
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(&key)
+        .cloned();
+    if let Some(value) = hit {
+        return Ok(value);
     }
+    let value = lookup()?;
+    cache
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(key, value.clone());
+    Ok(value)
 }
 
 impl<R: packetcraftr_netio::route::Provider> packetcraftr_netio::route::Provider
@@ -68,29 +70,22 @@ impl<R: packetcraftr_netio::route::Provider> packetcraftr_netio::route::Provider
         destination: IpAddr,
         interface_hint: Option<&InterfaceId>,
         preferred_source: Option<IpAddr>,
-    ) -> Result<packetcraftr_netio::route::Decision, Self::Error> {
-        let key = LookupKey::LookupWithPreferences {
+    ) -> Result<Decision, Self::Error> {
+        let key = PreferenceKey {
             destination,
             interface_hint: interface_hint.cloned(),
             preferred_source,
         };
-        Ok(self
-            .get_or_lookup(key, || {
-                self.inner
-                    .lookup_with_preferences(destination, interface_hint, preferred_source)
-                    .map(Some)
-            })?
-            .expect("route provider lookup always returns a decision"))
+        cached(&self.by_preference, key, || {
+            self.inner
+                .lookup_with_preferences(destination, interface_hint, preferred_source)
+        })
     }
 
-    fn lookup_interface(
-        &self,
-        interface: &InterfaceId,
-    ) -> Result<Option<packetcraftr_netio::route::Decision>, Self::Error> {
-        let key = LookupKey::Interface {
-            interface: interface.clone(),
-        };
-        self.get_or_lookup(key, || self.inner.lookup_interface(interface))
+    fn lookup_interface(&self, interface: &InterfaceId) -> Result<Option<Decision>, Self::Error> {
+        cached(&self.by_interface, interface.clone(), || {
+            self.inner.lookup_interface(interface)
+        })
     }
 
     fn classify_error(&self, error: &Self::Error) -> packetcraftr_core::error::Classification {
@@ -286,7 +281,7 @@ mod tests {
         let provider = CountingProvider::new(Some(decision()));
         let cache = CachedProvider::new(&provider);
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _guard = cache.decisions.lock().expect("initial cache lock");
+            let _guard = cache.by_interface.lock().expect("initial cache lock");
             panic!("poison fixture cache");
         }));
 

@@ -13,11 +13,8 @@ use packetcraftr_core::protocol::{
     QuotedIcmpError, QuotedProbeTransport, quoted_icmp_error_kind, transport::Tcp,
 };
 use packetcraftr_core::{
-    Packet,
-    decode::DecodedPacket,
-    diagnostic::Diagnostic,
-    registry::Registry,
-    semantics::{self, BuiltinProtocol},
+    Packet, decode::DecodedPacket, diagnostic::Diagnostic, protocol::BuiltinProtocol,
+    registry::Registry, semantics,
 };
 
 /// Maps an operation-local sequence to an IPv4 identification that native
@@ -155,10 +152,10 @@ pub(crate) fn observe(
         .iter()
         .filter_map(|layer| registry.matcher(layer.protocol_id().as_str()))
         .filter_map(|matcher| {
-            let result = matcher.matches(request, &response.packet);
-            result.matched.then_some((matcher, result))
+            let matched = matcher.matches(request, &response.packet)?;
+            Some((matcher, matched))
         })
-        .max_by_key(|(_, result)| result.confidence);
+        .max_by_key(|(_, matched)| matched.confidence);
     if let Some((matcher, _)) = direct_match {
         let responder = matcher
             .responder(request, &response.packet)

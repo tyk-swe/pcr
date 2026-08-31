@@ -19,6 +19,7 @@ pub(in crate::platform) fn system_time(
     if !(0..1_000_000).contains(&microseconds) {
         return Err(Error::Capture {
             message: format!("native capture timestamp has invalid microseconds {microseconds}"),
+            source: None,
         });
     }
     let fractional = Duration::from_micros(microseconds as u64);
@@ -33,6 +34,7 @@ pub(in crate::platform) fn system_time(
     }
     .ok_or_else(|| Error::Capture {
         message: "native capture timestamp is outside SystemTime range".to_owned(),
+        source: None,
     })
 }
 

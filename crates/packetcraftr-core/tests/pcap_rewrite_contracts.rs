@@ -58,12 +58,8 @@ fn an_output_failure_poisons_future_writer_operations() {
     let frame = frame_at(SystemTime::UNIX_EPOCH, LinkType::ETHERNET, b"abc");
     let first = writer.write_frame(&frame).expect_err("record must fail");
     assert!(matches!(first, Error::Io(ref error) if error.kind() == io::ErrorKind::BrokenPipe));
-    writer
-        .set_stream_limits(Limits {
-            max_frames: 0,
-            max_bytes: 0,
-        })
-        .expect("the failed record committed neither a frame nor a byte");
+    assert_eq!(writer.frames_written(), 0);
+    assert_eq!(writer.captured_bytes_written(), 0);
     assert!(matches!(
         writer.write_frame(&frame),
         Err(Error::Io(ref error)) if error.kind() == io::ErrorKind::BrokenPipe

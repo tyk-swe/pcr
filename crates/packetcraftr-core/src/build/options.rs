@@ -1,31 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::net::IpAddr;
-
 use bytes::Bytes;
-use serde::{Deserialize, Serialize};
 
 use crate::Packet;
+use crate::codec::Mode;
 use crate::diagnostic::Diagnostic;
-use crate::layout::PacketLayout;
-
-pub const DEFAULT_MAX_PACKET_SIZE: usize = 16 * 1024 * 1024;
-pub const DEFAULT_MAX_LAYERS: usize = 64;
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Mode {
-    #[default]
-    Strict,
-    Permissive,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Context {
-    pub source: Option<IpAddr>,
-    pub destination: Option<IpAddr>,
-}
+use crate::layout::{DEFAULT_MAX_LAYERS, DEFAULT_MAX_PACKET_SIZE, PacketLayout};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Options {

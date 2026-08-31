@@ -7,12 +7,37 @@ use std::time::{Duration, Instant};
 
 use packetcraftr_netio::{Error as LiveIoError, capture::Session};
 
+use crate::planning::expired;
+
 use super::transaction::OperationError;
 use super::transaction::Transaction;
-use super::{
-    ProcessContext, ProcessOutcome, WorkflowPromotionContext, WorkflowResponseMatcher,
-    WorkflowStopPredicate,
-};
+use super::{ProcessContext, ProcessOutcome, WorkflowResponseMatcher, WorkflowStopPredicate};
+
+/// Whether a zero-time drain has to finish inside the exchange deadline.
+///
+/// The two cases are not the same failure: a drain that runs while requests
+/// are still unsent must not overrun the deadline, while the final drain after
+/// the last send simply stops when correlation does.
+#[derive(Clone, Copy)]
+pub(super) enum DrainPolicy {
+    /// Requests remain to be sent, so crossing `deadline` aborts the operation.
+    Enforced(Instant),
+    /// Every request is sent; crossing the deadline just ends correlation.
+    BestEffort,
+}
+
+impl DrainPolicy {
+    fn expired(self) -> bool {
+        match self {
+            Self::Enforced(deadline) => expired(deadline),
+            Self::BestEffort => false,
+        }
+    }
+
+    const fn is_enforced(self) -> bool {
+        matches!(self, Self::Enforced(_))
+    }
+}
 
 impl<C: Session> Transaction<C> {
     pub(super) fn collect_remaining<F>(
@@ -32,25 +57,22 @@ impl<C: Session> Transaction<C> {
                 match self.process_frame(frame, workflow_matcher, stop_predicate, emit)? {
                     ProcessOutcome::StopCapture => return Ok(()),
                     ProcessOutcome::CorrelationDeadlineExpired => break,
-                    ProcessOutcome::DuplicateRecordIdentity => {
-                        return Err(LiveIoError::Capture {
-                            message:
-                                "capture provider returned the same ingress record more than once"
-                                    .to_owned(),
-                        }
-                        .into());
-                    }
                     ProcessOutcome::Continue => {}
                 }
             }
         }
-        let _ = self.drain(None, workflow_matcher, stop_predicate, emit)?;
+        let _ = self.drain(
+            DrainPolicy::BestEffort,
+            workflow_matcher,
+            stop_predicate,
+            emit,
+        )?;
         Ok(())
     }
 
     pub(super) fn drain<F>(
         &mut self,
-        enforced_deadline: Option<Instant>,
+        policy: DrainPolicy,
         workflow_matcher: &mut Option<&mut WorkflowResponseMatcher<'_>>,
         stop_predicate: &mut Option<&mut WorkflowStopPredicate<'_>>,
         emit: &mut F,
@@ -58,8 +80,10 @@ impl<C: Session> Transaction<C> {
     where
         F: FnMut(super::Event) -> Result<(), crate::BoundaryError>,
     {
-        for _ in 0..self.capture_limits.max_frames {
-            Self::ensure_drain_deadline(enforced_deadline)?;
+        for _ in 0..self.options.capture.max_frames {
+            if policy.expired() {
+                return Err(drain_deadline_error().into());
+            }
             let Some(frame) = self.capture.inner.next_captured_frame(Duration::ZERO)? else {
                 return Ok(ProcessOutcome::Continue);
             };
@@ -68,29 +92,21 @@ impl<C: Session> Transaction<C> {
                 return Ok(outcome);
             }
             if outcome == ProcessOutcome::CorrelationDeadlineExpired {
-                if enforced_deadline.is_some() {
+                if policy.is_enforced() {
                     return Err(drain_deadline_error().into());
                 }
                 return Ok(outcome);
             }
-            if outcome == ProcessOutcome::DuplicateRecordIdentity {
-                return Err(LiveIoError::Capture {
-                    message: "capture provider returned the same ingress record more than once"
-                        .to_owned(),
-                }
-                .into());
-            }
         }
-        packetcraftr_core::diagnostic::push_once(
-            &mut self.captured.diagnostics,
-            packetcraftr_core::diagnostic::Diagnostic::warning(
+        self.captured
+            .diagnostics
+            .push_once(packetcraftr_core::diagnostic::Diagnostic::warning(
                 "exchange.drain_limit",
                 format!(
                     "zero-time capture drain stopped after the bounded {} frame(s)",
-                    self.capture_limits.max_frames
+                    self.options.capture.max_frames
                 ),
-            ),
-        );
+            ));
         self.publish_diagnostics(emit)?;
         Ok(ProcessOutcome::Continue)
     }
@@ -113,15 +129,26 @@ impl<C: Session> Transaction<C> {
             deadline: self.deadline,
             options: &self.options,
         };
-        let processed = self.captured.process(frame, context);
-        let promoted = self.promote_workflow(workflow_matcher);
+        // A duplicated ingress record aborts the operation, so nothing that
+        // depends on it — promotion, the stop predicate, event draining —
+        // runs for the frame that carried it.
+        let processed = self
+            .captured
+            .process(frame, context)
+            .map_err(|duplicate| OperationError::from(duplicate.into_error()))?;
+        let promoted = match workflow_matcher.as_deref_mut() {
+            Some(matches_request) => self
+                .captured
+                .promote_workflow_unsolicited(context, matches_request),
+            None => {
+                self.captured.finalize_unsolicited();
+                ProcessOutcome::Continue
+            }
+        };
         let stop_requested = self.workflow_stop_requested(stop_predicate);
         self.publish_diagnostics(emit)?;
         for event in self.captured.drain_events() {
             emit(event).map_err(OperationError::output)?;
-        }
-        if processed == ProcessOutcome::DuplicateRecordIdentity {
-            return Ok(processed);
         }
         if stop_requested {
             return Ok(ProcessOutcome::StopCapture);
@@ -158,55 +185,13 @@ impl<C: Session> Transaction<C> {
         })
     }
 
-    pub(super) fn promote_workflow(
-        &mut self,
-        workflow_matcher: &mut Option<&mut WorkflowResponseMatcher<'_>>,
-    ) -> ProcessOutcome {
-        let Some(matches_request) = workflow_matcher.as_deref_mut() else {
-            self.captured.finalize_unsolicited();
-            return ProcessOutcome::Continue;
-        };
-        let context = WorkflowPromotionContext {
-            prepared: &self.prepared,
-            sent: &self.sent,
-            deadline: self.deadline,
-            max_responses: self.options.max_responses,
-        };
-        self.captured
-            .promote_workflow_unsolicited(context, matches_request)
-    }
-
-    fn ensure_drain_deadline(enforced_deadline: Option<Instant>) -> Result<(), OperationError> {
-        if enforced_deadline
-            .is_some_and(|deadline| deadline.checked_duration_since(Instant::now()).is_none())
-        {
-            return Err(drain_deadline_error().into());
-        }
-        Ok(())
-    }
-
     pub(super) fn publish_diagnostics<F>(&mut self, emit: &mut F) -> Result<(), OperationError>
     where
         F: FnMut(super::Event) -> Result<(), crate::BoundaryError>,
     {
-        #[expect(
-            clippy::indexing_slicing,
-            reason = "`published_diagnostics` only ever counts diagnostics already emitted \
-                      from this append-only vector, so it stays within `diagnostics.len()`"
-        )]
-        let diagnostics = self.captured.diagnostics[self.published_diagnostics..].to_vec();
-        for diagnostic in diagnostics {
-            emit(super::Event::Diagnostic(diagnostic)).map_err(OperationError::output)?;
-            #[expect(
-                clippy::arithmetic_side_effects,
-                reason = "one increment per diagnostic in the vector, so the count cannot exceed \
-                          `diagnostics.len()`"
-            )]
-            {
-                self.published_diagnostics += 1;
-            }
-        }
-        Ok(())
+        self.captured.diagnostics.publish_new(|diagnostic| {
+            emit(super::Event::Diagnostic(diagnostic)).map_err(OperationError::output)
+        })
     }
 }
 
@@ -347,7 +332,8 @@ mod tests {
             max_responses,
             ..crate::exchange::Options::default()
         };
-        let capture_limits = options.validate().expect("fixture exchange options");
+        options.validate().expect("fixture exchange options");
+        let snap_length = options.capture.snap_length;
         let started = Instant::now();
         let deadline = started + Duration::from_secs(1);
         let state = Arc::new(CaptureState {
@@ -365,13 +351,12 @@ mod tests {
                     index: 1,
                 },
                 link_type: LinkType::RAW,
-                snap_length: capture_limits.snap_length,
+                snap_length,
             },
         };
         let prepared = Prepared {
             started,
             deadline,
-            capture_limits,
             options,
             packets: prepared_packets,
             packet_count: u64::try_from(request_count).expect("bounded fixture"),
@@ -380,9 +365,7 @@ mod tests {
         };
         (
             Transaction::new(
-                Arc::new(
-                    packetcraftr_core::protocol::builtin::registry().expect("built-in registry"),
-                ),
+                packetcraftr_core::protocol::builtin::registry(),
                 capture,
                 prepared,
             ),

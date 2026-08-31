@@ -12,9 +12,13 @@ use crate::{
 };
 
 use crate::protocol::common::{
-    ensure_encode_budget, make_layer, payload_without_padding, protocol, strict_or_diagnostic,
-    truncated, wrong_layer,
+    child_is_opaque, ensure_encode_budget, make_layer, payload_without_padding, protocol,
+    strict_or_diagnostic, truncated, typed_layer,
 };
+
+use crate::protocol::BuiltinProtocol;
+
+const NAME: &str = BuiltinProtocol::Esp.as_str();
 
 const ESP_LEN: usize = 8;
 
@@ -42,7 +46,7 @@ impl Default for Esp {
 }
 
 reflective_layer! {
-    fn esp_schema() => { protocol: protocol("esp"), name: "ESP" }
+    fn esp_schema() => { protocol: protocol(NAME), name: "ESP" }
     impl Esp {
         "spi" => { kind: Unsigned, derived: false, required: true, description: "Security parameters index", reflect: spi, layout: (0, 4) },
         "sequence" => { kind: Unsigned, derived: false, required: false, description: "Anti-replay sequence number", reflect: sequence, layout: (4, 8) }
@@ -54,8 +58,8 @@ reflective_layer! {
 pub(crate) struct EspCodec;
 
 impl LayerCodec for EspCodec {
-    fn protocol_id(&self) -> crate::layer::Id {
-        protocol("esp")
+    fn protocol_id(&self) -> &'static crate::layer::Id {
+        &esp_schema().protocol
     }
 
     fn encode(
@@ -64,17 +68,14 @@ impl LayerCodec for EspCodec {
         payload: &[u8],
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
-        let layer = layer
-            .as_any()
-            .downcast_ref::<Esp>()
-            .ok_or_else(|| wrong_layer("esp", layer))?;
-        ensure_encode_budget("esp", ESP_LEN, context)?;
+        let layer = typed_layer::<Esp>(NAME, layer)?;
+        ensure_encode_budget(NAME, ESP_LEN, context)?;
         let mut diagnostics = Vec::new();
         // The ciphertext always ends in the two-byte Pad Length / Next
         // Header trailer, so a shorter payload cannot be a complete packet.
-        if payload_without_padding("esp", payload, context)?.len() < 2 {
+        if payload_without_padding(NAME, payload, context)?.len() < 2 {
             strict_or_diagnostic(
-                "esp",
+                NAME,
                 "build.esp_trailer",
                 "spi",
                 "the encrypted payload must include the two-byte ESP trailer",
@@ -84,7 +85,7 @@ impl LayerCodec for EspCodec {
         }
         if layer.spi == 0 {
             strict_or_diagnostic(
-                "esp",
+                NAME,
                 "build.esp_spi",
                 "spi",
                 "SPI zero is reserved and must not appear on the wire",
@@ -96,13 +97,10 @@ impl LayerCodec for EspCodec {
         // protocol structure that dissection deliberately never recovers, so
         // the layer stack could not round-trip.
         if let Some(child) = context.child
-            && !matches!(
-                child.protocol_id().as_str(),
-                "raw" | "padding" | "malformed"
-            )
+            && !child_is_opaque(child)
         {
             strict_or_diagnostic(
-                "esp",
+                NAME,
                 "build.esp_ciphertext",
                 "spi",
                 format!(
@@ -116,13 +114,9 @@ impl LayerCodec for EspCodec {
         let mut prefix = Vec::with_capacity(ESP_LEN);
         prefix.extend_from_slice(&layer.spi.to_be_bytes());
         prefix.extend_from_slice(&layer.sequence.to_be_bytes());
-        Ok(EncodedLayer {
-            prefix,
-            suffix: Vec::new(),
-            materialized: Box::new(layer.clone()),
-            fields: esp_layout(),
-            diagnostics,
-        })
+        Ok(EncodedLayer::header(prefix, Box::new(layer.clone()))
+            .with_fields(esp_layout())
+            .with_diagnostics(diagnostics))
     }
 
     fn decode(
@@ -131,7 +125,7 @@ impl LayerCodec for EspCodec {
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
         let Some(header) = input.first_chunk::<ESP_LEN>() else {
-            return Err(truncated("esp", ESP_LEN, input.len()));
+            return Err(truncated(NAME, ESP_LEN, input.len()));
         };
         let payload_len = input.len().saturating_sub(ESP_LEN);
         let mut diagnostics = Vec::new();

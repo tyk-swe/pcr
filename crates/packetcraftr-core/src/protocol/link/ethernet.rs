@@ -13,12 +13,16 @@ use crate::{
     registry::Discriminator,
 };
 
-use super::super::common::{
-    ValueExpectation, aliased_fields, binding_protocol, expected_discriminator_for_value, invalid,
-    make_layer, payload_without_padding, protocol, resolve_u16, strict_or_diagnostic, truncated,
-    validate_auto_raw_discriminator, validate_raw_child_discriminator, wrong_layer,
-};
 use super::llc::{LLC_FRAME_DISCRIMINATOR, MAX_FRAME_LENGTH};
+use crate::protocol::common::{
+    ValueExpectation, binding_protocol, expected_discriminator, invalid, make_layer,
+    payload_without_padding, protocol, resolve_u16, strict_or_diagnostic, truncated, typed_layer,
+    validate_auto_raw_discriminator, validate_raw_child_discriminator,
+};
+
+use crate::protocol::BuiltinProtocol;
+
+const NAME: &str = BuiltinProtocol::Ethernet.as_str();
 
 const ETHERNET_LEN: usize = 14;
 const MAC_LEN: usize = 6;
@@ -99,9 +103,7 @@ pub(super) fn link_type_expectation(
     {
         return Ok(ValueExpectation::Suggested(LINK_RAW_FALLBACK_DISCRIMINATOR));
     }
-    Ok(expected_discriminator_for_value(
-        name, context, 0_u16, value,
-    ))
+    Ok(expected_discriminator(name, context, 0_u16, value))
 }
 
 /// Rejects a length-form `ether_type` over anything other than LLC framing:
@@ -154,10 +156,10 @@ impl Default for Ethernet {
 }
 
 reflective_layer! {
-    fn ethernet_schema() => { protocol: protocol("ethernet"), name: "Ethernet II" }
+    fn ethernet_schema() => { protocol: protocol(NAME), name: "Ethernet II" }
     impl Ethernet {
-        "destination" => { kind: Mac, derived: false, required: true, description: "Destination MAC address", reflect: destination, layout: (0, 6) },
-        "source" => { kind: Mac, derived: false, required: true, description: "Source MAC address", reflect: source, layout: (6, 12) },
+        "destination" | "dst" => { kind: Mac, derived: false, required: true, description: "Destination MAC address", reflect: destination, layout: (0, 6) },
+        "source" | "src" => { kind: Mac, derived: false, required: true, description: "Source MAC address", reflect: source, layout: (6, 12) },
         "ether_type" => { kind: Unsigned, derived: true, required: false, description: "EtherType discriminator", reflect: ether_type, layout: (12, 14) },
     }
     layout pub(crate) fn ethernet_layout();
@@ -167,8 +169,8 @@ reflective_layer! {
 pub(crate) struct EthernetCodec;
 
 impl LayerCodec for EthernetCodec {
-    fn protocol_id(&self) -> crate::layer::Id {
-        protocol("ethernet")
+    fn protocol_id(&self) -> &'static crate::layer::Id {
+        &ethernet_schema().protocol
     }
 
     fn encode(
@@ -177,27 +179,20 @@ impl LayerCodec for EthernetCodec {
         payload: &[u8],
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
-        let layer = layer
-            .as_any()
-            .downcast_ref::<Ethernet>()
-            .ok_or_else(|| wrong_layer("ethernet", layer))?;
-        let covered_payload = payload_without_padding("ethernet", payload, context)?;
-        let expectation = link_type_expectation(
-            "ethernet",
-            context,
-            &layer.ether_type,
-            covered_payload.len(),
-        )?;
+        let layer = typed_layer::<Ethernet>(NAME, layer)?;
+        let covered_payload = payload_without_padding(NAME, payload, context)?;
+        let expectation =
+            link_type_expectation(NAME, context, &layer.ether_type, covered_payload.len())?;
         let mut diagnostics = Vec::new();
         validate_auto_raw_discriminator(
-            "ethernet",
+            NAME,
             "ether_type",
             &layer.ether_type,
             context,
             &mut diagnostics,
         )?;
         let (ether_type, materialized_type) = resolve_u16(
-            "ethernet",
+            NAME,
             "ether_type",
             &layer.ether_type,
             expectation,
@@ -205,31 +200,22 @@ impl LayerCodec for EthernetCodec {
             &mut diagnostics,
         )?;
         validate_link_length_form(
-            "ethernet",
+            NAME,
             ether_type,
             covered_payload.len(),
             context,
             &mut diagnostics,
         )?;
-        validate_raw_child_discriminator(
-            "ethernet",
-            u64::from(ether_type),
-            context,
-            &mut diagnostics,
-        )?;
+        validate_raw_child_discriminator(NAME, u64::from(ether_type), context, &mut diagnostics)?;
         let mut header = Vec::with_capacity(ETHERNET_LEN);
         header.extend_from_slice(&layer.destination);
         header.extend_from_slice(&layer.source);
         header.extend_from_slice(&ether_type.to_be_bytes());
         let mut materialized = layer.clone();
         materialized.ether_type = materialized_type;
-        Ok(EncodedLayer {
-            prefix: header,
-            suffix: Vec::new(),
-            materialized: Box::new(materialized),
-            fields: ethernet_layout(),
-            diagnostics,
-        })
+        Ok(EncodedLayer::header(header, Box::new(materialized))
+            .with_fields(ethernet_layout())
+            .with_diagnostics(diagnostics))
     }
 
     fn decode(
@@ -242,11 +228,11 @@ impl LayerCodec for EthernetCodec {
             ethernet_chunk::<MAC_LEN>(input, MAC_LEN),
             ethernet_chunk::<2>(input, 12),
         ) else {
-            return Err(truncated("ethernet", ETHERNET_LEN, input.len()));
+            return Err(truncated(NAME, ETHERNET_LEN, input.len()));
         };
         let ether_type = u16::from_be_bytes(ether_type);
         let (payload_len, next) = link_payload_selection(
-            "ethernet",
+            NAME,
             ether_type,
             input.len().saturating_sub(ETHERNET_LEN),
             ETHERNET_LEN,
@@ -271,13 +257,6 @@ impl LayerCodec for EthernetCodec {
         &self,
         fields: &BTreeMap<String, FieldValue>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(
-            Ethernet::default(),
-            &aliased_fields(
-                "ethernet",
-                fields,
-                &[("dst", "destination"), ("src", "source")],
-            )?,
-        )
+        make_layer(Ethernet::default(), fields)
     }
 }

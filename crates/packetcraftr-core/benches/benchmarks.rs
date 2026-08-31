@@ -12,7 +12,7 @@ use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 
 use packetcraftr_core::Packet;
 use packetcraftr_core::analysis::pcap::{Reader, ReaderOptions, Writer};
-use packetcraftr_core::analysis::reassembly::Limits as ReassemblyLimits;
+use packetcraftr_core::analysis::reassembly::tcp::Limits as ReassemblyLimits;
 use packetcraftr_core::analysis::reassembly::tcp::{FlowKey, Reassembler, ScopedFlowKey, Segment};
 use packetcraftr_core::analysis::scope::Interner;
 use packetcraftr_core::build::{Builder, Context, Options as BuildOptions};
@@ -30,7 +30,7 @@ use packetcraftr_core::protocol::transport::Tcp;
 use packetcraftr_core::registry::Registry;
 
 fn bench_registry() -> Arc<Registry> {
-    Arc::new(builtin::registry().expect("built-in registry"))
+    builtin::registry()
 }
 
 fn bench_packet_decode_and_rebuild(c: &mut Criterion) {

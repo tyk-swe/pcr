@@ -3,26 +3,26 @@
 
 //! Structured `dissect` output.
 
-use bytes::Bytes;
 use serde::Serialize;
 
 use packetcraftr_core::{decode::DecodedPacket, diagnostic::Diagnostic, layout::PacketLayout};
 
-use super::hex::compact_hex;
+use super::frame::Wire;
 
 /// Structured result of `dissect`.
 #[derive(Clone, Debug, Serialize)]
-pub struct Result {
-    #[serde(skip)]
-    bytes: Bytes,
-    pub bytes_hex: String,
-    pub length: u64,
+pub struct Report {
+    /// Publishes the `bytes_hex` and `length` keys the contract declares,
+    /// formatting the hexadecimal at serialization rather than retaining a
+    /// second copy of the frame.
+    #[serde(flatten)]
+    pub frame: Wire,
     pub link_type: u32,
     pub packet: packetcraftr_core::document::Packet,
     pub layout: PacketLayout,
 }
 
-impl Result {
+impl Report {
     pub fn from_decoded(decoded: DecodedPacket) -> (Self, Vec<Diagnostic>) {
         let DecodedPacket {
             packet,
@@ -33,33 +33,30 @@ impl Result {
         } = decoded;
         (
             Self {
-                bytes_hex: compact_hex(&original),
-                length: u64::try_from(original.len()).unwrap_or(u64::MAX),
+                frame: Wire::new(original),
                 link_type: frame.link_type.0,
                 packet: packetcraftr_core::document::Packet::from_packet(&packet),
                 layout,
-                bytes: original,
             },
             diagnostics,
         )
     }
-
-    pub fn bytes(&self) -> &[u8] {
-        &self.bytes
-    }
 }
 
+/// What `dissect` publishes once a filter has decided: the dissection when the
+/// frame matched, and an explicit `null` when it did not.
 #[derive(Clone, Debug, Serialize)]
 pub struct AggregateResult {
     matched: bool,
-    dissection: Option<Result>,
+    dissection: Option<Report>,
 }
 
 impl AggregateResult {
-    pub fn from_filter(matched: bool, dissection: Result) -> Self {
+    #[must_use]
+    pub const fn new(dissection: Option<Report>) -> Self {
         Self {
-            matched,
-            dissection: matched.then_some(dissection),
+            matched: dissection.is_some(),
+            dissection,
         }
     }
 }

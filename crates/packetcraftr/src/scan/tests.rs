@@ -12,6 +12,7 @@ use std::time::{Duration, UNIX_EPOCH};
 use bytes::Bytes;
 use packetcraftr_core::error::{Classification as ErrorClassification, Kind};
 use packetcraftr_core::frame::{Frame, LinkType};
+use packetcraftr_core::progress::Runtime;
 use packetcraftr_core::protocol::{
     network::{Ipv4, Ipv6},
     transport::Tcp,
@@ -24,7 +25,8 @@ use super::classification::classify_response;
 use super::engine::{run, run_with_events};
 use super::error::Error;
 use super::model::{
-    Batch, Classification, Event, Execution, Executor, Limits, ProbeStatus, Request, Transport,
+    Batch, Classification, Event, Execution, Executor, Limits, PortSpec, Probe, ProbeStatus,
+    Request, Transport, select_ports,
 };
 use super::probe::probe_packet;
 use crate::target::{PolicyAuthorizer, Target};
@@ -56,7 +58,7 @@ struct CountingRejectExecutor {
     calls: Arc<AtomicUsize>,
 }
 
-impl Executor for CountingRejectExecutor {
+impl Executor<Probe> for CountingRejectExecutor {
     fn execute(&mut self, _batch: &Batch) -> Result<Execution, BoundaryError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         Err(BoundaryError::new(
@@ -73,11 +75,15 @@ struct TimeoutExecutor {
     invalid_sent_index: Option<usize>,
 }
 
-impl Executor for TimeoutExecutor {
+impl Executor<Probe> for TimeoutExecutor {
     fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
         self.batches.push((
             batch.probes[0].attempt,
-            batch.probes.iter().map(|probe| probe.port).collect(),
+            batch
+                .probes
+                .iter()
+                .map(|probe| probe.endpoint.port())
+                .collect(),
         ));
         let mut sent = Vec::new();
         let mut bytes = 0_u64;
@@ -120,7 +126,7 @@ impl Executor for TimeoutExecutor {
 
 struct LateResponseExecutor(TimeoutExecutor);
 
-impl Executor for LateResponseExecutor {
+impl Executor<Probe> for LateResponseExecutor {
     fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
         let mut execution = self.0.execute(batch)?;
         execution.unsolicited.push(decoded(
@@ -146,7 +152,7 @@ struct ProgressiveExecutor {
 
 struct RetainedEvidenceExecutor(TimeoutExecutor);
 
-impl Executor for RetainedEvidenceExecutor {
+impl Executor<Probe> for RetainedEvidenceExecutor {
     fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
         let mut execution = self.0.execute(batch)?;
         execution.undecoded.extend([
@@ -160,7 +166,7 @@ impl Executor for RetainedEvidenceExecutor {
     }
 }
 
-impl Executor for ProgressiveExecutor {
+impl Executor<Probe> for ProgressiveExecutor {
     fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
         let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
         if self.fail_at == Some(call) {
@@ -218,7 +224,7 @@ fn decoded(packet: Packet, diagnostics: Vec<Diagnostic>) -> DecodedPacket {
 
 #[test]
 fn scan_batching_attempts_rate_and_timeout_evidence_are_deterministic() {
-    let registry = packetcraftr_core::protocol::builtin::registry().unwrap();
+    let registry = packetcraftr_core::protocol::builtin::registry();
     let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
     let mut request = tcp_scan_request(Target::Address(address));
     request.ports = vec![80, 81, 82, 83];
@@ -275,7 +281,7 @@ fn scan_hostname_policy_denial_precedes_resolution_and_execution() {
     let error = run(
         &tcp_scan_request(Target::Hostname("lab.example".parse().unwrap())),
         &mut authorizer,
-        &packetcraftr_core::protocol::builtin::registry().unwrap(),
+        &packetcraftr_core::protocol::builtin::registry(),
         &mut executor,
         &mut NoopClock,
     )
@@ -308,7 +314,7 @@ fn scan_authorizes_mixed_resolution_answers_before_family_filtering() {
     let error = run(
         &request,
         &mut authorizer,
-        &packetcraftr_core::protocol::builtin::registry().unwrap(),
+        &packetcraftr_core::protocol::builtin::registry(),
         &mut executor,
         &mut NoopClock,
     )
@@ -325,7 +331,7 @@ fn scan_authorizes_mixed_resolution_answers_before_family_filtering() {
 
 #[test]
 fn scan_tcp_correlation_requires_integrity_and_classifies_valid_replies() {
-    let registry = packetcraftr_core::protocol::builtin::registry().unwrap();
+    let registry = packetcraftr_core::protocol::builtin::registry();
     let local = Ipv4Addr::new(10, 0, 0, 1);
     let remote = Ipv4Addr::new(10, 0, 0, 2);
     let request = tcp_packet(local, remote, 50_000, 443, Tcp::SYN);
@@ -394,7 +400,7 @@ fn scan_late_unsolicited_response_remains_a_timeout() {
         &mut AddressListAuthorizer {
             addresses: vec![address],
         },
-        &packetcraftr_core::protocol::builtin::registry().unwrap(),
+        &packetcraftr_core::protocol::builtin::registry(),
         &mut LateResponseExecutor(TimeoutExecutor::default()),
         &mut NoopClock,
     )
@@ -414,7 +420,7 @@ fn scan_invalid_sent_evidence_reports_the_exact_probe_sequence() {
         &mut AddressListAuthorizer {
             addresses: vec![address],
         },
-        &packetcraftr_core::protocol::builtin::registry().unwrap(),
+        &packetcraftr_core::protocol::builtin::registry(),
         &mut TimeoutExecutor {
             invalid_sent_index: Some(1),
             ..TimeoutExecutor::default()
@@ -453,9 +459,10 @@ fn scan_events_precede_later_work_and_survive_a_later_failure() {
         &mut AddressListAuthorizer {
             addresses: vec![address],
         },
-        &packetcraftr_core::protocol::builtin::registry().unwrap(),
+        &packetcraftr_core::protocol::builtin::registry(),
         &mut executor,
         &mut NoopClock,
+        &Runtime::default(),
         move |event| {
             assert_eq!(callback_calls.load(Ordering::SeqCst), 1);
             observed_events.lock().unwrap().push(event);
@@ -495,9 +502,10 @@ fn scan_sink_failure_stops_batches_after_cleaning_up_the_current_session() {
         &mut AddressListAuthorizer {
             addresses: vec![address],
         },
-        &packetcraftr_core::protocol::builtin::registry().unwrap(),
+        &packetcraftr_core::protocol::builtin::registry(),
         &mut executor,
         &mut NoopClock,
+        &Runtime::default(),
         |_| {
             Err(BoundaryError::new(
                 "induced output failure",
@@ -527,7 +535,7 @@ fn scan_event_collection_preserves_stats_diagnostics_and_evidence_limits() {
         &mut AddressListAuthorizer {
             addresses: vec![address],
         },
-        &packetcraftr_core::protocol::builtin::registry().unwrap(),
+        &packetcraftr_core::protocol::builtin::registry(),
         &mut RetainedEvidenceExecutor(TimeoutExecutor::default()),
         &mut NoopClock,
     )
@@ -549,4 +557,78 @@ fn scan_event_collection_preserves_stats_diagnostics_and_evidence_limits() {
             .iter()
             .any(|diagnostic| diagnostic.code == "scan.undecoded_limit")
     );
+}
+
+#[test]
+fn port_selection_is_stable_deduplicated_and_limit_aware() {
+    let specs = [
+        PortSpec::Single(443),
+        PortSpec::RangeInclusive { start: 80, end: 82 },
+        PortSpec::Single(80),
+        PortSpec::RangeInclusive {
+            start: 81,
+            end: 443,
+        },
+    ];
+
+    let ports = select_ports(specs, 364).expect("364 distinct ports fit");
+    assert_eq!(&ports[..4], &[443, 80, 81, 82]);
+    assert_eq!(ports.len(), 364);
+    assert_eq!(ports.last(), Some(&442));
+
+    let repeated = [
+        PortSpec::Single(7),
+        PortSpec::Single(7),
+        PortSpec::RangeInclusive { start: 7, end: 8 },
+    ];
+    assert_eq!(
+        select_ports(repeated, 2).expect("duplicates do not consume the limit"),
+        vec![7, 8],
+    );
+}
+
+/// The bound is enforced while expanding, so a 65535-port range never
+/// materializes before the limit rejects it.
+#[test]
+fn port_selection_stops_at_the_first_distinct_port_over_the_limit() {
+    let error = select_ports(
+        [PortSpec::RangeInclusive {
+            start: 1,
+            end: u16::MAX,
+        }],
+        2,
+    )
+    .expect_err("a third distinct port exceeds the bound");
+
+    match error {
+        Error::InvalidLimit {
+            field,
+            value,
+            reason,
+        } => {
+            assert_eq!(field, "ports");
+            assert_eq!(value, 3);
+            assert_eq!(reason, "exceeds max_ports=2");
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+}
+
+/// A validated request selects the ports it declared, once each; the CLI and
+/// the library agree because there is one expansion.
+#[test]
+fn a_validated_request_selects_its_declared_ports_once_each() {
+    let target = Target::Address("192.0.2.1".parse().expect("documentation address"));
+    let mut request = tcp_scan_request(target);
+    request.ports = vec![80, 443, 80];
+    assert_eq!(
+        request.selected_ports().expect("validated request"),
+        vec![80, 443]
+    );
+
+    request.limits.max_ports = 1;
+    let error = request
+        .selected_ports()
+        .expect_err("two distinct ports exceed max_ports=1");
+    assert!(matches!(error, Error::InvalidLimit { field: "ports", .. }));
 }

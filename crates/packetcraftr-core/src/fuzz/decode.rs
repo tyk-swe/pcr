@@ -3,19 +3,20 @@
 
 //! Bounded decode evidence and capture-link helpers.
 
+use super::request::Limits;
 use crate::frame::{Frame, LinkType};
 use crate::{
     Packet,
     build::BuiltPacket,
     decode::{DecodedPacket, Dissector},
     diagnostic::Diagnostic,
-    semantics::BuiltinProtocol,
+    protocol::BuiltinProtocol,
 };
 
 pub fn dissect_built(
     dissector: &Dissector,
     built: &BuiltPacket,
-    limits: super::super::request::Limits,
+    limits: Limits,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<DecodedPacket> {
     let Some(link_type) = packet_link_type(&built.packet) else {

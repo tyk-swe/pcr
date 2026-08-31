@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::net::IpAddr;
 
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::Packet;
@@ -16,6 +17,25 @@ use crate::field::FieldValue;
 use crate::layer::{FieldError, Id, Layer, Schema};
 use crate::layout::FieldLayout;
 use crate::registry::{Discriminator, Registry};
+
+/// How strictly a codec treats a construct the wire format allows but the
+/// protocol does not: `Strict` refuses it, `Permissive` encodes it and raises
+/// a diagnostic.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Mode {
+    #[default]
+    Strict,
+    Permissive,
+}
+
+/// Addresses an enclosing operation supplies so codecs can derive fields the
+/// packet itself does not carry, such as a transport pseudo-header.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Context {
+    pub source: Option<IpAddr>,
+    pub destination: Option<IpAddr>,
+}
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -41,8 +61,8 @@ pub enum Error {
 pub struct LayerEncodeContext<'a> {
     pub packet: &'a Packet,
     pub index: usize,
-    pub build_context: &'a crate::build::Context,
-    pub mode: crate::build::Mode,
+    pub build_context: &'a Context,
+    pub mode: Mode,
     pub registry: &'a Registry,
     pub child: Option<&'a dyn Layer>,
     /// Maximum additional bytes this layer may contribute without exceeding
@@ -60,6 +80,9 @@ pub struct EncodedLayer {
 }
 
 impl EncodedLayer {
+    /// A layer that contributes a header and no trailer, which is every
+    /// built-in codec. A codec that emits trailing bytes assigns
+    /// [`Self::suffix`] afterwards.
     pub fn header(prefix: Vec<u8>, materialized: Box<dyn Layer>) -> Self {
         Self {
             prefix,
@@ -68,6 +91,20 @@ impl EncodedLayer {
             fields: Vec::new(),
             diagnostics: Vec::new(),
         }
+    }
+
+    /// Attaches this header's reflective field layout.
+    #[must_use]
+    pub fn with_fields(mut self, fields: Vec<FieldLayout>) -> Self {
+        self.fields = fields;
+        self
+    }
+
+    /// Attaches the diagnostics raised while encoding this header.
+    #[must_use]
+    pub fn with_diagnostics(mut self, diagnostics: Vec<Diagnostic>) -> Self {
+        self.diagnostics = diagnostics;
+        self
     }
 }
 
@@ -121,17 +158,15 @@ impl DecodedLayerValue {
 
 /// Encoder, bounded decoder, and expression factory for one protocol.
 pub trait LayerCodec: Send + Sync + fmt::Debug {
-    fn protocol_id(&self) -> Id;
+    /// The protocol this codec registers under, borrowed from the protocol's
+    /// own reflective schema so no call allocates.
+    fn protocol_id(&self) -> &'static Id;
 
     /// Whether a decoded layer protocol is a valid result for this codec.
     /// Most codecs return their own protocol. A decode-only multiplexing root
     /// may explicitly admit the concrete protocols it selects.
     fn accepts_decoded_protocol(&self, protocol: &Id) -> bool {
-        *protocol == self.protocol_id()
-    }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        &[]
+        protocol == self.protocol_id()
     }
 
     /// Publishes the reflective schema without requiring a constructible

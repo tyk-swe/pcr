@@ -5,7 +5,7 @@
 
 #![allow(unsafe_code)]
 
-use std::mem::{MaybeUninit, size_of};
+use std::mem::{MaybeUninit, offset_of, size_of};
 use std::net::IpAddr;
 use std::ptr;
 use std::sync::atomic::{AtomicI32, Ordering};
@@ -13,10 +13,11 @@ use std::time::{Duration, Instant};
 
 use socket2::{Domain, Socket, Type};
 
-use super::enumeration::{interfaces, os_error};
+use super::enumeration::interfaces;
 use super::parser::{parse_route_addresses, roundup};
 use crate::{
     interface::Id as InterfaceId,
+    platform::os_error,
     route::{
         Decision, NativeRouteSnapshot, SelectionReason, SystemError, find_interface, finish_route,
         interface_decision, validate_preferred_source_family,
@@ -24,6 +25,8 @@ use crate::{
 };
 
 static ROUTE_SEQUENCE: AtomicI32 = AtomicI32::new(1);
+
+const ROUTE_QUERY_TIMEOUT: Duration = Duration::from_secs(2);
 
 pub(in crate::platform) fn route(
     destination: IpAddr,
@@ -133,8 +136,12 @@ fn query_route(
     interface_index: Option<u32>,
 ) -> Result<RouteResponse, SystemError> {
     let deadline = Instant::now()
-        .checked_add(Duration::from_secs(2))
-        .expect("the bounded routing-socket timeout must fit Instant");
+        .checked_add(ROUTE_QUERY_TIMEOUT)
+        .ok_or_else(|| SystemError::OperatingSystem {
+            operation: "RTM_GET",
+            message: "macOS routing-socket deadline exceeded the monotonic clock range".to_owned(),
+            source: None,
+        })?;
     let request = build_route_request(destination, interface_index)?;
     let socket = send_route_request(&request, deadline)?;
     read_route_response(&socket, destination, deadline, &request)
@@ -208,6 +215,7 @@ fn send_route_request(request: &RouteRequest, deadline: Instant) -> Result<Socke
         .ok_or_else(|| SystemError::OperatingSystem {
             operation: "write RTM_GET",
             message: "macOS routing-socket request deadline expired".to_owned(),
+            source: None,
         })?;
     socket
         .set_write_timeout(Some(remaining))
@@ -239,6 +247,7 @@ fn read_route_response(
             .ok_or_else(|| SystemError::OperatingSystem {
                 operation: "read RTM_GET",
                 message: "macOS routing-socket response deadline expired".to_owned(),
+                source: None,
             })?;
         socket
             .set_read_timeout(Some(remaining))
@@ -299,45 +308,137 @@ fn read_route_response(
     })
 }
 
-pub(super) fn encode_sockaddr(address: IpAddr) -> Result<Vec<u8>, SystemError> {
+/// Encodes a destination as the Darwin routing-socket `sockaddr`.
+///
+/// Each field is written at the offset `libc` declares for this target's own
+/// structure, and every byte the C structure does not name stays zero. That
+/// needs neither an uninitialized value nor a reinterpretation of one, and it
+/// makes the encoding testable without a routing socket.
+fn encode_sockaddr(address: IpAddr) -> Result<Vec<u8>, SystemError> {
     match address {
         IpAddr::V4(address) => {
-            // SAFETY: zero is valid for unused sockaddr fields.
-            let mut value: libc::sockaddr_in = unsafe { std::mem::zeroed() };
-            value.sin_len = u8::try_from(size_of::<libc::sockaddr_in>()).map_err(|_| {
+            let length = u8::try_from(size_of::<libc::sockaddr_in>()).map_err(|_| {
                 SystemError::InvalidResponse {
                     message: "macOS sockaddr_in length does not fit sin_len".to_owned(),
                 }
             })?;
-            value.sin_family = libc::sa_family_t::try_from(libc::AF_INET).map_err(|_| {
+            let family = libc::sa_family_t::try_from(libc::AF_INET).map_err(|_| {
                 SystemError::InvalidResponse {
                     message: "macOS AF_INET does not fit sa_family_t".to_owned(),
                 }
             })?;
-            value.sin_addr.s_addr = u32::from_ne_bytes(address.octets());
-            Ok(structure_bytes(&value))
+            let mut bytes = vec![0_u8; size_of::<libc::sockaddr_in>()];
+            write_sockaddr_field(
+                &mut bytes,
+                offset_of!(libc::sockaddr_in, sin_len),
+                &length.to_ne_bytes(),
+            )?;
+            write_sockaddr_field(
+                &mut bytes,
+                offset_of!(libc::sockaddr_in, sin_family),
+                &family.to_ne_bytes(),
+            )?;
+            write_sockaddr_field(
+                &mut bytes,
+                offset_of!(libc::sockaddr_in, sin_addr),
+                &address.octets(),
+            )?;
+            Ok(bytes)
         }
         IpAddr::V6(address) => {
-            // SAFETY: zero is valid for unused sockaddr fields.
-            let mut value: libc::sockaddr_in6 = unsafe { std::mem::zeroed() };
-            value.sin6_len = u8::try_from(size_of::<libc::sockaddr_in6>()).map_err(|_| {
+            let length = u8::try_from(size_of::<libc::sockaddr_in6>()).map_err(|_| {
                 SystemError::InvalidResponse {
                     message: "macOS sockaddr_in6 length does not fit sin6_len".to_owned(),
                 }
             })?;
-            value.sin6_family = libc::sa_family_t::try_from(libc::AF_INET6).map_err(|_| {
+            let family = libc::sa_family_t::try_from(libc::AF_INET6).map_err(|_| {
                 SystemError::InvalidResponse {
                     message: "macOS AF_INET6 does not fit sa_family_t".to_owned(),
                 }
             })?;
-            value.sin6_addr.s6_addr = address.octets();
-            Ok(structure_bytes(&value))
+            let mut bytes = vec![0_u8; size_of::<libc::sockaddr_in6>()];
+            write_sockaddr_field(
+                &mut bytes,
+                offset_of!(libc::sockaddr_in6, sin6_len),
+                &length.to_ne_bytes(),
+            )?;
+            write_sockaddr_field(
+                &mut bytes,
+                offset_of!(libc::sockaddr_in6, sin6_family),
+                &family.to_ne_bytes(),
+            )?;
+            write_sockaddr_field(
+                &mut bytes,
+                offset_of!(libc::sockaddr_in6, sin6_addr),
+                &address.octets(),
+            )?;
+            Ok(bytes)
         }
     }
 }
 
-fn structure_bytes<T>(value: &T) -> Vec<u8> {
-    // SAFETY: callers use plain C structs whose full initialized object
-    // representation may be copied into an operating-system message.
-    unsafe { std::slice::from_raw_parts((value as *const T).cast::<u8>(), size_of::<T>()).to_vec() }
+/// Copies one field into the encoded structure, refusing rather than
+/// truncating if it does not fit — which a field taken from the same
+/// structure cannot do.
+fn write_sockaddr_field(bytes: &mut [u8], offset: usize, value: &[u8]) -> Result<(), SystemError> {
+    offset
+        .checked_add(value.len())
+        .and_then(|end| bytes.get_mut(offset..end))
+        .ok_or_else(|| SystemError::InvalidResponse {
+            message: "macOS sockaddr field does not fit its own structure".to_owned(),
+        })?
+        .copy_from_slice(value);
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+
+    use std::net::{Ipv4Addr, Ipv6Addr};
+
+    use super::*;
+
+    #[test]
+    fn sockaddr_encoding_fills_exactly_the_darwin_length_family_and_address_fields() {
+        let encoded =
+            encode_sockaddr(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1))).expect("IPv4 sockaddr");
+        assert_eq!(encoded.len(), size_of::<libc::sockaddr_in>());
+        assert_eq!(
+            usize::from(encoded[offset_of!(libc::sockaddr_in, sin_len)]),
+            size_of::<libc::sockaddr_in>()
+        );
+        assert_eq!(
+            i32::from(encoded[offset_of!(libc::sockaddr_in, sin_family)]),
+            libc::AF_INET
+        );
+        let address = offset_of!(libc::sockaddr_in, sin_addr);
+        assert_eq!(&encoded[address..address + 4], &[192, 0, 2, 1]);
+        let port = offset_of!(libc::sockaddr_in, sin_port);
+        assert_eq!(&encoded[port..port + 2], &[0, 0]);
+
+        let address = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1);
+        let encoded = encode_sockaddr(IpAddr::V6(address)).expect("IPv6 sockaddr");
+        assert_eq!(encoded.len(), size_of::<libc::sockaddr_in6>());
+        assert_eq!(
+            usize::from(encoded[offset_of!(libc::sockaddr_in6, sin6_len)]),
+            size_of::<libc::sockaddr_in6>()
+        );
+        assert_eq!(
+            i32::from(encoded[offset_of!(libc::sockaddr_in6, sin6_family)]),
+            libc::AF_INET6
+        );
+        let start = offset_of!(libc::sockaddr_in6, sin6_addr);
+        assert_eq!(&encoded[start..start + 16], &address.octets());
+        let scope = offset_of!(libc::sockaddr_in6, sin6_scope_id);
+        assert_eq!(&encoded[scope..scope + 4], &[0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn sockaddr_field_writes_refuse_to_run_past_their_structure() {
+        let mut bytes = [0_u8; 4];
+        assert!(write_sockaddr_field(&mut bytes, 3, &[1, 2]).is_err());
+        assert!(write_sockaddr_field(&mut bytes, usize::MAX, &[1]).is_err());
+        assert_eq!(bytes, [0; 4]);
+    }
 }

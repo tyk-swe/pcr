@@ -5,9 +5,9 @@
 
 use std::cmp::Ordering;
 
-use super::super::field::FieldValue;
 use super::lexer::CompareOperator;
 use super::literal::Literal;
+use crate::field::FieldValue;
 
 /// Whether a single field value satisfies `value <operator> literal`.
 ///

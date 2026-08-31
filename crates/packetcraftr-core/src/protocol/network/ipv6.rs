@@ -14,14 +14,18 @@ use crate::{
     registry::Discriminator,
 };
 
-use super::super::common::{
-    ValueExpectation, aliased_fields, expected_discriminator, invalid, make_layer,
-    network_from_addresses, payload_without_padding, protocol, resolve_u8, resolve_u16,
-    strict_or_diagnostic, truncated, validate_auto_raw_discriminator, validate_ipv6_routing_child,
-    validate_raw_child_discriminator, wrong_layer,
+use crate::protocol::common::{
+    ValueExpectation, expected_discriminator, invalid, make_layer, network_from_addresses,
+    payload_without_padding, protocol, resolve_u8, resolve_u16, strict_or_diagnostic, truncated,
+    typed_layer, validate_auto_raw_discriminator, validate_ipv6_routing_child,
+    validate_raw_child_discriminator,
 };
 
 use super::envelope::{is_ipv6_extension_layer, is_outer_network_layer};
+
+use crate::protocol::BuiltinProtocol;
+
+const NAME: &str = BuiltinProtocol::Ipv6.as_str();
 
 const IPV6_LEN: usize = 40;
 
@@ -51,15 +55,15 @@ impl Default for Ipv6 {
 }
 
 reflective_layer! {
-    fn ipv6_schema() => { protocol: protocol("ipv6"), name: "IPv6" }
+    fn ipv6_schema() => { protocol: protocol(NAME), name: "IPv6" }
     impl Ipv6 {
         "traffic_class" => { kind: Unsigned, derived: false, required: false, description: "IPv6 traffic class", reflect: traffic_class, layout: (0, 4) },
         "flow_label" => { kind: Unsigned, derived: false, required: false, description: "IPv6 flow label", reflect_bounded: flow_label, 0x000f_ffff_u64, layout: (0, 4) },
         "payload_length" => { kind: Unsigned, derived: true, required: false, description: "IPv6 payload length", reflect: payload_length, layout: (4, 6) },
         "next_header" => { kind: Unsigned, derived: true, required: false, description: "Next-header discriminator", reflect: next_header, layout: (6, 7) },
         "hop_limit" => { kind: Unsigned, derived: false, required: true, description: "Hop limit", reflect: hop_limit, layout: (7, 8) },
-        "source" => { kind: Ipv6, derived: false, required: true, description: "Source IPv6 address", reflect: source, layout: (8, 24) },
-        "destination" => { kind: Ipv6, derived: false, required: true, description: "Destination IPv6 address", reflect: destination, layout: (24, 40) },
+        "source" | "src" => { kind: Ipv6, derived: false, required: true, description: "Source IPv6 address", reflect: source, layout: (8, 24) },
+        "destination" | "dst" => { kind: Ipv6, derived: false, required: true, description: "Destination IPv6 address", reflect: destination, layout: (24, 40) },
     }
     layout pub(crate) fn ipv6_layout();
 }
@@ -68,8 +72,8 @@ reflective_layer! {
 pub(crate) struct Ipv6Codec;
 
 impl LayerCodec for Ipv6Codec {
-    fn protocol_id(&self) -> crate::layer::Id {
-        protocol("ipv6")
+    fn protocol_id(&self) -> &'static crate::layer::Id {
+        &ipv6_schema().protocol
     }
     fn encode(
         &self,
@@ -77,48 +81,40 @@ impl LayerCodec for Ipv6Codec {
         payload: &[u8],
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
-        let layer = layer
-            .as_any()
-            .downcast_ref::<Ipv6>()
-            .ok_or_else(|| wrong_layer("ipv6", layer))?;
+        let layer = typed_layer::<Ipv6>(NAME, layer)?;
         if layer.flow_label > 0x000f_ffff {
-            return Err(invalid("ipv6", "flow label exceeds 20 bits"));
+            return Err(invalid(NAME, "flow label exceeds 20 bits"));
         }
         let (source, destination, mut diagnostics) = resolve_addresses(layer, context)?;
-        let covered_payload = payload_without_padding("ipv6", payload, context)?;
+        let covered_payload = payload_without_padding(NAME, payload, context)?;
         let expected_length = u16::try_from(covered_payload.len())
-            .map_err(|_| invalid("ipv6", "jumbograms are not supported"))?;
+            .map_err(|_| invalid(NAME, "jumbograms are not supported"))?;
         let (payload_length, materialized_length) = resolve_u16(
-            "ipv6",
+            NAME,
             "payload_length",
             &layer.payload_length,
             ValueExpectation::Required(expected_length),
             context.mode,
             &mut diagnostics,
         )?;
-        let expected_next = expected_discriminator("ipv6", context, 59_u8);
+        let expected_next = expected_discriminator(NAME, context, 59_u8, &layer.next_header);
         validate_auto_raw_discriminator(
-            "ipv6",
+            NAME,
             "next_header",
             &layer.next_header,
             context,
             &mut diagnostics,
         )?;
         let (next_header, materialized_next) = resolve_u8(
-            "ipv6",
+            NAME,
             "next_header",
             &layer.next_header,
             expected_next,
             context.mode,
             &mut diagnostics,
         )?;
-        validate_raw_child_discriminator(
-            "ipv6",
-            u64::from(next_header),
-            context,
-            &mut diagnostics,
-        )?;
-        validate_ipv6_routing_child("ipv6", next_header, context, &mut diagnostics)?;
+        validate_raw_child_discriminator(NAME, u64::from(next_header), context, &mut diagnostics)?;
+        validate_ipv6_routing_child(NAME, next_header, context, &mut diagnostics)?;
         let version_flow = (6u32 << 28) | (u32::from(layer.traffic_class) << 20) | layer.flow_label;
         let mut prefix = Vec::with_capacity(IPV6_LEN);
         prefix.extend_from_slice(&version_flow.to_be_bytes());
@@ -132,13 +128,9 @@ impl LayerCodec for Ipv6Codec {
         materialized.next_header = materialized_next;
         materialized.source = source;
         materialized.destination = destination;
-        Ok(EncodedLayer {
-            prefix,
-            suffix: Vec::new(),
-            materialized: Box::new(materialized),
-            fields: ipv6_layout(),
-            diagnostics,
-        })
+        Ok(EncodedLayer::header(prefix, Box::new(materialized))
+            .with_fields(ipv6_layout())
+            .with_diagnostics(diagnostics))
     }
 
     fn decode(
@@ -147,11 +139,11 @@ impl LayerCodec for Ipv6Codec {
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, crate::codec::Error> {
         let Some(header) = input.first_chunk::<IPV6_LEN>() else {
-            return Err(truncated("ipv6", IPV6_LEN, input.len()));
+            return Err(truncated(NAME, IPV6_LEN, input.len()));
         };
         if header[0] >> 4 != 6 {
             return Err(invalid(
-                "ipv6",
+                NAME,
                 format!("version is {}, not 6", header[0] >> 4),
             ));
         }
@@ -164,27 +156,27 @@ impl LayerCodec for Ipv6Codec {
         // trailer according to the enclosing link context.
         if payload_length == 0 && input.len() > IPV6_LEN && header[6] == 0 {
             return Err(crate::codec::Error::Unsupported {
-                protocol: protocol("ipv6"),
+                protocol: protocol(NAME),
                 message: "IPv6 jumbogram payload requires a Hop-by-Hop Jumbo Payload option"
                     .to_string(),
             });
         }
         let required = IPV6_LEN
             .checked_add(payload_length)
-            .ok_or_else(|| invalid("ipv6", "payload length overflow"))?;
+            .ok_or_else(|| invalid(NAME, "payload length overflow"))?;
         if input.len() < required {
-            return Err(truncated("ipv6", required, input.len()));
+            return Err(truncated(NAME, required, input.len()));
         }
         let first = u32::from_be_bytes([header[0], header[1], header[2], header[3]]);
         let source_bytes = input
             .get(8..)
             .and_then(<[u8]>::first_chunk::<16>)
-            .ok_or_else(|| truncated("ipv6", IPV6_LEN, input.len()))?;
+            .ok_or_else(|| truncated(NAME, IPV6_LEN, input.len()))?;
         let source = Ipv6Addr::from(*source_bytes);
         let destination_bytes = input
             .get(24..)
             .and_then(<[u8]>::first_chunk::<16>)
-            .ok_or_else(|| truncated("ipv6", IPV6_LEN, input.len()))?;
+            .ok_or_else(|| truncated(NAME, IPV6_LEN, input.len()))?;
         let destination = Ipv6Addr::from(*destination_bytes);
         let next = header[6];
         Ok(DecodedLayerValue {
@@ -211,10 +203,7 @@ impl LayerCodec for Ipv6Codec {
         &self,
         fields: &BTreeMap<String, FieldValue>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        make_layer(
-            Ipv6::default(),
-            &aliased_fields("ipv6", fields, &[("src", "source"), ("dst", "destination")])?,
-        )
+        make_layer(Ipv6::default(), fields)
     }
 }
 
@@ -235,7 +224,7 @@ fn resolve_addresses(
         .find_map(|candidate| {
             let routing = candidate
                 .as_any()
-                .downcast_ref::<super::super::ipv6::SegmentRoutingHeader>()?;
+                .downcast_ref::<crate::protocol::ipv6::SegmentRoutingHeader>()?;
             let last = routing.segments.len().checked_sub(1)?;
             let segments_left = match routing.segments_left {
                 WireValue::Auto => last,
@@ -252,7 +241,7 @@ fn resolve_addresses(
         && layer.destination != active
     {
         strict_or_diagnostic(
-            "ipv6",
+            NAME,
             "build.srh_outer_destination",
             "destination",
             format!(

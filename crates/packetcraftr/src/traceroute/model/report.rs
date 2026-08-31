@@ -109,7 +109,7 @@ pub struct UndecodedEvidence {
 }
 
 #[derive(Clone, Debug)]
-pub struct Result {
+pub struct Report {
     pub target: String,
     pub resolved_addresses: Vec<IpAddr>,
     pub destination: IpAddr,
@@ -132,6 +132,9 @@ pub enum Event {
     Diagnostic(Diagnostic),
 }
 
+/// Final trace metadata after every probe event was published. Diagnostics are
+/// not repeated here: each one already reached the caller as
+/// [`Event::Diagnostic`] when it was raised.
 #[derive(Clone, Debug)]
 pub struct Summary {
     pub target: String,
@@ -140,7 +143,6 @@ pub struct Summary {
     pub strategy: Strategy,
     pub destination_port: Option<u16>,
     pub completion: Completion,
-    pub diagnostics: Vec<Diagnostic>,
     pub stats: Stats,
 }
 

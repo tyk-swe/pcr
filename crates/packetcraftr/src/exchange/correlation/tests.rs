@@ -112,14 +112,26 @@ fn workflow_deadline_expiry_preserves_unsolicited_order_and_discards_freshness()
         },
     ];
     let mut matcher = |_: usize, _: &Packet, _: &DecodedPacket| false;
+    let registry = packetcraftr_core::protocol::builtin::registry();
+    let dissector = Dissector::new(Arc::clone(&registry));
+    let options = Options {
+        max_responses: usize::MAX,
+        ..Options::default()
+    };
 
     assert_eq!(
         accumulator.promote_workflow_unsolicited(
-            WorkflowPromotionContext {
+            ProcessContext {
+                registry: &registry,
+                dissector: &dissector,
                 prepared: &[],
                 sent: &[],
-                deadline: Instant::now(),
-                max_responses: usize::MAX,
+                // Unambiguously past: the boundary instant itself is not
+                // expired under the shared convention.
+                deadline: Instant::now()
+                    .checked_sub(Duration::from_millis(1))
+                    .expect("fixture deadline"),
+                options: &options,
             },
             &mut matcher,
         ),
@@ -130,7 +142,7 @@ fn workflow_deadline_expiry_preserves_unsolicited_order_and_discards_freshness()
         accumulator
             .drain_events()
             .map(|event| match event {
-                super::super::Event::Unsolicited { frame } => frame.original,
+                crate::exchange::Event::Unsolicited { frame } => frame.original,
                 _ => panic!("deadline candidates must become unsolicited events"),
             })
             .collect::<Vec<_>>(),
@@ -170,14 +182,22 @@ fn workflow_matcher_crossing_deadline_expires_and_retains_candidates() {
         std::thread::sleep(deadline.saturating_duration_since(Instant::now()));
         true
     };
+    let registry = packetcraftr_core::protocol::builtin::registry();
+    let dissector = Dissector::new(Arc::clone(&registry));
+    let options = Options {
+        max_responses: usize::MAX,
+        ..Options::default()
+    };
 
     assert_eq!(
         accumulator.promote_workflow_unsolicited(
-            WorkflowPromotionContext {
+            ProcessContext {
+                registry: &registry,
+                dissector: &dissector,
                 prepared: &prepared,
                 sent: &sent,
                 deadline,
-                max_responses: usize::MAX,
+                options: &options,
             },
             &mut matcher,
         ),
@@ -192,7 +212,7 @@ fn workflow_matcher_crossing_deadline_expires_and_retains_candidates() {
         accumulator
             .drain_events()
             .map(|event| match event {
-                super::super::Event::Unsolicited { frame } => frame.original,
+                crate::exchange::Event::Unsolicited { frame } => frame.original,
                 _ => panic!("expired candidates must become unsolicited events"),
             })
             .collect::<Vec<_>>(),
@@ -200,6 +220,7 @@ fn workflow_matcher_crossing_deadline_expires_and_retains_candidates() {
     );
     let deadline_diagnostics = accumulator
         .diagnostics
+        .as_slice()
         .iter()
         .filter(|diagnostic| diagnostic.code == "exchange.correlation_deadline")
         .collect::<Vec<_>>();
@@ -217,8 +238,7 @@ fn duplicated_ingress_record_cannot_enter_several_evidence_categories() {
             .expect("fixture frame"),
         Instant::now(),
     );
-    let registry =
-        Arc::new(packetcraftr_core::protocol::builtin::registry().expect("built-in registry"));
+    let registry = packetcraftr_core::protocol::builtin::registry();
     let dissector = Dissector::new(Arc::clone(&registry));
     let options = Options::default();
     let mut accumulator = Accumulator::new(0);
@@ -233,11 +253,11 @@ fn duplicated_ingress_record_cannot_enter_several_evidence_categories() {
 
     assert_eq!(
         accumulator.process(captured.clone(), context),
-        ProcessOutcome::Continue
+        Ok(ProcessOutcome::Continue)
     );
     assert_eq!(
         accumulator.process(captured, context),
-        ProcessOutcome::DuplicateRecordIdentity
+        Err(super::DuplicateRecord)
     );
     assert_eq!(
         accumulator.response_count + accumulator.retained_unmatched,
@@ -257,8 +277,7 @@ fn duplicate_tracking_is_bounded_to_retained_evidence() {
             .expect("fixture frame"),
         Instant::now(),
     );
-    let registry =
-        Arc::new(packetcraftr_core::protocol::builtin::registry().expect("built-in registry"));
+    let registry = packetcraftr_core::protocol::builtin::registry();
     let dissector = Dissector::new(Arc::clone(&registry));
     let options = Options {
         max_unmatched_frames: 1,
@@ -276,15 +295,15 @@ fn duplicate_tracking_is_bounded_to_retained_evidence() {
 
     assert_eq!(
         accumulator.process(retained, context),
-        ProcessOutcome::Continue
+        Ok(ProcessOutcome::Continue)
     );
     assert_eq!(
         accumulator.process(dropped.clone(), context),
-        ProcessOutcome::Continue
+        Ok(ProcessOutcome::Continue)
     );
     assert_eq!(
         accumulator.process(dropped, context),
-        ProcessOutcome::Continue
+        Ok(ProcessOutcome::Continue)
     );
     assert_eq!(accumulator.retained_record_identities.len(), 1);
     assert_eq!(accumulator.retained_unmatched, 1);

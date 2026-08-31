@@ -3,26 +3,26 @@
 
 //! Structured `build` output.
 
-use bytes::Bytes;
 use serde::Serialize;
 
 use packetcraftr_core::{build::BuiltPacket, diagnostic::Diagnostic, layout::PacketLayout};
 
-use super::hex::compact_hex;
+use super::frame::Wire;
 
 /// Structured result of `build`.
 #[derive(Clone, Debug, Serialize)]
-pub struct Result {
-    #[serde(skip)]
-    bytes: Bytes,
-    pub bytes_hex: String,
-    pub length: u64,
+pub struct Report {
+    /// Publishes the `bytes_hex` and `length` keys the contract declares,
+    /// formatting the hexadecimal at serialization rather than retaining a
+    /// second copy of the packet.
+    #[serde(flatten)]
+    pub frame: Wire,
     pub packet: packetcraftr_core::document::Packet,
     pub layout: PacketLayout,
     pub requires_live_opt_in: bool,
 }
 
-impl Result {
+impl Report {
     pub fn from_built(built: BuiltPacket) -> (Self, Vec<Diagnostic>) {
         let BuiltPacket {
             bytes,
@@ -33,18 +33,12 @@ impl Result {
         } = built;
         (
             Self {
-                bytes_hex: compact_hex(&bytes),
-                length: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
+                frame: Wire::new(bytes),
                 packet: packetcraftr_core::document::Packet::from_packet(&packet),
                 layout,
                 requires_live_opt_in,
-                bytes,
             },
             diagnostics,
         )
-    }
-
-    pub fn bytes(&self) -> &[u8] {
-        &self.bytes
     }
 }

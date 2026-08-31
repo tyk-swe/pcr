@@ -22,6 +22,7 @@ use std::time::Instant;
 use bytes::Bytes;
 use packetcraftr_core::error::{Classification, Kind};
 use packetcraftr_core::layer::Raw;
+use packetcraftr_core::progress::Runtime;
 use packetcraftr_core::protocol::{network::Ipv4, transport::Udp};
 use packetcraftr_core::{Packet, decode::DecodedPacket, frame::Frame, frame::LinkType};
 
@@ -30,7 +31,7 @@ use crate::target::{Authorized, Authorizer, Family, Target};
 use crate::test_fixtures::NoopClock;
 use crate::{BoundaryError, Stats};
 
-use super::DEFAULT_DNS_SERVER_PORT;
+use super::DEFAULT_SERVER_PORT;
 
 struct SingleAddressAuthorizer {
     address: IpAddr,
@@ -46,8 +47,8 @@ impl Authorizer for SingleAddressAuthorizer {
 
     fn authorize_operation(&mut self, operation: Operation<'_>) -> Result<(), BoundaryError> {
         assert!(
-            matches!(operation, Operation::Budgeted(_)),
-            "dns submits a budget-only request, got {operation:?}"
+            matches!(operation, Operation::Dns(_)),
+            "dns always states its own operation shape, got {operation:?}"
         );
         Ok(())
     }
@@ -215,7 +216,7 @@ impl super::model::Executor for LoopbackExecutor {
                 SocketAddr::new(exchange.probe.server_address, exchange.probe.server_port),
             )
             .map_err(loopback_boundary_error)?;
-        let mut response = vec![0u8; exchange.limits.max_message_bytes];
+        let mut response = vec![0u8; exchange.limits.message.max_message_bytes];
         let (length, peer) = socket
             .recv_from(&mut response)
             .map_err(loopback_boundary_error)?;
@@ -234,15 +235,13 @@ impl super::model::Executor for LoopbackExecutor {
         &mut self,
         exchange: &super::model::TcpExchange,
     ) -> Result<super::model::TcpExecution, packetcraftr_netio::dns_tcp::Error> {
-        let response = packetcraftr_netio::dns_tcp::Provider::exchange(
-            &packetcraftr_netio::dns_tcp::SystemProvider,
-            packetcraftr_netio::dns_tcp::Request {
+        let response =
+            packetcraftr_netio::dns_tcp::exchange(packetcraftr_netio::dns_tcp::Request {
                 endpoint: exchange.endpoint,
                 query: &exchange.query,
                 timeout: exchange.timeout,
                 max_message_bytes: exchange.max_message_bytes,
-            },
-        )?;
+            })?;
         Ok(super::model::TcpExecution::new(exchange.permit, response))
     }
 }
@@ -308,6 +307,7 @@ impl super::model::Executor for ScriptedExecutor {
             TcpScript::Error(packetcraftr_netio::dns_tcp::Error::Connect {
                 endpoint: exchange.endpoint,
                 message: "missing TCP fixture".to_owned(),
+                source: None,
             })
         }) {
             TcpScript::Response { message, elapsed } => {
@@ -324,13 +324,11 @@ impl super::model::Executor for ScriptedExecutor {
                     packetcraftr_netio::dns_tcp::Response {
                         peer_address: exchange.endpoint,
                         local_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 50_000),
-                        started_at: UNIX_EPOCH + Duration::from_secs(10),
                         sent_at: UNIX_EPOCH + Duration::from_secs(10) + elapsed - latency,
                         received_at: UNIX_EPOCH + Duration::from_secs(10) + elapsed,
                         elapsed,
                         latency,
                         bytes_written: exchange.query.len() + 2,
-                        bytes_read: frame.len(),
                         frame: Bytes::from(frame),
                     },
                 ))
@@ -600,7 +598,7 @@ fn dns_request(address: IpAddr) -> super::model::Request {
     super::model::Request {
         server: Target::Address(address),
         address_family: Family::Any,
-        server_port: DEFAULT_DNS_SERVER_PORT,
+        server_port: DEFAULT_SERVER_PORT,
         source_port: 49_152,
         query_name: "example.com".to_owned(),
         query_type: super::model::QueryType::A,
@@ -620,7 +618,7 @@ fn dns_executor_success_uses_trusted_sent_timestamp() {
     super::engine::run(
         &dns_request(address),
         &mut SingleAddressAuthorizer { address },
-        &packetcraftr_core::protocol::builtin::registry().expect("built-in registry"),
+        &packetcraftr_core::protocol::builtin::registry(),
         &mut TrustedReceiptExecutor,
         &mut NoopClock,
     )
@@ -633,7 +631,7 @@ fn dns_executor_rejects_nonzero_response_index() {
     let error = super::engine::run(
         &dns_request(address),
         &mut SingleAddressAuthorizer { address },
-        &packetcraftr_core::protocol::builtin::registry().expect("built-in registry"),
+        &packetcraftr_core::protocol::builtin::registry(),
         &mut InvalidResponseIndexExecutor,
         &mut NoopClock,
     )
@@ -667,7 +665,7 @@ fn fallback_operation_deadline_precedes_authorization_failure() {
             now,
             expired_at,
         },
-        &packetcraftr_core::protocol::builtin::registry().expect("built-in registry"),
+        &packetcraftr_core::protocol::builtin::registry(),
         &mut TrustedReceiptExecutor,
         &mut NoopClock,
         deadline,
@@ -697,9 +695,10 @@ fn dns_attempt_events_precede_retries_and_survive_a_later_failure() {
     let error = super::engine::run_with_events(
         &request,
         &mut SingleAddressAuthorizer { address },
-        &packetcraftr_core::protocol::builtin::registry().expect("built-in registry"),
+        &packetcraftr_core::protocol::builtin::registry(),
         &mut executor,
         &mut NoopClock,
+        &Runtime::default(),
         move |event| {
             assert_eq!(callback_calls.load(Ordering::SeqCst), 1);
             observed_events.lock().unwrap().push(event);
@@ -735,9 +734,10 @@ fn dns_sink_failure_stops_retries_after_session_shutdown() {
     let error = super::engine::run_with_events(
         &request,
         &mut SingleAddressAuthorizer { address },
-        &packetcraftr_core::protocol::builtin::registry().expect("built-in registry"),
+        &packetcraftr_core::protocol::builtin::registry(),
         &mut executor,
         &mut NoopClock,
+        &Runtime::default(),
         |_| {
             Err(BoundaryError::new(
                 "induced output failure",
@@ -765,7 +765,7 @@ fn dns_aggregate_result_is_collected_from_attempt_events() {
     let result = super::engine::run(
         &request,
         &mut SingleAddressAuthorizer { address },
-        &packetcraftr_core::protocol::builtin::registry().expect("built-in registry"),
+        &packetcraftr_core::protocol::builtin::registry(),
         &mut TrustedReceiptExecutor,
         &mut NoopClock,
     )
@@ -788,9 +788,10 @@ fn dns_response_events_preserve_attempt_record_rejection_and_evidence_order() {
     let summary = super::engine::run_with_events(
         &request,
         &mut SingleAddressAuthorizer { address },
-        &packetcraftr_core::protocol::builtin::registry().expect("built-in registry"),
+        &packetcraftr_core::protocol::builtin::registry(),
         &mut ClassifiedResponseExecutor,
         &mut NoopClock,
+        &Runtime::default(),
         move |event| {
             observed_events.lock().unwrap().push(event);
             Ok(())
@@ -840,7 +841,7 @@ fn dns_response_events_preserve_attempt_record_rejection_and_evidence_order() {
     let aggregate = super::engine::run(
         &request,
         &mut SingleAddressAuthorizer { address },
-        &packetcraftr_core::protocol::builtin::registry().expect("built-in registry"),
+        &packetcraftr_core::protocol::builtin::registry(),
         &mut ClassifiedResponseExecutor,
         &mut NoopClock,
     )
@@ -894,7 +895,7 @@ fn executor_diagnostic_precedes_response_selection_deadline_failure() {
     let error = super::engine::run_observed_with_deadline(
         &request,
         &mut SingleAddressAuthorizer { address },
-        &packetcraftr_core::protocol::builtin::registry().expect("built-in registry"),
+        &packetcraftr_core::protocol::builtin::registry(),
         &mut SelectionDeadlineExecutor { completed },
         &mut NoopClock,
         deadline,
@@ -930,7 +931,7 @@ fn dns_stops_publishing_when_an_event_sink_exhausts_the_deadline() {
     let error = super::engine::run_observed_with_deadline(
         &request,
         &mut SingleAddressAuthorizer { address },
-        &packetcraftr_core::protocol::builtin::registry().expect("built-in registry"),
+        &packetcraftr_core::protocol::builtin::registry(),
         &mut ClassifiedResponseExecutor,
         &mut NoopClock,
         deadline,
@@ -965,7 +966,7 @@ fn truncated_udp_falls_back_once_and_accepts_tcp_without_a_captured_frame() {
     let result = super::engine::run(
         &request,
         &mut authorizer,
-        &packetcraftr_core::protocol::builtin::registry().unwrap(),
+        &packetcraftr_core::protocol::builtin::registry(),
         &mut executor,
         &mut NoopClock,
     )
@@ -997,10 +998,6 @@ fn truncated_udp_falls_back_once_and_accepts_tcp_without_a_captured_frame() {
     assert_eq!(authorizer.budgets[0].packets(), 3);
     assert_eq!(authorizer.socket_budgets[0].connections(), 1);
     assert_eq!(authorizer.socket_budgets[0].messages(), 1);
-    assert_eq!(
-        authorizer.socket_budgets[0].max_duration(),
-        Duration::from_secs(1)
-    );
 }
 
 #[test]
@@ -1014,7 +1011,7 @@ fn udp_only_mode_keeps_truncation_terminal_and_reserves_no_tcp_phase() {
     let result = super::engine::run(
         &request,
         &mut authorizer,
-        &packetcraftr_core::protocol::builtin::registry().unwrap(),
+        &packetcraftr_core::protocol::builtin::registry(),
         &mut executor,
         &mut NoopClock,
     )
@@ -1047,7 +1044,7 @@ fn only_a_validated_truncated_udp_response_triggers_tcp() {
         let result = super::engine::run(
             &request,
             &mut RecordingAuthorizer::new(address),
-            &packetcraftr_core::protocol::builtin::registry().unwrap(),
+            &packetcraftr_core::protocol::builtin::registry(),
             &mut executor,
             &mut NoopClock,
         )
@@ -1072,7 +1069,7 @@ fn ipv6_link_local_fallback_is_rejected_before_udp_io() {
     let error = super::engine::run(
         &request,
         &mut RecordingAuthorizer::new(IpAddr::V6(address)),
-        &packetcraftr_core::protocol::builtin::registry().unwrap(),
+        &packetcraftr_core::protocol::builtin::registry(),
         &mut executor,
         &mut NoopClock,
     )
@@ -1089,8 +1086,8 @@ fn ipv6_link_local_fallback_is_rejected_before_udp_io() {
 
 #[test]
 fn complete_udp_response_ranks_above_truncation_when_both_are_retained() {
-    let limits = super::Limits::default();
-    let complete = super::wire::ResponseClassification::Response(
+    let limits = super::MessageLimits::default();
+    let complete = super::classification::ResponseClassification::Response(
         super::decode_response(
             &dns_response(),
             "example.com",
@@ -1100,7 +1097,7 @@ fn complete_udp_response_ranks_above_truncation_when_both_are_retained() {
         )
         .unwrap(),
     );
-    let truncated = super::wire::ResponseClassification::Response(
+    let truncated = super::classification::ResponseClassification::Response(
         super::decode_response(
             &truncated_dns_response(),
             "example.com",
@@ -1129,7 +1126,7 @@ fn tcp_fallback_receives_only_the_shared_attempt_remainder() {
     super::engine::run(
         &request,
         &mut RecordingAuthorizer::new(address),
-        &packetcraftr_core::protocol::builtin::registry().unwrap(),
+        &packetcraftr_core::protocol::builtin::registry(),
         &mut executor,
         &mut NoopClock,
     )
@@ -1143,7 +1140,7 @@ fn tcp_fallback_receives_only_the_shared_attempt_remainder() {
 #[test]
 fn tcp_failures_map_to_stable_retry_outcomes() {
     let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53));
-    let endpoint = SocketAddr::new(address, DEFAULT_DNS_SERVER_PORT);
+    let endpoint = SocketAddr::new(address, DEFAULT_SERVER_PORT);
     let mut mismatched = dns_response().to_vec();
     mismatched[0..2].copy_from_slice(&0x4321_u16.to_be_bytes());
     for (script, expected, sent) in [
@@ -1159,6 +1156,7 @@ fn tcp_failures_map_to_stable_retry_outcomes() {
             TcpScript::Error(packetcraftr_netio::dns_tcp::Error::Connect {
                 endpoint,
                 message: "fixture refusal".to_owned(),
+                source: None,
             }),
             super::Outcome::NetworkFailure,
             false,
@@ -1193,7 +1191,7 @@ fn tcp_failures_map_to_stable_retry_outcomes() {
         let result = super::engine::run(
             &request,
             &mut RecordingAuthorizer::new(address),
-            &packetcraftr_core::protocol::builtin::registry().unwrap(),
+            &packetcraftr_core::protocol::builtin::registry(),
             &mut executor,
             &mut NoopClock,
         )
@@ -1214,7 +1212,7 @@ fn executor_without_tcp_support_reports_a_capability_error() {
     let error = super::engine::run(
         &request,
         &mut RecordingAuthorizer::new(address),
-        &packetcraftr_core::protocol::builtin::registry().unwrap(),
+        &packetcraftr_core::protocol::builtin::registry(),
         &mut UdpOnlyTruncatedExecutor,
         &mut NoopClock,
     )
@@ -1229,7 +1227,7 @@ fn executor_without_tcp_support_reports_a_capability_error() {
 #[test]
 fn tcp_failure_retries_once_per_attempt_and_preserves_final_precedence() {
     let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53));
-    let endpoint = SocketAddr::new(address, DEFAULT_DNS_SERVER_PORT);
+    let endpoint = SocketAddr::new(address, DEFAULT_SERVER_PORT);
     let mut request = dns_request(address);
     request.tcp_fallback = true;
     request.attempts = 2;
@@ -1243,6 +1241,7 @@ fn tcp_failure_retries_once_per_attempt_and_preserves_final_precedence() {
         TcpScript::Error(packetcraftr_netio::dns_tcp::Error::Connect {
             endpoint,
             message: "fixture refusal".to_owned(),
+            source: None,
         }),
     ]);
     let mut authorizer = RecordingAuthorizer::new(address);
@@ -1250,7 +1249,7 @@ fn tcp_failure_retries_once_per_attempt_and_preserves_final_precedence() {
     let result = super::engine::run(
         &request,
         &mut authorizer,
-        &packetcraftr_core::protocol::builtin::registry().unwrap(),
+        &packetcraftr_core::protocol::builtin::registry(),
         &mut executor,
         &mut NoopClock,
     )
@@ -1285,9 +1284,10 @@ fn tcp_destination_policy_denial_happens_before_connection() {
     let error = super::engine::run_with_events(
         &request,
         &mut authorizer,
-        &packetcraftr_core::protocol::builtin::registry().unwrap(),
+        &packetcraftr_core::protocol::builtin::registry(),
         &mut executor,
         &mut NoopClock,
+        &Runtime::default(),
         move |event| {
             observed.lock().unwrap().push(event);
             Ok(())
@@ -1326,7 +1326,7 @@ fn tcp_reauthorization_failure_after_attempt_deadline_becomes_timeout() {
     let result = super::engine::run(
         &request,
         &mut authorizer,
-        &packetcraftr_core::protocol::builtin::registry().unwrap(),
+        &packetcraftr_core::protocol::builtin::registry(),
         &mut executor,
         &mut NoopClock,
     )
@@ -1355,7 +1355,7 @@ fn aggregate_udp_and_socket_budget_is_approved_before_any_io() {
     let error = super::engine::run(
         &request,
         &mut authorizer,
-        &packetcraftr_core::protocol::builtin::registry().unwrap(),
+        &packetcraftr_core::protocol::builtin::registry(),
         &mut executor,
         &mut NoopClock,
     )
@@ -1366,6 +1366,44 @@ fn aggregate_udp_and_socket_budget_is_approved_before_any_io() {
     assert_eq!(
         packetcraftr_core::error::Classified::classification(&error).code,
         "policy.traffic_unit_limit"
+    );
+}
+
+/// The same query-count overrun used to report `policy.packet_limit` with
+/// `--udp-only` and `policy.traffic_unit_limit` with fallback enabled, because
+/// the operation shape changed with a runtime flag. It is one condition, so it
+/// is one code.
+#[test]
+fn the_query_count_overrun_is_classified_the_same_with_and_without_fallback() {
+    let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53));
+    let policy = crate::policy::Policy {
+        max_packets_per_operation: 2,
+        ..crate::policy::Policy::default()
+    };
+    let mut codes = Vec::new();
+    for tcp_fallback in [false, true] {
+        let mut request = dns_request(address);
+        request.attempts = 3;
+        request.tcp_fallback = tcp_fallback;
+        request.timeout = Duration::from_secs(1);
+        let mut authorizer = crate::target::PolicyAuthorizer::for_packets(&policy);
+        let mut executor = ScriptedExecutor::new([Some(dns_response())]);
+
+        let error = super::engine::run(
+            &request,
+            &mut authorizer,
+            &packetcraftr_core::protocol::builtin::registry(),
+            &mut executor,
+            &mut NoopClock,
+        )
+        .expect_err("three queries exceed the two-packet policy budget");
+
+        assert_eq!(executor.udp_calls, 0);
+        codes.push(packetcraftr_core::error::Classified::classification(&error).code);
+    }
+    assert_eq!(
+        codes,
+        ["policy.traffic_unit_limit", "policy.traffic_unit_limit"]
     );
 }
 
@@ -1384,9 +1422,10 @@ fn udp_attempt_sink_failure_prevents_tcp_side_effects() {
     let error = super::engine::run_with_events(
         &request,
         &mut RecordingAuthorizer::new(address),
-        &packetcraftr_core::protocol::builtin::registry().unwrap(),
+        &packetcraftr_core::protocol::builtin::registry(),
         &mut executor,
         &mut NoopClock,
+        &Runtime::default(),
         |_| {
             Err(BoundaryError::new(
                 "fixture output failure",
@@ -1444,7 +1483,7 @@ fn loopback_udp_truncation_continues_over_fragmented_tcp_response() {
     let result = super::engine::run(
         &request,
         &mut RecordingAuthorizer::new(address),
-        &packetcraftr_core::protocol::builtin::registry().unwrap(),
+        &packetcraftr_core::protocol::builtin::registry(),
         &mut LoopbackExecutor,
         &mut NoopClock,
     )
@@ -1481,7 +1520,7 @@ fn loopback_udp_only_truncation_never_connects_tcp() {
     let result = super::engine::run(
         &request,
         &mut RecordingAuthorizer::new(address),
-        &packetcraftr_core::protocol::builtin::registry().unwrap(),
+        &packetcraftr_core::protocol::builtin::registry(),
         &mut LoopbackExecutor,
         &mut NoopClock,
     )

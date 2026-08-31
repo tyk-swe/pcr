@@ -3,7 +3,7 @@
 
 //! MTU validation for exact built packets.
 
-use packetcraftr_core::{build::BuiltPacket, layer::Padding, semantics::BuiltinProtocol};
+use packetcraftr_core::{build::BuiltPacket, layer::Padding, protocol::BuiltinProtocol};
 
 use crate::Error;
 
@@ -46,7 +46,6 @@ pub(super) fn validate_mtu(built: &BuiltPacket, mtu: u32) -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use std::net::Ipv4Addr;
-    use std::sync::Arc;
 
     use super::*;
     use packetcraftr_core::protocol::{link::Ethernet, network::Ipv4, transport::Udp};
@@ -58,15 +57,13 @@ mod tests {
     };
 
     fn build(packet: Packet) -> BuiltPacket {
-        Builder::new(Arc::new(
-            packetcraftr_core::protocol::builtin::registry().expect("built-in registry"),
-        ))
-        .build(
-            packet,
-            packetcraftr_core::build::Context::default(),
-            packetcraftr_core::build::Options::default(),
-        )
-        .expect("fixture packet builds")
+        Builder::new(packetcraftr_core::protocol::builtin::registry())
+            .build(
+                packet,
+                packetcraftr_core::build::Context::default(),
+                packetcraftr_core::build::Options::default(),
+            )
+            .expect("fixture packet builds")
     }
 
     #[test]

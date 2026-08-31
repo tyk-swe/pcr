@@ -11,6 +11,7 @@ use thiserror::Error;
 
 use crate::Packet;
 
+use crate::error::{Classification, Classified, Kind};
 use crate::field::{FieldValue, parse_mac};
 use crate::registry::Registry;
 
@@ -46,6 +47,41 @@ pub enum Error {
     },
 }
 
+impl Classified for Error {
+    fn classification(&self) -> Classification {
+        match self {
+            Self::Empty | Self::Syntax { .. } | Self::DuplicateField { .. } => Classification::new(
+                "cli.expression_syntax",
+                Kind::Cli,
+                Some("write one `protocol(field=value)` layer per `/`-separated segment"),
+            ),
+            Self::SizeLimit { .. }
+            | Self::LayerLimit { .. }
+            | Self::NestingLimit { .. }
+            | Self::InvalidNestingLimit { .. } => Classification::new(
+                "cli.expression_limit",
+                Kind::Cli,
+                Some("shorten the expression to stay inside its byte, layer, and nesting bounds"),
+            ),
+            Self::UnknownProtocol { .. } => Classification::new(
+                "cli.expression_protocol",
+                Kind::Cli,
+                Some("run `packetcraftr protocols` to list the protocol names the registry binds"),
+            ),
+            Self::Layer { .. } => Classification::new(
+                "cli.expression_field",
+                Kind::Cli,
+                Some("correct the layer's field names and values against its reflective schema"),
+            ),
+        }
+    }
+
+    /// Walked from the retained `#[source]` chain rather than hand-written.
+    fn causes(&self) -> Vec<String> {
+        crate::error::source_chain(self)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Options {
     pub max_bytes: usize,
@@ -57,7 +93,7 @@ impl Default for Options {
     fn default() -> Self {
         Self {
             max_bytes: DEFAULT_MAX_EXPRESSION_BYTES,
-            max_layers: crate::build::DEFAULT_MAX_LAYERS,
+            max_layers: crate::layout::DEFAULT_MAX_LAYERS,
             max_nesting: MAX_EXPRESSION_NESTING,
         }
     }
@@ -558,7 +594,7 @@ mod tests {
 
     #[test]
     fn expression_limits_and_registry_failures_report_the_exact_boundary() {
-        let registry = crate::protocol::builtin::registry().expect("built-in registry");
+        let registry = crate::protocol::builtin::registry();
 
         assert!(matches!(
             parse(" ", &registry, Options::default()),

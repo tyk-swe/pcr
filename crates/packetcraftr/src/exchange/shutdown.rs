@@ -40,6 +40,7 @@ impl<C: Session> CaptureGuard<C> {
             Ok(result) => result,
             Err(_) => Err(LiveIoError::Capture {
                 message: "capture provider panicked during shutdown".to_owned(),
+                source: None,
             }),
         };
         if let Err(error) = &result {
@@ -121,6 +122,7 @@ mod tests {
                 ShutdownOutcome::Success => Ok(()),
                 ShutdownOutcome::Failure => Err(LiveIoError::Capture {
                     message: "fixture shutdown failure".to_owned(),
+                    source: None,
                 }),
                 ShutdownOutcome::Panic => panic!("fixture shutdown panic"),
             }
@@ -157,7 +159,7 @@ mod tests {
             for _ in 0..2 {
                 assert!(matches!(
                     guard.shutdown(),
-                    Err(LiveIoError::Capture { message })
+                    Err(LiveIoError::Capture { message, .. })
                         if message == "fixture shutdown failure"
                 ));
             }
@@ -177,7 +179,7 @@ mod tests {
         for _ in 0..2 {
             assert!(matches!(
                 guard.shutdown(),
-                Err(LiveIoError::Capture { message })
+                Err(LiveIoError::Capture { message, .. })
                     if message == "capture provider panicked during shutdown"
             ));
         }

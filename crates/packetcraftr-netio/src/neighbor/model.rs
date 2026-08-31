@@ -5,34 +5,11 @@ use std::net::IpAddr;
 
 use packetcraftr_core::frame::{Frame, LinkType};
 
-use crate::{capture::Statistics, interface::Id, link::MacAddress};
-
-/// Maximum explicit VLAN headers copied into a neighbor-discovery request.
-pub(crate) const MAX_VLAN_TAGS: usize = 8;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum VlanKind {
-    Ieee8021Q,
-    Ieee8021Ad,
-}
-
-impl VlanKind {
-    pub const fn ether_type(self) -> u16 {
-        match self {
-            Self::Ieee8021Q => 0x8100,
-            Self::Ieee8021Ad => 0x88a8,
-        }
-    }
-}
-
-/// One fixed-width tag copied from a packet's explicit VLAN stack.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct VlanTag {
-    pub kind: VlanKind,
-    pub priority: u8,
-    pub drop_eligible: bool,
-    pub vlan_id: u16,
-}
+use crate::{
+    capture::Statistics,
+    interface::Id,
+    link::{MacAddress, VlanTag},
+};
 
 /// Interface-owned context for one active ARP/NDP lookup.
 #[derive(Clone, Debug, PartialEq, Eq)]

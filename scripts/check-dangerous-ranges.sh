@@ -103,7 +103,7 @@ check_pattern '\.drain[[:space:]]*\(\.\.[^)]+\)' \
   'bounded drain endpoint outside checked_drain_prefix'
 
 check_pattern '\.chunks[[:space:]]*\(' \
-  'crates/packetcraftr/src/scan/plan.rs:[0-9]+:.*endpoint_ports\.chunks\(batch_size\)' \
+  'crates/packetcraftr/src/scan/plan.rs:[0-9]+:.*endpoints\.chunks\(batch_size\)' \
   'dynamic chunks call outside checked_batch_size'
 
 check_pattern '\.split_at(_mut)?[[:space:]]*\(' \

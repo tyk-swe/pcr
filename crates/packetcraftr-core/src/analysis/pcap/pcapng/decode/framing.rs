@@ -7,16 +7,16 @@ use std::io::Read;
 
 use bytes::Bytes;
 
-use super::super::super::{
+use super::PcapNgState;
+use crate::analysis::pcap::pcapng::section::validate_pcapng_block_length;
+use crate::analysis::pcap::{
     error::Error,
-    model::ReaderOptions,
+    model::{PacketBlockKind, ReaderOptions},
     wire::{
         PCAPNG_ENHANCED_PACKET_BLOCK, PCAPNG_PACKET_BLOCK, PCAPNG_SIMPLE_PACKET_BLOCK, decode_u32,
         read_exact_vec,
     },
 };
-use super::super::section::validate_pcapng_block_length;
-use super::PcapNgState;
 
 pub(super) struct FramedBlock<'a> {
     pub(super) block_type: u32,
@@ -24,11 +24,18 @@ pub(super) struct FramedBlock<'a> {
     pub(super) raw: Bytes,
 }
 
-pub(super) fn is_packet_block(block_type: u32) -> bool {
-    matches!(
-        block_type,
-        PCAPNG_ENHANCED_PACKET_BLOCK | PCAPNG_PACKET_BLOCK | PCAPNG_SIMPLE_PACKET_BLOCK
-    )
+/// Which packet-block layout a block type names, or [`None`] for the
+/// metadata blocks.
+///
+/// Deciding this once is what lets the rest of the decoder read the block by
+/// its kind instead of re-testing the raw type at every field it needs.
+pub(super) const fn packet_block_kind(block_type: u32) -> Option<PacketBlockKind> {
+    match block_type {
+        PCAPNG_ENHANCED_PACKET_BLOCK => Some(PacketBlockKind::Enhanced),
+        PCAPNG_PACKET_BLOCK => Some(PacketBlockKind::Obsolete),
+        PCAPNG_SIMPLE_PACKET_BLOCK => Some(PacketBlockKind::Simple),
+        _ => None,
+    }
 }
 
 pub(super) fn read<'a, R: Read>(
@@ -53,7 +60,7 @@ pub(super) fn read<'a, R: Read>(
         usize::try_from(block_length).map_err(|_| Error::InvalidBlockLength {
             length: block_length,
         })?;
-    if !is_packet_block(block_type) {
+    if packet_block_kind(block_type).is_none() {
         state.account_metadata(block_length_usize, options)?;
     }
 

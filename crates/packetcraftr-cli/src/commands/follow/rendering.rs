@@ -4,23 +4,34 @@
 use packetcraftr::{analysis, output};
 
 use crate::commands::format::FollowFormat;
+use crate::commands::offline_analysis::{Retained, omitted_diagnostic};
 use crate::errors::CliError;
 use crate::rendering::{
     StreamEncoder, emit_aggregate, emit_stderr_message, write_raw, write_stdout_line,
 };
 
-use analysis::follow::{Chunk, Selector, Summary};
+use analysis::StreamRef;
+use analysis::follow::{Chunk, Summary};
 
-#[derive(Default)]
 pub(super) struct State {
-    retained: Vec<output::follow::Chunk>,
+    retained: Retained<output::follow::Chunk>,
+}
+
+impl State {
+    /// `max_chunks` bounds only the aggregate JSON document, which holds every
+    /// chunk at once.
+    pub(super) const fn new(max_chunks: usize) -> Self {
+        Self {
+            retained: Retained::new(max_chunks),
+        }
+    }
 }
 
 pub(super) fn render_record(
     format: FollowFormat,
     chunk: Chunk,
     state: &mut State,
-    stream: &mut StreamEncoder,
+    stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     match format {
         FollowFormat::Text => write_stdout_line(format_args!(
@@ -49,8 +60,8 @@ pub(super) fn render_record(
     }
 }
 
-pub(super) fn render_text(selector: Selector, summary: &Summary) -> Result<(), CliError> {
-    let transport = output::expert::StreamTransport::from(selector.transport).as_str();
+pub(super) fn render_text(selector: StreamRef, summary: &Summary) -> Result<(), CliError> {
+    let transport = selector.transport.as_str();
     match &summary.client_flow {
         Some(flow) => write_stdout_line(format_args!(
             "followed {transport} stream {}: client {}:{} sent {} byte(s), \
@@ -73,32 +84,38 @@ pub(super) fn render_text(selector: Selector, summary: &Summary) -> Result<(), C
 }
 
 pub(super) fn render_aggregate(
-    selector: Selector,
+    selector: StreamRef,
     summary: Summary,
     state: State,
     ip_reassembly: &analysis::IpReassemblyReport,
 ) -> Result<(), CliError> {
+    let diagnostics = omitted_diagnostic(
+        "follow.chunks_omitted",
+        "payload chunk(s)",
+        state.retained.omitted(),
+        "--max-frames",
+    );
     emit_aggregate(
         output::contract::Command::Follow,
-        output::follow::Result::from_summary(
+        output::follow::Report::from_summary(
             selector.transport.into(),
             selector.index,
             summary,
-            state.retained,
+            state.retained.into_items(),
             ip_reassembly,
         ),
-        Vec::new(),
+        diagnostics,
     )
 }
 
 pub(super) fn render_stream(
-    selector: Selector,
+    selector: StreamRef,
     summary: Summary,
     ip_reassembly: &analysis::IpReassemblyReport,
-    stream: &mut StreamEncoder,
+    stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     Ok(stream.complete(
-        output::follow::Result::from_summary(
+        output::follow::Report::from_summary(
             selector.transport.into(),
             selector.index,
             summary,

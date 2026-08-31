@@ -5,8 +5,8 @@ use crate::protocol::transport::Tcp;
 use crate::{
     Packet,
     field::FieldValue,
-    matcher::{MatchResult, ResponseMatcher},
-    semantics::BuiltinProtocol,
+    matcher::{Match, ResponseMatcher},
+    protocol::BuiltinProtocol,
 };
 
 use super::{
@@ -30,32 +30,23 @@ impl ReverseFlowMatcher {
 }
 
 impl ResponseMatcher for ReverseFlowMatcher {
-    fn matches(&self, request: &Packet, response: &Packet) -> MatchResult {
+    fn matches(&self, request: &Packet, response: &Packet) -> Option<Match> {
         let transport = match self.protocol {
             BuiltinProtocol::Tcp => QuotedProbeTransport::Tcp,
             BuiltinProtocol::Udp => QuotedProbeTransport::Udp,
             BuiltinProtocol::Sctp => QuotedProbeTransport::Sctp,
-            _ => return MatchResult::no_match(),
+            _ => return None,
         };
         if quoted_icmp_error_kind(request, response, transport).is_some() {
-            return MatchResult::matched(
-                150,
-                match transport {
-                    QuotedProbeTransport::Sctp => "matching quoted SCTP ICMP error response",
-                    _ => "matching quoted ICMP error response",
-                },
-            );
+            return Some(Match::new(150));
         }
-        let Some(layers) = reversed_protocol_layers(self.protocol, request, response) else {
-            return MatchResult::no_match();
-        };
+        let layers = reversed_protocol_layers(self.protocol, request, response)?;
         match self.protocol {
             BuiltinProtocol::Tcp => match_tcp(request, &layers),
             BuiltinProtocol::Sctp => match_sctp(request, response, &layers),
-            _ => MatchResult::matched(
-                100,
-                format!("all reverse {} tuples", self.protocol.as_str()),
-            ),
+            // UDP has no further state to confirm: reverse tuples are the
+            // whole attribution.
+            _ => Some(Match::new(100)),
         }
     }
 
@@ -64,22 +55,14 @@ impl ResponseMatcher for ReverseFlowMatcher {
     }
 }
 
-fn match_tcp(request: &Packet, layers: &[ReversedProtocolLayers<'_, '_>]) -> MatchResult {
+fn match_tcp(request: &Packet, layers: &[ReversedProtocolLayers<'_, '_>]) -> Option<Match> {
     for layers in layers {
         let request_layer = layers.request;
         let response_layer = layers.response;
-        let Some(request_flags) = unsigned_field::<u16>(request_layer, "flags") else {
-            return MatchResult::no_match();
-        };
-        let Some(request_sequence) = unsigned_field::<u32>(request_layer, "sequence") else {
-            return MatchResult::no_match();
-        };
-        let Some(response_flags) = unsigned_field::<u16>(response_layer, "flags") else {
-            return MatchResult::no_match();
-        };
-        let Some(request_payload_length) = tcp_payload_length(request, layers.request_index) else {
-            return MatchResult::no_match();
-        };
+        let request_flags = unsigned_field::<u16>(request_layer, "flags")?;
+        let request_sequence = unsigned_field::<u32>(request_layer, "sequence")?;
+        let response_flags = unsigned_field::<u16>(response_layer, "flags")?;
+        let request_payload_length = tcp_payload_length(request, layers.request_index)?;
         let expected_acknowledgment = request_sequence
             .wrapping_add(request_payload_length)
             .wrapping_add(u32::from(request_flags & Tcp::SYN != 0))
@@ -87,41 +70,31 @@ fn match_tcp(request: &Packet, layers: &[ReversedProtocolLayers<'_, '_>]) -> Mat
         let has_ack = response_flags & Tcp::ACK != 0;
         let has_rst = response_flags & Tcp::RST != 0;
         if has_ack {
-            let Some(response_acknowledgment) =
-                unsigned_field::<u32>(response_layer, "acknowledgment")
-            else {
-                return MatchResult::no_match();
-            };
+            let response_acknowledgment = unsigned_field::<u32>(response_layer, "acknowledgment")?;
             if response_acknowledgment != expected_acknowledgment {
-                return MatchResult::no_match();
+                return None;
             }
         } else if has_rst && request_flags & Tcp::ACK != 0 {
-            let Some(request_acknowledgment) =
-                unsigned_field::<u32>(request_layer, "acknowledgment")
-            else {
-                return MatchResult::no_match();
-            };
-            let Some(response_sequence) = unsigned_field::<u32>(response_layer, "sequence") else {
-                return MatchResult::no_match();
-            };
+            let request_acknowledgment = unsigned_field::<u32>(request_layer, "acknowledgment")?;
+            let response_sequence = unsigned_field::<u32>(response_layer, "sequence")?;
             if response_sequence != request_acknowledgment {
-                return MatchResult::no_match();
+                return None;
             }
         } else {
-            return MatchResult::no_match();
+            return None;
         }
         if has_rst && response_flags & Tcp::SYN != 0 {
-            return MatchResult::no_match();
+            return None;
         }
     }
-    MatchResult::matched(200, "reverse TCP tuples and sequence state")
+    Some(Match::new(200))
 }
 
 fn match_sctp(
     request: &Packet,
     response: &Packet,
     layers: &[ReversedProtocolLayers<'_, '_>],
-) -> MatchResult {
+) -> Option<Match> {
     for layers in layers {
         if layers
             .request
@@ -129,12 +102,9 @@ fn match_sctp(
             .and_then(|value| value.as_u64())
             != Some(0)
         {
-            return MatchResult::no_match();
+            return None;
         }
-        let Some((request_initiate_tag, _)) = sctp_initiate_tag(request, layers.request_index, 1)
-        else {
-            return MatchResult::no_match();
-        };
+        let (request_initiate_tag, _) = sctp_initiate_tag(request, layers.request_index, 1)?;
         if request_initiate_tag == 0
             || sctp_initiate_tag(response, layers.response_index, 2).is_none()
             || layers
@@ -143,10 +113,10 @@ fn match_sctp(
                 .and_then(|value| value.as_u64())
                 != Some(u64::from(request_initiate_tag))
         {
-            return MatchResult::no_match();
+            return None;
         }
     }
-    MatchResult::matched(200, "reverse SCTP tuples and INIT verification tags")
+    Some(Match::new(200))
 }
 
 fn tcp_payload_length(packet: &Packet, tcp_layer_index: usize) -> Option<u32> {

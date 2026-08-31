@@ -4,6 +4,7 @@
 use packetcraftr::{analysis, core, output};
 
 use crate::commands::format::ToolFormat;
+use crate::commands::offline_analysis::Retained;
 use crate::errors::CliError;
 use crate::rendering::{StreamEncoder, comma_separated, emit_aggregate, write_stdout_line};
 
@@ -18,26 +19,22 @@ use output::tls::{Client, Server, Session, Summary};
 /// many it left out. Text and NDJSON write each session as it completes, so
 /// neither holds anything and neither ever leaves a session out.
 pub(super) struct State {
-    max_sessions: usize,
-    retained: Vec<Session>,
+    retained: Retained<Session>,
     selected: u64,
-    omitted: u64,
 }
 
 impl State {
     pub(super) const fn new(max_sessions: usize) -> Self {
         Self {
-            max_sessions,
-            retained: Vec::new(),
+            retained: Retained::new(max_sessions),
             selected: 0,
-            omitted: 0,
         }
     }
 
     pub(super) const fn counts(&self) -> output::tls::SelectionCounts {
         output::tls::SelectionCounts {
             selected: self.selected,
-            omitted: self.omitted,
+            omitted: self.retained.omitted(),
         }
     }
 
@@ -45,29 +42,20 @@ impl State {
     fn select(&mut self) {
         self.selected = self.selected.saturating_add(1);
     }
-
-    /// Holds a session for the aggregate document, up to the ceiling.
-    fn retain(&mut self, session: Session) {
-        if self.retained.len() >= self.max_sessions {
-            self.omitted = self.omitted.saturating_add(1);
-            return;
-        }
-        self.retained.push(session);
-    }
 }
 
 pub(super) fn render_session(
     format: ToolFormat,
     session: analysis::tls::Session,
     state: &mut State,
-    stream: &mut StreamEncoder,
+    stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     let session = Session::from(session);
     state.select();
     match format {
         ToolFormat::Text => write_stdout_line(format_args!("{}", session_line(&session))),
         ToolFormat::Json => {
-            state.retain(session);
+            state.retained.push(session);
             Ok(())
         }
         ToolFormat::Ndjson => {
@@ -93,15 +81,15 @@ pub(super) fn render_text(
 pub(super) fn render_aggregate(state: State, summary: Summary) -> Result<(), CliError> {
     emit_aggregate(
         output::contract::Command::Tls,
-        output::tls::Result {
-            sessions: state.retained,
+        output::tls::Report {
+            sessions: state.retained.into_items(),
             summary,
         },
         Vec::new(),
     )
 }
 
-pub(super) fn render_stream(summary: Summary, stream: &mut StreamEncoder) -> Result<(), CliError> {
+pub(super) fn render_stream(summary: Summary, stream: &StreamEncoder) -> Result<(), CliError> {
     Ok(stream.complete(output::tls::Event::complete(summary), Vec::new())?)
 }
 
@@ -395,11 +383,11 @@ mod tests {
         let mut state = State::new(2);
         for _ in 0..5 {
             state.select();
-            state.retain(session());
+            state.retained.push(session());
         }
-        assert_eq!(state.retained.len(), 2);
         assert_eq!(state.counts().selected, 5);
         assert_eq!(state.counts().omitted, 3);
+        assert_eq!(state.retained.into_items().len(), 2);
 
         // Text counts every session it printed and leaves none out.
         let mut streaming = State::new(2);

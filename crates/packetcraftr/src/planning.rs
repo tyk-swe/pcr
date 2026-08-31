@@ -12,8 +12,25 @@ use packetcraftr_netio::{
 use crate::Client;
 use crate::Error;
 
+/// Whether `deadline` has passed.
+///
+/// The boundary instant itself is not expired. That is the convention the
+/// send and drain paths already used through `checked_duration_since`, and the
+/// one the correlation eligibility tests use when they accept a capture whose
+/// `received_at <= deadline`; correlation's own activity check used
+/// `now >= deadline` and so declared itself inactive, at the exact deadline
+/// instant, for frames it had just declared eligible.
+///
+/// Every "has the deadline passed" question in a live operation goes through
+/// here. Each caller keeps its own error, because each names a different
+/// operation.
+#[must_use]
+pub(crate) fn expired(deadline: Instant) -> bool {
+    deadline.checked_duration_since(Instant::now()).is_none()
+}
+
 pub(crate) fn ensure_preparation_deadline(deadline: Instant) -> Result<(), Error> {
-    if deadline.checked_duration_since(Instant::now()).is_none() {
+    if expired(deadline) {
         return Err(LiveIoError::DeadlineExceeded {
             operation: "preparing the exchange",
         }

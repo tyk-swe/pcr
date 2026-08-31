@@ -109,9 +109,7 @@ fn write_capture_with_later_missing_timestamp() -> tempfile::NamedTempFile {
 }
 
 fn ipv6_fragment_hex() -> String {
-    let registry = std::sync::Arc::new(
-        packetcraftr::core::protocol::builtin::registry().expect("built-in registry builds"),
-    );
+    let registry = packetcraftr::core::protocol::builtin::registry();
     let mut packet = Packet::new();
     packet.push(Ipv6 {
         source: "2001:db8::1".parse().expect("documentation source"),
@@ -876,6 +874,21 @@ fn format_and_limit_failures_are_reported_before_offline_work() {
         vec!["tls", missing, "--max-ip-reassembly-bytes", "0"],
         vec!["stats", missing, "--max-ip-outcomes", "0"],
         vec!["expert", missing, "--ip-idle-expiry-ms", "0"],
+        vec!["stats", missing, "--max-tcp-bytes-per-flow", "0"],
+        vec!["expert", missing, "--max-tcp-reassembly-bytes", "0"],
+        vec![
+            "follow",
+            missing,
+            "--stream",
+            "tcp:0",
+            "--max-tcp-segments-per-flow",
+            "0",
+        ],
+        vec!["tls", missing, "--tcp-idle-expiry-ms", "0"],
+        // The per-flow window doubles as the reordering window, so the
+        // serial half-space is refused before the capture is opened rather
+        // than by the first pushed segment.
+        vec!["stats", missing, "--max-tcp-bytes-per-flow", "2147483648"],
         vec!["stats", missing, "--ip-overlap", "invalid"],
     ] {
         let output = run(&arguments);

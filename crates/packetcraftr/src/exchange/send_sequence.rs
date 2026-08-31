@@ -4,7 +4,6 @@
 //! Ordered packet transmission and inter-send correlation drains.
 
 use std::sync::Arc;
-use std::time::Instant;
 
 use packetcraftr_netio::{
     Error as LiveIoError,
@@ -12,6 +11,9 @@ use packetcraftr_netio::{
     transmit::{Frame as TransmissionFrame, Sender as PacketIo},
 };
 
+use crate::planning::expired;
+
+use super::capture::DrainPolicy;
 use super::transaction::OperationError;
 use super::transaction::Transaction;
 use super::{Event, ProcessOutcome, WorkflowResponseMatcher, WorkflowStopPredicate};
@@ -29,8 +31,12 @@ impl<C: Session> Transaction<C> {
         F: FnMut(Event) -> Result<(), crate::BoundaryError>,
     {
         for send_index in 0..self.prepared.len() {
-            if self.drain(Some(self.deadline), workflow_matcher, stop_predicate, emit)?
-                == ProcessOutcome::StopCapture
+            if self.drain(
+                DrainPolicy::Enforced(self.deadline),
+                workflow_matcher,
+                stop_predicate,
+                emit,
+            )? == ProcessOutcome::StopCapture
             {
                 return Ok(ProcessOutcome::StopCapture);
             }
@@ -38,13 +44,12 @@ impl<C: Session> Transaction<C> {
             self.send_one(io, send_index, emit)?;
             self.ensure_send_deadline()?;
 
-            let more_requests = send_index.saturating_add(1) < self.prepared.len();
-            let outcome = self.drain(
-                more_requests.then_some(self.deadline),
-                workflow_matcher,
-                stop_predicate,
-                emit,
-            )?;
+            let policy = if send_index.saturating_add(1) < self.prepared.len() {
+                DrainPolicy::Enforced(self.deadline)
+            } else {
+                DrainPolicy::BestEffort
+            };
+            let outcome = self.drain(policy, workflow_matcher, stop_predicate, emit)?;
             if outcome == ProcessOutcome::StopCapture {
                 return Ok(outcome);
             }
@@ -97,11 +102,7 @@ impl<C: Session> Transaction<C> {
     }
 
     fn ensure_send_deadline(&self) -> Result<(), LiveIoError> {
-        if self
-            .deadline
-            .checked_duration_since(Instant::now())
-            .is_none()
-        {
+        if expired(self.deadline) {
             return Err(LiveIoError::DeadlineExceeded {
                 operation: "sending exchange requests",
             });

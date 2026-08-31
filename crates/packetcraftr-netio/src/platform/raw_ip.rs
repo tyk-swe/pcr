@@ -4,10 +4,7 @@
 //! Target-native raw IP transmission after upstream authorization, route, MTU,
 //! and capture-readiness checks.
 
-#![cfg_attr(windows, allow(unsafe_code))]
-#![cfg_attr(not(windows), forbid(unsafe_code))]
-
-use super::super::{
+use crate::{
     Error,
     transmit::{self, Layer3Frame, Submission},
 };

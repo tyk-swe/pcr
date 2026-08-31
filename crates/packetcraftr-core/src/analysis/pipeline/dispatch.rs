@@ -6,54 +6,60 @@
 use std::collections::HashSet;
 use std::time::SystemTime;
 
-use crate::decode::DecodedPacket;
-use crate::protocol::transport::Tcp;
 use bytes::Bytes;
 
+use crate::protocol::transport::Tcp;
+
 use crate::analysis::Error;
-use crate::analysis::adapter::transports;
+use crate::analysis::pipeline::Limits;
 use crate::analysis::pipeline::clock::CaptureClock;
-use crate::analysis::reassembly::Limits as TcpReassemblyLimits;
 use crate::analysis::reassembly::tcp::{
-    Error as ReassemblyTcpError, Event as TcpEvent, Reassembler as TcpReassembler, ScopedFlowKey,
-    Segment,
+    Error as ReassemblyTcpError, Event as TcpEvent, Reassembler as TcpReassembler,
+    ResourceError as TcpResourceError, ScopedFlowKey, Segment,
 };
 
+/// A conversation occupies one reassembly flow, and one half-open SYN slot,
+/// per direction.
+const DIRECTIONS_PER_CONVERSATION: usize = 2;
+
+/// Owns every piece of TCP reassembly state the loop advances.
+///
+/// The clock lives here rather than in the loop because only matched frames
+/// advance TCP expiry: making that a property of the type is what stops a
+/// later edit from sweeping on frames the filter dropped.
 pub(super) struct ReassemblyDispatch {
     tcp_reassembler: Option<TcpReassembler>,
     half_open_pure_syns: HashSet<ScopedFlowKey>,
+    max_half_open_pure_syns: usize,
+    clock: CaptureClock,
 }
 
 impl ReassemblyDispatch {
-    pub(super) fn new(enabled: bool, max_flows: usize) -> Self {
-        let tcp_reassembler = enabled.then(|| {
-            TcpReassembler::new(TcpReassemblyLimits {
-                max_flows: max_flows.saturating_mul(2),
-                ..TcpReassemblyLimits::default()
-            })
-        });
+    pub(super) fn new(enabled: bool, limits: &Limits) -> Self {
+        let tcp_reassembler = enabled
+            .then(|| TcpReassembler::new(limits.tcp_reassembly(DIRECTIONS_PER_CONVERSATION)));
         Self {
             tcp_reassembler,
             half_open_pure_syns: HashSet::new(),
+            max_half_open_pure_syns: limits.max_flows.saturating_mul(DIRECTIONS_PER_CONVERSATION),
+            clock: CaptureClock::new(),
         }
     }
 
     pub(super) fn dispatch(
         &mut self,
-        decoded: &DecodedPacket,
+        tcp_header: Option<&Tcp>,
         segment: Option<&Segment>,
         timestamp: SystemTime,
         number: u64,
-        clock: &mut CaptureClock,
-        max_flows: usize,
     ) -> Result<Vec<TcpEvent>, Error> {
         let mut tcp_events = Vec::new();
         let Some(reassembler) = &mut self.tcp_reassembler else {
             return Ok(tcp_events);
         };
 
-        let now = clock.at(timestamp, number)?;
-        let sweep_due = clock.should_sweep(now);
+        let now = self.clock.at(timestamp, number)?;
+        let sweep_due = self.clock.should_sweep(now);
         let pushable = segment.as_ref().is_some_and(|segment| {
             !segment.payload.is_empty() || segment.syn || segment.fin || segment.rst
         });
@@ -67,11 +73,11 @@ impl ReassemblyDispatch {
             tcp_events.extend(dispatch_segment(
                 reassembler,
                 &mut self.half_open_pure_syns,
-                decoded,
+                self.max_half_open_pure_syns,
+                acknowledgment(tcp_header),
                 segment,
                 now,
                 number,
-                max_flows,
             )?);
         }
 
@@ -86,19 +92,24 @@ impl ReassemblyDispatch {
     }
 }
 
+/// The acknowledgment a segment carries, when the ACK flag says it carries
+/// one at all. Reassembly does not track acknowledgments itself, so this is
+/// the only header field the dispatch reads beyond the segment.
+fn acknowledgment(tcp_header: Option<&Tcp>) -> Option<u32> {
+    tcp_header
+        .filter(|tcp| tcp.flags & Tcp::ACK != 0)
+        .map(|tcp| tcp.acknowledgment)
+}
+
 fn dispatch_segment(
     reassembler: &mut TcpReassembler,
     half_open_pure_syns: &mut HashSet<ScopedFlowKey>,
-    decoded: &DecodedPacket,
+    max_half_open_pure_syns: usize,
+    acknowledgment: Option<u32>,
     segment: &Segment,
     now: std::time::Instant,
     number: u64,
-    max_flows: usize,
 ) -> Result<Vec<TcpEvent>, Error> {
-    let acknowledgment = transports(&decoded.packet)
-        .tcp
-        .filter(|transport| transport.layer.flags & Tcp::ACK != 0)
-        .map(|transport| transport.layer.acknowledgment);
     let flow = segment.flow.clone();
     let pure_syn = segment.syn && acknowledgment.is_none() && segment.payload.is_empty();
     let mut events = Vec::new();
@@ -121,7 +132,7 @@ fn dispatch_segment(
     };
     push_with_retry(reassembler, segment, now, number, &mut events)?;
     clear_closed_flows(half_open_pure_syns, &events);
-    if pure_syn && half_open_pure_syns.len() < max_flows.saturating_mul(2) {
+    if pure_syn && half_open_pure_syns.len() < max_half_open_pure_syns {
         half_open_pure_syns.insert(flow);
     } else if !pure_syn {
         half_open_pure_syns.remove(&flow);
@@ -185,11 +196,11 @@ fn push_with_retry(
 ) -> Result<(), Error> {
     match reassembler.push(segment.clone(), now) {
         Ok(produced) => events.extend(produced),
-        Err(
-            ReassemblyTcpError::FlowByteLimit { .. }
-            | ReassemblyTcpError::SegmentLimit { .. }
-            | ReassemblyTcpError::AggregateByteLimit { .. },
-        ) => {
+        Err(ReassemblyTcpError::Resource(
+            TcpResourceError::FlowByteLimit { .. }
+            | TcpResourceError::SegmentLimit { .. }
+            | TcpResourceError::AggregateByteLimit { .. },
+        )) => {
             events.extend(reassembler.evict_flow(&segment.flow));
             events.extend(
                 reassembler

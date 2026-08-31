@@ -29,7 +29,7 @@ fn old_encode(format: Format, frames: Vec<Frame>) -> Vec<u8> {
     output.into_inner()
 }
 
-fn render(format: output::contract::Format, frames: Vec<Frame>) -> Result<Vec<u8>, CliError> {
+fn render(format: Format, frames: Vec<Frame>) -> Result<Vec<u8>, CliError> {
     let mut destination = Vec::new();
     write_capture_file_with(
         format,
@@ -44,7 +44,7 @@ fn render(format: output::contract::Format, frames: Vec<Frame>) -> Result<Vec<u8
 fn empty_capture_is_rejected_before_spool_creation() {
     let mut created = false;
     let error = write_capture_file_with(
-        output::contract::Format::Pcap,
+        Format::Pcap,
         Vec::new(),
         || {
             created = true;
@@ -53,7 +53,7 @@ fn empty_capture_is_rejected_before_spool_creation() {
         &mut Vec::new(),
     )
     .expect_err("empty capture");
-    assert_eq!(error.exit_code, 2);
+    assert_eq!(error.exit_code(), 2);
     assert!(!created);
 }
 
@@ -61,7 +61,7 @@ fn empty_capture_is_rejected_before_spool_creation() {
 fn pcap_and_mixed_pcapng_match_the_previous_encoder_bytes() {
     let pcap = vec![frame(LinkType::IPV4, vec![1, 2, 3])];
     assert_eq!(
-        render(output::contract::Format::Pcap, pcap.clone()).unwrap(),
+        render(Format::Pcap, pcap.clone()).unwrap(),
         old_encode(Format::Pcap, pcap)
     );
 
@@ -69,7 +69,7 @@ fn pcap_and_mixed_pcapng_match_the_previous_encoder_bytes() {
         frame(LinkType::ETHERNET, vec![4, 5]),
         frame(LinkType::IPV4, vec![6, 7, 8]),
     ];
-    let encoded = render(output::contract::Format::PcapNg, mixed.clone()).unwrap();
+    let encoded = render(Format::PcapNg, mixed.clone()).unwrap();
     assert_eq!(encoded, old_encode(Format::PcapNg, mixed));
     let mut reader = Reader::new(Cursor::new(encoded)).expect("pcapng opens");
     assert!(reader.next_frame().unwrap().is_some());
@@ -84,7 +84,7 @@ fn encoding_failure_emits_no_stdout_bytes() {
     ];
     let mut destination = Vec::new();
     let error = write_capture_file_with(
-        output::contract::Format::Pcap,
+        Format::Pcap,
         frames,
         || Ok(Box::new(Cursor::new(Vec::new()))),
         &mut destination,
@@ -154,13 +154,13 @@ fn scripted(
 
 fn assert_spool_failure(operation: &str, create: impl FnOnce() -> io::Result<Box<dyn Spool>>) {
     let error = write_capture_file_with(
-        output::contract::Format::Pcap,
+        Format::Pcap,
         [frame(LinkType::IPV4, vec![1])],
         create,
         &mut Vec::new(),
     )
     .expect_err(operation);
-    assert_eq!(error.exit_code, 5, "{operation}");
+    assert_eq!(error.exit_code(), 5, "{operation}");
     assert_eq!(error.classification.code, "io.capture_file", "{operation}");
     assert!(error.classification.remediation.is_some(), "{operation}");
 }
@@ -194,7 +194,7 @@ impl Write for FailingDestination {
 #[test]
 fn stdout_write_failure_is_classified() {
     let error = write_capture_file_with(
-        output::contract::Format::Pcap,
+        Format::Pcap,
         [frame(LinkType::IPV4, vec![1])],
         || Ok(Box::new(Cursor::new(Vec::new()))),
         &mut FailingDestination,
@@ -227,7 +227,7 @@ fn large_capture_is_spooled_and_copied_in_bounded_chunks() {
         largest_write: 0,
     };
     write_capture_file_with(
-        output::contract::Format::Pcap,
+        Format::Pcap,
         frames,
         || tempfile::tempfile().map(|file| Box::new(file) as Box<dyn Spool>),
         &mut destination,

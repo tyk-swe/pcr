@@ -5858,9 +5858,6 @@
         "field": {
           "type": "string",
           "minLength": 1
-        },
-        "range": {
-          "$ref": "#/$defs/byteRange"
         }
       },
       "additionalProperties": false

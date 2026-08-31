@@ -109,6 +109,7 @@ impl<W: Write> Writer<W> {
             timestamp_resolution,
             snap_len,
             max_size,
+            stream_limits,
         } = options;
         if link_type.0 > u16::MAX as u32 {
             return Err(Error::LinkTypeOutOfRange {
@@ -143,6 +144,7 @@ impl<W: Write> Writer<W> {
             },
             max_size,
             DEFAULT_INTERFACE_LIMIT,
+            stream_limits,
         ))
     }
 
@@ -157,6 +159,7 @@ impl<W: Write> Writer<W> {
             endianness,
             max_size,
             max_interfaces,
+            stream_limits,
         } = options;
         if max_size < 28 {
             return Err(Error::SizeLimitExceeded {
@@ -174,16 +177,23 @@ impl<W: Write> Writer<W> {
             },
             max_size,
             max_interfaces,
+            stream_limits,
         ))
     }
 
-    fn from_state(inner: W, state: WriterState, max_size: usize, max_interfaces: usize) -> Self {
+    fn from_state(
+        inner: W,
+        state: WriterState,
+        max_size: usize,
+        max_interfaces: usize,
+        stream_limits: Limits,
+    ) -> Self {
         Self {
             inner,
             state,
             max_size,
             max_interfaces,
-            stream_limits: Limits::default(),
+            stream_limits,
             frames_written: 0,
             captured_bytes_written: 0,
             output_failure: None,
@@ -209,29 +219,25 @@ impl<W: Write> Writer<W> {
         self.max_size
     }
 
-    /// Applies aggregate frame and captured-payload limits to future writes.
-    ///
-    /// Lowering a limit below already committed output is rejected without
-    /// changing the writer configuration.
-    pub fn set_stream_limits(&mut self, limits: Limits) -> Result<(), Error> {
-        if self.frames_written > limits.max_frames {
-            return Err(Error::FrameLimitExceeded {
-                actual: self.frames_written,
-                limit: limits.max_frames,
-            });
-        }
-        if self.captured_bytes_written > limits.max_bytes {
-            return Err(Error::StreamByteLimitExceeded {
-                actual: self.captured_bytes_written,
-                limit: limits.max_bytes,
-            });
-        }
-        self.stream_limits = limits;
-        Ok(())
-    }
-
+    /// The aggregate ceilings this writer was opened under. They are fixed
+    /// at construction: a stream's budget cannot be raised part-way through
+    /// the output it already committed.
     pub fn stream_limits(&self) -> Limits {
         self.stream_limits
+    }
+
+    /// Frames committed to the output so far.
+    ///
+    /// A record refused for any reason — an exhausted budget, a metadata
+    /// mismatch, or an output failure — commits neither a frame nor a byte,
+    /// and this pair is how a caller observes that.
+    pub fn frames_written(&self) -> u64 {
+        self.frames_written
+    }
+
+    /// Captured payload bytes committed to the output so far.
+    pub fn captured_bytes_written(&self) -> u64 {
+        self.captured_bytes_written
     }
 
     /// Adds a PCAPNG interface using the writer's configured size limit as

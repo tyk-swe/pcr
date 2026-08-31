@@ -3,10 +3,9 @@
 
 //! Bounded route-netlink execution on a caller-namespace worker thread.
 
-#![forbid(unsafe_code)]
-
 use std::{
     future::Future,
+    sync::Arc,
     sync::mpsc::{self, SyncSender},
     thread::{self, JoinHandle},
     time::{Duration, Instant},
@@ -14,7 +13,7 @@ use std::{
 
 use rtnetlink::{Handle, new_connection};
 
-use super::os_error;
+use crate::platform::os_error;
 use crate::{
     platform::worker_reaper::{
         ReapTask, ReaperClient, ReaperPermit, TransferOutcome, shared_reaper,
@@ -34,7 +33,8 @@ where
 {
     let reaper = shared_reaper().map_err(|error| SystemError::OperatingSystem {
         operation: "initialize native worker cleanup",
-        message: error.to_string(),
+        message: "the shared native worker cleanup service is unavailable".to_owned(),
+        source: Some(Arc::new(error)),
     })?;
     let permit = reaper
         .reserve()
@@ -44,6 +44,7 @@ where
                 "shared native worker cleanup capacity {} is exhausted",
                 error.capacity
             ),
+            source: None,
         })?;
     // ponytail: one worker per call; restore namespace-local reuse only if route benchmarks show
     // startup dominates.
@@ -196,6 +197,7 @@ fn netlink_timeout(operation: &'static str) -> SystemError {
     SystemError::OperatingSystem {
         operation,
         message: "finite operation deadline expired".to_owned(),
+        source: None,
     }
 }
 

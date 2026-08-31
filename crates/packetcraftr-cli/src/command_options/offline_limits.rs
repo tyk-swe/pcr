@@ -4,6 +4,8 @@
 use clap::{Args, ValueEnum};
 use packetcraftr::{analysis, analysis::pcap as capture};
 
+use crate::input::ReaderBounds;
+
 /// How conflicting bytes in overlapping IP fragments are handled.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
 pub(crate) enum IpOverlap {
@@ -30,6 +32,10 @@ fn default_ip_idle_expiry_ms() -> u64 {
     u64::try_from(analysis::Limits::default().ip_idle_expiry.as_millis()).unwrap_or(u64::MAX)
 }
 
+fn default_tcp_idle_expiry_ms() -> u64 {
+    u64::try_from(analysis::Limits::default().tcp_idle_expiry.as_millis()).unwrap_or(u64::MAX)
+}
+
 /// Capture-reader bounds shared by offline commands.
 #[derive(Clone, Copy, Debug, Args)]
 pub(crate) struct OfflineCaptureLimitsArgs {
@@ -47,6 +53,24 @@ pub(crate) struct OfflineCaptureLimitsArgs {
     pub(crate) max_interfaces: usize,
 }
 
+impl OfflineCaptureLimitsArgs {
+    /// The ceiling on what an aggregate JSON document retains, taken from the
+    /// frame budget the same run already enforces so a document is bounded by
+    /// a limit the caller set rather than only by how much the capture held.
+    pub(crate) fn retention_ceiling(self) -> usize {
+        usize::try_from(self.max_frames).unwrap_or(usize::MAX)
+    }
+
+    /// The subset a capture reader is opened under; the aggregate frame and
+    /// byte ceilings are charged per frame while streaming instead.
+    pub(crate) const fn reader_bounds(self) -> ReaderBounds {
+        ReaderBounds {
+            max_frame_bytes: self.max_frame_bytes,
+            max_interfaces: self.max_interfaces,
+        }
+    }
+}
+
 /// Capture and analysis bounds shared by stats, expert, follow, and TLS.
 #[derive(Clone, Copy, Debug, Args)]
 pub(crate) struct OfflineLimitsArgs {
@@ -55,6 +79,24 @@ pub(crate) struct OfflineLimitsArgs {
     /// Maximum distinct conversations tracked per transport.
     #[arg(long, default_value_t = analysis::Limits::default().max_flows)]
     pub(crate) max_flows: usize,
+    /// Maximum retained TCP stream bytes in one direction.
+    #[arg(long, default_value_t = analysis::Limits::default().max_tcp_bytes_per_flow)]
+    pub(crate) max_tcp_bytes_per_flow: usize,
+    /// Maximum retained TCP payload and metadata bytes.
+    #[arg(
+        long,
+        default_value_t = analysis::Limits::default().max_tcp_reassembly_bytes
+    )]
+    pub(crate) max_tcp_reassembly_bytes: usize,
+    /// Maximum pending out-of-order segments retained for one TCP direction.
+    #[arg(
+        long,
+        default_value_t = analysis::Limits::default().max_tcp_segments_per_flow
+    )]
+    pub(crate) max_tcp_segments_per_flow: usize,
+    /// TCP flow inactivity interval in capture-time milliseconds.
+    #[arg(long, default_value_t = default_tcp_idle_expiry_ms())]
+    pub(crate) tcp_idle_expiry_ms: u64,
     /// Policy for conflicting bytes in overlapping IPv4 or IPv6 fragments.
     #[arg(long, value_enum, default_value_t = IpOverlap::Reject)]
     pub(crate) ip_overlap: IpOverlap,

@@ -3,7 +3,7 @@
 
 use std::net::IpAddr;
 
-use super::super::Stats;
+use crate::Stats;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Options {

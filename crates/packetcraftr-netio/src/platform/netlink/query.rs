@@ -19,10 +19,11 @@ use rtnetlink::{
 };
 
 use crate::platform::os_error;
+use crate::platform::route_normalize::{NativeRouteSnapshot, finish_route};
 use crate::{
     interface::{self, Id as InterfaceId},
     link::{Capability, MacAddress},
-    route::{Decision, NativeRouteSnapshot, SelectionReason, SystemError, finish_route},
+    route::{Decision, SelectionReason, SystemError},
 };
 use packetcraftr_core::frame::LinkType;
 

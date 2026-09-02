@@ -4,7 +4,6 @@
 //! Windows passive route selection backed by `GetBestRoute2`.
 
 #![allow(unsafe_code)]
-#![cfg(feature = "native-route")]
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
@@ -21,12 +20,12 @@ use windows::Win32::Networking::WinSock::{
 
 use super::adapter::{WindowsAdapter, adapter_index_for, find_windows_adapter};
 use super::enumeration::{adapter_snapshots, win32_error};
+use crate::platform::route_normalize::{
+    NativeRouteSnapshot, finish_route, interface_decision, validate_preferred_source_family,
+};
 use crate::{
     interface::Id as InterfaceId,
-    route::{
-        Decision, NativeRouteSnapshot, SelectionReason, SystemError, finish_route,
-        interface_decision, validate_preferred_source_family,
-    },
+    route::{Decision, SelectionReason, SystemError},
 };
 
 pub(in crate::platform) fn route(

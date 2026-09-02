@@ -2,70 +2,44 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 //! Crate-private FFI and reviewed-unsafe-code boundary.
+//!
+//! The `native_*`, `pcap_backend`, `npcap_backend`, and `worker_reaper`
+//! predicates come from the build script, which combines the enabled
+//! features with the target the crate is compiled for.
 
-mod capture_dispatch;
-#[cfg(all(
-    feature = "native-layer2",
-    any(target_os = "linux", target_os = "macos", windows)
-))]
+#[cfg(all(native_route, target_os = "macos"))]
+mod af_route;
+#[cfg(native_layer2)]
 mod capture_filter;
-mod interface_dispatch;
-#[cfg(all(
-    any(feature = "native-layer2", feature = "native-layer3"),
-    any(target_os = "linux", target_os = "macos", windows)
-))]
+mod dispatch;
+#[cfg(native_send)]
 mod interface_identity;
-#[cfg(any(
-    all(
-        feature = "native-route",
-        any(target_os = "linux", target_os = "macos")
-    ),
-    all(any(feature = "native-interfaces", feature = "native-route"), windows)
-))]
+#[cfg(native_route)]
 mod interface_validation;
-mod layer2_dispatch;
-mod layer3_dispatch;
-#[cfg(all(target_os = "linux", feature = "native-route"))]
-mod linux;
-#[cfg(all(
-    feature = "native-layer2",
-    any(target_os = "linux", target_os = "macos", windows)
-))]
+#[cfg(all(native_route, windows))]
+mod iphelper;
+#[cfg(native_layer2)]
 mod live_capture;
-#[cfg(all(target_os = "macos", feature = "native-route"))]
-mod macos;
-#[cfg(all(feature = "native-layer2", windows))]
+#[cfg(all(native_route, target_os = "linux"))]
+mod netlink;
+#[cfg(npcap_backend)]
 mod npcap;
-#[cfg(all(
-    feature = "native-layer2",
-    any(target_os = "linux", target_os = "macos")
-))]
+#[cfg(pcap_backend)]
 mod pcap_backend;
-#[cfg(all(
-    feature = "native-layer3",
-    any(target_os = "linux", target_os = "macos", windows)
-))]
+#[cfg(native_layer2)]
+mod pcap_common;
+#[cfg(native_layer3)]
 mod raw_ip;
-mod route_dispatch;
-#[cfg(all(windows, any(feature = "native-interfaces", feature = "native-route")))]
-mod windows;
-#[cfg(any(
-    all(target_os = "linux", feature = "native-route"),
-    all(
-        feature = "native-layer2",
-        any(target_os = "linux", target_os = "macos", windows)
-    )
-))]
+#[cfg(native_route)]
+mod route_normalize;
+#[cfg(worker_reaper)]
 mod worker_reaper;
 
 /// Wraps a native failure as the operating-system route diagnostic.
 ///
 /// Linux and macOS phrased this identically in their own modules; Windows
 /// keeps its own because it also renders the Win32 status code.
-#[cfg(all(
-    feature = "native-route",
-    any(target_os = "linux", target_os = "macos")
-))]
+#[cfg(all(native_route, any(target_os = "linux", target_os = "macos")))]
 fn os_error(
     operation: &'static str,
     error: impl std::error::Error + Send + Sync + 'static,
@@ -77,13 +51,7 @@ fn os_error(
     }
 }
 
-pub(crate) use capture_dispatch::system_capture;
-pub(crate) use interface_dispatch::system_interfaces;
-#[cfg(all(
-    feature = "native-route",
-    any(target_os = "linux", target_os = "macos", windows)
-))]
-pub(crate) use interface_validation::validate_native_interface;
-pub(crate) use layer2_dispatch::system_send_layer2;
-pub(crate) use layer3_dispatch::system_send_layer3;
-pub(crate) use route_dispatch::{system_interface_route, system_route};
+pub(crate) use dispatch::{
+    system_capture, system_interface_route, system_interfaces, system_route, system_send_layer2,
+    system_send_layer3,
+};

@@ -22,13 +22,13 @@ use crate::{
     interface::Id as InterfaceId,
     platform::live_capture::{
         CaptureInterrupt, NativeCaptureEvent, NativeCaptureParts, NativeCaptureSource,
-        NativeCaptureStatistics, NativeCapturedPacket, canonical_link_type, monotonic_packet_time,
-        system_time, validate_effective_snapshot_length,
+        NativeCaptureStatistics, NativeCapturedPacket, monotonic_packet_time, system_time,
     },
+    platform::pcap_common::{canonical_link_type, validate_effective_snapshot_length},
 };
 use bytes::Bytes;
 
-pub(in crate::platform::npcap) fn open_capture(
+pub(crate) fn open_capture(
     interface: &InterfaceId,
     limits: Limits,
     capture_filter: Option<&str>,

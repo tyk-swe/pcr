@@ -7,9 +7,7 @@
 
 mod adapter;
 mod enumeration;
-#[cfg(feature = "native-route")]
 mod query;
 
 pub(super) use enumeration::interfaces;
-#[cfg(feature = "native-route")]
 pub(super) use query::{interface_route, route};

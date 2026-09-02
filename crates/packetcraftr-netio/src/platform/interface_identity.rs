@@ -20,14 +20,11 @@ use crate::{Error, interface::Id as InterfaceId};
 /// Reserved for capture, which reads the returned addresses, and for targets
 /// with no cheap name lookup. Every other native boundary uses
 /// [`verify_interface_identity`].
-#[cfg(any(
-    feature = "native-layer2",
-    not(any(target_os = "linux", target_os = "macos"))
-))]
+#[cfg(any(native_layer2, not(any(target_os = "linux", target_os = "macos"))))]
 pub(super) fn validate_current_interface_identity(
     expected: &InterfaceId,
 ) -> Result<crate::interface::Info, Error> {
-    let mut interfaces = super::interface_dispatch::system_interfaces()?;
+    let mut interfaces = super::system_interfaces()?;
     if let Some(position) = interfaces
         .iter()
         .position(|interface| interface.id == *expected)

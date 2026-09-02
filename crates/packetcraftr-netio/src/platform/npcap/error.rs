@@ -11,7 +11,11 @@ use super::abi::{
     PCAP_ERROR_NO_SUCH_DEVICE, PCAP_ERROR_PERM_DENIED, PCAP_ERROR_PROMISC_PERM_DENIED,
     PCAP_ERROR_RFMON_NOTSUP, PCAP_WARNING_PROMISC_NOTSUP,
 };
-use crate::{Error, interface::Id as InterfaceId, platform::live_capture::is_permission_denied};
+use crate::{
+    Error,
+    interface::Id as InterfaceId,
+    platform::pcap_common::{is_missing_device, is_permission_denied},
+};
 
 pub(super) fn map_activation_error(
     interface: &InterfaceId,
@@ -65,11 +69,7 @@ pub(super) fn map_open_message(interface: &InterfaceId, message: String) -> Erro
             source: None,
         };
     }
-    let lower = message.to_ascii_lowercase();
-    if lower.contains("no such device")
-        || lower.contains("not found")
-        || lower.contains("does not exist")
-    {
+    if is_missing_device(&message) {
         return Error::Device {
             interface: interface.name.clone(),
             message: format!("Npcap could not open this interface: {message}"),

@@ -91,7 +91,7 @@ All notable changes to PacketcraftR are documented here. The format follows
   repository-backed Quick Start commands.
 
 ### Changed
-
+- `packetcraftr-netio` now resolves native capabilities through build-script `cfg` flags (`native_route`, `pcap_backend`, `npcap_backend`, `native_layer3`, ...) and a single `platform::dispatch` module instead of five per-capability dispatch files. Platform backends are named after the operating-system facility they use (`netlink`, `af_route`, `iphelper`), route normalization lives in `platform::route_normalize`, and rules shared by the libpcap and Npcap backends live in `platform::pcap_common`. Npcap on targets other than x86_64 MSVC is now reported by the generic unsupported-capability message. No public API or error code changed.
 - **BREAKING:** `Registry` lookups take protocol names as `&str` and return `layer::Id` by value; `BuiltinProtocol::from_id` takes an `Id` by value; `codec::DecodedLayerValue` is now `codec::DecodedLayer`. Reassembly `contract` modules are named `model`, `Padding::excluded_from` is the single padding-exclusion rule, and offline analysis no longer materializes filter inputs when no filter is set.
 - Codecs and analyzers identify layers through `BuiltinProtocol::identifies` and name IP protocol numbers through `packetcraftr_core::protocol::network::ip_protocol` instead of comparing protocol names as strings and repeating numeric literals.
 - **BREAKING:** `Diagnostic::code` and `Diagnostic::field` (core and output mirrors) are now `&'static str`; diagnostic codes come from a fixed published set, and `Diagnostic::{info, warning, error, at_field}` take static names.

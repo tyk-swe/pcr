@@ -11,7 +11,7 @@ use super::capture::map_open_error;
 use crate::{
     Error,
     interface::Id as InterfaceId,
-    platform::live_capture::is_permission_denied,
+    platform::pcap_common::is_permission_denied,
     transmit::{self, Layer2Frame, Submission},
 };
 

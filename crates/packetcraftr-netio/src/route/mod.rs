@@ -1,11 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#[cfg(all(
-    feature = "native-route",
-    any(target_os = "linux", target_os = "macos", windows)
-))]
-mod decision;
 mod error;
 mod intent;
 mod materialize;
@@ -18,16 +13,3 @@ pub use materialize::{Materialized, materialize};
 pub use models::{Decision, Options, Plan, Provider, Scope, SelectionReason};
 pub use planner::plan;
 pub use provider::{SystemError, SystemProvider};
-
-#[cfg(all(
-    feature = "native-route",
-    any(target_os = "linux", target_os = "macos")
-))]
-pub(crate) use decision::find_interface;
-#[cfg(all(
-    feature = "native-route",
-    any(target_os = "linux", target_os = "macos", windows)
-))]
-pub(crate) use decision::{
-    NativeRouteSnapshot, finish_route, interface_decision, validate_preferred_source_family,
-};

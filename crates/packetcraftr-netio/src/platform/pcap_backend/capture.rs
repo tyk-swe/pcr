@@ -21,8 +21,11 @@ use crate::{
     interface::Id as InterfaceId,
     platform::live_capture::{
         CaptureInterrupt, NativeCaptureEvent, NativeCaptureParts, NativeCaptureSource,
-        NativeCaptureStatistics, NativeCapturedPacket, canonical_link_type, is_permission_denied,
-        monotonic_packet_time, system_time, validate_effective_snapshot_length,
+        NativeCaptureStatistics, NativeCapturedPacket, monotonic_packet_time, system_time,
+    },
+    platform::pcap_common::{
+        canonical_link_type, is_missing_device, is_permission_denied,
+        validate_effective_snapshot_length,
     },
 };
 const READ_TIMEOUT_MILLIS: i32 = 50;
@@ -186,11 +189,7 @@ pub(super) fn map_open_error(interface: &InterfaceId, error: PcapError) -> Error
             source,
         };
     }
-    let lower = message.to_ascii_lowercase();
-    if lower.contains("no such device")
-        || lower.contains("not found")
-        || lower.contains("does not exist")
-    {
+    if is_missing_device(&message) {
         return Error::Device {
             interface: interface.name.clone(),
             message: "libpcap could not open this interface".to_owned(),

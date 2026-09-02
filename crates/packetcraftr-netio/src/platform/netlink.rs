@@ -9,11 +9,12 @@ use self::{
     query::{query_interfaces, query_route},
     worker::with_netlink,
 };
+use crate::platform::route_normalize::{
+    find_interface, interface_decision, validate_preferred_source_family,
+};
 use crate::{
     interface::{self, Id as InterfaceId},
-    route::{
-        Decision, SystemError, find_interface, interface_decision, validate_preferred_source_family,
-    },
+    route::{Decision, SystemError},
 };
 
 mod query;

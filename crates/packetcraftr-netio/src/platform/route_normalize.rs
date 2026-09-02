@@ -1,17 +1,16 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Portable route policy: validates and normalizes an operating-system route
-//! snapshot into a [`Decision`]. No native code lives here.
+//! Validates and normalizes an operating-system route snapshot into a
+//! [`Decision`]. Shared by every native route backend; no FFI lives here.
 
 use std::net::{IpAddr, Ipv4Addr};
 
+use super::interface_validation::validate_native_interface;
 use crate::{
     interface::{self, Id as InterfaceId},
-    platform::validate_native_interface,
+    route::{Decision, Scope, SelectionReason, SystemError},
 };
-
-use super::{Decision, Scope, SelectionReason, SystemError};
 
 pub(crate) struct NativeRouteSnapshot {
     pub interface: interface::Info,

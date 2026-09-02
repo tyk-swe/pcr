@@ -9,8 +9,6 @@ use std::{
     mem::{align_of, size_of},
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
 };
-
-#[cfg(feature = "native-route")]
 use windows::Win32::NetworkManagement::Ndis::NET_LUID_LH;
 use windows::Win32::{
     NetworkManagement::{
@@ -33,11 +31,8 @@ use packetcraftr_core::frame::LinkType;
 #[derive(Clone)]
 pub(super) struct WindowsAdapter {
     pub(super) interface: interface::Info,
-    #[cfg(feature = "native-route")]
     pub(super) ipv4_index: u32,
-    #[cfg(feature = "native-route")]
     pub(super) ipv6_index: u32,
-    #[cfg(feature = "native-route")]
     pub(super) luid: NET_LUID_LH,
 }
 
@@ -77,8 +72,6 @@ impl BufferBounds {
                 .is_some_and(|end| end <= self.end)
     }
 }
-
-#[cfg(feature = "native-route")]
 pub(super) fn adapter_index_for(adapter: &WindowsAdapter, destination: IpAddr) -> u32 {
     if destination.is_ipv4() {
         adapter.ipv4_index
@@ -86,8 +79,6 @@ pub(super) fn adapter_index_for(adapter: &WindowsAdapter, destination: IpAddr) -
         adapter.ipv6_index
     }
 }
-
-#[cfg(feature = "native-route")]
 pub(super) fn find_windows_adapter(
     adapters: &[WindowsAdapter],
     requested: &InterfaceId,
@@ -196,11 +187,8 @@ pub(super) fn parse_adapters(
                         LinkType::RAW
                     },
                 },
-                #[cfg(feature = "native-route")]
                 ipv4_index,
-                #[cfg(feature = "native-route")]
                 ipv6_index: adapter.Ipv6IfIndex,
-                #[cfg(feature = "native-route")]
                 luid: adapter.Luid,
             });
         }

@@ -102,8 +102,9 @@ impl Registry {
                     .map(move |entry| (*parent, entry.discriminator))
             })
             .collect();
-        bindings
-            .sort_unstable_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
+        bindings.sort_unstable_by(|left, right| {
+            left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1))
+        });
         bindings.dedup();
         bindings
     }

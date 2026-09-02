@@ -226,12 +226,13 @@ pub(super) fn resolve(path: &str, registry: &Registry, offset: usize) -> Result<
 
     if let Some((head, tail)) = stripped.split_once('.') {
         let protocol = registry.protocol_named(head).ok_or_else(unknown)?;
-        let schema = registry
-            .schema(protocol.as_str())
-            .ok_or_else(|| Error::UnresolvableProtocol {
-                path: path.to_owned(),
-                protocol,
-            })?;
+        let schema =
+            registry
+                .schema(protocol.as_str())
+                .ok_or_else(|| Error::UnresolvableProtocol {
+                    path: path.to_owned(),
+                    protocol,
+                })?;
         let declared = schema
             .fields
             .iter()

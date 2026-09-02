@@ -5,7 +5,7 @@
 
 use std::net::IpAddr;
 
-use packetcraftr_core::{Packet, field::FieldValue, protocol::BuiltinProtocol, semantics};
+use packetcraftr_core::{Packet, field::FieldValue, packet::semantics, protocol::BuiltinProtocol};
 
 use super::error::Error;
 use crate::link::{MAX_VLAN_TAGS, MacAddress, VlanTag};

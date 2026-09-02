@@ -92,6 +92,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- **Breaking:** `packetcraftr_core::Packet` now lives in the public `packetcraftr_core::packet` module, and the formerly hidden IP semantics (`IpPath`, `TransportKey`, `outer_ip_path`, `live_destinations`, VLAN metadata) are published as `packetcraftr_core::packet::semantics`. The semantics no longer panic on unexpected address families; every failure is reported through `semantics::Error`.
+
 - **BREAKING:** the DNS-over-TCP exchange moved from
   `packetcraftr_netio::dns_tcp` to `packetcraftr::dns::tcp`. It is portable
   `std::net` code with no native dependency and one consumer, the DNS

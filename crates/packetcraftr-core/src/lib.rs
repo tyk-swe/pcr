@@ -27,14 +27,10 @@ pub mod fuzz;
 pub mod layer;
 pub mod layout;
 pub mod matcher;
-mod model;
+pub mod packet;
 pub mod protocol;
 mod protocol_catalog;
 pub mod registry;
-/// Cross-crate seam for the `packetcraftr` and `packetcraftr-netio` crates.
-/// Hidden from the docs and outside the semver contract.
-#[doc(hidden)]
-pub mod semantics;
 pub mod template;
 
-pub use model::{Packet, PacketError};
+pub use packet::{Packet, PacketError};

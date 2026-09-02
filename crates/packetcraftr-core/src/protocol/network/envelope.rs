@@ -8,8 +8,8 @@ use std::net::IpAddr;
 use crate::{
     codec::{LayerEncodeContext, NetworkEnvelope},
     layer::Layer,
+    packet::semantics::ipv4_source_route_destination,
     protocol::BuiltinProtocol,
-    semantics::ipv4_source_route_destination,
 };
 
 use crate::protocol::common::{invalid, network_from_addresses};

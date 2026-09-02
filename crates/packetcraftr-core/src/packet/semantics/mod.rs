@@ -1,6 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Canonical interpretation of the fields a live boundary acts on: the outer
+//! IP path, transport keys, VLAN tags, and every destination a packet
+//! declares. The protocol identity it interprets is
+//! [`BuiltinProtocol`](crate::protocol::BuiltinProtocol).
+
 //! Canonical IP and live-route interpretation.
 
 mod destination;

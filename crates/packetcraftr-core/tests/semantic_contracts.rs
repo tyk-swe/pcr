@@ -9,17 +9,17 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use bytes::Bytes;
 use packetcraftr_core::field::WireValue;
 use packetcraftr_core::layer::{Malformed, Raw};
+use packetcraftr_core::packet::semantics::{
+    VlanKind, VlanMetadata, enclosing_ip_path, live_destinations, outer_ip_path, outer_layers,
+    outer_scope_len, transport_key, transport_keys_are_reversed, validate_segment_route,
+    vlan_metadata,
+};
 use packetcraftr_core::protocol::BuiltinProtocol;
 use packetcraftr_core::protocol::ipv6::{Fragment, SegmentRoutingHeader};
 use packetcraftr_core::protocol::link::{Arp, Vlan, Vlan8021ad};
 use packetcraftr_core::protocol::network::{Ipv4, Ipv6};
 use packetcraftr_core::protocol::transport::{Sctp, Tcp, Udp};
 use packetcraftr_core::protocol::tunnel::Vxlan;
-use packetcraftr_core::semantics::{
-    VlanKind, VlanMetadata, enclosing_ip_path, live_destinations, outer_ip_path, outer_layers,
-    outer_scope_len, transport_key, transport_keys_are_reversed, validate_segment_route,
-    vlan_metadata,
-};
 use packetcraftr_core::{Packet, reflective_layer};
 
 #[derive(Clone, Debug, PartialEq, Eq)]

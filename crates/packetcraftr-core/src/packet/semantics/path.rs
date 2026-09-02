@@ -1,12 +1,15 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::net::{IpAddr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use super::error::Error;
 use super::ipv4_option::{ParsedIpv4SourceRoutes, parse_ipv4_source_routes};
 use super::segment_routing::{SegmentRoute, validate_segment_route};
-use crate::semantics::{BuiltinProtocol, FieldValue, Layer, Packet};
+use crate::field::FieldValue;
+use crate::layer::Layer;
+use crate::packet::Packet;
+use crate::protocol::BuiltinProtocol;
 
 pub const SOURCE: &str = "source";
 pub const DESTINATION: &str = "destination";
@@ -32,6 +35,23 @@ pub struct IpPath {
     pub declared_route_destinations: Vec<IpAddr>,
 }
 
+/// The address family of one built-in IP header layer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum IpFamily {
+    V4,
+    V6,
+}
+
+impl IpFamily {
+    pub(super) fn of(protocol: BuiltinProtocol) -> Option<Self> {
+        match protocol {
+            BuiltinProtocol::Ipv4 => Some(Self::V4),
+            BuiltinProtocol::Ipv6 => Some(Self::V6),
+            _ => None,
+        }
+    }
+}
+
 /// Number of directly transmitted layers through the first encapsulation boundary.
 pub fn outer_scope_len(packet: &Packet) -> usize {
     packet
@@ -49,19 +69,15 @@ pub fn outer_layers(packet: &Packet) -> impl Iterator<Item = &dyn Layer> {
 
 pub fn outer_ip_path(packet: &Packet) -> Result<Option<IpPath>, Error> {
     let scope = outer_scope_len(packet);
-    let Some((index, protocol)) =
-        packet
-            .iter()
-            .take(scope)
-            .enumerate()
-            .find_map(|(index, layer)| {
-                let protocol = BuiltinProtocol::of(layer)?;
-                protocol.is_ip().then_some((index, protocol))
-            })
+    let Some((index, family)) = packet
+        .iter()
+        .take(scope)
+        .enumerate()
+        .find_map(|(index, layer)| Some((index, IpFamily::of(BuiltinProtocol::of(layer)?)?)))
     else {
         return Ok(None);
     };
-    ip_path_at(packet, index, scope, protocol).map(Some)
+    ip_path_at(packet, index, scope, family).map(Some)
 }
 
 /// Returns the nearest enclosing IP path. A malformed nearest header is an
@@ -70,75 +86,84 @@ pub fn enclosing_ip_path(
     packet: &Packet,
     upper_layer_index: usize,
 ) -> Result<Option<IpPath>, Error> {
-    let Some((index, protocol)) = packet
+    let Some((index, family)) = packet
         .iter()
         .enumerate()
         .take(upper_layer_index)
         .rev()
-        .find_map(|(index, layer)| {
-            let protocol = BuiltinProtocol::of(layer)?;
-            protocol.is_ip().then_some((index, protocol))
-        })
+        .find_map(|(index, layer)| Some((index, IpFamily::of(BuiltinProtocol::of(layer)?)?)))
     else {
         return Ok(None);
     };
-    ip_path_at(packet, index, upper_layer_index, protocol).map(Some)
+    ip_path_at(packet, index, upper_layer_index, family).map(Some)
 }
 
 pub(super) fn ip_path_at(
     packet: &Packet,
     network_index: usize,
     upper_bound: usize,
-    protocol: BuiltinProtocol,
+    family: IpFamily,
 ) -> Result<IpPath, Error> {
     let layer = packet
         .layer(network_index)
         .ok_or(Error::LayerIndexOutOfRange)?;
-    let source = ip_field(layer, SOURCE, protocol)?;
-    let header_destination = ip_field(layer, DESTINATION, protocol)?;
-
-    if protocol == BuiltinProtocol::Ipv4 {
-        reject_non_atomic_fragment(layer)?;
-        let source_route = match layer.field(IPV4_OPTIONS) {
-            Some(FieldValue::Bytes(options)) => parse_ipv4_source_routes(&options)?,
-            None => ParsedIpv4SourceRoutes::default(),
-            Some(_) => {
-                return Err(Error::field(
-                    layer.protocol_id(),
-                    IPV4_OPTIONS,
-                    "is not bytes",
-                ));
-            }
-        };
-        let IpAddr::V4(header_destination_v4) = header_destination else {
-            unreachable!("IPv4 field extraction returned a different family");
-        };
-        let final_destination = IpAddr::V4(source_route.final_destination(header_destination_v4));
-        let declared_route_destinations = source_route
-            .declared
-            .into_iter()
-            .map(IpAddr::V4)
-            .collect::<Vec<_>>();
-        let mut visited_destinations = vec![header_destination];
-        visited_destinations.extend(source_route.remaining.into_iter().map(IpAddr::V4));
-        return Ok(IpPath {
-            source,
-            header_destination,
-            active_destination: header_destination,
-            final_destination,
-            visited_destinations,
-            declared_route_destinations,
-        });
+    match family {
+        IpFamily::V4 => ipv4_path(layer),
+        IpFamily::V6 => ipv6_path(packet, network_index, upper_bound, layer),
     }
+}
 
-    let IpAddr::V6(header_destination_v6) = header_destination else {
-        unreachable!("IPv6 field extraction returned a different family");
+fn ipv4_path(layer: &dyn Layer) -> Result<IpPath, Error> {
+    let source = ipv4_field(layer, SOURCE)?;
+    let header_destination = ipv4_field(layer, DESTINATION)?;
+    reject_non_atomic_fragment(layer)?;
+    let source_route = match layer.field(IPV4_OPTIONS) {
+        Some(FieldValue::Bytes(options)) => parse_ipv4_source_routes(&options)?,
+        None => ParsedIpv4SourceRoutes::default(),
+        Some(_) => {
+            return Err(Error::field(
+                layer.protocol_id(),
+                IPV4_OPTIONS,
+                "is not bytes",
+            ));
+        }
     };
+    let final_destination = IpAddr::V4(source_route.final_destination(header_destination));
+    let declared_route_destinations = source_route
+        .declared
+        .into_iter()
+        .map(IpAddr::V4)
+        .collect::<Vec<_>>();
+    let header_destination = IpAddr::V4(header_destination);
+    let mut visited_destinations = vec![header_destination];
+    visited_destinations.extend(source_route.remaining.into_iter().map(IpAddr::V4));
+    Ok(IpPath {
+        source: IpAddr::V4(source),
+        header_destination,
+        active_destination: header_destination,
+        final_destination,
+        visited_destinations,
+        declared_route_destinations,
+    })
+}
+
+fn ipv6_path(
+    packet: &Packet,
+    network_index: usize,
+    upper_bound: usize,
+    layer: &dyn Layer,
+) -> Result<IpPath, Error> {
+    let source = IpAddr::V6(ipv6_field(layer, SOURCE)?);
+    let header_destination_v6 = ipv6_field(layer, DESTINATION)?;
+    let header_destination = IpAddr::V6(header_destination_v6);
     let mut segment_route = None;
-    for candidate_index in network_index.saturating_add(1)..upper_bound.min(packet.len()) {
-        let candidate = packet
-            .layer(candidate_index)
-            .expect("bounded packet layer index");
+    let extension_headers = packet
+        .iter()
+        .enumerate()
+        .take(upper_bound)
+        .skip(network_index.saturating_add(1))
+        .map(|(_, candidate)| candidate);
+    for candidate in extension_headers {
         let Some(candidate_protocol) = BuiltinProtocol::of(candidate) else {
             break;
         };
@@ -156,40 +181,38 @@ pub(super) fn ip_path_at(
         }
     }
 
-    if let Some(route) = segment_route {
-        let declared_route_destinations = route
-            .segments
-            .iter()
-            .copied()
-            .map(IpAddr::V6)
-            .collect::<Vec<_>>();
-        #[expect(
-            clippy::indexing_slicing,
-            reason = "validate_segment_route keeps active_index at or below segments.len() - 1"
-        )]
-        let visited_destinations = route.segments[route.active_index..]
-            .iter()
-            .copied()
-            .map(IpAddr::V6)
-            .collect();
-        Ok(IpPath {
-            source,
-            header_destination,
-            active_destination: IpAddr::V6(route.active_destination),
-            final_destination: IpAddr::V6(route.final_destination),
-            visited_destinations,
-            declared_route_destinations,
-        })
-    } else {
-        Ok(IpPath {
+    let Some(route) = segment_route else {
+        return Ok(IpPath {
             source,
             header_destination,
             active_destination: header_destination,
             final_destination: header_destination,
             visited_destinations: vec![header_destination],
             declared_route_destinations: Vec::new(),
-        })
-    }
+        });
+    };
+    let declared_route_destinations = route
+        .segments
+        .iter()
+        .copied()
+        .map(IpAddr::V6)
+        .collect::<Vec<_>>();
+    let visited_destinations = route
+        .segments
+        .get(route.active_index..)
+        .unwrap_or_default()
+        .iter()
+        .copied()
+        .map(IpAddr::V6)
+        .collect();
+    Ok(IpPath {
+        source,
+        header_destination,
+        active_destination: IpAddr::V6(route.active_destination),
+        final_destination: IpAddr::V6(route.final_destination),
+        visited_destinations,
+        declared_route_destinations,
+    })
 }
 
 pub(super) fn reject_non_atomic_fragment(layer: &dyn Layer) -> Result<(), Error> {
@@ -291,21 +314,18 @@ pub(super) fn required_u8_field(layer: &dyn Layer, field: &'static str) -> Resul
     }
 }
 
-fn ip_field(
-    layer: &dyn Layer,
-    field: &'static str,
-    protocol: BuiltinProtocol,
-) -> Result<IpAddr, Error> {
-    match (protocol, layer.field(field)) {
-        (BuiltinProtocol::Ipv4, Some(FieldValue::Ipv4(value))) => Ok(IpAddr::V4(value)),
-        (BuiltinProtocol::Ipv6, Some(FieldValue::Ipv6(value))) => Ok(IpAddr::V6(value)),
-        (BuiltinProtocol::Ipv4, Some(_)) => {
-            Err(Error::field(layer.protocol_id(), field, "is not IPv4"))
-        }
-        (BuiltinProtocol::Ipv6, Some(_)) => {
-            Err(Error::field(layer.protocol_id(), field, "is not IPv6"))
-        }
-        (_, None) => Err(Error::field(layer.protocol_id(), field, "is missing")),
-        _ => unreachable!("ip_field is only called for an IP protocol"),
+fn ipv4_field(layer: &dyn Layer, field: &'static str) -> Result<Ipv4Addr, Error> {
+    match layer.field(field) {
+        Some(FieldValue::Ipv4(value)) => Ok(value),
+        Some(_) => Err(Error::field(layer.protocol_id(), field, "is not IPv4")),
+        None => Err(Error::field(layer.protocol_id(), field, "is missing")),
+    }
+}
+
+fn ipv6_field(layer: &dyn Layer, field: &'static str) -> Result<Ipv6Addr, Error> {
+    match layer.field(field) {
+        Some(FieldValue::Ipv6(value)) => Ok(value),
+        Some(_) => Err(Error::field(layer.protocol_id(), field, "is not IPv6")),
+        None => Err(Error::field(layer.protocol_id(), field, "is missing")),
     }
 }

@@ -8,7 +8,7 @@ use std::time::Instant;
 
 use packetcraftr_core::build::{self, Builder, BuiltPacket};
 use packetcraftr_core::protocol::link::Ethernet;
-use packetcraftr_core::{Packet, field::FieldValue, protocol::BuiltinProtocol, semantics};
+use packetcraftr_core::{Packet, field::FieldValue, packet::semantics, protocol::BuiltinProtocol};
 use packetcraftr_netio::{neighbor, route, transmit};
 
 use super::target::Family;

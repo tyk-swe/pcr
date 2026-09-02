@@ -5,7 +5,7 @@
 
 use std::fmt;
 
-use packetcraftr_core::semantics;
+use packetcraftr_core::packet::semantics;
 
 /// Maximum explicit VLAN headers carried by one planned link-layer route.
 pub const MAX_VLAN_TAGS: usize = 8;

@@ -1,14 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Ordered layer stacks and the canonical interpretation of their outer scope.
+
 use std::fmt;
 
-use super::layer::Layer;
+use crate::layer::{Layer, Padding};
 
-mod boundary;
-mod error;
-
-pub use error::PacketError;
+pub mod semantics;
 
 /// Exactly one ordered, arbitrary wire stack.
 ///
@@ -76,7 +75,7 @@ impl Packet {
                 len: self.layers.len(),
             });
         }
-        boundary::shift_padding_for_insert(&mut self.layers, index);
+        shift_padding_for_insert(&mut self.layers, index);
         self.layers.insert(index, Box::new(layer));
         self.invalidate_encoded_payload_lengths();
         Ok(self)
@@ -89,11 +88,11 @@ impl Packet {
                 len: self.layers.len(),
             });
         }
-        if boundary::removal_would_orphan_padding(&self.layers, index) {
+        if removal_would_orphan_padding(&self.layers, index) {
             return Err(PacketError::PaddingBoundaryRemoval { index });
         }
         let removed = self.layers.remove(index);
-        boundary::shift_padding_for_remove(&mut self.layers, index);
+        shift_padding_for_remove(&mut self.layers, index);
         self.invalidate_encoded_payload_lengths();
         Ok(removed)
     }
@@ -190,5 +189,57 @@ impl<L: Layer> FromIterator<L> for Packet {
             layers,
             encoded_payload_lengths,
         }
+    }
+}
+
+/// Why a structural [`crate::Packet`] operation was refused.
+#[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PacketError {
+    #[error("layer index {index} is outside packet length {len}")]
+    IndexOutOfBounds { index: usize, len: usize },
+    #[error(
+        "cannot remove layer {index}: padding coverage ends at that layer and no successor can preserve the boundary"
+    )]
+    PaddingBoundaryRemoval { index: usize },
+}
+
+/// Whether removing the layer at `index` would leave a padding layer whose
+/// declared boundary no longer has a layer to sit outside of.
+fn removal_would_orphan_padding(layers: &[Box<dyn Layer>], index: usize) -> bool {
+    layers.iter().enumerate().any(|(padding_index, layer)| {
+        layer
+            .as_any()
+            .downcast_ref::<Padding>()
+            .is_some_and(|padding| {
+                padding.outside_layer == Some(index) && index.saturating_add(1) >= padding_index
+            })
+    })
+}
+
+fn shift_padding_for_insert(layers: &mut [Box<dyn Layer>], index: usize) {
+    for layer in layers {
+        let Some(padding) = layer.as_any_mut().downcast_mut::<Padding>() else {
+            continue;
+        };
+        if let Some(outside_layer) = &mut padding.outside_layer
+            && *outside_layer >= index
+        {
+            *outside_layer = outside_layer.saturating_add(1);
+        }
+    }
+}
+
+fn shift_padding_for_remove(layers: &mut [Box<dyn Layer>], index: usize) {
+    for layer in layers {
+        let Some(padding) = layer.as_any_mut().downcast_mut::<Padding>() else {
+            continue;
+        };
+        padding.outside_layer = match padding.outside_layer {
+            Some(outside_layer) if outside_layer > index => Some(outside_layer.saturating_sub(1)),
+            // The successor now occupies the removed index.
+            Some(outside_layer) if outside_layer == index => Some(index),
+            value => value,
+        };
     }
 }

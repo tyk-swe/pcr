@@ -5,7 +5,7 @@
 
 use packetcraftr_core::codec::NetworkEnvelope;
 use packetcraftr_core::frame::Frame;
-use packetcraftr_core::semantics;
+use packetcraftr_core::packet::semantics;
 use packetcraftr_netio::route::Provider;
 use packetcraftr_netio::{
     Error as LiveIoError,

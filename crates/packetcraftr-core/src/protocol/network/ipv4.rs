@@ -13,8 +13,8 @@ use crate::{
     diagnostic::{Diagnostic, IPV4_CHECKSUM},
     field::{FieldValue, WireValue},
     layer::{Layer, reflective_layer},
+    packet::semantics::ipv4_source_route_destination,
     registry::Discriminator,
-    semantics::ipv4_source_route_destination,
 };
 
 use crate::protocol::common::{

@@ -6,7 +6,9 @@ mod quoted_icmp;
 mod reverse_flow;
 mod sctp;
 
-use crate::{Packet, codec::NetworkEnvelope, layer::Layer, protocol::BuiltinProtocol, semantics};
+use crate::{
+    Packet, codec::NetworkEnvelope, layer::Layer, packet::semantics, protocol::BuiltinProtocol,
+};
 
 pub(crate) use echo::EchoMatcher;
 #[doc(hidden)]

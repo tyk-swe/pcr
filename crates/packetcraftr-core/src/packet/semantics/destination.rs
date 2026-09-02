@@ -4,9 +4,11 @@
 use std::net::IpAddr;
 
 use super::error::Error;
-use super::path::{DESTINATION, SEGMENTS, TARGET_PROTOCOL, ip_path_at};
+use super::path::{DESTINATION, IpFamily, SEGMENTS, TARGET_PROTOCOL, ip_path_at};
+use crate::field::FieldValue;
 use crate::layer::Malformed;
-use crate::semantics::{BuiltinProtocol, FieldValue, Packet};
+use crate::packet::Packet;
+use crate::protocol::BuiltinProtocol;
 
 pub(super) const ROUTE_FIELDS: [&str; 3] = [DESTINATION, SEGMENTS, TARGET_PROTOCOL];
 
@@ -26,9 +28,13 @@ pub fn live_destinations(packet: &Packet) -> Result<Vec<IpAddr>, Error> {
             });
         }
         match BuiltinProtocol::of(layer) {
-            Some(BuiltinProtocol::Ipv4 | BuiltinProtocol::Ipv6) => {
-                let protocol = BuiltinProtocol::of(layer).expect("matched built-in IP protocol");
-                let path = ip_path_at(packet, index, packet.len(), protocol)?;
+            Some(protocol @ (BuiltinProtocol::Ipv4 | BuiltinProtocol::Ipv6)) => {
+                let family = if protocol == BuiltinProtocol::Ipv4 {
+                    IpFamily::V4
+                } else {
+                    IpFamily::V6
+                };
+                let path = ip_path_at(packet, index, packet.len(), family)?;
                 push_if_specified(&mut destinations, path.header_destination);
                 for destination in path.declared_route_destinations {
                     push_if_specified(&mut destinations, destination);
@@ -130,7 +136,7 @@ fn validate_attached_srh(packet: &Packet, srh_index: usize) -> Result<(), Error>
                     packet,
                     network_index,
                     srh_index.saturating_add(1),
-                    BuiltinProtocol::Ipv6,
+                    IpFamily::V6,
                 )?;
                 return Ok(());
             }

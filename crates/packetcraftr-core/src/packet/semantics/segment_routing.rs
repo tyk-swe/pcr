@@ -21,9 +21,9 @@ pub fn validate_segment_route(
     last_entry: u8,
     flags: u8,
 ) -> Result<SegmentRoute, Error> {
-    if segments.is_empty() || segments.len() > 127 {
+    let Some(&final_destination) = segments.last().filter(|_| segments.len() <= 127) else {
         return Err(Error::SegmentCount);
-    }
+    };
     let expected_last = u8::try_from(segments.len().saturating_sub(1))
         .map_err(|_| Error::SegmentCountUnrepresentable)?;
     if last_entry != expected_last {
@@ -53,9 +53,6 @@ pub fn validate_segment_route(
             active: active_destination,
         });
     }
-    let final_destination = *segments
-        .last()
-        .expect("non-empty segment list was validated");
     Ok(SegmentRoute {
         active_destination,
         final_destination,

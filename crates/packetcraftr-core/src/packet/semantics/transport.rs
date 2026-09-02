@@ -4,7 +4,8 @@
 //! All-or-nothing transport tuple interpretation.
 
 use super::path::{DESTINATION_PORT, SOURCE_PORT};
-use crate::semantics::{BuiltinProtocol, Layer};
+use crate::layer::Layer;
+use crate::protocol::BuiltinProtocol;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TransportKey {

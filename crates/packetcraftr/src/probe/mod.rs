@@ -13,8 +13,8 @@ use packetcraftr_core::protocol::{
     QuotedIcmpError, QuotedProbeTransport, quoted_icmp_error_kind, transport::Tcp,
 };
 use packetcraftr_core::{
-    Packet, decode::DecodedPacket, diagnostic::Diagnostic, protocol::BuiltinProtocol,
-    registry::Registry, semantics,
+    Packet, decode::DecodedPacket, diagnostic::Diagnostic, packet::semantics,
+    protocol::BuiltinProtocol, registry::Registry,
 };
 
 /// Maps an operation-local sequence to an IPv4 identification that native

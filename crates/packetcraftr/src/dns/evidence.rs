@@ -119,7 +119,7 @@ fn map_dns_evidence_error(attempt: u32, error: ExchangeEvidenceError) -> Error {
 }
 
 fn dns_network_envelope(packet: &Packet) -> Option<NetworkEnvelope> {
-    let path = packetcraftr_core::semantics::outer_ip_path(packet).ok()??;
+    let path = packetcraftr_core::packet::semantics::outer_ip_path(packet).ok()??;
     Some(NetworkEnvelope {
         source: path.source,
         destination: path.header_destination,
@@ -135,7 +135,7 @@ fn dns_udp_ports(packet: &Packet) -> Option<UdpPorts> {
     let udp = packet
         .iter()
         .find(|layer| BuiltinProtocol::of(*layer) == Some(BuiltinProtocol::Udp))?;
-    let udp = packetcraftr_core::semantics::transport_key(udp)?;
+    let udp = packetcraftr_core::packet::semantics::transport_key(udp)?;
     Some(UdpPorts {
         source: udp.source_port,
         destination: udp.destination_port,

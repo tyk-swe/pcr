@@ -4,27 +4,26 @@
 // for library paths.
 #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
+//! Contracts for the offline fuzz engine: determinism, bounded resources, and
+//! progressive output.
+
 use std::net::Ipv4Addr;
 use std::sync::Arc;
 
-use crate::protocol::{network::Ipv4, transport::Udp};
-use crate::{
-    Packet,
-    build::{Mode, Options},
-    layer::Raw,
-    registry::Registry,
-};
 use bytes::Bytes;
-
-use super::error::Error;
-use super::report::CaseOutcome;
-use super::request::{Limits, Request, Strategy};
-use super::run::run as fuzz;
-use super::run::run_observed;
-use crate::error::{BoundaryError, Classification, Classified, Kind};
+use packetcraftr_core::Packet;
+use packetcraftr_core::build::{Mode, Options};
+use packetcraftr_core::error::{BoundaryError, Classification, Classified, Kind};
+use packetcraftr_core::fuzz::{
+    CaseOutcome, Error, Limits, Request, Strategy, run as fuzz, run_observed,
+};
+use packetcraftr_core::layer::Raw;
+use packetcraftr_core::protocol::network::Ipv4;
+use packetcraftr_core::protocol::transport::Udp;
+use packetcraftr_core::registry::Registry;
 
 fn fuzz_protocol_registry() -> Arc<Registry> {
-    crate::protocol::builtin::registry()
+    packetcraftr_core::protocol::builtin::registry()
 }
 
 fn udp_fuzz_packet() -> Packet {

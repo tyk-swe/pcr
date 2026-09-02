@@ -4,28 +4,16 @@
 // for library paths.
 #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
+mod common;
+
+use common::packets::{ROOT_LINK_TYPE, rooted_registry};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use packetcraftr_core::frame::{Frame, LinkType};
+use packetcraftr_core::frame::Frame;
 use packetcraftr_core::protocol::{BuiltinProtocol, builtin};
-use packetcraftr_core::registry::Registry;
 use packetcraftr_core::{Packet, build, decode};
-
-/// A spare link type bound to an explicit root protocol so a dissection can
-/// start below the capture layer.
-const ROOT_LINK_TYPE: LinkType = LinkType(u32::MAX);
-
-fn rooted_registry(root: &'static str) -> Arc<Registry> {
-    Arc::new(
-        builtin::registry_with(|builder| {
-            builder.bind_link_type(ROOT_LINK_TYPE.0, root)?;
-            Ok(())
-        })
-        .unwrap_or_else(|error| panic!("{root} root binding: {error}")),
-    )
-}
 
 const REQUIRES_PACKET_CONTEXT_OR_CHILD: &[&str] = &[
     "bsd_loop", "bsd_null", "erspan", "esp", "icmpv6", "ipv6_srh", "llc", "padding", "pppoe",

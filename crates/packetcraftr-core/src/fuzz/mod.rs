@@ -49,8 +49,6 @@ mod report;
 mod request;
 pub(crate) mod rng;
 mod run;
-#[cfg(test)]
-mod tests;
 
 pub use decode::{dissect_built, packet_link_type};
 pub use error::Error;

@@ -4,15 +4,14 @@
 // for library paths.
 #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
-#[path = "common/tls_vectors.rs"]
-mod tls_vectors;
+mod common;
 
 use packetcraftr_core::protocol::application::tls::{
     Handshake, Outcome, Transport, ja3, ja3s, ja4, looks_like_record_start, parse_handshake,
     parse_record,
 };
 
-use tls_vectors::{CLIENT_HELLO_VECTORS, HelloVector, SERVER_HELLO_VECTORS, decode_hex};
+use common::tls_vectors::{CLIENT_HELLO_VECTORS, HelloVector, SERVER_HELLO_VECTORS, decode_hex};
 
 fn handshake(vector: &HelloVector) -> Handshake {
     let record = decode_hex(vector.record_hex);

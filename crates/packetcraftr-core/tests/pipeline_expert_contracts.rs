@@ -10,9 +10,9 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use common::{TcpSpec, client_tcp, reader, registry, server_tcp, tcp_frame};
-use packetcraftr_core::analysis::expert::Collector;
+use packetcraftr_core::analysis::expert::{Collector, Finding};
 use packetcraftr_core::analysis::reassembly::tcp;
-use packetcraftr_core::analysis::{Error, Options, run};
+use packetcraftr_core::analysis::{Error, Options, StreamRef, StreamTransport, run};
 use packetcraftr_core::error::{BoundaryError, Classified, Kind};
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::protocol::transport::Tcp;
@@ -107,7 +107,6 @@ fn expert_frames(registry: &Arc<Registry>, epoch: SystemTime) -> Vec<Frame> {
 
 #[test]
 fn expert_combines_header_reassembly_and_end_of_capture_findings() {
-    let _udp_fixture = common::udp_frame;
     let registry = registry();
     let frames = expert_frames(&registry, SystemTime::UNIX_EPOCH);
     let mut capture = reader(&frames);
@@ -249,4 +248,35 @@ fn analysis_errors_keep_policy_packet_and_boundary_classifications_distinct() {
     };
     assert_eq!(sink.classification().code, "test.sink");
     assert_eq!(sink.causes(), Vec::<String>::new());
+}
+
+#[test]
+fn expert_public_models_and_collector_keep_their_contracts() {
+    type Finish = fn(
+        packetcraftr_core::analysis::expert::Collector,
+        &packetcraftr_core::analysis::Summary,
+    ) -> (Vec<Finding>, packetcraftr_core::analysis::expert::Summary);
+
+    fn assert_model<T: Clone + std::fmt::Debug + Eq>() {}
+    fn assert_collector<T: Default + std::fmt::Debug>() {}
+    fn observe<'record>(
+        collector: &mut packetcraftr_core::analysis::expert::Collector,
+        record: &packetcraftr_core::analysis::FrameRecord<'record>,
+    ) -> Vec<Finding> {
+        collector.observe(record)
+    }
+
+    assert_model::<Finding>();
+    assert_model::<packetcraftr_core::analysis::expert::Summary>();
+    assert_model::<StreamRef>();
+    assert_model::<StreamTransport>();
+    assert_collector::<packetcraftr_core::analysis::expert::Collector>();
+
+    let _: fn() -> packetcraftr_core::analysis::expert::Collector =
+        packetcraftr_core::analysis::expert::Collector::new;
+    let _: for<'record> fn(
+        &mut packetcraftr_core::analysis::expert::Collector,
+        &packetcraftr_core::analysis::FrameRecord<'record>,
+    ) -> Vec<Finding> = observe;
+    let _: Finish = packetcraftr_core::analysis::expert::Collector::finish;
 }

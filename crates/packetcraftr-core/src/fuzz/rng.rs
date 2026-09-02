@@ -15,7 +15,7 @@ pub(super) fn case_seed(operation_seed: u64, case_index: u64) -> u64 {
 /// SplitMix64: the one deterministic generator this crate uses.
 ///
 /// The fuzz engine seeds cases with it, and the TLS parser's mutation test
-/// reuses it rather than hand-rolling another.
+/// reuses it.
 pub(crate) struct SplitMix64 {
     state: u64,
 }

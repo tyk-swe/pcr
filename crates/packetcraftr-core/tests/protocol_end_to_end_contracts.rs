@@ -4,6 +4,10 @@
 // for library paths.
 #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
+mod common;
+
+use common::packets::{ROOT_LINK_TYPE, ipv4, ipv6, rooted_registry};
+use common::registry;
 use std::collections::BTreeSet;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
@@ -18,7 +22,6 @@ use packetcraftr_core::filter::{Context as FilterContext, Filter};
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::{Layer, Malformed, Raw};
 use packetcraftr_core::protocol::application::Dns;
-use packetcraftr_core::protocol::builtin;
 use packetcraftr_core::protocol::capture::{BsdLoop, BsdNull, LinuxSll, LinuxSll2};
 use packetcraftr_core::protocol::gre::Gre;
 use packetcraftr_core::protocol::icmp::{Icmpv4, Icmpv6};
@@ -26,31 +29,13 @@ use packetcraftr_core::protocol::ipv6::{
     DestinationOptions, Fragment, HopByHop, SegmentRoutingHeader,
 };
 use packetcraftr_core::protocol::link::{Arp, Ethernet, Llc, Snap, Vlan};
-use packetcraftr_core::protocol::network::{Igmp, Ipv4, Ipv6};
+use packetcraftr_core::protocol::network::{Igmp, Ipv4};
 use packetcraftr_core::protocol::transport::{Sctp, Tcp, Udp};
 use packetcraftr_core::protocol::tunnel::{
     Ah, Erspan, Esp, Geneve, L2tpv3, Mpls, Ppp, Pppoe, Vxlan,
 };
 use packetcraftr_core::registry::Registry;
 use packetcraftr_core::{Packet, build, decode};
-
-fn registry() -> Arc<Registry> {
-    builtin::registry()
-}
-
-/// A spare link type these tests bind to an explicit root protocol so a
-/// dissection can start below the capture layer.
-const ROOT_LINK_TYPE: LinkType = LinkType(u32::MAX);
-
-fn rooted_registry(root: &'static str) -> Arc<Registry> {
-    Arc::new(
-        builtin::registry_with(|builder| {
-            builder.bind_link_type(ROOT_LINK_TYPE.0, root)?;
-            Ok(())
-        })
-        .unwrap_or_else(|error| panic!("{root} root binding: {error}")),
-    )
-}
 
 fn decode_from_root(
     registry: &Arc<Registry>,
@@ -78,22 +63,6 @@ fn round_trip(packet: Packet, root: &'static str) -> (build::BuiltPacket, decode
         .unwrap_or_else(|error| panic!("{root} rebuild: {error}"));
     assert_eq!(rebuilt.bytes, built.bytes, "{root} exact round trip");
     (built, decoded)
-}
-
-fn ipv4(source: [u8; 4], destination: [u8; 4]) -> Ipv4 {
-    Ipv4 {
-        source: Ipv4Addr::from(source),
-        destination: Ipv4Addr::from(destination),
-        ..Ipv4::default()
-    }
-}
-
-fn ipv6(source: &str, destination: &str) -> Ipv6 {
-    Ipv6 {
-        source: source.parse().expect("source address"),
-        destination: destination.parse().expect("destination address"),
-        ..Ipv6::default()
-    }
 }
 
 fn ipv4_source_route(option: u8, pointer: u8, addresses: &[Ipv4Addr]) -> Bytes {

@@ -7,25 +7,22 @@
 //! Contracts of the display-filter language: what a path resolves to, what a
 //! comparison means at run time, and which mistakes are compile errors.
 
+mod common;
+
+use common::registry;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use packetcraftr_core::filter::{Context, Error, Filter, Options};
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::Raw;
-use packetcraftr_core::protocol::builtin;
 use packetcraftr_core::protocol::link::Ethernet;
 use packetcraftr_core::protocol::network::{Ipv4, Ipv6};
 use packetcraftr_core::protocol::transport::{Tcp, Udp};
 use packetcraftr_core::protocol::tunnel::Vxlan;
-use packetcraftr_core::registry::Registry;
 use packetcraftr_core::{Packet, build, decode};
 
 const PAYLOAD: &[u8] = b"GET /index HTTP/1.1";
-
-fn registry() -> Arc<Registry> {
-    builtin::registry()
-}
 
 /// Builds one Ethernet-rooted packet and dissects the exact bytes back.
 fn decoded(packet: Packet) -> decode::DecodedPacket {

@@ -92,8 +92,7 @@ impl Classified for Error {
         }
     }
 
-    /// Walked from the retained `#[source]` chain rather than hand-written.
-    /// The output variant delegates instead: a [`BoundaryError`] carries a
+    /// The output variant delegates to its [`BoundaryError`], which carries a
     /// captured `causes` snapshot its own source chain no longer holds.
     fn causes(&self) -> Vec<String> {
         match self {

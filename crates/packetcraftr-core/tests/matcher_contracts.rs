@@ -4,8 +4,10 @@
 // for library paths.
 #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
+mod common;
+
+use common::registry;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::sync::Arc;
 
 use bytes::Bytes;
 use packetcraftr_core::layer::Raw;
@@ -14,9 +16,7 @@ use packetcraftr_core::protocol::ipv6::{Fragment, HopByHop};
 use packetcraftr_core::protocol::network::{Ipv4, Ipv6};
 use packetcraftr_core::protocol::transport::{Sctp, Tcp, Udp};
 use packetcraftr_core::protocol::tunnel::Ah;
-use packetcraftr_core::protocol::{
-    QuotedIcmpError, QuotedProbeTransport, builtin, quoted_icmp_error_kind,
-};
+use packetcraftr_core::protocol::{QuotedIcmpError, QuotedProbeTransport, quoted_icmp_error_kind};
 use packetcraftr_core::{Packet, build};
 
 const IPV4_CLIENT: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 1);
@@ -61,10 +61,6 @@ impl ProbeTransport {
             Self::Icmp => None,
         }
     }
-}
-
-fn registry() -> Arc<packetcraftr_core::registry::Registry> {
-    builtin::registry()
 }
 
 fn ipv4_envelope(source: Ipv4Addr, destination: Ipv4Addr) -> Packet {

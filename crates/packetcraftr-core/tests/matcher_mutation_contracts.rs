@@ -4,29 +4,18 @@
 // for library paths.
 #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
-use std::net::Ipv4Addr;
+mod common;
+
+use common::packets::ipv4;
+use common::registry;
 use std::sync::Arc;
 use std::time::SystemTime;
 
 use bytes::Bytes;
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::{Padding, Raw};
-use packetcraftr_core::protocol::builtin;
-use packetcraftr_core::protocol::network::Ipv4;
 use packetcraftr_core::protocol::transport::Tcp;
 use packetcraftr_core::{Packet, build, decode};
-
-fn registry() -> Arc<packetcraftr_core::registry::Registry> {
-    builtin::registry()
-}
-
-fn ipv4(source: [u8; 4], destination: [u8; 4]) -> Ipv4 {
-    Ipv4 {
-        source: Ipv4Addr::from(source),
-        destination: Ipv4Addr::from(destination),
-        ..Ipv4::default()
-    }
-}
 
 #[test]
 fn tcp_response_correlation_uses_decoded_payload_after_every_mutation_api() {

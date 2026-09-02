@@ -43,7 +43,7 @@ reflective_layer! {
     layout pub fn route_mimic_layout();
 }
 
-fn ipv6(value: &str) -> Ipv6Addr {
+fn ipv6_addr(value: &str) -> Ipv6Addr {
     value.parse().expect("test address must be valid IPv6")
 }
 
@@ -88,14 +88,14 @@ fn live_destinations_include_ipv4_routes_and_arp_targets_once() {
 #[test]
 fn ipv6_segment_route_reports_active_final_and_declared_destinations() {
     let segments = [
-        ipv6("2001:db8::10"),
-        ipv6("2001:db8::20"),
-        ipv6("2001:db8::30"),
+        ipv6_addr("2001:db8::10"),
+        ipv6_addr("2001:db8::20"),
+        ipv6_addr("2001:db8::30"),
     ];
     let mut packet = Packet::new();
     packet
         .push(Ipv6 {
-            source: ipv6("2001:db8::1"),
+            source: ipv6_addr("2001:db8::1"),
             destination: segments[1],
             ..Ipv6::default()
         })
@@ -132,9 +132,9 @@ fn ipv6_segment_route_reports_active_final_and_declared_destinations() {
 
 #[test]
 fn segment_route_validation_rejects_each_inconsistent_state() {
-    let first = ipv6("2001:db8::1");
-    let second = ipv6("2001:db8::2");
-    let other = ipv6("2001:db8::ffff");
+    let first = ipv6_addr("2001:db8::1");
+    let second = ipv6_addr("2001:db8::2");
+    let other = ipv6_addr("2001:db8::ffff");
     let cases = [
         ("empty", first, Vec::new(), 0, 0, 0, "requires 1..=127"),
         (
@@ -221,7 +221,7 @@ fn malformed_ipv4_source_routes_fail_closed() {
 #[test]
 fn encapsulation_bounds_outer_ip_and_vlan_interpretation() {
     let outer_destination = Ipv4Addr::new(192, 0, 2, 2);
-    let inner_destination = ipv6("2001:db8::2");
+    let inner_destination = ipv6_addr("2001:db8::2");
     let mut packet = Packet::new();
     packet
         .push(Vlan8021ad {
@@ -247,7 +247,7 @@ fn encapsulation_bounds_outer_ip_and_vlan_interpretation() {
             ..Vlan::default()
         })
         .push(Ipv6 {
-            source: ipv6("2001:db8::1"),
+            source: ipv6_addr("2001:db8::1"),
             destination: inner_destination,
             ..Ipv6::default()
         });
@@ -329,7 +329,7 @@ fn ambiguous_live_route_state_is_rejected_at_the_trust_boundary() {
     let mut ipv6_fragment = Packet::new();
     ipv6_fragment
         .push(Ipv6 {
-            destination: ipv6("2001:db8::1"),
+            destination: ipv6_addr("2001:db8::1"),
             ..Ipv6::default()
         })
         .push(Fragment {

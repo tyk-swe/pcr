@@ -3,6 +3,17 @@
 // Test code indexes fixtures and counts by hand; the fail-closed lints are
 // for library paths.
 #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+// Every integration test binary compiles this module tree separately and
+// uses only the fixtures it needs.
+#![allow(dead_code)]
+
+pub(crate) mod ip_fragments;
+pub(crate) mod packets;
+pub(crate) mod pcap;
+pub(crate) mod probe;
+pub(crate) mod tls_capture;
+pub(crate) mod tls_frames;
+pub(crate) mod tls_vectors;
 
 use std::io::Cursor;
 use std::net::Ipv4Addr;

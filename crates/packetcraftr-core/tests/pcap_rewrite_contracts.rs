@@ -4,6 +4,9 @@
 // for library paths.
 #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
+mod common;
+
+use common::pcap::{frame_at, pcap_bytes};
 use std::io::{self, Cursor, Write};
 use std::time::{Duration, SystemTime};
 
@@ -11,20 +14,7 @@ use packetcraftr_core::analysis::pcap::{
     Endianness, Error, Format, Limits, PcapOptions, Reader, Writer, rewrite,
 };
 use packetcraftr_core::error::{Classified, Kind};
-use packetcraftr_core::frame::{Frame, LinkType};
-
-fn frame_at(timestamp: SystemTime, link_type: LinkType, bytes: &[u8]) -> Frame {
-    Frame::new(timestamp, link_type, bytes.to_vec()).expect("fixture frame must be valid")
-}
-
-fn pcap_bytes(options: PcapOptions, frames: &[Frame]) -> Vec<u8> {
-    let mut writer = Writer::pcap_with_options(Vec::new(), LinkType::ETHERNET, options)
-        .expect("fixture writer must initialize");
-    for frame in frames {
-        writer.write_frame(frame).expect("fixture frame must write");
-    }
-    writer.into_inner()
-}
+use packetcraftr_core::frame::LinkType;
 
 #[derive(Debug)]
 struct FailAfter {

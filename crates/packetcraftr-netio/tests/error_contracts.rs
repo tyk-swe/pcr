@@ -64,7 +64,9 @@ fn ipv6(value: &str) -> IpAddr {
     value.parse().expect("fixture IPv6 address")
 }
 
-fn assert_contract(
+/// One table row: the published code and kind, a remediation, and a
+/// non-empty message.
+fn assert_row(
     error: &(impl Classified + fmt::Display),
     expected_code: &'static str,
     expected_kind: Kind,
@@ -76,6 +78,8 @@ fn assert_contract(
     assert!(!error.to_string().is_empty());
 }
 
+/// `route::Error` is `#[non_exhaustive]`; the table lists all 22 variants
+/// exactly once, so a new variant must add a row here.
 #[test]
 fn route_errors_keep_stable_classes_for_every_public_failure_variant() {
     let provider_failure = Classification::new(
@@ -231,7 +235,7 @@ fn route_errors_keep_stable_classes_for_every_public_failure_variant() {
     ];
 
     for (error, code, kind) in cases {
-        assert_contract(&error, code, kind);
+        assert_row(&error, code, kind);
     }
 }
 
@@ -261,6 +265,8 @@ fn route_lookup_failures_retain_the_provider_error_as_a_source() {
     assert_eq!(neighbor.to_string(), "neighbor request is invalid: fixture");
 }
 
+/// `route::SystemError` is `#[non_exhaustive]`; the table lists all 8
+/// variants exactly once, so a new variant must add a row here.
 #[test]
 fn system_route_errors_keep_stable_provider_classes() {
     let cases = [
@@ -331,7 +337,7 @@ fn system_route_errors_keep_stable_provider_classes() {
     ];
 
     for (error, code, kind) in cases {
-        assert_contract(&error, code, kind);
+        assert_row(&error, code, kind);
     }
 }
 
@@ -346,6 +352,8 @@ fn not_found() -> NeighborError {
     }
 }
 
+/// `neighbor::Error` is `#[non_exhaustive]`; the table lists all 8 variants
+/// exactly once, so a new variant must add a row here.
 #[test]
 fn neighbor_errors_keep_stable_classes_and_ordered_provider_causes() {
     const NO_CAUSES: &[&str] = &[];
@@ -435,13 +443,15 @@ fn neighbor_errors_keep_stable_classes_and_ordered_provider_causes() {
     ];
 
     for (error, code, kind, expected_causes) in cases {
-        assert_contract(&error, code, kind);
+        assert_row(&error, code, kind);
         let causes = error.causes();
         let causes = causes.iter().map(String::as_str).collect::<Vec<_>>();
         assert_eq!(causes.as_slice(), expected_causes, "{error}");
     }
 }
 
+/// `packetcraftr_netio::Error` is `#[non_exhaustive]`; the table lists all 22
+/// variants exactly once, so a new variant must add a row here.
 #[test]
 fn live_io_errors_keep_stable_classes_for_every_public_failure_variant() {
     let cases = [
@@ -621,7 +631,7 @@ fn live_io_errors_keep_stable_classes_for_every_public_failure_variant() {
     ];
 
     for (error, code, kind) in cases {
-        assert_contract(&error, code, kind);
+        assert_row(&error, code, kind);
     }
 }
 

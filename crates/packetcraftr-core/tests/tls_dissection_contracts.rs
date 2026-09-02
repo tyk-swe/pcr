@@ -7,22 +7,9 @@
 //! Per-frame TLS dissection: which TCP segments become a `tls` layer, which
 //! stay `raw`, and what each one publishes.
 
-#[expect(
-    dead_code,
-    reason = "the shared vector table carries provenance metadata that \
-              tls_fingerprint_contracts asserts; this file needs only the bytes"
-)]
-#[path = "common/tls_vectors.rs"]
-mod tls_vectors;
+mod common;
 
-#[expect(
-    dead_code,
-    reason = "the shared frame builders cover every TLS test; this file needs \
-              only a hello and an application-data record"
-)]
-#[path = "common/tls_frames.rs"]
-mod tls_frames;
-
+use common::registry;
 use std::sync::Arc;
 use std::time::SystemTime;
 
@@ -36,20 +23,15 @@ use packetcraftr_core::protocol::builtin;
 use packetcraftr_core::protocol::link::Ethernet;
 use packetcraftr_core::protocol::network::Ipv4;
 use packetcraftr_core::protocol::transport::Tcp;
-use packetcraftr_core::registry::Registry;
 use packetcraftr_core::{Packet, build, decode};
 
-use tls_frames::{ClientHelloSpec, application_data, client_hello, handshake_record};
-use tls_vectors::{CLIENT_HELLO_VECTORS, SERVER_HELLO_VECTORS, decode_hex};
+use common::tls_frames::{ClientHelloSpec, application_data, client_hello, handshake_record};
+use common::tls_vectors::{CLIENT_HELLO_VECTORS, SERVER_HELLO_VECTORS, decode_hex};
 
 /// The ports the default registry binds to TLS.
 const TLS_PORTS: &[u16] = &[443, 465, 636, 853, 993, 995, 8443];
 
 const CLIENT_PORT: u16 = 40_000;
-
-fn registry() -> Arc<Registry> {
-    builtin::registry()
-}
 
 /// A whole ClientHello record, from the published-JA4 vector.
 fn client_hello_record() -> Vec<u8> {

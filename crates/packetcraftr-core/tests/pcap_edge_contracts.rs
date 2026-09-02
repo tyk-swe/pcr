@@ -4,6 +4,9 @@
 // for library paths.
 #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
+mod common;
+
+use common::pcap::{frame_at, pcap_bytes};
 use std::io::Cursor;
 use std::time::{Duration, SystemTime};
 
@@ -11,20 +14,7 @@ use packetcraftr_core::analysis::pcap::{
     Endianness, Error, Format, Interface, Limits, PcapNgOptions, PcapOptions, Reader,
     ReaderOptions, TimestampResolution, Writer,
 };
-use packetcraftr_core::frame::{Direction, Frame, LinkType};
-
-fn frame_at(timestamp: SystemTime, link_type: LinkType, bytes: &[u8]) -> Frame {
-    Frame::new(timestamp, link_type, bytes.to_vec()).expect("fixture frame must be valid")
-}
-
-fn pcap_bytes(options: PcapOptions, frames: &[Frame]) -> Vec<u8> {
-    let mut writer = Writer::pcap_with_options(Vec::new(), LinkType::ETHERNET, options)
-        .expect("fixture writer must initialize");
-    for frame in frames {
-        writer.write_frame(frame).expect("fixture frame must write");
-    }
-    writer.into_inner()
-}
+use packetcraftr_core::frame::{Direction, LinkType};
 
 fn push_u16(bytes: &mut Vec<u8>, endianness: Endianness, value: u16) {
     let encoded = match endianness {
@@ -153,7 +143,7 @@ fn simple_packet_block(endianness: Endianness, original_length: u32, captured: &
     bytes
 }
 
-fn metadata_block(endianness: Endianness, block_type: u32) -> Vec<u8> {
+fn empty_metadata_block(endianness: Endianness, block_type: u32) -> Vec<u8> {
     let mut bytes = Vec::new();
     push_u32(&mut bytes, endianness, block_type);
     push_u32(&mut bytes, endianness, 12);
@@ -677,7 +667,7 @@ fn pcapng_reader_enforces_metadata_and_interface_budgets() {
     let bytes = pcapng_stream(
         endianness,
         &[
-            metadata_block(endianness, 0xfeed_beef),
+            empty_metadata_block(endianness, 0xfeed_beef),
             interface_block(endianness, 1, 64),
             enhanced_packet_block(endianness, 0, 0, 1, b"x", &[]),
         ],
@@ -782,7 +772,8 @@ fn pcapng_structural_corruption_fails_closed() {
         Err(Error::InvalidBlockLength { length: 14 })
     ));
 
-    let mut mismatch_block = pcapng_stream(endianness, &[metadata_block(endianness, 0xfeed_beef)]);
+    let mut mismatch_block =
+        pcapng_stream(endianness, &[empty_metadata_block(endianness, 0xfeed_beef)]);
     let end = mismatch_block.len();
     mismatch_block[end - 4..].copy_from_slice(&16_u32.to_le_bytes());
     let mut reader = Reader::new(Cursor::new(mismatch_block)).expect("section opens");
@@ -888,7 +879,7 @@ fn malformed_pcapng_packets_and_options_are_rejected() {
     ));
 
     for block_type in [6, 2] {
-        let bytes = pcapng_stream(endianness, &[metadata_block(endianness, block_type)]);
+        let bytes = pcapng_stream(endianness, &[empty_metadata_block(endianness, block_type)]);
         let mut reader = Reader::new(Cursor::new(bytes)).expect("section opens");
         assert!(matches!(
             reader.next_frame(),

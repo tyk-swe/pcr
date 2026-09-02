@@ -1,30 +1,17 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Directly transmitted VLAN metadata interpretation.
+//! Directly transmitted VLAN tag interpretation.
 
 use super::error::Error;
 use super::path::{outer_scope_len, required_u8_field};
 use crate::field::FieldValue;
 use crate::packet::Packet;
+use crate::packet::link::{VlanKind, VlanTag};
 use crate::protocol::BuiltinProtocol;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum VlanKind {
-    Ieee8021Q,
-    Ieee8021Ad,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct VlanMetadata {
-    pub kind: VlanKind,
-    pub priority: u8,
-    pub drop_eligible: bool,
-    pub vlan_id: u16,
-}
-
 /// Outermost-first VLAN tags on the directly transmitted packet.
-pub fn vlan_metadata(packet: &Packet) -> Result<Vec<VlanMetadata>, Error> {
+pub fn vlan_tags(packet: &Packet) -> Result<Vec<VlanTag>, Error> {
     packet
         .iter()
         .take(outer_scope_len(packet))
@@ -77,7 +64,7 @@ pub fn vlan_metadata(packet: &Packet) -> Result<Vec<VlanMetadata>, Error> {
                     return Err(Error::field(layer.protocol_id(), "vlan_id", "is missing"));
                 }
             };
-            Ok(VlanMetadata {
+            Ok(VlanTag {
                 kind,
                 priority,
                 drop_eligible,

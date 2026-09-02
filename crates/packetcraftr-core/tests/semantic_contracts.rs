@@ -9,10 +9,10 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use bytes::Bytes;
 use packetcraftr_core::field::WireValue;
 use packetcraftr_core::layer::{Malformed, Raw};
+use packetcraftr_core::packet::link::{VlanKind, VlanTag};
 use packetcraftr_core::packet::semantics::{
-    VlanKind, VlanMetadata, enclosing_ip_path, live_destinations, outer_ip_path, outer_layers,
-    outer_scope_len, transport_key, transport_keys_are_reversed, validate_segment_route,
-    vlan_metadata,
+    enclosing_ip_path, live_destinations, outer_ip_path, outer_layers, outer_scope_len,
+    transport_key, transport_keys_are_reversed, validate_segment_route, vlan_tags,
 };
 use packetcraftr_core::protocol::BuiltinProtocol;
 use packetcraftr_core::protocol::ipv6::{Fragment, SegmentRoutingHeader};
@@ -278,15 +278,15 @@ fn encapsulation_bounds_outer_ip_and_vlan_interpretation() {
         [IpAddr::V4(outer_destination), IpAddr::V6(inner_destination)]
     );
     assert_eq!(
-        vlan_metadata(&packet).expect("only directly transmitted tags are interpreted"),
+        vlan_tags(&packet).expect("only directly transmitted tags are interpreted"),
         [
-            VlanMetadata {
+            VlanTag {
                 kind: VlanKind::Ieee8021Ad,
                 priority: 5,
                 drop_eligible: true,
                 vlan_id: 4095,
             },
-            VlanMetadata {
+            VlanTag {
                 kind: VlanKind::Ieee8021Q,
                 priority: 1,
                 drop_eligible: false,
@@ -312,7 +312,7 @@ fn encapsulation_bounds_outer_ip_and_vlan_interpretation() {
         ),
     ] {
         let packet = [tag].into_iter().collect();
-        let error = vlan_metadata(&packet).unwrap_err();
+        let error = vlan_tags(&packet).unwrap_err();
         assert!(error.to_string().contains(message), "{error}");
     }
 }

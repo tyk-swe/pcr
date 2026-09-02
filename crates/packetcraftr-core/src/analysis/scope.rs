@@ -12,7 +12,7 @@ use thiserror::Error;
 use crate::frame::GlobalInterfaceId;
 
 /// One semantic identifier in the ordered encapsulation path enclosing a flow.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum EncapsulationIdentifier {
     Vlan {
@@ -250,10 +250,10 @@ mod tests {
         let mut interner = Interner::new();
         let ah = EncapsulationIdentifier::Ah { spi: 42 };
         let base = interner
-            .intern(Some(7), vec![ah.clone()])
+            .intern(Some(7), vec![ah])
             .expect("fragment scope fits");
         let mut replacement = tunnel_path(10);
-        replacement.insert(1, ah.clone());
+        replacement.insert(1, ah);
         let composed = interner
             .replace_suffix(base, std::slice::from_ref(&ah), &replacement)
             .expect("replayed suffix composes");

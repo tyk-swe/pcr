@@ -6,7 +6,9 @@
 use std::net::IpAddr;
 
 use crate::Packet;
+use crate::byte_slice::checked_slice;
 use crate::decode::DecodedPacket;
+use crate::layer::Layer;
 use crate::layer::Padding;
 use crate::protocol::gre::Gre;
 use crate::protocol::ipv6::Fragment as Ipv6FragmentHeader;
@@ -23,7 +25,7 @@ use crate::analysis::reassembly::ip::{
     Ipv6DatagramKey, Ipv6Fragment,
 };
 use crate::analysis::reassembly::tcp::{FlowKey, ScopedFlowKey, Segment};
-use crate::analysis::scope::{EncapsulationIdentifier, Interner, ScopeId};
+use crate::analysis::scope::{EncapsulationIdentifier, Error as ScopeError, Interner, ScopeId};
 
 /// Fragment observations extracted from one physical decoded frame.
 ///
@@ -71,7 +73,7 @@ pub(crate) struct UdpTransport {
 /// to dissection. Every walk that looks for fragments needs both the
 /// downcast and that test, so they travel together here rather than being
 /// restated at each site.
-fn ipv4_fragment(layer: &dyn crate::layer::Layer) -> Option<&Ipv4> {
+fn ipv4_fragment(layer: &dyn Layer) -> Option<&Ipv4> {
     layer
         .as_any()
         .downcast_ref::<Ipv4>()
@@ -80,7 +82,7 @@ fn ipv4_fragment(layer: &dyn crate::layer::Layer) -> Option<&Ipv4> {
 
 /// The IPv6 Fragment header at this layer, when it is non-atomic. The atomic
 /// rule is the same one [`ipv4_fragment`] documents.
-fn ipv6_fragment(layer: &dyn crate::layer::Layer) -> Option<&Ipv6FragmentHeader> {
+fn ipv6_fragment(layer: &dyn Layer) -> Option<&Ipv6FragmentHeader> {
     layer
         .as_any()
         .downcast_ref::<Ipv6FragmentHeader>()
@@ -92,7 +94,7 @@ fn ipv6_fragment(layer: &dyn crate::layer::Layer) -> Option<&Ipv6FragmentHeader>
 /// The transport walk and the fragment walk must agree on the encapsulation
 /// path or the same conversation would land in two scopes, so both read this
 /// single table rather than repeating the downcast chain.
-fn tunnel_identifier(layer: &dyn crate::layer::Layer) -> Option<EncapsulationIdentifier> {
+fn tunnel_identifier(layer: &dyn Layer) -> Option<EncapsulationIdentifier> {
     let any = layer.as_any();
     if let Some(vlan) = any.downcast_ref::<Vlan>() {
         Some(EncapsulationIdentifier::Vlan {
@@ -216,7 +218,7 @@ fn path_without(path: &[EncapsulationIdentifier], excluded: usize) -> Vec<Encaps
     path.iter()
         .enumerate()
         .filter(|(index, _)| *index != excluded)
-        .map(|(_, identifier)| identifier.clone())
+        .map(|(_, identifier)| *identifier)
         .collect()
 }
 
@@ -227,7 +229,7 @@ fn path_without(path: &[EncapsulationIdentifier], excluded: usize) -> Vec<Encaps
 pub(crate) fn ip_fragments(
     decoded: &DecodedPacket,
     scopes: &mut Interner,
-) -> Result<IpFragments, crate::analysis::scope::Error> {
+) -> Result<IpFragments, ScopeError> {
     ip_fragments_with_scope(decoded, None, &[], scopes)
 }
 
@@ -238,7 +240,7 @@ pub(crate) fn ip_fragments_in_scope(
     source: &DecodedPacket,
     base_scope: ScopeId,
     scopes: &mut Interner,
-) -> Result<IpFragments, crate::analysis::scope::Error> {
+) -> Result<IpFragments, ScopeError> {
     let replayed = replayed_ipv6_encapsulation(source);
     ip_fragments_with_scope(decoded, Some(base_scope), &replayed, scopes)
 }
@@ -252,7 +254,7 @@ fn ip_fragments_with_scope(
     base_scope: Option<ScopeId>,
     replayed: &[EncapsulationIdentifier],
     scopes: &mut Interner,
-) -> Result<IpFragments, crate::analysis::scope::Error> {
+) -> Result<IpFragments, ScopeError> {
     struct Ipv6Network<'a> {
         layer: &'a Ipv6,
         layer_index: usize,
@@ -285,12 +287,8 @@ fn ip_fragments_with_scope(
             let Some(layout) = decoded.layout.layer(index) else {
                 continue;
             };
-            let header = crate::byte_slice::checked_slice(
-                &decoded.original,
-                layout.range.start,
-                layout.range.end,
-            )
-            .unwrap_or_default();
+            let header = checked_slice(&decoded.original, layout.range.start, layout.range.end)
+                .unwrap_or_default();
             let total_length = ipv4
                 .total_length
                 .exact()
@@ -301,9 +299,7 @@ fn ip_fragments_with_scope(
             let payload_length = total_length.saturating_sub(header_length);
             let payload_end = layout.range.end.checked_add(payload_length);
             let payload = payload_end
-                .and_then(|end| {
-                    crate::byte_slice::checked_slice(&decoded.original, layout.range.end, end)
-                })
+                .and_then(|end| checked_slice(&decoded.original, layout.range.end, end))
                 .unwrap_or_default();
             let protocol = ipv4.protocol.exact().copied().unwrap_or_default();
             non_atomic = Some(ReassemblyFragment::Ipv4(Ipv4Fragment {
@@ -358,12 +354,9 @@ fn ip_fragments_with_scope(
                 continue;
             };
             let prefix_start = ipv6_layout.range.start;
-            let prefix = crate::byte_slice::checked_slice(
-                &decoded.original,
-                prefix_start,
-                fragment_layout.range.start,
-            )
-            .unwrap_or_default();
+            let prefix =
+                checked_slice(&decoded.original, prefix_start, fragment_layout.range.start)
+                    .unwrap_or_default();
             let predecessor_next_header_offset = index
                 .checked_sub(1)
                 .and_then(|previous| decoded.layout.layer(previous))
@@ -386,13 +379,7 @@ fn ip_fragments_with_scope(
                 .checked_add(40)
                 .and_then(|base| base.checked_add(payload_length));
             let payload = datagram_end
-                .and_then(|end| {
-                    crate::byte_slice::checked_slice(
-                        &decoded.original,
-                        fragment_layout.range.end,
-                        end,
-                    )
-                })
+                .and_then(|end| checked_slice(&decoded.original, fragment_layout.range.end, end))
                 .unwrap_or_default();
             non_atomic = Some(ReassemblyFragment::Ipv6(Ipv6Fragment {
                 key: Ipv6DatagramKey {
@@ -425,7 +412,7 @@ fn fragment_scope(
     replayed: &[EncapsulationIdentifier],
     encapsulation: Vec<EncapsulationIdentifier>,
     scopes: &mut Interner,
-) -> Result<ScopeId, crate::analysis::scope::Error> {
+) -> Result<ScopeId, ScopeError> {
     match base_scope {
         Some(base_scope) => scopes.replace_suffix(base_scope, replayed, &encapsulation),
         None => scopes.intern(decoded.frame.interface, encapsulation),
@@ -466,7 +453,7 @@ pub(crate) fn transport_payload(decoded: &DecodedPacket, transport_index: usize)
     let start = start.min(decoded.original.len());
     let end = end.min(decoded.original.len());
     if end > start {
-        crate::byte_slice::checked_slice(&decoded.original, start, end).unwrap_or_default()
+        checked_slice(&decoded.original, start, end).unwrap_or_default()
     } else {
         Bytes::new()
     }
@@ -485,7 +472,7 @@ pub(crate) fn tcp_segment(
     transport: TcpTransport<'_>,
     base: ScopeBase<'_>,
     scopes: &mut Interner,
-) -> Result<Option<Segment>, crate::analysis::scope::Error> {
+) -> Result<Option<Segment>, ScopeError> {
     if transport_hidden_by_fragment(decoded, transport.index, 6) {
         return Ok(None);
     }
@@ -510,7 +497,7 @@ pub(crate) fn udp_flow(
     transport: UdpTransport,
     base: ScopeBase<'_>,
     scopes: &mut Interner,
-) -> Result<Option<ScopedFlowKey>, crate::analysis::scope::Error> {
+) -> Result<Option<ScopedFlowKey>, ScopeError> {
     if transport_hidden_by_fragment(decoded, transport.index, 17) {
         return Ok(None);
     }
@@ -526,7 +513,7 @@ fn transport_scope(
     base: ScopeBase<'_>,
     encapsulation: Vec<EncapsulationIdentifier>,
     scopes: &mut Interner,
-) -> Result<ScopeId, crate::analysis::scope::Error> {
+) -> Result<ScopeId, ScopeError> {
     match base {
         Some((physical, base_scope)) => {
             let replayed = replayed_ipv6_encapsulation(physical);

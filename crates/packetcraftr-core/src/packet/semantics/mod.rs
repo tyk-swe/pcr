@@ -26,4 +26,4 @@ pub use path::{
 };
 pub use segment_routing::{SegmentRoute, validate_segment_route};
 pub use transport::{TransportKey, transport_key, transport_keys_are_reversed};
-pub use vlan::{VlanKind, VlanMetadata, vlan_metadata};
+pub use vlan::vlan_tags;

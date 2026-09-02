@@ -180,8 +180,8 @@ impl fmt::Display for LinkMode {
 #[serde(transparent)]
 pub struct MacAddress(pub [u8; 6]);
 
-impl From<packetcraftr_netio::link::MacAddress> for MacAddress {
-    fn from(value: packetcraftr_netio::link::MacAddress) -> Self {
+impl From<packetcraftr_core::packet::link::MacAddress> for MacAddress {
+    fn from(value: packetcraftr_core::packet::link::MacAddress) -> Self {
         Self(value.0)
     }
 }
@@ -199,7 +199,7 @@ impl fmt::Display for MacAddress {
 
 mirror_enum! {
     #[serde(rename_all = "snake_case")]
-    pub enum VlanKind from packetcraftr_netio::link::VlanKind {
+    pub enum VlanKind from packetcraftr_core::packet::link::VlanKind {
         Ieee8021Q = Ieee8021Q,
         Ieee8021Ad = Ieee8021Ad,
     }
@@ -213,8 +213,8 @@ pub struct VlanTag {
     pub vlan_id: u16,
 }
 
-impl From<packetcraftr_netio::link::VlanTag> for VlanTag {
-    fn from(value: packetcraftr_netio::link::VlanTag) -> Self {
+impl From<packetcraftr_core::packet::link::VlanTag> for VlanTag {
+    fn from(value: packetcraftr_core::packet::link::VlanTag) -> Self {
         Self {
             kind: value.kind.into(),
             priority: value.priority,

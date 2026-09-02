@@ -30,18 +30,17 @@ pub(super) fn outer_ethernet_mac(packet: &Packet, field: &str) -> Option<MacAddr
 }
 
 pub(super) fn extract_neighbor_vlan_tags(packet: &Packet) -> Result<Vec<VlanTag>, Error> {
-    let metadata =
-        semantics::vlan_metadata(packet).map_err(|source| Error::InvalidNeighborVlan {
-            message: "the VLAN stack could not be read".to_owned(),
-            source: Some(Box::new(source)),
-        })?;
-    if metadata.len() > MAX_VLAN_TAGS {
+    let tags = semantics::vlan_tags(packet).map_err(|source| Error::InvalidNeighborVlan {
+        message: "the VLAN stack could not be read".to_owned(),
+        source: Some(Box::new(source)),
+    })?;
+    if tags.len() > MAX_VLAN_TAGS {
         return Err(Error::InvalidNeighborVlan {
             message: format!("more than {MAX_VLAN_TAGS} VLAN headers are not supported"),
             source: None,
         });
     }
-    Ok(metadata.into_iter().map(Into::into).collect())
+    Ok(tags)
 }
 
 pub(super) fn arp_link_macs(packet: &Packet) -> (Option<MacAddress>, Option<MacAddress>) {

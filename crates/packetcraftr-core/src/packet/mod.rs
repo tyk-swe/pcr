@@ -7,6 +7,7 @@ use std::fmt;
 
 use crate::layer::{Layer, Padding};
 
+pub mod link;
 pub mod semantics;
 
 /// Exactly one ordered, arbitrary wire stack.

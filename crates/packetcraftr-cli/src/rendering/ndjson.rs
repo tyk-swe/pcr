@@ -7,7 +7,7 @@ use std::io;
 
 use packetcraftr::output;
 
-pub(crate) use packetcraftr::output::envelope::StreamEncoder;
+pub(crate) use packetcraftr::output::stream::StreamEncoder;
 
 /// Opens the process-wide NDJSON stream on stdout.
 pub(crate) fn stdout_stream(command: output::contract::Command) -> StreamEncoder {
@@ -19,8 +19,8 @@ pub(crate) fn stdout_stream(command: output::contract::Command) -> StreamEncoder
 pub(crate) fn write_unattributed_error(
     command: Option<output::contract::Command>,
     error: output::envelope::Error,
-) -> Result<(), output::envelope::EncodeError> {
-    output::envelope::write_unattributed_error(io::stdout(), command, error)
+) -> Result<(), output::stream::EncodeError> {
+    output::stream::write_unattributed_error(io::stdout(), command, error)
 }
 
 #[cfg(test)]

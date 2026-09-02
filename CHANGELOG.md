@@ -56,7 +56,7 @@ All notable changes to PacketcraftR are documented here. The format follows
   pre-epoch floor-seconds encoding that `Timestamp::try_from` applies, with the
   round-trip test the rule never had. The rule previously lived only in the
   CLI's renderer, two crates from the encoding it inverts.
-- `output::envelope::write_unattributed_error`, which publishes the one
+- `output::stream::write_unattributed_error`, which publishes the one
   command-less NDJSON error record a failure before command selection can emit.
 - A test pinning every enum whose serialized names the output schema freezes —
   including the ten re-exported straight out of a domain module, where renaming
@@ -91,6 +91,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   repository-backed Quick Start commands.
 
 ### Changed
+
+- **BREAKING:** `packetcraftr::Stats::checked_add_assign` reports overflow as `Err(StatsOverflow)` instead of `None`. The `output::envelope::{Aggregate, AggregateError}` aliases are gone (use `Envelope`), the NDJSON encoder and unattributed error record now live in `packetcraftr::output::stream`, and the offline fuzz statistics conversion moved next to `output::fuzz`. Private workflow modules named `contract.rs` under `policy`, `send`, and `target` are now `model.rs`.
 
 - Consolidated the workflow crate's internals: the exchange now lives in eight cohesive modules instead of fourteen, the transmission pipeline (`plan_and_authorize`, `materialize_and_authorize`) sits on `Client` next to the gates it applies, and the replay system boundary is `replay::{authorizer, transmitter}`. No public paths changed.
 
@@ -646,7 +648,7 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Removed
 
-- **Breaking (library):** `output::envelope::EncodeError::MissingCommand` and
+- **Breaking (library):** `output::stream::EncodeError::MissingCommand` and
   `::Writing`. The first existed only because `StreamEncoder::new` accepted an
   `Option<Command>` for one error-only pre-parse path, now served by
   `write_unattributed_error`; the second could never be observed, because the

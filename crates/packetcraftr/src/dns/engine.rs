@@ -535,7 +535,7 @@ where
         self.summary
             .stats
             .checked_add_assign(&execution.stats)
-            .ok_or(Error::StatisticsOverflow {
+            .map_err(|_| Error::StatisticsOverflow {
                 attempt: probe.attempt,
             })?;
         for diagnostic in execution.diagnostics.drain(..) {
@@ -634,7 +634,7 @@ where
         self.summary
             .stats
             .checked_add_assign(&tcp_stats)
-            .ok_or(Error::StatisticsOverflow {
+            .map_err(|_| Error::StatisticsOverflow {
                 attempt: probe.attempt,
             })?;
 

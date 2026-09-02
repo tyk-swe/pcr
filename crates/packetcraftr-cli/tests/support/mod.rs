@@ -70,10 +70,10 @@ pub(crate) fn parse_ndjson(output: &Output) -> Vec<Value> {
 /// An NDJSON encoder writing into a buffer the caller can read back.
 pub(crate) fn stream(
     command: output::contract::Command,
-) -> (output::envelope::StreamEncoder, SharedBuffer) {
+) -> (output::stream::StreamEncoder, SharedBuffer) {
     let buffer = SharedBuffer::default();
     (
-        output::envelope::StreamEncoder::new(command, buffer.clone()),
+        output::stream::StreamEncoder::new(command, buffer.clone()),
         buffer,
     )
 }

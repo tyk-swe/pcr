@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::contract::{Error, Policy};
+use super::model::{Error, Policy};
 
 /// Frame and byte accounting for one live capture.
 ///

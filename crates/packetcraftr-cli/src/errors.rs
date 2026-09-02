@@ -91,8 +91,8 @@ impl CliError {
 
 /// The NDJSON encoder reports failures without an exit code, and every CLI
 /// failure path starts from a [`CliError`].
-impl From<output::envelope::EncodeError> for CliError {
-    fn from(error: output::envelope::EncodeError) -> Self {
+impl From<output::stream::EncodeError> for CliError {
+    fn from(error: output::stream::EncodeError) -> Self {
         Self::classified(error)
     }
 }
@@ -160,7 +160,7 @@ mod tests {
 
     #[test]
     fn ndjson_encode_failures_keep_their_classification_and_exit_code() {
-        let write = output::envelope::EncodeError::Write {
+        let write = output::stream::EncodeError::Write {
             sequence: 3,
             source: std::io::Error::other("sink closed"),
         };
@@ -169,7 +169,7 @@ mod tests {
         assert_eq!(error.classification.code, "io.stdout");
         assert!(error.message.contains("sequence 3"));
 
-        let terminated = CliError::from(output::envelope::EncodeError::Terminal);
+        let terminated = CliError::from(output::stream::EncodeError::Terminal);
         assert_eq!(terminated.exit_code(), 70);
         assert_eq!(terminated.classification.code, "internal.ndjson_stream");
     }

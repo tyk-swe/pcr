@@ -35,7 +35,7 @@ pub(crate) fn run() -> ExitCode {
                 let kind = if code == 2 { Kind::Cli } else { Kind::Internal };
                 let error = CliError::new(kind, message);
                 let emitted = match format {
-                    MachineFormat::Json => emit_json(&output::envelope::AggregateError::error(
+                    MachineFormat::Json => emit_json(&output::envelope::Envelope::<()>::error(
                         context.command,
                         error.output_error(),
                     )),
@@ -98,7 +98,7 @@ fn command_failure(
     let exit_code = error.exit_code();
     let (emitted, report_write_error) = match format {
         output::contract::Format::Json => (
-            emit_json(&output::envelope::AggregateError::error(
+            emit_json(&output::envelope::Envelope::<()>::error(
                 Some(command),
                 error.output_error(),
             )),

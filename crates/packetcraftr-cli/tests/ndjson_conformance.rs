@@ -695,10 +695,10 @@ fn validate_exchange_event_variants() {
 }
 
 fn complete(
-    sink: &output::envelope::StreamEncoder,
+    sink: &output::stream::StreamEncoder,
     requires_terminal_stats: bool,
     result: Value,
-) -> Result<(), output::envelope::EncodeError> {
+) -> Result<(), output::stream::EncodeError> {
     if requires_terminal_stats {
         sink.complete_with_stats(result, Vec::new(), output::envelope::Stats::default())
     } else {

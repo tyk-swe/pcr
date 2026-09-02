@@ -33,7 +33,7 @@ pub(crate) fn emit_aggregate<T: Serialize>(
     result: T,
     diagnostics: Vec<core::diagnostic::Diagnostic>,
 ) -> Result<(), CliError> {
-    emit_json(&output::envelope::Aggregate::success(
+    emit_json(&output::envelope::Envelope::success(
         command,
         result,
         diagnostics,
@@ -46,5 +46,5 @@ pub(crate) fn emit_aggregate_with_stats<T: Serialize>(
     diagnostics: Vec<core::diagnostic::Diagnostic>,
     stats: output::envelope::Stats,
 ) -> Result<(), CliError> {
-    emit_json(&output::envelope::Aggregate::success(command, result, diagnostics).with_stats(stats))
+    emit_json(&output::envelope::Envelope::success(command, result, diagnostics).with_stats(stats))
 }

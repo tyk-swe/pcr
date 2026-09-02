@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use packetcraftr::{
-    Client, Stats, exchange, policy,
+    Client, Stats, StatsOverflow, exchange, policy,
     target::{Error as TargetError, Family, Hostname, Resolver, Target},
 };
 use packetcraftr_core::error::{Classified, Kind};
@@ -355,7 +355,7 @@ fn stats_checked_add_is_complete_and_atomic_on_overflow() {
         },
     };
     let increment = total.clone();
-    assert_eq!(total.checked_add_assign(&increment), Some(()));
+    assert_eq!(total.checked_add_assign(&increment), Ok(()));
     assert_eq!(total.packets_attempted, 2);
     assert_eq!(total.packets_completed, 2);
     assert_eq!(total.bytes, 20);
@@ -368,7 +368,7 @@ fn stats_checked_add_is_complete_and_atomic_on_overflow() {
         bytes: u64::MAX,
         ..Stats::default()
     };
-    assert_eq!(total.checked_add_assign(&overflow), None);
+    assert_eq!(total.checked_add_assign(&overflow), Err(StatsOverflow));
     assert_eq!(total, before);
 
     let overflow = Stats {
@@ -378,7 +378,7 @@ fn stats_checked_add_is_complete_and_atomic_on_overflow() {
         },
         ..Stats::default()
     };
-    assert_eq!(total.checked_add_assign(&overflow), None);
+    assert_eq!(total.checked_add_assign(&overflow), Err(StatsOverflow));
     assert_eq!(total, before);
 
     let mut elapsed = Stats {
@@ -391,7 +391,7 @@ fn stats_checked_add_is_complete_and_atomic_on_overflow() {
             elapsed: Duration::from_nanos(1),
             ..Stats::default()
         }),
-        None
+        Err(StatsOverflow)
     );
     assert_eq!(elapsed, before);
 }

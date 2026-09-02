@@ -5,8 +5,8 @@
 
 mod authorization;
 mod capture;
-mod contract;
+mod model;
 
 pub use capture::CaptureBudget;
-pub use contract::{DEFAULT_MAX_RESOLVED_ADDRESSES, MAX_RESOLVED_ADDRESSES};
-pub use contract::{Error, Policy};
+pub use model::{DEFAULT_MAX_RESOLVED_ADDRESSES, MAX_RESOLVED_ADDRESSES};
+pub use model::{Error, Policy};

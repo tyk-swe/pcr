@@ -35,7 +35,7 @@ use packetcraftr::netio::interface::{Address, Flags, Id as InterfaceId, Info};
 use packetcraftr::netio::link::{Capability, MacAddress, Mode as LinkMode, VlanKind, VlanTag};
 use packetcraftr::netio::route::{Decision, Materialized, Plan, Scope, SelectionReason};
 use packetcraftr::output::contract::{Command, Format};
-use packetcraftr::output::envelope::{Aggregate, Stats};
+use packetcraftr::output::envelope::{Envelope, Stats};
 use packetcraftr::output::{
     build as build_output, dissect as dissect_output, dns as dns_output,
     exchange as exchange_output, expert as expert_output, follow as follow_output,
@@ -129,7 +129,7 @@ fn envelope<T: serde::Serialize>(
     payload: T,
     diagnostics: Vec<Diagnostic>,
 ) -> Value {
-    serde_json::to_value(Aggregate::success(command, payload, diagnostics))
+    serde_json::to_value(Envelope::success(command, payload, diagnostics))
         .expect("aggregate envelope serializes")
 }
 
@@ -139,7 +139,7 @@ fn envelope_with_stats<T: serde::Serialize>(
     diagnostics: Vec<Diagnostic>,
     stats: Stats,
 ) -> Value {
-    serde_json::to_value(Aggregate::success(command, payload, diagnostics).with_stats(stats))
+    serde_json::to_value(Envelope::success(command, payload, diagnostics).with_stats(stats))
         .expect("aggregate envelope serializes")
 }
 

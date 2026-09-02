@@ -22,10 +22,11 @@ use packetcraftr::netio::{
 };
 use packetcraftr::output::{
     contract::{Command, Error as ContractError, Format},
-    envelope::{Aggregate, Error as OutputError, Stats, StreamEncoder},
+    envelope::{Envelope, Error as OutputError, Stats},
     frame::{Captured, Timestamp, Wire},
     interfaces,
     protocols::{Binding, Detail, Field, FieldKind, Summary},
+    stream::StreamEncoder,
 };
 use serde_json::json;
 
@@ -145,7 +146,7 @@ fn envelopes_convert_diagnostics_errors_and_statistics() {
     };
     let stats = Stats::from(client_stats);
     let value = serde_json::to_value(
-        Aggregate::success(Command::Send, json!({"sent": true}), vec![diagnostic])
+        Envelope::success(Command::Send, json!({"sent": true}), vec![diagnostic])
             .with_stats(stats.clone()),
     )
     .expect("aggregate serializes");
@@ -176,7 +177,7 @@ fn envelopes_convert_diagnostics_errors_and_statistics() {
     assert_eq!(classified.kind, Kind::Packet);
     assert!(classified.remediation.is_some());
 
-    let aggregate = Aggregate::error(Some(Command::Build), classified.clone());
+    let aggregate = Envelope::error(Some(Command::Build), classified.clone());
     let value = serde_json::to_value(aggregate).expect("error aggregate serializes");
     assert_eq!(value["status"], "error");
     assert_eq!(value["error"]["code"], "packet.timestamp_range");
@@ -184,7 +185,7 @@ fn envelopes_convert_diagnostics_errors_and_statistics() {
     // A failure before command selection publishes one command-less NDJSON
     // error record, which is the whole document.
     let mut output = Vec::new();
-    packetcraftr::output::envelope::write_unattributed_error(&mut output, None, classified)
+    packetcraftr::output::stream::write_unattributed_error(&mut output, None, classified)
         .expect("error stream serializes");
     let value: serde_json::Value =
         serde_json::from_slice(&output).expect("the record must be JSON");

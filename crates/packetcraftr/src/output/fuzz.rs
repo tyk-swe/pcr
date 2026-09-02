@@ -13,6 +13,20 @@ use super::contract::Error as ContractError;
 use super::envelope::{Diagnostic, Error as OutputError, Stats};
 use super::frame::{Captured, Wire};
 
+impl From<&packet_fuzz::Stats> for Stats {
+    /// An offline campaign transmits nothing, so each generated case is the
+    /// packet operation it attempted and each built case the one it completed.
+    fn from(value: &packet_fuzz::Stats) -> Self {
+        Self {
+            packets_attempted: value.cases_generated,
+            packets_completed: value.cases_built,
+            bytes: value.bytes,
+            elapsed: value.elapsed,
+            capture: super::envelope::CaptureStats::default(),
+        }
+    }
+}
+
 /// Output-v1 fuzz execution mode.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]

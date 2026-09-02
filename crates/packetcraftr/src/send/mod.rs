@@ -3,7 +3,7 @@
 
 //! Single-packet send contracts.
 
-mod contract;
 mod execution;
+mod model;
 
-pub use contract::{Options, Report};
+pub use model::{Options, Report};

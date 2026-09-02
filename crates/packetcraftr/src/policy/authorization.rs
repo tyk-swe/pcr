@@ -6,7 +6,7 @@ use std::net::IpAddr;
 use packetcraftr_core::{Packet, packet::semantics, protocol::link::Ethernet};
 use packetcraftr_netio::{link::MacAddress, route::Plan};
 
-use super::contract::{Error, MAX_RESOLVED_ADDRESSES, Policy};
+use super::model::{Error, MAX_RESOLVED_ADDRESSES, Policy};
 use crate::address::is_public;
 use crate::target::{Authorized, Error as TargetError, Hostname, Resolver, Target};
 

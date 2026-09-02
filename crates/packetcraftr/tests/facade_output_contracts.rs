@@ -8,7 +8,8 @@ use packetcraftr::{
     core::protocol,
     output::{
         contract::{Command, Format, SCHEMA_V1},
-        envelope::{Aggregate, StreamEncoder},
+        envelope::Envelope,
+        stream::StreamEncoder,
     },
 };
 use serde_json::{Value, json};
@@ -32,7 +33,7 @@ fn facade_reexports_domains_and_command_formats_are_complete() {
 
 #[test]
 fn aggregate_and_stream_envelopes_keep_version_and_discriminators() {
-    let aggregate = serde_json::to_value(Aggregate::success(
+    let aggregate = serde_json::to_value(Envelope::success(
         Command::Protocols,
         json!({"count": 1}),
         Vec::new(),

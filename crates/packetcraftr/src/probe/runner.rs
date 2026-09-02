@@ -12,6 +12,7 @@ use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::{decode::DecodedPacket, diagnostic::Diagnostic};
 
+use crate::StatsOverflow;
 use crate::clock::{Clock, check_deadline, rate_delay};
 use crate::probe::{Error, ErrorKind, Workflow};
 use crate::{SentPacket, Stats};
@@ -189,7 +190,7 @@ where
         check_deadline(deadline, duration)?;
         stats
             .checked_add_assign(&execution.stats)
-            .ok_or_else(|| statistics(sequence))?;
+            .map_err(|StatsOverflow| statistics(sequence))?;
         if lifecycle.process(batch, execution, deadline)?.is_break() {
             break;
         }

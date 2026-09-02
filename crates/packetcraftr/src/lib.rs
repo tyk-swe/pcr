@@ -64,4 +64,4 @@ pub use packetcraftr_core::error::BoundaryError;
 pub use packetcraftr_netio as netio;
 pub use probe::ExchangeExecutor;
 pub use probe::{EPHEMERAL_SOURCE_PORT_BASE, ephemeral_source_port};
-pub use stats::Stats;
+pub use stats::{Stats, StatsOverflow};

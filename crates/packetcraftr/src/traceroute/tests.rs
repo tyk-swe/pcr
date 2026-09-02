@@ -78,7 +78,7 @@ impl Authorizer for FixedAuthorizer {
 
 struct CountingRejectExecutor(Arc<AtomicUsize>);
 
-impl Executor<Probe> for CountingRejectExecutor {
+impl Executor<Batch> for CountingRejectExecutor {
     fn execute(&mut self, _batch: &Batch) -> Result<Execution, BoundaryError> {
         self.0.fetch_add(1, Ordering::SeqCst);
         Err(BoundaryError::new(
@@ -94,7 +94,7 @@ struct NoResponseExecutor {
     invalid_sent_index: Option<usize>,
 }
 
-impl Executor<Probe> for NoResponseExecutor {
+impl Executor<Batch> for NoResponseExecutor {
     fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
         let mut sent = Vec::new();
         let mut bytes = 0_u64;
@@ -131,7 +131,7 @@ impl Executor<Probe> for NoResponseExecutor {
 
 struct MixedHopExecutor;
 
-impl Executor<Probe> for MixedHopExecutor {
+impl Executor<Batch> for MixedHopExecutor {
     fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
         let local = Ipv4Addr::new(10, 0, 0, 1);
         let remote = Ipv4Addr::new(10, 0, 0, 9);
@@ -198,7 +198,7 @@ struct ProgressiveExecutor {
 
 struct RetainedEvidenceExecutor(NoResponseExecutor);
 
-impl Executor<Probe> for RetainedEvidenceExecutor {
+impl Executor<Batch> for RetainedEvidenceExecutor {
     fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
         let mut execution = self.0.execute(batch)?;
         execution.undecoded.extend([frame_at(3), frame_at(4)]);
@@ -209,7 +209,7 @@ impl Executor<Probe> for RetainedEvidenceExecutor {
     }
 }
 
-impl Executor<Probe> for ProgressiveExecutor {
+impl Executor<Batch> for ProgressiveExecutor {
     fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
         let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
         if self.fail_at == Some(call) {

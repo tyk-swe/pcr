@@ -88,9 +88,13 @@ pub struct Execution {
     pub(crate) stats: Stats,
 }
 
-pub trait Executor {
-    fn execute(&mut self, exchange: &Exchange) -> Result<Execution, crate::BoundaryError>;
+impl crate::probe::Request for Exchange {
+    type Execution = Execution;
+}
 
+/// The optional DNS-over-TCP continuation an executor may provide next to its
+/// UDP [`crate::probe::Executor`] implementation.
+pub trait TcpExecutor {
     /// Executes one bounded DNS-over-TCP continuation. Expected socket and
     /// framing failures are returned as typed data so the workflow can apply
     /// its normal retry precedence.

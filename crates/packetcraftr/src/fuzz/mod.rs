@@ -10,10 +10,10 @@ pub const MAX_DURATION: Duration = packetcraftr_netio::capture::MAX_TIMEOUT;
 
 const SYNTHESIZED_ETHERNET_BYTES: u64 = 14;
 
-mod client_executor;
 mod error;
 mod evidence;
 mod execution;
+mod executor;
 mod plan;
 mod report;
 mod request;
@@ -22,8 +22,9 @@ mod run;
 mod tests;
 
 pub use crate::authorization::PolicyAuthorizer;
+pub use crate::probe::Executor;
 pub use error::Error;
-pub use execution::{Execution, ExecutionCase, Executor};
+pub use execution::{Execution, ExecutionCase};
 pub use report::{Case, CaseOutcome, Report, Stats, Summary};
 pub use request::{LiveLimits, LiveOptions};
 pub use run::{RunInput, run, run_offline_with_events, run_with_events};

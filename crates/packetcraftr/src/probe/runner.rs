@@ -78,12 +78,8 @@ impl Execution {
     }
 }
 
-/// The executor boundary every homogeneous probe workflow shares: it takes one
-/// approved batch of probes and returns the evidence that batch produced.
-/// `P` is the workflow's probe type, so a scan executor and a traceroute
-/// executor stay distinct implementations.
-pub trait Executor<P> {
-    fn execute(&mut self, batch: &Batch<P>) -> Result<Execution, BoundaryError>;
+impl<P> crate::probe::Request for Batch<P> {
+    type Execution = Execution;
 }
 
 /// Wraps a caller's progressive callback in a bounded [`Sink`] and adapts both

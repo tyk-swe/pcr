@@ -29,11 +29,12 @@ use super::error::{Error, duration_limit};
 use super::evidence::{
     ExecutionEvidence, add_execution_stats, retain_evidence, validate_execution,
 };
-use super::execution::{Execution, ExecutionCase, Executor};
+use super::execution::{Execution, ExecutionCase};
 use super::plan::{rate_delay, worst_case_duration};
 use super::report::{Case, CaseOutcome, Report, Stats, Summary};
 use super::request::LiveOptions;
 use crate::authorization::{Authorizer, DeclaredPackets, Operation, PermissiveLive, WireBudget};
+use crate::probe::Executor;
 
 /// Builds and validates all cases offline, then authorizes and executes the campaign.
 pub fn run<A, E, C>(
@@ -44,7 +45,7 @@ pub fn run<A, E, C>(
 ) -> Result<Report, Error>
 where
     A: Authorizer,
-    E: Executor,
+    E: Executor<ExecutionCase>,
     C: Clock,
 {
     let mut cases = Vec::new();
@@ -76,7 +77,7 @@ pub fn run_with_events<A, E, C, F>(
 ) -> Result<Summary, Error>
 where
     A: Authorizer,
-    E: Executor,
+    E: Executor<ExecutionCase>,
     C: Clock,
     F: FnMut(Case) -> Result<(), crate::BoundaryError> + Send + 'static,
 {
@@ -126,7 +127,7 @@ fn run_observed<A, E, C, F>(
 ) -> Result<Summary, Error>
 where
     A: Authorizer,
-    E: Executor,
+    E: Executor<ExecutionCase>,
     C: Clock,
     F: FnMut(Case, &Deadline) -> Result<(), Error>,
 {
@@ -292,7 +293,7 @@ impl ExecutionPhase<'_> {
         emit: &mut F,
     ) -> Result<Summary, Error>
     where
-        E: Executor,
+        E: Executor<ExecutionCase>,
         C: Clock,
         F: FnMut(Case, &Deadline) -> Result<(), Error>,
     {
@@ -352,17 +353,18 @@ impl ExecutionPhase<'_> {
 
     fn execute_case<E>(&mut self, case: &mut Case, executor: &mut E) -> Result<(), Error>
     where
-        E: Executor,
+        E: Executor<ExecutionCase>,
     {
         let execution_case = ExecutionCase {
             permit: crate::evidence::ExecutionPermit::new(),
             packet: case.prepared.recipe.clone(),
+            timeout: self.live.timeout,
         };
         self.deadline
             .start_accounting(Duration::ZERO)
             .map_err(duration_limit)?;
         let execution = executor
-            .execute(&execution_case, self.live.timeout)
+            .execute(&execution_case)
             .map_err(|source| Error::Execution {
                 case_index: case.prepared.index,
                 source,

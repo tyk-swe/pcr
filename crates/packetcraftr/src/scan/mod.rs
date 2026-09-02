@@ -25,8 +25,8 @@ const IPV6_PROBE_BYTES: u64 = 14 + 40 + 20;
 const WORKFLOW: Workflow = Workflow::Scan;
 
 mod classification;
-mod client_executor;
 mod engine;
+mod executor;
 mod model;
 mod plan;
 mod probe;

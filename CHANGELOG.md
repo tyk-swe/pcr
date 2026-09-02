@@ -92,6 +92,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- **BREAKING:** live workflows share one executor boundary: `packetcraftr::probe::{Request, Executor}` replaces the separate `scan::Executor<Probe>`, `traceroute::Executor<Probe>`, `dns::Executor`, and `fuzz::Executor` traits (the names remain as re-exports of the shared trait, keyed by `scan::Batch`, `traceroute::Batch`, `dns::Exchange`, and `fuzz::ExecutionCase`); DNS-over-TCP continuation moved to `dns::TcpExecutor`, and a fuzz `ExecutionCase` now carries its own timeout instead of a second `execute` argument.
+
 - **BREAKING:** scan and traceroute share one probe skeleton under `packetcraftr::probe`: `probe::Error { workflow, kind }` with `ErrorKind` and `Workflow` replaces `scan::Error` and `traceroute::Error` (the published codes and remediations are unchanged), `probe::{Transport, ProbeEndpoint, ProbeStatus}` replace the duplicated scan/traceroute enums (`traceroute::Strategy` and `traceroute::ProbeTarget` remain as aliases; `ProbeTarget::strategy()` is now `transport()`), and evidence retention, diagnostics, and batch validation live in one shared state type.
 
 - `packetcraftr-netio` platform internals share one worker-join helper (`platform::worker_reaper::join_with_deadline`), the capture queue plans oldest-first eviction separately from admission, the neighbor resolver keeps evidence in one `EvidenceBuffer`, `neighbor::Options::capture_limits()` exposes the discovery capture bounds, and the macOS and Windows route backends share `route_normalize::constrain_by_preferred_source`. The Npcap loader binds its symbols through one `load_symbols!` macro and the interface-identity module only opts out of `unsafe_code` on Linux and macOS.

@@ -10,13 +10,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, UNIX_EPOCH};
 
-#[cfg(feature = "native-route")]
 use std::io::{Read, Write};
-#[cfg(feature = "native-route")]
 use std::net::{TcpListener, UdpSocket};
-#[cfg(feature = "native-route")]
 use std::thread;
-#[cfg(feature = "native-route")]
 use std::time::Instant;
 
 use crate::progress::Runtime;
@@ -27,9 +23,12 @@ use packetcraftr_core::protocol::{network::Ipv4, transport::Udp};
 use packetcraftr_core::{Packet, decode::DecodedPacket, frame::Frame, frame::LinkType};
 
 use crate::authorization::Operation;
+use crate::probe::Executor;
 use crate::target::{Authorized, Authorizer, Family, Target};
 use crate::test_fixtures::NoopClock;
 use crate::{BoundaryError, Stats};
+
+use super::model::{Exchange, TcpExecutor};
 
 use super::DEFAULT_SERVER_PORT;
 
@@ -109,7 +108,7 @@ impl Authorizer for SlowTcpDenyingAuthorizer {
 
 struct TrustedReceiptExecutor;
 
-impl super::model::Executor for TrustedReceiptExecutor {
+impl Executor<Exchange> for TrustedReceiptExecutor {
     fn execute(
         &mut self,
         exchange: &super::model::Exchange,
@@ -134,9 +133,11 @@ impl super::model::Executor for TrustedReceiptExecutor {
     }
 }
 
+impl TcpExecutor for TrustedReceiptExecutor {}
+
 struct InvalidResponseIndexExecutor;
 
-impl super::model::Executor for InvalidResponseIndexExecutor {
+impl Executor<Exchange> for InvalidResponseIndexExecutor {
     fn execute(
         &mut self,
         exchange: &super::model::Exchange,
@@ -158,6 +159,8 @@ impl super::model::Executor for InvalidResponseIndexExecutor {
     }
 }
 
+impl TcpExecutor for InvalidResponseIndexExecutor {}
+
 struct ProgressiveExecutor {
     calls: Arc<AtomicUsize>,
     shutdowns: Arc<AtomicUsize>,
@@ -170,7 +173,7 @@ struct SelectionDeadlineExecutor {
     completed: Arc<AtomicBool>,
 }
 
-impl super::model::Executor for SelectionDeadlineExecutor {
+impl Executor<Exchange> for SelectionDeadlineExecutor {
     fn execute(
         &mut self,
         exchange: &super::model::Exchange,
@@ -181,9 +184,11 @@ impl super::model::Executor for SelectionDeadlineExecutor {
     }
 }
 
+impl TcpExecutor for SelectionDeadlineExecutor {}
+
 struct UdpOnlyTruncatedExecutor;
 
-impl super::model::Executor for UdpOnlyTruncatedExecutor {
+impl Executor<Exchange> for UdpOnlyTruncatedExecutor {
     fn execute(
         &mut self,
         exchange: &super::model::Exchange,
@@ -196,11 +201,11 @@ impl super::model::Executor for UdpOnlyTruncatedExecutor {
     }
 }
 
-#[cfg(feature = "native-route")]
+impl TcpExecutor for UdpOnlyTruncatedExecutor {}
+
 struct LoopbackExecutor;
 
-#[cfg(feature = "native-route")]
-impl super::model::Executor for LoopbackExecutor {
+impl Executor<Exchange> for LoopbackExecutor {
     fn execute(
         &mut self,
         exchange: &super::model::Exchange,
@@ -230,7 +235,9 @@ impl super::model::Executor for LoopbackExecutor {
             started.elapsed(),
         ))
     }
+}
 
+impl TcpExecutor for LoopbackExecutor {
     fn execute_tcp(
         &mut self,
         exchange: &super::model::TcpExchange,
@@ -245,7 +252,6 @@ impl super::model::Executor for LoopbackExecutor {
     }
 }
 
-#[cfg(feature = "native-route")]
 fn loopback_boundary_error(error: impl std::fmt::Display) -> BoundaryError {
     BoundaryError::new(
         format!("loopback DNS fixture failed: {error}"),
@@ -286,7 +292,7 @@ impl ScriptedExecutor {
     }
 }
 
-impl super::model::Executor for ScriptedExecutor {
+impl Executor<Exchange> for ScriptedExecutor {
     fn execute(
         &mut self,
         exchange: &super::model::Exchange,
@@ -295,7 +301,9 @@ impl super::model::Executor for ScriptedExecutor {
         let payload = self.udp_payloads.pop_front().unwrap_or(None);
         Ok(scripted_udp_execution(exchange, payload, self.udp_elapsed))
     }
+}
 
+impl TcpExecutor for ScriptedExecutor {
     fn execute_tcp(
         &mut self,
         exchange: &super::model::TcpExchange,
@@ -399,7 +407,7 @@ fn scripted_udp_execution(
     }
 }
 
-impl super::model::Executor for ClassifiedResponseExecutor {
+impl Executor<Exchange> for ClassifiedResponseExecutor {
     fn execute(
         &mut self,
         exchange: &super::model::Exchange,
@@ -470,6 +478,8 @@ impl super::model::Executor for ClassifiedResponseExecutor {
         })
     }
 }
+
+impl TcpExecutor for ClassifiedResponseExecutor {}
 
 fn dns_response() -> Bytes {
     let mut response = Vec::new();
@@ -574,7 +584,7 @@ fn push_a_record_tail(output: &mut Vec<u8>, address: [u8; 4]) {
     output.extend_from_slice(&address);
 }
 
-impl super::model::Executor for ProgressiveExecutor {
+impl Executor<Exchange> for ProgressiveExecutor {
     fn execute(
         &mut self,
         exchange: &super::model::Exchange,
@@ -592,6 +602,8 @@ impl super::model::Executor for ProgressiveExecutor {
         execution
     }
 }
+
+impl TcpExecutor for ProgressiveExecutor {}
 
 fn dns_request(address: IpAddr) -> super::model::Request {
     super::model::Request {
@@ -1439,7 +1451,6 @@ fn udp_attempt_sink_failure_prevents_tcp_side_effects() {
     assert_eq!(executor.tcp_calls, 0);
 }
 
-#[cfg(feature = "native-route")]
 #[test]
 fn loopback_udp_truncation_continues_over_fragmented_tcp_response() {
     let tcp = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("TCP loopback listener");
@@ -1498,7 +1509,6 @@ fn loopback_udp_truncation_continues_over_fragmented_tcp_response() {
     assert_eq!(result.response.unwrap().answers.len(), 1);
 }
 
-#[cfg(feature = "native-route")]
 #[test]
 fn loopback_udp_only_truncation_never_connects_tcp() {
     let tcp = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("TCP loopback listener");

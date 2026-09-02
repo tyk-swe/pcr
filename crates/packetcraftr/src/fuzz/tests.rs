@@ -173,12 +173,8 @@ impl Authorizer for AllowAll {
 
 struct RebuildingExecutor;
 
-impl Executor for RebuildingExecutor {
-    fn execute(
-        &mut self,
-        case: &ExecutionCase,
-        _timeout: Duration,
-    ) -> Result<Execution, BoundaryError> {
+impl Executor<ExecutionCase> for RebuildingExecutor {
+    fn execute(&mut self, case: &ExecutionCase) -> Result<Execution, BoundaryError> {
         let sent = crate::evidence::test_sent_packet(case.packet.clone());
         Ok(Execution {
             permit: case.permit,
@@ -202,15 +198,11 @@ struct CountingExecutor {
     executions: usize,
 }
 
-impl Executor for CountingExecutor {
-    fn execute(
-        &mut self,
-        case: &ExecutionCase,
-        _timeout: Duration,
-    ) -> Result<Execution, BoundaryError> {
+impl Executor<ExecutionCase> for CountingExecutor {
+    fn execute(&mut self, case: &ExecutionCase) -> Result<Execution, BoundaryError> {
         self.executions += 1;
         let mut executor = RebuildingExecutor;
-        executor.execute(case, Duration::ZERO)
+        executor.execute(case)
     }
 }
 
@@ -218,12 +210,8 @@ struct RouteMaterializingExecutor {
     registry: Arc<packetcraftr_core::registry::Registry>,
 }
 
-impl Executor for RouteMaterializingExecutor {
-    fn execute(
-        &mut self,
-        case: &ExecutionCase,
-        _timeout: Duration,
-    ) -> Result<Execution, BoundaryError> {
+impl Executor<ExecutionCase> for RouteMaterializingExecutor {
+    fn execute(&mut self, case: &ExecutionCase) -> Result<Execution, BoundaryError> {
         let sent = route_materialized_sent_packet(&self.registry, case.packet.clone());
         Ok(Execution {
             permit: case.permit,
@@ -244,12 +232,8 @@ impl Executor for RouteMaterializingExecutor {
 
 struct SubstitutingFuzzExecutor;
 
-impl Executor for SubstitutingFuzzExecutor {
-    fn execute(
-        &mut self,
-        _case: &ExecutionCase,
-        _timeout: Duration,
-    ) -> Result<Execution, BoundaryError> {
+impl Executor<ExecutionCase> for SubstitutingFuzzExecutor {
+    fn execute(&mut self, _case: &ExecutionCase) -> Result<Execution, BoundaryError> {
         let sent = crate::evidence::test_sent_packet(packet());
         Ok(Execution {
             permit: _case.permit,

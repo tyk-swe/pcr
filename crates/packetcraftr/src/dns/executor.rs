@@ -3,13 +3,13 @@
 
 use crate::BoundaryError;
 use crate::ExchangeExecutor;
-use crate::probe::client_executor::{ExecutorFault, WorkflowOverrides};
-use crate::probe::{self, Transport as ProbeTransport};
+use crate::probe::executor::{ExecutorFault, WorkflowOverrides};
+use crate::probe::{self, Executor, Transport as ProbeTransport};
 
 use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Sender as PacketIo};
 
 use super::classification::{ResponseClassification, classify_response};
-use super::model::{Exchange, Execution, Executor, TcpExchange, TcpExecution};
+use super::model::{Exchange, Execution, TcpExchange, TcpExecution, TcpExecutor};
 
 const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
     "cli.dns_executor",
@@ -22,7 +22,7 @@ const RESULT_FAULT: ExecutorFault = ExecutorFault::new(
 
 /// Executes one DNS query through the client's capture-ready exchange
 /// lifecycle.
-impl<R, N, I> Executor for ExchangeExecutor<'_, R, N, I>
+impl<R, N, I> Executor<Exchange> for ExchangeExecutor<'_, R, N, I>
 where
     R: packetcraftr_netio::route::Provider,
     N: packetcraftr_netio::neighbor::Resolver,
@@ -97,7 +97,11 @@ where
             stats,
         })
     }
+}
 
+/// Continues a truncated UDP answer over kernel TCP, which cannot honour
+/// packet-oriented route overrides.
+impl<R, N, I> TcpExecutor for ExchangeExecutor<'_, R, N, I> {
     fn execute_tcp(
         &mut self,
         exchange: &TcpExchange,

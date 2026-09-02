@@ -42,7 +42,7 @@ pub fn run<A, E, C>(
 ) -> Result<Report, Error>
 where
     A: Authorizer,
-    E: Executor<Probe>,
+    E: Executor<Batch>,
     C: Clock,
 {
     let mut collector = Collector::default();
@@ -77,7 +77,7 @@ pub fn run_with_events<A, E, C, F>(
 ) -> Result<Summary, Error>
 where
     A: Authorizer,
-    E: Executor<Probe>,
+    E: Executor<Batch>,
     C: Clock,
     F: FnMut(Event) -> Result<(), BoundaryError> + Send + 'static,
 {
@@ -100,7 +100,7 @@ fn run_observed<A, E, C, F>(
 ) -> Result<Summary, Error>
 where
     A: Authorizer,
-    E: Executor<Probe>,
+    E: Executor<Batch>,
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
@@ -329,7 +329,7 @@ struct Lifecycle<'a, E, F> {
 
 impl<E, F> ProbeLifecycle<Probe> for Lifecycle<'_, E, F>
 where
-    E: Executor<Probe>,
+    E: Executor<Batch>,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
     fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
@@ -358,7 +358,7 @@ where
 
 impl<E, F> Lifecycle<'_, E, F>
 where
-    E: Executor<Probe>,
+    E: Executor<Batch>,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
     fn process_batch(

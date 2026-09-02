@@ -3,15 +3,16 @@
 
 //! The lifecycle, vocabulary, and wire correlation shared by probe workflows.
 
-pub(crate) mod client_executor;
 mod error;
 pub(crate) mod evidence;
+pub(crate) mod executor;
 mod model;
 pub(crate) mod runner;
 
 pub use error::{Error, ErrorKind, Workflow};
+pub use executor::{ExchangeExecutor, Executor, Request};
 pub use model::{ProbeEndpoint, ProbeStatus, Transport};
-pub use runner::{Batch, Execution, Executor};
+pub use runner::{Batch, Execution};
 
 use std::net::IpAddr;
 

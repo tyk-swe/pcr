@@ -5,7 +5,7 @@ mod execution;
 mod report;
 mod request;
 
-pub use execution::{Exchange, Execution, Executor, Probe, TcpExchange, TcpExecution};
+pub use execution::{Exchange, Execution, Probe, TcpExchange, TcpExecution, TcpExecutor};
 pub use report::{
     AttemptEvidence, Edns, EdnsOption, Event, EventContext, Name, Outcome, Record, RecordValue,
     RejectedRecord, Report, ResponseMetadata, Section, Summary, Transport, UndecodedEvidence,

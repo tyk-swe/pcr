@@ -1,10 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Live workflow executor shared by the probe-driven commands. Each workflow
-//! trait resolves the deferred interface once, then delegates to the exchange.
-
-use std::time::Duration;
+//! Live workflow executor shared by the probe-driven commands. It resolves
+//! the deferred interface once, then delegates to the library exchange.
 
 use crate::errors::CliError;
 use crate::system::{Client, Exchange, InterfaceSelector, resolve};
@@ -48,56 +46,28 @@ impl Executor {
     }
 }
 
-impl packetcraftr::dns::Executor for Executor {
-    fn execute(
-        &mut self,
-        exchange: &packetcraftr::dns::Exchange,
-    ) -> Result<packetcraftr::dns::Execution, packetcraftr::BoundaryError> {
+/// Every live workflow request the library's exchange executor accepts is
+/// served the same way: bind the interface once, then delegate.
+impl<Req> packetcraftr::probe::Executor<Req> for Executor
+where
+    Req: packetcraftr::probe::Request,
+    for<'a> Exchange<'a>: packetcraftr::probe::Executor<Req>,
+{
+    fn execute(&mut self, request: &Req) -> Result<Req::Execution, packetcraftr::BoundaryError> {
         self.prepared()
             .map_err(CliError::into_boundary_error)?
-            .execute(exchange)
+            .execute(request)
     }
+}
 
+impl packetcraftr::dns::TcpExecutor for Executor {
     fn execute_tcp(
         &mut self,
         exchange: &packetcraftr::dns::TcpExchange,
     ) -> Result<packetcraftr::dns::TcpExecution, packetcraftr::dns::tcp::Error> {
-        let mut executor = packetcraftr::ExchangeExecutor::new(&self.client, self.exchange.clone());
-        packetcraftr::dns::Executor::execute_tcp(&mut executor, exchange)
-    }
-}
-
-impl packetcraftr::scan::Executor<packetcraftr::scan::Probe> for Executor {
-    fn execute(
-        &mut self,
-        batch: &packetcraftr::scan::Batch,
-    ) -> Result<packetcraftr::scan::Execution, packetcraftr::BoundaryError> {
-        self.prepared()
-            .map_err(CliError::into_boundary_error)?
-            .execute(batch)
-    }
-}
-
-impl packetcraftr::traceroute::Executor<packetcraftr::traceroute::Probe> for Executor {
-    fn execute(
-        &mut self,
-        batch: &packetcraftr::traceroute::Batch,
-    ) -> Result<packetcraftr::traceroute::Execution, packetcraftr::BoundaryError> {
-        self.prepared()
-            .map_err(CliError::into_boundary_error)?
-            .execute(batch)
-    }
-}
-
-impl packetcraftr::fuzz::Executor for Executor {
-    fn execute(
-        &mut self,
-        case: &packetcraftr::fuzz::ExecutionCase,
-        timeout: Duration,
-    ) -> Result<packetcraftr::fuzz::Execution, packetcraftr::BoundaryError> {
-        self.prepared()
-            .map_err(CliError::into_boundary_error)?
-            .execute(case, timeout)
+        // TCP only continues a truncated UDP answer, so the UDP execution has
+        // already bound the interface; the kernel socket cannot honour it.
+        Exchange::new(&self.client, self.exchange.clone()).execute_tcp(exchange)
     }
 }
 

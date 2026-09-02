@@ -54,10 +54,10 @@ const TYPE_OPT: u16 = 41;
 const MAX_PROBE_OVERHEAD: u64 = 14 + 40 + 8;
 
 mod classification;
-mod client_executor;
 mod engine;
 mod error;
 mod evidence;
+mod executor;
 mod model;
 mod plan;
 mod probe;
@@ -66,13 +66,14 @@ pub mod tcp;
 mod tests;
 mod wire;
 
+pub use crate::probe::Executor;
 pub use classification::{ResponseClassification, classify_response, response_code_name};
 pub use engine::{run, run_with_events};
 pub use error::{Error, WireError};
 pub use model::{
-    AttemptEvidence, Edns, EdnsOption, Event, EventContext, Exchange, Execution, Executor, Limits,
+    AttemptEvidence, Edns, EdnsOption, Event, EventContext, Exchange, Execution, Limits,
     MessageLimits, Name, Outcome, Probe, QueryType, Record, RecordValue, RejectedRecord, Report,
-    Request, ResponseMetadata, Section, Summary, TcpExchange, TcpExecution, Transport,
+    Request, ResponseMetadata, Section, Summary, TcpExchange, TcpExecution, TcpExecutor, Transport,
     UndecodedEvidence, ValidatedResponse,
 };
 pub use probe::{unpredictable_source_port, unpredictable_transaction_id};

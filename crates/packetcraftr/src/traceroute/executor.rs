@@ -3,12 +3,12 @@
 
 use crate::BoundaryError;
 use crate::ExchangeExecutor;
-use crate::probe::client_executor::{ExecutorFault, WorkflowOverrides};
+use crate::probe::executor::{ExecutorFault, WorkflowOverrides};
 
 use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Sender as PacketIo};
 
 use super::classification::classify_response;
-use super::model::{Batch, Execution, Executor, Probe, Strategy};
+use super::model::{Batch, Execution, Executor, Strategy};
 
 const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
     "cli.traceroute_executor",
@@ -17,7 +17,7 @@ const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
 
 /// Executes homogeneous traceroute hop batches through the client's
 /// capture-ready exchange lifecycle.
-impl<R, N, I> Executor<Probe> for ExchangeExecutor<'_, R, N, I>
+impl<R, N, I> Executor<Batch> for ExchangeExecutor<'_, R, N, I>
 where
     R: packetcraftr_netio::route::Provider,
     N: packetcraftr_netio::neighbor::Resolver,

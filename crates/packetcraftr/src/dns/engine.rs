@@ -19,6 +19,7 @@ use crate::Stats;
 use crate::authorization::{DnsOperation, Operation as AuthorizedOperation, WireBudget};
 use crate::clock::Clock;
 use crate::evidence::{Budget, DiagnosticLog};
+use crate::probe::Executor;
 use crate::probe::evidence::{
     ResponseCandidate, UndecodedRetention, response_within_deadline, update_best_candidate,
 };
@@ -33,8 +34,8 @@ use super::classification::{
 use super::error::Error;
 use super::evidence::validate_dns_execution;
 use super::model::{
-    AttemptEvidence, Event, EventContext, Exchange, Execution, Executor, Limits, Outcome, Probe,
-    Record, Report, Request, Section, Summary, TcpExchange, Transport, UndecodedEvidence,
+    AttemptEvidence, Event, EventContext, Exchange, Execution, Limits, Outcome, Probe, Record,
+    Report, Request, Section, Summary, TcpExchange, TcpExecutor, Transport, UndecodedEvidence,
     ValidatedResponse,
 };
 use super::plan::{OperationBudget, operation_budget};
@@ -53,7 +54,7 @@ pub fn run<A, E, C>(
 ) -> Result<Report, Error>
 where
     A: Authorizer,
-    E: Executor,
+    E: Executor<Exchange> + TcpExecutor,
     C: Clock,
 {
     let mut collector = Collector::default();
@@ -88,7 +89,7 @@ pub fn run_with_events<A, E, C, F>(
 ) -> Result<Summary, Error>
 where
     A: Authorizer,
-    E: Executor,
+    E: Executor<Exchange> + TcpExecutor,
     C: Clock,
     F: FnMut(Event) -> Result<(), BoundaryError> + Send + 'static,
 {
@@ -111,7 +112,7 @@ fn run_observed<A, E, C, F>(
 ) -> Result<Summary, Error>
 where
     A: Authorizer,
-    E: Executor,
+    E: Executor<Exchange> + TcpExecutor,
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
@@ -137,7 +138,7 @@ pub(super) fn run_observed_with_deadline<A, E, C, F>(
 ) -> Result<Summary, Error>
 where
     A: Authorizer,
-    E: Executor,
+    E: Executor<Exchange> + TcpExecutor,
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
@@ -320,7 +321,7 @@ struct ProbeExecution {
 impl<A, E, C, F> Operation<'_, A, E, C, F>
 where
     A: Authorizer,
-    E: Executor,
+    E: Executor<Exchange> + TcpExecutor,
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {

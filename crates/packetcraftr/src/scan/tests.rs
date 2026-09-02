@@ -25,8 +25,8 @@ use packetcraftr_core::{
 use super::classification::classify_response;
 use super::engine::{run, run_with_events};
 use super::model::{
-    Batch, Classification, Event, Execution, Executor, Limits, PortSpec, Probe, ProbeStatus,
-    Request, Transport, select_ports,
+    Batch, Classification, Event, Execution, Executor, Limits, PortSpec, ProbeStatus, Request,
+    Transport, select_ports,
 };
 use super::probe::probe_packet;
 use crate::target::{PolicyAuthorizer, Target};
@@ -58,7 +58,7 @@ struct CountingRejectExecutor {
     calls: Arc<AtomicUsize>,
 }
 
-impl Executor<Probe> for CountingRejectExecutor {
+impl Executor<Batch> for CountingRejectExecutor {
     fn execute(&mut self, _batch: &Batch) -> Result<Execution, BoundaryError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         Err(BoundaryError::new(
@@ -75,7 +75,7 @@ struct TimeoutExecutor {
     invalid_sent_index: Option<usize>,
 }
 
-impl Executor<Probe> for TimeoutExecutor {
+impl Executor<Batch> for TimeoutExecutor {
     fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
         self.batches.push((
             batch.probes[0].attempt,
@@ -126,7 +126,7 @@ impl Executor<Probe> for TimeoutExecutor {
 
 struct LateResponseExecutor(TimeoutExecutor);
 
-impl Executor<Probe> for LateResponseExecutor {
+impl Executor<Batch> for LateResponseExecutor {
     fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
         let mut execution = self.0.execute(batch)?;
         execution.unsolicited.push(decoded(
@@ -152,7 +152,7 @@ struct ProgressiveExecutor {
 
 struct RetainedEvidenceExecutor(TimeoutExecutor);
 
-impl Executor<Probe> for RetainedEvidenceExecutor {
+impl Executor<Batch> for RetainedEvidenceExecutor {
     fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
         let mut execution = self.0.execute(batch)?;
         execution.undecoded.extend([
@@ -166,7 +166,7 @@ impl Executor<Probe> for RetainedEvidenceExecutor {
     }
 }
 
-impl Executor<Probe> for ProgressiveExecutor {
+impl Executor<Batch> for ProgressiveExecutor {
     fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
         let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
         if self.fail_at == Some(call) {

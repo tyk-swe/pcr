@@ -13,6 +13,12 @@ use packetcraftr_core::{Packet, diagnostic::Diagnostic};
 pub struct ExecutionCase {
     pub(crate) permit: crate::evidence::ExecutionPermit,
     pub(crate) packet: Packet,
+    /// How long the executor may wait for responses to this one case.
+    pub(crate) timeout: Duration,
+}
+
+impl crate::probe::Request for ExecutionCase {
+    type Execution = Execution;
 }
 
 #[derive(Clone, Debug)]
@@ -24,12 +30,4 @@ pub struct Execution {
     pub(crate) undecoded: Vec<Frame>,
     pub(crate) diagnostics: Vec<Diagnostic>,
     pub(crate) stats: crate::Stats,
-}
-
-pub trait Executor {
-    fn execute(
-        &mut self,
-        case: &ExecutionCase,
-        timeout: Duration,
-    ) -> Result<Execution, crate::BoundaryError>;
 }

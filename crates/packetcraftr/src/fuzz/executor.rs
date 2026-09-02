@@ -1,14 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::time::Duration;
-
 use crate::BoundaryError;
 use crate::ExchangeExecutor;
-use crate::probe::client_executor::ExecutorFault;
+use crate::probe::Executor;
+use crate::probe::executor::ExecutorFault;
 use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Sender as PacketIo};
 
-use super::execution::{Execution, ExecutionCase, Executor};
+use super::execution::{Execution, ExecutionCase};
 
 const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
     "internal.fuzz_executor",
@@ -17,19 +16,15 @@ const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
 
 /// Executes one generated fuzz case through the client's capture-ready
 /// exchange lifecycle.
-impl<R, N, I> Executor for ExchangeExecutor<'_, R, N, I>
+impl<R, N, I> Executor<ExecutionCase> for ExchangeExecutor<'_, R, N, I>
 where
     R: packetcraftr_netio::route::Provider,
     N: packetcraftr_netio::neighbor::Resolver,
     I: PacketIo + CaptureProvider,
 {
-    fn execute(
-        &mut self,
-        case: &ExecutionCase,
-        timeout: Duration,
-    ) -> Result<Execution, BoundaryError> {
+    fn execute(&mut self, case: &ExecutionCase) -> Result<Execution, BoundaryError> {
         let mut options = self.options.clone();
-        options.timeout = timeout;
+        options.timeout = case.timeout;
         options.max_template_packets = 1;
         let exchange = self
             .client

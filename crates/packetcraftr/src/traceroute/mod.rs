@@ -27,8 +27,8 @@ const SOURCE_PORT: u16 = crate::probe::EPHEMERAL_SOURCE_PORT_BASE;
 const WORKFLOW: Workflow = Workflow::Traceroute;
 
 mod classification;
-mod client_executor;
 mod engine;
+mod executor;
 mod model;
 mod plan;
 mod probe;

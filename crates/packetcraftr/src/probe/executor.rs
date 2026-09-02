@@ -27,6 +27,19 @@ impl ExecutorFault {
     }
 }
 
+/// One unit of live work a workflow hands to its executor, paired with the
+/// evidence receipt that work produces.
+pub trait Request {
+    type Execution;
+}
+
+/// The executor boundary every live workflow shares: it carries out one
+/// approved request and returns the evidence it produced. Implementations are
+/// keyed by request type, so a scan executor and a DNS executor stay distinct.
+pub trait Executor<Req: Request> {
+    fn execute(&mut self, request: &Req) -> Result<Req::Execution, BoundaryError>;
+}
+
 /// Shared client and exchange options for live workflow executors.
 pub struct ExchangeExecutor<'a, R, N, I> {
     pub(crate) client: &'a crate::Client<R, N, I>,

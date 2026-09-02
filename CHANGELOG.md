@@ -92,6 +92,16 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- **BREAKING:** the progressive-output runtime moved from
+  `packetcraftr_core::progress` to `packetcraftr::progress`. Nothing in the
+  core crate consumed it — it is workflow-crate infrastructure, and hiding it
+  behind `#[doc(hidden)]` only obscured that. The offline fuzz campaign now
+  publishes through `packetcraftr::fuzz::run_offline_with_events`;
+  `packetcraftr_core::fuzz::run_observed` (formerly `run_with_events`) takes a
+  deadline-aware observer and no runtime. `DeadlineExceeded` implements
+  `Display`/`Error`, and `progress::EmitError` is a `thiserror` enum whose
+  variants convert `From` their payloads.
+
 - **Breaking (CLI text):** human output no longer prints library enums through
   `Debug`. A diagnostic line reads `warning tcp.retransmission: ...` rather
   than `Warning tcp.retransmission: ...`, matching the `"warning"` the same

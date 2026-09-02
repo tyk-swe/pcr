@@ -14,8 +14,8 @@ use std::{
     time::Duration,
 };
 
-use crate::budget::{Deadline, DeadlineExceeded};
-use crate::error::{BoundaryError, Classification, Kind};
+use packetcraftr_core::budget::{Deadline, DeadlineExceeded};
+use packetcraftr_core::error::{BoundaryError, Classification, Kind};
 
 /// Upper bound on callbacks one [`Runtime`] can own an OS worker for,
 /// including callbacks still running after their publisher stopped waiting.
@@ -34,7 +34,7 @@ const REAPER_POLL_INTERVAL: Duration = Duration::from_millis(10);
 /// runtime that never publishes costs no thread.
 pub struct Runtime {
     capacity: usize,
-    workers: OnceLock<Result<Workers, Arc<str>>>,
+    workers: OnceLock<Result<Workers, String>>,
 }
 
 impl Runtime {
@@ -85,10 +85,14 @@ impl fmt::Debug for Runtime {
 }
 
 /// Failure returned by an interruptible progressive sink.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum EmitError {
-    Deadline(DeadlineExceeded),
-    Output(BoundaryError),
+    /// The publisher's deadline expired while waiting for the callback.
+    #[error(transparent)]
+    Deadline(#[from] DeadlineExceeded),
+    /// The callback failed or the worker could not accept the event.
+    #[error(transparent)]
+    Output(#[from] BoundaryError),
 }
 
 /// Runs a user callback on an isolated, runtime-budgeted worker.
@@ -339,14 +343,14 @@ impl HandleReaper {
     }
 }
 
-fn start_workers(capacity: usize) -> Result<Workers, Arc<str>> {
+fn start_workers(capacity: usize) -> Result<Workers, String> {
     let (workers, receiver) = mpsc::channel();
     let available = Arc::new(AtomicBool::new(true));
     let reaper_available = Arc::clone(&available);
     let reaper_worker = thread::Builder::new()
         .name("packetcraftr-progress-reaper".to_owned())
         .spawn(move || run_handle_reaper(receiver, reaper_available, capacity))
-        .map_err(|error| Arc::from(error.to_string()))?;
+        .map_err(|error| error.to_string())?;
     Ok(Workers {
         budget: WorkerBudget::new(capacity),
         reaper: HandleReaper { workers, available },
@@ -433,7 +437,7 @@ mod tests {
     };
     use std::time::{Duration, Instant};
 
-    use crate::error::Classified;
+    use packetcraftr_core::error::Classified;
 
     use super::*;
 

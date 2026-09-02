@@ -103,9 +103,11 @@ impl Classified for Error {
     }
 }
 
-pub(super) fn duration_limit(error: DeadlineExceeded) -> Error {
-    Error::DurationLimit {
-        actual: error.actual,
-        limit: error.limit,
+impl From<DeadlineExceeded> for Error {
+    fn from(error: DeadlineExceeded) -> Self {
+        Self::DurationLimit {
+            actual: error.actual,
+            limit: error.limit,
+        }
     }
 }

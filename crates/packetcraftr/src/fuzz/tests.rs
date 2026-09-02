@@ -8,11 +8,11 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::progress::Runtime;
 use bytes::Bytes;
 use packetcraftr_core::build::Builder;
 use packetcraftr_core::error::Classified;
 use packetcraftr_core::fuzz as packet_fuzz;
-use packetcraftr_core::progress::Runtime;
 use packetcraftr_core::protocol::{network::Ipv4, transport::Udp};
 use packetcraftr_core::{Packet, layer::Raw};
 use packetcraftr_netio::{capture::Statistics as CaptureStatistics, transmit::Submission};

@@ -39,7 +39,7 @@ where
     /// Confirmed sends are published before later requests, capture evidence
     /// when its classification is final, and unanswered requests after capture
     /// shutdown. The callback runs on a one-event worker admitted by this
-    /// client's [`Runtime`](packetcraftr_core::progress::Runtime); failure
+    /// client's [`Runtime`](crate::progress::Runtime); failure
     /// aborts later work, and the timeout bounds publisher waiting, not
     /// arbitrary callback execution. A callback may finish after this method
     /// returns and holds one of that runtime's worker permits until then.
@@ -53,12 +53,11 @@ where
         F: FnMut(crate::exchange::Event) -> Result<(), crate::BoundaryError> + Send + 'static,
     {
         let deadline = Deadline::new(options.timeout);
-        let sink =
-            packetcraftr_core::progress::Sink::new_in(&self.runtime, emit).map_err(|source| {
-                Error::ExchangeOutput {
-                    source: Box::new(source),
-                }
-            })?;
+        let sink = crate::progress::Sink::new_in(&self.runtime, emit).map_err(|source| {
+            Error::ExchangeOutput {
+                source: Box::new(source),
+            }
+        })?;
         self.exchange_streamed(template, options, None, None, &mut |event| {
             sink.emit(event, &deadline).map_err(exchange_sink_error)
         })
@@ -132,10 +131,10 @@ where
     }
 }
 
-fn exchange_sink_error(error: packetcraftr_core::progress::EmitError) -> BoundaryError {
+fn exchange_sink_error(error: crate::progress::EmitError) -> BoundaryError {
     match error {
-        packetcraftr_core::progress::EmitError::Output(source) => source,
-        packetcraftr_core::progress::EmitError::Deadline(error) => BoundaryError::new(
+        crate::progress::EmitError::Output(source) => source,
+        crate::progress::EmitError::Deadline(error) => BoundaryError::new(
             format!(
                 "exchange progressive output exceeded the operation deadline of {:?}",
                 error.limit

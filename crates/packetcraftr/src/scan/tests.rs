@@ -9,10 +9,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, UNIX_EPOCH};
 
+use crate::progress::Runtime;
 use bytes::Bytes;
 use packetcraftr_core::error::{Classification as ErrorClassification, Kind};
 use packetcraftr_core::frame::{Frame, LinkType};
-use packetcraftr_core::progress::Runtime;
 use packetcraftr_core::protocol::{
     network::{Ipv4, Ipv6},
     transport::Tcp,

@@ -3,9 +3,9 @@
 
 use std::sync::Arc;
 
+use crate::progress::Runtime;
 use packetcraftr_core::build::BuiltPacket;
 use packetcraftr_core::frame::LinkType;
-use packetcraftr_core::progress::Runtime;
 use packetcraftr_core::registry::Registry;
 use packetcraftr_netio::transmit::Sender as PacketIo;
 use packetcraftr_netio::{Error as LiveIoError, link::Mode as LinkMode};

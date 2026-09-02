@@ -6,7 +6,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use packetcraftr_core::budget::Deadline;
-use packetcraftr_core::progress::Runtime;
 use packetcraftr_core::{
     Packet,
     build::{Builder, BuiltPacket},
@@ -23,6 +22,7 @@ use crate::materialize::{
     require_fixed_width_link_materialization,
 };
 use crate::probe::runner::sink_observer;
+use crate::progress::Runtime;
 
 use super::SYNTHESIZED_ETHERNET_BYTES;
 use super::error::{Error, duration_limit};
@@ -84,6 +84,24 @@ where
         source,
     })?;
     run_observed(input, authorizer, executor, clock, observe)
+}
+
+/// Generates an offline campaign and publishes each case through a bounded
+/// callback worker admitted by `runtime`, without any live execution.
+pub fn run_offline_with_events<F>(
+    request: &packet_fuzz::Request,
+    packet: Packet,
+    registry: Arc<Registry>,
+    runtime: &Runtime,
+    emit: F,
+) -> Result<packet_fuzz::Summary, packet_fuzz::Error>
+where
+    F: FnMut(packet_fuzz::Case) -> Result<(), crate::BoundaryError> + Send + 'static,
+{
+    let observe = sink_observer(runtime, emit, packet_fuzz::Error::from, |source| {
+        packet_fuzz::Error::Output { source }
+    })?;
+    packet_fuzz::run_observed(request, packet, registry, observe)
 }
 
 /// The validated campaign request together with the packet, registry, and

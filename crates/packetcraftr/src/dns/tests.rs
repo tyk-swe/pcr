@@ -19,10 +19,10 @@ use std::thread;
 #[cfg(feature = "native-route")]
 use std::time::Instant;
 
+use crate::progress::Runtime;
 use bytes::Bytes;
 use packetcraftr_core::error::{Classification, Kind};
 use packetcraftr_core::layer::Raw;
-use packetcraftr_core::progress::Runtime;
 use packetcraftr_core::protocol::{network::Ipv4, transport::Udp};
 use packetcraftr_core::{Packet, decode::DecodedPacket, frame::Frame, frame::LinkType};
 

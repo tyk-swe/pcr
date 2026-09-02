@@ -4,11 +4,9 @@
 use std::sync::Arc;
 
 use crate::budget::Deadline;
-use crate::error::BoundaryError;
-use crate::progress::{EmitError, Runtime, Sink};
 use crate::{Packet, registry::Registry};
 
-use super::error::{Error, duration_limit};
+use super::error::Error;
 use super::prepare::prepare_with_events;
 use super::report::{Case, Report, Stats, Summary};
 use super::request::Request;
@@ -58,38 +56,12 @@ pub fn run(request: &Request, packet: Packet, registry: Arc<Registry>) -> Result
     })
 }
 
-/// Generates each deterministic case once and publishes it as soon as its
-/// offline outcome is final.
+/// Generates each deterministic case once and hands it to `emit` as soon as
+/// its offline outcome is final.
 ///
-/// The callback runs on a worker admitted by `runtime`. Each result is
-/// acknowledged before generation continues, callback failure aborts later
-/// cases, and the deadline bounds publisher waiting for callback backpressure.
-/// It does not terminate callback code: a callback may finish after this
-/// function returns and holds one of the runtime's worker permits until then.
-pub fn run_with_events<F>(
-    request: &Request,
-    packet: Packet,
-    registry: Arc<Registry>,
-    runtime: &Runtime,
-    emit: F,
-) -> Result<Summary, Error>
-where
-    F: FnMut(Case) -> Result<(), BoundaryError> + Send + 'static,
-{
-    let sink = Sink::new_in(runtime, emit).map_err(|source| Error::Output { source })?;
-    run_observed(
-        request,
-        packet,
-        registry,
-        move |case, deadline| match sink.emit(case, deadline) {
-            Ok(()) => Ok(()),
-            Err(EmitError::Deadline(error)) => Err(duration_limit(error)),
-            Err(EmitError::Output(source)) => Err(Error::Output { source }),
-        },
-    )
-}
-
-fn run_observed<F>(
+/// `emit` receives the campaign deadline so a publisher can bound how long it
+/// waits for backpressure. Its failure aborts later cases.
+pub fn run_observed<F>(
     request: &Request,
     packet: Packet,
     registry: Arc<Registry>,

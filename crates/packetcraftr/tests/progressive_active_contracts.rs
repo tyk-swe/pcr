@@ -14,7 +14,6 @@ use std::time::{Duration, Instant, UNIX_EPOCH};
 use bytes::Bytes;
 use packetcraftr::core::error::{Classification, Classified, Kind};
 use packetcraftr::core::frame::LinkType;
-use packetcraftr::core::progress::Runtime;
 use packetcraftr::core::protocol::{network::Ipv4, transport::Udp};
 use packetcraftr::core::{Packet, field::FieldValue, layer::Raw};
 use packetcraftr::netio::capture;
@@ -23,6 +22,7 @@ use packetcraftr::netio::link::{Capability, Mode};
 use packetcraftr::netio::neighbor;
 use packetcraftr::netio::route::{Decision, Provider, Scope, SelectionReason};
 use packetcraftr::netio::transmit;
+use packetcraftr::progress::Runtime;
 use packetcraftr::target::Target;
 use packetcraftr::{BoundaryError, Client, ExchangeExecutor, clock, dns, policy, scan, traceroute};
 

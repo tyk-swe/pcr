@@ -152,15 +152,20 @@ fn execute_offline(
 ) -> Result<(), CliError> {
     if format == ToolFormat::Ndjson {
         let event_stream = stream.clone();
-        let runtime = core::progress::Runtime::default();
-        let summary =
-            core::fuzz::run_with_events(&request, packet, registry, &runtime, move |case| {
+        let runtime = packetcraftr::progress::Runtime::default();
+        let summary = packetcraftr::fuzz::run_offline_with_events(
+            &request,
+            packet,
+            registry,
+            &runtime,
+            move |case| {
                 output::fuzz::Event::try_from_offline(case)
                     .map_err(CliError::classified)
                     .and_then(|event| Ok(event_stream.emit_data(event, Vec::new())?))
                     .map_err(CliError::into_boundary_error)
-            })
-            .map_err(CliError::classified)?;
+            },
+        )
+        .map_err(CliError::classified)?;
         return rendering::render_offline_complete(summary, stream);
     }
     let format = AggregateFormat::narrow_from(output::contract::Command::Fuzz, format)?;
@@ -187,7 +192,7 @@ fn execute_live(
     let mut clock = packetcraftr::clock::SystemClock;
     if format == ToolFormat::Ndjson {
         let event_stream = stream.clone();
-        let runtime = core::progress::Runtime::default();
+        let runtime = packetcraftr::progress::Runtime::default();
         let summary = packetcraftr::fuzz::run_with_events(
             packetcraftr::fuzz::RunInput {
                 request: &request,

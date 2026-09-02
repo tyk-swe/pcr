@@ -20,9 +20,8 @@ use super::error::Error;
 use super::report::CaseOutcome;
 use super::request::{Limits, Request, Strategy};
 use super::run::run as fuzz;
-use super::run::run_with_events;
+use super::run::run_observed;
 use crate::error::{BoundaryError, Classification, Classified, Kind};
-use crate::progress::Runtime;
 
 fn fuzz_protocol_registry() -> Arc<Registry> {
     crate::protocol::builtin::registry()
@@ -146,14 +145,15 @@ fn offline_fuzz_sink_failure_stops_generation_after_the_emitted_case() {
     let emitted = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let observed = std::sync::Arc::clone(&emitted);
 
-    let error = run_with_events(
+    let error = run_observed(
         &request,
         raw_fuzz_packet(),
         fuzz_protocol_registry(),
-        &Runtime::default(),
-        move |case| {
+        move |case, _| {
             observed.lock().unwrap().push(case.index);
-            Err(output_failure())
+            Err(Error::Output {
+                source: output_failure(),
+            })
         },
     )
     .expect_err("the first sink write must stop generation");
@@ -184,12 +184,11 @@ fn offline_fuzz_late_limit_failure_preserves_earlier_cases() {
     let emitted = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let observed = std::sync::Arc::clone(&emitted);
 
-    let error = run_with_events(
+    let error = run_observed(
         &request,
         raw_fuzz_packet(),
         fuzz_protocol_registry(),
-        &Runtime::default(),
-        move |case| {
+        move |case, _| {
             observed.lock().unwrap().push(case.index);
             Ok(())
         },

@@ -102,7 +102,7 @@ impl TargetWorkflow for Scan {
         registry: &core::registry::Registry,
         executor: &mut Executor,
         clock: &mut impl packetcraftr::clock::Clock,
-        runtime: &core::progress::Runtime,
+        runtime: &packetcraftr::progress::Runtime,
         stream: &StreamEncoder,
     ) -> Result<(), CliError> {
         let event_stream = stream.clone();

@@ -54,7 +54,7 @@ pub(super) trait TargetWorkflow {
         registry: &core::registry::Registry,
         executor: &mut Executor,
         clock: &mut impl packetcraftr::clock::Clock,
-        runtime: &core::progress::Runtime,
+        runtime: &packetcraftr::progress::Runtime,
         stream: &StreamEncoder,
     ) -> Result<(), CliError>;
 
@@ -163,7 +163,7 @@ pub(super) struct TargetProviders {
     pub(super) registry: Arc<core::registry::Registry>,
     executor: Executor,
     /// Admits the one callback worker NDJSON streaming publishes through.
-    runtime: core::progress::Runtime,
+    runtime: packetcraftr::progress::Runtime,
 }
 
 /// Validates the policy and interface selector, then binds an executor to the
@@ -206,6 +206,6 @@ pub(super) fn prepare(
         policy,
         registry,
         executor,
-        runtime: core::progress::Runtime::default(),
+        runtime: packetcraftr::progress::Runtime::default(),
     })
 }

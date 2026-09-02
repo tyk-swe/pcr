@@ -6,10 +6,10 @@
 use std::ops::ControlFlow;
 use std::time::Duration;
 
+use crate::progress::{EmitError, Runtime, Sink};
 use packetcraftr_core::budget::{Deadline, DeadlineExceeded};
 use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::frame::Frame;
-use packetcraftr_core::progress::{EmitError, Runtime, Sink};
 use packetcraftr_core::{decode::DecodedPacket, diagnostic::Diagnostic};
 
 use crate::clock::{Clock, check_deadline, rate_delay};

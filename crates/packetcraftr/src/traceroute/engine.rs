@@ -9,8 +9,8 @@ use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::progress::Runtime;
 use packetcraftr_core::budget::Deadline;
-use packetcraftr_core::progress::Runtime;
 use packetcraftr_core::{diagnostic::Diagnostic, registry::Registry};
 
 use crate::clock::Clock;

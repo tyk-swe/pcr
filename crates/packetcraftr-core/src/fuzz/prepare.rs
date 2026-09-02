@@ -18,7 +18,7 @@ use crate::{
 
 use super::MAX_TARGET_FIELDS;
 use super::decode::dissect_built;
-use super::error::{Error, duration_limit};
+use super::error::Error;
 use super::mutation::{bounded_value_size, index_from, mutation_value, shrink_values};
 use super::report::{Case, CaseFailure, CaseOutcome, Mutation};
 use super::request::{Limits, Request, Strategy, Target};
@@ -46,7 +46,7 @@ where
 {
     deadline
         .start_accounting(Duration::ZERO)
-        .map_err(duration_limit)?;
+        .map_err(Error::from)?;
     let started = Instant::now();
     validate_base_shape(&packet, request.build.max_layers)?;
     packet_reflected_value_bytes(&packet, request.limits)?;
@@ -79,7 +79,7 @@ where
     };
     let mut campaign = prepare_cases(&inputs, deadline, emit)?;
     campaign.elapsed = started.elapsed();
-    deadline.account(campaign.elapsed).map_err(duration_limit)?;
+    deadline.account(campaign.elapsed).map_err(Error::from)?;
     Ok(campaign)
 }
 
@@ -117,7 +117,7 @@ where
 {
     let mut counters = Counters::default();
     for offset in 0..inputs.request.cases {
-        deadline.check().map_err(duration_limit)?;
+        deadline.check().map_err(Error::from)?;
         let case = prepare_case(inputs, offset, &mut counters)?;
         emit(case, deadline)?;
     }

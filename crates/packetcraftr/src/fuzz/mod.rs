@@ -26,4 +26,4 @@ pub use error::Error;
 pub use execution::{Execution, ExecutionCase, Executor};
 pub use report::{Case, CaseOutcome, Report, Stats, Summary};
 pub use request::{LiveLimits, LiveOptions};
-pub use run::{RunInput, run, run_with_events};
+pub use run::{RunInput, run, run_offline_with_events, run_with_events};

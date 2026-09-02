@@ -22,7 +22,7 @@ impl super::builder::Builder {
         for protocol in self.roots.values() {
             if !self.codecs.contains_key(protocol) {
                 return Err(Error::UnknownProtocol {
-                    protocol: protocol.clone(),
+                    protocol: *protocol,
                 });
             }
         }
@@ -32,9 +32,7 @@ impl super::builder::Builder {
         > = HashMap::new();
         for (parent, discriminators) in &mut self.bindings {
             if !self.codecs.contains_key(parent) {
-                return Err(Error::UnknownProtocol {
-                    protocol: parent.clone(),
-                });
+                return Err(Error::UnknownProtocol { protocol: *parent });
             }
             for (discriminator, entries) in discriminators {
                 entries.sort_by(|left, right| {
@@ -46,7 +44,7 @@ impl super::builder::Builder {
                 for entry in entries.iter() {
                     if !self.codecs.contains_key(&entry.child) {
                         return Err(Error::UnknownProtocol {
-                            protocol: entry.child.clone(),
+                            protocol: entry.child,
                         });
                     }
                 }
@@ -55,9 +53,9 @@ impl super::builder::Builder {
                     continue;
                 };
                 reverse_bindings
-                    .entry(parent.clone())
+                    .entry(*parent)
                     .or_default()
-                    .entry(winner.child.clone())
+                    .entry(winner.child)
                     .or_default()
                     .push(ReverseBinding {
                         discriminator: *discriminator,
@@ -78,7 +76,7 @@ impl super::builder::Builder {
         for protocol in self.matchers.keys() {
             if !self.codecs.contains_key(protocol) {
                 return Err(Error::UnknownProtocol {
-                    protocol: protocol.clone(),
+                    protocol: *protocol,
                 });
             }
         }
@@ -86,7 +84,7 @@ impl super::builder::Builder {
         let mut schemas = BTreeMap::new();
         for (protocol, codec) in &self.codecs {
             if let Some(schema) = codec.published_schema() {
-                schemas.insert(protocol.clone(), schema);
+                schemas.insert(*protocol, schema);
             }
         }
         for (path, binding) in &self.filter_fields {
@@ -135,7 +133,7 @@ fn reject_canonical_filter_path(
     {
         return Err(Error::DuplicateFilterField {
             path: path.to_owned(),
-            existing: protocol.clone(),
+            existing: *protocol,
         });
     }
     Ok(())
@@ -155,7 +153,7 @@ fn validate_filter_field(
     let protocol = binding.protocol();
     if !codecs.contains_key(protocol) {
         return Err(Error::UnknownProtocol {
-            protocol: protocol.clone(),
+            protocol: *protocol,
         });
     }
     // A decode-only codec has no default layer and therefore no cached schema.
@@ -167,7 +165,7 @@ fn validate_filter_field(
         let Some(declared) = schema.fields.iter().find(|entry| entry.name == *field) else {
             return Err(Error::UnknownFilterField {
                 path: path.to_owned(),
-                protocol: protocol.clone(),
+                protocol: *protocol,
                 field: (*field).to_owned(),
             });
         };

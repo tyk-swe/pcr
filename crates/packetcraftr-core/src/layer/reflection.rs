@@ -108,7 +108,7 @@ macro_rules! reflective_layer {
                         ),
                     )*
                     _ => Err($crate::layer::FieldError::UnknownField {
-                        protocol: $schema().protocol.clone(),
+                        protocol: $schema().protocol,
                         field: name.to_owned(),
                     }),
                 }
@@ -206,12 +206,12 @@ pub fn reflect_set<T: ReflectiveField>(
         .set_reflective_value(value)
         .map_err(|error| match error {
             ReflectiveFieldError::WrongType(expected) => FieldError::WrongType {
-                protocol: schema.protocol.clone(),
+                protocol: schema.protocol,
                 field: field.to_owned(),
                 expected,
             },
             ReflectiveFieldError::OutOfRange => FieldError::OutOfRange {
-                protocol: schema.protocol.clone(),
+                protocol: schema.protocol,
                 field: field.to_owned(),
             },
         })
@@ -230,7 +230,7 @@ pub fn reflect_set_bounded<T: ReflectiveField>(
         && value > maximum
     {
         return Err(FieldError::OutOfRange {
-            protocol: schema.protocol.clone(),
+            protocol: schema.protocol,
             field: field.to_owned(),
         });
     }

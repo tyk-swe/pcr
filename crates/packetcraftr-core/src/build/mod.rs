@@ -93,14 +93,11 @@ impl Builder {
                 .validate_required_fields()
                 .map_err(|source| Error::InvalidLayer {
                     index,
-                    protocol: layer.protocol_id().clone(),
+                    protocol: *layer.protocol_id(),
                     source,
                 })?;
         }
-        let protocols: Vec<_> = packet
-            .iter()
-            .map(|layer| layer.protocol_id().clone())
-            .collect();
+        let protocols: Vec<_> = packet.iter().map(|layer| *layer.protocol_id()).collect();
         validation::validate_bindings(
             &self.registry,
             packet,
@@ -125,13 +122,10 @@ impl Builder {
         let mut payload_lengths = Vec::with_capacity(packet.len());
 
         for (index, (layer, protocol)) in packet.iter().zip(protocols).enumerate().rev() {
-            let codec =
-                self.registry
-                    .codec(protocol.as_str())
-                    .ok_or_else(|| Error::MissingCodec {
-                        index,
-                        protocol: protocol.clone(),
-                    })?;
+            let codec = self
+                .registry
+                .codec(protocol.as_str())
+                .ok_or(Error::MissingCodec { index, protocol })?;
             #[expect(
                 clippy::arithmetic_side_effects,
                 reason = "`index` comes from enumerating `protocols`, so it is below its length"
@@ -155,7 +149,7 @@ impl Builder {
                 )
                 .map_err(|source| Error::Codec {
                     index,
-                    protocol: protocol.clone(),
+                    protocol,
                     source,
                 })?;
 
@@ -163,7 +157,7 @@ impl Builder {
             if actual != &protocol {
                 return Err(Error::MaterializedProtocolMismatch {
                     protocol,
-                    actual: actual.clone(),
+                    actual: *actual,
                 });
             }
             encoded
@@ -171,7 +165,7 @@ impl Builder {
                 .validate_required_fields()
                 .map_err(|source| Error::InvalidLayer {
                     index,
-                    protocol: encoded.materialized.protocol_id().clone(),
+                    protocol: *encoded.materialized.protocol_id(),
                     source,
                 })?;
 

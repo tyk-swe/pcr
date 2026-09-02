@@ -5,16 +5,18 @@
 
 use crate::layer::{FieldError, Layer, Malformed};
 
-pub(crate) fn protocol(name: &str) -> crate::layer::Id {
+pub(crate) fn protocol(name: &'static str) -> crate::layer::Id {
     crate::layer::Id::new(name)
 }
 
-pub(crate) fn binding_protocol(layer: &dyn Layer) -> &crate::layer::Id {
+/// The protocol name a parent binds this child under: the intended protocol
+/// of a malformed layer, otherwise the layer's own identifier.
+pub(crate) fn binding_protocol(layer: &dyn Layer) -> &str {
     layer
         .as_any()
         .downcast_ref::<Malformed>()
-        .and_then(|layer| layer.intended_protocol.as_ref())
-        .unwrap_or_else(|| layer.protocol_id())
+        .and_then(|layer| layer.intended_protocol.as_deref())
+        .unwrap_or_else(|| layer.protocol_id().as_str())
 }
 
 /// Whether a child layer only preserves opaque bytes, so a parent that would
@@ -27,7 +29,7 @@ pub(crate) fn child_is_opaque(child: &dyn Layer) -> bool {
 /// Borrows the concrete layer a codec encodes, or reports the mismatch as
 /// [`crate::codec::Error::WrongLayer`].
 pub(crate) fn typed_layer<'a, L: Layer + 'static>(
-    name: &str,
+    name: &'static str,
     layer: &'a dyn Layer,
 ) -> Result<&'a L, crate::codec::Error> {
     layer
@@ -36,14 +38,18 @@ pub(crate) fn typed_layer<'a, L: Layer + 'static>(
         .ok_or_else(|| wrong_layer(name, layer))
 }
 
-fn wrong_layer(expected: &str, actual: &dyn Layer) -> crate::codec::Error {
+fn wrong_layer(expected: &'static str, actual: &dyn Layer) -> crate::codec::Error {
     crate::codec::Error::WrongLayer {
         expected: protocol(expected),
-        actual: actual.protocol_id().clone(),
+        actual: *actual.protocol_id(),
     }
 }
 
-pub(crate) fn truncated(name: &str, needed: usize, available: usize) -> crate::codec::Error {
+pub(crate) fn truncated(
+    name: &'static str,
+    needed: usize,
+    available: usize,
+) -> crate::codec::Error {
     crate::codec::Error::Truncated {
         protocol: protocol(name),
         needed,
@@ -51,7 +57,7 @@ pub(crate) fn truncated(name: &str, needed: usize, available: usize) -> crate::c
     }
 }
 
-pub(crate) fn invalid(name: &str, message: impl Into<String>) -> crate::codec::Error {
+pub(crate) fn invalid(name: &'static str, message: impl Into<String>) -> crate::codec::Error {
     crate::codec::Error::Invalid {
         protocol: protocol(name),
         message: message.into(),
@@ -64,7 +70,7 @@ pub(crate) fn wrong_type(
     expected: &'static str,
 ) -> FieldError {
     FieldError::WrongType {
-        protocol: schema.protocol.clone(),
+        protocol: schema.protocol,
         field: field.to_owned(),
         expected,
     }
@@ -72,7 +78,7 @@ pub(crate) fn wrong_type(
 
 pub(crate) fn out_of_range(schema: &'static crate::layer::Schema, field: &str) -> FieldError {
     FieldError::OutOfRange {
-        protocol: schema.protocol.clone(),
+        protocol: schema.protocol,
         field: field.to_owned(),
     }
 }
@@ -82,7 +88,7 @@ pub(crate) fn read_only(
     field: &str,
 ) -> Result<(), FieldError> {
     Err(FieldError::ReadOnly {
-        protocol: schema.protocol.clone(),
+        protocol: schema.protocol,
         field: field.to_owned(),
     })
 }

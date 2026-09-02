@@ -106,7 +106,7 @@ struct VlanEncodeFields<'a> {
 }
 
 fn encode_vlan<L>(
-    name: &str,
+    name: &'static str,
     fields: VlanEncodeFields<'_>,
     payload: &[u8],
     context: &LayerEncodeContext<'_>,
@@ -163,7 +163,7 @@ where
 }
 
 fn decode_vlan(
-    name: &str,
+    name: &'static str,
     input: &[u8],
     layout: fn() -> Vec<crate::layout::FieldLayout>,
     layer: impl FnOnce(u8, bool, u16, WireValue<u16>) -> Box<dyn Layer>,

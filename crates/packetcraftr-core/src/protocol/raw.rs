@@ -43,11 +43,11 @@ pub fn parse_hex(input: &str) -> Result<Bytes, crate::codec::Error> {
     let mut offset = 0_usize;
     while let Some(pair) = digits.get(offset..).and_then(<[u8]>::first_chunk::<2>) {
         let high = hex_nibble(pair[0]).ok_or_else(|| crate::codec::Error::Invalid {
-            protocol: protocol.clone(),
+            protocol,
             message: format!("invalid hex at byte {offset}"),
         })?;
         let low = hex_nibble(pair[1]).ok_or_else(|| crate::codec::Error::Invalid {
-            protocol: protocol.clone(),
+            protocol,
             message: format!("invalid hex at byte {}", offset.saturating_add(1)),
         })?;
         bytes.push((high << 4) | low);
@@ -212,7 +212,7 @@ impl LayerCodec for PaddingCodec {
 
 fn raw_fields(
     fields: &BTreeMap<String, FieldValue>,
-    name: &str,
+    name: &'static str,
 ) -> Result<BTreeMap<String, FieldValue>, crate::codec::Error> {
     let mut normalized = fields.clone();
     let derived = match normalized.remove("hex") {

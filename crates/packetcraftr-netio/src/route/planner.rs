@@ -182,7 +182,7 @@ fn reject_offline_link_header(packet: &Packet) -> Result<(), Error> {
                     | BuiltinProtocol::LinuxSll2
             )
         )
-        .then(|| layer.protocol_id().clone())
+        .then(|| *layer.protocol_id())
     }) {
         return Err(Error::OfflineOnlyLinkHeader { protocol });
     }

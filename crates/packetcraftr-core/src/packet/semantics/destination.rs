@@ -18,12 +18,12 @@ pub fn live_destinations(packet: &Packet) -> Result<Vec<IpAddr>, Error> {
     let mut destinations = Vec::new();
     for (index, layer) in packet.iter().enumerate() {
         if let Some(malformed) = layer.as_any().downcast_ref::<Malformed>()
-            && let Some(intended) = malformed.intended_protocol.as_ref()
-            && BuiltinProtocol::from_name_or_alias(intended.as_str())
+            && let Some(intended) = malformed.intended_protocol.as_deref()
+            && BuiltinProtocol::from_name_or_alias(intended)
                 .is_some_and(malformed_protocol_may_hide_destination)
         {
             return Err(Error::MalformedMayHideDestination {
-                protocol: intended.clone(),
+                protocol: intended.to_owned(),
                 reason: malformed.reason.clone(),
             });
         }
@@ -73,7 +73,7 @@ pub fn live_destinations(packet: &Packet) -> Result<Vec<IpAddr>, Error> {
                         || layer.field(field).is_some()
                 }) {
                     return Err(Error::UnknownProtocolRouteField {
-                        protocol: layer.protocol_id().clone(),
+                        protocol: *layer.protocol_id(),
                         field,
                     });
                 }

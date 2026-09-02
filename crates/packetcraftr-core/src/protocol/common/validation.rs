@@ -11,7 +11,7 @@ use crate::{
 use super::errors::{binding_protocol, child_is_opaque, invalid, protocol};
 
 pub(crate) fn validate_ipv6_routing_child(
-    name: &str,
+    name: &'static str,
     next_header: u8,
     context: &LayerEncodeContext<'_>,
     diagnostics: &mut Vec<Diagnostic>,
@@ -40,7 +40,7 @@ pub(crate) fn validate_ipv6_routing_child(
 /// selects a registered typed codec must have that child; it cannot be used to
 /// smuggle arbitrary bytes or claim a header that is absent.
 pub(crate) fn validate_raw_child_discriminator(
-    parent: &str,
+    parent: &'static str,
     discriminator: u64,
     context: &LayerEncodeContext<'_>,
     diagnostics: &mut Vec<Diagnostic>,
@@ -62,7 +62,7 @@ pub(crate) fn validate_raw_child_discriminator(
         ))
         .then(|| binding_protocol(child))
     });
-    if actual == Some(bound) {
+    if actual == Some(bound.as_str()) {
         return Ok(());
     }
     let absent_payload = context
@@ -105,7 +105,7 @@ pub(crate) fn validate_raw_child_discriminator(
 /// Registered typed selections are left to `validate_raw_child_discriminator`,
 /// which already rejects a mismatch there.
 pub(crate) fn validate_typed_child_discriminator(
-    parent: &str,
+    parent: &'static str,
     discriminator: u64,
     context: &LayerEncodeContext<'_>,
     diagnostics: &mut Vec<Diagnostic>,
@@ -137,7 +137,7 @@ pub(crate) fn validate_typed_child_discriminator(
 }
 
 pub(crate) fn validate_auto_raw_discriminator<T>(
-    name: &str,
+    name: &'static str,
     field: &'static str,
     value: &WireValue<T>,
     context: &LayerEncodeContext<'_>,
@@ -161,7 +161,7 @@ pub(crate) fn validate_auto_raw_discriminator<T>(
 }
 
 pub(crate) fn strict_or_diagnostic(
-    name: &str,
+    name: &'static str,
     code: &'static str,
     field: &'static str,
     message: impl Into<String>,
@@ -177,7 +177,7 @@ pub(crate) fn strict_or_diagnostic(
 }
 
 pub(crate) fn ensure_encode_budget(
-    name: &str,
+    name: &'static str,
     contribution: usize,
     context: &LayerEncodeContext<'_>,
 ) -> Result<(), crate::codec::Error> {

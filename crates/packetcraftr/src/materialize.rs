@@ -225,7 +225,6 @@ pub(super) fn materialize_network_fields(
     Ok(())
 }
 
-// rebuild dominates.
 pub(super) fn materialize_link_fields(
     packet: &mut Packet,
     route: &packetcraftr_netio::route::Materialized,

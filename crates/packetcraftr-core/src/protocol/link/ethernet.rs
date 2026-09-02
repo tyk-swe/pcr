@@ -41,7 +41,7 @@ fn ethernet_chunk<const N: usize>(input: &[u8], offset: usize) -> Option<[u8; N]
 /// header, 1536 and above is an EtherType, and the undefined band between
 /// them falls through to the raw payload.
 pub(super) fn link_payload_selection(
-    name: &str,
+    name: &'static str,
     ether_type: u16,
     available: usize,
     header_len: usize,
@@ -76,14 +76,14 @@ pub(super) fn link_payload_selection(
 /// preserving broken LLC bytes from a length-framed capture — and the
 /// registered discriminator otherwise.
 pub(super) fn link_type_expectation(
-    name: &str,
+    name: &'static str,
     context: &LayerEncodeContext<'_>,
     value: &WireValue<u16>,
     covered_payload_len: usize,
 ) -> Result<ValueExpectation<u16>, crate::codec::Error> {
     if context
         .child
-        .is_some_and(|child| binding_protocol(child).as_str() == "llc")
+        .is_some_and(|child| binding_protocol(child) == "llc")
     {
         let length = u16::try_from(covered_payload_len)
             .ok()
@@ -112,7 +112,7 @@ pub(super) fn link_type_expectation(
 /// a different layer stack. The zero-length empty frame is the one
 /// length-form value with no payload to misframe.
 pub(super) fn validate_link_length_form(
-    name: &str,
+    name: &'static str,
     ether_type: u16,
     covered_payload_len: usize,
     context: &LayerEncodeContext<'_>,
@@ -122,7 +122,7 @@ pub(super) fn validate_link_length_form(
         || (ether_type == 0 && covered_payload_len == 0)
         || context
             .child
-            .is_some_and(|child| binding_protocol(child).as_str() == "llc")
+            .is_some_and(|child| binding_protocol(child) == "llc")
     {
         return Ok(());
     }

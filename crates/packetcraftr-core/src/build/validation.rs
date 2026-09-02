@@ -69,8 +69,8 @@ fn validate_adjacent_bindings(
         }
         if mode == super::Mode::Strict {
             return Err(Error::UnboundLayers {
-                parent: parent.clone(),
-                child: child.clone(),
+                parent: *parent,
+                child: *child,
             });
         }
         diagnostics.push(
@@ -132,8 +132,8 @@ fn validate_padding(
     let child_protocol = packet
         .layer(child_layer)
         .and_then(|child| child.as_any().downcast_ref::<Malformed>())
-        .and_then(|child| child.intended_protocol.as_ref())
-        .unwrap_or(declared_child);
+        .and_then(|child| child.intended_protocol.as_deref())
+        .unwrap_or(declared_child.as_str());
     let link_declares_length = || match outside.field("ether_type") {
         Some(FieldValue::Unsigned(value)) => value <= 1500,
         #[expect(
@@ -144,7 +144,7 @@ fn validate_padding(
             u16::from_be_bytes([value[0], value[1]]) <= 1500
         }
         _ => matches!(
-            BuiltinProtocol::from_id(child_protocol),
+            BuiltinProtocol::from_name(child_protocol),
             Some(BuiltinProtocol::Llc | BuiltinProtocol::Padding)
         ),
     };

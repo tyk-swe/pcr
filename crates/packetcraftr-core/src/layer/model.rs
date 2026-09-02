@@ -6,24 +6,30 @@ use std::borrow::Borrow;
 use std::fmt;
 
 use bytes::Bytes;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use thiserror::Error;
 
 use super::reflection::reflective_layer;
 use crate::field::{FieldKind, FieldValue};
 
 /// An open, stable identifier for a protocol layer or codec.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+///
+/// Every codec, built-in layer, and registry entry names itself with a
+/// string literal, so an identifier is a cheap `Copy` handle over a static
+/// name rather than an owned allocation. Protocol names that arrive at run
+/// time (documents, filters, command lines) are resolved against a
+/// [`Registry`](crate::registry::Registry) rather than turned into identifiers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(transparent)]
-pub struct Id(String);
+pub struct Id(&'static str);
 
 impl Id {
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
+    pub const fn new(value: &'static str) -> Self {
+        Self(value)
     }
 
-    pub fn as_str(&self) -> &str {
-        &self.0
+    pub const fn as_str(self) -> &'static str {
+        self.0
     }
 }
 
@@ -39,21 +45,15 @@ impl Borrow<str> for Id {
     }
 }
 
-impl From<&str> for Id {
-    fn from(value: &str) -> Self {
-        Self::new(value)
-    }
-}
-
-impl From<String> for Id {
-    fn from(value: String) -> Self {
+impl From<&'static str> for Id {
+    fn from(value: &'static str) -> Self {
         Self::new(value)
     }
 }
 
 impl fmt::Display for Id {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.0)
+        formatter.write_str(self.0)
     }
 }
 
@@ -127,7 +127,7 @@ pub trait Layer: Any + Send + Sync + fmt::Debug {
         for field in self.schema().fields.iter().filter(|field| field.required) {
             if self.field(field.name).is_none() {
                 return Err(FieldError::MissingRequired {
-                    protocol: self.protocol_id().clone(),
+                    protocol: *self.protocol_id(),
                     field: field.name.to_owned(),
                 });
             }
@@ -213,12 +213,12 @@ reflective_layer! {
             set |layer, value, name| match value {
                 FieldValue::Unsigned(value) => {
                     layer.outside_layer = Some(usize::try_from(value).map_err(|_| FieldError::OutOfRange {
-                        protocol: padding_schema().protocol.clone(), field: name.to_owned(),
+                        protocol: padding_schema().protocol, field: name.to_owned(),
                     })?);
                     Ok(())
                 }
                 _ => Err(FieldError::WrongType {
-                    protocol: padding_schema().protocol.clone(), field: name.to_owned(), expected: "unsigned",
+                    protocol: padding_schema().protocol, field: name.to_owned(), expected: "unsigned",
                 }),
             }
         }
@@ -228,7 +228,7 @@ reflective_layer! {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Malformed {
-    pub intended_protocol: Option<Id>,
+    pub intended_protocol: Option<String>,
     pub bytes: Bytes,
     pub reason: String,
 }
@@ -240,7 +240,7 @@ impl Malformed {
         reason: impl Into<String>,
     ) -> Self {
         Self {
-            intended_protocol,
+            intended_protocol: intended_protocol.map(|protocol| protocol.as_str().to_owned()),
             bytes: bytes.into(),
             reason: reason.into(),
         }
@@ -253,10 +253,10 @@ reflective_layer! {
         "protocol" => {
             kind: Text, derived: false, required: false,
             description: "Intended protocol identifier",
-            get |layer| layer.intended_protocol.as_ref().map(|value| FieldValue::Text(value.to_string())),
+            get |layer| layer.intended_protocol.clone().map(FieldValue::Text),
             set |layer, value, name| match value {
-                FieldValue::Text(value) => { layer.intended_protocol = Some(Id::new(value)); Ok(()) }
-                _ => Err(FieldError::WrongType { protocol: malformed_schema().protocol.clone(), field: name.to_owned(), expected: "text" }),
+                FieldValue::Text(value) => { layer.intended_protocol = Some(value); Ok(()) }
+                _ => Err(FieldError::WrongType { protocol: malformed_schema().protocol, field: name.to_owned(), expected: "text" }),
             }
         },
         "bytes" => {

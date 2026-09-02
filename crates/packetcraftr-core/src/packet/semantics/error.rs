@@ -22,7 +22,7 @@ pub enum Error {
     #[error("non-atomic {protocol} fragment may hide a live destination")]
     NonAtomicFragment { protocol: Id },
     #[error("malformed {protocol} layer may hide a live destination: {reason}")]
-    MalformedMayHideDestination { protocol: Id, reason: String },
+    MalformedMayHideDestination { protocol: String, reason: String },
     #[error("unknown protocol {protocol} exposes route-bearing field {field}")]
     UnknownProtocolRouteField { protocol: Id, field: &'static str },
     #[error("IP layer index is outside the packet")]
@@ -60,7 +60,7 @@ pub enum Error {
 impl Error {
     pub(super) fn field(protocol: &Id, field: &'static str, reason: &'static str) -> Self {
         Self::Field {
-            protocol: protocol.clone(),
+            protocol: *protocol,
             field,
             reason,
         }

@@ -33,7 +33,7 @@ impl<T: Copy> ValueExpectation<T> {
 }
 
 pub(crate) fn resolve_u8(
-    name: &str,
+    name: &'static str,
     field: &str,
     value: &WireValue<u8>,
     expectation: ValueExpectation<u8>,
@@ -52,7 +52,7 @@ pub(crate) fn resolve_u8(
 }
 
 pub(crate) fn resolve_u16(
-    name: &str,
+    name: &'static str,
     field: &str,
     value: &WireValue<u16>,
     expectation: ValueExpectation<u16>,
@@ -71,7 +71,7 @@ pub(crate) fn resolve_u16(
 }
 
 pub(crate) fn resolve_fixed<T, const N: usize>(
-    name: &str,
+    name: &'static str,
     field: &str,
     value: &WireValue<T>,
     expectation: ValueExpectation<T>,
@@ -118,7 +118,7 @@ where
 }
 
 fn validate_dependent<T>(
-    name: &str,
+    name: &'static str,
     field: &str,
     actual: T,
     expectation: ValueExpectation<T>,
@@ -168,7 +168,7 @@ where
         && context
             .registry
             .child_for(parent, Discriminator((*exact).into()))
-            .is_some_and(|selected| selected == binding_protocol(child))
+            .is_some_and(|selected| selected.as_str() == binding_protocol(child))
     {
         return ValueExpectation::Required(*exact);
     }
@@ -182,7 +182,7 @@ where
     }
     context
         .registry
-        .discriminator_for(parent, binding_protocol(child).as_str())
+        .discriminator_for(parent, binding_protocol(child))
         .and_then(|value| T::try_from(value.0).ok())
         .map_or(
             ValueExpectation::Suggested(fallback),

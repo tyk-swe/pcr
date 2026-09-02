@@ -240,7 +240,7 @@ pub(super) fn reject_non_atomic_fragment(layer: &dyn Layer) -> Result<(), Error>
     };
     if offset != 0 || more {
         return Err(Error::NonAtomicFragment {
-            protocol: layer.protocol_id().clone(),
+            protocol: *layer.protocol_id(),
         });
     }
     Ok(())

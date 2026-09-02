@@ -46,8 +46,6 @@ where
             ),
             source: None,
         })?;
-    // ponytail: one worker per call; restore namespace-local reuse only if route benchmarks show
-    // startup dominates.
     let (setup, setup_receiver) = mpsc::sync_channel(1);
     let (response, response_receiver) = mpsc::sync_channel(1);
     let worker = thread::Builder::new()

@@ -291,7 +291,7 @@ mod tests {
             let raw = layer.as_any().downcast_ref::<Raw>().ok_or_else(|| {
                 packetcraftr_core::codec::Error::WrongLayer {
                     expected: "raw".into(),
-                    actual: layer.protocol_id().clone(),
+                    actual: *layer.protocol_id(),
                 }
             })?;
             let mut encoded = EncodedLayer::header(raw.bytes.to_vec(), Box::new(raw.clone()));

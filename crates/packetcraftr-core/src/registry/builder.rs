@@ -36,7 +36,7 @@ impl Builder {
         C: LayerCodec + 'static,
     {
         let codec: Arc<dyn LayerCodec> = Arc::new(codec);
-        let protocol = codec.protocol_id().clone();
+        let protocol = *codec.protocol_id();
         if self.codecs.contains_key(&protocol) {
             return Err(Error::DuplicateProtocol { protocol });
         }
@@ -51,12 +51,12 @@ impl Builder {
             if let Some(existing) = self.aliases.get(alias) {
                 return Err(Error::DuplicateAlias {
                     alias: alias.clone(),
-                    existing: existing.clone(),
+                    existing: *existing,
                 });
             }
         }
         for alias in resolvable {
-            self.aliases.insert(alias, protocol.clone());
+            self.aliases.insert(alias, protocol);
         }
         self.codecs.insert(protocol, codec);
         Ok(self)
@@ -85,7 +85,7 @@ impl Builder {
         let child = child.into();
         let entries = self
             .bindings
-            .entry(parent.clone())
+            .entry(parent)
             .or_default()
             .entry(Discriminator(discriminator))
             .or_default();
@@ -136,7 +136,7 @@ impl Builder {
         if let Some(existing) = self.filter_fields.get(&normalized) {
             return Err(Error::DuplicateFilterField {
                 path: normalized,
-                existing: existing.protocol().clone(),
+                existing: *existing.protocol(),
             });
         }
         // Reject structural binding defects at registration.

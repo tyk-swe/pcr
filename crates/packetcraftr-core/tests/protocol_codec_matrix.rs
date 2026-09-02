@@ -17,7 +17,7 @@ use packetcraftr_core::{Packet, build, decode};
 /// start below the capture layer.
 const ROOT_LINK_TYPE: LinkType = LinkType(u32::MAX);
 
-fn rooted_registry(root: &str) -> Arc<Registry> {
+fn rooted_registry(root: &'static str) -> Arc<Registry> {
     Arc::new(
         builtin::registry_with(|builder| {
             builder.bind_link_type(ROOT_LINK_TYPE.0, root)?;

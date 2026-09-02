@@ -114,7 +114,7 @@ fn fold_checksum(mut sum: u128) -> u16 {
 /// `name` is the calling codec's protocol, so a pseudo-header failure is
 /// reported against a protocol that is actually in the catalog.
 pub(crate) fn transport_checksum(
-    name: &str,
+    name: &'static str,
     network: NetworkEnvelope,
     protocol_number: u8,
     segment: &[u8],
@@ -124,7 +124,7 @@ pub(crate) fn transport_checksum(
 
 /// Treats `parts` as one contiguous byte stream, including across odd boundaries.
 pub(crate) fn transport_checksum_parts(
-    name: &str,
+    name: &'static str,
     network: NetworkEnvelope,
     protocol_number: u8,
     parts: &[&[u8]],

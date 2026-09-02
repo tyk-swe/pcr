@@ -8,7 +8,7 @@ use crate::{codec::LayerEncodeContext, layer::Padding};
 use super::errors::invalid;
 
 pub(crate) fn payload_without_padding<'a>(
-    name: &str,
+    name: &'static str,
     payload: &'a [u8],
     context: &LayerEncodeContext<'_>,
 ) -> Result<&'a [u8], crate::codec::Error> {

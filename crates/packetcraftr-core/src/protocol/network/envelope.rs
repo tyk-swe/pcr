@@ -50,7 +50,7 @@ pub(crate) fn ipv6_extension_header_length(next_header: u8, encoded_length: u8) 
 /// `name` is the calling codec's protocol, so a missing or mismatched
 /// envelope is reported against a protocol the catalog actually has.
 pub(crate) fn resolve_envelope(
-    name: &str,
+    name: &'static str,
     context: &LayerEncodeContext<'_>,
 ) -> Result<NetworkEnvelope, crate::codec::Error> {
     for index in (0..context.index).rev() {

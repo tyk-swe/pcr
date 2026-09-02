@@ -42,7 +42,7 @@ fn registry() -> Arc<Registry> {
 /// dissection can start below the capture layer.
 const ROOT_LINK_TYPE: LinkType = LinkType(u32::MAX);
 
-fn rooted_registry(root: &str) -> Arc<Registry> {
+fn rooted_registry(root: &'static str) -> Arc<Registry> {
     Arc::new(
         builtin::registry_with(|builder| {
             builder.bind_link_type(ROOT_LINK_TYPE.0, root)?;
@@ -61,7 +61,7 @@ fn decode_from_root(
     decode::Dissector::new(Arc::clone(registry)).decode(frame, options)
 }
 
-fn round_trip(packet: Packet, root: &str) -> (build::BuiltPacket, decode::DecodedPacket) {
+fn round_trip(packet: Packet, root: &'static str) -> (build::BuiltPacket, decode::DecodedPacket) {
     let registry = rooted_registry(root);
     let builder = build::Builder::new(Arc::clone(&registry));
     let built = builder
@@ -828,13 +828,7 @@ fn typed_child_without_payload_is_preserved_as_malformed() {
         .packet
         .get::<Malformed>()
         .expect("missing IPv4 header should be materialized as malformed");
-    assert_eq!(
-        malformed
-            .intended_protocol
-            .as_ref()
-            .map(|protocol| protocol.as_str()),
-        Some("ipv4")
-    );
+    assert_eq!(malformed.intended_protocol.as_deref(), Some("ipv4"));
     assert!(malformed.bytes.is_empty());
     assert_eq!(malformed.reason, "required child header is absent");
     assert_eq!(

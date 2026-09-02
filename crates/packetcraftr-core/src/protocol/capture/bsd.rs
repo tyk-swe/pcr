@@ -92,7 +92,7 @@ pub(crate) fn family_discriminator(family: u32) -> u64 {
 }
 
 pub(crate) fn validate_family_binding(
-    parent: &str,
+    parent: &'static str,
     family: u32,
     context: &LayerEncodeContext<'_>,
 ) -> Result<Vec<Diagnostic>, crate::codec::Error> {
@@ -111,7 +111,7 @@ pub(crate) fn validate_family_binding(
     }
     let Some(expected) = context
         .registry
-        .discriminator_for(parent, binding_protocol(child).as_str())
+        .discriminator_for(parent, binding_protocol(child))
     else {
         return Ok(diagnostics);
     };

@@ -158,12 +158,7 @@ pub(crate) fn dns_payload(packet: &Packet) -> Option<Bytes> {
         Some(BuiltinProtocol::Malformed) if port_53 => payload
             .as_any()
             .downcast_ref::<packetcraftr_core::layer::Malformed>()
-            .filter(|layer| {
-                layer
-                    .intended_protocol
-                    .as_ref()
-                    .is_some_and(|protocol| protocol.as_str() == "dns")
-            })
+            .filter(|layer| layer.intended_protocol.as_deref() == Some("dns"))
             .map(|layer| layer.bytes.clone()),
         Some(BuiltinProtocol::Raw) => payload
             .as_any()

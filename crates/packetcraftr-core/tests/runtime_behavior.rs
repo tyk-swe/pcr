@@ -167,7 +167,7 @@ impl LayerCodec for ProbeCodec {
         let probe = layer.as_any().downcast_ref::<Probe>().ok_or_else(|| {
             packetcraftr_core::codec::Error::WrongLayer {
                 expected: "probe".into(),
-                actual: layer.protocol_id().clone(),
+                actual: *layer.protocol_id(),
             }
         })?;
         let mut encoded = EncodedLayer::header(vec![probe.value], Box::new(probe.clone()));
@@ -238,7 +238,7 @@ impl LayerCodec for ChildCodec {
         let child = layer.as_any().downcast_ref::<Child>().ok_or_else(|| {
             packetcraftr_core::codec::Error::WrongLayer {
                 expected: "child".into(),
-                actual: layer.protocol_id().clone(),
+                actual: *layer.protocol_id(),
             }
         })?;
         let mut encoded = EncodedLayer::header(vec![child.value], Box::new(child.clone()));
@@ -590,13 +590,7 @@ fn field_values_raw_layers_and_diagnostics_have_stable_views() {
     malformed
         .set_field("reason", "truncated".into())
         .expect("set reason");
-    assert_eq!(
-        malformed
-            .intended_protocol
-            .as_ref()
-            .map(packetcraftr_core::layer::Id::as_str),
-        Some("ipv4")
-    );
+    assert_eq!(malformed.intended_protocol.as_deref(), Some("ipv4"));
 
     let mut diagnostics = Vec::new();
     packetcraftr_core::diagnostic::push_once(
@@ -835,20 +829,20 @@ fn assert_registry_queries(registry: &packetcraftr_core::registry::Registry) {
     assert_eq!(
         registry
             .protocol_named(" P ")
-            .map(packetcraftr_core::layer::Id::as_str),
+            .map(|protocol| protocol.as_str()),
         Some("probe")
     );
     assert!(registry.codec_named("P").is_some());
     assert_eq!(
         registry
             .root_for_link_type(777)
-            .map(packetcraftr_core::layer::Id::as_str),
+            .map(|protocol| protocol.as_str()),
         Some("probe")
     );
     assert_eq!(
         registry
             .child_for("probe", Discriminator(7))
-            .map(packetcraftr_core::layer::Id::as_str),
+            .map(|protocol| protocol.as_str()),
         Some("child")
     );
     assert_eq!(

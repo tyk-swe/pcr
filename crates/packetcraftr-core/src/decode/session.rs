@@ -84,7 +84,7 @@ impl<'registry> DecodeSession<'registry> {
 
     pub(super) fn run(mut self) -> Result<DecodedPacket, Error> {
         let mut cursor = DecodeCursor {
-            protocol: self.root.clone(),
+            protocol: self.root,
             discriminator: None,
             bytes: 0..self.original.len(),
         };
@@ -149,7 +149,7 @@ impl<'registry> DecodeSession<'registry> {
     fn preserve_missing_codec(&mut self, cursor: &DecodeCursor) -> Result<(), Error> {
         if self.packet.is_empty() {
             return Err(Error::MissingRootCodec {
-                protocol: cursor.protocol.clone(),
+                protocol: cursor.protocol,
             });
         }
         append_raw(
@@ -170,7 +170,7 @@ impl<'registry> DecodeSession<'registry> {
         append_malformed(
             &mut self.packet,
             &mut self.layouts,
-            Some(cursor.protocol.clone()),
+            Some(cursor.protocol),
             slice_original(&self.original, cursor.bytes.start, cursor.bytes.len()),
             message.clone(),
             cursor.bytes.start,
@@ -184,10 +184,10 @@ impl<'registry> DecodeSession<'registry> {
         cursor: &DecodeCursor,
         mut decoded: DecodedLayerValue,
     ) -> Result<ValidatedLayer, Error> {
-        let actual_protocol = decoded.layer.protocol_id().clone();
+        let actual_protocol = *decoded.layer.protocol_id();
         if !codec.accepts_decoded_protocol(&actual_protocol) {
             return Err(Error::CodecLayerMismatch {
-                protocol: cursor.protocol.clone(),
+                protocol: cursor.protocol,
                 actual: actual_protocol,
             });
         }
@@ -195,14 +195,14 @@ impl<'registry> DecodeSession<'registry> {
             .layer
             .validate_required_fields()
             .map_err(|source| Error::InvalidLayer {
-                protocol: actual_protocol.clone(),
+                protocol: actual_protocol,
                 source,
             })?;
 
         let input_len = cursor.bytes.len();
         if decoded.consumed > input_len || (!decoded.stop && decoded.consumed == 0) {
             return Err(Error::InvalidCodecCursor {
-                protocol: cursor.protocol.clone(),
+                protocol: cursor.protocol,
             });
         }
         let payload_end = decoded
@@ -210,16 +210,17 @@ impl<'registry> DecodeSession<'registry> {
             .checked_add(decoded.payload_len)
             .filter(|end| *end <= input_len)
             .and_then(|end| cursor.bytes.start.checked_add(end))
-            .ok_or_else(|| Error::InvalidCodecCursor {
-                protocol: cursor.protocol.clone(),
+            .ok_or(Error::InvalidCodecCursor {
+                protocol: cursor.protocol,
             })?;
-        let layer_end = cursor
-            .bytes
-            .start
-            .checked_add(decoded.consumed)
-            .ok_or_else(|| Error::InvalidCodecCursor {
-                protocol: cursor.protocol.clone(),
-            })?;
+        let layer_end =
+            cursor
+                .bytes
+                .start
+                .checked_add(decoded.consumed)
+                .ok_or(Error::InvalidCodecCursor {
+                    protocol: cursor.protocol,
+                })?;
 
         if decoded
             .fields
@@ -227,13 +228,13 @@ impl<'registry> DecodeSession<'registry> {
             .any(|field| field.range.start > field.range.end || field.range.end > decoded.consumed)
         {
             return Err(Error::InvalidCodecLayout {
-                protocol: cursor.protocol.clone(),
+                protocol: cursor.protocol,
             });
         }
         for field in &mut decoded.fields {
             if !field.range.checked_shift(cursor.bytes.start) {
                 return Err(Error::InvalidCodecLayout {
-                    protocol: cursor.protocol.clone(),
+                    protocol: cursor.protocol,
                 });
             }
         }
@@ -277,7 +278,7 @@ impl<'registry> DecodeSession<'registry> {
         let selected = layer.decoded.next.iter().find_map(|value| {
             self.registry
                 .child_for(layer.protocol.as_str(), *value)
-                .map(|protocol| (*value, protocol.clone()))
+                .map(|protocol| (*value, *protocol))
         });
         ChildSelection {
             discriminator: selected.as_ref().map(|(value, _)| *value),
@@ -300,7 +301,7 @@ impl<'registry> DecodeSession<'registry> {
         } = layer;
         self.layouts.push(LayerLayout {
             index,
-            protocol: decoded_protocol.clone(),
+            protocol: decoded_protocol,
             range: ByteRange::new(cursor.bytes.start, layer_end),
             fields: decoded.fields,
         });

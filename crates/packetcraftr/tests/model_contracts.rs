@@ -450,7 +450,7 @@ fn workflow_failures_publish_the_causes_of_the_error_they_carry() {
     let udp = packetcraftr::core::layer::Id::from("udp");
     let codec = packetcraftr::core::build::Error::Codec {
         index: 1,
-        protocol: udp.clone(),
+        protocol: udp,
         source: packetcraftr::core::codec::Error::Invalid {
             protocol: udp,
             message: "port 53 is reserved".to_owned(),

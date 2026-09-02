@@ -186,7 +186,7 @@ fn specs_for(
             .find(|entry| entry.name == *field)
             .ok_or_else(|| Error::UnresolvableProtocol {
                 path: path.to_owned(),
-                protocol: protocol.clone(),
+                protocol: *protocol,
             })?;
         specs.push(FieldSpec {
             kind: declared.kind,
@@ -225,12 +225,12 @@ pub(super) fn resolve(path: &str, registry: &Registry, offset: usize) -> Result<
     }
 
     if let Some((head, tail)) = stripped.split_once('.') {
-        let protocol = registry.protocol_named(head).ok_or_else(unknown)?.clone();
+        let protocol = *registry.protocol_named(head).ok_or_else(unknown)?;
         let schema = registry
             .schema(&protocol)
             .ok_or_else(|| Error::UnresolvableProtocol {
                 path: path.to_owned(),
-                protocol: protocol.clone(),
+                protocol,
             })?;
         let declared = schema
             .fields
@@ -256,7 +256,7 @@ pub(super) fn resolve(path: &str, registry: &Registry, offset: usize) -> Result<
 
     let protocol = registry.protocol_named(&stripped).ok_or_else(unknown)?;
     Ok(Resolved::Layer {
-        protocol: protocol.clone(),
+        protocol: *protocol,
         occurrence,
     })
 }

@@ -87,7 +87,7 @@ pub(crate) struct HopByHopCodec;
 pub(crate) struct DestinationOptionsCodec;
 
 fn encode_options<L>(
-    name: &str,
+    name: &'static str,
     layer: &L,
     next_header: &WireValue<u8>,
     options: &Bytes,
@@ -145,7 +145,7 @@ where
 }
 
 fn decode_options<L>(
-    name: &str,
+    name: &'static str,
     input: &[u8],
     make: impl FnOnce(u8, Bytes) -> L,
     layout: fn(usize) -> Vec<crate::layout::FieldLayout>,

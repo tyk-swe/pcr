@@ -234,14 +234,13 @@ impl super::model::Executor for LoopbackExecutor {
     fn execute_tcp(
         &mut self,
         exchange: &super::model::TcpExchange,
-    ) -> Result<super::model::TcpExecution, packetcraftr_netio::dns_tcp::Error> {
-        let response =
-            packetcraftr_netio::dns_tcp::exchange(packetcraftr_netio::dns_tcp::Request {
-                endpoint: exchange.endpoint,
-                query: &exchange.query,
-                timeout: exchange.timeout,
-                max_message_bytes: exchange.max_message_bytes,
-            })?;
+    ) -> Result<super::model::TcpExecution, crate::dns::tcp::Error> {
+        let response = crate::dns::tcp::exchange(crate::dns::tcp::Request {
+            endpoint: exchange.endpoint,
+            query: &exchange.query,
+            timeout: exchange.timeout,
+            max_message_bytes: exchange.max_message_bytes,
+        })?;
         Ok(super::model::TcpExecution::new(exchange.permit, response))
     }
 }
@@ -257,7 +256,7 @@ fn loopback_boundary_error(error: impl std::fmt::Display) -> BoundaryError {
 
 enum TcpScript {
     Response { message: Bytes, elapsed: Duration },
-    Error(packetcraftr_netio::dns_tcp::Error),
+    Error(crate::dns::tcp::Error),
 }
 
 struct ScriptedExecutor {
@@ -300,11 +299,11 @@ impl super::model::Executor for ScriptedExecutor {
     fn execute_tcp(
         &mut self,
         exchange: &super::model::TcpExchange,
-    ) -> Result<super::model::TcpExecution, packetcraftr_netio::dns_tcp::Error> {
+    ) -> Result<super::model::TcpExecution, crate::dns::tcp::Error> {
         self.tcp_calls += 1;
         self.tcp_timeouts.push(exchange.timeout);
         match self.tcp_scripts.pop_front().unwrap_or_else(|| {
-            TcpScript::Error(packetcraftr_netio::dns_tcp::Error::Connect {
+            TcpScript::Error(crate::dns::tcp::Error::Connect {
                 endpoint: exchange.endpoint,
                 message: "missing TCP fixture".to_owned(),
                 source: None,
@@ -321,7 +320,7 @@ impl super::model::Executor for ScriptedExecutor {
                 frame.extend_from_slice(&message);
                 Ok(super::model::TcpExecution::new(
                     exchange.permit,
-                    packetcraftr_netio::dns_tcp::Response {
+                    crate::dns::tcp::Response {
                         peer_address: exchange.endpoint,
                         local_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 50_000),
                         sent_at: UNIX_EPOCH + Duration::from_secs(10) + elapsed - latency,
@@ -1145,15 +1144,15 @@ fn tcp_failures_map_to_stable_retry_outcomes() {
     mismatched[0..2].copy_from_slice(&0x4321_u16.to_be_bytes());
     for (script, expected, sent) in [
         (
-            TcpScript::Error(packetcraftr_netio::dns_tcp::Error::Timeout {
-                phase: packetcraftr_netio::dns_tcp::Phase::Connect,
+            TcpScript::Error(crate::dns::tcp::Error::Timeout {
+                phase: crate::dns::tcp::Phase::Connect,
                 transferred: 0,
             }),
             super::Outcome::Timeout,
             false,
         ),
         (
-            TcpScript::Error(packetcraftr_netio::dns_tcp::Error::Connect {
+            TcpScript::Error(crate::dns::tcp::Error::Connect {
                 endpoint,
                 message: "fixture refusal".to_owned(),
                 source: None,
@@ -1162,7 +1161,7 @@ fn tcp_failures_map_to_stable_retry_outcomes() {
             false,
         ),
         (
-            TcpScript::Error(packetcraftr_netio::dns_tcp::Error::IncompletePrefix { actual: 1 }),
+            TcpScript::Error(crate::dns::tcp::Error::IncompletePrefix { actual: 1 }),
             super::Outcome::DecodeFailure,
             false,
         ),
@@ -1237,8 +1236,8 @@ fn tcp_failure_retries_once_per_attempt_and_preserves_final_precedence() {
         Some(truncated_dns_response()),
     ])
     .with_tcp([
-        TcpScript::Error(packetcraftr_netio::dns_tcp::Error::IncompletePrefix { actual: 1 }),
-        TcpScript::Error(packetcraftr_netio::dns_tcp::Error::Connect {
+        TcpScript::Error(crate::dns::tcp::Error::IncompletePrefix { actual: 1 }),
+        TcpScript::Error(crate::dns::tcp::Error::Connect {
             endpoint,
             message: "fixture refusal".to_owned(),
             source: None,

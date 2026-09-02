@@ -166,7 +166,7 @@ pub enum Error {
     TcpExecution {
         attempt: u32,
         #[source]
-        source: packetcraftr_netio::dns_tcp::Error,
+        source: crate::dns::tcp::Error,
     },
     #[error("DNS retry clock failed before attempt {attempt}")]
     Clock {

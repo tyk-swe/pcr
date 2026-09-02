@@ -101,27 +101,26 @@ where
     fn execute_tcp(
         &mut self,
         exchange: &TcpExchange,
-    ) -> Result<TcpExecution, packetcraftr_netio::dns_tcp::Error> {
+    ) -> Result<TcpExecution, crate::dns::tcp::Error> {
         validate_tcp_route_options(&self.options.send.plan)?;
-        let response =
-            packetcraftr_netio::dns_tcp::exchange(packetcraftr_netio::dns_tcp::Request {
-                endpoint: exchange.endpoint,
-                query: &exchange.query,
-                timeout: exchange.timeout,
-                max_message_bytes: exchange.max_message_bytes,
-            })?;
+        let response = crate::dns::tcp::exchange(crate::dns::tcp::Request {
+            endpoint: exchange.endpoint,
+            query: &exchange.query,
+            timeout: exchange.timeout,
+            max_message_bytes: exchange.max_message_bytes,
+        })?;
         Ok(TcpExecution::new(exchange.permit, response))
     }
 }
 
 fn validate_tcp_route_options(
     plan: &packetcraftr_netio::route::Options,
-) -> Result<(), packetcraftr_netio::dns_tcp::Error> {
+) -> Result<(), crate::dns::tcp::Error> {
     if plan.interface.is_some()
         || plan.preferred_source.is_some()
         || !matches!(plan.link_mode, packetcraftr_netio::link::Mode::Auto)
     {
-        return Err(packetcraftr_netio::dns_tcp::Error::Unsupported {
+        return Err(crate::dns::tcp::Error::Unsupported {
             message: "kernel TCP cannot preserve packet-oriented interface, source, or link-mode overrides; use UDP-only DNS"
                 .to_owned(),
         });

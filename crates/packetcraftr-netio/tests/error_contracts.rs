@@ -4,9 +4,7 @@
 // for library paths.
 #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
-use std::{
-    error::Error as StdError, fmt, io, net::IpAddr, net::SocketAddr, sync::Arc, time::Duration,
-};
+use std::{fmt, io, net::IpAddr, sync::Arc, time::Duration};
 
 use packetcraftr_core::{
     error::{Classification, Classified, Kind},
@@ -14,208 +12,10 @@ use packetcraftr_core::{
 };
 use packetcraftr_netio::{
     Error, SendEvidenceFault, capture,
-    dns_tcp::{self, Category},
     link::Mode,
     neighbor::Error as NeighborError,
     route::{Error as RouteError, SystemError},
 };
-
-#[test]
-fn dns_tcp_errors_keep_stable_classes_for_every_public_failure_variant() {
-    let endpoint = "127.0.0.1:53".parse().expect("fixture endpoint");
-    let cases = [
-        (
-            dns_tcp::Error::Unsupported {
-                message: "fixture".to_owned(),
-            },
-            Category::Unsupported,
-            "capability.dns_tcp",
-            Kind::Capability,
-        ),
-        (
-            dns_tcp::Error::InvalidTimeout {
-                value: Duration::ZERO,
-            },
-            Category::Request,
-            "internal.dns_tcp_request",
-            Kind::Internal,
-        ),
-        (
-            dns_tcp::Error::QueryTooLarge {
-                actual: 65_536,
-                maximum: 65_535,
-            },
-            Category::Request,
-            "internal.dns_tcp_request",
-            Kind::Internal,
-        ),
-        (
-            dns_tcp::Error::EmptyQuery,
-            Category::Request,
-            "internal.dns_tcp_request",
-            Kind::Internal,
-        ),
-        (
-            dns_tcp::Error::InvalidMessageLimit {
-                value: 0,
-                maximum: 65_535,
-            },
-            Category::Request,
-            "internal.dns_tcp_request",
-            Kind::Internal,
-        ),
-        (
-            dns_tcp::Error::DeadlineOverflow {
-                value: Duration::MAX,
-            },
-            Category::Request,
-            "internal.dns_tcp_request",
-            Kind::Internal,
-        ),
-        (
-            dns_tcp::Error::Timeout {
-                phase: dns_tcp::Phase::Connect,
-                transferred: 0,
-            },
-            Category::Timeout,
-            "io.dns_tcp_timeout",
-            Kind::Io,
-        ),
-        (
-            dns_tcp::Error::Connect {
-                endpoint,
-                message: "fixture".to_owned(),
-                source: Some(Arc::new(io::Error::other("provider refused"))),
-            },
-            Category::Network,
-            "io.dns_tcp",
-            Kind::Io,
-        ),
-        (
-            dns_tcp::Error::ConfigureTimeout {
-                phase: dns_tcp::Phase::Write,
-                transferred: 1,
-                source: Arc::new(io::Error::other("timeout not installable")),
-            },
-            Category::Network,
-            "io.dns_tcp",
-            Kind::Io,
-        ),
-        (
-            dns_tcp::Error::Write {
-                written: 1,
-                expected: 2,
-                message: "fixture".to_owned(),
-                source: None,
-            },
-            Category::Network,
-            "io.dns_tcp",
-            Kind::Io,
-        ),
-        (
-            dns_tcp::Error::Read {
-                phase: dns_tcp::Phase::ReadPrefix,
-                message: "fixture".to_owned(),
-                source: None,
-            },
-            Category::Network,
-            "io.dns_tcp",
-            Kind::Io,
-        ),
-        (
-            dns_tcp::Error::IncompletePrefix { actual: 1 },
-            Category::Framing,
-            "packet.dns_tcp_frame",
-            Kind::Packet,
-        ),
-        (
-            dns_tcp::Error::ZeroLength,
-            Category::Framing,
-            "packet.dns_tcp_frame",
-            Kind::Packet,
-        ),
-        (
-            dns_tcp::Error::MessageTooLarge {
-                declared: 512,
-                maximum: 511,
-            },
-            Category::Framing,
-            "packet.dns_tcp_frame",
-            Kind::Packet,
-        ),
-        (
-            dns_tcp::Error::IncompleteMessage {
-                declared: 4,
-                actual: 2,
-            },
-            Category::Framing,
-            "packet.dns_tcp_frame",
-            Kind::Packet,
-        ),
-    ];
-
-    let mut seen: Vec<Category> = Vec::new();
-    for (error, category, code, kind) in cases {
-        assert_eq!(error.category(), category, "{error}");
-        // The classification is a function of the category alone, so every
-        // variant sharing a category must share its code and kind.
-        assert_eq!(dns_tcp_classification(category), (code, kind), "{error}");
-        assert_contract(&error, code, kind);
-        if !seen.contains(&category) {
-            seen.push(category);
-        }
-    }
-    assert_eq!(
-        seen.len(),
-        5,
-        "every DNS-over-TCP category needs a covered variant"
-    );
-}
-
-/// A socket refusal reaches the render boundary as a typed source rather than
-/// as text pasted into the message, so the operator-facing message states the
-/// step and the published cause states what the system said, once each.
-#[test]
-fn dns_tcp_socket_failures_retain_the_system_error_without_restating_it() {
-    let endpoint: SocketAddr = "127.0.0.1:53".parse().expect("fixture endpoint");
-    let refused = io::Error::new(io::ErrorKind::ConnectionRefused, "connection refused");
-
-    let error = dns_tcp::Error::Connect {
-        endpoint,
-        message: "the socket could not be opened".to_owned(),
-        source: Some(Arc::new(refused)),
-    };
-    assert_eq!(
-        error.to_string(),
-        "DNS-over-TCP connection to 127.0.0.1:53 failed: the socket could not be opened"
-    );
-    assert_eq!(error.causes(), ["connection refused"]);
-    assert!(StdError::source(&error).is_some());
-
-    // Configuring a per-call timeout can only fail because the socket refused,
-    // so that variant has no message of its own to keep.
-    let configure = dns_tcp::Error::ConfigureTimeout {
-        phase: dns_tcp::Phase::Write,
-        transferred: 2,
-        source: Arc::new(io::Error::other("timeout not installable")),
-    };
-    assert_eq!(
-        configure.to_string(),
-        "DNS-over-TCP could not configure the write timeout after 2 phase byte(s)"
-    );
-    assert_eq!(configure.causes(), ["timeout not installable"]);
-
-    // This module's own accounting invariants have no system source and
-    // publish no cause.
-    let accounting = dns_tcp::Error::Write {
-        written: 1,
-        expected: 2,
-        message: "peer accepted zero bytes".to_owned(),
-        source: None,
-    };
-    assert!(accounting.causes().is_empty());
-    assert!(StdError::source(&accounting).is_none());
-}
 
 /// The live-I/O failures a native adapter raises keep the platform refusal as
 /// a source, and the retained failure is published exactly once.
@@ -254,19 +54,6 @@ fn live_io_failures_retain_the_platform_refusal_as_a_source() {
             "operation not permitted",
         ]
     );
-}
-
-/// The one stable mapping from category to classification. A category with no
-/// row here fails the test instead of silently reaching a catch-all.
-fn dns_tcp_classification(category: Category) -> (&'static str, Kind) {
-    match category {
-        Category::Request => ("internal.dns_tcp_request", Kind::Internal),
-        Category::Unsupported => ("capability.dns_tcp", Kind::Capability),
-        Category::Timeout => ("io.dns_tcp_timeout", Kind::Io),
-        Category::Network => ("io.dns_tcp", Kind::Io),
-        Category::Framing => ("packet.dns_tcp_frame", Kind::Packet),
-        other => panic!("DNS-over-TCP category {other:?} has no declared classification"),
-    }
 }
 
 fn ipv4(value: &str) -> IpAddr {

@@ -16,7 +16,6 @@
 #![deny(unsafe_code)]
 
 pub mod capture;
-pub mod dns_tcp;
 mod error;
 pub mod interface;
 pub mod link;

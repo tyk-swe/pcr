@@ -92,6 +92,12 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- **BREAKING:** the DNS-over-TCP exchange moved from
+  `packetcraftr_netio::dns_tcp` to `packetcraftr::dns::tcp`. It is portable
+  `std::net` code with no native dependency and one consumer, the DNS
+  workflow, so it no longer sits in the native-I/O crate or behind the
+  `native-route` feature: an offline-only build now performs TCP fallback
+  instead of returning `Error::Unsupported`.
 - **BREAKING:** the progressive-output runtime moved from
   `packetcraftr_core::progress` to `packetcraftr::progress`. Nothing in the
   core crate consumed it — it is workflow-crate infrastructure, and hiding it

@@ -61,6 +61,7 @@ mod evidence;
 mod model;
 mod plan;
 mod probe;
+pub mod tcp;
 #[cfg(test)]
 mod tests;
 mod wire;

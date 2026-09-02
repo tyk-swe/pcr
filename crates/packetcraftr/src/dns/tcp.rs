@@ -11,13 +11,10 @@
 
 use std::error::Error as StdError;
 use std::fmt;
-#[cfg(any(feature = "native-route", test))]
 use std::io::{self, Read, Write};
 use std::net::SocketAddr;
-#[cfg(feature = "native-route")]
 use std::net::TcpStream;
 use std::sync::Arc;
-#[cfg(any(feature = "native-route", test))]
 use std::time::Instant;
 use std::time::{Duration, SystemTime};
 
@@ -313,23 +310,11 @@ pub struct Response {
 ///
 /// Connects, writes one framed query, and reads the first framed response; a
 /// subsequent message on the same stream is not part of that response. Backed
-/// by `std::net::TcpStream` when `native-route` is enabled; an offline-only
-/// build returns [`Error::Unsupported`] before opening a socket.
+/// by `std::net::TcpStream`.
 pub fn exchange(request: Request<'_>) -> Result<Response, Error> {
-    #[cfg(feature = "native-route")]
-    {
-        exchange_with_connector(request, &SystemConnector)
-    }
-    #[cfg(not(feature = "native-route"))]
-    {
-        let _ = request;
-        Err(Error::Unsupported {
-            message: "packetcraftr-netio was built without native-route support".to_owned(),
-        })
-    }
+    exchange_with_connector(request, &SystemConnector)
 }
 
-#[cfg(any(feature = "native-route", test))]
 trait Stream: Read + Write {
     fn peer_addr(&self) -> io::Result<SocketAddr>;
     fn local_addr(&self) -> io::Result<SocketAddr>;
@@ -337,7 +322,6 @@ trait Stream: Read + Write {
     fn set_write_timeout(&self, timeout: Option<Duration>) -> io::Result<()>;
 }
 
-#[cfg(feature = "native-route")]
 impl Stream for TcpStream {
     fn peer_addr(&self) -> io::Result<SocketAddr> {
         Self::peer_addr(self)
@@ -356,17 +340,14 @@ impl Stream for TcpStream {
     }
 }
 
-#[cfg(any(feature = "native-route", test))]
 trait Connector {
     type Stream: Stream;
 
     fn connect(&self, endpoint: SocketAddr, timeout: Duration) -> io::Result<Self::Stream>;
 }
 
-#[cfg(feature = "native-route")]
 struct SystemConnector;
 
-#[cfg(feature = "native-route")]
 impl Connector for SystemConnector {
     type Stream = TcpStream;
 
@@ -375,7 +356,6 @@ impl Connector for SystemConnector {
     }
 }
 
-#[cfg(any(feature = "native-route", test))]
 fn exchange_with_connector<C: Connector>(
     request: Request<'_>,
     connector: &C,
@@ -509,7 +489,6 @@ fn exchange_with_connector<C: Connector>(
     })
 }
 
-#[cfg(any(feature = "native-route", test))]
 fn remaining(deadline: Instant, phase: Phase, transferred: usize) -> Result<Duration, Error> {
     deadline
         .checked_duration_since(Instant::now())
@@ -517,7 +496,6 @@ fn remaining(deadline: Instant, phase: Phase, transferred: usize) -> Result<Dura
         .ok_or(Error::Timeout { phase, transferred })
 }
 
-#[cfg(any(feature = "native-route", test))]
 fn map_connect_error(endpoint: SocketAddr, source: io::Error) -> Error {
     if is_timeout(&source) {
         Error::Timeout {
@@ -533,7 +511,6 @@ fn map_connect_error(endpoint: SocketAddr, source: io::Error) -> Error {
     }
 }
 
-#[cfg(any(feature = "native-route", test))]
 fn write_exact<S: Stream>(
     stream: &mut S,
     mut bytes: &[u8],
@@ -593,7 +570,6 @@ fn write_exact<S: Stream>(
     Ok(())
 }
 
-#[cfg(any(feature = "native-route", test))]
 fn read_exact<S: Stream>(
     stream: &mut S,
     bytes: &mut [u8],
@@ -644,7 +620,6 @@ fn read_exact<S: Stream>(
     Ok(read)
 }
 
-#[cfg(any(feature = "native-route", test))]
 fn is_timeout(error: &io::Error) -> bool {
     matches!(
         error.kind(),
@@ -1104,13 +1079,5 @@ mod tests {
             .query_bytes_written(framed),
             0
         );
-    }
-
-    #[cfg(not(feature = "native-route"))]
-    #[test]
-    fn exchange_fails_closed_without_native_route_support() {
-        let error = exchange(request(b"query")).unwrap_err();
-        assert!(matches!(error, Error::Unsupported { .. }));
-        assert_eq!(error.category(), Category::Unsupported);
     }
 }

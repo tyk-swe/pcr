@@ -65,13 +65,13 @@ pub struct TcpExchange {
 #[derive(Clone, Debug)]
 pub struct TcpExecution {
     pub(crate) permit: crate::evidence::ExecutionPermit,
-    pub(crate) response: packetcraftr_netio::dns_tcp::Response,
+    pub(crate) response: crate::dns::tcp::Response,
 }
 
 impl TcpExecution {
     pub(crate) const fn new(
         permit: crate::evidence::ExecutionPermit,
-        response: packetcraftr_netio::dns_tcp::Response,
+        response: crate::dns::tcp::Response,
     ) -> Self {
         Self { permit, response }
     }
@@ -97,8 +97,8 @@ pub trait Executor {
     fn execute_tcp(
         &mut self,
         _exchange: &TcpExchange,
-    ) -> Result<TcpExecution, packetcraftr_netio::dns_tcp::Error> {
-        Err(packetcraftr_netio::dns_tcp::Error::Unsupported {
+    ) -> Result<TcpExecution, crate::dns::tcp::Error> {
+        Err(crate::dns::tcp::Error::Unsupported {
             message: "DNS executor does not provide TCP fallback".to_owned(),
         })
     }

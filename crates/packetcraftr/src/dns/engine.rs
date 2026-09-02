@@ -7,12 +7,12 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::dns::tcp::Category as TcpCategory;
 use crate::progress::Runtime;
 use bytes::Bytes;
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::registry::Registry;
-use packetcraftr_netio::dns_tcp::Category as TcpCategory;
 
 use crate::BoundaryError;
 use crate::Stats;

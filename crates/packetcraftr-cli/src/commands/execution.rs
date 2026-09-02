@@ -61,7 +61,7 @@ impl packetcraftr::dns::Executor for Executor {
     fn execute_tcp(
         &mut self,
         exchange: &packetcraftr::dns::TcpExchange,
-    ) -> Result<packetcraftr::dns::TcpExecution, packetcraftr::netio::dns_tcp::Error> {
+    ) -> Result<packetcraftr::dns::TcpExecution, packetcraftr::dns::tcp::Error> {
         let mut executor = packetcraftr::ExchangeExecutor::new(&self.client, self.exchange.clone());
         packetcraftr::dns::Executor::execute_tcp(&mut executor, exchange)
     }

@@ -343,7 +343,7 @@ pub(super) fn tcp_failure_evidence(
 pub(super) fn classify_tcp_response(
     probe: &Probe,
     timeout: Duration,
-    response: packetcraftr_netio::dns_tcp::Response,
+    response: crate::dns::tcp::Response,
     limits: MessageLimits,
 ) -> Result<ClassifiedAttempt, Error> {
     let expected_written = probe

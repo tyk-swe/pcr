@@ -475,11 +475,6 @@ impl Classified for EncodeError {
             ),
         }
     }
-
-    /// Walked from the retained `#[source]` chain rather than hand-written.
-    fn causes(&self) -> Vec<String> {
-        packetcraftr_core::error::source_chain(self)
-    }
 }
 
 #[cfg(test)]

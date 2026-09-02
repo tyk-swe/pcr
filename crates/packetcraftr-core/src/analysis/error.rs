@@ -9,6 +9,7 @@ use thiserror::Error;
 use crate::analysis::pcap::Error as CaptureError;
 use crate::analysis::reassembly::ip::Error as IpError;
 use crate::analysis::reassembly::tcp::Error as TcpError;
+use crate::budget::DeadlineExceeded;
 
 use crate::error::{Classification, Classified, Kind};
 
@@ -99,7 +100,7 @@ impl Classified for Error {
             Self::Decode {
                 source: crate::decode::Error::PacketSizeLimit { .. },
                 ..
-            } => resource_limit(),
+            } => resource_limit(GENERAL_RESOURCE_REMEDIATION),
             Self::Decode { .. } | Self::DerivedDecode { .. } => Classification::new(
                 "packet.decode",
                 Kind::Packet,
@@ -131,13 +132,15 @@ impl Classified for Error {
             Self::Filter { .. } => {
                 Classification::new("cli.filter", Kind::Cli, Some("repair the display filter"))
             }
-            Self::StreamLimit { .. } | Self::DurationLimit { .. } => resource_limit(),
+            Self::StreamLimit { .. } | Self::DurationLimit { .. } => {
+                resource_limit(GENERAL_RESOURCE_REMEDIATION)
+            }
             Self::Scope {
                 source:
                     crate::analysis::scope::Error::Capacity
                     | crate::analysis::scope::Error::Limit { .. },
                 ..
-            } => resource_limit(),
+            } => resource_limit(GENERAL_RESOURCE_REMEDIATION),
             Self::Scope { .. } => Classification::new(
                 "internal.scope_composition",
                 Kind::Internal,
@@ -149,11 +152,11 @@ impl Classified for Error {
             // make the caller choose a side rather than leaving a catch-all
             // here to misfile a future variant.
             Self::Reassembly { source, .. } => match source {
-                TcpError::Resource(_) => tcp_resource_limit(),
+                TcpError::Resource(_) => resource_limit(TCP_RESOURCE_REMEDIATION),
                 TcpError::Malformed(_) => malformed_reassembly(),
             },
             Self::IpReassembly { source, .. } => match source {
-                IpError::Resource(_) => ip_resource_limit(),
+                IpError::Resource(_) => resource_limit(IP_RESOURCE_REMEDIATION),
                 IpError::Malformed(_) => malformed_reassembly(),
                 IpError::Inconsistent { .. } => Classification::new(
                     "internal.ip_reassembly",
@@ -178,33 +181,27 @@ impl Classified for Error {
     }
 }
 
-fn resource_limit() -> Classification {
-    Classification::new(
-        "policy.analysis_resource_limit",
-        Kind::Policy,
-        Some("narrow the input with a filter or deliberately raise the finite analysis budget"),
-    )
+impl From<DeadlineExceeded> for Error {
+    fn from(error: DeadlineExceeded) -> Self {
+        Self::DurationLimit {
+            actual: error.actual,
+            limit: error.limit,
+        }
+    }
 }
 
-fn ip_resource_limit() -> Classification {
-    Classification::new(
-        "policy.analysis_resource_limit",
-        Kind::Policy,
-        Some(
-            "trim or pre-filter the capture, or deliberately raise the relevant finite \
-             --max-ip-* analysis budget",
-        ),
-    )
-}
+const GENERAL_RESOURCE_REMEDIATION: &str =
+    "narrow the input with a filter or deliberately raise the finite analysis budget";
+const IP_RESOURCE_REMEDIATION: &str = "trim or pre-filter the capture, or deliberately raise the \
+                                       relevant finite --max-ip-* analysis budget";
+const TCP_RESOURCE_REMEDIATION: &str = "trim or pre-filter the capture, or deliberately raise the \
+                                        relevant finite --max-tcp-* analysis budget";
 
-fn tcp_resource_limit() -> Classification {
+fn resource_limit(remediation: &'static str) -> Classification {
     Classification::new(
         "policy.analysis_resource_limit",
         Kind::Policy,
-        Some(
-            "trim or pre-filter the capture, or deliberately raise the relevant finite \
-             --max-tcp-* analysis budget",
-        ),
+        Some(remediation),
     )
 }
 

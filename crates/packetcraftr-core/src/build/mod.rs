@@ -124,10 +124,7 @@ impl Builder {
         let mut layers = Vec::with_capacity(packet.len());
         let mut payload_lengths = Vec::with_capacity(packet.len());
 
-        for (index, protocol) in protocols.into_iter().enumerate().rev() {
-            let layer = packet
-                .layer(index)
-                .expect("validated layer index must remain present");
+        for (index, (layer, protocol)) in packet.iter().zip(protocols).enumerate().rev() {
             let codec =
                 self.registry
                     .codec(protocol.as_str())

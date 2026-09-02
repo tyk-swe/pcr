@@ -62,9 +62,4 @@ impl Classified for Error {
             Self::InvalidFrame(source) => source.classification(),
         }
     }
-
-    /// Walked from the retained `#[source]` chain rather than hand-written.
-    fn causes(&self) -> Vec<String> {
-        crate::error::source_chain(self)
-    }
 }

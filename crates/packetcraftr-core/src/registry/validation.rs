@@ -51,7 +51,9 @@ impl super::builder::Builder {
                     }
                 }
                 entries.truncate(1);
-                let winner = entries.first().expect("bindings are never empty");
+                let Some(winner) = entries.first() else {
+                    continue;
+                };
                 reverse_bindings
                     .entry(parent.clone())
                     .or_default()

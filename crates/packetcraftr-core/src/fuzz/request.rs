@@ -59,18 +59,25 @@ impl FromStr for Target {
     type Err = TargetParseError;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        let (layer, field) = value
-            .split_once('.')
-            .ok_or_else(|| TargetParseError(value.to_owned()))?;
+        let (layer, field) =
+            value
+                .split_once('.')
+                .ok_or_else(|| TargetParseError::MissingSeparator {
+                    target: value.to_owned(),
+                })?;
         let layer = layer
             .parse::<usize>()
-            .map_err(|_| TargetParseError(value.to_owned()))?;
+            .map_err(|_| TargetParseError::InvalidLayer {
+                target: value.to_owned(),
+            })?;
         if field.is_empty()
             || !field
                 .bytes()
                 .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
         {
-            return Err(TargetParseError(value.to_owned()));
+            return Err(TargetParseError::InvalidField {
+                target: value.to_owned(),
+            });
         }
         Ok(Self {
             layer,
@@ -79,9 +86,17 @@ impl FromStr for Target {
     }
 }
 
+/// Why a `LAYER.FIELD` fuzz target text did not parse.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
-#[error("invalid fuzz target {0:?}; expected LAYER.FIELD")]
-pub struct TargetParseError(String);
+#[non_exhaustive]
+pub enum TargetParseError {
+    #[error("invalid fuzz target {target:?}; expected LAYER.FIELD")]
+    MissingSeparator { target: String },
+    #[error("invalid fuzz target {target:?}; the layer must be a decimal index")]
+    InvalidLayer { target: String },
+    #[error("invalid fuzz target {target:?}; the field must be a non-empty [A-Za-z0-9_] name")]
+    InvalidField { target: String },
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Limits {

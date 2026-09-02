@@ -158,11 +158,15 @@ fn prepare_case(
     )]
     let field = &inputs.fields[field_index];
     let mut recipe = inputs.packet.clone();
-    let original = recipe
-        .layer(field.target.layer)
-        .expect("resolved layer must remain present")
-        .field(&field.target.field)
-        .expect("resolved field must remain readable");
+    let Some(layer) = recipe.layer_mut(field.target.layer) else {
+        return Err(unresolved_target(field, "layer is outside the packet"));
+    };
+    let Some(original) = layer.field(&field.target.field) else {
+        return Err(unresolved_target(
+            field,
+            "field is not reflectively readable",
+        ));
+    };
     let mutated_value = mutation_value(
         strategy,
         field,
@@ -180,10 +184,7 @@ fn prepare_case(
         value: mutated_value.clone(),
     };
     let shrink_values = shrink_values(&mutated_value, request.limits.max_shrink_steps);
-    let mutation_result = recipe
-        .layer_mut(field.target.layer)
-        .expect("resolved mutable layer must remain present")
-        .set_field(&field.target.field, mutated_value);
+    let mutation_result = layer.set_field(&field.target.field, mutated_value);
     let retained_value_bytes =
         retained_case_value_bytes(&mutation, &shrink_values, &recipe, request.limits)?;
     charge_retained_bytes(
@@ -402,6 +403,13 @@ fn charge_retained_bytes(total: &mut u64, value: u64, limit: u64) -> Result<(), 
     }
     *total = next;
     Ok(())
+}
+
+fn unresolved_target(field: &ResolvedField, message: &str) -> Error {
+    Error::InvalidTarget {
+        target: field.target.clone(),
+        message: message.to_owned(),
+    }
 }
 
 fn byte_limit(actual: u64, limit: u64) -> Error {

@@ -56,6 +56,8 @@ impl fmt::Display for CaseFailure {
     }
 }
 
+impl std::error::Error for CaseFailure {}
+
 impl Classified for CaseFailure {
     fn classification(&self) -> Classification {
         self.classification

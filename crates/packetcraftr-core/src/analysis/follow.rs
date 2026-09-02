@@ -139,14 +139,13 @@ impl Collector {
         let Some(flow) = record.tcp_flow else {
             return Vec::new();
         };
-        if self.client_flow.is_none() {
-            self.summary.client_flow = Some(flow.flow.clone());
-            self.client_flow = Some(flow.clone());
-        }
         let client = self
             .client_flow
-            .clone()
-            .expect("client flow was established");
+            .get_or_insert_with(|| {
+                self.summary.client_flow = Some(flow.flow.clone());
+                flow.clone()
+            })
+            .clone();
 
         self.dedup.observe_syn(flow, &client, tcp);
         self.summary.frames = self.summary.frames.saturating_add(1);
@@ -192,14 +191,13 @@ impl Collector {
         let Some(flow) = record.udp_flow else {
             return Vec::new();
         };
-        if self.client_flow.is_none() {
-            self.summary.client_flow = Some(flow.flow.clone());
-            self.client_flow = Some(flow.clone());
-        }
         let client = self
             .client_flow
-            .clone()
-            .expect("client flow was established");
+            .get_or_insert_with(|| {
+                self.summary.client_flow = Some(flow.flow.clone());
+                flow.clone()
+            })
+            .clone();
         self.summary.frames = self.summary.frames.saturating_add(1);
         let direction = if *flow == client {
             Direction::ClientToServer

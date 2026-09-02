@@ -7,6 +7,9 @@ use std::fmt;
 use super::{Classification, Classified, Coordinate, Kind};
 
 /// Classified failure propagated across a workflow authorization or execution seam.
+///
+/// The classification is boxed deliberately: it is five words, and this type
+/// rides inside every workflow error enum, whose `Err` size clippy bounds.
 #[derive(Debug)]
 pub struct BoundaryError {
     message: String,

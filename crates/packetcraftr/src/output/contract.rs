@@ -190,56 +190,34 @@ const FOLLOW_FORMATS: &[Format] = &[
 ];
 
 /// Failure produced while enforcing the shared output contract.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
+    #[error(
+        "{command} does not support {format} output; choose {}",
+        supported_formats(command)
+    )]
     UnsupportedFormat { command: Command, format: Format },
+    #[error("capture timestamp is outside the signed v1 output range")]
     TimestampOutOfRange,
+    #[error("source frame must be a non-zero unsigned 64-bit position")]
     InvalidSourceFrame,
+    #[error("fuzz events are incoherent: {message}")]
     IncoherentFuzzEvents { message: String },
+    #[error("DNS evidence is incoherent: {message}")]
     IncoherentDnsEvidence { message: String },
+    #[error("field {field} has a reflective kind the v1 output contract cannot name")]
     UnsupportedFieldKind { field: String },
 }
 
-impl fmt::Display for Error {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::UnsupportedFormat { command, format } => {
-                write!(
-                    formatter,
-                    "{command} does not support {format} output; choose "
-                )?;
-                for (index, supported) in command.formats().iter().enumerate() {
-                    if index != 0 {
-                        formatter.write_str(", ")?;
-                    }
-                    write!(formatter, "{supported}")?;
-                }
-                Ok(())
-            }
-            Self::TimestampOutOfRange => {
-                formatter.write_str("capture timestamp is outside the signed v1 output range")
-            }
-            Self::InvalidSourceFrame => {
-                formatter.write_str("source frame must be a non-zero unsigned 64-bit position")
-            }
-            Self::IncoherentFuzzEvents { message } => {
-                write!(formatter, "fuzz events are incoherent: {message}")
-            }
-            Self::IncoherentDnsEvidence { message } => {
-                write!(formatter, "DNS evidence is incoherent: {message}")
-            }
-            Self::UnsupportedFieldKind { field } => {
-                write!(
-                    formatter,
-                    "field {field} has a reflective kind the v1 output contract cannot name"
-                )
-            }
-        }
-    }
+fn supported_formats(command: &Command) -> String {
+    command
+        .formats()
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(", ")
 }
-
-impl std::error::Error for Error {}
 
 impl Classified for Error {
     fn classification(&self) -> Classification {

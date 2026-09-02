@@ -60,10 +60,10 @@ impl Packet {
                 })?;
             value
                 .validate_required_fields()
-                .map_err(|source| Error::Layer {
+                .map_err(|source| Error::Field {
                     layer: index,
                     protocol: layer.protocol.clone(),
-                    source: crate::codec::Error::Field(source),
+                    source,
                 })?;
             packet.push_boxed(value);
         }

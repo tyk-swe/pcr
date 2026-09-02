@@ -136,7 +136,7 @@ impl Frame {
         bytes: impl Into<Bytes>,
     ) -> Result<Self, Error> {
         let bytes = bytes.into();
-        if bytes.len() != captured_length as usize {
+        if usize::try_from(captured_length) != Ok(bytes.len()) {
             return Err(Error::CapturedLengthMismatch {
                 declared: captured_length,
                 actual: bytes.len(),

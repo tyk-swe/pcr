@@ -592,8 +592,5 @@ fn next_frame<R: Read>(
 /// budget has one owner and callers cannot pass a limit that disagrees with
 /// the clock enforcing it.
 fn enforce_deadline(deadline: &Deadline) -> Result<(), Error> {
-    deadline.check().map_err(|error| Error::DurationLimit {
-        actual: error.actual,
-        limit: error.limit,
-    })
+    deadline.check().map_err(Error::from)
 }

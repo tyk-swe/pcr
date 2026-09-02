@@ -116,7 +116,7 @@ pub fn source_chain(error: &(impl std::error::Error + ?Sized)) -> Vec<String> {
 }
 
 /// Implemented by public errors that cross a live-workflow or CLI boundary.
-pub trait Classified {
+pub trait Classified: std::error::Error {
     fn classification(&self) -> Classification;
 
     /// The stable domain coordinate for automation and partial-stream
@@ -126,11 +126,11 @@ pub trait Classified {
     }
 
     /// Ordered source diagnostics retained for structured renderers. The main
-    /// error remains authoritative. An error that retains its sources derives
-    /// this with [`source_chain`] rather than hand-walking the chain; the
-    /// exceptions are dual operation/cleanup failures and value types that
-    /// carry a captured snapshot.
+    /// error remains authoritative. The default walks the retained `#[source]`
+    /// chain with [`source_chain`]; the only overrides are dual
+    /// operation/cleanup failures, value types that carry a captured snapshot,
+    /// and wrappers whose source is one of those.
     fn causes(&self) -> Vec<String> {
-        Vec::new()
+        source_chain(self)
     }
 }

@@ -43,6 +43,13 @@ pub enum Error {
         #[source]
         source: crate::codec::Error,
     },
+    #[error("invalid {protocol} layer at index {layer}: {source}")]
+    Field {
+        layer: usize,
+        protocol: String,
+        #[source]
+        source: crate::layer::FieldError,
+    },
 }
 
 impl Error {
@@ -106,16 +113,11 @@ impl Classified for Error {
                 Kind::Cli,
                 Some("run `packetcraftr protocols` to list the protocol names the registry binds"),
             ),
-            Self::Layer { .. } => Classification::new(
+            Self::Layer { .. } | Self::Field { .. } => Classification::new(
                 "cli.document_field",
                 Kind::Cli,
                 Some("correct the layer's field names and values against its reflective schema"),
             ),
         }
-    }
-
-    /// Walked from the retained `#[source]` chain rather than hand-written.
-    fn causes(&self) -> Vec<String> {
-        crate::error::source_chain(self)
     }
 }

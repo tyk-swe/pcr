@@ -12,6 +12,13 @@ use packetcraftr_core::error::BoundaryError;
 use crate::authorization::{Authorizer, Operation, WireBudget};
 use crate::clock::check_deadline;
 
+/// How a workflow names the two failures every policy gate can raise.
+pub(crate) trait GateErrors {
+    type Error;
+    fn duration_limit(&self, actual: Duration, limit: Duration) -> Self::Error;
+    fn authorization(&self, source: BoundaryError) -> Self::Error;
+}
+
 pub(crate) struct SelectedTargets {
     pub(crate) declared: String,
     pub(crate) addresses: Vec<IpAddr>,
@@ -19,27 +26,28 @@ pub(crate) struct SelectedTargets {
 
 /// Resolves, authorizes, filters, and de-duplicates a target while checking
 /// the same absolute deadline on both sides of every policy boundary.
-pub(crate) fn resolve_selected<A, E>(
+pub(crate) fn resolve_selected<A, G>(
     authorizer: &mut A,
     target: &Target,
     family: Family,
     deadline: &Deadline,
-    mut duration_error: impl FnMut(Duration, Duration) -> E,
-) -> Result<SelectedTargets, E>
+    gates: &G,
+) -> Result<SelectedTargets, G::Error>
 where
     A: Authorizer,
-    E: From<BoundaryError>,
+    G: GateErrors,
 {
-    check_deadline(deadline, &mut duration_error)?;
+    let duration_error = |actual, limit| gates.duration_limit(actual, limit);
+    check_deadline(deadline, duration_error)?;
     let resolved = authorizer.resolve_and_authorize(target);
-    check_deadline(deadline, &mut duration_error)?;
-    let resolved = resolved.map_err(E::from)?;
+    check_deadline(deadline, duration_error)?;
+    let resolved = resolved.map_err(|source| gates.authorization(source))?;
 
     let declared = resolved.declared.to_string();
     let mut addresses = Vec::with_capacity(resolved.addresses.len());
     let mut seen = HashSet::with_capacity(resolved.addresses.len());
     for address in resolved.addresses {
-        check_deadline(deadline, &mut duration_error)?;
+        check_deadline(deadline, duration_error)?;
         if family.accepts(address) && seen.insert(address) {
             addresses.push(address);
         }
@@ -56,20 +64,21 @@ where
 ///
 /// Every packet-oriented workflow states its own shape here; the bracket is
 /// shared so no caller has to open-code it.
-pub(crate) fn approve_operation<A, E>(
+pub(crate) fn approve_operation<A, G>(
     authorizer: &mut A,
     operation: Operation<'_>,
     deadline: &Deadline,
-    mut duration_error: impl FnMut(Duration, Duration) -> E,
-) -> Result<(), E>
+    gates: &G,
+) -> Result<(), G::Error>
 where
     A: Authorizer,
-    E: From<BoundaryError>,
+    G: GateErrors,
 {
-    check_deadline(deadline, &mut duration_error)?;
+    let duration_error = |actual, limit| gates.duration_limit(actual, limit);
+    check_deadline(deadline, duration_error)?;
     let approval = authorizer.authorize_operation(operation);
-    check_deadline(deadline, &mut duration_error)?;
-    approval.map_err(E::from)
+    check_deadline(deadline, duration_error)?;
+    approval.map_err(|source| gates.authorization(source))
 }
 
 /// The packet-and-byte budget shape scan and traceroute state.

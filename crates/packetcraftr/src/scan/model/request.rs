@@ -1,7 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 use std::collections::HashSet;
-use std::fmt;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -9,47 +8,18 @@ use serde::{Deserialize, Serialize};
 use packetcraftr_core::template::DEFAULT_MAX_TEMPLATE_PACKETS;
 use packetcraftr_netio::capture::{MAX_CAPTURE_QUEUE_BYTES, MAX_CAPTURE_QUEUE_FRAMES};
 
-use crate::probe::evidence::{check_limits, duration_violation};
+use crate::probe::evidence::{EvidenceLimits, check_limits, duration_violation};
 use crate::target::Family;
 use crate::target::Target;
 
-use crate::scan::error::Error;
+use crate::probe::{Error, ErrorKind};
+use crate::scan::WORKFLOW;
 use crate::scan::{
     DEFAULT_BATCH_SIZE, DEFAULT_MAX_PORTS, DEFAULT_MAX_UNDECODED_FRAMES, MAX_ATTEMPTS,
     MAX_DURATION, MAX_PROBES, MAX_RATE,
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Transport {
-    Tcp,
-    Udp,
-    Icmp,
-}
-
-impl Transport {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Tcp => "tcp",
-            Self::Udp => "udp",
-            Self::Icmp => "icmp",
-        }
-    }
-
-    pub(in crate::scan) const fn probe_transport(self) -> crate::probe::Transport {
-        match self {
-            Self::Tcp => crate::probe::Transport::Tcp,
-            Self::Udp => crate::probe::Transport::Udp,
-            Self::Icmp => crate::probe::Transport::Icmp,
-        }
-    }
-}
-
-impl fmt::Display for Transport {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
+pub use crate::probe::Transport;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Limits {
@@ -77,6 +47,14 @@ impl Default for Limits {
 }
 
 impl Limits {
+    pub(crate) const fn evidence(&self) -> EvidenceLimits {
+        EvidenceLimits {
+            max_frames: self.max_evidence_frames,
+            max_bytes: self.max_evidence_bytes,
+            max_undecoded: self.max_undecoded,
+        }
+    }
+
     /// Rejects any bound above the ceiling this crate enforces, and any pair
     /// of bounds that cannot both hold.
     pub fn validate(&self) -> Result<(), Error> {
@@ -116,17 +94,25 @@ impl Limits {
                     "cannot exceed max_evidence_frames",
                 ),
             ],
-            |field, value, reason| Error::InvalidLimit {
-                field,
-                value,
-                reason,
+            |field, value, reason| {
+                Error::new(
+                    WORKFLOW,
+                    ErrorKind::InvalidLimit {
+                        field,
+                        value,
+                        reason,
+                    },
+                )
             },
         )?;
         if duration_violation(self.max_duration, MAX_DURATION) {
-            return Err(Error::InvalidDuration {
-                value: self.max_duration,
-                maximum: MAX_DURATION,
-            });
+            return Err(Error::new(
+                WORKFLOW,
+                ErrorKind::InvalidDuration {
+                    value: self.max_duration,
+                    maximum: MAX_DURATION,
+                },
+            ));
         }
         Ok(())
     }
@@ -163,13 +149,16 @@ pub fn select_ports(
                 continue;
             }
             if ports.len() >= max_ports {
-                return Err(Error::InvalidLimit {
-                    field: "ports",
-                    value: u64::try_from(ports.len())
-                        .unwrap_or(u64::MAX)
-                        .saturating_add(1),
-                    reason: format!("exceeds max_ports={max_ports}"),
-                });
+                return Err(Error::new(
+                    WORKFLOW,
+                    ErrorKind::InvalidLimit {
+                        field: "ports",
+                        value: u64::try_from(ports.len())
+                            .unwrap_or(u64::MAX)
+                            .saturating_add(1),
+                        reason: format!("exceeds max_ports={max_ports}"),
+                    },
+                ));
             }
             ports.push(port);
         }
@@ -200,38 +189,54 @@ impl Request {
     pub fn validate(&self) -> Result<(), Error> {
         self.limits.validate()?;
         if !(1..=MAX_ATTEMPTS).contains(&self.attempts) {
-            return Err(Error::InvalidLimit {
-                field: "attempts",
-                value: u64::from(self.attempts),
-                reason: format!("must be within 1..={MAX_ATTEMPTS}"),
-            });
+            return Err(Error::new(
+                WORKFLOW,
+                ErrorKind::InvalidLimit {
+                    field: "attempts",
+                    value: u64::from(self.attempts),
+                    reason: format!("must be within 1..={MAX_ATTEMPTS}"),
+                },
+            ));
         }
         if self.timeout.is_zero() || self.timeout > packetcraftr_netio::capture::MAX_TIMEOUT {
-            return Err(Error::InvalidTimeout {
-                value: self.timeout,
-                maximum: packetcraftr_netio::capture::MAX_TIMEOUT,
-            });
+            return Err(Error::new(
+                WORKFLOW,
+                ErrorKind::InvalidTimeout {
+                    value: self.timeout,
+                    maximum: packetcraftr_netio::capture::MAX_TIMEOUT,
+                },
+            ));
         }
         if let Some(rate) = self.probes_per_second
             && (rate == 0 || rate > MAX_RATE)
         {
-            return Err(Error::InvalidLimit {
-                field: "probes_per_second",
-                value: u64::from(rate),
-                reason: format!("must be within 1..={MAX_RATE}"),
-            });
+            return Err(Error::new(
+                WORKFLOW,
+                ErrorKind::InvalidLimit {
+                    field: "probes_per_second",
+                    value: u64::from(rate),
+                    reason: format!("must be within 1..={MAX_RATE}"),
+                },
+            ));
         }
         match self.transport {
             Transport::Tcp | Transport::Udp if self.ports.is_empty() => {
-                return Err(Error::InvalidPorts {
-                    message: "TCP and UDP scans require at least one destination port".to_owned(),
-                });
+                return Err(Error::new(
+                    WORKFLOW,
+                    ErrorKind::InvalidPort {
+                        message: "TCP and UDP scans require at least one destination port"
+                            .to_owned(),
+                    },
+                ));
             }
             Transport::Icmp if !self.ports.is_empty() => {
-                return Err(Error::InvalidPorts {
-                    message: "ICMP scans are portless and do not accept destination ports"
-                        .to_owned(),
-                });
+                return Err(Error::new(
+                    WORKFLOW,
+                    ErrorKind::InvalidPort {
+                        message: "ICMP scans are portless and do not accept destination ports"
+                            .to_owned(),
+                    },
+                ));
             }
             _ => {}
         }

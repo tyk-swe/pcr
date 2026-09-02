@@ -262,7 +262,7 @@ fn prepare_operation<A: Authorizer>(
             tcp,
         )),
         &deadline,
-        duration_error,
+        &Gates,
     )?;
 
     Ok(PreparedOperation {
@@ -457,7 +457,7 @@ where
             &self.request.server,
             self.request.address_family,
             &self.deadline,
-            duration_error,
+            &Gates,
         )?;
         self.summary.server = resolved.declared;
         let addresses = resolved.addresses;
@@ -698,7 +698,7 @@ where
             &target,
             Family::Any,
             &self.deadline,
-            duration_error,
+            &Gates,
         );
         self.deadline.check()?;
         if attempt_deadline.check().is_err() {
@@ -856,6 +856,21 @@ fn select_response<'a>(
         deadline.check()?;
     }
     Ok(best)
+}
+
+/// The DNS workflow's names for the shared policy-gate failures.
+struct Gates;
+
+impl crate::target::GateErrors for Gates {
+    type Error = Error;
+
+    fn duration_limit(&self, actual: Duration, limit: Duration) -> Error {
+        duration_error(actual, limit)
+    }
+
+    fn authorization(&self, source: BoundaryError) -> Error {
+        Error::from(source)
+    }
 }
 
 fn duration_error(actual: Duration, limit: Duration) -> Error {

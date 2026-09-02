@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use crate::probe::evidence::EvidenceDiagnosticDescriptor;
+use crate::probe::Workflow;
 
 pub const DEFAULT_FIRST_HOP: u8 = 1;
 pub const DEFAULT_MAX_HOPS: u8 = 30;
@@ -24,26 +24,20 @@ pub const MAX_DURATION: Duration = packetcraftr_netio::capture::MAX_TIMEOUT;
 // possible before any route, capture, neighbor, or send side effect.
 const MAX_PROBE_BYTES: u64 = 14 + 40 + 20;
 const SOURCE_PORT: u16 = crate::probe::EPHEMERAL_SOURCE_PORT_BASE;
-const EVIDENCE_DIAGNOSTICS: EvidenceDiagnosticDescriptor = EvidenceDiagnosticDescriptor::new(
-    "traceroute.evidence_limit",
-    "traceroute.undecoded_limit",
-    "traceroute",
-);
+const WORKFLOW: Workflow = Workflow::Traceroute;
 
 mod classification;
 mod client_executor;
 mod engine;
-mod error;
-mod evidence;
 mod model;
 mod plan;
 mod probe;
 #[cfg(test)]
 mod tests;
 
+pub use crate::probe::Error;
 pub use classification::{ResponseClassification, classify_response};
 pub use engine::{run, run_with_events};
-pub use error::Error;
 pub use model::{
     Batch, Completion, Event, Execution, Executor, Hop, Limits, Probe, ProbeEvidence, ProbeStatus,
     ProbeTarget, Report, Request, ResponseKind, Strategy, Summary, UndecodedEvidence,

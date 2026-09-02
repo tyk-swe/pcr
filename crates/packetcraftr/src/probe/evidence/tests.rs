@@ -12,10 +12,11 @@ use bytes::Bytes;
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::{Packet, decode::DecodedPacket, layer::Raw, layout::PacketLayout};
 
+use super::exact_validation::validate_batch_exchange_evidence;
 use super::exact_validation::validate_decoded_frame;
 use super::{
     EvidenceDiagnosticDescriptor, ExchangeEvidenceError, ResponseCandidate, UndecodedRetention,
-    response_within_deadline, update_best_candidate, validate_batch_exchange_evidence,
+    response_within_deadline, update_best_candidate,
 };
 
 struct TestObservation {

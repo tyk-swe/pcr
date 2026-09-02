@@ -14,21 +14,21 @@ use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::{diagnostic::Diagnostic, registry::Registry};
 
 use crate::clock::Clock;
-use crate::evidence::{Budget, DiagnosticLog};
-use crate::probe::evidence::{ResponseSelector, UndecodedRetention, retain_evidence};
+use crate::probe::evidence::{EvidenceState, ResponseSelector, Retained, validate_batch_evidence};
 use crate::probe::runner::{ProbeLifecycle, run_batches, sink_observer};
 use crate::target::{Authorizer, approve_operation, budgeted, resolve_selected};
 use crate::{BoundaryError, SentPacket};
 
+use super::MAX_PROBE_BYTES;
+use super::WORKFLOW;
 use super::classification::classify_response;
-use super::error::Error;
-use super::evidence::validate_execution;
 use super::model::{
     Batch, Completion, Event, Execution, Executor, Hop, Limits, Probe, ProbeEvidence, ProbeStatus,
     Report, Request, ResponseKind, Strategy, Summary, UndecodedEvidence,
 };
 use super::plan::{build_batches, worst_case_duration};
-use super::{EVIDENCE_DIAGNOSTICS, MAX_PROBE_BYTES};
+use super::probe::sent_probe_matches;
+use crate::probe::{Error, ErrorKind};
 
 /// Validates the request, authorizes every resolved target and the complete
 /// operation budget before constructing probes, then executes hop batches until
@@ -85,7 +85,7 @@ where
         runtime,
         emit,
         |error| traceroute_duration_error(error.actual, error.limit),
-        |source| Error::Output { source },
+        |source| Error::new(WORKFLOW, ErrorKind::Output { source }),
     )?;
     run_observed(request, authorizer, registry, executor, clock, observe)
 }
@@ -119,6 +119,7 @@ where
             emit: &mut emit,
         };
         run_batches(
+            WORKFLOW,
             &batches,
             request.probes_per_second,
             &mut deadline,
@@ -209,12 +210,15 @@ fn approve_traceroute<A: Authorizer>(
         &request.target,
         request.address_family,
         deadline,
-        traceroute_duration_error,
+        &WORKFLOW,
     )?;
     let Some(&destination) = resolved.addresses.first() else {
-        return Err(Error::Family {
-            family: request.address_family.label(),
-        });
+        return Err(Error::new(
+            WORKFLOW,
+            ErrorKind::Family {
+                family: request.address_family.label(),
+            },
+        ));
     };
 
     let total_probes = request.total_probe_count()?;
@@ -222,11 +226,14 @@ fn approve_traceroute<A: Authorizer>(
     let maximum_wire_bytes = u64::try_from(total_probes)
         .unwrap_or(u64::MAX)
         .checked_mul(MAX_PROBE_BYTES)
-        .ok_or(Error::InvalidLimit {
-            field: "wire_bytes",
-            value: u64::MAX,
-            reason: "wire-byte accounting overflowed".to_owned(),
-        })?;
+        .ok_or(Error::new(
+            WORKFLOW,
+            ErrorKind::InvalidLimit {
+                field: "wire_bytes",
+                value: u64::MAX,
+                reason: "wire-byte accounting overflowed".to_owned(),
+            },
+        ))?;
     approve_operation(
         authorizer,
         budgeted(
@@ -234,7 +241,7 @@ fn approve_traceroute<A: Authorizer>(
             maximum_wire_bytes,
         ),
         deadline,
-        traceroute_duration_error,
+        &WORKFLOW,
     )?;
     Ok(ApprovedTraceroute {
         declared_target: resolved.declared,
@@ -245,11 +252,14 @@ fn approve_traceroute<A: Authorizer>(
 
 fn validate_probe_plan(request: &Request, total_probes: usize) -> Result<(), Error> {
     if total_probes > request.limits.max_probes {
-        return Err(Error::InvalidLimit {
-            field: "probes",
-            value: u64::try_from(total_probes).unwrap_or(u64::MAX),
-            reason: format!("exceeds max_probes={}", request.limits.max_probes),
-        });
+        return Err(Error::new(
+            WORKFLOW,
+            ErrorKind::InvalidLimit {
+                field: "probes",
+                value: u64::try_from(total_probes).unwrap_or(u64::MAX),
+                reason: format!("exceeds max_probes={}", request.limits.max_probes),
+            },
+        ));
     }
     if let (Strategy::Udp, Some(base)) = (request.strategy, request.destination_port) {
         let last_offset = total_probes.saturating_sub(1);
@@ -257,38 +267,40 @@ fn validate_probe_plan(request: &Request, total_probes: usize) -> Result<(), Err
             .checked_add(last_offset)
             .is_none_or(|last| last > usize::from(u16::MAX))
         {
-            return Err(Error::InvalidPort {
-                message: format!(
-                    "base UDP port {base} plus {} unique probe(s) exceeds 65535",
-                    total_probes
-                ),
-            });
+            return Err(Error::new(
+                WORKFLOW,
+                ErrorKind::InvalidPort {
+                    message: format!(
+                        "base UDP port {base} plus {} unique probe(s) exceeds 65535",
+                        total_probes
+                    ),
+                },
+            ));
         }
     }
     let worst_case = worst_case_duration(request)?;
     if worst_case > request.limits.max_duration {
-        return Err(Error::DurationLimit {
-            actual: worst_case,
-            limit: request.limits.max_duration,
-        });
+        return Err(Error::new(
+            WORKFLOW,
+            ErrorKind::DurationLimit {
+                actual: worst_case,
+                limit: request.limits.max_duration,
+            },
+        ));
     }
     Ok(())
 }
 
 struct TracerouteState {
-    evidence_budget: Budget,
-    retained_undecoded: usize,
+    evidence: EvidenceState,
     completion: Completion,
-    diagnostics: DiagnosticLog,
 }
 
 impl Default for TracerouteState {
     fn default() -> Self {
         Self {
-            evidence_budget: Budget::default(),
-            retained_undecoded: 0,
+            evidence: EvidenceState::default(),
             completion: Completion::Timeout,
-            diagnostics: DiagnosticLog::default(),
         }
     }
 }
@@ -320,14 +332,18 @@ where
     E: Executor<Probe>,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
-    type Error = Error;
-
     fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
         self.executor.execute(batch)
     }
 
-    fn validate(&mut self, batch: &Batch, execution: &Execution) -> Result<(), Self::Error> {
-        validate_execution(batch, execution, self.limits)
+    fn validate(&mut self, batch: &Batch, execution: &Execution) -> Result<(), Error> {
+        validate_batch_evidence(
+            WORKFLOW,
+            batch,
+            execution,
+            self.limits.evidence(),
+            sent_probe_matches,
+        )
     }
 
     fn process(
@@ -335,7 +351,7 @@ where
         batch: &Batch,
         execution: Execution,
         deadline: &Deadline,
-    ) -> Result<ControlFlow<()>, Self::Error> {
+    ) -> Result<ControlFlow<()>, Error> {
         self.process_batch(batch, execution, deadline)
     }
 }
@@ -362,14 +378,16 @@ where
             stats: _,
         } = execution;
         if permit != batch.permit {
-            return Err(Error::InvalidEvidence {
-                sequence: batch.sequence,
-                message: "executor returned evidence for a different execution permit".to_owned(),
-            });
+            return Err(Error::new(
+                WORKFLOW,
+                ErrorKind::InvalidEvidence {
+                    sequence: batch.sequence,
+                    message: "executor returned evidence for a different execution permit"
+                        .to_owned(),
+                },
+            ));
         }
-        for diagnostic in batch_diagnostics {
-            self.record_diagnostic(diagnostic, deadline)?;
-        }
+        self.record_diagnostics(batch_diagnostics, deadline)?;
         enforce_deadline(deadline)?;
         let mut response_selector = ResponseSelector::new(&mut responses);
         let terminal = self.process_probes(batch, &sent, &mut response_selector, deadline)?;
@@ -436,7 +454,7 @@ where
             |response| {
                 classify_response(
                     self.registry,
-                    probe.target.strategy(),
+                    probe.target.transport(),
                     &sent.built().packet,
                     response,
                 )
@@ -451,7 +469,7 @@ where
                 hop_limit: probe.hop_limit,
                 attempt: probe.attempt,
                 destination: probe.address,
-                strategy: probe.target.strategy(),
+                strategy: probe.target.transport(),
                 destination_port: probe.target.port(),
                 status: ProbeStatus::Timeout,
                 response_kind: None,
@@ -464,21 +482,17 @@ where
                     .to_owned(),
             });
         };
-        let response = retain_evidence(
-            &mut self.state.evidence_budget,
+        let response = self.state.evidence.retain_response(
             &candidate.decoded.frame,
-            EVIDENCE_DIAGNOSTICS,
-            self.limits.max_evidence_frames,
-            self.limits.max_evidence_bytes,
-            &mut self.state.diagnostics,
-        )
-        .then(|| candidate.decoded.frame.clone());
+            self.limits.evidence(),
+            WORKFLOW.evidence_diagnostics(),
+        );
         Ok(ProbeEvidence {
             sequence: probe.sequence,
             hop_limit: probe.hop_limit,
             attempt: probe.attempt,
             destination: probe.address,
-            strategy: probe.target.strategy(),
+            strategy: probe.target.transport(),
             destination_port: probe.target.port(),
             status: ProbeStatus::Response,
             response_kind: Some(candidate.observation.kind),
@@ -497,36 +511,40 @@ where
         hop_limit: u8,
         deadline: &Deadline,
     ) -> Result<(), Error> {
-        let mut retention = UndecodedRetention::new(
-            &mut self.state.retained_undecoded,
-            self.limits.max_undecoded,
-            &mut self.state.evidence_budget,
-            EVIDENCE_DIAGNOSTICS,
-            self.limits.max_evidence_frames,
-            self.limits.max_evidence_bytes,
-            &mut self.state.diagnostics,
-        );
-        retention.retain(
+        self.state.evidence.retain_undecoded(
             frames,
-            |frame| Event::Undecoded(UndecodedEvidence { hop_limit, frame }),
-            Event::Diagnostic,
-            |event| (self.emit)(event, deadline),
+            self.limits.evidence(),
+            WORKFLOW.evidence_diagnostics(),
+            |retained| {
+                let event = match retained {
+                    Retained::Frame(frame) => {
+                        Event::Undecoded(UndecodedEvidence { hop_limit, frame })
+                    }
+                    Retained::Diagnostic(diagnostic) => Event::Diagnostic(diagnostic),
+                };
+                (self.emit)(event, deadline)
+            },
             || enforce_deadline(deadline),
         )
     }
 
-    fn record_diagnostic(
+    fn record_diagnostics(
         &mut self,
-        diagnostic: Diagnostic,
+        diagnostics: Vec<Diagnostic>,
         deadline: &Deadline,
     ) -> Result<(), Error> {
-        self.state.diagnostics.push_once(diagnostic);
-        self.publish_new_diagnostics(deadline)
+        let Self { state, emit, .. } = self;
+        state
+            .evidence
+            .record_diagnostics(diagnostics, |diagnostic| {
+                emit(Event::Diagnostic(diagnostic), deadline)
+            })
     }
 
     fn publish_new_diagnostics(&mut self, deadline: &Deadline) -> Result<(), Error> {
         let Self { state, emit, .. } = self;
         state
+            .evidence
             .diagnostics
             .publish_new(|diagnostic| emit(Event::Diagnostic(diagnostic), deadline))
     }
@@ -537,5 +555,5 @@ fn enforce_deadline(deadline: &Deadline) -> Result<(), Error> {
 }
 
 fn traceroute_duration_error(actual: Duration, limit: Duration) -> Error {
-    Error::DurationLimit { actual, limit }
+    Error::new(WORKFLOW, ErrorKind::DurationLimit { actual, limit })
 }

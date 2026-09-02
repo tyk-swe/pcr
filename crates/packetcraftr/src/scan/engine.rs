@@ -16,20 +16,20 @@ use packetcraftr_core::{diagnostic::Diagnostic, registry::Registry};
 
 use crate::BoundaryError;
 use crate::clock::Clock;
-use crate::evidence::{Budget, DiagnosticLog};
-use crate::probe::evidence::{ResponseSelector, UndecodedRetention, retain_evidence};
+use crate::probe::evidence::{EvidenceState, ResponseSelector, Retained, validate_batch_evidence};
 use crate::probe::runner::{ProbeLifecycle, run_batches, sink_observer};
 use crate::target::{Authorizer, approve_operation, budgeted, resolve_selected};
 
+use super::WORKFLOW;
 use super::classification::classify_response;
-use super::error::Error;
-use super::evidence::validate_exchange_evidence;
 use super::model::{
     Batch, Classification, Endpoint, Event, Execution, Executor, Limits, Probe, ProbeEndpoint,
     ProbeEvidence, ProbeStatus, Report, Request, Summary, Transport,
 };
 use super::plan::{build_batches, worst_case_duration};
-use super::{EVIDENCE_DIAGNOSTICS, IPV4_PROBE_BYTES, IPV6_PROBE_BYTES};
+use super::probe::sent_probe_matches;
+use super::{IPV4_PROBE_BYTES, IPV6_PROBE_BYTES};
+use crate::probe::{Error, ErrorKind};
 
 /// Validates the request, authorizes every resolved target and the complete
 /// operation budget before constructing probes, then executes and classifies
@@ -86,7 +86,7 @@ where
         runtime,
         emit,
         |error| scan_duration_error(error.actual, error.limit),
-        |source| Error::Output { source },
+        |source| Error::new(WORKFLOW, ErrorKind::Output { source }),
     )?;
     run_observed(request, authorizer, registry, executor, clock, observe)
 }
@@ -109,7 +109,7 @@ where
     let approved = approve_scan(request, authorizer, &deadline)?;
     let batches = build_batches(request, &approved.addresses, &approved.endpoints)?;
     enforce_deadline(&deadline)?;
-    let mut state = ScanState::default();
+    let mut state = EvidenceState::default();
     let stats = {
         let mut lifecycle = Lifecycle {
             executor,
@@ -120,6 +120,7 @@ where
             emit: &mut emit,
         };
         run_batches(
+            WORKFLOW,
             &batches,
             request.probes_per_second,
             &mut deadline,
@@ -215,12 +216,15 @@ fn approve_scan<A: Authorizer>(
         &request.target,
         request.address_family,
         deadline,
-        scan_duration_error,
+        &WORKFLOW,
     )?;
     if resolved.addresses.is_empty() {
-        return Err(Error::Family {
-            family: request.address_family.label(),
-        });
+        return Err(Error::new(
+            WORKFLOW,
+            ErrorKind::Family {
+                family: request.address_family.label(),
+            },
+        ));
     }
 
     let endpoints_per_address = if request.transport == Transport::Icmp {
@@ -234,19 +238,25 @@ fn approve_scan<A: Authorizer>(
         request.attempts,
     )?;
     if total_probes > request.limits.max_probes {
-        return Err(Error::InvalidLimit {
-            field: "probes",
-            value: u64::try_from(total_probes).unwrap_or(u64::MAX),
-            reason: format!("exceeds max_probes={}", request.limits.max_probes),
-        });
+        return Err(Error::new(
+            WORKFLOW,
+            ErrorKind::InvalidLimit {
+                field: "probes",
+                value: u64::try_from(total_probes).unwrap_or(u64::MAX),
+                reason: format!("exceeds max_probes={}", request.limits.max_probes),
+            },
+        ));
     }
     let maximum_bytes = maximum_wire_bytes(&resolved.addresses, endpoints_per_address, request)?;
     let worst_case = worst_case_duration(request, resolved.addresses.len(), endpoints_per_address)?;
     if worst_case > request.limits.max_duration {
-        return Err(Error::DurationLimit {
-            actual: worst_case,
-            limit: request.limits.max_duration,
-        });
+        return Err(Error::new(
+            WORKFLOW,
+            ErrorKind::DurationLimit {
+                actual: worst_case,
+                limit: request.limits.max_duration,
+            },
+        ));
     }
     approve_operation(
         authorizer,
@@ -255,7 +265,7 @@ fn approve_scan<A: Authorizer>(
             maximum_bytes,
         ),
         deadline,
-        scan_duration_error,
+        &WORKFLOW,
     )?;
 
     let endpoints = match request.transport {
@@ -284,11 +294,14 @@ fn probe_count(
     address_count
         .checked_mul(endpoints_per_address)
         .and_then(|value| value.checked_mul(usize::try_from(attempts).unwrap_or(usize::MAX)))
-        .ok_or(Error::InvalidLimit {
-            field: "probes",
-            value: u64::MAX,
-            reason: "probe-count arithmetic overflowed".to_owned(),
-        })
+        .ok_or(Error::new(
+            WORKFLOW,
+            ErrorKind::InvalidLimit {
+                field: "probes",
+                value: u64::MAX,
+                reason: "probe-count arithmetic overflowed".to_owned(),
+            },
+        ))
 }
 
 fn maximum_wire_bytes(
@@ -305,31 +318,31 @@ fn maximum_wire_bytes(
         let address_probes = u64::try_from(endpoints_per_address)
             .unwrap_or(u64::MAX)
             .checked_mul(u64::from(request.attempts))
-            .ok_or(Error::InvalidLimit {
+            .ok_or(Error::new(
+                WORKFLOW,
+                ErrorKind::InvalidLimit {
+                    field: "wire_bytes",
+                    value: u64::MAX,
+                    reason: "wire-byte accounting overflowed".to_owned(),
+                },
+            ))?;
+        let address_bytes = per_probe.checked_mul(address_probes).ok_or(Error::new(
+            WORKFLOW,
+            ErrorKind::InvalidLimit {
                 field: "wire_bytes",
                 value: u64::MAX,
                 reason: "wire-byte accounting overflowed".to_owned(),
-            })?;
-        let address_bytes = per_probe
-            .checked_mul(address_probes)
-            .ok_or(Error::InvalidLimit {
+            },
+        ))?;
+        total.checked_add(address_bytes).ok_or(Error::new(
+            WORKFLOW,
+            ErrorKind::InvalidLimit {
                 field: "wire_bytes",
                 value: u64::MAX,
                 reason: "wire-byte accounting overflowed".to_owned(),
-            })?;
-        total.checked_add(address_bytes).ok_or(Error::InvalidLimit {
-            field: "wire_bytes",
-            value: u64::MAX,
-            reason: "wire-byte accounting overflowed".to_owned(),
-        })
+            },
+        ))
     })
-}
-
-#[derive(Default)]
-struct ScanState {
-    evidence_budget: Budget,
-    retained_undecoded: usize,
-    diagnostics: DiagnosticLog,
 }
 
 struct ProbeOutcome {
@@ -348,7 +361,7 @@ struct Lifecycle<'a, E, F> {
     registry: &'a Registry,
     limits: Limits,
     target: Arc<str>,
-    state: &'a mut ScanState,
+    state: &'a mut EvidenceState,
     emit: &'a mut F,
 }
 
@@ -357,14 +370,18 @@ where
     E: Executor<Probe>,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
-    type Error = Error;
-
     fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
         self.executor.execute(batch)
     }
 
-    fn validate(&mut self, batch: &Batch, execution: &Execution) -> Result<(), Self::Error> {
-        validate_exchange_evidence(batch, execution, self.limits)
+    fn validate(&mut self, batch: &Batch, execution: &Execution) -> Result<(), Error> {
+        validate_batch_evidence(
+            WORKFLOW,
+            batch,
+            execution,
+            self.limits.evidence(),
+            sent_probe_matches,
+        )
     }
 
     fn process(
@@ -372,7 +389,7 @@ where
         batch: &Batch,
         execution: Execution,
         deadline: &Deadline,
-    ) -> Result<ControlFlow<()>, Self::Error> {
+    ) -> Result<ControlFlow<()>, Error> {
         self.process_batch(batch, execution, deadline)?;
         Ok(ControlFlow::Continue(()))
     }
@@ -400,14 +417,16 @@ where
             stats: _,
         } = exchange;
         if permit != batch.permit {
-            return Err(Error::InvalidEvidence {
-                sequence: batch.sequence,
-                message: "executor returned evidence for a different execution permit".to_owned(),
-            });
+            return Err(Error::new(
+                WORKFLOW,
+                ErrorKind::InvalidEvidence {
+                    sequence: batch.sequence,
+                    message: "executor returned evidence for a different execution permit"
+                        .to_owned(),
+                },
+            ));
         }
-        for diagnostic in batch_diagnostics {
-            self.record_diagnostic(diagnostic, deadline)?;
-        }
+        self.record_diagnostics(batch_diagnostics, deadline)?;
         enforce_deadline(deadline)?;
         let mut response_selector = ResponseSelector::new(&mut responses);
         for (request_index, (probe, sent)) in batch.probes.iter().zip(sent.iter()).enumerate() {
@@ -475,15 +494,11 @@ where
                 },
             ));
         };
-        let response = retain_evidence(
-            &mut self.state.evidence_budget,
+        let response = self.state.retain_response(
             &candidate.decoded.frame,
-            EVIDENCE_DIAGNOSTICS,
-            self.limits.max_evidence_frames,
-            self.limits.max_evidence_bytes,
-            &mut self.state.diagnostics,
-        )
-        .then(|| candidate.decoded.frame.clone());
+            self.limits.evidence(),
+            WORKFLOW.evidence_diagnostics(),
+        );
         Ok(Self::probe_evidence(
             probe,
             ProbeOutcome {
@@ -518,31 +533,30 @@ where
     }
 
     fn retain_undecoded(&mut self, frames: Vec<Frame>, deadline: &Deadline) -> Result<(), Error> {
-        let mut retention = UndecodedRetention::new(
-            &mut self.state.retained_undecoded,
-            self.limits.max_undecoded,
-            &mut self.state.evidence_budget,
-            EVIDENCE_DIAGNOSTICS,
-            self.limits.max_evidence_frames,
-            self.limits.max_evidence_bytes,
-            &mut self.state.diagnostics,
-        );
-        retention.retain(
+        self.state.retain_undecoded(
             frames,
-            |frame| Event::Undecoded { frame },
-            Event::Diagnostic,
-            |event| (self.emit)(event, deadline),
+            self.limits.evidence(),
+            WORKFLOW.evidence_diagnostics(),
+            |retained| {
+                let event = match retained {
+                    Retained::Frame(frame) => Event::Undecoded { frame },
+                    Retained::Diagnostic(diagnostic) => Event::Diagnostic(diagnostic),
+                };
+                (self.emit)(event, deadline)
+            },
             || enforce_deadline(deadline),
         )
     }
 
-    fn record_diagnostic(
+    fn record_diagnostics(
         &mut self,
-        diagnostic: Diagnostic,
+        diagnostics: Vec<Diagnostic>,
         deadline: &Deadline,
     ) -> Result<(), Error> {
-        self.state.diagnostics.push_once(diagnostic);
-        self.publish_new_diagnostics(deadline)
+        let Self { state, emit, .. } = self;
+        state.record_diagnostics(diagnostics, |diagnostic| {
+            emit(Event::Diagnostic(diagnostic), deadline)
+        })
     }
 
     fn publish_new_diagnostics(&mut self, deadline: &Deadline) -> Result<(), Error> {
@@ -558,5 +572,5 @@ fn enforce_deadline(deadline: &Deadline) -> Result<(), Error> {
 }
 
 fn scan_duration_error(actual: Duration, limit: Duration) -> Error {
-    Error::DurationLimit { actual, limit }
+    Error::new(WORKFLOW, ErrorKind::DurationLimit { actual, limit })
 }

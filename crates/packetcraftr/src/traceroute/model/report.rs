@@ -13,22 +13,7 @@ use crate::Stats;
 
 use super::request::Strategy;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ProbeStatus {
-    Response,
-    Timeout,
-}
-
-impl ProbeStatus {
-    /// The name the CLI prints, identical to the serialized one.
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Response => "response",
-            Self::Timeout => "timeout",
-        }
-    }
-}
+pub use crate::probe::ProbeStatus;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]

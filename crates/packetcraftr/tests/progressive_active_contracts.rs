@@ -22,6 +22,7 @@ use packetcraftr::netio::link::{Capability, Mode};
 use packetcraftr::netio::neighbor;
 use packetcraftr::netio::route::{Decision, Provider, Scope, SelectionReason};
 use packetcraftr::netio::transmit;
+use packetcraftr::probe::ErrorKind;
 use packetcraftr::progress::Runtime;
 use packetcraftr::target::Target;
 use packetcraftr::{BoundaryError, Client, ExchangeExecutor, clock, dns, policy, scan, traceroute};
@@ -550,7 +551,7 @@ fn scan_sink_failure_stops_after_capture_shutdown() {
     )
     .expect_err("sink failure must abort the second scan batch");
 
-    assert!(matches!(error, scan::Error::Output { .. }), "{error:?}");
+    assert!(matches!(error.kind, ErrorKind::Output { .. }), "{error:?}");
     assert_one_clean_exchange(&harness.state);
 }
 
@@ -590,7 +591,10 @@ fn later_capture_shutdown_failure_preserves_the_earlier_scan_event() {
     )
     .expect_err("the second capture shutdown must fail");
 
-    assert!(matches!(error, scan::Error::Execution { sequence: 1, .. }));
+    assert!(matches!(
+        error.kind,
+        ErrorKind::Execution { sequence: 1, .. }
+    ));
     assert_eq!(events.lock().unwrap().len(), 1);
     assert_eq!(
         *harness.state.events.lock().unwrap(),
@@ -629,10 +633,7 @@ fn traceroute_sink_failure_stops_after_capture_shutdown() {
     )
     .expect_err("sink failure must abort the second hop");
 
-    assert!(
-        matches!(error, traceroute::Error::Output { .. }),
-        "{error:?}"
-    );
+    assert!(matches!(error.kind, ErrorKind::Output { .. }), "{error:?}");
     assert_one_clean_exchange(&harness.state);
 }
 

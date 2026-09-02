@@ -1,11 +1,17 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Private wire correlation shared by probe-based workflows.
+//! The lifecycle, vocabulary, and wire correlation shared by probe workflows.
 
 pub(crate) mod client_executor;
+mod error;
 pub(crate) mod evidence;
+mod model;
 pub(crate) mod runner;
+
+pub use error::{Error, ErrorKind, Workflow};
+pub use model::{ProbeEndpoint, ProbeStatus, Transport};
+pub use runner::{Batch, Execution, Executor};
 
 use std::net::IpAddr;
 
@@ -61,13 +67,6 @@ pub fn ephemeral_source_port(base: u16, offset: u64) -> u16 {
         .checked_rem(width)
         .unwrap_or(0);
     range_start.saturating_add(rotated) as u16
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Transport {
-    Tcp,
-    Udp,
-    Icmp,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

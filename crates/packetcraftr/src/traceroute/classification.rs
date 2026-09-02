@@ -26,7 +26,7 @@ pub fn classify_response(
     request: &Packet,
     response: &DecodedPacket,
 ) -> Option<ResponseClassification> {
-    let observation = probe::observe(registry, strategy.probe_transport(), request, response)?;
+    let observation = probe::observe(registry, strategy, request, response)?;
     let destination = packet_destination(request, strategy)?;
     let kind = match observation.correlation {
         Correlation::TimeExceeded => ResponseKind::Intermediate,

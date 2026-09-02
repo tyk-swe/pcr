@@ -38,9 +38,9 @@ where
         }
         if batch.probes.iter().any(|probe| {
             probe.address != first.address
-                || probe.target.strategy() != first.target.strategy()
+                || probe.target.transport() != first.target.transport()
                 || probe.hop_limit != first.hop_limit
-                || (probe.target.strategy() == Strategy::Tcp && probe.target != first.target)
+                || (probe.target.transport() == Strategy::Tcp && probe.target != first.target)
         }) {
             return Err(EXECUTOR_FAULT.invalid(
                 "traceroute batches must share address, strategy, hop limit, and TCP destination port",
@@ -54,7 +54,7 @@ where
             )));
         }
 
-        let varying_field = match first.target.strategy() {
+        let varying_field = match first.target.transport() {
             Strategy::Udp => "destination_port",
             Strategy::Tcp => "sequence",
             Strategy::Icmp => "body",
@@ -73,7 +73,7 @@ where
                         .ok_or_else(|| {
                             EXECUTOR_FAULT.invalid(format!(
                                 "{} probe has no {varying_field} correlation field",
-                                probe.target.strategy()
+                                probe.target.transport()
                             ))
                         })
                 })
@@ -88,7 +88,7 @@ where
                 batch.probes.get(request_index).is_some_and(|probe| {
                     classify_response(
                         self.client.registry(),
-                        probe.target.strategy(),
+                        probe.target.transport(),
                         sent,
                         response,
                     )

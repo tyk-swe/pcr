@@ -4,41 +4,7 @@ use std::net::IpAddr;
 
 use packetcraftr_core::Packet;
 
-use super::request::Strategy;
-
-/// The transport-specific destination one traceroute probe addresses.
-///
-/// Pairing each strategy with exactly the addressing it needs makes a portless
-/// UDP or TCP probe — and a ported ICMP probe — unrepresentable, so
-/// [`Probe::packet`] never has to unwrap a port that a different module
-/// validated.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ProbeTarget {
-    Udp { port: u16 },
-    Tcp { port: u16 },
-    Icmp,
-}
-
-impl ProbeTarget {
-    /// The strategy this target traces with, as the request names it.
-    #[must_use]
-    pub const fn strategy(self) -> Strategy {
-        match self {
-            Self::Udp { .. } => Strategy::Udp,
-            Self::Tcp { .. } => Strategy::Tcp,
-            Self::Icmp => Strategy::Icmp,
-        }
-    }
-
-    /// The destination port, absent for the portless ICMP target.
-    #[must_use]
-    pub const fn port(self) -> Option<u16> {
-        match self {
-            Self::Udp { port } | Self::Tcp { port } => Some(port),
-            Self::Icmp => None,
-        }
-    }
-}
+pub use crate::probe::ProbeEndpoint as ProbeTarget;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Probe {
@@ -58,5 +24,11 @@ impl Probe {
     }
 }
 
-pub type Batch = crate::probe::runner::Batch<Probe>;
-pub use crate::probe::runner::{Execution, Executor};
+impl crate::probe::runner::Sequenced for Probe {
+    fn sequence(&self) -> u64 {
+        self.sequence
+    }
+}
+
+pub type Batch = crate::probe::Batch<Probe>;
+pub use crate::probe::{Execution, Executor};

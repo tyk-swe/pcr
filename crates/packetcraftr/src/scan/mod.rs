@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use crate::probe::evidence::EvidenceDiagnosticDescriptor;
+use crate::probe::Workflow;
 
 pub const DEFAULT_BATCH_SIZE: usize = 64;
 pub const DEFAULT_MAX_PORTS: usize = 1_024;
@@ -22,23 +22,20 @@ pub const MAX_DURATION: Duration = packetcraftr_netio::capture::MAX_TIMEOUT;
 // effect, even though individual batches are delegated to Client::exchange.
 const IPV4_PROBE_BYTES: u64 = 14 + 20 + 20;
 const IPV6_PROBE_BYTES: u64 = 14 + 40 + 20;
-const EVIDENCE_DIAGNOSTICS: EvidenceDiagnosticDescriptor =
-    EvidenceDiagnosticDescriptor::new("scan.evidence_limit", "scan.undecoded_limit", "scan");
+const WORKFLOW: Workflow = Workflow::Scan;
 
 mod classification;
 mod client_executor;
 mod engine;
-mod error;
-mod evidence;
 mod model;
 mod plan;
 mod probe;
 #[cfg(test)]
 mod tests;
 
+pub use crate::probe::Error;
 pub use classification::{ResponseClassification, classify_response};
 pub use engine::{run, run_with_events};
-pub use error::Error;
 pub use model::{
     Batch, Classification, Endpoint, Event, Execution, Executor, Limits, PortSpec, Probe,
     ProbeEndpoint, ProbeEvidence, ProbeStatus, Report, Request, Summary, Transport, select_ports,

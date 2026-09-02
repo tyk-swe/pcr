@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, UNIX_EPOCH};
 
+use crate::probe::ErrorKind;
 use crate::progress::Runtime;
 use bytes::Bytes;
 use packetcraftr_core::error::{Classification as ErrorClassification, Kind};
@@ -23,7 +24,6 @@ use packetcraftr_core::{
 
 use super::classification::classify_response;
 use super::engine::{run, run_with_events};
-use super::error::Error;
 use super::model::{
     Batch, Classification, Event, Execution, Executor, Limits, PortSpec, Probe, ProbeStatus,
     Request, Transport, select_ports,
@@ -430,8 +430,8 @@ fn scan_invalid_sent_evidence_reports_the_exact_probe_sequence() {
     .unwrap_err();
 
     assert!(matches!(
-        error,
-        Error::InvalidEvidence { sequence: 1, message }
+        error.kind,
+        ErrorKind::InvalidEvidence { sequence: 1, message }
             if message == "sent packet does not preserve the scan destination and probe identity"
     ));
 }
@@ -471,7 +471,10 @@ fn scan_events_precede_later_work_and_survive_a_later_failure() {
     )
     .expect_err("the second batch must fail");
 
-    assert!(matches!(error, Error::Execution { sequence: 1, .. }));
+    assert!(matches!(
+        error.kind,
+        ErrorKind::Execution { sequence: 1, .. }
+    ));
     let events = events.lock().unwrap();
     assert_eq!(events.len(), 1);
     assert!(matches!(
@@ -516,7 +519,7 @@ fn scan_sink_failure_stops_batches_after_cleaning_up_the_current_session() {
     )
     .expect_err("the progressive sink must fail");
 
-    assert!(matches!(&error, Error::Output { .. }));
+    assert!(matches!(&error.kind, ErrorKind::Output { .. }));
     assert_eq!(
         packetcraftr_core::error::Classified::classification(&error).code,
         "io.test_output"
@@ -600,8 +603,8 @@ fn port_selection_stops_at_the_first_distinct_port_over_the_limit() {
     )
     .expect_err("a third distinct port exceeds the bound");
 
-    match error {
-        Error::InvalidLimit {
+    match error.kind {
+        ErrorKind::InvalidLimit {
             field,
             value,
             reason,
@@ -630,5 +633,8 @@ fn a_validated_request_selects_its_declared_ports_once_each() {
     let error = request
         .selected_ports()
         .expect_err("two distinct ports exceed max_ports=1");
-    assert!(matches!(error, Error::InvalidLimit { field: "ports", .. }));
+    assert!(matches!(
+        error.kind,
+        ErrorKind::InvalidLimit { field: "ports", .. }
+    ));
 }

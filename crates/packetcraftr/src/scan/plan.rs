@@ -6,8 +6,9 @@
 use std::net::IpAddr;
 use std::time::Duration;
 
-use super::error::Error;
+use super::WORKFLOW;
 use super::model::{Batch, Probe, ProbeEndpoint, Request};
+use crate::probe::{Error, ErrorKind};
 
 pub(super) fn build_batches(
     request: &Request,
@@ -30,11 +31,14 @@ pub(super) fn build_batches(
                             endpoint: *endpoint,
                             attempt,
                         };
-                        sequence = sequence.checked_add(1).ok_or(Error::InvalidLimit {
-                            field: "probes",
-                            value: u64::MAX,
-                            reason: "probe sequence overflowed".to_owned(),
-                        })?;
+                        sequence = sequence.checked_add(1).ok_or(Error::new(
+                            WORKFLOW,
+                            ErrorKind::InvalidLimit {
+                                field: "probes",
+                                value: u64::MAX,
+                                reason: "probe sequence overflowed".to_owned(),
+                            },
+                        ))?;
                         Ok(probe)
                     })
                     .collect::<Result<Vec<_>, Error>>()?;
@@ -60,22 +64,32 @@ pub(super) fn worst_case_duration(
     let batch_count = address_count
         .checked_mul(usize::try_from(request.attempts).unwrap_or(usize::MAX))
         .and_then(|count| count.checked_mul(batches_per_attempt))
-        .ok_or(Error::DurationLimit {
-            actual: Duration::MAX,
-            limit: request.limits.max_duration,
-        })?;
-    let batch_count_u32 = u32::try_from(batch_count).map_err(|_| Error::DurationLimit {
-        actual: Duration::MAX,
-        limit: request.limits.max_duration,
-    })?;
-    let exchange_time =
-        request
-            .timeout
-            .checked_mul(batch_count_u32)
-            .ok_or(Error::DurationLimit {
+        .ok_or(Error::new(
+            WORKFLOW,
+            ErrorKind::DurationLimit {
                 actual: Duration::MAX,
                 limit: request.limits.max_duration,
-            })?;
+            },
+        ))?;
+    let batch_count_u32 = u32::try_from(batch_count).map_err(|_| {
+        Error::new(
+            WORKFLOW,
+            ErrorKind::DurationLimit {
+                actual: Duration::MAX,
+                limit: request.limits.max_duration,
+            },
+        )
+    })?;
+    let exchange_time = request
+        .timeout
+        .checked_mul(batch_count_u32)
+        .ok_or(Error::new(
+            WORKFLOW,
+            ErrorKind::DurationLimit {
+                actual: Duration::MAX,
+                limit: request.limits.max_duration,
+            },
+        ))?;
     #[expect(
         clippy::arithmetic_side_effects,
         reason = "checked_batch_size returned a non-zero divisor"
@@ -103,36 +117,46 @@ pub(super) fn worst_case_duration(
             };
             total
                 .checked_add(rate_delay(probes, request.probes_per_second)?)
-                .ok_or(Error::DurationLimit {
-                    actual: Duration::MAX,
-                    limit: request.limits.max_duration,
-                })
+                .ok_or(Error::new(
+                    WORKFLOW,
+                    ErrorKind::DurationLimit {
+                        actual: Duration::MAX,
+                        limit: request.limits.max_duration,
+                    },
+                ))
         })?;
-    exchange_time
-        .checked_add(delay)
-        .ok_or(Error::DurationLimit {
+    exchange_time.checked_add(delay).ok_or(Error::new(
+        WORKFLOW,
+        ErrorKind::DurationLimit {
             actual: Duration::MAX,
             limit: request.limits.max_duration,
-        })
+        },
+    ))
 }
 
 fn checked_batch_size(request: &Request) -> Result<usize, Error> {
     if request.limits.batch_size == 0 {
-        return Err(Error::InvalidLimit {
-            field: "batch_size",
-            value: 0,
-            reason: "must be non-zero".to_owned(),
-        });
+        return Err(Error::new(
+            WORKFLOW,
+            ErrorKind::InvalidLimit {
+                field: "batch_size",
+                value: 0,
+                reason: "must be non-zero".to_owned(),
+            },
+        ));
     }
     Ok(request.limits.batch_size)
 }
 
 fn rate_delay(probes: usize, rate: Option<u32>) -> Result<Duration, Error> {
-    crate::clock::rate_delay(probes, rate).ok_or(Error::InvalidLimit {
-        field: "probes_per_second",
-        value: u64::from(rate.unwrap_or_default()),
-        reason: "rate-delay arithmetic overflowed".to_owned(),
-    })
+    crate::clock::rate_delay(probes, rate).ok_or(Error::new(
+        WORKFLOW,
+        ErrorKind::InvalidLimit {
+            field: "probes_per_second",
+            value: u64::from(rate.unwrap_or_default()),
+            reason: "rate-delay arithmetic overflowed".to_owned(),
+        },
+    ))
 }
 
 #[cfg(test)]
@@ -159,17 +183,23 @@ mod tests {
         };
         assert!(matches!(
             build_batches(&request, &[address], &[ProbeEndpoint::Tcp { port: 80 }]),
-            Err(Error::InvalidLimit {
-                field: "batch_size",
-                value: 0,
+            Err(Error {
+                kind: ErrorKind::InvalidLimit {
+                    field: "batch_size",
+                    value: 0,
+                    ..
+                },
                 ..
             })
         ));
         assert!(matches!(
             worst_case_duration(&request, 1, 1),
-            Err(Error::InvalidLimit {
-                field: "batch_size",
-                value: 0,
+            Err(Error {
+                kind: ErrorKind::InvalidLimit {
+                    field: "batch_size",
+                    value: 0,
+                    ..
+                },
                 ..
             })
         ));

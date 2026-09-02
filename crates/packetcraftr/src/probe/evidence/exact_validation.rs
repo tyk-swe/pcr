@@ -6,7 +6,10 @@
 use std::time::Duration;
 
 use crate::SentPacket;
-use crate::probe::runner::{Batch, Execution};
+use crate::probe::runner::{Batch, Execution, Sequenced};
+use crate::probe::{Error, ErrorKind, Workflow};
+
+use super::EvidenceLimits;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::{Packet, decode::DecodedPacket};
 use packetcraftr_netio::capture::Statistics;
@@ -266,4 +269,40 @@ where
         return Err(ExchangeEvidenceError::IncompleteStatistics);
     }
     Ok(())
+}
+
+/// Validates one batch's executor evidence under the workflow's limits and
+/// reports any inconsistency at the sequence of the probe it concerns.
+pub(crate) fn validate_batch_evidence<P: Sequenced>(
+    workflow: Workflow,
+    batch: &Batch<P>,
+    execution: &Execution,
+    limits: EvidenceLimits,
+    sent_packet_matches: impl FnMut(&P, &Packet) -> bool,
+) -> Result<(), Error> {
+    validate_batch_exchange_evidence(
+        batch,
+        execution,
+        limits.max_frames,
+        limits.max_bytes,
+        sent_packet_matches,
+    )
+    .map_err(|error| {
+        let sequence = error
+            .request_index()
+            .and_then(|index| batch.probes.get(index))
+            .or_else(|| batch.probes.first())
+            .map_or(0, Sequenced::sequence);
+        Error::new(
+            workflow,
+            ErrorKind::InvalidEvidence {
+                sequence,
+                message: format_exchange_evidence_error(
+                    error,
+                    workflow.batch_noun(),
+                    workflow.as_str(),
+                ),
+            },
+        )
+    })
 }

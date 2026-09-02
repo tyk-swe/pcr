@@ -55,37 +55,33 @@ impl SystemTransmitter {
             LinkMode::Layer3 => Some(replay_network_envelope(frame)?),
             LinkMode::Layer2 | LinkMode::Auto => None,
         };
-        if self
+        let cached = self
             .validated_interface
-            .as_ref()
-            .is_some_and(|selected| !requested_interface_matches(&selected.id, requested))
-        {
-            self.validated_interface = None;
-        }
-        if self.validated_interface.is_none() {
-            let interfaces = SystemInterfaceProvider.interfaces()?;
-            let selected = interfaces
-                .into_iter()
-                .find(|interface| requested_interface_matches(&interface.id, requested))
-                .ok_or_else(|| LiveIoError::Device {
-                    interface: requested.name.clone(),
-                    message: "no interface matches the requested name or index".to_owned(),
-                    source: None,
-                })?;
-            if !selected.flags.up {
-                return Err(LiveIoError::Device {
-                    interface: selected.id.name,
-                    message: "selected interface is not up".to_owned(),
-                    source: None,
-                });
+            .take()
+            .filter(|selected| requested_interface_matches(&selected.id, requested));
+        let selected = match cached {
+            Some(selected) => selected,
+            None => {
+                let interfaces = SystemInterfaceProvider.interfaces()?;
+                let selected = interfaces
+                    .into_iter()
+                    .find(|interface| requested_interface_matches(&interface.id, requested))
+                    .ok_or_else(|| LiveIoError::Device {
+                        interface: requested.name.clone(),
+                        message: "no interface matches the requested name or index".to_owned(),
+                        source: None,
+                    })?;
+                if !selected.flags.up {
+                    return Err(LiveIoError::Device {
+                        interface: selected.id.name,
+                        message: "selected interface is not up".to_owned(),
+                        source: None,
+                    });
+                }
+                selected
             }
-            self.validated_interface = Some(selected);
-        }
-        let selected = self
-            .validated_interface
-            .as_ref()
-            .expect("validated above")
-            .clone();
+        };
+        self.validated_interface = Some(selected.clone());
         if !selected.capability.supports(mode) {
             return Err(LiveIoError::Unsupported {
                 message: format!(

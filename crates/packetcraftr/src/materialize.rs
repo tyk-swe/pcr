@@ -225,7 +225,6 @@ pub(super) fn materialize_network_fields(
     Ok(())
 }
 
-// ponytail: callers rebuild after link changes; restore byte patching only if profiles show the
 // rebuild dominates.
 pub(super) fn materialize_link_fields(
     packet: &mut Packet,
@@ -239,9 +238,9 @@ pub(super) fn materialize_link_fields(
     else {
         return Ok(false);
     };
-    let layer = packet
-        .layer_mut(index)
-        .expect("position returned an existing layer");
+    let Some(layer) = packet.layer_mut(index) else {
+        return Ok(false);
+    };
     let mut changed = false;
     if matches!(
         layer.field("source"),

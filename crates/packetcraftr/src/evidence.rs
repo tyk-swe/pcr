@@ -18,16 +18,11 @@ use packetcraftr_netio::{
 pub(crate) struct ExecutionPermit(u64);
 
 impl ExecutionPermit {
+    /// Issues a process-unique permit. The 64-bit counter cannot wrap within
+    /// the lifetime of a process, so no overflow branch exists.
     pub(crate) fn new() -> Self {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-        Self(
-            NEXT.fetch_update(
-                std::sync::atomic::Ordering::Relaxed,
-                std::sync::atomic::Ordering::Relaxed,
-                |current| current.checked_add(1),
-            )
-            .expect("live execution permit space exhausted"),
-        )
+        Self(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
     }
 }
 

@@ -65,9 +65,3 @@ pub use packetcraftr_netio as netio;
 pub use probe::client_executor::ExchangeExecutor;
 pub use probe::{EPHEMERAL_SOURCE_PORT_BASE, ephemeral_source_port};
 pub use stats::Stats;
-
-fn live_timestamp(frame: &packetcraftr_core::frame::Frame) -> std::time::SystemTime {
-    frame
-        .timestamp
-        .expect("live capture and transmission adapters always timestamp evidence frames")
-}

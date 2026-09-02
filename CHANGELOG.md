@@ -92,6 +92,7 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- The workflow crate no longer panics on internal invariants: live response timestamps come straight from the validated capture frame, execution permits use a monotonic counter, and the replay, exchange, fuzz, and materialization paths report impossible states as errors instead of aborting.
 - **BREAKING:** `packetcraftr_netio::Error::Encapsulation`, which nothing raised, is removed. Native interface snapshot validation reports `route::SystemError::InvalidResponse` instead of a bare string; the published interface-discovery message is unchanged.
 - **BREAKING:** `packetcraftr_core::error::Classified` now requires `std::error::Error` and derives `causes` from the retained source chain by default; only dual-failure and snapshot types override it. `fuzz::TargetParseError` is an enum naming the rejected part of a `LAYER.FIELD` target, and `document::Error::Field` reports a required-field failure without wrapping it in `codec::Error`. `analysis::Error`, `fuzz::Error`, and `progress::EmitError` convert from `budget::DeadlineExceeded`. The registry, builder, fuzz preparation, and follow engines no longer contain reachable panics.
 - **BREAKING:** link-layer identity types now live in core as `packetcraftr_core::packet::link::{MacAddress, VlanKind, VlanTag}`; `packetcraftr_netio::link` re-exports them, and `packet::semantics::vlan_tags` returns `Vec<VlanTag>` directly (the `VlanMetadata` wrapper and `vlan_metadata` are gone).

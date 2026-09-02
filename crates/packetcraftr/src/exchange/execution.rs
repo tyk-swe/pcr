@@ -110,12 +110,12 @@ where
         &self,
         prepared: Prepared,
     ) -> Result<Transaction<<I as CaptureProvider>::Capture>, Error> {
-        let first_route = &prepared
-            .packets
-            .first()
-            .expect("non-empty prepared exchange")
-            .route
-            .plan;
+        let Some(first_packet) = prepared.packets.first() else {
+            return Err(Error::Template {
+                message: "template expanded to no packets".to_owned(),
+            });
+        };
+        let first_route = &first_packet.route.plan;
         ensure_preparation_deadline(prepared.deadline)?;
         let capture = self.io.arm_capture(&CaptureRequest {
             interface: first_route.decision.interface.clone(),

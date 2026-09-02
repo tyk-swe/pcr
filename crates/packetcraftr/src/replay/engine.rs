@@ -287,10 +287,15 @@ fn plan_frame(
     deadline
         .check_additional(delay)
         .map_err(|error| duration_limit(source_index, error))?;
-    let next_completed = progress
-        .frames_transmitted
-        .checked_add(1)
-        .expect("completed frames cannot exceed validated attempted frames");
+    let next_completed =
+        progress
+            .frames_transmitted
+            .checked_add(1)
+            .ok_or(Error::SourceFrameLimit {
+                source_index,
+                actual: u64::MAX,
+                limit: limits.max_source_frames,
+            })?;
     Ok(FramePlan {
         mode,
         delay,

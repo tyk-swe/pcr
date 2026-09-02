@@ -484,7 +484,7 @@ where
             response_kind: Some(candidate.observation.kind),
             responder: Some(candidate.observation.responder),
             sent_at,
-            received_at: Some(crate::live_timestamp(&candidate.decoded.frame)),
+            received_at: candidate.decoded.frame.timestamp,
             latency: Some(candidate.latency),
             response,
             reason: candidate.observation.reason.to_owned(),

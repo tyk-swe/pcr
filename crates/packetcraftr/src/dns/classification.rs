@@ -244,7 +244,6 @@ pub(super) fn candidate_evidence(
     budget: &mut Budget,
     diagnostics: &mut DiagnosticLog,
 ) -> ClassifiedAttempt {
-    let received_at = crate::live_timestamp(&candidate.decoded.frame);
     let response_frame = retain_evidence(
         budget,
         &candidate.decoded.frame,
@@ -280,7 +279,7 @@ pub(super) fn candidate_evidence(
             source_port: Some(probe.source_port),
             status,
             sent_at: Some(sent_at),
-            received_at: Some(received_at),
+            received_at: candidate.decoded.frame.timestamp,
             latency: Some(candidate.latency),
             response: response_frame,
             response_code,

@@ -39,7 +39,7 @@ where
             )
             .map_err(BoundaryError::from_error)?;
         let crate::exchange::Report {
-            mut sent,
+            sent,
             responses,
             unanswered: _,
             unsolicited,
@@ -47,14 +47,15 @@ where
             diagnostics,
             stats,
         } = exchange;
-        if sent.len() != 1 {
-            return Err(EXECUTOR_FAULT.internal(format!(
-                "expected one sent receipt, received {}",
-                sent.len()
-            )));
-        }
-        let sent =
-            crate::exchange::into_sent_packet(sent.pop().expect("validated one sent fuzz packet"));
+        let sent = match <[_; 1]>::try_from(sent) {
+            Ok([sent]) => crate::exchange::into_sent_packet(sent),
+            Err(sent) => {
+                return Err(EXECUTOR_FAULT.internal(format!(
+                    "expected one sent receipt, received {}",
+                    sent.len()
+                )));
+            }
+        };
         Ok(Execution {
             permit: case.permit,
             sent,

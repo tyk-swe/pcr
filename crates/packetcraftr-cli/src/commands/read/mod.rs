@@ -32,9 +32,6 @@ use rendering::render_record;
 
 /// The decoding one `read` invocation needs, built only when `--filter` or
 /// `--dissect` asks for it.
-///
-/// `publish_layers` lives here rather than beside it so "dissect with nothing
-/// to dissect with" is not a state a caller can hold.
 struct Decoding {
     decoder: core::decode::Dissector,
     filter: Option<core::filter::Filter>,
@@ -63,9 +60,8 @@ pub(super) fn run(
     } = arguments;
     let format = CaptureFormat::narrow(output::contract::Command::Read, format)?;
     validate_capture_stream_limits(limits)?;
-    // Both rejections precede filter compilation, so a request that rewrites
-    // a capture is answered with the incompatibility rather than with a
-    // syntax error from a filter it would have refused anyway.
+    // Both rejections precede filter compilation, so an incompatible request
+    // is answered with the incompatibility, not a filter syntax error.
     validate_dissect_format(dissect, format)?;
     let rewrite_format = match format {
         CaptureFormat::Pcap => Some(capture::Format::Pcap),

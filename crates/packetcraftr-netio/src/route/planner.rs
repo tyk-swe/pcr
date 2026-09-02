@@ -61,8 +61,7 @@ pub fn plan<P: Provider>(
 /// Packet-derived route inputs that are safe to pass to a route provider.
 ///
 /// Constructing this value performs every validation that must precede
-/// provider I/O. Keeping that boundary explicit prevents later planner changes
-/// from accidentally consulting the operating system for an invalid packet.
+/// provider I/O, so an invalid packet never reaches the operating system.
 struct PacketIntent {
     has_link_layer: bool,
     has_ip: bool,

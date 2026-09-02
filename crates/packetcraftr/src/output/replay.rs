@@ -15,8 +15,7 @@ use super::frame::Captured;
 pub use crate::replay::Timing;
 pub use packetcraftr_core::analysis::pcap::Format as SourceFormat;
 // The schema resolves both replay interface fields to `$defs.interfaceId` and
-// both link-mode fields to `$defs.linkMode`, so replay names the shared
-// network types rather than declaring twins of them.
+// both link-mode fields to `$defs.linkMode`.
 pub use super::network::{InterfaceId, LinkMode};
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -66,11 +65,9 @@ pub struct Frame {
     pub scheduled_delay: Duration,
     pub bytes_sent: u64,
     pub frame: Captured,
-    /// Always `true`: `replay` only publishes a frame record after the frame
-    /// has been transmitted, and a frame the selector skipped produces no
-    /// record at all. The field is `required` in the frozen v1 schema, so it
-    /// stays until a contract revision either removes it or gives it a second
-    /// producer.
+    /// Always `true`: `replay` publishes a frame record only after the frame has
+    /// been transmitted, and a frame the selector skipped produces no record.
+    /// The field is `required` in the frozen v1 schema.
     pub transmitted: bool,
 }
 

@@ -16,13 +16,10 @@ use super::error::Error;
 /// Republishes a route adapter refusal as the live-I/O failure replay
 /// transmission reports.
 ///
-/// Both arms retain the adapter's own refusal as the `#[source]` rather than
-/// formatting it into `message`, so the route diagnostic — which destination
-/// had no route, which interface was missing, what the operating system
-/// reported — survives to the render boundary in `causes()` instead of being
-/// lost with the consumed [`SystemError`].
-///
-/// [`SystemError`]: packetcraftr_netio::route::SystemError
+/// Both arms retain the adapter's own refusal as the `#[source]`, so the route
+/// diagnostic — which destination had no route, which interface was missing,
+/// what the operating system reported — survives to `causes()` at the render
+/// boundary.
 pub(super) fn map_replay_route_error(
     source: packetcraftr_netio::route::SystemError,
 ) -> LiveIoError {

@@ -175,7 +175,7 @@ pub fn decompress(
                 }
                 let length = usize::from(length);
                 // Unreachable while the `0xc0` mask arm above owns every length
-                // above 63, and kept so the bound survives a change to it.
+                // above 63.
                 if length > MAX_LABEL_LEN {
                     return Err(Error::LabelTooLong {
                         offset: length_offset,

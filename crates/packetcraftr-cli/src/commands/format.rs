@@ -56,8 +56,7 @@ macro_rules! narrowed_format {
     (@wide $name:ident { $($variant:ident),+ }) => {
         impl $name {
             /// The wide format, for naming the requested `--output` choice in
-            /// a message. A renderer that writes capture bytes takes
-            /// `analysis::pcap::Format` from its own match arm instead.
+            /// a message.
             pub(crate) const fn format(self) -> output::contract::Format {
                 match self {
                     $(Self::$variant => output::contract::Format::$variant),+

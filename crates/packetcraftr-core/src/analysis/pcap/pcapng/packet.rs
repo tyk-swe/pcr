@@ -16,10 +16,6 @@ use crate::analysis::pcap::wire::{
 };
 
 /// One parsed packet block.
-///
-/// The single pass over the block header already reads the interface ID and
-/// locates the trailing options, so both travel out with the frame instead
-/// of being decoded a second time from the raw block type.
 pub(in crate::analysis::pcap) struct ParsedPacket<'a> {
     pub(in crate::analysis::pcap) frame: Frame,
     pub(in crate::analysis::pcap) interface_id: u32,

@@ -165,9 +165,8 @@ pub(crate) fn parse_target(target: String) -> Result<packetcraftr::target::Targe
 
 /// The two bounds a capture reader is opened under.
 ///
-/// Named so a caller cannot hand the reader a budget it does not read: the
-/// aggregate frame and byte ceilings are charged per frame while streaming,
-/// not while opening.
+/// The aggregate frame and byte ceilings are charged per frame while
+/// streaming, not while opening.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ReaderBounds {
     pub(crate) max_frame_bytes: usize,

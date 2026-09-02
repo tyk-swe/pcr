@@ -26,9 +26,6 @@ pub(super) struct FramedBlock<'a> {
 
 /// Which packet-block layout a block type names, or [`None`] for the
 /// metadata blocks.
-///
-/// Deciding this once is what lets the rest of the decoder read the block by
-/// its kind instead of re-testing the raw type at every field it needs.
 pub(super) const fn packet_block_kind(block_type: u32) -> Option<PacketBlockKind> {
     match block_type {
         PCAPNG_ENHANCED_PACKET_BLOCK => Some(PacketBlockKind::Enhanced),

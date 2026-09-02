@@ -24,11 +24,9 @@ const REAPER_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 /// The worker budget and handle cleanup that one set of [`Sink`]s shares.
 ///
-/// A runtime owns its budget instead of borrowing a process-wide one, so a
-/// caller that composes a fresh runtime always starts from a full budget and
-/// working cleanup. That matters because cleanup failure disables admission:
-/// scoping it here keeps the failure to the operations that share this
-/// runtime rather than to every later operation in the process.
+/// Cleanup failure disables admission, so each runtime owns its own budget and
+/// the failure stays with the operations that share this runtime rather than
+/// every later operation in the process.
 ///
 /// The cleanup worker starts with the first admitted sink, so composing a
 /// runtime that never publishes costs no thread.

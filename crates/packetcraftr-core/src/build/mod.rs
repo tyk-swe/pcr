@@ -21,7 +21,7 @@ mod validation;
 
 /// Re-exported so a builder caller names the encoding mode, the address
 /// context, and the default ceilings without importing the codec contract or
-/// the layout module. These are the same items, not copies.
+/// the layout module.
 pub use crate::codec::{Context, Mode};
 pub use crate::layout::{DEFAULT_MAX_LAYERS, DEFAULT_MAX_PACKET_SIZE};
 pub use error::Error;

@@ -151,12 +151,12 @@ impl Classified for Error {
         }
     }
 
-    /// Walked from the retained `#[source]` chain rather than hand-written.
-    /// A transparent variant delegates, because its own `Display` is already
-    /// the inner error's message; so does the boundary-sourced variant, whose
-    /// [`BoundaryError`] carries a captured `causes` snapshot its own source
-    /// chain no longer holds. The two paired failures carry an operation and
-    /// an unrelated cleanup at once, so neither has a single chain to walk.
+    /// Walked from the retained `#[source]` chain. A transparent variant
+    /// delegates, because its own `Display` is already the inner error's
+    /// message; so does the boundary-sourced variant, whose [`BoundaryError`]
+    /// carries a captured `causes` snapshot its own source chain does not
+    /// hold. The two paired failures carry an operation and an unrelated
+    /// cleanup at once, so neither has a single chain to walk.
     ///
     /// [`BoundaryError`]: packetcraftr_core::error::BoundaryError
     fn causes(&self) -> Vec<String> {

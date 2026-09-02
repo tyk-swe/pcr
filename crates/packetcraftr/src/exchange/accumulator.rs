@@ -154,10 +154,7 @@ impl Accumulator {
     /// unsolicited/undecoded frame ceiling, then the aggregate evidence budget.
     ///
     /// Both retention paths reach the ceiling under the same condition, so both
-    /// report it with the same words. They previously published the same
-    /// `exchange.unsolicited_limit` code with two different messages, and
-    /// `push_once` deduplicates by code, so whichever path hit the limit first
-    /// decided what the operator saw.
+    /// report it with the same words; `push_once` deduplicates by code.
     fn reserve_unattributed(
         &mut self,
         identity: RecordIdentity,

@@ -92,6 +92,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- Test suites and comments follow the repository conventions: `packetcraftr-core` integration tests share fixtures under `tests/common/` and are split into files under ~600 lines named `*_contracts.rs`; the offline fuzz engine tests moved to `tests/fuzz_engine_contracts.rs`; `packetcraftr-netio/tests/error_contracts.rs` documents its per-enum tables; source comments state invariants instead of history, and `AGENTS.md` records the module layout and naming vocabulary.
+
 - **BREAKING:** `packetcraftr::Stats::checked_add_assign` reports overflow as `Err(StatsOverflow)` instead of `None`. The `output::envelope::{Aggregate, AggregateError}` aliases are gone (use `Envelope`), the NDJSON encoder and unattributed error record now live in `packetcraftr::output::stream`, and the offline fuzz statistics conversion moved next to `output::fuzz`. Private workflow modules named `contract.rs` under `policy`, `send`, and `target` are now `model.rs`.
 
 - Consolidated the workflow crate's internals: the exchange now lives in eight cohesive modules instead of fourteen, the transmission pipeline (`plan_and_authorize`, `materialize_and_authorize`) sits on `Client` next to the gates it applies, and the replay system boundary is `replay::{authorizer, transmitter}`. No public paths changed.

@@ -677,7 +677,7 @@ impl Live {
                 Verdict::Open
             }
             // The parser admits content types 20..=23 only, so nothing else
-            // reaches here; ignoring it keeps the match total either way.
+            // reaches here.
             _ => Verdict::Open,
         }
     }

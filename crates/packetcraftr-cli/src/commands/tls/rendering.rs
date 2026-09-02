@@ -13,11 +13,9 @@ use output::tls::{Client, Server, Session, Summary};
 
 /// What has been reported so far.
 ///
-/// The retention ceiling is a property of the JSON document, which has to hold
-/// every session in memory before it can be written: past `--max-tls-sessions`
-/// the document keeps the sessions it already has and says in the summary how
-/// many it left out. Text and NDJSON write each session as it completes, so
-/// neither holds anything and neither ever leaves a session out.
+/// The retention ceiling applies only to the JSON document, which holds every
+/// session in memory: past `--max-tls-sessions` it keeps what it has and reports
+/// the rest as omitted. Text and NDJSON write each session as it completes.
 pub(super) struct State {
     retained: Retained<Session>,
     selected: u64,
@@ -96,10 +94,7 @@ pub(super) fn render_stream(summary: Summary, stream: &StreamEncoder) -> Result<
 /// The single line for selectors that kept none of the sessions that were
 /// assembled.
 ///
-/// `None` when nothing was assembled at all: that is a different answer, and
-/// [`render_empty`] gives it. Telling someone whose `--sni` simply matched
-/// nothing that no session was assembled would send them looking for a
-/// capture problem that is not there.
+/// `None` when nothing was assembled at all; [`render_empty`] answers that case.
 fn unmatched_note(summary: &Summary) -> Option<String> {
     (summary.sessions > 0).then(|| {
         format!(

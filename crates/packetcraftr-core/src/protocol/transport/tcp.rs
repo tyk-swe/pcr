@@ -246,11 +246,11 @@ impl LayerCodec for TcpCodec {
             }),
             consumed: header_len,
             payload_len,
-            // Both endpoints are offered before the raw fallback, exactly as
-            // UDP does, so a payload protocol bound to a well-known TCP port
-            // dissects in either direction. Unlike UDP there is no content
-            // preference between them: a TLS segment looks the same in both
-            // directions and the codec gates on the payload itself.
+            // Both endpoints are offered before the raw fallback so a payload
+            // protocol bound to a well-known TCP port dissects in either
+            // direction. Unlike UDP there is no content preference between
+            // them: a TLS segment looks the same in both directions and the
+            // codec gates on the payload itself.
             next: if payload_len == 0 {
                 Vec::new()
             } else {

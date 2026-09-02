@@ -24,10 +24,8 @@ pub struct Batch<P> {
     pub timeout: Duration,
     pub(crate) permit: crate::evidence::ExecutionPermit,
     /// The first probe's operation-local sequence, recorded by the planner
-    /// that built the batch. It names the batch in every error the runner
-    /// reports, so the identity is fixed where the probes are numbered rather
-    /// than re-derived by indexing a vector the runner has to assume is
-    /// non-empty.
+    /// that built the batch; it names the batch in every error the runner
+    /// reports.
     pub(crate) sequence: u64,
 }
 

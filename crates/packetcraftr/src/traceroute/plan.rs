@@ -55,9 +55,8 @@ pub(super) fn build_batches(request: &Request, destination: IpAddr) -> Result<Ve
 }
 
 /// Resolves the request's strategy and declared port into the target the probe
-/// at `sequence` addresses. UDP walks one unique destination port per probe,
-/// so the guard that keeps that walk inside `u16` lives here beside the
-/// arithmetic it protects.
+/// at `sequence` addresses. UDP walks one unique destination port per probe, so
+/// the walk is guarded to stay inside `u16`.
 fn probe_target(request: &Request, sequence: u64) -> Result<ProbeTarget, Error> {
     let declared_port = || {
         request.destination_port.ok_or_else(|| {

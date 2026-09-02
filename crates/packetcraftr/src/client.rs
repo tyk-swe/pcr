@@ -67,10 +67,7 @@ where
 ///
 /// `send`, `exchange`, and `plan` never take an injected
 /// [`Authorizer`](crate::authorization::Authorizer); they apply the [`Policy`]
-/// this client owns through the two methods below. Both are named for what
-/// they authorize — the built packet's declared destinations, and the exact
-/// built bytes against the selected route — so neither can be mistaken for the
-/// same-named workflow trait method.
+/// this client owns through the two methods below.
 impl<R, N, I> Client<R, N, I> {
     /// The traffic policy this client applies to every operation it runs.
     pub fn policy(&self) -> &Policy {

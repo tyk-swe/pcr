@@ -20,7 +20,7 @@ pub use crate::dns::{Outcome, Transport};
 /// publish, present exactly when a response was accepted.
 ///
 /// Flattened at both use sites, so the emitted keys sit beside their siblings
-/// as they always have and a new header flag is declared once.
+/// and a new header flag is declared once.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ResponseSummary {
     pub response_code: u16,

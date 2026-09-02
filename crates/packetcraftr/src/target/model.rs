@@ -212,9 +212,9 @@ impl Classified for Error {
         }
     }
 
-    /// Walked from the retained `#[source]` chain rather than hand-written,
-    /// except for the transparent policy variant, whose own `Display` is
-    /// already this error's message and which therefore delegates.
+    /// Walked from the retained `#[source]` chain, except for the transparent
+    /// policy variant, whose own `Display` is already this error's message and
+    /// which therefore delegates.
     fn causes(&self) -> Vec<String> {
         match self {
             Self::Policy(error) => error.causes(),

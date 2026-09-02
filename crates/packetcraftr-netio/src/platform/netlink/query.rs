@@ -110,10 +110,8 @@ pub(super) async fn query_route(
     )
 }
 
-/// Reports the kernel's own "no route" errnos as a missing route rather than
-/// as a generic operating-system failure, so the same unreachable destination
-/// classifies as `io.route_not_found` on Linux exactly as it already does on
-/// macOS and Windows.
+/// Reports the kernel's "no route" errnos as `RouteNotFound`, so an
+/// unreachable destination classifies as `io.route_not_found` on every target.
 fn route_lookup_error(destination: IpAddr, error: rtnetlink::Error) -> SystemError {
     const NO_ROUTE: [i32; 4] = [
         libc::ENETUNREACH,

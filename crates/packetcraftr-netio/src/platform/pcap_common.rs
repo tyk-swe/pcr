@@ -86,11 +86,9 @@ pub(crate) fn is_missing_device(message: &str) -> bool {
 
 /// Recognizes the privilege refusals libpcap and Npcap phrase differently.
 ///
-/// One list keeps the classification identical on every target. libpcap
-/// reports `Permission denied` or `Operation not permitted`; Npcap reports
-/// `Access is denied` or asks to be run as an administrator. Splitting the
-/// list per backend is what made `administrator` a privilege failure on
-/// Windows and a generic capture failure on Linux for the same refusal.
+/// libpcap reports `Permission denied` or `Operation not permitted`; Npcap
+/// reports `Access is denied` or asks to be run as an administrator. One list
+/// keeps the classification identical on every target.
 pub(crate) fn is_permission_denied(message: &str) -> bool {
     const PHRASES: [&str; 4] = [
         "permission denied",

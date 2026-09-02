@@ -72,9 +72,8 @@ pub enum Error {
 impl Classified for Error {
     fn classification(&self) -> Classification {
         let (code, remediation) = match self {
-            // A malformed resolved-address bound is a caller request error,
-            // and keeps the published `cli.live_target` code and remediation
-            // it reported while it lived on the target-resolution error.
+            // A malformed resolved-address bound is a caller request error and
+            // shares the `cli.live_target` code with target resolution.
             Self::InvalidAddressLimit { .. } => (
                 "cli.live_target",
                 "use a valid IP address or bounded ASCII DNS hostname",

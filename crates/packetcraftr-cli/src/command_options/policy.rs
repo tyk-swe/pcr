@@ -48,10 +48,8 @@ pub(crate) struct SourceSpoofingArgs {
 /// What `--max-packets` and `--max-bytes` default to, and what they are called,
 /// for one kind of operation.
 ///
-/// The two flags are one pair of budgets with one meaning — the ceiling the
-/// policy enforces for this operation — but a command that replays a captured
-/// stream starts from different numbers than one that sends a single packet,
-/// and a command that only receives should not be told about transmission.
+/// Replay starts from far larger defaults than a hand-built send, and a
+/// receive-only command's help must not mention transmission.
 pub(crate) trait Budget: Clone + fmt::Debug + Default {
     fn max_packets() -> u64;
     fn max_bytes() -> u64;
@@ -109,9 +107,7 @@ impl Budget for Streamed {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Captured;
 
-/// Frames one capture may keep. It starts level with the transmitted ceiling
-/// but is its own number: receiving and sending answer to different concerns,
-/// so either ceiling can move without dragging the other with it.
+/// Frames one capture may keep; independent of the transmitted ceiling.
 pub(crate) const DEFAULT_CAPTURED_FRAMES: u64 = 10_000;
 
 impl Budget for Captured {

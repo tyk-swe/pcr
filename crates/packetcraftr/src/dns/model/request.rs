@@ -75,11 +75,10 @@ impl fmt::Display for QueryType {
 
 /// Bounds every decision the DNS message codec makes about hostile input.
 ///
-/// These are separate from the workflow's [`Limits`] on purpose: decoding one
-/// message has nothing to say about capture-queue frames or an operation
-/// deadline, so a caller of [`decode_response`](crate::dns::decode_response)
-/// is not asked for them, and the codec's own defaults never reach for a
-/// capture constant.
+/// These are separate from the workflow's [`Limits`]: decoding one message has
+/// nothing to say about capture-queue frames or an operation deadline, so a
+/// caller of [`decode_response`](crate::dns::decode_response) is not asked for
+/// them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MessageLimits {
     pub max_message_bytes: usize,

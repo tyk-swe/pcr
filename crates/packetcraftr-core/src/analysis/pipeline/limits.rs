@@ -173,9 +173,7 @@ impl Limits {
         Ok(())
     }
 
-    /// The aggregate stream bounds the capture reader already knows how to
-    /// enforce, so the analysis loop charges frames and captured bytes
-    /// through the same code the rewrite path uses.
+    /// The aggregate stream bounds the capture reader enforces.
     pub(super) fn capture(&self) -> CaptureLimits {
         CaptureLimits {
             max_frames: self.max_frames,
@@ -183,8 +181,7 @@ impl Limits {
         }
     }
 
-    /// The IP reassembler's complete budget set, with no field left to a
-    /// default the caller could not name.
+    /// The IP reassembler's complete budget set.
     pub(super) fn ip_reassembly(&self) -> IpReassemblyLimits {
         IpReassemblyLimits {
             max_datagrams: self.max_ip_datagrams,

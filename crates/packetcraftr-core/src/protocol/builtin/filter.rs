@@ -11,8 +11,7 @@
 //! Deliberately absent are the spellings that need no entry because a protocol
 //! alias already produces them: `ip.ttl`, `icmp.type`, `udp.checksum`, and
 //! their kin resolve straight through the schema. Registering those would be
-//! rejected when the registry is built, precisely so one path can never mean
-//! two things.
+//! rejected when the registry is built, so one path can never mean two things.
 
 use crate::registry::FilterFieldBinding;
 

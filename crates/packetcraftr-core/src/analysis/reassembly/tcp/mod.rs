@@ -18,8 +18,8 @@ mod pending;
 mod state;
 
 // Conservative accounting for a BTree node, key, and Bytes handle. The
-// allocator may use more, but never charging metadata allowed sparse one-byte
-// segments to bypass the aggregate resource ceiling entirely.
+// allocator may use more; without a fixed charge, sparse one-byte segments
+// bypass the aggregate resource ceiling entirely.
 const PENDING_SEGMENT_METADATA_CHARGE: usize = 64;
 // Conservative accounting for the flow-table entry, expiry-index entry, key,
 // and otherwise-empty TCP state. Without a fixed charge, opening payload-free

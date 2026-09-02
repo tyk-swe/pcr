@@ -28,10 +28,9 @@ use crate::replay::wire::{map_replay_route_error, replay_network_envelope};
 /// Production replay transmitter backed by the system interface, route, and
 /// Layer 2/Layer 3 providers.
 ///
-/// The only retained state is the selected interface, which is a genuine cache
-/// of an operating-system enumeration. The route is not remembered: the engine
-/// hands the exact plan it had authorized straight back to
-/// [`Transmitter::transmit`].
+/// The only retained state is the selected interface, a cache of an
+/// operating-system enumeration; the engine hands the authorized plan straight
+/// back to [`Transmitter::transmit`], so no route is remembered.
 pub struct SystemTransmitter {
     validated_interface: Option<InterfaceInfo>,
     packet_io: ModeSender<SystemLayer2Io, SystemLayer3Io>,

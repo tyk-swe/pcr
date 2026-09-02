@@ -355,7 +355,7 @@ impl LayerCodec for TlsCodec {
     }
 
     /// A segment on a TLS port that is not TLS decodes as `raw`, so this codec
-    /// legitimately produces either protocol.
+    /// produces either protocol.
     fn accepts_decoded_protocol(&self, protocol: &crate::layer::Id) -> bool {
         matches!(protocol.as_str(), NAME | "raw")
     }

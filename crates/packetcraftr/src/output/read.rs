@@ -13,9 +13,6 @@ use super::frame::{Captured, SourceFrame};
 use super::frame::Stack;
 
 /// One frame `read` publishes, optionally with its dissected layer stack.
-///
-/// Named apart from the completion record so a per-frame renderer takes the
-/// record it can actually receive rather than the whole event.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Frame {
     pub source_frame: SourceFrame,

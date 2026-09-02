@@ -280,9 +280,8 @@ impl NativeCaptureSession {
                             operation: "shutting down native capture",
                         });
                     }
-                    // The worker is now known to be finished, so the native
-                    // interrupt and the cleanup permit are released here and
-                    // only here: after that ownership boundary has completed.
+                    // The worker is finished, so the native interrupt and the
+                    // cleanup permit are released here and only here.
                     JoinAttempt::Finished(join_result) => join_result
                         .map_err(|_| Error::Capture {
                             message: "native capture worker panicked during shutdown".to_owned(),

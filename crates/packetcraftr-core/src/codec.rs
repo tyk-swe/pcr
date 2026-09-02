@@ -170,7 +170,7 @@ pub trait LayerCodec: Send + Sync + fmt::Debug {
     }
 
     /// Publishes the reflective schema without requiring a constructible
-    /// layer. The default keeps existing codecs on their factory-based path.
+    /// layer. The default derives the schema from a default-constructed layer.
     fn published_schema(&self) -> Option<&'static Schema> {
         let fields = BTreeMap::new();
         self.make_layer(&fields).ok().map(|layer| layer.schema())

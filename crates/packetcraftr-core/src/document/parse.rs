@@ -106,12 +106,10 @@ fn yaml_config(limits: &DocumentLimits) -> noyalib::ParserConfig {
 /// ended rather than because the input is malformed.
 ///
 /// noyalib has no typed end-of-stream signal: a read after the last document
-/// fails with a `ScanError` whose message is [`YAML_STREAM_ENDED`]. That makes
-/// an ordinary one-document parse depend on a dependency's internal wording,
-/// which is one reason `noyalib` is pinned exactly (`=0.0.28`). Every use of
-/// that spelling is here, and
+/// fails with a `ScanError` whose message is [`YAML_STREAM_ENDED`], which is
+/// one reason `noyalib` is pinned exactly (`=0.0.28`).
 /// `the_yaml_end_of_stream_probe_still_matches_the_pinned_parser` fails if a
-/// bump changes it.
+/// bump changes that spelling.
 fn yaml_stream_ended(error: &noyalib::Error) -> bool {
     error.to_string().contains(YAML_STREAM_ENDED)
 }

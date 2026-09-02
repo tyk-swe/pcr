@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This Rust 2024 workspace has four crates: `packetcraftr-core` for packets and offline analysis, `packetcraftr-netio` for native I/O, `packetcraftr` for policy-gated workflows, and `packetcraftr-cli` for commands and rendering. Unit tests sit beside modules; integration tests live under `crates/*/tests/`. Keep `schemas/` synchronized with `examples/documents/`.
+This Rust 2024 workspace has four crates: `packetcraftr-core` for packets and offline analysis, `packetcraftr-netio` for native I/O, `packetcraftr` for policy-gated workflows, and `packetcraftr-cli` for commands and rendering. Packet structure and semantics live under `packetcraftr_core::packet`; the progressive-output runtime and DNS-over-TCP fallback belong to the workflow crate (`packetcraftr::progress`, `packetcraftr::dns::tcp`); native backends are selected in `packetcraftr-netio/build.rs` and reached only through `platform::dispatch`. Unit tests sit beside modules; integration tests live under `crates/*/tests/`. Keep `schemas/` synchronized with `examples/documents/`.
 
 PacketcraftR is intended for protocol engineering, interoperability testing, and authorized network diagnostics. Keep examples and tests on loopback, documentation address ranges, or isolated fixtures; preserve the live-operation authorization and finite-budget gates.
 
@@ -23,6 +23,8 @@ The toolchain is pinned in `rust-toolchain.toml`; the MSRV is `rust-version` in 
 ## Coding Style & Naming Conventions
 
 Use `rustfmt` defaults (four-space indentation). Name modules, functions, and tests in `snake_case`; types and traits in `UpperCamelCase`; constants in `SCREAMING_SNAKE_CASE`. Prefer checked conversions. The workspace denies `clippy::indexing_slicing` and `clippy::arithmetic_side_effects` in library code: use `get`/`checked_*`, or a narrowly scoped `#[expect(clippy::..., reason = "...")]` that names the invariant; never `#[allow]` outside test modules. Preserve the acyclic crate dependency direction.
+
+Per-module public types live in `model.rs` (or `model/` when large); do not add `contract.rs`, `types.rs`, or `support.rs`. Workflow inputs are `Request`, tunables nested inside a request are `Options`, results are `Report`, streamed items are `Event`, and end-of-run rollups are `Summary`. Module and file names describe contents, not concepts. Each public item has one canonical path; re-exports belong at crate roots and in the `packetcraftr::output` mirror. Comments state the invariant the next line relies on: no history narration, no arguing with a reviewer, no placeholder markers.
 
 `unsafe` belongs only in `packetcraftr-netio/src/platform/`, each block carrying a `SAFETY` comment naming the specific invariant it relies on. That crate denies `unsafe_code` once at its root and the platform wrappers opt out individually, so the exception list is `git grep -l 'allow(unsafe_code)'`; `packetcraftr-netio/tests/unsafe_boundary.rs` fails if an opt-out appears anywhere else. Every other crate forbids `unsafe_code` at its own root only — repeating the attribute on an inner module says nothing and implies, falsely, that its siblings are less protected.
 

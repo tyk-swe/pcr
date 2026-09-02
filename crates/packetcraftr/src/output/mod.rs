@@ -14,8 +14,7 @@
 //!
 //! # Where an output type comes from
 //!
-//! A domain type becomes an output type one of three ways, and the choice is
-//! not free:
+//! A domain type becomes an output type one of three ways:
 //!
 //! - **Re-export** ([`scan::Classification`], [`dns::Section`],
 //!   [`replay::Timing`], …) when the domain type's own serialization *is* the
@@ -34,9 +33,7 @@
 //! # NDJSON record conventions
 //!
 //! Most commands emit `{"event": ..., ...}`: an externally visible
-//! discriminator names the record kind. Three v1 exceptions exist and are not
-//! being changed, because inconsistency is not brokenness and a consumer can
-//! dispatch on field presence today:
+//! discriminator names the record kind. Three v1 exceptions exist:
 //!
 //! - `tls` flattens its payload under the tag, so a session record carries the
 //!   session's own keys beside `"event": "session"` rather than nesting them.
@@ -45,12 +42,6 @@
 //!   the *tagged* `ip_datagram_completed` / `ip_datagram_incomplete` /
 //!   `ip_overlap_resolved` events from [`reassembly::Event`]. An NDJSON consumer
 //!   of `follow` must therefore dispatch on field presence, not on `event`.
-//!
-//! Unifying these is the v2 change: give `expert`, `follow` and `replay` an
-//! `Event` enum with the same `event` discriminator and un-flatten
-//! [`tls::Event`], revising `$defs.expertStreamResult`,
-//! `$defs.followStreamResult`, `$defs.replayStreamResult`,
-//! `$defs.tlsSessionEvent` and `$defs.tlsCompleteEvent` together.
 
 #[macro_use]
 mod mirror;

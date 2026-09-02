@@ -272,8 +272,7 @@ pub enum Error {
     /// datagram already found complete.
     ///
     /// This is a defect in reassembly, never a property of the capture, so
-    /// it reaches the operator as an internal failure rather than telling
-    /// them to repair their input or raise a budget.
+    /// it is classified as an internal failure.
     #[error("IP reassembly state is inconsistent: {reason}")]
     Inconsistent { reason: &'static str },
 }

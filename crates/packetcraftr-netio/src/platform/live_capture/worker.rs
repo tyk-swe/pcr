@@ -37,9 +37,7 @@ pub(super) fn transfer_capture_worker(
         let _permit = permit;
         stop.store(true, Ordering::Release);
         wait_until_finished(worker, REAPER_POLL_INTERVAL, || {
-            // CaptureInterrupt is an internal native boundary, but keeping its
-            // panic contained prevents a defective implementation from
-            // abandoning the complete ownership bundle.
+            // A panicking interrupt must not abandon the ownership bundle.
             let _ = catch_unwind(AssertUnwindSafe(|| interrupt.interrupt()));
         });
         drop(interrupt);

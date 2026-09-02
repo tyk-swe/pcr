@@ -261,10 +261,9 @@ impl Classified for Error {
         }
     }
 
-    /// Walked from the retained `#[source]` chain rather than hand-written.
-    /// The boundary-sourced variants delegate instead: a [`BoundaryError`]
-    /// carries a captured `causes` snapshot its own source chain no longer
-    /// holds.
+    /// Walked from the retained `#[source]` chain. The boundary-sourced
+    /// variants delegate instead: a [`BoundaryError`] carries a captured
+    /// `causes` snapshot its own source chain does not hold.
     ///
     /// [`BoundaryError`]: crate::BoundaryError
     fn causes(&self) -> Vec<String> {

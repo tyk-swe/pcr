@@ -35,8 +35,7 @@ impl Probe {
 
 /// One bounded UDP DNS query the executor may transmit.
 ///
-/// Response retention is bounded by `limits.max_evidence_frames`; there is no
-/// second response knob for the executor and the workflow to disagree about.
+/// Response retention is bounded by `limits.max_evidence_frames`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Exchange {
     pub probe: Probe,

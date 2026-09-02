@@ -321,7 +321,6 @@ fn gre_option(input: &[u8], cursor: usize) -> Result<[u8; GRE_OPTION_LEN], crate
 }
 
 fn gre_layout(layer: &Gre) -> Vec<crate::layout::FieldLayout> {
-    // GRE optional fields are dynamic; only the fixed prefix is static.
     let mut fields = gre_static_layout();
     let mut cursor = GRE_BASE_LEN;
     if layer.checksum.is_some() {

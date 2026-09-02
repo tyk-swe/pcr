@@ -21,8 +21,7 @@ struct PreferenceKey {
 /// operating-system route snapshot beyond that operation.
 ///
 /// The two lookups have different answers — one always yields a decision, the
-/// other may legitimately find none — so they get one map each rather than a
-/// shared `Option`-valued map that would force the infallible lookup to unwrap.
+/// other may legitimately find none — so each has its own map.
 pub(super) struct CachedProvider<'a, R> {
     inner: &'a R,
     by_preference: Mutex<HashMap<PreferenceKey, Decision>>,

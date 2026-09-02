@@ -47,7 +47,6 @@ pub(super) fn register(
 /// HTTPS, SMTPS, LDAPS, DNS-over-TLS, IMAPS, POP3S, and the conventional
 /// alternate HTTPS port. Anything else on these ports still dissects as `raw`:
 /// the codec gates on the payload, not on the port alone.
-/// The TCP ports the default registry dissects as TLS.
 pub const TLS_TCP_PORTS: &[u16] = &[443, 465, 636, 853, 993, 995, 8443];
 
 /// Binds the TLS codec under every well-known TCP port and gives it the raw

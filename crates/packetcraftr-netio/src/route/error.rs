@@ -153,9 +153,9 @@ impl Classified for Error {
         }
     }
 
-    /// Walked from the retained `#[source]` chain rather than hand-written,
-    /// except for the transparent neighbor variant, whose own `Display` is
-    /// already this error's message and which therefore delegates.
+    /// Walks the retained `#[source]` chain, except for the transparent
+    /// neighbor variant, whose own `Display` is already this error's message
+    /// and which therefore delegates.
     fn causes(&self) -> Vec<String> {
         match self {
             Self::Neighbor(error) => error.causes(),

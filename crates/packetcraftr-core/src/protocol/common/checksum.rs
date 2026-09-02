@@ -32,12 +32,11 @@ pub struct ChecksumAccumulator {
 }
 
 impl ChecksumAccumulator {
-    /// Adds byte slice to the checksum accumulator.
+    /// Adds a byte slice to the accumulator.
     ///
-    /// Performance: Processes bytes in 64-bit (8-byte) chunks instead of 16-bit (2-byte) chunks.
-    /// RFC 1071 allows accumulating 16-bit big-endian words via 64-bit word additions because
-    /// carry propagation in 64-bit addition matches ones' complement 16-bit word addition modulo (2^16 - 1).
-    /// Using `u128` for `self.sum` prevents overflow during 64-bit chunk accumulation.
+    /// Bytes are folded in 64-bit chunks: RFC 1071 permits summing 16-bit words in wider
+    /// registers because carry propagation matches ones'-complement addition modulo 2^16 - 1,
+    /// and the `u128` sum has room for every chunk a slice can contribute.
     #[expect(
         clippy::arithmetic_side_effects,
         reason = "the u128 accumulator has room for far more than the 2^64 word additions a slice could contribute"
@@ -53,7 +52,6 @@ impl ChecksumAccumulator {
             self.pending_high_byte = None;
         }
 
-        // Process 8-byte chunks (64 bits) for up to 4x speedup on large byte slices.
         let mut chunks8 = bytes.chunks_exact(8);
         for chunk in &mut chunks8 {
             #[expect(

@@ -31,8 +31,7 @@ pub trait ResponseMatcher: Send + Sync + fmt::Debug {
     fn matches(&self, request: &Packet, response: &Packet) -> Option<Match>;
 
     /// Returns the network-layer source selected for a matched response when
-    /// the matcher can identify one. The default preserves compatibility for
-    /// matchers that do not expose responder metadata.
+    /// the matcher can identify one. The default reports no responder.
     fn responder(&self, _request: &Packet, _response: &Packet) -> Option<IpAddr> {
         None
     }

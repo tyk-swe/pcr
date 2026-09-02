@@ -126,10 +126,8 @@ fn capture_io_error(operation: &str, source: io::Error) -> CliError {
 /// The one mapping for a capture-file writer that writes straight to stdout,
 /// as `capture` and `replay` do.
 ///
-/// An I/O failure there is a stdout failure and is classified as one, exactly
-/// as the spooled `send`/`exchange` path classifies its final copy; anything
-/// else keeps the capture error's own classification, so the same stream-limit
-/// or metadata failure is reported the same way whichever command hit it.
+/// An I/O failure there is a stdout failure and is classified as one; anything
+/// else keeps the capture error's own classification.
 pub(crate) fn stream_capture_error(operation: &str, source: CaptureError) -> CliError {
     match source {
         CaptureError::Io(source) => stdout_error(operation, source),

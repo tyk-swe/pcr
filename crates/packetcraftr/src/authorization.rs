@@ -220,9 +220,6 @@ impl<'a> DeclaredPackets<'a> {
 
     /// Packets whose declared destinations must be authorized before a route,
     /// capture, neighbor, or transmission provider can observe them.
-    ///
-    /// Borrowed, never owned: a campaign states ten thousand built packets
-    /// here, and the authorizer only reads their declared destinations.
     #[must_use]
     pub const fn packets(&self) -> &'a [&'a Packet] {
         self.packets
@@ -432,10 +429,9 @@ fn no_resolver() -> BoundaryError {
 /// Applies a client traffic policy, and an optional hostname resolver, to an
 /// operation without exposing either concern to workflow engines.
 ///
-/// The resolver is `Option` rather than a stand-in that always fails: a
-/// workflow that authorizes packets rather than names has no resolver, and
-/// saying so is what lets [`Authorizer::resolve_and_authorize`] report that
-/// wiring fault instead of a policy denial for a policy that was never asked.
+/// A workflow that authorizes packets rather than names has no resolver, so
+/// [`Authorizer::resolve_and_authorize`] reports that wiring fault instead of
+/// a policy denial for a policy that was never asked.
 pub struct PolicyAuthorizer<'a> {
     policy: &'a crate::policy::Policy,
     resolver: Option<&'a dyn Resolver>,
@@ -568,10 +564,8 @@ pub(crate) enum WireAuthorizationError {
 
 /// Decodes exact wire bytes with the trusted built-in registry.
 ///
-/// The caller passes the link type and the bytes rather than a capture record:
-/// bytes about to be transmitted have no capture time, no interface, and no
-/// original length to invent, and the one place they must be expressed as a
-/// record is here.
+/// Bytes about to be transmitted have no capture time, interface, or original
+/// length, so the caller passes only the link type and the bytes.
 pub(crate) fn decode_wire(
     link_type: LinkType,
     bytes: &Bytes,

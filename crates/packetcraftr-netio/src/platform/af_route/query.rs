@@ -288,9 +288,7 @@ fn read_route_response(
 /// Encodes a destination as the Darwin routing-socket `sockaddr`.
 ///
 /// Each field is written at the offset `libc` declares for this target's own
-/// structure, and every byte the C structure does not name stays zero. That
-/// needs neither an uninitialized value nor a reinterpretation of one, and it
-/// makes the encoding testable without a routing socket.
+/// structure, and every byte the C structure does not name stays zero.
 fn encode_sockaddr(address: IpAddr) -> Result<Vec<u8>, SystemError> {
     match address {
         IpAddr::V4(address) => {
@@ -354,9 +352,7 @@ fn encode_sockaddr(address: IpAddr) -> Result<Vec<u8>, SystemError> {
     }
 }
 
-/// Copies one field into the encoded structure, refusing rather than
-/// truncating if it does not fit — which a field taken from the same
-/// structure cannot do.
+/// Copies one field into the encoded structure, refusing if it does not fit.
 fn write_sockaddr_field(bytes: &mut [u8], offset: usize, value: &[u8]) -> Result<(), SystemError> {
     offset
         .checked_add(value.len())

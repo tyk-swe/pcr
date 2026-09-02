@@ -18,8 +18,7 @@ use super::{Ipv4, Ipv6, ip_protocol};
 
 pub(super) fn is_ipv6_extension_layer(layer: &dyn Layer) -> bool {
     // AH participates in the IPv6 extension chain (RFC 8200), so the
-    // pseudo-header scan for the final destination walks through it, which is
-    // exactly what the catalog's extension predicate answers.
+    // pseudo-header scan for the final destination walks through it.
     BuiltinProtocol::of(layer).is_some_and(BuiltinProtocol::is_ipv6_extension)
 }
 

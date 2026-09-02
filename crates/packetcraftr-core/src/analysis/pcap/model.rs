@@ -46,8 +46,7 @@ impl Limits {
     ///
     /// Every path that streams frames under an aggregate budget — the rewrite
     /// copy, the analysis loop, and the CLI's per-frame reader — charges
-    /// through here, so the two ceilings have one implementation and one pair
-    /// of errors.
+    /// through here.
     pub fn advance(
         self,
         frames: u64,

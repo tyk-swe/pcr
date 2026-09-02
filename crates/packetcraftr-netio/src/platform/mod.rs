@@ -37,8 +37,7 @@ mod worker_reaper;
 
 /// Wraps a native failure as the operating-system route diagnostic.
 ///
-/// Linux and macOS phrased this identically in their own modules; Windows
-/// keeps its own because it also renders the Win32 status code.
+/// Windows keeps its own because it also renders the Win32 status code.
 #[cfg(all(native_route, any(target_os = "linux", target_os = "macos")))]
 fn os_error(
     operation: &'static str,

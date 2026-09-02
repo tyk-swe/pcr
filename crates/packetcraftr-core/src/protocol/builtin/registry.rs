@@ -85,7 +85,7 @@ fn register_catalog(builder: &mut crate::registry::Builder) -> Result<(), crate:
 ///
 /// Panics if the built-in catalog registers a duplicate protocol, alias, link
 /// type, matcher, or filter path — a defect in this crate, not in caller
-/// input. `builtin_registry_initializes_and_is_shared` pins that it does not.
+/// input.
 pub fn registry() -> Arc<crate::registry::Registry> {
     static REGISTRY: OnceLock<Arc<crate::registry::Registry>> = OnceLock::new();
     Arc::clone(REGISTRY.get_or_init(|| {

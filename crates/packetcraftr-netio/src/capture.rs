@@ -68,8 +68,7 @@ impl Statistics {
     }
 
     /// Returns the typed loss error these counters describe, or `None` when the
-    /// backend reported no drop and no queue overflow. This is the single
-    /// answer to "is the evidence complete"; there is no separate predicate.
+    /// backend reported no drop and no queue overflow.
     pub fn evidence_loss_error(self) -> Option<Error> {
         if self.overflow_events != 0 {
             Some(Error::CaptureQueueOverflow {

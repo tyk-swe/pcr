@@ -364,9 +364,9 @@ fn split_top_level_bounded(
 
 /// Walks input while tracking quotes, escapes, and bracket nesting.
 ///
-/// `merge_brackets` treats `(`/`[` and `)`/`]` as one shared depth, matching
-/// the assignment scanner's historical behavior; the splitter keeps the depths
-/// separate so a mismatched bracket reports the offending character.
+/// `merge_brackets` treats `(`/`[` and `)`/`]` as one shared depth for the
+/// assignment scanner; the splitter keeps the depths separate so a mismatched
+/// bracket reports the offending character.
 struct TopLevelScanner<'a> {
     chars: std::str::CharIndices<'a>,
     quoted: bool,

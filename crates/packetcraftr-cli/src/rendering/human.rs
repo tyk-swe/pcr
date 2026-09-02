@@ -14,10 +14,7 @@ use super::style::{
 };
 use crate::errors::CliError;
 
-/// The diagnostic fields the human renderer prints.
-///
-/// The core and envelope diagnostics carry the same three fields under
-/// different types, and both render identically.
+/// The three fields a diagnostic prints as one text line.
 pub(crate) trait DiagnosticLine {
     fn severity(&self) -> core::diagnostic::Severity;
     fn code(&self) -> &str;
@@ -52,8 +49,7 @@ impl DiagnosticLine for output::envelope::Diagnostic {
     }
 }
 
-/// One diagnostic line, severity spelled exactly as the JSON document spells
-/// it. Written once so the stdout and stderr renderers cannot drift apart.
+/// One diagnostic line, severity spelled exactly as the JSON document spells it.
 fn diagnostic_line(diagnostic: &impl DiagnosticLine) -> String {
     format!(
         "{} {}: {}",

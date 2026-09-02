@@ -54,9 +54,8 @@ pub(crate) struct OfflineCaptureLimitsArgs {
 }
 
 impl OfflineCaptureLimitsArgs {
-    /// The ceiling on what an aggregate JSON document retains, taken from the
-    /// frame budget the same run already enforces so a document is bounded by
-    /// a limit the caller set rather than only by how much the capture held.
+    /// The ceiling on what an aggregate JSON document retains: the run's frame
+    /// budget, so the document is bounded by a caller-set limit.
     pub(crate) fn retention_ceiling(self) -> usize {
         usize::try_from(self.max_frames).unwrap_or(usize::MAX)
     }

@@ -66,8 +66,7 @@ pub struct FrameRecord<'a> {
     /// numbers agree with every other command reading the same file.
     pub number: u64,
     /// The frame's capture timestamp, already validated as present by the
-    /// loop that read it. Every time-dependent consumer reads it from here
-    /// rather than re-deriving it and inventing its own failure case.
+    /// loop that read it.
     pub timestamp: SystemTime,
     pub decoded: &'a DecodedPacket,
     derived_datagrams: &'a [DerivedDatagram],
@@ -456,10 +455,9 @@ struct TransportViews<'a> {
 /// Elects the innermost transport of each kind across the physical frame and
 /// its derived datagram views.
 ///
-/// One walk per decoded view, and the located transports are carried forward
-/// rather than looked up again: a tunnelled frame legitimately belongs to
-/// both a UDP conversation and a TCP conversation, and the innermost
-/// occurrence of each kind is the one an operator means.
+/// A tunnelled frame legitimately belongs to both a UDP conversation and a
+/// TCP conversation, and the innermost occurrence of each kind is the one an
+/// operator means.
 fn elect_transport_views<'a>(
     decoded: &'a DecodedPacket,
     derived: &'a [DerivedDatagram],
@@ -560,7 +558,7 @@ fn decode_derived(
 
 /// Reads one physical frame and charges it against the aggregate frame and
 /// captured-byte ceilings, which the capture reader's own [`pcap::Limits`]
-/// enforces so this loop does not re-implement them.
+/// enforces.
 fn next_frame<R: Read>(
     reader: &mut Reader<R>,
     frames_read: &mut u64,
@@ -587,10 +585,6 @@ fn next_frame<R: Read>(
 }
 
 /// Refuses to continue once the run's own processing budget is spent.
-///
-/// The deadline already carries the limit it was built from, so the duration
-/// budget has one owner and callers cannot pass a limit that disagrees with
-/// the clock enforcing it.
 fn enforce_deadline(deadline: &Deadline) -> Result<(), Error> {
     deadline.check().map_err(Error::from)
 }

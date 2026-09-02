@@ -153,8 +153,8 @@ fn decode_error(source: decode::Error) -> BoundaryError {
     )
 }
 
-/// Replay reports the missing opt-in in its own words: it refuses captured
-/// bytes, not a packet it built, and it names the flag that unblocks them.
+/// Replay's denial names captured bytes rather than a built packet, and the
+/// flag that unblocks them.
 fn permissive_live_error(denial: PermissiveLiveDenial) -> BoundaryError {
     match denial {
         PermissiveLiveDenial::OperationOptIn => BoundaryError::new(

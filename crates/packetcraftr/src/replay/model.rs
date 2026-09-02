@@ -114,13 +114,11 @@ fn required_times(
 
 /// Finite resource ceilings applied before authorizing or transmitting a frame.
 ///
-/// The two aggregate ceilings bound different quantities, and the names say
-/// which: `max_source_frames` bounds frames *read* from the capture, including
-/// the ones a selector skips before they are ever authorized, while
-/// `max_transmitted_bytes` bounds only the bytes that actually reach the wire.
-/// This engine bound is independent of the authorizer's own budget on purpose:
-/// it is what still bounds the operation when an injected authorizer approves
-/// everything.
+/// `max_source_frames` bounds frames *read* from the capture, including the ones
+/// a selector skips before they are authorized; `max_transmitted_bytes` bounds
+/// only the bytes that reach the wire. The engine bound is independent of the
+/// authorizer's own budget: it still bounds the operation when an injected
+/// authorizer approves everything.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
     pub max_source_frames: u64,
@@ -248,10 +246,9 @@ pub trait Selector {
 /// Exact-frame transmitter seam used by native and injected adapters.
 ///
 /// The two methods are one handoff: [`plan_frame`](Transmitter::plan_frame)
-/// produces the exact route the engine then has authorized, and that same
-/// route is handed back to [`transmit`](Transmitter::transmit). "The bytes on
-/// the wire are routed by the plan that was authorized" is therefore
-/// structural, not a runtime comparison of remembered frames.
+/// produces the exact route the engine then authorizes, and that same route is
+/// handed back to [`transmit`](Transmitter::transmit), so the bytes on the wire
+/// are routed by the authorized plan.
 pub trait Transmitter {
     /// Resolve and validate the concrete interface, then passively select and
     /// materialize the final route, before any intentional delay.

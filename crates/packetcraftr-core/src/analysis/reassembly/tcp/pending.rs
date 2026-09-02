@@ -470,8 +470,7 @@ fn materialize_pending_merge(
             let value = existing.get(&start)?;
             let relative = usize::try_from(start.checked_sub(plan.union_start)?).ok()?;
             let end = relative.checked_add(value.len())?;
-            // Retained bytes win overlaps, preserving the existing retransmission
-            // semantics after conflict detection.
+            // Retained bytes win overlaps.
             bytes.get_mut(relative..end)?.copy_from_slice(value);
             if index.saturating_add(1) < plan.affected_segment_count {
                 current = existing

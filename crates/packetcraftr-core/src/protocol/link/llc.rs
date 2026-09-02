@@ -26,7 +26,7 @@ const SNAP_NAME: &str = BuiltinProtocol::Snap.as_str();
 /// Synthetic discriminator selecting IEEE 802.2 LLC framing. An EtherType at
 /// or below 1500 is an 802.3 payload length, and `Discriminator` is wide
 /// enough that a sentinel above the 16-bit EtherType space can never collide
-/// with a real EtherType, so every existing binding is untouched.
+/// with a real EtherType.
 pub(crate) const LLC_FRAME_DISCRIMINATOR: u64 = 0x1_0000;
 /// The largest 802.3 length; 1501–1535 are undefined, 1536+ are EtherTypes.
 pub(crate) const MAX_FRAME_LENGTH: u16 = 1500;
@@ -190,9 +190,8 @@ impl LayerCodec for LlcCodec {
             }),
             consumed: header_len,
             payload_len,
-            // Kept even with no payload: a UI frame on a registered SAP
-            // pair announces a header, so the decoder reports it missing,
-            // exactly as strict build rejects the childless layer.
+            // Advertised even with no payload: a UI frame on a registered SAP
+            // pair announces a header, so the decoder reports it missing.
             next,
             diagnostics: Vec::new(),
             stop: payload_len == 0,

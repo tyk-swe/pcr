@@ -33,8 +33,8 @@ pub(super) struct ReaperClient {
 
 struct ReaperService {
     client: ReaperClient,
-    // The process-wide service intentionally lives for the process lifetime.
-    // Retaining its handles makes that ownership explicit instead of detaching it.
+    // The service lives for the process lifetime; retaining the handles keeps
+    // the threads owned rather than detached.
     _workers: Vec<JoinHandle<()>>,
 }
 

@@ -26,9 +26,6 @@ pub(super) struct CaptureSettings {
 
 /// One replay, borrowed for the length of one render: the source, the frame
 /// selector, and the three providers a run drives.
-///
-/// The four renderers take this instead of the same six positional arguments,
-/// so every one of them is generic and every one can be driven by fakes.
 pub(super) struct Run<'a, R, A, T, C> {
     pub(super) reader: &'a mut Reader<R>,
     pub(super) options: &'a packetcraftr::replay::Options,

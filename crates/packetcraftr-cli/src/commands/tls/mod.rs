@@ -60,9 +60,8 @@ impl Selector {
 /// A `--sni` pattern: a literal compared case-insensitively, optionally
 /// anchored loosely at either end by `*`.
 ///
-/// Deliberately not a glob dialect. `*` at the start, the end, or both is the
-/// whole vocabulary, so the pattern means the same thing here as it does in a
-/// shell prompt and there is nothing else to learn.
+/// `*` at the start, the end, or both is the whole vocabulary; it is not a
+/// glob dialect.
 struct SniPattern {
     literal: String,
     leading: bool,
@@ -181,8 +180,8 @@ pub(super) fn run(
         }
     }
 
-    // A selector that matched no frame at all is more likely a typo than an
-    // empty conversation, so the range that does exist is worth the reread.
+    // A selector that matched no frame at all is most likely a typo, so the
+    // error reports the range that does exist.
     if let Some(index) = selected_stream
         && run_summary.frames_matched == 0
     {
@@ -238,9 +237,6 @@ fn parse_tcp_stream_selector(spec: &str) -> Result<u64, CliError> {
 }
 
 /// Reports which TCP conversations the capture actually holds.
-///
-/// Only reached when the selector matched nothing, so the second read costs
-/// nothing on the path that works.
 fn missing_stream_error(index: u64, arguments: &Args) -> CliError {
     match count_tcp_streams(arguments) {
         Ok(0) => CliError::new(

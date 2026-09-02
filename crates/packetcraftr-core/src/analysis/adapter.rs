@@ -70,9 +70,7 @@ pub(crate) struct UdpTransport {
 ///
 /// Offset zero with no More Fragments is an *atomic* fragment: a complete
 /// datagram that is not reassembly input and whose payload stays transparent
-/// to dissection. Every walk that looks for fragments needs both the
-/// downcast and that test, so they travel together here rather than being
-/// restated at each site.
+/// to dissection.
 fn ipv4_fragment(layer: &dyn Layer) -> Option<&Ipv4> {
     layer
         .as_any()
@@ -92,8 +90,7 @@ fn ipv6_fragment(layer: &dyn Layer) -> Option<&Ipv6FragmentHeader> {
 /// Scope identity contributed by one tunnel or tag layer.
 ///
 /// The transport walk and the fragment walk must agree on the encapsulation
-/// path or the same conversation would land in two scopes, so both read this
-/// single table rather than repeating the downcast chain.
+/// path or the same conversation would land in two scopes.
 fn tunnel_identifier(layer: &dyn Layer) -> Option<EncapsulationIdentifier> {
     let any = layer.as_any();
     if let Some(vlan) = any.downcast_ref::<Vlan>() {

@@ -41,10 +41,6 @@ impl Progress {
 }
 
 /// One armed capture and the bounds it runs under.
-///
-/// The four renderers differ only in what they do with each frame, so they
-/// take this rather than the same five positional arguments and hand it
-/// straight to [`run`].
 pub(super) struct Session<'a, C> {
     pub(super) capture: C,
     pub(super) timeout: Duration,

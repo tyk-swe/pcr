@@ -24,9 +24,8 @@ const DIRECTIONS_PER_CONVERSATION: usize = 2;
 
 /// Owns every piece of TCP reassembly state the loop advances.
 ///
-/// The clock lives here rather than in the loop because only matched frames
-/// advance TCP expiry: making that a property of the type is what stops a
-/// later edit from sweeping on frames the filter dropped.
+/// Only matched frames advance TCP expiry, so the clock lives here rather
+/// than in the loop.
 pub(super) struct ReassemblyDispatch {
     tcp_reassembler: Option<TcpReassembler>,
     half_open_pure_syns: HashSet<ScopedFlowKey>,

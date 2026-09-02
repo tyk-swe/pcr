@@ -33,13 +33,10 @@ impl CaptureQueue {
 
     /// Poisoning is always recovered from rather than reported.
     ///
-    /// `CaptureState` is plain data with no cross-field invariant to break
-    /// halfway: every mutation below computes into locals and commits each
-    /// counter, the queue, and the terminal error in one step, so a panic
-    /// while the lock is held cannot leave a partially applied update. A
-    /// worker that panics has already recorded its terminal error through
-    /// `set_error`, and refusing the lock afterwards would hide that evidence
-    /// from the reader instead of surfacing it.
+    /// `CaptureState` has no cross-field invariant; every mutation computes
+    /// into locals and commits in one step, so a poisoned lock holds consistent
+    /// data. A panicking worker has already recorded its terminal error through
+    /// `set_error`, which refusing the lock would hide from the reader.
     pub(super) fn lock(&self) -> MutexGuard<'_, CaptureState> {
         self.state
             .lock()

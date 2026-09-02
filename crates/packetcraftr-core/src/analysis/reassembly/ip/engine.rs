@@ -1068,10 +1068,6 @@ fn copy_into(target: &mut [u8], start: usize, bytes: &[u8]) -> Result<(), Error>
 
 /// The single contiguous payload of a complete datagram, with its known
 /// final length, or [`None`] while any gap remains.
-///
-/// Completion is one fact, so it is decided once here instead of being
-/// re-derived — with its own failure case — by every consumer of a datagram
-/// already known to be complete.
 fn completed_payload(state: &DatagramState) -> Option<(&Bytes, usize)> {
     let final_length = state.final_length?;
     match state.ranges.as_slice() {

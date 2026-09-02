@@ -45,10 +45,9 @@ impl Default for Options {
 pub struct Requirements {
     /// The filter reads `tcp.stream` or `udp.stream`.
     ///
-    /// This aggregate remains useful to callers whose conversation indexing
-    /// capability always covers both transports. Callers that prepare indexes
-    /// on demand can inspect [`tcp_stream`](Self::tcp_stream) and
-    /// [`udp_stream`](Self::udp_stream) instead.
+    /// Callers that prepare indexes per transport inspect
+    /// [`tcp_stream`](Self::tcp_stream) and [`udp_stream`](Self::udp_stream)
+    /// instead.
     pub stream_index: bool,
     /// The filter reads `tcp.stream`, so TCP conversation indexes are needed.
     pub tcp_stream: bool,

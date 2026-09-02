@@ -126,9 +126,7 @@ pub enum MalformedError {
 ///
 /// The split mirrors [`ip::Error`](crate::analysis::reassembly::ip::Error)
 /// because the operator's answer differs: a resource failure is answered by
-/// raising a finite budget, a malformed one only by inspecting the flow. A
-/// new variant has to choose a side, so it can never be misfiled by a
-/// catch-all at a classification site.
+/// raising a finite budget, a malformed one only by inspecting the flow.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Error {

@@ -64,8 +64,7 @@ pub enum IpDatagramOutcome {
         duplicate_fragments: usize,
         overlap_bytes: usize,
     },
-    /// The engine's own retirement evidence, carried through unchanged
-    /// rather than restated field by field.
+    /// The engine's own retirement evidence, carried through unchanged.
     Incomplete(ip::IncompleteDatagram),
 }
 
@@ -134,8 +133,7 @@ impl IpDispatch {
     }
 
     /// The monotonic instant this frame's capture timestamp maps to. Every
-    /// physical frame advances IP expiry, matched or not, so the clock lives
-    /// with the state it ages rather than beside the loop.
+    /// physical frame advances IP expiry, matched or not.
     pub(super) fn at(&mut self, timestamp: SystemTime, number: u64) -> Result<Instant, Error> {
         self.clock.at(timestamp, number)
     }

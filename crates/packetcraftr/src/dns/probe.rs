@@ -63,11 +63,10 @@ pub(super) fn rotated_source_port(base: u16, attempt: u32) -> u16 {
 
 /// An unpredictable DNS transaction ID for a new query.
 ///
-/// Query-ID unpredictability is spoofing resistance, not cosmetics: an
-/// off-path attacker who can guess the ID (and the source port below) can
-/// forge an answer that passes the same transaction and question checks a
-/// genuine response passes. Callers that need a fixed ID for reproducibility
-/// pass one explicitly instead.
+/// Query-ID unpredictability is spoofing resistance: an off-path attacker who
+/// can guess the ID (and the source port below) can forge an answer that
+/// passes the same transaction and question checks a genuine response passes.
+/// Callers that need a fixed ID for reproducibility pass one explicitly.
 ///
 /// This is a per-call mix of OS-seeded hasher state, the wall clock, and the
 /// process ID. It is deliberately not a cryptographic generator, and nothing

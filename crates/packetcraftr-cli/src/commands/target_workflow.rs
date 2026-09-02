@@ -155,9 +155,6 @@ pub(super) fn run<W: TargetWorkflow>(
 
 /// The providers the three commands compose identically once their request is
 /// built.
-///
-/// Named for what it holds, not for what it runs: in this codebase a *probe*
-/// is one transmitted attempt (`scan::Probe`, `ProbeEvidence`, `--max-probes`).
 pub(super) struct TargetProviders {
     policy: packetcraftr::policy::Policy,
     pub(super) registry: Arc<core::registry::Registry>,

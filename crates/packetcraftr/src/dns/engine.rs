@@ -378,8 +378,7 @@ where
         self.emit_attempt(udp.evidence)?;
         self.retain_undecoded(attempt, execution.undecoded)?;
         // A validated response is present exactly when the attempt was
-        // accepted, so this match is total: there is no shape for "timed out
-        // and yet produced a response".
+        // accepted.
         let terminal = match udp.response {
             None => {
                 self.record_failure_outcome(udp_status);

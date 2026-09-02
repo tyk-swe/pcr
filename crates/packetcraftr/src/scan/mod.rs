@@ -17,9 +17,8 @@ pub const MAX_RATE: u32 = 1_000_000;
 pub const MAX_DURATION: Duration = packetcraftr_netio::capture::MAX_TIMEOUT;
 
 // Every generated scan probe is at most an Ethernet header plus IPv6 and TCP
-// without options. Keeping this bound explicit lets the workflow authorize
-// the complete multi-batch byte budget before the first route or send side
-// effect, even though individual batches are delegated to Client::exchange.
+// without options. The explicit bound lets the workflow authorize the complete
+// multi-batch byte budget before the first route or send side effect.
 const IPV4_PROBE_BYTES: u64 = 14 + 20 + 20;
 const IPV6_PROBE_BYTES: u64 = 14 + 40 + 20;
 const WORKFLOW: Workflow = Workflow::Scan;

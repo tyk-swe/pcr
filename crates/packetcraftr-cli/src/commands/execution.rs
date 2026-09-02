@@ -21,10 +21,8 @@ pub(super) struct Executor {
 impl Executor {
     /// Binds the deferred `--interface` selector, once.
     ///
-    /// The selector is cleared only after the lookup succeeds. Clearing it
-    /// first would let a second attempt run with no interface constraint at
-    /// all and transmit on whatever the route provider picked — the opposite
-    /// of what `--interface` asked for.
+    /// The selector is cleared only after the lookup succeeds, so a failed
+    /// lookup never leaves a later attempt unconstrained.
     fn bind_interface<P: packetcraftr::netio::interface::Provider>(
         &mut self,
         provider: &P,

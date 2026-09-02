@@ -170,10 +170,6 @@ pub(super) fn npcap_device_name(interface: &InterfaceId) -> Result<String, Error
 
 /// Renders the adapter GUID in the registry form Npcap's device namespace
 /// uses, from the GUID's own fields.
-///
-/// The previous spelling went through `windows-rs`'s `Debug` implementation,
-/// making every Windows capture and Layer 2 send depend on a formatting choice
-/// that carries no stability guarantee.
 fn format_npcap_device(guid: GUID) -> String {
     format!(
         r"\Device\NPF_{{{:08X}-{:04X}-{:04X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}}}",

@@ -138,10 +138,8 @@ impl Command {
 
     /// Dispatches to the selected command.
     ///
-    /// The format gate lives in each command's own `narrow` call, which is the
-    /// first thing every `run` does and produces the same
-    /// `contract::Error::UnsupportedFormat`; `format::formats_match_the_published_contract`
-    /// keeps those subsets equal to what the contract publishes.
+    /// Each command's `run` narrows the global format first, so an unsupported
+    /// `--output` is refused before any work is done.
     pub(crate) fn run(
         self,
         format: output::contract::Format,

@@ -14,12 +14,8 @@ use crate::Error;
 
 /// Whether `deadline` has passed.
 ///
-/// The boundary instant itself is not expired. That is the convention the
-/// send and drain paths already used through `checked_duration_since`, and the
-/// one the correlation eligibility tests use when they accept a capture whose
-/// `received_at <= deadline`; correlation's own activity check used
-/// `now >= deadline` and so declared itself inactive, at the exact deadline
-/// instant, for frames it had just declared eligible.
+/// The boundary instant itself is not expired, matching correlation
+/// eligibility, which accepts a capture whose `received_at <= deadline`.
 ///
 /// Every "has the deadline passed" question in a live operation goes through
 /// here. Each caller keeps its own error, because each names a different

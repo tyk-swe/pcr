@@ -104,9 +104,8 @@ impl Classified for Error {
         }
     }
 
-    /// Walked from the retained `#[source]` chain rather than hand-written,
-    /// except for the dual failure, which carries two unrelated errors at once
-    /// and so has no single chain to walk.
+    /// Walks the retained `#[source]` chain, except for the dual failure, which
+    /// carries two unrelated errors at once and so has no single chain to walk.
     fn causes(&self) -> Vec<String> {
         match self {
             Self::OperationAndCleanup {

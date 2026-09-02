@@ -148,9 +148,7 @@ impl Classified for Error {
             ),
             // Reassembly fails for two distinct reasons: a finite budget was
             // exhausted, or the capture itself carries conflicting data. Only
-            // the former is answered by raising budgets, and both engines
-            // make the caller choose a side rather than leaving a catch-all
-            // here to misfile a future variant.
+            // the former is answered by raising budgets.
             Self::Reassembly { source, .. } => match source {
                 TcpError::Resource(_) => resource_limit(TCP_RESOURCE_REMEDIATION),
                 TcpError::Malformed(_) => malformed_reassembly(),

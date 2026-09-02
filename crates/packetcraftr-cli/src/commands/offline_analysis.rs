@@ -31,9 +31,8 @@ pub(super) struct AnalysisSetup {
 }
 
 impl AnalysisSetup {
-    /// Analysis options carrying every prepared analysis-wide setting, so a
-    /// new knob needs no per-command plumbing. Commands choose only whether
-    /// the run drives TCP reassembly.
+    /// Analysis options from every prepared analysis-wide setting; commands
+    /// choose only whether the run drives TCP reassembly.
     pub(super) fn options(&self, tcp_events: bool) -> analysis::Options<'_> {
         analysis::Options {
             filter: self.filter.as_ref(),
@@ -55,9 +54,8 @@ pub(super) fn prepare(
 
 /// [`prepare`], with extra TCP ports dissected as TLS.
 ///
-/// The seam exists because the default registry is immutable once built, so a
-/// command honouring `--tls-port` needs the extra bindings before the registry
-/// is frozen rather than after.
+/// The registry is immutable once built, so the extra bindings must be
+/// supplied here.
 pub(super) fn prepare_with_tls_ports(
     limits: OfflineLimitsArgs,
     filter_source: Option<&str>,
@@ -100,9 +98,8 @@ pub(super) fn prepare_with_tls_ports(
 /// The items an aggregate JSON document holds in memory before it can be
 /// written, under a finite ceiling.
 ///
-/// Text and NDJSON write each item as it completes and retain nothing, so only
-/// a JSON renderer ever fills one of these — and only a JSON renderer needs a
-/// bound, because the whole document has to exist at once.
+/// Only the aggregate JSON renderer fills one; text and NDJSON write each item
+/// as it completes and retain nothing.
 pub(super) struct Retained<T> {
     maximum: usize,
     items: Vec<T>,

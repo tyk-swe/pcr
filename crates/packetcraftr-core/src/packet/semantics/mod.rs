@@ -6,8 +6,6 @@
 //! declares. The protocol identity it interprets is
 //! [`BuiltinProtocol`](crate::protocol::BuiltinProtocol).
 
-//! Canonical IP and live-route interpretation.
-
 mod destination;
 mod error;
 mod ipv4_option;

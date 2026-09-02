@@ -9,6 +9,7 @@ use crate::{
 };
 
 use super::{sctp::sctp_initiate_tag, unsigned_field};
+use crate::protocol::network::ip_protocol;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum QuotedIcmpError {
@@ -332,8 +333,7 @@ fn parse_quoted_ipv6_payload(bytes: &[u8], mut protocol: u8, end: usize) -> Opti
     loop {
         let header = bytes.get(offset..end)?;
         let header_len = match protocol {
-            // Hop-by-Hop Options, Routing, and Destination Options.
-            0 | 43 | 60 => {
+            ip_protocol::HOP_BY_HOP | ip_protocol::ROUTING | ip_protocol::DESTINATION_OPTIONS => {
                 if extension_count >= MAX_QUOTED_IPV6_EXTENSION_HEADERS {
                     return None;
                 }

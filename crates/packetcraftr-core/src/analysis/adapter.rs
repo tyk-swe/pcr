@@ -14,7 +14,7 @@ use crate::protocol::gre::Gre;
 use crate::protocol::ipv6::Fragment as Ipv6FragmentHeader;
 use crate::protocol::link::{Vlan, Vlan8021ad};
 use crate::protocol::network::{
-    Ipv4, Ipv6, ipv6_extension_header_length, is_walkable_ipv6_extension,
+    Ipv4, Ipv6, ip_protocol, ipv6_extension_header_length, is_walkable_ipv6_extension,
 };
 use crate::protocol::transport::{Tcp, Udp};
 use crate::protocol::tunnel::{Ah, Erspan, Geneve, L2tpv3, Mpls, Pppoe, Vxlan};
@@ -473,7 +473,7 @@ pub(crate) fn tcp_segment(
     base: ScopeBase<'_>,
     scopes: &mut Interner,
 ) -> Result<Option<Segment>, ScopeError> {
-    if transport_hidden_by_fragment(decoded, transport.index, 6) {
+    if transport_hidden_by_fragment(decoded, transport.index, ip_protocol::TCP) {
         return Ok(None);
     }
     let scope = transport_scope(decoded, base, transport.encapsulation, scopes)?;
@@ -498,7 +498,7 @@ pub(crate) fn udp_flow(
     base: ScopeBase<'_>,
     scopes: &mut Interner,
 ) -> Result<Option<ScopedFlowKey>, ScopeError> {
-    if transport_hidden_by_fragment(decoded, transport.index, 17) {
+    if transport_hidden_by_fragment(decoded, transport.index, ip_protocol::UDP) {
         return Ok(None);
     }
     let scope = transport_scope(decoded, base, transport.encapsulation, scopes)?;

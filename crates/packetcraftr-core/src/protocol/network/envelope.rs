@@ -14,7 +14,7 @@ use crate::{
 
 use crate::protocol::common::{invalid, network_from_addresses};
 
-use super::{Ipv4, Ipv6};
+use super::{Ipv4, Ipv6, ip_protocol};
 
 pub(super) fn is_ipv6_extension_layer(layer: &dyn Layer) -> bool {
     // AH participates in the IPv6 extension chain (RFC 8200), so the
@@ -27,7 +27,13 @@ pub(super) fn is_ipv6_extension_layer(layer: &dyn Layer) -> bool {
 /// walk can step over them: Hop-by-Hop (0), Routing (43), AH (51), and
 /// Destination Options (60).
 pub(crate) const fn is_walkable_ipv6_extension(next_header: u8) -> bool {
-    matches!(next_header, 0 | 43 | 51 | 60)
+    matches!(
+        next_header,
+        ip_protocol::HOP_BY_HOP
+            | ip_protocol::ROUTING
+            | ip_protocol::AH
+            | ip_protocol::DESTINATION_OPTIONS
+    )
 }
 
 /// Wire length of one walkable extension header, from the protocol number
@@ -36,10 +42,12 @@ pub(crate) const fn is_walkable_ipv6_extension(next_header: u8) -> bool {
 /// 4-byte words minus two and can never be shorter than its 12 fixed bytes.
 pub(crate) fn ipv6_extension_header_length(next_header: u8, encoded_length: u8) -> Option<usize> {
     match next_header {
-        0 | 43 | 60 => usize::from(encoded_length)
-            .checked_add(1)
-            .and_then(|units| units.checked_mul(8)),
-        51 => usize::from(encoded_length)
+        ip_protocol::HOP_BY_HOP | ip_protocol::ROUTING | ip_protocol::DESTINATION_OPTIONS => {
+            usize::from(encoded_length)
+                .checked_add(1)
+                .and_then(|units| units.checked_mul(8))
+        }
+        ip_protocol::AH => usize::from(encoded_length)
             .checked_add(2)
             .and_then(|words| words.checked_mul(4))
             .filter(|length| *length >= 12),

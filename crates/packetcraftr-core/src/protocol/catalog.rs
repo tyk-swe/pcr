@@ -139,6 +139,11 @@ macro_rules! define_builtin_protocol {
                 Self::from_id(&layer.schema().protocol)
             }
 
+            /// Whether `layer` is an instance of this built-in protocol.
+            pub fn identifies(self, layer: &dyn Layer) -> bool {
+                Self::of(layer) == Some(self)
+            }
+
             pub const fn is_ip(self) -> bool {
                 matches!(self, Self::Ipv4 | Self::Ipv6)
             }

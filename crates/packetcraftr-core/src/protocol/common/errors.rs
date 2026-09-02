@@ -4,6 +4,7 @@
 //! Shared codec error and protocol-identifier constructors.
 
 use crate::layer::{FieldError, Layer, Malformed};
+use crate::protocol::BuiltinProtocol;
 
 pub(crate) fn protocol(name: &'static str) -> crate::layer::Id {
     crate::layer::Id::new(name)
@@ -17,6 +18,11 @@ pub(crate) fn binding_protocol(layer: &dyn Layer) -> &str {
         .downcast_ref::<Malformed>()
         .and_then(|layer| layer.intended_protocol.as_deref())
         .unwrap_or_else(|| layer.protocol_id().as_str())
+}
+
+/// Whether a parent binds this child under `protocol`.
+pub(crate) fn binds_as(layer: &dyn Layer, protocol: BuiltinProtocol) -> bool {
+    BuiltinProtocol::from_name(binding_protocol(layer)) == Some(protocol)
 }
 
 /// Whether a child layer only preserves opaque bytes, so a parent that would

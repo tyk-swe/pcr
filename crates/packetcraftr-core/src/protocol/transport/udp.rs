@@ -20,7 +20,7 @@ use crate::protocol::common::{
     ValueExpectation, invalid, make_layer, payload_without_padding, protocol, resolve_u16,
     strict_or_diagnostic, transport_checksum, transport_checksum_parts, truncated, typed_layer,
 };
-use crate::protocol::network::resolve_envelope;
+use crate::protocol::network::{ip_protocol, resolve_envelope};
 
 const NAME: &str = BuiltinProtocol::Udp.as_str();
 
@@ -140,7 +140,7 @@ impl LayerCodec for UdpCodec {
         header[2..4].copy_from_slice(&layer.destination_port.to_be_bytes());
         header[4..6].copy_from_slice(&length.to_be_bytes());
         let mut checksum_expected =
-            transport_checksum_parts(NAME, network, 17, &[&header, covered_payload])?;
+            transport_checksum_parts(NAME, network, ip_protocol::UDP, &[&header, covered_payload])?;
         if checksum_expected == 0 {
             checksum_expected = 0xffff;
         }
@@ -195,7 +195,7 @@ impl LayerCodec for UdpCodec {
                             .at_field("checksum"),
                     );
                 }
-            } else if transport_checksum(NAME, network, 17, datagram)? != 0 {
+            } else if transport_checksum(NAME, network, ip_protocol::UDP, datagram)? != 0 {
                 diagnostics.push(
                     Diagnostic::warning(UDP_CHECKSUM, "UDP checksum mismatch").at_field("checksum"),
                 );

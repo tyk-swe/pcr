@@ -19,7 +19,7 @@ use crate::protocol::common::{
     ValueExpectation, invalid, make_layer, payload_without_padding, protocol, resolve_u16,
     transport_checksum, transport_checksum_parts, truncated, typed_layer,
 };
-use crate::protocol::network::resolve_envelope;
+use crate::protocol::network::{ip_protocol, resolve_envelope};
 
 use crate::protocol::BuiltinProtocol;
 
@@ -164,7 +164,7 @@ impl LayerCodec for TcpCodec {
         let covered_payload = payload_without_padding(NAME, payload, context)?;
         let network = resolve_envelope(NAME, context)?;
         let checksum_expected =
-            transport_checksum_parts(NAME, network, 6, &[&prefix, covered_payload])?;
+            transport_checksum_parts(NAME, network, ip_protocol::TCP, &[&prefix, covered_payload])?;
         let (checksum, materialized_checksum) = resolve_u16(
             NAME,
             "checksum",
@@ -222,7 +222,7 @@ impl LayerCodec for TcpCodec {
             );
         }
         if let Some(network) = context.network
-            && transport_checksum(NAME, network, 6, input)? != 0
+            && transport_checksum(NAME, network, ip_protocol::TCP, input)? != 0
         {
             diagnostics.push(
                 Diagnostic::warning(TCP_CHECKSUM, "TCP checksum mismatch").at_field("checksum"),

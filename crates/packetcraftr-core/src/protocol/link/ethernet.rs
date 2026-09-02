@@ -15,7 +15,7 @@ use crate::{
 
 use super::llc::{LLC_FRAME_DISCRIMINATOR, MAX_FRAME_LENGTH};
 use crate::protocol::common::{
-    ValueExpectation, binding_protocol, expected_discriminator, invalid, make_layer,
+    ValueExpectation, binds_as, expected_discriminator, invalid, make_layer,
     payload_without_padding, protocol, resolve_u16, strict_or_diagnostic, truncated, typed_layer,
     validate_auto_raw_discriminator, validate_raw_child_discriminator,
 };
@@ -83,7 +83,7 @@ pub(super) fn link_type_expectation(
 ) -> Result<ValueExpectation<u16>, crate::codec::Error> {
     if context
         .child
-        .is_some_and(|child| binding_protocol(child) == "llc")
+        .is_some_and(|child| binds_as(child, BuiltinProtocol::Llc))
     {
         let length = u16::try_from(covered_payload_len)
             .ok()
@@ -99,7 +99,7 @@ pub(super) fn link_type_expectation(
     if matches!(value, WireValue::Auto)
         && context
             .child
-            .is_some_and(|child| child.protocol_id().as_str() == "raw")
+            .is_some_and(|child| BuiltinProtocol::Raw.identifies(child))
     {
         return Ok(ValueExpectation::Suggested(LINK_RAW_FALLBACK_DISCRIMINATOR));
     }
@@ -122,7 +122,7 @@ pub(super) fn validate_link_length_form(
         || (ether_type == 0 && covered_payload_len == 0)
         || context
             .child
-            .is_some_and(|child| binding_protocol(child) == "llc")
+            .is_some_and(|child| binds_as(child, BuiltinProtocol::Llc))
     {
         return Ok(());
     }

@@ -4,7 +4,10 @@
 //! Child-discriminator, strictness, and encode-budget validation.
 
 use crate::{
-    codec::LayerEncodeContext, diagnostic::Diagnostic, field::WireValue, protocol::BuiltinProtocol,
+    codec::LayerEncodeContext,
+    diagnostic::Diagnostic,
+    field::WireValue,
+    protocol::{BuiltinProtocol, network::ip_protocol},
     registry::Discriminator,
 };
 
@@ -16,10 +19,10 @@ pub(crate) fn validate_ipv6_routing_child(
     context: &LayerEncodeContext<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), crate::codec::Error> {
-    let raw_routing_header = next_header == 43
+    let raw_routing_header = next_header == ip_protocol::ROUTING
         && context
             .child
-            .is_some_and(|child| child.protocol_id().as_str() == "raw");
+            .is_some_and(|child| BuiltinProtocol::Raw.identifies(child));
     if !raw_routing_header {
         return Ok(());
     }
@@ -51,7 +54,7 @@ pub(crate) fn validate_raw_child_discriminator(
     else {
         return Ok(());
     };
-    if bound.as_str() == "raw" {
+    if BuiltinProtocol::from_id(bound) == Some(BuiltinProtocol::Raw) {
         return Ok(());
     }
 
@@ -67,11 +70,11 @@ pub(crate) fn validate_raw_child_discriminator(
     }
     let absent_payload = context
         .child
-        .is_none_or(|child| child.protocol_id().as_str() == "padding");
+        .is_none_or(|child| BuiltinProtocol::Padding.identifies(child));
     // A malformed binding also represents a known terminal discriminator
     // (IPv6 No Next Header). It is valid with no protocol payload, while any
     // actual bytes must be represented by Malformed rather than Raw.
-    if bound.as_str() == "malformed" && absent_payload {
+    if BuiltinProtocol::from_id(bound) == Some(BuiltinProtocol::Malformed) && absent_payload {
         return Ok(());
     }
 
@@ -88,7 +91,7 @@ pub(crate) fn validate_raw_child_discriminator(
     }
     let code = if context
         .child
-        .is_some_and(|child| child.protocol_id().as_str() == "raw")
+        .is_some_and(|child| BuiltinProtocol::Raw.identifies(child))
     {
         "build.raw_typed_discriminator"
     } else {

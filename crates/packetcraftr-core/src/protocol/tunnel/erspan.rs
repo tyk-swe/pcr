@@ -356,7 +356,7 @@ fn validate_parent(
     }
     if layer.version == 1
         && parent.is_some_and(|parent| {
-            parent.protocol_id().as_str() == "gre" && parent.field("sequence").is_none()
+            BuiltinProtocol::Gre.identifies(parent) && parent.field("sequence").is_none()
         })
     {
         strict_or_diagnostic(

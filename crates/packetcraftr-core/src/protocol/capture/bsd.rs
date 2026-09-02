@@ -106,7 +106,7 @@ pub(crate) fn validate_family_binding(
     let Some(child) = context.child else {
         return Ok(diagnostics);
     };
-    if child.protocol_id().as_str() == "raw" {
+    if BuiltinProtocol::Raw.identifies(child) {
         return Ok(diagnostics);
     }
     let Some(expected) = context

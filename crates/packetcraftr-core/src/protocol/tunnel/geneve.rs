@@ -495,7 +495,7 @@ mod tests {
             decoded
                 .diagnostics
                 .iter()
-                .map(|diagnostic| diagnostic.code.as_str())
+                .map(|diagnostic| diagnostic.code)
                 .collect::<Vec<_>>(),
             ["decode.geneve_reserved", "decode.geneve_options"]
         );
@@ -515,7 +515,7 @@ mod tests {
             decoded
                 .diagnostics
                 .iter()
-                .map(|diagnostic| diagnostic.code.as_str())
+                .map(|diagnostic| diagnostic.code)
                 .collect::<Vec<_>>(),
             ["decode.geneve_critical", "decode.geneve_reserved"]
         );
@@ -603,7 +603,7 @@ mod tests {
             encoded
                 .diagnostics
                 .iter()
-                .map(|diagnostic| diagnostic.code.as_str())
+                .map(|diagnostic| diagnostic.code)
                 .collect::<Vec<_>>(),
             [
                 "build.geneve_version",

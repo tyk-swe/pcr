@@ -34,7 +34,7 @@ impl<T: Copy> ValueExpectation<T> {
 
 pub(crate) fn resolve_u8(
     name: &'static str,
-    field: &str,
+    field: &'static str,
     value: &WireValue<u8>,
     expectation: ValueExpectation<u8>,
     mode: crate::codec::Mode,
@@ -53,7 +53,7 @@ pub(crate) fn resolve_u8(
 
 pub(crate) fn resolve_u16(
     name: &'static str,
-    field: &str,
+    field: &'static str,
     value: &WireValue<u16>,
     expectation: ValueExpectation<u16>,
     mode: crate::codec::Mode,
@@ -72,7 +72,7 @@ pub(crate) fn resolve_u16(
 
 pub(crate) fn resolve_fixed<T, const N: usize>(
     name: &'static str,
-    field: &str,
+    field: &'static str,
     value: &WireValue<T>,
     expectation: ValueExpectation<T>,
     mode: crate::codec::Mode,
@@ -119,7 +119,7 @@ where
 
 fn validate_dependent<T>(
     name: &'static str,
-    field: &str,
+    field: &'static str,
     actual: T,
     expectation: ValueExpectation<T>,
     mode: crate::codec::Mode,

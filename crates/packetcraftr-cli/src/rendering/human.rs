@@ -30,7 +30,7 @@ impl DiagnosticLine for core::diagnostic::Diagnostic {
     }
 
     fn code(&self) -> &str {
-        &self.code
+        self.code
     }
 
     fn message(&self) -> &str {
@@ -44,7 +44,7 @@ impl DiagnosticLine for output::envelope::Diagnostic {
     }
 
     fn code(&self) -> &str {
-        &self.code
+        self.code
     }
 
     fn message(&self) -> &str {

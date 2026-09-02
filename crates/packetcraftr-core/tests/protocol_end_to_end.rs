@@ -832,10 +832,7 @@ fn typed_child_without_payload_is_preserved_as_malformed() {
     assert!(malformed.bytes.is_empty());
     assert_eq!(malformed.reason, "required child header is absent");
     assert_eq!(
-        decoded
-            .diagnostics
-            .last()
-            .map(|diagnostic| diagnostic.code.as_str()),
+        decoded.diagnostics.last().map(|diagnostic| diagnostic.code),
         Some("decode.missing_required_child")
     );
 }
@@ -1029,7 +1026,7 @@ fn corrupted_builtin_checksums_report_integrity_failures() {
             .diagnostics
             .iter()
             .filter(|diagnostic| diagnostic.is_checksum_failure())
-            .map(|diagnostic| diagnostic.code.as_str())
+            .map(|diagnostic| diagnostic.code)
             .collect();
         assert_eq!(
             failures,

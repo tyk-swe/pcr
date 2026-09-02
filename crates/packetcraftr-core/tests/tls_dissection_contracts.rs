@@ -139,7 +139,7 @@ fn diagnostic_codes(decoded: &decode::DecodedPacket) -> Vec<&str> {
     decoded
         .diagnostics
         .iter()
-        .map(|diagnostic| diagnostic.code.as_str())
+        .map(|diagnostic| diagnostic.code)
         .collect()
 }
 

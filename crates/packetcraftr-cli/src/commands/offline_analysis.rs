@@ -140,7 +140,7 @@ impl<T> Retained<T> {
 /// The one diagnostic a document that left items out carries, so a truncated
 /// document never looks complete.
 pub(super) fn omitted_diagnostic(
-    code: &str,
+    code: &'static str,
     subject: &str,
     omitted: u64,
     ceiling: &str,

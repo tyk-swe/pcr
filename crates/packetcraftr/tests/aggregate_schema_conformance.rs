@@ -148,7 +148,7 @@ fn envelope_with_stats<T: serde::Serialize>(
 fn diagnostic() -> Diagnostic {
     let mut diagnostic = Diagnostic::warning("fixture.conformance", "representative warning");
     diagnostic.layer = Some(0);
-    diagnostic.field = Some("length".to_owned());
+    diagnostic.field = Some("length");
     diagnostic
 }
 

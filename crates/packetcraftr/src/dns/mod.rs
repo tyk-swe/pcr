@@ -35,7 +35,7 @@ pub const MAX_RATE: u32 = 1_000_000;
 pub const MAX_DURATION: Duration = packetcraftr_netio::capture::MAX_TIMEOUT;
 
 const EVIDENCE_DIAGNOSTICS: EvidenceDiagnosticDescriptor =
-    EvidenceDiagnosticDescriptor::new("dns", "DNS");
+    EvidenceDiagnosticDescriptor::new("dns.evidence_limit", "dns.undecoded_limit", "DNS");
 
 const FLAG_RESPONSE: u16 = 0x8000;
 const FLAG_AUTHORITATIVE: u16 = 0x0400;

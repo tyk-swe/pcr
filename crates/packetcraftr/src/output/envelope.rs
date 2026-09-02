@@ -139,13 +139,13 @@ pub use packetcraftr_core::diagnostic::Severity as DiagnosticSeverity;
 /// Output-v1 diagnostic record.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Diagnostic {
-    pub code: String,
+    pub code: &'static str,
     pub severity: DiagnosticSeverity,
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub layer: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub field: Option<String>,
+    pub field: Option<&'static str>,
 }
 
 impl From<PacketDiagnostic> for Diagnostic {

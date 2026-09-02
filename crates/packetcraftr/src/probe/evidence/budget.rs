@@ -10,14 +10,20 @@ use crate::evidence::{Budget, BudgetError, DiagnosticLog};
 
 #[derive(Clone, Copy)]
 pub(crate) struct EvidenceDiagnosticDescriptor {
-    code_namespace: &'static str,
+    evidence_limit_code: &'static str,
+    undecoded_limit_code: &'static str,
     display_name: &'static str,
 }
 
 impl EvidenceDiagnosticDescriptor {
-    pub(crate) const fn new(code_namespace: &'static str, display_name: &'static str) -> Self {
+    pub(crate) const fn new(
+        evidence_limit_code: &'static str,
+        undecoded_limit_code: &'static str,
+        display_name: &'static str,
+    ) -> Self {
         Self {
-            code_namespace,
+            evidence_limit_code,
+            undecoded_limit_code,
             display_name,
         }
     }
@@ -49,10 +55,7 @@ pub(crate) fn retain_evidence(
             descriptor.display_name
         ),
     };
-    diagnostics.push_once(Diagnostic::warning(
-        format!("{}.evidence_limit", descriptor.code_namespace),
-        message,
-    ));
+    diagnostics.push_once(Diagnostic::warning(descriptor.evidence_limit_code, message));
     false
 }
 
@@ -62,7 +65,7 @@ pub(crate) fn push_undecoded_limit_diagnostic(
     limit: usize,
 ) {
     diagnostics.push_once(Diagnostic::warning(
-        format!("{}.undecoded_limit", descriptor.code_namespace),
+        descriptor.undecoded_limit_code,
         format!(
             "undecodable {} evidence limit {limit} reached; later frames were omitted",
             descriptor.display_name

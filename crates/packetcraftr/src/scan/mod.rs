@@ -23,7 +23,7 @@ pub const MAX_DURATION: Duration = packetcraftr_netio::capture::MAX_TIMEOUT;
 const IPV4_PROBE_BYTES: u64 = 14 + 20 + 20;
 const IPV6_PROBE_BYTES: u64 = 14 + 40 + 20;
 const EVIDENCE_DIAGNOSTICS: EvidenceDiagnosticDescriptor =
-    EvidenceDiagnosticDescriptor::new("scan", "scan");
+    EvidenceDiagnosticDescriptor::new("scan.evidence_limit", "scan.undecoded_limit", "scan");
 
 mod classification;
 mod client_executor;

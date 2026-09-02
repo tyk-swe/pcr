@@ -465,7 +465,7 @@ mod tests {
             dissection
                 .diagnostics
                 .iter()
-                .map(|diagnostic| diagnostic.code.as_str())
+                .map(|diagnostic| diagnostic.code)
                 .collect::<Vec<_>>(),
             vec![RECORD_CONTINUES]
         );
@@ -488,7 +488,7 @@ mod tests {
             dissection
                 .diagnostics
                 .iter()
-                .map(|diagnostic| diagnostic.code.as_str())
+                .map(|diagnostic| diagnostic.code)
                 .collect::<Vec<_>>(),
             vec![RECORDS_CAPPED]
         );

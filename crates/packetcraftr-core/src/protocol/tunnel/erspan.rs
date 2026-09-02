@@ -582,7 +582,7 @@ mod tests {
         let decoded = decode(&type_two, Some(TYPE_III_PROTOCOL)).unwrap();
         assert_eq!(decoded.diagnostics.len(), 1);
         assert_eq!(decoded.diagnostics[0].code, "decode.erspan_type");
-        assert_eq!(decoded.diagnostics[0].field.as_deref(), Some("version"));
+        assert_eq!(decoded.diagnostics[0].field, Some("version"));
     }
 
     #[test]

@@ -92,6 +92,7 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- **BREAKING:** `Diagnostic::code` and `Diagnostic::field` (core and output mirrors) are now `&'static str`; diagnostic codes come from a fixed published set, and `Diagnostic::{info, warning, error, at_field}` take static names.
 - **BREAKING:** `packetcraftr_core::layer::Id` is a `Copy` handle over a static protocol name: `Id::new` takes `&'static str`, `From<String>` and `Deserialize` are gone, and run-time names resolve through `Registry::protocol_named`. `layer::Malformed::intended_protocol` is `Option<String>` and `packet::semantics::Error::MalformedMayHideDestination` carries the name as text.
 - The workflow crate no longer panics on internal invariants: live response timestamps come straight from the validated capture frame, execution permits use a monotonic counter, and the replay, exchange, fuzz, and materialization paths report impossible states as errors instead of aborting.
 - **BREAKING:** `packetcraftr_netio::Error::Encapsulation`, which nothing raised, is removed. Native interface snapshot validation reports `route::SystemError::InvalidResponse` instead of a bare string; the published interface-discovery message is unchanged.

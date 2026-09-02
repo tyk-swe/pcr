@@ -59,31 +59,33 @@ impl fmt::Display for Severity {
 /// A machine-readable build, decode, session, or policy finding.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Diagnostic {
-    pub code: String,
+    /// Stable machine-readable code; always a literal from the published set.
+    pub code: &'static str,
     pub severity: Severity,
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub layer: Option<usize>,
+    /// Reflective field name the finding concerns, when it concerns one.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub field: Option<String>,
+    pub field: Option<&'static str>,
 }
 
 impl Diagnostic {
-    pub fn info(code: impl Into<String>, message: impl Into<String>) -> Self {
+    pub fn info(code: &'static str, message: impl Into<String>) -> Self {
         Self::new(Severity::Info, code, message)
     }
 
-    pub fn warning(code: impl Into<String>, message: impl Into<String>) -> Self {
+    pub fn warning(code: &'static str, message: impl Into<String>) -> Self {
         Self::new(Severity::Warning, code, message)
     }
 
-    pub fn error(code: impl Into<String>, message: impl Into<String>) -> Self {
+    pub fn error(code: &'static str, message: impl Into<String>) -> Self {
         Self::new(Severity::Error, code, message)
     }
 
-    fn new(severity: Severity, code: impl Into<String>, message: impl Into<String>) -> Self {
+    fn new(severity: Severity, code: &'static str, message: impl Into<String>) -> Self {
         Self {
-            code: code.into(),
+            code,
             severity,
             message: message.into(),
             layer: None,
@@ -98,15 +100,15 @@ impl Diagnostic {
     }
 
     #[must_use]
-    pub fn at_field(mut self, field: impl Into<String>) -> Self {
-        self.field = Some(field.into());
+    pub fn at_field(mut self, field: &'static str) -> Self {
+        self.field = Some(field);
         self
     }
 
     /// True only for a built-in checksum verification failure.
     #[must_use]
     pub fn is_checksum_failure(&self) -> bool {
-        CHECKSUM_FAILURE_CODES.contains(&self.code.as_str())
+        CHECKSUM_FAILURE_CODES.contains(&self.code)
     }
 }
 

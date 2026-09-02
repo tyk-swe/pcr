@@ -24,8 +24,11 @@ pub const MAX_DURATION: Duration = packetcraftr_netio::capture::MAX_TIMEOUT;
 // possible before any route, capture, neighbor, or send side effect.
 const MAX_PROBE_BYTES: u64 = 14 + 40 + 20;
 const SOURCE_PORT: u16 = crate::probe::EPHEMERAL_SOURCE_PORT_BASE;
-const EVIDENCE_DIAGNOSTICS: EvidenceDiagnosticDescriptor =
-    EvidenceDiagnosticDescriptor::new("traceroute", "traceroute");
+const EVIDENCE_DIAGNOSTICS: EvidenceDiagnosticDescriptor = EvidenceDiagnosticDescriptor::new(
+    "traceroute.evidence_limit",
+    "traceroute.undecoded_limit",
+    "traceroute",
+);
 
 mod classification;
 mod client_executor;

@@ -237,7 +237,11 @@ fn retained_undecoded_evidence_is_emitted_before_a_later_deadline_failure() {
         &mut retained_count,
         2,
         &mut budget,
-        EvidenceDiagnosticDescriptor::new("fixture", "fixture"),
+        EvidenceDiagnosticDescriptor::new(
+            "fixture.evidence_limit",
+            "fixture.undecoded_limit",
+            "fixture",
+        ),
         1,
         1,
         &mut diagnostics,

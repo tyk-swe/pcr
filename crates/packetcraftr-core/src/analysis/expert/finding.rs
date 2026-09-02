@@ -25,7 +25,7 @@ pub(super) fn from_diagnostics(record: &FrameRecord<'_>) -> Vec<Finding> {
     let finding = |diagnostic: &crate::diagnostic::Diagnostic, streams: DiagnosticStreams| {
         new(
             diagnostic.severity,
-            diagnostic.code.clone(),
+            diagnostic.code,
             record.number,
             diagnostic_stream(diagnostic.layer, streams),
             diagnostic.message.clone(),

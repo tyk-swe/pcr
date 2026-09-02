@@ -613,7 +613,7 @@ fn field_values_raw_layers_and_diagnostics_have_stable_views() {
         packetcraftr_core::diagnostic::Severity::Info
     );
     assert_eq!(diagnostics[0].layer, Some(2));
-    assert_eq!(diagnostics[0].field.as_deref(), Some("value"));
+    assert_eq!(diagnostics[0].field, Some("value"));
     assert_eq!(
         diagnostics[1].severity,
         packetcraftr_core::diagnostic::Severity::Warning

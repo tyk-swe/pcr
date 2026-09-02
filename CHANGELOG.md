@@ -92,6 +92,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- Consolidated the workflow crate's internals: the exchange now lives in eight cohesive modules instead of fourteen, the transmission pipeline (`plan_and_authorize`, `materialize_and_authorize`) sits on `Client` next to the gates it applies, and the replay system boundary is `replay::{authorizer, transmitter}`. No public paths changed.
+
 - **BREAKING:** live workflows share one executor boundary: `packetcraftr::probe::{Request, Executor}` replaces the separate `scan::Executor<Probe>`, `traceroute::Executor<Probe>`, `dns::Executor`, and `fuzz::Executor` traits (the names remain as re-exports of the shared trait, keyed by `scan::Batch`, `traceroute::Batch`, `dns::Exchange`, and `fuzz::ExecutionCase`); DNS-over-TCP continuation moved to `dns::TcpExecutor`, and a fuzz `ExecutionCase` now carries its own timeout instead of a second `execute` argument.
 
 - **BREAKING:** scan and traceroute share one probe skeleton under `packetcraftr::probe`: `probe::Error { workflow, kind }` with `ErrorKind` and `Workflow` replaces `scan::Error` and `traceroute::Error` (the published codes and remediations are unchanged), `probe::{Transport, ProbeEndpoint, ProbeStatus}` replace the duplicated scan/traceroute enums (`traceroute::Strategy` and `traceroute::ProbeTarget` remain as aliases; `ProbeTarget::strategy()` is now `transport()`), and evidence retention, diagnostics, and batch validation live in one shared state type.

@@ -12,7 +12,18 @@ use packetcraftr_netio::{Error as LiveIoError, link::Mode as LinkMode};
 
 use crate::Error;
 use crate::authorization::{WireAuthorizationError, authorize_permissive_live, authorize_wire};
+use crate::materialize::{
+    PlannedPacket, PreparedPacket, build_context, materialize_link_fields,
+    materialize_link_structure, materialize_network_fields,
+    require_fixed_width_link_materialization,
+};
+use crate::mtu::validate_mtu;
+use crate::planning::ensure_preparation_deadline;
 use crate::policy::Policy;
+use packetcraftr_core::Packet;
+use packetcraftr_core::build::Builder;
+use packetcraftr_netio::{neighbor, route, transmit};
+use std::time::Instant;
 
 /// High-level composition of packet construction, passive route planning,
 /// explicit neighbor materialization, policy, and packet I/O.
@@ -105,5 +116,93 @@ impl<R, N, I> Client<R, N, I> {
                 .into()
             },
         )
+    }
+}
+
+impl<R, N, I> Client<R, N, I>
+where
+    R: route::Provider,
+    N: neighbor::Resolver,
+    I: transmit::Sender,
+{
+    /// Steps 1-6 of the transmission pipeline, shared by `send` and the
+    /// exchange: materialize the route-dependent fields, build the exact
+    /// bytes, and authorize them against the selected route. Nothing here may
+    /// emit traffic — neighbor discovery is deliberately still ahead.
+    ///
+    /// `deadline` is checked between the steps that can allocate, and is
+    /// `None` for the single-packet path that has no bounded preparation
+    /// window.
+    pub(crate) fn plan_and_authorize(
+        &self,
+        mut packet: Packet,
+        plan: route::Plan,
+        builder: &Builder,
+        options: &crate::send::Options,
+        deadline: Option<Instant>,
+    ) -> Result<PlannedPacket, Error> {
+        // Route selection precedes all route-dependent materialization.
+        materialize_network_fields(&mut packet, &plan)?;
+        materialize_link_structure(&mut packet, &plan)?;
+        ensure_deadline(deadline)?;
+        let build_context = build_context(&plan);
+        let preliminary_build =
+            builder.build(packet.clone(), build_context.clone(), options.build.clone())?;
+        ensure_deadline(deadline)?;
+        validate_mtu(&preliminary_build, plan.decision.mtu)?;
+        self.authorize_built_packet(&preliminary_build, options.allow_permissive_live)?;
+        self.authorize_built_wire(&preliminary_build, &plan)?;
+        Ok(PlannedPacket {
+            packet,
+            plan,
+            build_context,
+            preliminary_build,
+        })
+    }
+
+    /// Steps 7-11: materialize the route — the only step that resolves link
+    /// fields, and the first that may emit traffic — rebuild if that changed
+    /// the packet, require the planned frame width, then re-authorize the
+    /// exact final bytes against the final route.
+    ///
+    /// The re-authorization is unconditional: it is the last gate before
+    /// capture arming and transmission can observe these bytes.
+    pub(crate) fn materialize_and_authorize(
+        &self,
+        planned: PlannedPacket,
+        builder: &Builder,
+        options: &crate::send::Options,
+        deadline: Option<Instant>,
+    ) -> Result<PreparedPacket, Error> {
+        let PlannedPacket {
+            mut packet,
+            plan,
+            build_context,
+            preliminary_build,
+        } = planned;
+        let preliminary_len = preliminary_build.bytes.len();
+        let route = route::materialize(plan, &self.neighbors)?;
+        ensure_deadline(deadline)?;
+        let link_changed = materialize_link_fields(&mut packet, &route)?;
+        let built = if link_changed {
+            ensure_deadline(deadline)?;
+            builder.build(packet, build_context, options.build.clone())?
+        } else {
+            preliminary_build
+        };
+        require_fixed_width_link_materialization(preliminary_len, built.bytes.len())?;
+        ensure_deadline(deadline)?;
+        self.authorize_built_packet(&built, options.allow_permissive_live)?;
+        // Every final materialized destination is authorized immediately
+        // before capture arming and transmission can observe it.
+        self.authorize_built_wire(&built, &route.plan)?;
+        Ok(PreparedPacket { built, route })
+    }
+}
+
+fn ensure_deadline(deadline: Option<Instant>) -> Result<(), Error> {
+    match deadline {
+        Some(deadline) => ensure_preparation_deadline(deadline),
+        None => Ok(()),
     }
 }

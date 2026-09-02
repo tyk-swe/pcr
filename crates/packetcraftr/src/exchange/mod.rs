@@ -5,27 +5,21 @@
 
 mod accumulator;
 mod capture;
-mod contract;
+mod client;
 mod correlation;
-mod execution;
-mod finalization;
-mod options;
-mod preparation;
-mod retention;
+mod model;
 mod route_cache;
-mod send_sequence;
 mod shutdown;
 mod transaction;
 
-pub(crate) use crate::materialize::PreparedPacket;
 pub(crate) use accumulator::{
     Accumulator, ProcessContext, ProcessOutcome, WorkflowResponseMatcher, WorkflowStopPredicate,
 };
-pub(crate) use contract::into_sent_packet;
-pub use contract::{
+pub(crate) use client::Prepared;
+pub(crate) use model::into_sent_packet;
+pub use model::{
     Collector, DEFAULT_MAX_RESPONSES, DEFAULT_MAX_UNMATCHED_FRAMES, Event, MAX_EXCHANGE_TIMEOUT,
     Options, Report, Response, Summary,
 };
-pub(crate) use preparation::Prepared;
 pub(crate) use shutdown::CaptureGuard;
 pub(crate) use transaction::Transaction;

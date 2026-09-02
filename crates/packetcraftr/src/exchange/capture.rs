@@ -205,6 +205,8 @@ fn drain_deadline_error() -> LiveIoError {
 mod tests {
     #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
+    use crate::materialize::PreparedPacket;
+
     use std::collections::VecDeque;
     use std::net::Ipv4Addr;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -220,9 +222,7 @@ mod tests {
     use packetcraftr_netio::transmit::{Frame as TransmissionFrame, Report};
 
     use super::*;
-    use crate::exchange::{
-        Event, Prepared, PreparedPacket, WorkflowResponseMatcher, WorkflowStopPredicate,
-    };
+    use crate::exchange::{Event, Prepared, WorkflowResponseMatcher, WorkflowStopPredicate};
 
     struct CaptureState {
         sends: AtomicUsize,

@@ -17,7 +17,7 @@ use super::accumulator::{
     Accumulator, DuplicateRecord, ProcessContext, ProcessOutcome, UnsolicitedEvidence,
     UnsolicitedFreshness, WorkflowResponseMatcher,
 };
-use super::contract::{Options, Response};
+use super::model::{Options, Response};
 use crate::materialize::PreparedPacket;
 use crate::planning::expired;
 
@@ -295,7 +295,7 @@ impl Accumulator {
                                   `request_index` is below `sent.len()`"
                     )]
                     self.pending_events
-                        .push(super::contract::Event::Response(Response {
+                        .push(super::model::Event::Response(Response {
                             request_index,
                             response: decoded,
                             latency: received_at.duration_since(
@@ -419,7 +419,7 @@ impl Accumulator {
             )]
             let sent_timing_monotonic = sent[request_index].timing().freshness_marker().monotonic();
             self.pending_events
-                .push(super::contract::Event::Response(Response {
+                .push(super::model::Event::Response(Response {
                     request_index,
                     response: candidate.decoded,
                     latency: freshness.received_at.duration_since(sent_timing_monotonic),
@@ -459,10 +459,9 @@ impl Accumulator {
     }
 
     fn queue_unsolicited(&mut self, candidate: UnsolicitedEvidence) {
-        self.pending_events
-            .push(super::contract::Event::Unsolicited {
-                frame: candidate.decoded,
-            });
+        self.pending_events.push(super::model::Event::Unsolicited {
+            frame: candidate.decoded,
+        });
     }
 
     fn mark_correlation_deadline_expired(&mut self) {

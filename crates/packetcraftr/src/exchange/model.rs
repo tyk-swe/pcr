@@ -5,11 +5,13 @@
 
 use std::sync::Arc;
 use std::time::Duration;
+use std::time::Instant;
 
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::{decode::DecodedPacket, template::DEFAULT_MAX_TEMPLATE_PACKETS};
 use packetcraftr_netio::capture::{Limits as CaptureQueueLimits, MAX_CAPTURE_QUEUE_FRAMES};
 
+use crate::Error;
 use crate::Stats;
 
 pub const DEFAULT_MAX_UNMATCHED_FRAMES: usize = MAX_CAPTURE_QUEUE_FRAMES;
@@ -177,6 +179,49 @@ fn incoherent(message: &str) -> crate::Error {
 
 pub(crate) fn into_sent_packet(sent: Arc<crate::SentPacket>) -> crate::SentPacket {
     Arc::unwrap_or_clone(sent)
+}
+
+impl Options {
+    /// Validates finite options and retention bounds before live providers run.
+    ///
+    /// Once this returns, [`Options::capture`](Options::capture) is
+    /// exactly the bounded queue configuration a capture provider may be armed
+    /// with, and every retention ceiling fits inside it.
+    pub fn validate(&self) -> Result<(), Error> {
+        if self.timeout > MAX_EXCHANGE_TIMEOUT {
+            return Err(Error::InvalidExchangeOption {
+                field: "timeout",
+                message: format!("must not exceed {MAX_EXCHANGE_TIMEOUT:?}"),
+            });
+        }
+        if self.max_template_packets == 0 {
+            return Err(Error::InvalidExchangeOption {
+                field: "max_template_packets",
+                message: "must be greater than zero".to_owned(),
+            });
+        }
+        for (field, value) in [
+            ("max_responses", self.max_responses),
+            ("max_unmatched_frames", self.max_unmatched_frames),
+        ] {
+            if value > self.capture.max_frames {
+                return Err(Error::InvalidExchangeOption {
+                    field,
+                    message: format!(
+                        "{value} exceeds aggregate capture frame ceiling {}",
+                        self.capture.max_frames
+                    ),
+                });
+            }
+        }
+        Instant::now()
+            .checked_add(self.timeout)
+            .ok_or_else(|| Error::InvalidExchangeOption {
+                field: "timeout",
+                message: "cannot be represented by the platform monotonic clock".to_owned(),
+            })?;
+        self.capture.validate().map_err(Error::from)
+    }
 }
 
 #[cfg(test)]

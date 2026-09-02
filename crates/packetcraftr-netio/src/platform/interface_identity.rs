@@ -11,7 +11,7 @@
 //! enumeration once per session; transmission needs nothing but the answer and
 //! runs once per frame, so it asks the operating system about that one name.
 
-#![allow(unsafe_code)]
+#![cfg_attr(any(target_os = "linux", target_os = "macos"), allow(unsafe_code))]
 
 use crate::{Error, interface::Id as InterfaceId};
 

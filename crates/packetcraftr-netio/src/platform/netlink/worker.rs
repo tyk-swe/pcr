@@ -8,7 +8,7 @@ use std::{
     sync::Arc,
     sync::mpsc::{self, SyncSender},
     thread::{self, JoinHandle},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use rtnetlink::{Handle, new_connection};
@@ -16,7 +16,8 @@ use rtnetlink::{Handle, new_connection};
 use crate::platform::os_error;
 use crate::{
     platform::worker_reaper::{
-        ReapTask, ReaperClient, ReaperPermit, TransferOutcome, shared_reaper,
+        JoinAttempt, ReapTask, ReaperClient, ReaperPermit, TransferOutcome, join_with_deadline,
+        shared_reaper, wait_until_finished,
     },
     route::SystemError,
 };
@@ -149,20 +150,16 @@ fn join_netlink_worker(
     reaper: &ReaperClient,
     timeout: Duration,
 ) -> Result<(), SystemError> {
-    let Some(deadline) = Instant::now().checked_add(timeout) else {
-        let _ = transfer_netlink_worker(worker, permit, reaper);
-        return Err(netlink_timeout("shut down netlink worker"));
-    };
-    while !worker.is_finished() {
-        let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+    match join_with_deadline(worker, timeout, NETLINK_REAPER_POLL_INTERVAL) {
+        JoinAttempt::TimedOut(worker) => {
             let _ = transfer_netlink_worker(worker, permit, reaper);
-            return Err(netlink_timeout("shut down netlink worker"));
-        };
-        thread::park_timeout(remaining.min(NETLINK_REAPER_POLL_INTERVAL));
+            Err(netlink_timeout("shut down netlink worker"))
+        }
+        JoinAttempt::Finished(result) => {
+            drop(permit);
+            result.map_err(|_| netlink_worker_panicked())
+        }
     }
-    let result = worker.join().map_err(|_| netlink_worker_panicked());
-    drop(permit);
-    result
 }
 
 fn transfer_netlink_worker(
@@ -172,10 +169,7 @@ fn transfer_netlink_worker(
 ) -> TransferOutcome {
     reaper.transfer(ReapTask::new(move || {
         let _permit = permit;
-        while !worker.is_finished() {
-            thread::park_timeout(NETLINK_REAPER_POLL_INTERVAL);
-        }
-        let _ = worker.join();
+        wait_until_finished(worker, NETLINK_REAPER_POLL_INTERVAL, || {});
     }))
 }
 

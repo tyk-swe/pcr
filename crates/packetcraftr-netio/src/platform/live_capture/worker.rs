@@ -9,15 +9,17 @@ use std::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
-    thread::{self, JoinHandle},
+    thread::JoinHandle,
     time::{Duration, Instant},
 };
 
 use crate::{Error, capture::Captured};
 use packetcraftr_core::frame::{Frame, LinkType};
 
-use super::{NativeCaptureEvent, NativeCaptureSource, queue::SharedCapture};
-use crate::platform::worker_reaper::{ReapTask, ReaperClient, ReaperPermit, TransferOutcome};
+use super::{NativeCaptureEvent, NativeCaptureSource, queue::CaptureQueue};
+use crate::platform::worker_reaper::{
+    ReapTask, ReaperClient, ReaperPermit, TransferOutcome, wait_until_finished,
+};
 
 const STATISTICS_INTERVAL: Duration = Duration::from_millis(250);
 const REAPER_POLL_INTERVAL: Duration = Duration::from_millis(10);
@@ -34,21 +36,19 @@ pub(super) fn transfer_capture_worker(
         // neither can be released before the worker has actually stopped.
         let _permit = permit;
         stop.store(true, Ordering::Release);
-        while !worker.is_finished() {
+        wait_until_finished(worker, REAPER_POLL_INTERVAL, || {
             // CaptureInterrupt is an internal native boundary, but keeping its
             // panic contained prevents a defective implementation from
             // abandoning the complete ownership bundle.
             let _ = catch_unwind(AssertUnwindSafe(|| interrupt.interrupt()));
-            thread::park_timeout(REAPER_POLL_INTERVAL);
-        }
-        let _ = worker.join();
+        });
         drop(interrupt);
     }))
 }
 
 pub(super) fn capture_worker(
     source: &mut dyn NativeCaptureSource,
-    shared: Arc<SharedCapture>,
+    shared: Arc<CaptureQueue>,
     stop: Arc<AtomicBool>,
     interface_index: u32,
     link_type: LinkType,

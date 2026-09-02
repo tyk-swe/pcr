@@ -67,14 +67,21 @@ impl Options {
                 "snap_length must be at least {MIN_NEIGHBOR_SNAPSHOT_LENGTH} bytes"
             )));
         }
+        self.capture_limits()
+            .validate()
+            .map_err(|error| invalid_options(error.to_string()))?;
+        Ok(())
+    }
+
+    /// The capture bounds a discovery session runs under. Overflow always
+    /// fails: a lost frame would make a negative result unverifiable.
+    #[must_use]
+    pub fn capture_limits(&self) -> capture::Limits {
         capture::Limits {
             max_frames: self.max_capture_queue_frames,
             max_bytes: self.max_captured_bytes,
             snap_length: self.snap_length,
             overflow_policy: capture::OverflowPolicy::Fail,
         }
-        .validate()
-        .map_err(|error| invalid_options(error.to_string()))?;
-        Ok(())
     }
 }

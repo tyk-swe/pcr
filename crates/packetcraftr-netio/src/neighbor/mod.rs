@@ -8,10 +8,10 @@ mod error;
 mod evidence;
 mod model;
 mod options;
-mod provider;
+mod resolver;
 mod wire;
 
 pub use error::Error;
 pub use model::{Request, Resolution};
 pub use options::Options;
-pub use provider::{ActiveResolver, Resolver, SystemResolver};
+pub use resolver::{ActiveResolver, Resolver, SystemResolver};

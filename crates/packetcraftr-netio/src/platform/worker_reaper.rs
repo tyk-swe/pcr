@@ -12,6 +12,7 @@ use std::{
         mpsc::{self, SyncSender, TrySendError},
     },
     thread::{self, JoinHandle},
+    time::{Duration, Instant},
 };
 
 /// The maximum number of native workers that may concurrently hold a cleanup
@@ -75,6 +76,49 @@ pub(super) enum TransferOutcome {
     Queued,
     RetainedQueueFull,
     RetainedReaperStopped,
+}
+
+/// Outcome of waiting for a worker thread within a deadline.
+pub(super) enum JoinAttempt {
+    Finished(thread::Result<()>),
+    /// The deadline expired first, so the still-running worker is handed back
+    /// to its owner rather than detached.
+    TimedOut(JoinHandle<()>),
+}
+
+/// Waits for `worker` to finish, polling every `poll_interval`, and hands the
+/// handle back if `timeout` expires first.
+pub(super) fn join_with_deadline(
+    worker: JoinHandle<()>,
+    timeout: Duration,
+    poll_interval: Duration,
+) -> JoinAttempt {
+    let Some(deadline) = Instant::now().checked_add(timeout) else {
+        return JoinAttempt::TimedOut(worker);
+    };
+    while !worker.is_finished() {
+        let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+            return JoinAttempt::TimedOut(worker);
+        };
+        thread::park_timeout(remaining.min(poll_interval));
+    }
+    // `is_finished` is monotonic: once true, joining cannot block on a worker
+    // that is still running.
+    JoinAttempt::Finished(worker.join())
+}
+
+/// Blocks until `worker` finishes, calling `on_poll` before every wait so a
+/// cleanup task can keep nudging a blocked worker.
+pub(super) fn wait_until_finished(
+    worker: JoinHandle<()>,
+    poll_interval: Duration,
+    mut on_poll: impl FnMut(),
+) {
+    while !worker.is_finished() {
+        on_poll();
+        thread::park_timeout(poll_interval);
+    }
+    let _ = worker.join();
 }
 
 impl ReaperClient {

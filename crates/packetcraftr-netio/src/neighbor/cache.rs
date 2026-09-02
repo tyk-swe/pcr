@@ -15,7 +15,7 @@ use crate::{
     interface::Id as InterfaceId,
     link::{MacAddress, VlanTag},
 };
-use packetcraftr_core::frame::{Frame, LinkType};
+use packetcraftr_core::frame::LinkType;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) struct NeighborCacheKey {
@@ -45,13 +45,6 @@ pub(super) struct NeighborCacheEntry {
     pub(super) mac_address: MacAddress,
     pub(super) inserted_at: Instant,
     pub(super) expires_at: Instant,
-}
-
-pub(super) struct NeighborExchangeOutcome {
-    pub(super) mac_address: Option<MacAddress>,
-    pub(super) attempts: u32,
-    pub(super) captured: Vec<Frame>,
-    pub(super) evidence_truncated: bool,
 }
 
 #[derive(Debug, Default)]

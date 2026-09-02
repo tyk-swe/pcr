@@ -16,12 +16,15 @@ use std::{
 use crate::{
     Error,
     capture::{Captured, Limits, MAX_TIMEOUT, Metadata, Session, Statistics},
-    platform::worker_reaper::{ReaperClient, ReaperPermit, ReaperStartError, shared_reaper},
+    platform::worker_reaper::{
+        JoinAttempt, ReaperClient, ReaperPermit, ReaperStartError, join_with_deadline,
+        shared_reaper,
+    },
 };
 
 use super::{
     CaptureInterrupt, NativeCaptureParts,
-    queue::SharedCapture,
+    queue::CaptureQueue,
     worker::{capture_worker, transfer_capture_worker},
 };
 
@@ -44,7 +47,7 @@ fn capture_deadline(timeout: Duration) -> Result<Instant, Error> {
 
 pub(in crate::platform) struct NativeCaptureSession {
     metadata: Metadata,
-    shared: Arc<SharedCapture>,
+    shared: Arc<CaptureQueue>,
     stop: Arc<AtomicBool>,
     /// Present exactly while a native worker is still owned by this session.
     ///
@@ -57,6 +60,9 @@ pub(in crate::platform) struct NativeCaptureSession {
     shutdown_timeout: Duration,
     shutdown: Shutdown,
 }
+
+/// How often a shutdown re-checks a worker it is waiting on.
+const SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 struct RunningCapture {
     worker: JoinHandle<()>,
@@ -112,7 +118,7 @@ impl NativeCaptureSession {
             interrupt,
             metadata,
         } = parts;
-        let shared = Arc::new(SharedCapture::new(limits));
+        let shared = Arc::new(CaptureQueue::new(limits));
         let stop = Arc::new(AtomicBool::new(false));
         let worker_shared = Arc::clone(&shared);
         let worker_stop = Arc::clone(&stop);
@@ -260,7 +266,7 @@ impl NativeCaptureSession {
                         message: "native capture interrupt panicked during shutdown".to_owned(),
                         source: None,
                     });
-                match join_worker(worker, timeout) {
+                match join_with_deadline(worker, timeout, SHUTDOWN_POLL_INTERVAL) {
                     JoinAttempt::TimedOut(worker) => {
                         // The deadline expired with the worker still running,
                         // so this session keeps the complete bundle and an
@@ -277,7 +283,12 @@ impl NativeCaptureSession {
                     // The worker is now known to be finished, so the native
                     // interrupt and the cleanup permit are released here and
                     // only here: after that ownership boundary has completed.
-                    JoinAttempt::Finished(join_result) => join_result.and(interrupt_result),
+                    JoinAttempt::Finished(join_result) => join_result
+                        .map_err(|_| Error::Capture {
+                            message: "native capture worker panicked during shutdown".to_owned(),
+                            source: None,
+                        })
+                        .and(interrupt_result),
                 }
             }
         };
@@ -297,32 +308,6 @@ impl NativeCaptureSession {
         self.shutdown = Shutdown::Finished(result.clone());
         result
     }
-}
-
-enum JoinAttempt {
-    Finished(Result<(), Error>),
-    /// The deadline expired first, so the still-running worker is handed back
-    /// to its owner rather than detached.
-    TimedOut(JoinHandle<()>),
-}
-
-fn join_worker(worker: JoinHandle<()>, timeout: Duration) -> JoinAttempt {
-    let Some(deadline) = Instant::now().checked_add(timeout) else {
-        return JoinAttempt::TimedOut(worker);
-    };
-    while !worker.is_finished() {
-        let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
-            return JoinAttempt::TimedOut(worker);
-        };
-        thread::park_timeout(remaining.min(Duration::from_millis(10)));
-    }
-
-    // `is_finished` is monotonic: once true, joining cannot block on a worker
-    // that is still running.
-    JoinAttempt::Finished(worker.join().map_err(|_| Error::Capture {
-        message: "native capture worker panicked during shutdown".to_owned(),
-        source: None,
-    }))
 }
 
 impl Drop for NativeCaptureSession {

@@ -1,7 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -10,19 +9,27 @@ use packetcraftr_core::frame::Frame;
 
 use crate::{
     capture::{self, Session},
+    link::MacAddress,
     route::Materialized,
     transmit::{self, Layer2Frame},
 };
 
-use super::cache::{NeighborCache, NeighborCacheKey, NeighborExchangeOutcome};
+use super::cache::{NeighborCache, NeighborCacheKey};
 use super::error::{invalid_options, map_io_error};
 use super::evidence::{
-    retain_evidence, retain_matching_evidence, validate_captured_frame, validate_neighbor_send,
-    validate_request,
+    EvidenceBuffer, validate_captured_frame, validate_neighbor_send, validate_request,
 };
 use super::options::Options;
 use super::wire::{build_request_frame, match_neighbor_response};
 use super::{Error, Request, Resolution};
+
+/// What one discovery session established, with the evidence it kept.
+struct ExchangeOutcome {
+    mac_address: Option<MacAddress>,
+    attempts: u32,
+    captured: Vec<Frame>,
+    evidence_truncated: bool,
+}
 
 pub trait Resolver: Send + Sync {
     fn resolve(&self, request: &Request) -> Result<Resolution, Error>;
@@ -91,15 +98,9 @@ where
             request.mtu,
             request.link_type,
         );
-        let limits = capture::Limits {
-            max_frames: self.options.max_capture_queue_frames,
-            max_bytes: self.options.max_captured_bytes,
-            snap_length: self.options.snap_length,
-            overflow_policy: capture::OverflowPolicy::Fail,
-        };
         let capture_request = capture::Request {
             interface: request.interface.clone(),
-            limits,
+            limits: self.options.capture_limits(),
             filter: None,
             promiscuous: false,
         };
@@ -174,20 +175,12 @@ where
         request_bytes: &Bytes,
         route: &Materialized,
         capture: &mut S,
-    ) -> Result<NeighborExchangeOutcome, Error> {
+    ) -> Result<ExchangeOutcome, Error> {
         capture
             .wait_ready(self.options.attempt_timeout)
             .map_err(|error| map_io_error(request, "waiting for capture readiness", error))?;
-        let mut captured: VecDeque<Frame> = VecDeque::new();
-        let mut captured_bytes = 0usize;
-        let mut evidence_truncated = false;
-        self.drain_pre_request(
-            request,
-            capture,
-            &mut captured,
-            &mut captured_bytes,
-            &mut evidence_truncated,
-        )?;
+        let mut evidence = EvidenceBuffer::new(&self.options);
+        self.drain_pre_request(request, capture, &mut evidence)?;
 
         for attempt in 1..=self.options.max_attempts {
             let deadline = Instant::now()
@@ -217,55 +210,41 @@ where
                 if received_at.is_none_or(|received_at| {
                     received_at < freshness_marker || received_at > deadline
                 }) {
-                    retain_evidence(
-                        frame,
-                        &self.options,
-                        &mut captured,
-                        &mut captured_bytes,
-                        &mut evidence_truncated,
-                    );
+                    evidence.retain(frame);
                     continue;
                 }
                 let response = match_neighbor_response(request, &frame);
                 if let Some(mac_address) = response {
-                    retain_matching_evidence(
-                        frame,
-                        &self.options,
-                        &mut captured,
-                        &mut captured_bytes,
-                        &mut evidence_truncated,
-                    );
-                    return Ok(NeighborExchangeOutcome {
-                        mac_address: Some(mac_address),
-                        attempts: attempt,
-                        captured: Vec::from(captured),
-                        evidence_truncated,
-                    });
+                    evidence.retain_matching(frame);
+                    return {
+                        let (captured, evidence_truncated) = evidence.into_evidence();
+                        Ok(ExchangeOutcome {
+                            mac_address: Some(mac_address),
+                            attempts: attempt,
+                            captured,
+                            evidence_truncated,
+                        })
+                    };
                 }
-                retain_evidence(
-                    frame,
-                    &self.options,
-                    &mut captured,
-                    &mut captured_bytes,
-                    &mut evidence_truncated,
-                );
+                evidence.retain(frame);
             }
         }
-        Ok(NeighborExchangeOutcome {
-            mac_address: None,
-            attempts: self.options.max_attempts,
-            captured: Vec::from(captured),
-            evidence_truncated,
-        })
+        {
+            let (captured, evidence_truncated) = evidence.into_evidence();
+            Ok(ExchangeOutcome {
+                mac_address: None,
+                attempts: self.options.max_attempts,
+                captured,
+                evidence_truncated,
+            })
+        }
     }
 
     fn drain_pre_request<S: Session>(
         &self,
         request: &Request,
         capture: &mut S,
-        captured: &mut VecDeque<Frame>,
-        captured_bytes: &mut usize,
-        evidence_truncated: &mut bool,
+        evidence: &mut EvidenceBuffer,
     ) -> Result<(), Error> {
         for _ in 0..self.options.max_capture_queue_frames {
             let Some(captured_frame) = capture
@@ -275,13 +254,7 @@ where
                 break;
             };
             validate_captured_frame(request, &captured_frame.frame, self.options.snap_length)?;
-            retain_evidence(
-                captured_frame.frame,
-                &self.options,
-                captured,
-                captured_bytes,
-                evidence_truncated,
-            );
+            evidence.retain(captured_frame.frame);
         }
         Ok(())
     }

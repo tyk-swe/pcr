@@ -104,54 +104,77 @@ pub(super) fn validate_neighbor_send(
         .map_err(|source| map_io_error(request, "validating discovery send evidence", source))
 }
 
-pub(super) fn retain_evidence(
-    frame: Frame,
-    options: &Options,
-    captured: &mut VecDeque<Frame>,
-    captured_bytes: &mut usize,
-    truncated: &mut bool,
-) {
-    if captured.len() >= options.max_capture_queue_frames
-        || captured_bytes
-            .checked_add(frame.bytes().len())
-            .is_none_or(|total| total > options.max_captured_bytes)
-    {
-        *truncated = true;
-        return;
-    }
-    *captured_bytes = captured_bytes.saturating_add(frame.bytes().len());
-    captured.push_back(frame);
+/// Captured frames retained as resolution evidence within the configured
+/// frame and byte budget. `truncated` records that at least one frame was
+/// dropped or evicted to stay within it.
+pub(super) struct EvidenceBuffer {
+    max_frames: usize,
+    max_bytes: usize,
+    frames: VecDeque<Frame>,
+    bytes: usize,
+    truncated: bool,
 }
 
-pub(super) fn retain_matching_evidence(
-    frame: Frame,
-    options: &Options,
-    captured: &mut VecDeque<Frame>,
-    captured_bytes: &mut usize,
-    truncated: &mut bool,
-) {
-    let frame_length = frame.bytes().len();
-    let over_budget = |captured: &VecDeque<Frame>, captured_bytes: usize| {
-        captured.len() >= options.max_capture_queue_frames
-            || captured_bytes
+impl EvidenceBuffer {
+    pub(super) fn new(options: &Options) -> Self {
+        Self {
+            max_frames: options.max_capture_queue_frames,
+            max_bytes: options.max_captured_bytes,
+            frames: VecDeque::new(),
+            bytes: 0,
+            truncated: false,
+        }
+    }
+
+    /// Keeps `frame` if it fits; otherwise drops it and marks the evidence
+    /// truncated.
+    pub(super) fn retain(&mut self, frame: Frame) {
+        if self.over_budget(frame.bytes().len()) {
+            self.truncated = true;
+            return;
+        }
+        self.push(frame);
+    }
+
+    /// Keeps `frame` even at the cost of evicting the oldest frames, so a
+    /// matching response is always part of the evidence unless it alone
+    /// exceeds the budget.
+    pub(super) fn retain_matching(&mut self, frame: Frame) {
+        let frame_length = frame.bytes().len();
+        while self.over_budget(frame_length) {
+            let Some(discarded) = self.frames.pop_front() else {
+                break;
+            };
+            self.bytes = self.bytes.saturating_sub(discarded.bytes().len());
+            self.truncated = true;
+        }
+        if self.over_budget(frame_length) {
+            // The frame alone exceeds the budget: dropping it is the only
+            // bounded outcome, and the caller learns about it through
+            // `truncated`.
+            self.truncated = true;
+            return;
+        }
+        self.push(frame);
+    }
+
+    /// The retained frames, oldest first, and whether any were dropped.
+    pub(super) fn into_evidence(self) -> (Vec<Frame>, bool) {
+        (Vec::from(self.frames), self.truncated)
+    }
+
+    fn over_budget(&self, frame_length: usize) -> bool {
+        self.frames.len() >= self.max_frames
+            || self
+                .bytes
                 .checked_add(frame_length)
-                .is_none_or(|total| total > options.max_captured_bytes)
-    };
-    while over_budget(captured, *captured_bytes) {
-        let Some(discarded) = captured.pop_front() else {
-            break;
-        };
-        *captured_bytes = captured_bytes.saturating_sub(discarded.bytes().len());
-        *truncated = true;
+                .is_none_or(|total| total > self.max_bytes)
     }
-    if over_budget(captured, *captured_bytes) {
-        // The frame alone exceeds the budget: dropping it is the only bounded
-        // outcome, and the caller learns about it through `truncated`.
-        *truncated = true;
-        return;
+
+    fn push(&mut self, frame: Frame) {
+        self.bytes = self.bytes.saturating_add(frame.bytes().len());
+        self.frames.push_back(frame);
     }
-    *captured_bytes = captured_bytes.saturating_add(frame_length);
-    captured.push_back(frame);
 }
 
 #[cfg(test)]
@@ -319,46 +342,20 @@ mod tests {
             max_captured_bytes: 4,
             snap_length: 128,
         };
-        let mut captured = VecDeque::new();
-        let mut bytes = 0;
-        let mut truncated = false;
-        retain_evidence(
-            frame(&[1, 2]),
-            &options,
-            &mut captured,
-            &mut bytes,
-            &mut truncated,
-        );
-        retain_evidence(
-            frame(&[3, 4]),
-            &options,
-            &mut captured,
-            &mut bytes,
-            &mut truncated,
-        );
-        retain_evidence(
-            frame(&[5]),
-            &options,
-            &mut captured,
-            &mut bytes,
-            &mut truncated,
-        );
-        assert_eq!(captured.len(), 2);
-        assert_eq!(bytes, 4);
-        assert!(truncated);
+        let mut evidence = EvidenceBuffer::new(&options);
+        evidence.retain(frame(&[1, 2]));
+        evidence.retain(frame(&[3, 4]));
+        evidence.retain(frame(&[5]));
+        assert_eq!(evidence.frames.len(), 2);
+        assert_eq!(evidence.bytes, 4);
+        assert!(evidence.truncated);
 
-        truncated = false;
-        retain_matching_evidence(
-            frame(&[9, 9, 9]),
-            &options,
-            &mut captured,
-            &mut bytes,
-            &mut truncated,
-        );
-        assert_eq!(captured.len(), 1);
-        assert_eq!(captured[0].bytes().as_ref(), [9, 9, 9]);
-        assert_eq!(bytes, 3);
-        assert!(truncated);
+        evidence.truncated = false;
+        evidence.retain_matching(frame(&[9, 9, 9]));
+        assert_eq!(evidence.frames.len(), 1);
+        assert_eq!(evidence.frames[0].bytes().as_ref(), [9, 9, 9]);
+        assert_eq!(evidence.bytes, 3);
+        assert!(evidence.truncated);
     }
 
     #[test]
@@ -372,30 +369,17 @@ mod tests {
             max_captured_bytes: 4,
             snap_length: 128,
         };
-        let mut captured = VecDeque::from([frame(&[1, 2])]);
-        let mut bytes = 2;
-        let mut truncated = false;
-        retain_matching_evidence(
-            frame(&[7, 7, 7, 7, 7]),
-            &options,
-            &mut captured,
-            &mut bytes,
-            &mut truncated,
-        );
-        assert!(captured.is_empty());
-        assert_eq!(bytes, 0);
-        assert!(truncated);
+        let mut evidence = EvidenceBuffer::new(&options);
+        evidence.retain(frame(&[1, 2]));
+        evidence.retain_matching(frame(&[7, 7, 7, 7, 7]));
+        assert!(evidence.frames.is_empty());
+        assert_eq!(evidence.bytes, 0);
+        assert!(evidence.truncated);
 
         // The same oversized frame on an empty queue must not panic either.
-        truncated = false;
-        retain_matching_evidence(
-            frame(&[7, 7, 7, 7, 7]),
-            &options,
-            &mut captured,
-            &mut bytes,
-            &mut truncated,
-        );
-        assert!(captured.is_empty());
-        assert!(truncated);
+        evidence.truncated = false;
+        evidence.retain_matching(frame(&[7, 7, 7, 7, 7]));
+        assert!(evidence.frames.is_empty());
+        assert!(evidence.truncated);
     }
 }

@@ -21,7 +21,8 @@ use windows::Win32::Networking::WinSock::{
 use super::adapter::{WindowsAdapter, adapter_index_for, find_windows_adapter};
 use super::enumeration::{adapter_snapshots, win32_error};
 use crate::platform::route_normalize::{
-    NativeRouteSnapshot, finish_route, interface_decision, validate_preferred_source_family,
+    InterfaceCandidate, NativeRouteSnapshot, constrain_by_preferred_source, finish_route,
+    interface_decision, validate_preferred_source_family,
 };
 use crate::{
     interface::Id as InterfaceId,
@@ -108,39 +109,20 @@ fn constrain_interface(
     interface_hint: Option<&InterfaceId>,
     preferred_source: Option<IpAddr>,
 ) -> Result<Option<WindowsAdapter>, SystemError> {
-    let mut constrained = interface_hint
+    let requested = interface_hint
         .map(|requested| find_windows_adapter(available, requested))
         .transpose()?;
-    if let Some(source) = preferred_source {
-        let source_interface = available
-            .iter()
-            .find(|adapter| {
-                adapter
-                    .interface
-                    .addresses
-                    .iter()
-                    .any(|assigned| assigned.address == source)
-            })
-            .cloned()
-            .ok_or_else(|| SystemError::SourceUnavailable {
-                preferred_source: source,
-                interface: interface_hint
-                    .map_or_else(|| "any interface".to_owned(), |hint| hint.name.clone()),
-            })?;
-        if let Some(requested) = &constrained {
-            if requested.ipv4_index != source_interface.ipv4_index
-                || requested.ipv6_index != source_interface.ipv6_index
-            {
-                return Err(SystemError::SourceUnavailable {
-                    preferred_source: source,
-                    interface: requested.interface.id.name.clone(),
-                });
-            }
-        } else {
-            constrained = Some(source_interface);
-        }
+    constrain_by_preferred_source(available, interface_hint, requested, preferred_source)
+}
+
+impl InterfaceCandidate for WindowsAdapter {
+    fn interface(&self) -> &crate::interface::Info {
+        &self.interface
     }
-    Ok(constrained)
+
+    fn is_same(&self, other: &Self) -> bool {
+        self.ipv4_index == other.ipv4_index && self.ipv6_index == other.ipv6_index
+    }
 }
 
 struct BestRoute {

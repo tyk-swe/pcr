@@ -16,8 +16,8 @@ use socket2::{Domain, Socket, Type};
 use super::enumeration::interfaces;
 use super::parser::{parse_route_addresses, roundup};
 use crate::platform::route_normalize::{
-    NativeRouteSnapshot, find_interface, finish_route, interface_decision,
-    validate_preferred_source_family,
+    NativeRouteSnapshot, constrain_by_preferred_source, find_interface, finish_route,
+    interface_decision, validate_preferred_source_family,
 };
 use crate::{
     interface::Id as InterfaceId,
@@ -37,35 +37,11 @@ pub(in crate::platform) fn route(
     validate_preferred_source_family(destination, preferred_source)?;
 
     let available = interfaces()?;
-    let mut constrained_interface = interface_hint
+    let requested = interface_hint
         .map(|requested| find_interface(&available, requested))
         .transpose()?;
-    if let Some(source) = preferred_source {
-        let source_interface = available
-            .iter()
-            .find(|interface| {
-                interface
-                    .addresses
-                    .iter()
-                    .any(|assigned| assigned.address == source)
-            })
-            .cloned()
-            .ok_or_else(|| SystemError::SourceUnavailable {
-                preferred_source: source,
-                interface: interface_hint
-                    .map_or_else(|| "any interface".to_owned(), |hint| hint.name.clone()),
-            })?;
-        if let Some(requested) = &constrained_interface {
-            if requested.id != source_interface.id {
-                return Err(SystemError::SourceUnavailable {
-                    preferred_source: source,
-                    interface: requested.id.name.clone(),
-                });
-            }
-        } else {
-            constrained_interface = Some(source_interface);
-        }
-    }
+    let constrained_interface =
+        constrain_by_preferred_source(&available, interface_hint, requested, preferred_source)?;
 
     let response = query_route(
         destination,

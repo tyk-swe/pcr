@@ -80,50 +80,26 @@ impl NpcapApi {
             source: Some(Arc::new(error)),
         })?;
 
-        // SAFETY: every requested symbol and function signature is copied
-        // directly from the pinned Npcap SDK 1.16 pcap.h ABI.
-        let pcap_init = unsafe { load_symbol::<PcapInit>(&library, b"pcap_init\0")? };
-        // SAFETY: see the ABI note above.
-        let pcap_create = unsafe { load_symbol::<PcapCreate>(&library, b"pcap_create\0")? };
-        // SAFETY: see the ABI note above.
-        let pcap_set_snaplen =
-            unsafe { load_symbol::<PcapSetInteger>(&library, b"pcap_set_snaplen\0")? };
-        // SAFETY: see the ABI note above.
-        let pcap_set_promisc =
-            unsafe { load_symbol::<PcapSetInteger>(&library, b"pcap_set_promisc\0")? };
-        // SAFETY: see the ABI note above.
-        let pcap_set_timeout =
-            unsafe { load_symbol::<PcapSetInteger>(&library, b"pcap_set_timeout\0")? };
-        // SAFETY: see the ABI note above.
-        let pcap_set_immediate_mode =
-            unsafe { load_symbol::<PcapSetInteger>(&library, b"pcap_set_immediate_mode\0")? };
-        // SAFETY: see the ABI note above.
-        let pcap_activate = unsafe { load_symbol::<PcapActivate>(&library, b"pcap_activate\0")? };
-        // SAFETY: see the ABI note above.
-        let pcap_datalink = unsafe { load_symbol::<PcapDatalink>(&library, b"pcap_datalink\0")? };
-        // SAFETY: see the ABI note above.
-        let pcap_snapshot = unsafe { load_symbol::<PcapSnapshot>(&library, b"pcap_snapshot\0")? };
-        // SAFETY: see the ABI note above.
-        let pcap_compile = unsafe { load_symbol::<PcapCompile>(&library, b"pcap_compile\0")? };
-        // SAFETY: see the ABI note above.
-        let pcap_setfilter =
-            unsafe { load_symbol::<PcapSetFilter>(&library, b"pcap_setfilter\0")? };
-        // SAFETY: see the ABI note above.
-        let pcap_freecode = unsafe { load_symbol::<PcapFreeCode>(&library, b"pcap_freecode\0")? };
-        // SAFETY: see the ABI note above.
-        let pcap_next_ex = unsafe { load_symbol::<PcapNextEx>(&library, b"pcap_next_ex\0")? };
-        // SAFETY: see the ABI note above.
-        let pcap_sendpacket =
-            unsafe { load_symbol::<PcapSendPacket>(&library, b"pcap_sendpacket\0")? };
-        // SAFETY: see the ABI note above.
-        let pcap_stats = unsafe { load_symbol::<PcapStats>(&library, b"pcap_stats\0")? };
-        // SAFETY: see the ABI note above.
-        let pcap_breakloop =
-            unsafe { load_symbol::<PcapBreakLoop>(&library, b"pcap_breakloop\0")? };
-        // SAFETY: see the ABI note above.
-        let pcap_geterr = unsafe { load_symbol::<PcapGetError>(&library, b"pcap_geterr\0")? };
-        // SAFETY: see the ABI note above.
-        let pcap_close = unsafe { load_symbol::<PcapClose>(&library, b"pcap_close\0")? };
+        load_symbols!(&library, {
+            pcap_init: PcapInit,
+            pcap_create: PcapCreate,
+            pcap_set_snaplen: PcapSetInteger,
+            pcap_set_promisc: PcapSetInteger,
+            pcap_set_timeout: PcapSetInteger,
+            pcap_set_immediate_mode: PcapSetInteger,
+            pcap_activate: PcapActivate,
+            pcap_datalink: PcapDatalink,
+            pcap_snapshot: PcapSnapshot,
+            pcap_compile: PcapCompile,
+            pcap_setfilter: PcapSetFilter,
+            pcap_freecode: PcapFreeCode,
+            pcap_next_ex: PcapNextEx,
+            pcap_sendpacket: PcapSendPacket,
+            pcap_stats: PcapStats,
+            pcap_breakloop: PcapBreakLoop,
+            pcap_geterr: PcapGetError,
+            pcap_close: PcapClose,
+        });
 
         let mut error_buffer = [0 as c_char; PCAP_ERROR_BUFFER_SIZE];
         // SAFETY: the function pointer came from the pinned DLL and the
@@ -236,6 +212,21 @@ fn npcap_library_path() -> Result<PathBuf, Error> {
     path.push("wpcap.dll");
     Ok(path)
 }
+
+/// Binds each listed export to a local of the same name, typed with the
+/// signature the pinned SDK declares for it.
+macro_rules! load_symbols {
+    ($library:expr, { $($symbol:ident : $signature:ty),* $(,)? }) => {
+        $(
+            // SAFETY: every requested symbol and function signature is copied
+            // directly from the pinned Npcap SDK 1.16 pcap.h ABI.
+            let $symbol = unsafe {
+                load_symbol::<$signature>($library, concat!(stringify!($symbol), "\0").as_bytes())?
+            };
+        )*
+    };
+}
+use load_symbols;
 
 unsafe fn load_symbol<T: Copy>(library: &Library, name: &'static [u8]) -> Result<T, Error> {
     // SAFETY: the caller supplies the exact SDK signature associated with this

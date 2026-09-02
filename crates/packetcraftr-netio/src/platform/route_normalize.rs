@@ -203,6 +203,65 @@ pub(crate) fn classify_destination(address: IpAddr) -> Scope {
     }
 }
 
+/// An interface a native route query may be pinned to.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub(crate) trait InterfaceCandidate: Clone {
+    fn interface(&self) -> &interface::Info;
+    /// Whether both candidates name the same operating-system interface.
+    fn is_same(&self, other: &Self) -> bool;
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+impl InterfaceCandidate for interface::Info {
+    fn interface(&self) -> &interface::Info {
+        self
+    }
+
+    fn is_same(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+/// Pins the query to the interface owning `preferred_source`, refusing a
+/// `requested` interface that does not own it. Without a preferred source the
+/// request passes through unchanged.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub(crate) fn constrain_by_preferred_source<T: InterfaceCandidate>(
+    available: &[T],
+    interface_hint: Option<&InterfaceId>,
+    requested: Option<T>,
+    preferred_source: Option<IpAddr>,
+) -> Result<Option<T>, SystemError> {
+    let Some(source) = preferred_source else {
+        return Ok(requested);
+    };
+    let source_interface = available
+        .iter()
+        .find(|candidate| {
+            candidate
+                .interface()
+                .addresses
+                .iter()
+                .any(|assigned| assigned.address == source)
+        })
+        .cloned()
+        .ok_or_else(|| SystemError::SourceUnavailable {
+            preferred_source: source,
+            interface: interface_hint
+                .map_or_else(|| "any interface".to_owned(), |hint| hint.name.clone()),
+        })?;
+    match requested {
+        Some(requested) if !requested.is_same(&source_interface) => {
+            Err(SystemError::SourceUnavailable {
+                preferred_source: source,
+                interface: requested.interface().id.name.clone(),
+            })
+        }
+        Some(requested) => Ok(Some(requested)),
+        None => Ok(Some(source_interface)),
+    }
+}
+
 pub(crate) fn validate_preferred_source_family(
     destination: IpAddr,
     preferred_source: Option<IpAddr>,

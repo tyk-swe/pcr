@@ -16,13 +16,13 @@ use crate::{
 
 use super::NativeCaptureStatistics;
 
-pub(super) struct SharedCapture {
+pub(super) struct CaptureQueue {
     state: Mutex<CaptureState>,
     changed: Condvar,
     limits: Limits,
 }
 
-impl SharedCapture {
+impl CaptureQueue {
     pub(super) fn new(limits: Limits) -> Self {
         Self {
             state: Mutex::new(CaptureState::default()),
@@ -88,78 +88,46 @@ impl SharedCapture {
     pub(super) fn enqueue(&self, captured: Captured) -> Result<(), Error> {
         let mut state = self.lock();
         let frame_bytes = captured.frame.bytes().len();
-        let mut queued_bytes = state.queued_bytes;
         let mut statistics = state.statistics;
-        let mut drop_count = 0usize;
-        let would_exceed_frames = state.queue.len() >= self.limits.max_frames;
-        let would_exceed_bytes = state
-            .queued_bytes
-            .checked_add(frame_bytes)
-            .is_none_or(|bytes| bytes > self.limits.max_bytes);
-        if would_exceed_frames || would_exceed_bytes {
+        let eviction = if self.admits(state.queue.len(), state.queued_bytes, frame_bytes) {
+            Eviction::none(state.queued_bytes)
+        } else {
             match self.limits.overflow_policy {
-                policy @ (OverflowPolicy::Fail | OverflowPolicy::DropNewest) => {
+                OverflowPolicy::Fail => {
                     record_overflow(&mut statistics, 1, frame_bytes as u64)?;
                     state.statistics = statistics;
-                    return if policy == OverflowPolicy::Fail {
-                        Err(Error::CaptureQueueOverflow {
-                            dropped_frames: statistics.dropped_frames,
-                            dropped_bytes: statistics.dropped_bytes,
-                            overflow_events: statistics.overflow_events,
-                        })
-                    } else {
-                        Ok(())
-                    };
+                    return Err(Error::CaptureQueueOverflow {
+                        dropped_frames: statistics.dropped_frames,
+                        dropped_bytes: statistics.dropped_bytes,
+                        overflow_events: statistics.overflow_events,
+                    });
+                }
+                OverflowPolicy::DropNewest => {
+                    record_overflow(&mut statistics, 1, frame_bytes as u64)?;
+                    state.statistics = statistics;
+                    return Ok(());
                 }
                 OverflowPolicy::DropOldest => {
-                    let mut retained_frames = state.queue.len();
-                    let mut retained_bytes = state.queued_bytes;
-                    let mut drop_bytes = 0usize;
-                    for dropped in &state.queue {
-                        if retained_frames < self.limits.max_frames
-                            && retained_bytes
-                                .checked_add(frame_bytes)
-                                .is_some_and(|bytes| bytes <= self.limits.max_bytes)
-                        {
-                            break;
-                        }
-                        let bytes = dropped.frame.bytes().len();
-                        retained_frames = retained_frames.saturating_sub(1);
-                        retained_bytes = retained_bytes.checked_sub(bytes).ok_or_else(|| {
-                            Error::InvalidCaptureStatistics {
-                                message: "native capture queue byte accounting underflowed"
-                                    .to_owned(),
-                            }
-                        })?;
-                        drop_count = drop_count.saturating_add(1);
-                        drop_bytes = drop_bytes.checked_add(bytes).ok_or_else(|| {
-                            Error::InvalidCaptureStatistics {
-                                message: "native capture dropped-byte accounting overflowed"
-                                    .to_owned(),
-                            }
-                        })?;
-                    }
-                    if retained_frames >= self.limits.max_frames
-                        || retained_bytes
-                            .checked_add(frame_bytes)
-                            .is_none_or(|bytes| bytes > self.limits.max_bytes)
-                    {
+                    let Some(eviction) = self.plan_eviction(&state, frame_bytes)? else {
                         record_overflow(&mut statistics, 1, frame_bytes as u64)?;
                         state.statistics = statistics;
                         return Ok(());
-                    }
-                    record_overflow(&mut statistics, drop_count as u64, drop_bytes as u64)?;
-                    queued_bytes = retained_bytes;
+                    };
+                    record_overflow(
+                        &mut statistics,
+                        eviction.frames as u64,
+                        eviction.bytes as u64,
+                    )?;
+                    eviction
                 }
             }
-        }
-        queued_bytes = queued_bytes.checked_add(frame_bytes).ok_or_else(|| {
-            Error::InvalidCaptureStatistics {
-                message: "native capture queue byte accounting overflowed".to_owned(),
-            }
-        })?;
+        };
+        let queued_bytes = eviction
+            .retained_bytes
+            .checked_add(frame_bytes)
+            .ok_or_else(|| accounting_error("native capture queue byte accounting overflowed"))?;
         record_received(&mut statistics, frame_bytes as u64)?;
-        for _ in 0..drop_count {
+        for _ in 0..eviction.frames {
             state.queue.pop_front();
         }
         state.queued_bytes = queued_bytes;
@@ -168,6 +136,44 @@ impl SharedCapture {
         drop(state);
         self.changed.notify_one();
         Ok(())
+    }
+
+    /// Whether a frame of `frame_bytes` fits beside `frames` queued frames
+    /// that already hold `queued_bytes`.
+    fn admits(&self, frames: usize, queued_bytes: usize, frame_bytes: usize) -> bool {
+        frames < self.limits.max_frames
+            && queued_bytes
+                .checked_add(frame_bytes)
+                .is_some_and(|bytes| bytes <= self.limits.max_bytes)
+    }
+
+    /// Plans the oldest-first eviction that makes room for `frame_bytes`, or
+    /// `None` when the frame would not fit even in an empty queue.
+    fn plan_eviction(
+        &self,
+        state: &CaptureState,
+        frame_bytes: usize,
+    ) -> Result<Option<Eviction>, Error> {
+        let mut eviction = Eviction::none(state.queued_bytes);
+        let mut retained_frames = state.queue.len();
+        for dropped in &state.queue {
+            if self.admits(retained_frames, eviction.retained_bytes, frame_bytes) {
+                break;
+            }
+            let bytes = dropped.frame.bytes().len();
+            retained_frames = retained_frames.saturating_sub(1);
+            eviction.retained_bytes =
+                eviction.retained_bytes.checked_sub(bytes).ok_or_else(|| {
+                    accounting_error("native capture queue byte accounting underflowed")
+                })?;
+            eviction.frames = eviction.frames.saturating_add(1);
+            eviction.bytes = eviction.bytes.checked_add(bytes).ok_or_else(|| {
+                accounting_error("native capture dropped-byte accounting overflowed")
+            })?;
+        }
+        Ok(self
+            .admits(retained_frames, eviction.retained_bytes, frame_bytes)
+            .then_some(eviction))
     }
 
     pub(super) fn add_native_drop_deltas(
@@ -211,6 +217,24 @@ impl SharedCapture {
     }
 }
 
+/// Oldest frames to discard before a new frame is admitted.
+struct Eviction {
+    frames: usize,
+    bytes: usize,
+    /// Queue bytes that remain once the planned frames are gone.
+    retained_bytes: usize,
+}
+
+impl Eviction {
+    const fn none(retained_bytes: usize) -> Self {
+        Self {
+            frames: 0,
+            bytes: 0,
+            retained_bytes,
+        }
+    }
+}
+
 #[derive(Default)]
 pub(super) struct CaptureState {
     pub(super) ready: bool,
@@ -220,6 +244,12 @@ pub(super) struct CaptureState {
     pub(super) queue: VecDeque<Captured>,
     pub(super) queued_bytes: usize,
     pub(super) statistics: Statistics,
+}
+
+fn accounting_error(message: &str) -> Error {
+    Error::InvalidCaptureStatistics {
+        message: message.to_owned(),
+    }
 }
 
 fn record_overflow(
@@ -274,8 +304,8 @@ mod tests {
         )
     }
 
-    fn queue(policy: OverflowPolicy, max_frames: usize, max_bytes: usize) -> SharedCapture {
-        SharedCapture::new(Limits {
+    fn queue(policy: OverflowPolicy, max_frames: usize, max_bytes: usize) -> CaptureQueue {
+        CaptureQueue::new(Limits {
             max_frames,
             max_bytes,
             snap_length: max_bytes,

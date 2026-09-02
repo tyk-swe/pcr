@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use crate::{
-    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::{Diagnostic, TCP_CHECKSUM},
     field::{FieldValue, WireValue},
     layer::{Layer, reflective_layer},
@@ -192,7 +192,7 @@ impl LayerCodec for TcpCodec {
         &self,
         input: &[u8],
         context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, crate::codec::Error> {
+    ) -> Result<DecodedLayer, crate::codec::Error> {
         let Some(header) = input.first_chunk::<TCP_MIN_LEN>() else {
             return Err(truncated(NAME, TCP_MIN_LEN, input.len()));
         };
@@ -231,7 +231,7 @@ impl LayerCodec for TcpCodec {
         let payload_len = input.len().saturating_sub(header_len);
         let source_port = u16::from_be_bytes([header[0], header[1]]);
         let destination_port = u16::from_be_bytes([header[2], header[3]]);
-        Ok(DecodedLayerValue {
+        Ok(DecodedLayer {
             layer: Box::new(Tcp {
                 source_port,
                 destination_port,

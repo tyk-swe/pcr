@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
     layer::{Layer, reflective_layer},
@@ -122,7 +122,7 @@ impl LayerCodec for PppoeCodec {
         &self,
         input: &[u8],
         context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, crate::codec::Error> {
+    ) -> Result<DecodedLayer, crate::codec::Error> {
         let Some(header) = input.first_chunk::<PPPOE_LEN>() else {
             return Err(truncated(PPPOE_NAME, PPPOE_LEN, input.len()));
         };
@@ -175,7 +175,7 @@ impl LayerCodec for PppoeCodec {
             session_id,
             length: WireValue::Exact(length_field),
         };
-        Ok(DecodedLayerValue {
+        Ok(DecodedLayer {
             fields: pppoe_layout(),
             layer: Box::new(layer),
             consumed: PPPOE_LEN,
@@ -362,7 +362,7 @@ impl LayerCodec for PppCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, crate::codec::Error> {
+    ) -> Result<DecodedLayer, crate::codec::Error> {
         let Some(header) = input.first_chunk::<PPP_LEN>() else {
             return Err(truncated(PPP_NAME, PPP_LEN, input.len()));
         };
@@ -375,7 +375,7 @@ impl LayerCodec for PppCodec {
             next.push(Discriminator(u64::from(protocol_number)));
         }
         next.push(Discriminator(0));
-        Ok(DecodedLayerValue {
+        Ok(DecodedLayer {
             fields: ppp_layout(),
             layer: Box::new(Ppp {
                 protocol: WireValue::Exact(protocol_number),

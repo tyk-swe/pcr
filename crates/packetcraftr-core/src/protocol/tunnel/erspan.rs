@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use crate::{
-    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::Diagnostic,
     field::FieldValue,
     layer::{Layer, reflect_get, reflect_set_bounded, reflective_layer},
@@ -150,7 +150,7 @@ impl LayerCodec for ErspanCodec {
         &self,
         input: &[u8],
         context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, crate::codec::Error> {
+    ) -> Result<DecodedLayer, crate::codec::Error> {
         let Some(base) = input.first_chunk::<ERSPAN_II_LEN>() else {
             return Err(truncated(NAME, ERSPAN_II_LEN, input.len()));
         };
@@ -235,7 +235,7 @@ impl LayerCodec for ErspanCodec {
         };
         let payload_len = input.len().saturating_sub(header_len);
         let fields = erspan_layout(&layer);
-        Ok(DecodedLayerValue {
+        Ok(DecodedLayer {
             fields,
             layer: Box::new(layer),
             consumed: header_len,
@@ -429,7 +429,7 @@ mod tests {
     fn decode(
         input: &[u8],
         discriminator: Option<u64>,
-    ) -> Result<DecodedLayerValue, crate::codec::Error> {
+    ) -> Result<DecodedLayer, crate::codec::Error> {
         let registry = crate::protocol::builtin::registry();
         let context = LayerDecodeContext {
             registry: &registry,

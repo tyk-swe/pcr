@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use crate::{
-    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::{Diagnostic, ICMPV4_CHECKSUM, ICMPV6_CHECKSUM},
     field::{FieldValue, WireValue},
     layer::{Layer, reflective_layer},
@@ -155,7 +155,7 @@ impl LayerCodec for Icmpv4Codec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, crate::codec::Error> {
+    ) -> Result<DecodedLayer, crate::codec::Error> {
         let Some(header) = input.first_chunk::<ICMP_MIN_LEN>() else {
             return Err(truncated(V4_NAME, ICMP_MIN_LEN, input.len()));
         };
@@ -167,7 +167,7 @@ impl LayerCodec for Icmpv4Codec {
                     .at_field("checksum"),
             );
         }
-        Ok(DecodedLayerValue {
+        Ok(DecodedLayer {
             layer: Box::new(Icmpv4 {
                 icmp_type: header[0],
                 code: header[1],
@@ -248,7 +248,7 @@ impl LayerCodec for Icmpv6Codec {
         &self,
         input: &[u8],
         context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, crate::codec::Error> {
+    ) -> Result<DecodedLayer, crate::codec::Error> {
         let Some(header) = input.first_chunk::<ICMP_MIN_LEN>() else {
             return Err(truncated(V6_NAME, ICMP_MIN_LEN, input.len()));
         };
@@ -262,7 +262,7 @@ impl LayerCodec for Icmpv6Codec {
                     .at_field("checksum"),
             );
         }
-        Ok(DecodedLayerValue {
+        Ok(DecodedLayer {
             layer: Box::new(Icmpv6 {
                 icmp_type: header[0],
                 code: header[1],

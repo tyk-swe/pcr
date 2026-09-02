@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     field::{FieldValue, WireValue},
     layer::{Layer, reflective_layer},
 };
@@ -167,7 +167,7 @@ fn decode_vlan(
     input: &[u8],
     layout: fn() -> Vec<crate::layout::FieldLayout>,
     layer: impl FnOnce(u8, bool, u16, WireValue<u16>) -> Box<dyn Layer>,
-) -> Result<DecodedLayerValue, crate::codec::Error> {
+) -> Result<DecodedLayer, crate::codec::Error> {
     let Some(header) = input.first_chunk::<VLAN_LEN>() else {
         return Err(truncated(name, VLAN_LEN, input.len()));
     };
@@ -179,7 +179,7 @@ fn decode_vlan(
         input.len().saturating_sub(VLAN_LEN),
         VLAN_LEN,
     )?;
-    Ok(DecodedLayerValue {
+    Ok(DecodedLayer {
         layer: layer(
             ((tci >> 13) & 7) as u8,
             (tci & 0x1000) != 0,
@@ -230,7 +230,7 @@ impl LayerCodec for VlanCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, crate::codec::Error> {
+    ) -> Result<DecodedLayer, crate::codec::Error> {
         decode_vlan(
             VLAN_NAME,
             input,
@@ -288,7 +288,7 @@ impl LayerCodec for Vlan8021adCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, crate::codec::Error> {
+    ) -> Result<DecodedLayer, crate::codec::Error> {
         decode_vlan(
             SERVICE_NAME,
             input,

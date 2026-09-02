@@ -15,8 +15,8 @@ use bytes::Bytes;
 
 use super::expiry::ExpiryIndex;
 
-mod contract;
-pub use contract::{
+mod model;
+pub use model::{
     CompletedDatagram, DatagramKey, Error, Family, Fragment, FragmentDisposition, FragmentOutcome,
     IncompleteDatagram, IncompleteReason, Ipv4DatagramKey, Ipv4Fragment, Ipv6DatagramKey,
     Ipv6Fragment, MalformedError, OverlapPolicy, PushOutcome, ResourceError, RetiredDatagrams,

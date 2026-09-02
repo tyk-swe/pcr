@@ -8,7 +8,7 @@ use bytes::Bytes;
 
 use crate::{
     codec::{
-        DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext,
+        DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext,
         NetworkEnvelope,
     },
     field::{FieldValue, WireValue},
@@ -171,7 +171,7 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
         &self,
         input: &[u8],
         context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, crate::codec::Error> {
+    ) -> Result<DecodedLayer, crate::codec::Error> {
         let Some(header) = input.first_chunk::<8>() else {
             return Err(truncated(NAME, 8, input.len()));
         };
@@ -226,7 +226,7 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
             source: network.source,
             destination: IpAddr::V6(final_destination),
         });
-        Ok(DecodedLayerValue {
+        Ok(DecodedLayer {
             layer: Box::new(SegmentRoutingHeader {
                 next_header: WireValue::Exact(header[0]),
                 segments_left: WireValue::Exact(header[3]),

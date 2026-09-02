@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::net::IpAddr;
 
 use crate::{
-    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::{Diagnostic, UDP_CHECKSUM},
     field::{FieldValue, WireValue},
     layer::{Layer, reflective_layer},
@@ -173,7 +173,7 @@ impl LayerCodec for UdpCodec {
         &self,
         input: &[u8],
         context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, crate::codec::Error> {
+    ) -> Result<DecodedLayer, crate::codec::Error> {
         let Some(header) = input.first_chunk::<UDP_LEN>() else {
             return Err(truncated(NAME, UDP_LEN, input.len()));
         };
@@ -204,7 +204,7 @@ impl LayerCodec for UdpCodec {
         let payload_len = length.saturating_sub(UDP_LEN);
         let source_port = u16::from_be_bytes([header[0], header[1]]);
         let destination_port = u16::from_be_bytes([header[2], header[3]]);
-        Ok(DecodedLayerValue {
+        Ok(DecodedLayer {
             layer: Box::new(Udp {
                 source_port,
                 destination_port,
@@ -250,7 +250,7 @@ fn validate_child_selection(
         return Ok(diagnostics);
     };
     if matches!(
-        BuiltinProtocol::from_id(child.protocol_id()),
+        BuiltinProtocol::from_id(*child.protocol_id()),
         Some(BuiltinProtocol::Padding | BuiltinProtocol::Malformed)
     ) {
         return Ok(diagnostics);
@@ -264,7 +264,7 @@ fn validate_child_selection(
     .find_map(|discriminator| context.registry.child_for(NAME, discriminator)) else {
         return Ok(diagnostics);
     };
-    if *selected == *child.protocol_id() {
+    if selected == *child.protocol_id() {
         return Ok(diagnostics);
     }
     let message = match context

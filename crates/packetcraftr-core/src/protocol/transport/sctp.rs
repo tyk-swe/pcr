@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::{Diagnostic, SCTP_CHECKSUM},
     field::{FieldValue, WireValue},
     layer::{Layer, reflective_layer},
@@ -132,7 +132,7 @@ impl LayerCodec for SctpCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, crate::codec::Error> {
+    ) -> Result<DecodedLayer, crate::codec::Error> {
         let Some(header) = input.first_chunk::<SCTP_HEADER_LEN>() else {
             return Err(truncated(NAME, SCTP_HEADER_LEN, input.len()));
         };
@@ -158,7 +158,7 @@ impl LayerCodec for SctpCodec {
             );
         }
 
-        Ok(DecodedLayerValue {
+        Ok(DecodedLayer {
             layer: Box::new(Sctp {
                 source_port,
                 destination_port,

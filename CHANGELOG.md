@@ -92,6 +92,7 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- **BREAKING:** `Registry` lookups take protocol names as `&str` and return `layer::Id` by value; `BuiltinProtocol::from_id` takes an `Id` by value; `codec::DecodedLayerValue` is now `codec::DecodedLayer`. Reassembly `contract` modules are named `model`, `Padding::excluded_from` is the single padding-exclusion rule, and offline analysis no longer materializes filter inputs when no filter is set.
 - Codecs and analyzers identify layers through `BuiltinProtocol::identifies` and name IP protocol numbers through `packetcraftr_core::protocol::network::ip_protocol` instead of comparing protocol names as strings and repeating numeric literals.
 - **BREAKING:** `Diagnostic::code` and `Diagnostic::field` (core and output mirrors) are now `&'static str`; diagnostic codes come from a fixed published set, and `Diagnostic::{info, warning, error, at_field}` take static names.
 - **BREAKING:** `packetcraftr_core::layer::Id` is a `Copy` handle over a static protocol name: `Id::new` takes `&'static str`, `From<String>` and `Deserialize` are gone, and run-time names resolve through `Registry::protocol_named`. `layer::Malformed::intended_protocol` is `Option<String>` and `packet::semantics::Error::MalformedMayHideDestination` carries the name as text.

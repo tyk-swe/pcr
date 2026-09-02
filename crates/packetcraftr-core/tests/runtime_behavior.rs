@@ -11,7 +11,7 @@ use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
 use packetcraftr_core::codec::{
-    DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext,
+    DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext,
 };
 use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::field::{FieldValue, WireValue};
@@ -182,7 +182,7 @@ impl LayerCodec for ProbeCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, packetcraftr_core::codec::Error> {
+    ) -> Result<DecodedLayer, packetcraftr_core::codec::Error> {
         let Some(value) = input.first().copied() else {
             return Err(packetcraftr_core::codec::Error::Truncated {
                 protocol: "probe".into(),
@@ -191,7 +191,7 @@ impl LayerCodec for ProbeCodec {
             });
         };
         let payload_len = input.len() - 1;
-        Ok(DecodedLayerValue {
+        Ok(DecodedLayer {
             layer: Box::new(Probe {
                 value,
                 ..Probe::default()
@@ -250,7 +250,7 @@ impl LayerCodec for ChildCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, packetcraftr_core::codec::Error> {
+    ) -> Result<DecodedLayer, packetcraftr_core::codec::Error> {
         let value =
             input
                 .first()
@@ -260,7 +260,7 @@ impl LayerCodec for ChildCodec {
                     needed: 1,
                     available: 0,
                 })?;
-        let mut decoded = DecodedLayerValue::terminal(Box::new(Child { value }), 1);
+        let mut decoded = DecodedLayer::terminal(Box::new(Child { value }), 1);
         decoded.fields = child_layout();
         Ok(decoded)
     }

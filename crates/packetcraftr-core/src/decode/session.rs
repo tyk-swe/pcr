@@ -8,7 +8,7 @@ use std::ops::Range;
 use bytes::Bytes;
 
 use crate::Packet;
-use crate::codec::{DecodedLayerValue, LayerCodec, LayerDecodeContext};
+use crate::codec::{DecodedLayer, LayerCodec, LayerDecodeContext};
 use crate::diagnostic::Diagnostic;
 use crate::frame::Frame;
 
@@ -40,7 +40,7 @@ struct TrailingBytes {
 }
 
 struct ValidatedLayer {
-    decoded: DecodedLayerValue,
+    decoded: DecodedLayer,
     protocol: crate::layer::Id,
     layer_end: usize,
     payload_end: usize,
@@ -128,7 +128,7 @@ impl<'registry> DecodeSession<'registry> {
         codec: &dyn LayerCodec,
         cursor: &DecodeCursor,
         allow_link_padding: bool,
-    ) -> Result<DecodedLayerValue, crate::codec::Error> {
+    ) -> Result<DecodedLayer, crate::codec::Error> {
         #[expect(
             clippy::indexing_slicing,
             reason = "cursor byte ranges are derived from the original buffer's own length and \
@@ -182,7 +182,7 @@ impl<'registry> DecodeSession<'registry> {
     fn validate_layer(
         codec: &dyn LayerCodec,
         cursor: &DecodeCursor,
-        mut decoded: DecodedLayerValue,
+        mut decoded: DecodedLayer,
     ) -> Result<ValidatedLayer, Error> {
         let actual_protocol = *decoded.layer.protocol_id();
         if !codec.accepts_decoded_protocol(&actual_protocol) {
@@ -278,7 +278,7 @@ impl<'registry> DecodeSession<'registry> {
         let selected = layer.decoded.next.iter().find_map(|value| {
             self.registry
                 .child_for(layer.protocol.as_str(), *value)
-                .map(|protocol| (*value, *protocol))
+                .map(|protocol| (*value, protocol))
         });
         ChildSelection {
             discriminator: selected.as_ref().map(|(value, _)| *value),
@@ -354,7 +354,7 @@ impl<'registry> DecodeSession<'registry> {
         offset: usize,
     ) -> Result<(), Error> {
         let Some(required) = child.filter(|protocol| {
-            !crate::protocol::BuiltinProtocol::from_id(protocol)
+            !crate::protocol::BuiltinProtocol::from_id(*protocol)
                 .is_some_and(crate::protocol::BuiltinProtocol::preserves_opaque_bytes)
         }) else {
             return Ok(());

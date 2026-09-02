@@ -182,6 +182,14 @@ pub struct Padding {
 }
 
 impl Padding {
+    /// Whether the layer at `layer_index` excludes these bytes from its
+    /// payload: link padding is excluded everywhere, and coverage-bounded
+    /// padding from the layer that declared the boundary onward.
+    pub fn excluded_from(&self, layer_index: usize) -> bool {
+        self.outside_layer
+            .is_none_or(|outside_layer| layer_index >= outside_layer)
+    }
+
     pub fn new(bytes: impl Into<Bytes>) -> Self {
         Self {
             bytes: bytes.into(),

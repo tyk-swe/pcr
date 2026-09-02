@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use crate::{
-    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
     layer::{Layer, reflective_layer},
@@ -185,7 +185,7 @@ impl LayerCodec for AhCodec {
         &self,
         input: &[u8],
         context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, crate::codec::Error> {
+    ) -> Result<DecodedLayer, crate::codec::Error> {
         let Some(fixed) = input.first_chunk::<AH_FIXED_LEN>() else {
             return Err(truncated(NAME, AH_FIXED_LEN, input.len()));
         };
@@ -239,7 +239,7 @@ impl LayerCodec for AhCodec {
             );
         }
         let payload_len = input.len().saturating_sub(header_len);
-        Ok(DecodedLayerValue {
+        Ok(DecodedLayer {
             fields: ah_layout(header_len),
             layer: Box::new(Ah {
                 next_header: WireValue::Exact(next_header),

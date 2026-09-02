@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use crate::{
-    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     field::{FieldValue, WireValue},
     layer::{Layer, reflective_layer},
     registry::Discriminator,
@@ -149,7 +149,7 @@ fn decode_options<L>(
     input: &[u8],
     make: impl FnOnce(u8, Bytes) -> L,
     layout: fn(usize) -> Vec<crate::layout::FieldLayout>,
-) -> Result<DecodedLayerValue, crate::codec::Error>
+) -> Result<DecodedLayer, crate::codec::Error>
 where
     L: Layer + 'static,
 {
@@ -166,7 +166,7 @@ where
     let options = input
         .get(2..header_len)
         .ok_or_else(|| truncated(name, header_len, input.len()))?;
-    Ok(DecodedLayerValue {
+    Ok(DecodedLayer {
         layer: Box::new(make(header[0], Bytes::copy_from_slice(options))),
         consumed: header_len,
         payload_len: input.len().saturating_sub(header_len),
@@ -204,7 +204,7 @@ impl LayerCodec for HopByHopCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, crate::codec::Error> {
+    ) -> Result<DecodedLayer, crate::codec::Error> {
         decode_options(
             HOP_NAME,
             input,
@@ -250,7 +250,7 @@ impl LayerCodec for DestinationOptionsCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, crate::codec::Error> {
+    ) -> Result<DecodedLayer, crate::codec::Error> {
         decode_options(
             DESTINATION_NAME,
             input,

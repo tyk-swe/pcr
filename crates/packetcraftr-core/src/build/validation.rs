@@ -59,9 +59,9 @@ fn validate_adjacent_bindings(
             }
         };
         if discriminator.is_some()
-            || BuiltinProtocol::from_id(parent) == Some(BuiltinProtocol::Raw)
+            || BuiltinProtocol::from_id(*parent) == Some(BuiltinProtocol::Raw)
             || matches!(
-                BuiltinProtocol::from_id(child),
+                BuiltinProtocol::from_id(*child),
                 Some(BuiltinProtocol::Padding | BuiltinProtocol::Malformed)
             )
         {
@@ -116,7 +116,7 @@ fn validate_padding(
             outside_layer,
         });
     };
-    let outside_builtin = BuiltinProtocol::from_id(outside_protocol);
+    let outside_builtin = BuiltinProtocol::from_id(*outside_protocol);
     let child_layer = outside_layer
         .checked_add(1)
         .ok_or(Error::InvalidPaddingBoundary {
@@ -196,7 +196,7 @@ fn validate_link_padding(
 ) -> Result<(), Error> {
     let enclosed_by_link = protocols.iter().take(index).any(|protocol| {
         matches!(
-            BuiltinProtocol::from_id(protocol),
+            BuiltinProtocol::from_id(*protocol),
             Some(
                 BuiltinProtocol::Ethernet
                     | BuiltinProtocol::BsdNull

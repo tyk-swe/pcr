@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
 
 use crate::{
-    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     field::{FieldValue, WireValue},
     layer::{Layer, reflective_layer},
 };
@@ -151,7 +151,7 @@ impl LayerCodec for ArpCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, crate::codec::Error> {
+    ) -> Result<DecodedLayer, crate::codec::Error> {
         let Some(head) = input.first_chunk::<ARP_HEAD_LEN>() else {
             return Err(truncated(NAME, ARP_HEAD_LEN, input.len()));
         };
@@ -192,7 +192,7 @@ impl LayerCodec for ArpCodec {
             target_hardware,
             target_protocol: Ipv4Addr::from(target_protocol),
         };
-        Ok(DecodedLayerValue {
+        Ok(DecodedLayer {
             layer: Box::new(layer),
             consumed: ARP_ETHERNET_IPV4_LEN,
             payload_len: 0,

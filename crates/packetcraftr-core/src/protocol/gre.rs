@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::{Diagnostic, GRE_CHECKSUM},
     field::{FieldValue, WireValue},
     layer::{Layer, reflect_get, reflect_set, reflective_layer},
@@ -172,7 +172,7 @@ impl LayerCodec for GreCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, crate::codec::Error> {
+    ) -> Result<DecodedLayer, crate::codec::Error> {
         let Some(header) = input.first_chunk::<GRE_BASE_LEN>() else {
             return Err(truncated(NAME, GRE_BASE_LEN, input.len()));
         };
@@ -227,7 +227,7 @@ impl LayerCodec for GreCodec {
             reserved_bits,
         };
         let payload_len = input.len().saturating_sub(header_len);
-        Ok(DecodedLayerValue {
+        Ok(DecodedLayer {
             fields: gre_layout(&layer),
             layer: Box::new(layer),
             consumed: header_len,

@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::Diagnostic,
     field::FieldValue,
     layer::{Layer, reflective_layer},
@@ -123,7 +123,7 @@ impl LayerCodec for EspCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, crate::codec::Error> {
+    ) -> Result<DecodedLayer, crate::codec::Error> {
         let Some(header) = input.first_chunk::<ESP_LEN>() else {
             return Err(truncated(NAME, ESP_LEN, input.len()));
         };
@@ -138,7 +138,7 @@ impl LayerCodec for EspCodec {
                 .at_field("sequence"),
             );
         }
-        Ok(DecodedLayerValue {
+        Ok(DecodedLayer {
             fields: esp_layout(),
             layer: Box::new(Esp {
                 spi: u32::from_be_bytes([header[0], header[1], header[2], header[3]]),

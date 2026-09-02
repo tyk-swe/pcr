@@ -9,8 +9,8 @@ use super::expiry::ExpiryIndex;
 
 use state::TcpFlowState;
 
-mod contract;
-pub use contract::{Error, Event, FlowKey, MalformedError, ResourceError, ScopedFlowKey, Segment};
+mod model;
+pub use model::{Error, Event, FlowKey, MalformedError, ResourceError, ScopedFlowKey, Segment};
 mod engine;
 mod limits;
 pub use limits::{Limits, MAX_BYTES_PER_FLOW};

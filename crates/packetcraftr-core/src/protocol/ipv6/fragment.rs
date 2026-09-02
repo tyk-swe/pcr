@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     field::{FieldValue, WireValue},
     layer::{Layer, reflective_layer},
     registry::Discriminator,
@@ -132,7 +132,7 @@ impl LayerCodec for FragmentCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, crate::codec::Error> {
+    ) -> Result<DecodedLayer, crate::codec::Error> {
         let Some(header) = input.first_chunk::<8>() else {
             return Err(truncated(NAME, 8, input.len()));
         };
@@ -141,7 +141,7 @@ impl LayerCodec for FragmentCodec {
             return Err(invalid(NAME, "reserved bits are non-zero"));
         }
         let fragment_offset = offset_flags >> 3;
-        Ok(DecodedLayerValue {
+        Ok(DecodedLayer {
             layer: Box::new(Fragment {
                 next_header: WireValue::Exact(header[0]),
                 fragment_offset,

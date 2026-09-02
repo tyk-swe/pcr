@@ -252,7 +252,7 @@ mod tests {
     use packetcraftr_core::Packet;
     use packetcraftr_core::build::{Builder, BuiltPacket};
     use packetcraftr_core::codec::{
-        DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext,
+        DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext,
     };
     use packetcraftr_core::error::Classified;
     use packetcraftr_core::field::FieldValue;
@@ -303,9 +303,9 @@ mod tests {
             &self,
             input: &[u8],
             _context: &LayerDecodeContext<'_>,
-        ) -> Result<DecodedLayerValue, packetcraftr_core::codec::Error> {
+        ) -> Result<DecodedLayer, packetcraftr_core::codec::Error> {
             let mut decoded =
-                DecodedLayerValue::terminal(Box::new(Raw::new(input.to_vec())), input.len());
+                DecodedLayer::terminal(Box::new(Raw::new(input.to_vec())), input.len());
             decoded.fields = raw_layout(input.len());
             Ok(decoded)
         }

@@ -22,11 +22,7 @@ pub(crate) fn payload_without_padding<'a>(
             layer
                 .as_any()
                 .downcast_ref::<Padding>()
-                .is_some_and(|padding| {
-                    padding
-                        .outside_layer
-                        .is_none_or(|outside_layer| context.index >= outside_layer)
-                })
+                .is_some_and(|padding| padding.excluded_from(context.index))
         })
         .try_fold(0_usize, |total, layer| {
             let length = layer

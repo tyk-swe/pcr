@@ -42,7 +42,7 @@ impl Dissector {
                 limit: options.max_packet_size,
             });
         }
-        let Some(root) = self.registry.root_for_link_type(frame.link_type.0).cloned() else {
+        let Some(root) = self.registry.root_for_link_type(frame.link_type.0) else {
             let link_type = frame.link_type.0;
             return Ok(raw_decoded_frame(
                 frame,

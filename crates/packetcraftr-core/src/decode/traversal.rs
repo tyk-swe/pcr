@@ -13,7 +13,7 @@ pub(super) struct TraversalScope {
 impl TraversalScope {
     pub(super) fn new(root: &crate::layer::Id) -> Self {
         Self {
-            allow_trailing_padding: link_scope_allows_padding(BuiltinProtocol::from_id(root)),
+            allow_trailing_padding: link_scope_allows_padding(BuiltinProtocol::from_id(*root)),
             network: None,
         }
     }
@@ -37,11 +37,11 @@ impl TraversalScope {
         parent: &crate::layer::Id,
         child: Option<&crate::layer::Id>,
     ) {
-        if BuiltinProtocol::from_id(parent).is_some_and(BuiltinProtocol::is_encapsulation_boundary)
+        if BuiltinProtocol::from_id(*parent).is_some_and(BuiltinProtocol::is_encapsulation_boundary)
         {
             self.network = None;
             self.allow_trailing_padding =
-                link_scope_allows_padding(child.and_then(BuiltinProtocol::from_id));
+                link_scope_allows_padding(child.copied().and_then(BuiltinProtocol::from_id));
         }
     }
 }

@@ -25,15 +25,22 @@ impl ByteRange {
         self.end.saturating_sub(self.start)
     }
 
+    /// The range moved `amount` bytes later, unless that overflows.
+    pub(crate) fn shifted(self, amount: usize) -> Option<Self> {
+        Some(Self {
+            start: self.start.checked_add(amount)?,
+            end: self.end.checked_add(amount)?,
+        })
+    }
+
     pub(crate) fn checked_shift(&mut self, amount: usize) -> bool {
-        let (Some(start), Some(end)) =
-            (self.start.checked_add(amount), self.end.checked_add(amount))
-        else {
-            return false;
-        };
-        self.start = start;
-        self.end = end;
-        true
+        match self.shifted(amount) {
+            Some(shifted) => {
+                *self = shifted;
+                true
+            }
+            None => false,
+        }
     }
 }
 
@@ -52,22 +59,27 @@ pub struct LayerLayout {
 }
 
 impl LayerLayout {
+    /// Moves the layer and every field `amount` bytes later, leaving the
+    /// layout untouched when any range would overflow.
     pub(crate) fn checked_shift(&mut self, amount: usize) -> bool {
-        if self.range.start.checked_add(amount).is_none()
-            || self.range.end.checked_add(amount).is_none()
-            || self.fields.iter().any(|field| {
-                field.range.start.checked_add(amount).is_none()
-                    || field.range.end.checked_add(amount).is_none()
-            })
-        {
+        let Some(range) = self.range.shifted(amount) else {
             return false;
-        }
-        let shifted = self.range.checked_shift(amount);
-        debug_assert!(shifted);
-        for field in &mut self.fields {
-            let shifted = field.range.checked_shift(amount);
-            debug_assert!(shifted);
-        }
+        };
+        let Some(fields) = self
+            .fields
+            .iter()
+            .map(|field| {
+                Some(FieldLayout {
+                    name: field.name,
+                    range: field.range.shifted(amount)?,
+                })
+            })
+            .collect::<Option<Vec<_>>>()
+        else {
+            return false;
+        };
+        self.range = range;
+        self.fields = fields;
         true
     }
 }

@@ -9,7 +9,7 @@ use std::net::{IpAddr, Ipv4Addr};
 use bytes::Bytes;
 
 use crate::{
-    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::{Diagnostic, IPV4_CHECKSUM},
     field::{FieldValue, WireValue},
     layer::{Layer, reflective_layer},
@@ -197,7 +197,7 @@ impl LayerCodec for Ipv4Codec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, crate::codec::Error> {
+    ) -> Result<DecodedLayer, crate::codec::Error> {
         let Some(header) = input.first_chunk::<IPV4_MIN_LEN>() else {
             return Err(truncated(NAME, IPV4_MIN_LEN, input.len()));
         };
@@ -254,7 +254,7 @@ impl LayerCodec for Ipv4Codec {
             );
         }
         let payload_len = total_length.saturating_sub(header_len);
-        Ok(DecodedLayerValue {
+        Ok(DecodedLayer {
             layer: Box::new(Ipv4 {
                 dscp_ecn: header[1],
                 total_length: WireValue::Exact(total_length_field),

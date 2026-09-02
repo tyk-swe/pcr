@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use crate::{
-    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::Diagnostic,
     field::FieldValue,
     layer::{Layer, Malformed, Padding, Raw},
@@ -95,8 +95,8 @@ impl LayerCodec for RawCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, crate::codec::Error> {
-        let mut decoded = DecodedLayerValue::terminal(
+    ) -> Result<DecodedLayer, crate::codec::Error> {
+        let mut decoded = DecodedLayer::terminal(
             Box::new(Raw::new(Bytes::copy_from_slice(input))),
             input.len(),
         );
@@ -145,8 +145,8 @@ impl LayerCodec for MalformedCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, crate::codec::Error> {
-        let mut decoded = DecodedLayerValue::terminal(
+    ) -> Result<DecodedLayer, crate::codec::Error> {
+        let mut decoded = DecodedLayer::terminal(
             Box::new(Malformed::new(
                 None,
                 Bytes::copy_from_slice(input),
@@ -193,8 +193,8 @@ impl LayerCodec for PaddingCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, crate::codec::Error> {
-        let mut decoded = DecodedLayerValue::terminal(
+    ) -> Result<DecodedLayer, crate::codec::Error> {
+        let mut decoded = DecodedLayer::terminal(
             Box::new(Padding::new(Bytes::copy_from_slice(input))),
             input.len(),
         );

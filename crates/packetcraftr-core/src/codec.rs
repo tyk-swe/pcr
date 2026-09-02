@@ -127,7 +127,7 @@ pub struct NetworkEnvelope {
     pub destination: IpAddr,
 }
 
-pub struct DecodedLayerValue {
+pub struct DecodedLayer {
     pub layer: Box<dyn Layer>,
     /// Number of leading input bytes consumed by this layer. The child
     /// payload, when present, begins at this offset.
@@ -141,7 +141,7 @@ pub struct DecodedLayerValue {
     pub network: Option<NetworkEnvelope>,
 }
 
-impl DecodedLayerValue {
+impl DecodedLayer {
     pub fn terminal(layer: Box<dyn Layer>, consumed: usize) -> Self {
         Self {
             layer,
@@ -183,11 +183,8 @@ pub trait LayerCodec: Send + Sync + fmt::Debug {
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, Error>;
 
-    fn decode(
-        &self,
-        input: &[u8],
-        context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, Error>;
+    fn decode(&self, input: &[u8], context: &LayerDecodeContext<'_>)
+    -> Result<DecodedLayer, Error>;
 
     /// Constructs one layer from caller-supplied reflective fields.
     ///

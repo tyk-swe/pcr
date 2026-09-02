@@ -283,16 +283,15 @@ where
             Some(flow) => Some(udp_streams.assign(flow, number, limits.max_flows)?),
             None => None,
         };
-        let filter_derived = derived
-            .iter()
-            .map(|derived| FilterDerivedPacket {
-                decoded: &derived.decoded,
-                replayed_prefix_layers: derived.replayed_prefix_layers,
-            })
-            .collect::<Vec<_>>();
-
-        if let Some(filter) = options.filter
-            && !filter
+        if let Some(filter) = options.filter {
+            let filter_derived = derived
+                .iter()
+                .map(|derived| FilterDerivedPacket {
+                    decoded: &derived.decoded,
+                    replayed_prefix_layers: derived.replayed_prefix_layers,
+                })
+                .collect::<Vec<_>>();
+            if !filter
                 .matches(&FilterContext {
                     decoded: &decoded,
                     derived: &filter_derived,
@@ -301,8 +300,9 @@ where
                     udp_stream,
                 })
                 .map_err(|source| Error::Filter { number, source })?
-        {
-            continue;
+            {
+                continue;
+            }
         }
         frames_matched = frames_matched.saturating_add(1);
 

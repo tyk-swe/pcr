@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use crate::{
-    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     field::{FieldValue, WireValue},
     layer::{Layer, reflective_layer},
     registry::Discriminator,
@@ -155,7 +155,7 @@ impl LayerCodec for LlcCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, crate::codec::Error> {
+    ) -> Result<DecodedLayer, crate::codec::Error> {
         let Some(head) = input.first_chunk::<LLC_MIN_LEN>() else {
             return Err(truncated(LLC_NAME, LLC_MIN_LEN, input.len()));
         };
@@ -181,7 +181,7 @@ impl LayerCodec for LlcCodec {
             next.push(Discriminator(sap_pair));
         }
         next.push(Discriminator(0));
-        Ok(DecodedLayerValue {
+        Ok(DecodedLayer {
             fields: llc_layout(header_len),
             layer: Box::new(Llc {
                 dsap,
@@ -339,14 +339,14 @@ impl LayerCodec for SnapCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, crate::codec::Error> {
+    ) -> Result<DecodedLayer, crate::codec::Error> {
         let Some(header) = input.first_chunk::<SNAP_LEN>() else {
             return Err(truncated(SNAP_NAME, SNAP_LEN, input.len()));
         };
         let oui = u32::from_be_bytes([0, header[0], header[1], header[2]]);
         let protocol_id = u16::from_be_bytes([header[3], header[4]]);
         let payload_len = input.len().saturating_sub(SNAP_LEN);
-        Ok(DecodedLayerValue {
+        Ok(DecodedLayer {
             fields: snap_layout(),
             layer: Box::new(Snap {
                 oui,

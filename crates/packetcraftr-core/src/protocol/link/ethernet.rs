@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
     layer::{Layer, reflective_layer},
@@ -222,7 +222,7 @@ impl LayerCodec for EthernetCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, crate::codec::Error> {
+    ) -> Result<DecodedLayer, crate::codec::Error> {
         let (Some(destination), Some(source), Some(ether_type)) = (
             ethernet_chunk::<MAC_LEN>(input, 0),
             ethernet_chunk::<MAC_LEN>(input, MAC_LEN),
@@ -237,7 +237,7 @@ impl LayerCodec for EthernetCodec {
             input.len().saturating_sub(ETHERNET_LEN),
             ETHERNET_LEN,
         )?;
-        Ok(DecodedLayerValue {
+        Ok(DecodedLayer {
             layer: Box::new(Ethernet {
                 destination,
                 source,

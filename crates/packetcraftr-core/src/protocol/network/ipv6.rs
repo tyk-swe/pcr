@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv6Addr};
 
 use crate::{
-    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
     layer::{Layer, reflective_layer},
@@ -137,7 +137,7 @@ impl LayerCodec for Ipv6Codec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, crate::codec::Error> {
+    ) -> Result<DecodedLayer, crate::codec::Error> {
         let Some(header) = input.first_chunk::<IPV6_LEN>() else {
             return Err(truncated(NAME, IPV6_LEN, input.len()));
         };
@@ -179,7 +179,7 @@ impl LayerCodec for Ipv6Codec {
             .ok_or_else(|| truncated(NAME, IPV6_LEN, input.len()))?;
         let destination = Ipv6Addr::from(*destination_bytes);
         let next = header[6];
-        Ok(DecodedLayerValue {
+        Ok(DecodedLayer {
             layer: Box::new(Ipv6 {
                 traffic_class: ((first >> 20) & 0xff) as u8,
                 flow_label: first & 0x000f_ffff,

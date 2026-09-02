@@ -9,7 +9,7 @@ use std::fmt::Write as _;
 use bytes::Bytes;
 
 use crate::{
-    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     field::FieldValue,
     layer::{Layer, reflective_layer},
 };
@@ -290,9 +290,9 @@ impl LayerCodec for DnsCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, crate::codec::Error> {
+    ) -> Result<DecodedLayer, crate::codec::Error> {
         let layer = Dns::from_wire(Bytes::copy_from_slice(input))?;
-        Ok(DecodedLayerValue {
+        Ok(DecodedLayer {
             layer: Box::new(layer),
             consumed: input.len(),
             payload_len: 0,

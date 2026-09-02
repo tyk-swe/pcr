@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     field::FieldValue,
     layer::{Layer, reflective_layer},
     registry::Discriminator,
@@ -94,12 +94,12 @@ impl LayerCodec for L2tpv3Codec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, crate::codec::Error> {
+    ) -> Result<DecodedLayer, crate::codec::Error> {
         let Some(header) = input.first_chunk::<L2TPV3_LEN>() else {
             return Err(truncated(NAME, L2TPV3_LEN, input.len()));
         };
         let payload_len = input.len().saturating_sub(L2TPV3_LEN);
-        Ok(DecodedLayerValue {
+        Ok(DecodedLayer {
             fields: l2tpv3_layout(),
             layer: Box::new(L2tpv3 {
                 session_id: u32::from_be_bytes(*header),

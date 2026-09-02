@@ -43,50 +43,40 @@ impl Registry {
         Builder::new()
     }
 
-    pub fn codec<Q>(&self, protocol: &Q) -> Option<&Arc<dyn LayerCodec>>
-    where
-        crate::layer::Id: std::borrow::Borrow<Q>,
-        Q: Ord + ?Sized,
-    {
+    /// The codec registered under a canonical protocol name.
+    pub fn codec(&self, protocol: &str) -> Option<&Arc<dyn LayerCodec>> {
         self.codecs.get(protocol)
     }
 
+    /// The codec a canonical name or alias resolves to, ignoring case.
     pub fn codec_named(&self, name: &str) -> Option<&Arc<dyn LayerCodec>> {
-        let normalized = name.trim().to_ascii_lowercase();
-        let protocol = self.aliases.get(&normalized)?;
-        self.codecs.get(protocol)
+        self.codecs.get(&self.protocol_named(name)?)
     }
 
-    pub fn protocol_named(&self, name: &str) -> Option<&crate::layer::Id> {
-        self.aliases.get(&name.trim().to_ascii_lowercase())
+    /// Resolves a canonical name or alias to its protocol, ignoring case.
+    pub fn protocol_named(&self, name: &str) -> Option<crate::layer::Id> {
+        self.aliases.get(&name.trim().to_ascii_lowercase()).copied()
     }
 
-    pub fn root_for_link_type(&self, link_type: u32) -> Option<&crate::layer::Id> {
-        self.roots.get(&link_type)
+    pub fn root_for_link_type(&self, link_type: u32) -> Option<crate::layer::Id> {
+        self.roots.get(&link_type).copied()
     }
 
-    pub fn child_for<Q>(
+    /// The winning child that `discriminator` selects under `parent`.
+    pub fn child_for(
         &self,
-        parent: &Q,
+        parent: &str,
         discriminator: Discriminator,
-    ) -> Option<&crate::layer::Id>
-    where
-        crate::layer::Id: std::borrow::Borrow<Q>,
-        Q: Eq + std::hash::Hash + ?Sized,
-    {
+    ) -> Option<crate::layer::Id> {
         self.bindings
             .get(parent)?
             .get(&discriminator)
             .and_then(|bindings| bindings.first())
-            .map(|binding| &binding.child)
+            .map(|binding| binding.child)
     }
 
-    pub fn discriminator_for<P, C>(&self, parent: &P, child: &C) -> Option<Discriminator>
-    where
-        crate::layer::Id: std::borrow::Borrow<P> + std::borrow::Borrow<C>,
-        P: Eq + std::hash::Hash + ?Sized,
-        C: Eq + std::hash::Hash + ?Sized,
-    {
+    /// The discriminator under which `parent` selects `child`.
+    pub fn discriminator_for(&self, parent: &str, child: &str) -> Option<Discriminator> {
         self.reverse_bindings
             .get(parent)?
             .get(child)
@@ -101,11 +91,7 @@ impl Registry {
     /// answers the question a protocol reference cannot otherwise answer:
     /// which ports or EtherTypes reach this protocol. Only winning bindings
     /// appear; a binding another child outranks is not listed.
-    pub fn parent_bindings<Q>(&self, child: &Q) -> Vec<(&crate::layer::Id, Discriminator)>
-    where
-        crate::layer::Id: std::borrow::Borrow<Q>,
-        Q: Eq + std::hash::Hash + ?Sized,
-    {
+    pub fn parent_bindings(&self, child: &str) -> Vec<(crate::layer::Id, Discriminator)> {
         let mut bindings: Vec<_> = self
             .reverse_bindings
             .iter()
@@ -113,20 +99,16 @@ impl Registry {
             .flat_map(|(parent, entries)| {
                 entries
                     .iter()
-                    .map(move |entry| (parent, entry.discriminator))
+                    .map(move |entry| (*parent, entry.discriminator))
             })
             .collect();
         bindings
-            .sort_unstable_by(|left, right| left.0.cmp(right.0).then_with(|| left.1.cmp(&right.1)));
+            .sort_unstable_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
         bindings.dedup();
         bindings
     }
 
-    pub fn matcher<Q>(&self, protocol: &Q) -> Option<&Arc<dyn ResponseMatcher>>
-    where
-        crate::layer::Id: std::borrow::Borrow<Q>,
-        Q: Ord + ?Sized,
-    {
+    pub fn matcher(&self, protocol: &str) -> Option<&Arc<dyn ResponseMatcher>> {
         self.matchers.get(protocol)
     }
 
@@ -139,11 +121,7 @@ impl Registry {
     /// Schemas are captured once, when the registry is built, through each
     /// codec's schema-publication hook. Decode-only codecs may publish a
     /// schema even when they cannot construct a layer.
-    pub fn schema<Q>(&self, protocol: &Q) -> Option<&'static crate::layer::Schema>
-    where
-        crate::layer::Id: std::borrow::Borrow<Q>,
-        Q: Ord + ?Sized,
-    {
+    pub fn schema(&self, protocol: &str) -> Option<&'static crate::layer::Schema> {
         self.schemas.get(protocol).copied()
     }
 

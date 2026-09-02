@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use crate::{
-    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
     layer::{Layer, reflective_layer},
@@ -184,7 +184,7 @@ impl LayerCodec for GeneveCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, crate::codec::Error> {
+    ) -> Result<DecodedLayer, crate::codec::Error> {
         let Some(header) = input.first_chunk::<GENEVE_BASE_LEN>() else {
             return Err(truncated(NAME, GENEVE_BASE_LEN, input.len()));
         };
@@ -259,7 +259,7 @@ impl LayerCodec for GeneveCodec {
             options,
         };
         let payload_len = input.len().saturating_sub(header_len);
-        Ok(DecodedLayerValue {
+        Ok(DecodedLayer {
             fields: geneve_layout(header_len),
             layer: Box::new(layer),
             consumed: header_len,
@@ -390,7 +390,7 @@ mod tests {
         GeneveCodec.encode(layer, &[], &context)
     }
 
-    fn decode(input: &[u8]) -> Result<DecodedLayerValue, crate::codec::Error> {
+    fn decode(input: &[u8]) -> Result<DecodedLayer, crate::codec::Error> {
         let registry = crate::protocol::builtin::registry();
         let context = LayerDecodeContext {
             registry: &registry,

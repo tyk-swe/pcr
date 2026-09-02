@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::Diagnostic,
     field::FieldValue,
     layer::{Layer, reflective_layer},
@@ -128,7 +128,7 @@ impl LayerCodec for VxlanCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, crate::codec::Error> {
+    ) -> Result<DecodedLayer, crate::codec::Error> {
         let Some(header) = input.first_chunk::<VXLAN_LEN>() else {
             return Err(truncated(NAME, VXLAN_LEN, input.len()));
         };
@@ -160,7 +160,7 @@ impl LayerCodec for VxlanCodec {
             reserved2,
         };
         let payload_len = input.len().saturating_sub(VXLAN_LEN);
-        Ok(DecodedLayerValue {
+        Ok(DecodedLayer {
             fields: vxlan_layout(),
             layer: Box::new(layer),
             consumed: VXLAN_LEN,

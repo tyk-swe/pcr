@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use crate::{
-    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::{Diagnostic, IGMP_CHECKSUM},
     field::{FieldValue, WireValue},
     layer::{Layer, reflective_layer},
@@ -133,7 +133,7 @@ impl LayerCodec for IgmpCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, crate::codec::Error> {
+    ) -> Result<DecodedLayer, crate::codec::Error> {
         let Some(header) = input.first_chunk::<IGMP_MIN_LEN>() else {
             return Err(truncated(NAME, IGMP_MIN_LEN, input.len()));
         };
@@ -146,7 +146,7 @@ impl LayerCodec for IgmpCodec {
         let body = input
             .get(IGMP_HEADER_LEN..)
             .ok_or_else(|| truncated(NAME, IGMP_MIN_LEN, input.len()))?;
-        Ok(DecodedLayerValue {
+        Ok(DecodedLayer {
             layer: Box::new(Igmp {
                 igmp_type: header[0],
                 code: header[1],

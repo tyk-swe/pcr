@@ -440,9 +440,7 @@ pub(crate) fn transport_payload(decoded: &DecodedPacket, transport_index: usize)
         .skip(transport_index.saturating_add(1))
     {
         if let Some(padding) = layer.as_any().downcast_ref::<Padding>()
-            && padding
-                .outside_layer
-                .is_none_or(|outside| outside <= transport_index)
+            && padding.excluded_from(transport_index)
         {
             continue;
         }

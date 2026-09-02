@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     field::{FieldValue, WireValue},
     layer::{Layer, reflective_layer},
     registry::Discriminator,
@@ -150,7 +150,7 @@ impl LayerCodec for LinuxSllCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, crate::codec::Error> {
+    ) -> Result<DecodedLayer, crate::codec::Error> {
         let Some(header) = input.first_chunk::<16>() else {
             return Err(truncated(SLL_NAME, 16, input.len()));
         };
@@ -161,7 +161,7 @@ impl LayerCodec for LinuxSllCodec {
         let mut address = [0; 8];
         address.copy_from_slice(&header[6..14]);
         let protocol_value = u16::from_be_bytes([header[14], header[15]]);
-        Ok(DecodedLayerValue {
+        Ok(DecodedLayer {
             layer: Box::new(LinuxSll {
                 packet_type: u16::from_be_bytes([header[0], header[1]]),
                 arp_hardware_type: u16::from_be_bytes([header[2], header[3]]),
@@ -244,7 +244,7 @@ impl LayerCodec for LinuxSll2Codec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, crate::codec::Error> {
+    ) -> Result<DecodedLayer, crate::codec::Error> {
         let Some(header) = input.first_chunk::<20>() else {
             return Err(truncated(SLL2_NAME, 20, input.len()));
         };
@@ -257,7 +257,7 @@ impl LayerCodec for LinuxSll2Codec {
         let protocol_value = u16::from_be_bytes([header[0], header[1]]);
         let mut address = [0; 8];
         address.copy_from_slice(&header[12..20]);
-        Ok(DecodedLayerValue {
+        Ok(DecodedLayer {
             layer: Box::new(LinuxSll2 {
                 protocol: WireValue::Exact(protocol_value),
                 interface_index: u32::from_be_bytes([header[4], header[5], header[6], header[7]]),

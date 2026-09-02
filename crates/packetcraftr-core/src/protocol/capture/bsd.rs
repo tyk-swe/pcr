@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::Diagnostic,
     field::FieldValue,
     layer::{Layer, reflective_layer},
@@ -159,7 +159,7 @@ impl LayerCodec for BsdNullCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, crate::codec::Error> {
+    ) -> Result<DecodedLayer, crate::codec::Error> {
         decode_family(input, FamilyHeader::Null)
     }
 
@@ -194,7 +194,7 @@ impl LayerCodec for BsdLoopCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, crate::codec::Error> {
+    ) -> Result<DecodedLayer, crate::codec::Error> {
         decode_family(input, FamilyHeader::Loop)
     }
 
@@ -209,7 +209,7 @@ impl LayerCodec for BsdLoopCodec {
 pub(crate) fn decode_family(
     input: &[u8],
     header: FamilyHeader,
-) -> Result<DecodedLayerValue, crate::codec::Error> {
+) -> Result<DecodedLayer, crate::codec::Error> {
     let name = match header {
         FamilyHeader::Null => NULL_NAME,
         FamilyHeader::Loop => LOOP_NAME,
@@ -230,7 +230,7 @@ pub(crate) fn decode_family(
         FamilyHeader::Loop => Box::new(BsdLoop { family }),
         FamilyHeader::Null => Box::new(BsdNull { family, byte_order }),
     };
-    Ok(DecodedLayerValue {
+    Ok(DecodedLayer {
         layer,
         consumed: 4,
         payload_len: input.len().saturating_sub(4),

@@ -30,7 +30,7 @@ use std::fmt::Write as _;
 use bytes::Bytes;
 
 use crate::{
-    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::Diagnostic,
     field::FieldValue,
     layer::{Layer, Raw, raw_layout, reflective_layer},
@@ -383,7 +383,7 @@ impl LayerCodec for TlsCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, crate::codec::Error> {
+    ) -> Result<DecodedLayer, crate::codec::Error> {
         let dissection = looks_like_record_start(input)
             .then(|| Tls::from_records(input))
             .flatten();
@@ -395,7 +395,7 @@ impl LayerCodec for TlsCodec {
         else {
             return raw_segment(input);
         };
-        Ok(DecodedLayerValue {
+        Ok(DecodedLayer {
             layer: Box::new(layer),
             consumed: input.len().saturating_sub(remainder),
             payload_len: remainder,
@@ -425,8 +425,8 @@ impl LayerCodec for TlsCodec {
 /// Preserves a segment that is not TLS as opaque bytes, with no diagnostics:
 /// a bound port carrying something else, or the middle of a split record, is
 /// not a defect.
-fn raw_segment(input: &[u8]) -> Result<DecodedLayerValue, crate::codec::Error> {
-    let mut decoded = DecodedLayerValue::terminal(
+fn raw_segment(input: &[u8]) -> Result<DecodedLayer, crate::codec::Error> {
+    let mut decoded = DecodedLayer::terminal(
         Box::new(Raw::new(Bytes::copy_from_slice(input))),
         input.len(),
     );

@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     field::FieldValue,
     layer::{Layer, reflective_layer},
     registry::Discriminator,
@@ -134,7 +134,7 @@ impl LayerCodec for MplsCodec {
         &self,
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, crate::codec::Error> {
+    ) -> Result<DecodedLayer, crate::codec::Error> {
         let Some(header) = input.first_chunk::<MPLS_LEN>() else {
             return Err(truncated(NAME, MPLS_LEN, input.len()));
         };
@@ -160,7 +160,7 @@ impl LayerCodec for MplsCodec {
         } else {
             Vec::new()
         };
-        Ok(DecodedLayerValue {
+        Ok(DecodedLayer {
             fields: mpls_layout(),
             layer: Box::new(layer),
             consumed: MPLS_LEN,

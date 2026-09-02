@@ -131,12 +131,12 @@ macro_rules! define_builtin_protocol {
                 None
             }
 
-            pub fn from_id(protocol: &Id) -> Option<Self> {
+            pub fn from_id(protocol: Id) -> Option<Self> {
                 Self::from_name(protocol.as_str())
             }
 
             pub fn of(layer: &dyn Layer) -> Option<Self> {
-                Self::from_id(&layer.schema().protocol)
+                Self::from_id(layer.schema().protocol)
             }
 
             /// Whether `layer` is an instance of this built-in protocol.

@@ -174,7 +174,7 @@ fn specs_for(
     fields: &[&'static str],
     path: &str,
 ) -> Result<Vec<FieldSpec>, Error> {
-    let Some(schema) = registry.schema(protocol) else {
+    let Some(schema) = registry.schema(protocol.as_str()) else {
         // Decode-only schemas are unknown until runtime; defer static type checks.
         return Ok(Vec::new());
     };
@@ -225,9 +225,9 @@ pub(super) fn resolve(path: &str, registry: &Registry, offset: usize) -> Result<
     }
 
     if let Some((head, tail)) = stripped.split_once('.') {
-        let protocol = *registry.protocol_named(head).ok_or_else(unknown)?;
+        let protocol = registry.protocol_named(head).ok_or_else(unknown)?;
         let schema = registry
-            .schema(&protocol)
+            .schema(protocol.as_str())
             .ok_or_else(|| Error::UnresolvableProtocol {
                 path: path.to_owned(),
                 protocol,
@@ -256,7 +256,7 @@ pub(super) fn resolve(path: &str, registry: &Registry, offset: usize) -> Result<
 
     let protocol = registry.protocol_named(&stripped).ok_or_else(unknown)?;
     Ok(Resolved::Layer {
-        protocol: *protocol,
+        protocol,
         occurrence,
     })
 }

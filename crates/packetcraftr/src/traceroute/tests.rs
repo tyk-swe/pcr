@@ -33,7 +33,7 @@ use super::model::{
 use super::probe::probe_packet;
 use crate::authorization::Operation;
 use crate::target::{Authorized, Authorizer, PolicyAuthorizer, Target};
-use crate::test_fixtures::{AddressListAuthorizer, NoopClock, ScriptedResolver};
+use crate::test_fixtures::{AddressListAuthorizer, NoopClock, RejectingExecutor, ScriptedResolver};
 use crate::{BoundaryError, Stats, target::Family};
 
 fn udp_traceroute_request(target: Target) -> Request {
@@ -73,19 +73,6 @@ impl Authorizer for FixedAuthorizer {
         self.operations
             .push((budget.packets(), budget.wire_bytes()));
         Ok(())
-    }
-}
-
-struct CountingRejectExecutor(Arc<AtomicUsize>);
-
-impl Executor<Batch> for CountingRejectExecutor {
-    fn execute(&mut self, _batch: &Batch) -> Result<Execution, BoundaryError> {
-        self.0.fetch_add(1, Ordering::SeqCst);
-        Err(BoundaryError::new(
-            "stop after authorization",
-            Classification::new("io.test", Kind::Io, None),
-            Vec::new(),
-        ))
     }
 }
 
@@ -365,7 +352,9 @@ fn traceroute_hostname_policy_precedes_resolution_and_probe_execution() {
     let private = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
     let resolver = ScriptedResolver::new([vec![private]]);
     let calls = Arc::new(AtomicUsize::new(0));
-    let mut executor = CountingRejectExecutor(Arc::clone(&calls));
+    let mut executor = RejectingExecutor {
+        calls: Arc::clone(&calls),
+    };
     let policy = private_traceroute_policy();
     let mut authorizer = PolicyAuthorizer::new(&policy, &resolver);
     let error = run(
@@ -413,7 +402,9 @@ fn traceroute_udp_port_overflow_is_rejected_before_authorization_or_execution() 
         &request,
         &mut authorizer,
         &packetcraftr_core::protocol::builtin::registry(),
-        &mut CountingRejectExecutor(Arc::clone(&calls)),
+        &mut RejectingExecutor {
+            calls: Arc::clone(&calls),
+        },
         &mut NoopClock,
     )
     .unwrap_err();

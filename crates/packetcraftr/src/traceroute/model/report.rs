@@ -134,31 +134,31 @@ pub struct Summary {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_fixtures::assert_names_match_serialization;
 
     /// One vocabulary: what the CLI prints for a hop is what the JSON document
     /// calls it.
     #[test]
     fn names_match_the_serialized_names() {
-        for status in [ProbeStatus::Response, ProbeStatus::Timeout] {
-            let serialized = serde_json::to_value(status).expect("probe status is a name");
-            assert_eq!(serialized.as_str(), Some(status.as_str()));
-        }
-        for kind in [
-            ResponseKind::Intermediate,
-            ResponseKind::DestinationReached,
-            ResponseKind::Unreachable,
-        ] {
-            let serialized = serde_json::to_value(kind).expect("response kind is a name");
-            assert_eq!(serialized.as_str(), Some(kind.as_str()));
-        }
-        for completion in [
-            Completion::DestinationReached,
-            Completion::Unreachable,
-            Completion::MaximumHops,
-            Completion::Timeout,
-        ] {
-            let serialized = serde_json::to_value(completion).expect("completion is a name");
-            assert_eq!(serialized.as_str(), Some(completion.as_str()));
-        }
+        assert_names_match_serialization([ProbeStatus::Response, ProbeStatus::Timeout], |value| {
+            value.as_str()
+        });
+        assert_names_match_serialization(
+            [
+                ResponseKind::Intermediate,
+                ResponseKind::DestinationReached,
+                ResponseKind::Unreachable,
+            ],
+            |value| value.as_str(),
+        );
+        assert_names_match_serialization(
+            [
+                Completion::DestinationReached,
+                Completion::Unreachable,
+                Completion::MaximumHops,
+                Completion::Timeout,
+            ],
+            |value| value.as_str(),
+        );
     }
 }

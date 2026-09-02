@@ -112,26 +112,25 @@ pub struct Summary {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_fixtures::assert_names_match_serialization;
 
     /// One vocabulary: what the CLI prints for a probe is what the JSON
     /// document calls it.
     #[test]
     fn names_match_the_serialized_names() {
-        for classification in [
-            Classification::Open,
-            Classification::Closed,
-            Classification::Filtered,
-            Classification::Unreachable,
-            Classification::Unknown,
-            Classification::Timeout,
-        ] {
-            let serialized =
-                serde_json::to_value(classification).expect("classification is a name");
-            assert_eq!(serialized.as_str(), Some(classification.as_str()));
-        }
-        for status in [ProbeStatus::Response, ProbeStatus::Timeout] {
-            let serialized = serde_json::to_value(status).expect("probe status is a name");
-            assert_eq!(serialized.as_str(), Some(status.as_str()));
-        }
+        assert_names_match_serialization(
+            [
+                Classification::Open,
+                Classification::Closed,
+                Classification::Filtered,
+                Classification::Unreachable,
+                Classification::Unknown,
+                Classification::Timeout,
+            ],
+            |value| value.as_str(),
+        );
+        assert_names_match_serialization([ProbeStatus::Response, ProbeStatus::Timeout], |value| {
+            value.as_str()
+        });
     }
 }

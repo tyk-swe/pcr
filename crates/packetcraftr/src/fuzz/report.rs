@@ -99,17 +99,18 @@ mod tests {
     #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
     use super::*;
+    use crate::test_fixtures::assert_names_match_serialization;
 
     #[test]
     fn names_match_the_serialized_names() {
-        for outcome in [
-            CaseOutcome::Built,
-            CaseOutcome::Rejected,
-            CaseOutcome::Response,
-            CaseOutcome::Timeout,
-        ] {
-            let serialized = serde_json::to_value(outcome).expect("case outcome is a name");
-            assert_eq!(serialized.as_str(), Some(outcome.as_str()));
-        }
+        assert_names_match_serialization(
+            [
+                CaseOutcome::Built,
+                CaseOutcome::Rejected,
+                CaseOutcome::Response,
+                CaseOutcome::Timeout,
+            ],
+            |value| value.as_str(),
+        );
     }
 }

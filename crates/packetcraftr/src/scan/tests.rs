@@ -30,7 +30,9 @@ use super::model::{
 };
 use super::probe::probe_packet;
 use crate::target::{PolicyAuthorizer, Target};
-use crate::test_fixtures::{AddressListAuthorizer, NoopClock, RecordingClock, ScriptedResolver};
+use crate::test_fixtures::{
+    AddressListAuthorizer, NoopClock, RecordingClock, RejectingExecutor, ScriptedResolver,
+};
 use crate::{BoundaryError, Stats, target::Family};
 
 fn private_scan_policy() -> crate::policy::Policy {
@@ -51,21 +53,6 @@ fn tcp_scan_request(target: Target) -> Request {
         timeout: Duration::from_millis(1),
         probes_per_second: None,
         limits: Limits::default(),
-    }
-}
-
-struct CountingRejectExecutor {
-    calls: Arc<AtomicUsize>,
-}
-
-impl Executor<Batch> for CountingRejectExecutor {
-    fn execute(&mut self, _batch: &Batch) -> Result<Execution, BoundaryError> {
-        self.calls.fetch_add(1, Ordering::SeqCst);
-        Err(BoundaryError::new(
-            "stop after authorization",
-            ErrorClassification::new("io.test", Kind::Io, None),
-            Vec::new(),
-        ))
     }
 }
 
@@ -273,7 +260,7 @@ fn scan_batching_attempts_rate_and_timeout_evidence_are_deterministic() {
 fn scan_hostname_policy_denial_precedes_resolution_and_execution() {
     let resolver = ScriptedResolver::new([vec![IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))]]);
     let executor_calls = Arc::new(AtomicUsize::new(0));
-    let mut executor = CountingRejectExecutor {
+    let mut executor = RejectingExecutor {
         calls: Arc::clone(&executor_calls),
     };
     let policy = private_scan_policy();
@@ -302,7 +289,7 @@ fn scan_authorizes_mixed_resolution_answers_before_family_filtering() {
         IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)),
     ]]);
     let executor_calls = Arc::new(AtomicUsize::new(0));
-    let mut executor = CountingRejectExecutor {
+    let mut executor = RejectingExecutor {
         calls: Arc::clone(&executor_calls),
     };
     let mut policy = private_scan_policy();

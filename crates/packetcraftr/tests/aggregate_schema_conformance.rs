@@ -28,9 +28,7 @@ use packetcraftr::core::analysis::stats::{
 use packetcraftr::core::analysis::{IpReassemblyReport, StreamTransport};
 use packetcraftr::core::diagnostic::Diagnostic;
 use packetcraftr::core::frame::{Direction as CaptureDirection, Frame, LinkType};
-use packetcraftr::core::protocol::{
-    builtin, network::Ipv4, support::BUILTIN_PROTOCOLS, transport::Udp,
-};
+use packetcraftr::core::protocol::{BuiltinProtocol, builtin, network::Ipv4, transport::Udp};
 use packetcraftr::core::{Packet, build, decode, fuzz as packet_fuzz, layer::Raw};
 use packetcraftr::netio::capture::Statistics as CaptureStatistics;
 use packetcraftr::netio::interface::{Address, Flags, Id as InterfaceId, Info};
@@ -426,8 +424,9 @@ fn protocols_list_case() -> Value {
     envelope(
         Command::Protocols,
         protocols_output::ListResult {
-            protocols: BUILTIN_PROTOCOLS
+            protocols: BuiltinProtocol::ALL
                 .iter()
+                .copied()
                 .map(protocols_output::Summary::from)
                 .collect(),
         },
@@ -437,12 +436,9 @@ fn protocols_list_case() -> Value {
 
 fn protocols_detail_case() -> Value {
     let registry = builtin::registry();
-    let support = BUILTIN_PROTOCOLS
-        .iter()
-        .find(|support| support.protocol == "ipv4")
-        .expect("ipv4 is a built-in protocol");
+    let protocol = BuiltinProtocol::Ipv4;
     let fields = registry
-        .schema(support.protocol)
+        .schema(protocol.as_str())
         .map(|schema| {
             schema
                 .fields
@@ -453,7 +449,7 @@ fn protocols_detail_case() -> Value {
         })
         .unwrap_or_default();
     let bindings = registry
-        .parent_bindings(support.protocol)
+        .parent_bindings(protocol.as_str())
         .into_iter()
         .map(|(parent, discriminator)| protocols_output::Binding {
             parent: parent.as_str().to_owned(),
@@ -464,7 +460,7 @@ fn protocols_detail_case() -> Value {
         Command::Protocols,
         protocols_output::DetailResult {
             protocol: protocols_output::Detail::new(
-                protocols_output::Summary::from(support),
+                protocols_output::Summary::from(protocol),
                 fields,
                 bindings,
             ),

@@ -3,7 +3,7 @@
 
 //! Runtime-neutral built-in protocol identities and capability metadata.
 
-use super::layer::Layer;
+use crate::layer::{Id, Layer};
 
 /// Authoritative built-in protocol identity and capability catalog.
 ///
@@ -15,8 +15,6 @@ use super::layer::Layer;
 /// bytes it was decoded from. It is false only for a codec that cannot encode
 /// at all — `raw_ip` is a decode-only version dispatcher whose `encode`
 /// always fails, so build IPv4 or IPv6 directly instead.
-#[macro_export]
-#[doc(hidden)]
 macro_rules! builtin_protocol_catalog {
     ($consumer:ident) => {
         $consumer! {
@@ -62,7 +60,6 @@ macro_rules! builtin_protocol_catalog {
     };
 }
 
-#[doc(hidden)]
 pub(crate) use builtin_protocol_catalog;
 
 macro_rules! define_builtin_protocol {
@@ -88,8 +85,23 @@ macro_rules! define_builtin_protocol {
         }
 
         impl BuiltinProtocol {
+            /// Every built-in protocol in stable manifest order.
+            pub const ALL: &'static [Self] = &[$(Self::$variant),*];
+
             pub const fn as_str(self) -> &'static str {
                 match self { $(Self::$variant => $canonical),* }
+            }
+
+            /// Whether a packet document may construct this layer. A protocol
+            /// that is not constructible is decode-only.
+            pub const fn is_constructible(self) -> bool {
+                match self { $(Self::$variant => $constructible),* }
+            }
+
+            /// Whether encoding a decoded layer reproduces its wire bytes
+            /// exactly. False only for a codec that cannot encode at all.
+            pub const fn exact_round_trip(self) -> bool {
+                match self { $(Self::$variant => $exact_round_trip),* }
             }
 
             pub const fn aliases(self) -> &'static [&'static str] {
@@ -119,7 +131,7 @@ macro_rules! define_builtin_protocol {
                 None
             }
 
-            pub fn from_id(protocol: &super::layer::Id) -> Option<Self> {
+            pub fn from_id(protocol: &Id) -> Option<Self> {
                 Self::from_name(protocol.as_str())
             }
 

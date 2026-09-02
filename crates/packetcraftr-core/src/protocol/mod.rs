@@ -11,9 +11,9 @@
 //! a bounded typed header/question summary while retaining their full wire
 //! image for exact round trips.
 //!
-//! [`support::BUILTIN_PROTOCOLS`] reports built-in construction, dissection,
-//! exact-round-trip, matcher, and decode-only capabilities;
-//! [`support::BUILTIN_CAPTURE_ROOTS`] reports capture bindings.
+//! [`BuiltinProtocol`] names every built-in protocol and reports its
+//! construction, exact-round-trip, and matcher capabilities;
+//! [`capture::BUILTIN_CAPTURE_ROOTS`] reports capture bindings.
 //! [`builtin::registry`] constructs the immutable default registry.
 //!
 //! The built-ins focus on packet headers and bounded framing. SCTP chunks are
@@ -24,6 +24,7 @@
 pub mod application;
 pub mod builtin;
 pub mod capture;
+mod catalog;
 mod common;
 pub mod gre;
 pub mod icmp;
@@ -32,12 +33,10 @@ pub mod link;
 mod matcher;
 pub mod network;
 pub mod raw;
-pub mod support;
 pub mod transport;
 pub mod tunnel;
 
-pub use crate::protocol_catalog::BuiltinProtocol;
+pub use catalog::BuiltinProtocol;
 pub use common::{ChecksumAccumulator, checksum, checksum_parts};
 
-#[doc(hidden)]
 pub use matcher::{QuotedIcmpError, QuotedProbeTransport, quoted_icmp_error_kind};

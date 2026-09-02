@@ -24,7 +24,7 @@ use tunnel::{
 };
 
 use crate::protocol::BuiltinProtocol;
-use crate::protocol_catalog::builtin_protocol_catalog;
+use crate::protocol::catalog::builtin_protocol_catalog;
 
 use application::{DnsCodec, TlsCodec};
 

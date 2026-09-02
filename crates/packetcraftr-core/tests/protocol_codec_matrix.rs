@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use packetcraftr_core::frame::{Frame, LinkType};
-use packetcraftr_core::protocol::{builtin, support::BUILTIN_PROTOCOLS};
+use packetcraftr_core::protocol::{BuiltinProtocol, builtin};
 use packetcraftr_core::registry::Registry;
 use packetcraftr_core::{Packet, build, decode};
 
@@ -39,31 +39,35 @@ fn constructible_defaults_either_build_standalone_or_require_declared_context() 
     let mut rejected = Vec::new();
     let mut built_count = 0_usize;
 
-    for support in BUILTIN_PROTOCOLS.iter().filter(|support| support.build) {
+    for protocol in BuiltinProtocol::ALL
+        .iter()
+        .copied()
+        .filter(|protocol| protocol.is_constructible())
+    {
         let codec = registry
-            .codec(support.protocol)
-            .unwrap_or_else(|| panic!("{} should be registered", support.protocol));
+            .codec(protocol.as_str())
+            .unwrap_or_else(|| panic!("{} should be registered", protocol.as_str()));
         let layer = codec.make_layer(&BTreeMap::new()).unwrap_or_else(|error| {
-            panic!("{} default construction failed: {error}", support.protocol)
+            panic!("{} default construction failed: {error}", protocol.as_str())
         });
         let mut packet = Packet::new();
         packet.push_boxed(layer);
 
         let Ok(built) = builder.build(packet, build::Context::default(), build::Options::default())
         else {
-            rejected.push(support.protocol);
+            rejected.push(protocol.as_str());
             continue;
         };
         built_count += 1;
-        assert_eq!(built.packet.len(), 1, "{}", support.protocol);
+        assert_eq!(built.packet.len(), 1, "{}", protocol.as_str());
         assert_eq!(
             built
                 .packet
                 .layer(0)
                 .map(|layer| layer.protocol_id().as_str()),
-            Some(support.protocol),
+            Some(protocol.as_str()),
             "{}",
-            support.protocol
+            protocol.as_str()
         );
         assert!(built.bytes.len() <= build::DEFAULT_MAX_PACKET_SIZE);
     }
@@ -83,43 +87,46 @@ fn exact_round_trip_builtins_decode_their_own_default_wire_image() {
     // which today is never a constructible one; this guard makes adding such a
     // protocol a test failure rather than a silently skipped row.
     assert!(
-        BUILTIN_PROTOCOLS
+        BuiltinProtocol::ALL
             .iter()
-            .filter(|support| support.build)
-            .all(|support| support.exact_round_trip),
+            .filter(|protocol| protocol.is_constructible())
+            .all(|protocol| protocol.exact_round_trip()),
         "a constructible codec that cannot round-trip needs its own coverage"
     );
 
-    for support in BUILTIN_PROTOCOLS
+    for protocol in BuiltinProtocol::ALL
         .iter()
-        .filter(|support| support.build && support.exact_round_trip)
+        .copied()
+        .filter(|protocol| protocol.is_constructible() && protocol.exact_round_trip())
     {
         let codec = registry
-            .codec(support.protocol)
+            .codec(protocol.as_str())
             .expect("codec should exist");
         let mut packet = Packet::new();
         packet.push_boxed(codec.make_layer(&BTreeMap::new()).unwrap_or_else(|error| {
-            panic!("{} default construction failed: {error}", support.protocol)
+            panic!("{} default construction failed: {error}", protocol.as_str())
         }));
         let Ok(first) = builder.build(packet, build::Context::default(), build::Options::default())
         else {
-            rejected.push(support.protocol);
+            rejected.push(protocol.as_str());
             continue;
         };
         round_trip_count += 1;
         let frame = Frame::new(SystemTime::UNIX_EPOCH, ROOT_LINK_TYPE, first.bytes.clone())
-            .unwrap_or_else(|error| panic!("{} default frame failed: {error}", support.protocol));
-        let decoded = decode::Dissector::new(rooted_registry(support.protocol))
+            .unwrap_or_else(|error| panic!("{} default frame failed: {error}", protocol.as_str()));
+        let decoded = decode::Dissector::new(rooted_registry(protocol.as_str()))
             .decode(frame, decode::Options::default())
-            .unwrap_or_else(|error| panic!("{} default decode failed: {error}", support.protocol));
+            .unwrap_or_else(|error| panic!("{} default decode failed: {error}", protocol.as_str()));
         let rebuilt = builder
             .build(
                 decoded.packet,
                 build::Context::default(),
                 build::Options::default(),
             )
-            .unwrap_or_else(|error| panic!("{} decoded rebuild failed: {error}", support.protocol));
-        assert_eq!(rebuilt.bytes, first.bytes, "{}", support.protocol);
+            .unwrap_or_else(|error| {
+                panic!("{} decoded rebuild failed: {error}", protocol.as_str())
+            });
+        assert_eq!(rebuilt.bytes, first.bytes, "{}", protocol.as_str());
     }
     assert!(round_trip_count > REQUIRES_PACKET_CONTEXT_OR_CHILD.len());
     assert_eq!(rejected, REQUIRES_PACKET_CONTEXT_OR_CHILD);

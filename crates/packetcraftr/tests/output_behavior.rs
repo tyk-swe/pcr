@@ -10,7 +10,7 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use packetcraftr::core::error::{Classified, Coordinate, Kind};
 use packetcraftr::core::frame::{Direction as CaptureDirection, Frame, LinkType};
-use packetcraftr::core::protocol::support::BUILTIN_PROTOCOLS;
+use packetcraftr::core::protocol::BuiltinProtocol;
 use packetcraftr::core::{
     diagnostic::Diagnostic, field::FieldKind as PacketFieldKind, layer::FieldSchema,
 };
@@ -338,8 +338,12 @@ fn protocol_output_converts_every_field_kind_and_manifest_capability() {
     assert!(field.derived);
     assert!(!field.required);
 
-    let summaries: Vec<Summary> = BUILTIN_PROTOCOLS.iter().map(Summary::from).collect();
-    assert_eq!(summaries.len(), BUILTIN_PROTOCOLS.len());
+    let summaries: Vec<Summary> = BuiltinProtocol::ALL
+        .iter()
+        .copied()
+        .map(Summary::from)
+        .collect();
+    assert_eq!(summaries.len(), BuiltinProtocol::ALL.len());
     assert!(summaries.iter().any(|protocol| protocol.decode_only));
     assert!(summaries.iter().any(|protocol| protocol.matcher));
     assert!(

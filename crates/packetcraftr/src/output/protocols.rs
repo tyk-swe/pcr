@@ -7,7 +7,7 @@ use serde::Serialize;
 
 use packetcraftr_core::field::FieldKind as CoreFieldKind;
 use packetcraftr_core::layer::FieldSchema;
-use packetcraftr_core::protocol::support;
+use packetcraftr_core::protocol::BuiltinProtocol;
 
 use super::contract::Error as ContractError;
 
@@ -23,20 +23,20 @@ pub struct Summary {
     pub decode_only: bool,
 }
 
-impl From<&support::Protocol> for Summary {
-    fn from(value: &support::Protocol) -> Self {
+impl From<BuiltinProtocol> for Summary {
+    fn from(protocol: BuiltinProtocol) -> Self {
         Self {
-            protocol: value.protocol.to_owned(),
-            aliases: value
-                .aliases
+            protocol: protocol.as_str().to_owned(),
+            aliases: protocol
+                .aliases()
                 .iter()
                 .map(|alias| (*alias).to_owned())
                 .collect(),
-            build: value.build,
-            dissect: value.dissect,
-            exact_round_trip: value.exact_round_trip,
-            matcher: value.matcher,
-            decode_only: value.decode_only,
+            build: protocol.is_constructible(),
+            dissect: true,
+            exact_round_trip: protocol.exact_round_trip(),
+            matcher: protocol.has_matcher(),
+            decode_only: !protocol.is_constructible(),
         }
     }
 }

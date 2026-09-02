@@ -92,6 +92,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- **BREAKING:** link-layer identity types now live in core as `packetcraftr_core::packet::link::{MacAddress, VlanKind, VlanTag}`; `packetcraftr_netio::link` re-exports them, and `packet::semantics::vlan_tags` returns `Vec<VlanTag>` directly (the `VlanMetadata` wrapper and `vlan_metadata` are gone).
+- **BREAKING:** the built-in protocol table is a single source of truth: `packetcraftr_core::protocol::support` was removed in favour of `BuiltinProtocol::ALL`, `BuiltinProtocol::is_constructible`, and `BuiltinProtocol::exact_round_trip`; capture link-type roots are published as `protocol::capture::BUILTIN_CAPTURE_ROOTS`.
 - **Breaking:** `packetcraftr_core::Packet` now lives in the public `packetcraftr_core::packet` module, and the formerly hidden IP semantics (`IpPath`, `TransportKey`, `outer_ip_path`, `live_destinations`, VLAN metadata) are published as `packetcraftr_core::packet::semantics`. The semantics no longer panic on unexpected address families; every failure is reported through `semantics::Error`.
 
 - **BREAKING:** the DNS-over-TCP exchange moved from

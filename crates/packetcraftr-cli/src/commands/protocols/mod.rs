@@ -5,7 +5,7 @@ pub(super) mod arguments;
 
 use packetcraftr::{
     core::error::{Classification, Kind},
-    core::protocol::support,
+    core::protocol::BuiltinProtocol,
     output,
 };
 
@@ -25,8 +25,9 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
 
 fn list_protocols(format: AggregateFormat) -> Result<(), CliError> {
     let result = output::protocols::ListResult {
-        protocols: support::BUILTIN_PROTOCOLS
+        protocols: BuiltinProtocol::ALL
             .iter()
+            .copied()
             .map(output::protocols::Summary::from)
             .collect(),
     };
@@ -53,19 +54,20 @@ fn list_protocols(format: AggregateFormat) -> Result<(), CliError> {
 }
 
 fn describe_protocol(name: &str, format: AggregateFormat) -> Result<(), CliError> {
-    let support = support::BUILTIN_PROTOCOLS
+    let protocol = BuiltinProtocol::ALL
         .iter()
-        .find(|support| {
-            support.protocol.eq_ignore_ascii_case(name)
-                || support
-                    .aliases
+        .copied()
+        .find(|protocol| {
+            protocol.as_str().eq_ignore_ascii_case(name)
+                || protocol
+                    .aliases()
                     .iter()
                     .any(|alias| alias.eq_ignore_ascii_case(name))
         })
         .ok_or_else(|| unknown_protocol(name))?;
     let registry = registry()?;
     let fields = registry
-        .schema(support.protocol)
+        .schema(protocol.as_str())
         .map(|schema| {
             schema
                 .fields
@@ -77,15 +79,18 @@ fn describe_protocol(name: &str, format: AggregateFormat) -> Result<(), CliError
         .map_err(CliError::classified)?
         .unwrap_or_default();
     let bindings = registry
-        .parent_bindings(support.protocol)
+        .parent_bindings(protocol.as_str())
         .into_iter()
         .map(|(parent, discriminator)| output::protocols::Binding {
             parent: parent.as_str().to_owned(),
             discriminator: discriminator.0,
         })
         .collect();
-    let detail =
-        output::protocols::Detail::new(output::protocols::Summary::from(support), fields, bindings);
+    let detail = output::protocols::Detail::new(
+        output::protocols::Summary::from(protocol),
+        fields,
+        bindings,
+    );
     match format {
         AggregateFormat::Text => render_detail(&detail),
         AggregateFormat::Json => emit_aggregate(

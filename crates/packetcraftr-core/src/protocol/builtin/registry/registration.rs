@@ -6,8 +6,8 @@
 use crate::{
     protocol::BuiltinProtocol,
     protocol::{
+        capture::BUILTIN_CAPTURE_ROOTS,
         link::LLC_FRAME_DISCRIMINATOR,
-        support::BUILTIN_CAPTURE_ROOTS,
         tunnel::{
             MPLS_BOTTOM_RAW, MPLS_BOTTOM_VERSION_BASE, MPLS_NEXT_LABEL, PPPOE_DISCOVERY,
             PPPOE_SESSION,
@@ -78,7 +78,7 @@ pub(crate) fn bind_tls_ports(
 
 fn register_link(builder: &mut crate::registry::Builder) -> Result<(), crate::registry::Error> {
     for root in BUILTIN_CAPTURE_ROOTS {
-        builder.bind_link_type(root.link_type, root.protocol)?;
+        builder.bind_link_type(root.link_type.0, root.protocol.as_str())?;
     }
     for parent in [
         BuiltinProtocol::Ethernet,

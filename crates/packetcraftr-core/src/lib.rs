@@ -29,7 +29,6 @@ pub mod layout;
 pub mod matcher;
 pub mod packet;
 pub mod protocol;
-mod protocol_catalog;
 pub mod registry;
 pub mod template;
 

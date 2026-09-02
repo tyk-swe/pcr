@@ -5,8 +5,8 @@
 //! built-in capability tables.
 //!
 //! Call [`registry`] for the immutable default registry. For codec and capture
-//! discovery, use [`super::support::BUILTIN_PROTOCOLS`] and
-//! [`super::support::BUILTIN_CAPTURE_ROOTS`].
+//! discovery, use [`super::BuiltinProtocol::ALL`] and
+//! [`super::capture::BUILTIN_CAPTURE_ROOTS`].
 //!
 //! [`registry_with`] is the seam for callers that need one more binding than
 //! the defaults — remapping a service onto a non-standard port, for instance.

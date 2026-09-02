@@ -9,10 +9,7 @@ use std::sync::Arc;
 
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::protocol::{
-    builtin,
-    network::Ipv4,
-    support::{BUILTIN_CAPTURE_ROOTS, BUILTIN_PROTOCOLS},
-    transport::Udp,
+    BuiltinProtocol, builtin, capture::BUILTIN_CAPTURE_ROOTS, network::Ipv4, transport::Udp,
 };
 use packetcraftr_core::{Packet, build, decode, layer::Raw};
 
@@ -75,27 +72,27 @@ fn ipv4_udp_build_dissect_rebuild_is_exact() {
 fn advertised_protocols_and_capture_roots_are_registered() {
     let registry = builtin::registry();
 
-    for support in BUILTIN_PROTOCOLS {
-        assert_eq!(registry.codec(support.protocol).is_some(), support.dissect);
+    for &protocol in BuiltinProtocol::ALL {
+        assert!(registry.codec(protocol.as_str()).is_some());
         assert_eq!(
-            registry.matcher(support.protocol).is_some(),
-            support.matcher,
+            registry.matcher(protocol.as_str()).is_some(),
+            protocol.has_matcher(),
             "{}",
-            support.protocol
+            protocol.as_str()
         );
-        for alias in support.aliases {
+        for alias in protocol.aliases() {
             assert_eq!(
                 registry.protocol_named(alias).map(|value| value.as_str()),
-                Some(support.protocol)
+                Some(protocol.as_str())
             );
         }
     }
     // The one advertised non-round-tripping codec is the one that cannot
     // encode at all, and it says so instead of failing silently.
-    let not_round_tripping: Vec<&str> = BUILTIN_PROTOCOLS
+    let not_round_tripping: Vec<&str> = BuiltinProtocol::ALL
         .iter()
-        .filter(|support| !support.exact_round_trip)
-        .map(|support| support.protocol)
+        .filter(|protocol| !protocol.exact_round_trip())
+        .map(|protocol| protocol.as_str())
         .collect();
     assert_eq!(not_round_tripping, ["raw_ip"]);
     let error = registry
@@ -123,9 +120,9 @@ fn advertised_protocols_and_capture_roots_are_registered() {
     for root in BUILTIN_CAPTURE_ROOTS {
         assert_eq!(
             registry
-                .root_for_link_type(root.link_type)
+                .root_for_link_type(root.link_type.0)
                 .map(|value| value.as_str()),
-            Some(root.protocol)
+            Some(root.protocol.as_str())
         );
     }
 }

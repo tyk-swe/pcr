@@ -527,13 +527,6 @@ fn live_io_errors_keep_stable_classes_for_every_public_failure_variant() {
             Kind::Internal,
         ),
         (
-            Error::Encapsulation {
-                message: "fixture".to_owned(),
-            },
-            "packet.encapsulation",
-            Kind::Packet,
-        ),
-        (
             Error::InvalidCaptureTimeout {
                 timeout: Duration::ZERO,
                 maximum: capture::MAX_TIMEOUT,

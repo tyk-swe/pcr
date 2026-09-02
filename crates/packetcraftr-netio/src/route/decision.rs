@@ -27,7 +27,7 @@ pub(crate) fn finish_route(
     preferred_source: Option<IpAddr>,
     snapshot: NativeRouteSnapshot,
 ) -> Result<Decision, SystemError> {
-    validate_interface(&snapshot.interface)?;
+    validate_native_interface(&snapshot.interface)?;
     if let Some(hint) = interface_hint {
         validate_interface_hint(hint, &snapshot.interface.id)?;
     }
@@ -136,7 +136,7 @@ fn is_interface_broadcast(destination: IpAddr, interface: &interface::Info) -> b
 }
 
 pub(crate) fn interface_decision(interface: interface::Info) -> Result<Decision, SystemError> {
-    validate_interface(&interface)?;
+    validate_native_interface(&interface)?;
     let mtu =
         interface
             .mtu
@@ -232,10 +232,6 @@ fn validate_interface_hint(
         actual: actual.name.clone(),
         actual_index: actual.index,
     })
-}
-
-fn validate_interface(interface: &interface::Info) -> Result<(), SystemError> {
-    validate_native_interface(interface).map_err(|message| SystemError::InvalidResponse { message })
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]

@@ -35,9 +35,9 @@ pub(crate) fn system_interfaces() -> Result<Vec<interface::Info>, Error> {
             source: Some(std::sync::Arc::new(error)),
         },
     })?;
-    super::interface_validation::validate_native_interfaces(interfaces).map_err(|message| {
+    super::interface_validation::validate_native_interfaces(interfaces).map_err(|error| {
         Error::InterfaceDiscovery {
-            message: format!("native route response was invalid: {message}"),
+            message: error.to_string(),
             source: None,
         }
     })

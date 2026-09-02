@@ -2,20 +2,26 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 //! Operating-system native interface snapshot validation.
+//!
+//! Every rejection is a [`SystemError::InvalidResponse`]: the snapshot came
+//! from the operating system, so an inconsistency in it is a native adapter
+//! fault rather than a caller error.
 
-use crate::interface;
+use crate::{interface, route::SystemError};
 
-pub(crate) fn validate_native_interface(interface: &interface::Info) -> Result<(), String> {
+pub(crate) fn validate_native_interface(interface: &interface::Info) -> Result<(), SystemError> {
     if interface.id.name.is_empty() || interface.id.index == 0 {
-        return Err("operating system returned an incomplete interface identity".to_owned());
+        return Err(invalid_response(
+            "operating system returned an incomplete interface identity".to_owned(),
+        ));
     }
     for assigned in &interface.addresses {
         let maximum = if assigned.address.is_ipv4() { 32 } else { 128 };
         if assigned.prefix_length > maximum {
-            return Err(format!(
+            return Err(invalid_response(format!(
                 "interface {} returned invalid prefix length {} for {}",
                 interface.id.name, assigned.prefix_length, assigned.address
-            ));
+            )));
         }
     }
     Ok(())
@@ -23,18 +29,22 @@ pub(crate) fn validate_native_interface(interface: &interface::Info) -> Result<(
 
 pub(super) fn validate_native_interfaces(
     interfaces: Vec<interface::Info>,
-) -> Result<Vec<interface::Info>, String> {
+) -> Result<Vec<interface::Info>, SystemError> {
     let mut identities = std::collections::HashSet::with_capacity(interfaces.len());
     for interface in &interfaces {
         validate_native_interface(interface)?;
         if !identities.insert(&interface.id) {
-            return Err(format!(
+            return Err(invalid_response(format!(
                 "operating system returned duplicate interface {} (index {})",
                 interface.id.name, interface.id.index
-            ));
+            )));
         }
     }
     Ok(interfaces)
+}
+
+fn invalid_response(message: String) -> SystemError {
+    SystemError::InvalidResponse { message }
 }
 
 #[cfg(test)]
@@ -122,6 +132,10 @@ mod tests {
         let error = validate_native_interfaces(vec![first, duplicate])
             .expect_err("duplicate identity must fail closed");
 
-        assert!(error.contains("duplicate interface fixture0 (index 7)"));
+        assert!(matches!(
+            error,
+            SystemError::InvalidResponse { ref message }
+                if message.contains("duplicate interface fixture0 (index 7)")
+        ));
     }
 }

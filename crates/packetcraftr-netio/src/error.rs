@@ -103,8 +103,6 @@ pub enum Error {
         #[source]
         fault: SendEvidenceFault,
     },
-    #[error("Layer 2 envelope synthesis failed: {message}")]
-    Encapsulation { message: String },
     #[error("raw Layer 3 frame is invalid for native transmission: {message}")]
     InvalidTransmissionFrame { message: String },
     #[error("capture failed: {message}")]
@@ -236,11 +234,6 @@ impl Classified for Error {
                 "packet.transmission_frame",
                 Kind::Packet,
                 "rebuild a complete route-consistent IP datagram without fields the native kernel would rewrite",
-            ),
-            Self::Encapsulation { .. } => classified(
-                "packet.encapsulation",
-                Kind::Packet,
-                "supply a complete link-layer envelope compatible with the materialized Layer 2 route",
             ),
             Self::TransmissionModeMismatch { .. }
             | Self::UnresolvedLinkMode

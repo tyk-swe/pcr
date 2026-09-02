@@ -317,12 +317,7 @@ impl Provider for SystemProvider {
     }
 }
 
-/// Composes an independently owned sender and capture provider for a
-/// capture-before-send exchange. The convention is sender first, capture
-/// second: `(sender, capture)` also implements [`transmit::Sender`].
-///
-/// [`transmit::Sender`]: crate::transmit::Sender
-impl<S, C> Provider for (S, C)
+impl<S, C> Provider for crate::PacketIo<S, C>
 where
     S: Send + Sync,
     C: Provider,
@@ -330,6 +325,6 @@ where
     type Capture = C::Capture;
 
     fn arm_capture(&self, request: &Request) -> Result<Self::Capture, Error> {
-        self.1.arm_capture(request)
+        self.capture.arm_capture(request)
     }
 }

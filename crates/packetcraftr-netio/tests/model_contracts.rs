@@ -21,7 +21,7 @@ use packetcraftr_core::{
 };
 use packetcraftr_netio::interface::Id as InterfaceId;
 use packetcraftr_netio::{
-    Error,
+    Error, PacketIo,
     capture::{self, Provider as _, Session as _},
     link::{Capability, MacAddress, Mode, VlanKind},
     neighbor,
@@ -29,7 +29,7 @@ use packetcraftr_netio::{
         Decision, Materialized, Options, Plan, Provider, Scope, SelectionReason, plan as plan_route,
     },
     transmit::{
-        Dispatch, Frame, Layer2Frame, Layer2Sender, Layer3Frame, Layer3Sender, Report, Sender,
+        Frame, Layer2Frame, Layer2Sender, Layer3Frame, Layer3Sender, ModeSender, Report, Sender,
     },
 };
 
@@ -432,9 +432,9 @@ impl Sender for CountingSender {
 }
 
 #[test]
-fn sender_capture_tuple_forwards_each_operation_to_its_owned_provider() {
+fn packet_io_forwards_each_operation_to_its_owned_provider() {
     let sends = Arc::new(AtomicUsize::new(0));
-    let io = (CountingSender(Arc::clone(&sends)), NoCapture);
+    let io = PacketIo::new(CountingSender(Arc::clone(&sends)), NoCapture);
     let bytes = Bytes::from_static(&[1, 2, 3]);
     let route = materialized(Mode::Layer2);
 
@@ -506,7 +506,7 @@ fn typed_transmission_frames_enforce_mode_and_dispatch_exact_bytes() {
 
     let layer2_calls = Arc::new(AtomicUsize::new(0));
     let layer3_calls = Arc::new(AtomicUsize::new(0));
-    let dispatch = Dispatch::new(
+    let dispatch = ModeSender::new(
         CountingLayer2(Arc::clone(&layer2_calls)),
         CountingLayer3(Arc::clone(&layer3_calls)),
     );

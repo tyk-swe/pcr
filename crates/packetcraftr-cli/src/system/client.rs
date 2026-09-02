@@ -5,8 +5,9 @@ use std::sync::Arc;
 
 use packetcraftr::{Client as WorkflowClient, core, netio as net};
 
-type PacketIo = net::transmit::Dispatch<net::transmit::SystemLayer2, net::transmit::SystemLayer3>;
-type ExchangeIo = (PacketIo, net::capture::SystemProvider);
+type SystemSender =
+    net::transmit::ModeSender<net::transmit::SystemLayer2, net::transmit::SystemLayer3>;
+type ExchangeIo = net::PacketIo<SystemSender, net::capture::SystemProvider>;
 pub(crate) type Client =
     WorkflowClient<net::route::SystemProvider, net::neighbor::SystemResolver, ExchangeIo>;
 pub(crate) type Exchange<'a> = packetcraftr::ExchangeExecutor<
@@ -24,8 +25,11 @@ pub(crate) fn client(
         registry,
         net::route::SystemProvider,
         net::neighbor::SystemResolver::default(),
-        (
-            net::transmit::Dispatch::new(net::transmit::SystemLayer2, net::transmit::SystemLayer3),
+        net::PacketIo::new(
+            net::transmit::ModeSender::new(
+                net::transmit::SystemLayer2,
+                net::transmit::SystemLayer3,
+            ),
             net::capture::SystemProvider,
         ),
         policy,

@@ -25,3 +25,20 @@ pub mod route;
 pub mod transmit;
 
 pub use error::{Error, SendEvidenceFault, SystemFault};
+
+/// Independently owned sender and capture provider composed into the single
+/// packet I/O value that capture-before-send exchanges require.
+///
+/// It implements [`transmit::Sender`] through `sender` and
+/// [`capture::Provider`] through `capture`.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PacketIo<S, C> {
+    pub sender: S,
+    pub capture: C,
+}
+
+impl<S, C> PacketIo<S, C> {
+    pub fn new(sender: S, capture: C) -> Self {
+        Self { sender, capture }
+    }
+}

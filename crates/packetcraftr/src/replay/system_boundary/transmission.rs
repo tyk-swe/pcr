@@ -16,8 +16,8 @@ use packetcraftr_netio::{
     },
     link::Mode as LinkMode,
     transmit::{
-        Dispatch as DispatchPacketIo, Frame as TransmissionFrame, Sender as PacketIo,
-        SystemLayer2 as SystemLayer2Io, SystemLayer3 as SystemLayer3Io,
+        Frame as TransmissionFrame, ModeSender, Sender, SystemLayer2 as SystemLayer2Io,
+        SystemLayer3 as SystemLayer3Io,
     },
 };
 
@@ -34,14 +34,14 @@ use crate::replay::wire::{map_replay_route_error, replay_network_envelope};
 /// [`Transmitter::transmit`].
 pub struct SystemTransmitter {
     validated_interface: Option<InterfaceInfo>,
-    packet_io: DispatchPacketIo<SystemLayer2Io, SystemLayer3Io>,
+    packet_io: ModeSender<SystemLayer2Io, SystemLayer3Io>,
 }
 
 impl SystemTransmitter {
     pub fn new() -> Self {
         Self {
             validated_interface: None,
-            packet_io: DispatchPacketIo::new(SystemLayer2Io, SystemLayer3Io),
+            packet_io: ModeSender::new(SystemLayer2Io, SystemLayer3Io),
         }
     }
 

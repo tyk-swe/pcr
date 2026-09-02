@@ -282,20 +282,21 @@ impl Layer3Sender for SystemLayer3 {
     }
 }
 
-/// Composes independently owned Layer 2 and Layer 3 providers into [`Sender`].
+/// Composes independently owned Layer 2 and Layer 3 providers into one
+/// [`Sender`] that dispatches on the frame's link mode.
 #[derive(Clone, Copy, Debug)]
-pub struct Dispatch<L2, L3> {
+pub struct ModeSender<L2, L3> {
     layer2: L2,
     layer3: L3,
 }
 
-impl<L2, L3> Dispatch<L2, L3> {
+impl<L2, L3> ModeSender<L2, L3> {
     pub fn new(layer2: L2, layer3: L3) -> Self {
         Self { layer2, layer3 }
     }
 }
 
-impl<L2, L3> Sender for Dispatch<L2, L3>
+impl<L2, L3> Sender for ModeSender<L2, L3>
 where
     L2: Layer2Sender,
     L3: Layer3Sender,
@@ -308,18 +309,13 @@ where
     }
 }
 
-/// Composes an independently owned sender and capture provider for a
-/// capture-before-send exchange. The convention is sender first, capture
-/// second: `(sender, capture)` also implements [`capture::Provider`].
-///
-/// [`capture::Provider`]: crate::capture::Provider
-impl<S, C> Sender for (S, C)
+impl<S, C> Sender for crate::PacketIo<S, C>
 where
     S: Sender,
     C: Send + Sync,
 {
     fn send(&self, frame: Frame<'_>) -> Result<Report, Error> {
-        self.0.send(frame)
+        self.sender.send(frame)
     }
 }
 

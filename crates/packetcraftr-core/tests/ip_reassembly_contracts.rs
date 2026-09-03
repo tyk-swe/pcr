@@ -583,7 +583,10 @@ fn resource_limits_reject_before_retaining_new_payload() {
 fn aggregate_limit_covers_replacement_and_completion_peak_allocations() {
     let key = ipv4_key();
     let now = Instant::now();
-    let limit = 4_295;
+    // The first fragment retains 4_188 bytes of charge; the completing
+    // append reserves 4 payload bytes plus range metadata, and the 32-byte
+    // reconstructed datagram then exceeds this limit by one byte.
+    let limit = 4_287;
     let mut reassembler = Reassembler::new(
         Limits {
             max_aggregate_bytes: limit,

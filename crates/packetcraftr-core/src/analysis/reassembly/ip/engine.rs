@@ -64,6 +64,26 @@ struct MergePlan {
     duplicate: bool,
 }
 
+/// How the retained ranges absorb one admitted fragment.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum UpdateKind {
+    /// Every incoming byte is already retained; nothing is stored.
+    Unchanged,
+    /// The fragment starts exactly where one retained range ends and touches
+    /// no other range, so its bytes extend that range in place.
+    Append,
+    /// The affected ranges and the fragment are rebuilt into one new range.
+    Replace,
+}
+
+/// The prepared range update: `Replace` carries the merged range, allocated
+/// before any retained state changes.
+enum RangeUpdate {
+    Unchanged,
+    Append,
+    Replace(RetainedRange),
+}
+
 impl Reassembler {
     #[must_use]
     pub fn new(limits: Limits, overlap_policy: OverlapPolicy) -> Self {
@@ -116,6 +136,7 @@ impl Reassembler {
         let empty_ranges = Vec::new();
         let ranges = existing.map_or(empty_ranges.as_slice(), |state| state.ranges.as_slice());
         let merge = plan_merge(ranges, &incoming)?;
+        let update_kind = plan_update_kind(ranges, &incoming, &merge)?;
         if merge.conflicting_bytes != 0 && self.overlap_policy == OverlapPolicy::Reject {
             return Err(MalformedError::ConflictingOverlap {
                 bytes: merge.conflicting_bytes,
@@ -187,6 +208,8 @@ impl Reassembler {
         // the same time rather than only the eventual steady state.
         let replacement_allocation = replacement_allocation_charge(
             &merge,
+            update_kind,
+            incoming.payload.len(),
             reconstruction_allocation,
             new_slot_charge,
             self.limits.max_aggregate_bytes,
@@ -209,7 +232,8 @@ impl Reassembler {
             })?;
 
         let reconstruction = materialize_reconstruction(existing, &incoming)?;
-        let new_ranges = materialize_ranges(ranges, &incoming, &merge, self.overlap_policy)?;
+        let update =
+            prepare_range_update(update_kind, ranges, &incoming, &merge, self.overlap_policy)?;
         let max_non_final_end = if incoming.more_fragments {
             Some(
                 existing
@@ -218,18 +242,6 @@ impl Reassembler {
             )
         } else {
             existing.and_then(|state| state.max_non_final_end)
-        };
-        let new_state = DatagramState {
-            ranges: new_ranges,
-            unique_bytes,
-            fragment_count,
-            duplicate_fragments,
-            overlap_bytes,
-            final_length,
-            max_non_final_end,
-            reconstruction,
-            last_update,
-            deadline,
         };
         let disposition = if merge.duplicate {
             FragmentDisposition::Duplicate {
@@ -254,18 +266,53 @@ impl Reassembler {
             known_final_length: final_length,
         };
         let previous_deadline = existing.and_then(|state| state.deadline);
-        let completed_datagram = if completed_payload(&new_state).is_some() {
-            let datagram_charge = reconstructed_datagram_length(&new_state)?;
+        // The datagram is complete when the update leaves exactly one range
+        // spanning offset zero to the known final length.
+        let completes = final_length.is_some_and(|length| {
+            merge.result_range_count == 1 && merge.union_start == 0 && merge.union_end == length
+        });
+        if completes {
+            let final_length = merge.union_end;
+            let datagram_charge = reconstructed_length(&reconstruction, final_length)?;
             replacement_peak_charge
                 .checked_add(datagram_charge)
                 .filter(|charge| *charge <= self.limits.max_aggregate_bytes)
                 .ok_or(ResourceError::AggregateMemoryLimit {
                     limit: self.limits.max_aggregate_bytes,
                 })?;
-            Some(reconstruct(&key, &new_state)?)
-        } else {
-            None
-        };
+            // The completed payload is read from the retained range and the
+            // update without storing it, so no retained state changes before
+            // the datagram is removed.
+            let retained = ranges.first().map(|range| range.bytes.as_slice());
+            let payload: [&[u8]; 2] = match &update {
+                RangeUpdate::Unchanged => [retained.ok_or(INCOMPLETE_RECONSTRUCTION)?, &[]],
+                RangeUpdate::Append => [
+                    retained.ok_or(INCOMPLETE_RECONSTRUCTION)?,
+                    incoming.payload.as_ref(),
+                ],
+                RangeUpdate::Replace(range) => [range.bytes.as_slice(), &[]],
+            };
+            let bytes = reconstruct_bytes(&reconstruction, payload)?;
+            let datagram = CompletedDatagram {
+                key: key.clone(),
+                bytes,
+                fragment_count,
+                unique_bytes,
+                final_payload_length: final_length,
+                duplicate_fragments,
+                overlap_bytes,
+            };
+            self.expiry.remove(previous_deadline, &key);
+            self.datagrams.remove(&key);
+            self.aggregate_payload_bytes = self
+                .aggregate_payload_bytes
+                .saturating_sub(old_unique_bytes);
+            self.aggregate_memory_charge = self.aggregate_memory_charge.saturating_sub(old_charge);
+            return Ok(PushOutcome::Completed {
+                fragment: fragment_outcome,
+                datagram,
+            });
+        }
 
         if existing.is_none() {
             self.datagrams
@@ -274,27 +321,40 @@ impl Reassembler {
                     requested: prospective_charge,
                 })?;
         }
-        self.expiry.remove(previous_deadline, &key);
-        if let Some(datagram) = completed_datagram {
-            self.datagrams.remove(&key);
-            self.aggregate_payload_bytes = self
-                .aggregate_payload_bytes
-                .saturating_sub(old_unique_bytes);
-            self.aggregate_memory_charge = self.aggregate_memory_charge.saturating_sub(old_charge);
-            Ok(PushOutcome::Completed {
-                fragment: fragment_outcome,
-                datagram,
-            })
-        } else {
-            self.datagrams.insert(key.clone(), new_state);
-            self.expiry.insert(deadline, key);
-            if new_slot_charge != 0 {
-                self.charged_datagram_slots = self.charged_datagram_slots.saturating_add(1);
+        // Applying the update reserves before it writes, so a failure here
+        // leaves the retained ranges exactly as they were.
+        let new_ranges = match self.datagrams.get_mut(&key) {
+            Some(state) => {
+                apply_range_update(&mut state.ranges, update, &incoming, &merge)?;
+                std::mem::take(&mut state.ranges)
             }
-            self.aggregate_payload_bytes = aggregate_payload_bytes;
-            self.aggregate_memory_charge = aggregate_memory_charge;
-            Ok(PushOutcome::Accepted(fragment_outcome))
+            None => {
+                let mut ranges = Vec::new();
+                apply_range_update(&mut ranges, update, &incoming, &merge)?;
+                ranges
+            }
+        };
+        let new_state = DatagramState {
+            ranges: new_ranges,
+            unique_bytes,
+            fragment_count,
+            duplicate_fragments,
+            overlap_bytes,
+            final_length,
+            max_non_final_end,
+            reconstruction,
+            last_update,
+            deadline,
+        };
+        self.expiry.remove(previous_deadline, &key);
+        self.datagrams.insert(key.clone(), new_state);
+        self.expiry.insert(deadline, key);
+        if new_slot_charge != 0 {
+            self.charged_datagram_slots = self.charged_datagram_slots.saturating_add(1);
         }
+        self.aggregate_payload_bytes = aggregate_payload_bytes;
+        self.aggregate_memory_charge = aggregate_memory_charge;
+        Ok(PushOutcome::Accepted(fragment_outcome))
     }
 
     /// Retires datagrams whose idle deadline is at or before `now`, retaining
@@ -819,6 +879,8 @@ fn reconstruction_retained_bytes(
 
 fn replacement_allocation_charge(
     merge: &MergePlan,
+    update_kind: UpdateKind,
+    incoming_bytes: usize,
     reconstruction: usize,
     new_slot_charge: usize,
     limit: usize,
@@ -827,13 +889,13 @@ fn replacement_allocation_charge(
         .result_range_count
         .checked_mul(super::RANGE_METADATA_CHARGE)
         .ok_or(ResourceError::AggregateMemoryLimit { limit })?;
-    let merged_payload = if merge.duplicate {
-        0
-    } else {
-        merge
+    let merged_payload = match update_kind {
+        UpdateKind::Unchanged => 0,
+        UpdateKind::Append => incoming_bytes,
+        UpdateKind::Replace => merge
             .union_end
             .checked_sub(merge.union_start)
-            .ok_or(MalformedError::OffsetOverflow)?
+            .ok_or(MalformedError::OffsetOverflow)?,
     };
     range_metadata
         .checked_add(merged_payload)
@@ -981,22 +1043,49 @@ fn plan_merge(ranges: &[RetainedRange], incoming: &Incoming) -> Result<MergePlan
     })
 }
 
-fn materialize_ranges(
+fn plan_update_kind(
+    ranges: &[RetainedRange],
+    incoming: &Incoming,
+    plan: &MergePlan,
+) -> Result<UpdateKind, Error> {
+    if plan.duplicate {
+        return Ok(UpdateKind::Unchanged);
+    }
+    if plan.affected_count == 1 && plan.added_bytes == incoming.payload.len() {
+        let affected = ranges
+            .get(plan.first_affected)
+            .ok_or(MalformedError::OffsetOverflow)?;
+        if affected.end() == Some(incoming.offset) {
+            return Ok(UpdateKind::Append);
+        }
+    }
+    Ok(UpdateKind::Replace)
+}
+
+fn prepare_range_update(
+    kind: UpdateKind,
     ranges: &[RetainedRange],
     incoming: &Incoming,
     plan: &MergePlan,
     policy: OverlapPolicy,
-) -> Result<Vec<RetainedRange>, Error> {
-    if plan.duplicate {
-        let mut unchanged = Vec::new();
-        unchanged
-            .try_reserve_exact(ranges.len())
-            .map_err(|_| ResourceError::AllocationFailed {
-                requested: ranges.len().saturating_mul(super::RANGE_METADATA_CHARGE),
-            })?;
-        unchanged.extend_from_slice(ranges);
-        return Ok(unchanged);
+) -> Result<RangeUpdate, Error> {
+    match kind {
+        UpdateKind::Unchanged => Ok(RangeUpdate::Unchanged),
+        UpdateKind::Append => Ok(RangeUpdate::Append),
+        UpdateKind::Replace => Ok(RangeUpdate::Replace(merge_affected(
+            ranges, incoming, plan, policy,
+        )?)),
     }
+}
+
+/// Builds the single range covering the fragment and every retained range it
+/// touches. Nothing retained is modified.
+fn merge_affected(
+    ranges: &[RetainedRange],
+    incoming: &Incoming,
+    plan: &MergePlan,
+    policy: OverlapPolicy,
+) -> Result<RetainedRange, Error> {
     let union_length = plan
         .union_end
         .checked_sub(plan.union_start)
@@ -1033,26 +1122,55 @@ fn materialize_ranges(
     if incoming_last {
         copy_into(&mut merged, incoming_start, &incoming.payload)?;
     }
-
-    let mut result = Vec::new();
-    result
-        .try_reserve_exact(plan.result_range_count)
-        .map_err(|_| ResourceError::AllocationFailed {
-            requested: plan
-                .result_range_count
-                .saturating_mul(super::RANGE_METADATA_CHARGE),
-        })?;
-    result.extend_from_slice(ranges.get(..plan.first_affected).unwrap_or_default());
-    result.push(RetainedRange {
+    Ok(RetainedRange {
         start: plan.union_start,
-        bytes: Bytes::from(merged),
-    });
-    let suffix_start = plan
-        .first_affected
-        .checked_add(plan.affected_count)
-        .ok_or(MalformedError::OffsetOverflow)?;
-    result.extend_from_slice(ranges.get(suffix_start..).unwrap_or_default());
-    Ok(result)
+        bytes: merged,
+    })
+}
+
+/// Stores the prepared update in `ranges`. Every reservation precedes every
+/// write, so an error leaves `ranges` untouched.
+fn apply_range_update(
+    ranges: &mut Vec<RetainedRange>,
+    update: RangeUpdate,
+    incoming: &Incoming,
+    plan: &MergePlan,
+) -> Result<(), Error> {
+    match update {
+        RangeUpdate::Unchanged => Ok(()),
+        RangeUpdate::Append => {
+            let range = ranges
+                .get_mut(plan.first_affected)
+                .ok_or(MalformedError::OffsetOverflow)?;
+            range
+                .bytes
+                .try_reserve_exact(incoming.payload.len())
+                .map_err(|_| ResourceError::AllocationFailed {
+                    requested: incoming.payload.len(),
+                })?;
+            range.bytes.extend_from_slice(&incoming.payload);
+            Ok(())
+        }
+        RangeUpdate::Replace(merged) => {
+            let replaced_end = plan
+                .first_affected
+                .checked_add(plan.affected_count)
+                .ok_or(MalformedError::OffsetOverflow)?;
+            if ranges.get(plan.first_affected..replaced_end).is_none() {
+                return Err(MalformedError::OffsetOverflow.into());
+            }
+            if plan.affected_count == 0 {
+                ranges
+                    .try_reserve(1)
+                    .map_err(|_| ResourceError::AllocationFailed {
+                        requested: super::RANGE_METADATA_CHARGE,
+                    })?;
+            }
+            // The range slot is reserved above, so the splice cannot allocate.
+            ranges.splice(plan.first_affected..replaced_end, std::iter::once(merged));
+            Ok(())
+        }
+    }
 }
 
 fn copy_into(target: &mut [u8], start: usize, bytes: &[u8]) -> Result<(), Error> {
@@ -1066,21 +1184,13 @@ fn copy_into(target: &mut [u8], start: usize, bytes: &[u8]) -> Result<(), Error>
     Ok(())
 }
 
-/// The single contiguous payload of a complete datagram, with its known
-/// final length, or [`None`] while any gap remains.
-fn completed_payload(state: &DatagramState) -> Option<(&Bytes, usize)> {
-    let final_length = state.final_length?;
-    match state.ranges.as_slice() {
-        [range] if range.start == 0 && range.end() == Some(final_length) => {
-            Some((&range.bytes, final_length))
-        }
-        _ => None,
-    }
-}
-
-fn reconstructed_datagram_length(state: &DatagramState) -> Result<usize, Error> {
-    let (_, payload) = completed_payload(state).ok_or(INCOMPLETE_RECONSTRUCTION)?;
-    let prefix = match &state.reconstruction {
+/// Wire length of the datagram a complete payload of `payload_length` bytes
+/// reconstructs to, including the retained header or prefix.
+fn reconstructed_length(
+    reconstruction: &Reconstruction,
+    payload_length: usize,
+) -> Result<usize, Error> {
+    let prefix = match reconstruction {
         Reconstruction::Ipv4 { first_header } => first_header
             .as_ref()
             .map(Bytes::len)
@@ -1088,15 +1198,15 @@ fn reconstructed_datagram_length(state: &DatagramState) -> Result<usize, Error> 
         Reconstruction::Ipv6 { prefix, .. } => prefix.len(),
     };
     prefix
-        .checked_add(payload)
+        .checked_add(payload_length)
         .ok_or(MalformedError::OffsetOverflow.into())
 }
 
-fn reconstruct(key: &DatagramKey, state: &DatagramState) -> Result<CompletedDatagram, Error> {
-    let (payload, final_length) = completed_payload(state).ok_or(INCOMPLETE_RECONSTRUCTION)?;
-    let payload = payload.as_ref();
-    let bytes = match &state.reconstruction {
-        Reconstruction::Ipv4 { first_header } => reconstruct_ipv4(first_header.as_ref(), payload)?,
+/// Reconstructs the datagram from its complete payload, given as up to two
+/// consecutive slices so a completing append need not be stored first.
+fn reconstruct_bytes(reconstruction: &Reconstruction, payload: [&[u8]; 2]) -> Result<Bytes, Error> {
+    match reconstruction {
+        Reconstruction::Ipv4 { first_header } => reconstruct_ipv4(first_header.as_ref(), payload),
         Reconstruction::Ipv6 {
             prefix,
             predecessor_next_header_offset,
@@ -1106,24 +1216,23 @@ fn reconstruct(key: &DatagramKey, state: &DatagramState) -> Result<CompletedData
             *predecessor_next_header_offset,
             *next_header,
             payload,
-        )?,
-    };
-    Ok(CompletedDatagram {
-        key: key.clone(),
-        bytes,
-        fragment_count: state.fragment_count,
-        unique_bytes: state.unique_bytes,
-        final_payload_length: final_length,
-        duplicate_fragments: state.duplicate_fragments,
-        overlap_bytes: state.overlap_bytes,
-    })
+        ),
+    }
 }
 
-fn reconstruct_ipv4(first_header: Option<&Bytes>, payload: &[u8]) -> Result<Bytes, Error> {
+fn payload_length(payload: [&[u8]; 2]) -> Result<usize, Error> {
+    payload
+        .iter()
+        .try_fold(0usize, |total, part| total.checked_add(part.len()))
+        .ok_or(MalformedError::OffsetOverflow.into())
+}
+
+fn reconstruct_ipv4(first_header: Option<&Bytes>, payload: [&[u8]; 2]) -> Result<Bytes, Error> {
     let header = first_header.ok_or(MISSING_OFFSET_ZERO_HEADER)?;
+    let payload_length = payload_length(payload)?;
     let total_length = header
         .len()
-        .checked_add(payload.len())
+        .checked_add(payload_length)
         .and_then(|length| u16::try_from(length).ok())
         .ok_or(MalformedError::ReconstructedLength {
             family: Family::Ipv4,
@@ -1134,7 +1243,9 @@ fn reconstruct_ipv4(first_header: Option<&Bytes>, payload: &[u8]) -> Result<Byte
         .try_reserve_exact(requested)
         .map_err(|_| ResourceError::AllocationFailed { requested })?;
     datagram.extend_from_slice(header);
-    datagram.extend_from_slice(payload);
+    for part in payload {
+        datagram.extend_from_slice(part);
+    }
     datagram
         .get_mut(2..4)
         .ok_or(MalformedError::OffsetOverflow)?
@@ -1170,28 +1281,31 @@ fn reconstruct_ipv6(
     prefix: &Bytes,
     predecessor_next_header_offset: usize,
     next_header: u8,
-    payload: &[u8],
+    payload: [&[u8]; 2],
 ) -> Result<Bytes, Error> {
     let extension_length = prefix
         .len()
         .checked_sub(IPV6_HEADER_LENGTH)
         .ok_or(MalformedError::OffsetOverflow)?;
+    let payload_bytes = payload_length(payload)?;
     let payload_length = extension_length
-        .checked_add(payload.len())
+        .checked_add(payload_bytes)
         .and_then(|length| u16::try_from(length).ok())
         .ok_or(MalformedError::ReconstructedLength {
             family: Family::Ipv6,
         })?;
     let requested = prefix
         .len()
-        .checked_add(payload.len())
+        .checked_add(payload_bytes)
         .ok_or(MalformedError::OffsetOverflow)?;
     let mut datagram = Vec::new();
     datagram
         .try_reserve_exact(requested)
         .map_err(|_| ResourceError::AllocationFailed { requested })?;
     datagram.extend_from_slice(prefix);
-    datagram.extend_from_slice(payload);
+    for part in payload {
+        datagram.extend_from_slice(part);
+    }
     datagram
         .get_mut(4..6)
         .ok_or(MalformedError::OffsetOverflow)?

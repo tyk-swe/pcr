@@ -34,10 +34,12 @@ pub use limits::Limits;
 const DATAGRAM_METADATA_CHARGE: usize = 4_096;
 const RANGE_METADATA_CHARGE: usize = 64;
 
+/// One gap-free run of retained payload. The bytes are owned so that a
+/// fragment continuing the run is appended in place instead of rebuilding it.
 #[derive(Clone, Debug)]
 struct RetainedRange {
     start: usize,
-    bytes: Bytes,
+    bytes: Vec<u8>,
 }
 
 impl RetainedRange {

@@ -35,8 +35,18 @@ fn fuzz_targets_have_an_unambiguous_layer_field_grammar() {
     let target = fuzz::Target::from_str("3.destination_port").expect("target must parse");
     assert_eq!(target.layer, 3);
     assert_eq!(target.field, "destination_port");
-    assert!(fuzz::Target::from_str("3.bad-field").is_err());
-    assert!(fuzz::Target::from_str("destination_port").is_err());
+    assert!(matches!(
+        fuzz::Target::from_str("3.bad-field"),
+        Err(fuzz::TargetParseError::InvalidField { .. })
+    ));
+    assert!(matches!(
+        fuzz::Target::from_str("destination_port"),
+        Err(fuzz::TargetParseError::MissingSeparator { .. })
+    ));
+    assert!(matches!(
+        fuzz::Target::from_str("x.destination_port"),
+        Err(fuzz::TargetParseError::InvalidLayer { .. })
+    ));
 }
 
 #[test]

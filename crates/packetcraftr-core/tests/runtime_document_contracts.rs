@@ -99,8 +99,17 @@ fn parse_expression_fixture(registry: &packetcraftr_core::registry::Registry) ->
         packetcraftr_core::protocol::raw::parse_hex("0x01:ab-CD 20").expect("hex"),
         Bytes::from_static(&[1, 0xab, 0xcd, 0x20])
     );
-    assert!(packetcraftr_core::protocol::raw::parse_hex("abc").is_err());
-    assert!(packetcraftr_core::protocol::raw::parse_hex("zz").is_err());
+    for (input, expected) in [
+        ("abc", "hex value must contain an even number of digits"),
+        ("zz", "invalid hex at byte 0"),
+    ] {
+        match packetcraftr_core::protocol::raw::parse_hex(input) {
+            Err(packetcraftr_core::codec::Error::Invalid { message, .. }) => {
+                assert_eq!(message, expected, "{input}");
+            }
+            other => panic!("{input}: expected an invalid raw layer error, got {other:?}"),
+        }
+    }
     for source in ["", "probe(", "/probe", "probe(value=1,value=2)", "unknown"] {
         assert!(
             expression::parse(source, registry, expression::Options::default()).is_err(),
@@ -214,8 +223,28 @@ fn expressions_and_documents_round_trip_and_enforce_resource_bounds() {
         ),
         Err(document::Error::InvalidLimit { .. })
     ));
-    assert!(document::Packet::parse("{} trailing", document::Format::Json, 20).is_err());
-    assert!(document::Packet::parse("---\n{}\n---\n{}", document::Format::Yaml, 20).is_err());
+    // Each of these must surface as a parse failure of the named format, never
+    // as an accepted document or a limit breach.
     let duplicate = "schema: packetcraftr.packet/v1\nschema: duplicate\nlayers: []\n";
-    assert!(document::Packet::parse(duplicate, document::Format::Yaml, duplicate.len()).is_err());
+    for (input, format, expected_format, expected_fragment) in [
+        ("{} trailing", document::Format::Json, "JSON", "trailing"),
+        (
+            "---\n{}\n---\n{}",
+            document::Format::Yaml,
+            "YAML",
+            "multiple YAML documents",
+        ),
+        (duplicate, document::Format::Yaml, "YAML", "duplicate"),
+    ] {
+        match document::Packet::parse(input, format, input.len()) {
+            Err(document::Error::Parse { format, message }) => {
+                assert_eq!(format, expected_format, "{input:?}");
+                assert!(
+                    message.to_lowercase().contains(expected_fragment),
+                    "{input:?}: {message}"
+                );
+            }
+            other => panic!("{input:?}: expected a {expected_format} parse error, got {other:?}"),
+        }
+    }
 }

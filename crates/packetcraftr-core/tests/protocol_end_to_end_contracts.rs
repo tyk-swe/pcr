@@ -748,15 +748,30 @@ fn sctp_dns_and_malformed_inputs_cover_bounded_parsers() {
     let (_, decoded) = round_trip(packet, "ipv4");
     assert_eq!(decoded.packet.get::<Dns>().map(|dns| dns.id), Some(0x1234));
 
-    assert!(Dns::from_wire(vec![0; 11]).is_err());
+    assert!(matches!(
+        Dns::from_wire(vec![0; 11]),
+        Err(packetcraftr_core::codec::Error::Truncated {
+            needed: 12,
+            available: 11,
+            ..
+        })
+    ));
     let mut too_many = vec![0; 12];
     too_many[4..6].copy_from_slice(&65_u16.to_be_bytes());
-    assert!(Dns::from_wire(too_many).is_err());
+    let record_cap = Dns::from_wire(too_many).expect_err("record count above the cap");
+    assert!(
+        matches!(record_cap, packetcraftr_core::codec::Error::Invalid { .. }),
+        "{record_cap:?}"
+    );
     let mut pointer_loop = vec![0; 18];
     pointer_loop[4..6].copy_from_slice(&1_u16.to_be_bytes());
     pointer_loop[12] = 0xc0;
     pointer_loop[13] = 12;
-    assert!(Dns::from_wire(pointer_loop).is_err());
+    let looped = Dns::from_wire(pointer_loop).expect_err("self-referential name pointer");
+    assert!(
+        matches!(looped, packetcraftr_core::codec::Error::Invalid { .. }),
+        "{looped:?}"
+    );
 
     for (root, bytes) in [
         ("ethernet", vec![0; 13]),

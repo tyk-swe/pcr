@@ -86,10 +86,13 @@ fn ipv6_loopback_handles_fragmented_response_io_when_available() {
 fn loopback_read_timeout_uses_the_exchange_deadline() {
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("loopback listener");
     let endpoint = listener.local_addr().unwrap();
+    // The server holds the connection open until the client has already
+    // failed, so no scheduling delay can turn the timeout into a peer close.
+    let (release, released) = std::sync::mpsc::channel::<()>();
     let server = thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("loopback connection");
         read_query(&mut stream);
-        thread::sleep(Duration::from_millis(80));
+        let _ = released.recv();
     });
 
     let error = dns_tcp::exchange(dns_tcp::Request {
@@ -99,6 +102,7 @@ fn loopback_read_timeout_uses_the_exchange_deadline() {
         max_message_bytes: 512,
     })
     .expect_err("silent peer must time out");
+    release.send(()).expect("loopback server is waiting");
     server.join().expect("loopback server");
     assert_same_error(
         &error,

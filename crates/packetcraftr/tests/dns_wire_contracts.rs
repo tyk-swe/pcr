@@ -167,9 +167,23 @@ fn names_are_lossless_case_insensitive_and_safely_presented() {
 
     let escaped = Name::from_labels([Bytes::from_static(b"a.b\\\0")]).expect("octet label");
     assert_eq!(escaped.to_string(), "a\\046b\\092\\000.");
-    assert!(Name::from_labels([Bytes::new()]).is_err());
-    assert!(Name::from_labels([Bytes::from(vec![b'a'; 64])]).is_err());
-    assert!(Name::from_labels((0..4).map(|_| Bytes::from(vec![b'a'; 63]))).is_err());
+    for (labels, description, invalid_label) in [
+        (vec![Bytes::new()], "empty label", true),
+        (vec![Bytes::from(vec![b'a'; 64])], "64-octet label", true),
+        (
+            (0..4).map(|_| Bytes::from(vec![b'a'; 63])).collect(),
+            "256-octet name",
+            false,
+        ),
+    ] {
+        let error = Name::from_labels(labels).expect_err(description);
+        let expected_variant = match error {
+            WireError::InvalidName { .. } => invalid_label,
+            WireError::NameTooLong => !invalid_label,
+            _ => false,
+        };
+        assert!(expected_variant, "{description}: {error:?}");
+    }
     assert_eq!(Section::Answer.to_string(), "answer");
     assert_eq!(Section::Authority.to_string(), "authority");
     assert_eq!(Section::Additional.to_string(), "additional");

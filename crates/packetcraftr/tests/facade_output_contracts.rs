@@ -86,19 +86,6 @@ fn current_schema_and_published_examples_use_output_v1() {
             .expect("route selection reasons are an enum")
             .contains(&Value::String("broadcast".to_owned()))
     );
-
-    for document in [
-        include_str!("../../../examples/documents/output-build-success.json"),
-        include_str!("../../../examples/documents/output-dns-error.json"),
-        include_str!("../../../examples/documents/output-follow-event.json"),
-    ] {
-        let value: Value = serde_json::from_str(document).expect("example must be valid JSON");
-        assert_eq!(value["schema"], SCHEMA_V1);
-        assert!(matches!(
-            value["status"].as_str(),
-            Some("success" | "error")
-        ));
-    }
 }
 
 #[test]

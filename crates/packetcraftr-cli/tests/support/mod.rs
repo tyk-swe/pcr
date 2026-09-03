@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 // Shared by several test binaries; each one uses a different subset.
-#![allow(dead_code)]
+#![allow(dead_code, unused_imports)]
 // Test code indexes fixtures and counts by hand; the fail-closed lints are
 // for library paths.
 #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]

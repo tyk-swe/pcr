@@ -12,6 +12,10 @@ use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 
 use packetcraftr_core::Packet;
 use packetcraftr_core::analysis::pcap::{Reader, ReaderOptions, Writer};
+use packetcraftr_core::analysis::reassembly::ip::{
+    Fragment, Ipv4DatagramKey, Ipv4Fragment, Limits as IpReassemblyLimits, OverlapPolicy,
+    Reassembler as IpReassembler,
+};
 use packetcraftr_core::analysis::reassembly::tcp::Limits as ReassemblyLimits;
 use packetcraftr_core::analysis::reassembly::tcp::{FlowKey, Reassembler, ScopedFlowKey, Segment};
 use packetcraftr_core::analysis::scope::Interner;
@@ -353,6 +357,123 @@ fn client_hello_record_from_capture() -> Bytes {
     panic!("TLS benchmark capture contains no complete ClientHello record");
 }
 
+/// A 64 KiB IPv4 datagram split into fragments of one Ethernet MTU each, the
+/// shape produced by a large UDP message such as a DNS or NFS reply.
+fn ipv4_datagram_fragments() -> Vec<Fragment> {
+    const FRAGMENT_PAYLOAD: usize = 1_480;
+    const FRAGMENT_COUNT: usize = 44;
+    let mut interner = Interner::new();
+    let scope = interner.intern(None, Vec::new()).expect("root scope");
+    let key = Ipv4DatagramKey {
+        scope,
+        source: Ipv4Addr::new(192, 0, 2, 1),
+        destination: Ipv4Addr::new(198, 51, 100, 2),
+        identification: 0x1234,
+        protocol: 17,
+    };
+    let total_length =
+        u16::try_from(20_usize.saturating_add(FRAGMENT_PAYLOAD)).expect("length fits");
+    let [length_hi, length_lo] = total_length.to_be_bytes();
+    let [id_hi, id_lo] = key.identification.to_be_bytes();
+    let [s0, s1, s2, s3] = key.source.octets();
+    let [d0, d1, d2, d3] = key.destination.octets();
+    (0..FRAGMENT_COUNT)
+        .map(|index| {
+            let more_fragments = index < FRAGMENT_COUNT.saturating_sub(1);
+            let offset = index
+                .checked_mul(FRAGMENT_PAYLOAD)
+                .and_then(|bytes| bytes.checked_div(8))
+                .and_then(|units| u16::try_from(units).ok())
+                .expect("offset fits");
+            let [offset_hi, offset_lo] =
+                (offset | if more_fragments { 0x2000 } else { 0 }).to_be_bytes();
+            let header = [
+                0x45,
+                0,
+                length_hi,
+                length_lo,
+                id_hi,
+                id_lo,
+                offset_hi,
+                offset_lo,
+                64,
+                key.protocol,
+                0,
+                0,
+                s0,
+                s1,
+                s2,
+                s3,
+                d0,
+                d1,
+                d2,
+                d3,
+            ];
+            Fragment::Ipv4(Ipv4Fragment {
+                key: key.clone(),
+                fragment_offset: offset,
+                more_fragments,
+                header: Bytes::copy_from_slice(&header),
+                payload: Bytes::from(vec![0x42; FRAGMENT_PAYLOAD]),
+            })
+        })
+        .collect()
+}
+
+fn bench_ip_reassembly(c: &mut Criterion) {
+    let in_order = ipv4_datagram_fragments();
+    let mut reverse_order = in_order.clone();
+    reverse_order.reverse();
+    let datagram_bytes: usize = in_order
+        .iter()
+        .map(|fragment| match fragment {
+            Fragment::Ipv4(fragment) => fragment.payload.len(),
+            Fragment::Ipv6(fragment) => fragment.payload.len(),
+        })
+        .sum();
+
+    let mut group = c.benchmark_group("ip_reassembly");
+    group.throughput(Throughput::Bytes(
+        u64::try_from(datagram_bytes).expect("datagram size fits"),
+    ));
+    for (name, fragments) in [("in_order", &in_order), ("reverse_order", &reverse_order)] {
+        group.bench_function(name, |b| {
+            b.iter(|| {
+                let mut reassembler =
+                    IpReassembler::new(IpReassemblyLimits::default(), OverlapPolicy::Reject);
+                let now = Instant::now();
+                let mut completed = 0_usize;
+                for fragment in fragments {
+                    let outcome = reassembler
+                        .push(black_box(fragment.clone()), now)
+                        .expect("benchmark fragments reassemble");
+                    if matches!(
+                        outcome,
+                        packetcraftr_core::analysis::reassembly::ip::PushOutcome::Completed { .. }
+                    ) {
+                        completed = completed.saturating_add(1);
+                    }
+                }
+                assert_eq!(completed, 1);
+                black_box(reassembler);
+            });
+        });
+    }
+    group.finish();
+}
+
+fn bench_checksum(c: &mut Criterion) {
+    let payload = vec![0x5a_u8; 65_535];
+    let mut group = c.benchmark_group("internet_checksum");
+    group.throughput(Throughput::Bytes(
+        u64::try_from(payload.len()).expect("payload size fits"),
+    ));
+    group.bench_function("64_kib", |b| {
+        b.iter(|| black_box(packetcraftr_core::protocol::checksum(black_box(&payload))));
+    });
+    group.finish();
+}
+
 fn bench_tls_assembly(c: &mut Criterion) {
     let raw_client_hello = client_hello_record_from_capture();
 
@@ -412,6 +533,8 @@ criterion_group!(
     bench_document_parsing,
     bench_capture_processing_and_encoding,
     bench_tcp_reassembly,
+    bench_ip_reassembly,
+    bench_checksum,
     bench_tls_assembly,
     bench_filter_evaluation,
 );

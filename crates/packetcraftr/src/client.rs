@@ -178,8 +178,15 @@ where
             preliminary_build,
         } = planned;
         let preliminary_len = preliminary_build.bytes.len();
-        let route = route::materialize(plan, &self.neighbors)?;
-        ensure_deadline(deadline)?;
+        // The resolver stops at the deadline on its own; a failure it reports
+        // after the deadline passed is the deadline, not a neighbor verdict.
+        let route = match route::materialize(plan, &self.neighbors, deadline) {
+            Ok(route) => route,
+            Err(error) => {
+                ensure_deadline(deadline)?;
+                return Err(error.into());
+            }
+        };
         let link_changed = materialize_link_fields(&mut packet, &route)?;
         let built = if link_changed {
             ensure_deadline(deadline)?;

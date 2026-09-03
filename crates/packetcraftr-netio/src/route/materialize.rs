@@ -3,6 +3,8 @@
 
 //! Neighbor resolution materialization for planned routes.
 
+use std::time::Instant;
+
 use packetcraftr_core::frame::LinkType;
 
 use crate::interface::Id as InterfaceId;
@@ -13,9 +15,14 @@ use super::error::Error;
 use super::models::{Decision, Plan, Scope, SelectionReason};
 
 /// Materialize a planned route, invoking neighbor resolution when required.
+///
+/// Neighbor discovery is the one step here that waits on the network, so
+/// `deadline` is handed to the resolver rather than checked afterwards: the
+/// calling operation's budget bounds every attempt, not only the result.
 pub fn materialize<N: crate::neighbor::Resolver>(
     mut plan: Plan,
     resolver: &N,
+    deadline: Option<Instant>,
 ) -> Result<Materialized, Error> {
     let mut neighbor_resolution = None;
     if plan.needs_neighbor_resolution() {
@@ -43,6 +50,7 @@ pub fn materialize<N: crate::neighbor::Resolver>(
             vlan_tags: plan.neighbor_vlan_tags.clone(),
             mtu: plan.decision.mtu,
             link_type: plan.decision.link_type,
+            deadline,
         })?;
         plan.destination_mac = Some(resolution.mac_address);
         neighbor_resolution = Some(resolution);
@@ -206,10 +214,12 @@ mod tests {
             vlan_tags: plan.neighbor_vlan_tags.clone(),
             mtu: 1_400,
             link_type: LinkType::ETHERNET,
+            deadline: None,
         };
         let resolver = RecordingResolver::default();
 
-        let materialized = materialize(plan, &resolver).expect("complete plan must materialize");
+        let materialized =
+            materialize(plan, &resolver, None).expect("complete plan must materialize");
 
         assert_eq!(materialized.plan.destination_mac, Some(RESOLVED_MAC));
         assert_eq!(
@@ -231,7 +241,7 @@ mod tests {
         plan.destination_mac = Some(RESOLVED_MAC);
         let resolver = RecordingResolver::default();
 
-        let materialized = materialize(plan.clone(), &resolver).expect("resolved plan");
+        let materialized = materialize(plan.clone(), &resolver, None).expect("resolved plan");
 
         assert_eq!(materialized.plan, plan);
         assert_eq!(materialized.neighbor_resolution, None);
@@ -256,7 +266,7 @@ mod tests {
         plan.destination_mac = Some(MacAddress([0xff; 6]));
         let resolver = RecordingResolver::default();
 
-        let materialized = materialize(plan.clone(), &resolver).expect("broadcast plan");
+        let materialized = materialize(plan.clone(), &resolver, None).expect("broadcast plan");
 
         assert_eq!(materialized.plan, plan);
         assert_eq!(materialized.neighbor_resolution, None);
@@ -299,7 +309,7 @@ mod tests {
             remove_input(&mut plan);
             let resolver = RecordingResolver::default();
 
-            let error = materialize(plan, &resolver).expect_err("incomplete Layer 2 plan");
+            let error = materialize(plan, &resolver, None).expect_err("incomplete Layer 2 plan");
             assert!(expected(&error), "{error}");
             assert_eq!(
                 error.classification().code,

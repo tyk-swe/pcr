@@ -176,15 +176,31 @@ where
         route: &Materialized,
         capture: &mut S,
     ) -> Result<ExchangeOutcome, Error> {
-        capture
-            .wait_ready(self.options.attempt_timeout)
-            .map_err(|error| map_io_error(request, "waiting for capture readiness", error))?;
         let mut evidence = EvidenceBuffer::new(&self.options);
+        let Some(ready_timeout) = self.remaining_attempt_budget(request) else {
+            // The caller's deadline passed before discovery could start; the
+            // outcome is an honest zero-attempt miss, not an attempt.
+            let (captured, evidence_truncated) = evidence.into_evidence();
+            return Ok(ExchangeOutcome {
+                mac_address: None,
+                attempts: 0,
+                captured,
+                evidence_truncated,
+            });
+        };
+        capture
+            .wait_ready(ready_timeout)
+            .map_err(|error| map_io_error(request, "waiting for capture readiness", error))?;
         self.drain_pre_request(request, capture, &mut evidence)?;
 
+        let mut attempts = 0;
         for attempt in 1..=self.options.max_attempts {
+            let Some(attempt_budget) = self.remaining_attempt_budget(request) else {
+                break;
+            };
+            attempts = attempt;
             let deadline = Instant::now()
-                .checked_add(self.options.attempt_timeout)
+                .checked_add(attempt_budget)
                 .ok_or_else(|| invalid_options("attempt deadline overflowed".to_owned()))?;
             let frame = Layer2Frame::try_new(request_bytes, route)
                 .map_err(|error| map_io_error(request, "constructing discovery frame", error))?;
@@ -233,10 +249,23 @@ where
             let (captured, evidence_truncated) = evidence.into_evidence();
             Ok(ExchangeOutcome {
                 mac_address: None,
-                attempts: self.options.max_attempts,
+                attempts,
                 captured,
                 evidence_truncated,
             })
+        }
+    }
+
+    /// The budget the next attempt may spend: the configured per-attempt
+    /// timeout, clipped to whatever the request deadline still leaves. `None`
+    /// once that deadline has passed, so no further attempt starts.
+    fn remaining_attempt_budget(&self, request: &Request) -> Option<Duration> {
+        match request.deadline {
+            None => Some(self.options.attempt_timeout),
+            Some(deadline) => deadline
+                .checked_duration_since(Instant::now())
+                .filter(|remaining| !remaining.is_zero())
+                .map(|remaining| remaining.min(self.options.attempt_timeout)),
         }
     }
 
@@ -387,6 +416,54 @@ mod tests {
                 frame.bytes().len(),
                 frame.bytes().clone(),
             ))
+        }
+    }
+
+    /// A capture that sees nothing: every wait runs its full timeout, as a
+    /// real capture does on a quiet link.
+    struct SilentCaptureProvider;
+
+    impl capture::Provider for SilentCaptureProvider {
+        type Capture = SilentCapture;
+
+        fn arm_capture(&self, _request: &capture::Request) -> Result<Self::Capture, crate::Error> {
+            Ok(SilentCapture {
+                metadata: capture::Metadata {
+                    interface: request().interface,
+                    link_type: LinkType::ETHERNET,
+                    snap_length: 128,
+                },
+            })
+        }
+    }
+
+    struct SilentCapture {
+        metadata: capture::Metadata,
+    }
+
+    impl Session for SilentCapture {
+        fn metadata(&self) -> &capture::Metadata {
+            &self.metadata
+        }
+
+        fn wait_ready(&mut self, _timeout: Duration) -> Result<(), crate::Error> {
+            Ok(())
+        }
+
+        fn next_captured_frame(
+            &mut self,
+            timeout: Duration,
+        ) -> Result<Option<capture::Captured>, crate::Error> {
+            std::thread::sleep(timeout);
+            Ok(None)
+        }
+
+        fn shutdown(&mut self) -> Result<(), crate::Error> {
+            Ok(())
+        }
+
+        fn statistics(&self) -> capture::Statistics {
+            capture::Statistics::default()
         }
     }
 
@@ -567,6 +644,7 @@ mod tests {
             vlan_tags: Vec::new(),
             mtu: 1_500,
             link_type: LinkType::ETHERNET,
+            deadline: None,
         }
     }
 
@@ -913,6 +991,57 @@ mod tests {
                 ..
             }) if same_failure(&source, &send_failure)
         ));
+    }
+
+    #[test]
+    fn request_deadline_stops_attempts_before_the_configured_budget() {
+        let request = Request {
+            deadline: Instant::now().checked_add(Duration::from_millis(40)),
+            ..request()
+        };
+        let layer2 = FixtureLayer2::successful();
+        // Three attempts of 100 ms each are configured; the request deadline
+        // leaves room for one clipped attempt on a silent link.
+        let resolver =
+            ActiveResolver::try_new(layer2.clone(), SilentCaptureProvider, test_options(3))
+                .expect("resolver options");
+
+        let started = Instant::now();
+        let error = resolver
+            .resolve(&request)
+            .expect_err("no response within the request deadline");
+
+        assert!(
+            started.elapsed() < Duration::from_millis(100),
+            "attempts must stop at the request deadline, not the configured budget"
+        );
+        assert!(
+            matches!(error, Error::NotFound { attempts: 1, .. }),
+            "{error:?}"
+        );
+        assert_eq!(layer2.sent().len(), 1);
+    }
+
+    #[test]
+    fn expired_request_deadline_makes_no_attempt() {
+        let request = Request {
+            deadline: Some(Instant::now()),
+            ..request()
+        };
+        let layer2 = FixtureLayer2::successful();
+        let resolver =
+            ActiveResolver::try_new(layer2.clone(), SilentCaptureProvider, test_options(3))
+                .expect("resolver options");
+
+        let error = resolver
+            .resolve(&request)
+            .expect_err("an expired deadline cannot resolve");
+
+        assert!(
+            matches!(error, Error::NotFound { attempts: 0, .. }),
+            "{error:?}"
+        );
+        assert!(layer2.sent().is_empty());
     }
 
     #[test]

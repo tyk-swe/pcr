@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::net::IpAddr;
+use std::time::Instant;
 
 use packetcraftr_core::frame::{Frame, LinkType};
 
@@ -21,6 +22,10 @@ pub struct Request {
     pub vlan_tags: Vec<VlanTag>,
     pub mtu: u32,
     pub link_type: LinkType,
+    /// Absolute bound the calling operation imposes on top of the resolver's
+    /// own per-attempt budget: no attempt starts after it and every wait is
+    /// clipped to it. `None` leaves only the resolver `Options` bounds.
+    pub deadline: Option<Instant>,
 }
 
 /// Bounded evidence returned by an active resolver.

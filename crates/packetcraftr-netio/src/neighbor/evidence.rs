@@ -201,6 +201,7 @@ mod tests {
             vlan_tags: Vec::new(),
             mtu: 1_500,
             link_type: LinkType::ETHERNET,
+            deadline: None,
         }
     }
 

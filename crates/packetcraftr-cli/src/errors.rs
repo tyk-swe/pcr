@@ -49,14 +49,7 @@ impl CliError {
     /// The process exit code this failure ends in, which is a function of its
     /// classification kind and nothing else.
     pub(crate) const fn exit_code(&self) -> u8 {
-        match self.classification.kind {
-            Kind::Cli => 2,
-            Kind::Packet => 3,
-            Kind::Capability => 4,
-            Kind::Io => 5,
-            Kind::Policy => 6,
-            Kind::Internal => 70,
-        }
+        exit_code_for(self.classification.kind)
     }
 
     pub(crate) fn with_context(mut self, context: Option<Coordinate>) -> Self {
@@ -105,6 +98,19 @@ const fn fallback_code(kind: Kind) -> &'static str {
         Kind::Io => "io.runtime",
         Kind::Policy => "policy.denied",
         Kind::Internal => "internal.error",
+    }
+}
+
+/// The process exit code for a failure of `kind`; the root `--help` documents
+/// this table and a test keeps the two in step.
+pub(crate) const fn exit_code_for(kind: Kind) -> u8 {
+    match kind {
+        Kind::Cli => 2,
+        Kind::Packet => 3,
+        Kind::Capability => 4,
+        Kind::Io => 5,
+        Kind::Policy => 6,
+        Kind::Internal => 70,
     }
 }
 

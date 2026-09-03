@@ -17,6 +17,17 @@ const ROOT_AFTER_HELP: &str = r#"Output formats:
 
 Output availability is command-specific. Machine formats never contain terminal colour codes.
 
+Exit codes:
+  0   Success.
+  2   cli: the invocation or its input was invalid.
+  3   packet: the packet could not be built, parsed, or dissected.
+  4   capability: a native feature, backend, or privilege is unavailable.
+  5   io: a system or network operation failed.
+  6   policy: the traffic policy denied the operation.
+  70  internal: an invariant failed; please report it.
+
+The word after the code is the `error.kind` of the same failure in JSON and NDJSON output.
+
 Examples:
   packetcraftr build --packet 'raw(text=hello)'
   packetcraftr --output json dissect --hex '45000014000000004001f6e7c0000201c6336402'
@@ -135,5 +146,43 @@ mod tests {
     #[test]
     fn the_command_tree_is_valid() {
         <Cli as clap::CommandFactory>::command().debug_assert();
+    }
+
+    /// The exit-code table in the root help, as (code, kind name) pairs.
+    fn documented_exit_codes() -> Vec<(u8, String)> {
+        let (_, rest) = ROOT_AFTER_HELP
+            .split_once("Exit codes:\n")
+            .expect("the root help documents exit codes");
+        rest.lines()
+            .take_while(|line| !line.trim().is_empty())
+            .filter_map(|line| {
+                let mut words = line.split_whitespace();
+                let code = words.next()?.parse().ok()?;
+                let kind = words.next()?.trim_end_matches(':').to_owned();
+                Some((code, kind))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_root_help_documents_every_exit_code_exactly_once() {
+        use packetcraftr::core::error::Kind;
+
+        let kinds = [
+            Kind::Cli,
+            Kind::Packet,
+            Kind::Capability,
+            Kind::Io,
+            Kind::Policy,
+            Kind::Internal,
+        ];
+        let mut expected = vec![(0, "Success.".to_owned())];
+        expected.extend(kinds.iter().map(|kind| {
+            (
+                crate::errors::exit_code_for(*kind),
+                kind.as_str().to_owned(),
+            )
+        }));
+        assert_eq!(documented_exit_codes(), expected);
     }
 }

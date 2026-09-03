@@ -8,6 +8,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Added
 
+- The root `--help` and the README document the exit-code contract (2 cli,
+  3 packet, 4 capability, 5 io, 6 policy, 70 internal); a test keeps the help
+  table equal to the code that maps error kinds to exit codes.
 - A test that fails when a property in `schemas/packetcraftr.output.v1.schema.json`
   is serialized by no `examples/documents/output-*.json`, so consumers generating
   strict types from the examples see every field; the few live-only properties
@@ -103,6 +106,12 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- **Breaking:** `replay` and `fuzz --live` spell the permissive-live opt-in
+  `--allow-permissive-live`, the same flag `send` and `exchange` already use for
+  the same policy field; `--allow-malformed-live` remains as a hidden alias.
+- `--max-unsolicited` on `exchange` names its value `COUNT`, and the help for
+  the offline `--max-bytes` reader bound and the live `--max-bytes` traffic
+  budget now say which subsystem each one limits.
 - Test suites and comments follow the repository conventions: `packetcraftr-core` integration tests share fixtures under `tests/common/` and are split into files under ~600 lines named `*_contracts.rs`; the offline fuzz engine tests moved to `tests/fuzz_engine_contracts.rs`; `packetcraftr-netio/tests/error_contracts.rs` documents its per-enum tables; source comments state invariants instead of history, and `AGENTS.md` records the module layout and naming vocabulary.
 
 - **BREAKING:** `packetcraftr::Stats::checked_add_assign` reports overflow as `Err(StatsOverflow)` instead of `None`. The `output::envelope::{Aggregate, AggregateError}` aliases are gone (use `Envelope`), the NDJSON encoder and unattributed error record now live in `packetcraftr::output::stream`, and the offline fuzz statistics conversion moved next to `output::fuzz`. Private workflow modules named `contract.rs` under `policy`, `send`, and `target` are now `model.rs`.

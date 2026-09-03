@@ -100,7 +100,7 @@ impl Budget for Streamed {
     }
 
     const PACKETS_HELP: &'static str = "Maximum packets authorized for one operation";
-    const BYTES_HELP: &'static str = "Maximum wire bytes authorized for one operation";
+    const BYTES_HELP: &'static str = "Maximum wire bytes this operation is authorized to transmit";
 }
 
 /// Frames this operation only receives.

@@ -88,6 +88,14 @@ capture.pcapng`. Supported formats depend on the command and include `text`,
 combinations fail explicitly. Streaming NDJSON ends with one completion record
 or one typed error.
 
+Exit codes are part of the contract: 0 on success, 2 for an invalid invocation
+or input (`cli`), 3 for a packet that cannot be built or dissected (`packet`),
+4 when a native feature, backend, or privilege is unavailable (`capability`),
+5 for a failed system or network operation (`io`), 6 when the traffic policy
+denies the operation (`policy`), and 70 for an internal invariant failure.
+The name in parentheses is the `error.kind` of the same failure in JSON and
+NDJSON output; `packetcraftr --help` lists the table.
+
 Offline `stats`, `expert`, `follow`, and `tls` perform bounded, capture-global
 IPv4 and IPv6 fragment reassembly before downstream transport indexing. A
 completed datagram is a derived view attached to the physical fragment that

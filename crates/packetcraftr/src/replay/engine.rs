@@ -56,10 +56,6 @@ impl Progress {
 }
 
 /// Replays only the capture frames the selector keeps.
-///
-/// # Panics
-///
-/// Panics only if the transmitter reports more completed frames than authorized.
 pub fn run_with_selector<R, A, T, C, F>(
     reader: &mut Reader<R>,
     options: &Options,

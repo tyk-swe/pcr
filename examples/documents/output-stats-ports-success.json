@@ -1,0 +1,35 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "stats",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "table": "ports",
+    "frames_read": 8,
+    "frames_matched": 8,
+    "bytes_matched": 659,
+    "first_timestamp": {
+      "unix_seconds": 1787616000,
+      "nanoseconds": 0
+    },
+    "last_timestamp": {
+      "unix_seconds": 1787616000,
+      "nanoseconds": 68000000
+    },
+    "ports": [
+      {
+        "transport": "tcp",
+        "port": 443,
+        "frames": 8,
+        "bytes": 659
+      },
+      {
+        "transport": "tcp",
+        "port": 54321,
+        "frames": 8,
+        "bytes": 659
+      }
+    ]
+  },
+  "diagnostics": []
+}

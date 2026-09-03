@@ -1,0 +1,25 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "dns",
+  "mode": "stream",
+  "sequence": 1,
+  "status": "success",
+  "result": {
+    "event": "record",
+    "attempt": 1,
+    "transport": "udp",
+    "server": "resolver.lab",
+    "server_port": 53,
+    "query_name": "www.example.test.",
+    "query_type": "a",
+    "section": "answer",
+    "record": {
+      "owner": "www.example.test.",
+      "class": 1,
+      "ttl": 300,
+      "type": "cname",
+      "canonical_name": "web.example.test."
+    }
+  },
+  "diagnostics": []
+}

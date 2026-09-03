@@ -1,0 +1,318 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "read",
+  "mode": "stream",
+  "sequence": 0,
+  "status": "success",
+  "result": {
+    "event": "frame",
+    "source_frame": 1,
+    "frame": {
+      "timestamp": {
+        "unix_seconds": 1787616000,
+        "nanoseconds": 0
+      },
+      "captured_length": 40,
+      "original_length": 40,
+      "link_type": 228,
+      "interface": 0,
+      "bytes_hex": "450000280000000040068e99c0000201c6336402d43101bb000003e8000000005002faf0eee50000"
+    },
+    "decoded": {
+      "packet": {
+        "schema": "packetcraftr.packet/v1",
+        "layers": [
+          {
+            "protocol": "ipv4",
+            "fields": {
+              "checksum": {
+                "type": "unsigned",
+                "value": 36505
+              },
+              "destination": {
+                "type": "ipv4",
+                "value": "198.51.100.2"
+              },
+              "dont_fragment": {
+                "type": "bool",
+                "value": false
+              },
+              "dscp_ecn": {
+                "type": "unsigned",
+                "value": 0
+              },
+              "fragment_offset": {
+                "type": "unsigned",
+                "value": 0
+              },
+              "identification": {
+                "type": "unsigned",
+                "value": 0
+              },
+              "more_fragments": {
+                "type": "bool",
+                "value": false
+              },
+              "options": {
+                "type": "bytes",
+                "value": []
+              },
+              "protocol": {
+                "type": "unsigned",
+                "value": 6
+              },
+              "reserved_flag": {
+                "type": "bool",
+                "value": false
+              },
+              "source": {
+                "type": "ipv4",
+                "value": "192.0.2.1"
+              },
+              "total_length": {
+                "type": "unsigned",
+                "value": 40
+              },
+              "ttl": {
+                "type": "unsigned",
+                "value": 64
+              }
+            }
+          },
+          {
+            "protocol": "tcp",
+            "fields": {
+              "acknowledgment": {
+                "type": "unsigned",
+                "value": 0
+              },
+              "checksum": {
+                "type": "unsigned",
+                "value": 61157
+              },
+              "destination_port": {
+                "type": "unsigned",
+                "value": 443
+              },
+              "flags": {
+                "type": "unsigned",
+                "value": 2
+              },
+              "options": {
+                "type": "bytes",
+                "value": []
+              },
+              "reserved_bits": {
+                "type": "unsigned",
+                "value": 0
+              },
+              "sequence": {
+                "type": "unsigned",
+                "value": 1000
+              },
+              "source_port": {
+                "type": "unsigned",
+                "value": 54321
+              },
+              "urgent_pointer": {
+                "type": "unsigned",
+                "value": 0
+              },
+              "window": {
+                "type": "unsigned",
+                "value": 64240
+              }
+            }
+          }
+        ]
+      },
+      "layout": {
+        "layers": [
+          {
+            "index": 0,
+            "protocol": "ipv4",
+            "range": {
+              "start": 0,
+              "end": 20
+            },
+            "fields": [
+              {
+                "name": "dscp_ecn",
+                "range": {
+                  "start": 1,
+                  "end": 2
+                }
+              },
+              {
+                "name": "total_length",
+                "range": {
+                  "start": 2,
+                  "end": 4
+                }
+              },
+              {
+                "name": "identification",
+                "range": {
+                  "start": 4,
+                  "end": 6
+                }
+              },
+              {
+                "name": "reserved_flag",
+                "range": {
+                  "start": 6,
+                  "end": 8
+                }
+              },
+              {
+                "name": "dont_fragment",
+                "range": {
+                  "start": 6,
+                  "end": 8
+                }
+              },
+              {
+                "name": "more_fragments",
+                "range": {
+                  "start": 6,
+                  "end": 8
+                }
+              },
+              {
+                "name": "fragment_offset",
+                "range": {
+                  "start": 6,
+                  "end": 8
+                }
+              },
+              {
+                "name": "ttl",
+                "range": {
+                  "start": 8,
+                  "end": 9
+                }
+              },
+              {
+                "name": "protocol",
+                "range": {
+                  "start": 9,
+                  "end": 10
+                }
+              },
+              {
+                "name": "checksum",
+                "range": {
+                  "start": 10,
+                  "end": 12
+                }
+              },
+              {
+                "name": "source",
+                "range": {
+                  "start": 12,
+                  "end": 16
+                }
+              },
+              {
+                "name": "destination",
+                "range": {
+                  "start": 16,
+                  "end": 20
+                }
+              },
+              {
+                "name": "options",
+                "range": {
+                  "start": 20,
+                  "end": 20
+                }
+              }
+            ]
+          },
+          {
+            "index": 1,
+            "protocol": "tcp",
+            "range": {
+              "start": 20,
+              "end": 40
+            },
+            "fields": [
+              {
+                "name": "source_port",
+                "range": {
+                  "start": 20,
+                  "end": 22
+                }
+              },
+              {
+                "name": "destination_port",
+                "range": {
+                  "start": 22,
+                  "end": 24
+                }
+              },
+              {
+                "name": "sequence",
+                "range": {
+                  "start": 24,
+                  "end": 28
+                }
+              },
+              {
+                "name": "acknowledgment",
+                "range": {
+                  "start": 28,
+                  "end": 32
+                }
+              },
+              {
+                "name": "reserved_bits",
+                "range": {
+                  "start": 32,
+                  "end": 33
+                }
+              },
+              {
+                "name": "flags",
+                "range": {
+                  "start": 32,
+                  "end": 34
+                }
+              },
+              {
+                "name": "window",
+                "range": {
+                  "start": 34,
+                  "end": 36
+                }
+              },
+              {
+                "name": "checksum",
+                "range": {
+                  "start": 36,
+                  "end": 38
+                }
+              },
+              {
+                "name": "urgent_pointer",
+                "range": {
+                  "start": 38,
+                  "end": 40
+                }
+              },
+              {
+                "name": "options",
+                "range": {
+                  "start": 40,
+                  "end": 40
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "diagnostics": []
+    }
+  },
+  "diagnostics": []
+}

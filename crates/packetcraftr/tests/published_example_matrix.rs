@@ -25,11 +25,16 @@ const KINDS: [&str; 4] = ["success", "event", "complete", "error"];
 
 /// Documents published beyond the canonical kinds, each showing one branch a
 /// command's output can take.
-const SUB_KIND_EXAMPLES: [&str; 15] = [
+const SUB_KIND_EXAMPLES: [&str; 30] = [
+    "output-dissect-diagnostic-success.json",
     "output-dissect-filter-no-match.json",
+    "output-dns-any-success.json",
     "output-dns-attempt-response-event.json",
+    "output-dns-cname-record-event.json",
+    "output-dns-ptr-record-event.json",
     "output-dns-record-event.json",
     "output-dns-rejected-event.json",
+    "output-dns-srv-record-event.json",
     "output-exchange-diagnostic-event.json",
     "output-exchange-response-event.json",
     "output-exchange-sent-event.json",
@@ -39,8 +44,61 @@ const SUB_KIND_EXAMPLES: [&str; 15] = [
     "output-expert-ip-incomplete-event.json",
     "output-follow-ip-completed-event.json",
     "output-protocols-detail-success.json",
+    "output-read-dissect-event.json",
+    "output-scan-response-event.json",
+    "output-scan-undecoded-event.json",
+    "output-stats-endpoints-success.json",
     "output-stats-fragments-success.json",
+    "output-stats-io-success.json",
+    "output-stats-ports-success.json",
+    "output-stats-protocols-success.json",
+    "output-tls-alert-event.json",
     "output-tls-ip-overlap-event.json",
+    "output-tls-truncated-event.json",
+    "output-traceroute-undecoded-event.json",
+];
+
+/// Schema property paths no published example exercises, each with the reason
+/// an offline run cannot publish it. An entry covers itself and every path
+/// beneath it, and fails as stale once an example does exercise it.
+const UNPUBLISHED_PROPERTIES: [(&str, &str); 9] = [
+    (
+        "captureStatistics.receiver_dropped_frames",
+        "serialized only when a live capture backend drops frames",
+    ),
+    (
+        "dnsRecord.edns",
+        "OPT pseudo-records are lifted into the response's edns metadata before any record is \
+         published",
+    ),
+    (
+        "fuzzCase.decoded",
+        "fuzz dissects the frame it sent, which only a live run has",
+    ),
+    (
+        "fuzzCase.error",
+        "a case fails only while a live run transmits it",
+    ),
+    (
+        "fuzzCase.sent",
+        "the transmitted frame exists only after a live run sends the case",
+    ),
+    (
+        "materializedRoute.neighbor",
+        "neighbor resolution runs ARP/NDP on a live interface with a capture backend",
+    ),
+    (
+        "replayTiming.fixed_rate",
+        "replay sends on a live interface; the published aggregate shows immediate timing",
+    ),
+    (
+        "replayTiming.scaled",
+        "replay sends on a live interface; the published aggregate shows immediate timing",
+    ),
+    (
+        "tlsSession.alerts_dropped",
+        "serialized only past the 32-alert per-session cap",
+    ),
 ];
 
 /// Packet documents, which are command input rather than command output.
@@ -215,4 +273,200 @@ fn every_published_error_code_agrees_with_its_kind() {
             "{code}: published under {kinds:?} by {publications:?}, but its prefix says {prefix}"
         );
     }
+}
+
+/// The definition a local `$ref` names, with its name.
+fn referenced_definition<'a>(schema: &'a Value, reference: &'a str) -> (&'a str, &'a Value) {
+    let name = reference
+        .strip_prefix("#/$defs/")
+        .expect("the output schema only references its own $defs");
+    let definition = &schema["$defs"][name];
+    assert!(definition.is_object(), "{reference}: unknown definition");
+    (name, definition)
+}
+
+/// Every property path the schema declares, scoped by the definition that
+/// declares it: `statsIo.buckets`, `materializedRoute.neighbor.mac_address`.
+fn schema_property_paths(schema: &Value) -> BTreeSet<String> {
+    fn walk<'a>(
+        schema: &'a Value,
+        node: &'a Value,
+        prefix: &str,
+        visited: &mut BTreeSet<&'a str>,
+        paths: &mut BTreeSet<String>,
+    ) {
+        if let Some(reference) = node["$ref"].as_str() {
+            let (name, definition) = referenced_definition(schema, reference);
+            if visited.insert(name) {
+                walk(schema, definition, name, visited, paths);
+            }
+        }
+        for combinator in ["oneOf", "anyOf", "allOf"] {
+            for branch in node[combinator].as_array().into_iter().flatten() {
+                walk(schema, branch, prefix, visited, paths);
+            }
+        }
+        for (name, property) in node["properties"].as_object().into_iter().flatten() {
+            let path = format!("{prefix}.{name}");
+            walk(schema, property, &path, visited, paths);
+            paths.insert(path);
+        }
+        for keyword in ["items", "additionalProperties"] {
+            if node[keyword].is_object() {
+                walk(schema, &node[keyword], prefix, visited, paths);
+            }
+        }
+    }
+
+    let mut paths = BTreeSet::new();
+    walk(schema, schema, "root", &mut BTreeSet::new(), &mut paths);
+    paths
+}
+
+/// Whether a combinator branch can describe `instance`: every `const`
+/// discriminator it declares agrees with the instance, and every key it
+/// requires is present. Branches with other keywords are taken as applicable.
+fn branch_applies(schema: &Value, branch: &Value, instance: &Value) -> bool {
+    let branch = match branch["$ref"].as_str() {
+        Some(reference) => referenced_definition(schema, reference).1,
+        None => branch,
+    };
+    let Some(fields) = instance.as_object() else {
+        return true;
+    };
+    let required_present = branch["required"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .all(|key| key.as_str().is_none_or(|key| fields.contains_key(key)));
+    let constants_agree =
+        branch["properties"]
+            .as_object()
+            .into_iter()
+            .flatten()
+            .all(
+                |(name, property)| match (property.get("const"), fields.get(name)) {
+                    (Some(expected), Some(actual)) => expected == actual,
+                    _ => true,
+                },
+            );
+    required_present && constants_agree
+}
+
+/// Records every property path `instance` exercises under `node`, walking
+/// the schema and the document together so a property counts only where the
+/// schema declares it.
+fn mark_covered<'a>(
+    schema: &'a Value,
+    node: &'a Value,
+    instance: &Value,
+    prefix: &str,
+    covered: &mut BTreeSet<String>,
+) {
+    let (node, prefix): (&Value, &str) = match node["$ref"].as_str() {
+        Some(reference) => {
+            let (name, definition) = referenced_definition(schema, reference);
+            (definition, name)
+        }
+        None => (node, prefix),
+    };
+    for combinator in ["oneOf", "anyOf", "allOf"] {
+        for branch in node[combinator].as_array().into_iter().flatten() {
+            if branch_applies(schema, branch, instance) {
+                mark_covered(schema, branch, instance, prefix, covered);
+            }
+        }
+    }
+    match instance {
+        Value::Object(fields) => {
+            for (key, value) in fields {
+                if let Some(property) = node["properties"].get(key) {
+                    let path = format!("{prefix}.{key}");
+                    mark_covered(schema, property, value, &path, covered);
+                    covered.insert(path);
+                } else if node["additionalProperties"].is_object() {
+                    mark_covered(
+                        schema,
+                        &node["additionalProperties"],
+                        value,
+                        prefix,
+                        covered,
+                    );
+                }
+            }
+        }
+        Value::Array(items) if node["items"].is_object() => {
+            for item in items {
+                mark_covered(schema, &node["items"], item, prefix, covered);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The allow-list entry that explains `path`, if any.
+fn unpublished_reason(path: &str) -> Option<&'static (&'static str, &'static str)> {
+    UNPUBLISHED_PROPERTIES.iter().find(|(entry, _)| {
+        path == *entry
+            || path
+                .strip_prefix(entry)
+                .is_some_and(|rest| rest.starts_with('.'))
+    })
+}
+
+/// Nearly every object in the schema closes with `additionalProperties:
+/// false`, so a consumer generating strict types from the published examples
+/// never learns about a property no example serializes. Every declared
+/// property must therefore appear in some `output-*.json`, or carry a reason
+/// it cannot.
+#[test]
+fn every_schema_property_appears_in_a_published_example() {
+    let schema = output_schema();
+    let paths = schema_property_paths(schema);
+    assert!(
+        paths.len() > 300,
+        "the walker must resolve $refs: only {} property paths found",
+        paths.len()
+    );
+
+    let mut covered = BTreeSet::new();
+    for name in published_example_names() {
+        if !name.starts_with("output-") || !name.ends_with(".json") {
+            continue;
+        }
+        let document: Value = serde_json::from_str(
+            &fs::read_to_string(documents_directory().join(&name))
+                .expect("published example must be readable"),
+        )
+        .expect("published example must be JSON");
+        mark_covered(schema, schema, &document, "root", &mut covered);
+    }
+
+    let unpublished = paths
+        .iter()
+        .filter(|path| !covered.contains(*path))
+        .collect::<Vec<_>>();
+    let unexplained = unpublished
+        .iter()
+        .filter(|path| unpublished_reason(path).is_none())
+        .collect::<Vec<_>>();
+    assert!(
+        unexplained.is_empty(),
+        "{} of {} schema property paths appear in no examples/documents/output-*.json: \
+         {unexplained:#?}; publish an example that serializes each, or add the path to \
+         UNPUBLISHED_PROPERTIES with the reason no offline run can",
+        unexplained.len(),
+        paths.len()
+    );
+
+    let stale = UNPUBLISHED_PROPERTIES
+        .iter()
+        .filter(|(entry, _)| !paths.contains(*entry) || covered.contains(*entry))
+        .map(|(entry, _)| *entry)
+        .collect::<Vec<_>>();
+    assert!(
+        stale.is_empty(),
+        "UNPUBLISHED_PROPERTIES entries that the schema no longer declares or an example now \
+         exercises: {stale:?}; remove them"
+    );
 }

@@ -1,0 +1,167 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "dns",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "server": "resolver.lab",
+    "server_port": 53,
+    "resolved_addresses": [
+      "192.168.56.53"
+    ],
+    "query_name": "example.test.",
+    "query_type": "any",
+    "transaction_id": 4660,
+    "outcome": "response",
+    "fallback_attempted": false,
+    "accepted_transport": "udp",
+    "response_code": 0,
+    "response_code_name": "no_error",
+    "edns": {
+      "udp_payload_size": 1232,
+      "extended_response_code": 0,
+      "version": 0,
+      "dnssec_ok": true,
+      "flags": 32768,
+      "options": [
+        {
+          "code": 10,
+          "data_hex": "0102030405060708"
+        }
+      ]
+    },
+    "authoritative": true,
+    "truncated": false,
+    "recursion_desired": true,
+    "recursion_available": true,
+    "authenticated_data": false,
+    "checking_disabled": false,
+    "answers": [
+      {
+        "owner": "example.test.",
+        "class": 1,
+        "ttl": 3600,
+        "type": "soa",
+        "primary_name_server": "ns1.example.test.",
+        "responsible_mailbox": "hostmaster.example.test.",
+        "serial": 2026090301,
+        "refresh": 7200,
+        "retry": 900,
+        "expire": 1209600,
+        "minimum": 300
+      },
+      {
+        "owner": "example.test.",
+        "class": 1,
+        "ttl": 3600,
+        "type": "ns",
+        "name_server": "ns1.example.test."
+      },
+      {
+        "owner": "example.test.",
+        "class": 1,
+        "ttl": 3600,
+        "type": "mx",
+        "preference": 10,
+        "exchange": "mail.example.test."
+      },
+      {
+        "owner": "example.test.",
+        "class": 1,
+        "ttl": 3600,
+        "type": "unknown",
+        "type_code": 257,
+        "rdata_hex": "0005697373756563612e6578616d706c652e74657374"
+      }
+    ],
+    "authorities": [],
+    "additionals": [
+      {
+        "owner": "ns1.example.test.",
+        "class": 1,
+        "ttl": 3600,
+        "type": "a",
+        "address": "192.0.2.53"
+      },
+      {
+        "owner": "mail.example.test.",
+        "class": 1,
+        "ttl": 3600,
+        "type": "a",
+        "address": "192.0.2.25"
+      }
+    ],
+    "rejected_records": [],
+    "rejected_record_count": 0,
+    "attempts": [
+      {
+        "attempt": 1,
+        "transport": "udp",
+        "server_address": "192.168.56.53",
+        "source_port": 50000,
+        "status": "response",
+        "sent_at": {
+          "unix_seconds": 1770000000,
+          "nanoseconds": 0
+        },
+        "received_at": {
+          "unix_seconds": 1770000000,
+          "nanoseconds": 4000000
+        },
+        "latency": {
+          "secs": 0,
+          "nanos": 4000000
+        },
+        "response_code": 0,
+        "reason": "validated DNS response with code no_error",
+        "frame": {
+          "timestamp": {
+            "unix_seconds": 1770000000,
+            "nanoseconds": 4000000
+          },
+          "captured_length": 4,
+          "original_length": 4,
+          "link_type": 147,
+          "interface": 0,
+          "direction": "inbound",
+          "bytes_hex": "deadbeef"
+        }
+      }
+    ],
+    "undecoded": [
+      {
+        "attempt": 1,
+        "transport": "udp",
+        "frame": {
+          "timestamp": {
+            "unix_seconds": 1770000000,
+            "nanoseconds": 4000000
+          },
+          "captured_length": 4,
+          "original_length": 4,
+          "link_type": 147,
+          "interface": 0,
+          "direction": "inbound",
+          "bytes_hex": "deadbeef"
+        }
+      }
+    ]
+  },
+  "diagnostics": [],
+  "stats": {
+    "packets_attempted": 1,
+    "packets_completed": 1,
+    "bytes": 40,
+    "elapsed": {
+      "secs": 0,
+      "nanos": 4000000
+    },
+    "capture": {
+      "received_frames": 1,
+      "received_bytes": 245,
+      "dropped_frames": 0,
+      "dropped_bytes": 0,
+      "overflow_events": 0
+    }
+  }
+}

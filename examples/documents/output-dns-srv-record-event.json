@@ -1,0 +1,28 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "dns",
+  "mode": "stream",
+  "sequence": 1,
+  "status": "success",
+  "result": {
+    "event": "record",
+    "attempt": 1,
+    "transport": "udp",
+    "server": "resolver.lab",
+    "server_port": 53,
+    "query_name": "_sip._tcp.example.test.",
+    "query_type": "srv",
+    "section": "answer",
+    "record": {
+      "owner": "_sip._tcp.example.test.",
+      "class": 1,
+      "ttl": 3600,
+      "type": "srv",
+      "priority": 10,
+      "weight": 60,
+      "port": 5060,
+      "target": "sip.example.test."
+    }
+  },
+  "diagnostics": []
+}

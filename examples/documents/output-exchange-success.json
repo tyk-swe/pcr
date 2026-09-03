@@ -10,8 +10,69 @@
         "length": 4
       }
     ],
-    "responses": [],
-    "unanswered": [0],
+    "responses": [
+      {
+        "request_index": 0,
+        "response": {
+          "frame": {
+            "timestamp": {
+              "unix_seconds": 1770000000,
+              "nanoseconds": 4000000
+            },
+            "captured_length": 4,
+            "original_length": 4,
+            "link_type": 147,
+            "bytes_hex": "deadbeef"
+          },
+          "packet": {
+            "schema": "packetcraftr.packet/v1",
+            "layers": [
+              {
+                "protocol": "raw",
+                "fields": {
+                  "bytes": {
+                    "type": "bytes",
+                    "value": [
+                      222,
+                      173,
+                      190,
+                      239
+                    ]
+                  }
+                }
+              }
+            ]
+          },
+          "layout": {
+            "layers": [
+              {
+                "index": 0,
+                "protocol": "raw",
+                "range": {
+                  "start": 0,
+                  "end": 4
+                },
+                "fields": [
+                  {
+                    "name": "bytes",
+                    "range": {
+                      "start": 0,
+                      "end": 4
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "diagnostics": []
+        },
+        "latency": {
+          "secs": 0,
+          "nanos": 4000000
+        }
+      }
+    ],
+    "unanswered": [],
     "unsolicited": [],
     "undecoded": []
   },
@@ -25,8 +86,8 @@
       "nanos": 0
     },
     "capture": {
-      "received_frames": 0,
-      "received_bytes": 0,
+      "received_frames": 1,
+      "received_bytes": 4,
       "dropped_frames": 0,
       "dropped_bytes": 0,
       "overflow_events": 0

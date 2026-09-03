@@ -1,0 +1,69 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "tls",
+  "mode": "stream",
+  "sequence": 1,
+  "status": "success",
+  "result": {
+    "event": "session",
+    "session": 1,
+    "tcp_stream": 1,
+    "client_endpoint": {
+      "address": "192.0.2.1",
+      "port": 54322
+    },
+    "server_endpoint": {
+      "address": "198.51.100.2",
+      "port": 443
+    },
+    "first_frame": 9,
+    "last_frame": 11,
+    "client": {
+      "legacy_version": 771,
+      "legacy_version_name": "TLS 1.2",
+      "sni": "api.example.test",
+      "sni_raw_hex": "6170692e6578616d706c652e74657374",
+      "sni_is_outer": false,
+      "ech": false,
+      "alpn": [
+        "h2",
+        "http/1.1"
+      ],
+      "supported_versions": [
+        772,
+        771
+      ],
+      "cipher_suites": [
+        4865,
+        4866,
+        4867,
+        49199
+      ],
+      "supported_groups": [
+        29,
+        23
+      ],
+      "key_share_groups": [
+        29
+      ],
+      "signature_algorithms": [
+        1027,
+        2052,
+        1025
+      ],
+      "ja3": "54e2a2e989457808c77e4464d9361826",
+      "ja3_raw": "771,4865-4866-4867-49199,0-16-10-13-43-51,29-23,",
+      "ja4": "t13d0406h2_77f0cd3447db_5d4d534e3685"
+    },
+    "hello_retry": false,
+    "alerts": [
+      {
+        "level": 2,
+        "description": 40,
+        "description_name": "handshake_failure"
+      }
+    ],
+    "status": "alert"
+  },
+  "diagnostics": []
+}

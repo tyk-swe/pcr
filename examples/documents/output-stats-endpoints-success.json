@@ -1,0 +1,37 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "stats",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "table": "endpoints",
+    "frames_read": 8,
+    "frames_matched": 8,
+    "bytes_matched": 659,
+    "first_timestamp": {
+      "unix_seconds": 1787616000,
+      "nanoseconds": 0
+    },
+    "last_timestamp": {
+      "unix_seconds": 1787616000,
+      "nanoseconds": 68000000
+    },
+    "endpoints": [
+      {
+        "address": "192.0.2.1",
+        "tx_frames": 4,
+        "tx_bytes": 366,
+        "rx_frames": 4,
+        "rx_bytes": 293
+      },
+      {
+        "address": "198.51.100.2",
+        "tx_frames": 4,
+        "tx_bytes": 293,
+        "rx_frames": 4,
+        "rx_bytes": 366
+      }
+    ]
+  },
+  "diagnostics": []
+}

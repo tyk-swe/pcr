@@ -1,0 +1,47 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "scan",
+  "mode": "stream",
+  "sequence": 1,
+  "status": "success",
+  "result": {
+    "event": "probe",
+    "target": "192.168.56.10",
+    "probe": {
+      "sequence": 70000,
+      "protocol": "tcp",
+      "destination": "192.168.56.10",
+      "destination_port": 443,
+      "attempt": 1,
+      "status": "response",
+      "classification": "open",
+      "responder": "192.168.56.10",
+      "sent_at": {
+        "unix_seconds": 1770000000,
+        "nanoseconds": 0
+      },
+      "received_at": {
+        "unix_seconds": 1770000000,
+        "nanoseconds": 4000000
+      },
+      "latency": {
+        "secs": 0,
+        "nanos": 4000000
+      },
+      "frame": {
+        "timestamp": {
+          "unix_seconds": 1770000000,
+          "nanoseconds": 4000000
+        },
+        "captured_length": 4,
+        "original_length": 4,
+        "link_type": 147,
+        "interface": 0,
+        "direction": "inbound",
+        "bytes_hex": "deadbeef"
+      },
+      "reason": "checksum-valid SYN/ACK from the target"
+    }
+  },
+  "diagnostics": []
+}

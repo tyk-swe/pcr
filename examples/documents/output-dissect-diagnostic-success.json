@@ -1,0 +1,254 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "dissect",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "matched": true,
+    "dissection": {
+      "bytes_hex": "4500001c000100004001f6dcc0000201c00002020800000000010001",
+      "length": 28,
+      "link_type": 228,
+      "packet": {
+        "schema": "packetcraftr.packet/v1",
+        "layers": [
+          {
+            "protocol": "ipv4",
+            "fields": {
+              "checksum": {
+                "type": "unsigned",
+                "value": 63196
+              },
+              "destination": {
+                "type": "ipv4",
+                "value": "192.0.2.2"
+              },
+              "dont_fragment": {
+                "type": "bool",
+                "value": false
+              },
+              "dscp_ecn": {
+                "type": "unsigned",
+                "value": 0
+              },
+              "fragment_offset": {
+                "type": "unsigned",
+                "value": 0
+              },
+              "identification": {
+                "type": "unsigned",
+                "value": 1
+              },
+              "more_fragments": {
+                "type": "bool",
+                "value": false
+              },
+              "options": {
+                "type": "bytes",
+                "value": []
+              },
+              "protocol": {
+                "type": "unsigned",
+                "value": 1
+              },
+              "reserved_flag": {
+                "type": "bool",
+                "value": false
+              },
+              "source": {
+                "type": "ipv4",
+                "value": "192.0.2.1"
+              },
+              "total_length": {
+                "type": "unsigned",
+                "value": 28
+              },
+              "ttl": {
+                "type": "unsigned",
+                "value": 64
+              }
+            }
+          },
+          {
+            "protocol": "icmpv4",
+            "fields": {
+              "body": {
+                "type": "bytes",
+                "value": [
+                  0,
+                  1,
+                  0,
+                  1
+                ]
+              },
+              "checksum": {
+                "type": "unsigned",
+                "value": 0
+              },
+              "code": {
+                "type": "unsigned",
+                "value": 0
+              },
+              "type": {
+                "type": "unsigned",
+                "value": 8
+              }
+            }
+          }
+        ]
+      },
+      "layout": {
+        "layers": [
+          {
+            "index": 0,
+            "protocol": "ipv4",
+            "range": {
+              "start": 0,
+              "end": 20
+            },
+            "fields": [
+              {
+                "name": "dscp_ecn",
+                "range": {
+                  "start": 1,
+                  "end": 2
+                }
+              },
+              {
+                "name": "total_length",
+                "range": {
+                  "start": 2,
+                  "end": 4
+                }
+              },
+              {
+                "name": "identification",
+                "range": {
+                  "start": 4,
+                  "end": 6
+                }
+              },
+              {
+                "name": "reserved_flag",
+                "range": {
+                  "start": 6,
+                  "end": 8
+                }
+              },
+              {
+                "name": "dont_fragment",
+                "range": {
+                  "start": 6,
+                  "end": 8
+                }
+              },
+              {
+                "name": "more_fragments",
+                "range": {
+                  "start": 6,
+                  "end": 8
+                }
+              },
+              {
+                "name": "fragment_offset",
+                "range": {
+                  "start": 6,
+                  "end": 8
+                }
+              },
+              {
+                "name": "ttl",
+                "range": {
+                  "start": 8,
+                  "end": 9
+                }
+              },
+              {
+                "name": "protocol",
+                "range": {
+                  "start": 9,
+                  "end": 10
+                }
+              },
+              {
+                "name": "checksum",
+                "range": {
+                  "start": 10,
+                  "end": 12
+                }
+              },
+              {
+                "name": "source",
+                "range": {
+                  "start": 12,
+                  "end": 16
+                }
+              },
+              {
+                "name": "destination",
+                "range": {
+                  "start": 16,
+                  "end": 20
+                }
+              },
+              {
+                "name": "options",
+                "range": {
+                  "start": 20,
+                  "end": 20
+                }
+              }
+            ]
+          },
+          {
+            "index": 1,
+            "protocol": "icmpv4",
+            "range": {
+              "start": 20,
+              "end": 28
+            },
+            "fields": [
+              {
+                "name": "type",
+                "range": {
+                  "start": 20,
+                  "end": 21
+                }
+              },
+              {
+                "name": "code",
+                "range": {
+                  "start": 21,
+                  "end": 22
+                }
+              },
+              {
+                "name": "checksum",
+                "range": {
+                  "start": 22,
+                  "end": 24
+                }
+              },
+              {
+                "name": "body",
+                "range": {
+                  "start": 24,
+                  "end": 28
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "diagnostics": [
+    {
+      "code": "decode.icmpv4_checksum",
+      "severity": "warning",
+      "message": "ICMPv4 checksum mismatch",
+      "layer": 1,
+      "field": "checksum"
+    }
+  ]
+}

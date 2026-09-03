@@ -20,6 +20,14 @@
     "accepted_transport": "tcp",
     "response_code": 0,
     "response_code_name": "no_error",
+    "edns": {
+      "version": 0,
+      "udp_payload_size": 1232,
+      "extended_response_code": 0,
+      "dnssec_ok": false,
+      "flags": 0,
+      "options": []
+    },
     "authoritative": false,
     "truncated": false,
     "recursion_desired": true,

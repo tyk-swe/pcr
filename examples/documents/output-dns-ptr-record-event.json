@@ -1,0 +1,25 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "dns",
+  "mode": "stream",
+  "sequence": 1,
+  "status": "success",
+  "result": {
+    "event": "record",
+    "attempt": 1,
+    "transport": "udp",
+    "server": "resolver.lab",
+    "server_port": 53,
+    "query_name": "10.2.0.192.in-addr.arpa.",
+    "query_type": "ptr",
+    "section": "answer",
+    "record": {
+      "owner": "10.2.0.192.in-addr.arpa.",
+      "class": 1,
+      "ttl": 3600,
+      "type": "ptr",
+      "pointer": "www.example.test."
+    }
+  },
+  "diagnostics": []
+}

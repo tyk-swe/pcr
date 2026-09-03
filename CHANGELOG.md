@@ -8,6 +8,17 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Added
 
+- A test that fails when a property in `schemas/packetcraftr.output.v1.schema.json`
+  is serialized by no `examples/documents/output-*.json`, so consumers generating
+  strict types from the examples see every field; the few live-only properties
+  carry a reason in the test. New examples cover `stats --table io`, `--table
+  ports`, `--table protocols` and `--table endpoints`, `read --dissect`, a
+  dissection with a field-level diagnostic, a DNS `any` response with EDNS,
+  SOA, NS, MX and unknown-type records plus an undecoded reply, DNS CNAME, PTR
+  and SRV record events, scan and traceroute undecoded-frame events, a scan
+  probe response, and TLS sessions ended by a fatal alert or a truncated
+  capture; the exchange, traceroute and DNS `complete` examples now carry a
+  decoded response, an undecoded frame, and EDNS metadata respectively.
 - `packetcraftr_core::protocol::application::dns::name`: one bounded DNS name
   decompressor, with a typed failure enum and a caller-supplied
   compression-pointer ceiling. The built-in DNS-over-UDP dissector and the DNS

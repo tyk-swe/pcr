@@ -74,3 +74,15 @@ name = "dns_name"
 path = "fuzz_targets/dns_name.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "packet_build"
+path = "fuzz_targets/packet_build.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tls_session"
+path = "fuzz_targets/tls_session.rs"
+test = false
+doc = false

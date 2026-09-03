@@ -8,6 +8,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Added
 
+- Fuzz targets `packet_build` (expression and document parsing into every
+  encoder, both modes, with a decode round trip) and `tls_session` (captures
+  through TCP reassembly into the TLS session collector); `filter_parse` now
+  evaluates compiled filters against a fuzzed frame instead of an empty one.
 - The root `--help` and the README document the exit-code contract (2 cli,
   3 packet, 4 capability, 5 io, 6 policy, 70 internal); a test keeps the help
   table equal to the code that maps error kinds to exit codes.

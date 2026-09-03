@@ -36,6 +36,8 @@ jobs:
           - tls_assembly
           - filter_parse
           - dns_name
+          - packet_build
+          - tls_session
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install nightly toolchain for libfuzzer
@@ -52,14 +54,14 @@ jobs:
           # Published examples double as seeds; they are pinned to the
           # schemas by the example matrix tests, so they cannot rot.
           case "${{ matrix.target }}" in
-            packet_document_json) corpus+=("../examples/documents") ;;
-            pcapng_parse) corpus+=("../examples/captures") ;;
+            packet_document_json|packet_build) corpus+=("../examples/documents") ;;
+            pcapng_parse|tls_session) corpus+=("../examples/captures") ;;
           esac
           case "${{ matrix.target }}" in
             packet_document_json) dictionary+=("-dict=dictionaries/json.dict") ;;
             packet_document_yaml) dictionary+=("-dict=dictionaries/yaml.dict") ;;
             tls_assembly) dictionary+=("-dict=dictionaries/tls.dict") ;;
-            filter_parse) dictionary+=("-dict=dictionaries/filter.dict") ;;
+            filter_parse|packet_build) dictionary+=("-dict=dictionaries/filter.dict") ;;
           esac
           cargo +nightly fuzz run "${{ matrix.target }}" "${corpus[@]}" -- "${dictionary[@]}" -max_total_time=30
         working-directory: fuzz

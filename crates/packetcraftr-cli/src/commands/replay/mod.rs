@@ -90,8 +90,7 @@ fn prepare(arguments: &Args) -> Result<ReplayRun, CliError> {
     let capture_limits = OfflineCaptureLimitsArgs {
         max_frames: policy.max_packets_per_operation,
         max_bytes: policy.max_bytes_per_operation,
-        max_frame_bytes: arguments.max_frame_bytes,
-        max_interfaces: arguments.max_interfaces,
+        reader: arguments.reader,
     };
     validate_capture_stream_limits(capture_limits)?;
     let timing = timing(arguments)?;
@@ -99,13 +98,13 @@ fn prepare(arguments: &Args) -> Result<ReplayRun, CliError> {
     let filter = FrameSelector::compile_optional(
         arguments.filter.as_deref(),
         &registry,
-        arguments.max_frame_bytes,
+        arguments.reader.max_frame_bytes,
     )?;
     let requested_interface = interface(&arguments.interface)?;
     policy.validate().map_err(CliError::classified)?;
     let limits = packetcraftr::replay::Limits::from_policy(
         &policy,
-        arguments.max_frame_bytes,
+        arguments.reader.max_frame_bytes,
         Duration::from_millis(arguments.max_duration_ms),
     );
     limits.validate().map_err(CliError::classified)?;
@@ -121,12 +120,12 @@ fn prepare(arguments: &Args) -> Result<ReplayRun, CliError> {
         authorizer: packetcraftr::replay::SystemAuthorizer::new(
             Arc::clone(&registry),
             policy,
-            arguments.allow_malformed_live,
+            arguments.allow_permissive_live,
         ),
         transmitter: packetcraftr::replay::SystemTransmitter::new(),
         clock: packetcraftr::clock::SystemClock,
         filter,
         requested_interface,
-        max_interfaces: arguments.max_interfaces,
+        max_interfaces: arguments.reader.max_interfaces,
     })
 }

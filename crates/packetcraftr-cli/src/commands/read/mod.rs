@@ -223,7 +223,7 @@ fn convert_frame(
         .decode(
             frame.clone(),
             core::decode::Options {
-                max_packet_size: limits.max_frame_bytes,
+                max_packet_size: limits.reader.max_frame_bytes,
                 ..core::decode::Options::default()
             },
         )

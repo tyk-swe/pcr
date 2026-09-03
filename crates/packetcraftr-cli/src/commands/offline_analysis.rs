@@ -71,7 +71,7 @@ pub(super) fn prepare_with_tls_ports(
     let limits = analysis::Limits {
         max_frames: capture.max_frames,
         max_bytes: capture.max_bytes,
-        max_frame_bytes: capture.max_frame_bytes,
+        max_frame_bytes: capture.reader.max_frame_bytes,
         max_flows: limits.max_flows,
         max_tcp_bytes_per_flow: limits.max_tcp_bytes_per_flow,
         max_tcp_reassembly_bytes: limits.max_tcp_reassembly_bytes,

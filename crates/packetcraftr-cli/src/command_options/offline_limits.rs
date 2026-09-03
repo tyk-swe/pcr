@@ -42,9 +42,18 @@ pub(crate) struct OfflineCaptureLimitsArgs {
     /// Maximum frames read from the capture stream.
     #[arg(long, default_value_t = capture::DEFAULT_STREAM_FRAMES)]
     pub(crate) max_frames: u64,
-    /// Maximum aggregate captured payload bytes read.
+    /// Maximum aggregate captured payload bytes read from the input; a reader
+    /// bound, unrelated to the live traffic budget of the same name.
     #[arg(long, default_value_t = capture::DEFAULT_STREAM_BYTES)]
     pub(crate) max_bytes: u64,
+    #[command(flatten)]
+    pub(crate) reader: CaptureReaderBoundsArgs,
+}
+
+/// Per-item bounds a capture reader is opened under, shared by every command
+/// that reads a capture file so the defaults cannot diverge.
+#[derive(Clone, Copy, Debug, Args)]
+pub(crate) struct CaptureReaderBoundsArgs {
     /// Maximum bytes accepted from any one captured frame or PCAPNG block.
     #[arg(long, default_value_t = capture::DEFAULT_SIZE_LIMIT)]
     pub(crate) max_frame_bytes: usize,
@@ -64,8 +73,8 @@ impl OfflineCaptureLimitsArgs {
     /// byte ceilings are charged per frame while streaming instead.
     pub(crate) const fn reader_bounds(self) -> ReaderBounds {
         ReaderBounds {
-            max_frame_bytes: self.max_frame_bytes,
-            max_interfaces: self.max_interfaces,
+            max_frame_bytes: self.reader.max_frame_bytes,
+            max_interfaces: self.reader.max_interfaces,
         }
     }
 }

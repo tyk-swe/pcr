@@ -41,7 +41,7 @@ impl From<Strategy> for core::fuzz::Strategy {
     mut_arg("interface", |arg| arg.help("Interface name or numeric index used as an exact live route constraint").requires("live")),
     mut_arg("source", |arg| arg.help("Interface-owned source preference used only for live route selection").requires("live")),
     mut_arg("link_mode", |arg| arg.help("Automatic, Layer 2, or raw Layer 3 live transmission intent").requires("live")),
-    mut_arg("allow_malformed_live", |arg| arg.requires("live")),
+    mut_arg("allow_permissive_live", |arg| arg.requires("live")),
     mut_arg("destination", |arg| arg.requires("live")),
     mut_arg("timeout_ms", |arg| arg.requires("live")),
     mut_arg("rate", |arg| arg.requires("live")),
@@ -84,9 +84,9 @@ pub(crate) struct Args {
     /// Explicitly enable route, capture, and transmission; offline is the default.
     #[arg(long)]
     pub(crate) live: bool,
-    /// Independent per-operation opt-in for permissive/malformed live cases.
-    #[arg(long)]
-    pub(crate) allow_malformed_live: bool,
+    /// Per-operation opt-in required for a permissively built or malformed live frame.
+    #[arg(long, alias = "allow-malformed-live")]
+    pub(crate) allow_permissive_live: bool,
     /// Optional route destination when the packet has no fixed destination.
     #[arg(long)]
     pub(crate) destination: Option<IpAddr>,

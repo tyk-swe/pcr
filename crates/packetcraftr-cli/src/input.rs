@@ -11,7 +11,7 @@ use packetcraftr::{
     core::{self, Packet},
 };
 
-use super::command_options::{OfflineCaptureLimitsArgs, RecipeArgs};
+use super::command_options::{CaptureReaderBoundsArgs, OfflineCaptureLimitsArgs, RecipeArgs};
 use super::errors::CliError;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -238,8 +238,11 @@ pub(crate) fn validate_capture_stream_limits(
     let OfflineCaptureLimitsArgs {
         max_frames,
         max_bytes,
-        max_frame_bytes,
-        max_interfaces,
+        reader:
+            CaptureReaderBoundsArgs {
+                max_frame_bytes,
+                max_interfaces,
+            },
     } = limits;
     if max_frames == 0 || max_bytes == 0 || max_frame_bytes == 0 || max_interfaces == 0 {
         return Err(CliError::from_classification(
@@ -382,8 +385,10 @@ mod tests {
             |max_frames, max_bytes, max_frame_bytes, max_interfaces| OfflineCaptureLimitsArgs {
                 max_frames,
                 max_bytes,
-                max_frame_bytes,
-                max_interfaces,
+                reader: CaptureReaderBoundsArgs {
+                    max_frame_bytes,
+                    max_interfaces,
+                },
             };
 
         for limits in [(0, 1, 1, 1), (1, 0, 1, 1), (1, 1, 0, 1), (1, 1, 1, 0)] {

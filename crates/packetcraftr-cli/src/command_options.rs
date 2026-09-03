@@ -5,7 +5,9 @@
 
 pub(crate) use address_family::AddressFamily;
 pub(crate) use capture_limits::CaptureLimitsArgs;
-pub(crate) use offline_limits::{OfflineCaptureLimitsArgs, OfflineLimitsArgs};
+pub(crate) use offline_limits::{
+    CaptureReaderBoundsArgs, OfflineCaptureLimitsArgs, OfflineLimitsArgs,
+};
 pub(crate) use policy::{
     Captured, FuzzPolicyArgs, HostnamePolicyArgs, ReplayPolicyArgs, RoutePolicyArgs,
     SendPolicyArgs, TrafficBudgetArgs,

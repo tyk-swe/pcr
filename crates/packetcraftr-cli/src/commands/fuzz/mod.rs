@@ -95,7 +95,7 @@ fn prepare_live(
         timeout: Duration::from_millis(arguments.timeout_ms),
         cases_per_second: arguments.rate,
         destination: arguments.destination,
-        allow_malformed_live: arguments.allow_malformed_live,
+        allow_malformed_live: arguments.allow_permissive_live,
         limits: packetcraftr::fuzz::LiveLimits {
             max_evidence_frames: queue_limits.max_frames,
             max_evidence_bytes: queue_limits.max_bytes,
@@ -114,7 +114,7 @@ fn prepare_live(
                 preferred_source: arguments.route.source,
             },
             build: request.build.clone(),
-            allow_permissive_live: arguments.allow_malformed_live,
+            allow_permissive_live: arguments.allow_permissive_live,
         },
         Duration::from_millis(arguments.timeout_ms),
         1,

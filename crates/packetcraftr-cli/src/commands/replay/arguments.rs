@@ -3,10 +3,8 @@
 
 use std::path::PathBuf;
 
+use crate::command_options::{CaptureReaderBoundsArgs, LinkMode, ReplayPolicyArgs};
 use clap::ValueEnum;
-use packetcraftr::analysis::pcap as capture;
-
-use crate::command_options::{LinkMode, ReplayPolicyArgs};
 
 pub(crate) const AFTER_LONG_HELP: &str = r#"Replay is policy-gated and may require native features, dependencies, and privileges.
 
@@ -55,15 +53,11 @@ pub(crate) struct Args {
     /// Maximum cumulative intentional replay delay in milliseconds.
     #[arg(long, default_value_t = 3_600_000)]
     pub(crate) max_duration_ms: u64,
-    /// Maximum bytes accepted from any one captured frame or PCAPNG block.
-    #[arg(long, default_value_t = capture::DEFAULT_SIZE_LIMIT)]
-    pub(crate) max_frame_bytes: usize,
-    /// Maximum PCAPNG interfaces accepted from the input.
-    #[arg(long, default_value_t = capture::DEFAULT_INTERFACE_LIMIT)]
-    pub(crate) max_interfaces: usize,
-    /// Per-operation opt-in required when dissection preserves malformed bytes.
-    #[arg(long)]
-    pub(crate) allow_malformed_live: bool,
+    #[command(flatten)]
+    pub(crate) reader: CaptureReaderBoundsArgs,
+    /// Per-operation opt-in required for a permissively built or malformed live frame.
+    #[arg(long, alias = "allow-malformed-live")]
+    pub(crate) allow_permissive_live: bool,
     /// Replay only frames matching a display filter; skipped frames are never
     /// authorized or transmitted.
     #[arg(long, value_name = "EXPR")]

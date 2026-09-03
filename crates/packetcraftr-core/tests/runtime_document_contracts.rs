@@ -227,12 +227,17 @@ fn expressions_and_documents_round_trip_and_enforce_resource_bounds() {
     // as an accepted document or a limit breach.
     let duplicate = "schema: packetcraftr.packet/v1\nschema: duplicate\nlayers: []\n";
     for (input, format, expected_format, expected_fragment) in [
-        ("{} trailing", document::Format::Json, "JSON", "trailing"),
         (
-            "---\n{}\n---\n{}",
+            r#"{"schema":"packetcraftr.packet/v1","layers":[]} trailing"#,
+            document::Format::Json,
+            "JSON",
+            "trailing",
+        ),
+        (
+            "---\nschema: packetcraftr.packet/v1\nlayers: []\n---\n{}",
             document::Format::Yaml,
             "YAML",
-            "multiple YAML documents",
+            "multiple yaml documents",
         ),
         (duplicate, document::Format::Yaml, "YAML", "duplicate"),
     ] {

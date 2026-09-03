@@ -7,8 +7,8 @@ use packetcraftr::{core, output};
 
 use crate::errors::CliError;
 use crate::rendering::{
-    captured_frame_text, comma_separated, optional_display, render_diagnostics_text,
-    render_optional, write_stdout_line,
+    captured_frame_text, comma_separated, optional_debug, optional_display,
+    render_diagnostics_text, write_stdout_line,
 };
 
 pub(super) fn render_text(
@@ -38,7 +38,7 @@ pub(super) fn render_text(
             attempt.status.as_str(),
             optional_display(attempt.sent_at),
             optional_display(attempt.received_at),
-            render_optional(attempt.latency, |value| format!("{value:?}")),
+            optional_debug(attempt.latency),
             optional_display(attempt.response_code),
             attempt.reason,
         ))?;
@@ -164,6 +164,7 @@ mod tests {
     use crate::commands::dns::Dns;
     use crate::commands::target_workflow::TargetWorkflow as _;
     use crate::rendering::ndjson_test_support::{assert_contiguous, stream};
+    use crate::test_support::assert_single_complete;
     use packetcraftr::output;
 
     fn attempt_event(attempt: u32) -> dns::Event {
@@ -253,12 +254,6 @@ mod tests {
         assert_eq!(records[1]["result"]["evidence"]["attempt"], 2);
         assert_eq!(records[2]["result"]["transaction_id"], u16::MAX);
         assert_eq!(records[2]["result"]["event"], "complete");
-        assert_eq!(
-            records
-                .iter()
-                .filter(|record| record["result"]["event"] == "complete")
-                .count(),
-            1
-        );
+        assert_single_complete(&records);
     }
 }

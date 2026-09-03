@@ -16,8 +16,8 @@ use crate::{
 
 use super::ports::child_discriminators;
 use crate::protocol::common::{
-    ValueExpectation, invalid, make_layer, payload_without_padding, protocol, resolve_u16,
-    transport_checksum, transport_checksum_parts, truncated, typed_layer,
+    ValueExpectation, invalid, make_layer, pad_options_to_four_bytes, payload_without_padding,
+    protocol, resolve_u16, transport_checksum, transport_checksum_parts, truncated, typed_layer,
 };
 use crate::protocol::network::{ip_protocol, resolve_envelope};
 
@@ -126,18 +126,12 @@ impl LayerCodec for TcpCodec {
                 Diagnostic::warning("build.tcp_reserved_bits", message).at_field("reserved_bits"),
             );
         }
-        let mut options = layer.options.to_vec();
-        let padding = 4_usize.saturating_sub(options.len() % 4) % 4;
-        if padding != 0 {
-            options.resize(options.len().saturating_add(padding), 0);
-            diagnostics.push(
-                Diagnostic::warning(
-                    "build.tcp_options_padded",
-                    format!("padded TCP options with {padding} zero byte(s)"),
-                )
-                .at_field("options"),
-            );
-        }
+        let options = pad_options_to_four_bytes(
+            &layer.options,
+            "build.tcp_options_padded",
+            "TCP",
+            &mut diagnostics,
+        );
         let header_len = TCP_MIN_LEN.saturating_add(options.len());
         let data_offset =
             u8::try_from(header_len / 4).map_err(|_| invalid(NAME, "header length overflow"))?;

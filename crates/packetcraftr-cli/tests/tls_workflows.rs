@@ -4,8 +4,8 @@
 // for library paths.
 #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
-//! Contracts for the `tls` command and the `--tls-port` remap it shares with
-//! `read` and `dissect`.
+//! Contracts for the `tls` command and the `--tls-port` remap shared by the
+//! offline dissection and analysis commands.
 
 use std::path::PathBuf;
 
@@ -253,6 +253,92 @@ fn an_extra_tls_port_reaches_the_per_frame_view_that_assembly_never_needed() {
         text(&without_remap).is_empty(),
         "the default port list leaves 4433 raw"
     );
+
+    // `stats` counts the same per-frame layer in its protocols table, so the
+    // remap adds a `tls` row while the defaults leave 4433 raw.
+    let protocols_with = parse_json(&run_success(&[
+        "--output",
+        "json",
+        "stats",
+        path,
+        "--table",
+        "protocols",
+        "--tls-port",
+        "4433",
+    ]));
+    let rows_with = protocols_with["result"]["protocols"]
+        .as_array()
+        .expect("protocols is an array");
+    let tls_row = rows_with
+        .iter()
+        .find(|row| row["protocol"] == "tls")
+        .expect("remapped 4433 counts as tls");
+    assert_eq!(tls_row["frames"], 2);
+
+    let protocols_without = parse_json(&run_success(&[
+        "--output",
+        "json",
+        "stats",
+        path,
+        "--table",
+        "protocols",
+    ]));
+    let rows_without = protocols_without["result"]["protocols"]
+        .as_array()
+        .expect("protocols is an array");
+    assert!(
+        rows_without.iter().all(|row| row["protocol"] != "tls"),
+        "defaults leave 4433 raw: {rows_without:?}"
+    );
+
+    // The `tls` display filter sees the same layer, so it matches the two
+    // hello frames only with the remap, in both `stats` and `expert`.
+    let stats_filtered = parse_json(&run_success(&[
+        "--output",
+        "json",
+        "stats",
+        path,
+        "--table",
+        "protocols",
+        "--filter",
+        "tls",
+        "--tls-port",
+        "4433",
+    ]));
+    assert_eq!(stats_filtered["result"]["frames_read"], 7);
+    assert_eq!(stats_filtered["result"]["frames_matched"], 2);
+
+    let stats_unfiltered = parse_json(&run_success(&[
+        "--output",
+        "json",
+        "stats",
+        path,
+        "--table",
+        "protocols",
+        "--filter",
+        "tls",
+    ]));
+    assert_eq!(stats_unfiltered["result"]["frames_read"], 7);
+    assert_eq!(stats_unfiltered["result"]["frames_matched"], 0);
+
+    let expert_filtered = parse_json(&run_success(&[
+        "--output",
+        "json",
+        "expert",
+        path,
+        "--filter",
+        "tls",
+        "--tls-port",
+        "4433",
+    ]));
+    assert_eq!(expert_filtered["result"]["frames_read"], 7);
+    assert_eq!(expert_filtered["result"]["frames_matched"], 2);
+
+    let expert_unfiltered = parse_json(&run_success(&[
+        "--output", "json", "expert", path, "--filter", "tls",
+    ]));
+    assert_eq!(expert_unfiltered["result"]["frames_read"], 7);
+    assert_eq!(expert_unfiltered["result"]["frames_matched"], 0);
 }
 
 #[test]

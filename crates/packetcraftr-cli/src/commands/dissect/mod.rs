@@ -22,8 +22,8 @@ use crate::errors::CliError;
 use crate::filtering::{self, Capabilities};
 use crate::input::{InputKind, read_bounded_file, read_stdin_bounded};
 use crate::rendering::{
-    emit_aggregate, render_diagnostics_text, write_plain_line, write_raw, write_stdout_line,
-    write_summary_line,
+    emit_aggregate, emit_stderr_message, render_diagnostics_text, write_plain_line, write_raw,
+    write_stdout_line, write_summary_line,
 };
 
 pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
@@ -73,11 +73,13 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
         None => true,
     };
     let (result, diagnostics) = output::dissect::Report::from_decoded(decoded);
+    // An unmatched frame keeps byte-oriented stdout empty on success; the
+    // notice goes to stderr through the shared human renderer.
+    if !kept && !matches!(format, BuildFormat::Json) {
+        return emit_stderr_message("frame did not match the filter");
+    }
     match format {
         BuildFormat::Text => {
-            if !kept {
-                return Ok(());
-            }
             write_summary_line(format_args!(
                 "decoded {} bytes into {} layer(s)",
                 result.frame.length,
@@ -88,18 +90,8 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
             }
             render_diagnostics_text(&diagnostics)
         }
-        BuildFormat::Hex => {
-            if !kept {
-                return Ok(());
-            }
-            write_plain_line(format_args!("{}", result.frame.bytes_hex()))
-        }
-        BuildFormat::Raw => {
-            if !kept {
-                return Ok(());
-            }
-            write_raw(result.frame.bytes())
-        }
+        BuildFormat::Hex => write_plain_line(format_args!("{}", result.frame.bytes_hex())),
+        BuildFormat::Raw => write_raw(result.frame.bytes()),
         BuildFormat::Json => emit_aggregate(
             output::contract::Command::Dissect,
             output::dissect::AggregateResult::new(kept.then_some(result)),

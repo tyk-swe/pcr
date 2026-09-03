@@ -5,8 +5,8 @@ use packetcraftr::{core, output};
 
 use crate::errors::CliError;
 use crate::rendering::{
-    captured_frame_text, comma_separated, optional_display, render_diagnostics_text,
-    render_optional, write_stdout_line,
+    captured_frame_text, comma_separated, optional_debug, optional_display,
+    render_diagnostics_text, write_stdout_line,
 };
 
 pub(super) fn render_text(
@@ -36,7 +36,7 @@ pub(super) fn render_text(
                 probe.sent_at,
                 optional_display(probe.received_at),
                 optional_display(probe.responder),
-                render_optional(probe.latency, |value| format!("{value:?}")),
+                optional_debug(probe.latency),
                 optional_display(probe.destination_port),
                 probe.reason,
             ))?;
@@ -75,6 +75,7 @@ mod tests {
     use crate::commands::target_workflow::TargetWorkflow as _;
     use crate::commands::traceroute::Traceroute;
     use crate::rendering::ndjson_test_support::{assert_contiguous, stream};
+    use crate::test_support::assert_single_complete;
 
     fn probe_event(sequence: u64, hop_limit: u8) -> traceroute::Event {
         let destination = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 20));
@@ -125,12 +126,6 @@ mod tests {
         assert_eq!(records[0]["result"]["probe"]["hop_limit"], 200);
         assert_eq!(records[1]["result"]["probe"]["sequence"], 3);
         assert_eq!(records[2]["result"]["event"], "complete");
-        assert_eq!(
-            records
-                .iter()
-                .filter(|record| record["result"]["event"] == "complete")
-                .count(),
-            1
-        );
+        assert_single_complete(&records);
     }
 }

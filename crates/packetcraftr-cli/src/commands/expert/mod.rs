@@ -8,7 +8,7 @@ use packetcraftr::{analysis, output};
 
 use self::arguments::{Args, Severity};
 use super::format::ToolFormat;
-use super::offline_analysis::prepare;
+use super::offline_analysis::prepare_with_tls_ports;
 use crate::errors::CliError;
 use crate::input::open_capture;
 use crate::rendering::StreamEncoder;
@@ -33,7 +33,11 @@ pub(super) fn run(
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     let format = ToolFormat::narrow(output::contract::Command::Expert, format)?;
-    let prepared = prepare(arguments.limits, arguments.filter.as_deref())?;
+    let prepared = prepare_with_tls_ports(
+        arguments.limits,
+        arguments.filter.as_deref(),
+        &arguments.tls_ports.ports,
+    )?;
     let mut reader = open_capture(&arguments.path, arguments.limits.capture.reader)?;
 
     // Expert needs the reassembler's byte-exact retransmission evidence.

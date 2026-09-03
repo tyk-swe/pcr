@@ -155,13 +155,16 @@ where
         .map_err(|source| stream_capture_error("flush capture output failed", source))
 }
 
+fn output_error(source_index: u64, message: impl Into<String>) -> packetcraftr::replay::Error {
+    packetcraftr::replay::Error::output_at_source_index(source_index, message)
+}
+
 fn output_frame(
     evidence: packetcraftr::replay::FrameEvidence,
 ) -> Result<output::replay::Frame, packetcraftr::replay::Error> {
     let source_index = evidence.source_index;
-    output::replay::Frame::try_from_evidence(evidence).map_err(|source| {
-        packetcraftr::replay::Error::output_at_source_index(source_index, source.to_string())
-    })
+    output::replay::Frame::try_from_evidence(evidence)
+        .map_err(|source| output_error(source_index, source.to_string()))
 }
 
 fn render_record(
@@ -178,9 +181,7 @@ fn render_record(
         result.frame.link_type,
         spaced_hex(result.frame.bytes())
     ))
-    .map_err(|source| {
-        packetcraftr::replay::Error::output_at_source_index(result.source_index, source.message)
-    })
+    .map_err(|source| output_error(result.source_index, source.message))
 }
 
 fn render_stream_record(
@@ -189,9 +190,9 @@ fn render_stream_record(
 ) -> Result<(), packetcraftr::replay::Error> {
     let source_index = evidence.source_index;
     let result = output_frame(evidence)?;
-    stream.emit_data(result, Vec::new()).map_err(|error| {
-        packetcraftr::replay::Error::output_at_source_index(source_index, error.to_string())
-    })
+    stream
+        .emit_data(result, Vec::new())
+        .map_err(|error| output_error(source_index, error.to_string()))
 }
 
 fn capture_writer<R: Read, W: Write>(
@@ -275,9 +276,7 @@ fn render_capture_record<W: Write>(
             evidence.capture_interface,
             evidence.frame,
         )
-        .map_err(|source| {
-            packetcraftr::replay::Error::output_at_source_index(source_index, source.to_string())
-        })
+        .map_err(|source| output_error(source_index, source.to_string()))
 }
 
 fn stats(summary: &packetcraftr::replay::Summary, elapsed: Duration) -> output::envelope::Stats {

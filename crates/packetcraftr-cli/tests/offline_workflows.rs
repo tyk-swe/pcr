@@ -525,6 +525,69 @@ fn expert_reports_tcp_state_in_aggregate_stream_and_text_modes() {
 }
 
 #[test]
+fn expert_text_lists_one_count_line_per_code_before_the_summary() {
+    let capture = write_capture();
+    let path = path_text(capture.path());
+
+    let aggregated = run_success(&["--output", "json", "expert", path]);
+    let document = parse_json(&aggregated);
+    let expected: Vec<String> = document["result"]["codes"]
+        .as_array()
+        .expect("aggregate expert output lists per-code counts")
+        .iter()
+        .map(|entry| {
+            format!(
+                "code={} findings={}",
+                entry["code"].as_str().expect("code is a string"),
+                entry["findings"].as_u64().expect("count is a number"),
+            )
+        })
+        .collect();
+    assert_eq!(
+        expected,
+        ["code=tcp.retransmission_conflicting findings=1"],
+        "the fixture's aggregate code count is part of this contract",
+    );
+
+    let text = run_success(&["--output", "text", "expert", path]);
+    let stdout = String::from_utf8_lossy(&text.stdout);
+    let lines: Vec<&str> = stdout.lines().collect();
+    let summary = lines.last().expect("text output ends with a summary");
+    assert_eq!(
+        *summary,
+        "found 1 finding(s) (1 error(s), 0 warning(s), 0 note(s)) in 5 of 5 frame(s)",
+    );
+    let reported: Vec<String> = lines
+        .iter()
+        .filter(|line| line.starts_with("code="))
+        .map(ToString::to_string)
+        .collect();
+    assert_eq!(reported, expected);
+    assert_eq!(
+        &lines[lines.len() - 1 - reported.len()..lines.len() - 1],
+        expected.as_slice(),
+        "count lines must sit immediately before the final summary",
+    );
+}
+
+#[test]
+fn expert_text_with_zero_findings_adds_no_code_lines() {
+    let capture = write_capture();
+    let path = path_text(capture.path());
+
+    let output = run_success(&["--output", "text", "expert", path, "--filter", "udp"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.lines().any(|line| line.starts_with("code=")),
+        "zero findings must add no lines: {stdout:?}",
+    );
+    assert_eq!(
+        stdout.lines().collect::<Vec<_>>(),
+        ["found 0 finding(s) (0 error(s), 0 warning(s), 0 note(s)) in 2 of 5 frame(s)"],
+    );
+}
+
+#[test]
 fn follow_and_expert_stream_failures_terminate_at_the_next_position() {
     let capture = write_truncated_capture();
     let path = path_text(capture.path());
@@ -850,6 +913,86 @@ fn packet_documents_stdin_and_file_inputs_cover_offline_input_paths() {
         "228",
     ]);
     assert!(decoded.status.success(), "{:?}", decoded.stderr);
+}
+
+#[test]
+fn dissect_unmatched_filter_keeps_byte_output_empty_and_reports_on_stderr() {
+    let frame = decode_hex(UDP_CLIENT);
+    for format in ["text", "hex", "raw"] {
+        let output = run_with_stdin(
+            &[
+                "--output",
+                format,
+                "dissect",
+                "--link-type",
+                "228",
+                "--filter",
+                "tcp",
+            ],
+            &frame,
+        );
+        assert!(output.status.success(), "{format}: {:?}", output.stderr);
+        assert!(
+            output.stdout.is_empty(),
+            "{format} must keep stdout empty for a miss",
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stderr).trim(),
+            "frame did not match the filter",
+            "{format} must report the miss on stderr",
+        );
+    }
+}
+
+#[test]
+fn dissect_matched_and_json_outputs_are_unchanged_by_the_miss_notice() {
+    let frame = decode_hex(UDP_CLIENT);
+    for format in ["text", "hex", "raw"] {
+        let output = run_with_stdin(
+            &[
+                "--output",
+                format,
+                "dissect",
+                "--link-type",
+                "228",
+                "--filter",
+                "udp",
+            ],
+            &frame,
+        );
+        assert!(output.status.success(), "{format}: {:?}", output.stderr);
+        assert!(
+            !output.stdout.is_empty(),
+            "{format} must still emit a match",
+        );
+        assert!(
+            output.stderr.is_empty(),
+            "{format} must stay silent on stderr for a match: {:?}",
+            String::from_utf8_lossy(&output.stderr),
+        );
+    }
+
+    let filtered = run_with_stdin(
+        &[
+            "--output",
+            "json",
+            "dissect",
+            "--link-type",
+            "228",
+            "--filter",
+            "tcp",
+        ],
+        &frame,
+    );
+    assert!(filtered.status.success(), "{:?}", filtered.stderr);
+    let value = parse_json(&filtered);
+    assert_eq!(value["result"]["matched"], false);
+    assert!(value["result"]["dissection"].is_null());
+    assert!(
+        filtered.stderr.is_empty(),
+        "JSON keeps the miss in the document, not on stderr: {:?}",
+        String::from_utf8_lossy(&filtered.stderr),
+    );
 }
 
 #[test]

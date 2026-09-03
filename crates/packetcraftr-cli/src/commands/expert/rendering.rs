@@ -82,6 +82,10 @@ pub(super) fn render_record(
 }
 
 pub(super) fn render_text(summary: &analysis::Summary, state: &State) -> Result<(), CliError> {
+    // BTreeMap iteration is code order, so the per-code lines are deterministic.
+    for (code, findings) in &state.codes {
+        write_stdout_line(format_args!("code={code} findings={findings}"))?;
+    }
     write_stdout_line(format_args!(
         "found {} finding(s) ({} error(s), {} warning(s), {} note(s)) in {} of {} frame(s)",
         state.findings,

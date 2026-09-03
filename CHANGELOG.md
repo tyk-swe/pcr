@@ -8,6 +8,13 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Added
 
+- `stats` and `expert` accept the shared, repeatable `--tls-port` option, so
+  their protocol accounting and display filters can recognize per-frame TLS
+  layers on non-default TCP ports.
+- Text `expert` output reports deterministic per-code finding counts before
+  its final severity summary.
+- Text, hex, and raw `dissect` output reports a filtered-out frame on stderr
+  while retaining empty stdout and a successful exit status.
 - Fuzz targets `packet_build` (expression and document parsing into every
   encoder, both modes, with a decode round trip) and `tls_session` (captures
   through TCP reassembly into the TLS session collector); `filter_parse` now

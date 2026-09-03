@@ -24,7 +24,7 @@ pub(crate) use fields::{
 };
 pub(crate) use payload::payload_without_padding;
 pub(crate) use validation::{
-    ensure_encode_budget, strict_or_diagnostic, validate_auto_raw_discriminator,
-    validate_ipv6_routing_child, validate_raw_child_discriminator,
+    ensure_encode_budget, pad_options_to_four_bytes, strict_or_diagnostic,
+    validate_auto_raw_discriminator, validate_ipv6_routing_child, validate_raw_child_discriminator,
     validate_typed_child_discriminator,
 };

@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use clap::ValueEnum;
 
-use crate::command_options::OfflineLimitsArgs;
+use crate::command_options::{OfflineLimitsArgs, TlsPortArgs};
 
 pub(crate) const AFTER_LONG_HELP: &str = r#"Statistics are computed offline over dissected frames; no live capture or transmission is involved.
 
@@ -56,6 +56,8 @@ pub(crate) struct Args {
     /// Bucket width of the io table in milliseconds.
     #[arg(long, default_value_t = 1_000)]
     pub(crate) interval_ms: u64,
+    #[command(flatten)]
+    pub(crate) tls_ports: TlsPortArgs,
     #[command(flatten)]
     pub(crate) limits: OfflineLimitsArgs,
 }

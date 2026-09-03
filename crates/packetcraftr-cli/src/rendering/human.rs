@@ -85,6 +85,10 @@ pub(crate) fn optional_display<T: std::fmt::Display>(value: Option<T>) -> String
     render_optional(value, |value| value.to_string())
 }
 
+pub(crate) fn optional_debug<T: std::fmt::Debug>(value: Option<T>) -> String {
+    render_optional(value, |value| format!("{value:?}"))
+}
+
 pub(crate) fn comma_separated<I, T>(values: I) -> String
 where
     I: IntoIterator<Item = T>,

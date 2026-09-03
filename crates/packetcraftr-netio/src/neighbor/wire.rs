@@ -10,6 +10,7 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 use bytes::Bytes;
 
 use super::Request as NeighborRequest;
+use super::error::invalid_request;
 use crate::link::MacAddress;
 use packetcraftr_core::frame::{Frame, LinkType};
 
@@ -43,13 +44,11 @@ pub(super) fn build_request_frame(
     match (request.interface_source, request.target) {
         (IpAddr::V4(source), IpAddr::V4(target)) => {
             if arp::PAYLOAD_LENGTH > request.mtu as usize {
-                return Err(crate::neighbor::Error::InvalidRequest {
-                    message: format!(
-                        "ARP request is {} bytes but route MTU is {}",
-                        arp::PAYLOAD_LENGTH,
-                        request.mtu
-                    ),
-                });
+                return Err(invalid_request(format!(
+                    "ARP request is {} bytes but route MTU is {}",
+                    arp::PAYLOAD_LENGTH,
+                    request.mtu
+                )));
             }
             let destination = MacAddress([0xff; 6]);
             Ok((arp::build_request(request, source, target), destination))
@@ -59,21 +58,17 @@ pub(super) fn build_request_frame(
             let destination = ndp::ipv6_multicast_mac(ipv6_destination);
             let packet_length = ndp::IPV6_HEADER_LENGTH + ndp::SOLICITATION_LENGTH;
             if packet_length > request.mtu as usize {
-                return Err(crate::neighbor::Error::InvalidRequest {
-                    message: format!(
-                        "IPv6 neighbor solicitation is {packet_length} bytes but route MTU is {}",
-                        request.mtu
-                    ),
-                });
+                return Err(invalid_request(format!(
+                    "IPv6 neighbor solicitation is {packet_length} bytes but route MTU is {}",
+                    request.mtu
+                )));
             }
             Ok((
                 ndp::build_solicitation(request, source, target, ipv6_destination, destination),
                 destination,
             ))
         }
-        _ => Err(crate::neighbor::Error::InvalidRequest {
-            message: "source and target address families differ".to_owned(),
-        }),
+        _ => Err(invalid_request("source and target address families differ")),
     }
 }
 

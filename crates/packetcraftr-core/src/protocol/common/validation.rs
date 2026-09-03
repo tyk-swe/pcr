@@ -179,6 +179,29 @@ pub(crate) fn strict_or_diagnostic(
     Ok(())
 }
 
+/// Copies option bytes and zero-pads the copy to a four-byte boundary,
+/// emitting the caller's padded-options diagnostic when padding is added.
+pub(crate) fn pad_options_to_four_bytes(
+    options: &[u8],
+    code: &'static str,
+    protocol_label: &'static str,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Vec<u8> {
+    let mut padded = options.to_vec();
+    let padding = 4_usize.saturating_sub(padded.len() % 4) % 4;
+    if padding != 0 {
+        padded.resize(padded.len().saturating_add(padding), 0);
+        diagnostics.push(
+            Diagnostic::warning(
+                code,
+                format!("padded {protocol_label} options with {padding} zero byte(s)"),
+            )
+            .at_field("options"),
+        );
+    }
+    padded
+}
+
 pub(crate) fn ensure_encode_budget(
     name: &'static str,
     contribution: usize,

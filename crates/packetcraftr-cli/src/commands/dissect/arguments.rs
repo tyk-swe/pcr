@@ -7,7 +7,7 @@ use crate::command_options::TlsPortArgs;
 
 pub(crate) const AFTER_LONG_HELP: &str = r#"When neither --hex nor --file is supplied, raw frame bytes are read from standard input.
 
-With --filter, text, hex, and raw output emit the dissection only when the frame matches. Aggregate JSON always emits one document: result.matched reports the filter outcome and result.dissection is null only when the frame does not match.
+With --filter, text, hex, and raw output emit the dissection only when the frame matches; when the frame does not match, stdout stays empty (still a success) and `frame did not match the filter` is reported on stderr. Aggregate JSON always emits one document: result.matched reports the filter outcome and result.dissection is null only when the frame does not match.
 
 Examples:
   packetcraftr dissect --hex '45000014000000004001f6e7c0000201c6336402'

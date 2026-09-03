@@ -8,7 +8,7 @@ use std::collections::VecDeque;
 use bytes::Bytes;
 
 use super::Request as NeighborRequest;
-use super::error::{map_io_error, resolution_error};
+use super::error::{invalid_request, map_io_error, resolution_error};
 use super::options::Options;
 use super::wire::is_unicast_mac;
 use crate::link::MAX_VLAN_TAGS;
@@ -20,57 +20,48 @@ use crate::Error;
 
 pub(super) fn validate_request(request: &NeighborRequest) -> Result<(), crate::neighbor::Error> {
     if request.interface_source.is_ipv4() != request.target.is_ipv4() {
-        return Err(crate::neighbor::Error::InvalidRequest {
-            message: format!(
-                "source {} and target {} use different address families",
-                request.interface_source, request.target
-            ),
-        });
+        return Err(invalid_request(format!(
+            "source {} and target {} use different address families",
+            request.interface_source, request.target
+        )));
     }
     if request.interface_source.is_unspecified() || request.interface_source.is_multicast() {
-        return Err(crate::neighbor::Error::InvalidRequest {
-            message: format!(
-                "interface source {} is not a usable unicast address",
-                request.interface_source
-            ),
-        });
+        return Err(invalid_request(format!(
+            "interface source {} is not a usable unicast address",
+            request.interface_source
+        )));
     }
     if request.target.is_unspecified() || request.target.is_multicast() {
-        return Err(crate::neighbor::Error::InvalidRequest {
-            message: format!("target {} is not a unicast neighbor", request.target),
-        });
+        return Err(invalid_request(format!(
+            "target {} is not a unicast neighbor",
+            request.target
+        )));
     }
     if request.link_type != LinkType::ETHERNET {
-        return Err(crate::neighbor::Error::InvalidRequest {
-            message: format!(
-                "link type {} does not support Ethernet ARP/NDP",
-                request.link_type.0
-            ),
-        });
+        return Err(invalid_request(format!(
+            "link type {} does not support Ethernet ARP/NDP",
+            request.link_type.0
+        )));
     }
     if !is_unicast_mac(request.interface_mac) {
-        return Err(crate::neighbor::Error::InvalidRequest {
-            message: format!(
-                "interface MAC {} is not an individual unicast address",
-                request.interface_mac
-            ),
-        });
+        return Err(invalid_request(format!(
+            "interface MAC {} is not an individual unicast address",
+            request.interface_mac
+        )));
     }
     if request.mtu == 0 {
-        return Err(crate::neighbor::Error::InvalidRequest {
-            message: "interface MTU is zero".to_owned(),
-        });
+        return Err(invalid_request("interface MTU is zero"));
     }
     if request.vlan_tags.len() > MAX_VLAN_TAGS {
-        return Err(crate::neighbor::Error::InvalidRequest {
-            message: format!("VLAN stack exceeds {MAX_VLAN_TAGS} discovery tags"),
-        });
+        return Err(invalid_request(format!(
+            "VLAN stack exceeds {MAX_VLAN_TAGS} discovery tags"
+        )));
     }
     for tag in &request.vlan_tags {
         if tag.priority > 7 || tag.vlan_id > 4095 {
-            return Err(crate::neighbor::Error::InvalidRequest {
-                message: "VLAN priority or identifier is outside its wire range".to_owned(),
-            });
+            return Err(invalid_request(
+                "VLAN priority or identifier is outside its wire range",
+            ));
         }
     }
     Ok(())

@@ -10,7 +10,7 @@ use packetcraftr::{analysis, output};
 
 use self::arguments::Args;
 use super::format::AggregateFormat;
-use super::offline_analysis::prepare;
+use super::offline_analysis::prepare_with_tls_ports;
 use crate::errors::CliError;
 use crate::input::open_capture;
 use crate::rendering::emit_aggregate;
@@ -19,7 +19,11 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
     let format = AggregateFormat::narrow(output::contract::Command::Stats, format)?;
     // Stats assigns conversation indices, so stream-aware filters like
     // `tcp.stream == 7` are supported here.
-    let prepared = prepare(arguments.limits, arguments.filter.as_deref())?;
+    let prepared = prepare_with_tls_ports(
+        arguments.limits,
+        arguments.filter.as_deref(),
+        &arguments.tls_ports.ports,
+    )?;
     let mut collector =
         analysis::stats::Collector::new(Duration::from_millis(arguments.interval_ms))
             .map_err(CliError::classified)?;

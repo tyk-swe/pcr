@@ -55,6 +55,17 @@ pub(crate) fn assert_contiguous(records: &[Value]) {
     }
 }
 
+pub(crate) fn assert_single_complete(records: &[Value]) {
+    assert_eq!(
+        records
+            .iter()
+            .filter(|record| record["result"]["event"] == "complete")
+            .count(),
+        1,
+        "stream must contain exactly one complete event"
+    );
+}
+
 pub(crate) fn schema_validator() -> &'static jsonschema::Validator {
     static VALIDATOR: OnceLock<jsonschema::Validator> = OnceLock::new();
     VALIDATOR.get_or_init(|| {

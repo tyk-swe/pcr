@@ -19,9 +19,9 @@ use crate::{
 
 use crate::protocol::common::{
     ValueExpectation, checksum, child_is_opaque, expected_discriminator, invalid, make_layer,
-    network_from_addresses, payload_without_padding, protocol, resolve_u8, resolve_u16,
-    strict_or_diagnostic, truncated, typed_layer, validate_auto_raw_discriminator,
-    validate_raw_child_discriminator,
+    network_from_addresses, pad_options_to_four_bytes, payload_without_padding, protocol,
+    resolve_u8, resolve_u16, strict_or_diagnostic, truncated, typed_layer,
+    validate_auto_raw_discriminator, validate_raw_child_discriminator,
 };
 
 use super::envelope::is_outer_network_layer;
@@ -331,18 +331,12 @@ fn prepare_payload(
             Diagnostic::warning("build.ipv4_reserved_flag", message).at_field("reserved_flag"),
         );
     }
-    let mut options = layer.options.to_vec();
-    let padding = 4_usize.saturating_sub(options.len() % 4) % 4;
-    if padding != 0 {
-        options.resize(options.len().saturating_add(padding), 0);
-        diagnostics.push(
-            Diagnostic::warning(
-                "build.ipv4_options_padded",
-                format!("padded IPv4 options with {padding} zero byte(s)"),
-            )
-            .at_field("options"),
-        );
-    }
+    let options = pad_options_to_four_bytes(
+        &layer.options,
+        "build.ipv4_options_padded",
+        "IPv4",
+        &mut diagnostics,
+    );
     let covered_payload_len = payload_without_padding(NAME, payload, context)?.len();
     if layer.dont_fragment && (layer.more_fragments || layer.fragment_offset != 0) {
         strict_or_diagnostic(

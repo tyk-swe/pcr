@@ -140,3 +140,9 @@ pub(super) fn map_io_error(
 pub(super) fn invalid_options(message: String) -> Error {
     Error::InvalidOptions { message }
 }
+
+pub(super) fn invalid_request(message: impl Into<String>) -> Error {
+    Error::InvalidRequest {
+        message: message.into(),
+    }
+}

@@ -184,16 +184,23 @@ fn build_route_request(
     })
 }
 
+/// Time left before `deadline`, or `None` once it has arrived. A socket
+/// timeout of exactly zero is rejected as `InvalidInput`, so an exact hit must
+/// classify as the deadline expiring rather than as an I/O failure.
+fn remaining_before(deadline: Instant) -> Option<Duration> {
+    deadline
+        .checked_duration_since(Instant::now())
+        .filter(|remaining| !remaining.is_zero())
+}
+
 fn send_route_request(request: &RouteRequest, deadline: Instant) -> Result<Socket, SystemError> {
     let socket = Socket::new(Domain::from(libc::AF_ROUTE), Type::RAW, None)
         .map_err(|error| os_error("open routing socket", error))?;
-    let remaining = deadline
-        .checked_duration_since(Instant::now())
-        .ok_or_else(|| SystemError::OperatingSystem {
-            operation: "write RTM_GET",
-            message: "macOS routing-socket request deadline expired".to_owned(),
-            source: None,
-        })?;
+    let remaining = remaining_before(deadline).ok_or_else(|| SystemError::OperatingSystem {
+        operation: "write RTM_GET",
+        message: "macOS routing-socket request deadline expired".to_owned(),
+        source: None,
+    })?;
     socket
         .set_write_timeout(Some(remaining))
         .map_err(|error| os_error("set routing-socket timeout", error))?;
@@ -219,13 +226,11 @@ fn read_route_response(
     request: &RouteRequest,
 ) -> Result<RouteResponse, SystemError> {
     for _ in 0..64 {
-        let remaining = deadline
-            .checked_duration_since(Instant::now())
-            .ok_or_else(|| SystemError::OperatingSystem {
-                operation: "read RTM_GET",
-                message: "macOS routing-socket response deadline expired".to_owned(),
-                source: None,
-            })?;
+        let remaining = remaining_before(deadline).ok_or_else(|| SystemError::OperatingSystem {
+            operation: "read RTM_GET",
+            message: "macOS routing-socket response deadline expired".to_owned(),
+            source: None,
+        })?;
         socket
             .set_read_timeout(Some(remaining))
             .map_err(|error| os_error("set routing-socket timeout", error))?;

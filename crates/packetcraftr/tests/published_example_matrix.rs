@@ -206,19 +206,27 @@ fn published_examples_are_pinned_by_name() {
     );
 }
 
+/// Every published `output-*` document whose name ends in `suffix`, parsed.
+fn published_output_documents(suffix: &str) -> Vec<(String, Value)> {
+    published_example_names()
+        .into_iter()
+        .filter(|name| name.starts_with("output-") && name.ends_with(suffix))
+        .map(|name| {
+            let document = serde_json::from_str(
+                &fs::read_to_string(documents_directory().join(&name))
+                    .expect("published example must be readable"),
+            )
+            .expect("published example must be JSON");
+            (name, document)
+        })
+        .collect()
+}
+
 /// Every stable error code the published documents name, with the `kind` each
 /// was published under.
 fn published_error_codes() -> BTreeMap<String, BTreeSet<(String, String)>> {
     let mut codes: BTreeMap<String, BTreeSet<(String, String)>> = BTreeMap::new();
-    for name in published_example_names() {
-        if !name.starts_with("output-") || !name.ends_with("-error.json") {
-            continue;
-        }
-        let document: Value = serde_json::from_str(
-            &fs::read_to_string(documents_directory().join(&name))
-                .expect("published example must be readable"),
-        )
-        .expect("published example must be JSON");
+    for (name, document) in published_output_documents("-error.json") {
         let error = &document["error"];
         let code = error["code"].as_str().expect("an error names its code");
         let kind = error["kind"].as_str().expect("an error names its kind");
@@ -404,9 +412,9 @@ fn mark_covered<'a>(
     }
 }
 
-/// The allow-list entry that explains `path`, if any.
-fn unpublished_reason(path: &str) -> Option<&'static (&'static str, &'static str)> {
-    UNPUBLISHED_PROPERTIES.iter().find(|(entry, _)| {
+/// Whether the allow-list explains why `path` (or an ancestor) is unpublished.
+fn is_explained_unpublished(path: &str) -> bool {
+    UNPUBLISHED_PROPERTIES.iter().any(|(entry, _)| {
         path == *entry
             || path
                 .strip_prefix(entry)
@@ -430,15 +438,7 @@ fn every_schema_property_appears_in_a_published_example() {
     );
 
     let mut covered = BTreeSet::new();
-    for name in published_example_names() {
-        if !name.starts_with("output-") || !name.ends_with(".json") {
-            continue;
-        }
-        let document: Value = serde_json::from_str(
-            &fs::read_to_string(documents_directory().join(&name))
-                .expect("published example must be readable"),
-        )
-        .expect("published example must be JSON");
+    for (_, document) in published_output_documents(".json") {
         mark_covered(schema, schema, &document, "root", &mut covered);
     }
 
@@ -448,7 +448,7 @@ fn every_schema_property_appears_in_a_published_example() {
         .collect::<Vec<_>>();
     let unexplained = unpublished
         .iter()
-        .filter(|path| unpublished_reason(path).is_none())
+        .filter(|path| !is_explained_unpublished(path))
         .collect::<Vec<_>>();
     assert!(
         unexplained.is_empty(),

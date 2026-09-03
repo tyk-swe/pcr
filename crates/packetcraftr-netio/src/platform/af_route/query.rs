@@ -15,6 +15,7 @@ use socket2::{Domain, Socket, Type};
 
 use super::enumeration::interfaces;
 use super::parser::{parse_route_addresses, roundup};
+use crate::deadline::remaining_before;
 use crate::platform::route_normalize::{
     NativeRouteSnapshot, constrain_by_preferred_source, find_interface, finish_route,
     interface_decision, validate_preferred_source_family,
@@ -182,15 +183,6 @@ fn build_route_request(
         pid,
         sequence,
     })
-}
-
-/// Time left before `deadline`, or `None` once it has arrived. A socket
-/// timeout of exactly zero is rejected as `InvalidInput`, so an exact hit must
-/// classify as the deadline expiring rather than as an I/O failure.
-fn remaining_before(deadline: Instant) -> Option<Duration> {
-    deadline
-        .checked_duration_since(Instant::now())
-        .filter(|remaining| !remaining.is_zero())
 }
 
 fn send_route_request(request: &RouteRequest, deadline: Instant) -> Result<Socket, SystemError> {

@@ -29,13 +29,15 @@ use packetcraftr_netio::{
     Error as LiveIoError,
     interface::Id as InterfaceId,
     link::{Capability as LinkCapability, MacAddress, Mode as LinkMode},
-    neighbor,
     route::{
-        Decision, Materialized as MaterializedRoute, Plan as RoutePlan, Provider, Scope,
-        SelectionReason,
+        Decision, Materialized as MaterializedRoute, Plan as RoutePlan, Scope, SelectionReason,
     },
-    transmit::{self, Submission},
+    transmit::Submission,
 };
+
+mod support;
+
+use support::{FixedRoutes, NeverNeighbors, NeverTransmit};
 
 fn assert_message_is_stable(message: &str, variant: &str) {
     assert!(!message.is_empty(), "{variant} must render a message");
@@ -314,57 +316,6 @@ fn replay_stops_at_the_wire_byte_ceiling_before_the_frame_that_would_cross_it() 
     assert_eq!(authorizer.operations, 1);
     assert_eq!(authorizer.final_wires, 1);
     assert_eq!(evidence, [0]);
-}
-
-struct FixedRoutes;
-
-const INTERFACE_MAC: MacAddress = MacAddress([0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0x01]);
-const SELECTED_SOURCE: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 5);
-
-impl Provider for FixedRoutes {
-    type Error = Infallible;
-
-    fn lookup_with_preferences(
-        &self,
-        _destination: IpAddr,
-        _interface_hint: Option<&InterfaceId>,
-        _preferred_source: Option<IpAddr>,
-    ) -> Result<Decision, Self::Error> {
-        Ok(Decision {
-            interface: InterfaceId {
-                name: "fixture0".to_owned(),
-                index: 1,
-            },
-            source_mac: Some(INTERFACE_MAC),
-            selected_source: Some(IpAddr::V4(SELECTED_SOURCE)),
-            preferred_source: None,
-            next_hop: None,
-            selection_reason: SelectionReason::OnLink,
-            destination_scope: Scope::Link,
-            mtu: 1_500,
-            capability: LinkCapability::Layer2AndLayer3,
-            link_type: LinkType::ETHERNET,
-        })
-    }
-}
-
-struct NeverNeighbors;
-
-impl neighbor::Resolver for NeverNeighbors {
-    fn resolve(
-        &self,
-        _request: &neighbor::Request,
-    ) -> Result<neighbor::Resolution, neighbor::Error> {
-        unreachable!("a refused wire must not reach neighbor discovery")
-    }
-}
-
-struct NeverTransmit;
-
-impl transmit::Sender for NeverTransmit {
-    fn send(&self, _frame: transmit::Frame<'_>) -> Result<transmit::Report, LiveIoError> {
-        unreachable!("a refused wire must not reach transmission")
-    }
 }
 
 /// An IPv4 header whose IHL promises 8 option bytes that the wire does not

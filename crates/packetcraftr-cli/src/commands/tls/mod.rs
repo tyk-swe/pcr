@@ -149,7 +149,7 @@ pub(super) fn run(
         source.as_deref(),
         &arguments.tls_ports.ports,
     )?;
-    let mut reader = open_capture(&arguments.path, arguments.limits.capture.reader_bounds())?;
+    let mut reader = open_capture(&arguments.path, arguments.limits.capture.reader)?;
 
     // Assembly consumes the reassembler's in-order deliveries.
     let options = prepared.options(true);
@@ -256,7 +256,7 @@ fn missing_stream_error(index: u64, arguments: &Args) -> CliError {
 /// Counts the capture's TCP conversations, which are indexed before filtering.
 fn count_tcp_streams(arguments: &Args) -> Result<u64, CliError> {
     let prepared = prepare_with_tls_ports(arguments.limits, None, &arguments.tls_ports.ports)?;
-    let mut reader = open_capture(&arguments.path, arguments.limits.capture.reader_bounds())?;
+    let mut reader = open_capture(&arguments.path, arguments.limits.capture.reader)?;
     let options = prepared.options(false);
     let mut highest = None;
     analysis::run(&mut reader, prepared.registry.clone(), &options, |record| {

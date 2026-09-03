@@ -36,12 +36,9 @@ fuzz_target!(|data: &[u8]| {
             max_layers: 16,
             max_packet_size: 64 * 1024,
         };
+        let frame_bytes = Bytes::copy_from_slice(frame_bytes);
         for link_type in [LinkType::ETHERNET, LinkType::IPV4, LinkType::IPV6] {
-            let Ok(frame) = Frame::new(
-                SystemTime::now(),
-                link_type,
-                Bytes::copy_from_slice(frame_bytes),
-            ) else {
+            let Ok(frame) = Frame::new(SystemTime::now(), link_type, frame_bytes.clone()) else {
                 continue;
             };
             if let Ok(decoded) = dissector.decode(frame, decode_options.clone()) {

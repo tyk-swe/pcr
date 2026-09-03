@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 // Shared by several test binaries; each one uses a different subset.
-#![allow(dead_code, unused_imports)]
+#![allow(dead_code)]
 // Test code indexes fixtures and counts by hand; the fail-closed lints are
 // for library paths.
 #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
@@ -15,6 +15,9 @@ use serde_json::Value;
 #[path = "../../src/test_support.rs"]
 mod shared;
 
+// Re-exported for the binaries that need them; an unused re-export warns
+// even though the definitions behind it are allowed to be dead.
+#[allow(unused_imports)]
 pub(crate) use shared::{SharedBuffer, assert_contiguous, schema_validator};
 
 pub(crate) fn path_text(path: &Path) -> &str {

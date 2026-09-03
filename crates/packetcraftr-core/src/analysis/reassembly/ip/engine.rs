@@ -61,7 +61,7 @@ struct MergePlan {
     added_bytes: usize,
     conflicting_bytes: usize,
     result_range_count: usize,
-    duplicate: bool,
+    kind: UpdateKind,
 }
 
 /// How the retained ranges absorb one admitted fragment.
@@ -136,7 +136,6 @@ impl Reassembler {
         let empty_ranges = Vec::new();
         let ranges = existing.map_or(empty_ranges.as_slice(), |state| state.ranges.as_slice());
         let merge = plan_merge(ranges, &incoming)?;
-        let update_kind = plan_update_kind(ranges, &incoming, &merge)?;
         if merge.conflicting_bytes != 0 && self.overlap_policy == OverlapPolicy::Reject {
             return Err(MalformedError::ConflictingOverlap {
                 bytes: merge.conflicting_bytes,
@@ -170,7 +169,7 @@ impl Reassembler {
         )?);
         let duplicate_fragments = existing
             .map_or(0, |state| state.duplicate_fragments)
-            .checked_add(usize::from(merge.duplicate))
+            .checked_add(usize::from(merge.kind == UpdateKind::Unchanged))
             .ok_or(ResourceError::AggregateMemoryLimit {
                 limit: self.limits.max_aggregate_bytes,
             })?;
@@ -208,7 +207,6 @@ impl Reassembler {
         // the same time rather than only the eventual steady state.
         let replacement_allocation = replacement_allocation_charge(
             &merge,
-            update_kind,
             incoming.payload.len(),
             reconstruction_allocation,
             new_slot_charge,
@@ -232,8 +230,16 @@ impl Reassembler {
             })?;
 
         let reconstruction = materialize_reconstruction(existing, &incoming)?;
-        let update =
-            prepare_range_update(update_kind, ranges, &incoming, &merge, self.overlap_policy)?;
+        let update = match merge.kind {
+            UpdateKind::Unchanged => RangeUpdate::Unchanged,
+            UpdateKind::Append => RangeUpdate::Append,
+            UpdateKind::Replace => RangeUpdate::Replace(merge_affected(
+                ranges,
+                &incoming,
+                &merge,
+                self.overlap_policy,
+            )?),
+        };
         let max_non_final_end = if incoming.more_fragments {
             Some(
                 existing
@@ -243,7 +249,7 @@ impl Reassembler {
         } else {
             existing.and_then(|state| state.max_non_final_end)
         };
-        let disposition = if merge.duplicate {
+        let disposition = if merge.kind == UpdateKind::Unchanged {
             FragmentDisposition::Duplicate {
                 bytes: incoming.payload.len(),
             }
@@ -323,19 +329,15 @@ impl Reassembler {
         }
         // Applying the update reserves before it writes, so a failure here
         // leaves the retained ranges exactly as they were.
-        let new_ranges = match self.datagrams.get_mut(&key) {
-            Some(state) => {
-                apply_range_update(&mut state.ranges, update, &incoming, &merge)?;
-                std::mem::take(&mut state.ranges)
-            }
-            None => {
-                let mut ranges = Vec::new();
-                apply_range_update(&mut ranges, update, &incoming, &merge)?;
-                ranges
-            }
+        let mut fresh_ranges = Vec::new();
+        let mut slot = self.datagrams.get_mut(&key);
+        let ranges = match slot.as_deref_mut() {
+            Some(state) => &mut state.ranges,
+            None => &mut fresh_ranges,
         };
+        apply_range_update(ranges, update, &incoming, &merge)?;
         let new_state = DatagramState {
-            ranges: new_ranges,
+            ranges: std::mem::take(ranges),
             unique_bytes,
             fragment_count,
             duplicate_fragments,
@@ -346,8 +348,13 @@ impl Reassembler {
             last_update,
             deadline,
         };
+        match slot {
+            Some(state) => *state = new_state,
+            None => {
+                self.datagrams.insert(key.clone(), new_state);
+            }
+        }
         self.expiry.remove(previous_deadline, &key);
-        self.datagrams.insert(key.clone(), new_state);
         self.expiry.insert(deadline, key);
         if new_slot_charge != 0 {
             self.charged_datagram_slots = self.charged_datagram_slots.saturating_add(1);
@@ -879,7 +886,6 @@ fn reconstruction_retained_bytes(
 
 fn replacement_allocation_charge(
     merge: &MergePlan,
-    update_kind: UpdateKind,
     incoming_bytes: usize,
     reconstruction: usize,
     new_slot_charge: usize,
@@ -889,7 +895,7 @@ fn replacement_allocation_charge(
         .result_range_count
         .checked_mul(super::RANGE_METADATA_CHARGE)
         .ok_or(ResourceError::AggregateMemoryLimit { limit })?;
-    let merged_payload = match update_kind {
+    let merged_payload = match merge.kind {
         UpdateKind::Unchanged => 0,
         UpdateKind::Append => incoming_bytes,
         UpdateKind::Replace => merge
@@ -1031,6 +1037,19 @@ fn plan_merge(ranges: &[RetainedRange], incoming: &Incoming) -> Result<MergePlan
         .checked_add(1)
         .and_then(|count| count.checked_sub(affected_count))
         .ok_or(MalformedError::OffsetOverflow)?;
+    let kind = if added_bytes == 0 && conflicting_bytes == 0 {
+        UpdateKind::Unchanged
+    } else if affected_count == 1
+        && added_bytes == incoming.payload.len()
+        && ranges
+            .get(first_affected)
+            .and_then(RetainedRange::end)
+            .is_some_and(|end| end == incoming.offset)
+    {
+        UpdateKind::Append
+    } else {
+        UpdateKind::Replace
+    };
     Ok(MergePlan {
         first_affected,
         affected_count,
@@ -1039,43 +1058,8 @@ fn plan_merge(ranges: &[RetainedRange], incoming: &Incoming) -> Result<MergePlan
         added_bytes,
         conflicting_bytes,
         result_range_count,
-        duplicate: added_bytes == 0 && conflicting_bytes == 0,
+        kind,
     })
-}
-
-fn plan_update_kind(
-    ranges: &[RetainedRange],
-    incoming: &Incoming,
-    plan: &MergePlan,
-) -> Result<UpdateKind, Error> {
-    if plan.duplicate {
-        return Ok(UpdateKind::Unchanged);
-    }
-    if plan.affected_count == 1 && plan.added_bytes == incoming.payload.len() {
-        let affected = ranges
-            .get(plan.first_affected)
-            .ok_or(MalformedError::OffsetOverflow)?;
-        if affected.end() == Some(incoming.offset) {
-            return Ok(UpdateKind::Append);
-        }
-    }
-    Ok(UpdateKind::Replace)
-}
-
-fn prepare_range_update(
-    kind: UpdateKind,
-    ranges: &[RetainedRange],
-    incoming: &Incoming,
-    plan: &MergePlan,
-    policy: OverlapPolicy,
-) -> Result<RangeUpdate, Error> {
-    match kind {
-        UpdateKind::Unchanged => Ok(RangeUpdate::Unchanged),
-        UpdateKind::Append => Ok(RangeUpdate::Append),
-        UpdateKind::Replace => Ok(RangeUpdate::Replace(merge_affected(
-            ranges, incoming, plan, policy,
-        )?)),
-    }
 }
 
 /// Builds the single range covering the fragment and every retained range it

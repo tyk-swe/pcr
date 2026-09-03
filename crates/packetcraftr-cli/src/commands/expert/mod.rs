@@ -34,7 +34,7 @@ pub(super) fn run(
 ) -> Result<(), CliError> {
     let format = ToolFormat::narrow(output::contract::Command::Expert, format)?;
     let prepared = prepare(arguments.limits, arguments.filter.as_deref())?;
-    let mut reader = open_capture(&arguments.path, arguments.limits.capture.reader_bounds())?;
+    let mut reader = open_capture(&arguments.path, arguments.limits.capture.reader)?;
 
     // Expert needs the reassembler's byte-exact retransmission evidence.
     let options = prepared.options(true);

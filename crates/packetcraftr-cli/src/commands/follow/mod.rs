@@ -42,7 +42,7 @@ pub(super) fn run(
         selector.index
     );
     let prepared = prepare(arguments.limits, Some(&source))?;
-    let mut reader = open_capture(&arguments.path, arguments.limits.capture.reader_bounds())?;
+    let mut reader = open_capture(&arguments.path, arguments.limits.capture.reader)?;
 
     // Only TCP needs reassembly; UDP chunks come straight from frames.
     let options = prepared.options(selector.transport == StreamTransport::Tcp);

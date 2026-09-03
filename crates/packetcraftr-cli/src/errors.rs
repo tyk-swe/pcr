@@ -101,8 +101,18 @@ const fn fallback_code(kind: Kind) -> &'static str {
     }
 }
 
-/// The process exit code for a failure of `kind`; the root `--help` documents
-/// this table and a test keeps the two in step.
+/// Every failure class in exit-code order; the root `--help` renders its
+/// exit-code table from this list.
+pub(crate) const KINDS: [Kind; 6] = [
+    Kind::Cli,
+    Kind::Packet,
+    Kind::Capability,
+    Kind::Io,
+    Kind::Policy,
+    Kind::Internal,
+];
+
+/// The process exit code for a failure of `kind`.
 pub(crate) const fn exit_code_for(kind: Kind) -> u8 {
     match kind {
         Kind::Cli => 2,
@@ -111,6 +121,18 @@ pub(crate) const fn exit_code_for(kind: Kind) -> u8 {
         Kind::Io => 5,
         Kind::Policy => 6,
         Kind::Internal => 70,
+    }
+}
+
+/// The one-line meaning of `kind` shown beside its exit code in the root help.
+pub(crate) const fn exit_code_description(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Cli => "the invocation or its input was invalid.",
+        Kind::Packet => "the packet could not be built, parsed, or dissected.",
+        Kind::Capability => "a native feature, backend, or privilege is unavailable.",
+        Kind::Io => "a system or network operation failed.",
+        Kind::Policy => "the traffic policy denied the operation.",
+        Kind::Internal => "an invariant failed; please report it.",
     }
 }
 

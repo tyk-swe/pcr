@@ -163,17 +163,12 @@ pub(crate) fn parse_target(target: String) -> Result<packetcraftr::target::Targe
         .map_err(CliError::classified)
 }
 
-/// The two bounds a capture reader is opened under.
-///
-/// The aggregate frame and byte ceilings are charged per frame while
-/// streaming, not while opening.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct ReaderBounds {
-    pub(crate) max_frame_bytes: usize,
-    pub(crate) max_interfaces: usize,
-}
-
-pub(crate) fn open_capture(path: &Path, bounds: ReaderBounds) -> Result<Reader<File>, CliError> {
+/// Opens a capture reader under its per-item bounds; the aggregate frame and
+/// byte ceilings are charged per frame while streaming, not while opening.
+pub(crate) fn open_capture(
+    path: &Path,
+    bounds: CaptureReaderBoundsArgs,
+) -> Result<Reader<File>, CliError> {
     let file = File::open(path).map_err(|source| {
         CliError::new(
             Kind::Io,

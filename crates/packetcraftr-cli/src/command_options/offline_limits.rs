@@ -4,8 +4,6 @@
 use clap::{Args, ValueEnum};
 use packetcraftr::{analysis, analysis::pcap as capture};
 
-use crate::input::ReaderBounds;
-
 /// How conflicting bytes in overlapping IP fragments are handled.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
 pub(crate) enum IpOverlap {
@@ -67,15 +65,6 @@ impl OfflineCaptureLimitsArgs {
     /// budget, so the document is bounded by a caller-set limit.
     pub(crate) fn retention_ceiling(self) -> usize {
         usize::try_from(self.max_frames).unwrap_or(usize::MAX)
-    }
-
-    /// The subset a capture reader is opened under; the aggregate frame and
-    /// byte ceilings are charged per frame while streaming instead.
-    pub(crate) const fn reader_bounds(self) -> ReaderBounds {
-        ReaderBounds {
-            max_frame_bytes: self.reader.max_frame_bytes,
-            max_interfaces: self.reader.max_interfaces,
-        }
     }
 }
 

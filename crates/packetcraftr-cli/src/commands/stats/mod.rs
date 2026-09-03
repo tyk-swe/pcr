@@ -24,7 +24,7 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
         analysis::stats::Collector::new(Duration::from_millis(arguments.interval_ms))
             .map_err(CliError::classified)?;
 
-    let mut reader = open_capture(&arguments.path, arguments.limits.capture.reader_bounds())?;
+    let mut reader = open_capture(&arguments.path, arguments.limits.capture.reader)?;
 
     let options = prepared.options(false);
     let summary = analysis::run(&mut reader, prepared.registry.clone(), &options, |record| {

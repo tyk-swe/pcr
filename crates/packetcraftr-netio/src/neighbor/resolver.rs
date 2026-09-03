@@ -9,6 +9,7 @@ use packetcraftr_core::frame::Frame;
 
 use crate::{
     capture::{self, Session},
+    deadline::remaining_before,
     link::MacAddress,
     route::Materialized,
     transmit::{self, Layer2Frame},
@@ -176,21 +177,20 @@ where
         route: &Materialized,
         capture: &mut S,
     ) -> Result<ExchangeOutcome, Error> {
-        let mut evidence = EvidenceBuffer::new(&self.options);
         let Some(ready_timeout) = self.remaining_attempt_budget(request) else {
             // The caller's deadline passed before discovery could start; the
             // outcome is an honest zero-attempt miss, not an attempt.
-            let (captured, evidence_truncated) = evidence.into_evidence();
             return Ok(ExchangeOutcome {
                 mac_address: None,
                 attempts: 0,
-                captured,
-                evidence_truncated,
+                captured: Vec::new(),
+                evidence_truncated: false,
             });
         };
         capture
             .wait_ready(ready_timeout)
             .map_err(|error| map_io_error(request, "waiting for capture readiness", error))?;
+        let mut evidence = EvidenceBuffer::new(&self.options);
         self.drain_pre_request(request, capture, &mut evidence)?;
 
         let mut attempts = 0;
@@ -262,9 +262,7 @@ where
     fn remaining_attempt_budget(&self, request: &Request) -> Option<Duration> {
         match request.deadline {
             None => Some(self.options.attempt_timeout),
-            Some(deadline) => deadline
-                .checked_duration_since(Instant::now())
-                .filter(|remaining| !remaining.is_zero())
+            Some(deadline) => remaining_before(deadline)
                 .map(|remaining| remaining.min(self.options.attempt_timeout)),
         }
     }

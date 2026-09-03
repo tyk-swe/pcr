@@ -72,7 +72,7 @@ pub(super) fn run(
         return Err(capture_rewrite_filter_error());
     }
     let decoding = prepare_decoding(filter.as_deref(), dissect, &tls_ports.ports)?;
-    let mut reader = open_capture(&path, limits.reader_bounds())?;
+    let mut reader = open_capture(&path, limits.reader)?;
     if let Some(rewrite_format) = rewrite_format {
         let stream_limits = Limits {
             max_frames: limits.max_frames,

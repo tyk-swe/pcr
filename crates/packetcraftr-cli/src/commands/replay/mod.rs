@@ -108,7 +108,7 @@ fn prepare(arguments: &Args) -> Result<ReplayRun, CliError> {
         Duration::from_millis(arguments.max_duration_ms),
     );
     limits.validate().map_err(CliError::classified)?;
-    let reader = open_capture(&arguments.path, capture_limits.reader_bounds())?;
+    let reader = open_capture(&arguments.path, arguments.reader)?;
     Ok(ReplayRun {
         reader,
         options: packetcraftr::replay::Options {

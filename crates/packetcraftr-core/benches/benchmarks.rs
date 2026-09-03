@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 
 use bytes::Bytes;
-use criterion::{Criterion, Throughput, criterion_group, criterion_main};
+use criterion::{BatchSize, Criterion, Throughput, criterion_group, criterion_main};
 
 use packetcraftr_core::Packet;
 use packetcraftr_core::analysis::pcap::{Reader, ReaderOptions, Writer};
@@ -357,11 +357,13 @@ fn client_hello_record_from_capture() -> Bytes {
     panic!("TLS benchmark capture contains no complete ClientHello record");
 }
 
+const FRAGMENT_PAYLOAD: usize = 1_480;
+const FRAGMENT_COUNT: usize = 44;
+const DATAGRAM_BYTES: usize = FRAGMENT_PAYLOAD * FRAGMENT_COUNT;
+
 /// A 64 KiB IPv4 datagram split into fragments of one Ethernet MTU each, the
 /// shape produced by a large UDP message such as a DNS or NFS reply.
 fn ipv4_datagram_fragments() -> Vec<Fragment> {
-    const FRAGMENT_PAYLOAD: usize = 1_480;
-    const FRAGMENT_COUNT: usize = 44;
     let mut interner = Interner::new();
     let scope = interner.intern(None, Vec::new()).expect("root scope");
     let key = Ipv4DatagramKey {
@@ -424,39 +426,39 @@ fn bench_ip_reassembly(c: &mut Criterion) {
     let in_order = ipv4_datagram_fragments();
     let mut reverse_order = in_order.clone();
     reverse_order.reverse();
-    let datagram_bytes: usize = in_order
-        .iter()
-        .map(|fragment| match fragment {
-            Fragment::Ipv4(fragment) => fragment.payload.len(),
-            Fragment::Ipv6(fragment) => fragment.payload.len(),
-        })
-        .sum();
 
     let mut group = c.benchmark_group("ip_reassembly");
     group.throughput(Throughput::Bytes(
-        u64::try_from(datagram_bytes).expect("datagram size fits"),
+        u64::try_from(DATAGRAM_BYTES).expect("datagram size fits"),
     ));
     for (name, fragments) in [("in_order", &in_order), ("reverse_order", &reverse_order)] {
         group.bench_function(name, |b| {
-            b.iter(|| {
-                let mut reassembler =
-                    IpReassembler::new(IpReassemblyLimits::default(), OverlapPolicy::Reject);
-                let now = Instant::now();
-                let mut completed = 0_usize;
-                for fragment in fragments {
-                    let outcome = reassembler
-                        .push(black_box(fragment.clone()), now)
-                        .expect("benchmark fragments reassemble");
-                    if matches!(
-                        outcome,
-                        packetcraftr_core::analysis::reassembly::ip::PushOutcome::Completed { .. }
-                    ) {
-                        completed = completed.saturating_add(1);
+            // Cloning the fragments and building the reassembler are setup,
+            // not the work being measured.
+            b.iter_batched(
+                || {
+                    let reassembler =
+                        IpReassembler::new(IpReassemblyLimits::default(), OverlapPolicy::Reject);
+                    (reassembler, fragments.clone(), Instant::now())
+                },
+                |(mut reassembler, fragments, now)| {
+                    let mut completed = 0_usize;
+                    for fragment in fragments {
+                        let outcome = reassembler
+                            .push(black_box(fragment), now)
+                            .expect("benchmark fragments reassemble");
+                        if matches!(
+                            outcome,
+                            packetcraftr_core::analysis::reassembly::ip::PushOutcome::Completed { .. }
+                        ) {
+                            completed = completed.saturating_add(1);
+                        }
                     }
-                }
-                assert_eq!(completed, 1);
-                black_box(reassembler);
-            });
+                    assert_eq!(completed, 1);
+                    black_box(reassembler);
+                },
+                BatchSize::SmallInput,
+            );
         });
     }
     group.finish();

@@ -1,12 +1,15 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::fmt::Write as _;
+
 use clap::{Parser, ValueEnum};
 use packetcraftr::output;
 
 use crate::commands::Command;
+use crate::errors::{KINDS, exit_code_description, exit_code_for};
 
-const ROOT_AFTER_HELP: &str = r#"Output formats:
+const ROOT_HELP_FORMATS: &str = r#"Output formats:
   text    Human-readable summaries and diagnostics.
   json    One aggregate JSON document.
   ndjson  One JSON record per streamed event.
@@ -15,18 +18,9 @@ const ROOT_AFTER_HELP: &str = r#"Output formats:
   pcap    Classic PCAP capture bytes.
   pcapng  PCAPNG capture bytes.
 
-Output availability is command-specific. Machine formats never contain terminal colour codes.
+Output availability is command-specific. Machine formats never contain terminal colour codes."#;
 
-Exit codes:
-  0   Success.
-  2   cli: the invocation or its input was invalid.
-  3   packet: the packet could not be built, parsed, or dissected.
-  4   capability: a native feature, backend, or privilege is unavailable.
-  5   io: a system or network operation failed.
-  6   policy: the traffic policy denied the operation.
-  70  internal: an invariant failed; please report it.
-
-The word after the code is the `error.kind` of the same failure in JSON and NDJSON output.
+const ROOT_HELP_EXAMPLES: &str = r#"The word after the code is the `error.kind` of the same failure in JSON and NDJSON output.
 
 Examples:
   packetcraftr build --packet 'raw(text=hello)'
@@ -34,6 +28,24 @@ Examples:
   packetcraftr --output ndjson read capture.pcapng --max-frames 100
 
 Run `packetcraftr <COMMAND> --help` for command-specific options and examples."#;
+
+/// The root help trailer, with the exit-code table rendered from the same
+/// mapping the process exits with.
+fn root_after_help() -> String {
+    let mut help = format!("{ROOT_HELP_FORMATS}\n\nExit codes:\n  0   Success.\n");
+    for kind in KINDS {
+        let _ = writeln!(
+            help,
+            "  {:<3} {}: {}",
+            exit_code_for(kind),
+            kind.as_str(),
+            exit_code_description(kind)
+        );
+    }
+    help.push('\n');
+    help.push_str(ROOT_HELP_EXAMPLES);
+    help
+}
 
 #[derive(Debug, Parser)]
 #[command(
@@ -43,7 +55,7 @@ Run `packetcraftr <COMMAND> --help` for command-specific options and examples."#
     arg_required_else_help = true,
     about = "Reflective packet construction, dissection, capture, and network tools",
     long_about = "PacketcraftR builds and dissects arbitrary packet stacks with exact bytes, bounded parsing, passive route planning, and policy-gated live workflows. Native features, dependencies, and privileges determine which live paths are available.",
-    after_long_help = ROOT_AFTER_HELP
+    after_long_help = root_after_help()
 )]
 pub(crate) struct Cli {
     /// Select the output encoding; supported formats are command-specific.
@@ -146,43 +158,5 @@ mod tests {
     #[test]
     fn the_command_tree_is_valid() {
         <Cli as clap::CommandFactory>::command().debug_assert();
-    }
-
-    /// The exit-code table in the root help, as (code, kind name) pairs.
-    fn documented_exit_codes() -> Vec<(u8, String)> {
-        let (_, rest) = ROOT_AFTER_HELP
-            .split_once("Exit codes:\n")
-            .expect("the root help documents exit codes");
-        rest.lines()
-            .take_while(|line| !line.trim().is_empty())
-            .filter_map(|line| {
-                let mut words = line.split_whitespace();
-                let code = words.next()?.parse().ok()?;
-                let kind = words.next()?.trim_end_matches(':').to_owned();
-                Some((code, kind))
-            })
-            .collect()
-    }
-
-    #[test]
-    fn the_root_help_documents_every_exit_code_exactly_once() {
-        use packetcraftr::core::error::Kind;
-
-        let kinds = [
-            Kind::Cli,
-            Kind::Packet,
-            Kind::Capability,
-            Kind::Io,
-            Kind::Policy,
-            Kind::Internal,
-        ];
-        let mut expected = vec![(0, "Success.".to_owned())];
-        expected.extend(kinds.iter().map(|kind| {
-            (
-                crate::errors::exit_code_for(*kind),
-                kind.as_str().to_owned(),
-            )
-        }));
-        assert_eq!(documented_exit_codes(), expected);
     }
 }

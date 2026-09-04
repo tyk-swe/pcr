@@ -37,7 +37,7 @@ impl Executor {
 
     fn prepared(&mut self) -> Result<Exchange<'_>, CliError> {
         self.bind_interface(&packetcraftr::netio::interface::SystemProvider)?;
-        Ok(packetcraftr::ExchangeExecutor::new(
+        Ok(packetcraftr::probe::ExchangeExecutor::new(
             &self.client,
             self.exchange.clone(),
         ))

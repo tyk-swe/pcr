@@ -6,13 +6,21 @@ use packetcraftr::{netio as net, output};
 
 use super::format::AggregateFormat;
 use crate::errors::CliError;
-use crate::rendering::{emit_aggregate, optional_display, write_stdout_line};
+use crate::rendering::optional_display;
 
 pub(super) const AFTER_LONG_HELP: &str = r#"Examples:
   packetcraftr routes
+  packetcraftr routes --all
   packetcraftr --output json routes"#;
 
-pub(super) fn run(format: output::contract::Format) -> Result<(), CliError> {
+#[derive(Debug, clap::Args)]
+pub(crate) struct Args {
+    /// Report every enumerated interface, including ones that are not up.
+    #[arg(long)]
+    pub(crate) all: bool,
+}
+
+pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
     let format = AggregateFormat::narrow(output::contract::Command::Routes, format)?;
     let interfaces = net::interface::SystemProvider
         .interfaces()
@@ -21,7 +29,7 @@ pub(super) fn run(format: output::contract::Format) -> Result<(), CliError> {
     let mut routes = Vec::new();
     for interface in interfaces
         .into_iter()
-        .filter(|interface| interface.flags.up)
+        .filter(|interface| arguments.all || interface.flags.up)
     {
         let route = provider.lookup_interface(&interface.id).map_err(|source| {
             CliError::from_classification(
@@ -39,23 +47,24 @@ pub(super) fn run(format: output::contract::Format) -> Result<(), CliError> {
     let result = output::routes::Report {
         routes: routes.into_iter().map(Into::into).collect(),
     };
-    match format {
-        AggregateFormat::Text => {
-            for route in result.routes {
-                write_stdout_line(format_args!(
-                    "{} (index {}): source={} mtu={} capability={} link_type={}",
-                    route.interface.name,
-                    route.interface.index,
-                    optional_display(route.selected_source.or(route.preferred_source)),
-                    route.mtu,
-                    route.capability,
-                    route.link_type
-                ))?;
-            }
-            Ok(())
-        }
-        AggregateFormat::Json => {
-            emit_aggregate(output::contract::Command::Routes, result, Vec::new())
-        }
-    }
+    super::render_aggregate_rows(
+        output::contract::Command::Routes,
+        format,
+        &result,
+        &result.routes,
+        route_line,
+    )
+}
+
+/// One text row per route.
+fn route_line(route: &output::network::Decision) -> String {
+    format!(
+        "{} (index {}): source={} mtu={} capability={} link_type={}",
+        route.interface.name,
+        route.interface.index,
+        optional_display(route.selected_source.or(route.preferred_source)),
+        route.mtu,
+        route.capability,
+        route.link_type
+    )
 }

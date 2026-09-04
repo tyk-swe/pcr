@@ -29,6 +29,7 @@ use crate::rendering::{
 pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
     let format = BuildFormat::narrow(output::contract::Command::Dissect, format)?;
     let registry = registry_with_tls_ports(&arguments.tls_ports.ports)?;
+    let max_packet_size = arguments.budget.max_packet_size;
     // A bad filter fails before any input is read, so it cannot leave the
     // command waiting on standard input for frame bytes it would never use.
     let filter = arguments
@@ -40,21 +41,15 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
         (Some(value), None) => core::protocol::raw::parse_hex(&value)
             .map_err(|source| CliError::new(Kind::Cli, source.to_string()))?
             .to_vec(),
-        (None, Some(path)) => read_bounded_file(
-            &path,
-            core::document::DEFAULT_MAX_DOCUMENT_BYTES,
-            InputKind::Frame,
-        )?,
-        (None, None) => {
-            read_stdin_bounded(core::document::DEFAULT_MAX_DOCUMENT_BYTES, InputKind::Frame)?
-        }
+        (None, Some(path)) => read_bounded_file(&path, max_packet_size, InputKind::Frame)?,
+        (None, None) => read_stdin_bounded(max_packet_size, InputKind::Frame)?,
         (Some(_), Some(_)) => unreachable!("clap enforces conflicts"),
     };
     let decoded = core::decode::Dissector::new(registry)
         .decode(
             Frame::new(SystemTime::now(), LinkType(arguments.link_type), bytes)
                 .map_err(CliError::classified)?,
-            core::decode::Options::default(),
+            arguments.budget.decode_options(),
         )
         .map_err(CliError::classified)?;
     // The filter selects emission, not validity: a frame it rejects is still

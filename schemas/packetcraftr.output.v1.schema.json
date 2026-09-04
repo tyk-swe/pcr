@@ -3553,7 +3553,8 @@
           "required": [
             "event",
             "target",
-            "resolved_addresses"
+            "resolved_addresses",
+            "counts"
           ],
           "properties": {
             "event": {
@@ -3567,6 +3568,9 @@
               "items": {
                 "$ref": "#/$defs/ipAddress"
               }
+            },
+            "counts": {
+              "$ref": "#/$defs/scanClassificationCounts"
             }
           },
           "additionalProperties": false
@@ -4727,6 +4731,38 @@
       },
       "additionalProperties": false
     },
+    "scanClassificationCounts": {
+      "type": "object",
+      "required": [
+        "open",
+        "closed",
+        "filtered",
+        "unreachable",
+        "unknown",
+        "timeout"
+      ],
+      "properties": {
+        "open": {
+          "$ref": "#/$defs/uint64"
+        },
+        "closed": {
+          "$ref": "#/$defs/uint64"
+        },
+        "filtered": {
+          "$ref": "#/$defs/uint64"
+        },
+        "unreachable": {
+          "$ref": "#/$defs/uint64"
+        },
+        "unknown": {
+          "$ref": "#/$defs/uint64"
+        },
+        "timeout": {
+          "$ref": "#/$defs/uint64"
+        }
+      },
+      "additionalProperties": false
+    },
     "scanProbe": {
       "type": "object",
       "required": [
@@ -4934,6 +4970,7 @@
       "enum": [
         "a",
         "aaaa",
+        "caa",
         "cname",
         "mx",
         "ns",
@@ -5212,6 +5249,7 @@
           "enum": [
             "a",
             "aaaa",
+            "caa",
             "cname",
             "mx",
             "ns",
@@ -5250,6 +5288,37 @@
             "address": {
               "type": "string",
               "format": "ipv6"
+            }
+          }
+        },
+        {
+          "required": [
+            "flags",
+            "tag",
+            "tag_hex",
+            "value",
+            "value_hex"
+          ],
+          "properties": {
+            "type": {
+              "const": "caa"
+            },
+            "flags": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 255
+            },
+            "tag": {
+              "type": "string"
+            },
+            "tag_hex": {
+              "$ref": "#/$defs/hexBytes"
+            },
+            "value": {
+              "type": "string"
+            },
+            "value_hex": {
+              "$ref": "#/$defs/hexBytes"
             }
           }
         },

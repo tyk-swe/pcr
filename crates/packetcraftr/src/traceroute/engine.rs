@@ -14,7 +14,10 @@ use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::{diagnostic::Diagnostic, registry::Registry};
 
 use crate::clock::Clock;
-use crate::probe::evidence::{EvidenceState, ResponseSelector, Retained, validate_batch_evidence};
+use crate::probe::evidence::{
+    EvidenceState, ResponseSelector, Retained, check_probe_count, check_probe_duration,
+    validate_batch_evidence,
+};
 use crate::probe::runner::{ProbeLifecycle, run_batches, sink_observer};
 use crate::target::{Authorizer, approve_operation, budgeted, resolve_selected};
 use crate::{BoundaryError, SentPacket};
@@ -28,7 +31,7 @@ use super::model::{
 };
 use super::plan::{build_batches, worst_case_duration};
 use super::probe::sent_probe_matches;
-use crate::probe::{Error, ErrorKind};
+use crate::probe::{Error, ErrorKind, duration_limit, enforce_deadline, index_or_push};
 
 /// Validates the request, authorizes every resolved target and the complete
 /// operation budget before constructing probes, then executes hop batches until
@@ -84,7 +87,7 @@ where
     let observe = sink_observer(
         runtime,
         emit,
-        |error| traceroute_duration_error(error.actual, error.limit),
+        |error| duration_limit(WORKFLOW, error.actual, error.limit),
         |source| Error::new(WORKFLOW, ErrorKind::Output { source }),
     )?;
     run_observed(request, authorizer, registry, executor, clock, observe)
@@ -107,7 +110,7 @@ where
     let mut deadline = Deadline::new(request.limits.max_duration);
     let approved = approve_traceroute(request, authorizer, &deadline)?;
     let batches = build_batches(request, approved.destination)?;
-    enforce_deadline(&deadline)?;
+    enforce_deadline(WORKFLOW, &deadline)?;
     let mut state = TracerouteState::default();
     let stats = {
         let mut lifecycle = Lifecycle {
@@ -152,24 +155,15 @@ impl Collector {
     pub(super) fn observe(&mut self, event: Event) {
         match event {
             Event::Probe { target: _, probe } => {
-                let hop_index = match self.hop_indices.get(&probe.hop_limit) {
-                    Some(index) => *index,
-                    None => {
-                        let index = self.hops.len();
-                        self.hops.push(Hop {
-                            hop_limit: probe.hop_limit,
-                            probes: Vec::new(),
-                        });
-                        self.hop_indices.insert(probe.hop_limit, index);
-                        index
-                    }
-                };
-                #[expect(
-                    clippy::indexing_slicing,
-                    reason = "`hop_index` is either a live entry from `hop_indices` or the index \
-                              of the hop just pushed, so it is below `hops.len()`"
-                )]
-                let hop = &mut self.hops[hop_index];
+                let hop = index_or_push(
+                    &mut self.hops,
+                    &mut self.hop_indices,
+                    probe.hop_limit,
+                    || Hop {
+                        hop_limit: probe.hop_limit,
+                        probes: Vec::new(),
+                    },
+                );
                 hop.probes.push(probe);
             }
             Event::Undecoded(evidence) => self.undecoded.push(evidence),
@@ -251,16 +245,7 @@ fn approve_traceroute<A: Authorizer>(
 }
 
 fn validate_probe_plan(request: &Request, total_probes: usize) -> Result<(), Error> {
-    if total_probes > request.limits.max_probes {
-        return Err(Error::new(
-            WORKFLOW,
-            ErrorKind::InvalidLimit {
-                field: "probes",
-                value: u64::try_from(total_probes).unwrap_or(u64::MAX),
-                reason: format!("exceeds max_probes={}", request.limits.max_probes),
-            },
-        ));
-    }
+    check_probe_count(WORKFLOW, total_probes, request.limits.max_probes)?;
     if let (Strategy::Udp, Some(base)) = (request.strategy, request.destination_port) {
         let last_offset = total_probes.saturating_sub(1);
         if usize::from(base)
@@ -278,17 +263,11 @@ fn validate_probe_plan(request: &Request, total_probes: usize) -> Result<(), Err
             ));
         }
     }
-    let worst_case = worst_case_duration(request)?;
-    if worst_case > request.limits.max_duration {
-        return Err(Error::new(
-            WORKFLOW,
-            ErrorKind::DurationLimit {
-                actual: worst_case,
-                limit: request.limits.max_duration,
-            },
-        ));
-    }
-    Ok(())
+    check_probe_duration(
+        WORKFLOW,
+        worst_case_duration(request)?,
+        request.limits.max_duration,
+    )
 }
 
 struct TracerouteState {
@@ -367,7 +346,7 @@ where
         execution: Execution,
         deadline: &Deadline,
     ) -> Result<ControlFlow<()>, Error> {
-        enforce_deadline(deadline)?;
+        enforce_deadline(WORKFLOW, deadline)?;
         let Execution {
             permit,
             sent,
@@ -388,7 +367,7 @@ where
             ));
         }
         self.record_diagnostics(batch_diagnostics, deadline)?;
-        enforce_deadline(deadline)?;
+        enforce_deadline(WORKFLOW, deadline)?;
         let mut response_selector = ResponseSelector::new(&mut responses);
         let terminal = self.process_probes(batch, &sent, &mut response_selector, deadline)?;
         #[expect(
@@ -432,7 +411,7 @@ where
                 },
                 deadline,
             )?;
-            enforce_deadline(deadline)?;
+            enforce_deadline(WORKFLOW, deadline)?;
         }
         Ok(terminal)
     }
@@ -446,7 +425,7 @@ where
         response_selector: &mut ResponseSelector<'_>,
         deadline: &Deadline,
     ) -> Result<ProbeEvidence, Error> {
-        enforce_deadline(deadline)?;
+        enforce_deadline(WORKFLOW, deadline)?;
         let sent_at = sent.timing().freshness_marker().wall_clock();
         let best = response_selector.select(
             request_index,
@@ -461,7 +440,7 @@ where
             },
             |observation| observation.kind.rank(),
             |observation| observation.responder,
-            || enforce_deadline(deadline),
+            || enforce_deadline(WORKFLOW, deadline),
         )?;
         let Some(candidate) = best else {
             return Ok(ProbeEvidence {
@@ -524,7 +503,7 @@ where
                 };
                 (self.emit)(event, deadline)
             },
-            || enforce_deadline(deadline),
+            || enforce_deadline(WORKFLOW, deadline),
         )
     }
 
@@ -548,12 +527,4 @@ where
             .diagnostics
             .publish_new(|diagnostic| emit(Event::Diagnostic(diagnostic), deadline))
     }
-}
-
-fn enforce_deadline(deadline: &Deadline) -> Result<(), Error> {
-    crate::clock::check_deadline(deadline, traceroute_duration_error)
-}
-
-fn traceroute_duration_error(actual: Duration, limit: Duration) -> Error {
-    Error::new(WORKFLOW, ErrorKind::DurationLimit { actual, limit })
 }

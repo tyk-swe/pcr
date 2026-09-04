@@ -14,7 +14,7 @@ use super::contract::Error;
 use super::envelope::Stats;
 use super::frame::{Captured, Timestamp};
 
-pub use crate::scan::{Classification, ProbeStatus, Transport};
+pub use crate::scan::{Classification, ClassificationCounts, ProbeStatus, Transport};
 
 /// The wire protocol one probe was sent over. `scan::Transport::Icmp` splits by
 /// address family here because the v1 contract names the two ICMP protocols
@@ -127,6 +127,7 @@ pub enum Event {
     Complete {
         target: String,
         resolved_addresses: Vec<IpAddr>,
+        counts: ClassificationCounts,
     },
 }
 
@@ -160,6 +161,7 @@ impl Event {
             Self::Complete {
                 target: summary.target,
                 resolved_addresses: summary.resolved_addresses,
+                counts: summary.counts,
             },
             Vec::new(),
             summary.stats.into(),

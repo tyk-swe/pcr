@@ -10,18 +10,18 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, UNIX_EPOCH};
 
 use crate::probe::ErrorKind;
+use crate::probe::test_fixtures::{
+    ProgressiveExecutor, RetainedEvidenceExecutor, decoded_packet, private_policy, raw_frame,
+};
 use crate::progress::Runtime;
 use bytes::Bytes;
 use packetcraftr_core::error::{Classification, Classified, Kind};
-use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::protocol::{
     icmp::{Icmpv4, Icmpv6},
     network::{Ipv4, Ipv6},
     transport::Udp,
 };
-use packetcraftr_core::{
-    Packet, decode::DecodedPacket, diagnostic::Diagnostic, layout::PacketLayout,
-};
+use packetcraftr_core::{Packet, decode::DecodedPacket, diagnostic::Diagnostic};
 
 use super::DEFAULT_UDP_PORT;
 use super::classification::classify_response;
@@ -42,6 +42,7 @@ fn udp_traceroute_request(target: Target) -> Request {
         strategy: Strategy::Udp,
         address_family: Family::Any,
         destination_port: Some(DEFAULT_UDP_PORT),
+        source_port: None,
         first_hop: 1,
         max_hops: 2,
         probes_per_hop: 2,
@@ -176,68 +177,13 @@ impl Executor<Batch> for MixedHopExecutor {
     }
 }
 
-struct ProgressiveExecutor {
-    inner: NoResponseExecutor,
-    calls: Arc<AtomicUsize>,
-    shutdowns: Arc<AtomicUsize>,
-    fail_at: Option<usize>,
-}
-
-struct RetainedEvidenceExecutor(NoResponseExecutor);
-
-impl Executor<Batch> for RetainedEvidenceExecutor {
-    fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
-        let mut execution = self.0.execute(batch)?;
-        execution.undecoded.extend([frame_at(3), frame_at(4)]);
-        execution
-            .diagnostics
-            .push(Diagnostic::info("traceroute.fixture", "fixture diagnostic"));
-        Ok(execution)
-    }
-}
-
-impl Executor<Batch> for ProgressiveExecutor {
-    fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
-        let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
-        if self.fail_at == Some(call) {
-            return Err(BoundaryError::new(
-                "induced traceroute execution failure",
-                Classification::new("io.test_traceroute", Kind::Io, None),
-                Vec::new(),
-            ));
-        }
-        let execution = self.inner.execute(batch);
-        self.shutdowns.fetch_add(1, Ordering::SeqCst);
-        execution
-    }
-}
-
-fn private_traceroute_policy() -> crate::policy::Policy {
-    crate::policy::Policy {
-        max_packets_per_operation: 1_000,
-        max_bytes_per_operation: 1_000_000,
-        ..crate::policy::Policy::default()
-    }
-}
-
-fn frame_at(seconds: u64) -> Frame {
-    Frame::new(
-        UNIX_EPOCH + Duration::from_secs(seconds),
-        LinkType::RAW,
-        Bytes::from_static(&[0x45]),
-    )
-    .expect("traceroute evidence frame")
-}
-
 fn decoded_at(packet: Packet, seconds: u64, diagnostics: Vec<Diagnostic>) -> DecodedPacket {
-    let frame = frame_at(seconds);
-    DecodedPacket {
+    decoded_packet(
         packet,
-        original: frame.bytes().clone(),
-        frame,
-        layout: PacketLayout::default(),
+        UNIX_EPOCH + Duration::from_secs(seconds),
+        &[0x45],
         diagnostics,
-    }
+    )
 }
 
 fn ipv4_udp_quote(packet: &Packet) -> Vec<u8> {
@@ -355,7 +301,7 @@ fn traceroute_hostname_policy_precedes_resolution_and_probe_execution() {
     let mut executor = RejectingExecutor {
         calls: Arc::clone(&calls),
     };
-    let policy = private_traceroute_policy();
+    let policy = private_policy();
     let mut authorizer = PolicyAuthorizer::new(&policy, &resolver);
     let error = run(
         &udp_traceroute_request(Target::Hostname("lab.example".parse().unwrap())),
@@ -370,7 +316,7 @@ fn traceroute_hostname_policy_precedes_resolution_and_probe_execution() {
     assert_eq!(calls.load(Ordering::SeqCst), 0);
 
     let resolver = ScriptedResolver::new([vec![private, "8.8.8.8".parse().unwrap()]]);
-    let mut policy = private_traceroute_policy();
+    let mut policy = private_policy();
     policy.allow_hostname_resolution = true;
     let mut request = udp_traceroute_request(Target::Hostname("mixed.example".parse().unwrap()));
     request.address_family = Family::Ipv6;
@@ -389,10 +335,11 @@ fn traceroute_hostname_policy_precedes_resolution_and_probe_execution() {
 }
 
 #[test]
-fn traceroute_udp_port_overflow_is_rejected_before_authorization_or_execution() {
+fn traceroute_udp_port_overflow_precedes_duration_limit() {
     let destination = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
     let mut request = udp_traceroute_request(Target::Address(destination));
     request.destination_port = Some(u16::MAX);
+    request.limits.max_duration = Duration::from_millis(1);
     let mut authorizer = FixedAuthorizer {
         address: destination,
         operations: Vec::new(),
@@ -415,6 +362,84 @@ fn traceroute_udp_port_overflow_is_rejected_before_authorization_or_execution() 
 }
 
 #[test]
+fn traceroute_zero_source_port_is_rejected_before_authorization_or_execution() {
+    let destination = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
+    let mut request = udp_traceroute_request(Target::Address(destination));
+    request.source_port = Some(0);
+    let mut authorizer = FixedAuthorizer {
+        address: destination,
+        operations: Vec::new(),
+    };
+    let calls = Arc::new(AtomicUsize::new(0));
+    let error = run(
+        &request,
+        &mut authorizer,
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut RejectingExecutor {
+            calls: Arc::clone(&calls),
+        },
+        &mut NoopClock,
+    )
+    .unwrap_err();
+
+    assert!(matches!(error.kind, ErrorKind::InvalidSourcePort));
+    assert!(authorizer.operations.is_empty());
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn traceroute_icmp_source_port_is_rejected_before_authorization_or_execution() {
+    let destination = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
+    let mut request = udp_traceroute_request(Target::Address(destination));
+    request.strategy = Strategy::Icmp;
+    request.destination_port = None;
+    request.source_port = Some(53_333);
+    let mut authorizer = FixedAuthorizer {
+        address: destination,
+        operations: Vec::new(),
+    };
+    let calls = Arc::new(AtomicUsize::new(0));
+    let error = run(
+        &request,
+        &mut authorizer,
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut RejectingExecutor {
+            calls: Arc::clone(&calls),
+        },
+        &mut NoopClock,
+    )
+    .unwrap_err();
+
+    assert!(matches!(error.kind, ErrorKind::InvalidSourcePort));
+    assert!(authorizer.operations.is_empty());
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn traceroute_configured_source_port_threads_into_planned_probes() {
+    let destination = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
+    let mut request = udp_traceroute_request(Target::Address(destination));
+    request.source_port = Some(53_333);
+    let batches =
+        super::plan::build_batches(&request, destination).expect("custom source port is valid");
+    assert!(!batches.is_empty());
+    for probe in batches.iter().flat_map(|batch| batch.probes.iter()) {
+        assert_eq!(probe.source_port, 53_333);
+        let packet = probe.packet();
+        assert_eq!(packet.get::<Udp>().expect("UDP probe").source_port, 53_333);
+        assert!(super::probe::sent_probe_matches(probe, &packet));
+    }
+
+    request.source_port = None;
+    let batches =
+        super::plan::build_batches(&request, destination).expect("default source port is valid");
+    assert!(!batches.is_empty());
+    for probe in batches.iter().flat_map(|batch| batch.probes.iter()) {
+        assert_eq!(probe.source_port, super::SOURCE_PORT);
+    }
+}
+
+#[test]
 fn traceroute_ipv4_classification_distinguishes_intermediate_terminal_and_unreachable() {
     let registry = packetcraftr_core::protocol::builtin::registry();
     let local = Ipv4Addr::new(10, 0, 0, 1);
@@ -428,6 +453,7 @@ fn traceroute_ipv4_classification_distinguishes_intermediate_terminal_and_unreac
         },
         hop_limit: 1,
         attempt: 1,
+        source_port: super::SOURCE_PORT,
     }
     .packet();
     probe.get_mut::<Ipv4>().unwrap().source = local;
@@ -482,6 +508,7 @@ fn traceroute_ipv6_classification_correlates_intermediate_quote() {
         },
         hop_limit: 4,
         attempt: 1,
+        source_port: super::SOURCE_PORT,
     }
     .packet();
     probe.get_mut::<Ipv6>().unwrap().source = local;
@@ -570,6 +597,8 @@ fn traceroute_events_precede_later_hops_and_survive_a_later_failure() {
         calls: Arc::clone(&calls),
         shutdowns: Arc::clone(&shutdowns),
         fail_at: Some(2),
+        failure_message: "induced traceroute execution failure",
+        failure_code: "io.test_traceroute",
     };
     let events = Arc::new(std::sync::Mutex::new(Vec::new()));
     let observed_events = Arc::clone(&events);
@@ -619,6 +648,8 @@ fn traceroute_sink_failure_stops_later_hops_after_session_shutdown() {
         calls: Arc::clone(&calls),
         shutdowns: Arc::clone(&shutdowns),
         fail_at: None,
+        failure_message: "induced traceroute execution failure",
+        failure_code: "io.test_traceroute",
     };
 
     let error = run_with_events(
@@ -659,7 +690,11 @@ fn traceroute_event_collection_preserves_stats_diagnostics_and_evidence_limits()
             addresses: vec![address],
         },
         &packetcraftr_core::protocol::builtin::registry(),
-        &mut RetainedEvidenceExecutor(NoResponseExecutor::default()),
+        &mut RetainedEvidenceExecutor {
+            inner: NoResponseExecutor::default(),
+            frames: vec![raw_frame(3), raw_frame(4)],
+            diagnostic: Diagnostic::info("traceroute.fixture", "fixture diagnostic"),
+        },
         &mut NoopClock,
     )
     .expect("bounded undecoded evidence must complete");

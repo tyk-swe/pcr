@@ -31,26 +31,27 @@ fn list_protocols(format: AggregateFormat) -> Result<(), CliError> {
             .map(output::protocols::Summary::from)
             .collect(),
     };
-    match format {
-        AggregateFormat::Text => {
-            for protocol in &result.protocols {
-                write_stdout_line(format_args!(
-                    "{} aliases=[{}] build={} dissect={} exact_round_trip={} matcher={} decode_only={}",
-                    protocol.protocol,
-                    protocol.aliases.join(", "),
-                    protocol.build,
-                    protocol.dissect,
-                    protocol.exact_round_trip,
-                    protocol.matcher,
-                    protocol.decode_only
-                ))?;
-            }
-            Ok(())
-        }
-        AggregateFormat::Json => {
-            emit_aggregate(output::contract::Command::Protocols, result, Vec::new())
-        }
-    }
+    super::render_aggregate_rows(
+        output::contract::Command::Protocols,
+        format,
+        &result,
+        &result.protocols,
+        protocol_line,
+    )
+}
+
+/// One text row per protocol.
+fn protocol_line(protocol: &output::protocols::Summary) -> String {
+    format!(
+        "{} aliases=[{}] build={} dissect={} exact_round_trip={} matcher={} decode_only={}",
+        protocol.protocol,
+        protocol.aliases.join(", "),
+        protocol.build,
+        protocol.dissect,
+        protocol.exact_round_trip,
+        protocol.matcher,
+        protocol.decode_only
+    )
 }
 
 fn describe_protocol(name: &str, format: AggregateFormat) -> Result<(), CliError> {

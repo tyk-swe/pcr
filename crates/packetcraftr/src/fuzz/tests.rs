@@ -23,10 +23,8 @@ use crate::{BoundaryError, Stats as ExecutionStats};
 use super::evidence::add_execution_stats;
 use crate::authorization::{Authorizer, Operation};
 
-use super::{
-    Execution, ExecutionCase, Executor, LiveLimits, LiveOptions, RunInput, Stats, run,
-    run_with_events,
-};
+use super::model::{LiveLimits, LiveOptions, Stats};
+use super::{Execution, ExecutionCase, Executor, RunInput, run, run_with_events};
 
 #[test]
 fn live_evidence_limits_are_validated_outside_the_offline_campaign() {

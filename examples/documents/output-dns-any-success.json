@@ -69,9 +69,20 @@
         "owner": "example.test.",
         "class": 1,
         "ttl": 3600,
+        "type": "caa",
+        "flags": 0,
+        "tag": "issue",
+        "tag_hex": "6973737565",
+        "value": "ca.example.test",
+        "value_hex": "63612e6578616d706c652e74657374"
+      },
+      {
+        "owner": "example.test.",
+        "class": 1,
+        "ttl": 3600,
         "type": "unknown",
-        "type_code": 257,
-        "rdata_hex": "0005697373756563612e6578616d706c652e74657374"
+        "type_code": 65280,
+        "rdata_hex": "deadbeef"
       }
     ],
     "authorities": [],

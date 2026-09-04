@@ -8,19 +8,24 @@ pub(crate) mod evidence;
 pub(crate) mod executor;
 mod model;
 pub(crate) mod runner;
+#[cfg(test)]
+pub(crate) mod test_fixtures;
 
 pub use error::{Error, ErrorKind, Workflow};
 pub use executor::{ExchangeExecutor, Executor, Request};
 pub use model::{ProbeEndpoint, ProbeStatus, Transport};
 pub use runner::{Batch, Execution};
 
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::net::IpAddr;
+use std::time::Duration;
 
 use packetcraftr_core::protocol::{
     QuotedIcmpError, QuotedProbeTransport, quoted_icmp_error_kind, transport::Tcp,
 };
 use packetcraftr_core::{
-    Packet, decode::DecodedPacket, diagnostic::Diagnostic, packet::semantics,
+    Packet, budget::Deadline, decode::DecodedPacket, diagnostic::Diagnostic, packet::semantics,
     protocol::BuiltinProtocol, registry::Registry,
 };
 
@@ -68,6 +73,45 @@ pub fn ephemeral_source_port(base: u16, offset: u64) -> u16 {
         .checked_rem(width)
         .unwrap_or(0);
     range_start.saturating_add(rotated) as u16
+}
+
+/// Fails the workflow when its finite duration budget is exhausted. Scan and
+/// traceroute share this gate; the workflow tag keeps the code and remediation
+/// workflow-specific.
+pub(crate) fn enforce_deadline(workflow: Workflow, deadline: &Deadline) -> Result<(), Error> {
+    crate::clock::check_deadline(deadline, |actual, limit| {
+        duration_limit(workflow, actual, limit)
+    })
+}
+
+/// The error a workflow reports when `actual` elapsed time passed `limit`.
+pub(crate) fn duration_limit(workflow: Workflow, actual: Duration, limit: Duration) -> Error {
+    Error::new(workflow, ErrorKind::DurationLimit { actual, limit })
+}
+
+/// Returns the live collector entry for `key`, pushing `make()` first when
+/// absent. The shared scan/traceroute collector fan-out uses this so neither
+/// collector indexes the vector it just pushed to.
+pub(crate) fn index_or_push<'a, K, V>(
+    values: &'a mut Vec<V>,
+    indices: &'a mut HashMap<K, usize>,
+    key: K,
+    make: impl FnOnce() -> V,
+) -> &'a mut V
+where
+    K: Eq + std::hash::Hash,
+{
+    let index = match indices.entry(key) {
+        Entry::Occupied(entry) => *entry.get(),
+        Entry::Vacant(entry) => {
+            let index = values.len();
+            values.push(make());
+            *entry.insert(index)
+        }
+    };
+    values
+        .get_mut(index)
+        .expect("collector index points at a live entry")
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

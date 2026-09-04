@@ -92,7 +92,7 @@ pub fn unpredictable_transaction_id() -> u16 {
 /// the whole operation stays inside one predictable-to-the-caller range.
 #[must_use]
 pub fn unpredictable_source_port() -> u16 {
-    crate::probe::ephemeral_source_port(crate::EPHEMERAL_SOURCE_PORT_BASE, entropy())
+    crate::probe::ephemeral_source_port(crate::probe::EPHEMERAL_SOURCE_PORT_BASE, entropy())
 }
 
 fn entropy() -> u64 {
@@ -118,7 +118,7 @@ mod tests {
         assert!(
             ports
                 .iter()
-                .all(|port| *port >= crate::EPHEMERAL_SOURCE_PORT_BASE)
+                .all(|port| *port >= crate::probe::EPHEMERAL_SOURCE_PORT_BASE)
         );
         assert!(
             ports.iter().any(|port| Some(port) != ports.first()),
@@ -135,7 +135,7 @@ mod tests {
     /// Retries walk one step at a time and never leave the dynamic range.
     #[test]
     fn retries_rotate_the_source_port_within_the_dynamic_range() {
-        let base = crate::EPHEMERAL_SOURCE_PORT_BASE;
+        let base = crate::probe::EPHEMERAL_SOURCE_PORT_BASE;
         assert_eq!(rotated_source_port(base, 1), base);
         assert_eq!(rotated_source_port(base, 2), base.saturating_add(1));
         assert!(rotated_source_port(base, u32::MAX) >= base);

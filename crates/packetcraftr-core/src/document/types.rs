@@ -14,7 +14,6 @@ pub const DEFAULT_MAX_DOCUMENT_BYTES: usize = 16 * 1024 * 1024;
 /// Absolute recursive `FieldValue::List` nesting accepted by the stable
 /// packet-document parser.
 pub const MAX_DOCUMENT_NESTING: usize = 64;
-pub const DEFAULT_MAX_DOCUMENT_NESTING: usize = MAX_DOCUMENT_NESTING;
 
 pub(super) const DOCUMENT_BASE_CONTAINER_DEPTH: usize = 6;
 
@@ -69,7 +68,7 @@ impl DocumentLimits {
     pub const DEFAULT: Self = Self {
         max_input_bytes: DEFAULT_MAX_DOCUMENT_BYTES,
         max_layers: crate::layout::DEFAULT_MAX_LAYERS,
-        max_nesting: DEFAULT_MAX_DOCUMENT_NESTING,
+        max_nesting: MAX_DOCUMENT_NESTING,
         max_fields_per_layer: 256,
         max_total_nodes: 65_536,
         max_list_items: 4_096,

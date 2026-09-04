@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::fmt::Write as _;
+use std::sync::OnceLock;
 
 use clap::{Parser, ValueEnum};
 use packetcraftr::output;
@@ -47,11 +48,38 @@ fn root_after_help() -> String {
     help
 }
 
+/// The `--version` body: package version plus enabled native features.
+///
+/// Built from `cfg!` so no new dependency is needed.
+fn long_version() -> &'static str {
+    static LONG_VERSION: OnceLock<String> = OnceLock::new();
+    LONG_VERSION.get_or_init(|| {
+        let enabled = [
+            ("native-interfaces", cfg!(feature = "native-interfaces")),
+            ("native-route", cfg!(feature = "native-route")),
+            ("native-layer2", cfg!(feature = "native-layer2")),
+            ("native-layer3", cfg!(feature = "native-layer3")),
+        ];
+        let names = enabled
+            .into_iter()
+            .filter(|(_, on)| *on)
+            .map(|(name, _)| name)
+            .collect::<Vec<_>>();
+        let features = if names.is_empty() {
+            "none".to_owned()
+        } else {
+            names.join(", ")
+        };
+        format!("{}\nnative features: {features}", env!("CARGO_PKG_VERSION"))
+    })
+}
+
 #[derive(Debug, Parser)]
 #[command(
     name = "packetcraftr",
     bin_name = "packetcraftr",
     version,
+    long_version = long_version(),
     arg_required_else_help = true,
     about = "Reflective packet construction, dissection, capture, and network tools",
     long_about = "PacketcraftR builds and dissects arbitrary packet stacks with exact bytes, bounded parsing, passive route planning, and policy-gated live workflows. Native features, dependencies, and privileges determine which live paths are available.",

@@ -16,20 +16,23 @@ use packetcraftr_core::{diagnostic::Diagnostic, registry::Registry};
 
 use crate::BoundaryError;
 use crate::clock::Clock;
-use crate::probe::evidence::{EvidenceState, ResponseSelector, Retained, validate_batch_evidence};
+use crate::probe::evidence::{
+    EvidenceState, ResponseSelector, Retained, check_probe_count, check_probe_duration,
+    validate_batch_evidence,
+};
 use crate::probe::runner::{ProbeLifecycle, run_batches, sink_observer};
 use crate::target::{Authorizer, approve_operation, budgeted, resolve_selected};
 
 use super::WORKFLOW;
 use super::classification::classify_response;
 use super::model::{
-    Batch, Classification, Endpoint, Event, Execution, Executor, Limits, Probe, ProbeEndpoint,
-    ProbeEvidence, ProbeStatus, Report, Request, Summary, Transport,
+    Batch, Classification, ClassificationCounts, Endpoint, Event, Execution, Executor, Limits,
+    Probe, ProbeEndpoint, ProbeEvidence, ProbeStatus, Report, Request, Summary, Transport,
 };
 use super::plan::{build_batches, worst_case_duration};
 use super::probe::sent_probe_matches;
 use super::{IPV4_PROBE_BYTES, IPV6_PROBE_BYTES};
-use crate::probe::{Error, ErrorKind};
+use crate::probe::{Error, ErrorKind, duration_limit, enforce_deadline, index_or_push};
 
 /// Validates the request, authorizes every resolved target and the complete
 /// operation budget before constructing probes, then executes and classifies
@@ -85,7 +88,7 @@ where
     let observe = sink_observer(
         runtime,
         emit,
-        |error| scan_duration_error(error.actual, error.limit),
+        |error| duration_limit(WORKFLOW, error.actual, error.limit),
         |source| Error::new(WORKFLOW, ErrorKind::Output { source }),
     )?;
     run_observed(request, authorizer, registry, executor, clock, observe)
@@ -108,8 +111,9 @@ where
     let mut deadline = Deadline::new(request.limits.max_duration);
     let approved = approve_scan(request, authorizer, &deadline)?;
     let batches = build_batches(request, &approved.addresses, &approved.endpoints)?;
-    enforce_deadline(&deadline)?;
+    enforce_deadline(WORKFLOW, &deadline)?;
     let mut state = EvidenceState::default();
+    let mut winners = HashMap::new();
     let stats = {
         let mut lifecycle = Lifecycle {
             executor,
@@ -117,6 +121,7 @@ where
             limits: request.limits,
             target: Arc::from(approved.declared_target.as_str()),
             state: &mut state,
+            winners: &mut winners,
             emit: &mut emit,
         };
         run_batches(
@@ -129,10 +134,15 @@ where
         )
     };
     let stats = stats?;
+    let mut counts = ClassificationCounts::default();
+    for classification in winners.into_values() {
+        counts.increment(classification);
+    }
 
     Ok(Summary {
         target: approved.declared_target,
         resolved_addresses: approved.addresses,
+        counts,
         stats,
     })
 }
@@ -158,30 +168,19 @@ impl Collector {
         let address = evidence.address;
         let transport = evidence.transport;
         let port = evidence.port;
-        let index = match self.endpoint_indices.get(&(address, port)) {
-            Some(index) => *index,
-            None => {
-                let index = self.endpoints.len();
-                self.endpoints.push(Endpoint {
-                    address,
-                    transport,
-                    port,
-                    classification: Classification::Timeout,
-                    probes: Vec::new(),
-                });
-                self.endpoint_indices.insert((address, port), index);
-                index
-            }
-        };
-        #[expect(
-            clippy::indexing_slicing,
-            reason = "`index` is either a live entry from `endpoint_indices` or the index of the \
-                      endpoint just pushed, so it is below `endpoints.len()`"
-        )]
-        let endpoint = &mut self.endpoints[index];
-        if evidence.classification.rank() > endpoint.classification.rank() {
-            endpoint.classification = evidence.classification;
-        }
+        let endpoint = index_or_push(
+            &mut self.endpoints,
+            &mut self.endpoint_indices,
+            (address, port),
+            || Endpoint {
+                address,
+                transport,
+                port,
+                classification: Classification::Timeout,
+                probes: Vec::new(),
+            },
+        );
+        endpoint.classification.promote(evidence.classification);
         endpoint.probes.push(evidence);
     }
 
@@ -237,27 +236,10 @@ fn approve_scan<A: Authorizer>(
         endpoints_per_address,
         request.attempts,
     )?;
-    if total_probes > request.limits.max_probes {
-        return Err(Error::new(
-            WORKFLOW,
-            ErrorKind::InvalidLimit {
-                field: "probes",
-                value: u64::try_from(total_probes).unwrap_or(u64::MAX),
-                reason: format!("exceeds max_probes={}", request.limits.max_probes),
-            },
-        ));
-    }
+    check_probe_count(WORKFLOW, total_probes, request.limits.max_probes)?;
     let maximum_bytes = maximum_wire_bytes(&resolved.addresses, endpoints_per_address, request)?;
     let worst_case = worst_case_duration(request, resolved.addresses.len(), endpoints_per_address)?;
-    if worst_case > request.limits.max_duration {
-        return Err(Error::new(
-            WORKFLOW,
-            ErrorKind::DurationLimit {
-                actual: worst_case,
-                limit: request.limits.max_duration,
-            },
-        ));
-    }
+    check_probe_duration(WORKFLOW, worst_case, request.limits.max_duration)?;
     approve_operation(
         authorizer,
         budgeted(
@@ -268,7 +250,17 @@ fn approve_scan<A: Authorizer>(
         &WORKFLOW,
     )?;
 
-    let endpoints = match request.transport {
+    let endpoints = probe_endpoints(request.transport, ports);
+    Ok(ApprovedScan {
+        declared_target: resolved.declared,
+        addresses: resolved.addresses,
+        endpoints,
+    })
+}
+
+/// Expands the authorized port selection into probe endpoints for `transport`.
+fn probe_endpoints(transport: Transport, ports: Vec<u16>) -> Vec<ProbeEndpoint> {
+    match transport {
         Transport::Icmp => vec![ProbeEndpoint::Icmp],
         Transport::Tcp => ports
             .into_iter()
@@ -278,12 +270,7 @@ fn approve_scan<A: Authorizer>(
             .into_iter()
             .map(|port| ProbeEndpoint::Udp { port })
             .collect(),
-    };
-    Ok(ApprovedScan {
-        declared_target: resolved.declared,
-        addresses: resolved.addresses,
-        endpoints,
-    })
+    }
 }
 
 fn probe_count(
@@ -362,6 +349,9 @@ struct Lifecycle<'a, E, F> {
     limits: Limits,
     target: Arc<str>,
     state: &'a mut EvidenceState,
+    /// The winning classification per endpoint, so the summary reports counts
+    /// without a collector.
+    winners: &'a mut HashMap<(IpAddr, Option<u16>), Classification>,
     emit: &'a mut F,
 }
 
@@ -406,7 +396,7 @@ where
         exchange: Execution,
         deadline: &Deadline,
     ) -> Result<(), Error> {
-        enforce_deadline(deadline)?;
+        enforce_deadline(WORKFLOW, deadline)?;
         let Execution {
             permit,
             sent,
@@ -427,7 +417,7 @@ where
             ));
         }
         self.record_diagnostics(batch_diagnostics, deadline)?;
-        enforce_deadline(deadline)?;
+        enforce_deadline(WORKFLOW, deadline)?;
         let mut response_selector = ResponseSelector::new(&mut responses);
         for (request_index, (probe, sent)) in batch.probes.iter().zip(sent.iter()).enumerate() {
             let evidence = self.classify_probe(
@@ -439,6 +429,10 @@ where
                 deadline,
             )?;
             self.publish_new_diagnostics(deadline)?;
+            self.winners
+                .entry((evidence.address, evidence.port))
+                .or_insert(Classification::Timeout)
+                .promote(evidence.classification);
             (self.emit)(
                 Event::Probe {
                     target: Arc::clone(&self.target),
@@ -446,7 +440,7 @@ where
                 },
                 deadline,
             )?;
-            enforce_deadline(deadline)?;
+            enforce_deadline(WORKFLOW, deadline)?;
         }
         self.retain_undecoded(batch_undecoded, deadline)?;
         Ok(())
@@ -461,7 +455,7 @@ where
         response_selector: &mut ResponseSelector<'_>,
         deadline: &Deadline,
     ) -> Result<ProbeEvidence, Error> {
-        enforce_deadline(deadline)?;
+        enforce_deadline(WORKFLOW, deadline)?;
         let sent_at = sent.timing().freshness_marker().wall_clock();
         let best = response_selector.select(
             request_index,
@@ -476,7 +470,7 @@ where
             },
             |observation| observation.classification.rank(),
             |observation| observation.responder,
-            || enforce_deadline(deadline),
+            || enforce_deadline(WORKFLOW, deadline),
         )?;
         let Some(candidate) = best else {
             return Ok(Self::probe_evidence(
@@ -544,7 +538,7 @@ where
                 };
                 (self.emit)(event, deadline)
             },
-            || enforce_deadline(deadline),
+            || enforce_deadline(WORKFLOW, deadline),
         )
     }
 
@@ -565,12 +559,4 @@ where
             .diagnostics
             .publish_new(|diagnostic| emit(Event::Diagnostic(diagnostic), deadline))
     }
-}
-
-fn enforce_deadline(deadline: &Deadline) -> Result<(), Error> {
-    crate::clock::check_deadline(deadline, scan_duration_error)
-}
-
-fn scan_duration_error(actual: Duration, limit: Duration) -> Error {
-    Error::new(WORKFLOW, ErrorKind::DurationLimit { actual, limit })
 }

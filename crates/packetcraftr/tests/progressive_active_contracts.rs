@@ -23,9 +23,10 @@ use packetcraftr::netio::neighbor;
 use packetcraftr::netio::route::{Decision, Provider, Scope, SelectionReason};
 use packetcraftr::netio::transmit;
 use packetcraftr::probe::ErrorKind;
+use packetcraftr::probe::ExchangeExecutor;
 use packetcraftr::progress::Runtime;
 use packetcraftr::target::Target;
-use packetcraftr::{BoundaryError, Client, ExchangeExecutor, clock, dns, policy, scan, traceroute};
+use packetcraftr::{BoundaryError, Client, clock, dns, policy, scan, traceroute};
 
 #[derive(Default)]
 struct IoState {
@@ -614,6 +615,7 @@ fn traceroute_sink_failure_stops_after_capture_shutdown() {
         strategy: traceroute::Strategy::Udp,
         address_family: packetcraftr::target::Family::Any,
         destination_port: Some(traceroute::DEFAULT_UDP_PORT),
+        source_port: None,
         first_hop: 1,
         max_hops: 2,
         probes_per_hop: 1,
@@ -646,7 +648,7 @@ fn dns_sink_failure_stops_after_capture_shutdown() {
         server: Target::Address(destination),
         address_family: packetcraftr::target::Family::Any,
         server_port: dns::DEFAULT_SERVER_PORT,
-        source_port: packetcraftr::EPHEMERAL_SOURCE_PORT_BASE,
+        source_port: packetcraftr::probe::EPHEMERAL_SOURCE_PORT_BASE,
         query_name: "example.test".to_owned(),
         query_type: dns::QueryType::A,
         transaction_id: 7,

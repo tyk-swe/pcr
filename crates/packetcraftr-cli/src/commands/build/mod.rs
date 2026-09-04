@@ -3,6 +3,7 @@
 
 pub(super) mod arguments;
 
+use packetcraftr::core::error::{Classification, Classified as _, Kind};
 use packetcraftr::{core, output};
 
 use self::arguments::Args;
@@ -18,17 +19,15 @@ use crate::rendering::{
 pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
     let format = BuildFormat::narrow(output::contract::Command::Build, format)?;
     let registry = registry()?;
-    let packet = read_recipe(arguments.recipe, &registry)?;
+    // Recipe byte limits bound parsing; the builder owns the requested layer budget.
+    let packet = read_recipe(arguments.recipe, &registry, usize::MAX)?;
     let built = core::build::Builder::new(registry)
         .build(
             packet,
             core::build::Context::default(),
-            core::build::Options {
-                mode: arguments.mode.into(),
-                ..core::build::Options::default()
-            },
+            arguments.budget.build_options(arguments.mode.into()),
         )
-        .map_err(CliError::classified)?;
+        .map_err(build_error)?;
     let (result, diagnostics) = output::build::Report::from_built(built);
     match format {
         BuildFormat::Text => {
@@ -39,5 +38,24 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
         BuildFormat::Hex => write_plain_line(format_args!("{}", result.frame.bytes_hex())),
         BuildFormat::Raw => write_raw(result.frame.bytes()),
         BuildFormat::Json => emit_aggregate(output::contract::Command::Build, result, diagnostics),
+    }
+}
+
+fn build_error(error: core::build::Error) -> CliError {
+    match error {
+        error @ (core::build::Error::LayerLimit { .. }
+        | core::build::Error::PacketSizeLimit { .. }) => {
+            let classification = error.classification();
+            CliError::from_classification(
+                Classification::new(
+                    "packet.build_resource_limit",
+                    Kind::Packet,
+                    classification.remediation,
+                ),
+                error.to_string(),
+                error.causes(),
+            )
+        }
+        error => CliError::classified(error),
     }
 }

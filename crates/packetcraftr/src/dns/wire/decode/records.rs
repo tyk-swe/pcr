@@ -194,6 +194,23 @@ impl Rdata<'_> {
             target,
         })
     }
+
+    fn decode_caa(&self) -> Result<RecordValue, WireError> {
+        let [flags, tag_length, rest @ ..] = self.bytes else {
+            return Err(self.invalid("CAA RDATA is shorter than flags and tag length"));
+        };
+        let (tag, value) = rest
+            .split_at_checked(usize::from(*tag_length))
+            .ok_or_else(|| self.invalid("CAA tag exceeds declared RDATA"))?;
+        if tag.is_empty() {
+            return Err(self.invalid("CAA tag is empty"));
+        }
+        Ok(RecordValue::Caa {
+            flags: *flags,
+            tag: Bytes::copy_from_slice(tag),
+            value: Bytes::copy_from_slice(value),
+        })
+    }
 }
 
 fn decode_rdata(
@@ -237,6 +254,7 @@ fn decode_rdata(
             Ok(RecordValue::Aaaa(Ipv6Addr::from(bytes)))
         }
         33 => rdata.decode_srv(),
+        257 => rdata.decode_caa(),
         TYPE_OPT => decode_edns(class, ttl, bytes).map(RecordValue::Opt),
         _ => Ok(RecordValue::Unknown {
             type_code,

@@ -6,7 +6,7 @@ use packetcraftr::{core, output};
 use crate::errors::CliError;
 use crate::rendering::{
     captured_frame_text, comma_separated, optional_debug, optional_display,
-    render_diagnostics_text, write_stdout_line, write_summary_line,
+    render_diagnostics_text, render_undecoded, write_stdout_line, write_summary_line,
 };
 
 pub(super) fn render_text(
@@ -52,9 +52,7 @@ pub(super) fn render_text(
             }
         }
     }
-    for frame in &result.undecoded {
-        write_stdout_line(format_args!("undecoded {}", captured_frame_text(frame)))?;
-    }
+    render_undecoded(result.undecoded.iter().map(|frame| (None, frame)))?;
     write_summary_line(format_args!(
         "scanned {} endpoint(s) with {} completed probe(s), {} byte(s)",
         result.endpoints.len(),
@@ -105,6 +103,10 @@ mod tests {
         scan::Summary {
             target: "192.0.2.10".to_owned(),
             resolved_addresses: vec![IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10))],
+            counts: scan::ClassificationCounts {
+                timeout: 2,
+                ..scan::ClassificationCounts::default()
+            },
             stats: packetcraftr::Stats::default(),
         }
     }
@@ -122,6 +124,7 @@ mod tests {
         assert_eq!(records[0]["result"]["probe"]["sequence"], 70_000);
         assert_eq!(records[1]["result"]["probe"]["sequence"], 9);
         assert_eq!(records[2]["result"]["event"], "complete");
+        assert_eq!(records[2]["result"]["counts"]["timeout"], 2);
         assert_single_complete(&records);
     }
 }

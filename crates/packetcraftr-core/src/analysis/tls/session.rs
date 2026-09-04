@@ -107,11 +107,7 @@ impl Status {
     }
 }
 
-impl std::fmt::Display for Status {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
+display_via_as_str!(Status);
 
 /// One alert record observed in the clear, by numeric code point.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]

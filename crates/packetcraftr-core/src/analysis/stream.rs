@@ -3,8 +3,6 @@
 
 //! How the analysis surface names one conversation.
 
-use std::fmt;
-
 /// The transport namespace a conversation index belongs to.
 ///
 /// TCP and UDP indices are allocated independently, so a bare number cannot
@@ -27,11 +25,7 @@ impl StreamTransport {
     }
 }
 
-impl fmt::Display for StreamTransport {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
+display_via_as_str!(StreamTransport);
 
 /// One conversation: its transport namespace plus per-transport index,
 /// matching the `tcp.stream` and `udp.stream` filter vocabularies.

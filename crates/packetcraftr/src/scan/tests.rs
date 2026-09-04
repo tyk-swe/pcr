@@ -10,17 +10,16 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, UNIX_EPOCH};
 
 use crate::probe::ErrorKind;
+use crate::probe::test_fixtures::{
+    ProgressiveExecutor, RetainedEvidenceExecutor, decoded_packet, evidence_frame, private_policy,
+};
 use crate::progress::Runtime;
-use bytes::Bytes;
 use packetcraftr_core::error::{Classification as ErrorClassification, Kind};
-use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::protocol::{
     network::{Ipv4, Ipv6},
     transport::Tcp,
 };
-use packetcraftr_core::{
-    Packet, decode::DecodedPacket, diagnostic::Diagnostic, layout::PacketLayout,
-};
+use packetcraftr_core::{Packet, decode::DecodedPacket, diagnostic::Diagnostic};
 
 use super::classification::classify_response;
 use super::engine::{run, run_with_events};
@@ -34,14 +33,6 @@ use crate::test_fixtures::{
     AddressListAuthorizer, NoopClock, RecordingClock, RejectingExecutor, ScriptedResolver,
 };
 use crate::{BoundaryError, Stats, target::Family};
-
-fn private_scan_policy() -> crate::policy::Policy {
-    crate::policy::Policy {
-        max_packets_per_operation: 1_000,
-        max_bytes_per_operation: 1_000_000,
-        ..crate::policy::Policy::default()
-    }
-}
 
 fn tcp_scan_request(target: Target) -> Request {
     Request {
@@ -130,45 +121,6 @@ impl Executor<Batch> for LateResponseExecutor {
     }
 }
 
-struct ProgressiveExecutor {
-    inner: TimeoutExecutor,
-    calls: Arc<AtomicUsize>,
-    shutdowns: Arc<AtomicUsize>,
-    fail_at: Option<usize>,
-}
-
-struct RetainedEvidenceExecutor(TimeoutExecutor);
-
-impl Executor<Batch> for RetainedEvidenceExecutor {
-    fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
-        let mut execution = self.0.execute(batch)?;
-        execution.undecoded.extend([
-            Frame::new(UNIX_EPOCH, LinkType::RAW, Bytes::from_static(&[0xff])).unwrap(),
-            Frame::new(UNIX_EPOCH, LinkType::RAW, Bytes::from_static(&[0xfe])).unwrap(),
-        ]);
-        execution
-            .diagnostics
-            .push(Diagnostic::info("scan.fixture", "fixture diagnostic"));
-        Ok(execution)
-    }
-}
-
-impl Executor<Batch> for ProgressiveExecutor {
-    fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
-        let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
-        if self.fail_at == Some(call) {
-            return Err(BoundaryError::new(
-                "induced scan execution failure",
-                ErrorClassification::new("io.test_scan", Kind::Io, None),
-                Vec::new(),
-            ));
-        }
-        let execution = self.inner.execute(batch);
-        self.shutdowns.fetch_add(1, Ordering::SeqCst);
-        execution
-    }
-}
-
 fn tcp_packet(
     source: Ipv4Addr,
     destination: Ipv4Addr,
@@ -194,19 +146,12 @@ fn tcp_packet(
 }
 
 fn decoded(packet: Packet, diagnostics: Vec<Diagnostic>) -> DecodedPacket {
-    let frame = Frame::new(
-        UNIX_EPOCH + Duration::from_secs(2),
-        LinkType::RAW,
-        Bytes::from_static(&[0x45]),
-    )
-    .expect("decoded evidence frame");
-    DecodedPacket {
+    decoded_packet(
         packet,
-        original: frame.bytes().clone(),
-        frame,
-        layout: PacketLayout::default(),
+        UNIX_EPOCH + Duration::from_secs(2),
+        &[0x45],
         diagnostics,
-    }
+    )
 }
 
 #[test]
@@ -263,7 +208,7 @@ fn scan_hostname_policy_denial_precedes_resolution_and_execution() {
     let mut executor = RejectingExecutor {
         calls: Arc::clone(&executor_calls),
     };
-    let policy = private_scan_policy();
+    let policy = private_policy();
     let mut authorizer = PolicyAuthorizer::new(&policy, &resolver);
     let error = run(
         &tcp_scan_request(Target::Hostname("lab.example".parse().unwrap())),
@@ -292,7 +237,7 @@ fn scan_authorizes_mixed_resolution_answers_before_family_filtering() {
     let mut executor = RejectingExecutor {
         calls: Arc::clone(&executor_calls),
     };
-    let mut policy = private_scan_policy();
+    let mut policy = private_policy();
     policy.allow_hostname_resolution = true;
     let mut request = tcp_scan_request(Target::Hostname("mixed.example".parse().unwrap()));
     request.address_family = Family::Ipv6;
@@ -314,6 +259,42 @@ fn scan_authorizes_mixed_resolution_answers_before_family_filtering() {
     assert!(error.to_string().contains("8.8.8.8"));
     assert_eq!(resolver.calls.load(Ordering::SeqCst), 1);
     assert_eq!(executor_calls.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn scan_probe_limit_precedes_duration_planning() {
+    let first = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
+    let second = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3));
+    let mut request = tcp_scan_request(Target::Address(first));
+    request.ports = (1..=50_001).collect();
+    request.limits.max_ports = request.ports.len();
+    request.limits.max_probes = super::MAX_PROBES;
+    request.limits.max_duration = Duration::from_secs(1);
+    let calls = Arc::new(AtomicUsize::new(0));
+    let error = run(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: vec![first, second],
+        },
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut RejectingExecutor {
+            calls: Arc::clone(&calls),
+        },
+        &mut NoopClock,
+    )
+    .unwrap_err();
+
+    assert!(
+        matches!(
+            error.kind,
+            ErrorKind::InvalidLimit {
+                field: "probes",
+                ..
+            }
+        ),
+        "{error:?}"
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
 }
 
 #[test]
@@ -436,6 +417,8 @@ fn scan_events_precede_later_work_and_survive_a_later_failure() {
         calls: Arc::clone(&calls),
         shutdowns: Arc::clone(&shutdowns),
         fail_at: Some(2),
+        failure_message: "induced scan execution failure",
+        failure_code: "io.test_scan",
     };
     let events = Arc::new(std::sync::Mutex::new(Vec::new()));
     let observed_events = Arc::clone(&events);
@@ -485,6 +468,8 @@ fn scan_sink_failure_stops_batches_after_cleaning_up_the_current_session() {
         calls: Arc::clone(&calls),
         shutdowns: Arc::clone(&shutdowns),
         fail_at: None,
+        failure_message: "induced scan execution failure",
+        failure_code: "io.test_scan",
     };
 
     let error = run_with_events(
@@ -526,7 +511,14 @@ fn scan_event_collection_preserves_stats_diagnostics_and_evidence_limits() {
             addresses: vec![address],
         },
         &packetcraftr_core::protocol::builtin::registry(),
-        &mut RetainedEvidenceExecutor(TimeoutExecutor::default()),
+        &mut RetainedEvidenceExecutor {
+            inner: TimeoutExecutor::default(),
+            frames: vec![
+                evidence_frame(UNIX_EPOCH, &[0xff]),
+                evidence_frame(UNIX_EPOCH, &[0xfe]),
+            ],
+            diagnostic: Diagnostic::info("scan.fixture", "fixture diagnostic"),
+        },
         &mut NoopClock,
     )
     .expect("bounded undecoded evidence must complete");
@@ -547,6 +539,53 @@ fn scan_event_collection_preserves_stats_diagnostics_and_evidence_limits() {
             .iter()
             .any(|diagnostic| diagnostic.code == "scan.undecoded_limit")
     );
+}
+
+#[test]
+fn scan_summary_counts_endpoints_by_winning_classification() {
+    let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
+    let mut request = tcp_scan_request(Target::Address(address));
+    request.ports = vec![80, 81];
+    let summary = run_with_events(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: vec![address],
+        },
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut TimeoutExecutor::default(),
+        &mut NoopClock,
+        &Runtime::default(),
+        |_| Ok(()),
+    )
+    .expect("all-timeout scan completes");
+
+    assert_eq!(summary.target, "10.0.0.2");
+    assert_eq!(summary.resolved_addresses, vec![address]);
+    assert_eq!(summary.counts.timeout, 2);
+    assert_eq!(summary.counts.open, 0);
+    assert_eq!(summary.counts.closed, 0);
+    assert_eq!(summary.counts.filtered, 0);
+    assert_eq!(summary.counts.unreachable, 0);
+    assert_eq!(summary.counts.unknown, 0);
+}
+
+#[test]
+fn scan_classification_counts_cover_every_outcome_once() {
+    let mut counts = super::ClassificationCounts::default();
+    counts.increment(Classification::Open);
+    counts.increment(Classification::Closed);
+    counts.increment(Classification::Filtered);
+    counts.increment(Classification::Unreachable);
+    counts.increment(Classification::Unknown);
+    counts.increment(Classification::Timeout);
+    counts.increment(Classification::Timeout);
+
+    assert_eq!(counts.open, 1);
+    assert_eq!(counts.closed, 1);
+    assert_eq!(counts.filtered, 1);
+    assert_eq!(counts.unreachable, 1);
+    assert_eq!(counts.unknown, 1);
+    assert_eq!(counts.timeout, 2);
 }
 
 #[test]

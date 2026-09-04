@@ -157,6 +157,11 @@ impl fmt::Display for Section {
 pub enum RecordValue {
     A(Ipv4Addr),
     Aaaa(Ipv6Addr),
+    Caa {
+        flags: u8,
+        tag: Bytes,
+        value: Bytes,
+    },
     Cname(Name),
     Mx {
         preference: u16,
@@ -199,6 +204,7 @@ impl RecordValue {
             Self::Txt(_) => 16,
             Self::Aaaa(_) => 28,
             Self::Srv { .. } => 33,
+            Self::Caa { .. } => 257,
             Self::Opt(_) => TYPE_OPT,
             Self::Unknown { type_code, .. } => *type_code,
         }
@@ -208,6 +214,7 @@ impl RecordValue {
         match self {
             Self::A(_) => "a",
             Self::Aaaa(_) => "aaaa",
+            Self::Caa { .. } => "caa",
             Self::Cname(_) => "cname",
             Self::Mx { .. } => "mx",
             Self::Ns(_) => "ns",
@@ -227,6 +234,7 @@ impl RecordValue {
             Self::Srv { target, .. } => Some(target),
             Self::A(_)
             | Self::Aaaa(_)
+            | Self::Caa { .. }
             | Self::Ptr(_)
             | Self::Soa { .. }
             | Self::Txt(_)

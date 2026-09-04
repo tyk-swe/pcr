@@ -161,6 +161,29 @@ fn stats_exercises_every_table_and_filtering_mode() {
     assert_eq!(value["result"]["frames_read"], 5);
     assert_eq!(value["result"]["frames_matched"], 1);
 
+    let limited = run_success(&[
+        "--output",
+        "json",
+        "stats",
+        path,
+        "--table",
+        "protocols",
+        "--top",
+        "1",
+    ]);
+    let value = parse_json(&limited);
+    assert_eq!(
+        value["result"]["protocols"]
+            .as_array()
+            .expect("protocol rows")
+            .len(),
+        1
+    );
+    assert_eq!(value["diagnostics"][0]["code"], "stats.protocols_omitted");
+
+    let limited_text = run_success(&["stats", path, "--table", "protocols", "--top", "0"]);
+    assert!(String::from_utf8_lossy(&limited_text.stdout).contains("stats.protocols_omitted"));
+
     for table in [
         "conversations",
         "endpoints",

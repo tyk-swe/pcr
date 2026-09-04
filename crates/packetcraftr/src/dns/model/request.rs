@@ -25,6 +25,7 @@ pub enum QueryType {
     #[default]
     A,
     Aaaa,
+    Caa,
     Cname,
     Mx,
     Ns,
@@ -47,6 +48,7 @@ impl QueryType {
             Self::Txt => 16,
             Self::Aaaa => 28,
             Self::Srv => 33,
+            Self::Caa => 257,
             Self::Any => 255,
         }
     }
@@ -55,6 +57,7 @@ impl QueryType {
         match self {
             Self::A => "a",
             Self::Aaaa => "aaaa",
+            Self::Caa => "caa",
             Self::Cname => "cname",
             Self::Mx => "mx",
             Self::Ns => "ns",

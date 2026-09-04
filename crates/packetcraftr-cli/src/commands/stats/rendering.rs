@@ -5,16 +5,17 @@
 
 use std::net::SocketAddr;
 
-use packetcraftr::{analysis, output};
+use packetcraftr::{analysis, core, output};
 
 use super::arguments::Table;
 use crate::errors::CliError;
-use crate::rendering::{write_stdout_line, write_summary_line};
+use crate::rendering::{render_diagnostics_text, write_stdout_line, write_summary_line};
 
 pub(super) fn render_text(
     table: Table,
     report: &analysis::stats::Report,
     frames_read: u64,
+    diagnostics: &[core::diagnostic::Diagnostic],
 ) -> Result<(), CliError> {
     write_summary_line(format_args!(
         "matched {} of {} frame(s), {} byte(s)",
@@ -79,7 +80,7 @@ pub(super) fn render_text(
         }
         Table::Fragments => render_fragments(&report.ip_reassembly)?,
     }
-    Ok(())
+    render_diagnostics_text(diagnostics)
 }
 
 fn render_fragments(report: &analysis::IpReassemblyReport) -> Result<(), CliError> {

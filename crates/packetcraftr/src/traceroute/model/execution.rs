@@ -13,6 +13,7 @@ pub struct Probe {
     pub target: ProbeTarget,
     pub hop_limit: u8,
     pub attempt: u32,
+    pub source_port: u16,
 }
 
 impl Probe {

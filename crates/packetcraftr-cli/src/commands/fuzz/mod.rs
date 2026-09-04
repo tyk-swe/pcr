@@ -39,7 +39,7 @@ pub(super) fn run(
     let request = prepare_request(&arguments)?;
     let live = prepare_live(&arguments, &request)?;
     let registry = registry()?;
-    let packet = read_recipe(arguments.recipe, &registry)?;
+    let packet = read_recipe(arguments.recipe, &registry, request.build.max_layers)?;
     execute_and_render(request, packet, registry, live, format, stream)
 }
 

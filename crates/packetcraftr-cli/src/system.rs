@@ -9,7 +9,7 @@ pub(crate) mod exchange;
 mod interface;
 mod route;
 
-pub(crate) use interface::{InterfaceSelector, resolve};
+pub(crate) use interface::{InterfaceSelector, resolve, select_interfaces};
 
 pub(crate) use route::prepare_route;
 

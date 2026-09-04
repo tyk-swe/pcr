@@ -46,6 +46,9 @@ pub(crate) struct Args {
     /// Non-zero UDP base port (incremented per probe) or fixed TCP destination port.
     #[arg(long)]
     pub(crate) port: Option<u16>,
+    /// Optional non-zero UDP/TCP source port; defaults to the ephemeral base.
+    #[arg(long)]
+    pub(crate) source_port: Option<u16>,
     /// First non-zero IPv4 TTL or IPv6 hop limit.
     #[arg(long, default_value_t = packetcraftr::traceroute::DEFAULT_FIRST_HOP)]
     pub(crate) first_hop: u8,

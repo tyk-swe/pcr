@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::fmt;
-
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
@@ -218,14 +216,18 @@ pub enum Format {
     PcapNg,
 }
 
-impl fmt::Display for Format {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(match self {
+impl Format {
+    /// The stable lowercase name, matching the serialized form.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
             Self::Pcap => "pcap",
             Self::PcapNg => "pcapng",
-        })
+        }
     }
 }
+
+display_via_as_str!(Format);
 
 /// Byte order used by a capture file.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

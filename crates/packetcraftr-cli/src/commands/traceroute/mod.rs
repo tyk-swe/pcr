@@ -74,6 +74,7 @@ fn prepare_request(
         strategy,
         address_family: arguments.family.into(),
         destination_port,
+        source_port: arguments.source_port,
         first_hop: arguments.first_hop,
         max_hops: arguments.max_hops,
         probes_per_hop: arguments.attempts,

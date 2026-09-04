@@ -8,6 +8,7 @@ pub(crate) use capture_limits::CaptureLimitsArgs;
 pub(crate) use offline_limits::{
     CaptureReaderBoundsArgs, OfflineCaptureLimitsArgs, OfflineLimitsArgs,
 };
+pub(crate) use packet_budget::PacketBudgetArgs;
 pub(crate) use policy::{
     Captured, FuzzPolicyArgs, HostnamePolicyArgs, ReplayPolicyArgs, RoutePolicyArgs,
     SendPolicyArgs, TrafficBudgetArgs,
@@ -20,6 +21,7 @@ pub(crate) use tls_ports::TlsPortArgs;
 mod address_family;
 mod capture_limits;
 mod offline_limits;
+mod packet_budget;
 mod policy;
 mod recipe;
 mod route;

@@ -185,38 +185,24 @@ pub(in crate::analysis::pcap) fn write_padding<W: Write>(
     Ok(())
 }
 
-pub(in crate::analysis::pcap) fn decode_u16(
-    endianness: Endianness,
-    bytes: &[u8],
-) -> Result<u16, Error> {
-    let word = decode_array::<2>(bytes, "two-byte field")?;
-    Ok(match endianness {
-        Endianness::Little => u16::from_le_bytes(word),
-        Endianness::Big => u16::from_be_bytes(word),
-    })
+macro_rules! decode_int {
+    ($name:ident, $int:ty, $width:expr, $context:literal) => {
+        pub(in crate::analysis::pcap) fn $name(
+            endianness: Endianness,
+            bytes: &[u8],
+        ) -> Result<$int, Error> {
+            let word = decode_array::<$width>(bytes, $context)?;
+            Ok(match endianness {
+                Endianness::Little => <$int>::from_le_bytes(word),
+                Endianness::Big => <$int>::from_be_bytes(word),
+            })
+        }
+    };
 }
 
-pub(in crate::analysis::pcap) fn decode_u32(
-    endianness: Endianness,
-    bytes: &[u8],
-) -> Result<u32, Error> {
-    let word = decode_array::<4>(bytes, "four-byte field")?;
-    Ok(match endianness {
-        Endianness::Little => u32::from_le_bytes(word),
-        Endianness::Big => u32::from_be_bytes(word),
-    })
-}
-
-pub(in crate::analysis::pcap) fn decode_i64(
-    endianness: Endianness,
-    bytes: &[u8],
-) -> Result<i64, Error> {
-    let word = decode_array::<8>(bytes, "eight-byte field")?;
-    Ok(match endianness {
-        Endianness::Little => i64::from_le_bytes(word),
-        Endianness::Big => i64::from_be_bytes(word),
-    })
-}
+decode_int!(decode_u16, u16, 2, "two-byte field");
+decode_int!(decode_u32, u32, 4, "four-byte field");
+decode_int!(decode_i64, i64, 8, "eight-byte field");
 
 fn decode_array<const LENGTH: usize>(
     bytes: &[u8],

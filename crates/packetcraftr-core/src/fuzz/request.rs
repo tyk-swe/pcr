@@ -37,11 +37,7 @@ impl Strategy {
     }
 }
 
-impl fmt::Display for Strategy {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
+display_via_as_str!(Strategy);
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Target {

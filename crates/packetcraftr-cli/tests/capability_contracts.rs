@@ -62,7 +62,19 @@ fn send_fails_closed_without_a_native_transmit_backend() {
 fn interfaces_enumerates_the_loopback_interface() {
     let text = run(&["interfaces"]);
     assert!(text.status.success(), "{text:?}");
-    assert!(String::from_utf8_lossy(&text.stdout).contains("127.0.0.1"));
+    let stdout = String::from_utf8_lossy(&text.stdout);
+    assert!(stdout.contains("127.0.0.1"), "{stdout}");
+    // Every text row spells the fields the JSON document carries.
+    for key in [
+        "mtu=",
+        "capability=",
+        "link_type=",
+        "mac=",
+        "flags=",
+        "description=",
+    ] {
+        assert!(stdout.contains(key), "missing {key:?} in:\n{stdout}");
+    }
 
     let json = run(&["--output", "json", "interfaces"]);
     assert!(json.status.success(), "{json:?}");
@@ -80,6 +92,45 @@ fn interfaces_enumerates_the_loopback_interface() {
             .expect("addresses is an array")
             .iter()
             .any(|address| address.as_str().is_some_and(|a| a.starts_with("127.")))
+    );
+}
+
+#[cfg(feature = "native-interfaces")]
+#[test]
+fn interfaces_filters_to_one_interface_by_name_or_index() {
+    let json = run(&["--output", "json", "interfaces"]);
+    assert!(json.status.success(), "{json:?}");
+    let loopback = parse_json(&json)["result"]["interfaces"]
+        .as_array()
+        .expect("interfaces is an array")
+        .iter()
+        .find(|interface| interface["flags"]["loopback"] == true)
+        .expect("a loopback interface is listed")
+        .clone();
+    let name = loopback["name"].as_str().expect("name is a string");
+    let index = loopback["index"].to_string();
+
+    for selector in [name.to_owned(), index] {
+        let filtered = run(&["interfaces", "--interface", &selector]);
+        assert!(filtered.status.success(), "{selector}: {filtered:?}");
+        let lines = String::from_utf8_lossy(&filtered.stdout)
+            .lines()
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        assert_eq!(lines.len(), 1, "{selector}: {lines:?}");
+        assert!(lines[0].contains(name), "{selector}: {lines:?}");
+    }
+
+    let unknown = run(&[
+        "interfaces",
+        "--interface",
+        "packetcraftr-no-such-interface",
+    ]);
+    assert_eq!(unknown.status.code(), Some(5), "{unknown:?}");
+    assert!(unknown.stdout.is_empty(), "text errors leave stdout empty");
+    assert!(
+        String::from_utf8_lossy(&unknown.stderr).contains("io.device"),
+        "{unknown:?}"
     );
 }
 
@@ -106,4 +157,11 @@ fn routes_reports_every_enumerated_interface_once() {
     names.sort();
     names.dedup();
     assert_eq!(names.len(), listed, "each interface appears once");
+
+    let text = run(&["routes", "--all"]);
+    assert!(text.status.success(), "{text:?}");
+    assert!(
+        String::from_utf8_lossy(&text.stdout).contains("capability="),
+        "{text:?}"
+    );
 }

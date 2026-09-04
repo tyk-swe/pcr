@@ -56,6 +56,11 @@ pub(crate) struct Args {
     /// Bucket width of the io table in milliseconds.
     #[arg(long, default_value_t = 1_000)]
     pub(crate) interval_ms: u64,
+    /// Maximum rows kept for the protocols, conversations, endpoints, ports,
+    /// and io tables. The fragments table stays bounded by --max-ip-outcomes
+    /// instead, because its accounting is capture-global.
+    #[arg(long, value_name = "N")]
+    pub(crate) top: Option<usize>,
     #[command(flatten)]
     pub(crate) tls_ports: TlsPortArgs,
     #[command(flatten)]

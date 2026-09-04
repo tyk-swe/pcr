@@ -120,6 +120,8 @@ pub enum ErrorKind {
     InvalidPort {
         message: String,
     },
+    /// The requested source port is zero or unsupported by the strategy.
+    InvalidSourcePort,
     InvalidTimeout {
         value: Duration,
         maximum: Duration,
@@ -189,6 +191,12 @@ impl fmt::Display for Error {
                     workflow.port_noun()
                 )
             }
+            ErrorKind::InvalidSourcePort => {
+                write!(
+                    formatter,
+                    "invalid {workflow} source port: must be non-zero and is only supported for UDP/TCP"
+                )
+            }
             ErrorKind::InvalidTimeout { value, maximum } => write!(
                 formatter,
                 "{workflow} timeout {value:?} is invalid; maximum is {maximum:?}"
@@ -251,6 +259,7 @@ impl Classified for Error {
         match &self.kind {
             ErrorKind::InvalidLimit { .. }
             | ErrorKind::InvalidPort { .. }
+            | ErrorKind::InvalidSourcePort
             | ErrorKind::InvalidTimeout { .. }
             | ErrorKind::InvalidDuration { .. } => {
                 Classification::new(codes.limit, Kind::Cli, Some(codes.limit_remediation))

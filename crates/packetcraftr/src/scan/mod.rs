@@ -36,6 +36,7 @@ pub use crate::probe::Error;
 pub use classification::{ResponseClassification, classify_response};
 pub use engine::{run, run_with_events};
 pub use model::{
-    Batch, Classification, Endpoint, Event, Execution, Executor, Limits, PortSpec, Probe,
-    ProbeEndpoint, ProbeEvidence, ProbeStatus, Report, Request, Summary, Transport, select_ports,
+    Batch, Classification, ClassificationCounts, Endpoint, Event, Execution, Executor, Limits,
+    PortSpec, Probe, ProbeEndpoint, ProbeEvidence, ProbeStatus, Report, Request, Summary,
+    Transport, select_ports,
 };

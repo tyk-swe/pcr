@@ -103,6 +103,9 @@ pub struct Request {
     /// UDP base destination port or fixed TCP destination port. ICMP requires
     /// this to be absent.
     pub destination_port: Option<u16>,
+    /// Optional non-zero UDP/TCP source port. `None` selects the ephemeral
+    /// base the workflow already probes from.
+    pub source_port: Option<u16>,
     pub first_hop: u8,
     pub max_hops: u8,
     pub probes_per_hop: u32,
@@ -207,6 +210,11 @@ impl Request {
                 ));
             }
             _ => {}
+        }
+        if self.source_port == Some(0)
+            || (self.strategy == Strategy::Icmp && self.source_port.is_some())
+        {
+            return Err(Error::new(WORKFLOW, ErrorKind::InvalidSourcePort));
         }
         Ok(())
     }

@@ -6,7 +6,9 @@ use packetcraftr::{analysis, core, output};
 use crate::commands::format::ToolFormat;
 use crate::commands::offline_analysis::Retained;
 use crate::errors::CliError;
-use crate::rendering::{StreamEncoder, comma_separated, emit_aggregate, write_stdout_line};
+use crate::rendering::{
+    StreamEncoder, comma_separated, emit_aggregate, optional_display, write_stdout_line,
+};
 
 use analysis::tls::{ALERT_LEVEL_FATAL, ALERT_LEVEL_WARNING};
 use output::tls::{Client, Server, Session, Summary};
@@ -145,14 +147,14 @@ fn session_line(session: &Session) -> String {
         session.server_endpoint.address,
         session.server_endpoint.port,
         session.status,
-        optional(client.and_then(|client| client.sni.as_deref())),
-        optional(server.map(version_text).as_deref()),
-        optional(server.map(cipher_text).as_deref()),
-        optional(server.and_then(group_text).as_deref()),
+        optional_display(client.and_then(|client| client.sni.as_deref())),
+        optional_display(server.map(version_text).as_deref()),
+        optional_display(server.map(cipher_text).as_deref()),
+        optional_display(server.and_then(group_text).as_deref()),
         alpn_text(client),
-        optional(server.and_then(|server| server.alpn.as_deref())),
-        optional(client.map(|client| client.ja3.as_str())),
-        optional(client.map(|client| client.ja4.as_str())),
+        optional_display(server.and_then(|server| server.alpn.as_deref())),
+        optional_display(client.map(|client| client.ja3.as_str())),
+        optional_display(client.map(|client| client.ja4.as_str())),
         session.first_frame,
         session.last_frame,
         session
@@ -202,10 +204,6 @@ fn summary_line(summary: &Summary) -> String {
         summary.frames_matched,
         summary.frames_read,
     )
-}
-
-fn optional(value: Option<&str>) -> &str {
-    value.unwrap_or("none")
 }
 
 /// `TLS1.3`, with the registry's space removed so one field stays one token.

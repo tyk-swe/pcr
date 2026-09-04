@@ -21,6 +21,15 @@ pub enum RecordData {
     Aaaa {
         address: Ipv6Addr,
     },
+    Caa {
+        flags: u8,
+        /// UTF-8 display projection. `tag_hex` remains the exact value.
+        tag: String,
+        tag_hex: String,
+        /// UTF-8 display projection. `value_hex` remains the exact value.
+        value: String,
+        value_hex: String,
+    },
     Cname {
         canonical_name: String,
     },
@@ -115,6 +124,13 @@ impl Record {
         let data = match record.value {
             crate::dns::RecordValue::A(address) => RecordData::A { address },
             crate::dns::RecordValue::Aaaa(address) => RecordData::Aaaa { address },
+            crate::dns::RecordValue::Caa { flags, tag, value } => RecordData::Caa {
+                flags,
+                tag: String::from_utf8_lossy(&tag).into_owned(),
+                tag_hex: compact_hex(&tag),
+                value: String::from_utf8_lossy(&value).into_owned(),
+                value_hex: compact_hex(&value),
+            },
             crate::dns::RecordValue::Cname(canonical_name) => RecordData::Cname {
                 canonical_name: canonical_name.to_string(),
             },

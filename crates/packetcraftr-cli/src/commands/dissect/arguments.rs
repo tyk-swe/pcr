@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use crate::command_options::TlsPortArgs;
+use crate::command_options::{PacketBudgetArgs, TlsPortArgs};
 
 pub(crate) const AFTER_LONG_HELP: &str = r#"When neither --hex nor --file is supplied, raw frame bytes are read from standard input.
 
@@ -31,4 +31,6 @@ pub(crate) struct Args {
     pub(crate) filter: Option<String>,
     #[command(flatten)]
     pub(crate) tls_ports: TlsPortArgs,
+    #[command(flatten)]
+    pub(crate) budget: PacketBudgetArgs,
 }

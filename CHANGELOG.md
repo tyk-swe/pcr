@@ -8,6 +8,16 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Added
 
+- `build` and `dissect` expose `--max-layers` and `--max-packet-size`, and
+  `traceroute` exposes a validated `--source-port` for UDP and TCP probes.
+- DNS queries and decoded records support CAA (type 257), and streamed scan
+  completion records report final open, closed, filtered, unreachable,
+  unknown, and timeout endpoint counts.
+- `interfaces --interface NAME_OR_INDEX`, `routes --all`, and `stats --top N`
+  add focused selection controls; interface text rows now include MTU,
+  capability, link type, MAC address, flags, and description.
+- Long `--version` output lists the enabled native feature set without adding
+  a runtime dependency.
 - `stats` and `expert` accept the shared, repeatable `--tls-port` option, so
   their protocol accounting and display filters can recognize per-frame TLS
   layers on non-default TCP ports.
@@ -117,6 +127,16 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- The `build` CLI reports `--max-layers` and `--max-packet-size` breaches as
+  `packet.build_resource_limit` (exit 3); the core library retains its policy
+  classification for callers that enforce the same finite resource budget.
+- **BREAKING:** ephemeral-port helpers and `ExchangeExecutor` now have the
+  single canonical paths under `packetcraftr::probe`; their former
+  `packetcraftr` root re-exports are removed.
+- **BREAKING:** `traceroute::Request` adds `source_port`, `scan::Summary` adds
+  `counts`, and the `packetcraftr_core::document::DEFAULT_MAX_DOCUMENT_NESTING`
+  alias is removed; use `MAX_DOCUMENT_NESTING` instead. Downstream struct
+  literals must initialize the new fields.
 - **Breaking:** `replay` and `fuzz --live` spell the permissive-live opt-in
   `--allow-permissive-live`, the same flag `send` and `exchange` already use for
   the same policy field; `--allow-malformed-live` remains as a hidden alias.

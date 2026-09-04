@@ -9,7 +9,15 @@
     "target": "192.168.56.10",
     "resolved_addresses": [
       "192.168.56.10"
-    ]
+    ],
+    "counts": {
+      "open": 0,
+      "closed": 0,
+      "filtered": 0,
+      "unreachable": 0,
+      "unknown": 0,
+      "timeout": 1
+    }
   },
   "diagnostics": [],
   "stats": {

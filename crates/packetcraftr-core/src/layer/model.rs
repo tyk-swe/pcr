@@ -51,11 +51,7 @@ impl From<&'static str> for Id {
     }
 }
 
-impl fmt::Display for Id {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.0)
-    }
-}
+display_via_as_str!(Id);
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct FieldSchema {

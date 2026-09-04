@@ -95,11 +95,7 @@ pub(super) fn prepare_with_tls_ports(
     })
 }
 
-/// The items an aggregate JSON document holds in memory before it can be
-/// written, under a finite ceiling.
-///
-/// Only the aggregate JSON renderer fills one; text and NDJSON write each item
-/// as it completes and retain nothing.
+/// Retains output items under a finite ceiling while counting omissions.
 pub(super) struct Retained<T> {
     maximum: usize,
     items: Vec<T>,

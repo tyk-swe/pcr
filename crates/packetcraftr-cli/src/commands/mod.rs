@@ -8,7 +8,9 @@
 //! and sometimes `conversion.rs` once those parts stop fitting together, which
 //! is most of the live and capture-reading commands. [`format`] narrows the
 //! global `--output` choice to what each command publishes; [`execution`] and
-//! [`target_workflow`] hold what the probing commands share.
+//! [`target_workflow`] hold what the probing commands share, and
+//! [`render_aggregate_rows`] renders the Text/Json match the aggregate
+//! commands share.
 
 use packetcraftr::core::error::Kind;
 
@@ -18,7 +20,7 @@ use clap::Subcommand;
 use packetcraftr::{core, output};
 
 use crate::errors::CliError;
-use crate::rendering::StreamEncoder;
+use crate::rendering::{StreamEncoder, emit_aggregate, write_stdout_line};
 
 mod build;
 mod capture;
@@ -60,7 +62,7 @@ pub(crate) enum Command {
     Read(read::arguments::Args),
     /// Enumerate local interfaces.
     #[command(after_long_help = interfaces::AFTER_LONG_HELP)]
-    Interfaces,
+    Interfaces(interfaces::Args),
     /// Passively select route, source, MTU, and link mode.
     #[command(after_long_help = plan::arguments::AFTER_LONG_HELP)]
     Plan(plan::arguments::Args),
@@ -108,7 +110,7 @@ pub(crate) enum Command {
     Fuzz(fuzz::arguments::Args),
     /// Enumerate passive interface-bound route decisions.
     #[command(after_long_help = routes::AFTER_LONG_HELP)]
-    Routes,
+    Routes(routes::Args),
 }
 
 impl Command {
@@ -118,7 +120,7 @@ impl Command {
             Self::Dissect(_) => output::contract::Command::Dissect,
             Self::Protocols(_) => output::contract::Command::Protocols,
             Self::Read(_) => output::contract::Command::Read,
-            Self::Interfaces => output::contract::Command::Interfaces,
+            Self::Interfaces(_) => output::contract::Command::Interfaces,
             Self::Plan(_) => output::contract::Command::Plan,
             Self::Send(_) => output::contract::Command::Send,
             Self::Exchange(_) => output::contract::Command::Exchange,
@@ -132,7 +134,7 @@ impl Command {
             Self::Traceroute(_) => output::contract::Command::Traceroute,
             Self::Dns(_) => output::contract::Command::Dns,
             Self::Fuzz(_) => output::contract::Command::Fuzz,
-            Self::Routes => output::contract::Command::Routes,
+            Self::Routes(_) => output::contract::Command::Routes,
         }
     }
 
@@ -150,7 +152,7 @@ impl Command {
             Self::Dissect(arguments) => dissect::run(arguments, format),
             Self::Protocols(arguments) => protocols::run(arguments, format),
             Self::Read(arguments) => read::run(arguments, format, stream),
-            Self::Interfaces => interfaces::run(format),
+            Self::Interfaces(arguments) => interfaces::run(arguments, format),
             Self::Plan(arguments) => plan::run(arguments, format),
             Self::Send(arguments) => send::run(arguments, format),
             Self::Capture(arguments) => capture::run(arguments, format, stream),
@@ -164,13 +166,33 @@ impl Command {
             Self::Traceroute(arguments) => traceroute::run(arguments, format, stream),
             Self::Dns(arguments) => dns::run(arguments, format, stream),
             Self::Fuzz(arguments) => fuzz::run(arguments, format, stream),
-            Self::Routes => routes::run(format),
+            Self::Routes(arguments) => routes::run(arguments, format),
         }
     }
 }
 
 fn registry() -> Result<Arc<core::registry::Registry>, CliError> {
     registry_with_tls_ports(&[])
+}
+
+/// Renders one aggregate row per text line, or the whole result as one JSON
+/// document.
+fn render_aggregate_rows<T, R: serde::Serialize>(
+    command: output::contract::Command,
+    format: format::AggregateFormat,
+    result: &R,
+    rows: &[T],
+    line: impl Fn(&T) -> String,
+) -> Result<(), CliError> {
+    match format {
+        format::AggregateFormat::Text => {
+            for row in rows {
+                write_stdout_line(format_args!("{}", line(row)))?;
+            }
+            Ok(())
+        }
+        format::AggregateFormat::Json => emit_aggregate(command, result, Vec::new()),
+    }
 }
 
 /// The built-in registry with extra TCP ports dissected as TLS.

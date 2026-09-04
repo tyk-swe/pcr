@@ -135,6 +135,7 @@ fn query_encoder_canonicalizes_names_flags_and_all_type_codes() {
         (QueryType::Txt, 16, "txt"),
         (QueryType::Aaaa, 28, "aaaa"),
         (QueryType::Srv, 33, "srv"),
+        (QueryType::Caa, 257, "caa"),
         (QueryType::Any, 255, "any"),
     ];
     for (query_type, code, label) in cases {
@@ -559,6 +560,53 @@ fn decoder_supports_every_modeled_rdata_shape() {
         &decoded.answers[9].value,
         RecordValue::Unknown { rdata, .. } if rdata.as_ref() == [9, 8, 7]
     ));
+}
+
+#[test]
+fn caa_record_decodes_flags_tag_and_value() {
+    let mut rdata = vec![0_u8, 5];
+    rdata.extend_from_slice(b"issue");
+    rdata.extend_from_slice(b"letsencrypt.org");
+    let message = response(
+        "example.test.",
+        QueryType::Caa,
+        RESPONSE,
+        &[record(257, rdata)],
+        &[],
+        &[],
+    );
+    let decoded = decode(&message, "example.test", QueryType::Caa);
+    assert_eq!(decoded.answers.len(), 1);
+    assert_eq!(decoded.answers[0].value.type_code(), 257);
+    assert_eq!(decoded.answers[0].value.type_name(), "caa");
+    assert!(matches!(
+        &decoded.answers[0].value,
+        RecordValue::Caa { flags, tag, value }
+            if *flags == 0
+                && tag.as_ref() == b"issue"
+                && value.as_ref() == b"letsencrypt.org"
+    ));
+
+    for malformed in [Vec::new(), vec![0], vec![0, 5, b'i', b's'], vec![0, 0]] {
+        let message = response(
+            "example.test.",
+            QueryType::Caa,
+            RESPONSE,
+            &[record(257, malformed)],
+            &[],
+            &[],
+        );
+        assert!(matches!(
+            dns::decode_response(
+                &message,
+                "example.test",
+                QueryType::Caa,
+                ID,
+                Limits::default()
+            ),
+            Err(WireError::InvalidRdata { .. })
+        ));
+    }
 }
 
 #[test]

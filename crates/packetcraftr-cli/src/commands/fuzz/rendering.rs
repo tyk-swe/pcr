@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use packetcraftr::core::error::Kind;
-
 use packetcraftr::{core, output};
 
 use crate::errors::CliError;
@@ -37,18 +36,8 @@ pub(super) fn render_text(
             case.reproduction.operation_seed,
             case.reproduction.case_index,
         ))?;
-        let original = serde_json::to_string(&case.mutation.original).map_err(|source| {
-            CliError::new(
-                Kind::Internal,
-                format!("serialize fuzz mutation failed: {source}"),
-            )
-        })?;
-        let value = serde_json::to_string(&case.mutation.value).map_err(|source| {
-            CliError::new(
-                Kind::Internal,
-                format!("serialize fuzz mutation failed: {source}"),
-            )
-        })?;
+        let original = mutation_json(&case.mutation.original)?;
+        let value = mutation_json(&case.mutation.value)?;
         write_stdout_line(format_args!("  original={original} value={value}"))?;
         if let Some(frame) = &case.frame {
             write_stdout_line(format_args!("  frame {}", spaced_hex(frame.bytes())))?;
@@ -96,4 +85,13 @@ pub(super) fn render_live_complete(
 ) -> Result<(), CliError> {
     let (event, diagnostics, stats) = output::fuzz::Event::complete_from_live(summary);
     Ok(stream.complete_with_stats(event, diagnostics, stats)?)
+}
+
+fn mutation_json<T: serde::Serialize>(value: &T) -> Result<String, CliError> {
+    serde_json::to_string(value).map_err(|source| {
+        CliError::new(
+            Kind::Internal,
+            format!("serialize fuzz mutation failed: {source}"),
+        )
+    })
 }

@@ -1027,6 +1027,11 @@ fn dns_records() -> Vec<packetcraftr::dns::Record> {
         record(packetcraftr::dns::RecordValue::Aaaa(
             "2001:db8::1".parse().expect("documentation address"),
         )),
+        record(packetcraftr::dns::RecordValue::Caa {
+            flags: 0,
+            tag: Bytes::from_static(b"issue"),
+            value: Bytes::from_static(b"ca.example.test"),
+        }),
         record(packetcraftr::dns::RecordValue::Cname(dns_name(
             "alias.example.test.",
         ))),

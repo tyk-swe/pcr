@@ -10,7 +10,8 @@ use packetcraftr_netio::capture::{MAX_CAPTURE_QUEUE_BYTES, MAX_CAPTURE_QUEUE_FRA
 
 use crate::probe::evidence::check_limits;
 
-use super::{MAX_RATE, error::Error};
+use crate::fuzz::MAX_RATE;
+use crate::fuzz::error::Error;
 
 /// Bounds exact response evidence retained by a live fuzz campaign.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

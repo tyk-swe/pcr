@@ -15,7 +15,6 @@ use packetcraftr_core::{Packet, protocol::BuiltinProtocol};
 
 use crate::probe::{nonzero_ipv4_identification, packet_shape_matches};
 
-use super::SOURCE_PORT;
 use super::model::{Probe, ProbeTarget};
 
 #[expect(
@@ -48,12 +47,12 @@ pub(super) fn probe_packet(probe: &Probe) -> Packet {
     }
     match probe.target {
         ProbeTarget::Udp { port } => packet.push(Udp {
-            source_port: SOURCE_PORT,
+            source_port: probe.source_port,
             destination_port: port,
             ..Udp::default()
         }),
         ProbeTarget::Tcp { port } => packet.push(Tcp {
-            source_port: SOURCE_PORT,
+            source_port: probe.source_port,
             destination_port: port,
             sequence: probe.sequence as u32,
             flags: Tcp::SYN,
@@ -134,11 +133,11 @@ pub(super) fn sent_probe_matches(probe: &Probe, sent: &Packet) -> bool {
         return false;
     }
     match probe.target {
-        ProbeTarget::Udp { port } => sent
-            .get::<Udp>()
-            .is_some_and(|udp| udp.source_port == SOURCE_PORT && udp.destination_port == port),
+        ProbeTarget::Udp { port } => sent.get::<Udp>().is_some_and(|udp| {
+            udp.source_port == probe.source_port && udp.destination_port == port
+        }),
         ProbeTarget::Tcp { port } => sent.get::<Tcp>().is_some_and(|tcp| {
-            tcp.source_port == SOURCE_PORT
+            tcp.source_port == probe.source_port
                 && tcp.destination_port == port
                 && tcp.sequence == probe.sequence as u32
                 && tcp.flags == Tcp::SYN

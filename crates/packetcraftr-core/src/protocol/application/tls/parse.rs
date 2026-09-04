@@ -547,8 +547,7 @@ impl<'a> Reader<'a> {
     }
 
     fn random(&mut self) -> Result<[u8; 32], Error> {
-        let bytes = self.take(32)?;
-        <[u8; 32]>::try_from(bytes).map_err(|_| invalid(NAME, "hello random is not 32 bytes"))
+        Ok(*self.array::<32>()?)
     }
 
     fn vector8(&mut self) -> Result<&'a [u8], Error> {

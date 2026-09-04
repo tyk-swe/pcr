@@ -72,22 +72,40 @@ impl fmt::Display for InterfaceSelector {
     }
 }
 
+/// Enumerates interfaces, keeping only the ones `selector` names. A selector
+/// nothing matches fails with the one "no interface matches" error every
+/// command reports.
+pub(crate) fn select_interfaces<I: net::interface::Provider>(
+    provider: &I,
+    selector: Option<&InterfaceSelector>,
+) -> Result<Vec<net::interface::Info>, CliError> {
+    let interfaces = provider.interfaces().map_err(CliError::classified)?;
+    let Some(selector) = selector else {
+        return Ok(interfaces);
+    };
+    let selected = interfaces
+        .into_iter()
+        .filter(|interface| selector.matches(&interface.id))
+        .collect::<Vec<_>>();
+    if selected.is_empty() {
+        return Err(CliError::classified(net::Error::Device {
+            interface: selector.to_string(),
+            message: "no interface matches the requested name or index".to_owned(),
+            source: None,
+        }));
+    }
+    Ok(selected)
+}
+
 pub(crate) fn resolve<I: net::interface::Provider>(
     selector: InterfaceSelector,
     provider: &I,
 ) -> Result<net::interface::Id, CliError> {
-    let interfaces = provider.interfaces().map_err(CliError::classified)?;
-    interfaces
+    select_interfaces(provider, Some(&selector))?
         .into_iter()
-        .find(|interface| selector.matches(&interface.id))
+        .next()
         .map(|interface| interface.id)
-        .ok_or_else(|| {
-            CliError::classified(net::Error::Device {
-                interface: selector.to_string(),
-                message: "no interface matches the requested name or index".to_owned(),
-                source: None,
-            })
-        })
+        .ok_or_else(|| CliError::new(Kind::Internal, "interface selection returned no match"))
 }
 
 #[cfg(test)]

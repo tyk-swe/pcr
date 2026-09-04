@@ -6,7 +6,7 @@ use packetcraftr::{core, output};
 use crate::errors::CliError;
 use crate::rendering::{
     captured_frame_text, comma_separated, optional_debug, optional_display,
-    render_diagnostics_text, write_stdout_line,
+    render_diagnostics_text, render_undecoded, write_stdout_line,
 };
 
 pub(super) fn render_text(
@@ -45,13 +45,12 @@ pub(super) fn render_text(
             }
         }
     }
-    for evidence in &result.undecoded {
-        write_stdout_line(format_args!(
-            "undecoded hop={} {}",
-            evidence.hop_limit,
-            captured_frame_text(&evidence.frame)
-        ))?;
-    }
+    render_undecoded(
+        result
+            .undecoded
+            .iter()
+            .map(|evidence| (Some(format!("hop={}", evidence.hop_limit)), &evidence.frame)),
+    )?;
     write_stdout_line(format_args!(
         "trace completion={} hops={} probes={} bytes={}",
         result.completion.as_str(),

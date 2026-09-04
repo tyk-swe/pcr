@@ -3,8 +3,6 @@
 
 //! Structured diagnostics produced by build and decode operations.
 
-use std::fmt;
-
 use serde::{Deserialize, Serialize};
 
 pub const IPV4_CHECKSUM: &str = "decode.ipv4_checksum";
@@ -50,11 +48,7 @@ impl Severity {
     }
 }
 
-impl fmt::Display for Severity {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
+display_via_as_str!(Severity);
 
 /// A machine-readable build, decode, session, or policy finding.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

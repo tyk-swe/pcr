@@ -327,6 +327,17 @@ fn parse_quoted_probe(bytes: &[u8]) -> Option<QuotedProbe<'_>> {
     }
 }
 
+fn extension_len(header: &[u8], addend: usize, unit: usize, minimum: usize) -> Option<(u8, usize)> {
+    let next = *header.first()?;
+    let header_len = usize::from(*header.get(1)?)
+        .checked_add(addend)?
+        .checked_mul(unit)?;
+    if header_len < minimum || header.len() < header_len {
+        return None;
+    }
+    Some((next, header_len))
+}
+
 fn parse_quoted_ipv6_payload(bytes: &[u8], mut protocol: u8, end: usize) -> Option<(u8, &[u8])> {
     let mut offset = IPV6_HEADER_LEN;
     let mut extension_count = 0_usize;
@@ -334,25 +345,13 @@ fn parse_quoted_ipv6_payload(bytes: &[u8], mut protocol: u8, end: usize) -> Opti
         let header = bytes.get(offset..end)?;
         let header_len = match protocol {
             ip_protocol::HOP_BY_HOP | ip_protocol::ROUTING | ip_protocol::DESTINATION_OPTIONS => {
-                if extension_count >= MAX_QUOTED_IPV6_EXTENSION_HEADERS {
-                    return None;
-                }
-                let next = *header.first()?;
-                let header_len = usize::from(*header.get(1)?)
-                    .checked_add(1)?
-                    .checked_mul(8)?;
-                if header_len < 8 || header.len() < header_len {
-                    return None;
-                }
+                let (next, header_len) = extension_len(header, 1, 8, 8)?;
                 protocol = next;
                 header_len
             }
             // Fragment. Only atomic and first fragments can quote a transport
             // key at the start of this payload.
             44 => {
-                if extension_count >= MAX_QUOTED_IPV6_EXTENSION_HEADERS {
-                    return None;
-                }
                 let fragment = header.first_chunk::<8>()?;
                 let offset_and_flags = u16::from_be_bytes([fragment[2], fragment[3]]);
                 if offset_and_flags & 0xfffe != 0 {
@@ -364,16 +363,7 @@ fn parse_quoted_ipv6_payload(bytes: &[u8], mut protocol: u8, end: usize) -> Opti
             // Authentication Header. Its length is measured in 32-bit words
             // excluding the first two words.
             51 => {
-                if extension_count >= MAX_QUOTED_IPV6_EXTENSION_HEADERS {
-                    return None;
-                }
-                let next = *header.first()?;
-                let header_len = usize::from(*header.get(1)?)
-                    .checked_add(2)?
-                    .checked_mul(4)?;
-                if header_len < 12 || header.len() < header_len {
-                    return None;
-                }
+                let (next, header_len) = extension_len(header, 2, 4, 12)?;
                 protocol = next;
                 header_len
             }
@@ -381,6 +371,9 @@ fn parse_quoted_ipv6_payload(bytes: &[u8], mut protocol: u8, end: usize) -> Opti
         };
         offset = offset.checked_add(header_len)?;
         extension_count = extension_count.checked_add(1)?;
+        if extension_count > MAX_QUOTED_IPV6_EXTENSION_HEADERS {
+            return None;
+        }
     }
     if end.checked_sub(offset)? < MIN_QUOTED_TRANSPORT_LEN {
         return None;

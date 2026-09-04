@@ -11,8 +11,7 @@ use crate::evidence::{Budget, DiagnosticLog};
 
 use super::error::{Error, duration_limit};
 use super::execution::Execution;
-use super::report::{Case, Stats};
-use super::request::LiveLimits;
+use super::model::{Case, LiveLimits, Stats};
 
 pub(super) fn validate_execution(
     case: &Case,

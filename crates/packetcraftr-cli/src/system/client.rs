@@ -10,7 +10,7 @@ type SystemSender =
 type ExchangeIo = net::PacketIo<SystemSender, net::capture::SystemProvider>;
 pub(crate) type Client =
     WorkflowClient<net::route::SystemProvider, net::neighbor::SystemResolver, ExchangeIo>;
-pub(crate) type Exchange<'a> = packetcraftr::ExchangeExecutor<
+pub(crate) type Exchange<'a> = packetcraftr::probe::ExchangeExecutor<
     'a,
     net::route::SystemProvider,
     net::neighbor::SystemResolver,

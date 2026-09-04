@@ -10,6 +10,16 @@
 //! `packetcraftr-netio`; authorization-gated live workflows live in
 //! `packetcraftr`.
 
+macro_rules! display_via_as_str {
+    ($type:ty) => {
+        impl ::std::fmt::Display for $type {
+            fn fmt(&self, formatter: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+                formatter.write_str(self.as_str())
+            }
+        }
+    };
+}
+
 pub mod analysis;
 pub mod budget;
 pub mod build;

@@ -43,6 +43,18 @@ impl InputKind {
             Self::Frame => "provide --hex, --file, or pipe non-empty frame bytes to stdin",
         }
     }
+
+    fn oversized_error(self, actual: usize, limit: usize) -> CliError {
+        match self {
+            Self::Recipe => CliError::new(
+                Kind::Cli,
+                format!("{} input exceeds {limit} byte limit", self.label()),
+            ),
+            Self::Frame => {
+                CliError::classified(core::decode::Error::PacketSizeLimit { actual, limit })
+            }
+        }
+    }
 }
 
 fn missing_input_error(kind: InputKind) -> CliError {
@@ -68,6 +80,7 @@ fn require_redirected_stdin(kind: InputKind, stdin_is_terminal: bool) -> Result<
 pub(crate) fn read_recipe(
     arguments: RecipeArgs,
     registry: &core::registry::Registry,
+    max_layers: usize,
 ) -> Result<Packet, CliError> {
     let RecipeArgs {
         packet,
@@ -75,7 +88,7 @@ pub(crate) fn read_recipe(
     } = arguments;
 
     let (input, path) = match (packet, packet_file) {
-        (Some(expression), None) => return parse_expression(&expression, registry),
+        (Some(expression), None) => return parse_expression(&expression, registry, max_layers),
         (None, Some(path)) => {
             let bytes = read_bounded_file(
                 &path,
@@ -116,17 +129,31 @@ pub(crate) fn read_recipe(
         return core::document::Packet::parse_with_limits(
             &input,
             format,
-            &core::document::DocumentLimits::DEFAULT,
+            &core::document::DocumentLimits {
+                max_layers,
+                ..core::document::DocumentLimits::DEFAULT
+            },
         )
-        .and_then(|document| document.to_packet(registry, core::build::DEFAULT_MAX_LAYERS))
+        .and_then(|document| document.to_packet(registry, max_layers))
         .map_err(CliError::classified);
     }
-    parse_expression(&input, registry)
+    parse_expression(&input, registry, max_layers)
 }
 
-fn parse_expression(input: &str, registry: &core::registry::Registry) -> Result<Packet, CliError> {
-    core::expression::parse(input, registry, core::expression::Options::default())
-        .map_err(CliError::classified)
+fn parse_expression(
+    input: &str,
+    registry: &core::registry::Registry,
+    max_layers: usize,
+) -> Result<Packet, CliError> {
+    core::expression::parse(
+        input,
+        registry,
+        core::expression::Options {
+            max_layers,
+            ..core::expression::Options::default()
+        },
+    )
+    .map_err(CliError::classified)
 }
 
 fn document_format_from_path(path: &Path) -> Option<core::document::Format> {
@@ -199,15 +226,9 @@ fn read_bounded_allow_empty(
     max_bytes: usize,
     kind: InputKind,
 ) -> Result<Vec<u8>, CliError> {
-    let read_limit = max_bytes
-        .checked_add(1)
-        .and_then(|value| u64::try_from(value).ok())
-        .ok_or_else(|| {
-            CliError::new(
-                Kind::Internal,
-                format!("{} input byte limit cannot be represented", kind.label()),
-            )
-        })?;
+    let read_limit = u64::try_from(max_bytes)
+        .unwrap_or(u64::MAX)
+        .saturating_add(1);
     let mut bytes = Vec::new();
     reader
         .take(read_limit)
@@ -219,10 +240,7 @@ fn read_bounded_allow_empty(
             )
         })?;
     if bytes.len() > max_bytes {
-        return Err(CliError::new(
-            Kind::Cli,
-            format!("{} input exceeds {max_bytes} byte limit", kind.label()),
-        ));
+        return Err(kind.oversized_error(bytes.len(), max_bytes));
     }
     Ok(bytes)
 }
@@ -293,10 +311,19 @@ mod tests {
         assert_eq!(oversized.exit_code(), 2);
         assert_eq!(oversized.message, "packet input exceeds 4 byte limit");
 
-        let unrepresentable =
+        assert_eq!(
             read_bounded_allow_empty(Cursor::new([]), usize::MAX, InputKind::Recipe)
-                .expect_err("the sentinel byte must be representable");
-        assert_eq!(unrepresentable.exit_code(), 70);
+                .expect("the maximum limit accepts empty input"),
+            Vec::<u8>::new(),
+        );
+
+        let oversized_frame = read_bounded_allow_empty(Cursor::new(b"abcde"), 4, InputKind::Frame)
+            .expect_err("the decode byte budget is enforced while reading");
+        assert_eq!(oversized_frame.exit_code(), 6);
+        assert_eq!(
+            oversized_frame.classification.code,
+            "policy.decode_resource_limit"
+        );
     }
 
     /// A reader that dies partway through is an I/O failure, not a malformed

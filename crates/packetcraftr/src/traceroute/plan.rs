@@ -12,6 +12,7 @@ use crate::probe::{Error, ErrorKind};
 
 pub(super) fn build_batches(request: &Request, destination: IpAddr) -> Result<Vec<Batch>, Error> {
     let mut batches = Vec::with_capacity(request.hop_count());
+    let source_port = request.source_port.unwrap_or(super::SOURCE_PORT);
     let mut sequence = 0_u64;
     for hop_limit in request.first_hop..=request.max_hops {
         let batch_sequence = sequence;
@@ -34,6 +35,7 @@ pub(super) fn build_batches(request: &Request, destination: IpAddr) -> Result<Ve
                 target,
                 hop_limit,
                 attempt,
+                source_port,
             });
             sequence = sequence.checked_add(1).ok_or(Error::new(
                 WORKFLOW,
@@ -104,32 +106,23 @@ pub(super) fn worst_case_duration(request: &Request) -> Result<Duration, Error> 
                   never exceeds 256"
     )]
     let hops = request.hop_count() as u32;
-    let exchange = request.timeout.checked_mul(hops).ok_or(Error::new(
-        WORKFLOW,
-        ErrorKind::DurationLimit {
-            actual: Duration::MAX,
-            limit: request.limits.max_duration,
-        },
-    ))?;
+    let overflow = || {
+        Error::new(
+            WORKFLOW,
+            ErrorKind::DurationLimit {
+                actual: Duration::MAX,
+                limit: request.limits.max_duration,
+            },
+        )
+    };
+    let exchange = request.timeout.checked_mul(hops).ok_or_else(&overflow)?;
     let delay = rate_delay(
         usize::try_from(request.probes_per_hop).unwrap_or(usize::MAX),
         request.probes_per_second,
     )?
     .checked_mul(hops.saturating_sub(1))
-    .ok_or(Error::new(
-        WORKFLOW,
-        ErrorKind::DurationLimit {
-            actual: Duration::MAX,
-            limit: request.limits.max_duration,
-        },
-    ))?;
-    exchange.checked_add(delay).ok_or(Error::new(
-        WORKFLOW,
-        ErrorKind::DurationLimit {
-            actual: Duration::MAX,
-            limit: request.limits.max_duration,
-        },
-    ))
+    .ok_or_else(&overflow)?;
+    exchange.checked_add(delay).ok_or_else(overflow)
 }
 
 fn rate_delay(probes: usize, rate: Option<u32>) -> Result<Duration, Error> {

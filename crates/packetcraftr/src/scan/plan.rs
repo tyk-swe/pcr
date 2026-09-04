@@ -60,18 +60,7 @@ pub(super) fn worst_case_duration(
     endpoints_per_address: usize,
 ) -> Result<Duration, Error> {
     let batch_size = checked_batch_size(request)?;
-    let batches_per_attempt = endpoints_per_address.div_ceil(batch_size);
-    let batch_count = address_count
-        .checked_mul(usize::try_from(request.attempts).unwrap_or(usize::MAX))
-        .and_then(|count| count.checked_mul(batches_per_attempt))
-        .ok_or(Error::new(
-            WORKFLOW,
-            ErrorKind::DurationLimit {
-                actual: Duration::MAX,
-                limit: request.limits.max_duration,
-            },
-        ))?;
-    let batch_count_u32 = u32::try_from(batch_count).map_err(|_| {
+    let overflow = || {
         Error::new(
             WORKFLOW,
             ErrorKind::DurationLimit {
@@ -79,17 +68,17 @@ pub(super) fn worst_case_duration(
                 limit: request.limits.max_duration,
             },
         )
-    })?;
+    };
+    let batches_per_attempt = endpoints_per_address.div_ceil(batch_size);
+    let batch_count = address_count
+        .checked_mul(usize::try_from(request.attempts).unwrap_or(usize::MAX))
+        .and_then(|count| count.checked_mul(batches_per_attempt))
+        .ok_or_else(&overflow)?;
+    let batch_count_u32 = u32::try_from(batch_count).map_err(|_| overflow())?;
     let exchange_time = request
         .timeout
         .checked_mul(batch_count_u32)
-        .ok_or(Error::new(
-            WORKFLOW,
-            ErrorKind::DurationLimit {
-                actual: Duration::MAX,
-                limit: request.limits.max_duration,
-            },
-        ))?;
+        .ok_or_else(&overflow)?;
     #[expect(
         clippy::arithmetic_side_effects,
         reason = "checked_batch_size returned a non-zero divisor"
@@ -117,21 +106,9 @@ pub(super) fn worst_case_duration(
             };
             total
                 .checked_add(rate_delay(probes, request.probes_per_second)?)
-                .ok_or(Error::new(
-                    WORKFLOW,
-                    ErrorKind::DurationLimit {
-                        actual: Duration::MAX,
-                        limit: request.limits.max_duration,
-                    },
-                ))
+                .ok_or_else(&overflow)
         })?;
-    exchange_time.checked_add(delay).ok_or(Error::new(
-        WORKFLOW,
-        ErrorKind::DurationLimit {
-            actual: Duration::MAX,
-            limit: request.limits.max_duration,
-        },
-    ))
+    exchange_time.checked_add(delay).ok_or_else(overflow)
 }
 
 fn checked_batch_size(request: &Request) -> Result<usize, Error> {

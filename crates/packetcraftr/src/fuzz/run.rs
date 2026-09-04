@@ -30,9 +30,8 @@ use super::evidence::{
     ExecutionEvidence, add_execution_stats, retain_evidence, validate_execution,
 };
 use super::execution::{Execution, ExecutionCase};
+use super::model::{Case, CaseOutcome, LiveOptions, Report, Stats, Summary};
 use super::plan::{rate_delay, worst_case_duration};
-use super::report::{Case, CaseOutcome, Report, Stats, Summary};
-use super::request::LiveOptions;
 use crate::authorization::{Authorizer, DeclaredPackets, Operation, PermissiveLive, WireBudget};
 use crate::probe::Executor;
 

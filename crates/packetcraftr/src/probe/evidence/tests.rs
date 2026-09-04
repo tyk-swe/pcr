@@ -282,14 +282,12 @@ fn untimestamped_frame(bytes: &'static [u8]) -> Frame {
 }
 
 fn decoded_at(offset: Duration, bytes: &'static [u8]) -> DecodedPacket {
-    let frame = Frame::new(UNIX_EPOCH + offset, LinkType::RAW, bytes).expect("decoded frame");
-    DecodedPacket {
-        packet: Packet::new(),
-        original: frame.bytes().clone(),
-        frame,
-        layout: PacketLayout::default(),
-        diagnostics: Vec::new(),
-    }
+    crate::probe::test_fixtures::decoded_packet(
+        Packet::new(),
+        UNIX_EPOCH + offset,
+        bytes,
+        Vec::new(),
+    )
 }
 
 fn decoded_without_timestamp(bytes: &'static [u8]) -> DecodedPacket {

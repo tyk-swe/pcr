@@ -8,7 +8,7 @@ use packetcraftr::{core, output};
 use crate::errors::CliError;
 use crate::rendering::{
     captured_frame_text, comma_separated, optional_debug, optional_display,
-    render_diagnostics_text, write_stdout_line,
+    render_diagnostics_text, render_undecoded, write_stdout_line,
 };
 
 pub(super) fn render_text(
@@ -61,13 +61,12 @@ pub(super) fn render_text(
             record.section, record.index, record.owner, record.type_code, record.reason,
         ))?;
     }
-    for evidence in &result.undecoded {
-        write_stdout_line(format_args!(
-            "undecoded attempt={} {}",
-            evidence.attempt,
-            captured_frame_text(&evidence.frame)
-        ))?;
-    }
+    render_undecoded(result.undecoded.iter().map(|evidence| {
+        (
+            Some(format!("attempt={}", evidence.attempt)),
+            &evidence.frame,
+        )
+    }))?;
     write_stdout_line(format_args!(
         "{}",
         response_summary(ResponseLine {
@@ -180,7 +179,7 @@ mod tests {
                 attempt,
                 transport: dns::Transport::Udp,
                 server_address: address,
-                source_port: Some(packetcraftr::EPHEMERAL_SOURCE_PORT_BASE),
+                source_port: Some(packetcraftr::probe::EPHEMERAL_SOURCE_PORT_BASE),
                 status: dns::Outcome::Timeout,
                 sent_at: Some(UNIX_EPOCH),
                 received_at: None,

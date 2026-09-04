@@ -89,6 +89,24 @@ pub(crate) fn optional_debug<T: std::fmt::Debug>(value: Option<T>) -> String {
     render_optional(value, |value| format!("{value:?}"))
 }
 
+/// Renders `undecoded [<label> ]{captured_frame_text(frame)}` for every row,
+/// so the section's format string lives here alone while each command keeps
+/// its own row type.
+pub(crate) fn render_undecoded<'a>(
+    rows: impl IntoIterator<Item = (Option<String>, &'a output::frame::Captured)>,
+) -> Result<(), CliError> {
+    for (label, frame) in rows {
+        match label {
+            Some(label) => write_stdout_line(format_args!(
+                "undecoded {label} {}",
+                captured_frame_text(frame)
+            ))?,
+            None => write_stdout_line(format_args!("undecoded {}", captured_frame_text(frame)))?,
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn comma_separated<I, T>(values: I) -> String
 where
     I: IntoIterator<Item = T>,

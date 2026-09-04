@@ -93,10 +93,28 @@ fn help_and_version_are_available_without_network_access() {
     assert!(String::from_utf8_lossy(&help.stdout).contains("Usage: packetcraftr"));
 
     let version = run_success(&["--version"]);
-    assert_eq!(
-        String::from_utf8_lossy(&version.stdout).trim(),
-        concat!("packetcraftr ", env!("CARGO_PKG_VERSION"))
+    let version = String::from_utf8_lossy(&version.stdout);
+    assert!(
+        version.contains(concat!("packetcraftr ", env!("CARGO_PKG_VERSION"))),
+        "missing version in:\n{version}"
     );
+    assert!(
+        version.contains("native features:"),
+        "missing native feature line in:\n{version}"
+    );
+    for (name, enabled) in [
+        ("native-interfaces", cfg!(feature = "native-interfaces")),
+        ("native-route", cfg!(feature = "native-route")),
+        ("native-layer2", cfg!(feature = "native-layer2")),
+        ("native-layer3", cfg!(feature = "native-layer3")),
+    ] {
+        if enabled {
+            assert!(
+                version.contains(name),
+                "missing enabled feature {name:?} in:\n{version}"
+            );
+        }
+    }
 }
 
 #[test]
@@ -523,6 +541,161 @@ fn dissect_rejects_byte_oriented_output_and_names_the_format() {
             "{format}: {rendered}"
         );
     }
+}
+
+#[test]
+fn build_enforces_configurable_layer_and_packet_budgets() {
+    run_success(&["build", "--packet", "ipv4(dst=8.8.8.8)/udp(dport=9)"]);
+
+    let expanded_recipe = ["raw"; 65].join("/");
+    run_success(&["build", "--packet", &expanded_recipe, "--max-layers", "65"]);
+
+    let expanded_over_budget = run(&["build", "--packet", &expanded_recipe, "--max-layers", "1"]);
+    assert_eq!(
+        expanded_over_budget.status.code(),
+        Some(3),
+        "{expanded_over_budget:?}"
+    );
+    assert!(
+        String::from_utf8_lossy(&expanded_over_budget.stderr)
+            .contains("packet.build_resource_limit"),
+        "{expanded_over_budget:?}"
+    );
+
+    let mut document = tempfile::NamedTempFile::new().expect("packet document must open");
+    let layers = (0..65)
+        .map(|_| serde_json::json!({ "protocol": "raw", "fields": {} }))
+        .collect::<Vec<_>>();
+    serde_json::to_writer(
+        &mut document,
+        &serde_json::json!({
+            "schema": "packetcraftr.packet/v1",
+            "layers": layers,
+        }),
+    )
+    .expect("packet document must write");
+    document.flush().expect("packet document must flush");
+    run_success(&[
+        "build",
+        "--packet-file",
+        document.path().to_str().expect("packet path must be UTF-8"),
+        "--max-layers",
+        "65",
+    ]);
+
+    let layered = run(&[
+        "build",
+        "--packet",
+        "ipv4(dst=8.8.8.8)/udp(dport=9)",
+        "--max-layers",
+        "1",
+    ]);
+    assert_eq!(layered.status.code(), Some(3), "{layered:?}");
+    assert!(
+        String::from_utf8_lossy(&layered.stderr).contains("packet.build_resource_limit"),
+        "{layered:?}"
+    );
+
+    let oversized = run(&[
+        "build",
+        "--packet",
+        "raw(text=hi)",
+        "--max-packet-size",
+        "1",
+    ]);
+    assert_eq!(oversized.status.code(), Some(3), "{oversized:?}");
+    assert!(
+        String::from_utf8_lossy(&oversized.stderr).contains("packet.build_resource_limit"),
+        "{oversized:?}"
+    );
+}
+
+#[test]
+fn dissect_enforces_configurable_decode_budgets() {
+    run_success(&["dissect", "--hex", IPV4_FRAME_HEX]);
+
+    // Two layers (IPv4 plus ICMP echo) breach a one-layer budget.
+    let layered = run(&[
+        "dissect",
+        "--hex",
+        "4500001c0000000040017cdf7f0000017f0000010800f7ff00000000",
+        "--max-layers",
+        "1",
+    ]);
+    assert_eq!(layered.status.code(), Some(6), "{layered:?}");
+    assert!(
+        String::from_utf8_lossy(&layered.stderr).contains("policy.decode_resource_limit"),
+        "{layered:?}"
+    );
+
+    let oversized = run(&["dissect", "--hex", IPV4_FRAME_HEX, "--max-packet-size", "1"]);
+    assert_eq!(oversized.status.code(), Some(6), "{oversized:?}");
+    assert!(
+        String::from_utf8_lossy(&oversized.stderr).contains("policy.decode_resource_limit"),
+        "{oversized:?}"
+    );
+}
+
+#[test]
+fn dissect_uses_the_packet_budget_for_file_and_stdin_reads() {
+    let default_packet_size = packetcraftr::core::layout::DEFAULT_MAX_PACKET_SIZE;
+    let packet_size = default_packet_size + 1;
+    let packet_size_arg = packet_size.to_string();
+    let frame = vec![0; packet_size];
+
+    let mut frame_file = tempfile::NamedTempFile::new().expect("frame file must open");
+    frame_file.write_all(&frame).expect("frame file must write");
+    frame_file.flush().expect("frame file must flush");
+    let from_file = run(&[
+        "dissect",
+        "--file",
+        frame_file
+            .path()
+            .to_str()
+            .expect("frame path must be UTF-8"),
+        "--max-packet-size",
+        &packet_size_arg,
+    ]);
+    assert!(from_file.status.success(), "{from_file:?}");
+
+    let from_stdin = run_with_stdin(&["dissect", "--max-packet-size", &packet_size_arg], &frame);
+    assert!(from_stdin.status.success(), "{from_stdin:?}");
+
+    let default_packet_size_arg = default_packet_size.to_string();
+    let oversized_file = run(&[
+        "dissect",
+        "--file",
+        frame_file
+            .path()
+            .to_str()
+            .expect("frame path must be UTF-8"),
+        "--max-packet-size",
+        &default_packet_size_arg,
+    ]);
+    let oversized_stdin = run_with_stdin(
+        &["dissect", "--max-packet-size", &default_packet_size_arg],
+        &frame,
+    );
+    for output in [oversized_file, oversized_stdin] {
+        assert_eq!(output.status.code(), Some(6), "{output:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("policy.decode_resource_limit"),
+            "{output:?}"
+        );
+    }
+
+    let maximum_packet_size = usize::MAX.to_string();
+    let maximum = run(&[
+        "dissect",
+        "--file",
+        frame_file
+            .path()
+            .to_str()
+            .expect("frame path must be UTF-8"),
+        "--max-packet-size",
+        &maximum_packet_size,
+    ]);
+    assert!(maximum.status.success(), "{maximum:?}");
 }
 
 #[test]

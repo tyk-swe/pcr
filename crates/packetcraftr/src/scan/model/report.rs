@@ -37,6 +37,14 @@ impl Classification {
         }
     }
 
+    /// Replaces `self` when `candidate` outranks it, so every per-endpoint
+    /// winner is chosen by the same rule.
+    pub(in crate::scan) fn promote(&mut self, candidate: Self) {
+        if candidate.rank() > self.rank() {
+            *self = candidate;
+        }
+    }
+
     pub(in crate::scan) fn rank(self) -> u8 {
         match self {
             Self::Open => 6,
@@ -106,7 +114,35 @@ pub enum Event {
 pub struct Summary {
     pub target: String,
     pub resolved_addresses: Vec<IpAddr>,
+    pub counts: ClassificationCounts,
     pub stats: Stats,
+}
+
+/// How many probed endpoints settled on each final classification, mirroring
+/// traceroute's [`crate::traceroute::Completion`] rollup for streaming
+/// consumers that never see the per-endpoint outcomes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct ClassificationCounts {
+    pub open: usize,
+    pub closed: usize,
+    pub filtered: usize,
+    pub unreachable: usize,
+    pub unknown: usize,
+    pub timeout: usize,
+}
+
+impl ClassificationCounts {
+    pub(in crate::scan) fn increment(&mut self, classification: Classification) {
+        let counter = match classification {
+            Classification::Open => &mut self.open,
+            Classification::Closed => &mut self.closed,
+            Classification::Filtered => &mut self.filtered,
+            Classification::Unreachable => &mut self.unreachable,
+            Classification::Unknown => &mut self.unknown,
+            Classification::Timeout => &mut self.timeout,
+        };
+        *counter = counter.saturating_add(1);
+    }
 }
 
 #[cfg(test)]

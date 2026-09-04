@@ -652,13 +652,9 @@ mod tests {
 
     use super::*;
 
-    fn registry() -> std::sync::Arc<Registry> {
-        crate::protocol::builtin::registry()
-    }
-
     #[test]
     fn postfix_program_preserves_boolean_precedence_and_records_requirements() {
-        let registry = registry();
+        let registry = crate::protocol::builtin::registry();
         let compiled = compile(
             "frame.time_epoch >= 0 || tcp.stream == 1 && !udp.stream == 2",
             &registry,
@@ -686,7 +682,7 @@ mod tests {
 
     #[test]
     fn configured_parser_limits_fail_at_the_first_excess_item() {
-        let registry = registry();
+        let registry = crate::protocol::builtin::registry();
         assert!(matches!(
             compile(
                 "ipv4",
@@ -775,7 +771,7 @@ mod tests {
 
     #[test]
     fn structural_syntax_errors_identify_the_rejected_construct() {
-        let registry = registry();
+        let registry = crate::protocol::builtin::registry();
         let cases = [
             ("&& ipv4", "expected a field or `(`"),
             ("ipv4 &&", "ends where a field was expected"),
@@ -802,7 +798,7 @@ mod tests {
 
     #[test]
     fn incompatible_prefix_and_contains_operations_fail_during_compilation() {
-        let registry = registry();
+        let registry = crate::protocol::builtin::registry();
         assert!(matches!(
             compile("ipv4.source > 192.0.2.0/24", &registry, &Options::default()),
             Err(Error::OrderedPrefixComparison { .. })

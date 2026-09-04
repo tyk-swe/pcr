@@ -19,6 +19,7 @@ pub(crate) enum QueryType {
     #[default]
     A,
     Aaaa,
+    Caa,
     Cname,
     Mx,
     Ns,
@@ -34,6 +35,7 @@ impl From<QueryType> for packetcraftr::dns::QueryType {
         match value {
             QueryType::A => Self::A,
             QueryType::Aaaa => Self::Aaaa,
+            QueryType::Caa => Self::Caa,
             QueryType::Cname => Self::Cname,
             QueryType::Mx => Self::Mx,
             QueryType::Ns => Self::Ns,
@@ -138,5 +140,12 @@ mod tests {
     fn tcp_fallback_is_default_and_udp_only_is_explicit() {
         assert!(!dns_args(&[]).udp_only);
         assert!(dns_args(&["--udp-only"]).udp_only);
+    }
+
+    #[test]
+    fn caa_query_type_maps_to_the_workflow_model() {
+        let query_type: packetcraftr::dns::QueryType =
+            dns_args(&["--type", "caa"]).query_type.into();
+        assert_eq!(query_type, packetcraftr::dns::QueryType::Caa);
     }
 }

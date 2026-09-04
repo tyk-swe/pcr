@@ -84,7 +84,153 @@ enum RangeUpdate {
     Replace(RetainedRange),
 }
 
+/// Validated memory admission for one fragment arrival. Every fallible
+/// replacement allocation has succeeded when this is returned, so the caller
+/// can commit without further resource checks except the completion peak.
+struct Charges {
+    unique_bytes: usize,
+    duplicate_fragments: usize,
+    overlap_bytes: usize,
+    new_slot_charge: usize,
+    old_unique_bytes: usize,
+    old_charge: usize,
+    prospective_charge: usize,
+    aggregate_memory_charge: usize,
+    replacement_peak_charge: usize,
+    aggregate_payload_bytes: usize,
+    last_update: Instant,
+    deadline: Option<Instant>,
+}
+
 impl Reassembler {
+    fn aggregate_limit(&self) -> Error {
+        ResourceError::AggregateMemoryLimit {
+            limit: self.limits.max_aggregate_bytes,
+        }
+        .into()
+    }
+
+    fn replacement_allocation_charge(
+        &self,
+        merge: &MergePlan,
+        incoming_bytes: usize,
+        reconstruction: usize,
+        new_slot_charge: usize,
+    ) -> Result<usize, Error> {
+        let range_metadata = merge
+            .result_range_count
+            .checked_mul(super::RANGE_METADATA_CHARGE)
+            .ok_or_else(|| self.aggregate_limit())?;
+        let merged_payload = match merge.kind {
+            UpdateKind::Unchanged => 0,
+            UpdateKind::Append => incoming_bytes,
+            UpdateKind::Replace => merge
+                .union_end
+                .checked_sub(merge.union_start)
+                .ok_or(MalformedError::OffsetOverflow)?,
+        };
+        range_metadata
+            .checked_add(merged_payload)
+            .and_then(|charge| charge.checked_add(reconstruction))
+            .and_then(|charge| charge.checked_add(new_slot_charge))
+            .ok_or_else(|| self.aggregate_limit())
+    }
+
+    fn admit_charges(
+        &self,
+        existing: Option<&DatagramState>,
+        incoming: &Incoming,
+        merge: &MergePlan,
+        now: Instant,
+        external_charge: usize,
+    ) -> Result<Charges, Error> {
+        let old_unique_bytes = existing.map_or(0, |state| state.unique_bytes);
+        let new_slot_charge =
+            if existing.is_none() && self.datagrams.len() >= self.charged_datagram_slots {
+                super::DATAGRAM_METADATA_CHARGE
+            } else {
+                0
+            };
+        let unique_bytes = old_unique_bytes
+            .checked_add(merge.added_bytes)
+            .filter(|bytes| *bytes <= self.limits.max_bytes_per_datagram)
+            .ok_or(ResourceError::DatagramByteLimit {
+                limit: self.limits.max_bytes_per_datagram,
+            })?;
+        let reconstruction_bytes = reconstruction_retained_bytes(existing, incoming)?;
+        // Only the bytes this fragment newly retains are charged as an
+        // allocation; anything the datagram already held is already counted.
+        let reconstruction_allocation = reconstruction_bytes
+            .saturating_sub(existing.map_or(0, |state| state.reconstruction.retained_bytes()));
+        let last_update = existing.map_or(now, |state| state.last_update.max(now));
+        let deadline = Some(last_update.checked_add(self.limits.idle_expiry).ok_or(
+            ResourceError::IdleExpiryRange {
+                expiry: self.limits.idle_expiry,
+            },
+        )?);
+        let duplicate_fragments = existing
+            .map_or(0, |state| state.duplicate_fragments)
+            .checked_add(usize::from(merge.kind == UpdateKind::Unchanged))
+            .ok_or_else(|| self.aggregate_limit())?;
+        let overlap_bytes = existing
+            .map_or(0, |state| state.overlap_bytes)
+            .checked_add(merge.conflicting_bytes)
+            .ok_or_else(|| self.aggregate_limit())?;
+        let prospective_charge = merge
+            .result_range_count
+            .checked_mul(super::RANGE_METADATA_CHARGE)
+            .and_then(|charge| charge.checked_add(unique_bytes))
+            .and_then(|charge| charge.checked_add(reconstruction_bytes))
+            .ok_or_else(|| self.aggregate_limit())?;
+        let old_charge = existing.and_then(DatagramState::memory_charge).unwrap_or(0);
+        let aggregate_memory_charge = self
+            .aggregate_memory_charge
+            .checked_sub(old_charge)
+            .and_then(|charge| charge.checked_add(prospective_charge))
+            .and_then(|charge| charge.checked_add(new_slot_charge))
+            .filter(|charge| {
+                charge
+                    .checked_add(external_charge)
+                    .is_some_and(|total| total <= self.limits.max_aggregate_bytes)
+            })
+            .ok_or_else(|| self.aggregate_limit())?;
+        // The retained state is not removed until every fallible replacement
+        // allocation succeeds, so admission must cover old and new storage at
+        // the same time rather than only the eventual steady state.
+        let replacement_allocation = self.replacement_allocation_charge(
+            merge,
+            incoming.payload.len(),
+            reconstruction_allocation,
+            new_slot_charge,
+        )?;
+        let replacement_peak_charge = self
+            .aggregate_memory_charge
+            .checked_add(replacement_allocation)
+            .and_then(|charge| charge.checked_add(external_charge))
+            .filter(|charge| *charge <= self.limits.max_aggregate_bytes)
+            .ok_or_else(|| self.aggregate_limit())?;
+        let aggregate_payload_bytes = self
+            .aggregate_payload_bytes
+            .checked_sub(old_unique_bytes)
+            .and_then(|bytes| bytes.checked_add(unique_bytes))
+            .filter(|bytes| *bytes <= self.limits.max_aggregate_bytes)
+            .ok_or_else(|| self.aggregate_limit())?;
+        Ok(Charges {
+            unique_bytes,
+            duplicate_fragments,
+            overlap_bytes,
+            new_slot_charge,
+            old_unique_bytes,
+            old_charge,
+            prospective_charge,
+            aggregate_memory_charge,
+            replacement_peak_charge,
+            aggregate_payload_bytes,
+            last_update,
+            deadline,
+        })
+    }
+
     #[must_use]
     pub fn new(limits: Limits, overlap_policy: OverlapPolicy) -> Self {
         Self {
@@ -143,91 +289,20 @@ impl Reassembler {
             .into());
         }
 
-        let old_unique_bytes = existing.map_or(0, |state| state.unique_bytes);
-        let new_slot_charge =
-            if existing.is_none() && self.datagrams.len() >= self.charged_datagram_slots {
-                super::DATAGRAM_METADATA_CHARGE
-            } else {
-                0
-            };
-        let unique_bytes = old_unique_bytes
-            .checked_add(merge.added_bytes)
-            .filter(|bytes| *bytes <= self.limits.max_bytes_per_datagram)
-            .ok_or(ResourceError::DatagramByteLimit {
-                limit: self.limits.max_bytes_per_datagram,
-            })?;
-        let reconstruction_bytes = reconstruction_retained_bytes(existing, &incoming)?;
-        // Only the bytes this fragment newly retains are charged as an
-        // allocation; anything the datagram already held is already counted.
-        let reconstruction_allocation = reconstruction_bytes
-            .saturating_sub(existing.map_or(0, |state| state.reconstruction.retained_bytes()));
-        let last_update = existing.map_or(now, |state| state.last_update.max(now));
-        let deadline = Some(last_update.checked_add(self.limits.idle_expiry).ok_or(
-            ResourceError::IdleExpiryRange {
-                expiry: self.limits.idle_expiry,
-            },
-        )?);
-        let duplicate_fragments = existing
-            .map_or(0, |state| state.duplicate_fragments)
-            .checked_add(usize::from(merge.kind == UpdateKind::Unchanged))
-            .ok_or(ResourceError::AggregateMemoryLimit {
-                limit: self.limits.max_aggregate_bytes,
-            })?;
-        let overlap_bytes = existing
-            .map_or(0, |state| state.overlap_bytes)
-            .checked_add(merge.conflicting_bytes)
-            .ok_or(ResourceError::AggregateMemoryLimit {
-                limit: self.limits.max_aggregate_bytes,
-            })?;
-
-        let prospective_charge = merge
-            .result_range_count
-            .checked_mul(super::RANGE_METADATA_CHARGE)
-            .and_then(|charge| charge.checked_add(unique_bytes))
-            .and_then(|charge| charge.checked_add(reconstruction_bytes))
-            .ok_or(ResourceError::AggregateMemoryLimit {
-                limit: self.limits.max_aggregate_bytes,
-            })?;
-        let old_charge = existing.and_then(DatagramState::memory_charge).unwrap_or(0);
-        let aggregate_memory_charge = self
-            .aggregate_memory_charge
-            .checked_sub(old_charge)
-            .and_then(|charge| charge.checked_add(prospective_charge))
-            .and_then(|charge| charge.checked_add(new_slot_charge))
-            .filter(|charge| {
-                charge
-                    .checked_add(external_charge)
-                    .is_some_and(|total| total <= self.limits.max_aggregate_bytes)
-            })
-            .ok_or(ResourceError::AggregateMemoryLimit {
-                limit: self.limits.max_aggregate_bytes,
-            })?;
-        // The retained state is not removed until every fallible replacement
-        // allocation succeeds, so admission must cover old and new storage at
-        // the same time rather than only the eventual steady state.
-        let replacement_allocation = replacement_allocation_charge(
-            &merge,
-            incoming.payload.len(),
-            reconstruction_allocation,
+        let Charges {
+            unique_bytes,
+            duplicate_fragments,
+            overlap_bytes,
             new_slot_charge,
-            self.limits.max_aggregate_bytes,
-        )?;
-        let replacement_peak_charge = self
-            .aggregate_memory_charge
-            .checked_add(replacement_allocation)
-            .and_then(|charge| charge.checked_add(external_charge))
-            .filter(|charge| *charge <= self.limits.max_aggregate_bytes)
-            .ok_or(ResourceError::AggregateMemoryLimit {
-                limit: self.limits.max_aggregate_bytes,
-            })?;
-        let aggregate_payload_bytes = self
-            .aggregate_payload_bytes
-            .checked_sub(old_unique_bytes)
-            .and_then(|bytes| bytes.checked_add(unique_bytes))
-            .filter(|bytes| *bytes <= self.limits.max_aggregate_bytes)
-            .ok_or(ResourceError::AggregateMemoryLimit {
-                limit: self.limits.max_aggregate_bytes,
-            })?;
+            old_unique_bytes,
+            old_charge,
+            prospective_charge,
+            aggregate_memory_charge,
+            replacement_peak_charge,
+            aggregate_payload_bytes,
+            last_update,
+            deadline,
+        } = self.admit_charges(existing, &incoming, &merge, now, external_charge)?;
 
         let reconstruction = materialize_reconstruction(existing, &incoming)?;
         let update = match merge.kind {
@@ -283,9 +358,7 @@ impl Reassembler {
             replacement_peak_charge
                 .checked_add(datagram_charge)
                 .filter(|charge| *charge <= self.limits.max_aggregate_bytes)
-                .ok_or(ResourceError::AggregateMemoryLimit {
-                    limit: self.limits.max_aggregate_bytes,
-                })?;
+                .ok_or_else(|| self.aggregate_limit())?;
             // The completed payload is read from the retained range and the
             // update without storing it, so no retained state changes before
             // the datagram is removed.
@@ -882,32 +955,6 @@ fn reconstruction_retained_bytes(
             Some(Reconstruction::Ipv4 { .. }) => Err(FAMILY_MISMATCH),
         },
     }
-}
-
-fn replacement_allocation_charge(
-    merge: &MergePlan,
-    incoming_bytes: usize,
-    reconstruction: usize,
-    new_slot_charge: usize,
-    limit: usize,
-) -> Result<usize, Error> {
-    let range_metadata = merge
-        .result_range_count
-        .checked_mul(super::RANGE_METADATA_CHARGE)
-        .ok_or(ResourceError::AggregateMemoryLimit { limit })?;
-    let merged_payload = match merge.kind {
-        UpdateKind::Unchanged => 0,
-        UpdateKind::Append => incoming_bytes,
-        UpdateKind::Replace => merge
-            .union_end
-            .checked_sub(merge.union_start)
-            .ok_or(MalformedError::OffsetOverflow)?,
-    };
-    range_metadata
-        .checked_add(merged_payload)
-        .and_then(|charge| charge.checked_add(reconstruction))
-        .and_then(|charge| charge.checked_add(new_slot_charge))
-        .ok_or(ResourceError::AggregateMemoryLimit { limit }.into())
 }
 
 fn materialize_reconstruction(

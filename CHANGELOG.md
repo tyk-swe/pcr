@@ -729,6 +729,27 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Scan execution now materializes and validates one correlated probe per batch,
+  preventing reused sequence and IP identifiers. Larger batch limits currently
+  execute as single-probe batches, with duration budgets adjusted accordingly.
+- DNS relevance filtering indexes canonical owners and bounds CNAME traversal
+  work, including reverse-ordered chains and cycles.
+- TLS analysis consumes final payload before clean TCP closure. Hello parsing
+  rejects duplicate extensions, incomplete vectors, and trailing extension bytes,
+  and distinguishes HelloRetryRequest key shares from normal ServerHello shares.
+- PPPoE reassembly scopes include the direction-independent Ethernet endpoint pair.
+- Explicit interface selection checks source ownership on the selected interface
+  before considering other interfaces that own the same address.
+- Reduced IPv6 segment routes accept `Segments Left == Last Entry + 1` and
+  require and preserve the explicit outer IPv6 destination. `SegmentRoute::active_index`
+  is now optional because the active segment can be absent from the list.
+- Replay schedules frames against one monotonic anchor; overdue frames send
+  immediately without shifting subsequent targets. Deadline preflight charges only
+  the remaining anchored wait, so processing time does not cause premature rejection.
+- Hostname deserialization validates and canonicalizes input through its parser.
+- Quick-start checks use a private temporary directory. Deadline tests use
+  scripted time for exact phase assertions and bounded loopback server I/O.
+
 - A workflow failure over a packet-build error published no causes at all.
   `packetcraftr::Error::Build` fell into the arm that returns an empty list, so
   `send`, `exchange`, `fuzz`, and `replay` dropped the codec or field

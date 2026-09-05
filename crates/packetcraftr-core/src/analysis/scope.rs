@@ -40,6 +40,8 @@ pub enum EncapsulationIdentifier {
     },
     Pppoe {
         session_id: u16,
+        /// Sorted endpoints of the enclosing Ethernet header, when present.
+        endpoints: Option<([u8; 6], [u8; 6])>,
     },
     L2tpv3 {
         session_id: u32,

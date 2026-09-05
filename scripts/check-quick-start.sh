@@ -45,12 +45,14 @@ fi
 # A build without native capabilities must fail closed on a live command:
 # exit 4 with a capability error, never a partial or silent success.
 if [[ ${#QUICK_START_CLI[@]} -gt 1 ]]; then
+  quick_start_tmp="$(mktemp -d "${TMPDIR:-/tmp}/quick-start.XXXXXXXXXX")"
+  trap 'rm -rf -- "$quick_start_tmp"' EXIT
   set +e
-  "${QUICK_START_CLI[@]}" interfaces > /dev/null 2> "${TMPDIR:-/tmp}/quick-start-interfaces.err"
+  "${QUICK_START_CLI[@]}" interfaces > /dev/null 2> "$quick_start_tmp/interfaces.err"
   status=$?
   set -e
   if [[ $status -ne 4 ]] || ! grep -q '^error\[capability\.' \
-    "${TMPDIR:-/tmp}/quick-start-interfaces.err"; then
+    "$quick_start_tmp/interfaces.err"; then
     echo "interfaces without native features must exit 4 with a capability error (got $status)" >&2
     exit 1
   fi

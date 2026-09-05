@@ -182,7 +182,29 @@ impl Collector {
         {
             self.summary.udp_443_frames = self.summary.udp_443_frames.saturating_add(1);
         }
-        self.fold_reassembly_events(record.tcp_events, record.number, &mut events);
+        // Reassembly emits current-generation data before its clean close. Expiry
+        // and replacement events precede that data and must retain their ordering.
+        let last_data = record.tcp_events.iter().rposition(
+            |event| matches!(event, TcpEvent::Data { flow, .. } if Some(flow) == record.tcp_flow),
+        );
+        let deferred_close = last_data.and_then(|data| {
+            record
+                .tcp_events
+                .iter()
+                .enumerate()
+                .find_map(|(index, event)| {
+                    (index > data
+                        && matches!(event, TcpEvent::Closed { flow, reset: false }
+                    if Some(flow) == record.tcp_flow))
+                    .then_some(index)
+                })
+        });
+        self.fold_reassembly_events(
+            record.tcp_events,
+            record.number,
+            deferred_close,
+            &mut events,
+        );
 
         let (Some(flow), Some(stream)) = (record.tcp_flow, record.tcp_stream) else {
             return events;
@@ -218,6 +240,14 @@ impl Collector {
             }
         }
         self.fold_deliveries(record, &key, &mut events);
+        if let Some(close) = deferred_close.and_then(|index| record.tcp_events.get(index)) {
+            self.fold_reassembly_events(
+                std::slice::from_ref(close),
+                record.number,
+                None,
+                &mut events,
+            );
+        }
         events
     }
 
@@ -270,6 +300,7 @@ impl Collector {
         &mut self,
         tcp_events: &[TcpEvent],
         number: u64,
+        deferred_close: Option<usize>,
         events: &mut Vec<SessionEvent>,
     ) {
         for event in tcp_events {
@@ -284,7 +315,10 @@ impl Collector {
                 );
             }
         }
-        for event in tcp_events {
+        for (index, event) in tcp_events.iter().enumerate() {
+            if deferred_close == Some(index) {
+                continue;
+            }
             if let TcpEvent::Closed { flow, reset } = event {
                 let key = CanonicalFlow::from_flow(flow);
                 let Some(live) = self.live_mut(&key) else {

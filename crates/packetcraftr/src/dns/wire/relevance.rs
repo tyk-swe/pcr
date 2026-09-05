@@ -3,6 +3,8 @@
 
 //! Question-relevance filtering and bounded rejected-record auditing.
 
+use std::collections::{HashMap, HashSet, VecDeque};
+
 use crate::dns::model::{Name, QueryType, Record, RecordValue, RejectedRecord, Section};
 use crate::dns::{CLASS_IN, TYPE_OPT};
 
@@ -55,46 +57,73 @@ fn accepted_answers(
     query_type: QueryType,
     answers: &[Record],
 ) -> (Vec<Name>, Vec<bool>) {
+    let mut owners: HashMap<Vec<Vec<u8>>, Vec<usize>> = HashMap::new();
+    for (index, record) in answers.iter().enumerate() {
+        if record.class == CLASS_IN {
+            owners
+                .entry(canonical(&record.owner))
+                .or_default()
+                .push(index);
+        }
+    }
     let mut relevant_names = vec![query_name.clone()];
-    let mut accepted_answers = vec![false; answers.len()];
-    let mut changed = true;
-    while changed {
-        changed = false;
-        for (record, accepted) in answers.iter().zip(accepted_answers.iter_mut()) {
-            if record.class != CLASS_IN || !relevant_names.contains(&record.owner) {
+    let mut visited = HashSet::from([canonical(query_name)]);
+    let mut queue = VecDeque::from([canonical(query_name)]);
+    let mut accepted = vec![false; answers.len()];
+    // Each indexed record consumes one unit; removing its owner prevents revisits.
+    let mut budget = answers.len();
+    while let Some(owner) = queue.pop_front() {
+        for index in owners.remove(&owner).unwrap_or_default() {
+            let Some(remaining) = budget.checked_sub(1) else {
+                return (relevant_names, accepted);
+            };
+            budget = remaining;
+            let Some(record) = answers.get(index) else {
                 continue;
+            };
+            let keep = matches!(record.value, RecordValue::Cname(_))
+                || query_type == QueryType::Any
+                || record.value.type_code() == query_type.code();
+            if let Some(slot) = accepted.get_mut(index) {
+                *slot = keep;
             }
-            let type_code = record.value.type_code();
-            if type_code == QueryType::Cname.code() {
-                *accepted = true;
-                if let RecordValue::Cname(target) = &record.value
-                    && !relevant_names.contains(target)
-                {
+            if let RecordValue::Cname(target) = &record.value {
+                let key = canonical(target);
+                if visited.insert(key.clone()) {
+                    queue.push_back(key);
                     relevant_names.push(target.clone());
-                    changed = true;
                 }
-            } else if query_type == QueryType::Any || type_code == query_type.code() {
-                *accepted = true;
             }
         }
     }
-    (relevant_names, accepted_answers)
+    (relevant_names, accepted)
+}
+
+fn canonical(name: &Name) -> Vec<Vec<u8>> {
+    name.labels
+        .iter()
+        .map(|label| label.to_ascii_lowercase())
+        .collect()
 }
 
 fn accepted_authorities(relevant_names: &[Name], authorities: &[Record]) -> Vec<bool> {
-    let mut accepted_authorities = vec![false; authorities.len()];
-    for (record, accepted) in authorities.iter().zip(accepted_authorities.iter_mut()) {
-        let relevant_owner = relevant_names
-            .iter()
-            .any(|name| is_same_or_ancestor(&record.owner, name));
-        if record.class == CLASS_IN
-            && relevant_owner
-            && matches!(record.value, RecordValue::Ns(_) | RecordValue::Soa { .. })
-        {
-            *accepted = true;
+    let mut ancestors = HashSet::new();
+    for name in relevant_names {
+        let key = canonical(name);
+        for start in 0..=key.len() {
+            if let Some(suffix) = key.get(start..) {
+                ancestors.insert(suffix.to_vec());
+            }
         }
     }
-    accepted_authorities
+    authorities
+        .iter()
+        .map(|record| {
+            record.class == CLASS_IN
+                && ancestors.contains(&canonical(&record.owner))
+                && matches!(record.value, RecordValue::Ns(_) | RecordValue::Soa { .. })
+        })
+        .collect()
 }
 
 fn referenced_names(
@@ -102,27 +131,23 @@ fn referenced_names(
     accepted_answers: &[bool],
     authorities: &[Record],
     accepted_authorities: &[bool],
-) -> Vec<Name> {
-    let mut references = Vec::new();
-    for (record, accepted) in answers.iter().zip(accepted_answers.iter().copied()) {
-        if accepted && let Some(name) = record.value.referenced_name() {
-            push_unique(&mut references, name);
-        }
-    }
-    for (record, accepted) in authorities.iter().zip(accepted_authorities.iter().copied()) {
-        if accepted && let Some(name) = record.value.referenced_name() {
-            push_unique(&mut references, name);
-        }
-    }
-    references
+) -> HashSet<Vec<Vec<u8>>> {
+    answers
+        .iter()
+        .zip(accepted_answers)
+        .chain(authorities.iter().zip(accepted_authorities))
+        .filter(|(_, accepted)| **accepted)
+        .filter_map(|(record, _)| record.value.referenced_name())
+        .map(canonical)
+        .collect()
 }
 
-fn accepted_additionals(references: &[Name], additionals: &[Record]) -> Vec<bool> {
+fn accepted_additionals(references: &HashSet<Vec<Vec<u8>>>, additionals: &[Record]) -> Vec<bool> {
     additionals
         .iter()
         .map(|record| {
             record.class == CLASS_IN
-                && references.contains(&record.owner)
+                && references.contains(&canonical(&record.owner))
                 && matches!(record.value, RecordValue::A(_) | RecordValue::Aaaa(_))
         })
         .collect()
@@ -235,19 +260,58 @@ fn rejection_reason<'a>(record: &Record, default: &'a str) -> &'a str {
     }
 }
 
-fn push_unique(values: &mut Vec<Name>, value: &Name) {
-    if !values.iter().any(|existing| existing == value) {
-        values.push(value.to_owned());
-    }
-}
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+    use super::*;
 
-fn is_same_or_ancestor(zone: &Name, name: &Name) -> bool {
-    zone.is_root()
-        || (zone.labels.len() <= name.labels.len()
-            && zone
-                .labels
-                .iter()
-                .rev()
-                .zip(name.labels.iter().rev())
-                .all(|(left, right)| left.eq_ignore_ascii_case(right)))
+    #[test]
+    fn reverse_chain_with_cycle_and_case_variants_retains_only_relevant_records() {
+        let name = |index| Name::from_canonical_ascii(&format!("N{index}.example"));
+        let mut answers = vec![Record {
+            owner: name(2000),
+            class: CLASS_IN,
+            ttl: 1,
+            value: RecordValue::A("192.0.2.1".parse().unwrap()),
+        }];
+        for index in (0..2000).rev() {
+            answers.push(Record {
+                owner: name(index),
+                class: CLASS_IN,
+                ttl: 1,
+                value: RecordValue::Cname(name(index + 1)),
+            });
+        }
+        answers.push(Record {
+            owner: name(2000),
+            class: CLASS_IN,
+            ttl: 1,
+            value: RecordValue::Cname(Name::from_canonical_ascii("n0.EXAMPLE")),
+        });
+        answers.push(Record {
+            owner: name(3000),
+            class: CLASS_IN,
+            ttl: 1,
+            value: RecordValue::A("192.0.2.2".parse().unwrap()),
+        });
+        let (names, accepted) = accepted_answers(&name(0), QueryType::A, &answers);
+        assert_eq!(names.len(), 2001);
+        assert!(accepted[..2002].iter().all(|keep| *keep));
+        assert!(!accepted[2002]);
+        let (_, cname_only) = accepted_answers(&name(0), QueryType::Cname, &answers);
+        assert!(!cname_only[0]);
+        assert!(cname_only[1..2002].iter().all(|keep| *keep));
+    }
+
+    #[test]
+    fn canonical_keys_preserve_binary_label_boundaries() {
+        use bytes::Bytes;
+        let one = Name {
+            labels: vec![Bytes::from_static(b"a.b")],
+        };
+        let two = Name {
+            labels: vec![Bytes::from_static(b"a"), Bytes::from_static(b"b")],
+        };
+        assert_ne!(canonical(&one), canonical(&two));
+    }
 }

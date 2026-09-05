@@ -216,25 +216,27 @@ fn resolve_addresses(
         Some(IpAddr::V6(source)) if inherit && layer.source.is_unspecified() => source,
         _ => layer.source,
     };
-    let active_segment = context
+    let routing = context
         .packet
         .iter()
         .skip(context.index.saturating_add(1))
         .take_while(|candidate| is_ipv6_extension_layer(*candidate))
         .find_map(|candidate| {
-            let routing = candidate
+            candidate
                 .as_any()
-                .downcast_ref::<crate::protocol::ipv6::SegmentRoutingHeader>()?;
-            let last = routing.segments.len().checked_sub(1)?;
-            let segments_left = match routing.segments_left {
-                WireValue::Auto => last,
-                WireValue::Exact(value) => usize::from(value).min(last),
-                WireValue::Raw(_) => return None,
-            };
-            last.checked_sub(segments_left)
-                .and_then(|index| routing.segments.get(index))
-                .copied()
+                .downcast_ref::<crate::protocol::ipv6::SegmentRoutingHeader>()
         });
+    let active_segment = routing.and_then(|routing| {
+        let last = routing.segments.len().checked_sub(1)?;
+        let segments_left = match routing.segments_left {
+            WireValue::Auto => last,
+            WireValue::Exact(value) => usize::from(value),
+            WireValue::Raw(_) => return None,
+        };
+        last.checked_sub(segments_left)
+            .and_then(|index| routing.segments.get(index))
+            .copied()
+    });
     let mut diagnostics = Vec::new();
     if let Some(active) = active_segment
         && !layer.destination.is_unspecified()
@@ -261,5 +263,11 @@ fn resolve_addresses(
         (true, None, Some(IpAddr::V6(destination))) if inherit => destination,
         _ => layer.destination,
     };
+    if destination.is_unspecified() && routing.is_some_and(|routing|
+        matches!(routing.segments_left, WireValue::Exact(left) if usize::from(left) == routing.segments.len())) {
+        strict_or_diagnostic(NAME, "build.srh_outer_destination", "destination",
+            "reduced SRH requires an explicit outer IPv6 destination".to_owned(),
+            context, &mut diagnostics)?;
+    }
     Ok((source, destination, diagnostics))
 }

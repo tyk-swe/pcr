@@ -35,7 +35,7 @@ use packetcraftr_core::protocol::tunnel::{
     Ah, Erspan, Esp, Geneve, L2tpv3, Mpls, Ppp, Pppoe, Vxlan,
 };
 use packetcraftr_core::registry::Registry;
-use packetcraftr_core::{Packet, build, decode};
+use packetcraftr_core::{Packet, build, decode, field::WireValue};
 
 fn decode_from_root(
     registry: &Arc<Registry>,
@@ -1114,4 +1114,56 @@ fn pseudo_header_failures_name_the_calling_protocol() {
             "{protocol}: {message}"
         );
     }
+}
+
+#[test]
+fn reduced_srh_round_trips_with_explicit_outer_destination_and_valid_checksum() {
+    let mut packet = Packet::new();
+    packet.push(ipv6("2001:db8::1", "2001:db8::10"));
+    packet.push(SegmentRoutingHeader {
+        segments_left: WireValue::Exact(2),
+        segments: vec![
+            "2001:db8::20".parse().unwrap(),
+            "2001:db8::30".parse().unwrap(),
+        ],
+        ..SegmentRoutingHeader::default()
+    });
+    packet.push(Udp {
+        source_port: 5000,
+        destination_port: 5001,
+        ..Udp::default()
+    });
+    packet.push(Raw::new(vec![1, 2, 3, 4]));
+    let mut missing_destination = packet.clone();
+    missing_destination
+        .get_mut::<packetcraftr_core::protocol::network::Ipv6>()
+        .unwrap()
+        .destination = Ipv6Addr::UNSPECIFIED;
+    assert!(
+        build::Builder::new(rooted_registry("ipv6"))
+            .build(
+                missing_destination,
+                build::Context::default(),
+                build::Options::default()
+            )
+            .is_err()
+    );
+    let (_, decoded) = round_trip(packet, "ipv6");
+    assert!(
+        decoded
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.code != UDP_CHECKSUM)
+    );
+    let path = packetcraftr_core::packet::semantics::outer_ip_path(&decoded.packet)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        path.active_destination,
+        "2001:db8::10".parse::<std::net::IpAddr>().unwrap()
+    );
+    assert_eq!(
+        path.final_destination,
+        "2001:db8::30".parse::<std::net::IpAddr>().unwrap()
+    );
 }

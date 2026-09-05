@@ -204,28 +204,22 @@ pub(crate) fn classify_destination(address: IpAddr) -> Scope {
 }
 
 /// An interface a native route query may be pinned to.
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
 pub(crate) trait InterfaceCandidate: Clone {
     fn interface(&self) -> &interface::Info;
-    /// Whether both candidates name the same operating-system interface.
-    fn is_same(&self, other: &Self) -> bool;
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
 impl InterfaceCandidate for interface::Info {
     fn interface(&self) -> &interface::Info {
         self
-    }
-
-    fn is_same(&self, other: &Self) -> bool {
-        self.id == other.id
     }
 }
 
 /// Pins the query to the interface owning `preferred_source`, refusing a
 /// `requested` interface that does not own it. Without a preferred source the
 /// request passes through unchanged.
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
 pub(crate) fn constrain_by_preferred_source<T: InterfaceCandidate>(
     available: &[T],
     interface_hint: Option<&InterfaceId>,
@@ -235,31 +229,32 @@ pub(crate) fn constrain_by_preferred_source<T: InterfaceCandidate>(
     let Some(source) = preferred_source else {
         return Ok(requested);
     };
-    let source_interface = available
+    let owns_source = |candidate: &T| {
+        candidate
+            .interface()
+            .addresses
+            .iter()
+            .any(|assigned| assigned.address == source)
+    };
+    if let Some(requested) = requested {
+        if owns_source(&requested) {
+            return Ok(Some(requested));
+        }
+        return Err(SystemError::SourceUnavailable {
+            preferred_source: source,
+            interface: requested.interface().id.name.clone(),
+        });
+    }
+    available
         .iter()
-        .find(|candidate| {
-            candidate
-                .interface()
-                .addresses
-                .iter()
-                .any(|assigned| assigned.address == source)
-        })
+        .find(|candidate| owns_source(candidate))
         .cloned()
+        .map(Some)
         .ok_or_else(|| SystemError::SourceUnavailable {
             preferred_source: source,
             interface: interface_hint
                 .map_or_else(|| "any interface".to_owned(), |hint| hint.name.clone()),
-        })?;
-    match requested {
-        Some(requested) if !requested.is_same(&source_interface) => {
-            Err(SystemError::SourceUnavailable {
-                preferred_source: source,
-                interface: requested.interface().id.name.clone(),
-            })
-        }
-        Some(requested) => Ok(Some(requested)),
-        None => Ok(Some(source_interface)),
-    }
+        })
 }
 
 pub(crate) fn validate_preferred_source_family(
@@ -370,6 +365,39 @@ mod tests {
         interface::{self, Id as InterfaceId},
         link::{Capability, MacAddress},
     };
+
+    #[test]
+    fn explicit_interface_owns_source_even_when_another_owner_is_enumerated_first() {
+        let first = interface();
+        let mut selected = first.clone();
+        selected.id.name = "fixture1".to_owned();
+        selected.id.index = 8;
+        let source = first.addresses[0].address;
+        for available in [
+            vec![first.clone(), selected.clone()],
+            vec![selected.clone(), first],
+        ] {
+            let actual = constrain_by_preferred_source(
+                &available,
+                Some(&selected.id),
+                Some(selected.clone()),
+                Some(source),
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(actual.id, selected.id);
+        }
+        selected.addresses.clear();
+        assert!(
+            constrain_by_preferred_source(
+                &[interface()],
+                Some(&selected.id),
+                Some(selected.clone()),
+                Some(source)
+            )
+            .is_err()
+        );
+    }
 
     fn v4(a: u8, b: u8, c: u8, d: u8) -> IpAddr {
         IpAddr::V4(Ipv4Addr::new(a, b, c, d))

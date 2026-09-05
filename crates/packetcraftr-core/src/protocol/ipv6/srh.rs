@@ -121,9 +121,10 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
             context.mode,
             &mut diagnostics,
         )?;
-        if segments_left > expected_last {
-            let message =
-                format!("segments_left is {segments_left}, exceeding last_entry {expected_last}");
+        if u16::from(segments_left) > u16::from(expected_last).saturating_add(1) {
+            let message = format!(
+                "segments_left is {segments_left}, exceeding last_entry {expected_last} plus one"
+            );
             if context.mode == crate::codec::Mode::Strict {
                 return Err(invalid(NAME, message));
             }
@@ -199,7 +200,9 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
             .checked_mul(16)
             .and_then(|length| length.checked_add(8))
             .ok_or_else(|| invalid(NAME, "segment-list length overflow"))?;
-        if header_len < segments_end || header[3] > header[4] {
+        if header_len < segments_end
+            || u16::from(header[3]) > u16::from(header[4]).saturating_add(1)
+        {
             return Err(invalid(NAME, "Last Entry or Segments Left is inconsistent"));
         }
         if header[5] != 0 {

@@ -263,8 +263,12 @@ fn session_id<'a>(reader: &mut Reader<'a>) -> Result<&'a [u8], Error> {
 
 fn parse_client_extensions(input: &[u8], hello: &mut ClientHello) -> Result<(), Error> {
     let mut reader = Reader::new(input);
+    let mut seen = std::collections::HashSet::new();
     while !reader.is_empty() {
         let (extension, body) = next_extension(&mut reader, hello.extensions.len())?;
+        if !seen.insert(extension.kind) {
+            return Err(invalid(NAME, "duplicate hello extension"));
+        }
         hello.extensions.push(extension);
         apply_client_extension(extension.kind, body, hello)?;
     }
@@ -273,8 +277,12 @@ fn parse_client_extensions(input: &[u8], hello: &mut ClientHello) -> Result<(), 
 
 fn parse_server_extensions(input: &[u8], hello: &mut ServerHello) -> Result<(), Error> {
     let mut reader = Reader::new(input);
+    let mut seen = std::collections::HashSet::new();
     while !reader.is_empty() {
         let (extension, body) = next_extension(&mut reader, hello.extensions.len())?;
+        if !seen.insert(extension.kind) {
+            return Err(invalid(NAME, "duplicate hello extension"));
+        }
         hello.extensions.push(extension);
         apply_server_extension(extension.kind, body, hello)?;
     }
@@ -350,15 +358,25 @@ fn apply_server_extension(kind: u16, body: &[u8], hello: &mut ServerHello) -> Re
         extension::SUPPORTED_VERSIONS => {
             let mut reader = Reader::new(body);
             hello.selected_version = reader.u16()?;
-            Ok(())
+            trailing_bytes(&reader, "supported_versions")
         }
         extension::KEY_SHARE => {
             let mut reader = Reader::new(body);
             hello.key_share_group = Some(reader.u16()?);
-            Ok(())
+            if !hello.is_hello_retry_request && reader.vector16()?.is_empty() {
+                return Err(invalid(NAME, "ServerHello key_exchange is empty"));
+            }
+            trailing_bytes(&reader, "key_share")
         }
         extension::ALPN => {
-            hello.alpn_raw = parse_alpn(body)?.into_iter().next();
+            let protocols = parse_alpn(body)?;
+            if protocols.len() != 1 {
+                return Err(invalid(
+                    NAME,
+                    "ServerHello ALPN must select exactly one protocol",
+                ));
+            }
+            hello.alpn_raw = protocols.into_iter().next();
             hello.alpn = hello
                 .alpn_raw
                 .as_ref()
@@ -376,6 +394,7 @@ fn parse_server_name(body: &[u8], hello: &mut ClientHello) -> Result<(), Error> 
     }
     let mut reader = Reader::new(body);
     let mut list = Reader::new(reader.vector16()?);
+    trailing_bytes(&reader, "extension")?;
     while !list.is_empty() {
         let name_type = list.u8()?;
         let name = list.vector16()?;
@@ -391,9 +410,10 @@ fn parse_server_name(body: &[u8], hello: &mut ClientHello) -> Result<(), Error> 
                 ),
             ));
         }
-        hello.sni_raw = Some(Bytes::copy_from_slice(name));
-        hello.sni = validated_host_name(name);
-        return Ok(());
+        if hello.sni_raw.is_none() {
+            hello.sni_raw = Some(Bytes::copy_from_slice(name));
+            hello.sni = validated_host_name(name);
+        }
     }
     Ok(())
 }
@@ -416,6 +436,7 @@ fn validated_host_name(name: &[u8]) -> Option<String> {
 fn parse_alpn(body: &[u8]) -> Result<Vec<Bytes>, Error> {
     let mut reader = Reader::new(body);
     let mut list = Reader::new(reader.vector16()?);
+    trailing_bytes(&reader, "extension")?;
     let mut protocols = Vec::new();
     while !list.is_empty() {
         if protocols.len() >= MAX_ALPN {
@@ -436,18 +457,21 @@ fn parse_alpn(body: &[u8]) -> Result<Vec<Bytes>, Error> {
 fn parse_client_supported_versions(body: &[u8]) -> Result<Vec<u16>, Error> {
     let mut reader = Reader::new(body);
     let versions = reader.vector8()?;
+    trailing_bytes(&reader, "supported_versions")?;
     u16_list(versions, MAX_EXTENSION_LEN / 2, "supported version")
 }
 
 fn parse_u16_vector16(body: &[u8], what: &str) -> Result<Vec<u16>, Error> {
     let mut reader = Reader::new(body);
     let values = reader.vector16()?;
+    trailing_bytes(&reader, what)?;
     u16_list(values, MAX_EXTENSION_LEN / 2, what)
 }
 
 fn parse_client_key_share(body: &[u8]) -> Result<Vec<u16>, Error> {
     let mut reader = Reader::new(body);
     let mut list = Reader::new(reader.vector16()?);
+    trailing_bytes(&reader, "extension")?;
     let mut groups = Vec::new();
     while !list.is_empty() {
         if groups.len() >= MAX_EXTENSIONS {
@@ -457,14 +481,18 @@ fn parse_client_key_share(body: &[u8]) -> Result<Vec<u16>, Error> {
             ));
         }
         groups.push(list.u16()?);
-        let _key_exchange = list.vector16()?;
+        if list.vector16()?.is_empty() {
+            return Err(invalid(NAME, "ClientHello key_exchange is empty"));
+        }
     }
     Ok(groups)
 }
 
 fn parse_ec_point_formats(body: &[u8]) -> Result<Vec<u8>, Error> {
     let mut reader = Reader::new(body);
-    Ok(reader.vector8()?.to_vec())
+    let formats = reader.vector8()?.to_vec();
+    trailing_bytes(&reader, "ec_point_formats")?;
+    Ok(formats)
 }
 
 fn u16_list(input: &[u8], limit: usize, what: &str) -> Result<Vec<u16>, Error> {
@@ -572,7 +600,11 @@ mod tests {
         MAX_EXTENSION_LEN, MAX_EXTENSIONS, MAX_HANDSHAKE_BODY, MAX_RECORD_BODY, RECORD_HEADER_LEN,
     };
 
-    use super::{Outcome, looks_like_record_start, parse_handshake, parse_record, u16_list};
+    use super::{
+        ClientHello, Outcome, ServerHello, apply_server_extension, extension,
+        looks_like_record_start, parse_client_extensions, parse_handshake, parse_record,
+        parse_server_extensions, parse_server_hello, u16_list,
+    };
     use crate::protocol::application::tls::test_wire::{
         extension, handshake_message, record, u16_bytes, vector8, vector16,
     };
@@ -1065,7 +1097,7 @@ mod tests {
         for index in 0..=MAX_EXTENSIONS {
             let group = u16::try_from(index).expect("group index fits") + 0x0100;
             list.extend_from_slice(&group.to_be_bytes());
-            list.extend_from_slice(&vector16(&[]));
+            list.extend_from_slice(&vector16(&[1]));
         }
         let outcome = parse_handshake(&client_hello(&[extension(0x0033, &vector16(&list))]));
         assert!(malformed_message(outcome).contains("key_share list"));
@@ -1175,5 +1207,70 @@ mod tests {
             }
             let _ = looks_like_record_start(&bytes);
         }
+    }
+    #[test]
+    fn server_key_share_body_depends_on_retry_random() {
+        for retry in [false, true] {
+            for (body, valid) in [
+                (vec![0, 29], retry),
+                (vec![0, 29, 0, 1, 42], !retry),
+                (vec![0, 29, 0, 0], false),
+                (vec![0, 29, 0, 2, 42], false),
+                (vec![0, 29, 0, 1, 42, 0], false),
+            ] {
+                let mut hello = vec![3, 3];
+                hello.extend_from_slice(if retry {
+                    &HELLO_RETRY_REQUEST_RANDOM
+                } else {
+                    &[0; 32]
+                });
+                hello.extend_from_slice(&[0, 0x13, 1, 0]);
+                let extensions = extension(extension::KEY_SHARE, &body);
+                hello.extend_from_slice(&u16::try_from(extensions.len()).unwrap().to_be_bytes());
+                hello.extend_from_slice(&extensions);
+                assert_eq!(
+                    parse_server_hello(&hello).is_ok(),
+                    valid,
+                    "retry={retry}, body={body:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn hello_extensions_reject_duplicates_and_trailing_bytes() {
+        for body in [&[3, 4, 0][..], &[3][..]] {
+            assert!(
+                apply_server_extension(
+                    extension::SUPPORTED_VERSIONS,
+                    body,
+                    &mut ServerHello::default()
+                )
+                .is_err()
+            );
+        }
+        assert!(
+            apply_server_extension(
+                extension::ALPN,
+                &[0, 3, 2, b'h', b'2', 0],
+                &mut ServerHello::default()
+            )
+            .is_err()
+        );
+        assert!(
+            apply_server_extension(
+                extension::ALPN,
+                &[0, 4, 1, b'a', 1, b'b'],
+                &mut ServerHello::default()
+            )
+            .is_err()
+        );
+        for kind in [extension::SUPPORTED_VERSIONS, 0xaaaa] {
+            let one = extension(kind, &[3, 4]);
+            let duplicate = [one.clone(), one].concat();
+            assert!(parse_server_extensions(&duplicate, &mut ServerHello::default()).is_err());
+        }
+        let duplicate = [extension(0xaaaa, &[]), extension(0xaaaa, &[])].concat();
+        assert!(parse_client_extensions(&duplicate, &mut ClientHello::default()).is_err());
     }
 }

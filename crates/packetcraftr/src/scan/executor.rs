@@ -4,18 +4,17 @@
 use crate::BoundaryError;
 use crate::probe::ExchangeExecutor;
 use crate::probe::executor::{ExecutorFault, WorkflowOverrides};
-use packetcraftr_core::field::FieldValue;
 use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Sender as PacketIo};
 
 use super::classification::classify_response;
-use super::model::{Batch, Execution, Executor, Transport};
+use super::model::{Batch, Execution, Executor};
 
 const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
     "cli.scan_executor",
-    "use homogeneous bounded scan batches and retain at least one response per probe",
+    "use one correlated probe per scan batch and retain at least one response",
 );
 
-/// Executes homogeneous scan batches through the client's capture-ready
+/// Executes single-probe scan batches through the client's capture-ready
 /// exchange lifecycle.
 impl<R, N, I> Executor<Batch> for ExchangeExecutor<'_, R, N, I>
 where
@@ -28,17 +27,8 @@ where
             .probes
             .first()
             .ok_or_else(|| EXECUTOR_FAULT.invalid("scan executor received an empty batch"))?;
-        if batch.probes.iter().any(|probe| {
-            probe.address != first.address
-                || probe.endpoint.transport() != first.endpoint.transport()
-                || probe.attempt != first.attempt
-        }) {
-            return Err(EXECUTOR_FAULT
-                .invalid("scan executor batches must share address, transport, and attempt"));
-        }
-        if first.endpoint.transport() == Transport::Icmp && batch.probes.len() != 1 {
-            return Err(EXECUTOR_FAULT
-                .invalid("ICMP batches must contain exactly one uniquely identified echo probe"));
+        if batch.probes.len() != 1 {
+            return Err(EXECUTOR_FAULT.invalid("scan batches require exactly one correlated probe"));
         }
         if self.options.max_responses < batch.probes.len() {
             return Err(EXECUTOR_FAULT.invalid(format!(
@@ -48,24 +38,11 @@ where
             )));
         }
 
-        let mut template = packetcraftr_core::template::Template::new(first.packet());
-        if batch.probes.len() > 1 {
-            let ports = batch
-                .probes
-                .iter()
-                .map(|probe| {
-                    probe
-                        .endpoint
-                        .port()
-                        .map(|port| FieldValue::Unsigned(u64::from(port)))
-                        .ok_or_else(|| {
-                            EXECUTOR_FAULT
-                                .invalid("portless probes cannot form a multi-packet batch")
-                        })
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            template = template.axis(1, "destination_port", ports);
+        let packet = first.packet();
+        if !super::probe::sent_probe_matches(first, &packet) {
+            return Err(EXECUTOR_FAULT.invalid("scan packet does not match its correlated probe"));
         }
+        let template = packetcraftr_core::template::Template::new(packet);
         let mut matches_request =
             |request_index: usize,
              sent: &packetcraftr_core::Packet,

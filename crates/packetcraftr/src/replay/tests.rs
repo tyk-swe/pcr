@@ -568,3 +568,65 @@ fn replay_route_selection_failures_retain_the_route_adapter_refusal() {
         ["native route selection is unavailable: native route selection is off"]
     );
 }
+
+#[test]
+fn replay_processing_cost_reduces_waits_and_overruns_keep_the_anchor() {
+    use crate::clock::Clock;
+    use std::cell::Cell;
+    use std::rc::Rc;
+    use std::time::Instant;
+    struct VirtualClock {
+        now: Rc<Cell<Instant>>,
+        waits: Vec<Duration>,
+    }
+    impl Clock for VirtualClock {
+        type Error = std::convert::Infallible;
+        fn now(&mut self) -> Instant {
+            self.now.get()
+        }
+        fn sleep(&mut self, delay: Duration) -> Result<(), Self::Error> {
+            self.waits.push(delay);
+            self.now.set(self.now.get() + delay);
+            Ok(())
+        }
+    }
+    let now = Rc::new(Cell::new(Instant::now()));
+    let mut clock = VirtualClock {
+        now: Rc::clone(&now),
+        waits: Vec::new(),
+    };
+    let mut reader = capture_reader(
+        LinkType::ETHERNET,
+        &[
+            (Duration::from_secs(1), &[1]),
+            (Duration::from_secs(2), &[2]),
+            (Duration::from_secs(3), &[3]),
+            (Duration::from_secs(4), &[4]),
+        ],
+    );
+    let mut overhead = [700, 2500, 0, 0].into_iter();
+    let summary = run_with_selector(
+        &mut reader,
+        &replay_options(Timing::Original),
+        None,
+        &mut RecordingAuthorizer::default(),
+        &mut RecordingTransmitter::default(),
+        &mut clock,
+        |_| {
+            now.set(now.get() + Duration::from_millis(overhead.next().unwrap()));
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert_eq!(summary.frames_transmitted, 4);
+    assert_eq!(summary.scheduled_duration, Duration::from_secs(3));
+    assert_eq!(
+        clock.waits,
+        [
+            Duration::ZERO,
+            Duration::from_millis(300),
+            Duration::ZERO,
+            Duration::ZERO
+        ]
+    );
+}

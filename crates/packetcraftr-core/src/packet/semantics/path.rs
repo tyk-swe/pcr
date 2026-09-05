@@ -197,14 +197,17 @@ fn ipv6_path(
         .copied()
         .map(IpAddr::V6)
         .collect::<Vec<_>>();
-    let visited_destinations = route
+    let mut visited_destinations: Vec<_> = route
         .segments
-        .get(route.active_index..)
+        .get(route.active_index.unwrap_or(0)..)
         .unwrap_or_default()
         .iter()
         .copied()
         .map(IpAddr::V6)
         .collect();
+    if route.active_index.is_none() {
+        visited_destinations.insert(0, IpAddr::V6(route.active_destination));
+    }
     Ok(IpPath {
         source,
         header_destination,

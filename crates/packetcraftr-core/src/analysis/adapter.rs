@@ -12,7 +12,7 @@ use crate::layer::Layer;
 use crate::layer::Padding;
 use crate::protocol::gre::Gre;
 use crate::protocol::ipv6::Fragment as Ipv6FragmentHeader;
-use crate::protocol::link::{Vlan, Vlan8021ad};
+use crate::protocol::link::{Ethernet, Vlan, Vlan8021ad};
 use crate::protocol::network::{
     Ipv4, Ipv6, ip_protocol, ipv6_extension_header_length, is_walkable_ipv6_extension,
 };
@@ -91,7 +91,10 @@ fn ipv6_fragment(layer: &dyn Layer) -> Option<&Ipv6FragmentHeader> {
 ///
 /// The transport walk and the fragment walk must agree on the encapsulation
 /// path or the same conversation would land in two scopes.
-fn tunnel_identifier(layer: &dyn Layer) -> Option<EncapsulationIdentifier> {
+fn tunnel_identifier(
+    layer: &dyn Layer,
+    ethernet: Option<([u8; 6], [u8; 6])>,
+) -> Option<EncapsulationIdentifier> {
     let any = layer.as_any();
     if let Some(vlan) = any.downcast_ref::<Vlan>() {
         Some(EncapsulationIdentifier::Vlan {
@@ -112,6 +115,7 @@ fn tunnel_identifier(layer: &dyn Layer) -> Option<EncapsulationIdentifier> {
     } else if let Some(pppoe) = any.downcast_ref::<Pppoe>() {
         Some(EncapsulationIdentifier::Pppoe {
             session_id: pppoe.session_id,
+            endpoints: ethernet,
         })
     } else if let Some(l2tp) = any.downcast_ref::<L2tpv3>() {
         Some(EncapsulationIdentifier::L2tpv3 {
@@ -137,12 +141,16 @@ pub(crate) fn transports(packet: &Packet) -> Transports<'_> {
 
     let mut network: Option<Network> = None;
     let mut path = Vec::new();
+    let mut ethernet = None;
     let mut found = Transports {
         tcp: None,
         udp: None,
         outermost: None,
     };
     for (index, layer) in packet.iter().enumerate() {
+        if let Some(link) = layer.as_any().downcast_ref::<Ethernet>() {
+            ethernet = Some(ordered(link.source, link.destination));
+        }
         if let Some(ipv4) = layer.as_any().downcast_ref::<Ipv4>() {
             let source = IpAddr::V4(ipv4.source);
             let destination = IpAddr::V4(ipv4.destination);
@@ -165,7 +173,7 @@ pub(crate) fn transports(packet: &Packet) -> Transports<'_> {
                 destination,
                 path_index,
             });
-        } else if let Some(identifier) = tunnel_identifier(layer) {
+        } else if let Some(identifier) = tunnel_identifier(layer, ethernet) {
             path.push(identifier);
         } else if let Some(tcp) = layer.as_any().downcast_ref::<Tcp>() {
             if let Some(network) = &network {
@@ -259,11 +267,15 @@ fn ip_fragments_with_scope(
     }
 
     let mut path = Vec::new();
+    let mut ethernet = None;
     let mut ipv6_network: Option<Ipv6Network<'_>> = None;
     let mut atomic = Vec::new();
     let mut non_atomic = None;
 
     for (index, layer) in decoded.packet.iter().enumerate() {
+        if let Some(link) = layer.as_any().downcast_ref::<Ethernet>() {
+            ethernet = Some(ordered(link.source, link.destination));
+        }
         if let Some(ipv4) = layer.as_any().downcast_ref::<Ipv4>() {
             let source = IpAddr::V4(ipv4.source);
             let destination = IpAddr::V4(ipv4.destination);
@@ -395,7 +407,7 @@ fn ip_fragments_with_scope(
             break;
         }
 
-        if let Some(identifier) = tunnel_identifier(layer) {
+        if let Some(identifier) = tunnel_identifier(layer, ethernet) {
             path.push(identifier);
         }
     }
@@ -627,4 +639,41 @@ pub(crate) fn replayed_ip_prefix_layers(decoded: &DecodedPacket) -> usize {
         }
     }
     0
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+    use super::*;
+
+    fn pppoe_path(
+        source: [u8; 6],
+        destination: [u8; 6],
+        session_id: u16,
+    ) -> Vec<EncapsulationIdentifier> {
+        let mut packet = Packet::new();
+        packet
+            .push(Ethernet {
+                source,
+                destination,
+                ..Ethernet::default()
+            })
+            .push(Pppoe {
+                session_id,
+                ..Pppoe::default()
+            })
+            .push(Ipv4::default())
+            .push(Tcp::default());
+        transports(&packet).tcp.unwrap().encapsulation
+    }
+
+    #[test]
+    fn pppoe_scopes_separate_endpoint_pairs_and_normalize_direction() {
+        let a = [2, 0, 0, 0, 0, 1];
+        let b = [2, 0, 0, 0, 0, 2];
+        let c = [2, 0, 0, 0, 0, 3];
+        assert_eq!(pppoe_path(a, b, 7), pppoe_path(b, a, 7));
+        assert_ne!(pppoe_path(a, b, 7), pppoe_path(a, c, 7));
+        assert_ne!(pppoe_path(a, b, 7), pppoe_path(a, b, 8));
+    }
 }

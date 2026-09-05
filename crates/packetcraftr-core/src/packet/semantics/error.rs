@@ -37,10 +37,12 @@ pub enum Error {
     SegmentCountUnrepresentable,
     #[error("SRH last_entry {last_entry} does not match segment-list index {expected}")]
     SegmentLastEntry { last_entry: u8, expected: u8 },
-    #[error("SRH segments_left {segments_left} exceeds last_entry {last_entry}")]
+    #[error("SRH segments_left {segments_left} exceeds last_entry {last_entry} plus one")]
     SegmentsLeft { segments_left: u8, last_entry: u8 },
     #[error("unsupported SRH flags are non-zero")]
     SegmentFlags,
+    #[error("reduced SRH requires an explicit outer IPv6 destination")]
+    ReducedSegmentDestination,
     #[error("IPv6 header destination {header} does not match active SRH segment {active}")]
     SegmentDestinationMismatch { header: Ipv6Addr, active: Ipv6Addr },
     #[error("IPv4 option bytes exceed the 40-byte header limit")]

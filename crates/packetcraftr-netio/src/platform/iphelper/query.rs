@@ -119,10 +119,6 @@ impl InterfaceCandidate for WindowsAdapter {
     fn interface(&self) -> &crate::interface::Info {
         &self.interface
     }
-
-    fn is_same(&self, other: &Self) -> bool {
-        self.ipv4_index == other.ipv4_index && self.ipv6_index == other.ipv6_index
-    }
 }
 
 struct BestRoute {

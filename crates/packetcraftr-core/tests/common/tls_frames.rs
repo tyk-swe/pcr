@@ -221,7 +221,9 @@ pub(crate) fn server_hello(spec: &ServerHelloSpec) -> Vec<u8> {
     }
     if let Some(group) = spec.key_share_group {
         let mut share = group.to_be_bytes().to_vec();
-        share.extend_from_slice(&vector16(&[0x88; 32]));
+        if !spec.hello_retry_request {
+            share.extend_from_slice(&vector16(&[0x88; 32]));
+        }
         extensions.extend_from_slice(&extension(KEY_SHARE, &share));
     }
     if let Some(protocol) = &spec.alpn {

@@ -126,7 +126,7 @@ fn ipv6_segment_route_reports_active_final_and_declared_destinations() {
 
     let route = validate_segment_route(Ipv6Addr::UNSPECIFIED, segments.to_vec(), 2, 2, 0)
         .expect("an unspecified header destination may be materialized later");
-    assert_eq!(route.active_index, 0);
+    assert_eq!(route.active_index, Some(0));
     assert_eq!(route.active_destination, segments[0]);
 }
 
@@ -159,7 +159,7 @@ fn segment_route_validation_rejects_each_inconsistent_state() {
             "segments-left overflow",
             first,
             vec![first, second],
-            2,
+            3,
             1,
             0,
             "exceeds last_entry",
@@ -425,4 +425,35 @@ fn transport_keys_are_all_or_nothing_and_protocol_specific() {
     assert!(!transport_keys_are_reversed(&tcp_request, &tcp_request));
     assert!(!transport_keys_are_reversed(&tcp_request, &udp_response));
     assert!(transport_key(&Raw::new(vec![0_u8])).is_none());
+}
+
+#[test]
+fn reduced_segment_route_preserves_the_explicit_active_destination() {
+    let active = ipv6_addr("2001:db8::10");
+    let segments = vec![ipv6_addr("2001:db8::20"), ipv6_addr("2001:db8::30")];
+    let route = validate_segment_route(active, segments.clone(), 2, 1, 0).unwrap();
+    assert_eq!(route.active_index, None);
+    assert_eq!(route.active_destination, active);
+    assert_eq!(route.final_destination, segments[1]);
+    assert!(validate_segment_route(Ipv6Addr::UNSPECIFIED, segments.clone(), 2, 1, 0).is_err());
+    let mut packet = Packet::new();
+    packet
+        .push(Ipv6 {
+            destination: active,
+            ..Ipv6::default()
+        })
+        .push(SegmentRoutingHeader {
+            segments_left: WireValue::Exact(2),
+            segments,
+            ..SegmentRoutingHeader::default()
+        });
+    let path = outer_ip_path(&packet).unwrap().unwrap();
+    assert_eq!(
+        path.visited_destinations,
+        [
+            IpAddr::V6(active),
+            IpAddr::V6(ipv6_addr("2001:db8::20")),
+            IpAddr::V6(ipv6_addr("2001:db8::30"))
+        ]
+    );
 }

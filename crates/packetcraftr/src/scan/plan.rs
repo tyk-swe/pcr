@@ -122,7 +122,8 @@ fn checked_batch_size(request: &Request) -> Result<usize, Error> {
             },
         ));
     }
-    Ok(request.limits.batch_size)
+    // Each exchange must materialize its own correlated sequence and IP identifiers.
+    Ok(1)
 }
 
 fn rate_delay(probes: usize, rate: Option<u32>) -> Result<Duration, Error> {

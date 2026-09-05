@@ -338,6 +338,10 @@ impl Stream for TcpStream {
 trait Connector {
     type Stream: Stream;
 
+    fn now(&self) -> Instant {
+        Instant::now()
+    }
+
     fn connect(&self, endpoint: SocketAddr, timeout: Duration) -> io::Result<Self::Stream>;
 }
 
@@ -375,13 +379,14 @@ fn exchange_with_connector<C: Connector>(
         });
     }
 
-    let started = Instant::now();
+    let now = || connector.now();
+    let started = now();
     let deadline = started
         .checked_add(request.timeout)
         .ok_or(Error::DeadlineOverflow {
             value: request.timeout,
         })?;
-    let connect_timeout = remaining(deadline, Phase::Connect, 0)?;
+    let connect_timeout = remaining(deadline, now(), Phase::Connect, 0)?;
     let mut stream = connector
         .connect(request.endpoint, connect_timeout)
         .map_err(|source| map_connect_error(request.endpoint, source))?;
@@ -420,8 +425,9 @@ fn exchange_with_connector<C: Connector>(
         deadline,
         expected_write,
         &mut bytes_written,
+        &now,
     )?;
-    let sent = Instant::now();
+    let sent = now();
     let sent_at = SystemTime::now();
 
     let mut response_prefix = [0u8; LENGTH_PREFIX_BYTES];
@@ -430,6 +436,7 @@ fn exchange_with_connector<C: Connector>(
         &mut response_prefix,
         deadline,
         Phase::ReadPrefix,
+        &now,
     )?;
     if prefix_read != LENGTH_PREFIX_BYTES {
         return Err(Error::IncompletePrefix {
@@ -448,7 +455,13 @@ fn exchange_with_connector<C: Connector>(
     }
 
     let mut message = vec![0u8; declared];
-    let message_read = read_exact(&mut stream, &mut message, deadline, Phase::ReadMessage)?;
+    let message_read = read_exact(
+        &mut stream,
+        &mut message,
+        deadline,
+        Phase::ReadMessage,
+        &now,
+    )?;
     if message_read != declared {
         return Err(Error::IncompleteMessage {
             declared,
@@ -465,7 +478,7 @@ fn exchange_with_connector<C: Connector>(
     let mut frame = Vec::with_capacity(capacity);
     frame.extend_from_slice(&response_prefix);
     frame.extend_from_slice(&message);
-    let completed = Instant::now();
+    let completed = now();
     if completed >= deadline {
         return Err(Error::Timeout {
             phase: Phase::ReadMessage,
@@ -484,9 +497,14 @@ fn exchange_with_connector<C: Connector>(
     })
 }
 
-fn remaining(deadline: Instant, phase: Phase, transferred: usize) -> Result<Duration, Error> {
+fn remaining(
+    deadline: Instant,
+    now: Instant,
+    phase: Phase,
+    transferred: usize,
+) -> Result<Duration, Error> {
     deadline
-        .checked_duration_since(Instant::now())
+        .checked_duration_since(now)
         .filter(|remaining| !remaining.is_zero())
         .ok_or(Error::Timeout { phase, transferred })
 }
@@ -512,9 +530,10 @@ fn write_exact<S: Stream>(
     deadline: Instant,
     expected: usize,
     written: &mut usize,
+    now: &impl Fn() -> Instant,
 ) -> Result<(), Error> {
     while !bytes.is_empty() {
-        let timeout = remaining(deadline, Phase::Write, *written)?;
+        let timeout = remaining(deadline, now(), Phase::Write, *written)?;
         stream
             .set_write_timeout(Some(timeout))
             .map_err(|source| Error::ConfigureTimeout {
@@ -570,10 +589,11 @@ fn read_exact<S: Stream>(
     bytes: &mut [u8],
     deadline: Instant,
     phase: Phase,
+    now: &impl Fn() -> Instant,
 ) -> Result<usize, Error> {
     let mut read = 0usize;
     while read < bytes.len() {
-        let timeout = remaining(deadline, phase, read)?;
+        let timeout = remaining(deadline, now(), phase, read)?;
         stream
             .set_read_timeout(Some(timeout))
             .map_err(|source| Error::ConfigureTimeout {
@@ -611,7 +631,7 @@ fn read_exact<S: Stream>(
             }
         }
     }
-    let _ = remaining(deadline, phase, read)?;
+    let _ = remaining(deadline, now(), phase, read)?;
     Ok(read)
 }
 
@@ -653,6 +673,10 @@ mod tests {
     impl Connector for ScriptedConnector {
         type Stream = ScriptedStream;
 
+        fn now(&self) -> Instant {
+            self.stream.state.lock().unwrap().now
+        }
+
         fn connect(&self, _endpoint: SocketAddr, _timeout: Duration) -> io::Result<Self::Stream> {
             if let Some(kind) = self.connect_error {
                 return Err(io::Error::from(kind));
@@ -667,6 +691,7 @@ mod tests {
     }
 
     struct ScriptedState {
+        now: Instant,
         input: Cursor<Vec<u8>>,
         output: Vec<u8>,
         read_chunks: VecDeque<usize>,
@@ -684,6 +709,7 @@ mod tests {
         fn new(input: Vec<u8>) -> Self {
             Self {
                 state: Arc::new(Mutex::new(ScriptedState {
+                    now: Instant::now(),
                     input: Cursor::new(input),
                     output: Vec::new(),
                     read_chunks: VecDeque::new(),
@@ -706,15 +732,11 @@ mod tests {
     enum Pacing {
         /// Deliver immediately.
         Prompt,
-        /// Sleep past the whole budget the caller just set for this read, so
-        /// the read always completes after the deadline no matter how long the
-        /// preceding phases took. Reading the budget back off the stream is
-        /// what makes the outcome independent of the wall clock: a fixed delay
-        /// only outlasts a fixed timeout when the machine is not loaded.
+        /// Advance virtual time past the timeout installed for this read.
         PastDeadline,
     }
 
-    /// How far past the caller's budget a [`Pacing::PastDeadline`] read sleeps.
+    /// How far past the caller's budget virtual time advances.
     const OVERRUN_MARGIN: Duration = Duration::from_millis(1);
 
     impl Read for ScriptedStream {
@@ -738,7 +760,7 @@ mod tests {
                 }
             };
             if let Some(overrun) = overrun {
-                std::thread::sleep(overrun);
+                self.state.lock().unwrap().now += overrun;
             }
             let mut state = self.state.lock().unwrap();
             let limit = state.read_chunks.pop_front().unwrap_or(bytes.len());
@@ -751,7 +773,7 @@ mod tests {
         fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
             let delay = self.state.lock().unwrap().write_delays.pop_front();
             if let Some(delay) = delay {
-                std::thread::sleep(delay);
+                self.state.lock().unwrap().now += delay;
             }
             let mut state = self.state.lock().unwrap();
             if state.write_interrupts != 0 {
@@ -806,10 +828,7 @@ mod tests {
         }
     }
 
-    /// The budget a deadline-crossing test hands the exchange. Every phase
-    /// before the scripted overrun is in-memory work, so this only has to
-    /// outlast scheduler noise; the overrun itself sleeps the whole remaining
-    /// budget, so it also bounds how long such a test takes.
+    /// Budget measured entirely by the scripted monotonic clock.
     const SCRIPTED_TIMEOUT: Duration = Duration::from_millis(50);
 
     fn request(query: &[u8]) -> Request<'_> {

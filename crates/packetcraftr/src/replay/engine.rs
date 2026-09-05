@@ -80,6 +80,7 @@ where
     enforce_deadline(&deadline, 0)?;
     let source_format = reader.format();
     let mut progress = Progress::default();
+    let anchor = clock.now();
 
     loop {
         let source_index = progress.frames_read;
@@ -104,7 +105,6 @@ where
             &progress,
             &read.frame,
             source_index,
-            &deadline,
         )?;
         authorize_frame(
             authorizer,
@@ -130,7 +130,18 @@ where
             &read.frame,
             &route.plan,
         )?;
-        pace(clock, &mut deadline, source_index, plan.delay)?;
+        // Overdue frames are sent immediately; later targets stay on the same anchor.
+        let target = anchor.checked_add(plan.next_duration).ok_or_else(|| {
+            duration_limit(
+                source_index,
+                DeadlineExceeded {
+                    actual: Duration::MAX,
+                    limit: limits.max_duration,
+                },
+            )
+        })?;
+        let remaining = target.saturating_duration_since(clock.now());
+        pace(clock, &mut deadline, source_index, remaining)?;
         let transmission =
             transmit_frame(transmitter, &deadline, source_index, &route, &read.frame)?;
 
@@ -245,7 +256,6 @@ fn plan_frame(
     progress: &Progress,
     frame: &Frame,
     source_index: u64,
-    deadline: &Deadline,
 ) -> Result<FramePlan, Error> {
     let next_bytes = progress
         .bytes_transmitted
@@ -280,9 +290,6 @@ fn plan_frame(
             limit: limits.max_duration,
         });
     }
-    deadline
-        .check_additional(delay)
-        .map_err(|error| duration_limit(source_index, error))?;
     let next_completed =
         progress
             .frames_transmitted
@@ -454,5 +461,68 @@ fn duration_limit(source_index: u64, error: DeadlineExceeded) -> Error {
         source_index,
         actual: error.actual,
         limit: error.limit,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+    use super::*;
+    use crate::test_fixtures::RecordingClock;
+    use packetcraftr_core::frame::LinkType;
+    use packetcraftr_netio::interface::Id;
+    use std::time::{Instant, UNIX_EPOCH};
+
+    #[test]
+    fn processing_time_leaves_only_the_remaining_anchored_wait_to_budget() {
+        let anchor = Instant::now();
+        let options = Options {
+            interface: Id {
+                name: "test0".to_owned(),
+                index: 7,
+            },
+            link_mode: LinkMode::Auto,
+            timing: Timing::Original,
+            limits: Limits {
+                max_duration: Duration::from_secs(12),
+                ..Limits::default()
+            },
+        };
+        let mut deadline = Deadline::with_time_source(options.limits.max_duration, move || anchor);
+        deadline.account(Duration::from_secs(5)).unwrap();
+        let progress = Progress {
+            frames_transmitted: 1,
+            previous_timestamp: Some(UNIX_EPOCH),
+            has_previous: true,
+            ..Progress::default()
+        };
+        let frame = Frame::new(
+            UNIX_EPOCH + Duration::from_secs(10),
+            LinkType::ETHERNET,
+            vec![1],
+        )
+        .unwrap();
+        let plan = plan_frame(
+            &options,
+            &options.limits,
+            options.timing,
+            &progress,
+            &frame,
+            1,
+        )
+        .unwrap();
+        assert_eq!(plan.next_duration, Duration::from_secs(10));
+        let remaining =
+            (anchor + plan.next_duration).duration_since(anchor + Duration::from_secs(5));
+        let mut clock = RecordingClock::default();
+        pace(&mut clock, &mut deadline, 1, remaining).unwrap();
+        assert_eq!(clock.delays, [Duration::from_secs(5)]);
+        assert_eq!(deadline.remaining().unwrap(), Duration::from_secs(2));
+
+        assert!(matches!(
+            pace(&mut clock, &mut deadline, 2, Duration::from_secs(3)),
+            Err(Error::DurationLimit { .. })
+        ));
+        assert_eq!(clock.delays.len(), 1);
     }
 }

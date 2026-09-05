@@ -25,6 +25,7 @@ pub use crate::probe::Transport;
 pub struct Limits {
     pub max_ports: usize,
     pub max_probes: usize,
+    /// Upper bound on batch size; execution currently uses one correlated probe per batch.
     pub batch_size: usize,
     pub max_duration: Duration,
     pub max_evidence_frames: usize,

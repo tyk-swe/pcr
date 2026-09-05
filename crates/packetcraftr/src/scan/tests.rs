@@ -50,7 +50,7 @@ fn tcp_scan_request(target: Target) -> Request {
 #[derive(Default)]
 struct TimeoutExecutor {
     batches: Vec<(u32, Vec<Option<u16>>)>,
-    invalid_sent_index: Option<usize>,
+    invalid_sent_sequence: Option<u64>,
 }
 
 impl Executor<Batch> for TimeoutExecutor {
@@ -77,12 +77,12 @@ impl Executor<Batch> for TimeoutExecutor {
                         "fd00::1".parse().unwrap();
                 }
             }
+            if self.invalid_sent_sequence == Some(probe.sequence) {
+                packet.get_mut::<Tcp>().unwrap().sequence ^= 1;
+            }
             let receipt = crate::evidence::test_sent_packet(packet);
             bytes += u64::try_from(receipt.bytes_sent()).unwrap();
             sent.push(receipt);
-        }
-        if let Some(index) = self.invalid_sent_index {
-            sent[index] = sent[0].clone();
         }
         Ok(Execution {
             permit: batch.permit,
@@ -180,13 +180,17 @@ fn scan_batching_attempts_rate_and_timeout_evidence_are_deterministic() {
     assert_eq!(
         executor.batches,
         vec![
-            (1, vec![Some(80), Some(81)]),
-            (1, vec![Some(82), Some(83)]),
-            (2, vec![Some(80), Some(81)]),
-            (2, vec![Some(82), Some(83)]),
+            (1, vec![Some(80)]),
+            (1, vec![Some(81)]),
+            (1, vec![Some(82)]),
+            (1, vec![Some(83)]),
+            (2, vec![Some(80)]),
+            (2, vec![Some(81)]),
+            (2, vec![Some(82)]),
+            (2, vec![Some(83)]),
         ]
     );
-    assert_eq!(clock.delays, vec![Duration::from_secs(1); 3]);
+    assert_eq!(clock.delays, vec![Duration::from_millis(500); 7]);
     assert_eq!(result.endpoints.len(), 4);
     assert!(result.endpoints.iter().all(|endpoint| {
         endpoint.classification == Classification::Timeout
@@ -198,7 +202,7 @@ fn scan_batching_attempts_rate_and_timeout_evidence_are_deterministic() {
     }));
     assert_eq!(result.stats.packets_attempted, 8);
     assert_eq!(result.stats.packets_completed, 8);
-    assert_eq!(result.stats.elapsed, Duration::from_millis(3_004));
+    assert_eq!(result.stats.elapsed, Duration::from_millis(3_508));
 }
 
 #[test]
@@ -390,7 +394,7 @@ fn scan_invalid_sent_evidence_reports_the_exact_probe_sequence() {
         },
         &packetcraftr_core::protocol::builtin::registry(),
         &mut TimeoutExecutor {
-            invalid_sent_index: Some(1),
+            invalid_sent_sequence: Some(1),
             ..TimeoutExecutor::default()
         },
         &mut NoopClock,

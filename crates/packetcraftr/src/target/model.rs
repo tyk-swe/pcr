@@ -10,9 +10,17 @@ use thiserror::Error;
 use packetcraftr_core::error::{Classification, Classified, Kind};
 
 /// Validated, canonical ASCII DNS hostname used by live target resolution.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
 #[serde(transparent)]
 pub struct Hostname(String);
+
+impl<'de> Deserialize<'de> for Hostname {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        String::deserialize(deserializer)?
+            .parse()
+            .map_err(serde::de::Error::custom)
+    }
+}
 
 impl Hostname {
     pub fn as_str(&self) -> &str {
@@ -260,5 +268,20 @@ impl Resolver for SystemResolver {
             });
         }
         Ok(addresses)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+    use super::*;
+
+    #[test]
+    fn hostname_deserialization_validates_and_canonicalizes() {
+        let name: Hostname = serde_json::from_str("\"EXAMPLE.COM.\"").unwrap();
+        assert_eq!(name.as_str(), "example.com");
+        for invalid in ["", "a..b", "-bad.example", "bad_.example", "é.example"] {
+            assert!(serde_json::from_value::<Hostname>(serde_json::json!(invalid)).is_err());
+        }
     }
 }

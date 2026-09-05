@@ -35,12 +35,18 @@ impl Clock for NoopClock {
 #[derive(Default)]
 pub(crate) struct RecordingClock {
     pub(crate) delays: Vec<Duration>,
+    instant: Option<std::time::Instant>,
 }
 
 impl Clock for RecordingClock {
     type Error = Infallible;
 
+    fn now(&mut self) -> std::time::Instant {
+        *self.instant.get_or_insert_with(std::time::Instant::now)
+    }
+
     fn sleep(&mut self, delay: Duration) -> Result<(), Self::Error> {
+        self.instant = self.now().checked_add(delay);
         self.delays.push(delay);
         Ok(())
     }

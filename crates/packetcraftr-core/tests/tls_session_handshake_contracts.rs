@@ -282,3 +282,28 @@ fn udp_frames_on_the_quic_port_are_counted_rather_than_dropped_silently() {
     assert_eq!(sessions.len(), 1);
     assert_eq!(summary.udp_443_frames, 2);
 }
+
+#[test]
+fn fin_delivers_final_server_hello_or_alert_before_closing() {
+    use packetcraftr_core::protocol::transport::Tcp;
+    for (payload, status) in [
+        (
+            handshake_record(&server_hello(&ServerHelloSpec::default())),
+            Status::Complete,
+        ),
+        (alert(2, ALERT_HANDSHAKE_FAILURE), Status::Alert),
+    ] {
+        let mut capture = Capture::new();
+        let mut stream = Stream::new(40_000);
+        capture.open(&mut stream);
+        capture.client(
+            &mut stream,
+            &handshake_record(&client_hello(&ClientHelloSpec::default())),
+        );
+        let spec = capture.server_spec(&stream, Tcp::ACK | Tcp::FIN);
+        capture.push(spec, &payload);
+        let (sessions, _) = assemble_default(&capture);
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].status, status);
+    }
+}

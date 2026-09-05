@@ -32,6 +32,7 @@ use packetcraftr::{BoundaryError, Client, clock, dns, policy, scan, traceroute};
 struct IoState {
     events: Mutex<Vec<&'static str>>,
     captured: Mutex<VecDeque<capture::Captured>>,
+    sent: Mutex<Vec<Bytes>>,
     capture_requests: Mutex<Vec<capture::Request>>,
     shutdown_calls: AtomicUsize,
     fail_shutdown_at: usize,
@@ -46,6 +47,7 @@ impl transmit::Sender for FakeIo {
         frame: transmit::Frame<'_>,
     ) -> Result<transmit::Report, packetcraftr::netio::Error> {
         self.0.events.lock().unwrap().push("send");
+        self.0.sent.lock().unwrap().push(frame.bytes().clone());
         Ok(transmit::Report::committed(
             frame.bytes().len(),
             frame.bytes().clone(),
@@ -673,4 +675,49 @@ fn dns_sink_failure_stops_after_capture_shutdown() {
 
     assert!(matches!(error, dns::Error::Output { .. }), "{error:?}");
     assert_one_clean_exchange(&harness.state);
+}
+
+#[test]
+fn scan_materializes_distinct_correlated_identities_with_a_larger_batch_limit() {
+    let harness = Harness::new(IoState::default());
+    let (registry, mut executor, mut authorizer) = harness.parts();
+    let request = scan::Request {
+        target: Target::Address(DESTINATION),
+        transport: scan::Transport::Tcp,
+        address_family: packetcraftr::target::Family::Any,
+        ports: vec![80, 81, 82],
+        attempts: 1,
+        timeout: Duration::from_millis(100),
+        probes_per_second: None,
+        limits: scan::Limits {
+            batch_size: 3,
+            ..scan::Limits::default()
+        },
+    };
+    scan::run_with_events(
+        &request,
+        &mut authorizer,
+        &registry,
+        &mut executor,
+        &mut clock::SystemClock,
+        &Runtime::default(),
+        |_| Ok(()),
+    )
+    .unwrap();
+    let sent = harness.state.sent.lock().unwrap();
+    assert_eq!(sent.len(), 3);
+    for (index, frame) in sent.iter().enumerate() {
+        // The fixture emits raw IPv4 with a 20-byte header followed by TCP.
+        assert_eq!(frame[0], 0x45);
+        assert_eq!(
+            u16::from_be_bytes([frame[22], frame[23]]),
+            80 + u16::try_from(index).unwrap()
+        );
+        assert_eq!(
+            u32::from_be_bytes(frame[24..28].try_into().unwrap()),
+            u32::try_from(index).unwrap()
+        );
+    }
+    assert_ne!(&sent[0][4..6], &sent[1][4..6]);
+    assert_ne!(&sent[1][4..6], &sent[2][4..6]);
 }

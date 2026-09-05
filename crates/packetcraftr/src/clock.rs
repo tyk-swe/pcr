@@ -3,13 +3,19 @@
 
 use std::convert::Infallible;
 use std::error::Error;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use packetcraftr_core::budget::Deadline;
 
 /// Injectable delay seam shared by rate-limited and replay workflows.
 pub trait Clock {
     type Error: Error + Send + Sync + 'static;
+
+    /// Monotonic time used to anchor absolute replay targets. Deterministic
+    /// clocks must advance this value when sleeping or simulating work.
+    fn now(&mut self) -> Instant {
+        Instant::now()
+    }
 
     fn sleep(&mut self, delay: Duration) -> Result<(), Self::Error>;
 }

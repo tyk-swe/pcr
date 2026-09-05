@@ -10,7 +10,8 @@ pub struct SegmentRoute {
     pub active_destination: Ipv6Addr,
     pub final_destination: Ipv6Addr,
     pub segments: Vec<Ipv6Addr>,
-    pub active_index: usize,
+    /// Index in `segments`, or None when the reduced form omits the active segment.
+    pub active_index: Option<usize>,
 }
 
 /// Validates the routing state shared by typed packets and captured SRH bytes.
@@ -32,7 +33,7 @@ pub fn validate_segment_route(
             expected: expected_last,
         });
     }
-    if segments_left > last_entry {
+    if u16::from(segments_left) > u16::from(last_entry).saturating_add(1) {
         return Err(Error::SegmentsLeft {
             segments_left,
             last_entry,
@@ -41,12 +42,14 @@ pub fn validate_segment_route(
     if flags != 0 {
         return Err(Error::SegmentFlags);
     }
-    let active_index = usize::from(last_entry.saturating_sub(segments_left));
-    #[expect(
-        clippy::indexing_slicing,
-        reason = "segments_left <= last_entry == segments.len() - 1 is checked above"
-    )]
-    let active_destination = segments[active_index];
+    let active_index = last_entry.checked_sub(segments_left).map(usize::from);
+    let active_destination = match active_index {
+        Some(index) => *segments.get(index).ok_or(Error::SegmentCount)?,
+        None if header_destination.is_unspecified() => {
+            return Err(Error::ReducedSegmentDestination);
+        }
+        None => header_destination,
+    };
     if !header_destination.is_unspecified() && header_destination != active_destination {
         return Err(Error::SegmentDestinationMismatch {
             header: header_destination,

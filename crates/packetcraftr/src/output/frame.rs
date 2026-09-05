@@ -336,14 +336,14 @@ mod tests {
     }
 
     /// Encoding an instant and rendering it recovers the offset it was built
-    /// from, on both sides of the epoch.
+    /// from, on both sides of the epoch. Windows SystemTime uses 100 ns ticks.
     #[test]
     fn every_encoded_instant_renders_its_own_offset_from_the_epoch() {
         for (offset, before_epoch, expected) in [
             (Duration::ZERO, false, "0.000000000"),
-            (Duration::from_nanos(1), false, "0.000000001"),
+            (Duration::from_nanos(100), false, "0.000000100"),
             (Duration::new(3, 250_000_000), false, "3.250000000"),
-            (Duration::from_nanos(1), true, "-0.000000001"),
+            (Duration::from_nanos(100), true, "-0.000000100"),
             (Duration::new(2, 250_000_000), true, "-2.250000000"),
             (Duration::new(3, 0), true, "-3.000000000"),
         ] {

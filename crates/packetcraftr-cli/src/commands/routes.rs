@@ -15,9 +15,15 @@ pub(super) const AFTER_LONG_HELP: &str = r#"Examples:
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
-    /// Report every enumerated interface, including ones that are not up.
+    /// Report all interfaces with a usable MTU, including ones that are not up.
     #[arg(long)]
     pub(crate) all: bool,
+}
+
+impl Args {
+    fn includes(&self, interface: &net::interface::Info) -> bool {
+        (self.all || interface.flags.up) && interface.mtu.is_some_and(|mtu| mtu != 0)
+    }
 }
 
 pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
@@ -29,7 +35,7 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
     let mut routes = Vec::new();
     for interface in interfaces
         .into_iter()
-        .filter(|interface| arguments.all || interface.flags.up)
+        .filter(|interface| arguments.includes(interface))
     {
         let route = provider.lookup_interface(&interface.id).map_err(|source| {
             CliError::from_classification(
@@ -67,4 +73,39 @@ fn route_line(route: &output::network::Decision) -> String {
         route.capability,
         route.link_type
     )
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+
+    use super::*;
+
+    #[test]
+    fn route_listing_requires_a_usable_mtu_even_when_including_down_interfaces() {
+        let mut interface = net::interface::Info {
+            id: net::interface::Id {
+                name: "fixture0".to_owned(),
+                index: 7,
+            },
+            description: None,
+            mac_address: None,
+            addresses: Vec::new(),
+            flags: net::interface::Flags::default(),
+            mtu: None,
+            capability: net::link::Capability::Layer3,
+            link_type: packetcraftr::core::frame::LinkType::RAW,
+        };
+        for up in [false, true] {
+            interface.flags.up = up;
+            for mtu in [None, Some(0)] {
+                interface.mtu = mtu;
+                assert!(!Args { all: false }.includes(&interface));
+                assert!(!Args { all: true }.includes(&interface));
+            }
+            interface.mtu = Some(1_500);
+            assert_eq!(Args { all: false }.includes(&interface), up);
+            assert!(Args { all: true }.includes(&interface));
+        }
+    }
 }

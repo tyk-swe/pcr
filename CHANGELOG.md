@@ -729,6 +729,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- `routes` and `routes --all` skip interfaces without a usable MTU, so macOS
+  devices that cannot supply a route decision do not abort the listing.
 - Scan execution now materializes and validates one correlated probe per batch,
   preventing reused sequence and IP identifiers. Larger batch limits currently
   execute as single-probe batches, with duration budgets adjusted accordingly.

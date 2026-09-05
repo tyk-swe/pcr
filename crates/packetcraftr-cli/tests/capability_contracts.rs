@@ -11,10 +11,7 @@ use support::{parse_json, run};
 
 /// Every failed process here must exit 4 with a `capability.*` code in both
 /// renderings; text goes to stderr with nothing on stdout, JSON goes to stdout.
-#[cfg(not(all(
-    feature = "native-interfaces",
-    any(feature = "native-layer2", feature = "native-layer3")
-)))]
+#[cfg(not(any(feature = "native-layer2", feature = "native-layer3")))]
 fn assert_capability_failure(arguments: &[&str]) {
     let text = run(arguments);
     assert_eq!(text.status.code(), Some(4), "{arguments:?}: {text:?}");
@@ -38,9 +35,13 @@ fn assert_capability_failure(arguments: &[&str]) {
     assert!(code.starts_with("capability."), "{code}");
 }
 
-#[cfg(not(feature = "native-interfaces"))]
+#[cfg(not(any(
+    feature = "native-route",
+    feature = "native-layer2",
+    feature = "native-layer3"
+)))]
 #[test]
-fn interfaces_and_routes_fail_closed_without_native_interfaces() {
+fn interfaces_and_routes_fail_closed_without_a_native_route_backend() {
     assert_capability_failure(&["interfaces"]);
     assert_capability_failure(&["routes"]);
 }
@@ -57,7 +58,11 @@ fn send_fails_closed_without_a_native_transmit_backend() {
     ]);
 }
 
-#[cfg(feature = "native-interfaces")]
+#[cfg(any(
+    feature = "native-route",
+    feature = "native-layer2",
+    feature = "native-layer3"
+))]
 #[test]
 fn interfaces_enumerates_the_loopback_interface() {
     let text = run(&["interfaces"]);
@@ -95,7 +100,11 @@ fn interfaces_enumerates_the_loopback_interface() {
     );
 }
 
-#[cfg(feature = "native-interfaces")]
+#[cfg(any(
+    feature = "native-route",
+    feature = "native-layer2",
+    feature = "native-layer3"
+))]
 #[test]
 fn interfaces_filters_to_one_interface_by_name_or_index() {
     let json = run(&["--output", "json", "interfaces"]);
@@ -134,29 +143,57 @@ fn interfaces_filters_to_one_interface_by_name_or_index() {
     );
 }
 
-#[cfg(feature = "native-route")]
+#[cfg(any(
+    feature = "native-route",
+    feature = "native-layer2",
+    feature = "native-layer3"
+))]
 #[test]
-fn routes_reports_every_enumerated_interface_once() {
-    let json = run(&["--output", "json", "routes"]);
-    assert!(json.status.success(), "{json:?}");
-    let value = parse_json(&json);
-    assert_eq!(value["command"], "routes");
-    let mut names = value["result"]["routes"]
-        .as_array()
-        .expect("routes is an array")
-        .iter()
-        .map(|route| {
-            route["interface"]["name"]
-                .as_str()
-                .expect("interface name is a string")
-                .to_owned()
-        })
-        .collect::<Vec<_>>();
-    assert!(!names.is_empty(), "at least the loopback interface routes");
-    let listed = names.len();
-    names.sort();
-    names.dedup();
-    assert_eq!(names.len(), listed, "each interface appears once");
+fn routes_reports_each_eligible_interface_once() {
+    let interfaces = run(&["--output", "json", "interfaces"]);
+    assert!(interfaces.status.success(), "{interfaces:?}");
+    let interfaces = parse_json(&interfaces);
+    for all in [false, true] {
+        let mut arguments = vec!["--output", "json", "routes"];
+        if all {
+            arguments.push("--all");
+        }
+        let json = run(&arguments);
+        assert!(json.status.success(), "{json:?}");
+        let value = parse_json(&json);
+        assert_eq!(value["command"], "routes");
+        let mut names = value["result"]["routes"]
+            .as_array()
+            .expect("routes is an array")
+            .iter()
+            .map(|route| {
+                route["interface"]["name"]
+                    .as_str()
+                    .expect("interface name is a string")
+            })
+            .collect::<Vec<_>>();
+        let mut expected = interfaces["result"]["interfaces"]
+            .as_array()
+            .expect("interfaces is an array")
+            .iter()
+            .filter(|interface| {
+                (all || interface["flags"]["up"] == true)
+                    && interface["mtu"].as_u64().is_some_and(|mtu| mtu > 0)
+            })
+            .map(|interface| {
+                interface["name"]
+                    .as_str()
+                    .expect("interface name is a string")
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            !expected.is_empty(),
+            "at least the loopback interface routes"
+        );
+        names.sort();
+        expected.sort();
+        assert_eq!(names, expected, "each eligible interface appears once");
+    }
 
     let text = run(&["routes", "--all"]);
     assert!(text.status.success(), "{text:?}");

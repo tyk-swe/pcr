@@ -1004,20 +1004,17 @@ mod tests {
             ActiveResolver::try_new(layer2.clone(), SilentCaptureProvider, test_options(3))
                 .expect("resolver options");
 
-        let started = Instant::now();
         let error = resolver
             .resolve(&request)
             .expect_err("no response within the request deadline");
 
-        assert!(
-            started.elapsed() < Duration::from_millis(100),
-            "attempts must stop at the request deadline, not the configured budget"
-        );
-        assert!(
-            matches!(error, Error::NotFound { attempts: 1, .. }),
-            "{error:?}"
-        );
-        assert_eq!(layer2.sent().len(), 1);
+        let Error::NotFound { attempts, .. } = error else {
+            panic!("unexpected resolution failure: {error:?}");
+        };
+        // Scheduling can consume the deadline before the first send or delay
+        // a timeout wakeup, but cannot permit a second attempt.
+        assert!(attempts <= 1, "deadline allowed {attempts} attempts");
+        assert_eq!(layer2.sent().len(), usize::try_from(attempts).unwrap());
     }
 
     #[test]

@@ -6,6 +6,7 @@ on:
   workflow_dispatch:
   pull_request:
     paths:
+      - ".github/workflows/fuzz.yml"
       - "fuzz/**"
       - "crates/packetcraftr-core/**"
       - "examples/documents/**"
@@ -63,7 +64,9 @@ jobs:
             tls_assembly) dictionary+=("-dict=dictionaries/tls.dict") ;;
             filter_parse|packet_build) dictionary+=("-dict=dictionaries/filter.dict") ;;
           esac
-          cargo +nightly fuzz run "${{ matrix.target }}" "${corpus[@]}" -- "${dictionary[@]}" -max_total_time=30
+          # Prebuilt cargo-fuzz may default to its own musl build target;
+          # AddressSanitizer needs the runner's dynamically linked GNU target.
+          cargo +nightly fuzz run --target x86_64-unknown-linux-gnu "${{ matrix.target }}" "${corpus[@]}" -- "${dictionary[@]}" -max_total_time=30
         working-directory: fuzz
       - name: Upload artifacts on failure
         if: failure()

@@ -6,11 +6,13 @@
 //! A command that fits in one screen stays in one file (`interfaces.rs`,
 //! `routes.rs`, `send.rs`). A command splits into `arguments.rs`, `rendering.rs`,
 //! and sometimes `conversion.rs` once those parts stop fitting together, which
-//! is most of the live and capture-reading commands. [`format`] narrows the
-//! global `--output` choice to what each command publishes; [`execution`] and
+//! is most of the live and capture-reading commands. [`Command::run`] validates
+//! the global `--output` choice before dispatch; [`execution`] and
 //! [`target_workflow`] hold what the probing commands share, and
 //! [`render_aggregate_rows`] renders the Text/Json match the aggregate
 //! commands share.
+
+use packetcraftr::output::contract::Format;
 
 use packetcraftr::core::error::Kind;
 
@@ -30,7 +32,6 @@ mod exchange;
 mod execution;
 mod expert;
 mod follow;
-mod format;
 mod fuzz;
 mod interfaces;
 mod offline_analysis;
@@ -140,13 +141,11 @@ impl Command {
 
     /// Dispatches to the selected command.
     ///
-    /// Each command's `run` narrows the global format first, so an unsupported
-    /// `--output` is refused before any work is done.
-    pub(crate) fn run(
-        self,
-        format: output::contract::Format,
-        stream: &StreamEncoder,
-    ) -> Result<(), CliError> {
+    /// Rejects unsupported output formats before any command performs work.
+    pub(crate) fn run(self, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+        self.kind()
+            .require_format(format)
+            .map_err(CliError::classified)?;
         match self {
             Self::Build(arguments) => build::run(arguments, format),
             Self::Dissect(arguments) => dissect::run(arguments, format),
@@ -179,19 +178,20 @@ fn registry() -> Result<Arc<core::registry::Registry>, CliError> {
 /// document.
 fn render_aggregate_rows<T, R: serde::Serialize>(
     command: output::contract::Command,
-    format: format::AggregateFormat,
+    format: Format,
     result: &R,
     rows: &[T],
     line: impl Fn(&T) -> String,
 ) -> Result<(), CliError> {
     match format {
-        format::AggregateFormat::Text => {
+        Format::Text => {
             for row in rows {
                 write_stdout_line(format_args!("{}", line(row)))?;
             }
             Ok(())
         }
-        format::AggregateFormat::Json => emit_aggregate(command, result, Vec::new()),
+        Format::Json => emit_aggregate(command, result, Vec::new()),
+        _ => unreachable!("command dispatch validated the output format"),
     }
 }
 

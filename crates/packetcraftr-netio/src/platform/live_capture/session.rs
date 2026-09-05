@@ -129,22 +129,24 @@ impl NativeCaptureSession {
         let worker = thread::Builder::new()
             .name(worker_name)
             .spawn(move || {
-                let panic_shared = Arc::clone(&worker_shared);
-                if catch_unwind(AssertUnwindSafe(|| {
+                let terminal_shared = Arc::clone(&worker_shared);
+                let result = catch_unwind(AssertUnwindSafe(|| {
                     capture_worker(
                         source.as_mut(),
                         worker_shared,
                         worker_stop,
                         interface_index,
                         link_type,
-                    );
+                    )
                 }))
-                .is_err()
-                {
-                    panic_shared.set_error(Error::Capture {
+                .unwrap_or_else(|_| {
+                    Err(Error::Capture {
                         message: "native capture worker panicked".to_owned(),
                         source: None,
-                    });
+                    })
+                });
+                if let Err(error) = result {
+                    terminal_shared.set_error(error);
                 }
             })
             .map_err(|error| Error::Capture {
@@ -357,7 +359,7 @@ mod tests {
         capture::{Limits, Metadata},
         interface::Id as InterfaceId,
         platform::worker_reaper::{
-            ReapTask, TransferOutcome,
+            TransferOutcome,
             test_support::{client_with_receiver, retained_tasks, start_with},
         },
     };
@@ -788,10 +790,7 @@ mod tests {
     #[test]
     fn session_drop_is_no_panic_when_reaper_queue_is_saturated() {
         let (reaper, _receiver) = client_with_receiver(1, 1);
-        assert_eq!(
-            reaper.transfer(ReapTask::new(|| {})),
-            TransferOutcome::Queued
-        );
+        assert_eq!(reaper.transfer(Box::new(|| {})), TransferOutcome::Queued);
         let (release_sender, release_receiver) = mpsc::channel();
         let (started_sender, started_receiver) = mpsc::channel();
         let session = NativeCaptureSession::spawn_with_reaper(
@@ -878,7 +877,7 @@ mod tests {
         let task = receiver
             .recv_timeout(Duration::from_secs(1))
             .expect("drop transfers the complete capture bundle");
-        let reap = thread::spawn(move || task.run());
+        let reap = thread::spawn(task);
         assert!(matches!(
             interrupt_drop_receiver.try_recv(),
             Err(mpsc::TryRecvError::Empty)

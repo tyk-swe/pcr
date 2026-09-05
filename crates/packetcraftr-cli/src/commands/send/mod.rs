@@ -1,13 +1,14 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use packetcraftr::output::contract::Format;
+
 pub(super) use crate::command_options::SendArgs;
 
 use std::sync::Arc;
 
 use packetcraftr::{analysis::pcap as capture, core, output};
 
-use super::format::SendFormat;
 use super::registry;
 use crate::errors::CliError;
 use crate::rendering::{
@@ -58,8 +59,7 @@ pub(super) fn prepare(arguments: SendArgs) -> Result<PreparedSend, CliError> {
     })
 }
 
-pub(super) fn run(arguments: SendArgs, format: output::contract::Format) -> Result<(), CliError> {
-    let format = SendFormat::narrow(output::contract::Command::Send, format)?;
+pub(super) fn run(arguments: SendArgs, format: Format) -> Result<(), CliError> {
     let prepared = prepare(arguments)?;
     let report = prepared
         .client
@@ -69,7 +69,7 @@ pub(super) fn run(arguments: SendArgs, format: output::contract::Format) -> Resu
     let (result, diagnostics, stats) =
         output::send::Report::try_from_report(report).map_err(CliError::classified)?;
     match format {
-        SendFormat::Text => {
+        Format::Text => {
             write_summary_line(format_args!(
                 "sent {} bytes via {} (index {}, {})",
                 result.frame.length,
@@ -79,12 +79,13 @@ pub(super) fn run(arguments: SendArgs, format: output::contract::Format) -> Resu
             ))?;
             render_diagnostics_text(&diagnostics)
         }
-        SendFormat::Json => {
+        Format::Json => {
             emit_aggregate_with_stats(output::contract::Command::Send, result, diagnostics, stats)
         }
-        SendFormat::Hex => write_plain_line(format_args!("{}", result.frame.bytes_hex())),
-        SendFormat::Raw => write_raw(result.frame.bytes()),
-        SendFormat::Pcap => write_capture_file(capture::Format::Pcap, [capture_frame]),
-        SendFormat::PcapNg => write_capture_file(capture::Format::PcapNg, [capture_frame]),
+        Format::Hex => write_plain_line(format_args!("{}", result.frame.bytes_hex())),
+        Format::Raw => write_raw(result.frame.bytes()),
+        Format::Pcap => write_capture_file(capture::Format::Pcap, [capture_frame]),
+        Format::PcapNg => write_capture_file(capture::Format::PcapNg, [capture_frame]),
+        _ => unreachable!("command dispatch validated the output format"),
     }
 }

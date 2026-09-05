@@ -3,6 +3,8 @@
 
 //! Fuzz CLI command logic.
 
+use packetcraftr::output::contract::Format;
+
 use packetcraftr::core::error::Kind;
 
 pub(super) mod arguments;
@@ -21,7 +23,6 @@ use crate::rendering::{StreamEncoder, emit_aggregate_with_stats};
 use crate::system::{InterfaceSelector, client, exchange};
 
 use super::execution::Executor;
-use super::format::{AggregateFormat, ToolFormat};
 
 struct PreparedLive {
     options: packetcraftr::fuzz::LiveOptions,
@@ -30,12 +31,7 @@ struct PreparedLive {
     interface: Option<InterfaceSelector>,
 }
 
-pub(super) fn run(
-    arguments: Args,
-    format: output::contract::Format,
-    stream: &StreamEncoder,
-) -> Result<(), CliError> {
-    let format = ToolFormat::narrow(output::contract::Command::Fuzz, format)?;
+pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
     let request = prepare_request(&arguments)?;
     let live = prepare_live(&arguments, &request)?;
     let registry = registry()?;
@@ -133,7 +129,7 @@ fn execute_and_render(
     packet: core::Packet,
     registry: Arc<core::registry::Registry>,
     live: Option<PreparedLive>,
-    format: ToolFormat,
+    format: Format,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     if let Some(live) = live {
@@ -147,10 +143,10 @@ fn execute_offline(
     request: core::fuzz::Request,
     packet: core::Packet,
     registry: Arc<core::registry::Registry>,
-    format: ToolFormat,
+    format: Format,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    if format == ToolFormat::Ndjson {
+    if format == Format::Ndjson {
         let event_stream = stream.clone();
         let runtime = packetcraftr::progress::Runtime::default();
         let summary = packetcraftr::fuzz::run_offline_with_events(
@@ -168,7 +164,6 @@ fn execute_offline(
         .map_err(CliError::classified)?;
         return rendering::render_offline_complete(summary, stream);
     }
-    let format = AggregateFormat::narrow_from(output::contract::Command::Fuzz, format)?;
     let result = core::fuzz::run(&request, packet, registry).map_err(CliError::classified)?;
     let (result, diagnostics, stats) =
         output::fuzz::Report::try_from_offline(result).map_err(CliError::classified)?;
@@ -180,7 +175,7 @@ fn execute_live(
     packet: core::Packet,
     registry: Arc<core::registry::Registry>,
     live: PreparedLive,
-    format: ToolFormat,
+    format: Format,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     let mut executor = Executor {
@@ -190,7 +185,7 @@ fn execute_live(
     };
     let mut authorizer = packetcraftr::fuzz::PolicyAuthorizer::for_packets(&live.policy);
     let mut clock = packetcraftr::clock::SystemClock;
-    if format == ToolFormat::Ndjson {
+    if format == Format::Ndjson {
         let event_stream = stream.clone();
         let runtime = packetcraftr::progress::Runtime::default();
         let summary = packetcraftr::fuzz::run_with_events(
@@ -214,7 +209,6 @@ fn execute_live(
         .map_err(CliError::classified)?;
         return rendering::render_live_complete(summary, stream);
     }
-    let format = AggregateFormat::narrow_from(output::contract::Command::Fuzz, format)?;
     let result = packetcraftr::fuzz::run(
         packetcraftr::fuzz::RunInput {
             request: &request,
@@ -236,12 +230,13 @@ fn render_collected(
     result: output::fuzz::Report,
     diagnostics: Vec<core::diagnostic::Diagnostic>,
     stats: output::envelope::Stats,
-    format: AggregateFormat,
+    format: Format,
 ) -> Result<(), CliError> {
     match format {
-        AggregateFormat::Text => rendering::render_text(result, diagnostics, stats),
-        AggregateFormat::Json => {
+        Format::Text => rendering::render_text(result, diagnostics, stats),
+        Format::Json => {
             emit_aggregate_with_stats(output::contract::Command::Fuzz, result, diagnostics, stats)
         }
+        _ => unreachable!("streaming returned before aggregate rendering"),
     }
 }

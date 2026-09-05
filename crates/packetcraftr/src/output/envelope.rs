@@ -8,7 +8,6 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use packetcraftr_core::diagnostic::Diagnostic as PacketDiagnostic;
 use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 
 use super::contract::{Command, Mode, SCHEMA_V1};
@@ -118,31 +117,7 @@ impl From<&crate::fuzz::Stats> for Stats {
     }
 }
 
-pub use packetcraftr_core::diagnostic::Severity as DiagnosticSeverity;
-
-/// Output-v1 diagnostic record.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Diagnostic {
-    pub code: &'static str,
-    pub severity: DiagnosticSeverity,
-    pub message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub layer: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub field: Option<&'static str>,
-}
-
-impl From<PacketDiagnostic> for Diagnostic {
-    fn from(value: PacketDiagnostic) -> Self {
-        Self {
-            code: value.code,
-            severity: value.severity,
-            message: value.message,
-            layer: value.layer,
-            field: value.field,
-        }
-    }
-}
+pub use packetcraftr_core::diagnostic::{Diagnostic, Severity as DiagnosticSeverity};
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
@@ -169,14 +144,14 @@ pub struct Envelope<T> {
 
 impl<T> Envelope<T> {
     /// One aggregate JSON success.
-    pub fn success(command: Command, result: T, diagnostics: Vec<PacketDiagnostic>) -> Self {
+    pub fn success(command: Command, result: T, diagnostics: Vec<Diagnostic>) -> Self {
         Self {
             schema: SCHEMA_V1,
             command: Some(command),
             mode: Mode::Aggregate,
             sequence: None,
             payload: OutputPayload::Success { result },
-            diagnostics: diagnostics.into_iter().map(Into::into).collect(),
+            diagnostics,
             stats: None,
         }
     }
@@ -186,7 +161,7 @@ impl<T> Envelope<T> {
         command: Command,
         sequence: u64,
         result: T,
-        diagnostics: Vec<PacketDiagnostic>,
+        diagnostics: Vec<Diagnostic>,
     ) -> Self {
         Self {
             schema: SCHEMA_V1,
@@ -194,7 +169,7 @@ impl<T> Envelope<T> {
             mode: Mode::Stream,
             sequence: Some(sequence),
             payload: OutputPayload::Success { result },
-            diagnostics: diagnostics.into_iter().map(Into::into).collect(),
+            diagnostics,
             stats: None,
         }
     }

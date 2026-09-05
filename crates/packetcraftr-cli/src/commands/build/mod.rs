@@ -3,11 +3,12 @@
 
 pub(super) mod arguments;
 
+use packetcraftr::output::contract::Format;
+
 use packetcraftr::core::error::{Classification, Classified as _, Kind};
 use packetcraftr::{core, output};
 
 use self::arguments::Args;
-use super::format::BuildFormat;
 use super::registry;
 use crate::errors::CliError;
 use crate::input::read_recipe;
@@ -16,8 +17,7 @@ use crate::rendering::{
     write_stdout_line, write_summary_line,
 };
 
-pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
-    let format = BuildFormat::narrow(output::contract::Command::Build, format)?;
+pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
     let registry = registry()?;
     // Recipe byte limits bound parsing; the builder owns the requested layer budget.
     let packet = read_recipe(arguments.recipe, &registry, usize::MAX)?;
@@ -30,14 +30,15 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
         .map_err(build_error)?;
     let (result, diagnostics) = output::build::Report::from_built(built);
     match format {
-        BuildFormat::Text => {
+        Format::Text => {
             write_summary_line(format_args!("built {} bytes", result.frame.length))?;
             write_stdout_line(format_args!("{}", spaced_hex(result.frame.bytes())))?;
             render_diagnostics_text(&diagnostics)
         }
-        BuildFormat::Hex => write_plain_line(format_args!("{}", result.frame.bytes_hex())),
-        BuildFormat::Raw => write_raw(result.frame.bytes()),
-        BuildFormat::Json => emit_aggregate(output::contract::Command::Build, result, diagnostics),
+        Format::Hex => write_plain_line(format_args!("{}", result.frame.bytes_hex())),
+        Format::Raw => write_raw(result.frame.bytes()),
+        Format::Json => emit_aggregate(output::contract::Command::Build, result, diagnostics),
+        _ => unreachable!("command dispatch validated the output format"),
     }
 }
 

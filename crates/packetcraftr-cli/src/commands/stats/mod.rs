@@ -4,19 +4,19 @@
 pub(super) mod arguments;
 mod rendering;
 
+use packetcraftr::output::contract::Format;
+
 use std::time::Duration;
 
 use packetcraftr::{analysis, core, output};
 
 use self::arguments::{Args, Table};
-use super::format::AggregateFormat;
 use super::offline_analysis::{Retained, omitted_diagnostic, prepare_with_tls_ports};
 use crate::errors::CliError;
 use crate::input::open_capture;
 use crate::rendering::emit_aggregate;
 
-pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
-    let format = AggregateFormat::narrow(output::contract::Command::Stats, format)?;
+pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
     // Stats assigns conversation indices, so stream-aware filters like
     // `tcp.stream == 7` are supported here.
     let prepared = prepare_with_tls_ports(
@@ -41,10 +41,8 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
     let diagnostics = cap_table(&mut report, arguments.table, arguments.top);
 
     match format {
-        AggregateFormat::Text => {
-            rendering::render_text(arguments.table, &report, frames_read, &diagnostics)
-        }
-        AggregateFormat::Json => {
+        Format::Text => rendering::render_text(arguments.table, &report, frames_read, &diagnostics),
+        Format::Json => {
             let result = output::stats::Report::try_from_report(
                 arguments.table.into(),
                 &report,
@@ -53,6 +51,7 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
             .map_err(CliError::classified)?;
             emit_aggregate(output::contract::Command::Stats, result, diagnostics)
         }
+        _ => unreachable!("command dispatch validated the output format"),
     }
 }
 

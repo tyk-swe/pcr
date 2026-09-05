@@ -1,9 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use packetcraftr::output::contract::Format;
+
 use packetcraftr::output;
 
-use crate::commands::format::FrameFormat;
 use crate::errors::CliError;
 use crate::rendering::{
     StreamEncoder, captured_frame_text, spaced_hex, write_plain_line, write_stdout_line,
@@ -11,7 +12,7 @@ use crate::rendering::{
 
 pub(super) fn render_record(
     record: output::read::Frame,
-    format: FrameFormat,
+    format: Format,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     let output::read::Frame {
@@ -20,7 +21,7 @@ pub(super) fn render_record(
         decoded,
     } = &record;
     match format {
-        FrameFormat::Text => match decoded {
+        Format::Text => match decoded {
             None => write_stdout_line(format_args!(
                 "{source_frame}: {}",
                 captured_frame_text(frame)
@@ -40,9 +41,8 @@ pub(super) fn render_record(
                 spaced_hex(frame.bytes())
             )),
         },
-        FrameFormat::Hex => write_plain_line(format_args!("{}", frame.bytes_hex())),
-        FrameFormat::Ndjson => {
-            Ok(stream.emit_data(output::read::Event::Frame(record), Vec::new())?)
-        }
+        Format::Hex => write_plain_line(format_args!("{}", frame.bytes_hex())),
+        Format::Ndjson => Ok(stream.emit_data(output::read::Event::Frame(record), Vec::new())?),
+        _ => unreachable!("capture-file output returned before frame rendering"),
     }
 }

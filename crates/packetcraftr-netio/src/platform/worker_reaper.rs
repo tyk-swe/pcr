@@ -67,9 +67,7 @@ struct PermitPool {
     available: Mutex<usize>,
 }
 
-pub(super) struct ReapTask {
-    reap: Box<dyn FnOnce() + Send + 'static>,
-}
+pub(super) type ReapTask = Box<dyn FnOnce() + Send + 'static>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum TransferOutcome {
@@ -183,18 +181,6 @@ impl Drop for ReaperPermit {
     }
 }
 
-impl ReapTask {
-    pub(super) fn new(reap: impl FnOnce() + Send + 'static) -> Self {
-        Self {
-            reap: Box::new(reap),
-        }
-    }
-
-    pub(super) fn run(self) {
-        (self.reap)();
-    }
-}
-
 pub(super) fn shared_reaper() -> Result<ReaperClient, ReaperStartError> {
     SHARED_REAPER
         .get_or_init(|| start_reaper(REAPER_CAPACITY, spawn_reaper_thread))
@@ -258,7 +244,7 @@ fn run_reaper(receiver: SharedReceiver) {
         };
         // A defective cleanup task must not kill the shared receiver and strand
         // all later ownership transfers.
-        let _ = catch_unwind(AssertUnwindSafe(|| task.run()));
+        let _ = catch_unwind(AssertUnwindSafe(task));
     }
 }
 
@@ -320,12 +306,9 @@ mod tests {
     #[test]
     fn queue_saturation_retains_complete_task_without_panicking() {
         let (client, _receiver) = client_with_receiver(1, 1);
+        assert_eq!(client.transfer(Box::new(|| {})), TransferOutcome::Queued);
         assert_eq!(
-            client.transfer(ReapTask::new(|| {})),
-            TransferOutcome::Queued
-        );
-        assert_eq!(
-            client.transfer(ReapTask::new(|| {})),
+            client.transfer(Box::new(|| {})),
             TransferOutcome::RetainedQueueFull
         );
         assert_eq!(retained_tasks(&client), 1);
@@ -336,7 +319,7 @@ mod tests {
         let (client, receiver) = client_with_receiver(1, 1);
         drop(receiver);
         assert_eq!(
-            client.transfer(ReapTask::new(|| {})),
+            client.transfer(Box::new(|| {})),
             TransferOutcome::RetainedReaperStopped
         );
         assert_eq!(retained_tasks(&client), 1);
@@ -363,7 +346,7 @@ mod tests {
         let (release_first, release_first_receiver) = mpsc::channel();
         let (first_finished, first_finished_receiver) = mpsc::channel();
         assert_eq!(
-            client.transfer(ReapTask::new(move || {
+            client.transfer(Box::new(move || {
                 let _permit = first_permit;
                 first_started.send(()).expect("report first task start");
                 let _ = release_first_receiver.recv();
@@ -378,7 +361,7 @@ mod tests {
         let second_permit = client.reserve().expect("second cleanup reservation");
         let (second_finished, second_finished_receiver) = mpsc::channel();
         assert_eq!(
-            client.transfer(ReapTask::new(move || {
+            client.transfer(Box::new(move || {
                 let _permit = second_permit;
                 second_finished.send(()).expect("report second task finish");
             })),

@@ -14,52 +14,19 @@ use super::style::{
 };
 use crate::errors::CliError;
 
-/// The three fields a diagnostic prints as one text line.
-pub(crate) trait DiagnosticLine {
-    fn severity(&self) -> core::diagnostic::Severity;
-    fn code(&self) -> &str;
-    fn message(&self) -> &str;
-}
-
-impl DiagnosticLine for core::diagnostic::Diagnostic {
-    fn severity(&self) -> core::diagnostic::Severity {
-        self.severity
-    }
-
-    fn code(&self) -> &str {
-        self.code
-    }
-
-    fn message(&self) -> &str {
-        &self.message
-    }
-}
-
-impl DiagnosticLine for output::envelope::Diagnostic {
-    fn severity(&self) -> core::diagnostic::Severity {
-        self.severity
-    }
-
-    fn code(&self) -> &str {
-        self.code
-    }
-
-    fn message(&self) -> &str {
-        &self.message
-    }
-}
-
 /// One diagnostic line, severity spelled exactly as the JSON document spells it.
-fn diagnostic_line(diagnostic: &impl DiagnosticLine) -> String {
+fn diagnostic_line(diagnostic: &core::diagnostic::Diagnostic) -> String {
     format!(
         "{} {}: {}",
-        diagnostic.severity().as_str(),
-        diagnostic.code(),
-        diagnostic.message()
+        diagnostic.severity.as_str(),
+        diagnostic.code,
+        diagnostic.message
     )
 }
 
-pub(crate) fn render_diagnostics_text(diagnostics: &[impl DiagnosticLine]) -> Result<(), CliError> {
+pub(crate) fn render_diagnostics_text(
+    diagnostics: &[core::diagnostic::Diagnostic],
+) -> Result<(), CliError> {
     for diagnostic in diagnostics {
         write_stdout_line(format_args!("{}", diagnostic_line(diagnostic)))?;
     }
@@ -69,7 +36,7 @@ pub(crate) fn render_diagnostics_text(diagnostics: &[impl DiagnosticLine]) -> Re
 /// The same lines on stderr, for a command whose stdout carries capture bytes
 /// or NDJSON records a diagnostic must not be interleaved with.
 pub(crate) fn render_diagnostics_stderr(
-    diagnostics: &[impl DiagnosticLine],
+    diagnostics: &[core::diagnostic::Diagnostic],
 ) -> Result<(), CliError> {
     for diagnostic in diagnostics {
         emit_stderr_message(&diagnostic_line(diagnostic))?;

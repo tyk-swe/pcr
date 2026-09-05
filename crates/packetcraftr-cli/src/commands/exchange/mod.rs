@@ -4,21 +4,17 @@
 pub(super) mod arguments;
 mod rendering;
 
+use packetcraftr::output::contract::Format;
+
 use std::time::Duration;
 
 use packetcraftr::{analysis::pcap as capture, core, output};
 
 use self::arguments::Args;
-use super::format::{CollectedFormat, ExchangeFormat};
 use crate::errors::CliError;
 use crate::rendering::StreamEncoder;
 
-pub(super) fn run(
-    arguments: Args,
-    format: output::contract::Format,
-    stream: &StreamEncoder,
-) -> Result<(), CliError> {
-    let format = ExchangeFormat::narrow(output::contract::Command::Exchange, format)?;
+pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
     let Args {
         send,
         timeout_ms,
@@ -43,7 +39,7 @@ pub(super) fn run(
     options.send = prepared.options;
     let client = prepared.client;
     let template = core::template::Template::new(prepared.packet);
-    if format == ExchangeFormat::Ndjson {
+    if format == Format::Ndjson {
         let event_stream = stream.clone();
         let summary = client
             .exchange_with_events(&template, options, move |event| {
@@ -57,14 +53,14 @@ pub(super) fn run(
             .map_err(CliError::classified)?;
         return rendering::render_complete(summary, stream);
     }
-    let format = CollectedFormat::narrow_from(output::contract::Command::Exchange, format)?;
     let result = client
         .exchange(&template, options)
         .map_err(CliError::classified)?;
     match format {
-        CollectedFormat::Text => rendering::render_text(&result),
-        CollectedFormat::Json => rendering::render_aggregate(result),
-        CollectedFormat::Pcap => rendering::render_capture(&result, capture::Format::Pcap),
-        CollectedFormat::PcapNg => rendering::render_capture(&result, capture::Format::PcapNg),
+        Format::Text => rendering::render_text(&result),
+        Format::Json => rendering::render_aggregate(result),
+        Format::Pcap => rendering::render_capture(&result, capture::Format::Pcap),
+        Format::PcapNg => rendering::render_capture(&result, capture::Format::PcapNg),
+        _ => unreachable!("streaming returned before aggregate rendering"),
     }
 }

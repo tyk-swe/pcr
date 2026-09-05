@@ -273,12 +273,7 @@ impl Stack {
         Self {
             packet: packetcraftr_core::document::Packet::from_packet(&decoded.packet),
             layout: decoded.layout.clone(),
-            diagnostics: decoded
-                .diagnostics
-                .iter()
-                .cloned()
-                .map(Into::into)
-                .collect(),
+            diagnostics: decoded.diagnostics.clone(),
         }
     }
 }
@@ -305,7 +300,7 @@ impl Decoded {
             frame: Captured::try_from_frame(frame)?,
             packet: packetcraftr_core::document::Packet::from_packet(&packet),
             layout,
-            diagnostics: diagnostics.into_iter().map(Into::into).collect(),
+            diagnostics,
         })
     }
 }

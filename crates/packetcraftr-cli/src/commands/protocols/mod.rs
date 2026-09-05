@@ -3,6 +3,8 @@
 
 pub(super) mod arguments;
 
+use packetcraftr::output::contract::Format;
+
 use packetcraftr::{
     core::error::{Classification, Kind},
     core::protocol::BuiltinProtocol,
@@ -10,20 +12,18 @@ use packetcraftr::{
 };
 
 use self::arguments::Args;
-use super::format::AggregateFormat;
 use super::registry;
 use crate::errors::CliError;
 use crate::rendering::{emit_aggregate, write_stdout_line};
 
-pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
-    let format = AggregateFormat::narrow(output::contract::Command::Protocols, format)?;
+pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
     match arguments.protocol {
         Some(name) => describe_protocol(&name, format),
         None => list_protocols(format),
     }
 }
 
-fn list_protocols(format: AggregateFormat) -> Result<(), CliError> {
+fn list_protocols(format: Format) -> Result<(), CliError> {
     let result = output::protocols::ListResult {
         protocols: BuiltinProtocol::ALL
             .iter()
@@ -54,7 +54,7 @@ fn protocol_line(protocol: &output::protocols::Summary) -> String {
     )
 }
 
-fn describe_protocol(name: &str, format: AggregateFormat) -> Result<(), CliError> {
+fn describe_protocol(name: &str, format: Format) -> Result<(), CliError> {
     let protocol = BuiltinProtocol::ALL
         .iter()
         .copied()
@@ -93,12 +93,13 @@ fn describe_protocol(name: &str, format: AggregateFormat) -> Result<(), CliError
         bindings,
     );
     match format {
-        AggregateFormat::Text => render_detail(&detail),
-        AggregateFormat::Json => emit_aggregate(
+        Format::Text => render_detail(&detail),
+        Format::Json => emit_aggregate(
             output::contract::Command::Protocols,
             output::protocols::DetailResult { protocol: detail },
             Vec::new(),
         ),
+        _ => unreachable!("command dispatch validated the output format"),
     }
 }
 

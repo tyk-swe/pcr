@@ -102,9 +102,8 @@ check_pattern '\.drain[[:space:]]*\(\.\.[^)]+\)' \
   'crates/packetcraftr-core/src/analysis/reassembly/tcp/state.rs:[0-9]+:[[:space:]]*values\.drain\(\.\.end\);' \
   'bounded drain endpoint outside checked_drain_prefix'
 
-check_pattern '\.chunks[[:space:]]*\(' \
-  'crates/packetcraftr/src/scan/plan.rs:[0-9]+:.*endpoints\.chunks\(batch_size\)' \
-  'dynamic chunks call outside checked_batch_size'
+check_pattern '\.chunks[[:space:]]*\(' '^$' \
+  'chunks call without a checked non-zero width'
 
 check_pattern '\.split_at(_mut)?[[:space:]]*\(' \
   'crates/packetcraftr-core/src/analysis/reassembly/tcp/pending.rs:[0-9]+:.*payload\.split_at\(consumed\.min\(payload\.len\(\)\)\)' \

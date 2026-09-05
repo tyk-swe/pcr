@@ -1,9 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use packetcraftr::output::contract::Format;
+
 use packetcraftr::{netio as net, output};
 
-use super::format::AggregateFormat;
 use crate::errors::CliError;
 use crate::rendering::optional_display;
 use crate::system::{InterfaceSelector, select_interfaces};
@@ -20,8 +21,7 @@ pub(crate) struct Args {
     pub(crate) interface: Option<String>,
 }
 
-pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
-    let format = AggregateFormat::narrow(output::contract::Command::Interfaces, format)?;
+pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
     let selector = InterfaceSelector::parse_optional(arguments.interface.as_deref())?;
     let interfaces = select_interfaces(&net::interface::SystemProvider, selector.as_ref())?;
     let result = output::interfaces::Report::new(interfaces);

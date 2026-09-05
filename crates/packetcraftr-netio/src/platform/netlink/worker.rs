@@ -16,7 +16,7 @@ use rtnetlink::{Handle, new_connection};
 use crate::platform::os_error;
 use crate::{
     platform::worker_reaper::{
-        JoinAttempt, ReapTask, ReaperClient, ReaperPermit, TransferOutcome, join_with_deadline,
+        JoinAttempt, ReaperClient, ReaperPermit, TransferOutcome, join_with_deadline,
         shared_reaper, wait_until_finished,
     },
     route::SystemError,
@@ -167,7 +167,7 @@ fn transfer_netlink_worker(
     permit: ReaperPermit,
     reaper: &ReaperClient,
 ) -> TransferOutcome {
-    reaper.transfer(ReapTask::new(move || {
+    reaper.transfer(Box::new(move || {
         let _permit = permit;
         wait_until_finished(worker, NETLINK_REAPER_POLL_INTERVAL, || {});
     }))
@@ -241,6 +241,6 @@ mod tests {
         let task = receiver
             .recv_timeout(Duration::from_secs(1))
             .expect("timed-out worker transferred to the reaper");
-        task.run();
+        task();
     }
 }

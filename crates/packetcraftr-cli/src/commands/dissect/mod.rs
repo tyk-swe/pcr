@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use packetcraftr::output::contract::Format;
+
 use packetcraftr::core::error::Kind;
 
 pub(super) mod arguments;
@@ -16,7 +18,6 @@ use packetcraftr::{
 };
 
 use self::arguments::Args;
-use super::format::BuildFormat;
 use super::registry_with_tls_ports;
 use crate::errors::CliError;
 use crate::filtering::{self, Capabilities};
@@ -26,8 +27,7 @@ use crate::rendering::{
     write_stdout_line, write_summary_line,
 };
 
-pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
-    let format = BuildFormat::narrow(output::contract::Command::Dissect, format)?;
+pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
     let registry = registry_with_tls_ports(&arguments.tls_ports.ports)?;
     let max_packet_size = arguments.budget.max_packet_size;
     // A bad filter fails before any input is read, so it cannot leave the
@@ -70,11 +70,11 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
     let (result, diagnostics) = output::dissect::Report::from_decoded(decoded);
     // An unmatched frame keeps byte-oriented stdout empty on success; the
     // notice goes to stderr through the shared human renderer.
-    if !kept && !matches!(format, BuildFormat::Json) {
+    if !kept && !matches!(format, Format::Json) {
         return emit_stderr_message("frame did not match the filter");
     }
     match format {
-        BuildFormat::Text => {
+        Format::Text => {
             write_summary_line(format_args!(
                 "decoded {} bytes into {} layer(s)",
                 result.frame.length,
@@ -85,12 +85,13 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
             }
             render_diagnostics_text(&diagnostics)
         }
-        BuildFormat::Hex => write_plain_line(format_args!("{}", result.frame.bytes_hex())),
-        BuildFormat::Raw => write_raw(result.frame.bytes()),
-        BuildFormat::Json => emit_aggregate(
+        Format::Hex => write_plain_line(format_args!("{}", result.frame.bytes_hex())),
+        Format::Raw => write_raw(result.frame.bytes()),
+        Format::Json => emit_aggregate(
             output::contract::Command::Dissect,
             output::dissect::AggregateResult::new(kept.then_some(result)),
             diagnostics,
         ),
+        _ => unreachable!("command dispatch validated the output format"),
     }
 }

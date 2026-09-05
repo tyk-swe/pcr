@@ -7,17 +7,18 @@ pub(super) mod arguments;
 mod conversion;
 mod rendering;
 
+use packetcraftr::output::contract::Format;
+
 use std::fs::File;
 use std::sync::Arc;
 use std::time::Duration;
 
 use packetcraftr::{
     analysis::pcap::{self as capture, Reader},
-    netio as net, output,
+    netio as net,
 };
 
 use self::arguments::Args;
-use super::format::ExchangeFormat;
 use super::registry;
 use crate::command_options::OfflineCaptureLimitsArgs;
 use crate::errors::CliError;
@@ -40,12 +41,7 @@ struct ReplayRun {
     max_interfaces: usize,
 }
 
-pub(super) fn run(
-    arguments: Args,
-    format: output::contract::Format,
-    stream: &StreamEncoder,
-) -> Result<(), CliError> {
-    let format = ExchangeFormat::narrow(output::contract::Command::Replay, format)?;
+pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
     let mut prepared = prepare(&arguments)?;
     let filtered = prepared.filter.is_some();
     let requested_interface = prepared.requested_interface.clone();
@@ -62,23 +58,24 @@ pub(super) fn run(
         clock: &mut prepared.clock,
     };
     match format {
-        ExchangeFormat::Text => rendering::render_text(run, filtered),
-        ExchangeFormat::Json => rendering::render_aggregate(run, requested_interface),
-        ExchangeFormat::Ndjson => rendering::render_stream(run, stream),
-        ExchangeFormat::Pcap => rendering::render_capture(
+        Format::Text => rendering::render_text(run, filtered),
+        Format::Json => rendering::render_aggregate(run, requested_interface),
+        Format::Ndjson => rendering::render_stream(run, stream),
+        Format::Pcap => rendering::render_capture(
             run,
             rendering::CaptureSettings {
                 format: capture::Format::Pcap,
                 max_interfaces,
             },
         ),
-        ExchangeFormat::PcapNg => rendering::render_capture(
+        Format::PcapNg => rendering::render_capture(
             run,
             rendering::CaptureSettings {
                 format: capture::Format::PcapNg,
                 max_interfaces,
             },
         ),
+        _ => unreachable!("command dispatch validated the output format"),
     }
 }
 

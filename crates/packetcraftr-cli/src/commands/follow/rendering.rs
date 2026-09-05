@@ -1,9 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use packetcraftr::output::contract::Format;
+
 use packetcraftr::{analysis, output};
 
-use crate::commands::format::FollowFormat;
 use crate::commands::offline_analysis::{Retained, omitted_diagnostic};
 use crate::errors::CliError;
 use crate::rendering::{
@@ -28,19 +29,19 @@ impl State {
 }
 
 pub(super) fn render_record(
-    format: FollowFormat,
+    format: Format,
     chunk: Chunk,
     state: &mut State,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     match format {
-        FollowFormat::Text => write_stdout_line(format_args!(
+        Format::Text => write_stdout_line(format_args!(
             "{} #{} {}",
             direction_marker(&chunk),
             chunk.number,
             chunk.bytes.escape_ascii()
         )),
-        FollowFormat::Hex => {
+        Format::Hex => {
             let rendered = output::follow::Chunk::from(chunk.clone());
             write_stdout_line(format_args!(
                 "{} #{} {}",
@@ -49,14 +50,13 @@ pub(super) fn render_record(
                 rendered.bytes_hex
             ))
         }
-        FollowFormat::Raw => write_raw(&chunk.bytes),
-        FollowFormat::Json => {
+        Format::Raw => write_raw(&chunk.bytes),
+        Format::Json => {
             state.retained.push(chunk.into());
             Ok(())
         }
-        FollowFormat::Ndjson => {
-            Ok(stream.emit_data(output::follow::Chunk::from(chunk), Vec::new())?)
-        }
+        Format::Ndjson => Ok(stream.emit_data(output::follow::Chunk::from(chunk), Vec::new())?),
+        _ => unreachable!("command dispatch validated the output format"),
     }
 }
 

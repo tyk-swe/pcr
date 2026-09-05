@@ -1,10 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use packetcraftr::output::contract::Format;
+
 use packetcraftr::netio::{interface::Provider as _, route::Provider as _};
 use packetcraftr::{netio as net, output};
 
-use super::format::AggregateFormat;
 use crate::errors::CliError;
 use crate::rendering::optional_display;
 
@@ -26,8 +27,7 @@ impl Args {
     }
 }
 
-pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
-    let format = AggregateFormat::narrow(output::contract::Command::Routes, format)?;
+pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
     let interfaces = net::interface::SystemProvider
         .interfaces()
         .map_err(CliError::classified)?;

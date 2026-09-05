@@ -6,13 +6,14 @@
 pub(super) mod arguments;
 mod rendering;
 
+use packetcraftr::output::contract::Format;
+
 use std::time::Duration;
 
 use packetcraftr::{core, netio as net, output};
 
 use self::arguments::Args;
 use super::execution::Executor;
-use super::format::ToolFormat;
 use super::target_workflow::{self, Document, TargetWorkflow};
 use crate::errors::CliError;
 use crate::input::parse_target;
@@ -22,12 +23,7 @@ use crate::rendering::StreamEncoder;
 /// only ever needs room for one packet template.
 const MAX_TEMPLATE_PACKETS: usize = 1;
 
-pub(super) fn run(
-    arguments: Args,
-    format: output::contract::Format,
-    stream: &StreamEncoder,
-) -> Result<(), CliError> {
-    let format = ToolFormat::narrow(output::contract::Command::Dns, format)?;
+pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
     if !arguments.udp_only && !arguments.route.supports_kernel_tcp() {
         return Err(CliError::new(
             core::error::Kind::Cli,

@@ -1,9 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use packetcraftr::output::contract::Format;
+
 use packetcraftr::{analysis, core, output};
 
-use crate::commands::format::ToolFormat;
 use crate::commands::offline_analysis::Retained;
 use crate::errors::CliError;
 use crate::rendering::{
@@ -45,7 +46,7 @@ impl State {
 }
 
 pub(super) fn render_session(
-    format: ToolFormat,
+    format: Format,
     session: analysis::tls::Session,
     state: &mut State,
     stream: &StreamEncoder,
@@ -53,14 +54,13 @@ pub(super) fn render_session(
     let session = Session::from(session);
     state.select();
     match format {
-        ToolFormat::Text => write_stdout_line(format_args!("{}", session_line(&session))),
-        ToolFormat::Json => {
+        Format::Text => write_stdout_line(format_args!("{}", session_line(&session))),
+        Format::Json => {
             state.retained.push(session);
             Ok(())
         }
-        ToolFormat::Ndjson => {
-            Ok(stream.emit_data(output::tls::Event::session(session), Vec::new())?)
-        }
+        Format::Ndjson => Ok(stream.emit_data(output::tls::Event::session(session), Vec::new())?),
+        _ => unreachable!("command dispatch validated the output format"),
     }
 }
 

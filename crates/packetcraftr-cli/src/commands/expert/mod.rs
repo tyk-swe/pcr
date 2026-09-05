@@ -4,10 +4,11 @@
 pub(super) mod arguments;
 mod rendering;
 
-use packetcraftr::{analysis, output};
+use packetcraftr::output::contract::Format;
+
+use packetcraftr::analysis;
 
 use self::arguments::{Args, Severity};
-use super::format::ToolFormat;
 use super::offline_analysis::prepare_with_tls_ports;
 use crate::errors::CliError;
 use crate::input::open_capture;
@@ -27,12 +28,7 @@ fn matches_selector(
     true
 }
 
-pub(super) fn run(
-    arguments: Args,
-    format: output::contract::Format,
-    stream: &StreamEncoder,
-) -> Result<(), CliError> {
-    let format = ToolFormat::narrow(output::contract::Command::Expert, format)?;
+pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
     let prepared = prepare_with_tls_ports(
         arguments.limits,
         arguments.filter.as_deref(),
@@ -48,9 +44,7 @@ pub(super) fn run(
         &mut reader,
         prepared.registry.clone(),
         &options,
-        super::offline_analysis::ip_event_sink(
-            (format == ToolFormat::Ndjson).then(|| stream.clone()),
-        ),
+        super::offline_analysis::ip_event_sink((format == Format::Ndjson).then(|| stream.clone())),
         |record| {
             for finding in collector.observe(&record) {
                 if matches_selector(&finding, arguments.min_severity, &arguments.codes) {
@@ -72,8 +66,9 @@ pub(super) fn run(
     }
 
     match format {
-        ToolFormat::Text => rendering::render_text(&summary, &state),
-        ToolFormat::Json => rendering::render_aggregate(&summary, state),
-        ToolFormat::Ndjson => rendering::render_stream(&summary, state, stream),
+        Format::Text => rendering::render_text(&summary, &state),
+        Format::Json => rendering::render_aggregate(&summary, state),
+        Format::Ndjson => rendering::render_stream(&summary, state, stream),
+        _ => unreachable!("command dispatch validated the output format"),
     }
 }

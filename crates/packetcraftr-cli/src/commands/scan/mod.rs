@@ -6,24 +6,20 @@
 pub(super) mod arguments;
 mod rendering;
 
+use packetcraftr::output::contract::Format;
+
 use std::time::Duration;
 
 use packetcraftr::{core, output};
 
 use self::arguments::Args;
 use super::execution::Executor;
-use super::format::ToolFormat;
 use super::target_workflow::{self, Document, TargetWorkflow};
 use crate::errors::CliError;
 use crate::input::parse_target;
 use crate::rendering::StreamEncoder;
 
-pub(super) fn run(
-    arguments: Args,
-    format: output::contract::Format,
-    stream: &StreamEncoder,
-) -> Result<(), CliError> {
-    let format = ToolFormat::narrow(output::contract::Command::Scan, format)?;
+pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
     let Args {
         target,
         transport,

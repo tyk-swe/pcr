@@ -10,6 +10,8 @@
 //! completion record. Only the workflow types and the per-command text report
 //! differ, so those are what [`TargetWorkflow`] carries.
 
+use packetcraftr::output::contract::Format;
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -17,7 +19,6 @@ use packetcraftr::{core, netio as net, output};
 use serde::Serialize;
 
 use super::execution::Executor;
-use super::format::ToolFormat;
 use super::registry;
 use crate::command_options::{HostnamePolicyArgs, RouteSelectionArgs};
 use crate::errors::CliError;
@@ -115,14 +116,14 @@ impl<T> Document<T> {
 pub(super) fn run<W: TargetWorkflow>(
     request: &W::Request,
     providers: &mut TargetProviders,
-    format: ToolFormat,
+    format: Format,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     let resolver = packetcraftr::target::SystemResolver;
     let mut authorizer = packetcraftr::target::PolicyAuthorizer::new(&providers.policy, &resolver);
     let mut clock = packetcraftr::clock::SystemClock;
     match format {
-        ToolFormat::Text | ToolFormat::Json => {
+        Format::Text | Format::Json => {
             let document = W::execute(
                 request,
                 &mut authorizer,
@@ -130,7 +131,7 @@ pub(super) fn run<W: TargetWorkflow>(
                 &mut providers.executor,
                 &mut clock,
             )?;
-            if format == ToolFormat::Text {
+            if format == Format::Text {
                 W::render_text(document)
             } else {
                 emit_aggregate_with_stats(
@@ -141,7 +142,7 @@ pub(super) fn run<W: TargetWorkflow>(
                 )
             }
         }
-        ToolFormat::Ndjson => W::stream(
+        Format::Ndjson => W::stream(
             request,
             &mut authorizer,
             &providers.registry,
@@ -150,6 +151,7 @@ pub(super) fn run<W: TargetWorkflow>(
             &providers.runtime,
             stream,
         ),
+        _ => unreachable!("command dispatch validated the output format"),
     }
 }
 

@@ -503,21 +503,69 @@ fn replay_rejects_malformed_capture_before_emitting_transmission_evidence() {
 }
 
 #[test]
-fn unsupported_output_formats_fail_before_a_capture_is_read() {
-    let capture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../examples/captures/tls-handshake.pcapng");
-    let path = capture.to_str().expect("example capture path is UTF-8");
+fn unsupported_output_formats_fail_before_command_work() {
+    let directory = tempfile::tempdir().expect("temporary directory must open");
+    let missing = directory.path().join("missing");
+    let missing = missing.to_str().expect("temporary path is UTF-8");
+    let cases: &[(&str, &[&str])] = &[
+        ("pcap", &["build", "--packet-file", missing]),
+        ("pcap", &["dissect", "--file", missing]),
+        ("pcap", &["protocols", "unknown-protocol"]),
+        ("raw", &["read", missing]),
+        ("pcap", &["interfaces", "--interface", "missing-interface"]),
+        ("pcap", &["plan", "--packet-file", missing]),
+        ("ndjson", &["send", "--packet-file", missing]),
+        ("raw", &["exchange", "--packet-file", missing]),
+        (
+            "raw",
+            &[
+                "capture",
+                "--interface",
+                "missing-interface",
+                "--timeout-ms",
+                "0",
+            ],
+        ),
+        ("pcap", &["expert", missing]),
+        ("pcap", &["follow", missing, "--stream", "invalid"]),
+        (
+            "raw",
+            &["replay", missing, "--interface", "missing-interface"],
+        ),
+        ("pcap", &["scan", "192.0.2.1", "--attempts", "0"]),
+        ("pcap", &["stats", missing]),
+        ("pcap", &["tls", missing]),
+        ("pcap", &["traceroute", "192.0.2.1", "--max-hops", "0"]),
+        (
+            "pcap",
+            &["dns", "192.0.2.1", "example.test", "--attempts", "0"],
+        ),
+        ("pcap", &["fuzz", "--packet-file", missing]),
+        ("pcap", &["routes"]),
+    ];
 
-    for format in ["hex", "raw", "pcap", "pcapng"] {
-        let refused = run(&["--output", format, "tls", path]);
-        assert_eq!(refused.status.code(), Some(2), "{format}");
-        assert!(refused.stdout.is_empty(), "{format}");
-        let rendered = String::from_utf8_lossy(&refused.stderr);
+    for &(format, command) in cases {
+        let mut arguments = vec!["--output", format];
+        arguments.extend_from_slice(command);
+        let refused = run(&arguments);
+        assert_eq!(refused.status.code(), Some(2), "{arguments:?}: {refused:?}");
+        let rendered = if format == "ndjson" {
+            assert!(refused.stderr.is_empty(), "{arguments:?}");
+            let records = parse_ndjson(&refused);
+            assert_eq!(records.len(), 1, "{arguments:?}");
+            assert_eq!(records[0]["error"]["code"], "cli.output_format");
+            records[0]["error"]["message"].as_str().unwrap().to_owned()
+        } else {
+            assert!(refused.stdout.is_empty(), "{arguments:?}");
+            let rendered = String::from_utf8_lossy(&refused.stderr).into_owned();
+            assert!(rendered.contains("error[cli.output_format]"), "{rendered}");
+            rendered
+        };
         assert!(
-            rendered.contains(&format!("tls does not support {format} output")),
+            rendered.contains(&format!("{} does not support {format} output", command[0])),
             "{rendered}"
         );
-        assert!(rendered.contains("choose text, json, ndjson"), "{rendered}");
+        assert!(rendered.contains("choose "), "{rendered}");
     }
 }
 

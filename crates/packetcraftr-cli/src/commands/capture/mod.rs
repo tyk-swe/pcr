@@ -7,9 +7,11 @@ pub(super) mod arguments;
 mod execution;
 mod rendering;
 
+use packetcraftr::output::contract::Format;
+
 use std::time::{Duration, Instant};
 
-use packetcraftr::{analysis::pcap, netio as net, netio::capture::Provider as _, output};
+use packetcraftr::{analysis::pcap, netio as net, netio::capture::Provider as _};
 
 use self::arguments::Args;
 use super::registry;
@@ -20,14 +22,7 @@ use crate::system::{InterfaceSelector, resolve};
 
 use packetcraftr::policy::CaptureBudget;
 
-use super::format::CaptureFormat;
-
-pub(super) fn run(
-    arguments: Args,
-    format: output::contract::Format,
-    stream: &StreamEncoder,
-) -> Result<(), CliError> {
-    let format = CaptureFormat::narrow(output::contract::Command::Capture, format)?;
+pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
     let Args {
         interface,
         promiscuous,
@@ -73,10 +68,11 @@ pub(super) fn run(
         selector: selector.as_ref(),
     };
     match format {
-        CaptureFormat::Text => rendering::render_text(session()),
-        CaptureFormat::Hex => rendering::render_hex(session()),
-        CaptureFormat::Ndjson => rendering::render_stream(session(), stream),
-        CaptureFormat::Pcap => rendering::render_capture(session(), pcap::Format::Pcap),
-        CaptureFormat::PcapNg => rendering::render_capture(session(), pcap::Format::PcapNg),
+        Format::Text => rendering::render_text(session()),
+        Format::Hex => rendering::render_hex(session()),
+        Format::Ndjson => rendering::render_stream(session(), stream),
+        Format::Pcap => rendering::render_capture(session(), pcap::Format::Pcap),
+        Format::PcapNg => rendering::render_capture(session(), pcap::Format::PcapNg),
+        _ => unreachable!("command dispatch validated the output format"),
     }
 }

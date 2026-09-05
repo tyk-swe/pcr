@@ -17,10 +17,10 @@
 //! A domain type becomes an output type one of three ways:
 //!
 //! - **Re-export** ([`scan::Classification`], [`dns::Section`],
-//!   [`replay::Timing`], …) when the domain type's own serialization *is* the
-//!   frozen v1 vocabulary. Renaming a variant in the domain module is then a
-//!   wire break with nothing in between, so every re-exported enum is pinned
-//!   against the vocabulary the schema declares by
+//!   [`replay::Timing`], [`envelope::Diagnostic`], …) when the domain type's own
+//!   serialization *is* the frozen v1 vocabulary. Renaming a variant in the
+//!   domain module is then a wire break with nothing in between. Every
+//!   re-exported enum is pinned against the vocabulary the schema declares by
 //!   `every_frozen_enum_serializes_exactly_the_vocabulary_the_schema_declares`.
 //! - **`mirror_enum!`** when the output name should be free to differ from the
 //!   domain name, or when output must not inherit the domain type's derives.

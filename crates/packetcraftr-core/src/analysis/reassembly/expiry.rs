@@ -51,21 +51,8 @@ impl<K: Ord> ExpiryIndex<K> {
     where
         F: FnMut(K),
     {
-        let Some((&first_deadline, _)) = self.entries.first_key_value() else {
-            return;
-        };
-        if first_deadline > now {
-            return;
-        }
-
-        let mut future = self.entries.split_off(&now);
-        let at_now = future.remove(&now);
-        let expired = std::mem::replace(&mut self.entries, future);
-        for key in expired.into_values().flat_map(BTreeSet::into_iter) {
-            visit(key);
-        }
-        if let Some(at_now) = at_now {
-            for key in at_now {
+        for (_, keys) in self.entries.extract_if(..=now, |_, _| true) {
+            for key in keys {
                 visit(key);
             }
         }

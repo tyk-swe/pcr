@@ -3,19 +3,19 @@
 
 pub(super) mod arguments;
 
+use packetcraftr::output::contract::Format;
+
 use std::sync::Arc;
 
 use packetcraftr::output;
 
 use self::arguments::Args;
-use super::format::AggregateFormat;
 use super::registry;
 use crate::errors::CliError;
 use crate::rendering::{emit_aggregate, optional_display, write_stdout_line};
 use crate::system::{client, prepare_route};
 
-pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(), CliError> {
-    let format = AggregateFormat::narrow(output::contract::Command::Plan, format)?;
+pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
     let Args { route, policy } = arguments;
     let registry = registry()?;
     let request = prepare_route(route, policy.into_policy(), &registry)?;
@@ -25,10 +25,9 @@ pub(super) fn run(arguments: Args, format: output::contract::Format) -> Result<(
         .map_err(CliError::classified)?;
     let result = output::plan::Report { plan: route.into() };
     match format {
-        AggregateFormat::Text => render_text(&result.plan),
-        AggregateFormat::Json => {
-            emit_aggregate(output::contract::Command::Plan, result, Vec::new())
-        }
+        Format::Text => render_text(&result.plan),
+        Format::Json => emit_aggregate(output::contract::Command::Plan, result, Vec::new()),
+        _ => unreachable!("command dispatch validated the output format"),
     }
 }
 

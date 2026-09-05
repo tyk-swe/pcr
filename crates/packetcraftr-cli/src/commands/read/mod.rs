@@ -6,6 +6,8 @@
 pub(super) mod arguments;
 mod rendering;
 
+use packetcraftr::output::contract::Format;
+
 use std::fs::File;
 use std::io;
 
@@ -19,7 +21,6 @@ use packetcraftr::{
 };
 
 use self::arguments::Args;
-use super::format::{CaptureFormat, FrameFormat};
 use super::registry_with_tls_ports;
 use crate::command_options::OfflineCaptureLimitsArgs;
 use crate::errors::CliError;
@@ -46,11 +47,7 @@ struct StreamState {
     captured_bytes_read: u64,
 }
 
-pub(super) fn run(
-    arguments: Args,
-    format: output::contract::Format,
-    stream: &StreamEncoder,
-) -> Result<(), CliError> {
+pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
     let Args {
         path,
         limits,
@@ -58,15 +55,14 @@ pub(super) fn run(
         dissect,
         tls_ports,
     } = arguments;
-    let format = CaptureFormat::narrow(output::contract::Command::Read, format)?;
     validate_capture_stream_limits(limits)?;
     // Both rejections precede filter compilation, so an incompatible request
     // is answered with the incompatibility, not a filter syntax error.
     validate_dissect_format(dissect, format)?;
     let rewrite_format = match format {
-        CaptureFormat::Pcap => Some(capture::Format::Pcap),
-        CaptureFormat::PcapNg => Some(capture::Format::PcapNg),
-        CaptureFormat::Text | CaptureFormat::Ndjson | CaptureFormat::Hex => None,
+        Format::Pcap => Some(capture::Format::Pcap),
+        Format::PcapNg => Some(capture::Format::PcapNg),
+        _ => None,
     };
     if rewrite_format.is_some() && filter.is_some() {
         return Err(capture_rewrite_filter_error());
@@ -80,12 +76,11 @@ pub(super) fn run(
         };
         return rewrite_capture(&mut reader, rewrite_format, stream_limits);
     }
-    let format = FrameFormat::narrow_from(output::contract::Command::Read, format)?;
     read_records(&mut reader, limits, decoding.as_ref(), format, stream)
 }
 
-fn validate_dissect_format(dissect: bool, format: CaptureFormat) -> Result<(), CliError> {
-    if dissect && !matches!(format, CaptureFormat::Text | CaptureFormat::Ndjson) {
+fn validate_dissect_format(dissect: bool, format: Format) -> Result<(), CliError> {
+    if dissect && !matches!(format, Format::Text | Format::Ndjson) {
         return Err(CliError::from_classification(
             Classification::new(
                 "cli.dissect_unsupported_format",
@@ -159,7 +154,7 @@ fn read_records(
     reader: &mut Reader<File>,
     limits: OfflineCaptureLimitsArgs,
     decoding: Option<&Decoding>,
-    format: FrameFormat,
+    format: Format,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     let mut state = StreamState::default();
@@ -171,7 +166,7 @@ fn read_records(
         render_record(record, format, stream)?;
         state.frames_matched = increment_counter(state.frames_matched, "read matched-frame count")?;
     }
-    if format == FrameFormat::Ndjson {
+    if format == Format::Ndjson {
         stream.complete(
             output::read::Event::Complete {
                 frames_read: state.frames_read,

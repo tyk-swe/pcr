@@ -3,6 +3,8 @@
 
 //! Traceroute CLI command logic.
 
+use packetcraftr::output::contract::Format;
+
 use packetcraftr::core::error::Kind;
 
 pub(super) mod arguments;
@@ -14,18 +16,12 @@ use packetcraftr::{core, netio as net, output};
 
 use self::arguments::Args;
 use super::execution::Executor;
-use super::format::ToolFormat;
 use super::target_workflow::{self, Document, TargetWorkflow};
 use crate::errors::CliError;
 use crate::input::parse_target;
 use crate::rendering::StreamEncoder;
 
-pub(super) fn run(
-    arguments: Args,
-    format: output::contract::Format,
-    stream: &StreamEncoder,
-) -> Result<(), CliError> {
-    let format = ToolFormat::narrow(output::contract::Command::Traceroute, format)?;
+pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
     let queue_limits = arguments.limits.clone().into_limits();
     let request = prepare_request(&arguments, queue_limits)?;
     let max_template_packets = usize::try_from(arguments.attempts).map_err(|_| {

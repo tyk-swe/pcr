@@ -3,6 +3,8 @@
 
 //! TLS session assembly CLI command.
 
+use packetcraftr::output::contract::Format;
+
 use std::sync::OnceLock;
 
 use packetcraftr::core::error::Kind;
@@ -13,7 +15,6 @@ mod rendering;
 use packetcraftr::{analysis, output};
 
 use self::arguments::Args;
-use super::format::ToolFormat;
 use super::offline_analysis::{parse_stream_selector, prepare_with_tls_ports};
 use crate::errors::CliError;
 use crate::input::open_capture;
@@ -105,12 +106,7 @@ impl SniPattern {
     }
 }
 
-pub(super) fn run(
-    arguments: Args,
-    format: output::contract::Format,
-    stream: &StreamEncoder,
-) -> Result<(), CliError> {
-    let format = ToolFormat::narrow(output::contract::Command::Tls, format)?;
+pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
     let selected_stream = arguments
         .stream
         .as_deref()
@@ -159,9 +155,7 @@ pub(super) fn run(
         &mut reader,
         prepared.registry.clone(),
         &options,
-        super::offline_analysis::ip_event_sink(
-            (format == ToolFormat::Ndjson).then(|| stream.clone()),
-        ),
+        super::offline_analysis::ip_event_sink((format == Format::Ndjson).then(|| stream.clone())),
         |record| {
             for event in collector.observe(&record) {
                 if selector.matches(&event.session) {
@@ -196,9 +190,10 @@ pub(super) fn run(
         &run_summary.ip_reassembly,
     );
     match format {
-        ToolFormat::Text => rendering::render_text(&state, &summary, &arguments.tls_ports.ports),
-        ToolFormat::Json => rendering::render_aggregate(state, summary),
-        ToolFormat::Ndjson => rendering::render_stream(summary, stream),
+        Format::Text => rendering::render_text(&state, &summary, &arguments.tls_ports.ports),
+        Format::Json => rendering::render_aggregate(state, summary),
+        Format::Ndjson => rendering::render_stream(summary, stream),
+        _ => unreachable!("command dispatch validated the output format"),
     }
 }
 

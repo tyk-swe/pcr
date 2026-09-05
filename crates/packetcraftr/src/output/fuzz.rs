@@ -329,7 +329,7 @@ fn convert_case(
         responses: Captured::try_from_frames(responses)?,
         unmatched: Captured::try_from_frames(unmatched)?,
         undecoded: Captured::try_from_frames(undecoded)?,
-        diagnostics: diagnostics.into_iter().map(Into::into).collect(),
+        diagnostics,
     })
 }
 

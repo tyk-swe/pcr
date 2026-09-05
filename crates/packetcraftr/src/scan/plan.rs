@@ -15,39 +15,32 @@ pub(super) fn build_batches(
     addresses: &[IpAddr],
     endpoints: &[ProbeEndpoint],
 ) -> Result<Vec<Batch>, Error> {
-    let batch_size = checked_batch_size(request)?;
+    check_batch_size(request)?;
     let mut batches = Vec::new();
     let mut sequence = 0_u64;
     for address in addresses {
         for attempt in 1..=request.attempts {
-            for chunk in endpoints.chunks(batch_size) {
-                let batch_sequence = sequence;
-                let probes = chunk
-                    .iter()
-                    .map(|endpoint| {
-                        let probe = Probe {
-                            sequence,
-                            address: *address,
-                            endpoint: *endpoint,
-                            attempt,
-                        };
-                        sequence = sequence.checked_add(1).ok_or(Error::new(
-                            WORKFLOW,
-                            ErrorKind::InvalidLimit {
-                                field: "probes",
-                                value: u64::MAX,
-                                reason: "probe sequence overflowed".to_owned(),
-                            },
-                        ))?;
-                        Ok(probe)
-                    })
-                    .collect::<Result<Vec<_>, Error>>()?;
+            // Each exchange materializes its own correlated sequence and IP identifiers.
+            for endpoint in endpoints {
                 batches.push(Batch {
-                    probes,
+                    probes: vec![Probe {
+                        sequence,
+                        address: *address,
+                        endpoint: *endpoint,
+                        attempt,
+                    }],
                     timeout: request.timeout,
                     permit: crate::evidence::ExecutionPermit::new(),
-                    sequence: batch_sequence,
+                    sequence,
                 });
+                sequence = sequence.checked_add(1).ok_or(Error::new(
+                    WORKFLOW,
+                    ErrorKind::InvalidLimit {
+                        field: "probes",
+                        value: u64::MAX,
+                        reason: "probe sequence overflowed".to_owned(),
+                    },
+                ))?;
             }
         }
     }
@@ -59,7 +52,7 @@ pub(super) fn worst_case_duration(
     address_count: usize,
     endpoints_per_address: usize,
 ) -> Result<Duration, Error> {
-    let batch_size = checked_batch_size(request)?;
+    check_batch_size(request)?;
     let overflow = || {
         Error::new(
             WORKFLOW,
@@ -69,49 +62,27 @@ pub(super) fn worst_case_duration(
             },
         )
     };
-    let batches_per_attempt = endpoints_per_address.div_ceil(batch_size);
     let batch_count = address_count
         .checked_mul(usize::try_from(request.attempts).unwrap_or(usize::MAX))
-        .and_then(|count| count.checked_mul(batches_per_attempt))
+        .and_then(|count| count.checked_mul(endpoints_per_address))
         .ok_or_else(&overflow)?;
     let batch_count_u32 = u32::try_from(batch_count).map_err(|_| overflow())?;
     let exchange_time = request
         .timeout
         .checked_mul(batch_count_u32)
         .ok_or_else(&overflow)?;
-    #[expect(
-        clippy::arithmetic_side_effects,
-        reason = "checked_batch_size returned a non-zero divisor"
-    )]
-    let final_batch_size = endpoints_per_address % batch_size;
-    let delay =
-        (0..batch_count.saturating_sub(1)).try_fold(Duration::ZERO, |total, batch_index| {
-            #[expect(
-                clippy::arithmetic_side_effects,
-                reason = "`batch_count` is a multiple of `batches_per_attempt`, so this range is \
-                          empty when `batches_per_attempt` is zero; `position` is below it and \
-                          therefore below usize::MAX"
-            )]
-            let position = batch_index % batches_per_attempt;
-            #[expect(
-                clippy::arithmetic_side_effects,
-                reason = "`position` is a remainder modulo `batches_per_attempt`, so it is below \
-                          usize::MAX and the increment cannot overflow"
-            )]
-            let is_final_batch = position + 1 == batches_per_attempt;
-            let probes = if is_final_batch && final_batch_size != 0 {
-                final_batch_size
-            } else {
-                batch_size
-            };
-            total
-                .checked_add(rate_delay(probes, request.probes_per_second)?)
-                .ok_or_else(&overflow)
-        })?;
+    let delay_count = batch_count_u32.saturating_sub(1);
+    let delay = if delay_count == 0 {
+        Duration::ZERO
+    } else {
+        rate_delay(request.probes_per_second)?
+            .checked_mul(delay_count)
+            .ok_or_else(&overflow)?
+    };
     exchange_time.checked_add(delay).ok_or_else(overflow)
 }
 
-fn checked_batch_size(request: &Request) -> Result<usize, Error> {
+fn check_batch_size(request: &Request) -> Result<(), Error> {
     if request.limits.batch_size == 0 {
         return Err(Error::new(
             WORKFLOW,
@@ -122,12 +93,11 @@ fn checked_batch_size(request: &Request) -> Result<usize, Error> {
             },
         ));
     }
-    // Each exchange must materialize its own correlated sequence and IP identifiers.
-    Ok(1)
+    Ok(())
 }
 
-fn rate_delay(probes: usize, rate: Option<u32>) -> Result<Duration, Error> {
-    crate::clock::rate_delay(probes, rate).ok_or(Error::new(
+fn rate_delay(rate: Option<u32>) -> Result<Duration, Error> {
+    crate::clock::rate_delay(1, rate).ok_or(Error::new(
         WORKFLOW,
         ErrorKind::InvalidLimit {
             field: "probes_per_second",
@@ -181,5 +151,61 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn duration_planning_preserves_per_gap_rounding_empty_plans_and_overflow() {
+        let mut request = Request {
+            target: Target::Address("192.0.2.1".parse().expect("documentation address")),
+            transport: crate::scan::model::Transport::Tcp,
+            address_family: Family::Any,
+            ports: vec![80],
+            attempts: 1,
+            timeout: Duration::from_millis(1),
+            probes_per_second: Some(3),
+            limits: crate::scan::model::Limits::default(),
+        };
+        for (addresses, endpoints, expected) in [
+            (0, 1, Duration::ZERO),
+            (1, 0, Duration::ZERO),
+            (1, 1, request.timeout),
+            (1, 3, Duration::from_nanos(669_666_668)),
+        ] {
+            assert_eq!(
+                worst_case_duration(&request, addresses, endpoints).expect("bounded duration"),
+                expected
+            );
+        }
+
+        request.probes_per_second = Some(0);
+        assert_eq!(worst_case_duration(&request, 0, 1).unwrap(), Duration::ZERO);
+        assert_eq!(
+            worst_case_duration(&request, 1, 1).unwrap(),
+            request.timeout
+        );
+        assert!(matches!(
+            worst_case_duration(&request, 1, 2),
+            Err(Error {
+                kind: ErrorKind::InvalidLimit {
+                    field: "probes_per_second",
+                    ..
+                },
+                ..
+            })
+        ));
+
+        request.timeout = Duration::MAX;
+        for (addresses, endpoints) in [(usize::MAX, 2), (1, 2)] {
+            assert!(matches!(
+                worst_case_duration(&request, addresses, endpoints),
+                Err(Error {
+                    kind: ErrorKind::DurationLimit {
+                        actual: Duration::MAX,
+                        ..
+                    },
+                    ..
+                })
+            ));
+        }
     }
 }

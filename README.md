@@ -42,6 +42,23 @@ protocol catalogs.
 | Native inspection and planning | `interfaces`, `routes`, `plan` |
 | Live workflows | `send`, `exchange`, `capture`, `replay`, `scan`, `traceroute`, `dns`, `fuzz --live` |
 
+## Filtered capture export
+
+Save a focused capture in the source format:
+
+```console
+packetcraftr --output pcapng read capture.pcapng \
+  --filter 'udp.port == 53' > dns.pcapng
+```
+
+Selected packet records retain their original bytes, timestamps, and options.
+All metadata is retained; PCAPNG section lengths become unknown and interface
+statistics still describe the source capture. Filters use original frame numbers
+and do not automatically include related packets or fragments. Stream selectors
+and format conversion are unsupported. All input packets count toward the finite
+frame/byte limits, and an empty selection is valid. Errors can leave partial
+output. Without `--filter`, capture output remains a byte-for-byte rewrite.
+
 ## Install
 
 [GitHub releases](https://github.com/tyk-swe/pcr/releases) provide Linux

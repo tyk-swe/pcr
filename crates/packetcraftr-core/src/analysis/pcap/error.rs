@@ -146,3 +146,44 @@ impl Classified for Error {
         }
     }
 }
+
+/// A capture selection failure, retaining the predicate's classification.
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum SelectionError {
+    #[error(transparent)]
+    Capture(#[from] Error),
+    #[error("selection failed at frame {number}: {source}")]
+    Predicate {
+        number: u64,
+        #[source]
+        source: crate::error::BoundaryError,
+    },
+}
+
+impl Classified for SelectionError {
+    fn classification(&self) -> Classification {
+        match self {
+            Self::Capture(source) => source.classification(),
+            Self::Predicate { source, .. } => source.classification(),
+        }
+    }
+
+    fn context(&self) -> Option<crate::error::Coordinate> {
+        match self {
+            Self::Capture(source) => source.context(),
+            Self::Predicate { number, .. } => Some(crate::error::Coordinate::SourceFrame(*number)),
+        }
+    }
+
+    fn causes(&self) -> Vec<String> {
+        match self {
+            Self::Capture(source) => source.causes(),
+            Self::Predicate { source, .. } => {
+                let mut causes = vec![source.to_string()];
+                causes.extend(source.causes());
+                causes
+            }
+        }
+    }
+}

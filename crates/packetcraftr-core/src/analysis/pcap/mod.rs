@@ -19,14 +19,14 @@ mod rewrite;
 mod wire;
 mod writer;
 
-pub use error::Error;
+pub use error::{Error, SelectionError};
 pub use model::{
     CaptureHeader, CaptureRecord, DEFAULT_INTERFACE_LIMIT, DEFAULT_METADATA_BLOCK_LIMIT,
     DEFAULT_METADATA_BYTE_LIMIT, DEFAULT_SIZE_LIMIT, DEFAULT_STREAM_BYTES, DEFAULT_STREAM_FRAMES,
     DEFAULT_TOTAL_INTERFACE_LIMIT, Endianness, Format, Interface, Limits, MetadataBlockKind,
     PacketBlockKind, PcapHeader, PcapNgOption, PcapNgOptions, PcapOptions, ReaderOptions,
-    RecordKind, RewriteReport, Section, TimestampResolution,
+    RecordKind, RewriteReport, Section, SelectionReport, TimestampResolution,
 };
 pub use reader::Reader;
-pub use rewrite::rewrite;
+pub use rewrite::{rewrite, select};
 pub use writer::Writer;

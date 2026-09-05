@@ -11,9 +11,13 @@ pub(crate) const AFTER_LONG_HELP: &str = r#"Examples:
   packetcraftr read capture.pcapng --filter 'tcp.flags.syn == 1 && !tcp.flags.ack' --dissect
   packetcraftr read capture.pcapng --tls-port 4433 --filter 'tls.sni contains "example"' --dissect
   packetcraftr --output pcapng read capture.pcapng > validated-copy.pcapng
+  packetcraftr --output pcapng read capture.pcapng --filter 'udp.port == 53' > dns.pcapng
 
-Capture output validates and rewrites every source record without normalization.
-It requires the output format to match the input and cannot be combined with --filter.
+Capture output requires the input format. Without --filter, every record is copied
+verbatim. With --filter, selected packet records and all metadata are retained;
+PCAPNG section lengths become unknown. Interface statistics describe the source.
+Limits count all input packets. Errors can leave partial output. Related packets
+and fragments are not automatically included. An empty selection is valid.
 
 NDJSON emits frame events followed by one complete event. Text prefixes each frame,
 and NDJSON source_frame identifies it, with the one-based capture position used by
@@ -26,7 +30,7 @@ pub(crate) struct Args {
     pub(crate) path: PathBuf,
     #[command(flatten)]
     pub(crate) limits: OfflineCaptureLimitsArgs,
-    /// Keep only frames matching a display filter; unavailable for capture output.
+    /// Keep only frames matching a display filter.
     #[arg(long, value_name = "EXPR")]
     pub(crate) filter: Option<String>,
     /// Include each frame's dissected layer stack in the output.

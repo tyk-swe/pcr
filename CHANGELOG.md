@@ -8,6 +8,11 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Added
 
+- `read --filter` now exports selected packets as same-format PCAP/PCAPNG,
+  retaining raw packet records and metadata while making PCAPNG section lengths
+  unknown. Core `analysis::pcap::select` exposes bounded, fallible frame selection
+  with input/output accounting and source-frame error attribution.
+
 - Optional core `decrypt` feature with RustCrypto AES-GCM, ChaCha20-Poly1305,
   and HKDF dependencies, covered by the supported feature matrix.
 - CI checks public library API compatibility against the PR base or previous

@@ -698,12 +698,16 @@ fn read_rewrites_same_format_and_rejects_lossy_capture_output() {
     );
 
     let filtered = run(&["--output", "pcap", "read", path, "--filter", "udp"]);
-    assert!(!filtered.status.success());
-    assert!(
-        String::from_utf8_lossy(&filtered.stderr).contains("cannot filter records"),
-        "{:?}",
-        filtered.stderr
-    );
+    assert!(filtered.status.success(), "{:?}", filtered.stderr);
+    let mut reader =
+        packetcraftr::analysis::pcap::Reader::new(std::io::Cursor::new(filtered.stdout)).unwrap();
+    for packet in [UDP_CLIENT, UDP_SERVER] {
+        assert_eq!(
+            reader.next_frame().unwrap().unwrap().bytes().as_ref(),
+            decode_hex(packet)
+        );
+    }
+    assert!(reader.next_frame().unwrap().is_none());
 }
 
 #[test]
@@ -1260,4 +1264,84 @@ fn protocol_discovery_lists_describes_and_rejects_names() {
             .expect("remediation is present")
             .contains("protocols")
     );
+}
+
+#[test]
+fn read_exports_selected_source_frames_in_both_capture_formats() {
+    use packetcraftr::analysis::pcap::Reader;
+    use std::io::Cursor;
+    for (format, capture) in [
+        ("pcap", write_capture_frames(&[UDP_CLIENT, UDP_SERVER])),
+        ("pcapng", write_capture_with_later_missing_timestamp()),
+    ] {
+        let path = path_text(capture.path());
+        for (filter, selected) in [
+            ("frame.number == 2", vec![UDP_SERVER]),
+            ("udp", vec![UDP_CLIENT, UDP_SERVER]),
+            ("tcp", vec![]),
+        ] {
+            let output = run_success(&["--output", format, "read", path, "--filter", filter]);
+            let mut reader = Reader::new(Cursor::new(output.stdout)).unwrap();
+            for packet in selected {
+                let frame = reader.next_frame().unwrap().unwrap();
+                assert_eq!(frame.bytes().as_ref(), decode_hex(packet));
+                if format == "pcapng" && packet == UDP_SERVER {
+                    assert!(frame.timestamp.is_none());
+                }
+            }
+            assert!(reader.next_frame().unwrap().is_none());
+        }
+        let output = run(&[
+            "--output",
+            format,
+            "read",
+            path,
+            "--filter",
+            "tcp",
+            "--max-frames",
+            "1",
+        ]);
+        assert_eq!(output.status.code(), Some(6));
+        if format == "pcap" {
+            let output = run(&[
+                "--output",
+                format,
+                "read",
+                path,
+                "--filter",
+                "tcp",
+                "--max-bytes",
+                "33",
+                "--max-frame-bytes",
+                "33",
+            ]);
+            assert_eq!(output.status.code(), Some(6));
+        }
+        for filter in ["tcp.stream == 0", "udp.stream == 0", "udp &&"] {
+            let output = run(&["--output", format, "read", path, "--filter", filter]);
+            assert_eq!(output.status.code(), Some(2));
+            assert!(output.stdout.is_empty());
+        }
+    }
+    let capture = write_capture_with_later_missing_timestamp();
+    let output = run(&[
+        "--output",
+        "pcapng",
+        "read",
+        path_text(capture.path()),
+        "--filter",
+        "frame.time_epoch >= 0",
+    ]);
+    assert_eq!(output.status.code(), Some(3));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("frame 2"));
+    let capture = write_truncated_capture();
+    let output = run(&[
+        "--output",
+        "pcap",
+        "read",
+        path_text(capture.path()),
+        "--filter",
+        "frame.number == 99",
+    ]);
+    assert_eq!(output.status.code(), Some(3));
 }

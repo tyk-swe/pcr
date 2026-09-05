@@ -176,3 +176,18 @@ pub(in crate::analysis::pcap) fn validate_pcapng_block_length(
     }
     Ok(())
 }
+
+/// Copies a reader-validated section header with an unknown section length.
+#[expect(
+    clippy::indexing_slicing,
+    reason = "validated section headers contain at least 28 bytes"
+)]
+pub(in crate::analysis::pcap) fn write_selected_section(
+    output: &mut impl std::io::Write,
+    raw: &[u8],
+) -> Result<(), Error> {
+    output.write_all(&raw[..16])?;
+    output.write_all(&[0xff; 8])?;
+    output.write_all(&raw[24..])?;
+    Ok(())
+}

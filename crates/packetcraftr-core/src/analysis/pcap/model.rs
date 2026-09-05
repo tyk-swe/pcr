@@ -385,6 +385,19 @@ impl CaptureRecord {
     }
 }
 
+/// Input and output accounting for a bounded capture selection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SelectionReport {
+    pub format: Format,
+    pub frames_read: u64,
+    pub frames_selected: u64,
+    pub captured_bytes_read: u64,
+    pub captured_bytes_selected: u64,
+    pub interfaces: usize,
+    /// Copied metadata records, excluding the initial capture header.
+    pub metadata_records: u64,
+}
+
 /// Result of a bounded streaming capture rewrite.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RewriteReport {

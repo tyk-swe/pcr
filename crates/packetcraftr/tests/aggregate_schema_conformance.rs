@@ -8,9 +8,8 @@
 //! one and validates the emitted envelope against the published v1 schema.
 //!
 //! The published-example tests validate hand-written JSON, so they cannot see
-//! a Rust type drifting away from the contract. This file closes that hole:
-//! `additionalProperties: false` throughout the schema means one new `pub`
-//! field on any payload breaks every consumer, and that break now fails here.
+//! a Rust type drifting away from the contract. These tests check declared
+//! fields and frozen vocabularies while allowing additive payload fields.
 
 use std::collections::BTreeSet;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -1290,24 +1289,62 @@ fn routes_case() -> Value {
     )
 }
 
-/// The guard above is only worth having if it fails on drift, and every
-/// aggregate `$def` closes its property set. One stray key at either level
-/// must be rejected.
 #[test]
-fn an_undeclared_field_fails_validation_at_the_payload_and_the_envelope() {
-    for pointer in ["result", ""] {
+fn aggregate_payloads_accept_unknown_fields_in_nested_output_records() {
+    fn extend(value: &mut Value) {
+        match value {
+            Value::Object(object) => {
+                // Embedded packet inputs and reflective values keep their own contract.
+                if object.get("schema").and_then(Value::as_str) == Some("packetcraftr.packet/v1")
+                    || (object.contains_key("type") && object.contains_key("value"))
+                {
+                    return;
+                }
+                for child in object.values_mut() {
+                    extend(child);
+                }
+                object.insert("future_field".to_owned(), serde_json::json!({"value": 1}));
+            }
+            Value::Array(items) => {
+                for item in items {
+                    extend(item);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    for (command, branch, case) in CASES {
+        let mut document = case();
+        extend(&mut document["result"]);
+        output_schema_validator()
+            .validate(&document)
+            .unwrap_or_else(|error| panic!("{command} ({branch}): {error}"));
+    }
+}
+
+#[test]
+fn unknown_envelope_fields_and_invalid_known_payload_fields_are_rejected() {
+    for (pointer, value) in [
+        ("/undeclared", Value::from(1)),
+        ("/result/route", Value::from("invalid route")),
+    ] {
         let mut document = plan_case();
-        document
-            .pointer_mut(if pointer.is_empty() { "" } else { "/result" })
-            .expect("fixture has the addressed object")
-            .as_object_mut()
-            .expect("addressed value is an object")
-            .insert("undeclared".to_owned(), Value::from(1));
+        let (parent, key) = pointer.rsplit_once('/').expect("JSON pointer");
+        document.pointer_mut(parent).expect("parent exists")[key] = value;
         assert!(
             output_schema_validator().validate(&document).is_err(),
-            "an undeclared key under {pointer:?} must fail validation"
+            "invalid value at {pointer} must fail validation"
         );
     }
+
+    let mut document = plan_case();
+    document["result"].as_object_mut().unwrap().remove("route");
+    assert!(output_schema_validator().validate(&document).is_err());
+
+    let mut document = build_case();
+    document["result"]["packet"]["undeclared"] = Value::from(1);
+    assert!(output_schema_validator().validate(&document).is_err());
 }
 
 // --------------------------------------------------------- frozen vocabulary

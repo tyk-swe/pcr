@@ -3,7 +3,7 @@
   "$id": "https://raw.githubusercontent.com/tyk-swe/pcr/main/schemas/packetcraftr.output.v1.schema.json",
   "$comment": "SPDX-License-Identifier: AGPL-3.0-only",
   "title": "PacketcraftR CLI output envelope v1",
-  "description": "One typed aggregate JSON result or one independently valid NDJSON stream record.",
+  "description": "One typed aggregate JSON result or one independently valid NDJSON stream record. Aggregate result objects and their nested output records accept additional properties; consumers must ignore unknown fields. Embedded packet documents and reflective field values retain their own strict contracts. Envelope fields and enum vocabularies remain closed. Shared record definitions use the same policy in stream output.",
   "oneOf": [
     {
       "$ref": "#/$defs/aggregateSuccess"
@@ -787,7 +787,7 @@
           }
         }
       ],
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "statsConversation": {
       "type": "object",
@@ -854,7 +854,7 @@
           "$ref": "#/$defs/duration"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "statsEndpoint": {
       "type": "object",
@@ -882,7 +882,7 @@
           "$ref": "#/$defs/uint64"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "statsProtocol": {
       "type": "object",
@@ -902,7 +902,7 @@
           "$ref": "#/$defs/uint64"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "statsPort": {
       "type": "object",
@@ -931,7 +931,7 @@
           "$ref": "#/$defs/uint64"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "statsIo": {
       "type": "object",
@@ -950,7 +950,7 @@
           }
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "statsIoBucket": {
       "type": "object",
@@ -970,7 +970,7 @@
           "$ref": "#/$defs/uint64"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "ipDatagramKey": {
       "description": "Capture-scoped identity of one fragmented IPv4 or IPv6 datagram.",
@@ -1057,7 +1057,7 @@
           }
         }
       ],
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "ipCompletedDatagramOutcome": {
       "type": "object",
@@ -1097,7 +1097,7 @@
           "$ref": "#/$defs/uint64"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "ipIncompleteDatagramOutcome": {
       "type": "object",
@@ -1139,7 +1139,7 @@
           "$ref": "#/$defs/uint64"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "ipDatagramOutcome": {
       "oneOf": [
@@ -1216,7 +1216,7 @@
           "$ref": "#/$defs/uint64"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "ipReassemblyReport": {
       "description": "Capture-global fragment counters and bounded completed or incomplete datagram outcomes.",
@@ -1273,7 +1273,7 @@
           "$ref": "#/$defs/uint64"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "ipOverlapResolvedEvent": {
       "type": "object",
@@ -1483,7 +1483,7 @@
           "$ref": "#/$defs/ipReassemblyReport"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "expertFinding": {
       "type": "object",
@@ -1530,7 +1530,7 @@
           "transport"
         ]
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "expertCodeCount": {
       "type": "object",
@@ -1547,7 +1547,7 @@
           "$ref": "#/$defs/uint64"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "followSuccess": {
       "type": "object",
@@ -1622,7 +1622,7 @@
           "client"
         ]
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "followEndpoint": {
       "type": "object",
@@ -1640,7 +1640,7 @@
           "maximum": 65535
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "followChunk": {
       "type": "object",
@@ -1663,7 +1663,7 @@
           "$ref": "#/$defs/hexBytes"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "tlsSuccess": {
       "type": "object",
@@ -1727,7 +1727,7 @@
           "$ref": "#/$defs/tlsSummaryRecord"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "tlsSessionRecord": {
       "allOf": [
@@ -1735,7 +1735,7 @@
           "$ref": "#/$defs/tlsSession"
         }
       ],
-      "unevaluatedProperties": false
+      "unevaluatedProperties": true
     },
     "tlsSummaryRecord": {
       "allOf": [
@@ -1743,7 +1743,7 @@
           "$ref": "#/$defs/tlsSummary"
         }
       ],
-      "unevaluatedProperties": false
+      "unevaluatedProperties": true
     },
     "tlsSessionEvent": {
       "allOf": [
@@ -1833,7 +1833,7 @@
           "maximum": 65535
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "tlsAlert": {
       "description": "One alert record observed in the clear. A TLS 1.3 alert sent after the ServerHello is encrypted and therefore invisible.",
@@ -1864,7 +1864,7 @@
           ]
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "tlsClient": {
       "description": "What one client offered. Lists keep wire order and include GREASE code points. Fingerprints are advisory: every byte they are computed from is chosen by the client.",
@@ -1953,7 +1953,7 @@
           "type": "string"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "tlsServer": {
       "description": "What one server decided.",
@@ -2020,7 +2020,7 @@
           "type": "string"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "tlsSession": {
       "description": "One assembled TLS handshake, joining a client's offer to a server's decision.",
@@ -2125,7 +2125,7 @@
           "$ref": "#/$defs/uint64"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "tlsSummary": {
       "type": "object",
@@ -2450,7 +2450,7 @@
           "type": "boolean"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "dissectAggregateResult": {
       "type": "object",
@@ -2499,7 +2499,7 @@
           ]
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "dissectionResult": {
       "type": "object",
@@ -2529,7 +2529,7 @@
           "$ref": "#/$defs/packetLayout"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "protocolsResult": {
       "oneOf": [
@@ -2554,7 +2554,7 @@
           }
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "protocolDetailResult": {
       "type": "object",
@@ -2566,7 +2566,7 @@
           "$ref": "#/$defs/protocolDetail"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "protocolSummary": {
       "type": "object",
@@ -2607,7 +2607,7 @@
           "type": "boolean"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "protocolDetail": {
       "type": "object",
@@ -2662,7 +2662,7 @@
           }
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "protocolField": {
       "type": "object",
@@ -2702,7 +2702,7 @@
           "type": "string"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "protocolBinding": {
       "type": "object",
@@ -2721,7 +2721,7 @@
           "description": "Selector value the parent matches: a port, EtherType, or protocol number; zero is the parent's fallback"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "readStreamResult": {
       "oneOf": [
@@ -2823,7 +2823,7 @@
           }
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "planResult": {
       "type": "object",
@@ -2835,7 +2835,7 @@
           "$ref": "#/$defs/plannedRoute"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "routesResult": {
       "type": "object",
@@ -2850,7 +2850,7 @@
           }
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "sendResult": {
       "type": "object",
@@ -2866,7 +2866,7 @@
           "$ref": "#/$defs/materializedRoute"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "exchangeResult": {
       "type": "object",
@@ -2909,7 +2909,7 @@
           }
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "replayResult": {
       "type": "object",
@@ -2960,7 +2960,7 @@
           }
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "scanResult": {
       "type": "object",
@@ -2993,7 +2993,7 @@
           }
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "tracerouteResult": {
       "type": "object",
@@ -3057,7 +3057,7 @@
                 "$ref": "#/$defs/frame"
               }
             },
-            "additionalProperties": false
+            "additionalProperties": true
           }
         },
         "completion": {
@@ -3093,7 +3093,7 @@
           }
         }
       ],
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "dnsResult": {
       "type": "object",
@@ -3302,7 +3302,7 @@
           }
         }
       ],
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "fuzzResult": {
       "type": "object",
@@ -3341,7 +3341,7 @@
           }
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "exchangeStreamResult": {
       "oneOf": [
@@ -3505,7 +3505,7 @@
           "type": "boolean"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "scanStreamResult": {
       "oneOf": [
@@ -4124,15 +4124,15 @@
                       "$ref": "#/$defs/byteRange"
                     }
                   },
-                  "additionalProperties": false
+                  "additionalProperties": true
                 }
               }
             },
-            "additionalProperties": false
+            "additionalProperties": true
           }
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "wireFrame": {
       "type": "object",
@@ -4148,7 +4148,7 @@
           "$ref": "#/$defs/uint64"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "frame": {
       "type": "object",
@@ -4194,7 +4194,7 @@
           "$ref": "#/$defs/hexBytes"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "timestamp": {
       "type": "object",
@@ -4214,7 +4214,7 @@
           "maximum": 999999999
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "interfaceId": {
       "type": "object",
@@ -4232,7 +4232,7 @@
           "maximum": 4294967295
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "routeDecision": {
       "type": "object",
@@ -4303,7 +4303,7 @@
           "maximum": 4294967295
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "plannedRoute": {
       "type": "object",
@@ -4362,7 +4362,7 @@
           "type": "boolean"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "neighborVlanTag": {
       "type": "object",
@@ -4394,7 +4394,7 @@
           "maximum": 4095
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "macAddress": {
       "type": "array",
@@ -4466,7 +4466,7 @@
               "exclusiveMinimum": 0
             }
           },
-          "additionalProperties": false
+          "additionalProperties": true
         },
         {
           "type": "object",
@@ -4479,7 +4479,7 @@
               "exclusiveMinimum": 0
             }
           },
-          "additionalProperties": false
+          "additionalProperties": true
         }
       ]
     },
@@ -4543,7 +4543,7 @@
               "type": "boolean"
             }
           },
-          "additionalProperties": false
+          "additionalProperties": true
         },
         "mtu": {
           "type": "integer",
@@ -4564,7 +4564,7 @@
           "maximum": 4294967295
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "materializedRoute": {
       "type": "object",
@@ -4611,10 +4611,10 @@
               "$ref": "#/$defs/captureStatistics"
             }
           },
-          "additionalProperties": false
+          "additionalProperties": true
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "decodedFrame": {
       "type": "object",
@@ -4641,7 +4641,7 @@
           }
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "decodedStack": {
       "type": "object",
@@ -4684,7 +4684,7 @@
           "$ref": "#/$defs/duration"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "scanEndpoint": {
       "type": "object",
@@ -4729,7 +4729,7 @@
           }
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "scanClassificationCounts": {
       "type": "object",
@@ -4839,7 +4839,7 @@
           "minLength": 1
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "traceHop": {
       "type": "object",
@@ -4861,7 +4861,7 @@
           }
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "traceProbe": {
       "type": "object",
@@ -4963,7 +4963,7 @@
           }
         }
       ],
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "dnsQueryType": {
       "type": "string",
@@ -5105,7 +5105,7 @@
           }
         }
       ],
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "dnsRejectedRecord": {
       "type": "object",
@@ -5136,7 +5136,7 @@
           "minLength": 1
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "dnsEdns": {
       "type": "object",
@@ -5190,11 +5190,11 @@
                 "$ref": "#/$defs/hexBytes"
               }
             },
-            "additionalProperties": false
+            "additionalProperties": true
           }
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "dnsUndecoded": {
       "type": "object",
@@ -5214,7 +5214,7 @@
           "$ref": "#/$defs/frame"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "dnsRecords": {
       "type": "array",
@@ -5514,7 +5514,7 @@
           }
         }
       ],
-      "unevaluatedProperties": false
+      "unevaluatedProperties": true
     },
     "fuzzCase": {
       "type": "object",
@@ -5643,7 +5643,7 @@
           }
         }
       ],
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "fuzzMode": {
       "type": "string",
@@ -5690,7 +5690,7 @@
           "$ref": "#/$defs/fieldValue"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "fuzzReproduction": {
       "type": "object",
@@ -5710,7 +5710,7 @@
           "$ref": "#/$defs/uint64"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "fieldValue": {
       "oneOf": [
@@ -5851,7 +5851,7 @@
           "$ref": "#/$defs/uint64"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "error": {
       "type": "object",
@@ -5896,7 +5896,7 @@
           "minLength": 1
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "diagnostic": {
       "type": "object",
@@ -5929,7 +5929,7 @@
           "minLength": 1
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "operationStats": {
       "description": "Command-processed counters. For capture, packets_attempted is the one-based source-frame count, packets_completed is the matched/emitted frame count, and bytes is captured source bytes; capture contains distinct provider-reported backend statistics.",
@@ -5990,7 +5990,7 @@
           "$ref": "#/$defs/uint64"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "duration": {
       "type": "object",
@@ -6008,7 +6008,7 @@
           "maximum": 999999999
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "byteRange": {
       "type": "object",
@@ -6024,7 +6024,7 @@
           "$ref": "#/$defs/uint64"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     },
     "hexBytes": {
       "type": "string",

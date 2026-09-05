@@ -8,6 +8,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Added
 
+- Optional core `decrypt` feature with RustCrypto AES-GCM, ChaCha20-Poly1305,
+  and HKDF dependencies, covered by the supported feature matrix.
+- CI checks public library API compatibility against the PR base or previous
+  main commit with `cargo semver-checks`.
 - `build` and `dissect` expose `--max-layers` and `--max-packet-size`, and
   `traceroute` exposes a validated `--source-port` for UDP and TCP probes.
 - DNS queries and decoded records support CAA (type 257), and streamed scan
@@ -127,6 +131,11 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- Aggregate output result objects and nested output records accept unknown
+  fields, including shared records in NDJSON. Consumers must ignore these
+  fields; envelopes, enum vocabularies, and embedded packet documents retain
+  their strict contracts. Runtime schema lifetime and resource-budget
+  decisions are documented in `schemas/EVOLUTION.md`.
 - The `build` CLI reports `--max-layers` and `--max-packet-size` breaches as
   `packet.build_resource_limit` (exit 3); the core library retains its policy
   classification for callers that enforce the same finite resource budget.

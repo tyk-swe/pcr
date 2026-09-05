@@ -75,11 +75,21 @@ Use `--no-default-features` for offline-only builds,
 native support, or `--all-features` for every native provider. Run
 `./scripts/check-features.sh` to validate the complete supported matrix.
 
+The optional `packetcraftr-core/decrypt` feature enables the RustCrypto
+AES-GCM, ChaCha20-Poly1305, and HKDF dependencies for offline cryptographic
+analysis. It is disabled by default; decryption workflows are not yet exposed.
+
 ## Contracts
 
 - Packet JSON/YAML: [`packetcraftr.packet/v1`](schemas/packetcraftr.packet.v1.schema.json)
 - Structured command output: [`packetcraftr.output/v1`](schemas/packetcraftr.output.v1.schema.json)
 - Published packet and output examples: [`examples/documents`](examples/documents)
+
+Aggregate output consumers must ignore unknown fields in result objects and
+nested output records. Shared records follow this rule in NDJSON too. Envelope
+fields, enum vocabularies, and embedded packet documents remain strict. See
+[the evolution policy](schemas/EVOLUTION.md) for compatibility and runtime
+protocol schema decisions.
 
 Packet documents use bounded JSON/YAML parsing. Put the global `--output`
 option before the command, for example `packetcraftr --output json stats

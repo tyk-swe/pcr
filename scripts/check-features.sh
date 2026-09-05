@@ -13,6 +13,7 @@ cd "$ROOT_DIR"
 PROFILES=(
   "no-default-features|--no-default-features"
   "default|"
+  "decrypt|--no-default-features --features packetcraftr-core/decrypt"
   "pcap-free|--no-default-features --features native-route,native-layer3"
   "native-interfaces|--no-default-features --features native-interfaces"
   "native-route|--no-default-features --features native-route"

@@ -422,11 +422,9 @@ fn is_explained_unpublished(path: &str) -> bool {
     })
 }
 
-/// Nearly every object in the schema closes with `additionalProperties:
-/// false`, so a consumer generating strict types from the published examples
-/// never learns about a property no example serializes. Every declared
-/// property must therefore appear in some `output-*.json`, or carry a reason
-/// it cannot.
+/// Consumers generating types from the published examples must see every
+/// declared property even though output records accept unknown fields. Each
+/// property must appear in some `output-*.json`, or carry a reason it cannot.
 #[test]
 fn every_schema_property_appears_in_a_published_example() {
     let schema = output_schema();

@@ -52,7 +52,7 @@ pub(super) fn render_record(
         }
         Format::Raw => write_raw(&chunk.bytes),
         Format::Json => {
-            state.retained.push(chunk.into());
+            state.retained.push(|| chunk.into());
             Ok(())
         }
         Format::Ndjson => Ok(stream.emit_data(output::follow::Chunk::from(chunk), Vec::new())?),

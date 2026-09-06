@@ -51,15 +51,19 @@ pub(super) fn render_session(
     state: &mut State,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    let session = Session::from(session);
     state.select();
     match format {
-        Format::Text => write_stdout_line(format_args!("{}", session_line(&session))),
+        Format::Text => {
+            write_stdout_line(format_args!("{}", session_line(&Session::from(session))))
+        }
         Format::Json => {
-            state.retained.push(session);
+            state.retained.push(|| Session::from(session));
             Ok(())
         }
-        Format::Ndjson => Ok(stream.emit_data(output::tls::Event::session(session), Vec::new())?),
+        Format::Ndjson => Ok(stream.emit_data(
+            output::tls::Event::session(Session::from(session)),
+            Vec::new(),
+        )?),
         _ => unreachable!("command dispatch validated the output format"),
     }
 }
@@ -376,7 +380,7 @@ mod tests {
         let mut state = State::new(2);
         for _ in 0..5 {
             state.select();
-            state.retained.push(session());
+            state.retained.push(session);
         }
         assert_eq!(state.counts().selected, 5);
         assert_eq!(state.counts().omitted, 3);

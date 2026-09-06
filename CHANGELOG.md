@@ -738,6 +738,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Aggregate JSON output for `follow` and `tls` skips output conversion for
+  items beyond the retention ceiling while preserving omission counts.
 - Release archives include the capture and packet document used by the README
   Quick Start, with their example paths preserved.
 - Recipe stdin accepts YAML with leading comments or reordered mapping keys,

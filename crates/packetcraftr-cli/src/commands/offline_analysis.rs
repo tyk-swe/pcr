@@ -111,13 +111,14 @@ impl<T> Retained<T> {
         }
     }
 
-    /// Retains one item, or counts it as omitted once the ceiling is reached.
-    pub(super) fn push(&mut self, item: T) {
+    /// Converts and retains one item only while capacity remains; otherwise
+    /// counts it as omitted without calling the conversion.
+    pub(super) fn push(&mut self, convert: impl FnOnce() -> T) {
         if self.items.len() >= self.maximum {
             self.omitted = self.omitted.saturating_add(1);
             return;
         }
-        self.items.push(item);
+        self.items.push(convert());
     }
 
     /// How many items the ceiling kept out of the document.
@@ -195,16 +196,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn retention_counts_what_the_ceiling_kept_out() {
+    fn retention_skips_conversion_for_items_the_ceiling_keeps_out() {
+        let mut conversions = 0;
         let mut retained = Retained::new(2);
         for value in 0..5_u8 {
-            retained.push(value);
+            retained.push(|| {
+                conversions += 1;
+                value
+            });
         }
+        assert_eq!(conversions, 2);
         assert_eq!(retained.omitted(), 3);
         assert_eq!(retained.into_items(), vec![0, 1]);
 
         let mut empty = Retained::new(0);
-        empty.push(1_u8);
+        empty.push(|| {
+            conversions += 1;
+            1_u8
+        });
+        assert_eq!(conversions, 2);
         assert_eq!(empty.omitted(), 1);
         assert!(empty.into_items().is_empty());
     }

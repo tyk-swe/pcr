@@ -75,7 +75,7 @@ pub(super) fn render_record(
             )),
         },
         Format::Json => {
-            state.retained.push(finding);
+            state.retained.push(|| finding);
             Ok(())
         }
         Format::Ndjson => Ok(stream.emit_data(finding, Vec::new())?),

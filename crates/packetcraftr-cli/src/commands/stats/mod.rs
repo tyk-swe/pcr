@@ -74,7 +74,7 @@ fn cap_table(
     ) -> Vec<core::diagnostic::Diagnostic> {
         let mut retained = Retained::new(limit);
         for row in std::mem::take(rows) {
-            retained.push(row);
+            retained.push(|| row);
         }
         let omitted = retained.omitted();
         *rows = retained.into_items();

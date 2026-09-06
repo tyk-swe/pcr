@@ -5,8 +5,6 @@ use packetcraftr::core::error::Kind;
 
 mod context;
 
-use std::process::ExitCode;
-
 use clap::Parser;
 use packetcraftr::output;
 
@@ -18,7 +16,7 @@ use super::rendering::{
     stdout_stream, terminal_document, write_unattributed_error,
 };
 
-pub(crate) fn run() -> ExitCode {
+pub(crate) fn run() -> u8 {
     let context = from_env();
     context.color.write_global();
     let cli = match Cli::try_parse() {
@@ -41,14 +39,13 @@ pub(crate) fn run() -> ExitCode {
                     )),
                     MachineFormat::Ndjson => {
                         write_unattributed_error(context.command, error.output_error())
-                            .map_err(CliError::from)
                     }
                 };
                 return match emitted {
-                    Ok(()) => ExitCode::from(code),
+                    Ok(()) => code,
                     Err(write_error) => {
                         let _ = emit_stderr_error(&write_error);
-                        ExitCode::from(write_error.exit_code())
+                        write_error.exit_code()
                     }
                 };
             }
@@ -58,18 +55,28 @@ pub(crate) fn run() -> ExitCode {
                 emit_stdout_document(&raw_message)
             };
             return match emitted {
-                Ok(()) => ExitCode::from(code),
-                Err(_) => ExitCode::from(5),
+                Ok(()) => code,
+                Err(_) => 5,
             };
         }
     };
     cli.color.write_global();
     let format = output::contract::Format::from(cli.format);
     let command = cli.command.kind();
-    let stream = stdout_stream(command);
+    let stream = match if format == output::contract::Format::Ndjson {
+        stdout_stream(command)
+    } else {
+        Ok(StreamEncoder::new(command, std::io::stdout()))
+    } {
+        Ok(stream) => stream,
+        Err(error) => {
+            let _ = emit_stderr_error(&error);
+            return error.exit_code();
+        }
+    };
     match cli.command.run(format, &stream) {
         Ok(()) => match require_success_terminal(format, &stream) {
-            Ok(()) => ExitCode::SUCCESS,
+            Ok(()) => 0,
             Err(error) => command_failure(format, command, error, &stream),
         },
         Err(error) => command_failure(format, command, error, &stream),
@@ -94,7 +101,21 @@ fn command_failure(
     command: output::contract::Command,
     error: CliError,
     stream: &StreamEncoder,
-) -> ExitCode {
+) -> u8 {
+    let open = stream.is_open();
+    let error = if format == output::contract::Format::Ndjson && !open && !stream.is_terminal() {
+        CliError::from_classification(
+            packetcraftr::core::error::Classification::new(
+                "io.stdout",
+                Kind::Io,
+                Some("treat the structured stream as incomplete"),
+            ),
+            "NDJSON stream is incomplete; output is unavailable for a terminal record",
+            vec![error.message],
+        )
+    } else {
+        error
+    };
     let exit_code = error.exit_code();
     let (emitted, report_write_error) = match format {
         output::contract::Format::Json => (
@@ -104,7 +125,7 @@ fn command_failure(
             )),
             true,
         ),
-        output::contract::Format::Ndjson if stream.is_open() => (
+        output::contract::Format::Ndjson if open => (
             stream
                 .emit_error(error.output_error())
                 .map_err(CliError::from),
@@ -117,9 +138,9 @@ fn command_failure(
         if report_write_error {
             let _ = emit_stderr_error(&write_error);
         }
-        return ExitCode::from(write_error.exit_code());
+        return write_error.exit_code();
     }
-    ExitCode::from(exit_code)
+    exit_code
 }
 
 #[cfg(test)]

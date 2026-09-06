@@ -770,3 +770,47 @@ fn missing_input_file_reports_the_same_io_failure_for_every_reader() {
         );
     }
 }
+
+#[test]
+fn stalled_ndjson_stdout_exits_within_the_budget_and_shutdown_allowance() {
+    let mut capture = malformed_raw_frame_capture();
+    for _ in 0..9_999 {
+        capture
+            .write_all(&[0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0])
+            .unwrap();
+    }
+    capture.flush().unwrap();
+    let started = Instant::now();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_packetcraftr"))
+        .args(["--output", "ndjson", "expert"])
+        .arg(capture.path())
+        .args(["--max-duration-ms", "200", "--max-frames", "10000"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    // Keep the read end open without draining it until the child has exited.
+    let allowance = Duration::from_millis(200) + Duration::from_secs(2);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let output = child.wait_with_output().unwrap();
+                assert_eq!(status.code(), Some(5), "{output:?}");
+                assert!(
+                    String::from_utf8_lossy(&output.stderr).contains("incomplete"),
+                    "{output:?}"
+                );
+                assert!(!output.stdout.is_empty());
+                break;
+            }
+            Ok(None) if started.elapsed() < allowance => {
+                std::thread::sleep(Duration::from_millis(10))
+            }
+            result => {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("stalled stdout exceeded the finite shutdown allowance: {result:?}");
+            }
+        }
+    }
+}

@@ -5,6 +5,12 @@
 
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::error::BoundaryError;
+
+use crate::progress::{Runtime, Sink};
 
 use serde::Serialize;
 
@@ -45,7 +51,16 @@ enum EncoderState {
 struct EncoderOutput {
     state: EncoderState,
     sequence: u64,
-    writer: Box<dyn Write + Send>,
+    writer: EncoderWriter,
+}
+
+/// Bounded output retains its worker permit until the underlying write returns.
+enum EncoderWriter {
+    Direct(Box<dyn Write + Send>),
+    Bounded {
+        sink: Sink<Vec<u8>>,
+        timeout: Duration,
+    },
 }
 
 impl EncoderOutput {
@@ -72,9 +87,44 @@ impl StreamEncoder {
             output: Arc::new(Mutex::new(EncoderOutput {
                 state: EncoderState::Open,
                 sequence: 0,
-                writer: Box::new(writer),
+                writer: EncoderWriter::Direct(Box::new(writer)),
             })),
         }
+    }
+
+    /// Opens a stream whose individual writes and flushes wait at most `timeout`.
+    ///
+    /// The writer occupies one callback worker in `runtime`, independently of
+    /// any workflow event callback. On timeout the stream fails closed; the
+    /// write may finish later and retains its worker permit until it returns.
+    /// Serialization remains synchronous, as it is for [`Self::new`].
+    pub fn new_bounded(
+        command: Command,
+        mut writer: impl Write + Send + 'static,
+        runtime: &Runtime,
+        timeout: Duration,
+    ) -> Result<Self, BoundaryError> {
+        let sink = Sink::new_in(runtime, move |line: Vec<u8>| {
+            writer
+                .write_all(&line)
+                .and_then(|()| writer.flush())
+                .map_err(|source| {
+                    BoundaryError::with_source(
+                        format!("write NDJSON output failed: {source}"),
+                        Classification::new("io.stdout", Kind::Io, None),
+                        Vec::new(),
+                        source,
+                    )
+                })
+        })?;
+        Ok(Self {
+            command,
+            output: Arc::new(Mutex::new(EncoderOutput {
+                state: EncoderState::Open,
+                sequence: 0,
+                writer: EncoderWriter::Bounded { sink, timeout },
+            })),
+        })
     }
 
     pub fn emit_data<T: Serialize>(
@@ -108,14 +158,16 @@ impl StreamEncoder {
         let sequence = output.sequence;
         let record = Envelope::error_record(Some(self.command), sequence, error);
         let line = serialize_line(&record, sequence)?;
-        write_line(&mut output, &line, sequence, true)
+        write_line(&mut output, line, sequence, true)
     }
 
+    /// Returns false while a record is being written or the state is poisoned.
     #[must_use]
     pub fn is_open(&self) -> bool {
         self.state() == Some(EncoderState::Open)
     }
 
+    /// Returns true only after a terminal write and flush have finished.
     #[must_use]
     pub fn is_terminal(&self) -> bool {
         self.state() == Some(EncoderState::Terminal)
@@ -145,7 +197,7 @@ impl StreamEncoder {
             record = record.with_stats(stats);
         }
         let line = serialize_line(&record, sequence)?;
-        write_line(&mut output, &line, sequence, terminal)?;
+        write_line(&mut output, line, sequence, terminal)?;
         if let Some(next) = next {
             output.sequence = next;
         }
@@ -156,24 +208,25 @@ impl StreamEncoder {
         self.output.lock().map_err(|_| EncodeError::Poisoned)
     }
 
-    /// `None` once the lock is poisoned: a stream whose state cannot be read is
-    /// neither open nor cleanly terminated.
+    /// A busy or poisoned stream cannot safely accept a cleanup record.
     fn state(&self) -> Option<EncoderState> {
-        self.output.lock().ok().map(|output| output.state)
+        self.output.try_lock().ok().map(|output| output.state)
     }
 }
 
 fn write_line(
     output: &mut EncoderOutput,
-    line: &[u8],
+    line: Vec<u8>,
     sequence: u64,
     terminal: bool,
 ) -> Result<(), EncodeError> {
-    if let Err(source) = output
-        .writer
-        .write_all(line)
-        .and_then(|()| output.writer.flush())
-    {
+    let written = match &mut output.writer {
+        EncoderWriter::Direct(writer) => writer.write_all(&line).and_then(|()| writer.flush()),
+        EncoderWriter::Bounded { sink, timeout } => sink
+            .emit(line, &Deadline::new(*timeout))
+            .map_err(|source| io::Error::other(format!("NDJSON stream is incomplete: {source}"))),
+    };
+    if let Err(source) = written {
         output.state = EncoderState::Failed;
         return Err(EncodeError::Write { sequence, source });
     }
@@ -236,8 +289,146 @@ impl Classified for EncodeError {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        mpsc,
+    };
+    use std::time::Instant;
+
     use super::*;
     use packetcraftr_core::error::Coordinate;
+
+    struct BlockedWriter {
+        release: mpsc::Receiver<()>,
+        dropped: mpsc::Sender<()>,
+        writes: Arc<AtomicUsize>,
+    }
+
+    impl Write for BlockedWriter {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.writes.fetch_add(1, Ordering::SeqCst);
+            self.release
+                .recv_timeout(Duration::from_secs(3))
+                .map_err(io::Error::other)?;
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl Drop for BlockedWriter {
+        fn drop(&mut self) {
+            let _ = self.dropped.send(());
+        }
+    }
+
+    #[test]
+    fn bounded_terminal_writes_fail_incomplete_without_retrying_or_releasing_the_worker() {
+        for terminal_error in [false, true] {
+            let (release, wait) = mpsc::channel();
+            let (dropped, writer_dropped) = mpsc::channel();
+            let writes = Arc::new(AtomicUsize::new(0));
+            let runtime = Runtime::new(1);
+            let stream = StreamEncoder::new_bounded(
+                Command::Read,
+                BlockedWriter {
+                    release: wait,
+                    dropped,
+                    writes: Arc::clone(&writes),
+                },
+                &runtime,
+                Duration::from_millis(50),
+            )
+            .unwrap();
+            let started = Instant::now();
+            let error = if terminal_error {
+                stream.emit_error(Error::new(
+                    Classification::new("io.fixture", Kind::Io, None),
+                    "fixture failure".to_owned(),
+                    Vec::new(),
+                ))
+            } else {
+                stream.complete(serde_json::json!({"event": "complete"}), Vec::new())
+            }
+            .expect_err("terminal output is blocked");
+            assert!(started.elapsed() < Duration::from_secs(1));
+            assert!(error.to_string().contains("incomplete"));
+            assert!(!stream.is_open());
+            assert!(!stream.is_terminal());
+            assert!(stream.complete((), Vec::new()).is_err());
+            assert!(stream.emit_data((), Vec::new()).is_err());
+            assert_eq!(writes.load(Ordering::SeqCst), 1);
+            drop(stream);
+            assert!(Sink::new_in(&runtime, |(): ()| Ok(())).is_err());
+            release.send(()).unwrap();
+            writer_dropped.recv_timeout(Duration::from_secs(1)).unwrap();
+            let reclaimed = Instant::now();
+            loop {
+                if Sink::new_in(&runtime, |(): ()| Ok(())).is_ok() {
+                    break;
+                }
+                assert!(reclaimed.elapsed() < Duration::from_secs(1));
+                std::thread::yield_now();
+            }
+        }
+    }
+
+    #[test]
+    fn bounded_output_keeps_sequences_contiguous_and_writes_one_terminal() {
+        #[derive(Clone, Default)]
+        struct Buffer(Arc<Mutex<Vec<u8>>>);
+        impl Write for Buffer {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        let output = Buffer::default();
+        let stream = StreamEncoder::new_bounded(
+            Command::Read,
+            output.clone(),
+            &Runtime::new(1),
+            Duration::from_secs(1),
+        )
+        .unwrap();
+        for frame in 0..3 {
+            stream
+                .emit_data(serde_json::json!({"frame": frame}), Vec::new())
+                .unwrap();
+        }
+        stream
+            .complete_with_stats(
+                serde_json::json!({"event": "complete"}),
+                Vec::new(),
+                Stats::default(),
+            )
+            .unwrap();
+        assert!(stream.is_terminal());
+        assert!(stream.complete((), Vec::new()).is_err());
+        let records: Vec<serde_json::Value> =
+            serde_json::Deserializer::from_slice(&output.0.lock().unwrap())
+                .into_iter()
+                .collect::<Result<_, _>>()
+                .unwrap();
+        assert_eq!(records.len(), 4);
+        for (sequence, record) in records.iter().enumerate() {
+            assert_eq!(record["sequence"], sequence);
+        }
+        assert_eq!(
+            records
+                .iter()
+                .filter(|record| record["result"]["event"] == "complete")
+                .count(),
+            1
+        );
+    }
 
     #[test]
     fn classified_error_includes_typed_context() {

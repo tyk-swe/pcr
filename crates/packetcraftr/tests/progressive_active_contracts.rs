@@ -721,3 +721,86 @@ fn scan_materializes_distinct_correlated_identities_with_a_larger_batch_limit() 
     assert_ne!(&sent[0][4..6], &sent[1][4..6]);
     assert_ne!(&sent[1][4..6], &sent[2][4..6]);
 }
+
+#[test]
+fn blocked_encoder_does_not_hold_up_progressive_deadline_cleanup() {
+    use std::io::{self, Write};
+    use std::sync::mpsc;
+
+    struct Writer {
+        release: mpsc::Receiver<()>,
+        started: mpsc::Sender<()>,
+        dropped: mpsc::Sender<()>,
+    }
+    impl Write for Writer {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.started.send(()).unwrap();
+            self.release
+                .recv_timeout(Duration::from_secs(3))
+                .map_err(io::Error::other)?;
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+    impl Drop for Writer {
+        fn drop(&mut self) {
+            let _ = self.dropped.send(());
+        }
+    }
+
+    let harness = Harness::new(IoState::default());
+    let (registry, mut executor, mut authorizer) = harness.parts();
+    let request = scan::Request {
+        target: Target::Address(DESTINATION),
+        transport: scan::Transport::Tcp,
+        address_family: packetcraftr::target::Family::Any,
+        ports: vec![80, 81],
+        attempts: 1,
+        timeout: Duration::from_millis(10),
+        probes_per_second: None,
+        limits: scan::Limits {
+            max_duration: Duration::from_millis(100),
+            ..scan::Limits::default()
+        },
+    };
+    let (release, wait) = mpsc::channel();
+    let (started, writer_started) = mpsc::channel();
+    let (dropped, writer_dropped) = mpsc::channel();
+    let stream = packetcraftr::output::stream::StreamEncoder::new(
+        packetcraftr::output::contract::Command::Scan,
+        Writer {
+            release: wait,
+            started,
+            dropped,
+        },
+    );
+    let callback_stream = stream.clone();
+    let begin = Instant::now();
+    let error = scan::run_with_events(
+        &request,
+        &mut authorizer,
+        &registry,
+        &mut executor,
+        &mut clock::SystemClock,
+        &Runtime::new(1),
+        move |_| {
+            callback_stream
+                .emit_data(serde_json::json!({"event": "probe"}), Vec::new())
+                .map_err(|error| {
+                    BoundaryError::new(error.to_string(), error.classification(), Vec::new())
+                })
+        },
+    )
+    .expect_err("blocked publication must expire");
+    writer_started.recv_timeout(Duration::from_secs(1)).unwrap();
+    assert!(error.to_string().contains("duration"), "{error}");
+    assert!(!stream.is_open());
+    assert!(!stream.is_terminal());
+    assert!(begin.elapsed() < Duration::from_secs(1));
+    assert_one_clean_exchange(&harness.state);
+    drop(stream);
+    release.send(()).unwrap();
+    writer_dropped.recv_timeout(Duration::from_secs(1)).unwrap();
+}

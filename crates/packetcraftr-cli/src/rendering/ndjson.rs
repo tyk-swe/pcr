@@ -4,14 +4,24 @@
 //! The NDJSON stream every structured command writes through.
 
 use std::io;
+use std::time::Duration;
+
+use packetcraftr::core::budget::Deadline;
+use packetcraftr::progress::{Runtime, Sink};
+
+use crate::errors::CliError;
 
 use packetcraftr::output;
 
 pub(crate) use packetcraftr::output::stream::StreamEncoder;
 
+/// One blocked output attempt may add this much time to a workflow budget.
+const OUTPUT_TIMEOUT: Duration = Duration::from_secs(1);
+
 /// Opens the process-wide NDJSON stream on stdout.
-pub(crate) fn stdout_stream(command: output::contract::Command) -> StreamEncoder {
-    StreamEncoder::new(command, io::stdout())
+pub(crate) fn stdout_stream(command: output::contract::Command) -> Result<StreamEncoder, CliError> {
+    StreamEncoder::new_bounded(command, io::stdout(), &Runtime::new(1), OUTPUT_TIMEOUT)
+        .map_err(CliError::classified)
 }
 
 /// Writes the one NDJSON error record a failure before command selection can
@@ -19,8 +29,19 @@ pub(crate) fn stdout_stream(command: output::contract::Command) -> StreamEncoder
 pub(crate) fn write_unattributed_error(
     command: Option<output::contract::Command>,
     error: output::envelope::Error,
-) -> Result<(), output::stream::EncodeError> {
-    output::stream::write_unattributed_error(io::stdout(), command, error)
+) -> Result<(), CliError> {
+    let sink = Sink::new_in(&Runtime::new(1), move |error| {
+        output::stream::write_unattributed_error(io::stdout(), command, error)
+            .map_err(|error| CliError::from(error).into_boundary_error())
+    })
+    .map_err(CliError::classified)?;
+    sink.emit(error, &Deadline::new(OUTPUT_TIMEOUT))
+        .map_err(|source| {
+            CliError::from(output::stream::EncodeError::Write {
+                sequence: 0,
+                source: io::Error::other(format!("NDJSON stream is incomplete: {source}")),
+            })
+        })
 }
 
 #[cfg(test)]

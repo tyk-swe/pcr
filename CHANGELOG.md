@@ -8,6 +8,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Added
 
+- `read --normalize --output pcapng` exports matching physical frames from PCAP
+  or PCAPNG into one bounded section. The opt-in path preserves representable
+  packet/interface facts, discards source-only metadata, and rejects selected
+  timestamp-less frames; default source-record rewriting remains unchanged.
 - Offline `read`, `expert`, `follow`, `stats`, and `tls` stream PCAP/PCAPNG
   captures from redirected stdin with `-` as the path, preserving file-input
   limits and source-record rewrites. Live replay remains file-based.

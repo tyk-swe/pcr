@@ -5,10 +5,13 @@
 
 pub(super) mod arguments;
 mod rendering;
+#[cfg(test)]
+mod tests;
 
 use packetcraftr::output::contract::Format;
 
-use std::io::{self, Read};
+use std::collections::BTreeMap;
+use std::io::{self, Read, Write};
 
 use packetcraftr::{
     analysis::pcap::{self as capture, Limits, Reader, rewrite},
@@ -51,23 +54,36 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         path,
         limits,
         filter,
+        normalize,
         dissect,
         tls_ports,
     } = arguments;
     validate_capture_stream_limits(limits)?;
-    // Both rejections precede filter compilation, so an incompatible request
-    // is answered with the incompatibility, not a filter syntax error.
     validate_dissect_format(dissect, format)?;
+    if normalize && format != Format::PcapNg {
+        return Err(CliError::from_classification(
+            Classification::new(
+                "cli.capture_normalize_format",
+                Kind::Cli,
+                Some("use --normalize with --output pcapng"),
+            ),
+            "--normalize requires PCAPNG output",
+            Vec::new(),
+        ));
+    }
     let rewrite_format = match format {
         Format::Pcap => Some(capture::Format::Pcap),
         Format::PcapNg => Some(capture::Format::PcapNg),
         _ => None,
     };
-    if rewrite_format.is_some() && filter.is_some() {
+    if rewrite_format.is_some() && filter.is_some() && !normalize {
         return Err(capture_rewrite_filter_error());
     }
     let decoding = prepare_decoding(filter.as_deref(), dissect, &tls_ports.ports)?;
     let mut reader = open_capture(&path, limits.reader)?;
+    if normalize {
+        return normalize_capture(&mut reader, limits, decoding.as_ref(), io::stdout().lock());
+    }
     if let Some(rewrite_format) = rewrite_format {
         let stream_limits = Limits {
             max_frames: limits.max_frames,
@@ -98,7 +114,7 @@ fn capture_rewrite_filter_error() -> CliError {
         Classification::new(
             "cli.capture_rewrite_filter",
             Kind::Cli,
-            Some("use text, hex, or ndjson output to filter frames"),
+            Some("use text, hex, ndjson, or --normalize --output pcapng to filter frames"),
         ),
         "capture rewriting cannot filter records without discarding source structure",
         Vec::new(),
@@ -178,6 +194,59 @@ fn read_records(
     Ok(())
 }
 
+fn normalize_capture(
+    reader: &mut Reader<impl Read>,
+    limits: OfflineCaptureLimitsArgs,
+    decoding: Option<&Decoding>,
+    destination: impl Write,
+) -> Result<(), CliError> {
+    let mut writer = capture::Writer::pcapng_with_options(
+        destination,
+        capture::PcapNgOptions {
+            max_size: limits.reader.max_frame_bytes,
+            max_interfaces: limits.reader.max_interfaces,
+            stream_limits: Limits {
+                max_frames: limits.max_frames,
+                max_bytes: limits.max_bytes,
+            },
+            ..capture::PcapNgOptions::default()
+        },
+    )
+    .map_err(CliError::classified)?;
+    let mut interfaces = BTreeMap::new();
+    let mut state = StreamState::default();
+    while let Some(mut frame) = reader.next_frame().map_err(CliError::classified)? {
+        let source_frame = account_frame(&mut state, &frame, limits)?;
+        if let Some(decoding) = decoding
+            && decode_matching_frame(&frame, source_frame, decoding, limits)?.is_none()
+        {
+            continue;
+        }
+        // Classic PCAP exposes its single interface at zero; PCAPNG frame IDs are global.
+        let source_interface = frame.interface.unwrap_or(0);
+        let output_interface = match interfaces.get(&source_interface) {
+            Some(interface) => *interface,
+            None => {
+                let source_index = usize::try_from(source_interface)
+                    .expect("reader interface IDs fit the in-memory interface table");
+                let description = reader
+                    .interfaces()
+                    .get(source_index)
+                    .expect("reader registers each frame interface before returning the frame")
+                    .clone();
+                let output_interface = writer
+                    .add_interface_description(description)
+                    .map_err(CliError::classified)?;
+                interfaces.insert(source_interface, output_interface);
+                output_interface
+            }
+        };
+        frame.interface = Some(output_interface);
+        writer.write_frame(&frame).map_err(CliError::classified)?;
+    }
+    writer.flush().map_err(CliError::classified)
+}
+
 /// Charges one frame against the same two aggregate ceilings the rewrite copy
 /// and the analysis loop charge against, and answers with its source number.
 fn account_frame(
@@ -212,6 +281,24 @@ fn convert_frame(
             .map(Some)
             .map_err(CliError::classified);
     };
+    let Some(decoded) = decode_matching_frame(&frame, source_frame, decoding, limits)? else {
+        return Ok(None);
+    };
+    if decoding.publish_layers {
+        output::read::Frame::try_from_decoded(source_frame, frame, &decoded)
+    } else {
+        output::read::Frame::try_from_frame(source_frame, frame)
+    }
+    .map(Some)
+    .map_err(CliError::classified)
+}
+
+fn decode_matching_frame(
+    frame: &core::frame::Frame,
+    source_frame: u64,
+    decoding: &Decoding,
+    limits: OfflineCaptureLimitsArgs,
+) -> Result<Option<core::decode::DecodedPacket>, CliError> {
     let decoded = decoding
         .decoder
         .decode(
@@ -223,7 +310,7 @@ fn convert_frame(
         )
         .map_err(CliError::classified)?;
     if let Some(filter) = &decoding.filter {
-        validate_filter_timestamp(filter, &frame, source_frame)?;
+        validate_filter_timestamp(filter, frame, source_frame)?;
         if !filter
             .matches(&core::filter::Context {
                 decoded: &decoded,
@@ -237,13 +324,7 @@ fn convert_frame(
             return Ok(None);
         }
     }
-    if decoding.publish_layers {
-        output::read::Frame::try_from_decoded(source_frame, frame, &decoded)
-    } else {
-        output::read::Frame::try_from_frame(source_frame, frame)
-    }
-    .map(Some)
-    .map_err(CliError::classified)
+    Ok(Some(decoded))
 }
 
 fn validate_filter_timestamp(

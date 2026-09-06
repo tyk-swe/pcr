@@ -50,6 +50,18 @@ Terminal stdin is rejected; live `replay` remains file-based. Reads are
 synchronous and can block between duration checks while waiting for more input;
 a duration limit does not interrupt a pending stdin read.
 
+Capture output from `read` preserves source records and requires the same format
+by default. To export matching physical frames from either capture format, use
+`packetcraftr --output pcapng read capture.pcap --normalize --filter 'udp' > selected.pcapng`.
+Normalization writes one new section with remapped selected interfaces, retaining
+packet bytes, captured/original lengths, link types, direction, and interface
+snapshot length, timestamp resolution, and offset. It discards comments, unknown
+blocks/options, and original section structure; it does not reassemble packets.
+Timestamps pass through nanosecond capture time and round down to interface ticks;
+selected frames without timestamps fail instead of receiving invented times.
+Zero matches produce a valid section with no interfaces or packets. Input limits
+count filtered-out frames too; the same block and interface ceilings bound output.
+
 | Area | Commands |
 | --- | --- |
 | Packets and captures | `build`, `dissect`, `protocols`, `read` |

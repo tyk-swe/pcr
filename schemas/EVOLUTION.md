@@ -15,25 +15,16 @@ objects retain their current contracts. Embedded packet documents and tagged
 reflective field values remain strict, consistent with the separate packet
 input schema. Input misspellings must still fail validation.
 
-Published examples cover every declared output property. Aggregate conformance
-tests check real serialized values, additive fields, required fields, types,
-and envelope rejection. Enum tests continue to pin names and order.
-`cargo semver-checks` separately checks Rust library API compatibility against
-the PR base or previous main commit (the preceding commit for a manual CI
-run); it does not validate JSON contracts. This gate applies the policy to
-new changes. The existing unreleased changes include intentional breaks from
-`v0.5.0-beta.2`; review the full release delta separately with:
+Published-example tests check the required example kinds for each command and
+published error-code consistency. Aggregate conformance tests validate real
+serialized payloads for every aggregate command, additive output fields,
+required fields, types, and envelope rejection. Enum tests pin names and order.
+These checks do not require examples to cover every declared output property.
 
-```sh
-cargo semver-checks check-release \
-  -p packetcraftr-core -p packetcraftr-netio -p packetcraftr \
-  --baseline-rev v0.5.0-beta.2 --all-features --release-type patch
-```
-
-The explicit patch-level check is necessary while versions are prereleases:
-the tool otherwise assumes a major release and skips compatibility lints.
-An intentional breaking release must explicitly revise this gate as part of
-its version and migration-policy review.
+The [CI workflow](../.github/workflows/ci.yml) defines the current check set.
+As described in [CONTRIBUTING.md](../CONTRIBUTING.md), pre-1.0 Rust API changes
+are documented in the changelog without a patch-only compatibility gate.
+Serialized output changes remain subject to the v1 compatibility policy above.
 
 # Cryptographic dependencies
 

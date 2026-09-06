@@ -4,13 +4,17 @@
 //! Versioned, render-neutral CLI output. Its types are separate from workflow
 //! results so both can evolve independently.
 //!
-//! Everything here serializes into `schemas/packetcraftr.output.v1.schema.json`,
-//! which is frozen: 121 of its 122 `additionalProperties` declarations are
-//! `false` (the one exception carries arbitrary field names), so one added
-//! `pub` field breaks every consumer.
-//! `crates/packetcraftr/tests/aggregate_schema_conformance.rs` serializes a real
-//! value of every aggregate payload and validates it, so drift fails there
-//! rather than in the field.
+//! The CLI's serialized output is described by
+//! `schemas/packetcraftr.output.v1.schema.json`. Aggregate result objects and
+//! nested output records accept additional fields, which consumers must ignore.
+//! Shared records use the same policy in NDJSON. Existing required fields,
+//! types, meanings, and enum vocabularies remain part of the v1 contract.
+//! Envelopes, embedded packet documents, and tagged reflective field values
+//! remain strict; stream-only event objects retain their current contracts.
+//!
+//! `crates/packetcraftr/tests/aggregate_schema_conformance.rs` validates real
+//! serialized payloads for every aggregate command, additive output fields,
+//! required fields, types, envelope rejection, and frozen enum vocabularies.
 //!
 //! # Where an output type comes from
 //!

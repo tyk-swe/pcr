@@ -2,7 +2,7 @@
 
 | Baseline | Review | Scope |
 |---|---|---|
-| `26708188` | 11 raised → 11 kept; three independent reviews voted KEEP on every ID; no merges or split votes | Original findings grounded in inspection; implementation and validation status is recorded in PLAN.md |
+| `26708188` | 11 raised → 11 kept; three independent reviews voted KEEP on every ID; no merges or split votes | All 11 findings implemented; validation results and platform limits are recorded in PLAN.md |
 
 | Convention | Meaning |
 |---|---|

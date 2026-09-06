@@ -2,7 +2,7 @@
 
 | Status | Capacity | Schedule |
 |---|---|---|
-| Implementation in progress; execution evidence below | Coordinator + at most 3 worker agents | 5 waves: mandatory preparation + 4 implementation waves; 11 tasks fill 3/3/3/2 slots |
+| All 11 tasks implemented; validation and platform limits below | Coordinator + at most 3 worker agents | 5 waves: mandatory preparation + 4 implementation waves; 11 tasks fill 3/3/3/2 slots |
 
 ## Dispatch and gates
 
@@ -71,4 +71,38 @@ Wave 0 `finish-partials` prompt:
 - Wave 1 complete: I05 TLS selector tests passed in default, offline and all-feature profiles (12 each), with fmt and CLI Clippy. I04 focused suites passed (35 default, 62 offline, 61 all-feature), followed by three final startup/process regressions; blocked stdout exited in approximately 1.12 seconds against a 200ms workflow budget plus a two-second allowance. A review removed unnecessary process-exit changes; task and integrated-wave debt reviews found no remaining removals. Affected all-target/all-feature Clippy and fmt passed.
 - Wave 2 complete: I06 review passed, default/all-feature focused CLI tests passed (30 each), and all 31 offline cases passed after correcting and rerunning one test fixture. I10 DNS unit/contract tests passed in all three profiles (47 each), including no-client cleanup in approximately 64–69ms. Affected Clippy and fmt passed. I07 Unix tar and PowerShell 7.6.5 ZIP packaging and extracted README smoke scripts passed on Linux; ZIP validation used a Linux executable renamed `.exe` with executable permission restored in the disposable harness, so native Windows/macOS execution remains a CI requirement. The wave debt review corrected the new stdin example to use the packaged JSON fixture; that command passed from the extracted Unix archive.
 - Wave 3 complete: I01 review passed; final sequential CLI suites passed (72 default, 74 offline, 72 all-feature), including Linux PTY terminal rejection and replay's file-only behavior. Early invalid fixtures/assertions were corrected; concurrent shared-binary profile interference was eliminated by serializing validation. I11 retention/output suites passed in all three profiles (42 each); affected Clippy and fmt passed. I09 ran `cargo llvm-cov nextest --locked --workspace --all-features --profile ci --lcov --output-path lcov.info`: 1,036 tests passed, zero skipped, and LCOV contained 6,675,838 bytes across 390 source records. Profile `ci` inherits the default 15-second slow timeout with termination after four periods. Wave debt review found no removals.
-- Library closing checks: `cargo semver-checks check-release -p packetcraftr-core -p packetcraftr-netio -p packetcraftr --baseline-rev 26708188 --all-features --release-type patch` passed for all three libraries with no semver update required. `cargo test --locked --workspace --all-features --doc` passed (11 doctests, one intentionally ignored). Remaining implementation tasks only change CLI code and documentation.
+- Library closing checks: `cargo semver-checks check-release -p packetcraftr-core -p packetcraftr-netio -p packetcraftr --baseline-rev 26708188 --all-features --release-type patch` passed for all three libraries with no semver update required. `cargo test --locked --workspace --all-features --doc` passed (11 doctests, one intentionally ignored). Subsequent library edits only correct tests; public implementation is unchanged.
+- Wave 4 complete: I03 focused suites passed (35 default, 36 offline, 35 all-feature). I02 isolated-target suites passed (44 default, 45 offline, 44 all-feature); review corrected timestamp documentation and fixtures to match the reader's existing exact-representability requirement. Affected Clippy and fmt passed. The integrated-wave debt review found no removals. All I01–I11 acceptance changes are implemented.
+- Final test corrections: workspace validation exposed two scheduling assumptions in I04 regressions. The subprocess fixture now emits one large first TCP chunk instead of relying on many small records filling stdout within 200ms. The terminal-writer fixture waits for an explicit writer-entry signal before asserting its invocation count. Original output deadlines, incomplete-stream assertions, finite cleanup and worker-permit checks remain. Both selected regressions passed in all four profiles; the final debt review found no removals. No production fix was needed.
+
+## Final validation
+
+Final Linux builds used fresh `target/final`, feature/MSRV checks used `target/final-checks`, and cross-checks used `target/final-cross`, all from the integration checkout. Earlier cross-worktree artifact reuse was avoided. A temporary-filesystem quota interrupted some final regression reruns; those checks passed after moving `TMPDIR` and logs under `target/`.
+
+| Check | Exact command / selection | Result |
+|---|---|---|
+| Workspace tests | `cargo nextest run --locked --workspace --profile ci`, with the profile flags below | Default: 1,029/1,029 passed. All-features: 1,061/1,061 passed. Offline: initially 1,011/1,012 passed; pcap-free: initially 1,037/1,038 passed. Their sole failures were the corrected fixtures above, which passed targeted reruns. Initial offline/pcap-free runs also reported 6/7 nextest leak warnings; default/all-feature runs reported none. |
+| Corrected regressions | Command below, in all four profiles | 2/2 selected tests passed in each profile; unrelated tests were filtered out. Stalled stdout exited in approximately 1.1 seconds against a 200ms workflow budget plus a two-second allowance. |
+| Workspace Clippy | `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` | Passed. |
+| Final fixture Clippy | `cargo clippy --locked -p packetcraftr -p packetcraftr-cli --lib --test process_contracts --all-features -- -D warnings` | Passed after both corrections. |
+| Formatting | `cargo fmt --all -- --check`; `cargo fmt --manifest-path fuzz/Cargo.toml -- --check` | Passed; workspace formatting checked again after fixture corrections. |
+| Rustdoc | `RUSTDOCFLAGS="-D warnings" cargo doc --locked --workspace --all-features --no-deps` | Passed. Doctests and semver results are recorded above. |
+| Feature matrix | `bash scripts/check-features.sh` | All nine all-target workspace profiles passed. |
+| MSRV | `cargo +1.96.0 check --locked --workspace --all-targets`, with offline, pcap-free and all-feature flags | All three passed. Final library-test correction also passed `cargo +1.96.0 check --locked -p packetcraftr --tests --all-features`. |
+| Dependency policy | `cargo deny check`; `cargo deny --manifest-path fuzz/Cargo.toml check advisories` | Both passed. Dependencies are unchanged. |
+| Repository smoke | `bash scripts/check-dangerous-ranges.sh`; `bash scripts/check-quick-start.sh /tmp/pcr-final-quickstart` | Both passed; Quick Start used a copy of the final all-feature executable. |
+| Release archives | Current workflow's Unix and PowerShell package/extracted-smoke scripts, with final executable and README | Both passed, including recipe/capture stdin examples from both extracted directories. Packaged README matched the final source. PowerShell used the Linux executable renamed `.exe` with execution permission restored in the disposable harness. |
+| Production portability | `cargo check --locked --workspace --all-features --target x86_64-apple-darwin`; same with `--target x86_64-pc-windows-msvc` | Both passed. |
+| Native platform limits | Same cross-checks with `--all-targets` | Unavailable locally: unchanged `alloca` C dependency needs a macOS compiler/SDK or Windows `lib.exe`/MSVC tooling. Native macOS/Windows tests and release execution remain CI responsibilities; Linux PowerShell smoke does not establish native Windows execution. |
+
+Profile flags: default uses no additional flags; offline uses `--no-default-features`; pcap-free uses `--no-default-features --features native-route,native-layer3`; all-features uses `--all-features`.
+
+The final regression command was run with each of those four feature selections:
+
+```sh
+cargo nextest run --locked -p packetcraftr -p packetcraftr-cli \
+  --lib --test process_contracts --profile ci --all-features \
+  -E 'test(bounded_terminal_writes_fail_incomplete_without_retrying_or_releasing_the_worker) | test(stalled_ndjson_stdout_exits_within_the_budget_and_shutdown_allowance)'
+```
+
+Validation logs are in `/tmp/pcr-final-*.log`, with quota-recovery regression/Clippy logs under `target/validation-logs/`. Final archive logs are under `/tmp/pcr-i07-validation-imv541y8/final/`. The successful coverage run and LCOV evidence are recorded under Wave 3 above. No PR was published.

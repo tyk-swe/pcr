@@ -5,10 +5,18 @@
 #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 use std::io::{Cursor, Write};
+use std::net::Ipv4Addr;
 use std::process::{Command, Output, Stdio};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
-use packetcraftr::analysis::pcap::{Format as CaptureFormat, Reader};
+use packetcraftr::analysis::pcap::{Format as CaptureFormat, Reader, Writer};
+use packetcraftr::core::{
+    Packet,
+    build::{Builder, Context, Options},
+    frame::{Frame, LinkType},
+    layer::Raw,
+    protocol::{builtin, network::Ipv4, transport::Tcp},
+};
 use serde_json::Value;
 
 #[path = "support/process.rs"]
@@ -836,18 +844,43 @@ fn missing_input_file_reports_the_same_io_failure_for_every_reader() {
 
 #[test]
 fn stalled_ndjson_stdout_exits_within_the_budget_and_shutdown_allowance() {
-    let mut capture = malformed_raw_frame_capture();
-    for _ in 0..9_999 {
-        capture
-            .write_all(&[0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0])
-            .unwrap();
+    let mut packet = Packet::new();
+    packet.push(Ipv4 {
+        source: Ipv4Addr::new(192, 0, 2, 1),
+        destination: Ipv4Addr::new(198, 51, 100, 2),
+        ..Ipv4::default()
+    });
+    packet.push(Tcp {
+        source_port: 40_000,
+        destination_port: 40_001,
+        sequence: 1,
+        flags: Tcp::ACK,
+        ..Tcp::default()
+    });
+    // The first chunk's hexadecimal payload exceeds a 64 KiB stdout pipe.
+    packet.push(Raw::new(vec![b'x'; 60 * 1024]));
+    let built = Builder::new(builtin::registry())
+        .build(packet, Context::default(), Options::default())
+        .unwrap();
+    let frame = Frame::new(UNIX_EPOCH, LinkType::IPV4, built.bytes.to_vec()).unwrap();
+    let mut capture = tempfile::NamedTempFile::new().unwrap();
+    {
+        let mut writer = Writer::new(&mut capture, CaptureFormat::Pcap, LinkType::IPV4).unwrap();
+        writer.write_frame(&frame).unwrap();
+        writer.flush().unwrap();
     }
-    capture.flush().unwrap();
     let started = Instant::now();
     let mut child = Command::new(env!("CARGO_BIN_EXE_packetcraftr"))
-        .args(["--output", "ndjson", "expert"])
+        .args(["--output", "ndjson", "follow"])
         .arg(capture.path())
-        .args(["--max-duration-ms", "200", "--max-frames", "10000"])
+        .args([
+            "--stream",
+            "tcp:0",
+            "--max-duration-ms",
+            "200",
+            "--max-frames",
+            "1",
+        ])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -864,6 +897,10 @@ fn stalled_ndjson_stdout_exits_within_the_budget_and_shutdown_allowance() {
                     "{output:?}"
                 );
                 assert!(!output.stdout.is_empty());
+                assert!(
+                    !output.stdout.contains(&b'\n'),
+                    "the first NDJSON record must remain incomplete: {output:?}"
+                );
                 break;
             }
             Ok(None) if started.elapsed() < allowance => {

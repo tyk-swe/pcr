@@ -25,7 +25,7 @@ impl crate::probe::Request for ExecutionCase {
 pub struct Execution {
     pub(crate) permit: crate::evidence::ExecutionPermit,
     pub(crate) sent: crate::SentPacket,
-    pub(crate) responses: Vec<Frame>,
+    pub(crate) responses: Vec<crate::exchange::Response>,
     pub(crate) unmatched: Vec<Frame>,
     pub(crate) undecoded: Vec<Frame>,
     pub(crate) diagnostics: Vec<Diagnostic>,

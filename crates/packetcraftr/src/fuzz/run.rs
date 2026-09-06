@@ -354,7 +354,7 @@ impl ExecutionPhase<'_> {
     where
         E: Executor<ExecutionCase>,
     {
-        let execution_case = ExecutionCase {
+        let mut execution_case = ExecutionCase {
             permit: crate::evidence::ExecutionPermit::new(),
             packet: case.prepared.recipe.clone(),
             timeout: self.live.timeout,
@@ -362,6 +362,15 @@ impl ExecutionPhase<'_> {
         self.deadline
             .start_accounting(Duration::ZERO)
             .map_err(duration_limit)?;
+        execution_case.timeout = execution_case
+            .timeout
+            .min(self.deadline.remaining().map_err(duration_limit)?);
+        if execution_case.timeout.is_zero() {
+            return Err(Error::DurationLimit {
+                actual: self.request.limits.max_duration,
+                limit: self.request.limits.max_duration,
+            });
+        }
         let execution = executor
             .execute(&execution_case)
             .map_err(|source| Error::Execution {
@@ -397,6 +406,7 @@ impl ExecutionPhase<'_> {
         validate_execution(
             case,
             &execution,
+            &execution_case,
             self.request.limits.max_packet_bytes,
             &self.deadline,
         )?;
@@ -416,7 +426,11 @@ impl ExecutionPhase<'_> {
         retain_evidence(
             case,
             ExecutionEvidence {
-                responses: execution.responses,
+                responses: execution
+                    .responses
+                    .into_iter()
+                    .map(|response| response.response.frame)
+                    .collect(),
                 unmatched: execution.unmatched,
                 undecoded: execution.undecoded,
             },
@@ -495,3 +509,6 @@ fn last_case_index(request: &packet_fuzz::Request) -> u64 {
 fn stringify<T, E: Display>(result: Result<T, E>) -> Result<T, String> {
     result.map_err(|source| source.to_string())
 }
+
+#[cfg(test)]
+mod tests;

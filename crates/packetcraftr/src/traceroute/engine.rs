@@ -125,6 +125,7 @@ where
             WORKFLOW,
             &batches,
             request.probes_per_second,
+            request.limits.max_duration,
             &mut deadline,
             clock,
             &mut lifecycle,

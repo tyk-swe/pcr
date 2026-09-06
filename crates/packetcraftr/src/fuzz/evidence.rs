@@ -10,12 +10,13 @@ use packetcraftr_core::frame::Frame;
 use crate::evidence::{Budget, DiagnosticLog};
 
 use super::error::{Error, duration_limit};
-use super::execution::Execution;
+use super::execution::{Execution, ExecutionCase};
 use super::model::{Case, LiveLimits, Stats};
 
 pub(super) fn validate_execution(
     case: &Case,
     execution: &Execution,
+    request: &ExecutionCase,
     max_packet_bytes: usize,
     deadline: &Deadline,
 ) -> Result<(), Error> {
@@ -51,7 +52,16 @@ pub(super) fn validate_execution(
         })?;
     for response in &execution.responses {
         deadline.check().map_err(duration_limit)?;
-        let Some(_received_at) = response.timestamp else {
+        if response.latency > request.timeout {
+            return Err(Error::InvalidEvidence {
+                case_index: case.prepared.index,
+                message: format!(
+                    "matched response latency {:?} exceeds timeout {:?}",
+                    response.latency, request.timeout
+                ),
+            });
+        }
+        let Some(_received_at) = response.response.frame.timestamp else {
             return Err(Error::InvalidEvidence {
                 case_index: case.prepared.index,
                 message: "executor returned response frame without a timestamp".to_owned(),

@@ -54,10 +54,7 @@ where
         Ok(Execution {
             permit: case.permit,
             sent,
-            responses: responses
-                .into_iter()
-                .map(|response| response.response.frame)
-                .collect(),
+            responses,
             unmatched: unsolicited
                 .into_iter()
                 .map(|response| response.frame)

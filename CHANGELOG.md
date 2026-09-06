@@ -6,6 +6,12 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Scan, traceroute, and live fuzz execution clip child response timeouts to the
+  remaining operation budget, reject execution after exhaustion, and validate
+  response evidence against the effective timeout.
+
 ### Added
 
 - Protocol details list registered display-filter aliases, either-endpoint

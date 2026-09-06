@@ -131,11 +131,13 @@ pub(crate) fn run_batches<P, L, C>(
     workflow: Workflow,
     batches: &[Batch<P>],
     probes_per_second: Option<u32>,
+    max_duration: Duration,
     deadline: &mut Deadline,
     clock: &mut C,
     lifecycle: &mut L,
 ) -> Result<Stats, Error>
 where
+    P: Clone,
     L: ProbeLifecycle<P>,
     C: Clock,
 {
@@ -173,23 +175,32 @@ where
         }
         previous = Some(batch);
 
+        let mut effective = batch.clone();
         check_deadline(deadline, duration)?;
         deadline
             .start_accounting(Duration::ZERO)
             .map_err(exceeded)?;
+        let timeout = batch.timeout.min(deadline.remaining().map_err(exceeded)?);
+        if timeout.is_zero() {
+            return Err(duration(max_duration, max_duration));
+        }
+        effective.timeout = timeout;
         let execution = lifecycle
-            .execute(batch)
+            .execute(&effective)
             .map_err(|source| fail(ErrorKind::Execution { sequence, source }))?;
         check_deadline(deadline, duration)?;
         deadline
             .account(execution.stats.elapsed)
             .map_err(exceeded)?;
-        lifecycle.validate(batch, &execution)?;
+        lifecycle.validate(&effective, &execution)?;
         check_deadline(deadline, duration)?;
         stats
             .checked_add_assign(&execution.stats)
             .map_err(|StatsOverflow| statistics(sequence))?;
-        if lifecycle.process(batch, execution, deadline)?.is_break() {
+        if lifecycle
+            .process(&effective, execution, deadline)?
+            .is_break()
+        {
             break;
         }
     }
@@ -202,3 +213,6 @@ where
         .ok_or_else(|| statistics(final_sequence))?;
     Ok(stats)
 }
+
+#[cfg(test)]
+mod tests;

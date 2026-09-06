@@ -29,12 +29,16 @@ fn handshake_capture(format: Format) -> Vec<u8> {
         return source.to_vec();
     }
     let mut reader = Reader::new(Cursor::new(source)).expect("published capture opens");
-    let first = reader.next_frame().unwrap().expect("handshake has frames");
+    let mut first = reader.next_frame().unwrap().expect("handshake has frames");
+    first.interface = None;
+    first.direction = None;
     let mut bytes = Vec::new();
     {
         let mut writer = Writer::new(&mut bytes, format, first.link_type).unwrap();
         writer.write_frame(&first).unwrap();
-        while let Some(frame) = reader.next_frame().unwrap() {
+        while let Some(mut frame) = reader.next_frame().unwrap() {
+            frame.interface = None;
+            frame.direction = None;
             writer.write_frame(&frame).unwrap();
         }
         writer.flush().unwrap();
@@ -88,12 +92,14 @@ fn piped_pcap_and_pcapng_match_all_offline_commands() {
                 if *format == "ndjson" {
                     let records = parse_ndjson(&output);
                     assert_contiguous(&records);
-                    assert_eq!(records.last().unwrap()["result"]["event"], "complete");
+                    let is_complete = |record: &serde_json::Value| match command {
+                        "expert" => record["result"].get("frames_read").is_some(),
+                        "follow" => record["result"].get("frames").is_some(),
+                        _ => record["result"]["event"] == "complete",
+                    };
+                    assert!(is_complete(records.last().unwrap()));
                     assert_eq!(
-                        records
-                            .iter()
-                            .filter(|record| record["result"]["event"] == "complete")
-                            .count(),
+                        records.iter().filter(|record| is_complete(record)).count(),
                         1
                     );
                 }

@@ -333,3 +333,24 @@ fn impossible_paths_slices_and_literals_are_compile_errors() {
         ("ethernet.source[3:1] == 00", "precedes start"),
     ]);
 }
+
+#[test]
+fn either_endpoint_inequality_matches_even_when_the_other_endpoint_is_equal() {
+    assert_filters(
+        &ipv6_tcp(),
+        &[
+            ("tcp.port == 443", true),
+            ("tcp.port != 443", true),
+            ("tcp.dstport != 443", false),
+            ("!(tcp.port == 443)", false),
+        ],
+    );
+    assert_filters(
+        &tunnelled(),
+        &[
+            ("udp.port == 4789", true),
+            ("udp.port != 4789", true),
+            ("!(udp.port == 4789)", false),
+        ],
+    );
+}

@@ -8,6 +8,7 @@ use serde::Serialize;
 use packetcraftr_core::field::FieldKind as CoreFieldKind;
 use packetcraftr_core::layer::FieldSchema;
 use packetcraftr_core::protocol::BuiltinProtocol;
+use packetcraftr_core::registry::FilterFieldBinding;
 
 use super::contract::Error as ContractError;
 
@@ -134,6 +135,78 @@ pub struct Binding {
     pub discriminator: u64,
 }
 
+/// How a registered filter spelling reads its reflective fields.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FilterKind {
+    Direct,
+    Either,
+    Bits,
+}
+
+/// One registered display-filter spelling, separate from dissection bindings.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct FilterField {
+    pub path: String,
+    pub kind: FilterKind,
+    /// Canonical protocol-qualified fields read by this spelling.
+    pub fields: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mask: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shift: Option<u32>,
+    pub description: String,
+}
+
+impl FilterField {
+    /// Describes a registry binding known to the output contract.
+    /// Future binding kinds may omit this optional discovery metadata.
+    pub fn from_binding(path: &str, binding: &FilterFieldBinding) -> Option<Self> {
+        let fields: Vec<_> = binding
+            .fields()
+            .iter()
+            .map(|field| format!("{}.{}", binding.protocol(), field))
+            .collect();
+        let (kind, mask, shift, description) = match binding {
+            FilterFieldBinding::Direct { protocol, field } => (
+                FilterKind::Direct,
+                None,
+                None,
+                format!("Alias for {protocol}.{field}."),
+            ),
+            FilterFieldBinding::Either { .. } => (
+                FilterKind::Either,
+                None,
+                None,
+                format!(
+                    "Comparison matches when any of [{}] satisfies it; != matches when any listed field differs, even if another equals the value.",
+                    fields.join(", ")
+                ),
+            ),
+            FilterFieldBinding::Bits {
+                protocol,
+                field,
+                mask,
+                shift,
+            } => (
+                FilterKind::Bits,
+                Some(*mask),
+                Some(*shift),
+                format!("Reads ({protocol}.{field} & {mask}) >> {shift} before comparison."),
+            ),
+            _ => return None,
+        };
+        Some(Self {
+            path: path.to_owned(),
+            kind,
+            fields,
+            mask,
+            shift,
+            description,
+        })
+    }
+}
+
 /// Detailed capability and reflection data for one built-in protocol.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Detail {
@@ -146,6 +219,8 @@ pub struct Detail {
     pub decode_only: bool,
     pub fields: Vec<Field>,
     pub bindings: Vec<Binding>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filter_fields: Option<Vec<FilterField>>,
 }
 
 impl Detail {
@@ -160,6 +235,7 @@ impl Detail {
             decode_only: summary.decode_only,
             fields,
             bindings,
+            filter_fields: None,
         }
     }
 }

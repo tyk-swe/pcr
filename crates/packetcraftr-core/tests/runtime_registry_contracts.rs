@@ -363,3 +363,61 @@ fn registry_rejects_alias_binding_and_filter_contract_conflicts() {
     assert_registry_binding_conflicts();
     assert_filter_field_binding_conflicts();
 }
+
+#[test]
+fn registered_filter_spellings_are_sorted_and_resolve_to_their_enumerated_bindings() {
+    let registry = packetcraftr_core::protocol::builtin::registry();
+    let paths: Vec<_> = registry
+        .filter_fields()
+        .map(|(path, binding)| {
+            assert_eq!(registry.filter_field(path), Some(binding));
+            let schema = registry
+                .schema(binding.protocol().as_str())
+                .expect("bound protocol schema");
+            for field in binding.fields() {
+                assert!(schema.fields.iter().any(|entry| entry.name == *field));
+            }
+            path
+        })
+        .collect();
+    assert!(paths.windows(2).all(|pair| pair[0] < pair[1]));
+    for path in [
+        "eth.src",
+        "ip.src",
+        "tcp.srcport",
+        "tcp.flags.syn",
+        "tcp.port",
+        "udp.port",
+    ] {
+        assert!(paths.contains(&path), "{path} is discoverable");
+    }
+    assert!(
+        !paths.contains(&"ip.ttl"),
+        "schema aliases need no stored binding"
+    );
+}
+
+#[test]
+fn filter_enumeration_uses_custom_registrations_in_normalized_path_order() {
+    let mut builder = packetcraftr_core::registry::Builder::new();
+    builder.register_codec(ProbeCodec, &["p"]).expect("probe");
+    for path in ["P.Z", "p.a"] {
+        builder
+            .bind_filter_field(
+                path,
+                FilterFieldBinding::Direct {
+                    protocol: "probe".into(),
+                    field: "value",
+                },
+            )
+            .expect("custom spelling");
+    }
+    let registry = builder.build().expect("valid custom registry");
+    assert_eq!(
+        registry
+            .filter_fields()
+            .map(|(path, _)| path)
+            .collect::<Vec<_>>(),
+        ["p.a", "p.z"]
+    );
+}

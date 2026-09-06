@@ -27,6 +27,19 @@
         {"name": "destination", "kind": "ipv4", "required": true, "derived": false, "description": "Destination IPv4 address"},
         {"name": "options", "kind": "bytes", "required": false, "derived": false, "description": "Verbatim IPv4 option bytes"}
       ],
+      "filter_fields": [
+        {"path": "ip.addr", "kind": "either", "fields": ["ipv4.source", "ipv4.destination"], "description": "Comparison matches when any of [ipv4.source, ipv4.destination] satisfies it; != matches when any listed field differs, even if another equals the value."},
+        {"path": "ip.dsfield", "kind": "direct", "fields": ["ipv4.dscp_ecn"], "description": "Alias for ipv4.dscp_ecn."},
+        {"path": "ip.dst", "kind": "direct", "fields": ["ipv4.destination"], "description": "Alias for ipv4.destination."},
+        {"path": "ip.flags.df", "kind": "direct", "fields": ["ipv4.dont_fragment"], "description": "Alias for ipv4.dont_fragment."},
+        {"path": "ip.flags.mf", "kind": "direct", "fields": ["ipv4.more_fragments"], "description": "Alias for ipv4.more_fragments."},
+        {"path": "ip.flags.rb", "kind": "direct", "fields": ["ipv4.reserved_flag"], "description": "Alias for ipv4.reserved_flag."},
+        {"path": "ip.frag_offset", "kind": "direct", "fields": ["ipv4.fragment_offset"], "description": "Alias for ipv4.fragment_offset."},
+        {"path": "ip.id", "kind": "direct", "fields": ["ipv4.identification"], "description": "Alias for ipv4.identification."},
+        {"path": "ip.len", "kind": "direct", "fields": ["ipv4.total_length"], "description": "Alias for ipv4.total_length."},
+        {"path": "ip.proto", "kind": "direct", "fields": ["ipv4.protocol"], "description": "Alias for ipv4.protocol."},
+        {"path": "ip.src", "kind": "direct", "fields": ["ipv4.source"], "description": "Alias for ipv4.source."}
+      ],
       "bindings": [
         {"parent": "ah", "discriminator": 4},
         {"parent": "bsd_loop", "discriminator": 4},

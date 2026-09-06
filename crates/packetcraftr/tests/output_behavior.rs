@@ -368,6 +368,13 @@ fn protocol_output_converts_every_field_kind_and_manifest_capability() {
     assert_eq!(detail.protocol, summaries[0].protocol);
     assert_eq!(detail.fields, vec![field]);
     assert_eq!(detail.bindings, vec![binding]);
+    assert!(detail.filter_fields.is_none());
+    assert!(
+        serde_json::to_value(detail)
+            .unwrap()
+            .get("filter_fields")
+            .is_none()
+    );
 }
 
 fn interface_fixture() -> Vec<Info> {

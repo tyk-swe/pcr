@@ -434,8 +434,11 @@ fn protocols_list_case() -> Value {
 }
 
 fn protocols_detail_case() -> Value {
+    protocols_detail_for(BuiltinProtocol::Ipv4)
+}
+
+fn protocols_detail_for(protocol: BuiltinProtocol) -> Value {
     let registry = builtin::registry();
-    let protocol = BuiltinProtocol::Ipv4;
     let fields = registry
         .schema(protocol.as_str())
         .map(|schema| {
@@ -455,15 +458,20 @@ fn protocols_detail_case() -> Value {
             discriminator: discriminator.0,
         })
         .collect();
+    let mut detail =
+        protocols_output::Detail::new(protocols_output::Summary::from(protocol), fields, bindings);
+    detail.filter_fields = Some(
+        registry
+            .filter_fields()
+            .filter(|(_, binding)| binding.protocol().as_str() == protocol.as_str())
+            .filter_map(|(path, binding)| {
+                protocols_output::FilterField::from_binding(path, binding)
+            })
+            .collect(),
+    );
     envelope(
         Command::Protocols,
-        protocols_output::DetailResult {
-            protocol: protocols_output::Detail::new(
-                protocols_output::Summary::from(protocol),
-                fields,
-                bindings,
-            ),
-        },
+        protocols_output::DetailResult { protocol: detail },
         Vec::new(),
     )
 }
@@ -1574,4 +1582,43 @@ fn tls_status_serializes_exactly_the_vocabulary_the_schema_declares() {
     .map(|status| serde_json::to_value(status).expect("a status serializes"))
     .collect::<Vec<_>>();
     assert_eq!(variants, declared);
+}
+
+#[test]
+fn filter_discovery_metadata_is_optional_and_validates_all_binding_kinds() {
+    let validator = output_schema_validator();
+    for protocol in [
+        BuiltinProtocol::Ipv4,
+        BuiltinProtocol::Tcp,
+        BuiltinProtocol::Udp,
+    ] {
+        let mut document = protocols_detail_for(protocol);
+        validator
+            .validate(&document)
+            .expect("registry metadata validates");
+        let detail = document["result"]["protocol"].as_object_mut().unwrap();
+        let fields = detail.remove("filter_fields").expect("metadata is present");
+        validator
+            .validate(&document)
+            .expect("older detail without metadata validates");
+        document["result"]["protocol"]["filter_fields"] = fields;
+        document["result"]["protocol"]["filter_fields"][0]["kind"] = "unknown".into();
+        assert!(
+            !validator.is_valid(&document),
+            "new binding vocabulary stays strict"
+        );
+    }
+    let mut document = protocols_detail_for(BuiltinProtocol::Tcp);
+    let fields = document["result"]["protocol"]["filter_fields"]
+        .as_array_mut()
+        .unwrap();
+    let bit = fields
+        .iter_mut()
+        .find(|field| field["path"] == "tcp.flags.syn")
+        .unwrap();
+    bit.as_object_mut().unwrap().remove("mask");
+    assert!(
+        !validator.is_valid(&document),
+        "bit extraction requires its mask"
+    );
 }

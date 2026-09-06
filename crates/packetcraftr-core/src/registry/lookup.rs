@@ -126,6 +126,16 @@ impl Registry {
         self.schemas.get(protocol).copied()
     }
 
+    /// Stored display-filter spellings in ascending path order.
+    ///
+    /// Canonical schema paths and protocol aliases resolve without a stored
+    /// binding and are described by [`Self::schema`] instead.
+    pub fn filter_fields(&self) -> impl ExactSizeIterator<Item = (&str, &FilterFieldBinding)> {
+        self.filter_fields
+            .iter()
+            .map(|(path, binding)| (path.as_str(), binding))
+    }
+
     /// Resolves a registered display-filter path. Lookup is case-insensitive.
     pub fn filter_field(&self, path: &str) -> Option<&FilterFieldBinding> {
         self.filter_fields.get(&path.trim().to_ascii_lowercase())

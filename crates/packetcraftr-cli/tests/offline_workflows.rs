@@ -1590,3 +1590,58 @@ fn read_exports_selected_source_frames_in_both_capture_formats() {
     ]);
     assert_eq!(output.status.code(), Some(3));
 }
+
+#[test]
+fn protocol_details_discover_filter_spellings_and_their_comparison_semantics() {
+    for (protocol, required_paths) in [
+        (
+            "tcp",
+            &["tcp.srcport", "tcp.dstport", "tcp.port", "tcp.flags.syn"][..],
+        ),
+        ("udp", &["udp.srcport", "udp.dstport", "udp.port"][..]),
+        ("ETH", &["eth.src", "eth.dst", "eth.addr"][..]),
+    ] {
+        let text = String::from_utf8(run_success(&["protocols", protocol]).stdout).unwrap();
+        let document = parse_json(&run_success(&["--output", "json", "protocols", protocol]));
+        let fields = document["result"]["protocol"]["filter_fields"]
+            .as_array()
+            .unwrap();
+        let paths: Vec<_> = fields
+            .iter()
+            .map(|field| field["path"].as_str().unwrap())
+            .collect();
+        assert!(paths.windows(2).all(|pair| pair[0] < pair[1]));
+        for path in required_paths {
+            assert!(paths.contains(path), "{protocol} lists {path}");
+        }
+        for field in fields {
+            let path = field["path"].as_str().unwrap();
+            let description = field["description"].as_str().unwrap();
+            assert!(text.contains(&format!("  {path}: {description}")));
+            match field["kind"].as_str().unwrap() {
+                "direct" => assert!(description.contains(field["fields"][0].as_str().unwrap())),
+                "either" => {
+                    assert!(description.contains("!= matches when any listed field differs"))
+                }
+                "bits" => {
+                    assert!(description.contains("before comparison"));
+                    if path == "tcp.flags.syn" {
+                        assert_eq!(field["fields"], serde_json::json!(["tcp.flags"]));
+                        assert_eq!(field["mask"], 2);
+                        assert_eq!(field["shift"], 1);
+                    }
+                }
+                kind => panic!("unexpected binding kind {kind}"),
+            }
+        }
+    }
+    let published: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../examples/documents/output-protocols-detail-success.json"
+    ))
+    .unwrap();
+    let current = parse_json(&run_success(&["--output", "json", "protocols", "ipv4"]));
+    assert_eq!(
+        current["result"], published["result"],
+        "published detail matches actual discovery"
+    );
+}

@@ -87,10 +87,19 @@ fn describe_protocol(name: &str, format: Format) -> Result<(), CliError> {
             discriminator: discriminator.0,
         })
         .collect();
-    let detail = output::protocols::Detail::new(
+    let mut detail = output::protocols::Detail::new(
         output::protocols::Summary::from(protocol),
         fields,
         bindings,
+    );
+    detail.filter_fields = Some(
+        registry
+            .filter_fields()
+            .filter(|(_, binding)| binding.protocol().as_str() == protocol.as_str())
+            .filter_map(|(path, binding)| {
+                output::protocols::FilterField::from_binding(path, binding)
+            })
+            .collect(),
     );
     match format {
         Format::Text => render_detail(&detail),
@@ -131,6 +140,12 @@ fn render_detail(protocol: &output::protocols::Detail) -> Result<(), CliError> {
             field.derived,
             field.description
         ))?;
+    }
+    if let Some(fields) = &protocol.filter_fields {
+        write_stdout_line(format_args!("filter_fields:"))?;
+        for field in fields {
+            write_stdout_line(format_args!("  {}: {}", field.path, field.description))?;
+        }
     }
     Ok(())
 }

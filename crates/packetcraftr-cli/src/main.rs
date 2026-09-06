@@ -19,9 +19,6 @@ mod system;
 #[cfg(test)]
 mod test_support;
 
-fn main() {
-    let code = startup::run();
-    // Rendering flushes each record; a timed-out worker may still hold stdout's
-    // lock, so process shutdown must not flush that global stream again.
-    std::process::exit(i32::from(code))
+fn main() -> std::process::ExitCode {
+    startup::run()
 }

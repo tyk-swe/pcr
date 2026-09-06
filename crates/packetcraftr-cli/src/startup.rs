@@ -5,6 +5,8 @@ use packetcraftr::core::error::Kind;
 
 mod context;
 
+use std::process::ExitCode;
+
 use clap::Parser;
 use packetcraftr::output;
 
@@ -16,7 +18,7 @@ use super::rendering::{
     stdout_stream, terminal_document, write_unattributed_error,
 };
 
-pub(crate) fn run() -> u8 {
+pub(crate) fn run() -> ExitCode {
     let context = from_env();
     context.color.write_global();
     let cli = match Cli::try_parse() {
@@ -42,10 +44,10 @@ pub(crate) fn run() -> u8 {
                     }
                 };
                 return match emitted {
-                    Ok(()) => code,
+                    Ok(()) => ExitCode::from(code),
                     Err(write_error) => {
                         let _ = emit_stderr_error(&write_error);
-                        write_error.exit_code()
+                        ExitCode::from(write_error.exit_code())
                     }
                 };
             }
@@ -55,8 +57,8 @@ pub(crate) fn run() -> u8 {
                 emit_stdout_document(&raw_message)
             };
             return match emitted {
-                Ok(()) => code,
-                Err(_) => 5,
+                Ok(()) => ExitCode::from(code),
+                Err(_) => ExitCode::from(5),
             };
         }
     };
@@ -71,12 +73,12 @@ pub(crate) fn run() -> u8 {
         Ok(stream) => stream,
         Err(error) => {
             let _ = emit_stderr_error(&error);
-            return error.exit_code();
+            return ExitCode::from(error.exit_code());
         }
     };
     match cli.command.run(format, &stream) {
         Ok(()) => match require_success_terminal(format, &stream) {
-            Ok(()) => 0,
+            Ok(()) => ExitCode::SUCCESS,
             Err(error) => command_failure(format, command, error, &stream),
         },
         Err(error) => command_failure(format, command, error, &stream),
@@ -101,9 +103,10 @@ fn command_failure(
     command: output::contract::Command,
     error: CliError,
     stream: &StreamEncoder,
-) -> u8 {
+) -> ExitCode {
     let open = stream.is_open();
     let error = if format == output::contract::Format::Ndjson && !open && !stream.is_terminal() {
+        let causes = std::iter::once(error.message).chain(error.causes).collect();
         CliError::from_classification(
             packetcraftr::core::error::Classification::new(
                 "io.stdout",
@@ -111,7 +114,7 @@ fn command_failure(
                 Some("treat the structured stream as incomplete"),
             ),
             "NDJSON stream is incomplete; output is unavailable for a terminal record",
-            vec![error.message],
+            causes,
         )
     } else {
         error
@@ -138,14 +141,56 @@ fn command_failure(
         if report_write_error {
             let _ = emit_stderr_error(&write_error);
         }
-        return write_error.exit_code();
+        return ExitCode::from(write_error.exit_code());
     }
-    exit_code
+    ExitCode::from(exit_code)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unavailable_encoder_fails_cleanup_without_another_output_attempt() {
+        use std::io::{self, Write};
+        use std::sync::mpsc;
+        use std::time::{Duration, Instant};
+
+        struct BlockedWriter(mpsc::Sender<()>, mpsc::Receiver<()>);
+        impl Write for BlockedWriter {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                self.0.send(()).unwrap();
+                self.1
+                    .recv_timeout(Duration::from_secs(3))
+                    .map_err(io::Error::other)?;
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        let (entered, writer_entered) = mpsc::channel();
+        let (release, wait) = mpsc::channel();
+        let stream = StreamEncoder::new(
+            output::contract::Command::Scan,
+            BlockedWriter(entered, wait),
+        );
+        let callback = stream.clone();
+        let worker = std::thread::spawn(move || callback.emit_data((), Vec::new()));
+        writer_entered.recv_timeout(Duration::from_secs(1)).unwrap();
+        let started = Instant::now();
+        let status = command_failure(
+            output::contract::Format::Ndjson,
+            output::contract::Command::Scan,
+            CliError::new(Kind::Policy, "workflow publication deadline expired"),
+            &stream,
+        );
+        assert_eq!(status, ExitCode::from(5));
+        assert!(started.elapsed() < Duration::from_secs(1));
+        release.send(()).unwrap();
+        worker.join().unwrap().unwrap();
+        assert!(writer_entered.try_recv().is_err());
+    }
 
     #[test]
     fn successful_ndjson_requires_a_terminal_record() {

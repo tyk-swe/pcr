@@ -18,9 +18,9 @@ Capture output preserves source records by default, requires the same format,
 and cannot filter. --normalize with --output pcapng instead writes matching physical
 frames into one new section, remapping selected interfaces. It preserves bytes,
 lengths, link types, directions and interface timestamp metadata. Comments, unknown
-blocks/options and original section structure are discarded. Timestamps pass through
-nanosecond capture time, losing subnanosecond detail. Selected frames without a
-timestamp or with a time not exactly representable at their interface resolution fail.
+blocks/options and original section structure are discarded. Timestamps must be
+exactly representable as nanosecond capture time and at their interface resolution;
+unrepresentable times and selected frames without timestamps fail.
 No matches produce a valid section with no interfaces or packets.
 Frame/payload limits count all input; block and interface limits also bound output.
 

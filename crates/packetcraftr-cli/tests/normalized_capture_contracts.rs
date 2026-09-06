@@ -317,10 +317,10 @@ fn normalization_fails_on_a_truncated_input_trailer_after_preserving_prior_frame
 }
 
 #[test]
-fn normalization_obeys_capture_time_precision_and_rejects_unrepresentable_ticks() {
-    for (resolution, nanoseconds, exit_code) in [
-        (TimestampResolution::Binary(10), 976_562, 3),
-        (TimestampResolution::Decimal(10), 0, 0),
+fn normalization_rejects_timestamps_not_representable_in_capture_time() {
+    for resolution in [
+        TimestampResolution::Binary(10),
+        TimestampResolution::Decimal(10),
     ] {
         let mut writer = Writer::pcapng(Vec::new()).unwrap();
         writer
@@ -337,20 +337,9 @@ fn normalization_obeys_capture_time_precision_and_rejects_unrepresentable_ticks(
         let mut input = writer.into_inner();
         // One source tick retains finer precision than the nanosecond Frame model.
         input[76..80].copy_from_slice(&1_u32.to_le_bytes());
-        assert_eq!(
-            read_frames(&input).0[0].timestamp,
-            Some(UNIX_EPOCH + Duration::from_nanos(nanoseconds))
-        );
-        let normalized = normalize(&input, &[], exit_code);
-        if exit_code == 0 {
-            assert_eq!(
-                read_frames(&normalized.stdout).0[0].timestamp,
-                Some(UNIX_EPOCH)
-            );
-        } else {
-            assert!(String::from_utf8_lossy(&normalized.stderr).contains("timestamp resolution"));
-            assert!(read_frames(&normalized.stdout).0.is_empty());
-        }
+        let normalized = normalize(&input, &[], 3);
+        assert!(String::from_utf8_lossy(&normalized.stderr).contains("sub-nanosecond timestamp"));
+        assert!(read_frames(&normalized.stdout).0.is_empty());
     }
 }
 

@@ -21,8 +21,13 @@ use support::{assert_contiguous, parse_json, parse_ndjson, run, run_success};
 const IPV4_FRAME_HEX: &str = "45000014000000004001f6e7c0000201c6336402";
 
 fn run_with_open_stdin(arguments: &[&str]) -> Output {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_packetcraftr"))
-        .args(arguments)
+    let mut command = Command::new(env!("CARGO_BIN_EXE_packetcraftr"));
+    command.args(arguments);
+    run_command_with_open_stdin(command)
+}
+
+fn run_command_with_open_stdin(mut command: Command) -> Output {
+    let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -47,7 +52,7 @@ fn run_with_open_stdin(arguments: &[&str]) -> Output {
                     .wait_with_output()
                     .expect("timed-out CLI process must be reaped");
                 panic!(
-                    "command {arguments:?} waited for stdin: status={:?}, stdout={:?}, stderr={:?}",
+                    "command {command:?} waited for stdin: status={:?}, stdout={:?}, stderr={:?}",
                     output.status,
                     String::from_utf8_lossy(&output.stdout),
                     String::from_utf8_lossy(&output.stderr),
@@ -57,10 +62,68 @@ fn run_with_open_stdin(arguments: &[&str]) -> Output {
                 drop(stdin_writer);
                 let _ = child.kill();
                 let _ = child.wait();
-                panic!("could not poll command {arguments:?}: {error}");
+                panic!("could not poll command {command:?}: {error}");
             }
         }
     }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn capture_commands_reject_terminal_stdin_before_reading() {
+    if Command::new("script").arg("--version").output().is_err() {
+        eprintln!("terminal-stdin process test requires util-linux script");
+        return;
+    }
+    for arguments in [
+        "read -",
+        "expert -",
+        "follow - --stream tcp:0",
+        "stats -",
+        "tls -",
+    ] {
+        let mut command = Command::new("script");
+        command.env(
+            "CAPTURE_STDIN_TEST_BINARY",
+            env!("CARGO_BIN_EXE_packetcraftr"),
+        );
+        command.args([
+            "--quiet",
+            "--return",
+            "--command",
+            &format!("exec \"$CAPTURE_STDIN_TEST_BINARY\" {arguments}"),
+            "/dev/null",
+        ]);
+        let output = run_command_with_open_stdin(command);
+        assert_eq!(output.status.code(), Some(2), "{arguments}: {output:?}");
+        let terminal = String::from_utf8_lossy(&output.stdout);
+        assert!(terminal.contains("cli.input_source"), "{terminal}");
+        assert!(terminal.contains("capture path"), "{terminal}");
+    }
+}
+
+#[test]
+fn replay_dash_remains_a_file_path_and_does_not_read_stdin() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut command = Command::new(env!("CARGO_BIN_EXE_packetcraftr"));
+    command.current_dir(directory.path()).args([
+        "--output",
+        "json",
+        "replay",
+        "-",
+        "--interface",
+        "fixture0",
+        "--timing",
+        "immediate",
+    ]);
+    let output = run_command_with_open_stdin(command);
+    assert_eq!(output.status.code(), Some(5), "{output:?}");
+    assert!(
+        parse_json(&output)["error"]["message"]
+            .as_str()
+            .unwrap()
+            .starts_with("open - failed:")
+    );
 }
 
 fn assert_no_terminal_style(bytes: &[u8]) {

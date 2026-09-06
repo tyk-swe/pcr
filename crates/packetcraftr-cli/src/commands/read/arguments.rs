@@ -8,6 +8,7 @@ use crate::command_options::{OfflineCaptureLimitsArgs, TlsPortArgs};
 pub(crate) const AFTER_LONG_HELP: &str = r#"Examples:
   packetcraftr read capture.pcapng --max-frames 100
   packetcraftr --output ndjson read capture.pcap
+  packetcraftr --output ndjson read - < capture.pcapng
   packetcraftr read capture.pcapng --filter 'tcp.flags.syn == 1 && !tcp.flags.ack' --dissect
   packetcraftr read capture.pcapng --tls-port 4433 --filter 'tls.sni contains "example"' --dissect
   packetcraftr --output pcapng read capture.pcapng > validated-copy.pcapng
@@ -22,7 +23,7 @@ sequence remains the zero-based emitted-record position."#;
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
-    /// Classic PCAP or PCAPNG input path.
+    /// Classic PCAP or PCAPNG input path; - reads redirected stdin.
     pub(crate) path: PathBuf,
     #[command(flatten)]
     pub(crate) limits: OfflineCaptureLimitsArgs,

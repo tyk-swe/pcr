@@ -30,7 +30,7 @@ pub(crate) enum Direction {
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
-    /// Classic PCAP or PCAPNG input path.
+    /// Classic PCAP or PCAPNG input path; - reads redirected stdin.
     pub(crate) path: PathBuf,
     /// Conversation to follow, as `tcp:INDEX` or `udp:INDEX`, using the
     /// same indices stats reports and stream filters match.

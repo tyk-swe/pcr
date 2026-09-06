@@ -8,6 +8,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Added
 
+- Offline `read`, `expert`, `follow`, `stats`, and `tls` stream PCAP/PCAPNG
+  captures from redirected stdin with `-` as the path, preserving file-input
+  limits and source-record rewrites. Live replay remains file-based.
 - Optional core `decrypt` feature with RustCrypto AES-GCM, ChaCha20-Poly1305,
   and HKDF dependencies, covered by the supported feature matrix.
 - CI checks public library API compatibility against the PR base or previous

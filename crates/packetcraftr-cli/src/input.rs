@@ -18,6 +18,7 @@ use super::errors::CliError;
 pub(crate) enum InputKind {
     Recipe,
     Frame,
+    Capture,
 }
 
 impl InputKind {
@@ -25,6 +26,7 @@ impl InputKind {
         match self {
             Self::Recipe => "packet",
             Self::Frame => "frame",
+            Self::Capture => "capture",
         }
     }
 
@@ -32,6 +34,7 @@ impl InputKind {
         match self {
             Self::Recipe => "--packet, --packet-file, or redirect non-empty stdin",
             Self::Frame => "--hex, --file, or redirect non-empty stdin",
+            Self::Capture => "a capture path, or use - with redirected capture stdin",
         }
     }
 
@@ -41,12 +44,13 @@ impl InputKind {
                 "provide --packet, --packet-file, or pipe a non-empty packet recipe to stdin"
             }
             Self::Frame => "provide --hex, --file, or pipe non-empty frame bytes to stdin",
+            Self::Capture => "provide a capture path or pipe PCAP/PCAPNG bytes with - as the path",
         }
     }
 
     fn oversized_error(self, actual: usize, limit: usize) -> CliError {
         match self {
-            Self::Recipe => CliError::new(
+            Self::Recipe | Self::Capture => CliError::new(
                 Kind::Cli,
                 format!("{} input exceeds {limit} byte limit", self.label()),
             ),
@@ -184,13 +188,16 @@ pub(crate) fn read_bounded_file(
     max_bytes: usize,
     kind: InputKind,
 ) -> Result<Vec<u8>, CliError> {
-    let file = File::open(path).map_err(|source| {
+    read_bounded(open_file(path)?, max_bytes, kind)
+}
+
+fn open_file(path: &Path) -> Result<File, CliError> {
+    File::open(path).map_err(|source| {
         CliError::new(
             Kind::Io,
             format!("open {} failed: {source}", path.display()),
         )
-    })?;
-    read_bounded(file, max_bytes, kind)
+    })
 }
 
 pub(crate) fn read_stdin_bounded(max_bytes: usize, kind: InputKind) -> Result<Vec<u8>, CliError> {
@@ -210,15 +217,30 @@ pub(crate) fn parse_target(target: String) -> Result<packetcraftr::target::Targe
 pub(crate) fn open_capture(
     path: &Path,
     bounds: CaptureReaderBoundsArgs,
+) -> Result<Reader<Box<dyn Read>>, CliError> {
+    let source: Box<dyn Read> = if path == Path::new("-") {
+        let stdin = io::stdin();
+        require_redirected_stdin(InputKind::Capture, stdin.is_terminal())?;
+        Box::new(stdin.lock())
+    } else {
+        Box::new(open_file(path)?)
+    };
+    capture_reader(source, bounds)
+}
+
+pub(crate) fn open_capture_file(
+    path: &Path,
+    bounds: CaptureReaderBoundsArgs,
 ) -> Result<Reader<File>, CliError> {
-    let file = File::open(path).map_err(|source| {
-        CliError::new(
-            Kind::Io,
-            format!("open {} failed: {source}", path.display()),
-        )
-    })?;
+    capture_reader(open_file(path)?, bounds)
+}
+
+fn capture_reader<R: Read>(
+    source: R,
+    bounds: CaptureReaderBoundsArgs,
+) -> Result<Reader<R>, CliError> {
     Reader::with_options(
-        file,
+        source,
         ReaderOptions {
             max_size: bounds.max_frame_bytes,
             max_interfaces_per_section: bounds.max_interfaces,
@@ -410,10 +432,20 @@ mod tests {
         assert!(!frame.message.contains("--packet-file"));
         assert!(frame.classification.remediation.is_some());
 
+        let capture = require_redirected_stdin(InputKind::Capture, true)
+            .expect_err("capture terminal input must be rejected");
+        assert_eq!(capture.classification.code, "cli.input_source");
+        assert_eq!(capture.exit_code(), 2);
+        assert!(capture.message.contains("capture path"));
+        assert!(capture.message.contains("-"));
+        assert!(capture.classification.remediation.is_some());
+
         require_redirected_stdin(InputKind::Recipe, false)
             .expect("redirected recipe input must remain available");
         require_redirected_stdin(InputKind::Frame, false)
             .expect("redirected frame input must remain available");
+        require_redirected_stdin(InputKind::Capture, false)
+            .expect("redirected capture input must remain available");
     }
 
     #[test]

@@ -39,7 +39,7 @@ impl From<Severity> for packetcraftr::core::diagnostic::Severity {
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
-    /// Classic PCAP or PCAPNG input path.
+    /// Classic PCAP or PCAPNG input path; - reads redirected stdin.
     pub(crate) path: PathBuf,
     /// Keep only frames matching a display filter; stream indices stay
     /// capture-global.

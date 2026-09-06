@@ -76,7 +76,7 @@ impl From<Status> for AnalysisStatus {
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
-    /// Classic PCAP or PCAPNG input path.
+    /// Classic PCAP or PCAPNG input path; - reads redirected stdin.
     pub(crate) path: PathBuf,
     /// Assemble only one conversation, as `tcp:INDEX`, using the same indices
     /// stats reports and stream filters match.

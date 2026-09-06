@@ -42,6 +42,14 @@ mapping key order work the same as in `.yaml` files. For example,
 document under the same input byte and build limits. Terminal stdin is rejected
 instead of waiting for interactive input.
 
+Offline `read`, `expert`, `follow`, `stats`, and `tls` accept `-` as the capture
+path to stream PCAP or PCAPNG from redirected stdin. For example,
+`packetcraftr --output ndjson read - < examples/captures/tls-handshake.pcapng`.
+The same frame, byte, interface, and analysis limits apply to files and pipes.
+Terminal stdin is rejected; live `replay` remains file-based. Reads are
+synchronous and can block between duration checks while waiting for more input;
+a duration limit does not interrupt a pending stdin read.
+
 | Area | Commands |
 | --- | --- |
 | Packets and captures | `build`, `dissect`, `protocols`, `read` |

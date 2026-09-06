@@ -23,7 +23,7 @@ use super::registry;
 use crate::command_options::OfflineCaptureLimitsArgs;
 use crate::errors::CliError;
 use crate::filtering::FrameSelector;
-use crate::input::{open_capture, validate_capture_stream_limits};
+use crate::input::{open_capture_file, validate_capture_stream_limits};
 use crate::rendering::StreamEncoder;
 
 use conversion::{interface, timing};
@@ -105,7 +105,7 @@ fn prepare(arguments: &Args) -> Result<ReplayRun, CliError> {
         Duration::from_millis(arguments.max_duration_ms),
     );
     limits.validate().map_err(CliError::classified)?;
-    let reader = open_capture(&arguments.path, arguments.reader)?;
+    let reader = open_capture_file(&arguments.path, arguments.reader)?;
     Ok(ReplayRun {
         reader,
         options: packetcraftr::replay::Options {

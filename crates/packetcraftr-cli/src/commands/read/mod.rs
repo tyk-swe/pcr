@@ -8,8 +8,7 @@ mod rendering;
 
 use packetcraftr::output::contract::Format;
 
-use std::fs::File;
-use std::io;
+use std::io::{self, Read};
 
 use packetcraftr::{
     analysis::pcap::{self as capture, Limits, Reader, rewrite},
@@ -126,7 +125,7 @@ fn prepare_decoding(
 }
 
 fn rewrite_capture(
-    reader: &mut Reader<File>,
+    reader: &mut Reader<impl Read>,
     format: capture::Format,
     limits: Limits,
 ) -> Result<(), CliError> {
@@ -151,7 +150,7 @@ fn rewrite_capture(
 }
 
 fn read_records(
-    reader: &mut Reader<File>,
+    reader: &mut Reader<impl Read>,
     limits: OfflineCaptureLimitsArgs,
     decoding: Option<&Decoding>,
     format: Format,

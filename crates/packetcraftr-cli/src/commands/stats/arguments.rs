@@ -44,7 +44,7 @@ impl From<Table> for packetcraftr::output::stats::Table {
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
-    /// Classic PCAP or PCAPNG input path.
+    /// Classic PCAP or PCAPNG input path; - reads redirected stdin.
     pub(crate) path: PathBuf,
     /// Statistics table to compute and report.
     #[arg(long, value_enum, default_value_t = Table::Conversations)]
